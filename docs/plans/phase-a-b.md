@@ -17,12 +17,12 @@ traex 使用 tend 专用的 home：宿主机目录 `~/.local/share/tend/traex-ho
 | --- | --- | --- |
 | A-1 | dev container：Go、Node、pnpm 可用；traex 只读挂载后能在容器内运行 | **已完成**：Go 1.27.2、Node 24.21、pnpm 10.34；容器内用 GPT-5.6-Sol 跑 `traex exec` 返回正常，记录的路径与宿主机一致 |
 | A0 | 鉴权与 home：专用 `TRAE_HOME`，通过 SSH 鉴权 | **已完成**：首次运行时自动完成 headless 鉴权，凭据保存在专用 home 中 |
-| A1 | app-server stdio 生命周期：initialize → thread/start → turn/start → 流式通知；记录 thread_id、turn_id、item id 的稳定性 | 写出一份最小 JSON-RPC 客户端，并记录完整事件序列样本 |
-| A2 | `thread/injectItems`：在 turn 之间注入 developer 消息，再用一个“暗号”问题确认模型能看到；测试 turn 进行中注入的行为；测试重复注入的效果 | 明确角色支持、turn 中途能否注入、重复注入时是否追加两份 |
-| A3 | Compaction：用 `thread/compact/start` 触发压缩，观察 `ContextCompaction` item 和 `postCompact`、`sessionStart` hook 的输入和输出；确认注入内容压缩后是否保留 | 有可靠的“基线失效”信号；明确 hook 能否回传上下文 |
-| A4 | MCP：通过 thread/start 的 `config` 给单个 thread 配置 streamable HTTP MCP server；记录 `tools/call` 携带的身份字段（turn_id、call_id、`_meta`），以及超时和重试行为 | 确定 request_id 的推导方式，或明确声明只有有限去重 |
+| A1 | app-server stdio 生命周期：initialize → thread/start → turn/start → 流式通知；记录 thread_id、turn_id、item id 的稳定性 | **已完成**，见 `docs/findings/spike-a.md` |
+| A2 | `thread/inject_items`：在 turn 之间注入 developer 消息，再用一个“暗号”问题确认模型能看到；测试 turn 进行中注入的行为；测试重复注入的效果 | **已完成**：可以注入 developer 消息；turn 进行中也可以注入；重复注入会追加两份 |
+| A3 | Compaction：用 `thread/compact/start` 触发压缩，观察 `contextCompaction` item 和 `postCompact`、`sessionStart` hook 的输入和输出；确认注入内容压缩后是否保留 | **部分完成**：`contextCompaction` item 是可靠的失效信号，压缩会丢掉注入的原始条目；hook 推迟 |
+| A4 | MCP：通过 thread/start 的 `config` 给单个 thread 配置 streamable HTTP MCP server；记录 `tools/call` 携带的身份字段（turn_id、call_id、`_meta`），以及超时和重试行为 | **改为动态工具并已验证**：`item/tool/call` 带 threadId、turnId、callId；MCP 作为备选 |
 | A5 | 主 Agent 隔离：只读 sandbox、`approvalPolicy=never`；确认能否禁用 shell 或写文件工具，只保留 MCP | 主 Agent 无法写工作区或数据库 |
-| A6 | 中断与恢复：turn/interrupt 的语义；app-server 进程重启后用 thread/resume 恢复，历史和注入内容是否还在 | 明确重启后基线是保留还是必须重建 |
+| A6 | 中断与恢复：turn/interrupt 的语义；app-server 进程重启后用 thread/resume 恢复，历史和注入内容是否还在 | **已完成**：重启后 resume 能恢复完整历史 |
 | A7 | Worker 形态：在 worktree 中以 workspace-write 运行一个 thread，完成后取 diff 或 commit；确认审批请求如何自动处理 | runner 可以照此驱动 worker |
 | A8 | 协议绑定：用 `generate-json-schema` 生成 Go 类型，或手写所需的子集，放入 `internal/harness/traex/generated/`，附带版本信息文件 | 绑定可以编译，并与 A1 的实际消息一致 |
 | A9 | tsnet：在 dev container 中用 ephemeral key 启动节点，手机通过 tailnet 访问；WhoIs 能拿到用户和节点身份；检查 HTTPS 证书是否可用；runner 节点交叉编译到 windows/amd64 后能加入 tailnet | 身份映射与 TLS 的结论写入 findings |

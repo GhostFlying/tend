@@ -12,10 +12,10 @@
 | --- | --- | --- |
 | D15 | 项目名 `tend`，使用独立仓库。 | 已确认 |
 | D16 | 主 harness 先接 traex（Codex fork），实现与协议细节参考上游 Codex 源码，以 traex 实际生成的协议为准。 | 已确认 |
-| D17 | 主会话上下文以 app-server 协议注入为主：由服务端在 turn 之间通过 `thread/injectItems` 写入 developer 消息。Hook 只覆盖我们无法发起的时机（compact 之后、harness 自行恢复）。 | 已确认方向，接口待验证 |
+| D17 | 主会话上下文以 app-server 协议注入为主：由服务端在 turn 之间通过 `thread/inject_items` 写入 developer 消息。Hook 只覆盖我们无法发起的时机（compact 之后、harness 自行恢复）。 | 已确认，接口已验证（spike A2） |
 | D18 | 不做每轮注入。只有基线失效或账本发生相关变化时才注入（见 §2）。 | 已确认 |
 | D19 | 执行节点一律用 pull 模式的 runner：runner 主动连控制服务，领取任务、续租、上报。控制服务不主动连节点。 | 已确认 |
-| D20 | 主 Agent 唯一的写入路径是 tend 提供的 MCP 工具。主 harness 使用只读 sandbox，看不到应用数据库和根凭据。 | 已确认 |
+| D20 | 主 Agent 唯一的写入路径是 tend 提供的工具。主 harness 使用只读 sandbox，看不到应用数据库和根凭据。工具的实现方式由 MCP 改为 app-server 的动态工具（`dynamicTools` / `item/tool/call`），MCP 作为备选（依据 `docs/findings/spike-a.md` A4）。 | 原则已确认；改用动态工具为建议 |
 | D21 | 远程访问走 tailscale。服务只监听 tailnet 地址，应用层仍保留鉴权与角色（tailscale 身份不替代角色权限）。 | 已确认 |
 | D22 | 技术栈：服务端和 runner 用 Go，单个 module；Web 用 TypeScript。SQLite 用 `modernc.org/sqlite`（纯 Go，便于交叉编译）。harness 适配是 Go 包，服务端与 runner 共用。领域与 API 类型以 Go 为准，导出 JSON Schema 后生成 TS 供 Web 使用。 | 已确认 |
 | D23 | 服务端和 runner 都内置 `tsnet` 加入 tailnet，不依赖设备上安装或运行 tailscaled。 | 已确认 |
@@ -27,9 +27,9 @@
 ### 2.1 已观察到的能力（traex 0.209.1 生成的协议）
 
 - `thread/start` 接受 `developerInstructions`、`baseInstructions`，以及按 thread 覆盖的 `config`（可用于给每个 thread 配置专属 MCP 地址和凭据，待验证）。
-- `thread/injectItems { threadId, items: JsonValue[] }`：把原始 Responses API item 追加到模型可见历史。
+- `thread/inject_items { threadId, items: JsonValue[] }`：把原始 Responses API item 追加到模型可见历史。turn 进行中也可以注入；重复注入会追加多份，app-server 不去重。
 - `turn/start` 的 `input` 只有用户输入类型（text、image、skill、mention），没有 developer 角色，因此不用它来承载上下文。
-- Compaction 以 thread item（`ContextCompaction`）的形式出现；Hook 事件包含 `postCompact`、`sessionStart`、`userPromptSubmit`。
+- Compaction 以独立的压缩 turn 进行，其中包含 `contextCompaction` item；压缩会替换历史，之前注入的原始条目会被丢掉。traex 0.209.1 不发 `thread/compacted` 通知。Hook 事件包含 `postCompact`、`sessionStart`、`userPromptSubmit`。
 - `thread/compact/start` 可以主动触发压缩，便于测试。
 
 ### 2.2 注入策略
@@ -41,8 +41,8 @@
    - 自上次水位以来没有相关变化：**不注入**。
    - 有相关变化：注入一条简短的 delta 消息，带上新水位。相关变化包括：任务状态跨越生命周期边界、新增或已解决的待决事项、约束或优先级变更、已到达的验收结论、unknown 或受阻状态。
    - 普通进度、心跳和日志永远不注入；模型需要时通过工具读取。
-3. **水位推进的条件**：只有 `thread/injectItems` 返回成功、并且随后的 `turn/start` 成功时，才推进该 thread 的水位。任一步失败，下次重算 delta，或者退回完整快照。
-4. **基线失效**：观察到 `ContextCompaction` item、`postCompact` hook、thread 被 harness 重建或回滚，或者 tend 无法确认历史状态时，基线作废，下一轮注入完整快照。如果 compaction 发生在 turn 中途，并且 traex 允许在 turn 进行中 inject，可以立即补注入；否则等下一个 turn 前补（待验证）。
+3. **水位推进的条件**：只有 `thread/inject_items` 返回成功、并且随后的 `turn/start` 成功时，才推进该 thread 的水位。任一步失败，下次重算 delta，或者退回完整快照。
+4. **基线失效**：观察到 `contextCompaction` item、`postCompact` hook、thread 被 harness 重建或回滚，或者 tend 无法确认历史状态时，基线作废，下一轮注入完整快照。如果 compaction 发生在 turn 中途，并且 traex 允许在 turn 进行中 inject，可以立即补注入；否则等下一个 turn 前补（待验证）。
 5. **turn 进行中的状态变化**：不依赖注入来拦截。所有写入类 MCP 工具都携带 `expected_control_revision`，版本不符时服务端拒绝，并在错误结果里附上当前状态摘要。这样模型在同一 turn 内就能拿到新事实。
 
 ContextPacket 仍按 v0.1 §7.3 的内容组织。注入的 developer 消息以 `[tend context packet <packet_id> epoch=<n> watermark=<event_seq>]` 开头，便于 trace 和排查重复注入。
