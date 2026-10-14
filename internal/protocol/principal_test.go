@@ -12,8 +12,9 @@ func TestPrincipalValidate(t *testing.T) {
 		p       Principal
 		wantErr bool
 	}{
-		{"owner", Principal{Kind: PrincipalOwner, Subject: "user@example.com"}, false},
-		{"owner without subject", Principal{Kind: PrincipalOwner}, true},
+		{"owner", Principal{Kind: PrincipalOwner, Subject: "user@example.com", Client: "cli-phone"}, false},
+		{"owner without subject", Principal{Kind: PrincipalOwner, Client: "cli-phone"}, true},
+		{"owner without client", Principal{Kind: PrincipalOwner, Subject: "user@example.com"}, true},
 		{"main agent", Principal{Kind: PrincipalMainAgent, Subject: "harness-1", Thread: "th-1"}, false},
 		{"main agent without thread", Principal{Kind: PrincipalMainAgent, Subject: "harness-1"}, true},
 		{"runner", Principal{Kind: PrincipalRunner, Subject: "host-a"}, false},
@@ -36,8 +37,8 @@ func TestPrincipalDedupDomain(t *testing.T) {
 		p    Principal
 		want string
 	}{
-		{Principal{Kind: PrincipalOwner, Subject: "phone"}, "owner"},
-		{Principal{Kind: PrincipalOwner, Subject: "laptop"}, "owner"},
+		{Principal{Kind: PrincipalOwner, Subject: "user@example.com", Client: "cli-phone"}, "owner"},
+		{Principal{Kind: PrincipalOwner, Subject: "user@example.com", Client: "cli-laptop"}, "owner"},
 		{Principal{Kind: PrincipalMainAgent, Subject: "harness-1", Thread: "th-1"}, "main_agent:harness-1"},
 		{Principal{Kind: PrincipalMainAgent, Subject: "harness-1", Thread: "th-2"}, "main_agent:harness-1"},
 		{Principal{Kind: PrincipalRunner, Subject: "host-a"}, "runner:host-a"},

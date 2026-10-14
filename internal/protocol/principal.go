@@ -31,12 +31,22 @@ type Principal struct {
 	Thread string `json:"thread,omitempty"`
 	// Role is the run role for run callers.
 	Role RunRole `json:"role,omitempty"`
+	// Client identifies the client instance, such as one browser on one
+	// device, that an owner request came from. Several clients of the same
+	// owner may be active at once. It is used for auditing and per-client
+	// state like event cursors; it is not a credential and does not affect
+	// the dedup domain.
+	Client string `json:"client,omitempty"`
 }
 
 // Validate checks that the principal carries the fields its kind needs.
 func (p Principal) Validate() error {
 	switch p.Kind {
-	case PrincipalOwner, PrincipalRunner:
+	case PrincipalOwner:
+		if p.Subject == "" || p.Client == "" {
+			return fmt.Errorf("protocol: owner principal needs a subject and a client")
+		}
+	case PrincipalRunner:
 		if p.Subject == "" {
 			return fmt.Errorf("protocol: %s principal needs a subject", p.Kind)
 		}
@@ -56,8 +66,9 @@ func (p Principal) Validate() error {
 }
 
 // DedupDomain returns the namespace in which the caller's request IDs must be
-// unique. Owners share one domain across devices so a retry from another
-// client still deduplicates; each harness instance, host and run has its own.
+// unique. All clients of the owner share one domain, so any client can look
+// up a request another client sent; request IDs are random, so clients do not
+// collide. Each harness instance, host and run has its own domain.
 func (p Principal) DedupDomain() string {
 	switch p.Kind {
 	case PrincipalOwner:

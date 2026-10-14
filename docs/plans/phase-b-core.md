@@ -38,13 +38,13 @@ type Envelope struct {
 ```
 
 - 调用方身份（`Principal`）不在信封里，由接入层从鉴权上下文得到并单独传入：
-  - `owner`：tailnet 用户；
+  - `owner`：tailnet 用户，加上客户端标识 client_id（同一用户可以同时有多个客户端，见 design.md D27 与 §9）；
   - `main_agent`：harness 实例加 thread；
   - `runner`：host；
   - `run`：run_id 加角色（implement 或 accept）；
   - `system`：tend 内部派生的请求。
 - 去重域（dedup domain）由 Principal 推导：
-  - owner 共用一个域；
+  - owner 的所有客户端共用一个域，client_id 不参与；
   - 每个 harness 实例一个域；
   - 每个 host 一个域；
   - system 一个域。
