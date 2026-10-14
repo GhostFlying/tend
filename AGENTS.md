@@ -87,7 +87,7 @@ harness/traex → harness, protocol
 
 ## 4. 测试
 
-- `make check` = 格式检查 + vet + staticcheck + `go test -race ./...`，提交前必须通过。
+- `make check` = 格式检查 + vet + staticcheck + `go test -race ./...`，提交前必须通过；CI 在每个 PR 上执行同样的检查，外加 Windows 和 macOS 的交叉编译。
 - 单元测试默认不联网、不调用模型，使用 `testkit` 替身。
 - 需要真实 traex 或 tailnet 的集成测试使用 build tag `integration`，通过 `make it` 显式运行；测试模型使用 `TEND_TRAEX_MODEL`（默认 GPT-5.6-Sol）。
 - v0.1 §17.2 的故障场景对应的测试命名为 `TestFault_*`，便于对照检查。
@@ -100,7 +100,8 @@ harness/traex → harness, protocol
 - body 用英文详细描述这次做了什么、为什么这样做、引入了哪些约束；涉及设计决策时引用编号（如 `Refs: D17`），涉及计划项时引用编号（如 `Plan: B3`）。
 - body 不写跑了哪些测试、多少测试、测试结果；提交前通过 `make check` 是默认前提。
 - 每个 commit 是一个可以独立构建、测试通过的原子变更；重构和行为变化分开提交。
-- 历史保持纯线性：小步变更直接提交到 `main`；较大的工作用短期分支（`<type>/<topic>`），rebase 到最新 `main` 后合入。GitHub 仓库只允许 rebase & merge，禁止 merge commit 和 squash。
+- 所有改动都通过 PR 合入：从最新的 `main` 拉短期分支（`<type>/<topic>`），推送后开 PR。CI（`.github/workflows/ci.yml`，执行 `make check` 和交叉编译）通过后才能合并。
+- 历史保持纯线性：GitHub 仓库只允许 rebase & merge，禁止 merge commit 和 squash；`main` 禁止直接 push 和 force push。PR 合并前先 rebase 到最新的 `main`。
 - 远程：GitHub，公开仓库。
 - git 身份使用仓库或全局已有配置，不添加 agent、bot 或工具作为作者或 co-author。
 - 不提交生成的二进制、数据库文件、`.env`、`.local/`，也不提交 `spikes/` 产生的输出。
