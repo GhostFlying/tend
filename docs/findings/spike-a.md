@@ -41,11 +41,11 @@
 
 - `thread/start` 有一个实验性参数 `dynamicTools`（需要 `experimentalApi`），用来注册由客户端实现的工具。模型调用工具时，app-server 向客户端发出 server request `item/tool/call`，参数是 `{threadId, turnId, callId, namespace, tool, arguments}`；客户端返回 `{success, contentItems}`。
 - 实测工具调用成功。模型是通过 code mode 间接调用的，所以 callId 是一个复合字符串（例如 `code-mode-nested:<n>:call_<id>:exec-<uuid>`），作为不透明字符串使用即可。
-- **影响（对 D20 的修订建议）**：主 Agent 的工具改用动态工具实现，不再单独起 MCP server。
+- **影响（D20 已据此确认）**：主 Agent 的工具用动态工具实现，不再单独起 MCP server。
   - 调用身份天然由 thread、turn 和 callId 组成，直接推导 request_id：`harness:<instance>:<threadId>:<turnId>:<callId>`。
   - 不用给每个 thread 分配 MCP 地址和 token，也省掉一个 listener。
   - 工具调用和主会话走同一条 stdio 连接，tend 是唯一的执行方。
-  - 风险：这是实验性 API，所以要固定 traex 版本，并在升级时用这个 spike 回归。MCP 作为备选方案保留在设计里。
+  - 动态工具在 Codex 中已经存在很长时间，虽然标记为实验性，但不作为风险项。升级 traex 时用这个 spike 做回归。
 - 还没验证：工具执行期间 tend 进程崩溃、app-server 重连之后，这次调用会怎么处理（结果丢失还是重新发起）。B12 需要专门做故障测试。
 
 ## A6 重启与恢复

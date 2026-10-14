@@ -24,7 +24,7 @@ tend/
     store/                 SQLite、嵌入式迁移、仓储、事务辅助
     app/                   用例层：请求去重 + 领域规则 + 存储 + outbox，在一个事务内完成
     api/                   浏览器 HTTP API 与 SSE
-    mcp/                   主 Agent 工具面
+    tools/                 主 Agent 工具面（app-server 动态工具）
     runnerapi/             runner 协议的服务端
     scheduler/             排队与资源分配
     dispatch/              outbox 投递
@@ -48,7 +48,7 @@ tend/
 依赖只能自上而下，禁止循环：
 
 ```
-cmd → api / mcp / runnerapi / scheduler / dispatch / contextbuilder
+cmd → api / tools / runnerapi / scheduler / dispatch / contextbuilder
     → app → domain → protocol
           → store  → protocol
 runner → harness, protocol, netx（runner 不 import 服务端的任何包）
@@ -56,7 +56,7 @@ harness/traex → harness, protocol
 ```
 
 - `domain` 不依赖 `store`、网络、时钟或随机数：所有输入通过参数传入，输出是决定（新状态、事件、待创建动作），方便穷举测试。
-- 服务端的 handler（`api`、`mcp`、`runnerapi`）不直接写数据库，所有有副作用的操作都走 `app`。
+- 服务端的 handler（`api`、`tools`、`runnerapi`）不直接写数据库，所有有副作用的操作都走 `app`。
 - `internal/` 之外不放 Go 业务代码。
 
 ## 2. 工程约束（不变量）

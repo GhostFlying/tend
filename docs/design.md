@@ -15,7 +15,7 @@
 | D17 | 主会话上下文以 app-server 协议注入为主：由服务端在 turn 之间通过 `thread/inject_items` 写入 developer 消息。Hook 只覆盖我们无法发起的时机（compact 之后、harness 自行恢复）。 | 已确认，接口已验证（spike A2） |
 | D18 | 不做每轮注入。只有基线失效或账本发生相关变化时才注入（见 §2）。 | 已确认 |
 | D19 | 执行节点一律用 pull 模式的 runner：runner 主动连控制服务，领取任务、续租、上报。控制服务不主动连节点。 | 已确认 |
-| D20 | 主 Agent 唯一的写入路径是 tend 提供的工具。主 harness 使用只读 sandbox，看不到应用数据库和根凭据。工具的实现方式由 MCP 改为 app-server 的动态工具（`dynamicTools` / `item/tool/call`），MCP 作为备选（依据 `docs/findings/spike-a.md` A4）。 | 原则已确认；改用动态工具为建议 |
+| D20 | 主 Agent 唯一的写入路径是 tend 提供的工具，通过 app-server 的动态工具（`dynamicTools` / `item/tool/call`）实现，经由主会话同一条 stdio 连接回调 tend。主 harness 使用只读 sandbox，看不到应用数据库和根凭据。 | 已确认 |
 | D21 | 远程访问走 tailscale。服务只监听 tailnet 地址，应用层仍保留鉴权与角色（tailscale 身份不替代角色权限）。 | 已确认 |
 | D22 | 技术栈：服务端和 runner 用 Go，单个 module；Web 用 TypeScript。SQLite 用 `modernc.org/sqlite`（纯 Go，便于交叉编译）。harness 适配是 Go 包，服务端与 runner 共用。领域与 API 类型以 Go 为准，导出 JSON Schema 后生成 TS 供 Web 使用。 | 已确认 |
 | D23 | 服务端和 runner 都内置 `tsnet` 加入 tailnet，不依赖设备上安装或运行 tailscaled。 | 已确认 |
@@ -26,7 +26,7 @@
 
 ### 2.1 已观察到的能力（traex 0.209.1 生成的协议）
 
-- `thread/start` 接受 `developerInstructions`、`baseInstructions`，以及按 thread 覆盖的 `config`（可用于给每个 thread 配置专属 MCP 地址和凭据，待验证）。
+- `thread/start` 接受 `developerInstructions`、`baseInstructions`，以及按 thread 覆盖的 `config`。
 - `thread/inject_items { threadId, items: JsonValue[] }`：把原始 Responses API item 追加到模型可见历史。turn 进行中也可以注入；重复注入会追加多份，app-server 不去重。
 - `turn/start` 的 `input` 只有用户输入类型（text、image、skill、mention），没有 developer 角色，因此不用它来承载上下文。
 - Compaction 以独立的压缩 turn 进行，其中包含 `contextCompaction` item；压缩会替换历史，之前注入的原始条目会被丢掉。traex 0.209.1 不发 `thread/compacted` 通知。Hook 事件包含 `postCompact`、`sessionStart`、`userPromptSubmit`。
@@ -43,7 +43,7 @@
    - 普通进度、心跳和日志永远不注入；模型需要时通过工具读取。
 3. **水位推进的条件**：只有 `thread/inject_items` 返回成功、并且随后的 `turn/start` 成功时，才推进该 thread 的水位。任一步失败，下次重算 delta，或者退回完整快照。
 4. **基线失效**：观察到 `contextCompaction` item、`postCompact` hook、thread 被 harness 重建或回滚，或者 tend 无法确认历史状态时，基线作废，下一轮注入完整快照。如果 compaction 发生在 turn 中途，并且 traex 允许在 turn 进行中 inject，可以立即补注入；否则等下一个 turn 前补（待验证）。
-5. **turn 进行中的状态变化**：不依赖注入来拦截。所有写入类 MCP 工具都携带 `expected_control_revision`，版本不符时服务端拒绝，并在错误结果里附上当前状态摘要。这样模型在同一 turn 内就能拿到新事实。
+5. **turn 进行中的状态变化**：不依赖注入来拦截。所有写入类工具都携带 `expected_control_revision`，版本不符时服务端拒绝，并在错误结果里附上当前状态摘要。这样模型在同一 turn 内就能拿到新事实。
 
 ContextPacket 仍按 v0.1 §7.3 的内容组织。注入的 developer 消息以 `[tend context packet <packet_id> epoch=<n> watermark=<event_seq>]` 开头，便于 trace 和排查重复注入。
 
@@ -55,10 +55,12 @@ ContextPacket 仍按 v0.1 §7.3 的内容组织。注入的 developer 消息以 
 
 ## 3. 主 Agent 的工具面（细化 v0.1 §14.3）
 
-- tend 以 streamable HTTP 方式提供 MCP server。每个主 thread 在 `thread/start` 的 `config` 里拿到专属 URL 或 token，服务端由此识别 harness 实例和 thread，不信任 payload 里自报的身份。
-- 应用 request_id 的推导：`mcp:<harness_instance>:<thread_id>:<turn_id>:<call_id>`。如果 MCP 请求里拿不到 turn_id 或 call_id，就退回到 MCP JSON-RPC 层的 `(session, rpc_id)`，并在文档中声明这种情况下只有有限去重（待验证）。
+- 工具以动态工具的形式在 `thread/start` 的 `dynamicTools` 中注册（initialize 时声明 `experimentalApi`）。模型调用时，app-server 通过主会话的 stdio 连接向 tend 发出 `item/tool/call`，参数为 `{threadId, turnId, callId, namespace, tool, arguments}`；tend 返回 `{success, contentItems}`。
+- 调用方身份由连接决定：只有 tend 自己启动的 app-server 进程能发起调用，tend 根据连接和 threadId 确定是哪个 harness 实例、哪个 thread，不信任 arguments 里自报的身份。
+- 应用 request_id 的推导：`harness:<harness_instance>:<threadId>:<turnId>:<callId>`。callId 当作不透明字符串使用（code mode 下是复合字符串）。
 - 第二层业务去重：规划写入以 `(source_message_id, plan_commit_seq)` 唯一；run 创建以 `(action_id, generation)` 唯一（v0.1 §8.6）。
 - 第一批工具：`tasks.list`、`tasks.read`、`tasks.create`、`tasks.update_intent`、`actions.create`、`decisions.open`、`decisions.resolve_from_message`、`artifacts.read`、`requests.read`。主 Agent 拿不到 `acceptance.submit`，也没有 completed 的写入路径。
+- 工具执行期间 tend 崩溃或连接中断时，调用的结果如何处理还没验证，B12 做专门的故障测试。在得到结论之前，工具的副作用按“结果未知”对待，靠 request_id 和业务去重保证重放安全。
 
 ## 4. Runner 协议（细化 v0.1 §10、§12.2）
 
@@ -80,7 +82,7 @@ Worker 在节点本地驱动 `traex app-server`（或测试适配器），与主
 
 ## 5. 范围（细化 v0.1 §17 阶段 C）
 
-MVP 闭环：Web 消息 → 主 Agent（traex，单前台 thread）→ 通过 MCP 创建任务与 PlanAction → 调度器派给 Linux 本机 runner → worker 产出 artifact（分支加 commit sha）→ 程序自动派独立验收 run → passed 则 completed，否则进入待决。
+MVP 闭环：Web 消息 → 主 Agent（traex，单前台 thread）→ 通过动态工具创建任务与 PlanAction → 调度器派给 Linux 本机 runner → worker 产出 artifact（分支加 commit sha）→ 程序自动派独立验收 run → passed 则 completed，否则进入待决。
 
 MVP 不做：任务范围的后台推理 thread（失败统一进入待决事项）、人工接管、导入、多机器、Orca、Electron。数据模型为这些保留字段，但不实现相关流程。
 
@@ -88,8 +90,7 @@ MVP 不做：任务范围的后台推理 thread（失败统一进入待决事项
 
 ### 6.1 拓扑
 
-- **服务端**（`tend-server`）以 tsnet 节点身份加入 tailnet，主机名默认为 `tend`。它只在 tsnet listener 上提供 Web、API、runner 协议和 MCP 服务，不监听宿主机的公网或局域网接口。
-- **MCP 的特殊情况**：主 harness 和服务端在同一台机器上，主 harness 访问 MCP 走本机 loopback 或 unix socket 上的独立 listener，不经过 tailnet。这个 listener 只接受 thread 级 token。
+- **服务端**（`tend-server`）以 tsnet 节点身份加入 tailnet，主机名默认为 `tend`。它只在 tsnet listener 上提供 Web、API 和 runner 协议，不监听宿主机的公网或局域网接口。
 - **runner**（`tend-runner`）也以 tsnet 节点身份加入 tailnet，主动连接 `tend`。Windows、macOS 和容器里都不需要安装 tailscaled。
 - tsnet 的 state 目录需要持久化（服务端放在数据目录下，runner 放在 journal 旁边），保证重启后节点身份不变。
 
@@ -102,7 +103,7 @@ MVP 不做：任务范围的后台推理 thread（失败统一进入待决事项
 
 - 服务端对每个请求调用 tsnet 的 WhoIs，取得调用方的节点和用户身份，用作第一层身份。
 - 角色映射写在服务端配置里：哪些 tailnet 用户是 owner；哪些节点（按 node key 或 tag 加主机名）对应哪个 host_id。
-- 第二层仍然使用应用凭据：runner 的 per-host token 和 run 级 token、thread 级 MCP token、浏览器会话。只在 tailnet 内也不能免除角色校验（D21）。
+- 第二层仍然使用应用凭据：runner 的 per-host token 和 run 级 token、浏览器会话。主 Agent 的工具调用走本机 stdio，不经过网络。只在 tailnet 内也不能免除角色校验（D21）。
 - 浏览器会话可以基于 WhoIs 自动登录（tailnet 用户等于 owner 时签发会话 cookie），不再单独设置密码。
 
 ### 6.4 TLS

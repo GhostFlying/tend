@@ -7,7 +7,7 @@
 
 目标：用 traex 0.209.1 的实际行为确认 design.md 中标为“待验证”的事项。产出 `docs/findings/spike-a.md`，每项结论写明：结论、复现脚本、traex 版本、限制。spike 脚本放在 `spikes/`，不进入正式包。
 
-traex 使用 tend 专用的 home：宿主机目录 `~/.local/share/tend/traex-home`，挂载到容器内相同的绝对路径，并设置 `TRAE_HOME`。工作目录也挂载到相同路径，保证 state db 里记录的绝对路径与宿主机一致。traex 通过 SSH 完成鉴权：宿主机的 `~/.ssh` 以只读方式挂载到 `~/.ssh-host`，`postStartCommand` 每次启动时复制一份可写的到 `~/.ssh`（traex 鉴权时需要在 `~/.ssh` 下创建临时文件）。tend 自己的 hook 和 MCP 配置通过 `-c` 参数或 thread 级 config 传入。
+traex 使用 tend 专用的 home：宿主机目录 `~/.local/share/tend/traex-home`，挂载到容器内相同的绝对路径，并设置 `TRAE_HOME`。工作目录也挂载到相同路径，保证 state db 里记录的绝对路径与宿主机一致。traex 通过 SSH 完成鉴权：宿主机的 `~/.ssh` 以只读方式挂载到 `~/.ssh-host`，`postStartCommand` 每次启动时复制一份可写的到 `~/.ssh`（traex 鉴权时需要在 `~/.ssh` 下创建临时文件）。tend 自己的 hook 等配置通过 `-c` 参数或 thread 级 config 传入。
 
 测试默认使用 `GPT-5.6-Sol`（环境变量 `TEND_TRAEX_MODEL`），避免 GPT-6.1 排队影响测试。
 
@@ -20,8 +20,8 @@ traex 使用 tend 专用的 home：宿主机目录 `~/.local/share/tend/traex-ho
 | A1 | app-server stdio 生命周期：initialize → thread/start → turn/start → 流式通知；记录 thread_id、turn_id、item id 的稳定性 | **已完成**，见 `docs/findings/spike-a.md` |
 | A2 | `thread/inject_items`：在 turn 之间注入 developer 消息，再用一个“暗号”问题确认模型能看到；测试 turn 进行中注入的行为；测试重复注入的效果 | **已完成**：可以注入 developer 消息；turn 进行中也可以注入；重复注入会追加两份 |
 | A3 | Compaction：用 `thread/compact/start` 触发压缩，观察 `contextCompaction` item 和 `postCompact`、`sessionStart` hook 的输入和输出；确认注入内容压缩后是否保留 | **部分完成**：`contextCompaction` item 是可靠的失效信号，压缩会丢掉注入的原始条目；hook 推迟 |
-| A4 | MCP：通过 thread/start 的 `config` 给单个 thread 配置 streamable HTTP MCP server；记录 `tools/call` 携带的身份字段（turn_id、call_id、`_meta`），以及超时和重试行为 | **改为动态工具并已验证**：`item/tool/call` 带 threadId、turnId、callId；MCP 作为备选 |
-| A5 | 主 Agent 隔离：只读 sandbox、`approvalPolicy=never`；确认能否禁用 shell 或写文件工具，只保留 MCP | 主 Agent 无法写工作区或数据库 |
+| A4 | 主 Agent 工具的调用身份：原计划验证 MCP，实际改为验证动态工具 | **改为动态工具并已验证**：`item/tool/call` 带 threadId、turnId、callId |
+| A5 | 主 Agent 隔离：只读 sandbox、`approvalPolicy=never`；确认能否禁用 shell、写文件工具、插件和 skills，只保留 tend 的动态工具 | 主 Agent 无法写工作区或数据库 |
 | A6 | 中断与恢复：turn/interrupt 的语义；app-server 进程重启后用 thread/resume 恢复，历史和注入内容是否还在 | **已完成**：重启后 resume 能恢复完整历史 |
 | A7 | Worker 形态：在 worktree 中以 workspace-write 运行一个 thread，完成后取 diff 或 commit；确认审批请求如何自动处理 | runner 可以照此驱动 worker |
 | A8 | 协议绑定：用 `generate-json-schema` 生成 Go 类型，或手写所需的子集，放入 `internal/harness/traex/generated/`，附带版本信息文件 | 绑定可以编译，并与 A1 的实际消息一致 |
@@ -50,9 +50,9 @@ traex 使用 tend 专用的 home：宿主机目录 `~/.local/share/tend/traex-ho
 7. **B7 runner 协议（服务端）**：hello、claim（长轮询）、heartbeat、events、complete；租约与 run 级 token；对账逻辑（runner 上报持有、服务端无记录的 run，以及反过来的情况）。
 8. **B8 runner（客户端）**：journal、自我 fencing 计时、harness 驱动接口、内置 tsnet；先用 testkit 的 fake harness。CI 交叉编译 windows/amd64、darwin/arm64、linux/amd64。
 9. **B9 验收流程**：实现 run 提交 artifact 后，由程序派生验收 action；验收 run 使用独立凭据，结论绑定 spec_version 与 artifact_id；迟到的结果按 v0.1 §9.4 处理。
-10. **B10 MCP 工具面**：design.md §3 的第一批工具，request_id 按 A4 的结论推导。
+10. **B10 工具面**：design.md §3 的第一批动态工具，request_id 按 A4 的结论推导。
 11. **B11 Context builder**：完整快照与 delta 的生成、预算裁剪、水位推进与失效处理（按 A2、A3、A6 的结论实现）。
-12. **B12 traex 适配接入**：主 thread 管理器（前台串行队列、注入、MCP 配置）；runner 的 traex worker 驱动。
+12. **B12 traex 适配接入**：主 thread 管理器（前台串行队列、注入、动态工具注册与回调）；runner 的 traex worker 驱动。
 
 ### 阶段 B 必须通过的测试（来自 v0.1 §17.2）
 
