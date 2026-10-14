@@ -18,8 +18,11 @@ const (
 	CodeForbidden         Code = "forbidden"
 	CodeNotFound          Code = "not_found"
 	CodeInvalidTransition Code = "invalid_transition"
-	CodeUnknownOutcome    Code = "unknown_outcome"
-	CodeInternal          Code = "internal"
+	// CodeDuplicateEffect means the business effect was already applied
+	// under another request; Details names the original.
+	CodeDuplicateEffect Code = "duplicate_effect"
+	CodeUnknownOutcome  Code = "unknown_outcome"
+	CodeInternal        Code = "internal"
 )
 
 // Error is the error returned across protocol boundaries. Message is written
