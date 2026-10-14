@@ -80,6 +80,8 @@ Runner 本地有一个 journal（SQLite），记录持有的 run、lease 和已�
 
 Worker 在节点本地驱动 `traex app-server`（或测试适配器），与主 harness 共用 harness 适配包。一个任务对应一个 worktree；验收 run 使用独立 worktree，基于 artifact 引用检出。
 
+Artifact 由 runner 生成，不由模型生成：worker 只修改工作区（sandbox 下 worktree 的 git 目录不可写），turn 完成后 runner 执行 commit，并把 `(分支, commit sha)` 作为不可变的 artifact 引用上报。runner 启动 worker 时显式配置可写根目录、网络策略和环境变量（依据 spike A7）。
+
 ## 5. 范围（细化 v0.1 §17 阶段 C）
 
 MVP 闭环：Web 消息 → 主 Agent（traex，单前台 thread）→ 通过动态工具创建任务与 PlanAction → 调度器派给 Linux 本机 runner → worker 产出 artifact（分支加 commit sha）→ 程序自动派独立验收 run → passed 则 completed，否则进入待决。

@@ -76,11 +76,37 @@
 - 关闭 app-server 进程，重新启动并握手之后，`thread/resume {threadId}` 成功，历史完整（包括压缩后的状态），模型答对了暗号。
 - **影响**：app-server 重启本身不会让基线失效，只要 resume 成功、并且期间没有发生 compaction。tend 重启后仍然要按“无法确认就重建”的原则：如果水位记录和 thread 的状态对不上，就注入一份完整快照。
 
+## A7 Worker 形态
+
+复现：`go run ./spikes/appserver -scenario worker`。用一个临时 git 仓库，在 `task/sub` 分支的 worktree 里启动 workspace-write、`approvalPolicy=never` 的 thread，让 worker 实现一个小改动并跑测试；turn 结束后由 spike 扮演 runner，执行 commit。
+
+| 项 | 结果 |
+| --- | --- |
+| Docker 中的 sandbox | 默认 seccomp 下 bubblewrap 建不了 user namespace，所有命令都失败。加上 `--security-opt seccomp=unconfined` 后正常（宿主机允许非特权 user namespace，不需要特权模式） |
+| 实现与测试 | worker 修改了 `calc.go`，新增 `calc_test.go`，`go test` 通过 |
+| `.git` 写入 | worktree 的 git 目录在 cwd 之外，sandbox 不允许写，模型无法 commit 或改分支 |
+| 产物 | runner 在 turn 结束后执行 `git add -A` 和 commit，得到确定的 commit sha 作为 artifact |
+| 网络 | workspace-write 下网络是通的（curl 成功） |
+| 构建缓存 | `GOCACHE` 在可写根目录之外，worker 只能自己绕到 `/tmp` |
+
+**影响**：
+- Artifact 由 runner 生成：turn 完成后，runner 检查工作区、commit，并把 `(分支, commit sha)` 作为不可变的 artifact 引用上报。模型只改工作区，不碰 git 历史。
+- runner 启动 worker 时显式设置：可写根目录（构建缓存、临时目录）、网络策略（`sandbox_workspace_write.network_access`），以及 worker 需要的环境变量。
+- 在容器中运行的 runner 需要放开 user namespace。开发容器用 `seccomp=unconfined`；生产环境的容器化 runner 改用只放开相关系统调用的自定义 seccomp profile。Windows 和 macOS 上的 runner 使用各自原生的 sandbox，需要在 A9 之后实机验证。
+
+## A8 协议绑定
+
+`generate-json-schema --experimental` 的输出约 5.4MB，v2 下有 345 个定义，其中大量是带标签的联合类型，生成 Go 代码的收益很低。
+
+**决定**：
+- `internal/harness/traex` 只手写 tend 用到的消息子集：握手、thread 和 turn 的启动与恢复、inject_items、compact、动态工具调用、tool 回调，以及几类 item 和通知。
+- 用脚本从 schema 中抽出这些定义，连同 traex 版本号一起提交为测试数据。
+- 写一个测试，校验手写结构体的 JSON 字段与 schema 的 properties 和 required 一致；升级 traex 时重新抽取，漂移会让测试失败。
+- 不引入代码生成器和 JSON Schema 校验库。具体实现放在 B12。
+
 ## 未完成项
 
 | 项 | 状态 |
 | --- | --- |
 | A3 hook | 推迟，注入不依赖 hook |
-| A7 worker 形态 | 待做 |
-| A8 协议绑定 | 待做：用 `generate-json-schema --experimental` 生成 Go 类型，或手写所需的子集 |
 | A9 tsnet | 待做 |

@@ -35,7 +35,7 @@ type spike struct {
 func main() {
 	bin := flag.String("bin", "traex", "harness binary")
 	outDir := flag.String("out", "spikes/appserver/out", "output directory")
-	scenario := flag.String("scenario", "protocol", "protocol or isolate")
+	scenario := flag.String("scenario", "protocol", "protocol, isolate or worker")
 	flag.Parse()
 
 	model := os.Getenv("TEND_TRAEX_MODEL")
@@ -70,6 +70,12 @@ func main() {
 			dataDir = os.TempDir()
 		}
 		runErr = s.runIsolation(ctx, filepath.Join(dataDir, "spike-main-cwd-"+stamp))
+	case "worker":
+		dataDir := os.Getenv("TEND_DATA_DIR")
+		if dataDir == "" {
+			dataDir = os.TempDir()
+		}
+		runErr = s.runWorker(ctx, filepath.Join(dataDir, "spike-worker-"+stamp))
 	default:
 		runErr = fmt.Errorf("unknown scenario %q", *scenario)
 	}
