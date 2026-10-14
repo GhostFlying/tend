@@ -48,6 +48,29 @@
   - 动态工具在 Codex 中已经存在很长时间，虽然标记为实验性，但不作为风险项。升级 traex 时用这个 spike 做回归。
 - 还没验证：工具执行期间 tend 进程崩溃、app-server 重连之后，这次调用会怎么处理（结果丢失还是重新发起）。B12 需要专门做故障测试。
 
+## A5 主 Agent 隔离
+
+复现：`go run ./spikes/appserver -scenario isolate`。主 thread 的 cwd 放在仓库外的专用目录，使用只读 sandbox，并通过 thread 级 `config`（点分路径，与 `-c` 写法相同）关闭不需要的功能，完整列表见 `spikes/appserver/isolate.go`。
+
+| 项 | 结果 |
+| --- | --- |
+| AGENTS.md | `instructionSources` 为空，不再加载任何项目说明 |
+| 基础上下文 | 第一个请求的输入从约 12.9k 降到约 8.7k token；剩下的系统内容是 tend 的 developerInstructions、sandbox 权限说明、多 agent 团队说明和 auto-compact 提示 |
+| shell、插件、skills、浏览器、web search、`request_user_input` | 已经从工具列表中移除 |
+| 写文件 | 模型尝试用 `apply_patch` 写文件，被只读 sandbox 拒绝，文件没有创建 |
+| 动态工具 | 正常可用 |
+
+关不掉的部分：
+- 这些工具由模型目录（model catalog）决定，配置覆盖不了：code mode（`exec`/`wait`）、`apply_patch`、三个 MCP resource 工具。GPT-5.6 和 GPT-6 系列的目录项强制使用 code mode。
+- `multi_tool_use.parallel` 由 Responses API 那一侧添加，无法关闭。
+- `cron_*` 是 traex 自己加的工具，上游没有，暂时没找到开关。
+- 这几项在只读 sandbox 下都写不了工作区，所以不影响隔离；代价只是一些上下文 token。
+- 多 agent 协作工具**有意保留**：主 Agent 有时需要用 subagent。注意 traex 的 `agents` 配置是“角色名 → 角色配置”的映射，和上游的 `agents.enabled` 不兼容。subagent 是否继承只读 sandbox，留到 B12 确认。
+
+**重复调用**：一次请求里，模型连续两次调用了同一个工具，参数相同、callId 不同，间隔约 3.6 秒。这直接证明只靠 request_id 去重不够，有副作用的工具必须做业务层去重（v0.1 §8.6，design.md §3 的第二层去重）。
+
+模型列出的工具清单只作参考，证据以工具列表的实际变化和 token 数为准。
+
 ## A6 重启与恢复
 
 - 关闭 app-server 进程，重新启动并握手之后，`thread/resume {threadId}` 成功，历史完整（包括压缩后的状态），模型答对了暗号。
@@ -58,7 +81,6 @@
 | 项 | 状态 |
 | --- | --- |
 | A3 hook | 推迟，注入不依赖 hook |
-| A5 主 Agent 隔离 | 待做：插件和 skills 的关闭、只读 sandbox 下禁用 shell |
 | A7 worker 形态 | 待做 |
 | A8 协议绑定 | 待做：用 `generate-json-schema --experimental` 生成 Go 类型，或手写所需的子集 |
 | A9 tsnet | 待做 |

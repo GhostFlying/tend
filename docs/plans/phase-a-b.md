@@ -21,7 +21,7 @@ traex 使用 tend 专用的 home：宿主机目录 `~/.local/share/tend/traex-ho
 | A2 | `thread/inject_items`：在 turn 之间注入 developer 消息，再用一个“暗号”问题确认模型能看到；测试 turn 进行中注入的行为；测试重复注入的效果 | **已完成**：可以注入 developer 消息；turn 进行中也可以注入；重复注入会追加两份 |
 | A3 | Compaction：用 `thread/compact/start` 触发压缩，观察 `contextCompaction` item 和 `postCompact`、`sessionStart` hook 的输入和输出；确认注入内容压缩后是否保留 | **部分完成**：`contextCompaction` item 是可靠的失效信号，压缩会丢掉注入的原始条目；hook 推迟 |
 | A4 | 主 Agent 工具的调用身份：原计划验证 MCP，实际改为验证动态工具 | **改为动态工具并已验证**：`item/tool/call` 带 threadId、turnId、callId |
-| A5 | 主 Agent 隔离：只读 sandbox、`approvalPolicy=never`；确认能否禁用 shell、写文件工具、插件和 skills，只保留 tend 的动态工具 | 主 Agent 无法写工作区或数据库 |
+| A5 | 主 Agent 隔离：只读 sandbox、`approvalPolicy=never`；确认能否禁用 shell、写文件工具、插件和 skills，只保留 tend 的动态工具 | **已完成**：shell、插件、skills、AGENTS.md 都已移除，只读 sandbox 拦住了写入；code mode 等由模型目录决定的工具关不掉；保留 subagent |
 | A6 | 中断与恢复：turn/interrupt 的语义；app-server 进程重启后用 thread/resume 恢复，历史和注入内容是否还在 | **已完成**：重启后 resume 能恢复完整历史 |
 | A7 | Worker 形态：在 worktree 中以 workspace-write 运行一个 thread，完成后取 diff 或 commit；确认审批请求如何自动处理 | runner 可以照此驱动 worker |
 | A8 | 协议绑定：用 `generate-json-schema` 生成 Go 类型，或手写所需的子集，放入 `internal/harness/traex/generated/`，附带版本信息文件 | 绑定可以编译，并与 A1 的实际消息一致 |

@@ -35,6 +35,7 @@ type spike struct {
 func main() {
 	bin := flag.String("bin", "traex", "harness binary")
 	outDir := flag.String("out", "spikes/appserver/out", "output directory")
+	scenario := flag.String("scenario", "protocol", "protocol or isolate")
 	flag.Parse()
 
 	model := os.Getenv("TEND_TRAEX_MODEL")
@@ -57,8 +58,23 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	defer cancel()
-	if err := s.run(ctx); err != nil {
-		s.results["fatal"] = err.Error()
+	var runErr error
+	switch *scenario {
+	case "protocol":
+		runErr = s.run(ctx)
+	case "isolate":
+		// The main agent's cwd must sit outside any repository so that no
+		// project AGENTS.md is loaded into its base context.
+		dataDir := os.Getenv("TEND_DATA_DIR")
+		if dataDir == "" {
+			dataDir = os.TempDir()
+		}
+		runErr = s.runIsolation(ctx, filepath.Join(dataDir, "spike-main-cwd-"+stamp))
+	default:
+		runErr = fmt.Errorf("unknown scenario %q", *scenario)
+	}
+	if runErr != nil {
+		s.results["fatal"] = runErr.Error()
 	}
 	b, _ := json.MarshalIndent(s.results, "", "  ")
 	_ = os.WriteFile(filepath.Join(*outDir, "results-"+stamp+".json"), b, 0o644)
@@ -125,6 +141,8 @@ type turnResult struct {
 	Text    string   `json:"text"`
 	Items   []string `json:"itemTypes"`
 	Methods []string `json:"notableNotifications,omitempty"`
+	// InputTokens is the input size of the first model request in the turn.
+	InputTokens int `json:"firstRequestInputTokens,omitempty"`
 }
 
 func (s *spike) startTurn(ctx context.Context, threadID, prompt string) (string, error) {
@@ -179,6 +197,19 @@ func (s *spike) waitTurn(ctx context.Context, threadID, turnID string, onStarted
 				if item.Type == "agentMessage" {
 					res.Text += item.Text
 				}
+			case "thread/tokenUsage/updated":
+				var u struct {
+					TurnID     string `json:"turnId"`
+					TokenUsage struct {
+						Last struct {
+							InputTokens int `json:"inputTokens"`
+						} `json:"last"`
+					} `json:"tokenUsage"`
+				}
+				_ = json.Unmarshal(m.Params, &u)
+				if u.TurnID == turnID && res.InputTokens == 0 {
+					res.InputTokens = u.TokenUsage.Last.InputTokens
+				}
 			case "thread/compacted", "error", "warning", "model/rerouted", "model/fallback":
 				res.Methods = append(res.Methods, m.Method)
 			case "turn/completed":
@@ -226,17 +257,7 @@ func (s *spike) run(ctx context.Context) error {
 		"approvalPolicy":        "never",
 		"sandbox":               "read-only",
 		"developerInstructions": "You are a test agent for the tend spike. Follow instructions literally and keep answers minimal.",
-		"dynamicTools": []any{map[string]any{
-			"type":        "function",
-			"name":        "tend_echo",
-			"description": "Echo a message back. Use when asked to call tend_echo.",
-			"inputSchema": map[string]any{
-				"type":                 "object",
-				"properties":           map[string]any{"message": map[string]any{"type": "string"}},
-				"required":             []string{"message"},
-				"additionalProperties": false,
-			},
-		}},
+		"dynamicTools":          []any{echoToolSpec()},
 	}, &started)
 	if err != nil {
 		return fmt.Errorf("thread/start: %w", err)
