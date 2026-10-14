@@ -103,4 +103,3 @@ func envOr(key, def string) string {
 	}
 	return def
 }
-
