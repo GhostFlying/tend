@@ -59,7 +59,8 @@ type Envelope struct {
 
 ### 1.4 错误码与结果
 
-- 错误码：`invalid_request`、`missing_request_id`、`conflict_payload`、`stale_revision`、`forbidden`、`not_found`、`invalid_transition`、`unknown_outcome`、`internal`。
+- 错误码：`invalid_request`、`missing_request_id`、`conflict_payload`、`stale_revision`、`forbidden`、`not_found`、`invalid_transition`、`duplicate_effect`、`unknown_outcome`、`internal`。
+- `duplicate_effect`：同一规划提交或同一 effect 已经由另一个请求完成；Details 给出原请求或已有动作的 ID，调用方据此查询，而不是重试。
 - `Error{Code, Message, Details}`。Message 面向调用方，不包含内部错误文本（约束 8）。
 - 有副作用请求的返回值是 `Operation{RequestID, Status, Result, Error}`：
   - Status 取 `succeeded`、`failed`、`accepted`、`unknown` 之一；
@@ -143,7 +144,7 @@ type Outcome struct {
    - **已存在，哈希相同** → 重新执行 `Authorize`（撤权之后不能凭旧 ID 读到结果），然后返回记录里的状态和结果，不重复执行。
    - **不存在** → 执行 `Authorize`，失败就返回 `forbidden`，**不记录**（权限之后可能被授予）。通过后执行 `Apply`：
      - 成功：在同一事务里写入业务变化、events、outbox 和 request_records（状态 succeeded 或 accepted）；
-     - 业务失败（`stale_revision`、`invalid_transition`、`not_found` 等确定性的错误）：回滚业务变化，但**在新事务中记录**失败状态和错误码，让同一 ID 重试时拿到相同的失败结果；
+     - 业务失败（`invalid_request`、`stale_revision`、`invalid_transition`、`not_found`、`duplicate_effect` 等确定性的错误）：Apply 在 SAVEPOINT 内执行，失败时回滚到 SAVEPOINT，**在同一事务中**记录失败状态、错误码和 Details，让同一 ID 重试时拿到相同的失败结果。同一事务完成，避免两个事务之间被其他请求插队；
      - 内部错误：回滚，不记录。调用方可以用同一个 ID 安全重试，因为没有任何东西提交。
 4. 提交事务。
 
@@ -161,9 +162,10 @@ SQLite 只有一个写入者，同一 ID 的并发请求会被串行化：后到
 
 - `tasks.create`：创建 task 和第一版 spec，写入 events。payload 必须包含 `source_message_id` 和 `commit_seq`，同时写入 `plan_commits`。
 - `tasks.update_intent`：修改优先级、约束或 spec；校验 `expected_control_revision`；spec 有实质变化时生成新版本。
-- `actions.create`：创建 PlanAction，受 effect_key 约束。
+- `actions.create`：MVP 中规划方能显式创建的只有下一个 implement 代次（`domain.RequestImplement`），accept 和 deliver 动作由规则派生。请求已有代次时返回 `duplicate_effect`，受 effect_key 约束。
 - `control.set_mode`：切换 managed、paused 或 human_control，control_revision 加 1。
-- `runs.record_artifact` 与 `acceptances.submit`：只实现领域部分和事务，Principal 校验用 run 角色的替身。真正的接入在 B7 和 B9。
+- `runs.report_started`、`runs.submit_artifact` 与 `acceptances.submit`：只实现领域部分和事务，run 由测试替身创建（调度器在 B6）。被验收的 spec 版本和 artifact 取自验收 run 的动作，不取自请求。真正的接入在 B7 和 B9。
+- 请求记录的 `error_details` 列由 `0002_request_error_details.sql` 增加（已合并的 0001 不修改）。
 
 ## 4. B4 `internal/domain`
 
@@ -248,7 +250,6 @@ type Decision struct {
 3. `feat: impl testkit clock and deterministic id generator`。
 4. `feat: impl sqlite store with embedded migrations`：B2，新增 modernc 依赖。
 5. `feat: impl domain lifecycle, run states and derivation rules`：B4（不依赖存储，可以和第 4 步并行）。
-6. `feat: impl request dedup and command execution`：B3 框架。
-7. `feat: impl first task and action commands`：第一批用例和 `TestFault_*`。
+6. `feat: impl request dedup, command execution and first commands`：B3 框架、第一批用例和 `TestFault_*`。框架的测试离不开具体用例，因此原计划的第 6、7 步合为一个 commit。
 
 每一步结束时 `make check` 都要通过。

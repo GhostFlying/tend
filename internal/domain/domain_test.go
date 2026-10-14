@@ -368,3 +368,30 @@ func TestInvariantsUnderRandomCommands(t *testing.T) {
 	}
 	t.Logf("coverage: %v", reached)
 }
+
+func TestRequestImplement(t *testing.T) {
+	task := taskIn(protocol.TaskChangesRequired)
+	task.Block = protocol.BlockBudgetExhausted
+	task.ImplementGeneration, task.Budget = 3, 3
+
+	d, err := RequestImplement(task, 4, task.ControlRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Task.ImplementGeneration != 4 || d.Task.Block != protocol.BlockNone || d.Task.Budget != 4 ||
+		len(d.Actions) != 1 || d.Actions[0].EffectKey() != "implement|task_1|1|-|4" {
+		t.Errorf("explicit retry beyond budget: %+v", d)
+	}
+
+	replay, err := RequestImplement(d.Task, 4, task.ControlRevision)
+	if err != nil || replay.Task != d.Task || replay.Actions[0].EffectKey() != "implement|task_1|1|-|4" {
+		t.Errorf("replaying an existing generation must return its effect unchanged: %+v, %v", replay, err)
+	}
+
+	if _, err := RequestImplement(d.Task, 6, d.Task.ControlRevision); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+		t.Errorf("skipping a generation: err = %v", err)
+	}
+	if _, err := RequestImplement(taskIn(protocol.TaskRunning), 2, 5); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
+		t.Errorf("retry while running: err = %v", err)
+	}
+}

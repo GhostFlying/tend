@@ -259,3 +259,38 @@ func Cancel(t Task, expectedRevision int64) (Decision, error) {
 	t.ControlRevision++
 	return Decision{Task: t, CancelOpenActions: true, Events: []EventDraft{{Kind: "task.cancelled"}}}, nil
 }
+
+// RequestImplement asks for another implement generation of the current spec
+// version, for example after the owner decided to retry or raise the budget.
+// An explicit request may exceed the spec's budget.
+//
+// A request for a generation that already exists returns that generation's
+// action unchanged, so the store reports it as a duplicate effect instead of
+// a stale revision; replaying an intent is not a conflict.
+func RequestImplement(t Task, generation int64, expectedRevision int64) (Decision, error) {
+	if generation >= 1 && generation <= t.ImplementGeneration {
+		d := implementAction(t)
+		d.Generation = generation
+		return Decision{Task: t, Actions: []ActionDraft{d}}, nil
+	}
+	if err := checkRevision(t, expectedRevision); err != nil {
+		return Decision{}, err
+	}
+	if t.Lifecycle != protocol.TaskQueued && t.Lifecycle != protocol.TaskChangesRequired {
+		return Decision{}, errTransition(t, "request another implementation of")
+	}
+	if generation != t.ImplementGeneration+1 {
+		return Decision{}, protocol.Errorf(protocol.CodeInvalidRequest, "next implement generation is %d, request asked for %d", t.ImplementGeneration+1, generation)
+	}
+	t.ImplementGeneration = generation
+	t.ControlRevision++
+	t.Block = protocol.BlockNone
+	if t.Budget < generation {
+		t.Budget = generation
+	}
+	return Decision{
+		Task:    t,
+		Actions: []ActionDraft{implementAction(t)},
+		Events:  []EventDraft{{Kind: "task.implement_requested", Body: map[string]any{"generation": generation}}},
+	}, nil
+}
