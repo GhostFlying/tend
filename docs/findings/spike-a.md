@@ -104,9 +104,27 @@
 - 写一个测试，校验手写结构体的 JSON 字段与 schema 的 properties 和 required 一致；升级 traex 时重新抽取，漂移会让测试失败。
 - 不引入代码生成器和 JSON Schema 校验库。具体实现放在 B12。
 
+## A9 tsnet
+
+复现：`go run ./spikes/tsnet`（见 `spikes/tsnet/README.md`）。在 dev container 中以 ephemeral 节点 `tend-dev` 加入 tailnet，再从 tailnet 内的另一台设备访问它。
+
+| 项 | 结果 |
+| --- | --- |
+| 加入 tailnet | 在容器内经由 HTTP 代理（tsnet 会读取 `HTTPS_PROXY`）连接控制服务器，大约 3 秒上线；不需要 tailscaled、TUN 设备或特权模式 |
+| HTTP + WhoIs | 通过短主机名访问成功；WhoIs 返回访问者的登录用户、节点名和 node key |
+| HTTPS | tailnet 已启用证书。证书在第一次 TLS 握手时才申请，第一次握手超时；签发后，之后的握手耗时数十毫秒，证书校验通过 |
+| 交叉编译 | 同一程序能为 `windows/amd64` 和 `darwin/arm64` 构建成功；实机入网留到部署第一台非 Linux runner 时验证 |
+| tag | 本次使用的 auth key 不带 tag，WhoIs 返回的 `tags` 为空 |
+
+**影响**：
+- D23 成立：服务端和 runner 都可以内置 tsnet。
+- 服务端启动后主动预取一次证书（例如对自己的 FQDN 发起一次 TLS 握手，或调用 LocalClient 获取证书），避免第一个用户等待证书签发。
+- 角色映射优先依据 tag（`tag:tend-server`、`tag:tend-runner`），按用户映射的只有 owner。正式部署需要换成带 tag 的 auth key，并在 tailnet ACL 中定义这些 tag。
+- tsnet 的 state 目录必须持久化（开发环境放在 `tend-data` 卷里），否则每次重启都会注册成一个新节点。
+
 ## 未完成项
 
 | 项 | 状态 |
 | --- | --- |
-| A3 hook | 推迟，注入不依赖 hook |
-| A9 tsnet | 待做 |
+| A3 hook | 推迟：注入不依赖 hook |
+| A9 非 Linux 实机 | 部署第一台 Windows 或 macOS runner 时验证 |

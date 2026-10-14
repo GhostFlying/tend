@@ -25,7 +25,7 @@ traex 使用 tend 专用的 home：宿主机目录 `~/.local/share/tend/traex-ho
 | A6 | 中断与恢复：turn/interrupt 的语义；app-server 进程重启后用 thread/resume 恢复，历史和注入内容是否还在 | **已完成**：重启后 resume 能恢复完整历史 |
 | A7 | Worker 形态：在 worktree 中以 workspace-write 运行一个 thread，完成后取 diff 或 commit；确认审批请求如何自动处理 | **已完成**：worker 在 worktree 中完成改动并通过测试；runner 负责 commit；Docker 中需要放开 user namespace |
 | A8 | 协议绑定：用 `generate-json-schema` 生成 Go 类型，或手写所需的子集，放入 `internal/harness/traex/generated/`，附带版本信息文件 | **已决定**：手写子集，用抽取的 schema 做一致性测试，B12 实现 |
-| A9 | tsnet：在 dev container 中用 ephemeral key 启动节点，手机通过 tailnet 访问；WhoIs 能拿到用户和节点身份；检查 HTTPS 证书是否可用；runner 节点交叉编译到 windows/amd64 后能加入 tailnet | 身份映射与 TLS 的结论写入 findings |
+| A9 | tsnet：在 dev container 中用 ephemeral key 启动节点，手机通过 tailnet 访问；WhoIs 能拿到用户和节点身份；检查 HTTPS 证书是否可用；runner 节点交叉编译到 windows/amd64 后能加入 tailnet | **已完成**：入网、WhoIs、HTTPS 都已验证；证书在首次握手时签发；交叉编译通过，非 Linux 实机待验证 |
 
 阶段 A 结束后，根据结论修订 design.md 的 §2–§4，再进入阶段 B。
 

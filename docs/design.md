@@ -110,7 +110,7 @@ MVP 不做：任务范围的后台推理 thread（失败统一进入待决事项
 
 ### 6.4 TLS
 
-服务端通过 tsnet 获取 tailscale 签发的证书，对外提供 `https://tend.<tailnet>.ts.net`。这需要 tailnet 开启 MagicDNS 和 HTTPS 证书（待验证）。没开启时退回 tailnet 内的明文 HTTP（WireGuard 已经加密），但浏览器的部分能力（例如 Service Worker、通知）会受限。
+服务端通过 tsnet 获取 tailscale 签发的证书，对外提供 `https://tend.<tailnet>.ts.net`。当前 tailnet 已开启 HTTPS 证书（spike A9）。证书在首次 TLS 握手时签发，服务端启动后应主动预取一次。没开启时退回 tailnet 内的明文 HTTP（WireGuard 已经加密），但浏览器的部分能力（例如 Service Worker、通知）会受限。
 
 ## 7. Web 客户端（细化 v0.1 §14.1）
 
