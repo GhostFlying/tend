@@ -17,7 +17,8 @@
   "remoteUser": "dev",
   "updateRemoteUserUID": true,
   "runArgs": [
-    "--env-file", "${localEnv:HOME}/.config/tend/dev.env"
+    "--env-file", "${localEnv:HOME}/.config/tend/dev.env",
+    "--security-opt", "seccomp=unconfined"
   ],
   "containerEnv": {
     "HTTP_PROXY": "${localEnv:HTTP_PROXY}",
