@@ -1,0 +1,12 @@
+# Secrets never live in the repo; dev auth keys go in ~/.config/tend/dev.env.
+# Machine-specific notes and config (hosts, paths, accounts) stay local.
+/.local/
+
+*.env
+.env*
+
+/bin/
+/dist/
+node_modules/
+*.sqlite
+*.sqlite-*
