@@ -10,3 +10,6 @@
 node_modules/
 *.sqlite
 *.sqlite-*
+
+# Spike outputs
+spikes/**/out/
