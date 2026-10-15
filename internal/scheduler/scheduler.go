@@ -52,10 +52,11 @@ type Candidate struct {
 	// WorkspaceHost is the host holding the task's workspace, or empty
 	// before the workspace exists.
 	WorkspaceHost string
-	// ImplementOccupied reports that an implement run of the task may
-	// still write to its workspace: it is starting, running, waiting,
-	// interrupted or unknown.
-	ImplementOccupied bool
+	// WorkspaceOccupied reports that a run of the task, of either role,
+	// may still be using its workspace: it is starting, running, waiting,
+	// interrupted or unknown. Implementation and acceptance share the
+	// workspace (D41).
+	WorkspaceOccupied bool
 }
 
 // Skip explains why a candidate is not eligible on a host. The empty string
@@ -94,10 +95,10 @@ func Skip(h Host, c Candidate) string {
 		// The workspace, and the artifact commits in its repositories,
 		// exist only on that host.
 		return "task workspace is on another host"
-	case c.Kind == protocol.ActionImplement && c.ImplementOccupied:
+	case c.WorkspaceOccupied:
 		// Includes unknown runs: losing contact does not prove the old
 		// run stopped writing.
-		return "an implement run may still be using the workspace"
+		return "a run may still be using the workspace"
 	}
 	return ""
 }

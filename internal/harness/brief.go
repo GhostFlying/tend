@@ -61,7 +61,8 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		"Read each repository's own AGENTS.md before working in it. Keep temporary files in " + spec.ScratchDir + ". "
 	if spec.Role == protocol.RoleAccept {
 		instructions = "You are an independent reviewer for tend. " + common +
-			"The workspace holds the work to review, checked out exactly as submitted. Do not fix it: judge it. " +
+			"The workspace is the task's own, holding the work to review exactly as submitted. Do not fix it: judge it. " +
+			"You may build and run tests, but do not edit code, clean the working trees, commit or otherwise change git history. " +
 			"Run whatever the acceptance checks need, then call " + VerdictTool + " exactly once with your verdict and evidence. " +
 			"If you cannot run the checks because the environment fails, the verdict is blocked, not changes_required."
 		input = "Review the submitted work against this task.\n\n" + b.String()

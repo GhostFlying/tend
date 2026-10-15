@@ -28,8 +28,8 @@ func writeAgentsFile(root string, as protocol.Assignment, st state) error {
 	b.WriteString("\n## Rules\n\n")
 	b.WriteString("- Before working in a repository, read its own `AGENTS.md` (or `CLAUDE.md`) if it has one, and follow it inside that directory.\n")
 	if as.Role == protocol.RoleAccept {
-		b.WriteString("- You are reviewing an artifact. Do not change the checked-out code to make it pass; run what you need, and report your verdict.\n")
-		b.WriteString("- Changes you make here are discarded.\n")
+		b.WriteString("- You are reviewing the work in this task's workspace, as the implementation left it. Judge whether the task is done; do not fix it.\n")
+		b.WriteString("- You may build and run tests, but do not edit the code, clean the working trees, or commit, switch branches or otherwise change git history: the next implementation continues from here.\n")
 	} else {
 		b.WriteString("- Make your changes in the working trees. Do not commit, switch or create branches, rebase, or add worktrees: tend records your changes when the run ends, and a changed history fails the run.\n")
 	}

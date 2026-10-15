@@ -302,6 +302,38 @@ func TestFault_WorkspaceHostAffinity(t *testing.T) {
 	}
 }
 
+// TestFault_WorkspaceExclusive: implementation and acceptance share the
+// task workspace (D41), so new work waits until no run of the task may be
+// using it.
+func TestFault_WorkspaceExclusive(t *testing.T) {
+	h := newHarness(t)
+	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
+	impl, _, _ := h.claim("linux-1")
+	h.runAs(impl, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	if op := h.runAs(impl, protocol.OpRunsSubmitArtifact, testArtifact(h.task(res.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatalf("submit artifact: %+v", op.Error)
+	}
+	acc, ok, _ := h.claim("linux-1")
+	if !ok || acc.Role != protocol.RoleAccept {
+		t.Fatalf("acceptance claim = %+v, %v", acc, ok)
+	}
+	h.runAs(acc, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+
+	// The spec changes while acceptance runs: a new implementation is due,
+	// but the acceptance run is still in the workspace.
+	changed := testSpec
+	changed.Constraints = []string{"also fix macOS"}
+	h.exec(owner, h.env("tasks.update_intent", taskTarget(res.TaskID), updateIntentPayload{Spec: &changed}, rev(h.task(res.TaskID).ControlRevision)), UpdateIntent{})
+	if as, ok, _ := h.claim("linux-1"); ok {
+		t.Fatalf("claimed %s generation %d while the acceptance run may be using the workspace", as.Role, as.Generation)
+	}
+	h.runAs(acc, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "stopped by tend"}, Release{})
+	next, ok, _ := h.claim("linux-1")
+	if !ok || next.Role != protocol.RoleImplement || next.SpecVersion != 2 {
+		t.Errorf("claim after the acceptance run ended = %+v, %v", next, ok)
+	}
+}
+
 func TestSubmitArtifactChecksMounts(t *testing.T) {
 	h := newHarness(t)
 	spec := testSpec

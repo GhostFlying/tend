@@ -54,8 +54,8 @@ func TestSkipRules(t *testing.T) {
 		{"repo", nil, func(c *Candidate) { c.Repos = []string{"tend", "template-assembler"} }, implement, "host does not serve every repository"},
 		{"implement on other host", nil, func(c *Candidate) { c.WorkspaceHost = "mac-1" }, implement, "task workspace is on another host"},
 		{"accept on other host", nil, func(c *Candidate) { c.WorkspaceHost = "mac-1" }, accept, "task workspace is on another host"},
-		{"workspace occupied", nil, func(c *Candidate) { c.ImplementOccupied = true }, implement, "an implement run may still be using the workspace"},
-		{"accept beside occupied", nil, func(c *Candidate) { c.ImplementOccupied = true }, accept, ""},
+		{"workspace occupied", nil, func(c *Candidate) { c.WorkspaceOccupied = true }, implement, "a run may still be using the workspace"},
+		{"accept in occupied workspace", nil, func(c *Candidate) { c.WorkspaceOccupied = true }, accept, "a run may still be using the workspace"},
 		{"implement on own host", nil, func(c *Candidate) { c.WorkspaceHost = "linux-1" }, implement, ""},
 	}
 	for _, tc := range cases {

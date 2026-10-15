@@ -23,7 +23,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -115,10 +114,8 @@ func (w *Workspaces) repoPath(repo string) string {
 	return filepath.Join(w.cfg.Home, "repos", repo+".git")
 }
 
+// root is the task's workspace. Acceptance runs there too (D41).
 func (w *Workspaces) root(as protocol.Assignment) string {
-	if as.Role == protocol.RoleAccept {
-		return filepath.Join(w.cfg.Home, "workspaces", ".accept", as.RunID)
-	}
 	return filepath.Join(w.cfg.Home, "workspaces", as.Workspace.Name)
 }
 
@@ -417,40 +414,29 @@ func (w *Workspaces) addWorktree(ctx context.Context, repo, dir, branch, base st
 	return err
 }
 
+// layoutAcceptance checks that the task's workspace holds the artifact
+// under acceptance: each mount on its branch at the artifact's commit.
+// Acceptance runs in the workspace as the implementation left it (D41).
 func (w *Workspaces) layoutAcceptance(ctx context.Context, as protocol.Assignment, root string, st *state) error {
 	var artifact protocol.ArtifactPayload
 	if err := json.Unmarshal(as.Artifact, &artifact); err != nil {
 		return fmt.Errorf("gitws: decode artifact: %w", err)
 	}
-	urls := map[string]string{}
-	for _, m := range as.Workspace.Mounts {
-		urls[m.Path] = m.RemoteURL
-	}
 	for _, m := range artifact.Mounts {
 		dir := filepath.Join(root, m.Path)
-		if _, ok := st.Mounts[m.Path]; ok {
-			continue
+		if _, ok := st.Mounts[m.Path]; !ok {
+			return fmt.Errorf("gitws: the workspace has no mount %s to review", m.Path)
 		}
-		if _, err := w.ensureClone(ctx, m.Repo, urls[m.Path], false); err != nil {
-			return err
+		branch, err := w.git.run(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+		if err != nil || branch != m.Branch {
+			return fmt.Errorf("%w: mount %s is not on %s", ErrTampered, m.Path, m.Branch)
 		}
-		if !w.hasCommit(ctx, m.Repo, m.CommitSHA) {
-			// Artifacts are local to the host that produced them until
-			// they can be transferred.
-			return fmt.Errorf("gitws: artifact commit %s of %s is not on this host", m.CommitSHA, m.Path)
-		}
-		unlock, err := w.lock(ctx, "repo:"+m.Repo)
+		head, err := w.git.run(ctx, dir, "rev-parse", "HEAD")
 		if err != nil {
 			return err
 		}
-		_, err = w.git.run(ctx, w.repoPath(m.Repo), "worktree", "add", "--quiet", "--detach", dir, m.CommitSHA)
-		unlock()
-		if err != nil {
-			return err
-		}
-		st.Mounts[m.Path] = mountState{Repo: m.Repo, Base: m.BaseSHA, From: "artifact", Head: m.CommitSHA}
-		if err := saveState(root, *st); err != nil {
-			return err
+		if head != m.CommitSHA {
+			return fmt.Errorf("%w: mount %s is at %s, not at the artifact's %s", ErrTampered, m.Path, head, m.CommitSHA)
 		}
 	}
 	return nil
@@ -578,38 +564,15 @@ func (w *Workspaces) checkIntact(ctx context.Context, root string, as protocol.A
 	return nil
 }
 
-// Finish implements runner.Workspaces. Implementation workspaces stay for
-// the task's next run; acceptance workspaces are removed.
-func (w *Workspaces) Finish(ctx context.Context, as protocol.Assignment) error {
+// Finish implements runner.Workspaces. Workspaces stay for the task's
+// next run, whatever an acceptance run left in them (D41); only an
+// acceptance run's scratch directory is removed.
+func (w *Workspaces) Finish(_ context.Context, as protocol.Assignment) error {
 	if as.Role != protocol.RoleAccept {
 		return nil
 	}
-	root := w.root(as)
-	unlock, err := w.lock(ctx, "ws:"+root)
-	if err != nil {
-		return err
+	if err := os.RemoveAll(filepath.Join(w.cfg.Home, "scratch", ".accept", as.RunID)); err != nil {
+		return fmt.Errorf("gitws: remove scratch: %w", err)
 	}
-	defer unlock()
-	st, err := loadState(root)
-	if err != nil {
-		return err
-	}
-	paths := make([]string, 0, len(st.Mounts))
-	for path := range st.Mounts {
-		paths = append(paths, path)
-	}
-	slices.Sort(paths)
-	var errs []error
-	for _, path := range paths {
-		repo := st.Mounts[path].Repo
-		unlockRepo, err := w.lock(ctx, "repo:"+repo)
-		if err != nil {
-			return err
-		}
-		_, err = w.git.run(ctx, w.repoPath(repo), "worktree", "remove", "--force", filepath.Join(root, path))
-		unlockRepo()
-		errs = append(errs, err)
-	}
-	errs = append(errs, os.RemoveAll(root), os.RemoveAll(filepath.Join(w.cfg.Home, "scratch", ".accept", as.RunID)))
-	return errors.Join(errs...)
+	return nil
 }
