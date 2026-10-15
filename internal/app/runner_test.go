@@ -482,3 +482,29 @@ func TestHelloRestoresStartingRun(t *testing.T) {
 		t.Errorf("start after reconcile: %+v", op.Error)
 	}
 }
+
+func TestResumedInterruptedRunDeliversResult(t *testing.T) {
+	h := newHarness(t)
+	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
+	as, _, _ := h.claim("linux-1")
+	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	h.clock.Advance(DefaultLeaseTTL + time.Second)
+	if _, err := h.app.ExpireLeases(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The runner fenced the worker and reports it interrupted, then resumes.
+	h.hello("linux-1", protocol.HeldRun{RunID: as.RunID, LeaseID: as.LeaseID, Observed: protocol.RunInterrupted})
+	if r := h.run(as.RunID); r.ObservedState != protocol.RunInterrupted {
+		t.Fatalf("run = %s, want interrupted", r.ObservedState)
+	}
+	if _, err := h.app.RecordRunEvents(context.Background(), runPrincipal(as.RunID, as.Role), as.RunID,
+		[]protocol.RunEvent{{Seq: 1, Kind: protocol.EventRunRunning}}); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.run(as.RunID); r.ObservedState != protocol.RunRunning {
+		t.Errorf("resumed run = %s, want running", r.ObservedState)
+	}
+	if op := h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(res.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatalf("artifact from the resumed run: %+v", op.Error)
+	}
+}
