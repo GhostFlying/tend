@@ -10,6 +10,8 @@ type RunFact struct {
 	Role        protocol.RunRole
 	SpecVersion int64
 	Generation  int64
+	// ArtifactID is the artifact an acceptance run judges.
+	ArtifactID string
 }
 
 // staleEvent records a fact that no longer matches the task's current
@@ -141,4 +143,43 @@ func RunTransitionAllowed(from, to protocol.RunObserved, reconciling bool) bool 
 		}
 	}
 	return false
+}
+
+// RunFailed applies the failure of a run that produced no result, such as a
+// worker that crashed, made no changes or was given up by its runner.
+// Without a background reasoning thread every such failure needs the owner
+// (D31): a failed implementation waits for a decision on how to proceed,
+// and a failed acceptance counts as an unusable acceptance environment,
+// like a blocked verdict. Failures of runs that are no longer current are
+// only recorded.
+func RunFailed(t Task, r RunFact, reason string) Decision {
+	body := map[string]any{"run_id": r.RunID, "role": r.Role, "spec_version": r.SpecVersion, "generation": r.Generation, "reason": reason}
+	switch {
+	case r.Role == protocol.RoleImplement && currentImplement(t, r) &&
+		(t.Lifecycle == protocol.TaskQueued || t.Lifecycle == protocol.TaskRunning || t.Lifecycle == protocol.TaskChangesRequired):
+		// Back to the queue, blocked until the owner decides; another
+		// generation is an explicit request.
+		t.Lifecycle = protocol.TaskQueued
+		t.Block = protocol.BlockWaitingDecision
+		return Decision{
+			Task:   t,
+			Events: []EventDraft{{Kind: "run.failed", Body: body}},
+			OpenDecisions: []DecisionDraft{{
+				Question: "The implementation run failed (" + reason + "). How should this task proceed?",
+				Options:  []string{"retry the implementation", "revise the spec", "cancel the task"},
+			}},
+		}
+	case r.Role == protocol.RoleAccept && t.Lifecycle == protocol.TaskAwaitingAcceptance &&
+		r.SpecVersion == t.SpecVersion && r.ArtifactID == t.CurrentArtifactID:
+		t.Block = protocol.BlockAcceptanceEnvUnavailable
+		return Decision{
+			Task:   t,
+			Events: []EventDraft{{Kind: "run.failed", Body: body}},
+			OpenDecisions: []DecisionDraft{{
+				Question: "The acceptance run failed (" + reason + "). How should this task proceed?",
+				Options:  []string{"retry acceptance", "fix the acceptance environment", "cancel the task"},
+			}},
+		}
+	}
+	return Decision{Task: t, Events: []EventDraft{staleEvent("run.failed", body)}}
 }

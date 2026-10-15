@@ -279,9 +279,10 @@ func (CancelTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	return Outcome{Result: newTaskResult(d.Task, nil), Events: events}, nil
 }
 
-// CreateAction handles actions.create. In the MVP the only action a planner
-// creates explicitly is another implement generation; acceptance and
-// delivery actions are derived by the rules.
+// CreateAction handles actions.create. A planner creates another implement
+// generation, or another acceptance of the artifact under acceptance after
+// an attempt could not reach a verdict. Every other action is derived by
+// the rules.
 type CreateAction struct{}
 
 type createActionPayload struct {
@@ -305,8 +306,8 @@ func (CreateAction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.Kind != protocol.ActionImplement {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "planners may only request implement actions")
+	if p.Kind != protocol.ActionImplement && p.Kind != protocol.ActionAccept {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "planners may only request implement or accept actions")
 	}
 	expected, err := requireRevision(x.Env)
 	if err != nil {
@@ -316,7 +317,17 @@ func (CreateAction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err != nil {
 		return Outcome{}, err
 	}
-	d, err := domain.RequestImplement(toDomain(row, spec.Budget()), p.Generation, expected)
+	task := toDomain(row, spec.Budget())
+	var d domain.Decision
+	if p.Kind == protocol.ActionImplement {
+		d, err = domain.RequestImplement(task, p.Generation, expected)
+	} else {
+		var latest int64
+		if latest, err = store.LatestAcceptGeneration(ctx, tx.Q(), row.TaskID, row.SpecVersion, row.CurrentArtifactID); err != nil {
+			return Outcome{}, err
+		}
+		d, err = domain.RequestAcceptance(task, latest, p.Generation, expected)
+	}
 	if err != nil {
 		return Outcome{}, err
 	}
