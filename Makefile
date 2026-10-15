@@ -4,7 +4,7 @@ GO ?= go
 STATICCHECK_VERSION ?= v0.8.2
 PKGS := ./...
 
-.PHONY: check fmt-check vet staticcheck test it build
+.PHONY: check fmt-check vet staticcheck test it build gen
 
 ## check: everything that must pass before a commit is merged
 check: fmt-check vet staticcheck test
@@ -28,3 +28,7 @@ it:
 
 build:
 	$(GO) build $(PKGS)
+
+## gen: regenerate the owner API schema for the web client
+gen:
+	$(GO) run ./internal/protocol/schemagen
