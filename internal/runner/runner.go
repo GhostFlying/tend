@@ -51,8 +51,35 @@ type Prepared struct {
 	Report     protocol.WorkspaceReport
 }
 
-// ErrNoChanges is returned by Collect when the worker changed nothing.
-var ErrNoChanges = errors.New("runner: no changes")
+// Workspace errors with their own release reasons.
+var (
+	// ErrNoChanges is returned by Collect when the worker changed nothing.
+	ErrNoChanges = errors.New("runner: no changes")
+	// ErrTampered is returned by Collect when the worker changed git
+	// history or worktrees, which only the runner may do.
+	ErrTampered = errors.New("runner: the worker changed git history")
+	// ErrFetchFailed is returned by Prepare when a repository could not be
+	// fetched; the runner never starts from a stale base instead.
+	ErrFetchFailed = errors.New("runner: fetch failed")
+	// ErrBaseNotFound is returned by Prepare when a mount's base does not
+	// exist on the remote.
+	ErrBaseNotFound = errors.New("runner: base not found")
+)
+
+// reasonFor names a workspace failure for tend.
+func reasonFor(err error, fallback string) string {
+	switch {
+	case errors.Is(err, ErrNoChanges):
+		return "no_changes"
+	case errors.Is(err, ErrTampered):
+		return "git_tampered"
+	case errors.Is(err, ErrFetchFailed):
+		return "fetch_failed"
+	case errors.Is(err, ErrBaseNotFound):
+		return "base_not_found"
+	}
+	return fallback
+}
 
 // Config assembles a Runner.
 type Config struct {

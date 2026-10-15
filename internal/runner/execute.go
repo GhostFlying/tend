@@ -85,7 +85,7 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 func (r *Runner) prepare(ctx context.Context, as protocol.Assignment) error {
 	p, err := r.cfg.Workspaces.Prepare(ctx, as)
 	if err != nil {
-		return failed("workspace_prepare_failed", err)
+		return failed(reasonFor(err, "workspace_prepare_failed"), err)
 	}
 	cred := runCredential(as)
 	if as.Role == protocol.RoleImplement {
@@ -144,7 +144,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}
 	p, err := r.cfg.Workspaces.Prepare(runCtx, as)
 	if err != nil {
-		return stopped(failed("workspace_prepare_failed", err))
+		return stopped(failed(reasonFor(err, "workspace_prepare_failed"), err))
 	}
 	attempt, err := r.cfg.Journal.NextAttempt(ctx, as.RunID)
 	if err != nil {
@@ -201,11 +201,8 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		return r.finish(ctx, as, journal.PhaseSubmitting, protocol.OpAcceptancesSubmit, verdict)
 	}
 	artifact, err := r.cfg.Workspaces.Collect(runCtx, as)
-	if errors.Is(err, ErrNoChanges) {
-		return failed("no_changes", err)
-	}
 	if err != nil {
-		return stopped(failed("collect_failed", err))
+		return stopped(failed(reasonFor(err, "collect_failed"), err))
 	}
 	return r.finish(ctx, as, journal.PhaseSubmitting, protocol.OpRunsSubmitArtifact, artifact)
 }
