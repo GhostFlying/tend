@@ -61,6 +61,9 @@ func (OpenDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, err
 		}
 	}
+	if err := bindSource(ctx, tx, p.SourceMessageID, "decision", id); err != nil {
+		return Outcome{}, err
+	}
 	return Outcome{
 		Result: map[string]any{"decision_id": id, "version": 1},
 		Events: []Event{{ObjectType: "decision", ObjectID: id, ObjectVersion: 1, Kind: "decision.opened", Body: map[string]any{"task_id": p.TaskID}}},
@@ -157,6 +160,9 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		return Outcome{}, pe
 	}
 	if err := tx.AnswerDecision(ctx, d.DecisionID, d.Version, string(answer), p.SourceMessageID, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	if err := bindSource(ctx, tx, p.SourceMessageID, "decision", d.DecisionID); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{

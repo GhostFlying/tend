@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/dispatch"
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/netx"
@@ -43,11 +44,12 @@ var (
 
 // server is tend's ledger and runner endpoint.
 type server struct {
-	t     *testing.T
-	store *store.Store
-	app   *app.App
-	ids   protocol.IDGen
-	url   string
+	t      *testing.T
+	store  *store.Store
+	app    *app.App
+	ids    protocol.IDGen
+	url    string
+	signal *dispatch.Signal
 }
 
 func newServer(t *testing.T, ttl time.Duration) *server {
@@ -61,8 +63,9 @@ func newServer(t *testing.T, ttl time.Duration) *server {
 	t.Cleanup(func() { s.Close() })
 	ids := protocol.NewULIDGen(time.Now, nil)
 	changes := runnerapi.NewBroadcast()
-	a := app.New(s, ids, time.Now, app.WithLeaseTTL(ttl), app.WithChangeNotifier(changes))
-	srv := &server{t: t, store: s, app: a, ids: ids}
+	sig := dispatch.NewSignal()
+	a := app.New(s, ids, time.Now, app.WithLeaseTTL(ttl), app.WithChangeNotifier(changes), app.WithNotifier(sig))
+	srv := &server{t: t, store: s, app: a, ids: ids, signal: sig}
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 2,
@@ -86,7 +89,7 @@ func (s *server) exec(p protocol.Principal, op string, target protocol.Target, p
 	}
 	env := &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: b}
 	res, err := s.app.Execute(context.Background(), p, env, cmd)
-	if err != nil || res.Status != protocol.OpSucceeded {
+	if err != nil || res.Status == protocol.OpFailed {
 		s.t.Fatalf("%s: %+v, %v", op, res, err)
 	}
 	return res

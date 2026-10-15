@@ -104,6 +104,9 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := bindSource(ctx, tx, p.SourceMessageID, "task", taskID); err != nil {
+		return Outcome{}, err
+	}
 	events := []Event{}
 	for _, e := range d.Events {
 		events = append(events, Event{ObjectType: "task", ObjectID: taskID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
@@ -190,6 +193,9 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	actions, events, err := applyDecision(ctx, x, tx, row, merged, map[string]any{"on": "task.spec_updated"})
 	if err != nil {
+		return Outcome{}, err
+	}
+	if err := bindSource(ctx, tx, p.SourceMessageID, "task", row.TaskID); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Result: newTaskResult(merged.Task, actions), Events: events}, nil
@@ -341,6 +347,9 @@ func (CreateAction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	actions, events, err := applyDecision(ctx, x, tx, row, d, map[string]any{"on": "requested"})
 	if err != nil {
+		return Outcome{}, err
+	}
+	if err := bindSource(ctx, tx, p.SourceMessageID, "task", row.TaskID); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Result: newTaskResult(d.Task, actions), Events: events}, nil

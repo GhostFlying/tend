@@ -25,6 +25,7 @@ tend/
     app/                   用例层：请求去重 + 领域规则 + 存储 + outbox，在一个事务内完成
     api/                   浏览器 HTTP API 与 SSE
     tools/                 主 Agent 工具面（app-server 动态工具）
+    mainthread/            主会话：前台 thread、逐条消息的 turn、上下文注入、工具回调
     runnerapi/             runner 协议的服务端
     scheduler/             排队与资源分配
     dispatch/              outbox 投递
@@ -49,6 +50,7 @@ tend/
 依赖只能自上而下，禁止循环：
 
 ```
+cmd → mainthread → app, tools, contextbuilder, harness
 cmd → api / tools / runnerapi / dispatch / contextbuilder
     → app → scheduler → domain → protocol
           → domain

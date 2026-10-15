@@ -3,7 +3,13 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 )
+
+// ErrRejected marks an error the harness answered with: the request
+// certainly did not take effect. Any other error, such as a broken
+// connection, leaves the outcome open.
+var ErrRejected = errors.New("harness: request rejected")
 
 // Session is one running harness, such as an app-server process, hosting
 // any number of threads.
