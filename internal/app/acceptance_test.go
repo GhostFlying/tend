@@ -151,3 +151,17 @@ func TestDecisions(t *testing.T) {
 		t.Errorf("main agent using decisions.respond: %v", err)
 	}
 }
+
+func TestNextGenerationGetsFeedback(t *testing.T) {
+	h := newHarness(t)
+	_, acc := h.toAcceptanceClaim()
+	h.runAs(acc, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	if op := h.runAs(acc, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictChangesRequired,
+		Evidence: json.RawMessage(`{"log":"tests failed"}`), Issues: json.RawMessage(`["handle empty input"]`)}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+		t.Fatalf("verdict: %+v", op.Error)
+	}
+	next, ok, _ := h.claim("linux-1")
+	if !ok || next.Generation != 2 || next.Feedback == nil || string(next.Feedback.Issues) != `["handle empty input"]` {
+		t.Errorf("second generation = %+v (feedback %+v)", next, next.Feedback)
+	}
+}

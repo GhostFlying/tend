@@ -157,7 +157,8 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 	}
 	w, err := r.cfg.Workers.Start(runCtx, harness.WorkerSpec{
-		RunID: as.RunID, Role: as.Role, Dir: p.Dir, ScratchDir: p.ScratchDir, Spec: as.Spec, Artifact: as.Artifact, Attempt: attempt,
+		RunID: as.RunID, Role: as.Role, Dir: p.Dir, ScratchDir: p.ScratchDir, Spec: as.Spec, Artifact: as.Artifact,
+		Feedback: as.Feedback, Attempt: attempt,
 	})
 	if err != nil {
 		return stopped(failed("worker_start_failed", err))
