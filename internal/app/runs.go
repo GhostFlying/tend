@@ -66,17 +66,11 @@ type ReportRunStarted struct{}
 func (ReportRunStarted) Operation() string { return protocol.OpRunsReportStarted }
 
 // Authorize implements Command.
-func (ReportRunStarted) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
+func (ReportRunStarted) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
 	switch x.Principal.Kind {
 	case protocol.PrincipalRun:
 		if x.Principal.Subject != x.Env.Target.ID {
 			return protocol.Errorf(protocol.CodeForbidden, "a run may only act on itself")
-		}
-		return nil
-	case protocol.PrincipalRunner:
-		run, err := store.GetRun(ctx, q, x.Env.Target.ID)
-		if err == nil && run.HostID != x.Principal.Subject {
-			return protocol.Errorf(protocol.CodeForbidden, "the run is assigned to another host")
 		}
 		return nil
 	case protocol.PrincipalSystem:
