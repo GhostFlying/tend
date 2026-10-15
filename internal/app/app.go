@@ -40,6 +40,8 @@ type Exec struct {
 	TraceID   string
 	Now       time.Time
 	IDs       protocol.IDGen
+	// LeaseTTL is the lease duration of runs allocated by this request.
+	LeaseTTL time.Duration
 }
 
 // Outcome is what a successful Apply produced besides its direct writes.
@@ -82,6 +84,8 @@ type App struct {
 	ids      protocol.IDGen
 	now      func() time.Time
 	notifier Notifier
+	changes  Notifier
+	leaseTTL time.Duration
 }
 
 // Option configures an App.
@@ -94,7 +98,7 @@ func WithNotifier(n Notifier) Option {
 
 // New returns an App.
 func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Option) *App {
-	a := &App{store: s, ids: ids, now: now}
+	a := &App{store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL}
 	for _, o := range opts {
 		o(a)
 	}
@@ -139,14 +143,15 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids}
+	x := &Exec{Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL}
 	if x.TraceID == "" {
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}
 
 	var (
-		op     protocol.Operation
-		queued bool
+		op      protocol.Operation
+		queued  bool
+		applied bool
 	)
 	err = a.store.Write(ctx, func(tx *store.Tx) error {
 		rec, err := store.GetRequest(ctx, tx.Q(), domain, env.RequestID)
@@ -207,6 +212,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 				return err
 			}
 			queued = len(out.Outbox) > 0
+			applied = true
 		}
 		if err := tx.InsertRequest(ctx, rec); err != nil {
 			return err
@@ -221,6 +227,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	}
 	if queued && a.notifier != nil {
 		a.notifier.Notify()
+	}
+	if applied {
+		a.notifyChange()
 	}
 	return op, nil
 }
