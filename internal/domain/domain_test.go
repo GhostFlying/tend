@@ -280,12 +280,16 @@ func TestInvariantsUnderRandomCommands(t *testing.T) {
 		}
 		task := d.Task
 		seen := map[string]bool{}
+		latestAccept := map[string]int64{}
 		record := func(d Decision) {
 			for _, a := range d.Actions {
 				if seen[a.EffectKey()] {
 					t.Fatalf("iteration %d: effect %s derived twice", iter, a.EffectKey())
 				}
 				seen[a.EffectKey()] = true
+				if a.Kind == protocol.ActionAccept {
+					latestAccept[a.ArtifactID] = max(latestAccept[a.ArtifactID], a.Generation)
+				}
 			}
 		}
 		record(d)
@@ -302,7 +306,7 @@ func TestInvariantsUnderRandomCommands(t *testing.T) {
 				}
 				return n + int64(rng.IntN(2))*2 - 1
 			}
-			switch rng.IntN(7) {
+			switch rng.IntN(9) {
 			case 0:
 				s := spec
 				s.Constraints = []string{string(rune('a' + rng.IntN(3)))}
@@ -337,6 +341,24 @@ func TestInvariantsUnderRandomCommands(t *testing.T) {
 						a.ArtifactID != before.CurrentArtifactID || before.Lifecycle != protocol.TaskAwaitingAcceptance {
 						t.Fatalf("iteration %d: completed on %+v from %+v", iter, a, before)
 					}
+				}
+			case 7:
+				r := implementRun(task)
+				if rng.IntN(2) == 0 {
+					r = RunFact{RunID: "run_a", Role: protocol.RoleAccept, SpecVersion: task.SpecVersion, ArtifactID: task.CurrentArtifactID}
+				}
+				r.SpecVersion, r.Generation = fuzz(r.SpecVersion), fuzz(r.Generation)
+				next = RunFailed(task, r, "crash")
+			case 8:
+				// The owner answers an open decision with a retry.
+				switch task.Block {
+				case protocol.BlockWaitingDecision, protocol.BlockBudgetExhausted:
+					next, err = RequestImplement(task, task.ImplementGeneration+1, task.ControlRevision)
+				case protocol.BlockAcceptanceEnvUnavailable:
+					latest := latestAccept[task.CurrentArtifactID]
+					next, err = RequestAcceptance(task, latest, latest+1, task.ControlRevision)
+				default:
+					next = Decision{Task: task}
 				}
 			case 6:
 				if rng.IntN(60) == 0 {
@@ -395,5 +417,62 @@ func TestRequestImplement(t *testing.T) {
 	}
 	if _, err := RequestImplement(taskIn(protocol.TaskRunning), 2, 5); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
 		t.Errorf("retry while running: err = %v", err)
+	}
+}
+
+func TestRunFailed(t *testing.T) {
+	running := taskIn(protocol.TaskRunning)
+	d := RunFailed(running, implementRun(running), "no_changes")
+	if d.Task.Lifecycle != protocol.TaskQueued || d.Task.Block != protocol.BlockWaitingDecision || len(d.OpenDecisions) != 1 || len(d.Actions) != 0 {
+		t.Errorf("implement failure: %+v", d)
+	}
+	// After the failure, another generation is an explicit request.
+	if _, err := RequestImplement(d.Task, d.Task.ImplementGeneration+1, d.Task.ControlRevision); err != nil {
+		t.Errorf("retry after failure: %v", err)
+	}
+
+	old := implementRun(running)
+	old.Generation--
+	if d := RunFailed(running, old, "crash"); d.Task != running || len(d.OpenDecisions) != 0 || d.Events[0].Body["stale"] != true {
+		t.Errorf("old generation failure moved the task: %+v", d)
+	}
+
+	waiting := taskIn(protocol.TaskAwaitingAcceptance)
+	acc := RunFact{RunID: "run_a", Role: protocol.RoleAccept, SpecVersion: waiting.SpecVersion, ArtifactID: waiting.CurrentArtifactID}
+	d = RunFailed(waiting, acc, "sandbox crashed")
+	if d.Task.Lifecycle != protocol.TaskAwaitingAcceptance || d.Task.Block != protocol.BlockAcceptanceEnvUnavailable || len(d.OpenDecisions) != 1 {
+		t.Errorf("acceptance failure: %+v", d)
+	}
+	acc.ArtifactID = "art_old"
+	if d := RunFailed(waiting, acc, "x"); d.Task != waiting {
+		t.Errorf("failure of an old acceptance moved the task: %+v", d)
+	}
+}
+
+func TestRequestAcceptance(t *testing.T) {
+	blocked := taskIn(protocol.TaskAwaitingAcceptance)
+	blocked.Block = protocol.BlockAcceptanceEnvUnavailable
+
+	d, err := RequestAcceptance(blocked, 1, 2, blocked.ControlRevision)
+	if err != nil || d.Task.Block != protocol.BlockNone || len(d.Actions) != 1 || d.Actions[0].EffectKey() != "accept|task_1|1|art_1|2" {
+		t.Fatalf("retry acceptance: %+v, %v", d, err)
+	}
+	if d, err := RequestAcceptance(blocked, 2, 2, 0); err != nil || d.Actions[0].Generation != 2 || d.Task != blocked {
+		t.Errorf("replayed generation: %+v, %v", d, err)
+	}
+	cases := []struct {
+		name string
+		task Task
+		gen  int64
+		code protocol.Code
+	}{
+		{"not blocked", taskIn(protocol.TaskAwaitingAcceptance), 2, protocol.CodeInvalidTransition},
+		{"skips a generation", blocked, 3, protocol.CodeInvalidRequest},
+		{"not awaiting acceptance", taskIn(protocol.TaskRunning), 2, protocol.CodeInvalidTransition},
+	}
+	for _, tc := range cases {
+		if _, err := RequestAcceptance(tc.task, 1, tc.gen, tc.task.ControlRevision); protocol.CodeOf(err) != tc.code {
+			t.Errorf("%s: %v, want %s", tc.name, err, tc.code)
+		}
 	}
 }

@@ -255,6 +255,18 @@ func ListActions(ctx context.Context, q Querier, taskID string) ([]ActionRow, er
 	return out, rows.Err()
 }
 
+// LatestAcceptGeneration returns the newest acceptance generation of an
+// artifact under a spec version, or zero.
+func LatestAcceptGeneration(ctx context.Context, q Querier, taskID string, specVersion int64, artifactID string) (int64, error) {
+	var n int64
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation), 0) FROM plan_actions
+		WHERE task_id = ? AND kind = 'accept' AND target_spec_version = ? AND target_artifact_id = ?`, taskID, specVersion, artifactID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("store: latest accept generation: %w", err)
+	}
+	return n, nil
+}
+
 // SupersedeActionsBefore marks the task's not-yet-dispatched actions for
 // spec versions older than version as superseded.
 func (t *Tx) SupersedeActionsBefore(ctx context.Context, taskID string, version int64, now int64) error {
@@ -445,4 +457,62 @@ func (t *Tx) RollbackTo(ctx context.Context, name string) error {
 func (t *Tx) Release(ctx context.Context, name string) error {
 	_, err := t.Exec(ctx, "RELEASE "+name)
 	return err
+}
+
+// DecisionRow is a question for the owner.
+type DecisionRow struct {
+	DecisionID        string
+	TaskID            string
+	Question          string
+	OptionsJSON       string
+	Version           int64
+	Status            string
+	AskedMessageID    string
+	AnsweredMessageID string
+	AnswerJSON        string
+}
+
+// Decision states.
+const (
+	DecisionOpen     = "open"
+	DecisionAnswered = "answered"
+)
+
+// GetDecision returns a decision, or ErrNotFound.
+func GetDecision(ctx context.Context, q Querier, decisionID string) (DecisionRow, error) {
+	d := DecisionRow{DecisionID: decisionID}
+	var task, asked, answered, answer sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT task_id, question, options_json, version, status, asked_message_id,
+		answered_message_id, answer_json FROM decisions WHERE decision_id = ?`, decisionID).
+		Scan(&task, &d.Question, &d.OptionsJSON, &d.Version, &d.Status, &asked, &answered, &answer)
+	if err != nil {
+		return DecisionRow{}, notFound(err, "decision "+decisionID)
+	}
+	d.TaskID, d.AskedMessageID, d.AnsweredMessageID, d.AnswerJSON = task.String, asked.String, answered.String, answer.String
+	return d, nil
+}
+
+// SetDecisionAskedMessage records the conversation message that asked the
+// question.
+func (t *Tx) SetDecisionAskedMessage(ctx context.Context, decisionID, messageID string) error {
+	_, err := t.Exec(ctx, `UPDATE decisions SET asked_message_id = ? WHERE decision_id = ?`, messageID, decisionID)
+	if err != nil {
+		return fmt.Errorf("store: set asked message: %w", err)
+	}
+	return nil
+}
+
+// AnswerDecision closes an open decision at the given version. It returns
+// ErrStale when the decision moved on.
+func (t *Tx) AnswerDecision(ctx context.Context, decisionID string, version int64, answerJSON, messageID string, now int64) error {
+	res, err := t.Exec(ctx, `UPDATE decisions SET status = 'answered', version = version + 1, answer_json = ?,
+		answered_message_id = ?, updated_at = ? WHERE decision_id = ? AND status = 'open' AND version = ?`,
+		answerJSON, nullString(messageID), now, decisionID, version)
+	if err != nil {
+		return fmt.Errorf("store: answer decision: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return ErrStale
+	}
+	return nil
 }

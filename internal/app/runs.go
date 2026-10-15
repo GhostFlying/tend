@@ -42,7 +42,10 @@ func loadRun(ctx context.Context, q store.Querier, runID string) (runContext, er
 // fact describes the run as the rules see it. Spec version and generation
 // come from the run's action, never from the caller.
 func (rc runContext) fact() domain.RunFact {
-	return domain.RunFact{RunID: rc.run.RunID, Role: rc.run.Role, SpecVersion: rc.action.TargetSpecVersion, Generation: rc.run.Generation}
+	return domain.RunFact{
+		RunID: rc.run.RunID, Role: rc.run.Role, SpecVersion: rc.action.TargetSpecVersion, Generation: rc.run.Generation,
+		ArtifactID: rc.action.TargetArtifactID,
+	}
 }
 
 // authorizeRunSelf allows a run to act only on itself, with its own role.

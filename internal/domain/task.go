@@ -319,3 +319,36 @@ func RequestImplement(t Task, generation int64, expectedRevision int64) (Decisio
 		Events:  []EventDraft{{Kind: "task.implement_requested", Body: map[string]any{"generation": generation}}},
 	}, nil
 }
+
+// RequestAcceptance asks for another acceptance of the artifact under
+// acceptance after the previous attempt could not reach a verdict, for
+// example because its environment was unavailable. latest is the newest
+// acceptance generation of that artifact.
+//
+// As with RequestImplement, asking for an existing generation returns its
+// action unchanged so the store reports a duplicate effect.
+func RequestAcceptance(t Task, latest, generation, expectedRevision int64) (Decision, error) {
+	action := ActionDraft{Kind: protocol.ActionAccept, TaskID: t.ID, SpecVersion: t.SpecVersion, ArtifactID: t.CurrentArtifactID, Generation: generation}
+	if t.CurrentArtifactID != "" && generation >= 1 && generation <= latest {
+		return Decision{Task: t, Actions: []ActionDraft{action}}, nil
+	}
+	if err := checkRevision(t, expectedRevision); err != nil {
+		return Decision{}, err
+	}
+	if t.Lifecycle != protocol.TaskAwaitingAcceptance || t.CurrentArtifactID == "" {
+		return Decision{}, errTransition(t, "request another acceptance of")
+	}
+	if t.Block != protocol.BlockAcceptanceEnvUnavailable {
+		return Decision{}, protocol.Errorf(protocol.CodeInvalidTransition, "acceptance can only be retried after an attempt could not reach a verdict")
+	}
+	if generation != latest+1 {
+		return Decision{}, protocol.Errorf(protocol.CodeInvalidRequest, "next acceptance generation is %d, request asked for %d", latest+1, generation)
+	}
+	t.ControlRevision++
+	t.Block = protocol.BlockNone
+	return Decision{
+		Task:    t,
+		Actions: []ActionDraft{action},
+		Events:  []EventDraft{{Kind: "task.acceptance_requested", Body: map[string]any{"artifact_id": t.CurrentArtifactID, "generation": generation}}},
+	}, nil
+}

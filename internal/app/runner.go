@@ -473,8 +473,9 @@ func runSpec(ctx context.Context, q store.Querier, rc runContext) (domain.Spec, 
 }
 
 // Release handles runs.release: the runner gives up a run that will not
-// produce a result, for example after a stop verdict or when the run is no
-// longer wanted. The run ends as failed and frees its slot and workspace.
+// produce a result, for example after a stop verdict, a crashed worker or
+// no changes. The run ends as failed and frees its slot and workspace; if
+// it was the task's current work, the task waits for the owner (D31).
 type Release struct{}
 
 // Operation implements Command.
@@ -504,10 +505,18 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	if err := endRun(ctx, x, tx, rc.run, protocol.RunFailed); err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{
-		Result: map[string]any{"run_id": rc.run.RunID, "observed": protocol.RunFailed},
-		Events: []Event{{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.released", Body: map[string]any{"reason": p.Reason}}},
-	}, nil
+	if rc.action.Status == protocol.ActionDispatched {
+		if err := tx.SetActionStatus(ctx, rc.action.ActionID, protocol.ActionDone, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
+	}
+	d := domain.RunFailed(toDomain(rc.task, rc.spec.Budget()), rc.fact(), p.Reason)
+	_, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "run.failed", "run_id": rc.run.RunID})
+	if err != nil {
+		return Outcome{}, err
+	}
+	events = append(events, Event{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.released", Body: map[string]any{"reason": p.Reason}})
+	return Outcome{Result: map[string]any{"run_id": rc.run.RunID, "observed": protocol.RunFailed, "task": newTaskResult(d.Task, nil)}, Events: events}, nil
 }
 
 // endRun moves a run to a terminal state and releases its lease. A result

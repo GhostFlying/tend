@@ -417,6 +417,8 @@ runner → harness, protocol, netx
 | 12 | `feat: impl traex worker driver and server assembly` | B12b worker、B12c、`cmd/tend-server`、integration 测试 |
 | 13 | `docs: record tool call crash findings` | §8.5 的故障验证结论 |
 
+实际执行时第 7 步（B9）提前到第 6 步之前：B7 的 review 指出，没有 B9 的失败规则，被放弃的当前 run 会让任务停在 running。
+
 第 8 步提前到工具面之前，是因为工具注册和回调的形态由 harness 接口决定；它不依赖 traex 运行，只用 schema 测试。
 
 ## 12. 之后的阶段要跟进的事项
