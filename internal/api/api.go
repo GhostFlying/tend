@@ -56,12 +56,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/session", s.createSession)
 	mux.HandleFunc("GET /api/v1/session", s.readSession)
+	mux.HandleFunc("POST /api/v1/ops", s.ops)
 	return mux
-}
-
-type response struct {
-	Operation *protocol.Operation `json:"operation,omitempty"`
-	Error     *protocol.Error     `json:"error,omitempty"`
 }
 
 var statusOf = map[protocol.Code]int{
@@ -73,17 +69,18 @@ var statusOf = map[protocol.Code]int{
 	protocol.CodeNotFound:         http.StatusNotFound,
 }
 
-func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
+// writeError answers with err, logging internal errors with attrs.
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error, attrs ...any) {
 	pe, ok := errors.AsType[*protocol.Error](err)
 	if !ok {
-		s.log.ErrorContext(r.Context(), "owner request failed", "path", r.URL.Path, "err", err)
+		s.log.ErrorContext(r.Context(), "owner request failed", append([]any{"path", r.URL.Path, "err", err}, attrs...)...)
 		pe = protocol.Errorf(protocol.CodeInternal, "internal error")
 	}
 	status, ok := statusOf[pe.Code]
 	if !ok {
 		status = http.StatusInternalServerError
 	}
-	writeJSON(w, status, response{Error: pe})
+	writeJSON(w, status, protocol.APIResponse{Error: pe})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

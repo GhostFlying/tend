@@ -12,10 +12,14 @@ import (
 )
 
 // The main thread outbox destination and the operation that delivers a
-// conversation message to it.
+// conversation message to it, and the destination for controlling the
+// front thread while a turn runs, with its operation. Control has its own
+// destination so it does not queue behind the turn it acts on (v0.1 §6.2).
 const (
-	MainThreadDestination = "main_thread"
-	OpHandleMessage       = "main_thread.handle_message"
+	MainThreadDestination  = "main_thread"
+	OpHandleMessage        = "main_thread.handle_message"
+	MainControlDestination = "main_control"
+	OpInterruptTurn        = "main_control.interrupt_turn"
 )
 
 // HandleMessage is the payload of a delivery to the main thread.
@@ -67,6 +71,49 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		Outbox:   []OutboxMessage{{Destination: MainThreadDestination, Operation: OpHandleMessage, Payload: HandleMessage{MessageID: id}}},
 		Accepted: true,
 	}, nil
+}
+
+// InterruptTurn is the payload of a delivery that stops the turn handling
+// a message.
+type InterruptTurn struct {
+	MessageID string `json:"message_id"`
+}
+
+// InterruptReply handles control.interrupt_reply: the owner stops the main
+// agent's reply to a message. If a turn is handling the message, the front
+// thread is told to interrupt it after commit and the operation is
+// accepted; the message becomes interrupted when the turn ends. Otherwise
+// there is nothing to stop and the operation succeeds without effect.
+type InterruptReply struct{}
+
+// Operation implements Command.
+func (InterruptReply) Operation() string { return protocol.OpInterruptReply }
+
+// Authorize implements Command.
+func (InterruptReply) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	return allowKinds(x.Principal, protocol.PrincipalOwner)
+}
+
+// Apply implements Command.
+func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	id := x.Env.Target.ID
+	if x.Env.Target.Type != "message" || id == "" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "the target must be a message")
+	}
+	if _, err := store.GetMessage(ctx, tx.Q(), id); err != nil {
+		return Outcome{}, errNotFound(err, "message %s does not exist", id)
+	}
+	turn, err := store.GetMainTurnByMessage(ctx, tx.Q(), id)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
+	running := err == nil && (turn.Status == store.TurnStarting || turn.Status == store.TurnStarted)
+	out := Outcome{Result: protocol.InterruptReplyResult{MessageID: id, Running: running}}
+	if running {
+		out.Outbox = []OutboxMessage{{Destination: MainControlDestination, Operation: OpInterruptTurn, Payload: InterruptTurn{MessageID: id}}}
+		out.Accepted = true
+	}
+	return out, nil
 }
 
 // RecordAgentMessage handles conversation.record_agent_message: the main

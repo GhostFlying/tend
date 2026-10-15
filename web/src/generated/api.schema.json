@@ -2,6 +2,22 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
+    "APIResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "$ref": "#/definitions/TaskSummary"
+        },
+        "error": {
+          "$ref": "#/definitions/Error"
+        },
+        "operation": {
+          "$ref": "#/definitions/Operation"
+        }
+      },
+      "title": "APIResponse",
+      "type": "object"
+    },
     "AcceptanceView": {
       "additionalProperties": false,
       "properties": {
@@ -287,6 +303,23 @@
         "message"
       ],
       "title": "Error",
+      "type": "object"
+    },
+    "InterruptReplyResult": {
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message_id",
+        "running"
+      ],
+      "title": "InterruptReplyResult",
       "type": "object"
     },
     "OpStatus": {
@@ -668,6 +701,9 @@
     }
   },
   "properties": {
+    "APIResponse": {
+      "$ref": "#/definitions/APIResponse"
+    },
     "AnswerDecisionPayload": {
       "$ref": "#/definitions/AnswerDecisionPayload"
     },
@@ -680,8 +716,8 @@
     "Envelope": {
       "$ref": "#/definitions/Envelope"
     },
-    "Operation": {
-      "$ref": "#/definitions/Operation"
+    "InterruptReplyResult": {
+      "$ref": "#/definitions/InterruptReplyResult"
     },
     "RequestView": {
       "$ref": "#/definitions/RequestView"

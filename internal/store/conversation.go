@@ -107,6 +107,16 @@ func GetMainTurn(ctx context.Context, q Querier, requestID string) (MainTurn, er
 	return m, nil
 }
 
+// GetMainTurnByMessage returns the delivery of a message, or ErrNotFound.
+func GetMainTurnByMessage(ctx context.Context, q Querier, messageID string) (MainTurn, error) {
+	var requestID string
+	err := q.QueryRowContext(ctx, `SELECT request_id FROM main_turns WHERE message_id = ? ORDER BY created_at DESC, request_id DESC LIMIT 1`, messageID).Scan(&requestID)
+	if err != nil {
+		return MainTurn{}, notFound(err, "turn of message "+messageID)
+	}
+	return GetMainTurn(ctx, q, requestID)
+}
+
 // GetMainTurnByTurn returns the delivery a harness turn handled, or
 // ErrNotFound.
 func GetMainTurnByTurn(ctx context.Context, q Querier, threadID, turnID string) (MainTurn, error) {

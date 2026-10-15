@@ -68,7 +68,7 @@ func newEnv(t *testing.T, h *testkit.Harness) *env {
 func (e *env) start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
-	d := dispatch.New(e.app, map[string]dispatch.Handler{app.MainThreadDestination: e.m}, e.signal, time.Now, dispatch.Config{PollInterval: 50 * time.Millisecond}, quiet())
+	d := dispatch.New(e.app, map[string]dispatch.Handler{app.MainThreadDestination: e.m, app.MainControlDestination: e.m.Controller()}, e.signal, time.Now, dispatch.Config{PollInterval: 50 * time.Millisecond}, quiet())
 	e.stopped.Go(func() { _ = e.m.Run(ctx) })
 	e.stopped.Go(func() { _ = d.Run(ctx) })
 }
@@ -402,4 +402,78 @@ func TestLaggingClientIsVisible(t *testing.T) {
 	if in := h.Starts()[2].Text; !strings.Contains(in, "having seen messages up to #1") {
 		t.Errorf("turn input = %q", in)
 	}
+}
+
+func TestFault_InterruptReply(t *testing.T) {
+	h := testkit.NewHarness()
+	h.Turn = func(_ *testkit.FakeThread, _ string, in harness.TurnInput) string {
+		if strings.Contains(in.Text, "long") {
+			return "" // runs until interrupted
+		}
+		return "completed"
+	}
+	e := newEnv(t, h)
+	interrupt := func(messageID string) protocol.Operation {
+		t.Helper()
+		envl := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: protocol.OpInterruptReply,
+			Target: protocol.Target{Type: "message", ID: messageID}}
+		op, err := e.app.Execute(context.Background(), owner, envl, app.InterruptReply{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return op
+	}
+	state := func(messageID string) string {
+		var s string
+		_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(context.Background(), `SELECT json_extract(body_json, '$.state') FROM events
+				WHERE kind = 'conversation.message_state' AND object_id = ? ORDER BY event_seq DESC LIMIT 1`, messageID).Scan(&s)
+		})
+		return s
+	}
+
+	long := e.say("a long one")
+	eventually(t, "the turn runs", func() bool { return state(long) == "processing" })
+	if op := interrupt(long); op.Status != protocol.OpAccepted || !strings.Contains(string(op.Result), `"running":true`) {
+		t.Fatalf("interrupting the running reply = %+v", op)
+	}
+	eventually(t, "the message is interrupted", func() bool { return state(long) == "interrupted" })
+	if n := len(h.Interrupts()); n != 1 {
+		t.Errorf("interrupts = %d, want 1", n)
+	}
+
+	// The next message is handled; stopping the finished reply does nothing.
+	next := e.say("next")
+	eventually(t, "the next message is replied", func() bool { return state(next) == "replied" })
+	if op := interrupt(long); op.Status != protocol.OpSucceeded || !strings.Contains(string(op.Result), `"running":false`) {
+		t.Errorf("interrupting a finished reply = %+v", op)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := len(h.Interrupts()); n != 1 {
+		t.Errorf("interrupts after the reply ended = %d, want 1", n)
+	}
+}
+
+func TestInterruptWhileTurnStarts(t *testing.T) {
+	gate := make(chan struct{})
+	h := testkit.NewHarness()
+	h.StartTurnErr = func(harness.TurnInput) error {
+		<-gate // turn/start has not answered yet
+		return nil
+	}
+	h.Turn = func(*testkit.FakeThread, string, harness.TurnInput) string { return "" }
+	e := newEnv(t, h)
+	id := e.say("a long one")
+	eventually(t, "the turn is starting", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id = ? AND status = 'starting'`, id) == 1
+	})
+	envl := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: protocol.OpInterruptReply, Target: protocol.Target{Type: "message", ID: id}}
+	if op, err := e.app.Execute(context.Background(), owner, envl, app.InterruptReply{}); err != nil || op.Status != protocol.OpAccepted {
+		t.Fatalf("interrupt = %+v, %v", op, err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	close(gate)
+	eventually(t, "the turn is interrupted", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id = ? AND status = 'interrupted'`, id) == 1
+	})
 }

@@ -16,6 +16,29 @@ type SessionView struct {
 	ClientID string `json:"client_id"`
 }
 
+// APIResponse is the body of an owner API write, and of any request that
+// failed.
+type APIResponse struct {
+	Operation *Operation `json:"operation,omitempty"`
+	Error     *Error     `json:"error,omitempty"`
+	// Current is the task's state after a stale write about it, so the
+	// client can decide again.
+	Current *TaskSummary `json:"current,omitempty"`
+}
+
+// Owner operations that only the owner API performs.
+const (
+	OpInterruptReply = "control.interrupt_reply"
+)
+
+// InterruptReplyResult is the result of control.interrupt_reply. Running
+// reports whether a turn was handling the message; if so the operation is
+// accepted and the message becomes interrupted when the turn ends.
+type InterruptReplyResult struct {
+	MessageID string `json:"message_id"`
+	Running   bool   `json:"running"`
+}
+
 // SubmitMessagePayload is the payload of conversation.submit_message.
 type SubmitMessagePayload struct {
 	Body string `json:"body"`

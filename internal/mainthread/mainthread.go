@@ -10,6 +10,9 @@
 // restart, a delivery without a record certainly never started, one whose
 // turn started is done, and one stuck before confirmation is unknown and
 // left to the owner rather than resent.
+//
+// Stopping a reply arrives through a separate destination, whose handler
+// is the manager's Controller, so it does not wait behind the turn.
 package mainthread
 
 import (
@@ -396,6 +399,56 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		m.cfg.Log.ErrorContext(ctx, "could not record the finished turn", "turn", turnID, "err", err)
 	}
 	return app.DeliveryResult{Outcome: app.Delivered}
+}
+
+// errTurnStarting reports a turn that cannot be interrupted yet because
+// turn/start has not returned its ID.
+var errTurnStarting = errors.New("mainthread: the turn is still starting")
+
+// Interrupt stops the turn handling a message, if the front thread is
+// handling it. It returns errTurnStarting for a turn without an ID yet.
+// Interrupting is idempotent.
+func (m *Manager) Interrupt(ctx context.Context, messageID string) error {
+	m.mu.Lock()
+	a, th := m.active, m.thread
+	if a == nil || a.messageID != messageID || th == nil {
+		m.mu.Unlock()
+		return nil
+	}
+	turnID := a.turnID
+	m.mu.Unlock()
+	if turnID == "" {
+		return errTurnStarting
+	}
+	return th.Interrupt(ctx, turnID)
+}
+
+// Controller is the dispatcher's handler for the main control destination.
+type Controller struct{ m *Manager }
+
+// Controller returns the handler for the main control destination.
+func (m *Manager) Controller() Controller { return Controller{m: m} }
+
+// Deliver implements dispatch.Handler.
+func (c Controller) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	if d.Operation != app.OpInterruptTurn {
+		return app.DeliveryResult{Outcome: app.Failed, Reason: "unknown control operation"}
+	}
+	var p app.InterruptTurn
+	if err := json.Unmarshal(d.Payload, &p); err != nil || p.MessageID == "" {
+		return app.DeliveryResult{Outcome: app.Failed, Reason: "the delivery names no message"}
+	}
+	// A turn still starting is interrupted on a later attempt.
+	if err := c.m.Interrupt(ctx, p.MessageID); err != nil {
+		return retry(err)
+	}
+	return app.DeliveryResult{Outcome: app.Delivered}
+}
+
+// Reconcile implements dispatch.Handler. Interrupting is idempotent, and
+// stops nothing once the turn ended, so an attempt cut short is repeated.
+func (Controller) Reconcile(context.Context, app.Delivery) app.DeliveryResult {
+	return app.DeliveryResult{Outcome: app.Retry}
 }
 
 // Reconcile implements dispatch.Handler for a delivery a previous process

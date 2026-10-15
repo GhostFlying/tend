@@ -26,14 +26,15 @@ type Harness struct {
 	// so its events can reach the consumer ahead of the response.
 	BeforeAnswer func(t *FakeThread, turnID string)
 
-	mu       sync.Mutex
-	persist  map[string]bool
-	sessions []*FakeSession
-	starts   []harness.TurnInput
-	injected map[string][]string
-	resumed  int
-	nextID   int
-	nextTurn int
+	mu         sync.Mutex
+	persist    map[string]bool
+	sessions   []*FakeSession
+	starts     []harness.TurnInput
+	interrupts []string
+	injected   map[string][]string
+	resumed    int
+	nextID     int
+	nextTurn   int
 }
 
 // NewHarness returns a Harness whose turns complete without doing anything
@@ -64,6 +65,13 @@ func (h *Harness) Starts() []harness.TurnInput {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]harness.TurnInput(nil), h.starts...)
+}
+
+// Interrupts returns the turns interrupted, in order.
+func (h *Harness) Interrupts() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.interrupts...)
 }
 
 // Injected returns the developer messages injected into a thread.
@@ -218,6 +226,9 @@ func (t *FakeThread) StartTurn(_ context.Context, in harness.TurnInput) (string,
 
 // Interrupt implements harness.Thread.
 func (t *FakeThread) Interrupt(_ context.Context, turnID string) error {
+	t.s.h.mu.Lock()
+	t.s.h.interrupts = append(t.s.h.interrupts, turnID)
+	t.s.h.mu.Unlock()
 	t.Emit(harness.Event{Kind: harness.EventTurnCompleted, TurnID: turnID, TurnStatus: "interrupted"})
 	return nil
 }

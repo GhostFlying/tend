@@ -171,7 +171,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		},
 		Log: log,
 	})
-	d := dispatch.New(a, map[string]dispatch.Handler{app.MainThreadDestination: front}, wake, time.Now, dispatch.Config{}, log)
+	d := dispatch.New(a, map[string]dispatch.Handler{app.MainThreadDestination: front, app.MainControlDestination: front.Controller()}, wake, time.Now, dispatch.Config{}, log)
 	runners := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
 	mux := http.NewServeMux()
 	mux.Handle(runnerapi.Path, runners.Handler())
