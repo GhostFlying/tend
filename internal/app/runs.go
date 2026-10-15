@@ -2,8 +2,12 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -59,7 +63,7 @@ func authorizeRunSelf(x *Exec, role protocol.RunRole) error {
 type ReportRunStarted struct{}
 
 // Operation implements Command.
-func (ReportRunStarted) Operation() string { return "runs.report_started" }
+func (ReportRunStarted) Operation() string { return protocol.OpRunsReportStarted }
 
 // Authorize implements Command.
 func (ReportRunStarted) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
@@ -101,17 +105,14 @@ func (ReportRunStarted) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	return Outcome{Result: newTaskResult(d.Task, nil), Events: events}, nil
 }
 
-// SubmitArtifact handles runs.submit_artifact.
+// SubmitArtifact handles runs.submit_artifact: an implement run reports
+// the commits it produced. The artifact covers every mount of the run's
+// workspace, changed or not, so acceptance can rebuild the combination.
+// Submitting ends the run.
 type SubmitArtifact struct{}
 
-type submitArtifactPayload struct {
-	Repo      string `json:"repo"`
-	Branch    string `json:"branch"`
-	CommitSHA string `json:"commit_sha"`
-}
-
 // Operation implements Command.
-func (SubmitArtifact) Operation() string { return "runs.submit_artifact" }
+func (SubmitArtifact) Operation() string { return protocol.OpRunsSubmitArtifact }
 
 // Authorize implements Command.
 func (SubmitArtifact) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
@@ -120,27 +121,50 @@ func (SubmitArtifact) Authorize(_ context.Context, x *Exec, _ store.Querier) err
 
 // Apply implements Command.
 func (SubmitArtifact) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	var p submitArtifactPayload
+	var p protocol.ArtifactPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
-	}
-	if p.Repo == "" || p.Branch == "" || p.CommitSHA == "" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "repo, branch and commit_sha are required")
 	}
 	rc, err := loadRun(ctx, tx.Q(), x.Env.Target.ID)
 	if err != nil {
 		return Outcome{}, err
 	}
+	spec, err := runSpec(ctx, tx.Q(), rc)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if err := checkArtifactMounts(spec.Workspace, p.Mounts); err != nil {
+		return Outcome{}, err
+	}
+	slices.SortFunc(p.Mounts, func(a, b protocol.ArtifactMount) int { return strings.Compare(a.Path, b.Path) })
 	ref, err := json.Marshal(p)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("app: encode artifact ref: %w", err)
 	}
-	artifactID := x.IDs.New(protocol.PrefixArtifact)
-	// The artifact is kept as a fact even when it is stale.
-	if err := tx.InsertArtifact(ctx, artifactID, rc.task.TaskID, rc.run.RunID, "git_commit", string(ref), p.CommitSHA, x.Now.UnixMilli()); err != nil {
+	digest := sha256.Sum256(ref)
+	if err := endRun(ctx, x, tx, rc.run, protocol.RunFinished); err != nil {
 		return Outcome{}, err
 	}
-	d := domain.ArtifactSubmitted(toDomain(rc.task, rc.spec.Budget()), rc.fact(), artifactID)
+	if err := tx.SetActionStatus(ctx, rc.action.ActionID, protocol.ActionDone, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	artifactID := x.IDs.New(protocol.PrefixArtifact)
+	// The artifact is kept as a fact even when it is stale.
+	if err := tx.InsertArtifact(ctx, artifactID, rc.task.TaskID, rc.run.RunID, "git_commits", string(ref), hex.EncodeToString(digest[:]), x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	task := toDomain(rc.task, rc.spec.Budget())
+	var started []domain.EventDraft
+	if rc.task.Lifecycle == protocol.TaskQueued || rc.task.Lifecycle == protocol.TaskChangesRequired {
+		// A result proves the run started, even if its start report was
+		// never recorded, for example because the lease expired first;
+		// apply the start so the task can advance. RunStarted itself
+		// ignores runs that are not the current implementation.
+		s := domain.RunStarted(task, rc.fact())
+		task, started = s.Task, s.Events
+	}
+	d := domain.ArtifactSubmitted(task, rc.fact(), artifactID)
+	d.Events = append(started, d.Events...)
 	actions, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "artifact.submitted", "artifact_id": artifactID})
 	if err != nil {
 		return Outcome{}, err
@@ -148,17 +172,43 @@ func (SubmitArtifact) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	return Outcome{Result: map[string]any{"artifact_id": artifactID, "task": newTaskResult(d.Task, actions)}, Events: events}, nil
 }
 
+// checkArtifactMounts requires one entry per mount of the workspace, with
+// full commit hashes, and at least one changed mount.
+func checkArtifactMounts(w domain.Workspace, mounts []protocol.ArtifactMount) error {
+	want := map[string]string{}
+	for _, m := range w.Mounts {
+		want[m.Path] = m.Repo
+	}
+	changed := false
+	for _, m := range mounts {
+		repo, ok := want[m.Path]
+		switch {
+		case !ok:
+			return protocol.Errorf(protocol.CodeInvalidRequest, "mount %q is not part of the workspace or is listed twice", m.Path)
+		case repo != m.Repo:
+			return protocol.Errorf(protocol.CodeInvalidRequest, "mount %q holds repo %q, not %q", m.Path, repo, m.Repo)
+		case !shaPattern.MatchString(m.BaseSHA) || !shaPattern.MatchString(m.CommitSHA):
+			return protocol.Errorf(protocol.CodeInvalidRequest, "mount %q needs full base and commit hashes", m.Path)
+		case m.Branch == "":
+			return protocol.Errorf(protocol.CodeInvalidRequest, "mount %q needs its branch", m.Path)
+		}
+		delete(want, m.Path)
+		changed = changed || m.Changed
+	}
+	if len(want) > 0 {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "the artifact must list every mount of the workspace")
+	}
+	if !changed {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "an artifact needs at least one changed mount")
+	}
+	return nil
+}
+
 // SubmitAcceptance handles acceptances.submit.
 type SubmitAcceptance struct{}
 
-type submitAcceptancePayload struct {
-	Verdict  protocol.Verdict `json:"verdict"`
-	Evidence json.RawMessage  `json:"evidence"`
-	Issues   json.RawMessage  `json:"issues,omitempty"`
-}
-
 // Operation implements Command.
-func (SubmitAcceptance) Operation() string { return "acceptances.submit" }
+func (SubmitAcceptance) Operation() string { return protocol.OpAcceptancesSubmit }
 
 // Authorize implements Command.
 func (SubmitAcceptance) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
@@ -169,7 +219,7 @@ func (SubmitAcceptance) Authorize(_ context.Context, x *Exec, _ store.Querier) e
 // the acceptance run's action, so a verdict cannot be pointed at a different
 // artifact than the one the run was given.
 func (SubmitAcceptance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	var p submitAcceptancePayload
+	var p protocol.VerdictPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
@@ -189,6 +239,12 @@ func (SubmitAcceptance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	}
 	if issues == "" {
 		issues = "[]"
+	}
+	if err := endRun(ctx, x, tx, rc.run, protocol.RunFinished); err != nil {
+		return Outcome{}, err
+	}
+	if err := tx.SetActionStatus(ctx, rc.action.ActionID, protocol.ActionDone, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
 	}
 	acceptanceID := x.IDs.New(protocol.PrefixAcceptance)
 	if err := tx.InsertAcceptance(ctx, acceptanceID, rc.task.TaskID, rc.run.RunID, rc.action.TargetSpecVersion,

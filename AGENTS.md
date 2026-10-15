@@ -48,14 +48,16 @@ tend/
 依赖只能自上而下，禁止循环：
 
 ```
-cmd → api / tools / runnerapi / scheduler / dispatch / contextbuilder
-    → app → domain → protocol
-          → store  → protocol
+cmd → api / tools / runnerapi / dispatch / contextbuilder
+    → app → scheduler → domain → protocol
+          → domain
+          → store → protocol
 runner → harness, protocol, netx（runner 不 import 服务端的任何包）
 harness/traex → harness, protocol
 ```
 
 - `domain` 不依赖 `store`、网络、时钟或随机数：所有输入通过参数传入，输出是决定（新状态、事件、待创建动作），方便穷举测试。
+- `scheduler` 和 `domain` 一样是纯函数：领取 run 时，`app` 在同一个事务里收集事实并调用它。
 - 服务端的 handler（`api`、`tools`、`runnerapi`）不直接写数据库，所有有副作用的操作都走 `app`。
 - `internal/` 之外不放 Go 业务代码。
 

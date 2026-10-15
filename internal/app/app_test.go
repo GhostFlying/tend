@@ -188,17 +188,29 @@ func (h *harness) toAwaitingAcceptance() (string, string) {
 	if op := h.exec(runPrincipal(impl, protocol.RoleImplement), h.env("runs.report_started", runTarget(impl), nil, nil), ReportRunStarted{}); op.Status != protocol.OpSucceeded {
 		h.t.Fatalf("report_started: %+v", op)
 	}
-	art := submitArtifactPayload{Repo: "tend", Branch: "task/windows", CommitSHA: "abc123"}
+	art := testArtifact(h.task(res.TaskID).WorkspaceName)
 	if op := h.exec(runPrincipal(impl, protocol.RoleImplement), h.env("runs.submit_artifact", runTarget(impl), art, nil), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		h.t.Fatalf("submit_artifact: %+v", op)
 	}
 	return res.TaskID, h.startRun(res.TaskID, protocol.ActionAccept)
 }
 
+const (
+	baseSHA   = "1111111111111111111111111111111111111111"
+	commitSHA = "2222222222222222222222222222222222222222"
+)
+
+// testArtifact is an artifact of testSpec's single mount.
+func testArtifact(workspace string) protocol.ArtifactPayload {
+	return protocol.ArtifactPayload{Mounts: []protocol.ArtifactMount{{
+		Repo: "tend", Path: "tend", BaseSHA: baseSHA, Branch: domain.TaskBranch(workspace), CommitSHA: commitSHA, Changed: true,
+	}}}
+}
+
 func (h *harness) submitVerdict(runID string, v protocol.Verdict) protocol.Operation {
 	h.t.Helper()
 	return h.exec(runPrincipal(runID, protocol.RoleAccept),
-		h.env("acceptances.submit", runTarget(runID), submitAcceptancePayload{Verdict: v, Evidence: json.RawMessage(`{"log":"ok"}`)}, nil),
+		h.env("acceptances.submit", runTarget(runID), protocol.VerdictPayload{Verdict: v, Evidence: json.RawMessage(`{"log":"ok"}`)}, nil),
 		SubmitAcceptance{})
 }
 
@@ -561,11 +573,11 @@ func TestAuthorization(t *testing.T) {
 		{"main agent takes human control", mainAgent,
 			h.env("control.set_mode", taskTarget(taskID), setControlModePayload{Mode: protocol.ControlHumanControl}, rev(1)), SetControlMode{}},
 		{"implement run submits a verdict", runPrincipal(accept, protocol.RoleImplement),
-			h.env("acceptances.submit", runTarget(accept), submitAcceptancePayload{Verdict: protocol.VerdictPassed}, nil), SubmitAcceptance{}},
+			h.env("acceptances.submit", runTarget(accept), protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, nil), SubmitAcceptance{}},
 		{"run judges another run", runPrincipal("run_other", protocol.RoleAccept),
-			h.env("acceptances.submit", runTarget(accept), submitAcceptancePayload{Verdict: protocol.VerdictPassed}, nil), SubmitAcceptance{}},
+			h.env("acceptances.submit", runTarget(accept), protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, nil), SubmitAcceptance{}},
 		{"main agent submits a verdict", mainAgent,
-			h.env("acceptances.submit", runTarget(accept), submitAcceptancePayload{Verdict: protocol.VerdictPassed}, nil), SubmitAcceptance{}},
+			h.env("acceptances.submit", runTarget(accept), protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, nil), SubmitAcceptance{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -304,17 +304,22 @@ func (t *Tx) InsertRun(ctx context.Context, r RunRow) error {
 	return nil
 }
 
+const runColumns = `run_id, task_id, action_id, generation, role, host_id, desired_state, observed_state, created_at`
+
+func scanRun(row interface{ Scan(...any) error }) (RunRow, error) {
+	var r RunRow
+	var host sql.NullString
+	err := row.Scan(&r.RunID, &r.TaskID, &r.ActionID, &r.Generation, &r.Role, &host, &r.DesiredState, &r.ObservedState, &r.CreatedAt)
+	r.HostID = host.String
+	return r, err
+}
+
 // GetRun returns a run, or ErrNotFound.
 func GetRun(ctx context.Context, q Querier, runID string) (RunRow, error) {
-	r := RunRow{RunID: runID}
-	var host sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT task_id, action_id, generation, role, host_id, desired_state, observed_state, created_at
-		FROM runs WHERE run_id = ?`, runID).
-		Scan(&r.TaskID, &r.ActionID, &r.Generation, &r.Role, &host, &r.DesiredState, &r.ObservedState, &r.CreatedAt)
+	r, err := scanRun(q.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE run_id = ?`, runID))
 	if err != nil {
 		return RunRow{}, notFound(err, "run "+runID)
 	}
-	r.HostID = host.String
 	return r, nil
 }
 
@@ -336,6 +341,15 @@ func (t *Tx) InsertArtifact(ctx context.Context, artifactID, taskID, runID, kind
 		return fmt.Errorf("store: insert artifact: %w", err)
 	}
 	return nil
+}
+
+// GetArtifactRef returns an artifact's reference document, or ErrNotFound.
+func GetArtifactRef(ctx context.Context, q Querier, artifactID string) (string, error) {
+	var ref string
+	if err := q.QueryRowContext(ctx, `SELECT ref_json FROM artifacts WHERE artifact_id = ?`, artifactID).Scan(&ref); err != nil {
+		return "", notFound(err, "artifact "+artifactID)
+	}
+	return ref, nil
 }
 
 // InsertAcceptance stores an acceptance verdict.
