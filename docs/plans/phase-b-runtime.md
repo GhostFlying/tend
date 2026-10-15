@@ -277,7 +277,7 @@ $TEND_HOME/                         默认 ~/.tend
 - 工具以 namespace `tend` 注册为动态工具，名称用下划线（模型的函数名不允许点号）：`tasks_list`、`tasks_read`、`tasks_create`、`tasks_update_intent`、`actions_create`、`decisions_open`、`decisions_resolve`、`artifacts_read`、`requests_read`，以及只读的 `repos_list`（已注册的仓库、工作区模板，以及哪些 host 服务哪些仓库，供主 Agent 在建任务时选择 mount）。名称到 `operation` 的映射是一张静态表。
 - 每个工具有 JSON Schema 输入定义，从 Go 结构体生成，单元测试检查 schema 与结构体一致。
 - **身份**：`Principal{main_agent, harness_instance, thread}` 由连接和 threadId 决定（design.md §3），不读 arguments。
-- **request_id**（D28）：`native_requests` 表（迁移 `0006`），`source = "harness:<instance>"`，`native_key = "<threadId>/<turnId>/<callId>"`。映射在执行命令的同一个事务里创建。
+- **request_id**（D28）：`native_requests` 表（迁移 `0006`），`source = "harness:<instance>"`，`native_key = "<threadId>/<turnId>/<callId>"`。映射单独一个事务创建（实现时调整：映射只是身份记录，命令内部出错回滚后，重试同一个调用仍然拿到同一个 ID，与放在同一事务里等价且更简单）。
 - **source_message_id 由服务端填**：`mainthread` 知道当前 turn 处理的是哪条用户消息，调用工具层时作为参数传入（`tools.Call{Principal, NativeKey, SourceMessageID, ...}`），工具层不读模型传入的值，也不反查 `mainthread` 的表。`commit_seq` 由模型提供（同一条消息的第几次规划写入），A5 中观察到的“相同参数、不同 callId”的重复调用会被 `plan_commits` 拦下。
 - **返回**：`{success, contentItems:[text]}`，text 是紧凑 JSON。失败时带错误码；`stale_revision` 附带当前状态摘要，让模型在同一个 turn 里拿到新事实（design.md §2.2 第 5 条）。
 - 主 Agent 没有 `acceptances.submit`、`control.set_mode`（human_control）和任何能写 completed 的工具。

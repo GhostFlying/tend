@@ -153,6 +153,11 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	task := toDomain(row, current.Budget())
 	merged := domain.Decision{Task: task}
 	if p.Spec != nil {
+		ws, err := expandTemplate(ctx, tx.Q(), p.Spec.Workspace)
+		if err != nil {
+			return Outcome{}, err
+		}
+		p.Spec.Workspace = ws
 		*p.Spec = p.Spec.Normalize()
 		if err := checkRepos(ctx, tx.Q(), addedRepos(current.Workspace, p.Spec.Workspace)); err != nil {
 			return Outcome{}, err
