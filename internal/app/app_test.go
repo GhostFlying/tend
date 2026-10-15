@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -20,6 +21,9 @@ type harness struct {
 	store *store.Store
 	clock *testkit.Clock
 	ids   protocol.IDGen
+	// seeded holds the row counts left by the configuration sync, which
+	// count excludes.
+	seeded map[string]int
 }
 
 func newHarness(t *testing.T) *harness {
@@ -31,7 +35,36 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { s.Close() })
 	ids := testkit.NewIDGen(clock, 42)
-	return &harness{t: t, app: New(s, ids, clock.Now), store: s, clock: clock, ids: ids}
+	h := &harness{t: t, app: New(s, ids, clock.Now), store: s, clock: clock, ids: ids}
+	h.syncConfig(testConfig())
+	h.seeded = map[string]int{}
+	for _, table := range []string{"request_records", "events", "inbox", "outbox", "tasks", "plan_actions", "runs"} {
+		h.seeded[table] = h.count(table)
+	}
+	return h
+}
+
+func testConfig() ConfigPayload {
+	return ConfigPayload{
+		Repos: []RepoConfig{
+			{Repo: "tend", RemoteURL: "https://example.com/tend.git"},
+			{Repo: "douyin", RemoteURL: "https://example.com/douyin.git", BaseCandidates: []string{"develop"}},
+			{Repo: "template-assembler", RemoteURL: "https://example.com/ta.git"},
+		},
+		Hosts: []HostConfig{{
+			HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend", "douyin", "template-assembler"},
+			Slots: 2, TokenHash: strings.Repeat("ab", 32), Nodes: []string{"tag:tend-runner"},
+		}},
+		Templates: []TemplateConfig{{Name: "douyin-with-lynx", Workspace: domain.Workspace{
+			Mounts:  []domain.Mount{{Repo: "douyin"}, {Repo: "template-assembler", Path: "lynx"}},
+			Profile: "link-lynx",
+		}}},
+	}
+}
+
+func (h *harness) syncConfig(c ConfigPayload) protocol.Operation {
+	h.t.Helper()
+	return h.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, h.env("config.sync", protocol.Target{Type: "config"}, c, nil), SyncConfig{})
 }
 
 var (
@@ -67,7 +100,10 @@ func (h *harness) exec(p protocol.Principal, env *protocol.Envelope, cmd Command
 
 func rev(n int64) *int64 { return &n }
 
-var testSpec = domain.Spec{Goal: "fix the windows build", Acceptance: []string{"build passes"}, Delivery: domain.DeliveryCommit}
+var testSpec = domain.Spec{
+	Goal: "fix the windows build", Acceptance: []string{"build passes"}, Delivery: domain.DeliveryCommit,
+	Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}},
+}
 
 func taskTarget(id string) protocol.Target { return protocol.Target{Type: "task", ID: id} }
 func runTarget(id string) protocol.Target  { return protocol.Target{Type: "run", ID: id} }
@@ -97,6 +133,8 @@ func (h *harness) task(id string) store.TaskRow {
 	return row
 }
 
+// count returns the rows of a table, excluding those of the configuration
+// sync every harness starts with.
 func (h *harness) count(table string) int {
 	h.t.Helper()
 	var n int
@@ -105,7 +143,7 @@ func (h *harness) count(table string) int {
 	}); err != nil {
 		h.t.Fatal(err)
 	}
-	return n
+	return n - h.seeded[table]
 }
 
 // startRun stands in for the scheduler (B6): it creates a run for the task's

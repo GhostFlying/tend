@@ -16,15 +16,18 @@ func toDomain(r store.TaskRow, budget int64) domain.Task {
 		ID: r.TaskID, Lifecycle: r.Lifecycle, Control: r.ControlMode, ControlRevision: r.ControlRevision,
 		SpecVersion: r.SpecVersion, Priority: r.Priority, Block: r.BlockReason,
 		ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Budget: budget,
+		WorkspaceAssigned: r.WorkspaceAssigned,
 	}
 }
 
-func fromDomain(t domain.Task, title string, createdAt, now int64) store.TaskRow {
-	return store.TaskRow{
-		TaskID: t.ID, Title: title, Lifecycle: t.Lifecycle, ControlMode: t.Control, ControlRevision: t.ControlRevision,
-		SpecVersion: t.SpecVersion, Priority: t.Priority, BlockReason: t.Block,
-		ImplementGeneration: t.ImplementGeneration, CurrentArtifactID: t.CurrentArtifactID, CreatedAt: createdAt, UpdatedAt: now,
-	}
+// fromDomain applies the task state to the stored row. Fields the rules do
+// not own, such as the title and workspace, are kept from prev.
+func fromDomain(t domain.Task, prev store.TaskRow, now int64) store.TaskRow {
+	r := prev
+	r.TaskID, r.Lifecycle, r.ControlMode, r.ControlRevision = t.ID, t.Lifecycle, t.Control, t.ControlRevision
+	r.SpecVersion, r.Priority, r.BlockReason = t.SpecVersion, t.Priority, t.Block
+	r.ImplementGeneration, r.CurrentArtifactID, r.UpdatedAt = t.ImplementGeneration, t.CurrentArtifactID, now
+	return r
 }
 
 // loadTask reads a task and its current spec.
@@ -56,7 +59,7 @@ type actionResult struct {
 // events. It returns the created actions.
 func applyDecision(ctx context.Context, x *Exec, tx *store.Tx, prev store.TaskRow, d domain.Decision, trigger map[string]any) ([]actionResult, []Event, error) {
 	now := x.Now.UnixMilli()
-	row := fromDomain(d.Task, prev.Title, prev.CreatedAt, now)
+	row := fromDomain(d.Task, prev, now)
 	if row != prev {
 		if err := tx.UpdateTask(ctx, row); err != nil {
 			return nil, nil, err

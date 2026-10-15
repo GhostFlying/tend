@@ -40,6 +40,10 @@ type createTaskPayload struct {
 	// produced this task, when it came from a conversation message.
 	SourceMessageID string `json:"source_message_id,omitempty"`
 	CommitSeq       int64  `json:"commit_seq,omitempty"`
+	// WorkspaceName names the task's workspace directory and branches,
+	// such as "fix-windows-build". It defaults to one derived from the
+	// task ID.
+	WorkspaceName string `json:"workspace_name,omitempty"`
 }
 
 // Operation implements Command.
@@ -63,12 +67,26 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	taskID := x.IDs.New(protocol.PrefixTask)
+	ws, err := expandTemplate(ctx, tx.Q(), p.Spec.Workspace)
+	if err != nil {
+		return Outcome{}, err
+	}
+	p.Spec.Workspace = ws
+	p.Spec = p.Spec.Normalize()
 	d, err := domain.NewTask(taskID, p.Spec, p.Priority)
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := checkRepos(ctx, tx.Q(), p.Spec.Workspace.Repos()); err != nil {
+		return Outcome{}, err
+	}
+	name, err := reserveWorkspaceName(ctx, tx.Q(), p.WorkspaceName, taskID)
+	if err != nil {
+		return Outcome{}, err
+	}
 	now := x.Now.UnixMilli()
-	if err := tx.InsertTask(ctx, fromDomain(d.Task, p.Title, now, now)); err != nil {
+	row := fromDomain(d.Task, store.TaskRow{Title: p.Title, WorkspaceName: name, CreatedAt: now}, now)
+	if err := tx.InsertTask(ctx, row); err != nil {
 		return Outcome{}, err
 	}
 	spec, err := json.Marshal(p.Spec)
@@ -135,6 +153,10 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	task := toDomain(row, current.Budget())
 	merged := domain.Decision{Task: task}
 	if p.Spec != nil {
+		*p.Spec = p.Spec.Normalize()
+		if err := checkRepos(ctx, tx.Q(), addedRepos(current.Workspace, p.Spec.Workspace)); err != nil {
+			return Outcome{}, err
+		}
 		d, err := domain.UpdateSpec(task, *p.Spec, current, expected)
 		if err != nil {
 			return Outcome{}, err

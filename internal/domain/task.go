@@ -28,6 +28,17 @@ type Spec struct {
 	// MaxImplementAttempts bounds implement generations for this version;
 	// zero means DefaultMaxImplementAttempts.
 	MaxImplementAttempts int64 `json:"max_implement_attempts,omitempty"`
+	// Workspace lists the repositories the task works on.
+	Workspace Workspace `json:"workspace"`
+	// Requirements constrain the hosts that may run the task.
+	Requirements Requirements `json:"requirements,omitzero"`
+}
+
+// Normalize returns the spec with defaults filled in. Specs are stored
+// normalized.
+func (s Spec) Normalize() Spec {
+	s.Workspace = s.Workspace.Normalize()
+	return s
 }
 
 // DeliveryCommit is the only delivery kind in the MVP.
@@ -46,7 +57,12 @@ func (s Spec) Validate() error {
 	case s.MaxImplementAttempts < 0:
 		return protocol.Errorf(protocol.CodeInvalidRequest, "max_implement_attempts must not be negative")
 	}
-	return nil
+	for _, l := range s.Requirements.Labels {
+		if !NamePattern.MatchString(l) {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "label %q is malformed", l)
+		}
+	}
+	return s.Workspace.Normalize().Validate()
 }
 
 // Budget returns the effective implement attempt budget.
@@ -60,7 +76,8 @@ func (s Spec) Budget() int64 {
 // Equal reports whether two specs ask for the same thing.
 func (s Spec) Equal(o Spec) bool {
 	return s.Goal == o.Goal && s.Scope == o.Scope && s.Delivery == o.Delivery &&
-		s.Budget() == o.Budget() && slices.Equal(s.Constraints, o.Constraints) && slices.Equal(s.Acceptance, o.Acceptance)
+		s.Budget() == o.Budget() && slices.Equal(s.Constraints, o.Constraints) && slices.Equal(s.Acceptance, o.Acceptance) &&
+		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements)
 }
 
 // Task is the projection of a task that the rules operate on.
@@ -80,6 +97,9 @@ type Task struct {
 	CurrentArtifactID string
 	// Budget is the implement attempt budget of the current spec version.
 	Budget int64
+	// WorkspaceAssigned reports that the task's workspace exists on a host.
+	// From then on its mounts can only be added to.
+	WorkspaceAssigned bool
 }
 
 // ActionDraft is a follow-up action the caller must create.
@@ -187,6 +207,11 @@ func UpdateSpec(t Task, spec Spec, current Spec, expectedRevision int64) (Decisi
 	}
 	if spec.Equal(current) {
 		return Decision{Task: t}, nil
+	}
+	if t.WorkspaceAssigned {
+		if err := checkPinnedWorkspace(current.Normalize(), spec.Normalize()); err != nil {
+			return Decision{}, err
+		}
 	}
 	t.SpecVersion++
 	t.ControlRevision++
