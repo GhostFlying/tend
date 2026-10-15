@@ -164,6 +164,12 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 		return nil, err
 	}
 	if ok {
+		// Turns still running belonged to a harness that is gone, such as
+		// one a crashed tend process took down with it; the harness ends
+		// them as interrupted (docs/findings/phase-b-traex.md).
+		if err := m.app.SettleOpenTurns(ctx, id); err != nil {
+			return nil, err
+		}
 		th, err := s.ResumeThread(ctx, id, m.threadConfig())
 		if err == nil {
 			return th, nil
