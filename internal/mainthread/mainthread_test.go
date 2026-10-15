@@ -318,6 +318,36 @@ func TestFault_TurnStartUnknownAfterRestart(t *testing.T) {
 	}
 }
 
+func TestFault_TurnRunningAtCrash(t *testing.T) {
+	h := testkit.NewHarness()
+	e := newEnv(t, h)
+	e.say("one")
+	eventually(t, "the first turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	e.stop()
+	// A previous process started the turn for "two" and died during it.
+	id := e.say("two")
+	if err := e.store.Write(context.Background(), func(tx *store.Tx) error {
+		thread, err := store.GetMainThread(context.Background(), tx.Q(), "main")
+		if err != nil {
+			return err
+		}
+		if err := tx.PutMainTurn(context.Background(), store.MainTurn{RequestID: "x", MessageID: id, ThreadID: thread, TurnID: "turn_old", Status: store.TurnStarted}, 0); err != nil {
+			return err
+		}
+		_, err = tx.Exec(context.Background(), `UPDATE outbox SET status = 'sending', attempts = 1, request_id = 'x' WHERE seq = (SELECT MAX(seq) FROM outbox)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.start()
+	eventually(t, "the turn is settled and its delivery kept", func() bool {
+		return e.outboxStatus() == store.OutboxDelivered && e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id = 'x' AND status = 'interrupted'`) == 1
+	})
+	if n := len(h.Starts()); n != 1 {
+		t.Errorf("turn starts = %d, want the interrupted message not sent again", n)
+	}
+}
+
 func TestReplayedToolCallKeepsItsMessage(t *testing.T) {
 	h := testkit.NewHarness()
 	var first string
