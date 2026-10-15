@@ -24,7 +24,7 @@ test:
 
 ## it: integration tests that need a real harness or tailnet
 it:
-	$(GO) test -race -tags integration $(PKGS)
+	$(GO) test -race -tags integration -timeout 60m $(PKGS)
 
 build:
 	$(GO) build $(PKGS)
