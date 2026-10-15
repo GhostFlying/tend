@@ -255,7 +255,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err := tx.TouchHost(ctx, host.HostID, now); err != nil {
 		return Outcome{}, err
 	}
-	res := protocol.HelloResult{Runs: []protocol.RunVerdict{}, Reassigned: []protocol.Assignment{}}
+	res := protocol.HelloResult{LeaseTTLMillis: x.LeaseTTL.Milliseconds(), Runs: []protocol.RunVerdict{}, Reassigned: []protocol.Assignment{}}
 	var events []Event
 	held := map[string]bool{}
 	stop := func(runID, reason string) {

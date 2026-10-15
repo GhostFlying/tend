@@ -34,6 +34,7 @@ tend/
     runner/                runner 客户端：journal、租约、自我 fencing、worker 驱动
     netx/                  tsnet 封装（listener、WhoIs）；测试时替换为本地 listener
     testkit/               fake harness、fake runner、可控时钟、ID 生成器、故障注入
+    e2e/                   服务端与 runner 的端到端测试（只有测试代码，可以 import 任何包）
   web/                     Web 客户端（Vite + React + TS），阶段 C 起
   spikes/                  阶段性验证脚本，每个子目录有 README；正式代码不得 import
   docs/

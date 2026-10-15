@@ -407,7 +407,7 @@ runner → harness, protocol, netx
 | 3 | `feat: impl outbox dispatcher with restart reconciliation` | B5 |
 | 4 | `feat: impl hosts, repos, workspaces and scheduling rules` | B6，迁移 0004，D30、D33、D34、D36 的账本部分，工作区模板展开 |
 | 5 | `feat: impl runner protocol server with leases` | B7，netx，迁移 0005，D29、D32 |
-| 6 | `feat: impl runner client with journal and self fencing` | B8 的 claim、心跳、fencing，fake harness，`cmd/tend-runner` |
+| 6 | `feat: impl runner client with journal and self fencing` | B8 的 claim、心跳、fencing，fake harness；`cmd/tend-runner` 连同 HuJSON 配置（D32）和 tsnet 移到第 12 步，和服务端一起组装 |
 | 6a | `feat: impl runner repo and workspace management` | B8 的 §6.5：bare clone、fetch 与基线解析、多 mount 工作区、AGENTS.md 生成、prepare、完整性检查，D35–D37；测试用本地临时 git 仓库作为 remote |
 | 7 | `feat: impl acceptance retry and run failure rules` | B9，D31；进程内端到端测试的 runner 部分 |
 | 8 | `feat: impl harness interface and traex client` | B12b 的协议层与 schema 一致性测试 |
