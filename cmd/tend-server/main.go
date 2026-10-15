@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/api"
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/cfgfile"
 	"github.com/GhostFlying/tend/internal/contextbuilder"
@@ -47,8 +48,14 @@ type config struct {
 		Hostname  string `json:"hostname"`
 		Ephemeral bool   `json:"ephemeral"`
 	} `json:"tailnet"`
-	Listen   string           `json:"listen"`
-	LeaseTTL cfgfile.Duration `json:"lease_ttl"`
+	Listen string `json:"listen"`
+	// Owners are the tailnet logins allowed to use the owner API and web
+	// client (D42).
+	Owners []string `json:"owners"`
+	// LocalOwner is the owner every caller is taken to be when the server
+	// listens off the tailnet, for development.
+	LocalOwner string           `json:"local_owner"`
+	LeaseTTL   cfgfile.Duration `json:"lease_ttl"`
 	// MainAgent runs the front thread with a dedicated traex home.
 	MainAgent struct {
 		Instance  string `json:"instance"`
@@ -126,6 +133,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		listener net.Listener
 		whois    netx.WhoIs
 	)
+	owners := cfg.Owners
 	if cfg.Tailnet != nil {
 		tn, err := netx.JoinTailnet(ctx, netx.TailnetConfig{
 			Hostname: cfg.Tailnet.Hostname, Dir: filepath.Join(dataDir, "tsnet"), AuthKey: os.Getenv("TS_AUTHKEY"),
@@ -145,8 +153,11 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 			return err
 		}
 		// Off the tailnet there is no peer identity; development only.
-		whois = netx.Static{Identity: &netx.Identity{Node: "local", Tags: []string{"tag:local"}}}
-		log.Warn("listening without the tailnet; every peer is taken as tag:local", "addr", listener.Addr().String())
+		whois = netx.Static{Identity: &netx.Identity{Node: "local", User: cfg.LocalOwner, Tags: []string{"tag:local"}}}
+		if cfg.LocalOwner != "" {
+			owners = []string{cfg.LocalOwner}
+		}
+		log.Warn("listening without the tailnet; every peer is taken as tag:local and the local owner", "addr", listener.Addr().String())
 	}
 
 	front := mainthread.New(a, contextbuilder.New(a, s, ids, contextbuilder.Config{}), tools.New(a, s, log), mainthread.Config{
@@ -161,8 +172,11 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		Log: log,
 	})
 	d := dispatch.New(a, map[string]dispatch.Handler{app.MainThreadDestination: front}, wake, time.Now, dispatch.Config{}, log)
-	api := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
-	server := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	runners := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
+	mux := http.NewServeMux()
+	mux.Handle(runnerapi.Path, runners.Handler())
+	mux.Handle("/api/", api.New(a, s, whois, secret, api.Config{Owners: owners}, log).Handler())
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	// The workers stop with the process or when serving fails.
 	runCtx, stop := context.WithCancel(ctx)
@@ -170,7 +184,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	var wg sync.WaitGroup
 	wg.Go(func() { _ = front.Run(runCtx) })
 	wg.Go(func() { _ = d.Run(runCtx) })
-	wg.Go(func() { api.SweepLeases(runCtx, a.LeaseTTL()/4) })
+	wg.Go(func() { runners.SweepLeases(runCtx, a.LeaseTTL()/4) })
 	wg.Go(func() {
 		<-runCtx.Done()
 		shutdown, cancel := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)

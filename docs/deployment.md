@@ -11,6 +11,7 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 
 - `TEND_SERVER_SECRET`：至少 32 字节，hex 编码，用来派生 run 凭据（D29）。更换它会让正在执行的 run 失去凭据。
 - `TS_AUTHKEY`：只在第一次加入 tailnet 时需要；之后状态保存在 `data_dir/tsnet`。正式部署使用带 `tag:tend-server` 的 key。
+- `owners`：可以使用 Web 和 owner API 的 tailnet 登录名（D42）。不加入 tailnet、只用 `listen` 时，用 `local_owner` 指定本地开发的 owner。
 - 主 Agent 使用专用的 traex home（`main_agent.traex_home`），需要在那个 home 下完成一次 traex 鉴权。
 
 ## tend-runner
