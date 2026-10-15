@@ -26,7 +26,7 @@ func (h *harness) toAcceptanceClaim() (string, protocol.Assignment) {
 
 func (h *harness) requestAction(taskID string, kind protocol.ActionKind, generation int64) protocol.Operation {
 	h.t.Helper()
-	return h.exec(owner, h.env("actions.create", taskTarget(taskID), createActionPayload{Kind: kind, Generation: generation},
+	return h.exec(owner, h.env("actions.create", taskTarget(taskID), protocol.CreateActionPayload{Kind: kind, Generation: generation},
 		rev(h.task(taskID).ControlRevision)), CreateAction{})
 }
 
@@ -125,28 +125,28 @@ func TestDecisions(t *testing.T) {
 		t.Fatalf("open: %+v", op)
 	}
 	target := protocol.Target{Type: "decision", ID: opened.DecisionID}
-	answer := func(p protocol.Principal, cmd AnswerDecision, payload answerDecisionPayload) protocol.Operation {
+	answer := func(p protocol.Principal, cmd AnswerDecision, payload protocol.AnswerDecisionPayload) protocol.Operation {
 		return h.exec(p, h.env(cmd.Operation(), target, payload, nil), cmd)
 	}
 
-	if op := answer(mainAgent, AnswerDecision{FromMessage: true}, answerDecisionPayload{Version: 1, Option: "second"}); op.Status != protocol.OpFailed {
+	if op := answer(mainAgent, AnswerDecision{FromMessage: true}, protocol.AnswerDecisionPayload{Version: 1, Option: "second"}); op.Status != protocol.OpFailed {
 		t.Errorf("resolve without a source message: %+v", op)
 	}
-	if op := answer(owner, AnswerDecision{}, answerDecisionPayload{Version: 1, Option: "third"}); op.Status != protocol.OpFailed {
+	if op := answer(owner, AnswerDecision{}, protocol.AnswerDecisionPayload{Version: 1, Option: "third"}); op.Status != protocol.OpFailed {
 		t.Errorf("answer outside the options: %+v", op)
 	}
-	if op := answer(owner, AnswerDecision{}, answerDecisionPayload{Version: 1, Option: "second"}); op.Status != protocol.OpSucceeded {
+	if op := answer(owner, AnswerDecision{}, protocol.AnswerDecisionPayload{Version: 1, Option: "second"}); op.Status != protocol.OpSucceeded {
 		t.Fatalf("answer: %+v", op.Error)
 	}
 	// Another client answers the same version: the same answer returns the
 	// recorded result, a different one is stale.
-	if op := answer(owner, AnswerDecision{}, answerDecisionPayload{Version: 1, Option: "second"}); op.Status != protocol.OpSucceeded {
+	if op := answer(owner, AnswerDecision{}, protocol.AnswerDecisionPayload{Version: 1, Option: "second"}); op.Status != protocol.OpSucceeded {
 		t.Errorf("same answer again: %+v", op.Error)
 	}
-	if op := answer(owner, AnswerDecision{}, answerDecisionPayload{Version: 1, Option: "first"}); op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeStaleRevision {
+	if op := answer(owner, AnswerDecision{}, protocol.AnswerDecisionPayload{Version: 1, Option: "first"}); op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeStaleRevision {
 		t.Errorf("conflicting answer: %+v", op)
 	}
-	envl := h.env("decisions.respond", target, answerDecisionPayload{Version: 2, Option: "first"}, nil)
+	envl := h.env("decisions.respond", target, protocol.AnswerDecisionPayload{Version: 2, Option: "first"}, nil)
 	if _, err := h.app.Execute(t.Context(), mainAgent, envl, AnswerDecision{}); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Errorf("main agent using decisions.respond: %v", err)
 	}
