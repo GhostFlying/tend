@@ -521,13 +521,13 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 
 // endRun moves a run to a terminal state and releases its lease. A result
 // or a release from the run itself proves it ran, so it may end a run that
-// is still starting or unknown.
+// is still starting, was interrupted and resumed, or is unknown.
 func endRun(ctx context.Context, x *Exec, tx *store.Tx, run store.RunRow, to protocol.RunObserved) error {
 	from := run.ObservedState
 	if from == protocol.RunFinished || from == protocol.RunFailed {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "run %s already ended as %s", run.RunID, from)
 	}
-	if from == protocol.RunStarting {
+	if from == protocol.RunStarting || from == protocol.RunInterrupted {
 		from = protocol.RunRunning
 	}
 	if !domain.RunTransitionAllowed(from, to, true) {
@@ -635,11 +635,11 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 			if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
 				return err
 			}
-			// Events only toggle a live run between running and waiting.
-			// Leaving starting goes through runs.report_started, which
-			// also applies the task rules.
+			// Events only move a live run between running and waiting, or
+			// resume an interrupted one. Leaving starting goes through
+			// runs.report_started, which also applies the task rules.
 			to := map[string]protocol.RunObserved{protocol.EventRunRunning: protocol.RunRunning, protocol.EventRunWaiting: protocol.RunWaiting}[e.Kind]
-			live := run.ObservedState == protocol.RunRunning || run.ObservedState == protocol.RunWaiting
+			live := run.ObservedState == protocol.RunRunning || run.ObservedState == protocol.RunWaiting || run.ObservedState == protocol.RunInterrupted
 			if to == "" || !live || !domain.RunTransitionAllowed(run.ObservedState, to, false) {
 				continue
 			}
