@@ -79,18 +79,21 @@ func applyDecision(ctx context.Context, x *Exec, tx *store.Tx, prev store.TaskRo
 	if err != nil {
 		return nil, nil, err
 	}
+	events := make([]Event, 0, len(d.Events)+len(d.OpenDecisions))
+	for _, e := range d.Events {
+		events = append(events, Event{ObjectType: "task", ObjectID: d.Task.ID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
+	}
 	for _, q := range d.OpenDecisions {
 		options, err := json.Marshal(q.Options)
 		if err != nil {
 			return nil, nil, fmt.Errorf("app: encode decision options: %w", err)
 		}
-		if err := tx.InsertDecision(ctx, x.IDs.New(protocol.PrefixDecision), d.Task.ID, q.Question, string(options), now); err != nil {
+		id := x.IDs.New(protocol.PrefixDecision)
+		if err := tx.InsertDecision(ctx, id, d.Task.ID, q.Question, string(options), now); err != nil {
 			return nil, nil, err
 		}
-	}
-	events := make([]Event, 0, len(d.Events))
-	for _, e := range d.Events {
-		events = append(events, Event{ObjectType: "task", ObjectID: d.Task.ID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
+		// Opened by a rule, it surfaces like one a planner opens.
+		events = append(events, Event{ObjectType: "decision", ObjectID: id, ObjectVersion: 1, Kind: "decision.opened", Body: map[string]any{"task_id": d.Task.ID}})
 	}
 	return actions, events, nil
 }

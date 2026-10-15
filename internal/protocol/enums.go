@@ -93,6 +93,25 @@ func (d RunDesired) Valid() bool {
 	return d == DesiredRun || d == DesiredPaused || d == DesiredStopped
 }
 
+// MessageState is how far the main agent got with an owner message.
+type MessageState string
+
+// Message states.
+const (
+	// MessageQueued: received, waiting for the main agent.
+	MessageQueued MessageState = "queued"
+	// MessageProcessing: the main agent's turn for it is running.
+	MessageProcessing MessageState = "processing"
+	// MessageReplied: the turn completed.
+	MessageReplied MessageState = "replied"
+	// MessageInterrupted: the turn was stopped before it completed.
+	MessageInterrupted MessageState = "interrupted"
+	// MessageFailed: the turn failed or the message could not be delivered.
+	MessageFailed MessageState = "failed"
+	// MessageUnknown: whether the main agent handled it cannot be told.
+	MessageUnknown MessageState = "unknown"
+)
+
 // RunRole is the responsibility of a run.
 type RunRole string
 

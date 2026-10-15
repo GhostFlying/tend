@@ -346,6 +346,9 @@ func TestFault_TurnRunningAtCrash(t *testing.T) {
 	if n := len(h.Starts()); n != 1 {
 		t.Errorf("turn starts = %d, want the interrupted message not sent again", n)
 	}
+	if n := e.count(`SELECT COUNT(*) FROM events WHERE kind = 'conversation.message_state' AND object_id = ? AND body_json LIKE '%interrupted%'`, id); n != 1 {
+		t.Errorf("interrupted state events = %d, want the owner told once", n)
+	}
 }
 
 func TestReplayedToolCallKeepsItsMessage(t *testing.T) {

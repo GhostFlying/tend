@@ -144,12 +144,25 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 	default:
 		return fmt.Errorf("app: invalid delivery outcome %d", r.Outcome)
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.store.Write(ctx, func(tx *store.Tx) error {
 		if err := tx.TransitionOutbox(ctx, tr); err != nil {
 			return err
 		}
 		if kind == "" {
 			return nil
+		}
+		if d.Destination == MainThreadDestination && d.Operation == OpHandleMessage {
+			var m HandleMessage
+			if err := json.Unmarshal(d.Payload, &m); err != nil {
+				return fmt.Errorf("app: decode message delivery: %w", err)
+			}
+			state := protocol.MessageFailed
+			if r.Outcome == Unknown {
+				state = protocol.MessageUnknown
+			}
+			if err := a.insertMessageState(ctx, tx, m.MessageID, state, now.UnixMilli()); err != nil {
+				return err
+			}
 		}
 		body, err := json.Marshal(map[string]any{
 			"request_id": d.RequestID, "parent_request_id": d.ParentRequestID, "destination": d.Destination,
@@ -164,6 +177,10 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		})
 		return err
 	})
+	if err == nil {
+		a.notifyChange()
+	}
+	return err
 }
 
 // NativeRequestID returns the request ID of a call that arrives with a
