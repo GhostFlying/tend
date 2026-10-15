@@ -11,10 +11,12 @@ type Code string
 
 // Error codes.
 const (
-	CodeInvalidRequest    Code = "invalid_request"
-	CodeMissingRequestID  Code = "missing_request_id"
-	CodeConflictPayload   Code = "conflict_payload"
-	CodeStaleRevision     Code = "stale_revision"
+	CodeInvalidRequest   Code = "invalid_request"
+	CodeMissingRequestID Code = "missing_request_id"
+	CodeConflictPayload  Code = "conflict_payload"
+	CodeStaleRevision    Code = "stale_revision"
+	// CodeUnauthenticated: the caller has no valid session.
+	CodeUnauthenticated   Code = "unauthenticated"
 	CodeForbidden         Code = "forbidden"
 	CodeNotFound          Code = "not_found"
 	CodeInvalidTransition Code = "invalid_transition"

@@ -36,6 +36,7 @@
 | D38 | worker 暂不托管：runner 直接使用所在机器上已安装的 traex 和用户的默认配置（home、鉴权、skills、plugins、用户级 AGENTS.md、默认模型），每个 run 一个 app-server 进程。runner 只覆盖无人值守必须改的项：cwd、`approvalPolicy=never`、sandbox（D39）、tend 的角色说明，以及验收用的 `submit_verdict` 工具。实现 run 的说明包含完整的 spec；后续代次还带上一次验收要求修改的内容。 | 已确认 |
 | D39 | 部署形态与 sandbox（修订 D26）：服务端、主 Agent、runner 和 worker 都直接运行在各自的机器上，不在 Docker 里；dev container 只用于开发和测试。第一期主 Agent 和 worker 一律使用 `danger-full-access`，sandbox（大概率是 auto mode）后续跟进。“主 Agent 只通过 tend 工具写账本”“worker 不碰 git 历史”在第一期是约定加事后检查（runner 的完整性检查），不是强制边界；agent 视为可信。 | 已确认 |
 | D41 | 验收在任务自己的工作区里进行（修订 D33 与阶段 B 计划 §6.2 的一次性验收工作区）。验收的独立性来自独立的 run 和 agent，不来自独立的工作区。同一任务任何角色的 run 还可能在使用工作区时（包括 unknown），不派发新的 run。验收 agent 只判断任务是否完成：可以构建、运行测试，但不修改代码、不清理、不提交，这只通过给验收 agent 的说明约束；tend 不在验收之后做任何清理，也不对验收后的工作区状态做承诺。验收开始前确认各 mount 停在 artifact 的分支和 commit 上，否则验收失败。 | 已确认 |
+| D42 | owner 身份：服务端配置 `owners` 列出 owner 的 tailnet 登录名，每个请求都用 WhoIs 取得登录名并检查。浏览器先领取会话 cookie：内容是登录名、client_id 和签发时间，用服务端密钥派生的会话密钥签名，HttpOnly、SameSite=Strict，有效期 30 天。cookie 只有和同一 owner 的 tailnet 身份一起才有效。领取会话时同样要在 `X-Tend-Client` 头里重复 client_id；写请求必须在该头里带上 cookie 中的 client_id，防止跨站请求。没有有效会话返回 `unauthenticated`（401），不是 owner 返回 `forbidden`。不加入 tailnet 的开发模式下，所有调用方都视为配置的 `local_owner`。 | 已确认 |
 | D44 | 交付由 worker agent 完成：push、MR、CQ 跟进、提交信息规范等仓库特定的流程，tend 不内置，也不提供交付 profile。`deliver` 动作类型保留，具体机制（例如验收通过后的交付 run）在需要时设计。 | 已确认 |
 
 ## 2. 上下文注入（修订 v0.1 §7）

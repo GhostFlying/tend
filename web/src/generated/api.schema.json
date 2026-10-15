@@ -147,6 +147,7 @@
         "missing_request_id",
         "conflict_payload",
         "stale_revision",
+        "unauthenticated",
         "forbidden",
         "not_found",
         "invalid_transition",
@@ -347,6 +348,36 @@
         "observed"
       ],
       "title": "RunView",
+      "type": "object"
+    },
+    "SessionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "client_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "client_id"
+      ],
+      "title": "SessionRequest",
+      "type": "object"
+    },
+    "SessionView": {
+      "additionalProperties": false,
+      "properties": {
+        "client_id": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "login",
+        "client_id"
+      ],
+      "title": "SessionView",
       "type": "object"
     },
     "Target": {
@@ -571,6 +602,12 @@
     },
     "RequestView": {
       "$ref": "#/definitions/RequestView"
+    },
+    "SessionRequest": {
+      "$ref": "#/definitions/SessionRequest"
+    },
+    "SessionView": {
+      "$ref": "#/definitions/SessionView"
     },
     "TaskDetail": {
       "$ref": "#/definitions/TaskDetail"

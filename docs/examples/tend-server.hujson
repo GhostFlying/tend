@@ -11,6 +11,11 @@
   "tailnet": {"hostname": "tend"},
   // "listen": "127.0.0.1:8640",
 
+  // Tailnet logins allowed to use the web client and owner API.
+  "owners": ["you@example.com"],
+  // With "listen" instead of "tailnet", every caller is this owner.
+  // "local_owner": "you@example.com",
+
   "lease_ttl": "60s",
 
   "main_agent": {
