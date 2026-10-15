@@ -165,3 +165,18 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		return err
 	})
 }
+
+// NativeRequestID returns the request ID of a call that arrives with a
+// native identity, such as a harness tool call, allocating one the first
+// time (D28). The mapping is identity bookkeeping and idempotent by the
+// identity itself, so it is written in its own transaction: if the command
+// later fails internally, a retry of the same call still gets the same ID.
+func (a *App) NativeRequestID(ctx context.Context, source, nativeKey string) (string, error) {
+	var id string
+	err := a.store.Write(ctx, func(tx *store.Tx) error {
+		var err error
+		id, err = tx.MapNativeRequest(ctx, source, nativeKey, a.ids.New(protocol.PrefixRequest), a.now().UnixMilli())
+		return err
+	})
+	return id, err
+}
