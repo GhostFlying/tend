@@ -1,0 +1,24 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"testing"
+)
+
+// committed is the schema checked into the web client.
+const committed = "../../../web/src/generated/api.schema.json"
+
+func TestCommittedSchemaIsCurrent(t *testing.T) {
+	want, err := generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(committed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("%s is out of date; run: go run ./internal/protocol/schemagen", committed)
+	}
+}

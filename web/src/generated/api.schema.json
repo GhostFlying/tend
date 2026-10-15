@@ -1,0 +1,584 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "AcceptanceView": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "evidence": {},
+        "issues": {},
+        "spec_version": {
+          "type": "integer"
+        },
+        "verdict": {
+          "$ref": "#/definitions/Verdict"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "spec_version",
+        "verdict",
+        "issues"
+      ],
+      "title": "AcceptanceView",
+      "type": "object"
+    },
+    "ActionKind": {
+      "enum": [
+        "implement",
+        "accept",
+        "deliver"
+      ],
+      "title": "ActionKind",
+      "type": "string"
+    },
+    "ActionStatus": {
+      "enum": [
+        "pending",
+        "ready",
+        "dispatched",
+        "done",
+        "cancelled",
+        "superseded"
+      ],
+      "title": "ActionStatus",
+      "type": "string"
+    },
+    "ActionView": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/definitions/ActionKind"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/ActionStatus"
+        }
+      },
+      "required": [
+        "action_id",
+        "kind",
+        "status",
+        "generation",
+        "spec_version"
+      ],
+      "title": "ActionView",
+      "type": "object"
+    },
+    "ArtifactDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptances": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AcceptanceView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifact": {
+          "$ref": "#/definitions/ArtifactView"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact",
+        "task_id",
+        "acceptances"
+      ],
+      "title": "ArtifactDetail",
+      "type": "object"
+    },
+    "ArtifactView": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "ref": {},
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "run_id",
+        "ref"
+      ],
+      "title": "ArtifactView",
+      "type": "object"
+    },
+    "BlockReason": {
+      "enum": [
+        "none",
+        "waiting_resource",
+        "waiting_decision",
+        "waiting_approval",
+        "acceptance_env_unavailable",
+        "budget_exhausted"
+      ],
+      "title": "BlockReason",
+      "type": "string"
+    },
+    "Code": {
+      "enum": [
+        "invalid_request",
+        "missing_request_id",
+        "conflict_payload",
+        "stale_revision",
+        "forbidden",
+        "not_found",
+        "invalid_transition",
+        "duplicate_effect",
+        "unknown_outcome",
+        "internal"
+      ],
+      "title": "Code",
+      "type": "string"
+    },
+    "ControlMode": {
+      "enum": [
+        "managed",
+        "paused",
+        "human_control"
+      ],
+      "title": "ControlMode",
+      "type": "string"
+    },
+    "DecisionView": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {},
+        "decision_id": {
+          "type": "string"
+        },
+        "options": {},
+        "question": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "decision_id",
+        "question",
+        "options",
+        "version",
+        "status"
+      ],
+      "title": "DecisionView",
+      "type": "object"
+    },
+    "Envelope": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_control_revision": {
+          "type": "integer"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "parent_request_id": {
+          "type": "string"
+        },
+        "payload": {},
+        "request_id": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/definitions/Target"
+        },
+        "trace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "operation",
+        "target"
+      ],
+      "title": "Envelope",
+      "type": "object"
+    },
+    "Error": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/Code"
+        },
+        "details": {},
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "Error",
+      "type": "object"
+    },
+    "OpStatus": {
+      "enum": [
+        "succeeded",
+        "failed",
+        "accepted",
+        "unknown"
+      ],
+      "title": "OpStatus",
+      "type": "string"
+    },
+    "Operation": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/Error"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result": {},
+        "status": {
+          "$ref": "#/definitions/OpStatus"
+        }
+      },
+      "required": [
+        "request_id",
+        "status"
+      ],
+      "title": "Operation",
+      "type": "object"
+    },
+    "RequestView": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/Error"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result": {},
+        "status": {
+          "$ref": "#/definitions/OpStatus"
+        }
+      },
+      "required": [
+        "request_id",
+        "operation",
+        "status"
+      ],
+      "title": "RequestView",
+      "type": "object"
+    },
+    "RunObserved": {
+      "enum": [
+        "starting",
+        "running",
+        "waiting",
+        "finished",
+        "failed",
+        "interrupted",
+        "unknown"
+      ],
+      "title": "RunObserved",
+      "type": "string"
+    },
+    "RunRole": {
+      "enum": [
+        "implement",
+        "accept"
+      ],
+      "title": "RunRole",
+      "type": "string"
+    },
+    "RunView": {
+      "additionalProperties": false,
+      "properties": {
+        "generation": {
+          "type": "integer"
+        },
+        "host": {
+          "type": "string"
+        },
+        "observed": {
+          "$ref": "#/definitions/RunObserved"
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "role",
+        "generation",
+        "host",
+        "observed"
+      ],
+      "title": "RunView",
+      "type": "object"
+    },
+    "Target": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Target",
+      "type": "object"
+    },
+    "TaskDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptances": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AcceptanceView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ActionView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifacts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ArtifactView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "block_reason": {
+          "$ref": "#/definitions/BlockReason"
+        },
+        "control_mode": {
+          "$ref": "#/definitions/ControlMode"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "decisions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/DecisionView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lifecycle": {
+          "$ref": "#/definitions/TaskLifecycle"
+        },
+        "next_implement_generation": {
+          "type": "integer"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "runs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RunView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "spec": {},
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "title",
+        "lifecycle",
+        "control_mode",
+        "control_revision",
+        "spec_version",
+        "priority",
+        "block_reason",
+        "workspace",
+        "next_implement_generation",
+        "spec",
+        "actions",
+        "runs",
+        "artifacts",
+        "acceptances",
+        "decisions"
+      ],
+      "title": "TaskDetail",
+      "type": "object"
+    },
+    "TaskLifecycle": {
+      "enum": [
+        "draft",
+        "queued",
+        "running",
+        "awaiting_acceptance",
+        "changes_required",
+        "completed",
+        "cancelled"
+      ],
+      "title": "TaskLifecycle",
+      "type": "string"
+    },
+    "TaskSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "block_reason": {
+          "$ref": "#/definitions/BlockReason"
+        },
+        "control_mode": {
+          "$ref": "#/definitions/ControlMode"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "lifecycle": {
+          "$ref": "#/definitions/TaskLifecycle"
+        },
+        "next_implement_generation": {
+          "type": "integer"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "title",
+        "lifecycle",
+        "control_mode",
+        "control_revision",
+        "spec_version",
+        "priority",
+        "block_reason",
+        "workspace",
+        "next_implement_generation"
+      ],
+      "title": "TaskSummary",
+      "type": "object"
+    },
+    "Verdict": {
+      "enum": [
+        "passed",
+        "changes_required",
+        "blocked",
+        "inconclusive"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "ArtifactDetail": {
+      "$ref": "#/definitions/ArtifactDetail"
+    },
+    "Envelope": {
+      "$ref": "#/definitions/Envelope"
+    },
+    "Operation": {
+      "$ref": "#/definitions/Operation"
+    },
+    "RequestView": {
+      "$ref": "#/definitions/RequestView"
+    },
+    "TaskDetail": {
+      "$ref": "#/definitions/TaskDetail"
+    },
+    "TaskSummary": {
+      "$ref": "#/definitions/TaskSummary"
+    }
+  },
+  "title": "TendAPI",
+  "type": "object"
+}
