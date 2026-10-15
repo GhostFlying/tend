@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/procx"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -73,7 +74,7 @@ func (w *Workspaces) runProfile(ctx context.Context, dir string, p Profile) erro
 		c := exec.CommandContext(ctx, argv[0], argv[1:]...)
 		c.Dir = dir
 		c.Env = append(os.Environ(), w.cfg.Env...)
-		contain(c)
+		procx.Contain(c)
 		out, err := c.CombinedOutput()
 		if err != nil {
 			tail := string(out)

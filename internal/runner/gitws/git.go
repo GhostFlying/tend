@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/GhostFlying/tend/internal/procx"
 )
 
 // git runs the git CLI. Prompts are disabled so a missing credential fails
@@ -21,7 +23,7 @@ type git struct {
 func (g git) cmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	c := exec.CommandContext(ctx, g.bin, append([]string{"-C", dir}, args...)...)
 	c.Env = append(append(os.Environ(), g.env...), "GIT_TERMINAL_PROMPT=0")
-	contain(c)
+	procx.Contain(c)
 	return c
 }
 
