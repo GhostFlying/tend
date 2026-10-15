@@ -113,8 +113,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	defer s.Close()
 	ids := protocol.NewULIDGen(time.Now, nil)
 	wake := dispatch.NewSignal()
-	changes := runnerapi.NewBroadcast()
-	opts := []app.Option{app.WithNotifier(wake), app.WithChangeNotifier(changes)}
+	opts := []app.Option{app.WithNotifier(wake)}
 	if cfg.LeaseTTL > 0 {
 		opts = append(opts, app.WithLeaseTTL(time.Duration(cfg.LeaseTTL)))
 	}
@@ -162,7 +161,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		Log: log,
 	})
 	d := dispatch.New(a, map[string]dispatch.Handler{app.MainThreadDestination: front}, wake, time.Now, dispatch.Config{}, log)
-	api := runnerapi.New(a, whois, secret, changes, runnerapi.Config{}, log)
+	api := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
 	server := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 
 	// The workers stop with the process or when serving fails.

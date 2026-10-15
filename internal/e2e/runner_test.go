@@ -63,16 +63,15 @@ func newServer(t *testing.T, ttl time.Duration) *server {
 	}
 	t.Cleanup(func() { s.Close() })
 	ids := protocol.NewULIDGen(time.Now, nil)
-	changes := runnerapi.NewBroadcast()
 	sig := dispatch.NewSignal()
-	a := app.New(s, ids, time.Now, app.WithLeaseTTL(ttl), app.WithChangeNotifier(changes), app.WithNotifier(sig))
+	a := app.New(s, ids, time.Now, app.WithLeaseTTL(ttl), app.WithNotifier(sig))
 	srv := &server{t: t, store: s, app: a, ids: ids, signal: sig}
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 2,
 			TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}},
 	}, app.SyncConfig{})
-	api := runnerapi.New(a, netx.Static{Identity: &peer}, secret, changes, runnerapi.Config{ClaimWait: 200 * time.Millisecond}, quiet())
+	api := runnerapi.New(a, netx.Static{Identity: &peer}, secret, runnerapi.Config{ClaimWait: 200 * time.Millisecond}, quiet())
 	go api.SweepLeases(ctx, 20*time.Millisecond)
 	hs := httptest.NewServer(api.Handler())
 	t.Cleanup(hs.Close)

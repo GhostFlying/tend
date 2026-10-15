@@ -24,20 +24,14 @@ func WithLeaseTTL(d time.Duration) Option {
 	return func(a *App) { a.leaseTTL = d }
 }
 
-// WithChangeNotifier makes the App notify n after every committed command,
-// for example so that waiting runner claims look for work again.
-func WithChangeNotifier(n Notifier) Option {
-	return func(a *App) { a.changes = n }
-}
-
 // LeaseTTL returns the lease duration of claimed runs.
 func (a *App) LeaseTTL() time.Duration { return a.leaseTTL }
 
-func (a *App) notifyChange() {
-	if a.changes != nil {
-		a.changes.Notify()
-	}
-}
+// Changes is notified after every committed change to the ledger, for
+// example so that waiting runner claims look for work again.
+func (a *App) Changes() *Broadcast { return a.changes }
+
+func (a *App) notifyChange() { a.changes.Notify() }
 
 // requireActiveHost returns the calling runner's host.
 func requireActiveHost(ctx context.Context, x *Exec, q store.Querier) (store.HostRow, error) {
