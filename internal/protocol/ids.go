@@ -32,6 +32,7 @@ const (
 	PrefixOutbox     Prefix = "obx"
 	PrefixLease      Prefix = "lse"
 	PrefixWorkspace  Prefix = "wsp"
+	PrefixPacket     Prefix = "pkt"
 )
 
 // bodyLen is the length of the Crockford base32 body: 48 bits of milliseconds
