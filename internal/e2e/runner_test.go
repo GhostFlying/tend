@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -173,9 +174,16 @@ func (s *server) claimDirectly(env *protocol.Envelope) protocol.Assignment {
 type workspaces struct {
 	dir       string
 	noChanges bool
+	// prepareErr fails preparing runs of a role; collectErr fails
+	// collecting the artifact.
+	prepareErr map[protocol.RunRole]error
+	collectErr error
 }
 
 func (w *workspaces) Prepare(_ context.Context, as protocol.Assignment) (runner.Prepared, error) {
+	if err := w.prepareErr[as.Role]; err != nil {
+		return runner.Prepared{}, err
+	}
 	p := runner.Prepared{Dir: filepath.Join(w.dir, as.Workspace.Name), ScratchDir: filepath.Join(w.dir, "scratch")}
 	for _, m := range as.Workspace.Mounts {
 		p.Report.Mounts = append(p.Report.Mounts, protocol.ResolvedMount{Path: m.Path, ResolvedBaseSHA: baseSHA, ResolvedFrom: "candidate:main", Branch: as.Workspace.Branch})
@@ -186,6 +194,9 @@ func (w *workspaces) Prepare(_ context.Context, as protocol.Assignment) (runner.
 func (w *workspaces) Collect(_ context.Context, as protocol.Assignment) (protocol.ArtifactPayload, error) {
 	if w.noChanges {
 		return protocol.ArtifactPayload{}, runner.ErrNoChanges
+	}
+	if w.collectErr != nil {
+		return protocol.ArtifactPayload{}, w.collectErr
 	}
 	var a protocol.ArtifactPayload
 	for _, m := range as.Workspace.Mounts {
@@ -471,6 +482,85 @@ func TestRunnerReleasesRunWithoutChanges(t *testing.T) {
 	if got := srv.count(`SELECT COUNT(*) FROM decisions`); got != 1 {
 		t.Errorf("decisions = %d, want 1", got)
 	}
+}
+
+// waitsForDecision reports whether the task is queued behind an open
+// decision, as after a failed implementation run.
+func (s *server) waitsForDecision(task string) bool {
+	row := s.task(task)
+	return row.Lifecycle == protocol.TaskQueued && row.BlockReason == protocol.BlockWaitingDecision
+}
+
+func (s *server) released(reason string) int {
+	return s.count(`SELECT COUNT(*) FROM events WHERE kind = 'run.released' AND json_extract(body_json, '$.reason') = ?`, reason)
+}
+
+// TestFault_WorkerTamperedGit: the run fails as git_tampered and leaves no
+// artifact. Detection itself is gitws's TestTamperingIsDetected.
+func TestFault_WorkerTamperedGit(t *testing.T) {
+	srv := newServer(t, time.Minute)
+	n := newNode(t, srv, passing)
+	n.ws.collectErr = fmt.Errorf("%w: HEAD moved", runner.ErrTampered)
+	n.start()
+	task := srv.createTask()
+	eventually(t, "the task waits for a decision", func() bool { return srv.waitsForDecision(task) })
+	if got := srv.released("git_tampered"); got != 1 {
+		t.Errorf("runs released as git_tampered = %d, want 1", got)
+	}
+	if got := srv.count(`SELECT COUNT(*) FROM artifacts`); got != 0 {
+		t.Errorf("artifacts = %d, want none from a tampered workspace", got)
+	}
+}
+
+// TestFault_FetchFailureNoStaleBase: a failed fetch fails the run as an
+// environment problem before any workspace is reported. That gitws does
+// not fall back to the stale clone is TestFetchFailureStopsPrepare.
+func TestFault_FetchFailureNoStaleBase(t *testing.T) {
+	srv := newServer(t, time.Minute)
+	n := newNode(t, srv, passing)
+	n.ws.prepareErr = map[protocol.RunRole]error{protocol.RoleImplement: fmt.Errorf("%w: remote unreachable", runner.ErrFetchFailed)}
+	n.start()
+	task := srv.createTask()
+	eventually(t, "the task waits for a decision", func() bool { return srv.waitsForDecision(task) })
+	if got := srv.released("fetch_failed"); got != 1 {
+		t.Errorf("runs released as fetch_failed = %d, want 1", got)
+	}
+	if got := srv.count(`SELECT COUNT(*) FROM workspaces WHERE status = 'ready'`); got != 0 {
+		t.Errorf("ready workspaces = %d, want none reported", got)
+	}
+}
+
+// TestFault_PrepareFailure: a failing prepare is the environment's fault,
+// not the implementation's. An implementation waits for the owner; an
+// acceptance blocks the task without a verdict against the artifact.
+func TestFault_PrepareFailure(t *testing.T) {
+	t.Run("implement", func(t *testing.T) {
+		srv := newServer(t, time.Minute)
+		n := newNode(t, srv, passing)
+		n.ws.prepareErr = map[protocol.RunRole]error{protocol.RoleImplement: errors.New("profile sync: exit status 1")}
+		n.start()
+		task := srv.createTask()
+		eventually(t, "the task waits for a decision", func() bool { return srv.waitsForDecision(task) })
+		if got := srv.released("workspace_prepare_failed"); got != 1 {
+			t.Errorf("runs released as workspace_prepare_failed = %d, want 1", got)
+		}
+	})
+	t.Run("accept", func(t *testing.T) {
+		srv := newServer(t, time.Minute)
+		n := newNode(t, srv, passing)
+		n.ws.prepareErr = map[protocol.RunRole]error{protocol.RoleAccept: errors.New("profile sync: exit status 1")}
+		n.start()
+		task := srv.createTask()
+		eventually(t, "the task waits on the acceptance environment", func() bool {
+			return srv.task(task).BlockReason == protocol.BlockAcceptanceEnvUnavailable
+		})
+		if got := srv.count(`SELECT COUNT(*) FROM acceptances`); got != 0 {
+			t.Errorf("verdicts = %d, want none against the artifact", got)
+		}
+		if got := srv.task(task).ImplementGeneration; got != 1 {
+			t.Errorf("implement generation = %d, want no new implementation", got)
+		}
+	})
 }
 
 func (s *server) setMode(task string, mode protocol.ControlMode) {

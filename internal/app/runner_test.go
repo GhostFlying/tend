@@ -274,6 +274,34 @@ func TestAcceptanceStaysOnWorkspaceHost(t *testing.T) {
 	}
 }
 
+// TestFault_WorkspaceHostAffinity: a later generation waits for the host
+// holding the workspace, even while another host serving the same
+// repositories is idle. Acceptance is covered by
+// TestAcceptanceStaysOnWorkspaceHost.
+func TestFault_WorkspaceHostAffinity(t *testing.T) {
+	h := newHarness(t)
+	h.withMac()
+	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
+	impl, _, _ := h.claim("linux-1")
+	h.runAs(impl, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	h.runAs(impl, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "worker_crashed"}, Release{})
+	if op := h.requestAction(res.TaskID, protocol.ActionImplement, 2); op.Status != protocol.OpSucceeded {
+		t.Fatalf("retry implementation: %+v", op.Error)
+	}
+
+	// linux-1 is offline and does not claim.
+	if as, ok, _ := h.claim("mac-1"); ok {
+		t.Fatalf("mac-1 claimed %s generation %d away from its workspace", as.Role, as.Generation)
+	}
+	again, ok, _ := h.claim("linux-1")
+	if !ok || again.Role != protocol.RoleImplement || again.Generation != 2 {
+		t.Fatalf("claim after linux-1 returned = %+v, %v", again, ok)
+	}
+	if again.Workspace.Name != impl.Workspace.Name {
+		t.Errorf("second generation workspace = %s, want %s", again.Workspace.Name, impl.Workspace.Name)
+	}
+}
+
 func TestSubmitArtifactChecksMounts(t *testing.T) {
 	h := newHarness(t)
 	spec := testSpec
