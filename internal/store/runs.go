@@ -25,7 +25,7 @@ type CandidateRow struct {
 	Priority            int64
 	DependenciesDone    bool
 	WorkspaceHost       string
-	ImplementOccupied   bool
+	WorkspaceOccupied   bool
 	SpecJSON            string
 }
 
@@ -39,8 +39,7 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dt ON dt.task_id = d.depends_on
 			WHERE d.task_id = t.task_id AND dt.lifecycle <> 'completed'),
 		COALESCE((SELECT w.host_id FROM workspaces w WHERE w.task_id = t.task_id), ''),
-		EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.role = 'implement'
-			AND r.observed_state IN `+openRunStates+`),
+		EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.observed_state IN `+openRunStates+`),
 		s.body_json
 		FROM plan_actions a
 		JOIN tasks t ON t.task_id = a.task_id
@@ -58,7 +57,7 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		if err := rows.Scan(&a.ActionID, &a.TaskID, &a.Kind, &a.EffectKey, &a.TriggerJSON, &a.TargetSpecVersion, &artifact,
 			&a.AuthorizationJSON, &a.Generation, &a.Status, &commit, &a.CreatedRequestID, &a.CreatedAt,
 			&c.Lifecycle, &c.Control, &c.Block, &c.SpecVersion, &c.ImplementGeneration, &c.CurrentArtifactID, &c.Priority,
-			&c.DependenciesDone, &c.WorkspaceHost, &c.ImplementOccupied, &c.SpecJSON); err != nil {
+			&c.DependenciesDone, &c.WorkspaceHost, &c.WorkspaceOccupied, &c.SpecJSON); err != nil {
 			return nil, fmt.Errorf("store: scan claim candidate: %w", err)
 		}
 		a.TargetArtifactID, a.PlanCommitRef = artifact.String, commit.String

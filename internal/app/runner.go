@@ -188,7 +188,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			Lifecycle: r.Lifecycle, Control: r.Control, Block: r.Block, SpecVersion: r.SpecVersion,
 			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Priority: r.Priority,
 			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(),
-			WorkspaceHost: r.WorkspaceHost, ImplementOccupied: r.ImplementOccupied,
+			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied,
 		})
 	}
 	pick, ok := scheduler.Pick(scheduler.Host{

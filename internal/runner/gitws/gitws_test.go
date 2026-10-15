@@ -206,7 +206,7 @@ func TestMountsAndExplicitBases(t *testing.T) {
 	}
 }
 
-func TestAcceptanceWorkspace(t *testing.T) {
+func TestAcceptanceRunsInTaskWorkspace(t *testing.T) {
 	f := newFixture(t, nil)
 	impl := f.implement()
 	p := f.prepare(impl)
@@ -219,23 +219,48 @@ func TestAcceptanceWorkspace(t *testing.T) {
 	acc := protocol.Assignment{RunID: "run_acc", TaskID: "task_1", Role: protocol.RoleAccept, Artifact: raw, Workspace: impl.Workspace}
 
 	ap := f.prepare(acc)
-	if ap.Dir == p.Dir {
-		t.Fatal("acceptance shares the implementation workspace")
-	}
-	if b, err := os.ReadFile(filepath.Join(ap.Dir, "tend", "fix.txt")); err != nil || string(b) != "fixed\n" {
-		t.Errorf("acceptance checkout lacks the artifact: %q, %v", b, err)
+	if ap.Dir != p.Dir {
+		t.Fatalf("acceptance dir = %s, want the task workspace %s", ap.Dir, p.Dir)
 	}
 	if head := run(t, f.env, filepath.Join(ap.Dir, "tend"), "rev-parse", "HEAD"); head != art.Mounts[0].CommitSHA {
 		t.Errorf("acceptance HEAD = %s", head)
 	}
+	// Whatever the acceptance run leaves, such as build output, stays.
+	write(t, filepath.Join(ap.Dir, "tend", "build.log"), "ok\n")
 	if err := f.ws.Finish(context.Background(), acc); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(ap.Dir); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("acceptance workspace left behind: %v", err)
+	if _, err := os.Stat(filepath.Join(ap.Dir, "tend", "build.log")); err != nil {
+		t.Errorf("the workspace was cleaned after acceptance: %v", err)
 	}
-	if list := run(t, f.env, f.ws.repoPath("tend"), "worktree", "list"); strings.Contains(list, "run_acc") {
-		t.Errorf("acceptance worktree still registered:\n%s", list)
+	if _, err := os.Stat(ap.ScratchDir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("acceptance scratch left behind: %v", err)
+	}
+
+	// The next generation continues in the same workspace.
+	impl.RunID = "run_2"
+	if p2 := f.prepare(impl); p2.Dir != p.Dir {
+		t.Errorf("next implementation dir = %s", p2.Dir)
+	}
+}
+
+func TestAcceptanceRejectsMovedWorkspace(t *testing.T) {
+	f := newFixture(t, nil)
+	impl := f.implement()
+	p := f.prepare(impl)
+	write(t, filepath.Join(p.Dir, "tend", "fix.txt"), "fixed\n")
+	art, err := f.ws.Collect(context.Background(), impl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mount := filepath.Join(p.Dir, "tend")
+	write(t, filepath.Join(mount, "more.txt"), "more\n")
+	run(t, f.env, mount, "add", ".")
+	run(t, f.env, mount, "commit", "--quiet", "-m", "sneaky")
+	raw, _ := json.Marshal(art)
+	acc := protocol.Assignment{RunID: "run_acc", TaskID: "task_1", Role: protocol.RoleAccept, Artifact: raw, Workspace: impl.Workspace}
+	if _, err := f.ws.Prepare(context.Background(), acc); !errors.Is(err, runner.ErrTampered) {
+		t.Errorf("Prepare with HEAD past the artifact = %v, want ErrTampered", err)
 	}
 }
 
