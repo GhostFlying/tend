@@ -1,0 +1,348 @@
+{
+  "traex_version": "0.209.1",
+  "generator": "traex app-server generate-json-schema --experimental",
+  "messages": {
+    "ClientInfo": {
+      "properties": [
+        "name",
+        "title",
+        "version"
+      ],
+      "required": [
+        "name",
+        "version"
+      ]
+    },
+    "DynamicToolCallParams": {
+      "properties": [
+        "arguments",
+        "callId",
+        "namespace",
+        "threadId",
+        "tool",
+        "turnId"
+      ],
+      "required": [
+        "arguments",
+        "callId",
+        "threadId",
+        "tool",
+        "turnId"
+      ]
+    },
+    "DynamicToolCallResponse": {
+      "properties": [
+        "contentItems",
+        "success"
+      ],
+      "required": [
+        "contentItems",
+        "success"
+      ]
+    },
+    "DynamicToolSpec": {
+      "properties": [
+        "deferLoading",
+        "description",
+        "inputSchema",
+        "name",
+        "type"
+      ],
+      "required": [
+        "description",
+        "inputSchema",
+        "name",
+        "type"
+      ]
+    },
+    "InitializeCapabilities": {
+      "properties": [
+        "experimentalApi",
+        "extensions",
+        "mcpServerOpenaiFormElicitation",
+        "optOutNotificationMethods",
+        "requestAttestation"
+      ],
+      "required": null
+    },
+    "InitializeParams": {
+      "properties": [
+        "capabilities",
+        "clientInfo"
+      ],
+      "required": [
+        "clientInfo"
+      ]
+    },
+    "ItemNotification": {
+      "properties": [
+        "completedAtMs",
+        "item",
+        "threadId",
+        "turnId"
+      ],
+      "required": [
+        "completedAtMs",
+        "item",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "Thread": {
+      "properties": [
+        "agentNickname",
+        "agentRole",
+        "canAcceptDirectInput",
+        "cliVersion",
+        "createdAt",
+        "cwd",
+        "environments",
+        "ephemeral",
+        "forkedFromId",
+        "gitInfo",
+        "historyMode",
+        "id",
+        "isPinned",
+        "model",
+        "modelProvider",
+        "name",
+        "originator",
+        "parentThreadId",
+        "path",
+        "preview",
+        "reasoningEffort",
+        "recencyAt",
+        "sessionId",
+        "source",
+        "status",
+        "threadSource",
+        "turns",
+        "updatedAt"
+      ],
+      "required": [
+        "cliVersion",
+        "createdAt",
+        "cwd",
+        "ephemeral",
+        "id",
+        "modelProvider",
+        "preview",
+        "sessionId",
+        "source",
+        "status",
+        "turns",
+        "updatedAt"
+      ]
+    },
+    "ThreadInjectItemsParams": {
+      "properties": [
+        "items",
+        "threadId"
+      ],
+      "required": [
+        "items",
+        "threadId"
+      ]
+    },
+    "ThreadItem": {
+      "properties": [
+        "delivery",
+        "id",
+        "memoryCitation",
+        "phase",
+        "questions",
+        "text",
+        "type"
+      ],
+      "required": [
+        "id",
+        "text",
+        "type"
+      ]
+    },
+    "ThreadResumeParams": {
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "developerInstructions",
+        "ephemeral",
+        "excludeTurns",
+        "history",
+        "initialTurnsPage",
+        "model",
+        "modelProvider",
+        "path",
+        "permissions",
+        "personality",
+        "runtimeWorkspaceRoots",
+        "sandbox",
+        "serviceTier",
+        "terminalVisualizationInstructions",
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ]
+    },
+    "ThreadStartParams": {
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "developerInstructions",
+        "dynamicTools",
+        "environments",
+        "ephemeral",
+        "experimentalRawEvents",
+        "historyMode",
+        "mockExperimentalField",
+        "model",
+        "modelProvider",
+        "multiAgentMode",
+        "permissions",
+        "personality",
+        "runtimeWorkspaceRoots",
+        "sandbox",
+        "selectedCapabilityRoots",
+        "serviceName",
+        "serviceTier",
+        "sessionStartSource",
+        "terminalVisualizationInstructions",
+        "threadSource"
+      ],
+      "required": null
+    },
+    "ThreadStartResponse": {
+      "properties": [
+        "activePermissionProfile",
+        "approvalPolicy",
+        "approvalsReviewer",
+        "cwd",
+        "instructionSources",
+        "model",
+        "modelBackendVariant",
+        "modelProvider",
+        "multiAgentMode",
+        "reasoningEffort",
+        "runtimeWorkspaceRoots",
+        "sandbox",
+        "serviceTier",
+        "thread"
+      ],
+      "required": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "cwd",
+        "model",
+        "modelProvider",
+        "sandbox",
+        "thread"
+      ]
+    },
+    "ToolResponseItem": {
+      "properties": [
+        "text",
+        "type"
+      ],
+      "required": [
+        "text",
+        "type"
+      ]
+    },
+    "Turn": {
+      "properties": [
+        "completedAt",
+        "durationMs",
+        "error",
+        "id",
+        "items",
+        "itemsView",
+        "startedAt",
+        "status"
+      ],
+      "required": [
+        "id",
+        "items",
+        "status"
+      ]
+    },
+    "TurnInterruptParams": {
+      "properties": [
+        "threadId",
+        "turnId"
+      ],
+      "required": [
+        "threadId",
+        "turnId"
+      ]
+    },
+    "TurnNotification": {
+      "properties": [
+        "threadId",
+        "turn"
+      ],
+      "required": [
+        "threadId",
+        "turn"
+      ]
+    },
+    "TurnStartParams": {
+      "properties": [
+        "additionalContext",
+        "approvalPolicy",
+        "approvalsReviewer",
+        "capabilities",
+        "collaborationMode",
+        "cwd",
+        "displayText",
+        "effort",
+        "environments",
+        "input",
+        "model",
+        "modelBackendVariant",
+        "modelProvider",
+        "modelVerbosity",
+        "multiAgentMode",
+        "outputSchema",
+        "permissions",
+        "personality",
+        "responsesapiClientMetadata",
+        "runtimeWorkspaceRoots",
+        "sandboxPolicy",
+        "serviceTier",
+        "summary",
+        "threadId",
+        "toolOutput",
+        "userMessageId"
+      ],
+      "required": [
+        "input",
+        "threadId"
+      ]
+    },
+    "TurnStartResponse": {
+      "properties": [
+        "turn"
+      ],
+      "required": [
+        "turn"
+      ]
+    },
+    "UserInput": {
+      "properties": [
+        "text",
+        "text_elements",
+        "type"
+      ],
+      "required": [
+        "text",
+        "type"
+      ]
+    }
+  }
+}
