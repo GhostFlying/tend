@@ -101,6 +101,7 @@ harness/traex → harness, protocol
 - body 不写跑了哪些测试、多少测试、测试结果；提交前通过 `make check` 是默认前提。
 - 每个 commit 是一个可以独立构建、测试通过的原子变更；重构和行为变化分开提交。
 - 所有改动都通过 PR 合入：从最新的 `main` 拉短期分支（`<type>/<topic>`），推送后开 PR。CI（`.github/workflows/ci.yml`，执行 `make check` 和交叉编译）通过后才能合并。
+- 每个 PR 合并前都要经过独立 review：在 PR 分支上运行 `codex review --base main -c model='"gpt-6.1-sol"' -c model_reasoning_effort='"xhigh"'`。review 意见由提交者逐条判断：确实的缺陷和值得做的改进在合并前修掉；过度防御的意见（为假设性场景加防护、超出本次范围的扩展）可以不采纳。在 PR 描述里简要记录采纳和不采纳的意见及理由。修改较大时重新 review。
 - 历史保持纯线性：GitHub 仓库只允许 rebase & merge，禁止 merge commit 和 squash；`main` 禁止直接 push 和 force push。PR 合并前先 rebase 到最新的 `main`。
 - 远程：GitHub，公开仓库。
 - git 身份使用仓库或全局已有配置，不添加 agent、bot 或工具作为作者或 co-author。
