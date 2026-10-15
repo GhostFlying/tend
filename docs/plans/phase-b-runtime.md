@@ -49,6 +49,7 @@ runner 是 pull 模式（D19），服务端不主动连 runner，所以 outbox �
 
 `outbox.status`：`pending` → `sending` → `delivered` | `failed` | `unknown`。
 
+- 每个目的地严格按入队顺序投递。顺序依据 `seq`（迁移 `0003`），它在入队事务内分配；`created_at` 取自事务开始前的时钟读数，并发时可能和提交顺序不一致，不能用来排序。
 - 投递前，在一个短事务里把行置为 `sending`，`attempts + 1`。
 - 投递后，在另一个事务里写结果。结果的应用和后续派生（例如消息已开始处理的事件）在同一个事务里。
 - `failed` 只用于确定没有生效的失败（例如 handler 明确拒绝）；可以重试的错误回到 `pending`，按指数退避设置 `next_attempt_at`（上限可配，默认 1 分钟）。
@@ -82,7 +83,7 @@ type Handler interface {
 
 ## 4. B6 调度（`internal/scheduler`）
 
-### 4.1 资源模型（迁移 `0003_hosts.sql`）
+### 4.1 资源模型（迁移 `0004_hosts.sql`）
 
 | 表 | 关键列 |
 | --- | --- |
@@ -163,7 +164,7 @@ type Base struct {
 | `runs.report_workspace` | run | 实现角色在启动 worker 之前上报工作区：每个 mount 的 `{path, resolved_base_sha, resolved_from, branch}`。只能在 run 处于 starting 时调用一次（重放返回原结果）。 |
 | `runner.complete` | run | 实现角色：映射到 `runs.submit_artifact`（payload 改为 `{mounts:[{repo, path, base_sha, branch, commit_sha, changed}]}`，覆盖工作区的全部 mount；digest 是按 path 排序后列表的哈希），或者失败 `{reason}`。验收角色：映射到 `acceptances.submit`，或者失败。run 观测状态同时置为 finished 或 failed。 |
 
-### 5.3 租约与对账（迁移 `0004_leases.sql`）
+### 5.3 租约与对账（迁移 `0005_leases.sql`）
 
 - `leases`：`lease_id` PK、`run_id` UNIQUE、`host_id`、`expires_at`、`status`（`active`、`lapsed`、`released`）。MVP 一个 run 只有一个 lease。
 - TTL 默认 60 秒，runner 每 15 秒心跳。响应里返回 **TTL 时长** 而不是绝对时间，runner 用本地单调时钟计时，避免两边时钟偏差。
@@ -178,7 +179,7 @@ type Base struct {
   | 不持有 | run 已分配给该 host，处于 starting | 把这个分配重新交给 runner（返回内容与 claim 的结果相同，run token 由 lease_id 重新派生），runner 写入 journal 后照常开始。runner 在开始工作前先写 journal，所以“不持有”说明它从未开始，不需要新建 run：这样不会占用第二个 slot，也不会碰到 `(action_id, generation)` 唯一约束 |
   | 持有 | 服务端没有这个 run | 期望状态 `stopped`，写事件（数据库从旧备份恢复的情形，v0.1 §17.2 最后一项） |
 
-### 5.4 run_logs（同在 `0004`）
+### 5.4 run_logs（同在 `0005`）
 
 `run_logs`：主键 `(run_id, seq)`；`native_id`、`kind`、`body_json`、`created_at`。阶段 C 的 Web 按需分页读取。
 
@@ -276,14 +277,14 @@ $TEND_HOME/                         默认 ~/.tend
 - 工具以 namespace `tend` 注册为动态工具，名称用下划线（模型的函数名不允许点号）：`tasks_list`、`tasks_read`、`tasks_create`、`tasks_update_intent`、`actions_create`、`decisions_open`、`decisions_resolve`、`artifacts_read`、`requests_read`，以及只读的 `repos_list`（已注册的仓库、工作区模板，以及哪些 host 服务哪些仓库，供主 Agent 在建任务时选择 mount）。名称到 `operation` 的映射是一张静态表。
 - 每个工具有 JSON Schema 输入定义，从 Go 结构体生成，单元测试检查 schema 与结构体一致。
 - **身份**：`Principal{main_agent, harness_instance, thread}` 由连接和 threadId 决定（design.md §3），不读 arguments。
-- **request_id**（D28）：`native_requests` 表（迁移 `0005`），`source = "harness:<instance>"`，`native_key = "<threadId>/<turnId>/<callId>"`。映射在执行命令的同一个事务里创建。
+- **request_id**（D28）：`native_requests` 表（迁移 `0006`），`source = "harness:<instance>"`，`native_key = "<threadId>/<turnId>/<callId>"`。映射在执行命令的同一个事务里创建。
 - **source_message_id 由服务端填**：`mainthread` 知道当前 turn 处理的是哪条用户消息，调用工具层时作为参数传入（`tools.Call{Principal, NativeKey, SourceMessageID, ...}`），工具层不读模型传入的值，也不反查 `mainthread` 的表。`commit_seq` 由模型提供（同一条消息的第几次规划写入），A5 中观察到的“相同参数、不同 callId”的重复调用会被 `plan_commits` 拦下。
 - **返回**：`{success, contentItems:[text]}`，text 是紧凑 JSON。失败时带错误码；`stale_revision` 附带当前状态摘要，让模型在同一个 turn 里拿到新事实（design.md §2.2 第 5 条）。
 - 主 Agent 没有 `acceptances.submit`、`control.set_mode`（human_control）和任何能写 completed 的工具。
 
 ### 8.2 B11 上下文构建（`internal/contextbuilder`）
 
-迁移 `0006_context.sql`：
+迁移 `0007_context.sql`：
 
 | 表 | 关键列 |
 | --- | --- |
@@ -312,7 +313,7 @@ $TEND_HOME/                         默认 ~/.tend
 - **投递**（实现 §3.2 的 `Handler`）：串行处理，一条消息一个 turn。
   1. 以 outbox 的 child request_id 为键查 `main_turns`：已经有记录且 turn 已开始 → `Delivered`。
   2. 调用 contextbuilder（§8.2）。
-  3. `turn/start`，输入为用户原文，前面加一行 `[message <message_id>, reply_to <id>]`，让模型能在工具调用里引用。记录 `main_turns(request_id, message_id, thread_id, turn_id, status)`（迁移 `0007_main_thread.sql`，同时包含 `main_threads`）。
+  3. `turn/start`，输入为用户原文，前面加一行 `[message <message_id>, reply_to <id>]`，让模型能在工具调用里引用。记录 `main_turns(request_id, message_id, thread_id, turn_id, status)`（迁移 `0008_main_thread.sql`，同时包含 `main_threads`）。
   4. 收集 `item/completed` 中的 agent 消息，写成 `author=main_agent` 的会话消息和事件。`turn/completed` 后状态置为 completed。
 - **Reconcile**：`turn/start` 发出后、响应前崩溃时，结果无法确认。B12 验证 `thread/resume` 返回的历史能否找到这条消息（按第 3 步的前缀匹配）；找得到就是 `Delivered`，找不到并且确认 thread 历史完整就是 `Retry`，其余情况 `Unknown`，在会话里标出“这条消息是否已处理未知”，由用户决定是否重发（不自动重发）。
 - **thread 生命周期**：单个前台 thread，id 存在 `main_threads` 表。启动时 `thread/resume`，失败则新建并让基线失效。thread 配置采用 spike A5 的隔离设置（专用 home 和 cwd、关闭的功能列表），sandbox 按 D39 第一期使用 `danger-full-access`。
@@ -404,15 +405,15 @@ runner → harness, protocol, netx
 | 1 | `docs: add phase b runtime plan` | 本文件 |
 | 2 | `feat: support no-effect outcomes in command execution` | §2 |
 | 3 | `feat: impl outbox dispatcher with restart reconciliation` | B5 |
-| 4 | `feat: impl hosts, repos, workspaces and scheduling rules` | B6，迁移 0003，D30、D33、D34、D36 的账本部分，工作区模板展开 |
-| 5 | `feat: impl runner protocol server with leases` | B7，netx，迁移 0004，D29、D32 |
+| 4 | `feat: impl hosts, repos, workspaces and scheduling rules` | B6，迁移 0004，D30、D33、D34、D36 的账本部分，工作区模板展开 |
+| 5 | `feat: impl runner protocol server with leases` | B7，netx，迁移 0005，D29、D32 |
 | 6 | `feat: impl runner client with journal and self fencing` | B8 的 claim、心跳、fencing，fake harness，`cmd/tend-runner` |
 | 6a | `feat: impl runner repo and workspace management` | B8 的 §6.5：bare clone、fetch 与基线解析、多 mount 工作区、AGENTS.md 生成、prepare、完整性检查，D35–D37；测试用本地临时 git 仓库作为 remote |
 | 7 | `feat: impl acceptance retry and run failure rules` | B9，D31；进程内端到端测试的 runner 部分 |
 | 8 | `feat: impl harness interface and traex client` | B12b 的协议层与 schema 一致性测试 |
-| 9 | `feat: impl main agent dynamic tools` | B10，迁移 0005，D28 |
-| 10 | `feat: impl context packets and baselines` | B11，迁移 0006 |
-| 11 | `feat: impl main thread manager and conversation submit` | B12a，迁移 0007，更新 AGENTS.md 结构；`TestEndToEnd_FakeHarness` |
+| 9 | `feat: impl main agent dynamic tools` | B10，迁移 0006，D28 |
+| 10 | `feat: impl context packets and baselines` | B11，迁移 0007 |
+| 11 | `feat: impl main thread manager and conversation submit` | B12a，迁移 0008，更新 AGENTS.md 结构；`TestEndToEnd_FakeHarness` |
 | 12 | `feat: impl traex worker driver and server assembly` | B12b worker、B12c、`cmd/tend-server`、integration 测试 |
 | 13 | `docs: record tool call crash findings` | §8.5 的故障验证结论 |
 

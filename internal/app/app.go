@@ -78,14 +78,27 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
-	store *store.Store
-	ids   protocol.IDGen
-	now   func() time.Time
+	store    *store.Store
+	ids      protocol.IDGen
+	now      func() time.Time
+	notifier Notifier
+}
+
+// Option configures an App.
+type Option func(*App)
+
+// WithNotifier makes the App notify n after committing outbox messages.
+func WithNotifier(n Notifier) Option {
+	return func(a *App) { a.notifier = n }
 }
 
 // New returns an App.
-func New(s *store.Store, ids protocol.IDGen, now func() time.Time) *App {
-	return &App{store: s, ids: ids, now: now}
+func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Option) *App {
+	a := &App{store: s, ids: ids, now: now}
+	for _, o := range opts {
+		o(a)
+	}
+	return a
 }
 
 // businessCodes are deterministic rejections: the same request would be
@@ -131,7 +144,10 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}
 
-	var op protocol.Operation
+	var (
+		op     protocol.Operation
+		queued bool
+	)
 	err = a.store.Write(ctx, func(tx *store.Tx) error {
 		rec, err := store.GetRequest(ctx, tx.Q(), domain, env.RequestID)
 		switch {
@@ -186,8 +202,11 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			}
 			rec.Status, rec.ErrorCode, rec.ErrorMessage, rec.ErrorDetails = protocol.OpFailed, string(pe.Code), pe.Message, string(pe.Details)
 			rec.ResultJSON = ""
-		} else if err := tx.Release(ctx, applySavepoint); err != nil {
-			return err
+		} else {
+			if err := tx.Release(ctx, applySavepoint); err != nil {
+				return err
+			}
+			queued = len(out.Outbox) > 0
 		}
 		if err := tx.InsertRequest(ctx, rec); err != nil {
 			return err
@@ -199,6 +218,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	// surface, since it usually means the connection is broken.
 	if err != nil && err != errNoEffect {
 		return protocol.Operation{}, err
+	}
+	if queued && a.notifier != nil {
+		a.notifier.Notify()
 	}
 	return op, nil
 }
