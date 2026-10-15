@@ -31,15 +31,6 @@ const maxMessageBytes = 64 << 10
 // one message per turn.
 type SubmitMessage struct{}
 
-type submitMessagePayload struct {
-	Body string `json:"body"`
-	// ReplyTo and LastSeenSeq are what the client showed when the owner
-	// wrote: the message replied to and the last message seen (v0.1
-	// §6.2, D27).
-	ReplyTo     string `json:"reply_to,omitempty"`
-	LastSeenSeq int64  `json:"last_seen_seq,omitempty"`
-}
-
 // Operation implements Command.
 func (SubmitMessage) Operation() string { return "conversation.submit_message" }
 
@@ -50,7 +41,7 @@ func (SubmitMessage) Authorize(_ context.Context, x *Exec, _ store.Querier) erro
 
 // Apply implements Command.
 func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	var p submitMessagePayload
+	var p protocol.SubmitMessagePayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
