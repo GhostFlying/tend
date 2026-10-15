@@ -6,6 +6,8 @@
 .env*
 
 /bin/
+/tend-server
+/tend-runner
 /dist/
 node_modules/
 *.sqlite

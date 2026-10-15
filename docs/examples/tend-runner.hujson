@@ -1,0 +1,26 @@
+// tend-runner configuration (HuJSON). Secrets are not here: set
+// TEND_HOST_TOKEN and, for the first start on the tailnet, TS_AUTHKEY,
+// through an env file.
+{
+  "server_url": "http://tend",
+  "host_id": "linux-1",
+  // TEND_HOME: repos/, workspaces/, scratch/ and runner/ live here.
+  "home": "~/.tend",
+  "tailnet": {"hostname": "tend-runner-linux-1"},
+
+  // Workers use this machine's traex and its own configuration.
+  "worker": {"traex_bin": "traex"},
+
+  "repos": {
+    "tend": {
+      // An existing clone to borrow objects from on the first clone.
+      // "reference": "~/src/tend",
+      "profiles": {
+        // A prepare step a mount can select, rerun when its inputs change.
+        "deps": {"commands": [["go", "mod", "download"]], "rerun_if_changed": ["go.sum"], "timeout": "10m"},
+      },
+    },
+  },
+  // Workspace-level prepare steps, run after every mount is prepared.
+  "profiles": {},
+}

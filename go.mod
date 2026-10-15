@@ -3,6 +3,7 @@ module github.com/GhostFlying/tend
 go 1.27.1
 
 require (
+	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	modernc.org/sqlite v1.60.1
 	tailscale.com v1.104.1
 )
@@ -37,7 +38,6 @@ require (
 	github.com/safchain/ethtool v0.7.0 // indirect
 	github.com/tailscale/certstore v0.1.1-0.20260409135935-3638fb84b77d // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
-	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f // indirect
 	github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc // indirect
 	github.com/tailscale/web-client-prebuilt v0.0.0-20260917222731-e0ed2d0d0fea // indirect
 	github.com/tailscale/wireguard-go v0.0.0-20260928213032-417aef361226 // indirect

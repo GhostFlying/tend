@@ -1,0 +1,51 @@
+// tend-server configuration (HuJSON: comments and trailing commas allowed).
+// Secrets are not here: set TEND_SERVER_SECRET (64 hex characters, for
+// example from `openssl rand -hex 32`) and, for the first start on the
+// tailnet, TS_AUTHKEY, through an env file.
+{
+  // The ledger and the tailnet state.
+  "data_dir": "~/.local/share/tend/server",
+
+  // Join the tailnet as this node; runners reach it as http://tend.
+  // Without "tailnet", the server listens on "listen" for development.
+  "tailnet": {"hostname": "tend"},
+  // "listen": "127.0.0.1:8640",
+
+  "lease_ttl": "60s",
+
+  "main_agent": {
+    "instance": "main",
+    "traex_bin": "traex",
+    // A home of its own, so the main agent does not load your skills and
+    // plugins.
+    "traex_home": "~/.local/share/tend/traex-home",
+    // Outside any repository, so no project AGENTS.md is loaded.
+    "cwd": "~/.local/share/tend/main-agent",
+  },
+
+  "repos": [
+    {"repo": "tend", "remote_url": "git@github.com:example/tend.git"},
+    // A repository new tasks may no longer mount, kept for tasks using it:
+    // {"repo": "old", "remote_url": "...", "retired": true},
+  ],
+
+  "hosts": [
+    {
+      "host_id": "linux-1",
+      "os": "linux",
+      "arch": "amd64",
+      "labels": ["gpu"],
+      "repos": ["tend"],
+      "slots": 2,
+      // SHA-256 of the host's TEND_HOST_TOKEN, lowercase hex:
+      // printf %s "$TOKEN" | sha256sum
+      "token_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      // Tailnet nodes allowed to act as this host: tags or machine names.
+      "nodes": ["tag:tend-runner"],
+    },
+  ],
+
+  "templates": [
+    // {"name": "app-with-lib", "workspace": {"mounts": [{"repo": "app"}, {"repo": "lib"}], "profile": "link"}},
+  ],
+}
