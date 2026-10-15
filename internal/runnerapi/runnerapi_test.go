@@ -66,15 +66,14 @@ func newEnv(t *testing.T, claimWait time.Duration) *env {
 	}
 	t.Cleanup(func() { s.Close() })
 	ids := testkit.NewIDGen(clock, 3)
-	changes := NewBroadcast()
-	a := app.New(s, ids, clock.Now, app.WithChangeNotifier(changes))
+	a := app.New(s, ids, clock.Now)
 	e := &env{t: t, app: a, ids: ids, peers: &peers{id: runnerNode}}
 	e.system("config.sync", app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 1,
 			TokenHash: HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}},
 	}, app.SyncConfig{})
-	srv := New(a, e.peers, secret, changes, Config{ClaimWait: claimWait}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := New(a, e.peers, secret, Config{ClaimWait: claimWait}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	e.server = httptest.NewServer(srv.Handler())
 	t.Cleanup(e.server.Close)
 	return e

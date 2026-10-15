@@ -20,7 +20,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -55,31 +54,6 @@ func HashToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Broadcast wakes every waiting claim when the ledger changes. It
-// implements app.Notifier.
-type Broadcast struct {
-	mu sync.Mutex
-	ch chan struct{}
-}
-
-// NewBroadcast returns a Broadcast.
-func NewBroadcast() *Broadcast { return &Broadcast{ch: make(chan struct{})} }
-
-// Notify implements app.Notifier.
-func (b *Broadcast) Notify() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	close(b.ch)
-	b.ch = make(chan struct{})
-}
-
-// wait returns a channel that is closed by the next Notify.
-func (b *Broadcast) wait() <-chan struct{} {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.ch
-}
-
 // Config tunes the server. Zero values select the defaults.
 type Config struct {
 	// ClaimWait bounds how long a claim waits for work. Default 25s.
@@ -88,20 +62,19 @@ type Config struct {
 
 // Server handles runner requests.
 type Server struct {
-	app     *app.App
-	whois   netx.WhoIs
-	secret  []byte
-	changes *Broadcast
-	cfg     Config
-	log     *slog.Logger
+	app    *app.App
+	whois  netx.WhoIs
+	secret []byte
+	cfg    Config
+	log    *slog.Logger
 }
 
-// New returns a Server. changes must be the Broadcast the App notifies.
-func New(a *app.App, whois netx.WhoIs, secret []byte, changes *Broadcast, cfg Config, log *slog.Logger) *Server {
+// New returns a Server.
+func New(a *app.App, whois netx.WhoIs, secret []byte, cfg Config, log *slog.Logger) *Server {
 	if cfg.ClaimWait <= 0 {
 		cfg.ClaimWait = 25 * time.Second
 	}
-	return &Server{app: a, whois: whois, secret: secret, changes: changes, cfg: cfg, log: log}
+	return &Server{app: a, whois: whois, secret: secret, cfg: cfg, log: log}
 }
 
 // Handler returns the HTTP handler of the protocol.
@@ -284,7 +257,7 @@ func (s *Server) claim(ctx context.Context, p protocol.Principal, env *protocol.
 	deadline := time.NewTimer(s.cfg.ClaimWait)
 	defer deadline.Stop()
 	for {
-		changed := s.changes.wait()
+		changed := s.app.Changes().Wait()
 		op, err := s.app.Execute(ctx, p, env, app.Claim{})
 		if err != nil || op.Status != protocol.OpSucceeded {
 			return op, err
