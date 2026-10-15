@@ -204,10 +204,6 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 // SetControlMode handles control.set_mode.
 type SetControlMode struct{}
 
-type setControlModePayload struct {
-	Mode protocol.ControlMode `json:"mode"`
-}
-
 // Operation implements Command.
 func (SetControlMode) Operation() string { return "control.set_mode" }
 
@@ -218,7 +214,7 @@ func (SetControlMode) Authorize(ctx context.Context, x *Exec, q store.Querier) e
 		return err
 	}
 	if x.Principal.Kind == protocol.PrincipalMainAgent {
-		var p setControlModePayload
+		var p protocol.SetControlModePayload
 		if err := decodePayload(x.Env, &p); err != nil {
 			return err
 		}
@@ -235,7 +231,7 @@ func (SetControlMode) Authorize(ctx context.Context, x *Exec, q store.Querier) e
 
 // Apply implements Command.
 func (SetControlMode) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	var p setControlModePayload
+	var p protocol.SetControlModePayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
@@ -296,13 +292,6 @@ func (CancelTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 // the rules.
 type CreateAction struct{}
 
-type createActionPayload struct {
-	Kind            protocol.ActionKind `json:"kind"`
-	Generation      int64               `json:"generation"`
-	SourceMessageID string              `json:"source_message_id,omitempty"`
-	CommitSeq       int64               `json:"commit_seq,omitempty"`
-}
-
 // Operation implements Command.
 func (CreateAction) Operation() string { return "actions.create" }
 
@@ -313,7 +302,7 @@ func (CreateAction) Authorize(_ context.Context, x *Exec, _ store.Querier) error
 
 // Apply implements Command.
 func (CreateAction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	var p createActionPayload
+	var p protocol.CreateActionPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}

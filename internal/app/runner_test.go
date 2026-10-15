@@ -420,7 +420,7 @@ func TestHeartbeatDesiredState(t *testing.T) {
 	if s := beat(); !s.Renewed || s.Desired != protocol.DesiredRun {
 		t.Errorf("managed: %+v", s)
 	}
-	h.exec(owner, h.env("control.set_mode", taskTarget(res.TaskID), setControlModePayload{Mode: protocol.ControlPaused}, rev(res.ControlRevision)), SetControlMode{})
+	h.exec(owner, h.env("control.set_mode", taskTarget(res.TaskID), protocol.SetControlModePayload{Mode: protocol.ControlPaused}, rev(res.ControlRevision)), SetControlMode{})
 	if s := beat(); s.Desired != protocol.DesiredPaused {
 		t.Errorf("paused task: %+v", s)
 	}
@@ -501,7 +501,7 @@ func TestReassignedPausedRunWaits(t *testing.T) {
 	h := newHarness(t)
 	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
 	h.claim("linux-1")
-	h.exec(owner, h.env("control.set_mode", taskTarget(res.TaskID), setControlModePayload{Mode: protocol.ControlPaused}, rev(res.ControlRevision)), SetControlMode{})
+	h.exec(owner, h.env("control.set_mode", taskTarget(res.TaskID), protocol.SetControlModePayload{Mode: protocol.ControlPaused}, rev(res.ControlRevision)), SetControlMode{})
 	hello := h.hello("linux-1")
 	if len(hello.Reassigned) != 1 || hello.Reassigned[0].Desired != protocol.DesiredPaused {
 		t.Errorf("reassigned = %+v, want one paused assignment", hello.Reassigned)

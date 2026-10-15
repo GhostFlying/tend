@@ -4,7 +4,8 @@ package protocol
 // the web client's types are generated (D22). Types they refer to are
 // included through them.
 func APITypes() []any {
-	return []any{Envelope{}, Operation{}, TaskSummary{}, TaskDetail{}, ArtifactDetail{}, RequestView{}, SessionRequest{}, SessionView{}}
+	return []any{Envelope{}, Operation{}, TaskSummary{}, TaskDetail{}, ArtifactDetail{}, RequestView{}, SessionRequest{}, SessionView{},
+		SubmitMessagePayload{}, AnswerDecisionPayload{}, SetControlModePayload{}, CreateActionPayload{}}
 }
 
 // APIEnums lists the values of every string enum in the owner API.

@@ -79,6 +79,28 @@
       "title": "ActionView",
       "type": "object"
     },
+    "AnswerDecisionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "option": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "AnswerDecisionPayload",
+      "type": "object"
+    },
     "ArtifactDetail": {
       "additionalProperties": false,
       "properties": {
@@ -166,6 +188,29 @@
       ],
       "title": "ControlMode",
       "type": "string"
+    },
+    "CreateActionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "commit_seq": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/definitions/ActionKind"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "generation"
+      ],
+      "title": "CreateActionPayload",
+      "type": "object"
     },
     "DecisionView": {
       "additionalProperties": false,
@@ -380,6 +425,38 @@
       "title": "SessionView",
       "type": "object"
     },
+    "SetControlModePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/definitions/ControlMode"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "SetControlModePayload",
+      "type": "object"
+    },
+    "SubmitMessagePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "last_seen_seq": {
+          "type": "integer"
+        },
+        "reply_to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "title": "SubmitMessagePayload",
+      "type": "object"
+    },
     "Target": {
       "additionalProperties": false,
       "properties": {
@@ -591,8 +668,14 @@
     }
   },
   "properties": {
+    "AnswerDecisionPayload": {
+      "$ref": "#/definitions/AnswerDecisionPayload"
+    },
     "ArtifactDetail": {
       "$ref": "#/definitions/ArtifactDetail"
+    },
+    "CreateActionPayload": {
+      "$ref": "#/definitions/CreateActionPayload"
     },
     "Envelope": {
       "$ref": "#/definitions/Envelope"
@@ -608,6 +691,12 @@
     },
     "SessionView": {
       "$ref": "#/definitions/SessionView"
+    },
+    "SetControlModePayload": {
+      "$ref": "#/definitions/SetControlModePayload"
+    },
+    "SubmitMessagePayload": {
+      "$ref": "#/definitions/SubmitMessagePayload"
     },
     "TaskDetail": {
       "$ref": "#/definitions/TaskDetail"

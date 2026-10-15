@@ -89,15 +89,6 @@ type AnswerDecision struct {
 	FromMessage bool
 }
 
-type answerDecisionPayload struct {
-	Version int64 `json:"version"`
-	// Option is one of the decision's options; Text is a free-form answer.
-	// At least one is required.
-	Option          string `json:"option,omitempty"`
-	Text            string `json:"text,omitempty"`
-	SourceMessageID string `json:"source_message_id,omitempty"`
-}
-
 type decisionAnswer struct {
 	Option string `json:"option,omitempty"`
 	Text   string `json:"text,omitempty"`
@@ -121,7 +112,7 @@ func (c AnswerDecision) Authorize(_ context.Context, x *Exec, _ store.Querier) e
 
 // Apply implements Command.
 func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	var p answerDecisionPayload
+	var p protocol.AnswerDecisionPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}

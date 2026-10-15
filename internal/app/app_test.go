@@ -355,7 +355,7 @@ func TestFault_NewCallIDSamePhase(t *testing.T) {
 	h.submitVerdict(accept, protocol.VerdictChangesRequired) // Plans generation 2.
 	revision := h.task(taskID).ControlRevision
 	ask := func() protocol.Operation {
-		return h.exec(mainAgent, h.env("actions.create", taskTarget(taskID), createActionPayload{Kind: protocol.ActionImplement, Generation: 3}, rev(revision)), CreateAction{})
+		return h.exec(mainAgent, h.env("actions.create", taskTarget(taskID), protocol.CreateActionPayload{Kind: protocol.ActionImplement, Generation: 3}, rev(revision)), CreateAction{})
 	}
 	if op := ask(); op.Status != protocol.OpSucceeded {
 		t.Fatalf("first request: %+v", op)
@@ -567,7 +567,7 @@ func TestAuthorization(t *testing.T) {
 		{"runner creates task", protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"},
 			h.env("tasks.create", protocol.Target{Type: "task"}, createTaskPayload{Title: "x", Spec: testSpec}, nil), CreateTask{}},
 		{"main agent takes human control", mainAgent,
-			h.env("control.set_mode", taskTarget(taskID), setControlModePayload{Mode: protocol.ControlHumanControl}, rev(1)), SetControlMode{}},
+			h.env("control.set_mode", taskTarget(taskID), protocol.SetControlModePayload{Mode: protocol.ControlHumanControl}, rev(1)), SetControlMode{}},
 		{"implement run submits a verdict", runPrincipal(accept, protocol.RoleImplement),
 			h.env("acceptances.submit", runTarget(accept), protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, nil), SubmitAcceptance{}},
 		{"run judges another run", runPrincipal("run_other", protocol.RoleAccept),
