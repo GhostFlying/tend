@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+
+	"github.com/GhostFlying/tend/internal/harness"
 )
 
 // message is the app-server's wire format: newline-delimited JSON-RPC
@@ -30,6 +32,9 @@ type RPCError struct {
 }
 
 func (e *RPCError) Error() string { return fmt.Sprintf("app-server error %d: %s", e.Code, e.Message) }
+
+// Is reports an error response as a definite rejection.
+func (e *RPCError) Is(target error) bool { return target == harness.ErrRejected }
 
 // ErrClosed is returned for calls on a connection whose app-server exited.
 var ErrClosed = errors.New("traex: app-server connection closed")

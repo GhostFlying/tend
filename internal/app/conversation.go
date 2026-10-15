@@ -1,0 +1,209 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"unicode/utf8"
+
+	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
+)
+
+// The main thread outbox destination and the operation that delivers a
+// conversation message to it.
+const (
+	MainThreadDestination = "main_thread"
+	OpHandleMessage       = "main_thread.handle_message"
+)
+
+// HandleMessage is the payload of a delivery to the main thread.
+type HandleMessage struct {
+	MessageID string `json:"message_id"`
+}
+
+const maxMessageBytes = 64 << 10
+
+// SubmitMessage handles conversation.submit_message: the owner says
+// something, from any client. The message joins the conversation in the
+// order tend received it and is queued for the main thread, which handles
+// one message per turn.
+type SubmitMessage struct{}
+
+type submitMessagePayload struct {
+	Body string `json:"body"`
+	// ReplyTo and LastSeenSeq are what the client showed when the owner
+	// wrote: the message replied to and the last message seen (v0.1
+	// §6.2, D27).
+	ReplyTo     string `json:"reply_to,omitempty"`
+	LastSeenSeq int64  `json:"last_seen_seq,omitempty"`
+}
+
+// Operation implements Command.
+func (SubmitMessage) Operation() string { return "conversation.submit_message" }
+
+// Authorize implements Command.
+func (SubmitMessage) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	return allowKinds(x.Principal, protocol.PrincipalOwner)
+}
+
+// Apply implements Command.
+func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p submitMessagePayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	if p.Body == "" || len(p.Body) > maxMessageBytes || !utf8.ValidString(p.Body) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body must be non-empty UTF-8 of at most %d bytes", maxMessageBytes)
+	}
+	if p.ReplyTo != "" {
+		if _, err := store.GetMessage(ctx, tx.Q(), p.ReplyTo); err != nil {
+			return Outcome{}, errNotFound(err, "message %s does not exist", p.ReplyTo)
+		}
+	}
+	id := x.IDs.New(protocol.PrefixMessage)
+	seq, err := tx.InsertMessage(ctx, store.MessageRow{
+		MessageID: id, Author: "owner", ClientID: x.Principal.Client, Body: p.Body, ReplyTo: p.ReplyTo,
+		LastSeenSeq: p.LastSeenSeq, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(),
+	})
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{
+		Result:   map[string]any{"message_id": id, "seq": seq},
+		Events:   []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": "owner", "seq": seq}}},
+		Outbox:   []OutboxMessage{{Destination: MainThreadDestination, Operation: OpHandleMessage, Payload: HandleMessage{MessageID: id}}},
+		Accepted: true,
+	}, nil
+}
+
+// RecordAgentMessage handles conversation.record_agent_message: the main
+// agent said something in a turn. Its request ID is derived from the
+// harness item, so recording the same item again has no effect.
+type RecordAgentMessage struct{}
+
+type recordAgentMessagePayload struct {
+	Body    string `json:"body"`
+	ReplyTo string `json:"reply_to"`
+	TurnID  string `json:"turn_id"`
+	ItemID  string `json:"item_id"`
+}
+
+// Operation implements Command.
+func (RecordAgentMessage) Operation() string { return "conversation.record_agent_message" }
+
+// Authorize implements Command.
+func (RecordAgentMessage) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	return allowKinds(x.Principal, protocol.PrincipalMainAgent, protocol.PrincipalSystem)
+}
+
+// Apply implements Command.
+func (RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p recordAgentMessagePayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	if p.Body == "" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body is required")
+	}
+	id := x.IDs.New(protocol.PrefixMessage)
+	seq, err := tx.InsertMessage(ctx, store.MessageRow{
+		MessageID: id, Author: "main_agent", Body: p.Body, ReplyTo: p.ReplyTo, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(),
+	})
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{
+		Result: map[string]any{"message_id": id, "seq": seq},
+		Events: []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message",
+			Body: map[string]any{"author": "main_agent", "seq": seq, "reply_to": p.ReplyTo, "turn_id": p.TurnID}}},
+	}, nil
+}
+
+// bindSource ties the conversation message a planning write came from to
+// the object it touched, so later context recalls what the discussion was
+// about. Writes that name no message, or a message tend does not have,
+// bind nothing.
+func bindSource(ctx context.Context, tx *store.Tx, messageID, objectType, objectID string) error {
+	if messageID == "" || objectID == "" {
+		return nil
+	}
+	if _, err := store.GetMessage(ctx, tx.Q(), messageID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	return tx.BindMessage(ctx, messageID, objectType, objectID, "resolved")
+}
+
+// The main thread's bookkeeping. Like the dispatcher's, these are system
+// maintenance writes keyed by their own identities.
+
+// MainThread returns the front thread of a harness instance.
+func (a *App) MainThread(ctx context.Context, instance string) (string, bool, error) {
+	var id string
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		id, err = store.GetMainThread(ctx, tx.Q(), instance)
+		return err
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		return "", false, nil
+	}
+	return id, err == nil, err
+}
+
+// SetMainThread records the front thread of a harness instance.
+func (a *App) SetMainThread(ctx context.Context, instance, threadID string) error {
+	return a.store.Write(ctx, func(tx *store.Tx) error { return tx.PutMainThread(ctx, instance, threadID, a.now().UnixMilli()) })
+}
+
+// MainTurn returns the turn of a delivery to the main thread.
+func (a *App) MainTurn(ctx context.Context, requestID string) (store.MainTurn, bool, error) {
+	var m store.MainTurn
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		m, err = store.GetMainTurn(ctx, tx.Q(), requestID)
+		return err
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		return m, false, nil
+	}
+	return m, err == nil, err
+}
+
+// PutMainTurn records the progress of a delivery's turn.
+func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
+	return a.store.Write(ctx, func(tx *store.Tx) error { return tx.PutMainTurn(ctx, m, a.now().UnixMilli()) })
+}
+
+// TurnDelivery returns the delivery a harness turn handled.
+func (a *App) TurnDelivery(ctx context.Context, threadID, turnID string) (store.MainTurn, bool, error) {
+	var m store.MainTurn
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		m, err = store.GetMainTurnByTurn(ctx, tx.Q(), threadID, turnID)
+		return err
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		return m, false, nil
+	}
+	return m, err == nil, err
+}
+
+// SettleOpenTurns marks a thread's running turns as interrupted after its
+// harness went away.
+func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
+	return a.store.Write(ctx, func(tx *store.Tx) error { return tx.SettleOpenTurns(ctx, threadID, a.now().UnixMilli()) })
+}
+
+// Message returns a conversation message.
+func (a *App) Message(ctx context.Context, messageID string) (store.MessageView, error) {
+	var m store.MessageView
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		m, err = store.GetMessage(ctx, tx.Q(), messageID)
+		return err
+	})
+	return m, err
+}

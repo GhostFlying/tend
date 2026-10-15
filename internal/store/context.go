@@ -153,6 +153,9 @@ type MessageView struct {
 	Body      string
 	ReplyTo   string
 	CreatedAt int64
+	// LastSeenSeq is the last message the sender's client showed when the
+	// message was written; zero when unknown.
+	LastSeenSeq int64
 	// Bindings are the objects the message was tied to, as type:id.
 	Bindings []string
 }
