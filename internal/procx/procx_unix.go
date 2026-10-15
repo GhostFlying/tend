@@ -17,3 +17,13 @@ func Contain(cmd *exec.Cmd) {
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 5 * time.Second
 }
+
+// KillGroup kills whatever is left of cmd's process group. A command that
+// exited normally can leave background children behind; exec only kills
+// the group while it is still waiting, so callers that need nothing to
+// survive must call this after Wait too.
+func KillGroup(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+}

@@ -22,6 +22,9 @@ type WorkerSpec struct {
 	Spec json.RawMessage
 	// Artifact is what an acceptance run judges.
 	Artifact json.RawMessage
+	// Feedback is what the last acceptance asked to change, for an
+	// implementation after a changes-required verdict.
+	Feedback *protocol.Feedback
 	// Attempt counts how often the worker was started for this run; it is
 	// above 1 when a run resumes after fencing or a restart.
 	Attempt int

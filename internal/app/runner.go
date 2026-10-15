@@ -124,6 +124,20 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		}
 		as.Artifact = json.RawMessage(ref)
 	}
+	if action.Kind == protocol.ActionImplement && action.Generation > 1 {
+		// A later generation should know what the last acceptance of this
+		// spec version asked to change.
+		accs, err := store.ListAcceptances(ctx, q, run.TaskID, "")
+		if err != nil {
+			return protocol.Assignment{}, err
+		}
+		for i := len(accs) - 1; i >= 0; i-- {
+			if a := accs[i]; a.SpecVersion == action.TargetSpecVersion && a.Verdict == protocol.VerdictChangesRequired {
+				as.Feedback = &protocol.Feedback{Verdict: a.Verdict, Issues: json.RawMessage(a.IssuesJSON), Evidence: json.RawMessage(a.EvidenceJSON)}
+				break
+			}
+		}
+	}
 	return as, nil
 }
 

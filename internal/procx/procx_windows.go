@@ -13,3 +13,11 @@ import (
 func Contain(cmd *exec.Cmd) {
 	cmd.WaitDelay = 5 * time.Second
 }
+
+// KillGroup kills the process itself; without a job object its children
+// cannot be reached as a group.
+func KillGroup(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+}

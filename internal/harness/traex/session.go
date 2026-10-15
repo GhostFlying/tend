@@ -86,14 +86,18 @@ func Start(ctx context.Context, opts Options) (*Session, error) {
 		_ = stdin.Close()
 		exited := make(chan error, 1)
 		go func() { exited <- cmd.Wait() }()
+		var err error
 		select {
-		case err := <-exited:
-			kill()
-			return err
+		case err = <-exited:
 		case <-time.After(5 * time.Second):
 			kill()
-			return <-exited
+			err = <-exited
 		}
+		// Whatever the app-server started and left running, such as a
+		// background command of a worker, must not outlive the session.
+		procx.KillGroup(cmd)
+		kill()
+		return err
 	}
 	if err := s.initialize(ctx, opts.Version); err != nil {
 		_ = s.Close()

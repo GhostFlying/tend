@@ -81,6 +81,16 @@ type Assignment struct {
 	Workspace AssignmentWorkspace `json:"workspace"`
 	// Artifact is the artifact reference an acceptance run judges.
 	Artifact json.RawMessage `json:"artifact,omitempty"`
+	// Feedback is what the last acceptance of the same spec version asked
+	// to change, for an implementation after a changes-required verdict.
+	Feedback *Feedback `json:"feedback,omitempty"`
+}
+
+// Feedback is an acceptance verdict an implementation must address.
+type Feedback struct {
+	Verdict  Verdict         `json:"verdict"`
+	Issues   json.RawMessage `json:"issues"`
+	Evidence json.RawMessage `json:"evidence,omitempty"`
 }
 
 // AssignmentWorkspace tells the runner how to lay out the workspace.
