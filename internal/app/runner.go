@@ -33,6 +33,10 @@ func (a *App) Changes() *Broadcast { return a.changes }
 
 func (a *App) notifyChange() { a.changes.Notify() }
 
+// RunLogs is notified after run logs are recorded. Logs are not events,
+// so Changes does not cover them.
+func (a *App) RunLogs() *Broadcast { return a.logs }
+
 // requireActiveHost returns the calling runner's host.
 func requireActiveHost(ctx context.Context, x *Exec, q store.Querier) (store.HostRow, error) {
 	if err := allowKinds(x.Principal, protocol.PrincipalRunner); err != nil {
@@ -669,6 +673,9 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 		}
 		return nil
 	})
+	if err == nil && res.Accepted > 0 {
+		a.logs.Notify()
+	}
 	if err == nil && changed {
 		a.notifyChange()
 	}
@@ -683,11 +690,13 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 func (a *App) ExpireLeases(ctx context.Context) (int, error) {
 	now := a.now().UnixMilli()
 	n := 0
+	lapsed := 0
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
 		expired, err := store.ListExpiredLeases(ctx, tx.Q(), now)
 		if err != nil {
 			return err
 		}
+		lapsed = len(expired)
 		for _, l := range expired {
 			if err := tx.SetLease(ctx, l.LeaseID, store.LeaseActive, store.LeaseLapsed, l.ExpiresAt, now); err != nil {
 				return err
@@ -716,6 +725,9 @@ func (a *App) ExpireLeases(ctx context.Context) (int, error) {
 		}
 		return nil
 	})
+	if err == nil && lapsed > 0 {
+		a.notifyChange()
+	}
 	return n, err
 }
 

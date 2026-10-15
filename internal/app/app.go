@@ -85,6 +85,7 @@ type App struct {
 	now      func() time.Time
 	notifier Notifier
 	changes  *Broadcast
+	logs     *Broadcast
 	leaseTTL time.Duration
 }
 
@@ -98,7 +99,7 @@ func WithNotifier(n Notifier) Option {
 
 // New returns an App.
 func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Option) *App {
-	a := &App{store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, changes: NewBroadcast()}
+	a := &App{store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, changes: NewBroadcast(), logs: NewBroadcast()}
 	for _, o := range opts {
 		o(a)
 	}

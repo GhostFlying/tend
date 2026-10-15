@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -172,9 +174,49 @@ func (a *App) MainTurn(ctx context.Context, requestID string) (store.MainTurn, b
 	return m, err == nil, err
 }
 
-// PutMainTurn records the progress of a delivery's turn.
+// turnStates are the message states the owner sees for main turn states. A
+// turn that is starting or was rejected leaves its message queued.
+var turnStates = map[string]protocol.MessageState{
+	store.TurnStarted:     protocol.MessageProcessing,
+	store.TurnCompleted:   protocol.MessageReplied,
+	store.TurnInterrupted: protocol.MessageInterrupted,
+	store.TurnFailed:      protocol.MessageFailed,
+}
+
+// insertMessageState records that an owner message reached a new state.
+func (a *App) insertMessageState(ctx context.Context, tx *store.Tx, messageID string, state protocol.MessageState, now int64) error {
+	body, err := json.Marshal(map[string]any{"state": state})
+	if err != nil {
+		return fmt.Errorf("app: encode message state: %w", err)
+	}
+	_, err = tx.InsertEvent(ctx, store.EventRow{
+		EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: messageID,
+		Kind: "conversation.message_state", BodyJSON: string(body), CreatedAt: now,
+	})
+	return err
+}
+
+// PutMainTurn records the progress of a delivery's turn, and the state its
+// message reached when that changes.
 func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error { return tx.PutMainTurn(ctx, m, a.now().UnixMilli()) })
+	now := a.now().UnixMilli()
+	err := a.store.Write(ctx, func(tx *store.Tx) error {
+		prev, err := store.GetMainTurn(ctx, tx.Q(), m.RequestID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if err := tx.PutMainTurn(ctx, m, now); err != nil {
+			return err
+		}
+		if state, ok := turnStates[m.Status]; ok && prev.Status != m.Status {
+			return a.insertMessageState(ctx, tx, m.MessageID, state, now)
+		}
+		return nil
+	})
+	if err == nil {
+		a.notifyChange()
+	}
+	return err
 }
 
 // TurnDelivery returns the delivery a harness turn handled.
@@ -194,7 +236,25 @@ func (a *App) TurnDelivery(ctx context.Context, threadID, turnID string) (store.
 // SettleOpenTurns marks a thread's running turns as interrupted after its
 // harness went away.
 func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error { return tx.SettleOpenTurns(ctx, threadID, a.now().UnixMilli()) })
+	now := a.now().UnixMilli()
+	settled := 0
+	err := a.store.Write(ctx, func(tx *store.Tx) error {
+		ids, err := tx.SettleOpenTurns(ctx, threadID, now)
+		if err != nil {
+			return err
+		}
+		settled = len(ids)
+		for _, id := range ids {
+			if err := a.insertMessageState(ctx, tx, id, protocol.MessageInterrupted, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err == nil && settled > 0 {
+		a.notifyChange()
+	}
+	return err
 }
 
 // Message returns a conversation message.

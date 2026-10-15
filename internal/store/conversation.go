@@ -131,11 +131,25 @@ func (t *Tx) PutMainTurn(ctx context.Context, m MainTurn, now int64) error {
 }
 
 // SettleOpenTurns marks the turns of a thread that were still running as
-// interrupted, for example after the harness restarted.
-func (t *Tx) SettleOpenTurns(ctx context.Context, threadID string, now int64) error {
-	_, err := t.Exec(ctx, `UPDATE main_turns SET status = 'interrupted', updated_at = ? WHERE thread_id = ? AND status = 'started'`, now, threadID)
+// interrupted, for example after the harness restarted, and returns the
+// messages they handled.
+func (t *Tx) SettleOpenTurns(ctx context.Context, threadID string, now int64) ([]string, error) {
+	rows, err := t.Q().QueryContext(ctx, `UPDATE main_turns SET status = 'interrupted', updated_at = ? WHERE thread_id = ? AND status = 'started'
+		RETURNING message_id`, now, threadID)
 	if err != nil {
-		return fmt.Errorf("store: settle turns: %w", err)
+		return nil, fmt.Errorf("store: settle turns: %w", err)
 	}
-	return nil
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: settle turns: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: settle turns: %w", err)
+	}
+	return ids, nil
 }
