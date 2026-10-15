@@ -447,21 +447,17 @@ func TestFault_StaleRevisionRejected(t *testing.T) {
 
 func TestFault_ReplayAfterRevoke(t *testing.T) {
 	h := newHarness(t)
-	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
-	runID := h.startRun(res.TaskID, protocol.ActionImplement)
-	runner := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"}
-	env := h.env("runs.report_started", runTarget(runID), nil, nil)
-	if op := h.exec(runner, env, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
-		t.Fatalf("report: %+v", op)
+	h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
+	host := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}
+	env := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, map[string]any{}, nil)
+	if op := h.exec(host, env, Claim{}); op.Status != protocol.OpSucceeded {
+		t.Fatalf("claim: %+v", op)
 	}
-	// The run is reassigned; host-a loses access to it.
-	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
-		_, err := tx.Exec(context.Background(), `UPDATE runs SET host_id = 'host-b' WHERE run_id = ?`, runID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.app.Execute(context.Background(), runner, env, ReportRunStarted{}); protocol.CodeOf(err) != protocol.CodeForbidden {
+	// The host is retired; its old request must not reveal the run any more.
+	c := testConfig()
+	c.Hosts = nil
+	h.syncConfig(c)
+	if _, err := h.app.Execute(context.Background(), host, env, Claim{}); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Errorf("replay after revoke: err = %v, want forbidden", err)
 	}
 }
