@@ -7,7 +7,9 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-var execSpec = Spec{Goal: "fix the windows build", Acceptance: []string{"build passes"}, Delivery: DeliveryCommit}
+var testWorkspace = Workspace{Mounts: []Mount{{Repo: "tend"}}}
+
+var execSpec = Spec{Goal: "fix the windows build", Acceptance: []string{"build passes"}, Delivery: DeliveryCommit, Workspace: testWorkspace}
 
 func changedSpec() Spec {
 	s := execSpec
@@ -114,7 +116,7 @@ func TestNewTask(t *testing.T) {
 		t.Errorf("executable spec: stage %q, actions %+v", d.Task.Lifecycle, d.Actions)
 	}
 
-	d, err = NewTask("task_2", Spec{Goal: "think about it", Delivery: DeliveryCommit}, 0)
+	d, err = NewTask("task_2", Spec{Goal: "think about it", Delivery: DeliveryCommit, Workspace: testWorkspace}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

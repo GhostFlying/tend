@@ -79,32 +79,39 @@ type TaskRow struct {
 	BlockReason         protocol.BlockReason
 	ImplementGeneration int64
 	CurrentArtifactID   string
-	CreatedAt           int64
-	UpdatedAt           int64
+	// WorkspaceName is reserved at creation and never changes.
+	WorkspaceName string
+	// WorkspaceAssigned reports that the workspace exists on a host. It is
+	// derived from the workspaces table and not written by UpdateTask.
+	WorkspaceAssigned bool
+	CreatedAt         int64
+	UpdatedAt         int64
 }
 
 // GetTask returns the task, or ErrNotFound.
 func GetTask(ctx context.Context, q Querier, taskID string) (TaskRow, error) {
 	r := TaskRow{TaskID: taskID}
-	var artifact sql.NullString
+	var artifact, workspace sql.NullString
 	err := q.QueryRowContext(ctx, `SELECT title, lifecycle, control_mode, control_revision, spec_version, priority,
-		block_reason, implement_generation, current_artifact_id, created_at, updated_at FROM tasks WHERE task_id = ?`, taskID).
+		block_reason, implement_generation, current_artifact_id, workspace_name,
+		EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = tasks.task_id), created_at, updated_at
+		FROM tasks WHERE task_id = ?`, taskID).
 		Scan(&r.Title, &r.Lifecycle, &r.ControlMode, &r.ControlRevision, &r.SpecVersion, &r.Priority, &r.BlockReason,
-			&r.ImplementGeneration, &artifact, &r.CreatedAt, &r.UpdatedAt)
+			&r.ImplementGeneration, &artifact, &workspace, &r.WorkspaceAssigned, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return TaskRow{}, notFound(err, "task "+taskID)
 	}
-	r.CurrentArtifactID = artifact.String
+	r.CurrentArtifactID, r.WorkspaceName = artifact.String, workspace.String
 	return r, nil
 }
 
 // InsertTask stores a new task.
 func (t *Tx) InsertTask(ctx context.Context, r TaskRow) error {
 	_, err := t.Exec(ctx, `INSERT INTO tasks (task_id, title, lifecycle, control_mode, control_revision, spec_version,
-		priority, block_reason, implement_generation, current_artifact_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		priority, block_reason, implement_generation, current_artifact_id, workspace_name, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.TaskID, r.Title, r.Lifecycle, r.ControlMode, r.ControlRevision, r.SpecVersion, r.Priority, r.BlockReason,
-		r.ImplementGeneration, nullString(r.CurrentArtifactID), r.CreatedAt, r.UpdatedAt)
+		r.ImplementGeneration, nullString(r.CurrentArtifactID), nullString(r.WorkspaceName), r.CreatedAt, r.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("store: insert task: %w", err)
 	}
