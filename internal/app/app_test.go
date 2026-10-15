@@ -455,6 +455,60 @@ func TestFault_InternalErrorRetrySafe(t *testing.T) {
 	}
 }
 
+// idleCommand writes a row and then reports that it had nothing to do.
+type idleCommand struct {
+	calls  *int
+	events bool
+}
+
+func (idleCommand) Operation() string { return "test.idle" }
+func (idleCommand) Authorize(context.Context, *Exec, store.Querier) error {
+	return nil
+}
+func (c idleCommand) Apply(ctx context.Context, _ *Exec, tx *store.Tx) (Outcome, error) {
+	*c.calls++
+	if _, err := tx.Exec(ctx, `INSERT INTO inbox (source, source_event_id, received_at) VALUES ('idle', ?, 0)`, *c.calls); err != nil {
+		return Outcome{}, err
+	}
+	out := Outcome{Result: map[string]any{"work": nil}, NoEffect: true}
+	if c.events {
+		out.Events = []Event{{ObjectType: "test", ObjectID: "x", Kind: "test.idle"}}
+	}
+	return out, nil
+}
+
+func TestNoEffectIsNotRecorded(t *testing.T) {
+	h := newHarness(t)
+	calls := 0
+	env := h.env("test.idle", protocol.Target{Type: "test"}, map[string]any{}, nil)
+	for i := range 2 {
+		op := h.exec(owner, env, idleCommand{calls: &calls})
+		if op.Status != protocol.OpSucceeded || op.RequestID != env.RequestID || string(op.Result) != `{"work":null}` {
+			t.Fatalf("attempt %d: %+v", i, op)
+		}
+	}
+	if calls != 2 {
+		t.Errorf("Apply calls = %d, want 2: a no-effect request must run again on retry", calls)
+	}
+	for _, table := range []string{"inbox", "request_records", "events"} {
+		if n := h.count(table); n != 0 {
+			t.Errorf("%s rows = %d, want 0", table, n)
+		}
+	}
+}
+
+func TestNoEffectWithEventsIsAnError(t *testing.T) {
+	h := newHarness(t)
+	calls := 0
+	env := h.env("test.idle", protocol.Target{Type: "test"}, map[string]any{}, nil)
+	if _, err := h.app.Execute(context.Background(), owner, env, idleCommand{calls: &calls, events: true}); err == nil {
+		t.Fatal("Execute succeeded, want an error for a no-effect outcome with events")
+	}
+	if n := h.count("inbox") + h.count("request_records"); n != 0 {
+		t.Errorf("rows = %d, want 0", n)
+	}
+}
+
 func TestAuthorization(t *testing.T) {
 	h := newHarness(t)
 	taskID, accept := h.toAwaitingAcceptance()

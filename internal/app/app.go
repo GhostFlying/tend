@@ -2,6 +2,12 @@
 // through App.Execute, which deduplicates it by request ID, authorizes it and
 // applies it in one transaction together with its events and outbox
 // messages.
+//
+// Commands that tend issues on its own behalf under the system principal,
+// such as lease expiry sweeps and startup reconciliation, use a fresh
+// request ID for every attempt. Their idempotence comes from state
+// preconditions checked inside Apply, for example "only if the lease is
+// still active and has expired", not from the request record.
 package app
 
 import (
@@ -43,7 +49,15 @@ type Outcome struct {
 	Outbox []OutboxMessage
 	// Accepted marks an external phase that continues after commit.
 	Accepted bool
+	// NoEffect reports that the command found nothing to do, such as a
+	// claim that found no work. The transaction is rolled back and the
+	// request is not recorded, so a retry with the same ID runs again. A
+	// no-effect outcome must not carry events or outbox messages.
+	NoEffect bool
 }
+
+// errNoEffect rolls back the transaction of a no-effect outcome.
+var errNoEffect = errors.New("app: no effect")
 
 // Event is a domain event about one object.
 type Event struct {
@@ -146,6 +160,17 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			return err
 		}
 		out, applyErr := cmd.Apply(ctx, x, tx)
+		if applyErr == nil && out.NoEffect {
+			if len(out.Events) > 0 || len(out.Outbox) > 0 {
+				return fmt.Errorf("app: %s returned a no-effect outcome with events or outbox messages", env.Operation)
+			}
+			result, err := json.Marshal(out.Result)
+			if err != nil {
+				return fmt.Errorf("app: encode result: %w", err)
+			}
+			op = protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: result}
+			return errNoEffect
+		}
 		if applyErr == nil {
 			applyErr = a.persistOutcome(ctx, x, tx, out, &rec)
 		}
@@ -170,7 +195,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		op = operationOf(rec)
 		return nil
 	})
-	if err != nil {
+	// Compare exactly: a rollback failure joined with the sentinel must
+	// surface, since it usually means the connection is broken.
+	if err != nil && err != errNoEffect {
 		return protocol.Operation{}, err
 	}
 	return op, nil
