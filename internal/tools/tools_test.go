@@ -146,7 +146,7 @@ func TestStaleWriteReturnsCurrentState(t *testing.T) {
 	if a.OK || a.Error.Code != protocol.CodeStaleRevision {
 		t.Fatalf("stale update = %+v", a)
 	}
-	var cur taskSummary
+	var cur protocol.TaskSummary
 	if err := json.Unmarshal(a.Current, &cur); err != nil || cur.ControlRevision != rev+1 || cur.Priority != 5 {
 		t.Errorf("current = %s (%v)", a.Current, err)
 	}
@@ -173,12 +173,12 @@ func TestReadTools(t *testing.T) {
 	id, _ := createdTask(t, created)
 
 	var list struct {
-		Tasks []taskSummary `json:"tasks"`
+		Tasks []protocol.TaskSummary `json:"tasks"`
 	}
 	if a := e.call("tasks_list", listArgs{}, ""); !a.OK || json.Unmarshal(a.Result, &list) != nil || len(list.Tasks) != 1 || list.Tasks[0].NextImplementGeneration != 2 {
 		t.Errorf("tasks_list = %s", a.Result)
 	}
-	var detail taskDetail
+	var detail protocol.TaskDetail
 	if a := e.call("tasks_read", taskArgs{TaskID: id}, ""); !a.OK || json.Unmarshal(a.Result, &detail) != nil || len(detail.Actions) != 1 || !strings.Contains(string(detail.Spec), `"repo":"tend"`) {
 		t.Errorf("tasks_read = %s", a.Result)
 	}

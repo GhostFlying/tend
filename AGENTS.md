@@ -25,6 +25,7 @@ tend/
     app/                   用例层：请求去重 + 领域规则 + 存储 + outbox，在一个事务内完成
     api/                   浏览器 HTTP API 与 SSE
     tools/                 主 Agent 工具面（app-server 动态工具）
+    views/                 账本的只读视图（主 Agent 工具与 owner API 共用）
     mainthread/            主会话：前台 thread、逐条消息的 turn、上下文注入、工具回调
     runnerapi/             runner 协议的服务端
     scheduler/             排队与资源分配
@@ -61,7 +62,7 @@ harness/traex → harness, protocol
 
 - `domain` 不依赖 `store`、网络、时钟或随机数：所有输入通过参数传入，输出是决定（新状态、事件、待创建动作），方便穷举测试。
 - `scheduler` 和 `domain` 一样是纯函数：领取 run 时，`app` 在同一个事务里收集事实并调用它。
-- 服务端的 handler（`api`、`tools`、`runnerapi`）不直接写数据库，所有有副作用的操作都走 `app`。
+- 服务端的 handler（`api`、`tools`、`runnerapi`）不直接写数据库，所有有副作用的操作都走 `app`。读取可以经 `views` 直接查询 `store`，视图类型定义在 `protocol`。
 - `internal/` 之外不放 Go 业务代码。
 
 ## 2. 工程约束（不变量）

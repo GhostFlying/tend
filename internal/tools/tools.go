@@ -24,6 +24,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // Call is one tool call from the main agent.
@@ -135,7 +136,7 @@ func (s *Service) currentFor(ctx context.Context, c Call) any {
 	_ = s.store.Read(ctx, func(tx *store.ReadTx) error {
 		row, err := store.GetTask(ctx, tx.Q(), args.TaskID)
 		if err == nil {
-			out = summarize(row)
+			out = views.Summary(row)
 		}
 		return err
 	})
