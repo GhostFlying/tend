@@ -390,10 +390,13 @@ type OutboxRow struct {
 	CreatedAt       int64
 }
 
-// InsertOutbox queues a message for delivery.
+// InsertOutbox queues a message for delivery. Its position in the queue is
+// assigned here, inside the transaction, so delivery order follows commit
+// order.
 func (t *Tx) InsertOutbox(ctx context.Context, o OutboxRow) error {
 	_, err := t.Exec(ctx, `INSERT INTO outbox (outbox_id, request_id, parent_request_id, destination, operation, payload_json,
-		status, attempts, next_attempt_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
+		status, attempts, next_attempt_at, created_at, updated_at, seq)
+		VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM outbox))`,
 		o.OutboxID, o.RequestID, nullString(o.ParentRequestID), o.Destination, o.Operation, o.PayloadJSON, o.CreatedAt,
 		o.CreatedAt, o.CreatedAt)
 	if err != nil {
