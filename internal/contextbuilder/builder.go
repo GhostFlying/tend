@@ -327,17 +327,16 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			if err != nil {
 				return err
 			}
-			line = "opened: " + decisionLine(d)
+			line = fmt.Sprintf("#%d opened: %s (by %s)", e.Seq, decisionLine(d), actor(e.ActorJSON))
 			if e.Kind == "decision.answered" {
-				line = answerLine(d)
+				line = fmt.Sprintf("#%d answered by %s: %s", e.Seq, actor(e.ActorJSON), answerLine(d))
 			}
-			line = fmt.Sprintf("#%d %s", e.Seq, line)
 		default:
 			about := e.ObjectID
 			if taskID != "" && taskID != e.ObjectID {
 				about = e.ObjectID + " of " + taskID
 			}
-			line = strings.TrimSpace(fmt.Sprintf("#%d %s %s %s", e.Seq, about, e.Kind, compact(body)))
+			line = strings.TrimSpace(fmt.Sprintf("#%d %s %s %s", e.Seq, about, e.Kind, compact(body))) + " (by " + actor(e.ActorJSON) + ")"
 		}
 		switch classify(e.Kind, body) {
 		case attention:
@@ -364,6 +363,31 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 		s.Changes = append(s.Changes, "now: "+line)
 	}
 	return nil
+}
+
+// actor names who caused an event, so an agent can tell the owner's
+// deliberate changes from its own work and tend's. Runners, runs and
+// tend's own rules are all tend.
+func actor(principalJSON string) string {
+	var p protocol.Principal
+	if principalJSON == "" || json.Unmarshal([]byte(principalJSON), &p) != nil {
+		return "tend"
+	}
+	switch {
+	case p.Kind == protocol.PrincipalOwner:
+		return "owner"
+	case p.Kind == protocol.PrincipalMainAgent && p.Agent == "":
+		return "the hosted main agent"
+	case p.Kind == protocol.PrincipalMainAgent && p.Thread == "":
+		return "a " + string(p.Agent) + " session"
+	case p.Kind == protocol.PrincipalMainAgent:
+		session := p.Thread
+		if r := []rune(session); len(r) > 8 {
+			session = string(r[:8])
+		}
+		return string(p.Agent) + " session " + session
+	}
+	return "tend"
 }
 
 // ownRequests tells whether a request was made by an agent session itself.
@@ -491,7 +515,7 @@ func answerLine(d store.DecisionRow) string {
 	if a.Text != "" {
 		answer = append(answer, "note "+strconv.Quote(a.Text))
 	}
-	line := fmt.Sprintf("answered: %s %s -> %s", d.DecisionID, d.Question, strings.Join(answer, ", "))
+	line := fmt.Sprintf("%s %s -> %s", d.DecisionID, d.Question, strings.Join(answer, ", "))
 	switch {
 	case a.Effect == nil:
 	case a.Effect.Applied:

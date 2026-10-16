@@ -167,7 +167,7 @@ func TestEndToEnd_AgentAddon(t *testing.T) {
 	if got := claude.hook("user-prompt-submit", "", "anything new?"); strings.Contains(got, task) {
 		t.Errorf("claude hears of its own task:\n%s", got)
 	}
-	if got := codex.hook("user-prompt-submit", "", "anything new?"); !strings.Contains(got, task) {
+	if got := codex.hook("user-prompt-submit", "", "anything new?"); !strings.Contains(got, task) || !strings.Contains(got, "(by claude session sess-cla)") {
 		t.Errorf("codex does not hear of the new task:\n%s", got)
 	}
 
@@ -176,7 +176,7 @@ func TestEndToEnd_AgentAddon(t *testing.T) {
 		return srv.count(`SELECT COUNT(*) FROM tasks WHERE task_id = ? AND lifecycle = 'completed'`, task) == 1
 	})
 	for _, a := range []*addonAgent{claude, codex} {
-		if got := a.hook("user-prompt-submit", "", "how is it going?"); !strings.Contains(got, task+" task.completed") {
+		if got := a.hook("user-prompt-submit", "", "how is it going?"); !strings.Contains(got, task+" task.completed") || !strings.Contains(got, "(by tend)") {
 			t.Errorf("%s does not hear that the task completed:\n%s", a.agent, got)
 		}
 		// Nothing new since.
@@ -225,7 +225,8 @@ func TestEndToEnd_OwnerAnswersDecision(t *testing.T) {
 		t.Errorf("task = %s, want cancelled", got)
 	}
 	got := claude.hook("user-prompt-submit", "", "and now?")
-	if !strings.Contains(got, "tend carried it out (cancel), nothing left to do") || !strings.Contains(got, task+" task.cancelled") {
+	if !strings.Contains(got, "answered by owner: ") || !strings.Contains(got, "tend carried it out (cancel), nothing left to do") ||
+		!strings.Contains(got, task+" task.cancelled (by owner)") {
 		t.Errorf("the agent does not hear what tend did:\n%s", got)
 	}
 }
