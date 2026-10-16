@@ -198,7 +198,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 - **`tend mcp`**：
   - stdio 上的 MCP server，按启动参数得知自己服务的是哪个 agent；
   - 会话 ID：Claude Code 从环境变量 `CLAUDE_CODE_SESSION_ID` 取，Codex 和 traex 从每次 `tools/call` 的 `_meta.x-codex-turn-metadata.session_id` 取（C5）；取不到时不带（§3.1）；
-  - `tools/list` 从服务端取工具定义，`tools/call` 转发；
+  - `tools/list` 从服务端取工具定义，`tools/call` 转发；每次取到工具定义都缓存到配置目录的 `tools.json`（按服务端地址），tend 不可达时用缓存回答 `tools/list`：agent 只在会话开始时取一次工具列表，否则 tend 暂时不可达时开的会话恢复后也没有工具（预验收发现）；
   - 传输失败时用同一个 request_id 重试，最多 3 次；
   - 服务端明确拒绝时，把错误作为工具结果返回给模型，不当成 MCP 协议错误。
 - **`tend hook <agent> <event>`**：
