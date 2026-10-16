@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,7 +16,11 @@ import (
 func fakeWorkers(t *testing.T) (*Workers, chan *fakeServer) {
 	servers := make(chan *fakeServer, 1)
 	w := NewWorkers(WorkerOptions{})
-	w.start = func(ctx context.Context, _ Options) (*Session, error) {
+	w.start = func(ctx context.Context, opts Options) (*Session, error) {
+		// A worker never acts as the owner's agent (D45).
+		if !slices.Contains(opts.Env, protocol.AddonEnv+"=off") {
+			t.Errorf("worker environment %v does not turn the agent add-on off", opts.Env)
+		}
 		f, s := newFake(t)
 		f.on(methodThreadStart, func(json.RawMessage) any { return map[string]any{"thread": map[string]any{"id": "th_w"}} })
 		f.on(methodTurnStart, func(json.RawMessage) any { return map[string]any{"turn": map[string]any{"id": "tu_w"}} })

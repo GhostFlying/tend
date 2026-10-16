@@ -8,6 +8,11 @@ import (
 // Wire types of the agent add-on (D45): the requests the tend CLI's hook
 // command and MCP bridge make for an agent the owner works in.
 
+// AddonEnv turns the agent add-on off when set to "off". tend-runner sets
+// it for the workers it starts: they may inherit the owner's user-level
+// MCP and hook configuration, and must not act as the owner's agent.
+const AddonEnv = "TEND_ADDON"
+
 // AgentKind is a supported agent.
 type AgentKind string
 
