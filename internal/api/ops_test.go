@@ -444,3 +444,28 @@ func TestRunLogs(t *testing.T) {
 		t.Errorf("negative after = %d, want 400", st)
 	}
 }
+
+func TestFault_HostedMainThreadDisabled(t *testing.T) {
+	e := newEnv(t)
+	tok := e.login(protocol.ScopeOwner)
+	say := func() (int, protocol.APIResponse) {
+		return e.op(tok, e.envelope("conversation.submit_message", protocol.Target{Type: "conversation"}, nil, protocol.SubmitMessagePayload{Body: "hello"}))
+	}
+	st, res := say()
+	if st != http.StatusBadRequest || res.Error == nil || res.Error.Code != protocol.CodeInvalidRequest || !strings.Contains(res.Error.Message, "hosted main agent") {
+		t.Errorf("message without the hosted main agent = %d %+v", st, res.Error)
+	}
+	for _, table := range []string{"request_records", "conversation_messages", "outbox"} {
+		if n := e.count(`SELECT COUNT(*) FROM ` + table); n != 0 {
+			t.Errorf("%s has %d rows after a refused message", table, n)
+		}
+	}
+
+	e.server.cfg.HostedMainAgent = true
+	if st, res := say(); st != http.StatusOK || res.Operation == nil || res.Operation.Status != protocol.OpAccepted {
+		t.Fatalf("message with the hosted main agent = %d %+v", st, res)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM outbox WHERE destination = ?`, app.MainThreadDestination); n != 1 {
+		t.Errorf("%d messages queued for the main thread, want 1", n)
+	}
+}

@@ -20,6 +20,10 @@ var ownerCommands = commandMap(
 	app.CancelTask{},
 )
 
+// hostedCommands are the conversation writes, accepted only when the
+// server runs the hosted main thread (D45).
+var hostedCommands = commandMap(app.SubmitMessage{})
+
 func commandMap(cmds ...app.Command) map[string]app.Command {
 	m := make(map[string]app.Command, len(cmds))
 	for _, c := range cmds {
@@ -42,6 +46,13 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd, ok := ownerCommands[env.Operation]
+	if hosted, isHosted := hostedCommands[env.Operation]; isHosted {
+		if !s.cfg.HostedMainAgent {
+			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q needs the hosted main agent, which this server does not run", env.Operation))
+			return
+		}
+		cmd, ok = hosted, true
+	}
 	if !ok {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not available to owners", env.Operation))
 		return
