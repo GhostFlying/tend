@@ -184,8 +184,47 @@ func (o owner) task(ctx context.Context, id string) error {
 			fmt.Fprintf(out, "  %s %s gen %d on %s: %s\n", r.RunID, r.Role, r.Generation, r.Host, r.Observed)
 		}
 	}
+	if len(d.Artifacts) > 0 {
+		fmt.Fprintln(out, "artifacts:")
+		for _, a := range d.Artifacts {
+			fmt.Fprintf(out, "  %s from %s\n", a.ArtifactID, a.RunID)
+			var ref struct {
+				Mounts []struct {
+					Path      string `json:"path"`
+					Branch    string `json:"branch"`
+					BaseSHA   string `json:"base_sha"`
+					CommitSHA string `json:"commit_sha"`
+					Changed   bool   `json:"changed"`
+				} `json:"mounts"`
+			}
+			_ = json.Unmarshal(a.Ref, &ref)
+			for _, m := range ref.Mounts {
+				if m.Changed {
+					fmt.Fprintf(out, "    %s: %s at %s (base %s)\n", m.Path, m.Branch, short(m.CommitSHA), short(m.BaseSHA))
+				} else {
+					// Untouched in this run, but an earlier run may have
+					// committed to it, so show what acceptance saw.
+					at := m.CommitSHA
+					if at == "" {
+						at = m.BaseSHA
+					}
+					fmt.Fprintf(out, "    %s: unchanged in this run, at %s\n", m.Path, short(at))
+				}
+			}
+		}
+	}
 	for _, a := range d.Acceptances {
-		fmt.Fprintf(out, "verdict on %s (spec v%d): %s %s\n", a.ArtifactID, a.SpecVersion, a.Verdict, a.Issues)
+		fmt.Fprintf(out, "verdict on %s (spec v%d): %s\n", a.ArtifactID, a.SpecVersion, a.Verdict)
+		var issues []any
+		_ = json.Unmarshal(a.Issues, &issues)
+		for _, i := range issues {
+			if s, ok := i.(string); ok {
+				fmt.Fprintf(out, "  - %s\n", s)
+			} else {
+				b, _ := json.Marshal(i)
+				fmt.Fprintf(out, "  - %s\n", b)
+			}
+		}
 	}
 	if len(d.Decisions) > 0 {
 		fmt.Fprintln(out, "decisions:")
@@ -231,7 +270,9 @@ func (o owner) logs(ctx context.Context, runID string, follow bool) error {
 				}
 				continue
 			}
-			fmt.Fprintf(o.e.Stdout, "%s #%d %s %s\n", l.CreatedAt.Local().Format("15:04:05"), l.Seq, l.Kind, l.Body)
+			if line, ok := logLine(l); ok {
+				fmt.Fprintln(o.e.Stdout, line)
+			}
 		}
 		after = page.Next
 		ended := page.Observed == protocol.RunFinished || page.Observed == protocol.RunFailed

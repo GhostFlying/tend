@@ -696,3 +696,63 @@ func TestOrderedRoundTrip(t *testing.T) {
 		t.Errorf("round trip:\n%s\nwant:\n%s", out, in)
 	}
 }
+
+func TestLogLines(t *testing.T) {
+	at := time.Date(2026, 10, 16, 7, 34, 40, 0, time.UTC)
+	for body, want := range map[string]string{
+		`{"type":"agentMessage","text":"Done.\nAll checks pass."}`:                                                                                                                           "Done.\n    All checks pass.",
+		`{"type":"userMessage","content":[{"type":"text","text":"Implement this task.\n\nGoal: x"}]}`:                                                                                        "brief: Implement this task.",
+		`{"type":"commandExecution","command":"python3 -m unittest","exitCode":0,"status":"completed"}`:                                                                                      "$ python3 -m unittest → exit 0",
+		`{"type":"fileChange","changes":[{"path":"/h/runner/workspaces/add-sub/calc/calc.py","kind":{"type":"update"}},{"path":"/h/runner/scratch/add-sub/plan.md","kind":{"type":"add"}}]}`: "changed calc/calc.py (update), scratch:plan.md (add)",
+		`{"type":"dynamicToolCall","tool":"submit_verdict","arguments":{}}`:                                                                                                                  "tool submit_verdict",
+		`{"type":"mcpToolCall","server":"docs","tool":"search"}`:                                                                                                                             "tool docs/search",
+		`{"type":"fileChange","status":"failed","changes":[{"path":"/h/runner/workspaces/add-sub/calc/calc.py","kind":{"type":"update"}}]}`:                                                  "change failed: calc/calc.py (update)",
+		`{"type":"commandExecution","command":"` + strings.Repeat("x", 3000) + `","exitCode":1}`:                                                                                             "$ " + strings.Repeat("x", 2000) + "… → exit 1",
+		`{"type":"somethingNew"}`: "item somethingNew",
+	} {
+		line, ok := logLine(protocol.RunLogView{Seq: 3, Kind: "item.completed", Body: json.RawMessage(body), CreatedAt: at})
+		if _, rest, _ := strings.Cut(line, " #3 "); !ok || rest != want {
+			t.Errorf("logLine(%s) = %q, %v; want %q", body, line, ok, want)
+		}
+	}
+	if _, ok := logLine(protocol.RunLogView{Kind: "item.completed", Body: json.RawMessage(`{"type":"reasoning","content":["x"]}`)}); ok {
+		t.Error("reasoning gets a line")
+	}
+	if line, _ := logLine(protocol.RunLogView{Kind: "item.started", Body: json.RawMessage(`{"type":"commandExecution","command":"make"}`)}); !strings.HasSuffix(line, "$ make …") {
+		t.Errorf("started command = %q", line)
+	}
+	if line, _ := logLine(protocol.RunLogView{Kind: "run.running", Body: json.RawMessage(`{}`)}); !strings.HasSuffix(line, " run.running") {
+		t.Errorf("run event = %q", line)
+	}
+	if got := clip("ab€cd", 4); got != "ab…" {
+		t.Errorf("clip in the middle of a rune = %q", got)
+	}
+}
+
+func TestTaskShowsArtifactsAndIssues(t *testing.T) {
+	f := newFakeServer(t)
+	f.answer("GET /api/v1/tasks/task_1", protocol.TaskDetail{
+		TaskSummary: protocol.TaskSummary{TaskID: "task_1", Title: "fix"},
+		Artifacts: []protocol.ArtifactView{{ArtifactID: "art_1", RunID: "run_1", Ref: json.RawMessage(
+			`{"mounts":[{"repo":"calc","path":"calc","base_sha":"2a5c718c56374b145d","branch":"tend/fix","commit_sha":"5f6ea1e143cd58d82c","changed":true},` +
+				`{"repo":"lib","path":"lib","base_sha":"9999999999999999","changed":false},` +
+				`{"repo":"doc","path":"doc","base_sha":"1111111111111111","branch":"tend/fix","commit_sha":"8888888888888888","changed":false}]}`)}},
+		Acceptances: []protocol.AcceptanceView{
+			{ArtifactID: "art_1", SpecVersion: 1, Verdict: protocol.VerdictChangesRequired, Issues: json.RawMessage(`["tests fail",{"check":2}]`)},
+			{ArtifactID: "art_1", SpecVersion: 1, Verdict: protocol.VerdictPassed, Issues: json.RawMessage(`[]`)},
+		},
+	})
+	te := newTestEnv(t, f.srv.URL)
+	if code := te.main("task", "task_1"); code != exitOK {
+		t.Fatalf("task = %d: %s", code, te.errOut)
+	}
+	for _, want := range []string{
+		"  art_1 from run_1\n    calc: tend/fix at 5f6ea1e143cd (base 2a5c718c5637)\n    lib: unchanged in this run, at 999999999999\n    doc: unchanged in this run, at 888888888888\n",
+		"verdict on art_1 (spec v1): changes_required\n  - tests fail\n  - {\"check\":2}\n",
+		"verdict on art_1 (spec v1): passed\n",
+	} {
+		if !strings.Contains(te.out.String(), want) {
+			t.Errorf("task output lacks %q:\n%s", want, te.out)
+		}
+	}
+}
