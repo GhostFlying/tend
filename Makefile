@@ -16,8 +16,11 @@ fmt-check:
 vet:
 	$(GO) vet $(PKGS)
 
+# go run pkg@version builds outside this module, so it would pick the Go
+# release staticcheck's own go.mod asks for, which may be too old to load
+# this module. Pin it to the toolchain that builds the module.
 staticcheck:
-	$(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(PKGS)
+	GOTOOLCHAIN=$$($(GO) env GOVERSION) $(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(PKGS)
 
 test:
 	$(GO) test -race $(PKGS)
