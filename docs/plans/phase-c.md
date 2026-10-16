@@ -323,3 +323,4 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 - 交付：验收通过后的交付 run（D44）。
 - 大仓库工作区的保留与清理策略。
 - 阶段 D：人工接管、`paused` 的恢复、多机器调度。
+- project 维度（D52）：按 project 划分上下文、backlog 与按规则排序，阶段 D 计划在本阶段验收后写出，经 owner review 后开始。
