@@ -77,7 +77,7 @@ func dedupe(s []string) []string {
 }
 
 // AnswerDecision handles decisions.respond, the owner answering from a
-// client, and decisions.resolve_from_message, the main agent recording the
+// client, and decisions.resolve_from_message, a main agent recording the
 // answer the owner gave in the conversation. The answer only closes the
 // decision: whatever it asks for, such as a retry, is a separate command.
 //
@@ -119,7 +119,9 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if p.Option == "" && p.Text == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "option or text is required")
 	}
-	if c.FromMessage && p.SourceMessageID == "" {
+	// The hosted main agent records answers from the conversation it
+	// hosts. An agent the owner works in has no message to point to.
+	if c.FromMessage && p.SourceMessageID == "" && !x.Principal.Addon() {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "source_message_id is required")
 	}
 	d, err := store.GetDecision(ctx, tx.Q(), x.Env.Target.ID)

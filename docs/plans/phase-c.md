@@ -32,7 +32,7 @@
 
 ## 1. 需要写入 design.md 的决策（提议）
 
-D45、D50、D51 已经写入 design.md。原计划提议的 D40（Web 工程）撤回，D43（owner API 经 `/api/v1/ops`）并入 D49。以下决策在落地的 commit 里写入。
+D45、D50、D51 已经写入 design.md，D49 随 C6、D47 和 D48 随 C7 写入。原计划提议的 D40（Web 工程）撤回，D43（owner API 经 `/api/v1/ops`）并入 D49。以下决策在落地的 commit 里写入。
 
 | 编号 | 决策 | 落地 |
 | --- | --- | --- |
@@ -302,7 +302,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 | `TestFault_StaleControlFromCLI` | 用旧的 control_revision 暂停任务，得到 `stale_revision` 和当前状态 | C6 |
 | `TestFault_ToolRetrySameRequest` | MCP 桥用同一 request_id 重发 `tasks_create`，只建一个任务，返回原结果 | C7、C8 |
 | `TestFault_ToolRecallSameWorkspace` | 模型用同一工作区名重新调用 `tasks_create`（新的 request_id）：不重复建任务，返回已有任务 | C7 |
-| `TestFault_ToolRecallStaleAction` | 模型重新调用 `actions_create`（新的 request_id，旧的代次和版本）：得到 `stale_revision`，不重复派发 | C7 |
+| `TestFault_ToolRecallStaleAction` | 模型重新调用 `actions_create`（新的 request_id，旧的代次和版本）：同一代次已存在，得到 `duplicate_effect`，不重复派发；请求更高的代次时得到 `stale_revision` | C7 |
 | `TestFault_HookServerDown` | 服务端不可达：hook 在超时内退出 0，输出提示，不阻塞输入 | C8 |
 | `TestFault_ProgressNotInjected` | 只有进度事件（run 开始、心跳、日志）时，UserPromptSubmit 不返回内容；有需要处理的事件时超出预算也不省略 | C7 |
 | `TestFault_HostedMainThreadDisabled` | 没有配置 `main_agent` 时服务端照常运行，对话操作被拒绝且不产生副作用；配置了时，阶段 B 的托管闭环测试仍然通过 | C9 |

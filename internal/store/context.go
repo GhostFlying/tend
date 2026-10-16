@@ -121,13 +121,15 @@ type EventView struct {
 	ObjectID   string
 	Kind       string
 	BodyJSON   string
-	CreatedAt  int64
+	// RequestID is the request whose execution recorded the event, if any.
+	RequestID string
+	CreatedAt int64
 }
 
 // ListEventsAfter returns events after seq up to and including through,
 // whose kind is in kinds, in order.
 func ListEventsAfter(ctx context.Context, q Querier, seq, through int64, kinds []string) ([]EventView, error) {
-	rows, err := q.QueryContext(ctx, `SELECT event_seq, object_type, object_id, kind, body_json, created_at FROM events
+	rows, err := q.QueryContext(ctx, `SELECT event_seq, object_type, object_id, kind, body_json, request_id, created_at FROM events
 		WHERE event_seq > ? AND event_seq <= ? AND kind IN (SELECT value FROM json_each(?)) ORDER BY event_seq`,
 		seq, through, jsonList(kinds))
 	if err != nil {
@@ -137,9 +139,11 @@ func ListEventsAfter(ctx context.Context, q Querier, seq, through int64, kinds [
 	var out []EventView
 	for rows.Next() {
 		var e EventView
-		if err := rows.Scan(&e.Seq, &e.ObjectType, &e.ObjectID, &e.Kind, &e.BodyJSON, &e.CreatedAt); err != nil {
+		var request sql.NullString
+		if err := rows.Scan(&e.Seq, &e.ObjectType, &e.ObjectID, &e.Kind, &e.BodyJSON, &request, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan event: %w", err)
 		}
+		e.RequestID = request.String
 		out = append(out, e)
 	}
 	return out, rows.Err()

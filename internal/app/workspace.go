@@ -76,12 +76,16 @@ func reserveWorkspaceName(ctx context.Context, q store.Querier, name, taskID str
 		return "", protocol.Errorf(protocol.CodeInvalidRequest,
 			"workspace name %q must be a single lowercase directory name that is also valid in a git branch", name)
 	}
-	taken, err := store.WorkspaceNameTaken(ctx, q, name)
+	other, err := store.TaskByWorkspaceName(ctx, q, name)
+	if errors.Is(err, store.ErrNotFound) {
+		return name, nil
+	}
 	if err != nil {
 		return "", err
 	}
-	if taken {
-		return "", protocol.Errorf(protocol.CodeInvalidRequest, "workspace name %q is already used by another task", name)
-	}
-	return name, nil
+	// The caller may be repeating its own earlier creation; the task it
+	// collides with lets it tell.
+	pe := protocol.Errorf(protocol.CodeInvalidRequest, "workspace name %q is already used by task %s", name, other)
+	pe.Details, _ = json.Marshal(map[string]string{"task_id": other})
+	return "", pe
 }

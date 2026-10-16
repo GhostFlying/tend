@@ -14,10 +14,12 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/tools"
 )
 
 var secret = bytes.Repeat([]byte{7}, 32)
@@ -69,7 +71,8 @@ func newEnv(t *testing.T) *env {
 	ids := testkit.NewIDGen(clock, 5)
 	a := app.New(s, ids, clock.Now)
 	e := &env{t: t, clock: clock, app: a, store: s, ids: ids, peer: &peer{id: netx.Identity{Node: "laptop", User: ownerLogin}}}
-	e.server = New(a, s, e.peer, secret, Config{Owners: []string{ownerLogin, "other-owner@example.com"}, Now: clock.Now}, quiet())
+	cb := contextbuilder.New(a, s, ids, contextbuilder.Config{})
+	e.server = New(a, s, tools.New(a, s, cb, quiet()), cb, e.peer, secret, Config{Owners: []string{ownerLogin, "other-owner@example.com"}, Now: clock.Now}, quiet())
 	hs := httptest.NewServer(e.server.Handler())
 	t.Cleanup(hs.Close)
 	e.url = hs.URL
@@ -170,7 +173,7 @@ func TestTamperedToken(t *testing.T) {
 	valid := e.server.sign(token{Login: ownerLogin, ClientID: clientID, Scope: protocol.ScopeAgent, Issued: e.clock.Now().UnixMilli()})
 	forged := valid[:len(valid)-2] + "AA"
 	// An agent token re-signed as an owner token with another key.
-	other := New(e.app, e.store, e.peer, bytes.Repeat([]byte{8}, 32), Config{Owners: []string{ownerLogin}, Now: e.clock.Now}, quiet())
+	other := New(e.app, e.store, e.server.tools, e.server.context, e.peer, bytes.Repeat([]byte{8}, 32), Config{Owners: []string{ownerLogin}, Now: e.clock.Now}, quiet())
 	foreign := other.sign(token{Login: ownerLogin, ClientID: clientID, Scope: protocol.ScopeOwner, Issued: e.clock.Now().UnixMilli()})
 	for _, tok := range []string{forged, foreign, "not-a-token"} {
 		if st := e.do("GET", "/api/v1/session", tok, nil, nil); st != http.StatusUnauthorized {

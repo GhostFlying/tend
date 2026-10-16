@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/json"
 	"regexp"
+	"unicode/utf8"
 )
 
 // Target names the object a request acts on. ID may be empty for operations
@@ -24,7 +25,14 @@ type Envelope struct {
 	Target                  Target          `json:"target"`
 	ExpectedControlRevision *int64          `json:"expected_control_revision,omitempty"`
 	Payload                 json.RawMessage `json:"payload,omitempty"`
+	// Reason is the caller's short note on why it made the request, kept
+	// with the request record as its provenance. It is not part of the
+	// payload hash.
+	Reason string `json:"reason,omitempty"`
 }
+
+// MaxReason bounds Envelope.Reason in characters.
+const MaxReason = 500
 
 var operationPattern = regexp.MustCompile(`^[a-z][a-z_]*(\.[a-z][a-z_]*)+$`)
 
@@ -45,6 +53,8 @@ func (e *Envelope) Validate() error {
 		return Errorf(CodeInvalidRequest, "target.type is required")
 	case len(e.Payload) > 0 && !json.Valid(e.Payload):
 		return Errorf(CodeInvalidRequest, "payload is not valid JSON")
+	case utf8.RuneCountInString(e.Reason) > MaxReason:
+		return Errorf(CodeInvalidRequest, "reason is longer than %d characters", MaxReason)
 	}
 	return nil
 }

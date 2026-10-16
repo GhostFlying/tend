@@ -27,7 +27,8 @@ func (s *server) startMainThread(h *testkit.Harness) {
 		cancel()
 		wg.Wait()
 	})
-	m := mainthread.New(s.app, contextbuilder.New(s.app, s.store, s.ids, contextbuilder.Config{}), tools.New(s.app, s.store, quiet()), mainthread.Config{
+	cb := contextbuilder.New(s.app, s.store, s.ids, contextbuilder.Config{})
+	m := mainthread.New(s.app, cb, tools.New(s.app, s.store, cb, quiet()), mainthread.Config{
 		Instance: "main", Thread: harness.ThreadConfig{Cwd: "/agent", DeveloperInstructions: mainthread.Instructions},
 		Open: h.Open, RestartDelay: 20 * time.Millisecond, Log: quiet(),
 	})

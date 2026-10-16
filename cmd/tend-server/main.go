@@ -160,7 +160,9 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		log.Warn("listening without the tailnet; every peer is taken as tag:local and the local owner", "addr", listener.Addr().String())
 	}
 
-	front := mainthread.New(a, contextbuilder.New(a, s, ids, contextbuilder.Config{}), tools.New(a, s, log), mainthread.Config{
+	cb := contextbuilder.New(a, s, ids, contextbuilder.Config{})
+	ts := tools.New(a, s, cb, log)
+	front := mainthread.New(a, cb, ts, mainthread.Config{
 		Instance: cfg.MainAgent.Instance,
 		Thread: harness.ThreadConfig{
 			Cwd: cwd, Model: cfg.MainAgent.Model, DeveloperInstructions: mainthread.Instructions,
@@ -175,7 +177,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	runners := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
 	mux := http.NewServeMux()
 	mux.Handle(runnerapi.Path, runners.Handler())
-	mux.Handle("/api/", api.New(a, s, whois, secret, api.Config{Owners: owners}, log).Handler())
+	mux.Handle("/api/", api.New(a, s, ts, cb, whois, secret, api.Config{Owners: owners}, log).Handler())
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	// The workers stop with the process or when serving fails.

@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | D15 | 项目名 `tend`，使用独立仓库。 | 已确认 |
 | D16 | （D45：托管主 Agent 延后，当前 traex 只用于 worker）主 harness 先接 traex（Codex fork），实现与协议细节参考上游 Codex 源码，以 traex 实际生成的协议为准。 | 已确认 |
-| D17 | （D45：外挂形态下上下文改由 agent 的 hook 注入；托管形态延后，届时仍按本条）主会话上下文以 app-server 协议注入为主：由服务端在 turn 之间通过 `thread/inject_items` 写入 developer 消息。Hook 只覆盖我们无法发起的时机（compact 之后、harness 自行恢复）。 | 已确认，接口已验证（spike A2） |
+| D17 | （D45、D47：外挂形态下上下文改由 agent 的 hook 注入；托管形态延后，届时仍按本条）主会话上下文以 app-server 协议注入为主：由服务端在 turn 之间通过 `thread/inject_items` 写入 developer 消息。Hook 只覆盖我们无法发起的时机（compact 之后、harness 自行恢复）。 | 已确认，接口已验证（spike A2） |
 | D18 | 不做每轮注入。只有基线失效或账本发生相关变化时才注入（见 §2）。 | 已确认 |
 | D19 | 执行节点一律用 pull 模式的 runner：runner 主动连控制服务，领取任务、续租、上报。控制服务不主动连节点。 | 已确认 |
 | D20 | （D45：外挂形态下工具改由 MCP 提供，主 Agent 的 sandbox 由用户的 agent 决定；托管形态延后，届时仍按本条）主 Agent 唯一的写入路径是 tend 提供的工具，通过 app-server 的动态工具（`dynamicTools` / `item/tool/call`）实现，经由主会话同一条 stdio 连接回调 tend。主 harness 使用只读 sandbox，看不到应用数据库和根凭据。 | 已确认 |
@@ -42,6 +42,8 @@
 | D50 | Web 延后：阶段 C 不做 Web（阶段 C 计划里提议的 D40 撤回），以后作为移动端访问的便利入口，后端是 owner API；SSE 事件流随 Web 一起做。通知 channel 同样延后：只有一个主会话时，找到它的成本很低。 | 已确认（2026-10-16） |
 | D51 | 与 cove 的关系：tend 是 cove 之外独立的编排服务，对应 cove 设计中预留的独立看板系统；两者通过显式接口和外部 ID 映射集成，不互写数据库，cove 不依赖 tend 运行。执行层的方向：工作区由 cove 创建，tend-runner 在 cove 管理的工作区里驱动 worker，人工接管就是在 cove 里对同一个工作区开终端。具体接口在 cove M1 合入之后设计，在此之前 runner 按 D33–D37 自己管理工作区。 | 方向已确认（2026-10-16），接口待设计 |
 | D49 | owner 与 agent 的凭据（修订 D42）：`POST /api/v1/session` 为 owner 的某个客户端签发 bearer token，内容是登录名、client_id、scope 和签发时间，用服务端密钥派生的密钥签名（派生标签与 run 凭据不同），有效期 30 天。scope 是 `owner`（owner 自己的命令，例如 tend CLI）或 `agent`（owner 使用的 agent 的 hook 和工具）。每个请求带 `Authorization: Bearer`，并且 WhoIs 的登录名必须在 `owners` 里、等于 token 里的登录名；token 拿到别的设备上无效。没有 cookie 这类自动携带的凭据，因此不再需要 `X-Tend-Client` 防跨站。只需要 owner 的操作拒绝 agent token。单个 token 暂不能吊销，轮换服务端密钥会让全部 token 失效。两种 token 在同一台机器上，scope 用来防误操作，不是安全边界（D39）。 | 已确认（2026-10-16） |
+| D47 | 外挂形态的上下文由 hook 注入（修订 D17、§2.2）：服务端按 `(agent, session_id)` 记录会话的基线和水位。SessionStart（任何来源，包括压缩之后）返回完整快照，开头声明取代之前所有的 tend 上下文，并附带外挂用的角色说明；账本为空时也发。UserPromptSubmit 只在自水位以来有需要提醒的事件时返回增量：需要处理的事件（新待决、run 失败或失联、未通过的验收、投递失败）总是发，超出预算也不省略；结果和账本意图的变化在预算内发；进度事件不发；本会话自己的请求直接产生的事件不发（按事件的 request_id 对应请求记录里的调用方判断，没带会话 ID 的调用不过滤）。其他 hook 不发。服务端答复即推进水位：tend 无法确认 agent 把上下文交给了模型，基于漏看状态的写入由版本校验拦下，会话恢复或压缩时重建基线。hook 不参与写入，没有 hook 的 agent 也能完整使用工具；同一 request_id 重试返回同一答复。预算：完整快照约 8000 字符，增量约 4000 字符（C5）。不保存用户输入。 | 已确认（2026-10-16） |
+| D48 | 外挂形态下规划写入的去重（D28、§3 的第二层去重仍用于托管形态）：外挂时 tend 看不到用户消息，不使用 `(source_message_id, plan_commit_seq)`，也不引入替代它的对话身份。MCP 桥为每次 `tools/call` 生成 request_id，传输失败时沿用。模型重新调用工具是新的请求，由各操作已有的业务约束拦住：`tasks_create` 的工作区名唯一（agent 调用时必填，重名时返回已有任务供模型判断），`tasks_update_intent`、`actions_create` 带 `expected_control_revision`，`actions_create` 的同一代次只建一次，`decisions_resolve` 带待决事项的版本。写入可以带一句理由（`reason`），和调用方一起记在请求记录里，作为来源。 | 已确认（2026-10-16） |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

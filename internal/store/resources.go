@@ -160,11 +160,23 @@ func GetTemplate(ctx context.Context, q Querier, name string) (string, error) {
 	return body, nil
 }
 
-// WorkspaceNameTaken reports whether a task already reserved the name.
-func WorkspaceNameTaken(ctx context.Context, q Querier, name string) (bool, error) {
-	var n int
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE workspace_name = ?`, name).Scan(&n); err != nil {
-		return false, fmt.Errorf("store: check workspace name: %w", err)
+// TaskByWorkspaceName returns the task that reserved a workspace name, or
+// ErrNotFound.
+func TaskByWorkspaceName(ctx context.Context, q Querier, name string) (string, error) {
+	var id string
+	if err := q.QueryRowContext(ctx, `SELECT task_id FROM tasks WHERE workspace_name = ?`, name).Scan(&id); err != nil {
+		return "", notFound(err, "task with workspace "+name)
 	}
-	return n > 0, nil
+	return id, nil
+}
+
+// UpsertAgentSession records that an agent session was seen.
+func (t *Tx) UpsertAgentSession(ctx context.Context, agent, sessionID, clientID string, now int64) error {
+	_, err := t.Exec(ctx, `INSERT INTO agent_sessions (agent, session_id, client_id, first_seen_at, last_seen_at)
+		VALUES (?, ?, ?, ?, ?) ON CONFLICT (agent, session_id) DO UPDATE SET client_id = excluded.client_id,
+		last_seen_at = excluded.last_seen_at`, agent, sessionID, clientID, now, now)
+	if err != nil {
+		return fmt.Errorf("store: upsert agent session: %w", err)
+	}
+	return nil
 }

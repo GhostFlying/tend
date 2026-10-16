@@ -52,7 +52,8 @@ func newEnv(t *testing.T, h *testkit.Harness) *env {
 	e.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 	}, app.SyncConfig{})
-	e.m = New(a, contextbuilder.New(a, s, ids, contextbuilder.Config{}), tools.New(a, s, quiet()), Config{
+	cb := contextbuilder.New(a, s, ids, contextbuilder.Config{})
+	e.m = New(a, cb, tools.New(a, s, cb, quiet()), Config{
 		Instance: "main", Thread: harness.ThreadConfig{Cwd: "/agent", DeveloperInstructions: Instructions},
 		Open: h.Open, RestartDelay: 20 * time.Millisecond, Log: quiet(),
 	})
