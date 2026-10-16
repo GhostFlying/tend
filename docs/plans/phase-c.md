@@ -216,7 +216,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
   - hook 命令保持稳定（`tend hook <agent> <event>`，不带版本号或临时路径）：Codex 和 traex 按命令的 hash 记录信任，命令一变就要重新信任。
 - **owner 命令**（owner token）：
   - `tend status`：未结束的任务和待决事项；
-  - `tend task <id>`、`tend logs <run_id> [-f]`；
+  - `tend task <id>`（含 artifact 的分支和 commit、验收意见）、`tend logs <run_id> [-f]`（每条 worker 条目一行：消息、命令和退出码、改动的文件，略去推理）；
   - `tend decide <decision_id> <option> [--note]`、`tend retry <task_id> --kind implement|accept`；
   - `tend pause|resume|cancel <task_id>`。
 
