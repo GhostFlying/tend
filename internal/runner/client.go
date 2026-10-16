@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -31,6 +34,34 @@ type client struct {
 	http   *http.Client
 	hostID string
 	token  string
+	log    *slog.Logger
+	now    func() time.Time
+
+	mu sync.Mutex
+	// downSince is when tend stopped answering; zero while it answers.
+	downSince time.Time
+}
+
+// unreachable logs the first failure to reach tend; the callers log their
+// own retries.
+func (c *client) unreachable(ctx context.Context, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.downSince.IsZero() {
+		c.downSince = c.now()
+		c.log.WarnContext(ctx, "tend is unreachable", "err", err)
+	}
+}
+
+// reached logs that tend answers again after it was unreachable. Any
+// answer counts, including a rejection.
+func (c *client) reached(ctx context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.downSince.IsZero() {
+		c.log.InfoContext(ctx, "reconnected to tend", "down_for", c.now().Sub(c.downSince).Round(time.Second).String())
+		c.downSince = time.Time{}
+	}
 }
 
 func (c *client) host() credential { return credential{token: c.token} }
@@ -77,9 +108,15 @@ func (c *client) do(ctx context.Context, cred credential, env *protocol.Envelope
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
+		// A request that timed out found tend unreachable; one the caller
+		// cancelled says nothing about tend.
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			c.unreachable(ctx, err)
+		}
 		return protocol.Operation{}, &transportError{err}
 	}
 	defer resp.Body.Close()
+	c.reached(ctx)
 	var out rpcResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return protocol.Operation{}, &transportError{fmt.Errorf("decode response (status %d): %w", resp.StatusCode, err)}
