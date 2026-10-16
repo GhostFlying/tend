@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// committed is the schema checked into the web client.
-const committed = "../../../web/src/generated/api.schema.json"
+// committed is the schema checked into the repository.
+const committed = "../generated/api.schema.json"
 
 func TestCommittedSchemaIsCurrent(t *testing.T) {
 	want, err := generate()

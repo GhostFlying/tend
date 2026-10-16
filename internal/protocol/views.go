@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Read views: the shapes in which the main agent's tools and the owner API
 // show the ledger. Both use the same views so they cannot drift apart.
@@ -30,6 +33,26 @@ type TaskDetail struct {
 	Artifacts   []ArtifactView   `json:"artifacts"`
 	Acceptances []AcceptanceView `json:"acceptances"`
 	Decisions   []DecisionView   `json:"decisions"`
+	// WorkspaceState is where the workspace was placed and how its mounts
+	// resolved, once a runner has laid it out.
+	WorkspaceState *WorkspaceView `json:"workspace_state,omitempty"`
+}
+
+// WorkspaceView is a task's workspace on a host.
+type WorkspaceView struct {
+	Host   string      `json:"host"`
+	Status string      `json:"status"`
+	Mounts []MountView `json:"mounts"`
+}
+
+// MountView is how one mount of a workspace was laid out.
+type MountView struct {
+	Path            string          `json:"path"`
+	Repo            string          `json:"repo"`
+	Base            json.RawMessage `json:"base"`
+	ResolvedBaseSHA string          `json:"resolved_base_sha"`
+	ResolvedFrom    string          `json:"resolved_from"`
+	Branch          string          `json:"branch"`
 }
 
 // ActionView is a plan action of a task.
@@ -70,6 +93,7 @@ type AcceptanceView struct {
 // DecisionView is a question for the owner.
 type DecisionView struct {
 	DecisionID string          `json:"decision_id"`
+	TaskID     string          `json:"task_id,omitempty"`
 	Question   string          `json:"question"`
 	Options    json.RawMessage `json:"options"`
 	Version    int64           `json:"version"`
@@ -91,4 +115,55 @@ type RequestView struct {
 	Status    OpStatus        `json:"status"`
 	Result    json.RawMessage `json:"result,omitempty"`
 	Error     *Error          `json:"error,omitempty"`
+}
+
+// HostView is an active execution host.
+type HostView struct {
+	HostID string   `json:"host_id"`
+	OS     string   `json:"os"`
+	Arch   string   `json:"arch"`
+	Labels []string `json:"labels"`
+	Slots  int64    `json:"slots"`
+	// OpenRuns counts the runs on the host that may still be working.
+	OpenRuns int64 `json:"open_runs"`
+}
+
+// Snapshot is the owner's overview of the ledger, read at one point.
+type Snapshot struct {
+	// EventSeq is the last event the snapshot reflects.
+	EventSeq int64 `json:"event_seq"`
+	// Tasks are the unfinished tasks.
+	Tasks []TaskSummary `json:"tasks"`
+	// Decisions are the open decisions.
+	Decisions []DecisionView `json:"decisions"`
+	Hosts     []HostView     `json:"hosts"`
+}
+
+// TaskPage is one page of a task listing.
+type TaskPage struct {
+	Tasks []TaskSummary `json:"tasks"`
+	// Next is an opaque cursor for the following page, passed back as
+	// before; it is empty on the last page.
+	Next string `json:"next,omitempty"`
+}
+
+// RunLogView is a run fact that does not change state.
+type RunLogView struct {
+	Seq       int64           `json:"seq"`
+	NativeID  string          `json:"native_id,omitempty"`
+	Kind      string          `json:"kind"`
+	Body      json.RawMessage `json:"body"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+// RunLogPage is one page of a run's logs.
+type RunLogPage struct {
+	RunID string `json:"run_id"`
+	// Observed is the run's state when the page was read. Once the run
+	// has ended, waiting for more logs is pointless.
+	Observed RunObserved  `json:"observed"`
+	Logs     []RunLogView `json:"logs"`
+	// Next is the after cursor for the following page: the last seq
+	// returned, or the given one if the page is empty.
+	Next int64 `json:"next"`
 }

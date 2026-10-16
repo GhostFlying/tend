@@ -5,6 +5,10 @@ package views
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"maps"
+	"slices"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -86,7 +90,34 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 	for _, x := range decs {
 		d.Decisions = append(d.Decisions, Decision(x))
 	}
+	if d.WorkspaceState, err = workspace(ctx, q, row.TaskID); err != nil {
+		return d, err
+	}
 	return d, nil
+}
+
+// workspace reads where a task's workspace was laid out, or nil if it has
+// not been yet.
+func workspace(ctx context.Context, q store.Querier, taskID string) (*protocol.WorkspaceView, error) {
+	w, err := store.GetWorkspaceByTask(ctx, q, taskID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	facts, err := store.ListMountFacts(ctx, q, w.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	v := &protocol.WorkspaceView{Host: w.HostID, Status: w.Status, Mounts: []protocol.MountView{}}
+	for _, path := range slices.Sorted(maps.Keys(facts)) {
+		m := facts[path]
+		v.Mounts = append(v.Mounts, protocol.MountView{
+			Path: m.Path, Repo: m.Repo, Base: json.RawMessage(m.BaseJSON), ResolvedBaseSHA: m.ResolvedBaseSHA, ResolvedFrom: m.ResolvedFrom, Branch: m.Branch,
+		})
+	}
+	return v, nil
 }
 
 // Acceptances shows verdicts, with their evidence if asked for.
@@ -104,7 +135,7 @@ func Acceptances(rows []store.AcceptanceRow, evidence bool) []protocol.Acceptanc
 
 // Decision shows a decision.
 func Decision(x store.DecisionRow) protocol.DecisionView {
-	v := protocol.DecisionView{DecisionID: x.DecisionID, Question: x.Question, Options: json.RawMessage(x.OptionsJSON), Version: x.Version, Status: x.Status}
+	v := protocol.DecisionView{DecisionID: x.DecisionID, TaskID: x.TaskID, Question: x.Question, Options: json.RawMessage(x.OptionsJSON), Version: x.Version, Status: x.Status}
 	if x.AnswerJSON != "" {
 		v.Answer = json.RawMessage(x.AnswerJSON)
 	}
@@ -146,4 +177,62 @@ func Request(ctx context.Context, q store.Querier, domain, requestID string) (pr
 		}
 	}
 	return v, nil
+}
+
+// Snapshot reads the owner's overview. q should be a single read
+// transaction, so the event sequence matches what is shown.
+func Snapshot(ctx context.Context, q store.Querier) (protocol.Snapshot, error) {
+	var v protocol.Snapshot
+	var err error
+	if v.EventSeq, err = store.LatestEventSeq(ctx, q); err != nil {
+		return v, err
+	}
+	if v.Tasks, err = Tasks(ctx, q, false); err != nil {
+		return v, err
+	}
+	decs, err := store.ListDecisions(ctx, q, "")
+	if err != nil {
+		return v, err
+	}
+	v.Decisions = make([]protocol.DecisionView, 0, len(decs))
+	for _, x := range decs {
+		v.Decisions = append(v.Decisions, Decision(x))
+	}
+	hosts, err := store.ListActiveHosts(ctx, q)
+	if err != nil {
+		return v, err
+	}
+	v.Hosts = make([]protocol.HostView, 0, len(hosts))
+	for _, h := range hosts {
+		n, err := store.CountOpenRuns(ctx, q, h.HostID)
+		if err != nil {
+			return v, err
+		}
+		v.Hosts = append(v.Hosts, protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, OpenRuns: n})
+	}
+	if v.Tasks == nil {
+		v.Tasks = []protocol.TaskSummary{}
+	}
+	return v, nil
+}
+
+// RunLogs reads up to limit of a run's logs after seq. A missing run is
+// store.ErrNotFound.
+func RunLogs(ctx context.Context, q store.Querier, runID string, after int64, limit int) (protocol.RunLogPage, error) {
+	run, err := store.GetRun(ctx, q, runID)
+	if err != nil {
+		return protocol.RunLogPage{}, err
+	}
+	rows, err := store.ListRunLogs(ctx, q, runID, after, limit)
+	if err != nil {
+		return protocol.RunLogPage{}, err
+	}
+	page := protocol.RunLogPage{RunID: runID, Observed: run.ObservedState, Logs: make([]protocol.RunLogView, 0, len(rows)), Next: after}
+	for _, l := range rows {
+		page.Logs = append(page.Logs, protocol.RunLogView{
+			Seq: l.Seq, NativeID: l.NativeID, Kind: l.Kind, Body: json.RawMessage(l.BodyJSON), CreatedAt: time.UnixMilli(l.CreatedAt).UTC(),
+		})
+		page.Next = l.Seq
+	}
+	return page, nil
 }

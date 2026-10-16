@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -272,4 +273,71 @@ func ListActiveHosts(ctx context.Context, q Querier) ([]HostRow, error) {
 		out = append(out, h)
 	}
 	return out, nil
+}
+
+// ListFinishedTasks returns finished tasks, most recently updated first,
+// starting after the task updated at beforeUpdated with ID beforeID. A
+// zero beforeUpdated starts at the newest.
+func ListFinishedTasks(ctx context.Context, q Querier, beforeUpdated int64, beforeID string, limit int) ([]TaskRow, error) {
+	rows, err := q.QueryContext(ctx, `SELECT task_id FROM tasks WHERE lifecycle IN ('completed', 'cancelled')
+		AND (? = 0 OR updated_at < ? OR (updated_at = ? AND task_id < ?))
+		ORDER BY updated_at DESC, task_id DESC LIMIT ?`, beforeUpdated, beforeUpdated, beforeUpdated, beforeID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list finished tasks: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("store: scan task: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("store: iterate: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	out := make([]TaskRow, 0, len(ids))
+	for _, id := range ids {
+		r, err := GetTask(ctx, q, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// RunLogRow is a stored run log.
+type RunLogRow struct {
+	Seq       int64
+	NativeID  string
+	Kind      string
+	BodyJSON  string
+	CreatedAt int64
+}
+
+// ListRunLogs returns up to limit of a run's logs after seq, in order.
+func ListRunLogs(ctx context.Context, q Querier, runID string, after int64, limit int) ([]RunLogRow, error) {
+	rows, err := q.QueryContext(ctx, `SELECT seq, native_id, kind, body_json, created_at FROM run_logs
+		WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?`, runID, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list run logs: %w", err)
+	}
+	defer rows.Close()
+	var out []RunLogRow
+	for rows.Next() {
+		var l RunLogRow
+		var native sql.NullString
+		if err := rows.Scan(&l.Seq, &native, &l.Kind, &l.BodyJSON, &l.CreatedAt); err != nil {
+			return nil, fmt.Errorf("store: scan run log: %w", err)
+		}
+		l.NativeID = native.String
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
