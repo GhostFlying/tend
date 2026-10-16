@@ -148,7 +148,7 @@ func New(cfg Config) *Runner {
 	}
 	return &Runner{
 		cfg:       cfg,
-		c:         &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken},
+		c:         &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now},
 		reconcile: make(chan struct{}, 1),
 		ttl:       time.Minute,
 		ttlWake:   make(chan struct{}),
