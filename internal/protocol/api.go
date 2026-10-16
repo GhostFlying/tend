@@ -5,7 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{Envelope{}, APIResponse{}, Snapshot{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ArtifactDetail{}, RequestView{},
-		SessionRequest{}, SessionView{}, AnswerDecisionPayload{}, SetControlModePayload{}, CreateActionPayload{},
+		SessionRequest{}, SessionView{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, CreateActionPayload{},
 		HookRequest{}, HookResponse{}, ToolSpec{}, ToolRequest{}, ToolResponse{}}
 }
 
@@ -20,6 +20,7 @@ func APIEnums() []any {
 		[]MessageState{MessageQueued, MessageProcessing, MessageReplied, MessageInterrupted, MessageFailed, MessageUnknown},
 		[]RunRole{RoleImplement, RoleAccept},
 		[]ActionKind{ActionImplement, ActionAccept, ActionDeliver},
+		[]DecisionEffect{EffectImplement, EffectAccept, EffectCancel},
 		[]ActionStatus{ActionPending, ActionReady, ActionDispatched, ActionDone, ActionCancelled, ActionSuperseded},
 		[]Verdict{VerdictPassed, VerdictChangesRequired, VerdictBlocked, VerdictInconclusive},
 		[]Code{CodeInvalidRequest, CodeMissingRequestID, CodeConflictPayload, CodeStaleRevision, CodeUnauthenticated, CodeForbidden, CodeNotFound,

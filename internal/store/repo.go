@@ -379,10 +379,13 @@ func (t *Tx) InsertAcceptance(ctx context.Context, id, taskID, runID string, spe
 	return nil
 }
 
-// InsertDecision stores an open decision.
-func (t *Tx) InsertDecision(ctx context.Context, id, taskID, question, optionsJSON string, now int64) error {
-	_, err := t.Exec(ctx, `INSERT INTO decisions (decision_id, task_id, question, options_json, scope, version, status,
-		created_at, updated_at) VALUES (?, ?, ?, ?, 'task', 1, 'open', ?, ?)`, id, nullString(taskID), question, optionsJSON, now, now)
+// InsertDecision stores an open decision. effectsJSON maps options to what
+// tend does when one is chosen, and askedRevision is the task's control
+// revision when it asked; a planner's decision has neither.
+func (t *Tx) InsertDecision(ctx context.Context, id, taskID, question, optionsJSON, effectsJSON string, askedRevision *int64, now int64) error {
+	_, err := t.Exec(ctx, `INSERT INTO decisions (decision_id, task_id, question, options_json, effects_json, asked_revision, scope,
+		version, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'task', 1, 'open', ?, ?)`,
+		id, nullString(taskID), question, optionsJSON, effectsJSON, askedRevision, now, now)
 	if err != nil {
 		return fmt.Errorf("store: insert decision: %w", err)
 	}
@@ -468,6 +471,8 @@ type DecisionRow struct {
 	TaskID            string
 	Question          string
 	OptionsJSON       string
+	EffectsJSON       string
+	AskedRevision     sql.NullInt64
 	Version           int64
 	Status            string
 	AskedMessageID    string
@@ -485,9 +490,9 @@ const (
 func GetDecision(ctx context.Context, q Querier, decisionID string) (DecisionRow, error) {
 	d := DecisionRow{DecisionID: decisionID}
 	var task, asked, answered, answer sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT task_id, question, options_json, version, status, asked_message_id,
-		answered_message_id, answer_json FROM decisions WHERE decision_id = ?`, decisionID).
-		Scan(&task, &d.Question, &d.OptionsJSON, &d.Version, &d.Status, &asked, &answered, &answer)
+	err := q.QueryRowContext(ctx, `SELECT task_id, question, options_json, effects_json, asked_revision, version, status,
+		asked_message_id, answered_message_id, answer_json FROM decisions WHERE decision_id = ?`, decisionID).
+		Scan(&task, &d.Question, &d.OptionsJSON, &d.EffectsJSON, &d.AskedRevision, &d.Version, &d.Status, &asked, &answered, &answer)
 	if err != nil {
 		return DecisionRow{}, notFound(err, "decision "+decisionID)
 	}

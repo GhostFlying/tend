@@ -139,6 +139,20 @@ func (k ActionKind) Valid() bool {
 	return k == ActionImplement || k == ActionAccept || k == ActionDeliver
 }
 
+// DecisionEffect is what tend does itself when an option of a decision it
+// opened is chosen (D53).
+type DecisionEffect string
+
+// Decision effects.
+const (
+	// EffectImplement requests the next implement generation.
+	EffectImplement DecisionEffect = "implement"
+	// EffectAccept requests the next acceptance of the current artifact.
+	EffectAccept DecisionEffect = "accept"
+	// EffectCancel cancels the task.
+	EffectCancel DecisionEffect = "cancel"
+)
+
 // ActionStatus is the progress of a plan action.
 type ActionStatus string
 

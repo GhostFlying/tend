@@ -134,6 +134,11 @@ func printDecision(w io.Writer, d protocol.DecisionView) {
 	}
 	fmt.Fprintf(w, "  %s v%d%s [%s]: %s\n", d.DecisionID, d.Version, about, d.Status, d.Question)
 	if len(options) > 0 {
+		for i, op := range options {
+			if e, ok := d.Effects[op]; ok {
+				options[i] = fmt.Sprintf("%s (tend: %s)", op, e)
+			}
+		}
 		fmt.Fprintf(w, "    options: %s\n", strings.Join(options, " | "))
 	}
 	if len(d.Answer) > 0 {
@@ -289,9 +294,15 @@ func (o owner) logs(ctx context.Context, runID string, follow bool) error {
 // write sends an owner write and explains a stale or failed answer. It
 // never retries a stale write: the owner decides again.
 func (o owner) write(ctx context.Context, op string, target protocol.Target, revision *int64, payload any) error {
+	_, err := o.writeResult(ctx, op, target, revision, payload)
+	return err
+}
+
+// writeResult is write that also returns the operation's result.
+func (o owner) writeResult(ctx context.Context, op string, target protocol.Target, revision *int64, payload any) (json.RawMessage, error) {
 	b, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	env := protocol.Envelope{RequestID: o.e.IDs.New(protocol.PrefixRequest), Operation: op, Target: target, ExpectedControlRevision: revision, Payload: b}
 	var res protocol.APIResponse
@@ -302,28 +313,28 @@ func (o owner) write(ctx context.Context, op string, target protocol.Target, rev
 		err = o.c.do(ctx, "POST", "/api/v1/ops", env, &res)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if o.json {
 		if err := o.printJSON(res); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	opr := res.Operation
 	if opr == nil {
-		return errors.New("the server sent no outcome")
+		return nil, errors.New("the server sent no outcome")
 	}
 	if opr.Status == protocol.OpFailed {
 		if res.Current != nil && !o.json {
 			fmt.Fprintln(o.e.Stdout, "The task changed since it was read; it is now:")
 			printSummary(o.e.Stdout, *res.Current)
 		}
-		return opr.Error
+		return nil, opr.Error
 	}
 	if !o.json {
 		fmt.Fprintf(o.e.Stdout, "%s: %s (request %s)\n", op, opr.Status, opr.RequestID)
 	}
-	return nil
+	return opr.Result, nil
 }
 
 func (o owner) decide(ctx context.Context, id, option, note string) error {
@@ -333,8 +344,18 @@ func (o owner) decide(ctx context.Context, id, option, note string) error {
 	}
 	for _, d := range s.Decisions {
 		if d.DecisionID == id {
-			return o.write(ctx, "decisions.respond", protocol.Target{Type: "decision", ID: id}, nil,
+			b, err := o.writeResult(ctx, "decisions.respond", protocol.Target{Type: "decision", ID: id}, nil,
 				protocol.AnswerDecisionPayload{Version: d.Version, Option: option, Text: note})
+			var res protocol.AnswerResult
+			if err != nil || o.json || json.Unmarshal(b, &res) != nil || res.Effect == nil {
+				return err
+			}
+			if res.Effect.Applied {
+				fmt.Fprintf(o.e.Stdout, "tend carried it out: %s\n", res.Effect.Effect)
+			} else {
+				fmt.Fprintf(o.e.Stdout, "tend did not carry it out (%s): %s\n", res.Effect.Effect, res.Effect.Reason)
+			}
+			return nil
 		}
 	}
 	return fmt.Errorf("decision %s is not open", id)

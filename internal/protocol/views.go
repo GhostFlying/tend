@@ -96,9 +96,12 @@ type DecisionView struct {
 	TaskID     string          `json:"task_id,omitempty"`
 	Question   string          `json:"question"`
 	Options    json.RawMessage `json:"options"`
-	Version    int64           `json:"version"`
-	Status     string          `json:"status"`
-	Answer     json.RawMessage `json:"answer,omitempty"`
+	// Effects maps the options tend carries out itself to what it does
+	// (D53).
+	Effects map[string]DecisionEffect `json:"effects,omitempty"`
+	Version int64                     `json:"version"`
+	Status  string                    `json:"status"`
+	Answer  json.RawMessage           `json:"answer,omitempty"`
 }
 
 // ArtifactDetail is an artifact with every verdict on it.

@@ -312,7 +312,7 @@ func TestDeltaGroupsChangesAndTiesRunsToTasks(t *testing.T) {
 		t.Errorf("the new decision and the unknown run need attention:\n%s", attention)
 	}
 	changes := sectionOf(delta.Text, "Changes")
-	if !strings.Contains(changes, `"option":"no"`) || !strings.Contains(changes, "now: "+id) {
+	if !strings.Contains(changes, `-> "no"`) || !strings.Contains(changes, "now: "+id) {
 		t.Errorf("the answer and the task's state among the changes:\n%s", changes)
 	}
 }
@@ -329,6 +329,8 @@ func TestClassify(t *testing.T) {
 		{"run.failed", nil, attention},
 		{"task.completed", nil, result},
 		{"decision.answered", nil, intent},
+		{"decision.answered", map[string]any{"answer": map[string]any{"option": "x", "effect": map[string]any{"effect": "cancel", "applied": true}}}, intent},
+		{"decision.answered", map[string]any{"answer": map[string]any{"option": "x", "effect": map[string]any{"effect": "cancel", "applied": false}}}, attention},
 		{"run.started", nil, progress},
 		{"artifact.submitted", nil, progress},
 	} {
@@ -338,5 +340,24 @@ func TestClassify(t *testing.T) {
 	}
 	if slices.Contains(told, "run.started") || !slices.Contains(told, "acceptance.submitted") {
 		t.Errorf("told = %v", told)
+	}
+}
+
+func TestDecisionEffectLines(t *testing.T) {
+	d := store.DecisionRow{DecisionID: "dec_1", TaskID: "task_1", Version: 1, Question: "Run failed. How should this task proceed?",
+		OptionsJSON: `["retry the implementation","revise the spec","cancel the task"]`,
+		EffectsJSON: `{"retry the implementation":"implement","cancel the task":"cancel"}`}
+	if got, want := decisionLine(d), "Options: retry the implementation (tend carries it out) / revise the spec / cancel the task (tend carries it out)"; !strings.HasSuffix(got, want) {
+		t.Errorf("decisionLine = %q, want suffix %q", got, want)
+	}
+	for answer, want := range map[string]string{
+		`{"option":"cancel the task","effect":{"effect":"cancel","applied":true}}`:                                                 `-> "cancel the task"; tend carried it out (cancel), nothing left to do`,
+		`{"option":"cancel the task","text":"too risky","effect":{"effect":"cancel","applied":false,"reason":"the task changed"}}`: `-> "cancel the task", note "too risky"; tend did not carry it out (cancel): the task changed. Act on the answer yourself`,
+		`{"option":"revise the spec"}`: `-> "revise the spec"`,
+	} {
+		d.AnswerJSON = answer
+		if got := answerLine(d); !strings.HasSuffix(got, want) {
+			t.Errorf("answerLine(%s) = %q, want suffix %q", answer, got, want)
+		}
 	}
 }

@@ -139,6 +139,10 @@ func Decision(x store.DecisionRow) protocol.DecisionView {
 	if x.AnswerJSON != "" {
 		v.Answer = json.RawMessage(x.AnswerJSON)
 	}
+	_ = json.Unmarshal([]byte(x.EffectsJSON), &v.Effects)
+	if len(v.Effects) == 0 {
+		v.Effects = nil
+	}
 	return v
 }
 

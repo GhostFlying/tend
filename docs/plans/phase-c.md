@@ -289,6 +289,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 | 7 | `feat: make the hosted main thread optional` | C9 |
 | 8 | `feat: assemble the agent add-on end to end` | C10 |
 | 9 | `docs: record phase c acceptance` | §8 的结论 |
+| 10 | `feat: carry out answers to tend's own decisions` | C11，D53，见 `docs/plans/decision-effects.md`（预验收发现） |
 
 每一步一个 PR，按 AGENTS.md §5 经过 codex review。C5 的结论如果改变了 D47 或 D48，先更新本计划再继续。
 

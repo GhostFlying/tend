@@ -100,19 +100,14 @@ func AcceptanceSubmitted(t Task, a AcceptanceFact) (Decision, error) {
 			d.Actions = append(d.Actions, implementAction(t))
 		} else {
 			t.Block = protocol.BlockBudgetExhausted
-			d.OpenDecisions = append(d.OpenDecisions, DecisionDraft{
-				Question: "The implement attempt budget is exhausted and acceptance still requires changes. How should this task proceed?",
-				Options:  []string{"raise the budget", "revise the spec", "cancel the task"},
-			})
+			d.OpenDecisions = append(d.OpenDecisions, budgetDecision(
+				"The implement attempt budget is exhausted and acceptance still requires changes. How should this task proceed?"))
 		}
 	case protocol.VerdictBlocked, protocol.VerdictInconclusive:
 		// An unusable acceptance environment is neither a defect in the
 		// artifact nor a pass.
 		t.Block = protocol.BlockAcceptanceEnvUnavailable
-		d.OpenDecisions = append(d.OpenDecisions, DecisionDraft{
-			Question: "Acceptance could not reach a verdict. How should this task proceed?",
-			Options:  []string{"retry acceptance", "fix the acceptance environment", "cancel the task"},
-		})
+		d.OpenDecisions = append(d.OpenDecisions, acceptanceDecision("Acceptance could not reach a verdict. How should this task proceed?"))
 	}
 	d.Task = t
 	return d, nil
@@ -162,23 +157,17 @@ func RunFailed(t Task, r RunFact, reason string) Decision {
 		t.Lifecycle = protocol.TaskQueued
 		t.Block = protocol.BlockWaitingDecision
 		return Decision{
-			Task:   t,
-			Events: []EventDraft{{Kind: "run.failed", Body: body}},
-			OpenDecisions: []DecisionDraft{{
-				Question: "The implementation run failed (" + reason + "). How should this task proceed?",
-				Options:  []string{"retry the implementation", "revise the spec", "cancel the task"},
-			}},
+			Task:          t,
+			Events:        []EventDraft{{Kind: "run.failed", Body: body}},
+			OpenDecisions: []DecisionDraft{failedImplementDecision("The implementation run failed (" + reason + "). How should this task proceed?")},
 		}
 	case r.Role == protocol.RoleAccept && t.Lifecycle == protocol.TaskAwaitingAcceptance &&
 		r.SpecVersion == t.SpecVersion && r.ArtifactID == t.CurrentArtifactID:
 		t.Block = protocol.BlockAcceptanceEnvUnavailable
 		return Decision{
-			Task:   t,
-			Events: []EventDraft{{Kind: "run.failed", Body: body}},
-			OpenDecisions: []DecisionDraft{{
-				Question: "The acceptance run failed (" + reason + "). How should this task proceed?",
-				Options:  []string{"retry acceptance", "fix the acceptance environment", "cancel the task"},
-			}},
+			Task:          t,
+			Events:        []EventDraft{{Kind: "run.failed", Body: body}},
+			OpenDecisions: []DecisionDraft{acceptanceDecision("The acceptance run failed (" + reason + "). How should this task proceed?")},
 		}
 	}
 	return Decision{Task: t, Events: []EventDraft{staleEvent("run.failed", body)}}

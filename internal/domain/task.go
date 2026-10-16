@@ -131,6 +131,50 @@ type EventDraft struct {
 type DecisionDraft struct {
 	Question string
 	Options  []string
+	// Effects maps the options tend carries out itself to what it does
+	// (D53). Options that need judgment, such as revising the spec, have
+	// none and are left to the main agent.
+	Effects map[string]protocol.DecisionEffect
+}
+
+// Options of the decisions the rules open.
+const (
+	optionRetryImplement = "retry the implementation"
+	optionRaiseBudget    = "raise the budget"
+	optionRetryAccept    = "retry acceptance"
+	optionReviseSpec     = "revise the spec"
+	optionFixAcceptEnv   = "fix the acceptance environment"
+	optionCancel         = "cancel the task"
+)
+
+// failedImplementDecision asks how to go on after an implementation could
+// not produce an artifact.
+func failedImplementDecision(question string) DecisionDraft {
+	return DecisionDraft{
+		Question: question,
+		Options:  []string{optionRetryImplement, optionReviseSpec, optionCancel},
+		Effects:  map[string]protocol.DecisionEffect{optionRetryImplement: protocol.EffectImplement, optionCancel: protocol.EffectCancel},
+	}
+}
+
+// budgetDecision asks how to go on after the implement budget ran out.
+func budgetDecision(question string) DecisionDraft {
+	return DecisionDraft{
+		Question: question,
+		Options:  []string{optionRaiseBudget, optionReviseSpec, optionCancel},
+		// Requesting another generation raises the budget to it.
+		Effects: map[string]protocol.DecisionEffect{optionRaiseBudget: protocol.EffectImplement, optionCancel: protocol.EffectCancel},
+	}
+}
+
+// acceptanceDecision asks how to go on after acceptance could not reach a
+// verdict.
+func acceptanceDecision(question string) DecisionDraft {
+	return DecisionDraft{
+		Question: question,
+		Options:  []string{optionRetryAccept, optionFixAcceptEnv, optionCancel},
+		Effects:  map[string]protocol.DecisionEffect{optionRetryAccept: protocol.EffectAccept, optionCancel: protocol.EffectCancel},
+	}
 }
 
 // Decision is the outcome of applying a command to a task.

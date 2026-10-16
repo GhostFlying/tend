@@ -11,6 +11,7 @@ import (
 )
 
 type eventView struct {
+	Seq      int64
 	ObjectID string
 	Body     map[string]any
 }
@@ -20,7 +21,7 @@ func (h *harness) events(kind string) []eventView {
 	h.t.Helper()
 	var out []eventView
 	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
-		rows, err := tx.Q().QueryContext(context.Background(), `SELECT object_id, body_json FROM events WHERE kind = ? ORDER BY event_seq`, kind)
+		rows, err := tx.Q().QueryContext(context.Background(), `SELECT event_seq, object_id, body_json FROM events WHERE kind = ? ORDER BY event_seq`, kind)
 		if err != nil {
 			return err
 		}
@@ -28,7 +29,7 @@ func (h *harness) events(kind string) []eventView {
 		for rows.Next() {
 			var v eventView
 			var body string
-			if err := rows.Scan(&v.ObjectID, &body); err != nil {
+			if err := rows.Scan(&v.Seq, &v.ObjectID, &body); err != nil {
 				return err
 			}
 			if err := json.Unmarshal([]byte(body), &v.Body); err != nil {

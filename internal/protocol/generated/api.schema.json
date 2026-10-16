@@ -126,6 +126,32 @@
       "title": "AnswerDecisionPayload",
       "type": "object"
     },
+    "AnswerResult": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {},
+        "decision_id": {
+          "type": "string"
+        },
+        "effect": {
+          "$ref": "#/definitions/EffectResult"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "decision_id",
+        "status",
+        "version",
+        "answer"
+      ],
+      "title": "AnswerResult",
+      "type": "object"
+    },
     "ArtifactDetail": {
       "additionalProperties": false,
       "properties": {
@@ -237,12 +263,27 @@
       "title": "CreateActionPayload",
       "type": "object"
     },
+    "DecisionEffect": {
+      "enum": [
+        "implement",
+        "accept",
+        "cancel"
+      ],
+      "title": "DecisionEffect",
+      "type": "string"
+    },
     "DecisionView": {
       "additionalProperties": false,
       "properties": {
         "answer": {},
         "decision_id": {
           "type": "string"
+        },
+        "effects": {
+          "additionalProperties": {
+            "$ref": "#/definitions/DecisionEffect"
+          },
+          "type": "object"
         },
         "options": {},
         "question": {
@@ -266,6 +307,26 @@
         "status"
       ],
       "title": "DecisionView",
+      "type": "object"
+    },
+    "EffectResult": {
+      "additionalProperties": false,
+      "properties": {
+        "applied": {
+          "type": "boolean"
+        },
+        "effect": {
+          "$ref": "#/definitions/DecisionEffect"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "effect",
+        "applied"
+      ],
+      "title": "EffectResult",
       "type": "object"
     },
     "Envelope": {
@@ -1067,6 +1128,9 @@
     },
     "AnswerDecisionPayload": {
       "$ref": "#/definitions/AnswerDecisionPayload"
+    },
+    "AnswerResult": {
+      "$ref": "#/definitions/AnswerResult"
     },
     "ArtifactDetail": {
       "$ref": "#/definitions/ArtifactDetail"
