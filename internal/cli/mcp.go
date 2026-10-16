@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -175,7 +176,24 @@ func (b *bridge) list(ctx context.Context) any {
 		return &rpcError{Code: -32603, Message: err.Error()}
 	}
 	var specs []protocol.ToolSpec
-	if err := c.do(ctx, "GET", "/api/v1/agent/tools", nil, &specs); err != nil {
+	// Answer from the cache well within the agents' own startup deadlines
+	// (Codex allows 30 seconds) when tend accepts but does not answer.
+	listCtx, cancel := context.WithTimeout(ctx, listTimeout)
+	err = c.do(listCtx, "GET", "/api/v1/agent/tools", nil, &specs)
+	cancel()
+	switch {
+	case err == nil:
+		_ = writeJSON(b.cachePath(), toolsCache{Server: c.server, Tools: specs}, 0o600)
+	case isTransport(err):
+		// Agents list tools once, when the session starts: without the
+		// last known list, a session started while tend is unreachable
+		// would have no tools even after tend is back.
+		var cached toolsCache
+		if readJSON(b.cachePath(), &cached) != nil || cached.Server != c.server || len(cached.Tools) == 0 {
+			return &rpcError{Code: -32603, Message: err.Error()}
+		}
+		specs = cached.Tools
+	default:
 		return &rpcError{Code: -32603, Message: err.Error()}
 	}
 	for _, s := range specs {
@@ -252,3 +270,16 @@ func (b *bridge) session(fromTurn, fromMeta string) string {
 	}
 	return fromMeta
 }
+
+// toolsCache is the last tool list tend gave this installation. Tool
+// definitions describe tend's interface, not the ledger, so keeping them
+// does not make the bridge cache ledger state (D46).
+type toolsCache struct {
+	Server string              `json:"server"`
+	Tools  []protocol.ToolSpec `json:"tools"`
+}
+
+// listTimeout bounds asking tend for the tools before using the cache.
+const listTimeout = 5 * time.Second
+
+func (b *bridge) cachePath() string { return filepath.Join(b.e.ConfigDir, "tools.json") }

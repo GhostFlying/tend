@@ -357,6 +357,71 @@ func TestMCPBridge(t *testing.T) {
 	}
 }
 
+func TestFault_MCPStartsWhileTendDown(t *testing.T) {
+	f := newFakeServer(t)
+	f.answer("GET /api/v1/agent/tools", []protocol.ToolSpec{{Name: "tasks_list", Description: "List tasks.", InputSchema: json.RawMessage(`{"type":"object"}`)}})
+	te := newTestEnv(t, f.srv.URL)
+	list := []any{
+		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{}},
+		map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+	}
+	type tools struct {
+		Tools []mcpTool `json:"tools"`
+	}
+	// Never reached: no tools to fall back on.
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+	down := newTestEnv(t, gone.URL)
+	if got := mcpSession(t, down, "claude", list...); got["2"].Error == nil {
+		t.Errorf("tools/list without tend or a cache = %+v", got["2"])
+	}
+
+	// Once tend has answered, a later session started while tend is down
+	// still gets the tools; calls fail until tend is back.
+	if got := result[tools](t, mcpSession(t, te, "claude", list...)["2"]); len(got.Tools) != 1 {
+		t.Fatalf("tools/list = %+v", got)
+	}
+	f.srv.Close()
+	te.out.Reset()
+	got := mcpSession(t, te, "claude", append(list,
+		map[string]any{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": map[string]any{"name": "tasks_list", "arguments": map[string]any{}}})...)
+	if l := result[tools](t, got["2"]); len(l.Tools) != 1 || l.Tools[0].Name != "tasks_list" {
+		t.Errorf("tools/list while tend is down = %+v", l)
+	}
+	if call := result[callResult](t, got["3"]); !call.IsError || !strings.Contains(call.Content[0].Text, "unreachable") {
+		t.Errorf("call while tend is down = %+v", call)
+	}
+	// A tend that accepts but does not answer gets the cache in time.
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(20 * time.Second):
+		}
+	}))
+	defer hung.Close()
+	if err := te.saveConfig(config{Server: hung.URL}, credentials{ClientID: "cli-0011223344556677", Agent: "agent-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(te.ConfigDir, "tools.json"), toolsCache{Server: hung.URL, Tools: []protocol.ToolSpec{{Name: "tasks_list"}}}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	te.out.Reset()
+	start := time.Now()
+	if l := result[tools](t, mcpSession(t, te, "claude", list...)["2"]); len(l.Tools) != 1 || time.Since(start) > listTimeout+3*time.Second {
+		t.Errorf("tools/list from a hung tend = %+v after %v", l, time.Since(start))
+	}
+
+	// The cache belongs to the server it came from.
+	te2 := newTestEnv(t, gone.URL)
+	te2.ConfigDir = te.ConfigDir
+	if err := te2.saveConfig(config{Server: gone.URL + "/other"}, credentials{ClientID: "cli-0011223344556677", Agent: "agent-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mcpSession(t, te2, "claude", list...); got["2"].Error == nil {
+		t.Errorf("tools/list for another server used the cache: %+v", got["2"])
+	}
+}
+
 func TestMCPSessionOfClaudeAndWorkers(t *testing.T) {
 	f := newFakeServer(t)
 	f.answer("GET /api/v1/agent/tools", []protocol.ToolSpec{{Name: "tasks_list", InputSchema: json.RawMessage(`{}`)}})
@@ -593,6 +658,31 @@ func TestSetupTraexQuotedPath(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(te.vars["TRAE_HOME"], "traecli.toml"))
 	if n := strings.Count(string(b), "[[hooks.SessionStart]]"); n != 1 {
 		t.Errorf("%d SessionStart hooks after two runs:\n%s", n, b)
+	}
+}
+
+func TestWriteJSONConcurrently(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tools.json")
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() {
+			for range 20 {
+				if err := writeJSON(path, map[string]int{"writer": i}, 0o600); err != nil {
+					t.Error(err)
+				}
+				var v map[string]int
+				if err := readJSON(path, &v); err != nil {
+					t.Errorf("read while writing: %v", err)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("file after writes: %v, %v", st, err)
+	}
+	if left, _ := filepath.Glob(path + ".*.tmp"); len(left) != 0 {
+		t.Errorf("temporary files left: %v", left)
 	}
 }
 
