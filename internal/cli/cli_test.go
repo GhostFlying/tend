@@ -516,7 +516,7 @@ func TestSetupClaude(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	original := "{\n  \"model\": \"opus\",\n  \"permissions\": {\n    \"allow\": [\"Bash(ls:*)\"]\n  },\n  \"hooks\": {\n    \"Stop\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"say done\"}]}]\n  }\n}\n"
+	original := "{\n  \"model\": \"opus\",\n  \"permissions\": {\n    \"allow\": [\"Bash(ls:*)\"]\n  },\n  \"hooks\": {\n    \"Stop\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"[ -x /bin/say ] && say done < /dev/null\"}]}]\n  }\n}\n"
 	if err := os.WriteFile(settings, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -528,6 +528,10 @@ func TestSetupClaude(t *testing.T) {
 	}
 	if !strings.Contains(te.out.String(), "+ ") || !strings.Contains(te.out.String(), "claude mcp add --scope user tend -- /opt/tend/bin/tend mcp --agent claude") {
 		t.Errorf("setup output:\n%s", te.out)
+	}
+	// The owner's shell command keeps &, < and > as written.
+	if strings.Contains(te.out.String(), `\u00`) {
+		t.Errorf("setup escapes the owner's own hook:\n%s", te.out)
 	}
 	if code := te.main("setup", "claude", "--write"); code != exitOK {
 		t.Fatalf("setup --write = %d: %s", code, te.errOut)
@@ -542,7 +546,7 @@ func TestSetupClaude(t *testing.T) {
 	}
 	hooks, _ := root.child("hooks")
 	if strings.Join(hooks.keys, ",") != "Stop,SessionStart,UserPromptSubmit" || !strings.Contains(string(b), `"/opt/tend/bin/tend hook claude user-prompt-submit"`) ||
-		!strings.Contains(string(b), `"mcp__tend__*"`) || !strings.Contains(string(b), `"say done"`) {
+		!strings.Contains(string(b), `"mcp__tend__*"`) || !strings.Contains(string(b), `"[ -x /bin/say ] && say done < /dev/null"`) {
 		t.Errorf("settings after setup:\n%s", b)
 	}
 	if len(te.runs) != 3 || strings.Join(te.runs[2], " ") != "claude mcp add --scope user tend -- /opt/tend/bin/tend mcp --agent claude" {
@@ -779,5 +783,11 @@ func TestTailnetHostsSkipTheProxy(t *testing.T) {
 	req, _ := http.NewRequest("GET", "https://tend.example-tailnet.ts.net/api/v1/session", nil)
 	if u, err := Transport().Proxy(req); u != nil || err != nil {
 		t.Errorf("proxy for a tailnet server = %v, %v", u, err)
+	}
+}
+
+func TestDiffShowsOldLinesFirst(t *testing.T) {
+	if got, want := diff("a\nb\nc\n", "a\nx\nc\n"), "  a\n- b\n+ x\n  c\n  \n"; got != want {
+		t.Errorf("diff = %q, want %q", got, want)
 	}
 }
