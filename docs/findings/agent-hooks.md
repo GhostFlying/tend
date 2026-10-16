@@ -82,7 +82,7 @@
    - Claude Code：settings 的 SessionStart 和 UserPromptSubmit hook；`claude mcp add` 添加 `tend mcp --agent claude`；permissions 放行 `mcp__tend__*`。
    - Codex / traex：`[mcp_servers.tend]`，加上 `env_vars = ["TEND_ADDON"]` 和 `default_tools_approval_mode = "approve"`；两个 hook 带 `additionalContextLimit = 0`；提示用户首次启动 TUI 时信任这两个 hook。
    - hook 命令保持稳定（例如 `tend hook codex session-start`，不带版本号或临时路径），否则每次升级都要重新信任。
-6. **会话归属可以确定**：工具调用都能带上会话 ID。是否在增量里过滤本会话自己的写入，按 owner 的决定暂不过滤；现在的结论是可以做到。
+6. **会话归属可以确定**：工具调用都能带上会话 ID。因此增量里过滤掉本会话自己的写入（owner 于 2026-10-16 决定，规则见计划 §4.3）。
 7. **worker 不接入（`TEND_ADDON=off`）**：
    - hook 在三者中都能看到这个变量；
    - MCP 在 Codex 和 traex 中需要 `env_vars` 转发，这正是 `tend setup` 必须写入的配置。
