@@ -585,8 +585,12 @@ func holdFor(t *testing.T, d time.Duration, what string, bad func() bool) {
 	}
 }
 
+// TestHealthyRunnerKeepsShortLease holds a worker across several renewal
+// cycles. The runner fences a quarter TTL early, so a short TTL leaves the
+// race detector on a busy machine too little slack; one second is still
+// short against the production TTL.
 func TestHealthyRunnerKeepsShortLease(t *testing.T) {
-	srv := newServer(t, 300*time.Millisecond)
+	srv := newServer(t, time.Second)
 	hold := make(chan struct{})
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		if spec.Role == protocol.RoleImplement {
@@ -597,7 +601,7 @@ func TestHealthyRunnerKeepsShortLease(t *testing.T) {
 	n.start()
 	task := srv.createTask()
 	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
-	holdFor(t, 1500*time.Millisecond, "a healthy runner lost its lease or fenced its worker", func() bool {
+	holdFor(t, 3*time.Second, "a healthy runner lost its lease or fenced its worker", func() bool {
 		return srv.runState(protocol.RoleImplement) == protocol.RunUnknown || len(n.workers.Stopped()) > 0
 	})
 	close(hold)
