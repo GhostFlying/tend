@@ -1,6 +1,6 @@
-// Package api is the owner's HTTP API (D43): requests from the web client,
-// authenticated as an owner (D42). Writes go through app like every other
-// caller's; reads use views.
+// Package api is the owner's HTTP API: requests from the tend CLI and the
+// agents the owner works in, authenticated with owner tokens (D49). Writes
+// go through app like every other caller's; reads use views.
 package api
 
 import (
@@ -23,8 +23,8 @@ const maxBody = 1 << 20
 type Config struct {
 	// Owners are the tailnet logins allowed to use the API.
 	Owners []string
-	// SessionTTL is how long a session lasts. Default 30 days.
-	SessionTTL time.Duration
+	// TokenTTL is how long a token lasts. Default 30 days.
+	TokenTTL time.Duration
 	// Now is the clock. Default time.Now.
 	Now func() time.Time
 }
@@ -40,15 +40,15 @@ type Server struct {
 }
 
 // New returns a Server. The store is used for reads only; secret is the
-// server secret sessions are signed with.
+// server secret tokens are signed with.
 func New(a *app.App, s *store.Store, whois netx.WhoIs, secret []byte, cfg Config, log *slog.Logger) *Server {
-	if cfg.SessionTTL <= 0 {
-		cfg.SessionTTL = 30 * 24 * time.Hour
+	if cfg.TokenTTL <= 0 {
+		cfg.TokenTTL = 30 * 24 * time.Hour
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Server{app: a, store: s, whois: whois, key: sessionKey(secret), cfg: cfg, log: log}
+	return &Server{app: a, store: s, whois: whois, key: tokenKey(secret), cfg: cfg, log: log}
 }
 
 // Handler returns the API's routes, all under /api/v1/.
