@@ -82,7 +82,7 @@ D45、D50、D51 已经写入 design.md。原计划提议的 D40（Web 工程）�
   2. WhoIs 的登录名在 `owners` 里，并且等于 token 里的登录名；
   3. 按 scope 得到 Principal：
      - `owner`：`{kind: owner, subject: login, client: client_id}`；
-     - `agent`：`{kind: main_agent, subject: client_id, agent: <claude|codex|traex>, thread: <session_id>}`。agent 种类由 hook 和 MCP 桥在请求里带上（桥从启动参数得知）；会话 ID 只在调用方知道时填写，只用作来源记录。MCP 桥不一定知道会话（§2），所以 `protocol.Principal` 为 main_agent 新增 `Agent` 字段，`Validate` 改为：托管来源要求 subject（harness 实例）和 thread，外挂来源要求 subject（client_id）和 agent，thread 可以为空。
+     - `agent`：`{kind: main_agent, subject: client_id, agent: <claude|codex|traex>, thread: <session_id>}`。agent 种类由 hook 和 MCP 桥在请求里带上（桥从启动参数得知）；会话 ID 只在调用方知道时填写，用作来源记录，并用来在增量里过滤本会话自己的写入（§4.3）。MCP 桥不一定知道会话（§2），所以 `protocol.Principal` 为 main_agent 新增 `Agent` 字段，`Validate` 改为：托管来源要求 subject（harness 实例）和 thread，外挂来源要求 subject（client_id）和 agent，thread 可以为空。
 - **吊销**：本阶段只能通过轮换服务端密钥整体吊销，单个 token 的吊销等需要时再加。
 - **说明**：两个 token 都在同一台机器上，agent 能读到 owner token。scope 的作用是防止误操作，不是安全边界（D39：agent 视为可信）。
 - **删除**：cookie、`X-Tend-Client` 校验和对应的测试。
@@ -158,13 +158,18 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 | --- | --- | --- |
 | 需要处理 | `decision.opened`；`run.failed`、`run.unknown`、`run.lost`；结论不是 passed 的 `acceptance.submitted`；`outbox.failed`、`outbox.unknown` | 总是发，放在受保护的段落，超出预算时最后才截断 |
 | 结果 | `task.completed`、`task.cancelled`；结论是 passed 的 `acceptance.submitted` | 发 |
-| 账本意图的变化 | `task.created`、`task.spec_updated`、`task.priority_changed`、`task.control_changed`、`task.implement_requested`、`task.acceptance_requested`、`decision.answered` | 发，每项一行。它们可能来自另一个会话或 CLI；本会话自己写的也会出现，因为 tend 不一定知道工具调用来自哪个会话（C5 确认后可以过滤掉） |
+| 账本意图的变化 | `task.created`、`task.spec_updated`、`task.priority_changed`、`task.control_changed`、`task.implement_requested`、`task.acceptance_requested`、`decision.answered` | 发，每项一行。它们可能来自另一个会话或 CLI；本会话自己写入引起的不发（见下） |
 | 进度 | `run.started`、`run.assigned`、`run.observed`、`run.released`、`run.reassigned`、`run.reconciled`、`workspace.ready`、`artifact.submitted`、日志 | 不发，需要时用工具读 |
 
 其他规则：
 
 - **预算**：增量最多约 4000 字符，完整快照最多约 8000 字符（C5：Claude Code 超过约 1 万字符就改为存文件、只注入预览，Codex 和 traex 默认 2,500 token）。超出时先压缩“账本意图的变化”和“结果”两类，改为“另有 N 项变化，用 `tasks_list` 查看”；“需要处理”一类不省略。
 - **多个会话**：每个会话有自己的水位，互不影响。
+- **本会话自己的写入不发**：本会话通过工具写入时，工具结果里已经有结果，不必再提醒一次。
+  - 判断依据：事件的 `request_id` 对应的请求记录里，调用方是 main_agent，agent 种类和会话 ID 都与当前会话相同；
+  - C5 确认三个 agent 的工具调用都能带上会话 ID（§5 的 `tend mcp`）；某次调用没带会话 ID 时，它引起的事件照常发给所有会话；
+  - 只过滤这次写入直接产生的事件。之后由调度、runner 或验收引起的变化（例如 run 失败、验收结论）来自别的请求，照常发；
+  - 完整快照不过滤，它描述的是当前状态，不是变化。
 - **过时的写入**：不依赖提醒。模型基于旧状态写入时，服务端返回 `stale_revision` 和当前状态（design.md §2.2 第 5 条）。
 
 相比阶段 B 现有的相关事件列表（`contextbuilder.relevant`），这里去掉了 `run.started`。
@@ -301,6 +306,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 | `TestFault_HookServerDown` | 服务端不可达：hook 在超时内退出 0，输出提示，不阻塞输入 | C8 |
 | `TestFault_ProgressNotInjected` | 只有进度事件（run 开始、心跳、日志）时，UserPromptSubmit 不返回内容；有需要处理的事件时超出预算也不省略 | C7 |
 | `TestFault_HostedMainThreadDisabled` | 没有配置 `main_agent` 时服务端照常运行，对话操作被拒绝且不产生副作用；配置了时，阶段 B 的托管闭环测试仍然通过 | C9 |
+| `TestFault_OwnWritesFiltered` | 会话 A 建任务后，A 的下一次增量不含这次建任务，会话 B 的增量含；之后这个任务的 run 失败，A 和 B 都收到；不带会话 ID 的调用引起的事件两边都收到 | C7 |
 | `TestFault_CompactRebuildsBaseline` | 压缩后的 SessionStart 作废基线，返回完整快照；之后的增量从新水位算起 | C7 |
 | `TestFault_WorkerIgnoresAddon` | 用户级安装了 `tend setup` 生成的 MCP 和 hook 配置时，worker 的 app-server 带 `TEND_ADDON=off`：经过真实的子进程链，hook 不发请求、不注入上下文，MCP 不暴露工具（需要 traex，标 `integration`） | C8 |
 | `TestFault_ToolWithoutSession` | MCP 调用不带会话 ID：照常执行，来源记录 client 和 agent 种类 | C7 |
