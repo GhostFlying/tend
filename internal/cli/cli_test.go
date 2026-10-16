@@ -78,6 +78,7 @@ type testEnv struct {
 	out, errOut *bytes.Buffer
 	vars        map[string]string
 	runs        [][]string
+	mcpAdded    bool
 }
 
 func newTestEnv(t *testing.T, server string) *testEnv {
@@ -93,8 +94,11 @@ func newTestEnv(t *testing.T, server string) *testEnv {
 		LookPath:   func(string) (string, error) { return "", os.ErrNotExist },
 		Run: func(_ context.Context, name string, args ...string) error {
 			te.runs = append(te.runs, append([]string{name}, args...))
-			if len(args) > 1 && args[1] == "get" {
-				return os.ErrNotExist // nothing is configured yet
+			switch {
+			case len(args) > 1 && args[1] == "get" && !te.mcpAdded:
+				return os.ErrNotExist
+			case len(args) > 1 && args[1] == "add":
+				te.mcpAdded = true
 			}
 			return nil
 		},
@@ -449,7 +453,7 @@ func TestSetupClaude(t *testing.T) {
 	if code := te.main("setup", "claude"); code != exitOK {
 		t.Fatalf("setup = %d: %s", code, te.errOut)
 	}
-	if b, _ := os.ReadFile(settings); string(b) != original || len(te.runs) != 0 {
+	if b, _ := os.ReadFile(settings); string(b) != original || len(te.runs) != 1 || strings.Join(te.runs[0], " ") != "claude mcp get tend" {
 		t.Fatalf("setup without --write changed something: %s, ran %v", b, te.runs)
 	}
 	if !strings.Contains(te.out.String(), "+ ") || !strings.Contains(te.out.String(), "claude mcp add --scope user tend -- /opt/tend/bin/tend mcp --agent claude") {
@@ -471,7 +475,7 @@ func TestSetupClaude(t *testing.T) {
 		!strings.Contains(string(b), `"mcp__tend__*"`) || !strings.Contains(string(b), `"say done"`) {
 		t.Errorf("settings after setup:\n%s", b)
 	}
-	if len(te.runs) != 2 || strings.Join(te.runs[1], " ") != "claude mcp add --scope user tend -- /opt/tend/bin/tend mcp --agent claude" {
+	if len(te.runs) != 3 || strings.Join(te.runs[2], " ") != "claude mcp add --scope user tend -- /opt/tend/bin/tend mcp --agent claude" {
 		t.Errorf("ran %v", te.runs)
 	}
 	// Running it again changes nothing.
@@ -481,6 +485,10 @@ func TestSetupClaude(t *testing.T) {
 	}
 	if again, _ := os.ReadFile(settings); string(again) != string(b) {
 		t.Errorf("second setup rewrote the settings:\n%s", again)
+	}
+	te.out.Reset()
+	if code := te.main("setup", "claude"); code != exitOK || !strings.Contains(te.out.String(), "already set up") || strings.Contains(te.out.String(), "--write") {
+		t.Errorf("setup once set up = %d:\n%s", code, te.out)
 	}
 }
 
@@ -517,11 +525,74 @@ func TestSetupCodexAndTraex(t *testing.T) {
 	if code := te.main("setup", "traex", "--write"); code != exitOK {
 		t.Fatalf("setup traex = %d: %s", code, te.errOut)
 	}
-	if b, _ := os.ReadFile(path); strings.Count(string(b), "[mcp_servers.tend]") != 1 {
-		t.Errorf("traecli.toml:\n%s", b)
+	// traex reads hooks only from traecli.toml.
+	want := "[[hooks.UserPromptSubmit]]\n[[hooks.UserPromptSubmit.hooks]]\ntype = \"command\"\ncommand = \"/opt/tend/bin/tend hook traex user-prompt-submit\"\ntimeout = 5\nadditionalContextLimit = 0\n"
+	traecli, _ := os.ReadFile(path)
+	if strings.Count(string(traecli), "[mcp_servers.tend]") != 1 || !strings.Contains(string(traecli), want) || !strings.Contains(string(traecli), "tend hook traex session-start") {
+		t.Errorf("traecli.toml:\n%s", traecli)
 	}
-	if _, err := os.Stat(filepath.Join(te.vars["TRAE_HOME"], "hooks.json")); err != nil {
-		t.Errorf("traex hooks.json: %v", err)
+	if _, err := os.Stat(filepath.Join(te.vars["TRAE_HOME"], "hooks.json")); err == nil {
+		t.Error("setup wrote a hooks.json traex does not read")
+	}
+	te.out.Reset()
+	if code := te.main("setup", "traex", "--write"); code != exitOK || !strings.Contains(te.out.String(), "already has tend's configuration") {
+		t.Errorf("second setup traex = %d:\n%s", code, te.out)
+	}
+	if again, _ := os.ReadFile(path); string(again) != string(traecli) {
+		t.Errorf("second setup rewrote traecli.toml:\n%s", again)
+	}
+	te.out.Reset()
+	if code := te.main("setup", "traex"); code != exitOK || !strings.Contains(te.out.String(), "already set up") {
+		t.Errorf("setup traex once set up = %d:\n%s", code, te.out)
+	}
+
+	// Hooks defined as a plain array cannot take appended tables: the
+	// owner merges them by hand.
+	conflict := "[hooks]\nSessionStart = []\n"
+	if err := os.WriteFile(path, []byte(conflict), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	te.out.Reset()
+	if code := te.main("setup", "traex", "--write"); code != exitOK || !strings.Contains(te.out.String(), "add tend's by hand") {
+		t.Errorf("setup traex with array hooks = %d:\n%s", code, te.out)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "[[hooks.") || !strings.Contains(string(b), "[mcp_servers.tend]") {
+		t.Errorf("traecli.toml with array hooks:\n%s", b)
+	}
+}
+
+func TestHookConflict(t *testing.T) {
+	for config, want := range map[string]bool{
+		"":                             false,
+		"[features]\nhooks = true\n":   false,
+		"[[hooks.Stop]]\nhooks = []\n": false,
+		"[[hooks.SessionStart]]\n[[hooks.SessionStart.hooks]]\ncommand = \"x\"\n": false,
+		"[hooks.state.\"a:b\"]\ntrusted_hash = \"h\"\n":                           false,
+		"[hooks]\nSessionStart = []\n":                                            true,
+		"[hooks]\n'UserPromptSubmit' = []\n":                                      true,
+		"[ hooks ]\n\"SessionStart\" = []\n":                                      true,
+		"hooks.SessionStart = []\n":                                               true,
+		"hooks = { SessionStart = [] }\n":                                         true,
+		"[hooks.SessionStart]\nx = 1\n":                                           true,
+	} {
+		if got := hookConflict(config); got != want {
+			t.Errorf("hookConflict(%q) = %v, want %v", config, got, want)
+		}
+	}
+}
+
+func TestSetupTraexQuotedPath(t *testing.T) {
+	te := newTestEnv(t, "")
+	te.Executable = `/opt/te"nd/bin/tend`
+	te.vars["TRAE_HOME"] = filepath.Join(te.Home, "trae-home")
+	for range 2 {
+		if code := te.main("setup", "traex", "--write"); code != exitOK {
+			t.Fatalf("setup traex = %d: %s", code, te.errOut)
+		}
+	}
+	b, _ := os.ReadFile(filepath.Join(te.vars["TRAE_HOME"], "traecli.toml"))
+	if n := strings.Count(string(b), "[[hooks.SessionStart]]"); n != 1 {
+		t.Errorf("%d SessionStart hooks after two runs:\n%s", n, b)
 	}
 }
 

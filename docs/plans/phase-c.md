@@ -211,7 +211,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
   - 默认不改用户的配置文件，`--write` 时才写入，写入前显示 diff；
   - 各 agent 的配置内容（依据 `docs/findings/agent-hooks.md`）：
     - Claude Code：`settings.json`（`$CLAUDE_CONFIG_DIR` 或 `~/.claude`）里的 SessionStart 和 UserPromptSubmit hook，permissions 放行 `mcp__tend__*`；MCP 用 `claude mcp add --scope user tend -- tend mcp --agent claude` 添加，`--write` 时先用 `claude mcp get tend` 检查，已有就不加；
-    - Codex / traex：hook 写在配置目录的 `hooks.json`（Codex 是 `$CODEX_HOME` 或 `~/.codex`，traex 是 `$TRAE_HOME` 或 `~/.trae`），两个 hook 带 `additionalContextLimit = 0`（预算由 tend 控制）；MCP 是追加到 `config.toml` / `traecli.toml` 的 `[mcp_servers.tend]`，带 `env_vars = ["TEND_ADDON", "TEND_CONFIG_DIR"]`（后者让 MCP 和 hook 用同一个配置目录）和 `default_tools_approval_mode = "approve"`，已有这一节就不动。两者的 `mcp add` 命令不能设置 `env_vars`，所以直接写配置文件；提示用户首次启动 TUI 时信任这两个 hook；
+    - Codex / traex：Codex 的 hook 写在配置目录（`$CODEX_HOME` 或 `~/.codex`）的 `hooks.json`；traex 只读 `traecli.toml`（`$TRAE_HOME` 或 `~/.trae`）里的 `[[hooks.<Event>]]` 表，已经用其他写法定义了这两个事件时不写，提示手动合并。两个 hook 带 `additionalContextLimit = 0`（预算由 tend 控制）；MCP 是追加到 `config.toml` / `traecli.toml` 的 `[mcp_servers.tend]`，带 `env_vars = ["TEND_ADDON", "TEND_CONFIG_DIR"]`（后者让 MCP 和 hook 用同一个配置目录）和 `default_tools_approval_mode = "approve"`，已有这一节就不动。两者的 `mcp add` 命令不能设置 `env_vars`，所以直接写配置文件；提示用户首次启动 TUI 时信任这两个 hook；
     - 写入保留原文件的键顺序，重复执行不会重复添加；
   - hook 命令保持稳定（`tend hook <agent> <event>`，不带版本号或临时路径）：Codex 和 traex 按命令的 hash 记录信任，命令一变就要重新信任。
 - **owner 命令**（owner token）：
