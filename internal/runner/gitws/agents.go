@@ -42,8 +42,9 @@ func writeAgentsFile(root string, as protocol.Assignment, st state) error {
 	if as.Role == protocol.RoleAccept {
 		b.WriteString("- You are reviewing the work in this task's workspace, as the implementation left it. Judge whether the task is done; do not fix it.\n")
 		b.WriteString("- You may build and run tests, but do not edit the code, clean the working trees, or commit, switch branches or otherwise change git history: the next implementation continues from here.\n")
+		b.WriteString("- The commits on the task branches are tend's records of each implementation run, not part of the work: judge the changes, not how they were committed. The repository's rules for commit messages and delivery apply when the work is delivered, which is not this task's job.\n")
 	} else {
-		b.WriteString("- Make your changes in the working trees. Do not commit, switch or create branches, rebase, or add worktrees: tend records your changes when the run ends, and a changed history fails the run.\n")
+		b.WriteString("- Make your changes in the working trees. Do not commit, switch or create branches, rebase, or add worktrees: tend records your changes when the run ends, and a changed history fails the run. The repository's rules for commit messages and delivery apply when the work is delivered, which is not this task's job.\n")
 	}
 	b.WriteString("- Keep temporary copies and experiments out of the repositories; use the scratch directory you were given.\n")
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(b.String()), 0o644); err != nil {
