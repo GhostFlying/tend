@@ -71,6 +71,8 @@ var tools = []tool{
 	{"tasks_read", "Read one task in full: spec, actions, runs, artifacts, verdicts and decisions.", (*Service).tasksRead},
 	{"tasks_create", "Create a task from an explicit request of the owner.", (*Service).tasksCreate},
 	{"tasks_update_intent", "Change a task's spec or priority as the owner asked.", (*Service).tasksUpdateIntent},
+	{"tasks_set_control", "Pause a task, or hand a paused task back to tend, as the owner asked. A paused task starts nothing new and its running work stops.", (*Service).tasksSetControl},
+	{"tasks_cancel", "Cancel a task as the owner asked. Its running work stops and it never runs again.", (*Service).tasksCancel},
 	{"actions_create", "Request another implementation or acceptance after the owner decided to retry.", (*Service).actionsCreate},
 	{"decisions_open", "Ask the owner a question that blocks a decision you cannot make.", (*Service).decisionsOpen},
 	{"decisions_resolve", "Record the answer the owner gave you to an open decision.", (*Service).decisionsResolve},
@@ -302,6 +304,43 @@ func (s *Service) tasksUpdateIntent(ctx context.Context, c Call) (any, error) {
 		payload["priority"] = *a.Priority
 	}
 	return s.execute(ctx, c, "tasks.update_intent", protocol.Target{Type: "task", ID: a.TaskID}, &a.ExpectedControlRevision, a.Reason, payload, app.UpdateIntent{})
+}
+
+type controlArgs struct {
+	TaskID                  string               `json:"task_id"`
+	ExpectedControlRevision int64                `json:"expected_control_revision"`
+	Mode                    protocol.ControlMode `json:"mode"`
+	Reason                  string               `json:"reason"`
+}
+
+func (s *Service) tasksSetControl(ctx context.Context, c Call) (any, error) {
+	var a controlArgs
+	if err := decode(c.Arguments, &a); err != nil {
+		return nil, err
+	}
+	if err := requireMessage(c); err != nil {
+		return nil, err
+	}
+	return s.execute(ctx, c, "control.set_mode", protocol.Target{Type: "task", ID: a.TaskID}, &a.ExpectedControlRevision, a.Reason,
+		protocol.SetControlModePayload{Mode: a.Mode}, app.SetControlMode{})
+}
+
+type cancelArgs struct {
+	TaskID                  string `json:"task_id"`
+	ExpectedControlRevision int64  `json:"expected_control_revision"`
+	Reason                  string `json:"reason"`
+}
+
+func (s *Service) tasksCancel(ctx context.Context, c Call) (any, error) {
+	var a cancelArgs
+	if err := decode(c.Arguments, &a); err != nil {
+		return nil, err
+	}
+	if err := requireMessage(c); err != nil {
+		return nil, err
+	}
+	return s.execute(ctx, c, "tasks.cancel", protocol.Target{Type: "task", ID: a.TaskID}, &a.ExpectedControlRevision, a.Reason,
+		map[string]any{}, app.CancelTask{})
 }
 
 type actionArgs struct {
