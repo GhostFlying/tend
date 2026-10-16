@@ -110,6 +110,11 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
+	// The call does not depend on the binding: a session that cannot be
+	// bound now still gets its answer and is bound by a later call.
+	if err := s.app.BindAgentSession(r.Context(), p); err != nil {
+		s.log.WarnContext(r.Context(), "binding an agent session failed", "agent", p.Agent, "request_id", req.RequestID, "err", err)
+	}
 	res := s.tools.Handle(r.Context(), tools.Call{Principal: p, RequestID: req.RequestID, Tool: r.PathValue("name"), Arguments: req.Arguments})
 	writeJSON(w, http.StatusOK, protocol.ToolResponse{Success: res.Success, Content: res.Text})
 }

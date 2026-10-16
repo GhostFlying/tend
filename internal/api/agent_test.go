@@ -22,7 +22,17 @@ type session struct {
 	id    string
 }
 
+// session returns an agent session that has used tend, so its hooks get
+// context (D54).
 func (e *env) session(agent protocol.AgentKind, id string) *session {
+	e.t.Helper()
+	s := e.unboundSession(agent, id)
+	s.call("repos_list", map[string]any{}, "")
+	return s
+}
+
+// unboundSession returns an agent session that has not called a tend tool.
+func (e *env) unboundSession(agent protocol.AgentKind, id string) *session {
 	e.t.Helper()
 	return &session{e: e, tok: e.login(protocol.ScopeAgent), agent: agent, id: id}
 }
@@ -169,6 +179,63 @@ func TestHookSnapshotAndRetry(t *testing.T) {
 	}
 	if got := s.prompt(); got != "" {
 		t.Errorf("next prompt with nothing new:\n%s", got)
+	}
+}
+
+// TestFault_UnboundSessionIgnored: an agent's other sessions, such as a
+// background session that consolidates memories, run the same hooks. tend
+// gives them nothing and records nothing until the session calls a tend
+// tool (D54).
+func TestFault_UnboundSessionIgnored(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	e.task("fix windows")
+	s := e.unboundSession(protocol.AgentCodex, "memories")
+	if got := s.start("startup") + s.prompt(); got != "" {
+		t.Errorf("an unbound session got context:\n%s", got)
+	}
+	for _, q := range []string{`SELECT COUNT(*) FROM agent_sessions`, `SELECT COUNT(*) FROM thread_baselines`,
+		`SELECT COUNT(*) FROM context_packets`, `SELECT COUNT(*) FROM request_records WHERE operation = 'agent.hook'`} {
+		if n := e.count(q); n != 0 {
+			t.Errorf("%s = %d for an unbound session", q, n)
+		}
+	}
+	// Its first tool call binds it; the next hook has no baseline yet and
+	// gets the whole ledger.
+	s.call("tasks_list", map[string]any{}, "")
+	if got := s.prompt(); !strings.Contains(got, "kind=full") || !strings.Contains(got, "fix windows") {
+		t.Errorf("first hook after binding:\n%s", got)
+	}
+}
+
+// TestFault_FirstUseKeepsResults: a new session uses tend, creates a task
+// and the task ends before the session's next prompt. That prompt gets a
+// full snapshot, which lists only unfinished tasks; the result is told
+// with it rather than lost.
+func TestFault_FirstUseKeepsResults(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	owner := e.login(protocol.ScopeOwner)
+	s := e.unboundSession(protocol.AgentClaude, "sess-a")
+	s.start("startup")
+	s.call("tend_context", map[string]any{}, "")
+	id := created(t, s.call("tasks_create", createArgs("fix windows", "fix-windows"), ""))
+	decision := e.decision(e.task("fix linux"))
+	e.op(owner, e.envelope("decisions.respond", protocol.Target{Type: "decision", ID: decision}, nil, protocol.AnswerDecisionPayload{Version: 1, Option: "a"}))
+	rev := int64(1)
+	e.op(owner, e.envelope("tasks.cancel", protocol.Target{Type: "task", ID: id}, &rev, map[string]any{}))
+	got := s.prompt()
+	unseen := sectionOf(got, "Since your last tend context")
+	if !strings.Contains(got, "kind=full") || !strings.Contains(unseen, id+" task.cancelled") || !strings.Contains(unseen, "answered by owner: "+decision) {
+		t.Errorf("first prompt after the task ended and the decision was answered:\n%s", got)
+	}
+	// Questions opened meanwhile are all told, whatever the budget.
+	if attention := sectionOf(got, "Since your last tend context, needs attention"); !strings.Contains(attention, "opened: "+decision) {
+		t.Errorf("the new decision is not among what needs attention:\n%s", got)
+	}
+	// Told once: a later full snapshot does not repeat them.
+	if got := s.start("compact"); strings.Contains(got, "task.cancelled") || strings.Contains(got, "answered by") {
+		t.Errorf("told again:\n%s", got)
 	}
 }
 

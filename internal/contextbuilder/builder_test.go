@@ -377,3 +377,14 @@ func TestActor(t *testing.T) {
 		}
 	}
 }
+
+func TestUnseenAttentionSurvivesTheBudget(t *testing.T) {
+	s := Snapshot{PacketID: "pkt_1", Epoch: 2, Full: true, Addon: true,
+		Tasks:           []string{strings.Repeat("task ", 400)},
+		Unseen:          []string{strings.Repeat("result ", 400)},
+		UnseenAttention: []string{"#9 answered by owner: dec_1 Retry? -> \"retry\"; tend did not carry it out (implement): the task changed. Act on the answer yourself"}}
+	got := Render(s, 1000)
+	if !strings.Contains(got, "Act on the answer yourself") {
+		t.Errorf("the answer to act on was cut:\n%s", got)
+	}
+}

@@ -31,6 +31,14 @@ type Snapshot struct {
 	Tasks []string
 	// Results are the task outcomes in a delta.
 	Results []string
+	// Unseen lists, in a full snapshot, what the session has not heard of
+	// and the snapshot cannot show: tasks that ended and decisions that
+	// were answered since its watermark. UnseenAttention holds what needs
+	// attention since then, such as a new decision or an answer tend
+	// could not carry out; like a delta's attention, it is never cut for
+	// the budget.
+	Unseen          []string
+	UnseenAttention []string
 	// Changes are a delta's other changes to what the ledger wants, and
 	// the current state of the tasks the delta touched.
 	Changes []string
@@ -85,6 +93,8 @@ func Render(s Snapshot, budget int) string {
 			{title: "Decisions", lines: s.Decisions, priority: 6, omitted: "(%d more decisions; see tasks_read)"},
 			{title: "Needs attention", lines: s.Attention, priority: 5, omitted: "(%d more tasks need attention; see tasks_list)"},
 			{title: "Recent conversation", lines: s.Focus, priority: 4, omitted: "(%d earlier messages omitted)"},
+			{title: "Since your last tend context, needs attention", lines: s.UnseenAttention, protected: true},
+			{title: "Since your last tend context", lines: s.Unseen, priority: 3, omitted: "(%d more; see tasks_list)"},
 			{title: "Open tasks", lines: s.Tasks, priority: 2, omitted: "(%d more open tasks; see tasks_list)"},
 		}
 	} else {

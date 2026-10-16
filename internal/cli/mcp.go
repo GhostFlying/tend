@@ -143,6 +143,13 @@ func (b *bridge) reply(req rpcMessage, res any) {
 	b.send(rpcMessage{ID: req.ID, Result: res})
 }
 
+// mcpInstructions tell a new session when to use tend. A session gets
+// tend's context through its hooks only after it calls a tend tool (D54),
+// so the first call is the model's to make.
+const mcpInstructions = "tend is the owner's ledger and scheduler for delegated coding tasks. " +
+	"When the owner asks to hand work to tend or asks about tend's tasks, call tend_context first: " +
+	"it shows the ledger and how to work with tend. From then on tend keeps this session up to date."
+
 func (b *bridge) handle(ctx context.Context, m rpcMessage) any {
 	switch m.Method {
 	case "initialize":
@@ -157,6 +164,7 @@ func (b *bridge) handle(ctx context.Context, m rpcMessage) any {
 			"protocolVersion": p.ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "tend", "version": "1"},
+			"instructions":    mcpInstructions,
 		}
 	case "ping":
 		return map[string]any{}

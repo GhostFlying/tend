@@ -328,7 +328,7 @@ func TestMCPBridge(t *testing.T) {
 		map[string]any{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": map[string]any{"name": "tasks_read", "arguments": map[string]any{}}},
 		map[string]any{"jsonrpc": "2.0", "id": 5, "method": "resources/list"},
 	)
-	if init := result[map[string]any](t, got["1"]); init["protocolVersion"] != "2025-03-26" {
+	if init := result[map[string]any](t, got["1"]); init["protocolVersion"] != "2025-03-26" || !strings.Contains(init["instructions"].(string), "tend_context") {
 		t.Errorf("initialize = %v", init)
 	}
 	list := result[struct {
