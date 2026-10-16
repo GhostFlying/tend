@@ -16,14 +16,26 @@ func writeAgentsFile(root string, as protocol.Assignment, st state) error {
 	var b strings.Builder
 	b.WriteString("# Workspace\n\n")
 	b.WriteString("This directory was laid out by tend, not by a repository. Each sub-directory below is a git worktree of one repository.\n\n")
-	b.WriteString("| Directory | Repository | Branch | Starts at |\n| --- | --- | --- | --- |\n")
+	b.WriteString("| Directory | Repository | Branch | Base commit |\n| --- | --- | --- | --- |\n")
 	for _, m := range as.Workspace.Mounts {
 		ms := st.Mounts[m.Path]
 		branch := ms.Branch
 		if branch == "" {
 			branch = "(detached)"
 		}
-		fmt.Fprintf(&b, "| `%s/` | %s | `%s` | `%s` (%s) |\n", m.Path, m.Repo, branch, short(ms.Base), ms.From)
+		fmt.Fprintf(&b, "| `%s/` | %s | `%s` | `%s` |\n", m.Path, m.Repo, branch, ms.Base)
+	}
+	b.WriteString("\n## Base\n\n")
+	b.WriteString("The task's work starts from each mount's base commit above. There are no local branches besides the task branch, so a check that compares with the base, such as \"the diff against main\", means the base commit. ")
+	if as.Role == protocol.RoleAccept {
+		// Collect committed everything, new files included.
+		b.WriteString("`git diff <base commit>` shows everything the task changed.\n\n")
+	} else {
+		b.WriteString("`git diff <base commit>` shows the task's changes to tracked files; files added since stay untracked until tend records the run, so `git status` lists them.\n\n")
+	}
+	for _, m := range as.Workspace.Mounts {
+		ms := st.Mounts[m.Path]
+		fmt.Fprintf(&b, "- `%s/`: %s.\n", m.Path, baseOrigin(ms.From))
 	}
 	b.WriteString("\n## Rules\n\n")
 	b.WriteString("- Before working in a repository, read its own `AGENTS.md` (or `CLAUDE.md`) if it has one, and follow it inside that directory.\n")
@@ -40,9 +52,15 @@ func writeAgentsFile(root string, as protocol.Assignment, st state) error {
 	return nil
 }
 
-func short(sha string) string {
-	if len(sha) > 12 {
-		return sha[:12]
+// baseOrigin says where a base commit came from, given how ResolveBase
+// found it.
+func baseOrigin(from string) string {
+	kind, branch, _ := strings.Cut(from, ":")
+	switch {
+	case kind == "commit":
+		return "the commit the task pinned"
+	case branch != "":
+		return "the tip of `origin/" + branch + "` when the workspace was laid out; `origin/" + branch + "` may have moved since"
 	}
-	return sha
+	return "resolved by tend"
 }

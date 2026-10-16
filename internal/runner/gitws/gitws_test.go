@@ -116,7 +116,9 @@ func TestImplementationWorkspace(t *testing.T) {
 		t.Errorf("mount is on %s", b)
 	}
 	agents, err := os.ReadFile(filepath.Join(p.Dir, "AGENTS.md"))
-	if err != nil || !strings.Contains(string(agents), "`tend/`") {
+	if err != nil || !strings.Contains(string(agents), "| `tend/` | tend | `tend/feature_a` | `"+f.mainSHA+"` |") ||
+		!strings.Contains(string(agents), "- `tend/`: the tip of `origin/main` when the workspace was laid out") ||
+		!strings.Contains(string(agents), "files added since stay untracked") {
 		t.Errorf("AGENTS.md = %q, %v", agents, err)
 	}
 
@@ -224,6 +226,9 @@ func TestAcceptanceRunsInTaskWorkspace(t *testing.T) {
 	}
 	if head := run(t, f.env, filepath.Join(ap.Dir, "tend"), "rev-parse", "HEAD"); head != art.Mounts[0].CommitSHA {
 		t.Errorf("acceptance HEAD = %s", head)
+	}
+	if agents, err := os.ReadFile(filepath.Join(ap.Dir, "AGENTS.md")); err != nil || !strings.Contains(string(agents), "`git diff <base commit>` shows everything the task changed") {
+		t.Errorf("acceptance AGENTS.md = %q, %v", agents, err)
 	}
 	// Whatever the acceptance run leaves, such as build output, stays.
 	write(t, filepath.Join(ap.Dir, "tend", "build.log"), "ok\n")
