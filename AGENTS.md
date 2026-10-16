@@ -18,15 +18,16 @@ tend/
   cmd/
     tend-server/           服务端入口：只做配置解析与组装
     tend-runner/           runner 入口：只做配置解析与组装
+    tend/                  tend CLI 入口：只做组装
   internal/
     protocol/              线上协议：请求信封、错误码、payload_hash、领域枚举；导出 JSON Schema
     domain/                纯领域逻辑：状态机、完成条件派生、动作代次规则；不做 IO
     store/                 SQLite、嵌入式迁移、仓储、事务辅助
     app/                   用例层：请求去重 + 领域规则 + 存储 + outbox，在一个事务内完成
-    api/                   浏览器 HTTP API 与 SSE
-    tools/                 主 Agent 工具面（app-server 动态工具）
+    api/                   owner 与 agent 的 HTTP API（bearer token，D49）
+    tools/                 主 Agent 工具面（外挂经 MCP 桥，托管经 app-server 动态工具）
     views/                 账本的只读视图（主 Agent 工具与 owner API 共用）
-    mainthread/            主会话：前台 thread、逐条消息的 turn、上下文注入、工具回调
+    mainthread/            托管主会话（默认不启用，D45）：前台 thread、逐条消息的 turn、上下文注入、工具回调
     runnerapi/             runner 协议的服务端
     scheduler/             排队与资源分配
     dispatch/              outbox 投递
@@ -34,6 +35,7 @@ tend/
     harness/               harness 抽象接口
     harness/traex/         traex app-server 客户端；generated/ 存放生成的协议类型
     runner/                runner 客户端：journal、租约、自我 fencing、worker 驱动
+    cli/                   tend CLI：login、MCP 桥、hook 命令、setup、owner 命令（D46）
     netx/                  tsnet 封装（listener、WhoIs）；测试时替换为本地 listener
     testkit/               fake harness、fake runner、可控时钟、ID 生成器、故障注入
     e2e/                   服务端与 runner 的端到端测试（只有测试代码，可以 import 任何包）
@@ -56,6 +58,7 @@ cmd → api / tools / runnerapi / dispatch / contextbuilder
           → domain
           → store → protocol
 runner → harness, protocol, netx（runner 不 import 服务端的任何包）
+cmd/tend → cli → protocol（cli 只用标准库，不 import 服务端的任何包）
 harness/traex → harness, protocol
 ```
 

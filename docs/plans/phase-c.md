@@ -231,9 +231,10 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 
 托管主 Agent 往后放，但不放弃（D45），所以已有的实现保留，只是默认不启用：
 
-- `tend-server` 的 `main_agent` 配置改为可选。没有配置时：
+- `tend-server` 的 `main_agent` 配置改为可选，示例配置默认不写。没有配置时：
   - 不启动主 harness，不注册 outbox 的 `main_thread` 目的地；
-  - 对话相关的操作（`conversation.submit_message` 等）返回 `invalid_request`，错误信息说明托管主 Agent 没有启用。
+  - 对话相关的操作（`conversation.submit_message`）在 `/api/v1/ops` 返回 `invalid_request`，错误信息说明托管主 Agent 没有启用，不产生请求记录。
+- 配置了时，owner API 的 `/api/v1/ops` 额外接受 `conversation.submit_message`，托管闭环可以从 owner API 驱动（阶段 B 的入口已随 #31 撤下）。
 - `internal/mainthread` 和相关的表保持不变，随 C7 对 `tools`、`contextbuilder` 的修改一起调整，继续编译并通过现有测试：
   - `tools.Call` 同时支持托管来源（原生调用身份、来源消息）和外挂来源（桥的 request_id）；
   - `contextbuilder` 保留托管用的 Prepare/Confirm 两步，外挂用一步。

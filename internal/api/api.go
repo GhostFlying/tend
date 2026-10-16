@@ -31,6 +31,9 @@ type Config struct {
 	TokenTTL time.Duration
 	// Now is the clock. Default time.Now.
 	Now func() time.Time
+	// HostedMainAgent accepts the conversation operations, which only the
+	// hosted main thread handles (D45).
+	HostedMainAgent bool
 }
 
 // Server serves the owner API.

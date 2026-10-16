@@ -49,26 +49,30 @@ type config struct {
 		Ephemeral bool   `json:"ephemeral"`
 	} `json:"tailnet"`
 	Listen string `json:"listen"`
-	// Owners are the tailnet logins allowed to use the owner API and web
-	// client (D42).
+	// Owners are the tailnet logins allowed to use the owner API, through
+	// the tend CLI and the agents it connects (D49).
 	Owners []string `json:"owners"`
 	// LocalOwner is the owner every caller is taken to be when the server
 	// listens off the tailnet, for development.
 	LocalOwner string           `json:"local_owner"`
 	LeaseTTL   cfgfile.Duration `json:"lease_ttl"`
-	// MainAgent runs the front thread with a dedicated traex home.
-	MainAgent struct {
-		Instance  string `json:"instance"`
-		TraexBin  string `json:"traex_bin"`
-		TraexHome string `json:"traex_home"`
-		Model     string `json:"model"`
-		// Cwd must be outside any repository, so no project AGENTS.md is
-		// loaded into the main agent (spike A1).
-		Cwd string `json:"cwd"`
-	} `json:"main_agent"`
+	// MainAgent runs the hosted main thread; without it the owner works
+	// in their own agent through the add-on (D45).
+	MainAgent *mainAgentConfig     `json:"main_agent"`
 	Hosts     []app.HostConfig     `json:"hosts"`
 	Repos     []app.RepoConfig     `json:"repos"`
 	Templates []app.TemplateConfig `json:"templates"`
+}
+
+// mainAgentConfig runs the front thread with a dedicated traex home.
+type mainAgentConfig struct {
+	Instance  string `json:"instance"`
+	TraexBin  string `json:"traex_bin"`
+	TraexHome string `json:"traex_home"`
+	Model     string `json:"model"`
+	// Cwd must be outside any repository, so no project AGENTS.md is
+	// loaded into the main agent (spike A1).
+	Cwd string `json:"cwd"`
 }
 
 func main() {
@@ -99,18 +103,8 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	cwd, err := cfgfile.Path(cfg.MainAgent.Cwd)
-	if err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
-	}
-	traexHome, err := cfgfile.Path(cfg.MainAgent.TraexHome)
-	if err != nil {
-		return err
-	}
-	for _, dir := range []string{dataDir, cwd} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
 	}
 
 	s, err := store.Open(ctx, filepath.Join(dataDir, "tend.db"), time.Now)
@@ -162,29 +156,29 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 
 	cb := contextbuilder.New(a, s, ids, contextbuilder.Config{})
 	ts := tools.New(a, s, cb, log)
-	front := mainthread.New(a, cb, ts, mainthread.Config{
-		Instance: cfg.MainAgent.Instance,
-		Thread: harness.ThreadConfig{
-			Cwd: cwd, Model: cfg.MainAgent.Model, DeveloperInstructions: mainthread.Instructions,
-			Sandbox: "danger-full-access", ApprovalPolicy: "never", Config: mainthread.Isolation,
-		},
-		Open: func(ctx context.Context) (harness.Session, error) {
-			return traex.Start(ctx, traex.Options{Bin: cfg.MainAgent.TraexBin, Env: []string{"TRAE_HOME=" + traexHome}, Dir: cwd, Version: "tend", Log: log})
-		},
-		Log: log,
-	})
-	d := dispatch.New(a, map[string]dispatch.Handler{app.MainThreadDestination: front}, wake, time.Now, dispatch.Config{}, log)
+	handlers := map[string]dispatch.Handler{}
+	var front *mainthread.Manager
+	if cfg.MainAgent != nil {
+		if front, err = hostedMainThread(a, cb, ts, *cfg.MainAgent, log); err != nil {
+			return err
+		}
+		handlers[app.MainThreadDestination] = front
+		log.Info("running the hosted main agent", "instance", cfg.MainAgent.Instance)
+	}
+	d := dispatch.New(a, handlers, wake, time.Now, dispatch.Config{}, log)
 	runners := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
 	mux := http.NewServeMux()
 	mux.Handle(runnerapi.Path, runners.Handler())
-	mux.Handle("/api/", api.New(a, s, ts, cb, whois, secret, api.Config{Owners: owners}, log).Handler())
+	mux.Handle("/api/", api.New(a, s, ts, cb, whois, secret, api.Config{Owners: owners, HostedMainAgent: front != nil}, log).Handler())
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	// The workers stop with the process or when serving fails.
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	var wg sync.WaitGroup
-	wg.Go(func() { _ = front.Run(runCtx) })
+	if front != nil {
+		wg.Go(func() { _ = front.Run(runCtx) })
+	}
 	wg.Go(func() { _ = d.Run(runCtx) })
 	wg.Go(func() { runners.SweepLeases(runCtx, a.LeaseTTL()/4) })
 	wg.Go(func() {
@@ -201,6 +195,32 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		return ctx.Err()
 	}
 	return err
+}
+
+// hostedMainThread prepares the hosted main thread (D45).
+func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg mainAgentConfig, log *slog.Logger) (*mainthread.Manager, error) {
+	cwd, err := cfgfile.Path(cfg.Cwd)
+	if err != nil {
+		return nil, err
+	}
+	traexHome, err := cfgfile.Path(cfg.TraexHome)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(cwd, 0o700); err != nil {
+		return nil, err
+	}
+	return mainthread.New(a, cb, ts, mainthread.Config{
+		Instance: cfg.Instance,
+		Thread: harness.ThreadConfig{
+			Cwd: cwd, Model: cfg.Model, DeveloperInstructions: mainthread.Instructions,
+			Sandbox: "danger-full-access", ApprovalPolicy: "never", Config: mainthread.Isolation,
+		},
+		Open: func(ctx context.Context) (harness.Session, error) {
+			return traex.Start(ctx, traex.Options{Bin: cfg.TraexBin, Env: []string{"TRAE_HOME=" + traexHome}, Dir: cwd, Version: "tend", Log: log})
+		},
+		Log: log,
+	}), nil
 }
 
 // syncConfig brings hosts, repositories and templates into the ledger.
