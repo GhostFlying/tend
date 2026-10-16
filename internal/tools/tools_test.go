@@ -18,6 +18,9 @@ import (
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
+// hosted is the hosted main agent's principal.
+var hosted = protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "harness-1", Thread: "th_1"}
+
 type env struct {
 	t     *testing.T
 	svc   *Service
@@ -61,7 +64,7 @@ func (e *env) call(tool string, args any, callID string) answerView {
 		e.t.Fatal(err)
 	}
 	res := e.svc.Handle(context.Background(), Call{
-		Instance: "harness-1", Thread: "th_1", Turn: "tu_1", CallID: callID, SourceMessageID: "msg_1", Tool: tool, Arguments: raw,
+		Principal: hosted, Native: "th_1/tu_1/" + callID, SourceMessageID: "msg_1", Tool: tool, Arguments: raw,
 	})
 	var a answerView
 	if err := json.Unmarshal([]byte(res.Text), &a); err != nil {
@@ -155,7 +158,7 @@ func TestStaleWriteReturnsCurrentState(t *testing.T) {
 func TestPlanningNeedsAMessage(t *testing.T) {
 	e := newEnv(t)
 	raw, _ := json.Marshal(createArgs{Title: "fix", Spec: spec, CommitSeq: 1})
-	res := e.svc.Handle(context.Background(), Call{Instance: "harness-1", Thread: "th_1", Turn: "t", CallID: "c", Tool: "tasks_create", Arguments: raw})
+	res := e.svc.Handle(context.Background(), Call{Principal: hosted, Native: "th_1/t/c", Tool: "tasks_create", Arguments: raw})
 	if res.Success || !strings.Contains(res.Text, "invalid_request") {
 		t.Errorf("create outside a message turn = %s", res.Text)
 	}

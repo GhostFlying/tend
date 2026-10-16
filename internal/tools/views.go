@@ -91,12 +91,11 @@ func (s *Service) requestsRead(ctx context.Context, c Call) (any, error) {
 	if err := decode(c.Arguments, &a); err != nil {
 		return nil, err
 	}
-	// Only the main agent's own requests: its dedup domain.
-	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: c.Instance, Thread: c.Thread}
+	// Only the caller's own requests: its dedup domain.
 	var out protocol.RequestView
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		out, err = views.Request(ctx, tx.Q(), principal.DedupDomain(), a.RequestID)
+		out, err = views.Request(ctx, tx.Q(), c.Principal.DedupDomain(), a.RequestID)
 		return notFound(err, "you made no request %s", a.RequestID)
 	})
 	if err != nil {

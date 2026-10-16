@@ -1,14 +1,13 @@
 // Package tools is the main agent's tool surface (D20): the only way the
-// main agent changes the ledger. Tools are registered with the harness as
-// dynamic tools in the "tend" namespace and answered here.
+// main agent changes the ledger. The hosted main agent gets the tools as
+// harness dynamic tools; an agent the owner works in gets them through the
+// tend MCP bridge.
 //
 // The caller's identity comes from the connection, never from the
-// arguments: the main thread manager passes the harness instance, thread
-// and the conversation message the turn handles. A call's request ID is
-// derived from its native identity (D28), so a call the harness repeats
-// replays the original result, and planning writes carry the message and a
-// commit sequence, so a turn repeated with new call IDs is caught as a
-// duplicate effect.
+// arguments. A hosted call's request ID is derived from its native identity
+// (D28), so a call the harness repeats replays the original result, and
+// its planning writes carry the message and a commit sequence, so a turn
+// repeated with new call IDs is caught as a duplicate effect.
 package tools
 
 import (
@@ -27,15 +26,15 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-// Call is one tool call from the main agent.
+// Call is one tool call from a main agent.
 type Call struct {
-	// Instance and Thread identify the harness and thread the call came
-	// through; they form the caller's principal.
-	Instance string
-	Thread   string
-	// Turn and CallID complete the call's native identity.
-	Turn   string
-	CallID string
+	// Principal is the caller, established by the connection.
+	Principal protocol.Principal
+	// RequestID is the call's request ID when the caller gives one.
+	// Otherwise it is derived from Native, the harness's identity of the
+	// call within the instance named by the principal.
+	RequestID string
+	Native    string
 	// SourceMessageID is the conversation message the turn handles.
 	SourceMessageID string
 	// ParentRequestID is the request that delivered that message.
@@ -107,7 +106,7 @@ func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
 	} else if res, err := t.run(s, ctx, c); err != nil {
 		pe, ok := errors.AsType[*protocol.Error](err)
 		if !ok {
-			s.log.ErrorContext(ctx, "tool failed", "tool", c.Tool, "thread", c.Thread, "call", c.CallID, "err", err)
+			s.log.ErrorContext(ctx, "tool failed", "tool", c.Tool, "thread", c.Principal.Thread, "request_id", c.RequestID, "native", c.Native, "err", err)
 			pe = protocol.Errorf(protocol.CodeInternal, "internal error")
 		}
 		a.Error = pe
@@ -155,22 +154,26 @@ func decode(raw json.RawMessage, v any) error {
 	return nil
 }
 
-// execute runs a write under the call's native identity.
+// execute runs a write under the call's request ID.
 func (s *Service) execute(ctx context.Context, c Call, op string, target protocol.Target, revision *int64, payload any, cmd app.Command) (any, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("tools: encode payload: %w", err)
 	}
-	requestID, err := s.app.NativeRequestID(ctx, "harness:"+c.Instance, c.Thread+"/"+c.Turn+"/"+c.CallID)
-	if err != nil {
-		return nil, err
+	requestID := c.RequestID
+	if requestID == "" {
+		if c.Native == "" {
+			return nil, protocol.Errorf(protocol.CodeMissingRequestID, "the call has no request ID")
+		}
+		if requestID, err = s.app.NativeRequestID(ctx, "harness:"+c.Principal.Subject, c.Native); err != nil {
+			return nil, err
+		}
 	}
 	env := &protocol.Envelope{
 		RequestID: requestID, ParentRequestID: c.ParentRequestID, Operation: op, Target: target,
 		ExpectedControlRevision: revision, Payload: body,
 	}
-	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: c.Instance, Thread: c.Thread}
-	res, err := s.app.Execute(ctx, principal, env, cmd)
+	res, err := s.app.Execute(ctx, c.Principal, env, cmd)
 	if err != nil {
 		return nil, err
 	}

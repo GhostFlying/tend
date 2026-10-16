@@ -249,7 +249,10 @@ func (m *Manager) recordReply(ctx context.Context, th harness.Thread, ev harness
 // delivery of that turn, so a replayed call keeps its original identity,
 // or else the delivery whose turn is starting.
 func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.ToolResult {
-	call := tools.Call{Instance: m.cfg.Instance, Thread: c.ThreadID, Turn: c.TurnID, CallID: c.CallID, Tool: c.Tool, Arguments: c.Arguments}
+	call := tools.Call{
+		Principal: protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.cfg.Instance, Thread: c.ThreadID},
+		Native:    c.ThreadID + "/" + c.TurnID + "/" + c.CallID, Tool: c.Tool, Arguments: c.Arguments,
+	}
 	rec, ok, err := m.app.TurnDelivery(ctx, c.ThreadID, c.TurnID)
 	if err != nil {
 		m.cfg.Log.ErrorContext(ctx, "could not look up the call's turn", "turn", c.TurnID, "err", err)
