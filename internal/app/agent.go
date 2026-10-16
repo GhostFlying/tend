@@ -19,7 +19,10 @@ type ComposeRequest struct {
 	// own requests recorded.
 	Self protocol.Principal
 	// Full asks for a full snapshot; otherwise the context is a delta of
-	// the changes after Watermark, or nothing.
+	// the changes after Watermark, or nothing. A full snapshot also tells
+	// the results after Watermark, when there is one: the snapshot lists
+	// only unfinished tasks, and the session has not heard of those
+	// results.
 	Full      bool
 	Epoch     int64
 	Watermark int64
@@ -38,10 +41,12 @@ type Composed struct {
 type ComposeFunc func(ctx context.Context, q store.Querier, r ComposeRequest) (Composed, error)
 
 // AgentHook handles agent.hook: an agent the owner works in asks what to
-// add to its context (D47). A session start of any kind, or a session tend
-// has no valid baseline for, gets a full snapshot; otherwise the session
-// gets the changes since its watermark that it should hear about, or
-// nothing. The watermark moves on as the answer is recorded: tend cannot
+// add to its context (D47). Only a session that has called a tend tool
+// gets any (D54); tend leaves every other session alone, such as an
+// agent's background sessions, and records nothing about it. A session
+// start of any kind, or a session tend has no valid baseline for, gets a
+// full snapshot; otherwise the session gets the changes since its
+// watermark that it should hear about, or nothing. The watermark moves on as the answer is recorded: tend cannot
 // tell whether the agent passed the context on, and a write based on what
 // it missed is caught by its revision check.
 type AgentHook struct {
@@ -77,6 +82,13 @@ func (c AgentHook) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, e
 	key := SessionKey(self.Agent, self.Thread)
 	if x.Env.Target.ID != key {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "the target must be the calling session %s", key)
+	}
+	bound, err := store.AgentSessionBound(ctx, tx.Q(), string(self.Agent), self.Thread)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !bound {
+		return Outcome{Result: protocol.HookResponse{}, NoEffect: true}, nil
 	}
 	now := x.Now.UnixMilli()
 	if err := tx.UpsertAgentSession(ctx, string(self.Agent), self.Thread, self.Subject, now); err != nil {
@@ -121,4 +133,37 @@ func (c AgentHook) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, e
 		return Outcome{}, err
 	}
 	return Outcome{Result: protocol.HookResponse{Context: out.Text}}, nil
+}
+
+// BindAgentSession records that an agent session called a tend tool, so
+// its hooks get context from now on (D54). Binding is idempotent
+// bookkeeping, like a heartbeat: it records no request and no event.
+//
+// A newly bound session starts with a watermark at the end of the ledger
+// but no valid baseline: its next hook gets a full snapshot, and the
+// results since binding with it, so a task it created and that finished
+// before that hook is not lost.
+func (a *App) BindAgentSession(ctx context.Context, p protocol.Principal) error {
+	if !p.Addon() || p.Thread == "" {
+		return nil
+	}
+	now := a.now().UnixMilli()
+	return a.store.Write(ctx, func(tx *store.Tx) error {
+		bound, err := store.AgentSessionBound(ctx, tx.Q(), string(p.Agent), p.Thread)
+		if err != nil || bound {
+			return err
+		}
+		if err := tx.BindAgentSession(ctx, string(p.Agent), p.Thread, p.Subject, now); err != nil {
+			return err
+		}
+		key := SessionKey(p.Agent, p.Thread)
+		if _, err := store.GetBaseline(ctx, tx.Q(), key); !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		latest, err := store.LatestEventSeq(ctx, tx.Q())
+		if err != nil {
+			return err
+		}
+		return tx.PutBaseline(ctx, store.Baseline{ThreadKey: key, Watermark: latest}, now)
+	})
 }

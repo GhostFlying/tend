@@ -227,6 +227,14 @@ func (b *Builder) Compose(ctx context.Context, q store.Querier, r app.ComposeReq
 	budget := b.cfg.HookFullBudget
 	if r.Full {
 		err = b.gatherFull(ctx, q, &snap, 0)
+		if err == nil && r.Watermark > 0 {
+			// Tasks that ended and decisions answered since the session
+			// last heard from tend are not in the snapshot; tell them. What
+			// needs attention is told in full, as a delta would.
+			var since Snapshot
+			err = b.gatherDelta(ctx, q, &since, r.Watermark, latest, r.Self)
+			snap.Unseen, snap.UnseenAttention = since.Unseen, since.Attention
+		}
 	} else {
 		budget = b.cfg.HookDeltaBudget
 		err = b.gatherDelta(ctx, q, &snap, r.Watermark, latest, r.Self)
@@ -338,7 +346,11 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			}
 			line = strings.TrimSpace(fmt.Sprintf("#%d %s %s %s", e.Seq, about, e.Kind, compact(body))) + " (by " + actor(e.ActorJSON) + ")"
 		}
-		switch classify(e.Kind, body) {
+		c := classify(e.Kind, body)
+		if c != attention && (c == result || e.Kind == "decision.answered") {
+			s.Unseen = append(s.Unseen, line)
+		}
+		switch c {
 		case attention:
 			s.Attention = append(s.Attention, line)
 		case result:

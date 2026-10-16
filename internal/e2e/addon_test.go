@@ -140,8 +140,12 @@ func TestEndToEnd_AgentAddon(t *testing.T) {
 	codex := newAddonAgent(t, configDir, string(protocol.AgentCodex), "sess-codex")
 
 	for _, a := range []*addonAgent{claude, codex} {
-		if got := a.hook("session-start", "startup", ""); !strings.Contains(got, "kind=full]") {
-			t.Fatalf("%s session start:\n%s", a.agent, got)
+		// Until a session uses tend, its hooks get nothing (D54).
+		if got := a.hook("session-start", "startup", ""); got != "" {
+			t.Fatalf("%s session start before using tend:\n%s", a.agent, got)
+		}
+		if got := a.call("tend_context", map[string]any{}); !strings.Contains(got, "[tend context snapshot") {
+			t.Fatalf("%s tend_context:\n%s", a.agent, got)
 		}
 	}
 
@@ -162,13 +166,12 @@ func TestEndToEnd_AgentAddon(t *testing.T) {
 	}
 	task := created.Result.Outcome.TaskID
 
-	// The session that created the task is not told about it again; the
-	// other session is.
-	if got := claude.hook("user-prompt-submit", "", "anything new?"); strings.Contains(got, task) {
-		t.Errorf("claude hears of its own task:\n%s", got)
-	}
-	if got := codex.hook("user-prompt-submit", "", "anything new?"); !strings.Contains(got, task) || !strings.Contains(got, "(by claude session sess-cla)") {
-		t.Errorf("codex does not hear of the new task:\n%s", got)
+	// The first prompt after a session started using tend gets the whole
+	// ledger, the new task included.
+	for _, a := range []*addonAgent{claude, codex} {
+		if got := a.hook("user-prompt-submit", "", "anything new?"); !strings.Contains(got, "kind=full]") || !strings.Contains(got, task) {
+			t.Errorf("%s first prompt:\n%s", a.agent, got)
+		}
 	}
 
 	newNode(t, srv, passing).start()
@@ -202,6 +205,7 @@ func TestEndToEnd_OwnerAnswersDecision(t *testing.T) {
 	configDir := filepath.Join(t.TempDir(), "tend")
 	claude := newAddonAgent(t, configDir, string(protocol.AgentClaude), "sess-claude")
 	claude.run("", "login", "--server", url)
+	claude.call("tend_context", map[string]any{})
 	claude.hook("session-start", "startup", "")
 
 	n := newNode(t, srv, passing)

@@ -170,6 +170,31 @@ func TaskByWorkspaceName(ctx context.Context, q Querier, name string) (string, e
 	return id, nil
 }
 
+// BindAgentSession records that an agent session called a tend tool. The
+// first call binds it; later ones only mark it seen.
+func (t *Tx) BindAgentSession(ctx context.Context, agent, sessionID, clientID string, now int64) error {
+	_, err := t.Exec(ctx, `INSERT INTO agent_sessions (agent, session_id, client_id, first_seen_at, last_seen_at, bound_at)
+		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (agent, session_id) DO UPDATE SET client_id = excluded.client_id,
+		last_seen_at = excluded.last_seen_at, bound_at = COALESCE(agent_sessions.bound_at, excluded.bound_at)`,
+		agent, sessionID, clientID, now, now, now)
+	if err != nil {
+		return fmt.Errorf("store: bind agent session: %w", err)
+	}
+	return nil
+}
+
+// AgentSessionBound reports whether an agent session has called a tend
+// tool.
+func AgentSessionBound(ctx context.Context, q Querier, agent, sessionID string) (bool, error) {
+	var n int
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE agent = ? AND session_id = ? AND bound_at IS NOT NULL`,
+		agent, sessionID).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("store: read agent session: %w", err)
+	}
+	return n > 0, nil
+}
+
 // UpsertAgentSession records that an agent session was seen.
 func (t *Tx) UpsertAgentSession(ctx context.Context, agent, sessionID, clientID string, now int64) error {
 	_, err := t.Exec(ctx, `INSERT INTO agent_sessions (agent, session_id, client_id, first_seen_at, last_seen_at)
