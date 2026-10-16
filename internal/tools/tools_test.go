@@ -251,7 +251,7 @@ func tags(v any) []string {
 func TestSchemasMatchArgs(t *testing.T) {
 	args := map[string]any{
 		"tasks_list": listArgs{}, "tasks_read": taskArgs{}, "tasks_create": createArgs{}, "tasks_update_intent": updateArgs{},
-		"actions_create": actionArgs{}, "decisions_open": openArgs{}, "decisions_resolve": resolveArgs{},
+		"tasks_set_control": controlArgs{}, "tasks_cancel": cancelArgs{}, "actions_create": actionArgs{}, "decisions_open": openArgs{}, "decisions_resolve": resolveArgs{},
 		"artifacts_read": artifactArgs{}, "requests_read": requestArgs{}, "repos_list": noArgs{}, "tend_context": noArgs{},
 	}
 	if len(args) != len(Specs()) {
@@ -312,5 +312,31 @@ func TestRequestsReadKeepsErrorDetails(t *testing.T) {
 	a := e.call("requests_read", requestArgs{RequestID: dup}, "")
 	if !a.OK || !strings.Contains(string(a.Result), "original_request_id") {
 		t.Errorf("requests_read of a duplicate = %s", a.Result)
+	}
+}
+
+func TestControlAndCancel(t *testing.T) {
+	e := newEnv(t)
+	id, rev := createdTask(t, e.call("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, ""))
+	if a := e.call("tasks_set_control", controlArgs{TaskID: id, ExpectedControlRevision: rev, Mode: protocol.ControlPaused}, ""); !a.OK {
+		t.Fatalf("pause: %+v", a.Error)
+	}
+	// The revision moved on: a write with the old one is stale.
+	if a := e.call("tasks_cancel", cancelArgs{TaskID: id, ExpectedControlRevision: rev}, ""); a.OK || a.Error.Code != protocol.CodeStaleRevision {
+		t.Fatalf("cancel with a stale revision: %+v", a)
+	}
+	if a := e.call("tasks_set_control", controlArgs{TaskID: id, ExpectedControlRevision: rev + 1, Mode: protocol.ControlHumanControl}, ""); a.OK || a.Error.Code != protocol.CodeForbidden {
+		t.Errorf("take human control: %+v", a)
+	}
+	if a := e.call("tasks_cancel", cancelArgs{TaskID: id, ExpectedControlRevision: rev + 1, Reason: "the owner changed their mind"}, ""); !a.OK {
+		t.Fatalf("cancel: %+v", a.Error)
+	}
+	var lifecycle string
+	if err := e.store.Read(context.Background(), func(tx *store.ReadTx) error {
+		row, err := store.GetTask(context.Background(), tx.Q(), id)
+		lifecycle = string(row.Lifecycle)
+		return err
+	}); err != nil || lifecycle != "cancelled" {
+		t.Errorf("lifecycle after cancel = %q, %v", lifecycle, err)
 	}
 }

@@ -79,6 +79,27 @@ var schemas = map[string]string{
   "required": ["task_id", "expected_control_revision", "commit_seq"],
   "additionalProperties": false
 }`,
+	"tasks_set_control": `{
+  "type": "object",
+  "properties": {
+    "task_id": {"type": "string"},
+    "expected_control_revision": {"type": "integer", "description": "The control_revision you last read; stale values are rejected."},
+    "mode": {"type": "string", "enum": ["paused", "managed"], "description": "paused stops the task; managed hands it back to tend."},
+    "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
+  },
+  "required": ["task_id", "expected_control_revision", "mode"],
+  "additionalProperties": false
+}`,
+	"tasks_cancel": `{
+  "type": "object",
+  "properties": {
+    "task_id": {"type": "string"},
+    "expected_control_revision": {"type": "integer", "description": "The control_revision you last read; stale values are rejected."},
+    "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
+  },
+  "required": ["task_id", "expected_control_revision"],
+  "additionalProperties": false
+}`,
 	"actions_create": `{
   "type": "object",
   "description": "Request the next implementation or acceptance after a failure, once the owner decided to retry.",
