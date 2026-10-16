@@ -64,6 +64,17 @@ func (t *Tailnet) DNSName() string { return t.dns }
 // Listen listens on the node's tailnet addresses only.
 func (t *Tailnet) Listen(addr string) (net.Listener, error) { return t.srv.Listen("tcp", addr) }
 
+// ListenTLS listens on the node's tailnet addresses with the tailnet's
+// certificate for the node's name, issued on the first handshake.
+func (t *Tailnet) ListenTLS(addr string) (net.Listener, error) { return t.srv.ListenTLS("tcp", addr) }
+
+// FetchCert obtains the node's certificate ahead of the first client. It
+// fails when the tailnet has HTTPS certificates turned off.
+func (t *Tailnet) FetchCert(ctx context.Context) error {
+	_, _, err := t.lc.CertPair(ctx, t.dns)
+	return err
+}
+
 // HTTPClient returns a client that dials through the tailnet.
 func (t *Tailnet) HTTPClient() *http.Client { return t.srv.HTTPClient() }
 

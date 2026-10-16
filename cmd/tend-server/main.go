@@ -124,12 +124,16 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	}
 
 	var (
-		listener net.Listener
-		whois    netx.WhoIs
+		// On the tailnet, the same handler serves https on 443 and plain
+		// http on 80; WireGuard already encrypts both (§6.4).
+		listeners []net.Listener
+		whois     netx.WhoIs
+		tn        *netx.Tailnet
+		secure    bool
 	)
 	owners := cfg.Owners
 	if cfg.Tailnet != nil {
-		tn, err := netx.JoinTailnet(ctx, netx.TailnetConfig{
+		tn, err = netx.JoinTailnet(ctx, netx.TailnetConfig{
 			Hostname: cfg.Tailnet.Hostname, Dir: filepath.Join(dataDir, "tsnet"), AuthKey: os.Getenv("TS_AUTHKEY"),
 			Ephemeral: cfg.Tailnet.Ephemeral, Logf: func(f string, args ...any) { log.Info(fmt.Sprintf(f, args...)) },
 		})
@@ -137,21 +141,31 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 			return err
 		}
 		defer tn.Close()
-		if listener, err = tn.Listen(":80"); err != nil {
+		plain, err := tn.Listen(":80")
+		if err != nil {
 			return err
+		}
+		listeners = []net.Listener{plain}
+		// Without HTTPS certificates on the tailnet, clients use http.
+		if l, err := tn.ListenTLS(":443"); err != nil {
+			log.Warn("no https listener; clients must use http", "name", tn.DNSName(), "err", err)
+		} else {
+			listeners, secure = append(listeners, l), true
 		}
 		whois = tn
 		log.Info("joined the tailnet", "name", tn.DNSName())
 	} else {
-		if listener, err = net.Listen("tcp", cfg.Listen); err != nil {
+		l, err := net.Listen("tcp", cfg.Listen)
+		if err != nil {
 			return err
 		}
+		listeners = []net.Listener{l}
 		// Off the tailnet there is no peer identity; development only.
 		whois = netx.Static{Identity: &netx.Identity{Node: "local", User: cfg.LocalOwner, Tags: []string{"tag:local"}}}
 		if cfg.LocalOwner != "" {
 			owners = []string{cfg.LocalOwner}
 		}
-		log.Warn("listening without the tailnet; every peer is taken as tag:local and the local owner", "addr", listener.Addr().String())
+		log.Warn("listening without the tailnet; every peer is taken as tag:local and the local owner", "addr", l.Addr().String())
 	}
 
 	cb := contextbuilder.New(a, s, ids, contextbuilder.Config{})
@@ -187,10 +201,27 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		defer cancel()
 		_ = server.Shutdown(shutdown)
 	})
+	if secure {
+		wg.Go(func() {
+			fetchCtx, cancel := context.WithTimeout(runCtx, time.Minute)
+			defer cancel()
+			if err := tn.FetchCert(fetchCtx); err != nil && runCtx.Err() == nil {
+				log.Warn("no https certificate; clients must use http", "name", tn.DNSName(), "err", err)
+			}
+		})
+	}
 	log.Info("tend-server running")
-	err = server.Serve(listener)
+	served := make(chan error, len(listeners))
+	for _, l := range listeners {
+		go func() { served <- server.Serve(l) }()
+	}
+	// The first listener to stop stops the server, which ends the others.
+	err = <-served
 	stop()
 	wg.Wait()
+	for range len(listeners) - 1 {
+		<-served
+	}
 	if errors.Is(err, http.ErrServerClosed) {
 		return ctx.Err()
 	}
