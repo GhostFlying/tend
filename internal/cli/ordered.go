@@ -136,8 +136,7 @@ func writeValue(b *strings.Builder, v any, indent string) {
 		}
 		b.WriteString("{\n")
 		for i, k := range t.keys {
-			key, _ := json.Marshal(k)
-			fmt.Fprintf(b, "%s%s: ", inner, key)
+			fmt.Fprintf(b, "%s%s: ", inner, marshalScalar(k))
 			writeValue(b, t.vals[k], inner)
 			if i < len(t.keys)-1 {
 				b.WriteString(",")
@@ -161,12 +160,21 @@ func writeValue(b *strings.Builder, v any, indent string) {
 		}
 		b.WriteString(indent + "]")
 	default:
-		out, err := json.Marshal(t)
-		if err != nil {
-			out = []byte("null")
-		}
-		b.Write(out)
+		b.WriteString(marshalScalar(t))
 	}
+}
+
+// marshalScalar encodes a scalar without escaping &, < and >, as the
+// agents' own tools write them: shell commands in hook settings are full
+// of them, and escaping would rewrite settings tend does not own.
+func marshalScalar(v any) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return "null"
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // diff renders the line changes from a to b with two lines of context.
@@ -198,12 +206,13 @@ func diff(a, b string) string {
 			lines = append(lines, line{' ', x[i]})
 			i++
 			j++
-		case j < len(y) && (i == len(x) || lcs[i][j+1] >= lcs[i+1][j]):
-			lines = append(lines, line{'+', y[j]})
-			j++
-		default:
+		case i < len(x) && (j == len(y) || lcs[i+1][j] >= lcs[i][j+1]):
+			// A replaced line shows the old text first.
 			lines = append(lines, line{'-', x[i]})
 			i++
+		default:
+			lines = append(lines, line{'+', y[j]})
+			j++
 		}
 	}
 	var out strings.Builder
