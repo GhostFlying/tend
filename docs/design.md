@@ -11,11 +11,11 @@
 | 编号 | 决策 | 状态 |
 | --- | --- | --- |
 | D15 | 项目名 `tend`，使用独立仓库。 | 已确认 |
-| D16 | 主 harness 先接 traex（Codex fork），实现与协议细节参考上游 Codex 源码，以 traex 实际生成的协议为准。 | 已确认 |
-| D17 | 主会话上下文以 app-server 协议注入为主：由服务端在 turn 之间通过 `thread/inject_items` 写入 developer 消息。Hook 只覆盖我们无法发起的时机（compact 之后、harness 自行恢复）。 | 已确认，接口已验证（spike A2） |
+| D16 | （D45：托管主 Agent 延后，当前 traex 只用于 worker）主 harness 先接 traex（Codex fork），实现与协议细节参考上游 Codex 源码，以 traex 实际生成的协议为准。 | 已确认 |
+| D17 | （D45：外挂形态下上下文改由 agent 的 hook 注入；托管形态延后，届时仍按本条）主会话上下文以 app-server 协议注入为主：由服务端在 turn 之间通过 `thread/inject_items` 写入 developer 消息。Hook 只覆盖我们无法发起的时机（compact 之后、harness 自行恢复）。 | 已确认，接口已验证（spike A2） |
 | D18 | 不做每轮注入。只有基线失效或账本发生相关变化时才注入（见 §2）。 | 已确认 |
 | D19 | 执行节点一律用 pull 模式的 runner：runner 主动连控制服务，领取任务、续租、上报。控制服务不主动连节点。 | 已确认 |
-| D20 | 主 Agent 唯一的写入路径是 tend 提供的工具，通过 app-server 的动态工具（`dynamicTools` / `item/tool/call`）实现，经由主会话同一条 stdio 连接回调 tend。主 harness 使用只读 sandbox，看不到应用数据库和根凭据。 | 已确认 |
+| D20 | （D45：外挂形态下工具改由 MCP 提供，主 Agent 的 sandbox 由用户的 agent 决定；托管形态延后，届时仍按本条）主 Agent 唯一的写入路径是 tend 提供的工具，通过 app-server 的动态工具（`dynamicTools` / `item/tool/call`）实现，经由主会话同一条 stdio 连接回调 tend。主 harness 使用只读 sandbox，看不到应用数据库和根凭据。 | 已确认 |
 | D21 | 远程访问走 tailscale。服务只监听 tailnet 地址，应用层仍保留鉴权与角色（tailscale 身份不替代角色权限）。 | 已确认 |
 | D22 | 技术栈：服务端和 runner 用 Go，单个 module；Web 用 TypeScript。SQLite 用 `modernc.org/sqlite`（纯 Go，便于交叉编译）。harness 适配是 Go 包，服务端与 runner 共用。领域与 API 类型以 Go 为准，导出 JSON Schema 后生成 TS 供 Web 使用。 | 已确认 |
 | D23 | 服务端和 runner 都内置 `tsnet` 加入 tailnet，不依赖设备上安装或运行 tailscaled。 | 已确认 |
@@ -38,8 +38,13 @@
 | D41 | 验收在任务自己的工作区里进行（修订 D33 与阶段 B 计划 §6.2 的一次性验收工作区）。验收的独立性来自独立的 run 和 agent，不来自独立的工作区。同一任务任何角色的 run 还可能在使用工作区时（包括 unknown），不派发新的 run。验收 agent 只判断任务是否完成：可以构建、运行测试，但不修改代码、不清理、不提交，这只通过给验收 agent 的说明约束；tend 不在验收之后做任何清理，也不对验收后的工作区状态做承诺。验收开始前确认各 mount 停在 artifact 的分支和 commit 上，否则验收失败。 | 已确认 |
 | D42 | owner 身份：服务端配置 `owners` 列出 owner 的 tailnet 登录名，每个请求都用 WhoIs 取得登录名并检查。浏览器先领取会话 cookie：内容是登录名、client_id 和签发时间，用服务端密钥派生的会话密钥签名，HttpOnly、SameSite=Strict，有效期 30 天。cookie 只有和同一 owner 的 tailnet 身份一起才有效。领取会话时同样要在 `X-Tend-Client` 头里重复 client_id；写请求必须在该头里带上 cookie 中的 client_id，防止跨站请求。没有有效会话返回 `unauthenticated`（401），不是 owner 返回 `forbidden`。不加入 tailnet 的开发模式下，所有调用方都视为配置的 `local_owner`。 | 已确认 |
 | D44 | 交付由 worker agent 完成：push、MR、CQ 跟进、提交信息规范等仓库特定的流程，tend 不内置，也不提供交付 profile。`deliver` 动作类型保留，具体机制（例如验收通过后的交付 run）在需要时设计。 | 已确认 |
+| D45 | 主 Agent 先做外挂形态（调整 v0.1 的 D01、D09，以及 D16、D17、D20 的实施顺序）：由 tend 托管主 Agent 的工作（自己的主会话、对话入口、聊天界面）没有放弃，只是降低优先级、往后放。当前先做外挂：用户在自己选择的 agent 里工作，tend 以 MCP 工具和 hook 接入，接入了 tend 的 agent 会话就是主 Agent；这时 tend 不持有对话。已有的托管实现保留但默认不启用。支持的 agent 显式列举：Claude Code、Codex、traex；接入要求是 stdio MCP，以及 SessionStart（含压缩后的来源）和 UserPromptSubmit 两个 hook 能向模型追加上下文。推荐长期使用一个主会话，但不强制；多个会话并发写入账本，由 `expected_control_revision` 解决冲突。外挂形态下，主 Agent 的配置与 sandbox 由用户的 agent 决定，D39 中关于主 Agent 的部分不适用。主 Agent 仍然拿不到验收提交和 completed 的写入路径，由服务端按调用方身份检查。worker 仍按 D38 运行，但不能当作主 Agent：worker 使用用户的默认配置，可能继承用户级安装的 tend MCP 和 hook，因此 runner 为 worker 进程设置 `TEND_ADDON=off`，tend 的 hook 和 MCP 桥看到它时不做任何事。 | 已确认（2026-10-16）；三个 agent 的 hook 细节待阶段 C 实测 |
+| D50 | Web 延后：阶段 C 不做 Web（阶段 C 计划里提议的 D40 撤回），以后作为移动端访问的便利入口，后端是 owner API；SSE 事件流随 Web 一起做。通知 channel 同样延后：只有一个主会话时，找到它的成本很低。 | 已确认（2026-10-16） |
+| D51 | 与 cove 的关系：tend 是 cove 之外独立的编排服务，对应 cove 设计中预留的独立看板系统；两者通过显式接口和外部 ID 映射集成，不互写数据库，cove 不依赖 tend 运行。执行层的方向：工作区由 cove 创建，tend-runner 在 cove 管理的工作区里驱动 worker，人工接管就是在 cove 里对同一个工作区开终端。具体接口在 cove M1 合入之后设计，在此之前 runner 按 D33–D37 自己管理工作区。 | 方向已确认（2026-10-16），接口待设计 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
+
+> D45：当前先做的外挂形态里，上下文由各 agent 的 hook 追加，水位、完整快照与增量的规则不变，具体机制见阶段 C 计划。本节描述的 `thread/inject_items` 方式属于托管形态，随托管一起延后；记录的 app-server 能力也适用于 worker。
 
 ### 2.1 已观察到的能力（traex 0.209.1 生成的协议）
 
@@ -72,6 +77,8 @@ ContextPacket 仍按 v0.1 §7.3 的内容组织。注入的 developer 消息以 
 
 ## 3. 主 Agent 的工具面（细化 v0.1 §14.3）
 
+> D45：外挂形态下工具集合不变，承载方式是 MCP，调用方身份、request_id 和去重规则见阶段 C 计划。本节描述的动态工具方式属于托管形态，随托管一起延后。
+
 - 工具以动态工具的形式在 `thread/start` 的 `dynamicTools` 中注册（initialize 时声明 `experimentalApi`）。模型调用时，app-server 通过主会话的 stdio 连接向 tend 发出 `item/tool/call`，参数为 `{threadId, turnId, callId, namespace, tool, arguments}`；tend 返回 `{success, contentItems}`。
 - 调用方身份由连接决定：只有 tend 自己启动的 app-server 进程能发起调用，tend 根据连接和 threadId 确定是哪个 harness 实例、哪个 thread，不信任 arguments 里自报的身份。
 - 应用 request_id 由原生身份映射得到（D28）：来源 `harness:<harness_instance>`，键 `<threadId>/<turnId>/<callId>`。callId 当作不透明字符串使用（code mode 下是复合字符串）。
@@ -101,9 +108,9 @@ Artifact 由 runner 生成，不由模型生成：worker 只修改工作区（sa
 
 ## 5. 范围（细化 v0.1 §17 阶段 C）
 
-MVP 闭环：Web 消息 → 主 Agent（traex，单前台 thread）→ 通过动态工具创建任务与 PlanAction → 调度器派给 Linux 本机 runner → worker 产出 artifact（分支加 commit sha）→ 程序自动派独立验收 run → passed 则 completed，否则进入待决。
+MVP 闭环（D45，外挂形态）：用户在接入了 tend 的 agent 会话里提出需求 → 主 Agent 通过 MCP 工具创建任务与 PlanAction → 调度器派给 Linux 本机 runner → worker 产出 artifact（分支加 commit sha）→ 程序自动派独立验收 run → passed 则 completed，否则进入待决。
 
-MVP 不做：任务范围的后台推理 thread（失败统一进入待决事项）、人工接管、导入、多机器、Orca、Electron。数据模型为这些保留字段，但不实现相关流程。
+MVP 不做：任务范围的后台推理 thread（失败统一进入待决事项）、人工接管、导入、多机器、Orca、Electron、Web（D50）。数据模型为这些保留字段，但不实现相关流程。
 
 ## 6. 网络与身份（tsnet）
 
@@ -130,6 +137,8 @@ MVP 不做：任务范围的后台推理 thread（失败统一进入待决事项
 服务端通过 tsnet 获取 tailscale 签发的证书，对外提供 `https://tend.<tailnet>.ts.net`。当前 tailnet 已开启 HTTPS 证书（spike A9）。证书在首次 TLS 握手时签发，服务端启动后应主动预取一次。没开启时退回 tailnet 内的明文 HTTP（WireGuard 已经加密），但浏览器的部分能力（例如 Service Worker、通知）会受限。
 
 ## 7. Web 客户端（细化 v0.1 §14.1）
+
+> 已由 D50 延后。以下内容保留，作为以后做 Web 时的出发点。
 
 - 按移动优先设计。窄屏时，聊天、任务、待决三个区域用底部 tab 切换；宽屏展开成多栏（聊天为主栏，看板和待决为侧栏）。
 - 待决事项在移动端是最高频的入口：按决策和审批分别展示，选项可以直接点按，提交时携带 decision_id 和版本。
