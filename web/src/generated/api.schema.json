@@ -355,10 +355,14 @@
       "properties": {
         "client_id": {
           "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/TokenScope"
         }
       },
       "required": [
-        "client_id"
+        "client_id",
+        "scope"
       ],
       "title": "SessionRequest",
       "type": "object"
@@ -369,13 +373,25 @@
         "client_id": {
           "type": "string"
         },
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
         "login": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/TokenScope"
+        },
+        "token": {
           "type": "string"
         }
       },
       "required": [
         "login",
-        "client_id"
+        "client_id",
+        "scope",
+        "expires_at"
       ],
       "title": "SessionView",
       "type": "object"
@@ -578,6 +594,14 @@
       ],
       "title": "TaskSummary",
       "type": "object"
+    },
+    "TokenScope": {
+      "enum": [
+        "owner",
+        "agent"
+      ],
+      "title": "TokenScope",
+      "type": "string"
     },
     "Verdict": {
       "enum": [

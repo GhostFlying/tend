@@ -1,7 +1,7 @@
 package protocol
 
 // APITypes are the root types of the owner API's JSON Schema, from which
-// the web client's types are generated (D22). Types they refer to are
+// clients' types are generated (D22). Types they refer to are
 // included through them.
 func APITypes() []any {
 	return []any{Envelope{}, Operation{}, TaskSummary{}, TaskDetail{}, ArtifactDetail{}, RequestView{}, SessionRequest{}, SessionView{}}
@@ -23,5 +23,6 @@ func APIEnums() []any {
 		[]Code{CodeInvalidRequest, CodeMissingRequestID, CodeConflictPayload, CodeStaleRevision, CodeUnauthenticated, CodeForbidden, CodeNotFound,
 			CodeInvalidTransition, CodeDuplicateEffect, CodeUnknownOutcome, CodeInternal},
 		[]OpStatus{OpSucceeded, OpFailed, OpAccepted, OpUnknown},
+		[]TokenScope{ScopeOwner, ScopeAgent},
 	}
 }
