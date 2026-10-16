@@ -227,7 +227,9 @@ func TestAcceptanceRunsInTaskWorkspace(t *testing.T) {
 	if head := run(t, f.env, filepath.Join(ap.Dir, "tend"), "rev-parse", "HEAD"); head != art.Mounts[0].CommitSHA {
 		t.Errorf("acceptance HEAD = %s", head)
 	}
-	if agents, err := os.ReadFile(filepath.Join(ap.Dir, "AGENTS.md")); err != nil || !strings.Contains(string(agents), "`git diff <base commit>` shows everything the task changed") {
+	// The runner's commit messages are not held against the work.
+	if agents, err := os.ReadFile(filepath.Join(ap.Dir, "AGENTS.md")); err != nil || !strings.Contains(string(agents), "`git diff <base commit>` shows everything the task changed") ||
+		!strings.Contains(string(agents), "judge the changes, not how they were committed") {
 		t.Errorf("acceptance AGENTS.md = %q, %v", agents, err)
 	}
 	// Whatever the acceptance run leaves, such as build output, stays.
