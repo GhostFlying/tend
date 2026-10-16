@@ -88,8 +88,17 @@ func applyDecision(ctx context.Context, x *Exec, tx *store.Tx, prev store.TaskRo
 		if err != nil {
 			return nil, nil, fmt.Errorf("app: encode decision options: %w", err)
 		}
+		effects, err := json.Marshal(q.Effects)
+		if err != nil {
+			return nil, nil, fmt.Errorf("app: encode decision effects: %w", err)
+		}
+		if q.Effects == nil {
+			effects = []byte("{}")
+		}
+		// Its effects apply only to the task as it is now.
+		asked := d.Task.ControlRevision
 		id := x.IDs.New(protocol.PrefixDecision)
-		if err := tx.InsertDecision(ctx, id, d.Task.ID, q.Question, string(options), now); err != nil {
+		if err := tx.InsertDecision(ctx, id, d.Task.ID, q.Question, string(options), string(effects), &asked, now); err != nil {
 			return nil, nil, err
 		}
 		// Opened by a rule, it surfaces like one a planner opens.

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -473,6 +474,24 @@ func TestRequestAcceptance(t *testing.T) {
 	for _, tc := range cases {
 		if _, err := RequestAcceptance(tc.task, 1, tc.gen, tc.task.ControlRevision); protocol.CodeOf(err) != tc.code {
 			t.Errorf("%s: %v, want %s", tc.name, err, tc.code)
+		}
+	}
+}
+
+func TestDecisionEffectsNameOptions(t *testing.T) {
+	for _, d := range []DecisionDraft{failedImplementDecision("q"), budgetDecision("q"), acceptanceDecision("q")} {
+		for option := range d.Effects {
+			if !slices.Contains(d.Options, option) {
+				t.Errorf("effect on %q, which is not an option of %v", option, d.Options)
+			}
+		}
+		if d.Effects[optionCancel] != protocol.EffectCancel {
+			t.Errorf("%v: cancel has effect %q", d.Options, d.Effects[optionCancel])
+		}
+		for _, judgment := range []string{optionReviseSpec, optionFixAcceptEnv} {
+			if _, ok := d.Effects[judgment]; ok {
+				t.Errorf("%q has an effect; it needs the agent", judgment)
+			}
 		}
 	}
 }

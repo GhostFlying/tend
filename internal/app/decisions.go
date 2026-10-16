@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
+	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -53,7 +55,7 @@ func (OpenDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		return Outcome{}, fmt.Errorf("app: encode options: %w", err)
 	}
 	id := x.IDs.New(protocol.PrefixDecision)
-	if err := tx.InsertDecision(ctx, id, p.TaskID, p.Question, string(options), x.Now.UnixMilli()); err != nil {
+	if err := tx.InsertDecision(ctx, id, p.TaskID, p.Question, string(options), "{}", nil, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
 	if p.SourceMessageID != "" {
@@ -78,8 +80,10 @@ func dedupe(s []string) []string {
 
 // AnswerDecision handles decisions.respond, the owner answering from a
 // client, and decisions.resolve_from_message, a main agent recording the
-// answer the owner gave in the conversation. The answer only closes the
-// decision: whatever it asks for, such as a retry, is a separate command.
+// answer the owner gave in the conversation. When the chosen option of a
+// decision tend opened has an effect, such as a retry, tend carries it out
+// in the same transaction (D53); otherwise the answer only closes the
+// decision and whatever it asks for is a separate command.
 //
 // The answer is checked against the version the answerer saw. Answering an
 // answered decision again with the same answer returns the recorded result;
@@ -90,8 +94,9 @@ type AnswerDecision struct {
 }
 
 type decisionAnswer struct {
-	Option string `json:"option,omitempty"`
-	Text   string `json:"text,omitempty"`
+	Option string                 `json:"option,omitempty"`
+	Text   string                 `json:"text,omitempty"`
+	Effect *protocol.EffectResult `json:"effect,omitempty"`
 }
 
 // Operation implements Command.
@@ -135,15 +140,11 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if p.Option != "" && !slices.Contains(options, p.Option) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "%q is not an option of this decision", p.Option)
 	}
-	answer, err := json.Marshal(decisionAnswer{Option: p.Option, Text: p.Text})
-	if err != nil {
-		return Outcome{}, fmt.Errorf("app: encode answer: %w", err)
-	}
-	result := func(version int64) map[string]any {
-		return map[string]any{"decision_id": d.DecisionID, "status": store.DecisionAnswered, "version": version, "answer": json.RawMessage(answer)}
-	}
-	if d.Status == store.DecisionAnswered && d.AnswerJSON == string(answer) {
-		return Outcome{Result: result(d.Version)}, nil
+	if d.Status == store.DecisionAnswered {
+		var prev decisionAnswer
+		if err := json.Unmarshal([]byte(d.AnswerJSON), &prev); err == nil && prev.Option == p.Option && prev.Text == p.Text {
+			return Outcome{Result: answerResult(d, d.Version, []byte(d.AnswerJSON), prev.Effect)}, nil
+		}
 	}
 	if d.Status != store.DecisionOpen || d.Version != p.Version {
 		pe := protocol.Errorf(protocol.CodeStaleRevision, "the decision changed since version %d", p.Version)
@@ -152,17 +153,81 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		return Outcome{}, pe
 	}
+	effect, effectEvents, err := answerEffect(ctx, x, tx, d, p.Option)
+	if err != nil {
+		return Outcome{}, err
+	}
+	answer, err := json.Marshal(decisionAnswer{Option: p.Option, Text: p.Text, Effect: effect})
+	if err != nil {
+		return Outcome{}, fmt.Errorf("app: encode answer: %w", err)
+	}
 	if err := tx.AnswerDecision(ctx, d.DecisionID, d.Version, string(answer), p.SourceMessageID, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
 	if err := bindSource(ctx, tx, p.SourceMessageID, "decision", d.DecisionID); err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{
-		Result: result(d.Version + 1),
-		Events: []Event{{ObjectType: "decision", ObjectID: d.DecisionID, ObjectVersion: d.Version + 1, Kind: "decision.answered",
-			Body: map[string]any{"task_id": d.TaskID, "answer": json.RawMessage(answer)}}},
-	}, nil
+	events := append([]Event{{ObjectType: "decision", ObjectID: d.DecisionID, ObjectVersion: d.Version + 1, Kind: "decision.answered",
+		Body: map[string]any{"task_id": d.TaskID, "answer": json.RawMessage(answer)}}}, effectEvents...)
+	return Outcome{Result: answerResult(d, d.Version+1, answer, effect), Events: events}, nil
+}
+
+func answerResult(d store.DecisionRow, version int64, answer []byte, effect *protocol.EffectResult) protocol.AnswerResult {
+	return protocol.AnswerResult{DecisionID: d.DecisionID, Status: store.DecisionAnswered, Version: version, Answer: answer, Effect: effect}
+}
+
+// answerEffect carries out the effect of the chosen option, if it has one,
+// through the same rules as the explicit command. The effect applies only
+// to the task as it was when tend asked: once anyone changed its control
+// state, the answer is kept as a fact and the effect is not applied, and
+// neither is one the rules refuse. Either way the result says why.
+func answerEffect(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRow, option string) (*protocol.EffectResult, []Event, error) {
+	var effects map[string]protocol.DecisionEffect
+	if err := json.Unmarshal([]byte(d.EffectsJSON), &effects); err != nil {
+		return nil, nil, fmt.Errorf("app: decode effects of %s: %w", d.DecisionID, err)
+	}
+	kind, ok := effects[option]
+	if !ok || d.TaskID == "" || !d.AskedRevision.Valid {
+		return nil, nil, nil
+	}
+	res := &protocol.EffectResult{Effect: kind}
+	row, spec, err := loadTask(ctx, tx.Q(), d.TaskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if row.ControlRevision != d.AskedRevision.Int64 {
+		res.Reason = fmt.Sprintf("the task changed after the question was asked (control revision %d, now %d)", d.AskedRevision.Int64, row.ControlRevision)
+		return res, nil, nil
+	}
+	task := toDomain(row, spec.Budget())
+	var dec domain.Decision
+	switch kind {
+	case protocol.EffectImplement:
+		dec, err = domain.RequestImplement(task, task.ImplementGeneration+1, row.ControlRevision)
+	case protocol.EffectAccept:
+		var latest int64
+		if latest, err = store.LatestAcceptGeneration(ctx, tx.Q(), row.TaskID, row.SpecVersion, row.CurrentArtifactID); err != nil {
+			return nil, nil, err
+		}
+		dec, err = domain.RequestAcceptance(task, latest, latest+1, row.ControlRevision)
+	case protocol.EffectCancel:
+		dec, err = domain.Cancel(task, row.ControlRevision)
+	default:
+		res.Reason = fmt.Sprintf("unknown effect %q", kind)
+		return res, nil, nil
+	}
+	if pe := (*protocol.Error)(nil); errors.As(err, &pe) {
+		res.Reason = pe.Message
+		return res, nil, nil
+	} else if err != nil {
+		return nil, nil, err
+	}
+	_, events, err := applyDecision(ctx, x, tx, row, dec, map[string]any{"on": "answered", "decision_id": d.DecisionID})
+	if err != nil {
+		return nil, nil, err
+	}
+	res.Applied = true
+	return res, events, nil
 }
 
 func nonEmpty(s string) string {

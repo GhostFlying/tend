@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -95,6 +96,12 @@ func classify(kind string, body map[string]any) class {
 	c := classes[kind]
 	if kind == "acceptance.submitted" && body["verdict"] != string(protocol.VerdictPassed) {
 		return attention
+	}
+	// An answer whose effect tend could not carry out is left to the agent.
+	if answer, _ := body["answer"].(map[string]any); kind == "decision.answered" && answer != nil {
+		if effect, _ := answer["effect"].(map[string]any); effect != nil && effect["applied"] != true {
+			return attention
+		}
 	}
 	return c
 }
@@ -322,7 +329,7 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			}
 			line = "opened: " + decisionLine(d)
 			if e.Kind == "decision.answered" {
-				line = fmt.Sprintf("answered: %s %s -> %s", d.DecisionID, d.Question, d.AnswerJSON)
+				line = answerLine(d)
 			}
 			line = fmt.Sprintf("#%d %s", e.Seq, line)
 		default:
@@ -450,13 +457,47 @@ func taskLine(ctx context.Context, q store.Querier, t store.TaskRow) (string, bo
 func decisionLine(d store.DecisionRow) string {
 	var options []string
 	_ = json.Unmarshal([]byte(d.OptionsJSON), &options)
+	var effects map[string]protocol.DecisionEffect
+	_ = json.Unmarshal([]byte(d.EffectsJSON), &effects)
 	task := ""
 	if d.TaskID != "" {
 		task = " about " + d.TaskID
 	}
 	line := fmt.Sprintf("%s v%d%s: %s", d.DecisionID, d.Version, task, d.Question)
 	if len(options) > 0 {
+		for i, o := range options {
+			if _, ok := effects[o]; ok {
+				options[i] = o + " (tend carries it out)"
+			}
+		}
 		line += " Options: " + strings.Join(options, " / ")
+	}
+	return line
+}
+
+// answerLine tells an answer and what tend did about it, so the agent
+// neither repeats an effect tend applied nor misses one it did not.
+func answerLine(d store.DecisionRow) string {
+	var a struct {
+		Option string                 `json:"option"`
+		Text   string                 `json:"text"`
+		Effect *protocol.EffectResult `json:"effect"`
+	}
+	_ = json.Unmarshal([]byte(d.AnswerJSON), &a)
+	var answer []string
+	if a.Option != "" {
+		answer = append(answer, strconv.Quote(a.Option))
+	}
+	if a.Text != "" {
+		answer = append(answer, "note "+strconv.Quote(a.Text))
+	}
+	line := fmt.Sprintf("answered: %s %s -> %s", d.DecisionID, d.Question, strings.Join(answer, ", "))
+	switch {
+	case a.Effect == nil:
+	case a.Effect.Applied:
+		line += fmt.Sprintf("; tend carried it out (%s), nothing left to do", a.Effect.Effect)
+	default:
+		line += fmt.Sprintf("; tend did not carry it out (%s): %s. Act on the answer yourself", a.Effect.Effect, a.Effect.Reason)
 	}
 	return line
 }

@@ -192,3 +192,40 @@ func TestEndToEnd_AgentAddon(t *testing.T) {
 		t.Errorf("tend task = %+v, %v", d, err)
 	}
 }
+
+// TestEndToEnd_OwnerAnswersDecision has the owner answer a decision tend
+// opened from the command line: tend carries out the chosen option, and
+// the agent hears on its next prompt that nothing is left to do.
+func TestEndToEnd_OwnerAnswersDecision(t *testing.T) {
+	srv := newServer(t, time.Minute)
+	url := srv.startAPI()
+	configDir := filepath.Join(t.TempDir(), "tend")
+	claude := newAddonAgent(t, configDir, string(protocol.AgentClaude), "sess-claude")
+	claude.run("", "login", "--server", url)
+	claude.hook("session-start", "startup", "")
+
+	n := newNode(t, srv, passing)
+	n.ws.noChanges = true
+	n.start()
+	task := srv.createTask()
+	eventually(t, "the task waits for a decision", func() bool { return srv.waitsForDecision(task) })
+	if got := claude.hook("user-prompt-submit", "", "anything new?"); !strings.Contains(got, "cancel the task (tend carries it out)") {
+		t.Errorf("the agent does not hear which options tend carries out:\n%s", got)
+	}
+
+	owner := newAddonAgent(t, configDir, "", "")
+	var s protocol.Snapshot
+	if err := json.Unmarshal([]byte(owner.run("", "status", "--json")), &s); err != nil || len(s.Decisions) != 1 {
+		t.Fatalf("tend status = %+v, %v", s, err)
+	}
+	if out := owner.run("", "decide", s.Decisions[0].DecisionID, "cancel the task"); !strings.Contains(out, "tend carried it out: cancel") {
+		t.Errorf("tend decide printed:\n%s", out)
+	}
+	if got := srv.task(task).Lifecycle; got != protocol.TaskCancelled {
+		t.Errorf("task = %s, want cancelled", got)
+	}
+	got := claude.hook("user-prompt-submit", "", "and now?")
+	if !strings.Contains(got, "tend carried it out (cancel), nothing left to do") || !strings.Contains(got, task+" task.cancelled") {
+		t.Errorf("the agent does not hear what tend did:\n%s", got)
+	}
+}

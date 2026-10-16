@@ -1,6 +1,9 @@
 package protocol
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Owner API wire types besides the envelope and the read views. The
 // payloads of operations other callers share carry fields only the hosted
@@ -70,6 +73,25 @@ type AnswerDecisionPayload struct {
 	Text   string `json:"text,omitempty"`
 	// SourceMessageID is set by the hosted main agent only.
 	SourceMessageID string `json:"source_message_id,omitempty"`
+}
+
+// AnswerResult is the result of answering a decision.
+type AnswerResult struct {
+	DecisionID string          `json:"decision_id"`
+	Status     string          `json:"status"`
+	Version    int64           `json:"version"`
+	Answer     json.RawMessage `json:"answer"`
+	// Effect is present when the chosen option has one (D53).
+	Effect *EffectResult `json:"effect,omitempty"`
+}
+
+// EffectResult tells what tend did about the effect of a chosen option.
+type EffectResult struct {
+	Effect  DecisionEffect `json:"effect"`
+	Applied bool           `json:"applied"`
+	// Reason says why the effect was not applied, for example because the
+	// task changed after the question was asked.
+	Reason string `json:"reason,omitempty"`
 }
 
 // SetControlModePayload is the payload of control.set_mode.

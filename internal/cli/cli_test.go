@@ -486,12 +486,17 @@ func TestDecideAnswersTheOpenVersion(t *testing.T) {
 	f.on("POST /api/v1/ops", func(w http.ResponseWriter, _ *http.Request, body []byte) {
 		var env protocol.Envelope
 		_ = json.Unmarshal(body, &env)
-		ok := protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}
+		result, _ := json.Marshal(protocol.AnswerResult{DecisionID: "dec_1", Status: "answered", Version: 4,
+			Effect: &protocol.EffectResult{Effect: protocol.EffectImplement, Reason: "the task changed after the question was asked"}})
+		ok := protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: result}
 		_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &ok})
 	})
 	te := newTestEnv(t, f.srv.URL)
 	if code := te.main("decide", "dec_1", "retry", "--note", "once more"); code != exitOK {
 		t.Fatalf("decide = %d: %s", code, te.errOut)
+	}
+	if want := "tend did not carry it out (implement): the task changed after the question was asked\n"; !strings.HasSuffix(te.out.String(), want) {
+		t.Errorf("decide printed %q, want it to end with %q", te.out, want)
 	}
 	var env protocol.Envelope
 	var p protocol.AnswerDecisionPayload
@@ -741,6 +746,9 @@ func TestTaskShowsArtifactsAndIssues(t *testing.T) {
 			{ArtifactID: "art_1", SpecVersion: 1, Verdict: protocol.VerdictChangesRequired, Issues: json.RawMessage(`["tests fail",{"check":2}]`)},
 			{ArtifactID: "art_1", SpecVersion: 1, Verdict: protocol.VerdictPassed, Issues: json.RawMessage(`[]`)},
 		},
+		Decisions: []protocol.DecisionView{{DecisionID: "dec_1", Version: 1, Status: "open", Question: "Run failed. How should this task proceed?",
+			Options: json.RawMessage(`["retry the implementation","revise the spec"]`),
+			Effects: map[string]protocol.DecisionEffect{"retry the implementation": protocol.EffectImplement}}},
 	})
 	te := newTestEnv(t, f.srv.URL)
 	if code := te.main("task", "task_1"); code != exitOK {
@@ -750,6 +758,7 @@ func TestTaskShowsArtifactsAndIssues(t *testing.T) {
 		"  art_1 from run_1\n    calc: tend/fix at 5f6ea1e143cd (base 2a5c718c5637)\n    lib: unchanged in this run, at 999999999999\n    doc: unchanged in this run, at 888888888888\n",
 		"verdict on art_1 (spec v1): changes_required\n  - tests fail\n  - {\"check\":2}\n",
 		"verdict on art_1 (spec v1): passed\n",
+		"    options: retry the implementation (tend: implement) | revise the spec\n",
 	} {
 		if !strings.Contains(te.out.String(), want) {
 			t.Errorf("task output lacks %q:\n%s", want, te.out)

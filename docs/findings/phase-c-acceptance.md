@@ -43,7 +43,7 @@
 
 ### 未决问题
 
-1. **待决事项的回答不会被执行。** 按 D31，回答只是记录，由主 Agent 据此行动。外挂形态下 owner 常用 `tend decide` 直接回答，这时要等 owner 回到某个 agent 会话，agent 看到增量后才会执行；在那之前任务一直停在 `blocked: waiting_decision`。tend 自己开出的待决事项有固定选项（重试、修改 spec、取消），可以考虑让这些选项带上效果，回答时由 tend 直接执行；“修改 spec”这类选项仍然要交给 agent。
+1. **待决事项的回答不会被执行。** 按 D31，回答只是记录，由主 Agent 据此行动。外挂形态下 owner 常用 `tend decide` 直接回答，这时要等 owner 回到某个 agent 会话，agent 看到增量后才会执行；在那之前任务一直停在 `blocked: waiting_decision`。已按 D53 解决（C11，`docs/plans/decision-effects.md`）：tend 自己开出的待决事项里，重试和取消类的选项在回答时由 tend 直接执行，agent 下一次输入时从增量里得知。
 2. Codex 的 memories 子会话也会触发 SessionStart，每次都拿到完整快照，增加了不必要的请求和水位记录。
 3. 完整快照只列未结束的任务。会话开始时 agent 看不到刚刚完成的任务，只能依赖增量。可以考虑附上最近结束的任务。
 4. 增量不说明变化来自谁（owner、其他会话还是 tend 自己），agent 无法区分。
