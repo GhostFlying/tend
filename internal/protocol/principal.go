@@ -24,11 +24,16 @@ const (
 type Principal struct {
 	Kind PrincipalKind `json:"kind"`
 	// Subject identifies the caller within its kind: the login for owners,
-	// the harness instance for main agents, the host for runners and the run
+	// the harness instance for the hosted main agent, the client ID of the
+	// token for agents the owner works in, the host for runners and the run
 	// ID for runs. It is empty for the system principal.
 	Subject string `json:"subject,omitempty"`
-	// Thread is the harness thread for main-agent callers.
+	// Thread is the harness thread for hosted main-agent callers, and the
+	// agent's session, when known, for agents the owner works in.
 	Thread string `json:"thread,omitempty"`
+	// Agent is the kind of agent for main-agent callers that are agents the
+	// owner works in (D45); it is empty for the hosted main agent.
+	Agent AgentKind `json:"agent,omitempty"`
 	// Role is the run role for run callers.
 	Role RunRole `json:"role,omitempty"`
 	// Client identifies the client instance, such as one browser on one
@@ -51,8 +56,10 @@ func (p Principal) Validate() error {
 			return fmt.Errorf("protocol: %s principal needs a subject", p.Kind)
 		}
 	case PrincipalMainAgent:
-		if p.Subject == "" || p.Thread == "" {
-			return fmt.Errorf("protocol: main_agent principal needs a subject and a thread")
+		// The hosted main agent always has its thread. An agent the owner
+		// works in may not know its session.
+		if p.Subject == "" || (p.Agent == "" && p.Thread == "") || (p.Agent != "" && !p.Agent.Valid()) {
+			return fmt.Errorf("protocol: main_agent principal needs a subject and a thread or a known agent kind")
 		}
 	case PrincipalRun:
 		if p.Subject == "" || !p.Role.Valid() {
@@ -79,3 +86,7 @@ func (p Principal) DedupDomain() string {
 		return string(p.Kind) + ":" + p.Subject
 	}
 }
+
+// Addon reports whether p is an agent the owner works in, rather than the
+// hosted main agent.
+func (p Principal) Addon() bool { return p.Kind == PrincipalMainAgent && p.Agent != "" }

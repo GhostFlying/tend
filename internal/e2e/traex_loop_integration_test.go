@@ -46,7 +46,8 @@ func TestIntegration_TraexLoop(t *testing.T) {
 		cancel()
 		wg.Wait()
 	}()
-	front := mainthread.New(srv.app, contextbuilder.New(srv.app, srv.store, srv.ids, contextbuilder.Config{}), tools.New(srv.app, srv.store, quiet()), mainthread.Config{
+	cb := contextbuilder.New(srv.app, srv.store, srv.ids, contextbuilder.Config{})
+	front := mainthread.New(srv.app, cb, tools.New(srv.app, srv.store, cb, quiet()), mainthread.Config{
 		Instance: "main",
 		Thread: harness.ThreadConfig{Cwd: t.TempDir(), Model: traexModel(), DeveloperInstructions: mainthread.Instructions,
 			Sandbox: "danger-full-access", ApprovalPolicy: "never", Config: mainthread.Isolation},

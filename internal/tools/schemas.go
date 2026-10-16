@@ -60,7 +60,8 @@ var schemas = map[string]string{
     "spec": ` + specSchema + `,
     "priority": {"type": "integer", "description": "Higher runs first. Default 0."},
     "workspace_name": {"type": "string", "description": "Short lowercase name for the workspace and branch, such as fix-windows-build."},
-    "commit_seq": {"type": "integer", "minimum": 1, "description": "1 for the first planning write for this message, then 2, 3 and so on. Repeating a number repeats nothing."}
+    "commit_seq": {"type": "integer", "minimum": 1, "description": "1 for the first planning write for this message, then 2, 3 and so on. Repeating a number repeats nothing."},
+    "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
   },
   "required": ["title", "spec", "commit_seq"],
   "additionalProperties": false
@@ -72,7 +73,8 @@ var schemas = map[string]string{
     "expected_control_revision": {"type": "integer", "description": "The control_revision you last read; stale values are rejected."},
     "spec": ` + specSchema + `,
     "priority": {"type": "integer"},
-    "commit_seq": {"type": "integer", "minimum": 1}
+    "commit_seq": {"type": "integer", "minimum": 1},
+    "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
   },
   "required": ["task_id", "expected_control_revision", "commit_seq"],
   "additionalProperties": false
@@ -85,7 +87,8 @@ var schemas = map[string]string{
     "expected_control_revision": {"type": "integer"},
     "kind": {"type": "string", "enum": ["implement", "accept"]},
     "generation": {"type": "integer", "minimum": 1, "description": "The next generation number shown by tasks_read."},
-    "commit_seq": {"type": "integer", "minimum": 1}
+    "commit_seq": {"type": "integer", "minimum": 1},
+    "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
   },
   "required": ["task_id", "expected_control_revision", "kind", "generation", "commit_seq"],
   "additionalProperties": false
@@ -95,19 +98,21 @@ var schemas = map[string]string{
   "properties": {
     "task_id": {"type": "string"},
     "question": {"type": "string"},
-    "options": {"type": "array", "items": {"type": "string"}, "maxItems": 10}
+    "options": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
+    "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
   },
   "required": ["question", "options"],
   "additionalProperties": false
 }`,
 	"decisions_resolve": `{
   "type": "object",
-  "description": "Record the owner's answer from the current message.",
+  "description": "Record the owner's answer to an open decision.",
   "properties": {
     "decision_id": {"type": "string"},
     "version": {"type": "integer", "description": "The decision version you last read."},
     "option": {"type": "string"},
-    "text": {"type": "string"}
+    "text": {"type": "string"},
+    "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
   },
   "required": ["decision_id", "version"],
   "additionalProperties": false
@@ -125,6 +130,11 @@ var schemas = map[string]string{
   "additionalProperties": false
 }`,
 	"repos_list": `{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}`,
+	"tend_context": `{
   "type": "object",
   "properties": {},
   "additionalProperties": false

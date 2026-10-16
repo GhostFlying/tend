@@ -7,34 +7,48 @@ import (
 
 // Snapshot is what a packet says, gathered from the ledger.
 type Snapshot struct {
+	// PacketID is empty for a snapshot that is shown but not recorded.
 	PacketID  string
 	Epoch     int64
 	Watermark int64
 	// Full marks a full snapshot; otherwise the packet is a delta.
 	Full bool
-	// Decisions are the open questions for the owner.
+	// Addon marks context for an agent the owner works in rather than the
+	// hosted main agent: a full snapshot then carries the standing
+	// instructions, which such an agent has no other place for.
+	Addon bool
+	// Decisions are the open questions for the owner, in a full snapshot.
 	Decisions []string
-	// Attention lists tasks that are blocked or have a run in unknown
-	// state, with their constraints.
+	// Attention lists, in a full snapshot, the tasks that are blocked or
+	// have a run in unknown state, with their constraints; in a delta, the
+	// changes that need someone to act, such as a new decision or a failed
+	// run.
 	Attention []string
 	// Focus is the recent conversation, oldest first. It comes from the
 	// messages, never from background events (v0.1 §6.1).
 	Focus []string
 	// Tasks lists the other unfinished tasks, most important first.
 	Tasks []string
-	// Changes are the relevant ledger changes since the watermark; a
-	// delta's decision questions and answers are in Decisions instead.
+	// Results are the task outcomes in a delta.
+	Results []string
+	// Changes are a delta's other changes to what the ledger wants, and
+	// the current state of the tasks the delta touched.
 	Changes []string
+}
+
+func (s Snapshot) empty() bool {
+	return len(s.Attention) == 0 && len(s.Results) == 0 && len(s.Changes) == 0
 }
 
 // section is a block of lines with a priority; under budget pressure the
 // lowest priority goes first, whole lines from the end, and an omission
-// note points to the tools.
+// note points to the tools. A protected section is never cut.
 type section struct {
-	title    string
-	lines    []string
-	priority int
-	omitted  string // note format with one %d for the count
+	title     string
+	lines     []string
+	priority  int
+	protected bool
+	omitted   string // note format with one %d for the count
 }
 
 // Render writes a packet's text within budget characters. A line is never
@@ -45,19 +59,42 @@ func Render(s Snapshot, budget int) string {
 	if s.Full {
 		kind = "full"
 	}
-	header := fmt.Sprintf("[tend context packet %s epoch=%d watermark=%d kind=%s]\n", s.PacketID, s.Epoch, s.Watermark, kind)
-	if s.Full {
-		header += "This is tend's ledger as of now. It is authoritative over anything you remember; read details with the tend tools.\n"
+	var header string
+	if s.PacketID == "" {
+		header = fmt.Sprintf("[tend context snapshot watermark=%d]\n", s.Watermark)
 	} else {
+		header = fmt.Sprintf("[tend context packet %s epoch=%d watermark=%d kind=%s]\n", s.PacketID, s.Epoch, s.Watermark, kind)
+	}
+	switch {
+	case s.Full && s.Addon:
+		header += "This replaces all earlier tend context in this conversation, including any carried over in a summary. " +
+			"It is tend's ledger as of now and is authoritative over anything you remember.\n\n" + AddonInstructions + "\n"
+		if len(s.Tasks) == 0 && len(s.Attention) == 0 {
+			header += "\nThere are no unfinished tasks.\n"
+		}
+	case s.Full:
+		header += "This is tend's ledger as of now. It is authoritative over anything you remember; read details with the tend tools.\n"
+	case s.Addon:
+		header += "Changes in tend's ledger since your last tend context, made by others or by tend itself. Read details with the tend tools.\n"
+	default:
 		header += "Changes in tend's ledger since your last context. Background changes do not change what the owner is talking about.\n"
 	}
-	sections := []*section{
-		{title: "Decisions", lines: s.Decisions, priority: 6, omitted: "(%d more decisions; see tasks_read)"},
-		{title: "Needs attention", lines: s.Attention, priority: 5, omitted: "(%d more tasks need attention; see tasks_list)"},
-		{title: "Recent conversation", lines: s.Focus, priority: 4, omitted: "(%d earlier messages omitted)"},
-		{title: "Changes", lines: s.Changes, priority: 3, omitted: "(%d more changes; see tasks_read)"},
-		{title: "Open tasks", lines: s.Tasks, priority: 2, omitted: "(%d more open tasks; see tasks_list)"},
+	var sections []*section
+	if s.Full {
+		sections = []*section{
+			{title: "Decisions", lines: s.Decisions, priority: 6, omitted: "(%d more decisions; see tasks_read)"},
+			{title: "Needs attention", lines: s.Attention, priority: 5, omitted: "(%d more tasks need attention; see tasks_list)"},
+			{title: "Recent conversation", lines: s.Focus, priority: 4, omitted: "(%d earlier messages omitted)"},
+			{title: "Open tasks", lines: s.Tasks, priority: 2, omitted: "(%d more open tasks; see tasks_list)"},
+		}
+	} else {
+		sections = []*section{
+			{title: "Needs attention", lines: s.Attention, protected: true},
+			{title: "Results", lines: s.Results, priority: 3, omitted: "(%d more results; see tasks_list)"},
+			{title: "Changes", lines: s.Changes, priority: 2, omitted: "(%d more changes; see tasks_list)"},
+		}
 	}
+	focus := func(sec *section) bool { return sec.title == "Recent conversation" }
 	dropped := map[*section]int{}
 	size := func() int {
 		n := len(header)
@@ -78,14 +115,14 @@ func Render(s Snapshot, budget int) string {
 	for size() > budget {
 		var victim *section
 		for _, sec := range sections {
-			if len(sec.lines) > 0 && (victim == nil || sec.priority < victim.priority) {
+			if !sec.protected && len(sec.lines) > 0 && (victim == nil || sec.priority < victim.priority) {
 				victim = sec
 			}
 		}
 		if victim == nil {
 			break
 		}
-		if victim == sections[2] {
+		if focus(victim) {
 			// Drop the oldest messages first; keep the latest exchange.
 			victim.lines = victim.lines[1:]
 		} else {
@@ -100,13 +137,13 @@ func Render(s Snapshot, budget int) string {
 			continue
 		}
 		fmt.Fprintf(&b, "\n## %s\n", sec.title)
-		if sec == sections[2] && dropped[sec] > 0 {
+		if focus(sec) && dropped[sec] > 0 {
 			fmt.Fprintf(&b, "- "+sec.omitted+"\n", dropped[sec])
 		}
 		for _, l := range sec.lines {
 			fmt.Fprintf(&b, "- %s\n", l)
 		}
-		if sec != sections[2] && dropped[sec] > 0 {
+		if !focus(sec) && dropped[sec] > 0 {
 			fmt.Fprintf(&b, "- "+sec.omitted+"\n", dropped[sec])
 		}
 	}

@@ -5,7 +5,8 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{Envelope{}, APIResponse{}, Snapshot{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ArtifactDetail{}, RequestView{},
-		SessionRequest{}, SessionView{}, AnswerDecisionPayload{}, SetControlModePayload{}, CreateActionPayload{}}
+		SessionRequest{}, SessionView{}, AnswerDecisionPayload{}, SetControlModePayload{}, CreateActionPayload{},
+		HookRequest{}, HookResponse{}, ToolSpec{}, ToolRequest{}, ToolResponse{}}
 }
 
 // APIEnums lists the values of every string enum in the owner API.
@@ -25,5 +26,7 @@ func APIEnums() []any {
 			CodeInvalidTransition, CodeDuplicateEffect, CodeUnknownOutcome, CodeInternal},
 		[]OpStatus{OpSucceeded, OpFailed, OpAccepted, OpUnknown},
 		[]TokenScope{ScopeOwner, ScopeAgent},
+		Agents,
+		[]HookEvent{HookSessionStart, HookUserPromptSubmit},
 	}
 }

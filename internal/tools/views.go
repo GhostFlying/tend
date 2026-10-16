@@ -163,3 +163,10 @@ func (s *Service) reposList(ctx context.Context, c Call) (any, error) {
 	}
 	return out, nil
 }
+
+func (s *Service) tendContext(ctx context.Context, c Call) (any, error) {
+	if err := decode(c.Arguments, &noArgs{}); err != nil {
+		return nil, err
+	}
+	return s.snapshots.Current(ctx)
+}

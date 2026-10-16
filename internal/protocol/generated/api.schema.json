@@ -95,6 +95,15 @@
       "title": "ActionView",
       "type": "object"
     },
+    "AgentKind": {
+      "enum": [
+        "claude",
+        "codex",
+        "traex"
+      ],
+      "title": "AgentKind",
+      "type": "string"
+    },
     "AnswerDecisionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -272,6 +281,9 @@
           "type": "string"
         },
         "payload": {},
+        "reason": {
+          "type": "string"
+        },
         "request_id": {
           "type": "string"
         },
@@ -306,6 +318,55 @@
         "message"
       ],
       "title": "Error",
+      "type": "object"
+    },
+    "HookEvent": {
+      "enum": [
+        "session_start",
+        "user_prompt_submit"
+      ],
+      "title": "HookEvent",
+      "type": "string"
+    },
+    "HookRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/definitions/AgentKind"
+        },
+        "event": {
+          "$ref": "#/definitions/HookEvent"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "agent",
+        "event",
+        "session_id"
+      ],
+      "title": "HookRequest",
+      "type": "object"
+    },
+    "HookResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string"
+        }
+      },
+      "title": "HookResponse",
       "type": "object"
     },
     "HostView": {
@@ -900,6 +961,64 @@
       "title": "TokenScope",
       "type": "string"
     },
+    "ToolRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/definitions/AgentKind"
+        },
+        "arguments": {},
+        "request_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "agent",
+        "arguments"
+      ],
+      "title": "ToolRequest",
+      "type": "object"
+    },
+    "ToolResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "content"
+      ],
+      "title": "ToolResponse",
+      "type": "object"
+    },
+    "ToolSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "input_schema": {},
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "input_schema"
+      ],
+      "title": "ToolSpec",
+      "type": "object"
+    },
     "Verdict": {
       "enum": [
         "passed",
@@ -958,6 +1077,12 @@
     "Envelope": {
       "$ref": "#/definitions/Envelope"
     },
+    "HookRequest": {
+      "$ref": "#/definitions/HookRequest"
+    },
+    "HookResponse": {
+      "$ref": "#/definitions/HookResponse"
+    },
     "RequestView": {
       "$ref": "#/definitions/RequestView"
     },
@@ -981,6 +1106,15 @@
     },
     "TaskPage": {
       "$ref": "#/definitions/TaskPage"
+    },
+    "ToolRequest": {
+      "$ref": "#/definitions/ToolRequest"
+    },
+    "ToolResponse": {
+      "$ref": "#/definitions/ToolResponse"
+    },
+    "ToolSpec": {
+      "$ref": "#/definitions/ToolSpec"
     }
   },
   "title": "TendAPI",

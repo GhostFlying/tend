@@ -35,32 +35,35 @@ type RequestRecord struct {
 	ErrorCode       string
 	ErrorMessage    string
 	ErrorDetails    string
-	CreatedAt       int64
+	// Reason is the caller's note on why it made the request.
+	Reason    string
+	CreatedAt int64
 }
 
 // GetRequest returns the record for (domain, requestID), or ErrNotFound.
 func GetRequest(ctx context.Context, q Querier, domain, requestID string) (RequestRecord, error) {
 	r := RequestRecord{Domain: domain, RequestID: requestID}
-	var parent, result, code, msg, details sql.NullString
+	var parent, result, code, msg, details, reason sql.NullString
 	err := q.QueryRowContext(ctx, `SELECT operation, payload_hash, principal_json, parent_request_id, trace_id, status,
-		result_json, error_code, error_message, error_details, created_at
+		result_json, error_code, error_message, error_details, reason, created_at
 		FROM request_records WHERE domain = ? AND request_id = ?`, domain, requestID).
-		Scan(&r.Operation, &r.PayloadHash, &r.PrincipalJSON, &parent, &r.TraceID, &r.Status, &result, &code, &msg, &details, &r.CreatedAt)
+		Scan(&r.Operation, &r.PayloadHash, &r.PrincipalJSON, &parent, &r.TraceID, &r.Status, &result, &code, &msg, &details, &reason, &r.CreatedAt)
 	if err != nil {
 		return RequestRecord{}, notFound(err, "request record")
 	}
 	r.ParentRequestID, r.ResultJSON, r.ErrorCode, r.ErrorMessage, r.ErrorDetails = parent.String, result.String, code.String, msg.String, details.String
+	r.Reason = reason.String
 	return r, nil
 }
 
 // InsertRequest stores a new request record.
 func (t *Tx) InsertRequest(ctx context.Context, r RequestRecord) error {
 	_, err := t.Exec(ctx, `INSERT INTO request_records (domain, request_id, operation, payload_hash, principal_json,
-		parent_request_id, trace_id, status, result_json, error_code, error_message, error_details, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		parent_request_id, trace_id, status, result_json, error_code, error_message, error_details, reason, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Domain, r.RequestID, r.Operation, r.PayloadHash, r.PrincipalJSON, nullString(r.ParentRequestID), r.TraceID,
 		r.Status, nullString(r.ResultJSON), nullString(r.ErrorCode), nullString(r.ErrorMessage), nullString(r.ErrorDetails),
-		r.CreatedAt, r.CreatedAt)
+		nullString(r.Reason), r.CreatedAt, r.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("store: insert request record: %w", err)
 	}

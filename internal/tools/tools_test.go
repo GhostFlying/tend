@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -48,7 +49,7 @@ func newEnv(t *testing.T) *env {
 	if _, err := a.Execute(context.Background(), protocol.Principal{Kind: protocol.PrincipalSystem}, envl, app.SyncConfig{}); err != nil {
 		t.Fatal(err)
 	}
-	return &env{t: t, svc: New(a, s, slog.New(slog.NewTextHandler(io.Discard, nil))), store: s}
+	return &env{t: t, svc: New(a, s, contextbuilder.New(a, s, ids, contextbuilder.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil))), store: s}
 }
 
 // call runs a tool as the main agent handling message msg_1. callID
@@ -251,7 +252,7 @@ func TestSchemasMatchArgs(t *testing.T) {
 	args := map[string]any{
 		"tasks_list": listArgs{}, "tasks_read": taskArgs{}, "tasks_create": createArgs{}, "tasks_update_intent": updateArgs{},
 		"actions_create": actionArgs{}, "decisions_open": openArgs{}, "decisions_resolve": resolveArgs{},
-		"artifacts_read": artifactArgs{}, "requests_read": requestArgs{}, "repos_list": noArgs{},
+		"artifacts_read": artifactArgs{}, "requests_read": requestArgs{}, "repos_list": noArgs{}, "tend_context": noArgs{},
 	}
 	if len(args) != len(Specs()) {
 		t.Fatalf("%d tools but %d argument types", len(Specs()), len(args))

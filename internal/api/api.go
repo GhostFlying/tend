@@ -1,6 +1,8 @@
 // Package api is the owner's HTTP API: requests from the tend CLI and the
 // agents the owner works in, authenticated with owner tokens (D49). Writes
-// go through app like every other caller's; reads use views.
+// go through app like every other caller's; reads use views. Agents get
+// their context from contextbuilder through their hooks and call the tools
+// package's tools through the MCP bridge.
 package api
 
 import (
@@ -11,9 +13,11 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/tools"
 )
 
 // maxBody bounds a request body.
@@ -31,24 +35,26 @@ type Config struct {
 
 // Server serves the owner API.
 type Server struct {
-	app   *app.App
-	store *store.Store
-	whois netx.WhoIs
-	key   []byte
-	cfg   Config
-	log   *slog.Logger
+	app     *app.App
+	store   *store.Store
+	tools   *tools.Service
+	context *contextbuilder.Builder
+	whois   netx.WhoIs
+	key     []byte
+	cfg     Config
+	log     *slog.Logger
 }
 
 // New returns a Server. The store is used for reads only; secret is the
 // server secret tokens are signed with.
-func New(a *app.App, s *store.Store, whois netx.WhoIs, secret []byte, cfg Config, log *slog.Logger) *Server {
+func New(a *app.App, s *store.Store, ts *tools.Service, cb *contextbuilder.Builder, whois netx.WhoIs, secret []byte, cfg Config, log *slog.Logger) *Server {
 	if cfg.TokenTTL <= 0 {
 		cfg.TokenTTL = 30 * 24 * time.Hour
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Server{app: a, store: s, whois: whois, key: tokenKey(secret), cfg: cfg, log: log}
+	return &Server{app: a, store: s, tools: ts, context: cb, whois: whois, key: tokenKey(secret), cfg: cfg, log: log}
 }
 
 // Handler returns the API's routes, all under /api/v1/.
@@ -62,6 +68,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/tasks/{id}", s.task)
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs", s.runLogs)
 	mux.HandleFunc("GET /api/v1/requests/{id}", s.request)
+	mux.HandleFunc("POST /api/v1/agent/hook", s.hook)
+	mux.HandleFunc("GET /api/v1/agent/tools", s.listTools)
+	mux.HandleFunc("POST /api/v1/agent/tools/{name}", s.callTool)
 	return mux
 }
 

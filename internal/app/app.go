@@ -176,7 +176,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		rec = store.RequestRecord{
 			Domain: domain, RequestID: env.RequestID, Operation: env.Operation, PayloadHash: hash,
 			PrincipalJSON: string(principalJSON), ParentRequestID: env.ParentRequestID, TraceID: x.TraceID,
-			CreatedAt: x.Now.UnixMilli(),
+			Reason: env.Reason, CreatedAt: x.Now.UnixMilli(),
 		}
 		if err := tx.Savepoint(ctx, applySavepoint); err != nil {
 			return err

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -283,7 +284,7 @@ func TestInvalidationWinsOverALateConfirm(t *testing.T) {
 	}
 }
 
-func TestDeltaCarriesDecisionsAndRunTasks(t *testing.T) {
+func TestDeltaGroupsChangesAndTiesRunsToTasks(t *testing.T) {
 	e := newEnv(t)
 	id, _ := e.task("fix windows")
 	_ = e.b.Confirm(context.Background(), e.prepare(0).ID)
@@ -306,12 +307,36 @@ func TestDeltaCarriesDecisionsAndRunTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	delta := e.prepare(0)
-	decisions := sectionOf(delta.Text, "Decisions")
-	if !strings.Contains(decisions, "opened: "+opened.DecisionID) || !strings.Contains(decisions, `"option":"no"`) {
-		t.Errorf("decisions in the delta:\n%s", decisions)
+	attention := sectionOf(delta.Text, "Needs attention")
+	if !strings.Contains(attention, "opened: "+opened.DecisionID) || !strings.Contains(attention, "run_x of "+id+" run.unknown") {
+		t.Errorf("the new decision and the unknown run need attention:\n%s", attention)
 	}
 	changes := sectionOf(delta.Text, "Changes")
-	if !strings.Contains(changes, "run_x of "+id+" run.unknown") || !strings.Contains(changes, "now: "+id) {
-		t.Errorf("run change not tied to its task:\n%s", changes)
+	if !strings.Contains(changes, `"option":"no"`) || !strings.Contains(changes, "now: "+id) {
+		t.Errorf("the answer and the task's state among the changes:\n%s", changes)
+	}
+}
+
+func TestClassify(t *testing.T) {
+	for _, tt := range []struct {
+		kind string
+		body map[string]any
+		want class
+	}{
+		{"acceptance.submitted", map[string]any{"verdict": "passed"}, result},
+		{"acceptance.submitted", map[string]any{"verdict": "changes_required"}, attention},
+		{"acceptance.submitted", map[string]any{"verdict": "inconclusive"}, attention},
+		{"run.failed", nil, attention},
+		{"task.completed", nil, result},
+		{"decision.answered", nil, intent},
+		{"run.started", nil, progress},
+		{"artifact.submitted", nil, progress},
+	} {
+		if got := classify(tt.kind, tt.body); got != tt.want {
+			t.Errorf("classify(%s, %v) = %d, want %d", tt.kind, tt.body, got, tt.want)
+		}
+	}
+	if slices.Contains(told, "run.started") || !slices.Contains(told, "acceptance.submitted") {
+		t.Errorf("told = %v", told)
 	}
 }

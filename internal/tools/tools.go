@@ -43,16 +43,22 @@ type Call struct {
 	Arguments       json.RawMessage
 }
 
+// Snapshots shows the ledger as a full snapshot, for tend_context.
+type Snapshots interface {
+	Current(ctx context.Context) (string, error)
+}
+
 // Service answers the main agent's tool calls.
 type Service struct {
-	app   *app.App
-	store *store.Store
-	log   *slog.Logger
+	app       *app.App
+	store     *store.Store
+	snapshots Snapshots
+	log       *slog.Logger
 }
 
 // New returns a Service. The store is used for reads only.
-func New(a *app.App, s *store.Store, log *slog.Logger) *Service {
-	return &Service{app: a, store: s, log: log}
+func New(a *app.App, s *store.Store, snapshots Snapshots, log *slog.Logger) *Service {
+	return &Service{app: a, store: s, snapshots: snapshots, log: log}
 }
 
 type tool struct {
@@ -67,17 +73,55 @@ var tools = []tool{
 	{"tasks_update_intent", "Change a task's spec or priority as the owner asked.", (*Service).tasksUpdateIntent},
 	{"actions_create", "Request another implementation or acceptance after the owner decided to retry.", (*Service).actionsCreate},
 	{"decisions_open", "Ask the owner a question that blocks a decision you cannot make.", (*Service).decisionsOpen},
-	{"decisions_resolve", "Record the answer the owner gave in the current message to an open decision.", (*Service).decisionsResolve},
+	{"decisions_resolve", "Record the answer the owner gave you to an open decision.", (*Service).decisionsResolve},
 	{"artifacts_read", "Read an artifact and the verdicts on it.", (*Service).artifactsRead},
 	{"requests_read", "Look up the outcome of one of your earlier requests instead of repeating it.", (*Service).requestsRead},
 	{"repos_list", "List the registered repositories, workspace templates and hosts.", (*Service).reposList},
+	{"tend_context", "Show tend's whole ledger again as a full snapshot.", (*Service).tendContext},
 }
 
-// Specs returns the tools to register with the harness.
+// Specs returns the tools to register with the hosted main agent's
+// harness.
 func Specs() []harness.ToolSpec {
 	out := make([]harness.ToolSpec, 0, len(tools))
 	for _, t := range tools {
 		out = append(out, harness.ToolSpec{Name: t.name, Description: t.description, InputSchema: json.RawMessage(schemas[t.name])})
+	}
+	return out
+}
+
+// AddonSpecs returns the tools for agents the owner works in (D48). Their
+// planning writes have no conversation message, so no commit_seq, and a
+// new task must name its workspace: the unique name is what stops a model
+// that calls tasks_create again from creating the task twice.
+func AddonSpecs() []protocol.ToolSpec {
+	out := make([]protocol.ToolSpec, 0, len(tools))
+	for _, t := range tools {
+		var schema map[string]any
+		if err := json.Unmarshal([]byte(schemas[t.name]), &schema); err != nil {
+			panic(fmt.Sprintf("tools: schema of %s: %v", t.name, err)) // the schemas are constants
+		}
+		props, _ := schema["properties"].(map[string]any)
+		delete(props, "commit_seq")
+		var required []string
+		if r, ok := schema["required"].([]any); ok {
+			for _, v := range r {
+				if v != "commit_seq" {
+					required = append(required, v.(string))
+				}
+			}
+		}
+		if t.name == "tasks_create" {
+			required = append(required, "workspace_name")
+		}
+		if required != nil {
+			schema["required"] = required
+		}
+		b, err := json.Marshal(schema)
+		if err != nil {
+			panic(fmt.Sprintf("tools: schema of %s: %v", t.name, err))
+		}
+		out = append(out, protocol.ToolSpec{Name: t.name, Description: t.description, InputSchema: b})
 	}
 	return out
 }
@@ -112,6 +156,15 @@ func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
 		a.Error = pe
 		if pe.Code == protocol.CodeStaleRevision {
 			a.Current = s.currentFor(ctx, c)
+		} else if c.Tool == "tasks_create" && pe.Code == protocol.CodeInvalidRequest {
+			// A taken workspace name names its task: the model may be
+			// repeating its own creation.
+			var d struct {
+				TaskID string `json:"task_id"`
+			}
+			if json.Unmarshal(pe.Details, &d) == nil && d.TaskID != "" {
+				a.Current = s.summary(ctx, d.TaskID)
+			}
 		}
 	} else {
 		a.OK, a.Result = true, res
@@ -131,9 +184,14 @@ func (s *Service) currentFor(ctx context.Context, c Call) any {
 	if json.Unmarshal(c.Arguments, &args) != nil || args.TaskID == "" {
 		return nil
 	}
+	return s.summary(ctx, args.TaskID)
+}
+
+// summary reads a task's summary, or nil.
+func (s *Service) summary(ctx context.Context, taskID string) any {
 	var out any
 	_ = s.store.Read(ctx, func(tx *store.ReadTx) error {
-		row, err := store.GetTask(ctx, tx.Q(), args.TaskID)
+		row, err := store.GetTask(ctx, tx.Q(), taskID)
 		if err == nil {
 			out = views.Summary(row)
 		}
@@ -154,8 +212,9 @@ func decode(raw json.RawMessage, v any) error {
 	return nil
 }
 
-// execute runs a write under the call's request ID.
-func (s *Service) execute(ctx context.Context, c Call, op string, target protocol.Target, revision *int64, payload any, cmd app.Command) (any, error) {
+// execute runs a write under the call's request ID, with the model's
+// reason for it.
+func (s *Service) execute(ctx context.Context, c Call, op string, target protocol.Target, revision *int64, reason string, payload any, cmd app.Command) (any, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("tools: encode payload: %w", err)
@@ -171,7 +230,7 @@ func (s *Service) execute(ctx context.Context, c Call, op string, target protoco
 	}
 	env := &protocol.Envelope{
 		RequestID: requestID, ParentRequestID: c.ParentRequestID, Operation: op, Target: target,
-		ExpectedControlRevision: revision, Payload: body,
+		ExpectedControlRevision: revision, Payload: body, Reason: reason,
 	}
 	res, err := s.app.Execute(ctx, c.Principal, env, cmd)
 	if err != nil {
@@ -183,9 +242,10 @@ func (s *Service) execute(ctx context.Context, c Call, op string, target protoco
 	return map[string]any{"request_id": res.RequestID, "status": res.Status, "outcome": res.Result}, nil
 }
 
-// requireMessage rejects a planning write outside a conversation turn.
+// requireMessage rejects a hosted planning write outside a conversation
+// turn. Agents the owner works in have no conversation in tend.
 func requireMessage(c Call) error {
-	if c.SourceMessageID == "" {
+	if c.SourceMessageID == "" && !c.Principal.Addon() {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "this tool can only be used while handling a message")
 	}
 	return nil
@@ -197,6 +257,7 @@ type createArgs struct {
 	Priority      int64       `json:"priority"`
 	WorkspaceName string      `json:"workspace_name"`
 	CommitSeq     int64       `json:"commit_seq"`
+	Reason        string      `json:"reason"`
 }
 
 func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
@@ -207,7 +268,10 @@ func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
 	if err := requireMessage(c); err != nil {
 		return nil, err
 	}
-	return s.execute(ctx, c, "tasks.create", protocol.Target{Type: "task"}, nil, map[string]any{
+	if c.Principal.Addon() && a.WorkspaceName == "" {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "workspace_name is required")
+	}
+	return s.execute(ctx, c, "tasks.create", protocol.Target{Type: "task"}, nil, a.Reason, map[string]any{
 		"title": a.Title, "spec": a.Spec, "priority": a.Priority, "workspace_name": a.WorkspaceName,
 		"source_message_id": c.SourceMessageID, "commit_seq": a.CommitSeq,
 	}, app.CreateTask{})
@@ -219,6 +283,7 @@ type updateArgs struct {
 	Spec                    *domain.Spec `json:"spec"`
 	Priority                *int64       `json:"priority"`
 	CommitSeq               int64        `json:"commit_seq"`
+	Reason                  string       `json:"reason"`
 }
 
 func (s *Service) tasksUpdateIntent(ctx context.Context, c Call) (any, error) {
@@ -236,7 +301,7 @@ func (s *Service) tasksUpdateIntent(ctx context.Context, c Call) (any, error) {
 	if a.Priority != nil {
 		payload["priority"] = *a.Priority
 	}
-	return s.execute(ctx, c, "tasks.update_intent", protocol.Target{Type: "task", ID: a.TaskID}, &a.ExpectedControlRevision, payload, app.UpdateIntent{})
+	return s.execute(ctx, c, "tasks.update_intent", protocol.Target{Type: "task", ID: a.TaskID}, &a.ExpectedControlRevision, a.Reason, payload, app.UpdateIntent{})
 }
 
 type actionArgs struct {
@@ -245,6 +310,7 @@ type actionArgs struct {
 	Kind                    protocol.ActionKind `json:"kind"`
 	Generation              int64               `json:"generation"`
 	CommitSeq               int64               `json:"commit_seq"`
+	Reason                  string              `json:"reason"`
 }
 
 func (s *Service) actionsCreate(ctx context.Context, c Call) (any, error) {
@@ -255,7 +321,7 @@ func (s *Service) actionsCreate(ctx context.Context, c Call) (any, error) {
 	if err := requireMessage(c); err != nil {
 		return nil, err
 	}
-	return s.execute(ctx, c, "actions.create", protocol.Target{Type: "task", ID: a.TaskID}, &a.ExpectedControlRevision, map[string]any{
+	return s.execute(ctx, c, "actions.create", protocol.Target{Type: "task", ID: a.TaskID}, &a.ExpectedControlRevision, a.Reason, map[string]any{
 		"kind": a.Kind, "generation": a.Generation, "source_message_id": c.SourceMessageID, "commit_seq": a.CommitSeq,
 	}, app.CreateAction{})
 }
@@ -264,6 +330,7 @@ type openArgs struct {
 	TaskID   string   `json:"task_id"`
 	Question string   `json:"question"`
 	Options  []string `json:"options"`
+	Reason   string   `json:"reason"`
 }
 
 func (s *Service) decisionsOpen(ctx context.Context, c Call) (any, error) {
@@ -271,7 +338,7 @@ func (s *Service) decisionsOpen(ctx context.Context, c Call) (any, error) {
 	if err := decode(c.Arguments, &a); err != nil {
 		return nil, err
 	}
-	return s.execute(ctx, c, "decisions.open", protocol.Target{Type: "decision"}, nil, map[string]any{
+	return s.execute(ctx, c, "decisions.open", protocol.Target{Type: "decision"}, nil, a.Reason, map[string]any{
 		"task_id": a.TaskID, "question": a.Question, "options": a.Options, "source_message_id": c.SourceMessageID,
 	}, app.OpenDecision{})
 }
@@ -281,6 +348,7 @@ type resolveArgs struct {
 	Version    int64  `json:"version"`
 	Option     string `json:"option"`
 	Text       string `json:"text"`
+	Reason     string `json:"reason"`
 }
 
 func (s *Service) decisionsResolve(ctx context.Context, c Call) (any, error) {
@@ -292,7 +360,7 @@ func (s *Service) decisionsResolve(ctx context.Context, c Call) (any, error) {
 		return nil, err
 	}
 	cmd := app.AnswerDecision{FromMessage: true}
-	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "decision", ID: a.DecisionID}, nil, map[string]any{
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "decision", ID: a.DecisionID}, nil, a.Reason, map[string]any{
 		"version": a.Version, "option": a.Option, "text": a.Text, "source_message_id": c.SourceMessageID,
 	}, cmd)
 }
