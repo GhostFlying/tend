@@ -33,7 +33,7 @@ func main() {
 	e := &cli.Env{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
 		Home: home, ConfigDir: configDir,
-		HTTP:       &http.Client{Timeout: 60 * time.Second},
+		HTTP:       &http.Client{Timeout: 60 * time.Second, Transport: cli.Transport()},
 		IDs:        protocol.NewULIDGen(time.Now, nil),
 		Executable: self, LookPath: exec.LookPath,
 		Run: func(ctx context.Context, name string, args ...string) error {

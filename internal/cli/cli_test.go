@@ -765,3 +765,19 @@ func TestTaskShowsArtifactsAndIssues(t *testing.T) {
 		}
 	}
 }
+
+func TestTailnetHostsSkipTheProxy(t *testing.T) {
+	for host, want := range map[string]bool{
+		"tend.example-tailnet.ts.net": true, "TEND.Example.ts.net.": true, "tend": true,
+		"100.120.122.6": true, "fd7a:115c:a1e0::1": true,
+		"github.com": false, "10.0.0.1": false, "8.8.8.8": false, "2001:db8::1": false, "": false,
+	} {
+		if got := onTailnet(host); got != want {
+			t.Errorf("onTailnet(%q) = %v, want %v", host, got, want)
+		}
+	}
+	req, _ := http.NewRequest("GET", "https://tend.example-tailnet.ts.net/api/v1/session", nil)
+	if u, err := Transport().Proxy(req); u != nil || err != nil {
+		t.Errorf("proxy for a tailnet server = %v, %v", u, err)
+	}
+}
