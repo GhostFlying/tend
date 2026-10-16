@@ -237,6 +237,10 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 
 func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Outcome, rec *store.RequestRecord) error {
 	now := x.Now.UnixMilli()
+	actor, err := json.Marshal(x.Principal)
+	if err != nil {
+		return fmt.Errorf("app: encode principal: %w", err)
+	}
 	for _, e := range out.Events {
 		body, err := json.Marshal(e.Body)
 		if err != nil {
@@ -245,7 +249,7 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		if _, err := tx.InsertEvent(ctx, store.EventRow{
 			EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: e.ObjectType, ObjectID: e.ObjectID,
 			ObjectVersion: e.ObjectVersion, Kind: e.Kind, BodyJSON: string(body), RequestID: x.Env.RequestID,
-			TraceID: x.TraceID, CreatedAt: now,
+			TraceID: x.TraceID, ActorJSON: string(actor), CreatedAt: now,
 		}); err != nil {
 			return err
 		}

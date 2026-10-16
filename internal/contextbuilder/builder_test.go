@@ -361,3 +361,19 @@ func TestDecisionEffectLines(t *testing.T) {
 		}
 	}
 }
+
+func TestActor(t *testing.T) {
+	for p, want := range map[string]string{
+		``: "tend",
+		`{"kind":"owner","subject":"me@example.com"}`:                                           "owner",
+		`{"kind":"main_agent","subject":"main-1","thread":"thr_1"}`:                             "the hosted main agent",
+		`{"kind":"main_agent","subject":"cli_1","agent":"codex","thread":"01a143a4-2d6d-7e70"}`: "codex session 01a143a4",
+		`{"kind":"main_agent","subject":"cli_1","agent":"claude"}`:                              "a claude session",
+		`{"kind":"runner","subject":"linux-1"}`:                                                 "tend",
+		`{"kind":"run","subject":"run_1","role":"accept"}`:                                      "tend",
+	} {
+		if got := actor(p); got != want {
+			t.Errorf("actor(%s) = %q, want %q", p, got, want)
+		}
+	}
+}

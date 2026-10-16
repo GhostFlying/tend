@@ -403,15 +403,18 @@ type EventRow struct {
 	BodyJSON      string
 	RequestID     string
 	TraceID       string
-	CreatedAt     int64
+	// ActorJSON is the principal of the request that recorded the event,
+	// if any.
+	ActorJSON string
+	CreatedAt int64
 }
 
 // InsertEvent appends an event and returns its sequence number.
 func (t *Tx) InsertEvent(ctx context.Context, e EventRow) (int64, error) {
 	res, err := t.Exec(ctx, `INSERT INTO events (event_id, source, object_type, object_id, object_version, kind, body_json,
-		request_id, trace_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		request_id, trace_id, actor_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.EventID, e.Source, e.ObjectType, e.ObjectID, e.ObjectVersion, e.Kind, e.BodyJSON, nullString(e.RequestID),
-		nullString(e.TraceID), e.CreatedAt)
+		nullString(e.TraceID), nullString(e.ActorJSON), e.CreatedAt)
 	if err != nil {
 		return 0, fmt.Errorf("store: insert event: %w", err)
 	}
