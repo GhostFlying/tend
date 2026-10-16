@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -52,6 +53,10 @@ type config struct {
 	// Owners are the tailnet logins allowed to use the owner API, through
 	// the tend CLI and the agents it connects (D49).
 	Owners []string `json:"owners"`
+	// OwnerNodes maps machines, by name or "tag:", to the owner in Owners
+	// whose devices they are, for tagged machines that have no login
+	// (D56). Prefer names: a tag may cover machines of others.
+	OwnerNodes map[string]string `json:"owner_nodes"`
 	// LocalOwner is the owner every caller is taken to be when the server
 	// listens off the tailnet, for development.
 	LocalOwner string           `json:"local_owner"`
@@ -132,6 +137,11 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		secure    bool
 	)
 	owners := cfg.Owners
+	for node, login := range cfg.OwnerNodes {
+		if !slices.Contains(owners, login) {
+			return fmt.Errorf("owner_nodes: %s belongs to %s, who is not in owners", node, login)
+		}
+	}
 	if cfg.Tailnet != nil {
 		tn, err = netx.JoinTailnet(ctx, netx.TailnetConfig{
 			Hostname: cfg.Tailnet.Hostname, Dir: filepath.Join(dataDir, "tsnet"), AuthKey: os.Getenv("TS_AUTHKEY"),
@@ -183,7 +193,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	runners := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
 	mux := http.NewServeMux()
 	mux.Handle(runnerapi.Path, runners.Handler())
-	mux.Handle("/api/", api.New(a, s, ts, cb, whois, secret, api.Config{Owners: owners, HostedMainAgent: front != nil}, log).Handler())
+	mux.Handle("/api/", api.New(a, s, ts, cb, whois, secret, api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}, log).Handler())
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	// The workers stop with the process or when serving fails.

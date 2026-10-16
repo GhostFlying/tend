@@ -168,6 +168,31 @@ func TestFault_TokenWithoutOwnerNode(t *testing.T) {
 	}
 }
 
+func TestOwnerNodes(t *testing.T) {
+	e := newEnv(t)
+	e.server.cfg.OwnerNodes = map[string]string{"devbox": ownerLogin, "tag:shared": "stranger@example.com"}
+	// The owner works on a tagged machine named as theirs.
+	e.peer.set(netx.Identity{Node: "devbox", Tags: []string{"tag:dev"}})
+	tok := e.login(protocol.ScopeOwner)
+	var v protocol.SessionView
+	if st := e.do("GET", "/api/v1/session", tok, nil, &v); st != http.StatusOK || v.Login != ownerLogin {
+		t.Errorf("session from the owner's tagged machine = %d %+v", st, v)
+	}
+	// The token is the owner's, so it works from their own devices too.
+	e.peer.set(netx.Identity{Node: "laptop", User: ownerLogin})
+	if st := e.do("GET", "/api/v1/session", tok, nil, nil); st != http.StatusOK {
+		t.Errorf("the same token from the owner's laptop = %d", st)
+	}
+	// Other tagged machines, and nodes mapped to someone who is not an
+	// owner, are not owner devices.
+	for _, id := range []netx.Identity{{Node: "buildbox", Tags: []string{"tag:dev"}}, {Node: "ci", Tags: []string{"tag:shared"}}} {
+		e.peer.set(id)
+		if st := e.do("GET", "/api/v1/session", tok, nil, nil); st != http.StatusForbidden {
+			t.Errorf("token from %+v = %d, want 403", id, st)
+		}
+	}
+}
+
 func TestTamperedToken(t *testing.T) {
 	e := newEnv(t)
 	valid := e.server.sign(token{Login: ownerLogin, ClientID: clientID, Scope: protocol.ScopeAgent, Issued: e.clock.Now().UnixMilli()})

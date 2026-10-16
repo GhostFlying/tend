@@ -12,7 +12,7 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 - `TEND_SERVER_SECRET`：至少 32 字节，hex 编码，用来派生 run 凭据（D29）和 owner、agent 的 token（D49）。更换它会让正在执行的 run 失去凭据，所有 token 失效，需要重新 `tend login`。
 - `TS_AUTHKEY`：只在第一次加入 tailnet 时需要；之后状态保存在 `data_dir/tsnet`。正式部署使用带 `tag:tend-server` 的 key。
 - 监听：加入 tailnet 后，同一组接口同时在 443（https，证书由 tailnet 签发）和 80（http）上提供。启动后会预取一次证书；tailnet 没有开启 HTTPS 证书时日志里有一条警告，这时客户端使用 `http://<hostname>`，WireGuard 仍然加密流量（design.md §6.4）。
-- `owners`：可以使用 owner API 的 tailnet 登录名，也就是可以运行 `tend login` 的人（D49）。不加入 tailnet、只用 `listen` 时，用 `local_owner` 指定本地开发的 owner。
+- `owners`：可以使用 owner API 的 tailnet 登录名，也就是可以运行 `tend login` 的人（D49）。不加入 tailnet、只用 `listen` 时，用 `local_owner` 指定本地开发的 owner。owner 在 tagged 机器上工作时（tagged 节点没有登录名），用 `owner_nodes` 把这台机器的名字映射到 `owners` 里的登录名（D56）。
 - `main_agent`：可选，默认不配置。主 Agent 是 owner 自己使用的 agent（见下文 `tend` CLI）；配置了 `main_agent` 时服务端另外运行一个托管的主 Agent（D45，目前不再开发）。它使用专用的 traex home（`main_agent.traex_home`），需要在那个 home 下完成一次 traex 鉴权。
 
 ## tend-runner

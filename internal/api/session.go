@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -87,14 +88,23 @@ func (s *Server) expires(v token) time.Time {
 	return time.UnixMilli(v.Issued).Add(s.cfg.TokenTTL).UTC()
 }
 
-// ownerLogin returns the caller's tailnet login if it is an owner.
+// ownerLogin returns the owner the caller's device belongs to: its
+// tailnet login if that is an owner, or the owner a configured node
+// belongs to.
 func (s *Server) ownerLogin(r *http.Request) (string, error) {
 	id, err := s.whois.WhoIs(r.Context(), r.RemoteAddr)
-	if err != nil || id.User == "" || !slices.Contains(s.cfg.Owners, id.User) {
-		s.log.WarnContext(r.Context(), "owner request from a non-owner", "remote", r.RemoteAddr, "node", id.Node, "user", id.User)
-		return "", errNotOwner
+	if err == nil && id.User != "" && slices.Contains(s.cfg.Owners, id.User) {
+		return id.User, nil
 	}
-	return id.User, nil
+	if err == nil {
+		for _, node := range slices.Sorted(maps.Keys(s.cfg.OwnerNodes)) {
+			if login := s.cfg.OwnerNodes[node]; id.Matches([]string{node}) && slices.Contains(s.cfg.Owners, login) {
+				return login, nil
+			}
+		}
+	}
+	s.log.WarnContext(r.Context(), "owner request from a non-owner", "remote", r.RemoteAddr, "node", id.Node, "user", id.User)
+	return "", errNotOwner
 }
 
 // authenticate checks a request's tailnet identity and bearer token and

@@ -27,6 +27,9 @@ const maxBody = 1 << 20
 type Config struct {
 	// Owners are the tailnet logins allowed to use the API.
 	Owners []string
+	// OwnerNodes maps nodes, by machine name or "tag:", to the owner whose
+	// devices they are. A tagged node has no login of its own (D56).
+	OwnerNodes map[string]string
 	// TokenTTL is how long a token lasts. Default 30 days.
 	TokenTTL time.Duration
 	// Now is the clock. Default time.Now.
