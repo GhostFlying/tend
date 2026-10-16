@@ -31,6 +31,7 @@
 
 - **Claude Code**：hook 写在 settings 的 `hooks` 里（用户级 `~/.claude/settings.json`，或用 `--settings` 传入）。MCP 用 `claude mcp add` 或 `--mcp-config` 配置。工具名是 `mcp__<server>__<tool>`，交互模式下需要在 permissions 里放行，否则每次询问。
 - **Codex / traex**：hook 写在 `config.toml` 的 `hooks.<Event>` 里，或者配置目录下的 `hooks.json`；MCP 是 `[mcp_servers.<name>]`。两者都可以用 `-c` 临时覆盖。hooks 功能默认开启（`features.hooks` 为 stable）。
+  - **更正（阶段 C 预验收，traex 0.210.1）**：traex 不读配置目录下的 `hooks.json`，只读 `traecli.toml` 的 `[hooks]` 表；`hooks.json` 只对 Codex 成立。spike 当时对 traex 只用 `-c` 验证过，`hooks.json` 这一条是从 Codex 源码推断的。
 - **hook 信任（Codex / traex）**：
   - 新出现的 hook 是 untrusted，不会运行。TUI 启动时会列出新 hook，选择“全部信任并继续”后，信任记录写进配置的 `hooks.state."<key>".trusted_hash`。
   - hook 的命令变了，hash 跟着变，需要重新信任。

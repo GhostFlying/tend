@@ -41,7 +41,8 @@ tend setup claude --write          # 写入；codex、traex 同理
 - 配置和凭据在 `~/.config/tend/`（可用 `TEND_CONFIG_DIR` 指定），凭据文件只有本人可读。token 有效期 30 天，过期后重新 `tend login`。
 - `tend setup` 每次都先显示 diff，重复执行不会重复添加：
   - Claude Code：在 `settings.json` 里加上 SessionStart 和 UserPromptSubmit 两个 hook，放行 `mcp__tend__*` 工具；`--write` 时用 `claude mcp add --scope user` 注册 MCP server。
-  - Codex、traex：在各自配置目录的 `hooks.json` 里加上两个 hook，在 `config.toml` / `traecli.toml` 里追加 `[mcp_servers.tend]`。**第一次启动 TUI 时要信任这两个 hook**，否则它们不会运行。
+  - Codex：在配置目录的 `hooks.json` 里加上两个 hook，在 `config.toml` 里追加 `[mcp_servers.tend]`。
+  - traex：在 `traecli.toml` 里追加两个 `[[hooks.<Event>]]` 表和 `[mcp_servers.tend]`（traex 不读 `hooks.json`）。如果已经用 `SessionStart = [...]` 这类写法定义了同名事件，`tend setup` 不改动，只打印需要手动合并的片段。**第一次启动 TUI 时要信任这两个 hook**，否则它们不会运行。
 - hook 命令按路径写入：`tend` 在 PATH 上时写 `tend`，否则写绝对路径。Codex 和 traex 按命令记录信任，换了路径要重新信任，所以升级时放回同一个位置。
 - hook 等 tend 最多 3 秒（`TEND_HOOK_TIMEOUT` 可调），超时或 tend 不可达时只注入一行提示，不会挡住输入。
 - owner 命令：`tend status`、`tend task <id>`、`tend logs <run_id> [-f]`、`tend decide`、`tend retry`、`tend pause|resume|cancel`，都支持 `--json`。
