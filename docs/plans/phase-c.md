@@ -64,7 +64,7 @@ D45、D50、D51 已经写入 design.md。原计划提议的 D40（Web 工程）�
    - MCP 子进程和 hook 命令是否继承 agent 进程的环境变量；不继承时，怎样在配置里转发（traex 0.209.1 的 stdio MCP 需要 `env_vars`）。
 6. **大小限制**：附加上下文的长度上限，以及超过上限时截断还是丢弃。
 
-Codex 的上游源码（hooks 模块）显示 SessionStart（来源含 compact）和 UserPromptSubmit 都支持 `additionalContext`，hook 输入带 `session_id`；traex 0.209.1 的 hook 事件已在 design.md §2.1 记录。spike 以实际行为为准。
+**结论（2026-10-16）**：三个 agent 都满足接入要求，详见 `docs/findings/agent-hooks.md`。对本计划的影响已经并入 §4.2、§4.3、§5：上下文预算缩小，hook 输出统一为一种 JSON 且不使用退出码 2，`tend setup` 要处理 hook 信任、MCP 审批和环境变量转发。
 
 如果某个 agent 不满足 D45 的接入要求，在 findings 里写明缺口，再和 owner 确认是否从支持列表中去掉。写入不依赖 hook，所以缺少 hook 只影响提醒：这样的 agent 仍可以完整使用工具，只是要靠说明（AGENTS.md 或 skill）让模型在开始工作前先调用 `tend_context`。
 
@@ -127,6 +127,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 - body：`{request_id, agent, event, session_id, source?, prompt?}`。同一个 request_id 重试时返回同一个结果。
 - **`session_start`**：
   - 作废该会话的基线，生成完整快照（角色约束、未完成的任务与承诺、待决事项索引）；
+  - 快照开头写明它取代之前所有的 tend 上下文：三个 agent 的压缩摘要都会带上压缩前注入的内容（C5），模型可能同时看到新旧两份状态；
   - 返回 `{context}`，水位推进到快照的 `event_seq`；
   - 稳定的角色说明也放在这里，因为 agent 没有和 `developerInstructions` 等价的入口。
 - **`user_prompt_submit`**：
@@ -162,7 +163,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 
 其他规则：
 
-- **预算**：增量最多约 6000 字符，完整快照最多约 16000 字符。超出时先压缩“账本意图的变化”和“结果”两类，改为“另有 N 项变化，用 `tasks_list` 查看”；“需要处理”一类不省略。
+- **预算**：增量最多约 4000 字符，完整快照最多约 8000 字符（C5：Claude Code 超过约 1 万字符就改为存文件、只注入预览，Codex 和 traex 默认 2,500 token）。超出时先压缩“账本意图的变化”和“结果”两类，改为“另有 N 项变化，用 `tasks_list` 查看”；“需要处理”一类不省略。
 - **多个会话**：每个会话有自己的水位，互不影响。
 - **过时的写入**：不依赖提醒。模型基于旧状态写入时，服务端返回 `stale_revision` 和当前状态（design.md §2.2 第 5 条）。
 
@@ -191,16 +192,22 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 - **`tend login [--server <url>]`**：领取两个 token，把服务端地址写进 `~/.config/tend/config.json`。
 - **`tend mcp`**：
   - stdio 上的 MCP server，按启动参数得知自己服务的是哪个 agent；
+  - 会话 ID：Claude Code 从环境变量 `CLAUDE_CODE_SESSION_ID` 取，Codex 和 traex 从每次 `tools/call` 的 `_meta.x-codex-turn-metadata.session_id` 取（C5）；取不到时不带（§3.1）；
   - `tools/list` 从服务端取工具定义，`tools/call` 转发；
   - 传输失败时用同一个 request_id 重试，最多 3 次；
   - 服务端明确拒绝时，把错误作为工具结果返回给模型，不当成 MCP 协议错误。
 - **`tend hook <agent> <event>`**：
-  - 从 stdin 读 agent 的 hook 输入，转换成 §4.2 的请求，再按该 agent 的格式输出附加上下文（格式以 C5 的结论为准）；
-  - 硬超时 3 秒，可以配置；
-  - 超时或服务端不可达时：退出码为 0，输出一行“tend 暂时不可达，本轮不能写入任务”，作为附加上下文。这样不会阻塞用户输入，模型也知道写入会失败。
+  - 从 stdin 读 agent 的 hook 输入，转换成 §4.2 的请求，输出 `{"hookSpecificOutput":{"hookEventName":...,"additionalContext":...}}`；三个 agent 用同一种格式（C5）；没有内容时什么都不输出；
+  - 硬超时 3 秒，可以配置；agent 侧配置的 hook 超时比它长（例如 5 秒），保证由 `tend hook` 自己先放弃；
+  - 超时或服务端不可达时：退出码为 0，输出一行“tend 暂时不可达”，作为附加上下文。这样不会阻塞用户输入，模型也知道写入可能失败；
+  - **任何情况都不以退出码 2 退出**：三个 agent 都会因此拦下用户输入（C5）。其他错误同样以 0 退出。
 - **`tend setup <claude|codex|traex>`**：
   - 打印该 agent 需要的 MCP 和 hook 配置片段，以及应该放到哪个文件；
-  - 默认不改用户的配置文件，`--write` 时才写入，写入前显示 diff。
+  - 默认不改用户的配置文件，`--write` 时才写入，写入前显示 diff；
+  - 各 agent 的配置内容（依据 `docs/findings/agent-hooks.md`）：
+    - Claude Code：settings 里的 SessionStart 和 UserPromptSubmit hook；`claude mcp add` 添加 `tend mcp --agent claude`；permissions 放行 `mcp__tend__*`；
+    - Codex / traex：`[mcp_servers.tend]` 带 `env_vars = ["TEND_ADDON"]` 和 `default_tools_approval_mode = "approve"`；两个 hook 带 `additionalContextLimit = 0`（预算由 tend 控制）；提示用户首次启动 TUI 时信任这两个 hook；
+  - hook 命令保持稳定（`tend hook <agent> <event>`，不带版本号或临时路径）：Codex 和 traex 按命令的 hash 记录信任，命令一变就要重新信任。
 - **owner 命令**（owner token）：
   - `tend status`：未结束的任务和待决事项；
   - `tend task <id>`、`tend logs <run_id> [-f]`；
@@ -211,7 +218,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 - **worker 不接入**：worker 使用用户的默认配置，可能继承用户级安装的 tend MCP 和 hook（D38、D45），因此：
   - 环境变量 `TEND_ADDON=off` 时，`tend hook` 不发请求、不输出任何上下文、退出 0；`tend mcp` 正常完成握手，但工具列表为空；
   - runner 在启动 worker 的 app-server 时设置这个变量（`internal/harness/traex` 的 worker 启动参数）；
-  - agent 不一定把自己的环境传给 MCP 子进程：traex 0.209.1 的 stdio MCP 默认不继承这个变量，配置里要写 `env_vars = ["TEND_ADDON"]` 才会转发。所以 `tend setup` 生成的 MCP 配置必须显式转发它；hook 命令是否继承环境，按 C5 的结论处理，不继承时同样在配置里转发；
+  - agent 不一定把自己的环境传给 MCP 子进程：traex 0.209.1 的 stdio MCP 默认不继承这个变量，配置里要写 `env_vars = ["TEND_ADDON"]` 才会转发。所以 `tend setup` 生成的 MCP 配置必须显式转发它（Codex 同样如此，Claude Code 的 MCP 默认继承）；hook 命令在三个 agent 中都继承环境（C5）；
   - 测试要走真实的进程链（app-server → MCP 子进程、app-server → hook 命令），不能只直接调用 `tend mcp` 和 `tend hook`。
 
 ## 6. C9 托管主会话改为可选
