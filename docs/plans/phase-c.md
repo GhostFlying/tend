@@ -244,15 +244,15 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 ## 7. C10 组装与端到端
 
 - **`tend-server`**：
-  - tailnet 模式下，同一个 mux 提供 `/runner/v1/*` 和 `/api/v1/*`，监听 tailnet 的 `:443`（`ListenTLS`）和 `:80`，两类接口各自鉴权；
+  - tailnet 模式下，同一个 mux 提供 `/runner/v1/*` 和 `/api/v1/*`，监听 tailnet 的 `:443`（`ListenTLS`）和 `:80`，两类接口各自鉴权；启动后预取一次证书，tailnet 没开 HTTPS 时记一条警告，客户端改用 http；
   - `listen` 模式用一个明文 listener，owner 是 `local_owner`。
 - 更新 `docs/deployment.md`：owner 配置、`tend login`、三个 agent 的 `tend setup`、ACL。
-- **端到端测试 `TestEndToEnd_AgentAddon`**：进程内的服务端、fake runner，用 `internal/cli` 的真实 hook 和 MCP 代码，由一个脚本化的 fake agent 驱动：
-  1. SessionStart 得到完整快照；
-  2. 通过 MCP 的 `tools/call` 调用 `tasks_create`；
-  3. 下一次 UserPromptSubmit 的增量里出现刚建的任务；
+- **端到端测试 `TestEndToEnd_AgentAddon`**：进程内的服务端、fake runner，用 `internal/cli` 的真实 login、hook 和 MCP 代码，由两个脚本化的 fake agent 会话（Claude Code 和 Codex，会话 ID 分别来自环境变量和 `_meta`）驱动：
+  1. 两个会话的 SessionStart 都得到完整快照；
+  2. Claude Code 会话通过 MCP 的 `tools/call` 调用 `tasks_create`；
+  3. 下一次 UserPromptSubmit：建任务的会话不再收到这次建任务（§4.3 过滤自己的写入），另一个会话的增量里出现它；
   4. fake runner 实现并验收；
-  5. 下一次 UserPromptSubmit 得到的增量里有任务 completed。
+  5. 下一次 UserPromptSubmit 两个会话都收到任务 completed，再下一次什么都不返回；`tend task --json` 看到同样的状态。
 
 ## 8. 真机验收
 
