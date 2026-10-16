@@ -72,7 +72,9 @@ func logLine(l protocol.RunLogView) (string, bool) {
 		switch {
 		case started:
 			text += " …"
-		case it.ExitCode != nil:
+		// Only a finished command has an exit code of its own: one moved
+		// to the background reports 0 and completes again when it ends.
+		case it.ExitCode != nil && (it.Status == "" || it.Status == "completed" || it.Status == "failed"):
 			text += fmt.Sprintf(" → exit %d", *it.ExitCode)
 		case it.Status != "":
 			text += " → " + it.Status

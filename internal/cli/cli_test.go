@@ -717,6 +717,8 @@ func TestLogLines(t *testing.T) {
 		`{"type":"mcpToolCall","server":"docs","tool":"search"}`:                                                                                                                             "tool docs/search",
 		`{"type":"fileChange","status":"failed","changes":[{"path":"/h/runner/workspaces/add-sub/calc/calc.py","kind":{"type":"update"}}]}`:                                                  "change failed: calc/calc.py (update)",
 		`{"type":"commandExecution","command":"` + strings.Repeat("x", 3000) + `","exitCode":1}`:                                                                                             "$ " + strings.Repeat("x", 2000) + "… → exit 1",
+		`{"type":"commandExecution","command":"make check","exitCode":0,"status":"backgrounded"}`:                                                                                            "$ make check → backgrounded",
+		`{"type":"commandExecution","command":"make check","exitCode":2,"status":"failed"}`:                                                                                                  "$ make check → exit 2",
 		`{"type":"somethingNew"}`: "item somethingNew",
 	} {
 		line, ok := logLine(protocol.RunLogView{Seq: 3, Kind: "item.completed", Body: json.RawMessage(body), CreatedAt: at})
