@@ -64,7 +64,9 @@ func (w *worker) Wait() (harness.WorkerResult, error) {
 func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.Worker, error) {
 	opts := ws.opts.Session
 	opts.Dir = spec.Dir
-	opts.Env = append(append([]string(nil), opts.Env...), "TEND_SCRATCH="+spec.ScratchDir)
+	// The worker may inherit the owner's tend hooks and MCP server from
+	// the user-level configuration; it is not the owner's agent (D45).
+	opts.Env = append(append([]string(nil), opts.Env...), "TEND_SCRATCH="+spec.ScratchDir, protocol.AddonEnv+"=off")
 	s, err := ws.start(ctx, opts)
 	if err != nil {
 		return nil, err

@@ -32,7 +32,7 @@
 
 ## 1. 需要写入 design.md 的决策（提议）
 
-D45、D50、D51 已经写入 design.md，D49 随 C6、D47 和 D48 随 C7 写入。原计划提议的 D40（Web 工程）撤回，D43（owner API 经 `/api/v1/ops`）并入 D49。以下决策在落地的 commit 里写入。
+D45、D50、D51 已经写入 design.md，D49 随 C6、D47 和 D48 随 C7、D46 随 C8 写入。原计划提议的 D40（Web 工程）撤回，D43（owner API 经 `/api/v1/ops`）并入 D49。以下决策在落地的 commit 里写入。
 
 | 编号 | 决策 | 落地 |
 | --- | --- | --- |
@@ -194,7 +194,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
 
 `cmd/tend` 只做参数解析和组装，逻辑放在 `internal/cli`（新增，只依赖 `protocol` 和标准库，不 import 服务端的包）。
 
-- **`tend login [--server <url>]`**：领取两个 token，把服务端地址写进 `~/.config/tend/config.json`。
+- **`tend login [--server <url>]`**：领取两个 token，把服务端地址写进 `~/.config/tend/config.json`，token 和 client_id 写进 `credentials.json`（0600）。重新登录沿用原来的 client_id。目录可以用 `TEND_CONFIG_DIR` 改。
 - **`tend mcp`**：
   - stdio 上的 MCP server，按启动参数得知自己服务的是哪个 agent；
   - 会话 ID：Claude Code 从环境变量 `CLAUDE_CODE_SESSION_ID` 取，Codex 和 traex 从每次 `tools/call` 的 `_meta.x-codex-turn-metadata.session_id` 取（C5）；取不到时不带（§3.1）；
@@ -203,15 +203,16 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
   - 服务端明确拒绝时，把错误作为工具结果返回给模型，不当成 MCP 协议错误。
 - **`tend hook <agent> <event>`**：
   - 从 stdin 读 agent 的 hook 输入，转换成 §4.2 的请求，输出 `{"hookSpecificOutput":{"hookEventName":...,"additionalContext":...}}`；三个 agent 用同一种格式（C5）；没有内容时什么都不输出；
-  - 硬超时 3 秒，可以配置；agent 侧配置的 hook 超时比它长（例如 5 秒），保证由 `tend hook` 自己先放弃；
+  - 硬超时 3 秒，用 `TEND_HOOK_TIMEOUT` 配置（时长或秒数），期间传输失败用同一个 request_id 重发；agent 侧配置的 hook 超时比它长（例如 5 秒），保证由 `tend hook` 自己先放弃；
   - 超时或服务端不可达时：退出码为 0，输出一行“tend 暂时不可达”，作为附加上下文。这样不会阻塞用户输入，模型也知道写入可能失败；
   - **任何情况都不以退出码 2 退出**：三个 agent 都会因此拦下用户输入（C5）。其他错误同样以 0 退出。
 - **`tend setup <claude|codex|traex>`**：
   - 打印该 agent 需要的 MCP 和 hook 配置片段，以及应该放到哪个文件；
   - 默认不改用户的配置文件，`--write` 时才写入，写入前显示 diff；
   - 各 agent 的配置内容（依据 `docs/findings/agent-hooks.md`）：
-    - Claude Code：settings 里的 SessionStart 和 UserPromptSubmit hook；`claude mcp add` 添加 `tend mcp --agent claude`；permissions 放行 `mcp__tend__*`；
-    - Codex / traex：`[mcp_servers.tend]` 带 `env_vars = ["TEND_ADDON"]` 和 `default_tools_approval_mode = "approve"`；两个 hook 带 `additionalContextLimit = 0`（预算由 tend 控制）；提示用户首次启动 TUI 时信任这两个 hook；
+    - Claude Code：`settings.json`（`$CLAUDE_CONFIG_DIR` 或 `~/.claude`）里的 SessionStart 和 UserPromptSubmit hook，permissions 放行 `mcp__tend__*`；MCP 用 `claude mcp add --scope user tend -- tend mcp --agent claude` 添加，`--write` 时先用 `claude mcp get tend` 检查，已有就不加；
+    - Codex / traex：hook 写在配置目录的 `hooks.json`（Codex 是 `$CODEX_HOME` 或 `~/.codex`，traex 是 `$TRAE_HOME` 或 `~/.trae`），两个 hook 带 `additionalContextLimit = 0`（预算由 tend 控制）；MCP 是追加到 `config.toml` / `traecli.toml` 的 `[mcp_servers.tend]`，带 `env_vars = ["TEND_ADDON", "TEND_CONFIG_DIR"]`（后者让 MCP 和 hook 用同一个配置目录）和 `default_tools_approval_mode = "approve"`，已有这一节就不动。两者的 `mcp add` 命令不能设置 `env_vars`，所以直接写配置文件；提示用户首次启动 TUI 时信任这两个 hook；
+    - 写入保留原文件的键顺序，重复执行不会重复添加；
   - hook 命令保持稳定（`tend hook <agent> <event>`，不带版本号或临时路径）：Codex 和 traex 按命令的 hash 记录信任，命令一变就要重新信任。
 - **owner 命令**（owner token）：
   - `tend status`：未结束的任务和待决事项；
@@ -224,7 +225,7 @@ JSON Schema 的输出从 `web/src/generated/` 移到 `internal/protocol/generate
   - 环境变量 `TEND_ADDON=off` 时，`tend hook` 不发请求、不输出任何上下文、退出 0；`tend mcp` 正常完成握手，但工具列表为空；
   - runner 在启动 worker 的 app-server 时设置这个变量（`internal/harness/traex` 的 worker 启动参数）；
   - agent 不一定把自己的环境传给 MCP 子进程：traex 0.209.1 的 stdio MCP 默认不继承这个变量，配置里要写 `env_vars = ["TEND_ADDON"]` 才会转发。所以 `tend setup` 生成的 MCP 配置必须显式转发它（Codex 同样如此，Claude Code 的 MCP 默认继承）；hook 命令在三个 agent 中都继承环境（C5）；
-  - 测试要走真实的进程链（app-server → MCP 子进程、app-server → hook 命令），不能只直接调用 `tend mcp` 和 `tend hook`。
+  - 测试要走真实的进程链（app-server → MCP 子进程、app-server → hook 命令），不能只直接调用 `tend mcp` 和 `tend hook`。`TestFault_WorkerIgnoresAddon` 用一个包装 traex 的脚本以 `-c` 加上 setup 生成的配置，并像 owner 在 TUI 里信任那样，按 `hooks/list` 给出的 key 和 hash 信任这两个 hook（app-server 的 worker 不能绕过信任），然后检查 hook 和 MCP 都启动了、服务端没有收到请求。
 
 ## 6. C9 托管主会话改为可选
 
