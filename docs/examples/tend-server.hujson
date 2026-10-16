@@ -13,6 +13,9 @@
 
   // Tailnet logins allowed to use the owner API: the tend CLI and their agents.
   "owners": ["you@example.com"],
+  // Tagged machines have no login. If you work on one, name it here as
+  // yours (D56); prefer the machine name over a tag.
+  // "owner_nodes": {"devbox": "you@example.com"},
   // With "listen" instead of "tailnet", every caller is this owner.
   // "local_owner": "you@example.com",
 

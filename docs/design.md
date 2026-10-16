@@ -49,6 +49,7 @@
 | D53 | 待决事项回答的效果（修订 D31）：tend 自己开出的待决事项，选项里 tend 能直接执行的在开出时带上效果——“retry the implementation”和“raise the budget”请求下一代实现，“retry acceptance”请求下一代验收，“cancel the task”取消任务；“revise the spec”等需要判断的选项不带效果，planner 开出的待决事项也不带。回答选中带效果的选项时，tend 在记录回答的同一个事务里执行效果，走和显式命令相同的领域规则。效果只作用于开出时的任务：开出时记下任务的控制版本，回答时版本变了或规则拒绝，回答照常记录，效果不执行并说明原因。回答连同效果的结果进入增量：已执行的告诉 agent 不必再做，未执行的归为 attention。这样 owner 用 `tend decide` 回答后任务立即继续，不必等 agent 会话。 | 已确认（2026-10-16） |
 | D54 | 只给用过 tend 的会话注入上下文（修订 D47）：会话第一次通过 MCP 调用 tend 的工具（带有它的 session ID）时绑定，绑定是幂等的记录，不产生事件。未绑定会话的 hook 什么都不返回，tend 也不记录它（不建基线、不写 packet、不留请求记录），这样 agent 的后台会话（如 Codex 的记忆整理）、子会话和与 tend 无关的会话都不会收到账本内容。已绑定的会话按 D47 处理，绑定后第一次 hook 返回完整快照。绑定时记下当时的账本位置；完整快照只列未结束的任务，所以对有水位的会话（绑定之后、压缩之后），完整快照同时附上水位之后结束的任务和被回答的待决事项，不会漏掉会话还没听说、快照又显示不出的变化。新会话从 MCP 的工具描述和 `initialize` 的 instructions 得知 tend，需要时先调用 `tend_context`。迁移把已有会话记为已绑定。 | 已确认（2026-10-16） |
 | D55 | 增量写明变化的来源（细化 D47）：事件写入时记下发起请求的 principal（`events.actor_json`），没有请求的事件（runner 上报、租约过期等）不记。增量每一行带上来源：owner、某个 agent 会话（种类和 session ID 前缀）、托管主 Agent；runner、run、规则和没有记录的统一写作 tend。让 agent 分清 owner 有意的操作、其他会话的操作和 tend 自己的推进。 | 已确认（2026-10-16） |
+| D56 | 指定的 tagged 设备也算 owner 设备（细化 D49）：tagged 节点在 tailnet 里没有登录名，owner 若在 tagged 的开发机上运行 agent 和 tend CLI，就无法按登录名认出。服务端配置 `owner_nodes` 把机器名或 `tag:` 映射到 `owners` 里的一个登录名，来自匹配节点的请求视为这个 owner；仍要 `tend login` 领取 token，token 的登录名必须一致。映射到不在 `owners` 里的登录名时拒绝启动。优先写机器名，一个 tag 可能覆盖别人的机器。 | 已确认（2026-10-16） |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

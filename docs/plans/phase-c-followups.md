@@ -36,6 +36,14 @@ Codex 的记忆整理会另起后台会话，它同样触发 hook，tend 给它�
 - **已有会话**：迁移把已有的会话记为已绑定，正在使用的控制会话不会因为升级而收不到上下文。
 - 风险：Claude Code 的 MCP 进程从环境变量取 session ID。如果会话在同一个进程里换了 ID（例如 `/clear`），之后的工具调用仍记在旧 ID 上，新 ID 无法绑定，也就收不到上下文。长期会话一般不这样用；遇到时再考虑在 hook 侧补充绑定。
 
+## C16 指定的 tagged 设备也算 owner 设备（D56，细化 D49）
+
+真机验收时发现：owner 在一台 tagged 开发机上运行 agent 和 tend CLI。tagged 节点在 tailnet 里没有登录名，按 D49 无法作为 owner 设备。
+
+- 服务端配置增加 `owner_nodes`：键是机器名或 `tag:`，值是 `owners` 里的一个登录名。来自匹配节点的请求视为这个 owner，其余规则不变：仍要 `tend login` 领取 token，token 里的登录名必须和这个 owner 一致。
+- 值不在 `owners` 里时，服务端拒绝启动。
+- 优先写机器名：一个 tag 往往覆盖多台机器，写 tag 等于把这些机器都交给 owner。
+
 ## 提交拆分
 
 | 步骤 | commit | 内容 |
@@ -44,3 +52,4 @@ Codex 的记忆整理会另起后台会话，它同样触发 hook，tend 给它�
 | 2 | `feat: state each mount's base in the workspace notes` | C13 |
 | 3 | `feat: name who made each change in deltas` | C14，D55 |
 | 4 | `feat: give context only to sessions that use tend` | C15，D54 |
+| 5 | `feat: let named tagged nodes act as an owner` | C16，D56 |
