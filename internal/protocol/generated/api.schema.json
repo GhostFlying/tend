@@ -2,6 +2,22 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
+    "APIResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "$ref": "#/definitions/TaskSummary"
+        },
+        "error": {
+          "$ref": "#/definitions/Error"
+        },
+        "operation": {
+          "$ref": "#/definitions/Operation"
+        }
+      },
+      "title": "APIResponse",
+      "type": "object"
+    },
     "AcceptanceView": {
       "additionalProperties": false,
       "properties": {
@@ -226,6 +242,9 @@
         "status": {
           "type": "string"
         },
+        "task_id": {
+          "type": "string"
+        },
         "version": {
           "type": "integer"
         }
@@ -289,6 +308,80 @@
       "title": "Error",
       "type": "object"
     },
+    "HostView": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "labels": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "open_runs": {
+          "type": "integer"
+        },
+        "os": {
+          "type": "string"
+        },
+        "slots": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "host_id",
+        "os",
+        "arch",
+        "labels",
+        "slots",
+        "open_runs"
+      ],
+      "title": "HostView",
+      "type": "object"
+    },
+    "MountView": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {},
+        "branch": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "resolved_base_sha": {
+          "type": "string"
+        },
+        "resolved_from": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "repo",
+        "base",
+        "resolved_base_sha",
+        "resolved_from",
+        "branch"
+      ],
+      "title": "MountView",
+      "type": "object"
+    },
     "OpStatus": {
       "enum": [
         "succeeded",
@@ -343,6 +436,68 @@
         "status"
       ],
       "title": "RequestView",
+      "type": "object"
+    },
+    "RunLogPage": {
+      "additionalProperties": false,
+      "properties": {
+        "logs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RunLogView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "type": "integer"
+        },
+        "observed": {
+          "$ref": "#/definitions/RunObserved"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "observed",
+        "logs",
+        "next"
+      ],
+      "title": "RunLogPage",
+      "type": "object"
+    },
+    "RunLogView": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {},
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "native_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "kind",
+        "body",
+        "created_at"
+      ],
+      "title": "RunLogView",
       "type": "object"
     },
     "RunObserved": {
@@ -452,6 +607,61 @@
         "mode"
       ],
       "title": "SetControlModePayload",
+      "type": "object"
+    },
+    "Snapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "decisions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/DecisionView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/HostView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TaskSummary"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "event_seq",
+        "tasks",
+        "decisions",
+        "hosts"
+      ],
+      "title": "Snapshot",
       "type": "object"
     },
     "Target": {
@@ -568,6 +778,9 @@
         },
         "workspace": {
           "type": "string"
+        },
+        "workspace_state": {
+          "$ref": "#/definitions/WorkspaceView"
         }
       },
       "required": [
@@ -603,6 +816,32 @@
       ],
       "title": "TaskLifecycle",
       "type": "string"
+    },
+    "TaskPage": {
+      "additionalProperties": false,
+      "properties": {
+        "next": {
+          "type": "string"
+        },
+        "tasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TaskSummary"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "tasks"
+      ],
+      "title": "TaskPage",
+      "type": "object"
     },
     "TaskSummary": {
       "additionalProperties": false,
@@ -670,9 +909,43 @@
       ],
       "title": "Verdict",
       "type": "string"
+    },
+    "WorkspaceView": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "mounts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MountView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "status",
+        "mounts"
+      ],
+      "title": "WorkspaceView",
+      "type": "object"
     }
   },
   "properties": {
+    "APIResponse": {
+      "$ref": "#/definitions/APIResponse"
+    },
     "AnswerDecisionPayload": {
       "$ref": "#/definitions/AnswerDecisionPayload"
     },
@@ -685,11 +958,11 @@
     "Envelope": {
       "$ref": "#/definitions/Envelope"
     },
-    "Operation": {
-      "$ref": "#/definitions/Operation"
-    },
     "RequestView": {
       "$ref": "#/definitions/RequestView"
+    },
+    "RunLogPage": {
+      "$ref": "#/definitions/RunLogPage"
     },
     "SessionRequest": {
       "$ref": "#/definitions/SessionRequest"
@@ -700,11 +973,14 @@
     "SetControlModePayload": {
       "$ref": "#/definitions/SetControlModePayload"
     },
+    "Snapshot": {
+      "$ref": "#/definitions/Snapshot"
+    },
     "TaskDetail": {
       "$ref": "#/definitions/TaskDetail"
     },
-    "TaskSummary": {
-      "$ref": "#/definitions/TaskSummary"
+    "TaskPage": {
+      "$ref": "#/definitions/TaskPage"
     }
   },
   "title": "TendAPI",

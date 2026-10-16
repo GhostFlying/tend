@@ -39,6 +39,16 @@ type SessionView struct {
 	Token     string     `json:"token,omitempty"`
 }
 
+// APIResponse is the body of an owner API write, and of any request that
+// failed.
+type APIResponse struct {
+	Operation *Operation `json:"operation,omitempty"`
+	Error     *Error     `json:"error,omitempty"`
+	// Current is the task's state after a stale write about it, so the
+	// caller can decide again.
+	Current *TaskSummary `json:"current,omitempty"`
+}
+
 // SubmitMessagePayload is the payload of conversation.submit_message.
 type SubmitMessagePayload struct {
 	Body string `json:"body"`

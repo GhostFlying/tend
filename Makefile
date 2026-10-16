@@ -29,6 +29,6 @@ it:
 build:
 	$(GO) build $(PKGS)
 
-## gen: regenerate the owner API schema for the web client
+## gen: regenerate the owner API schema
 gen:
 	$(GO) run ./internal/protocol/schemagen

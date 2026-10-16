@@ -104,8 +104,8 @@ D45、D50、D51 已经写入 design.md。原计划提议的 D40（Web 工程）�
 | --- | --- |
 | `GET /api/v1/snapshot` | 未结束的任务摘要、待决事项、hosts 概况和当前的 `event_seq` |
 | `GET /api/v1/tasks/{id}` | 任务详情：spec、动作、run、artifact、验收结论、待决事项、工作区的解析结果 |
-| `GET /api/v1/tasks?finished=1&before=` | 已结束的任务，分页 |
-| `GET /api/v1/runs/{id}/logs?after=<seq>&wait=<s>` | run 日志分页；带 `wait` 时没有新日志就长轮询，最多 25 秒 |
+| `GET /api/v1/tasks?finished=1&before=` | 已结束的任务，按更新时间倒序分页，`before` 是上一页返回的游标；不带 `finished` 时返回未结束的任务 |
+| `GET /api/v1/runs/{id}/logs?after=<seq>&wait=<s>` | run 日志分页，带上 run 当前的状态；带 `wait` 时没有新日志就长轮询，最多 25 秒，run 已结束则不等待 |
 | `GET /api/v1/requests/{id}` | 某个请求的状态（`requests.read`） |
 
 ### 3.4 Schema

@@ -1,7 +1,7 @@
-// Command schemagen writes the owner API's JSON Schema, from which the web
-// client generates its TypeScript types (D22):
+// Command schemagen writes the owner API's JSON Schema, from which clients in
+// other languages generate their types (D22):
 //
-//	go run ./internal/protocol/schemagen -out web/src/generated/api.schema.json
+//	go run ./internal/protocol/schemagen -out internal/protocol/generated/api.schema.json
 package main
 
 import (
@@ -26,7 +26,7 @@ func generate() ([]byte, error) {
 }
 
 func main() {
-	out := flag.String("out", "web/src/generated/api.schema.json", "file to write")
+	out := flag.String("out", "internal/protocol/generated/api.schema.json", "file to write")
 	flag.Parse()
 	b, err := generate()
 	if err == nil {

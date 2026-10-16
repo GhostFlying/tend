@@ -56,12 +56,13 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/session", s.createSession)
 	mux.HandleFunc("GET /api/v1/session", s.readSession)
+	mux.HandleFunc("POST /api/v1/ops", s.ops)
+	mux.HandleFunc("GET /api/v1/snapshot", s.snapshot)
+	mux.HandleFunc("GET /api/v1/tasks", s.tasks)
+	mux.HandleFunc("GET /api/v1/tasks/{id}", s.task)
+	mux.HandleFunc("GET /api/v1/runs/{id}/logs", s.runLogs)
+	mux.HandleFunc("GET /api/v1/requests/{id}", s.request)
 	return mux
-}
-
-type response struct {
-	Operation *protocol.Operation `json:"operation,omitempty"`
-	Error     *protocol.Error     `json:"error,omitempty"`
 }
 
 var statusOf = map[protocol.Code]int{
@@ -73,17 +74,19 @@ var statusOf = map[protocol.Code]int{
 	protocol.CodeNotFound:         http.StatusNotFound,
 }
 
-func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
+// writeError answers with err as a protocol error. Errors that are not
+// protocol errors are logged with attrs and hidden from the caller.
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error, attrs ...any) {
 	pe, ok := errors.AsType[*protocol.Error](err)
 	if !ok {
-		s.log.ErrorContext(r.Context(), "owner request failed", "path", r.URL.Path, "err", err)
+		s.log.ErrorContext(r.Context(), "owner request failed", append([]any{"path", r.URL.Path, "err", err}, attrs...)...)
 		pe = protocol.Errorf(protocol.CodeInternal, "internal error")
 	}
 	status, ok := statusOf[pe.Code]
 	if !ok {
 		status = http.StatusInternalServerError
 	}
-	writeJSON(w, status, response{Error: pe})
+	writeJSON(w, status, protocol.APIResponse{Error: pe})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -103,9 +103,15 @@ func (e *env) do(method, path, token string, body any, out any) int {
 // login creates a token of the given scope for clientID.
 func (e *env) login(scope protocol.TokenScope) string {
 	e.t.Helper()
+	return e.loginAs(clientID, scope)
+}
+
+// loginAs creates a token of the given scope for a client.
+func (e *env) loginAs(client string, scope protocol.TokenScope) string {
+	e.t.Helper()
 	var v protocol.SessionView
-	st := e.do("POST", "/api/v1/session", "", protocol.SessionRequest{ClientID: clientID, Scope: scope}, &v)
-	if st != http.StatusOK || v.ClientID != clientID || v.Login != ownerLogin || v.Scope != scope || v.Token == "" {
+	st := e.do("POST", "/api/v1/session", "", protocol.SessionRequest{ClientID: client, Scope: scope}, &v)
+	if st != http.StatusOK || v.ClientID != client || v.Login != ownerLogin || v.Scope != scope || v.Token == "" {
 		e.t.Fatalf("create %s token = %d %+v", scope, st, v)
 	}
 	return v.Token
