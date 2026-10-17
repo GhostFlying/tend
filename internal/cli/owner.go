@@ -195,17 +195,28 @@ func (o owner) task(ctx context.Context, id string) error {
 			fmt.Fprintf(out, "  %s from %s\n", a.ArtifactID, a.RunID)
 			var ref struct {
 				Mounts []struct {
-					Path      string `json:"path"`
-					Branch    string `json:"branch"`
-					BaseSHA   string `json:"base_sha"`
-					CommitSHA string `json:"commit_sha"`
-					Changed   bool   `json:"changed"`
+					Path        string `json:"path"`
+					Branch      string `json:"branch"`
+					BaseSHA     string `json:"base_sha"`
+					CommitSHA   string `json:"commit_sha"`
+					SnapshotSHA string `json:"snapshot_sha"`
+					Changed     bool   `json:"changed"`
 				} `json:"mounts"`
 			}
 			_ = json.Unmarshal(a.Ref, &ref)
 			for _, m := range ref.Mounts {
+				// A snapshot holds what a worker left uncommitted (D57), also
+				// in a mount an earlier run changed.
+				extra := ""
+				if m.SnapshotSHA != "" {
+					extra = ", uncommitted changes in snapshot " + short(m.SnapshotSHA)
+				}
 				if m.Changed {
-					fmt.Fprintf(out, "    %s: %s at %s (base %s)\n", m.Path, m.Branch, short(m.CommitSHA), short(m.BaseSHA))
+					branch := m.Branch
+					if branch == "" {
+						branch = "detached HEAD"
+					}
+					fmt.Fprintf(out, "    %s: %s at %s (base %s%s)\n", m.Path, branch, short(m.CommitSHA), short(m.BaseSHA), extra)
 				} else {
 					// Untouched in this run, but an earlier run may have
 					// committed to it, so show what acceptance saw.
@@ -213,7 +224,7 @@ func (o owner) task(ctx context.Context, id string) error {
 					if at == "" {
 						at = m.BaseSHA
 					}
-					fmt.Fprintf(out, "    %s: unchanged in this run, at %s\n", m.Path, short(at))
+					fmt.Fprintf(out, "    %s: unchanged in this run, at %s%s\n", m.Path, short(at), extra)
 				}
 			}
 		}

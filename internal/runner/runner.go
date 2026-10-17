@@ -55,9 +55,9 @@ type Prepared struct {
 var (
 	// ErrNoChanges is returned by Collect when the worker changed nothing.
 	ErrNoChanges = errors.New("runner: no changes")
-	// ErrTampered is returned by Collect when the worker changed git
-	// history or worktrees, which only the runner may do.
-	ErrTampered = errors.New("runner: the worker changed git history")
+	// ErrWorkspaceMoved is returned by Prepare when the workspace is not
+	// as the artifact under acceptance recorded it.
+	ErrWorkspaceMoved = errors.New("runner: the workspace is not as the artifact recorded")
 	// ErrFetchFailed is returned by Prepare when a repository could not be
 	// fetched; the runner never starts from a stale base instead.
 	ErrFetchFailed = errors.New("runner: fetch failed")
@@ -71,8 +71,8 @@ func reasonFor(err error, fallback string) string {
 	switch {
 	case errors.Is(err, ErrNoChanges):
 		return "no_changes"
-	case errors.Is(err, ErrTampered):
-		return "git_tampered"
+	case errors.Is(err, ErrWorkspaceMoved):
+		return "workspace_moved"
 	case errors.Is(err, ErrFetchFailed):
 		return "fetch_failed"
 	case errors.Is(err, ErrBaseNotFound):

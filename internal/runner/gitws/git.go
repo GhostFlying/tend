@@ -42,6 +42,12 @@ func describe(args []string, err error, stderr string) error {
 	return fmt.Errorf("git %s: %w: %s", redact(strings.Join(args, " ")), err, redact(msg))
 }
 
+// with returns g with env added to its environment.
+func (g git) with(env ...string) git {
+	g.env = append(append([]string(nil), g.env...), env...)
+	return g
+}
+
 // run returns the trimmed standard output of a git command.
 func (g git) run(ctx context.Context, dir string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer

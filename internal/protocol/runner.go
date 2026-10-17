@@ -199,12 +199,17 @@ type ArtifactPayload struct {
 
 // ArtifactMount is one repository's state in an artifact.
 type ArtifactMount struct {
-	Repo      string `json:"repo"`
-	Path      string `json:"path"`
-	BaseSHA   string `json:"base_sha"`
+	Repo    string `json:"repo"`
+	Path    string `json:"path"`
+	BaseSHA string `json:"base_sha"`
+	// Branch is the branch HEAD was on when the run ended, empty when
+	// detached; CommitSHA is that HEAD (D57).
 	Branch    string `json:"branch"`
 	CommitSHA string `json:"commit_sha"`
-	Changed   bool   `json:"changed"`
+	// SnapshotSHA is a commit on top of CommitSHA holding the working tree
+	// the run left, when it held changes HEAD does not; empty otherwise.
+	SnapshotSHA string `json:"snapshot_sha,omitempty"`
+	Changed     bool   `json:"changed"`
 }
 
 // VerdictPayload submits the conclusion of an acceptance run.

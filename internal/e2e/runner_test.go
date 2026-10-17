@@ -173,10 +173,8 @@ func (s *server) claimDirectly(env *protocol.Envelope) protocol.Assignment {
 type workspaces struct {
 	dir       string
 	noChanges bool
-	// prepareErr fails preparing runs of a role; collectErr fails
-	// collecting the artifact.
+	// prepareErr fails preparing runs of a role.
 	prepareErr map[protocol.RunRole]error
-	collectErr error
 }
 
 func (w *workspaces) Prepare(_ context.Context, as protocol.Assignment) (runner.Prepared, error) {
@@ -193,9 +191,6 @@ func (w *workspaces) Prepare(_ context.Context, as protocol.Assignment) (runner.
 func (w *workspaces) Collect(_ context.Context, as protocol.Assignment) (protocol.ArtifactPayload, error) {
 	if w.noChanges {
 		return protocol.ArtifactPayload{}, runner.ErrNoChanges
-	}
-	if w.collectErr != nil {
-		return protocol.ArtifactPayload{}, w.collectErr
 	}
 	var a protocol.ArtifactPayload
 	for _, m := range as.Workspace.Mounts {
@@ -494,20 +489,23 @@ func (s *server) released(reason string) int {
 	return s.count(`SELECT COUNT(*) FROM events WHERE kind = 'run.released' AND json_extract(body_json, '$.reason') = ?`, reason)
 }
 
-// TestFault_WorkerTamperedGit: the run fails as git_tampered and leaves no
-// artifact. Detection itself is gitws's TestTamperingIsDetected.
-func TestFault_WorkerTamperedGit(t *testing.T) {
+// TestFault_WorkspaceMovedBeforeAcceptance: a workspace that is no longer
+// as the artifact recorded fails the acceptance run without a verdict
+// against the artifact. Detection itself is gitws's
+// TestAcceptanceRejectsMovedWorkspace; how the worker uses git is not
+// checked at all (D57).
+func TestFault_WorkspaceMovedBeforeAcceptance(t *testing.T) {
 	srv := newServer(t, time.Minute)
 	n := newNode(t, srv, passing)
-	n.ws.collectErr = fmt.Errorf("%w: HEAD moved", runner.ErrTampered)
+	n.ws.prepareErr = map[protocol.RunRole]error{protocol.RoleAccept: fmt.Errorf("%w: HEAD moved", runner.ErrWorkspaceMoved)}
 	n.start()
 	task := srv.createTask()
-	eventually(t, "the task waits for a decision", func() bool { return srv.waitsForDecision(task) })
-	if got := srv.released("git_tampered"); got != 1 {
-		t.Errorf("runs released as git_tampered = %d, want 1", got)
+	eventually(t, "the acceptance run is released", func() bool { return srv.released("workspace_moved") == 1 })
+	if got := srv.count(`SELECT COUNT(*) FROM acceptances`); got != 0 {
+		t.Errorf("verdicts = %d, want none against the artifact", got)
 	}
-	if got := srv.count(`SELECT COUNT(*) FROM artifacts`); got != 0 {
-		t.Errorf("artifacts = %d, want none from a tampered workspace", got)
+	if got := srv.task(task); got.Lifecycle == protocol.TaskCompleted {
+		t.Errorf("task = %+v, want not completed", got)
 	}
 }
 

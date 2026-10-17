@@ -18,7 +18,7 @@ func TestBrief(t *testing.T) {
 			t.Errorf("implement input lacks %q:\n%s", want, input)
 		}
 	}
-	if !strings.Contains(instructions, "Do not commit") || !strings.Contains(instructions, "/w/feature_a") {
+	if !strings.Contains(instructions, "Whether and how to commit is yours to decide") || !strings.Contains(instructions, "/w/feature_a") {
 		t.Errorf("implement instructions:\n%s", instructions)
 	}
 	spec.Role, spec.Feedback, spec.Attempt = protocol.RoleAccept, nil, 1

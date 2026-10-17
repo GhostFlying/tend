@@ -118,18 +118,31 @@ func TestImplementationWorkspace(t *testing.T) {
 	agents, err := os.ReadFile(filepath.Join(p.Dir, "AGENTS.md"))
 	if err != nil || !strings.Contains(string(agents), "| `tend/` | tend | `tend/feature_a` | `"+f.mainSHA+"` |") ||
 		!strings.Contains(string(agents), "- `tend/`: the tip of `origin/main` when the workspace was laid out") ||
-		!strings.Contains(string(agents), "files added since stay untracked") {
+		!strings.Contains(string(agents), "lists new files that are not committed") ||
+		!strings.Contains(string(agents), "Whether and how to commit is yours to decide") {
 		t.Errorf("AGENTS.md = %q, %v", agents, err)
 	}
 
+	// A worker that does not commit: tend records the working tree in a
+	// snapshot and leaves the branch, the index and the files alone (D57).
 	write(t, filepath.Join(mount, "fix.txt"), "fixed\n")
 	art, err := f.ws.Collect(context.Background(), as)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
 	m := art.Mounts[0]
-	if !m.Changed || m.BaseSHA != f.mainSHA || m.CommitSHA == f.mainSHA || run(t, f.env, mount, "rev-parse", "HEAD") != m.CommitSHA {
+	if !m.Changed || m.BaseSHA != f.mainSHA || m.CommitSHA != f.mainSHA || m.Branch != "tend/feature_a" || m.SnapshotSHA == "" {
 		t.Errorf("artifact = %+v", m)
+	}
+	if head, status := run(t, f.env, mount, "rev-parse", "HEAD"), run(t, f.env, mount, "status", "--porcelain"); head != f.mainSHA || status != "?? fix.txt" {
+		t.Errorf("after Collect HEAD = %s, status = %q; want both untouched", head, status)
+	}
+	if parent, file := run(t, f.env, mount, "rev-parse", m.SnapshotSHA+"^"), run(t, f.env, mount, "show", m.SnapshotSHA+":fix.txt"); parent != f.mainSHA || file != "fixed" {
+		t.Errorf("snapshot has parent %s and fix.txt %q", parent, file)
+	}
+	// Collecting the same run again gives the same artifact.
+	if again, err := f.ws.Collect(context.Background(), as); err != nil || again.Mounts[0] != m {
+		t.Errorf("Collect again = %+v, %v; want %+v", again, err, m)
 	}
 
 	// The next generation reuses the workspace and keeps the base.
@@ -143,28 +156,62 @@ func TestImplementationWorkspace(t *testing.T) {
 	}
 }
 
-func TestTamperingIsDetected(t *testing.T) {
-	cases := map[string]func(f *fixture, root, mount string){
-		"worker commits": func(f *fixture, _, mount string) {
+// TestFault_WorkerRewritesHistory: how the worker uses git is its own
+// work (D57). Whatever it does, tend records the mount as it is, and
+// acceptance and the next implementation start from there.
+func TestFault_WorkerRewritesHistory(t *testing.T) {
+	cases := map[string]struct {
+		work   func(f *fixture, root, mount string)
+		branch string
+	}{
+		"worker commits": {func(f *fixture, _, mount string) {
 			write(f.t, filepath.Join(mount, "x"), "x")
 			run(f.t, f.env, mount, "add", ".")
-			run(f.t, f.env, mount, "commit", "--quiet", "-m", "sneaky")
-		},
-		"worker switches branch": func(f *fixture, _, mount string) {
+			run(f.t, f.env, mount, "commit", "--quiet", "-m", "feat: add x")
+		}, "tend/feature_a"},
+		"worker rewrites history below the base": {func(f *fixture, _, mount string) {
+			run(f.t, f.env, mount, "reset", "--quiet", "--hard", f.releaseSHA)
+			write(f.t, filepath.Join(mount, "x"), "x")
+			run(f.t, f.env, mount, "add", ".")
+			run(f.t, f.env, mount, "commit", "--quiet", "-m", "feat: add x")
+		}, "tend/feature_a"},
+		"worker switches branch": {func(f *fixture, _, mount string) {
 			run(f.t, f.env, mount, "switch", "--quiet", "-c", "other")
-		},
-		"worker adds a worktree": func(f *fixture, root, mount string) {
+			write(f.t, filepath.Join(mount, "x"), "x")
+		}, "other"},
+		"worker detaches HEAD": {func(f *fixture, _, mount string) {
+			run(f.t, f.env, mount, "switch", "--quiet", "--detach")
+			write(f.t, filepath.Join(mount, "x"), "x")
+		}, ""},
+		"worker changes git configuration and adds a worktree": {func(f *fixture, root, mount string) {
+			run(f.t, f.env, mount, "config", "core.excludesFile", "/dev/null")
 			run(f.t, f.env, mount, "worktree", "add", "--quiet", "--detach", filepath.Join(root, "extra"))
-		},
+			write(f.t, filepath.Join(mount, "x"), "x")
+		}, "tend/feature_a"},
 	}
-	for name, tamper := range cases {
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, nil)
 			as := f.implement()
 			p := f.prepare(as)
-			tamper(f, p.Dir, filepath.Join(p.Dir, "tend"))
-			if _, err := f.ws.Collect(context.Background(), as); !errors.Is(err, runner.ErrTampered) {
-				t.Errorf("Collect = %v, want ErrTampered", err)
+			mount := filepath.Join(p.Dir, "tend")
+			c.work(f, p.Dir, mount)
+			art, err := f.ws.Collect(context.Background(), as)
+			if err != nil {
+				t.Fatalf("Collect = %v", err)
+			}
+			m := art.Mounts[0]
+			if !m.Changed || m.Branch != c.branch || m.CommitSHA != run(t, f.env, mount, "rev-parse", "HEAD") || m.BaseSHA != f.mainSHA {
+				t.Errorf("artifact = %+v", m)
+			}
+			raw, _ := json.Marshal(art)
+			acc := protocol.Assignment{RunID: "run_acc", TaskID: "task_1", Role: protocol.RoleAccept, Artifact: raw, Workspace: as.Workspace}
+			f.prepare(acc)
+			next := f.implement()
+			next.RunID = "run_2"
+			f.prepare(next)
+			if head := run(t, f.env, mount, "rev-parse", "HEAD"); head != m.CommitSHA {
+				t.Errorf("the next implementation starts at %s, not at the artifact's %s", head, m.CommitSHA)
 			}
 		})
 	}
@@ -227,9 +274,8 @@ func TestAcceptanceRunsInTaskWorkspace(t *testing.T) {
 	if head := run(t, f.env, filepath.Join(ap.Dir, "tend"), "rev-parse", "HEAD"); head != art.Mounts[0].CommitSHA {
 		t.Errorf("acceptance HEAD = %s", head)
 	}
-	// The runner's commit messages are not held against the work.
-	if agents, err := os.ReadFile(filepath.Join(ap.Dir, "AGENTS.md")); err != nil || !strings.Contains(string(agents), "`git diff <base commit>` shows everything the task changed") ||
-		!strings.Contains(string(agents), "judge the changes, not how they were committed") {
+	if agents, err := os.ReadFile(filepath.Join(ap.Dir, "AGENTS.md")); err != nil || !strings.Contains(string(agents), "`git diff <base commit>` shows all changes to tracked files, committed or not") ||
+		!strings.Contains(string(agents), "The implementation's commits, and whatever it left uncommitted, are part of the result") {
 		t.Errorf("acceptance AGENTS.md = %q, %v", agents, err)
 	}
 	// Whatever the acceptance run leaves, such as build output, stays.
@@ -252,22 +298,32 @@ func TestAcceptanceRunsInTaskWorkspace(t *testing.T) {
 }
 
 func TestAcceptanceRejectsMovedWorkspace(t *testing.T) {
-	f := newFixture(t, nil)
-	impl := f.implement()
-	p := f.prepare(impl)
-	write(t, filepath.Join(p.Dir, "tend", "fix.txt"), "fixed\n")
-	art, err := f.ws.Collect(context.Background(), impl)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mount := filepath.Join(p.Dir, "tend")
-	write(t, filepath.Join(mount, "more.txt"), "more\n")
-	run(t, f.env, mount, "add", ".")
-	run(t, f.env, mount, "commit", "--quiet", "-m", "sneaky")
-	raw, _ := json.Marshal(art)
-	acc := protocol.Assignment{RunID: "run_acc", TaskID: "task_1", Role: protocol.RoleAccept, Artifact: raw, Workspace: impl.Workspace}
-	if _, err := f.ws.Prepare(context.Background(), acc); !errors.Is(err, runner.ErrTampered) {
-		t.Errorf("Prepare with HEAD past the artifact = %v, want ErrTampered", err)
+	for name, move := range map[string]func(f *fixture, mount string){
+		"HEAD moved": func(f *fixture, mount string) {
+			run(f.t, f.env, mount, "add", ".")
+			run(f.t, f.env, mount, "commit", "--quiet", "-m", "later")
+		},
+		"branch changed": func(f *fixture, mount string) {
+			run(f.t, f.env, mount, "switch", "--quiet", "-c", "other")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, nil)
+			impl := f.implement()
+			p := f.prepare(impl)
+			mount := filepath.Join(p.Dir, "tend")
+			write(t, filepath.Join(mount, "fix.txt"), "fixed\n")
+			art, err := f.ws.Collect(context.Background(), impl)
+			if err != nil {
+				t.Fatal(err)
+			}
+			move(f, mount)
+			raw, _ := json.Marshal(art)
+			acc := protocol.Assignment{RunID: "run_acc", TaskID: "task_1", Role: protocol.RoleAccept, Artifact: raw, Workspace: impl.Workspace}
+			if _, err := f.ws.Prepare(context.Background(), acc); !errors.Is(err, runner.ErrWorkspaceMoved) {
+				t.Errorf("Prepare = %v, want ErrWorkspaceMoved", err)
+			}
+		})
 	}
 }
 
@@ -301,6 +357,33 @@ func TestProfilesRerunWhenInputsChange(t *testing.T) {
 	if _, err := f.ws.Prepare(context.Background(), unknown); err == nil {
 		t.Error("an unknown profile was accepted")
 	}
+}
+
+// Files the runner's profiles regenerate, or an earlier acceptance left,
+// do not make the workspace "moved": only the branch and HEAD are tend's
+// record to check.
+func TestAcceptanceToleratesRegeneratedFiles(t *testing.T) {
+	f := newFixture(t, map[string]Repo{"tend": {Profiles: map[string]Profile{"gen": {
+		Commands:       [][]string{{"cp", "deps.txt", "generated.txt"}},
+		RerunIfChanged: []string{"deps.txt"},
+	}}}})
+	impl := f.implement(protocol.AssignedMount{Repo: "tend", Path: "tend", RemoteURL: f.url, Profile: "gen"})
+	p := f.prepare(impl)
+	write(t, filepath.Join(p.Dir, "tend", "deps.txt"), "v2\n")
+	art, err := f.ws.Collect(context.Background(), impl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(art)
+	acc := protocol.Assignment{RunID: "run_acc", TaskID: "task_1", Role: protocol.RoleAccept, Artifact: raw, Workspace: impl.Workspace}
+	// The runner prepares an acceptance run twice; the profile reruns on
+	// the first.
+	f.prepare(acc)
+	f.prepare(acc)
+	write(t, filepath.Join(p.Dir, "tend", "build.log"), "ok\n")
+	again := acc
+	again.RunID = "run_acc_2"
+	f.prepare(again)
 }
 
 func TestFetchFailureStopsPrepare(t *testing.T) {
@@ -338,37 +421,67 @@ func TestPrepareRecoversAfterProfileFailure(t *testing.T) {
 	}
 }
 
-func TestConfigChangeIsTampering(t *testing.T) {
+// An edit of the same size within the index's timestamp is still
+// recorded: the scratch index keeps the index's time, so git still treats
+// the entry as racy and rehashes the file.
+func TestSnapshotSeesRacyEdits(t *testing.T) {
 	f := newFixture(t, nil)
 	as := f.implement()
 	p := f.prepare(as)
 	mount := filepath.Join(p.Dir, "tend")
-	run(t, f.env, mount, "config", "core.excludesFile", "/dev/null")
-	write(t, filepath.Join(mount, "fix.txt"), "x")
-	if _, err := f.ws.Collect(context.Background(), as); !errors.Is(err, runner.ErrTampered) {
-		t.Errorf("Collect after a config change = %v, want ErrTampered", err)
+	// Compare whole-second mtimes and sizes only.
+	run(t, f.env, mount, "config", "core.checkStat", "minimal")
+	run(t, f.env, mount, "config", "core.trustctime", "false")
+	past := time.Now().Add(-100 * time.Second).Truncate(time.Second)
+	file := filepath.Join(mount, "README")
+	touch := func(path string) {
+		t.Helper()
+		if err := os.Chtimes(path, past, past); err != nil {
+			t.Fatal(err)
+		}
 	}
-}
-
-func TestCollectAdoptsOwnUnrecordedCommit(t *testing.T) {
-	f := newFixture(t, nil)
-	as := f.implement()
-	p := f.prepare(as)
-	mount := filepath.Join(p.Dir, "tend")
-	// A previous collection committed and stopped before saving its state.
-	write(t, filepath.Join(mount, "fix.txt"), "fixed\n")
-	run(t, f.env, mount, "add", ".")
-	run(t, f.env, mount, "commit", "--quiet", "-m", commitMessage(as))
-	write(t, filepath.Join(mount, "more.txt"), "more\n")
+	write(t, file, "aaaaa\n")
+	touch(file)
+	run(t, f.env, mount, "add", "README")
+	// The same size and second: only the racy check can tell.
+	write(t, file, "bbbbb\n")
+	touch(file)
+	index := run(t, f.env, mount, "rev-parse", "--git-path", "index")
+	if !filepath.IsAbs(index) {
+		index = filepath.Join(mount, index)
+	}
+	touch(index)
 	art, err := f.ws.Collect(context.Background(), as)
 	if err != nil {
 		t.Fatalf("Collect = %v", err)
 	}
-	if n := run(t, f.env, mount, "rev-list", "--count", f.mainSHA+"..HEAD"); n != "2" {
-		t.Errorf("commits since base = %s, want 2", n)
+	if got := run(t, f.env, mount, "show", art.Mounts[0].SnapshotSHA+":README"); got != "bbbbb" {
+		t.Errorf("snapshot README = %q, want the latest edit", got)
 	}
-	if !art.Mounts[0].Changed {
-		t.Errorf("artifact = %+v", art.Mounts[0])
+}
+
+func TestCommittingIsAChange(t *testing.T) {
+	f := newFixture(t, nil)
+	as := f.implement()
+	p := f.prepare(as)
+	mount := filepath.Join(p.Dir, "tend")
+	write(t, filepath.Join(mount, "fix.txt"), "fixed\n")
+	if _, err := f.ws.Collect(context.Background(), as); err != nil {
+		t.Fatal(err)
+	}
+	// The next run only commits what the first left uncommitted, as an
+	// acceptance may ask: the files are the same, the result is not.
+	next := f.implement()
+	next.RunID = "run_2"
+	f.prepare(next)
+	run(t, f.env, mount, "add", ".")
+	run(t, f.env, mount, "commit", "--quiet", "-m", "feat: fix")
+	art, err := f.ws.Collect(context.Background(), next)
+	if err != nil {
+		t.Fatalf("Collect = %v", err)
+	}
+	if m := art.Mounts[0]; !m.Changed || m.SnapshotSHA != "" || m.CommitSHA != run(t, f.env, mount, "rev-parse", "HEAD") {
+		t.Errorf("artifact = %+v", m)
 	}
 }
 

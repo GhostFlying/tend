@@ -747,7 +747,9 @@ func TestTaskShowsArtifactsAndIssues(t *testing.T) {
 		Artifacts: []protocol.ArtifactView{{ArtifactID: "art_1", RunID: "run_1", Ref: json.RawMessage(
 			`{"mounts":[{"repo":"calc","path":"calc","base_sha":"2a5c718c56374b145d","branch":"tend/fix","commit_sha":"5f6ea1e143cd58d82c","changed":true},` +
 				`{"repo":"lib","path":"lib","base_sha":"9999999999999999","changed":false},` +
-				`{"repo":"doc","path":"doc","base_sha":"1111111111111111","branch":"tend/fix","commit_sha":"8888888888888888","changed":false}]}`)}},
+				`{"repo":"web","path":"web","base_sha":"7777777777777777","branch":"","commit_sha":"7777777777777777","snapshot_sha":"6666666666666666","changed":true},` +
+				`{"repo":"doc","path":"doc","base_sha":"1111111111111111","branch":"tend/fix","commit_sha":"8888888888888888","changed":false},` +
+				`{"repo":"cfg","path":"cfg","base_sha":"5555555555555555","branch":"tend/fix","commit_sha":"5555555555555555","snapshot_sha":"4444444444444444","changed":false}]}`)}},
 		Acceptances: []protocol.AcceptanceView{
 			{ArtifactID: "art_1", SpecVersion: 1, Verdict: protocol.VerdictChangesRequired, Issues: json.RawMessage(`["tests fail",{"check":2}]`)},
 			{ArtifactID: "art_1", SpecVersion: 1, Verdict: protocol.VerdictPassed, Issues: json.RawMessage(`[]`)},
@@ -761,7 +763,7 @@ func TestTaskShowsArtifactsAndIssues(t *testing.T) {
 		t.Fatalf("task = %d: %s", code, te.errOut)
 	}
 	for _, want := range []string{
-		"  art_1 from run_1\n    calc: tend/fix at 5f6ea1e143cd (base 2a5c718c5637)\n    lib: unchanged in this run, at 999999999999\n    doc: unchanged in this run, at 888888888888\n",
+		"  art_1 from run_1\n    calc: tend/fix at 5f6ea1e143cd (base 2a5c718c5637)\n    lib: unchanged in this run, at 999999999999\n    web: detached HEAD at 777777777777 (base 777777777777, uncommitted changes in snapshot 666666666666)\n    doc: unchanged in this run, at 888888888888\n    cfg: unchanged in this run, at 555555555555, uncommitted changes in snapshot 444444444444\n",
 		"verdict on art_1 (spec v1): changes_required\n  - tests fail\n  - {\"check\":2}\n",
 		"verdict on art_1 (spec v1): passed\n",
 		"    options: retry the implementation (tend: implement) | revise the spec\n",
