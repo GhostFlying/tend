@@ -253,7 +253,7 @@ $TEND_HOME/                         默认 ~/.tend
 
 **turn 结束后**
 
-- **完整性检查**：第一期 worker 使用 `danger-full-access`（D39），spike A7 中“sandbox 不允许写 `.git`”的保证不成立，“不碰 git 历史”只是约定，靠这项检查兜底。runner 对每个 mount 检查：HEAD 和分支没有移动，`.git` 配置没有改动；bare 仓库里没有新增 runner 不知道的 worktree。违反时 run 以 `git_tampered` 失败，不提交 artifact。
+- **完整性检查**：第一期 worker 使用 `danger-full-access`（D39），spike A7 中“sandbox 不允许写 `.git`”的保证不成立，“不碰 git 历史”只是约定，靠这项检查兜底。runner 对每个 mount 检查：HEAD 和分支没有移动，`.git` 配置没有改动；bare 仓库里没有新增 runner 不知道的 worktree。违反时 run 以 `git_tampered` 失败，不提交 artifact。（D57 取消了完整性检查和 runner 的提交，见 `docs/plans/worker-commits.md`。）
 - **提交**：runner 对每个有改动的 mount 执行 `git add -A` 和 commit；artifact 包含全部 mount 的 `{repo, path, base_sha, branch, commit_sha, changed}`。没有任何 mount 有改动时以 `no_changes` 失败。
 - **验收工作区**：在 `.accept/<run_id>/` 下按 artifact 中各 mount 的 commit 以 detached 方式重建同样的布局，重新生成 `AGENTS.md`（验收角色的说明），执行 prepare。修改一律丢弃。
 - **sandbox 设置**：第一期固定为 `danger-full-access`（D39），scratch 和 prepare 用到的缓存目录不受限制。

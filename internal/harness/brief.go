@@ -70,7 +70,8 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 	}
 	instructions = "You implement a task for tend. " + common +
 		"Change the files in the working trees so the goal is met and the acceptance checks pass; run them yourself. " +
-		"Do not commit, switch or create branches, rebase or add worktrees: tend records your changes when you finish. " +
+		"Whether and how to commit is yours to decide, as the task and each repository's own rules ask; tend does not commit for you, " +
+		"and records each repository's HEAD and working tree as you leave them. " +
 		"An independent reviewer will check your work, so say plainly in your final message what you changed and what you verified."
 	input = "Implement this task.\n\n" + b.String()
 	if spec.Feedback != nil {

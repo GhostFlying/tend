@@ -184,10 +184,8 @@ func checkArtifactMounts(w domain.Workspace, mounts []protocol.ArtifactMount) er
 			return protocol.Errorf(protocol.CodeInvalidRequest, "mount %q is not part of the workspace or is listed twice", m.Path)
 		case repo != m.Repo:
 			return protocol.Errorf(protocol.CodeInvalidRequest, "mount %q holds repo %q, not %q", m.Path, repo, m.Repo)
-		case !shaPattern.MatchString(m.BaseSHA) || !shaPattern.MatchString(m.CommitSHA):
-			return protocol.Errorf(protocol.CodeInvalidRequest, "mount %q needs full base and commit hashes", m.Path)
-		case m.Branch == "":
-			return protocol.Errorf(protocol.CodeInvalidRequest, "mount %q needs its branch", m.Path)
+		case !shaPattern.MatchString(m.BaseSHA) || !shaPattern.MatchString(m.CommitSHA) || m.SnapshotSHA != "" && !shaPattern.MatchString(m.SnapshotSHA):
+			return protocol.Errorf(protocol.CodeInvalidRequest, "mount %q needs full base, commit and snapshot hashes", m.Path)
 		}
 		delete(want, m.Path)
 		changed = changed || m.Changed

@@ -6,11 +6,11 @@
 // workspace root, which is not itself a repository. An acceptance run gets
 // a throwaway workspace with the artifact's commits checked out detached.
 //
-// The runner, not the worker, owns git history: it creates the worktrees,
-// checks after each run that the worker did not move HEAD, add worktrees
-// or change git configuration, and commits the changes. Progress is saved
-// after every step, so a failure halfway leaves a workspace the next run
-// can pick up.
+// The runner creates the worktrees; what happens in them is the worker's
+// work, commits included (D57). When an implement run ends, the runner
+// records each mount as it is, its HEAD and a snapshot of its working tree,
+// without committing or checking anything. Progress is saved after every
+// step, so a failure halfway leaves a workspace the next run can pick up.
 package gitws
 
 import (
@@ -87,9 +87,9 @@ func New(cfg Config) *Workspaces {
 	return &Workspaces{cfg: cfg, git: git{bin: bin, env: cfg.Env}, locks: map[string]chan struct{}{}}
 }
 
-// ErrTampered means the worker changed git history, worktrees or git
-// configuration, which only the runner may do (D33).
-var ErrTampered = runner.ErrTampered
+// ErrWorkspaceMoved means a workspace is not as the artifact under
+// acceptance recorded it.
+var ErrWorkspaceMoved = runner.ErrWorkspaceMoved
 
 // lock serializes work on one repository clone or one workspace. Waiting
 // gives up when ctx ends, so a fenced run does not wait for another run's
@@ -133,11 +133,16 @@ type mountState struct {
 	Base   string `json:"base"`
 	From   string `json:"from"`
 	Branch string `json:"branch"`
-	// Head is the commit the runner expects the worktree to be at.
+	// Head and Tree are the mount as last recorded: HEAD and the tree of
+	// the working tree in the latest artifact, or the base before there is
+	// one. An empty Tree means Head's.
 	Head string `json:"head"`
-	// Config is the hash of the git configuration the worktree had when
-	// the runner handed it to a worker.
-	Config string `json:"config"`
+	Tree string `json:"tree,omitempty"`
+	// Run is the run that recorded them and Prev* what they were before
+	// it, so that run's collection can be repeated with the same result.
+	Run      string `json:"run,omitempty"`
+	PrevHead string `json:"prev_head,omitempty"`
+	PrevTree string `json:"prev_tree,omitempty"`
 }
 
 func statePath(root string) string { return filepath.Join(root, ".tend", "state.json") }
@@ -263,27 +268,6 @@ func (w *Workspaces) hasCommit(ctx context.Context, repo, sha string) bool {
 	return err == nil && ok
 }
 
-// configHash fingerprints the git configuration a worktree sees from its
-// repository, leaving out the remote URL, which the runner itself keeps
-// in line with the registration.
-func (w *Workspaces) configHash(ctx context.Context, dir string) (string, error) {
-	out, err := w.git.run(ctx, dir, "config", "--list", "--local", "--show-origin")
-	if err != nil {
-		return "", err
-	}
-	var kept []string
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(line, "\tremote.origin.url=") {
-			kept = append(kept, line)
-		}
-	}
-	if wt, err := w.git.run(ctx, dir, "config", "--list", "--worktree"); err == nil {
-		kept = append(kept, "worktree:"+wt)
-	}
-	sum := sha256.Sum256([]byte(strings.Join(kept, "\n")))
-	return hex.EncodeToString(sum[:]), nil
-}
-
 // Prepare implements runner.Workspaces.
 func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {
 	root := w.root(as)
@@ -312,14 +296,6 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 	}
 	if err := w.runProfiles(ctx, as, root, &st); err != nil {
 		return runner.Prepared{}, err
-	}
-	// Fingerprint the configuration only now, after the runner's own
-	// steps, as the state the worker receives.
-	for path, ms := range st.Mounts {
-		if ms.Config, err = w.configHash(ctx, filepath.Join(root, path)); err != nil {
-			return runner.Prepared{}, err
-		}
-		st.Mounts[path] = ms
 	}
 	if err := saveState(root, st); err != nil {
 		return runner.Prepared{}, err
@@ -415,8 +391,12 @@ func (w *Workspaces) addWorktree(ctx context.Context, repo, dir, branch, base st
 }
 
 // layoutAcceptance checks that the task's workspace holds the artifact
-// under acceptance: each mount on its branch at the artifact's commit.
-// Acceptance runs in the workspace as the implementation left it (D41).
+// under acceptance: each mount on the recorded branch at the recorded
+// HEAD. Acceptance runs in the workspace as the implementation left it
+// (D41); this checks tend's own record, so the verdict is about the
+// artifact, and limits nothing the worker does. Uncommitted files are not
+// compared: prepare profiles regenerate files and an earlier acceptance
+// may leave build output, both of which D41 allows.
 func (w *Workspaces) layoutAcceptance(ctx context.Context, as protocol.Assignment, root string, st *state) error {
 	var artifact protocol.ArtifactPayload
 	if err := json.Unmarshal(as.Artifact, &artifact); err != nil {
@@ -427,22 +407,85 @@ func (w *Workspaces) layoutAcceptance(ctx context.Context, as protocol.Assignmen
 		if _, ok := st.Mounts[m.Path]; !ok {
 			return fmt.Errorf("gitws: the workspace has no mount %s to review", m.Path)
 		}
-		branch, err := w.git.run(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
-		if err != nil || branch != m.Branch {
-			return fmt.Errorf("%w: mount %s is not on %s", ErrTampered, m.Path, m.Branch)
-		}
+		branch, _ := w.git.run(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 		head, err := w.git.run(ctx, dir, "rev-parse", "HEAD")
 		if err != nil {
 			return err
 		}
-		if head != m.CommitSHA {
-			return fmt.Errorf("%w: mount %s is at %s, not at the artifact's %s", ErrTampered, m.Path, head, m.CommitSHA)
+		switch {
+		case branch != m.Branch:
+			return fmt.Errorf("%w: mount %s is on %q, not on the artifact's %q", ErrWorkspaceMoved, m.Path, branch, m.Branch)
+		case head != m.CommitSHA:
+			return fmt.Errorf("%w: mount %s is at %s, not at the artifact's %s", ErrWorkspaceMoved, m.Path, head, m.CommitSHA)
 		}
 	}
 	return nil
 }
 
-// Collect implements runner.Workspaces.
+// mountNow is a mount as it is: the branch HEAD is on ("" when
+// detached), HEAD, and the tree of its working tree.
+type mountNow struct {
+	branch, head, tree string
+}
+
+// read looks at a mount without changing it. The working tree is staged
+// into a scratch copy of the index, so the worktree's own index stays as
+// the worker left it; ignored files stay out, as git add leaves them.
+func (w *Workspaces) read(ctx context.Context, root, dir string) (mountNow, error) {
+	var now mountNow
+	if b, err := w.git.run(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
+		now.branch = b
+	}
+	head, err := w.git.run(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return now, fmt.Errorf("gitws: read mount %s: %w", dir, err)
+	}
+	now.head = head
+	index, err := w.git.run(ctx, dir, "rev-parse", "--git-path", "index")
+	if err != nil {
+		return now, err
+	}
+	if !filepath.IsAbs(index) {
+		index = filepath.Join(dir, index)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".tend"), 0o755); err != nil {
+		return now, fmt.Errorf("gitws: state dir: %w", err)
+	}
+	sum := sha256.Sum256([]byte(dir))
+	scratch := filepath.Join(root, ".tend", "index-"+hex.EncodeToString(sum[:8]))
+	defer os.Remove(scratch)
+	g := w.git.with("GIT_INDEX_FILE=" + scratch)
+	// Starting from the worktree's index lets git reuse what it already
+	// hashed; without one, start from HEAD. The copy keeps the index's
+	// time, which git compares with the files' to catch edits made in the
+	// same instant as the index (racy git).
+	if b, err := os.ReadFile(index); err == nil {
+		info, err := os.Stat(index)
+		if err != nil {
+			return now, fmt.Errorf("gitws: copy index: %w", err)
+		}
+		if err := os.WriteFile(scratch, b, 0o644); err != nil {
+			return now, fmt.Errorf("gitws: copy index: %w", err)
+		}
+		if err := os.Chtimes(scratch, info.ModTime(), info.ModTime()); err != nil {
+			return now, fmt.Errorf("gitws: copy index: %w", err)
+		}
+	} else if _, err := g.run(ctx, dir, "read-tree", "HEAD"); err != nil {
+		return now, err
+	}
+	if _, err := g.run(ctx, dir, "add", "--all"); err != nil {
+		return now, err
+	}
+	if now.tree, err = g.run(ctx, dir, "write-tree"); err != nil {
+		return now, err
+	}
+	return now, nil
+}
+
+// Collect implements runner.Workspaces. It records each mount as the
+// worker left it (D57): HEAD as it is, and, when the working tree holds
+// changes HEAD does not, a snapshot commit of them kept under the run's
+// ref. Neither the branch, the index nor the files are changed.
 func (w *Workspaces) Collect(ctx context.Context, as protocol.Assignment) (protocol.ArtifactPayload, error) {
 	root := w.root(as)
 	unlock, err := w.lock(ctx, "ws:"+root)
@@ -454,49 +497,59 @@ func (w *Workspaces) Collect(ctx context.Context, as protocol.Assignment) (proto
 	if err != nil {
 		return protocol.ArtifactPayload{}, err
 	}
-	for _, m := range as.Workspace.Mounts {
-		if err := w.checkIntact(ctx, root, as, m, &st); err != nil {
-			return protocol.ArtifactPayload{}, err
-		}
-	}
 	var out protocol.ArtifactPayload
 	changed := false
 	for _, m := range as.Workspace.Mounts {
 		dir := filepath.Join(root, m.Path)
-		ms := st.Mounts[m.Path]
-		if _, err := w.git.run(ctx, dir, "add", "--all"); err != nil {
-			return protocol.ArtifactPayload{}, err
+		ms, ok := st.Mounts[m.Path]
+		if !ok {
+			return protocol.ArtifactPayload{}, fmt.Errorf("gitws: the workspace has no mount %s", m.Path)
 		}
-		clean, err := w.git.test(ctx, dir, "diff", "--cached", "--quiet")
+		now, err := w.read(ctx, root, dir)
 		if err != nil {
 			return protocol.ArtifactPayload{}, err
 		}
-		if !clean {
-			// Hooks are the worker's and the acceptance run's business;
-			// the runner's commit only records the result.
-			if _, err := w.git.run(ctx, dir, "commit", "--quiet", "--no-verify", "-m", commitMessage(as)); err != nil {
-				return protocol.ArtifactPayload{}, fmt.Errorf("gitws: commit %s (is a git identity configured?): %w", m.Path, err)
-			}
-			head, err := w.git.run(ctx, dir, "rev-parse", "HEAD")
-			if err != nil {
-				return protocol.ArtifactPayload{}, err
-			}
-			ms.Head = head
-			st.Mounts[m.Path] = ms
-			if err := saveState(root, st); err != nil {
-				return protocol.ArtifactPayload{}, err
-			}
-			changed = true
+		recorded, snapshot := now.head, ""
+		headTree, err := w.git.run(ctx, dir, "rev-parse", now.head+"^{tree}")
+		if err != nil {
+			return protocol.ArtifactPayload{}, err
 		}
-		if ms.Head != ms.Base {
-			// Keep the commit reachable whatever happens to the branch.
+		if now.tree != headTree {
+			if snapshot, err = w.snapshot(ctx, dir, as, now); err != nil {
+				return protocol.ArtifactPayload{}, err
+			}
+			recorded = snapshot
+		}
+		// Compare with the mount as it was before this run, also when this
+		// run's collection is repeated. A new commit is a change even when
+		// the files are not: the task may be to commit them.
+		prevHead, prevTree := ms.Head, ms.Tree
+		if ms.Run == as.RunID {
+			prevHead, prevTree = ms.PrevHead, ms.PrevTree
+		}
+		if prevTree == "" {
+			if prevTree, err = w.git.run(ctx, dir, "rev-parse", prevHead+"^{tree}"); err != nil {
+				return protocol.ArtifactPayload{}, err
+			}
+		}
+		mountChanged := now.head != prevHead || now.tree != prevTree
+		if recorded != ms.Base {
+			// Keep the recorded commits reachable whatever happens to the
+			// branch.
 			ref := "refs/tend/runs/" + as.RunID + "/" + hex.EncodeToString([]byte(m.Path))
-			if _, err := w.git.run(ctx, dir, "update-ref", ref, ms.Head); err != nil {
+			if _, err := w.git.run(ctx, dir, "update-ref", ref, recorded); err != nil {
 				return protocol.ArtifactPayload{}, err
 			}
 		}
+		ms.PrevHead, ms.PrevTree, ms.Head, ms.Tree, ms.Run = prevHead, prevTree, now.head, now.tree, as.RunID
+		st.Mounts[m.Path] = ms
+		if err := saveState(root, st); err != nil {
+			return protocol.ArtifactPayload{}, err
+		}
+		changed = changed || mountChanged
 		out.Mounts = append(out.Mounts, protocol.ArtifactMount{
-			Repo: m.Repo, Path: m.Path, BaseSHA: ms.Base, Branch: ms.Branch, CommitSHA: ms.Head, Changed: !clean,
+			Repo: m.Repo, Path: m.Path, BaseSHA: ms.Base, Branch: now.branch,
+			CommitSHA: now.head, SnapshotSHA: snapshot, Changed: mountChanged,
 		})
 	}
 	if !changed {
@@ -505,63 +558,17 @@ func (w *Workspaces) Collect(ctx context.Context, as protocol.Assignment) (proto
 	return out, nil
 }
 
-func commitMessage(as protocol.Assignment) string {
-	return fmt.Sprintf("tend: %s\n\nTask: %s\nRun: %s", as.Workspace.Name, as.TaskID, as.RunID)
-}
-
-// checkIntact verifies that a mount is still on its branch at the commit
-// the runner left it at, with the configuration it had, and that the
-// workspace holds no worktree of the mount's repository besides the
-// recorded mounts. A commit this run's own collection made but could not
-// record before stopping is recognized and adopted.
-func (w *Workspaces) checkIntact(ctx context.Context, root string, as protocol.Assignment, m protocol.AssignedMount, st *state) error {
-	ms := st.Mounts[m.Path]
-	dir := filepath.Join(root, m.Path)
-	branch, err := w.git.run(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil || branch != ms.Branch {
-		return fmt.Errorf("%w: mount %s is not on %s", ErrTampered, m.Path, ms.Branch)
-	}
-	head, err := w.git.run(ctx, dir, "rev-parse", "HEAD")
+// snapshot stores the mount's working tree as a commit on top of HEAD,
+// without moving any branch. It uses the machine's git identity with a
+// fixed date, so collecting the same run again gives the same commit.
+func (w *Workspaces) snapshot(ctx context.Context, dir string, as protocol.Assignment, now mountNow) (string, error) {
+	g := w.git.with("GIT_AUTHOR_DATE=@0 +0000", "GIT_COMMITTER_DATE=@0 +0000")
+	msg := fmt.Sprintf("tend: snapshot of the working tree\n\nTask: %s\nRun: %s", as.TaskID, as.RunID)
+	sha, err := g.run(ctx, dir, "commit-tree", now.tree, "-p", now.head, "-m", msg)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("gitws: snapshot %s (is a git identity configured?): %w", dir, err)
 	}
-	if head != ms.Head {
-		parent, perr := w.git.run(ctx, dir, "rev-parse", "HEAD^")
-		msg, merr := w.git.run(ctx, dir, "log", "-1", "--format=%B", "HEAD")
-		if perr != nil || merr != nil || parent != ms.Head || strings.TrimSpace(msg) != commitMessage(as) {
-			return fmt.Errorf("%w: mount %s moved from %s to %s", ErrTampered, m.Path, ms.Head, head)
-		}
-		ms.Head = head
-		st.Mounts[m.Path] = ms
-	}
-	if config, err := w.configHash(ctx, dir); err != nil || config != ms.Config {
-		return fmt.Errorf("%w: git configuration of mount %s changed", ErrTampered, m.Path)
-	}
-	list, err := w.git.run(ctx, w.repoPath(m.Repo), "worktree", "list", "--porcelain")
-	if err != nil {
-		return err
-	}
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return fmt.Errorf("gitws: resolve workspace: %w", err)
-	}
-	for _, line := range strings.Split(list, "\n") {
-		path, ok := strings.CutPrefix(line, "worktree ")
-		if !ok {
-			continue
-		}
-		if real, err := filepath.EvalSymlinks(path); err == nil {
-			path = real
-		}
-		rel, err := filepath.Rel(realRoot, path)
-		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-			continue
-		}
-		if _, ok := st.Mounts[rel]; !ok {
-			return fmt.Errorf("%w: unexpected worktree %s", ErrTampered, path)
-		}
-	}
-	return nil
+	return sha, nil
 }
 
 // Finish implements runner.Workspaces. Workspaces stay for the task's
