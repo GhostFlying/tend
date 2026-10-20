@@ -308,13 +308,22 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 
 // uploadEvents uploads a run's events every EventFlush until ctx ends.
 func (r *Runner) uploadEvents(ctx context.Context, as protocol.Assignment) {
+	// failing is set from the first failure until an upload succeeds, so
+	// an outage is logged once rather than on every attempt.
+	failing := false
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(r.cfg.EventFlush):
 		}
-		if err := r.flushEvents(ctx, as); err != nil && ctx.Err() == nil {
+		err := r.flushEvents(ctx, as)
+		switch {
+		case ctx.Err() != nil:
+		case err == nil:
+			failing = false
+		case !failing:
+			failing = true
 			r.cfg.Log.WarnContext(ctx, "run event upload failed", "run_id", as.RunID, "err", err)
 		}
 	}

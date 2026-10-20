@@ -36,6 +36,9 @@ type client struct {
 	token  string
 	log    *slog.Logger
 	now    func() time.Time
+	// timeout, if set, bounds each request. Over tsnet a connection to a
+	// server that went away may never fail on its own.
+	timeout time.Duration
 
 	mu sync.Mutex
 	// downSince is when tend stopped answering; zero while it answers.
@@ -94,6 +97,11 @@ func (c *client) do(ctx context.Context, cred credential, env *protocol.Envelope
 	body, err := json.Marshal(env)
 	if err != nil {
 		return protocol.Operation{}, fmt.Errorf("runner: encode envelope: %w", err)
+	}
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+rpcPath, bytes.NewReader(body))
 	if err != nil {
