@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -237,6 +238,32 @@ func (r *Runner) finish(ctx context.Context, as protocol.Assignment, phase, op s
 }
 
 // report sends a run's journaled final report and forgets the run.
+// outcome is what a run's final report says, as log attributes.
+func outcome(env protocol.Envelope) []any {
+	var p struct {
+		Verdict protocol.Verdict `json:"verdict"`
+		Reason  string           `json:"reason"`
+		Mounts  []struct {
+			Path    string `json:"path"`
+			Changed bool   `json:"changed"`
+		} `json:"mounts"`
+	}
+	_ = json.Unmarshal(env.Payload, &p)
+	switch env.Operation {
+	case protocol.OpAcceptancesSubmit:
+		return []any{"verdict", p.Verdict}
+	case protocol.OpRunsRelease:
+		return []any{"reason", p.Reason}
+	}
+	var changed []string
+	for _, m := range p.Mounts {
+		if m.Changed {
+			changed = append(changed, m.Path)
+		}
+	}
+	return []any{"changed", strings.Join(changed, ",")}
+}
+
 func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 	req, ok, err := r.cfg.Journal.RequestForRun(ctx, as.RunID)
 	if err != nil {
@@ -250,7 +277,11 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 			}
 			r.cfg.Log.ErrorContext(ctx, "tend rejected run events", "run_id", as.RunID, "err", err)
 		}
-		if _, err := r.send(ctx, runCredential(as), &req.Envelope); err != nil {
+		_, err := r.send(ctx, runCredential(as), &req.Envelope)
+		if err == nil {
+			r.cfg.Log.InfoContext(ctx, "run reported", append([]any{"run_id", as.RunID, "operation", req.Envelope.Operation}, outcome(req.Envelope)...)...)
+		}
+		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
