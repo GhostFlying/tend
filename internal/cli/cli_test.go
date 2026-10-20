@@ -795,3 +795,60 @@ func TestDiffShowsOldLinesFirst(t *testing.T) {
 		t.Errorf("diff = %q, want %q", got, want)
 	}
 }
+
+func TestLogsOfATask(t *testing.T) {
+	f := newFakeServer(t)
+	f.answer("GET /api/v1/tasks/task_1", protocol.TaskDetail{
+		TaskSummary: protocol.TaskSummary{TaskID: "task_1", Title: "fix"},
+		Runs: []protocol.RunView{
+			{RunID: "run_1", Role: protocol.RoleImplement, Generation: 1, Host: "h", Observed: protocol.RunFinished},
+			{RunID: "run_2", Role: protocol.RoleAccept, Generation: 1, Host: "h", Observed: protocol.RunFinished},
+		},
+	})
+	for _, run := range []string{"run_1", "run_2"} {
+		f.on("GET /api/v1/runs/"+run+"/logs", func(w http.ResponseWriter, r *http.Request, _ []byte) {
+			page := protocol.RunLogPage{Observed: protocol.RunFinished, Next: 1}
+			if r.URL.Query().Get("after") == "0" {
+				page.Logs = []protocol.RunLogView{{Seq: 1, Kind: "item.completed", Body: json.RawMessage(`{"type":"agentMessage","text":"said in ` + run + `"}`)}}
+			}
+			_ = json.NewEncoder(w).Encode(page)
+		})
+	}
+	te := newTestEnv(t, f.srv.URL)
+	if code := te.main("logs", "task_1"); code != exitOK {
+		t.Fatalf("logs = %d: %s", code, te.errOut)
+	}
+	out := te.out.String()
+	// JSON entries say which run they belong to.
+	te.out.Reset()
+	if code := te.main("logs", "--json", "task_1"); code != exitOK {
+		t.Fatalf("logs --json = %d: %s", code, te.errOut)
+	}
+	var runs []string
+	for _, line := range strings.Split(strings.TrimSpace(te.out.String()), "\n") {
+		var entry struct {
+			RunID string `json:"run_id"`
+			Seq   int64  `json:"seq"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil || entry.Seq != 1 {
+			t.Fatalf("logs --json line %q: %v", line, err)
+		}
+		runs = append(runs, entry.RunID)
+	}
+	if strings.Join(runs, ",") != "run_1,run_2" {
+		t.Errorf("logs --json runs = %v", runs)
+	}
+	first, second := strings.Index(out, "== run_1 implement gen 1 on h: finished\n"), strings.Index(out, "== run_2 accept gen 1 on h: finished\n")
+	if first < 0 || second < first || !strings.Contains(out[first:second], "said in run_1") || !strings.Contains(out[second:], "said in run_2") {
+		t.Errorf("logs of a task:\n%s", out)
+	}
+}
+
+func TestLogsOfATaskWithoutRuns(t *testing.T) {
+	f := newFakeServer(t)
+	f.answer("GET /api/v1/tasks/task_1", protocol.TaskDetail{TaskSummary: protocol.TaskSummary{TaskID: "task_1"}})
+	te := newTestEnv(t, f.srv.URL)
+	if code := te.main("logs", "--json", "task_1"); code != exitOK || te.out.Len() != 0 {
+		t.Errorf("logs --json of a task without runs = %d, %q; want no records", code, te.out)
+	}
+}

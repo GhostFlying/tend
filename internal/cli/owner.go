@@ -22,6 +22,10 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 	switch cmd {
 	case "logs":
 		follow = fs.Bool("f", false, "keep following new logs until the run ends")
+		fs.Usage = func() {
+			fmt.Fprintln(e.Stderr, "usage: tend logs [-f] [-json] <run_id | task_id>\nA task ID shows the logs of each of its runs in order.")
+			fs.PrintDefaults()
+		}
 	case "decide":
 		note = fs.String("note", "", "a free-form answer, with or instead of an option")
 	case "retry":
@@ -267,7 +271,39 @@ func short(sha string) string {
 	return sha
 }
 
-func (o owner) logs(ctx context.Context, runID string, follow bool) error {
+// logs shows a run's logs, or, given a task, those of each of its runs in
+// order; following a task follows its last run.
+func (o owner) logs(ctx context.Context, id string, follow bool) error {
+	if !strings.HasPrefix(id, string(protocol.PrefixTask)+"_") {
+		return o.runLogs(ctx, id, follow, false)
+	}
+	var d protocol.TaskDetail
+	if err := o.c.do(ctx, "GET", "/api/v1/tasks/"+url.PathEscape(id), nil, &d); err != nil {
+		return err
+	}
+	if len(d.Runs) == 0 {
+		if !o.json {
+			fmt.Fprintf(o.e.Stdout, "task %s has no runs yet\n", id)
+		}
+		return nil
+	}
+	for i, r := range d.Runs {
+		if !o.json {
+			if i > 0 {
+				fmt.Fprintln(o.e.Stdout)
+			}
+			fmt.Fprintf(o.e.Stdout, "== %s %s gen %d on %s: %s\n", r.RunID, r.Role, r.Generation, r.Host, r.Observed)
+		}
+		if err := o.runLogs(ctx, r.RunID, follow && i == len(d.Runs)-1, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runLogs shows one run's logs. labeled adds the run ID to each JSON
+// entry, for output that mixes the runs of a task.
+func (o owner) runLogs(ctx context.Context, runID string, follow, labeled bool) error {
 	var after int64
 	for {
 		wait := 0
@@ -281,7 +317,14 @@ func (o owner) logs(ctx context.Context, runID string, follow bool) error {
 		}
 		for _, l := range page.Logs {
 			if o.json {
-				if err := json.NewEncoder(o.e.Stdout).Encode(l); err != nil {
+				var entry any = l
+				if labeled {
+					entry = struct {
+						RunID string `json:"run_id"`
+						protocol.RunLogView
+					}{runID, l}
+				}
+				if err := json.NewEncoder(o.e.Stdout).Encode(entry); err != nil {
 					return err
 				}
 				continue

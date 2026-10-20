@@ -59,7 +59,7 @@ Owner commands:
   login --server <url>             get tokens for this machine
   status [--json]                  unfinished tasks, open decisions and hosts
   task <task_id> [--json]          one task in full
-  logs [-f] <run_id>               a run's logs; -f follows them
+  logs [-f] <run_id|task_id>       a run's logs, or all runs of a task; -f follows the last
   decide <decision_id> <option> [--note <text>]
   retry <task_id> --kind implement|accept
   pause|resume|cancel <task_id>
