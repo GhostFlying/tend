@@ -325,6 +325,8 @@ func Cancel(t Task, expectedRevision int64) (Decision, error) {
 		return Decision{}, errTransition(t, "cancel")
 	}
 	t.Lifecycle = protocol.TaskCancelled
+	// A cancelled task waits for nothing, as a completed one.
+	t.Block = protocol.BlockNone
 	t.ControlRevision++
 	return Decision{Task: t, CancelOpenActions: true, Events: []EventDraft{{Kind: "task.cancelled"}}}, nil
 }
