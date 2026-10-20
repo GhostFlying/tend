@@ -61,6 +61,13 @@ Codex 的记忆整理会另起后台会话，它同样触发 hook，tend 给它�
 - **超时按传输失败处理。** 结果不确定，沿用原来的规则：用同一个 request ID 重发，由服务端去重；同时记为 tend 不可达。
 - **事件上传的告警不刷屏。** 上传每 0.5s 尝试一次，失败时只在连续失败的第一次记 warn，成功后重新计数；tend 不可达和恢复已经由 C12 的日志说明。
 
+## C22 对端挂断不算失败
+
+依据：同一轮故障演练。runner 停止时，它正在重试的请求随之取消，runner 记了一条 "request failed, retrying" 的 warn，看起来像还要重试；服务端那一侧，runner 断开导致等待中的领取请求被取消，服务端记了一条 ERROR。两者都不是故障。
+
+- runner 重试前先看自己的 context：已经结束就直接返回，不记 warn。
+- 服务端（runner 协议和 owner/agent API）处理请求出错时，如果请求的 context 已经结束（对端断开），记一条 info 说明请求被放弃，不记 ERROR。
+
 ## 提交拆分
 
 | 步骤 | commit | 内容 |
@@ -75,3 +82,4 @@ Codex 的记忆整理会另起后台会话，它同样触发 hook，tend 给它�
 | 8 | `feat: log each run the runner takes` | C19 |
 | 9 | `feat: name the task and the review issues in deltas` | C20 |
 | 10 | `fix: time out runner requests` | C21 |
+| 11 | `fix: do not log hang-ups as failures` | C22 |

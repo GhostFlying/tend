@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -96,5 +97,23 @@ func TestClientTimesOutStalledRequests(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "tend is unreachable") {
 		t.Errorf("timeout not logged as unreachable:\n%s", logs.String())
+	}
+}
+
+func TestRetryStopsQuietlyWhenCancelled(t *testing.T) {
+	var logs syncBuffer
+	r := New(Config{Log: slog.New(slog.NewTextHandler(&logs, nil))})
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	err := r.retry(ctx, func() error {
+		calls++
+		cancel()
+		return &transportError{context.Canceled}
+	})
+	if !errors.Is(err, context.Canceled) || calls != 1 {
+		t.Fatalf("retry = %v after %d calls, want context.Canceled after 1", err, calls)
+	}
+	if logs.String() != "" {
+		t.Errorf("stopping logged:\n%s", logs.String())
 	}
 }

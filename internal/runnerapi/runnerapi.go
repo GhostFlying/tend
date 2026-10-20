@@ -104,7 +104,12 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, env *protoco
 		if env != nil {
 			attrs = append(attrs, "request_id", env.RequestID, "operation", env.Operation)
 		}
-		s.log.ErrorContext(r.Context(), "runner request failed", attrs...)
+		if r.Context().Err() != nil {
+			// The runner hung up, as it does when it stops; nothing failed.
+			s.log.InfoContext(r.Context(), "runner request abandoned", attrs...)
+		} else {
+			s.log.ErrorContext(r.Context(), "runner request failed", attrs...)
+		}
 		pe = protocol.Errorf(protocol.CodeInternal, "internal error")
 	}
 	status, ok := statusOf[pe.Code]

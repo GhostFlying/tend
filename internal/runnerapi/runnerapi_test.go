@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,6 +55,25 @@ type env struct {
 	ids    protocol.IDGen
 	server *httptest.Server
 	peers  *peers
+	logs   *syncBuffer
+}
+
+// syncBuffer is a bytes.Buffer safe for the server's goroutines and the test.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func newEnv(t *testing.T, claimWait time.Duration) *env {
@@ -67,13 +86,13 @@ func newEnv(t *testing.T, claimWait time.Duration) *env {
 	t.Cleanup(func() { s.Close() })
 	ids := testkit.NewIDGen(clock, 3)
 	a := app.New(s, ids, clock.Now)
-	e := &env{t: t, app: a, ids: ids, peers: &peers{id: runnerNode}}
+	e := &env{t: t, app: a, ids: ids, peers: &peers{id: runnerNode}, logs: &syncBuffer{}}
 	e.system("config.sync", app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 1,
 			TokenHash: HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}},
 	}, app.SyncConfig{})
-	srv := New(a, e.peers, secret, Config{ClaimWait: claimWait}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := New(a, e.peers, secret, Config{ClaimWait: claimWait}, slog.New(slog.NewTextHandler(e.logs, nil)))
 	e.server = httptest.NewServer(srv.Handler())
 	t.Cleanup(e.server.Close)
 	return e
@@ -259,6 +278,38 @@ func TestClaimTimesOutWithoutWork(t *testing.T) {
 	}
 	if d := time.Since(start); d < 50*time.Millisecond {
 		t.Errorf("claim returned after %v, before the wait elapsed", d)
+	}
+}
+
+// TestAbandonedClaimIsNotAnError covers a runner that stops while its claim
+// waits for work.
+func TestAbandonedClaimIsNotAnError(t *testing.T) {
+	e := newEnv(t, 5*time.Second)
+	b, err := json.Marshal(e.envelope(protocol.OpRunnerClaim, "", map[string]any{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.server.URL+Path, bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+hostToken)
+	req.Header.Set(HeaderHost, "linux-1")
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		resp.Body.Close()
+		t.Fatal("claim answered before the runner hung up")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(e.logs.String(), "runner request abandoned") {
+		if time.Now().After(deadline) {
+			t.Fatalf("abandoned claim not logged:\n%s", e.logs.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if strings.Contains(e.logs.String(), "level=ERROR") {
+		t.Errorf("abandoned claim logged as an error:\n%s", e.logs.String())
 	}
 }
 
