@@ -3,7 +3,7 @@
 计划 §8 的验收分两步：
 
 - 先在一台开发机上做本地预验收，覆盖不依赖 tailnet 的部分（本节）；
-- 剩下的项目和 owner 一起在真机上完成，见最后一节。
+- 剩下的项目和 owner 一起在真机上完成，见“真机验收”一节。
 
 ## 本地预验收
 
@@ -50,11 +50,49 @@
 5. worker 的工作区只有 `origin/main`，没有本地的 `main` 分支。按 `main` 写的验收命令会失败，这一点应该写进 worker 的说明。已解决（C13，#50）：工作区说明写明每个挂载的基线 commit；验收条件仍由主 Agent 按任务决定。
 6. runner 重新连上服务端时没有日志（小问题）。已解决（C12，#49）。
 
-## 待真机验收
+## 真机验收
 
-以下项目需要真实部署和 owner 的设备，和 owner 一起完成：
+**环境：**
 
-- 服务端和 runner 加入 tailnet：https 证书、只有 http 时的回退、ACL；
-- 在 Codex 和 traex 的 TUI 里第一次启动时信任 tend 的 hook；
-- 在 owner 自己的 agent 配置上运行 `tend setup`；
-- 用一个真实仓库跑一个真实需求。
+- 服务端和 runner 在 owner 的一台开发机上，都通过 tsnet 加入 tailnet。这台机器是 tagged 节点，按 D56 配置为 owner 设备；机器出网要经过 HTTP 代理。
+- owner 用自己日常的 Codex（TUI）作为控制会话，配置由 `tend setup codex --write` 写入；traex 的配置同样写入，但这轮没有用 traex 会话。Claude Code 的配置没有改。
+- worker 使用 traex，模型 GPT-5.6-Sol。
+- 仓库是 tend 自己，需求是给 CLI 加 `tend version` 命令。这是一次测试，结果不合入 `main`。
+
+需求跑了两次。第一次暴露出提交模型的问题，任务被取消；按 D57 修改后，第二次一代就通过了。
+
+### 结果
+
+| 项 | 结果 |
+| --- | --- |
+| 服务端和 runner 加入 tailnet，https | 通过；tagged 的 owner 设备需要 D56（#53） |
+| `tend login`、`tend status` 经过 tailnet | 通过；CLI 原先把 tailnet 地址也发给 HTTP 代理，已修（#54） |
+| 在 owner 自己的配置上运行 `tend setup` | 通过；原先会改写 owner 已有 hook 里的 `&`、`<`、`>`，已修（#55） |
+| Codex TUI 里信任 tend 的 hook | 通过 |
+| 会话绑定（D54） | 通过：会话第一次调用 tend 工具时绑定，之前的 SessionStart 不注入任何内容 |
+| 建任务、调度、工作区、实现、验收、completed | 第二次通过：一代完成，worker 按任务要求自己提交了一个符合仓库规范的 commit，验收核对了提交、作者身份和未推送 |
+| 下一次输入时报告结论 | 通过：两次都在 owner 下一次输入时报告了验收结论、run 失败、新开的待决事项和任务完成 |
+| 增量写明来源（D55） | 通过 |
+| 在会话里回答待决事项，tend 执行（D53） | 通过：选择取消后 tend 直接取消了任务 |
+| artifact 的分支和 commit 在 runner 上可查 | 通过；结果没有推送到远端 |
+
+### 发现并已修复的缺陷
+
+- **R1**：CLI 把 tailnet 上的服务端地址也交给 HTTP 代理，代理无法解析，`tend login` 失败。tailnet 的地址现在绕过代理（#54）。
+- **R2**：`tend setup` 用 Go 默认的 JSON 编码重写配置，把 owner 已有 hook 命令里的 `&`、`<`、`>` 转义，预览的 diff 也先列新行再列旧行（#55）。
+- **R3**：tagged 节点在 tailnet 里没有登录名，无法作为 owner 设备。按 D56 增加 `owner_nodes`（#53）。
+- **R4（主要问题）**：runner 替 worker 提交，worker 不许提交。任务要求“交付为一个符合仓库规范的 commit”，验收据此拒绝 runner 写的记录提交；实现 worker 无法提交，第三代把 runner 的提交 reset 掉，run 以 `git_tampered` 失败；即使重试，也会从同一个被改动的状态出发再次失败。任务无法通过。按 D57 改为提交归 worker：tend 不提交，也不限制 worker 怎么用 git，只如实记下每个 mount 的分支、HEAD 和未提交改动的快照（#56 的说明修改为过渡，#57 为正式修改）。
+- **R5**：`make check` 里的 `go run staticcheck@…` 在模块之外构建，在本地 Go 比模块旧的机器上会切到 staticcheck 自己要求的旧版 Go，无法加载本模块。两个 worker 都靠 `GOTOOLCHAIN` 绕过。现在 staticcheck 固定使用构建本模块的工具链（#56）。
+- **R6**：traex 把长时间的命令转到后台时先报一次“完成”，状态为 `backgrounded`、退出码为 0，`tend logs` 把它显示成 `exit 0`。现在只有结束的命令显示退出码（#56）。
+- **R7**：`TestEndToEnd_RunnerCompletesTask` 在任务完成后立刻停 runner，runner 可能还没从 journal 删除这个 run，CI 偶发失败（#57）。
+
+### 未决问题
+
+1. 取消任务时没有清掉阻塞原因，已取消的任务仍显示 `blocked: waiting_decision`（小问题）。
+2. `tend logs` 只接受 run ID，传任务 ID 返回 not_found，帮助里也没写参数是什么（小问题）。
+3. runner 的日志不记录领取和开始 run，排查时只能查账本（小问题）。
+4. 增量里的行是事件的原样输出，只有任务 ID 没有标题；`changes_required` 不带验收意见，agent 要再读一次任务才知道原因。
+5. worker 继承本机 agent 的配置（D38），也会读 owner 的个人记忆。第二次实现时 worker 从记忆里沿用了 R5 的绕过方式。好处是经验能沿用，坏处是过时的经验也会被带入，是否隔离需要讨论。
+6. 第二次实现里，worker 的 `make check` 用了约 15 分钟，验收时的同一命令只要几秒（可能有测试缓存），原因没有查。
+7. 故障演练只在本地预验收里做过（停服务端、两个写入者等），真机上没有专门演练 runner 中途重启这类场景。
+8. Claude Code 在同一个进程里 `/clear` 之后，MCP 调用仍然带旧的 session ID，新会话无法绑定（C15 已记录的风险）。这轮没有使用 Claude Code。
