@@ -53,6 +53,14 @@ Codex 的记忆整理会另起后台会话，它同样触发 hook，tend 给它�
 - **C19 runner 记录 run 的经过。** 领取 run 时记一条 info（run、任务、角色、代次），结束时记一条 info，写明结果（提交了 artifact、结论、失败原因）；失败时原有的 warn 不变。
 - **C20 增量写明任务和验收意见。** 每行的任务带上标题；验收结论不是 passed 时，附上验收意见的摘要，agent 不必再读一次任务。
 
+## C21 runner 的请求有超时
+
+依据：`docs/findings/phase-c-acceptance.md` 真机验收的未决问题 7（故障演练）。服务端重启时，runner 正在等待的领取请求一直没有返回：tsnet 的用户态网络栈不会因为对端进程退出而断开连接，runner 的 HTTP 请求又没有超时，于是 runner 再也不领取新的 run，直到重启。
+
+- **每个请求都有超时。** runner 配置增加 `RequestTimeout`，默认 60s，对所有请求生效。它必须大于服务端领取请求的最长等待（25s），否则空闲时每次领取都会超时。
+- **超时按传输失败处理。** 结果不确定，沿用原来的规则：用同一个 request ID 重发，由服务端去重；同时记为 tend 不可达。
+- **事件上传的告警不刷屏。** 上传每 0.5s 尝试一次，失败时只在连续失败的第一次记 warn，成功后重新计数；tend 不可达和恢复已经由 C12 的日志说明。
+
 ## 提交拆分
 
 | 步骤 | commit | 内容 |
@@ -66,3 +74,4 @@ Codex 的记忆整理会另起后台会话，它同样触发 hook，tend 给它�
 | 7 | `feat: show a task's run logs in tend logs` | C18 |
 | 8 | `feat: log each run the runner takes` | C19 |
 | 9 | `feat: name the task and the review issues in deltas` | C20 |
+| 10 | `fix: time out runner requests` | C21 |

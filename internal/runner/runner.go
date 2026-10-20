@@ -98,6 +98,9 @@ type Config struct {
 	RetryDelay time.Duration
 	// EventFlush is how often run events are uploaded. Default 500ms.
 	EventFlush time.Duration
+	// RequestTimeout bounds each request to tend. It must exceed how long
+	// tend holds a claim open waiting for work (25s). Default 60s.
+	RequestTimeout time.Duration
 }
 
 var (
@@ -143,12 +146,16 @@ func New(cfg Config) *Runner {
 	if cfg.EventFlush <= 0 {
 		cfg.EventFlush = 500 * time.Millisecond
 	}
+	if cfg.RequestTimeout <= 0 {
+		cfg.RequestTimeout = time.Minute
+	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
 	return &Runner{
-		cfg:       cfg,
-		c:         &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now},
+		cfg: cfg,
+		c: &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now,
+			timeout: cfg.RequestTimeout},
 		reconcile: make(chan struct{}, 1),
 		ttl:       time.Minute,
 		ttlWake:   make(chan struct{}),

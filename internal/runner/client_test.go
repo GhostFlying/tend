@@ -67,3 +67,34 @@ func TestClientLogsLostAndRegainedLink(t *testing.T) {
 		t.Errorf("reconnection logged %d times:\n%s", n, got)
 	}
 }
+
+// TestClientTimesOutStalledRequests covers a server that went away without
+// closing the connection, which over tsnet leaves a request waiting forever
+// unless the client bounds it.
+func TestClientTimesOutStalledRequests(t *testing.T) {
+	release := make(chan struct{})
+	stalled := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	defer stalled.Close()
+	defer close(release)
+
+	var logs bytes.Buffer
+	c := &client{base: stalled.URL, http: stalled.Client(), hostID: "linux-1", log: slog.New(slog.NewTextHandler(&logs, nil)),
+		now: time.Now, timeout: 50 * time.Millisecond}
+	env := &protocol.Envelope{RequestID: "req_1", Operation: protocol.OpRunnerClaim}
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.do(context.Background(), c.host(), env)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !isRetryable(err) {
+			t.Fatalf("stalled do = %v, want a transport error", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("stalled do did not time out")
+	}
+	if !strings.Contains(logs.String(), "tend is unreachable") {
+		t.Errorf("timeout not logged as unreachable:\n%s", logs.String())
+	}
+}
