@@ -85,6 +85,8 @@
 - **R5**：`make check` 里的 `go run staticcheck@…` 在模块之外构建，在本地 Go 比模块旧的机器上会切到 staticcheck 自己要求的旧版 Go，无法加载本模块。两个 worker 都靠 `GOTOOLCHAIN` 绕过。现在 staticcheck 固定使用构建本模块的工具链（#56）。
 - **R6**：traex 把长时间的命令转到后台时先报一次“完成”，状态为 `backgrounded`、退出码为 0，`tend logs` 把它显示成 `exit 0`。现在只有结束的命令显示退出码（#56）。
 - **R7**：`TestEndToEnd_RunnerCompletesTask` 在任务完成后立刻停 runner，runner 可能还没从 journal 删除这个 run，CI 偶发失败（#57）。
+- **R8**：runner 的请求没有超时。故障演练中服务端重启时，runner 正在等待领取；tsnet 的用户态网络栈不会因为对端进程退出而断开连接，这个请求一直没有返回，runner 不再领取新的 run，直到它自己重启。现在每个请求都有超时，超时后用同一个 request ID 重发。同一轮还发现服务端不可达时，事件上传每 0.5 秒记一次 warn；现在每次连续失败只记一次（#60）。
+- **R9**：runner 停止时，为被自己取消的请求记 "request failed, retrying"；服务端把 runner 断开导致的领取取消记为 ERROR。两者都不是故障，现在不再这样记（#61）。
 
 ### 未决问题
 
@@ -94,5 +96,11 @@
 4. 增量里的行是事件的原样输出，只有任务 ID 没有标题；`changes_required` 不带验收意见，agent 要再读一次任务才知道原因。已解决（C20）。
 5. worker 继承本机 agent 的配置（D38），也会读 owner 的个人记忆。第二次实现时 worker 从记忆里沿用了 R5 的绕过方式。好处是经验能沿用，坏处是过时的经验也会被带入。owner 决定不隔离：worker 继续继承本机 agent 的配置和记忆。
 6. 第二次实现里，worker 的 `make check` 看起来用了约 15 分钟。查 traex 的会话记录：命令本身 43 秒就结束了，之后 worker 向模型请求下一步，这一次模型响应用了约 15 分钟。慢在模型服务，不在 tend 或命令。
-7. 故障演练只在本地预验收里做过（停服务端、两个写入者等），真机上没有专门演练 runner 中途重启这类场景。
+7. 故障演练只在本地预验收里做过（停服务端、两个写入者等），真机上没有专门演练 runner 中途重启这类场景。已在真机上演练，结论如下（R8、R9 修复后部署）：
+   - **服务端重启，worker 正在运行**：worker 继续工作；服务端不可达期间，runner 把最终报告留在 journal，重连后提交；任务验收通过。
+   - **服务端重启，runner 空闲等待领取**：修复前领取请求一直挂住（R8）；修复后请求超时、重发，runner 重连并正常领取之后创建的任务。
+   - **SIGTERM 停 runner，验收 run 正在运行**：runner 和 worker 进程都退出。重启后 runner 向 tend 报告它持有的 run，tend 让它继续，runner 重新启动验收 worker，run 日志的序号接续；验收通过。
+   - **SIGKILL 停 runner，实现 run 正在运行**：worker 的整个进程树随之退出，没有残留进程。重启后实现 run 在中断时的工作区上重新开始，提交 artifact，验收通过。
+   - 观察：tsnet 节点刚启动时，第一次连接常在约 15 秒后超时，重试即成功，因此 runner 重启后约 30–45 秒才恢复工作。这是 tailnet 建立路径的耗时，不处理。
+   - 观察：中断后重新开始的 run，worker 会重新收到 brief、从头执行，工作区保留中断时的改动，中断前的部分工作会重做。目前可以接受。
 8. Claude Code 在同一个进程里 `/clear` 之后，MCP 调用仍然带旧的 session ID，新会话无法绑定（C15 已记录的风险）。这轮没有使用 Claude Code。
