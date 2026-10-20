@@ -351,10 +351,15 @@ func TestEndToEnd_RunnerCompletesTask(t *testing.T) {
 		t.Errorf("runs = %d, want an implement and an acceptance run", got)
 	}
 	eventually(t, "the implement events are uploaded", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs`) == 2 })
+	// The task completes when tend commits the verdict; the runner forgets
+	// the run only once the answer reaches it.
+	j := n.journal()
+	defer j.Close()
+	eventually(t, "the runner forgets its runs", func() bool {
+		runs, err := j.Runs(context.Background())
+		return err == nil && len(runs) == 0
+	})
 	n.stop()
-	if runs, err := n.journal().Runs(context.Background()); err != nil || len(runs) != 0 {
-		t.Errorf("journal still holds %+v (%v)", runs, err)
-	}
 }
 
 func TestFault_ClaimReceiptLost_Runner(t *testing.T) {
