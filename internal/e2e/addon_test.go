@@ -179,7 +179,7 @@ func TestEndToEnd_AgentAddon(t *testing.T) {
 		return srv.count(`SELECT COUNT(*) FROM tasks WHERE task_id = ? AND lifecycle = 'completed'`, task) == 1
 	})
 	for _, a := range []*addonAgent{claude, codex} {
-		if got := a.hook("user-prompt-submit", "", "how is it going?"); !strings.Contains(got, task+" task.completed") || !strings.Contains(got, "(by tend)") {
+		if got := a.hook("user-prompt-submit", "", "how is it going?"); !strings.Contains(got, task+` "fix the build" task.completed`) || !strings.Contains(got, "(by tend)") {
 			t.Errorf("%s does not hear that the task completed:\n%s", a.agent, got)
 		}
 		// Nothing new since.
@@ -230,7 +230,7 @@ func TestEndToEnd_OwnerAnswersDecision(t *testing.T) {
 	}
 	got := claude.hook("user-prompt-submit", "", "and now?")
 	if !strings.Contains(got, "answered by owner: ") || !strings.Contains(got, "tend carried it out (cancel), nothing left to do") ||
-		!strings.Contains(got, task+" task.cancelled (by owner)") {
+		!strings.Contains(got, task+` "fix it" task.cancelled (by owner)`) {
 		t.Errorf("the agent does not hear what tend did:\n%s", got)
 	}
 }

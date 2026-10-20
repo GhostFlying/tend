@@ -309,6 +309,7 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 		return err
 	}
 	own := ownRequests{self: self, seen: map[string]bool{}}
+	titles := map[string]string{}
 	touched := map[string]bool{}
 	var order []string
 	for _, e := range events {
@@ -341,10 +342,36 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			}
 		default:
 			about := e.ObjectID
-			if taskID != "" && taskID != e.ObjectID {
-				about = e.ObjectID + " of " + taskID
+			if taskID != "" {
+				// Name the task, so a line reads without looking it up.
+				title, ok := titles[taskID]
+				if !ok {
+					t, err := store.GetTask(ctx, q, taskID)
+					if err != nil && !errors.Is(err, store.ErrNotFound) {
+						return err
+					}
+					title, titles[taskID] = t.Title, t.Title
+				}
+				named := taskID
+				if title != "" {
+					named = fmt.Sprintf("%s %q", taskID, clipRunes(title, 80))
+				}
+				about = named
+				if taskID != e.ObjectID {
+					about = e.ObjectID + " of " + named
+				}
 			}
-			line = strings.TrimSpace(fmt.Sprintf("#%d %s %s %s", e.Seq, about, e.Kind, compact(body))) + " (by " + actor(e.ActorJSON) + ")"
+			line = strings.TrimSpace(fmt.Sprintf("#%d %s %s %s", e.Seq, about, e.Kind, compact(body)))
+			if e.Kind == "acceptance.submitted" && body["verdict"] != string(protocol.VerdictPassed) {
+				issues, err := reviewIssues(ctx, q, taskID, body)
+				if err != nil {
+					return err
+				}
+				if issues != "" {
+					line += "; issues: " + issues
+				}
+			}
+			line += " (by " + actor(e.ActorJSON) + ")"
 		}
 		c := classify(e.Kind, body)
 		if c != attention && (c == result || e.Kind == "decision.answered") {
@@ -554,6 +581,49 @@ func messageLine(m store.MessageView) string {
 }
 
 // compact renders an event body's scalar fields briefly.
+// reviewIssues summarizes what an acceptance run asked to change, so an
+// agent learns why a verdict was not passed without reading the task.
+func reviewIssues(ctx context.Context, q store.Querier, taskID string, body map[string]any) (string, error) {
+	runID, _ := body["run_id"].(string)
+	artifactID, _ := body["artifact_id"].(string)
+	if taskID == "" || runID == "" {
+		return "", nil
+	}
+	accs, err := store.ListAcceptances(ctx, q, taskID, artifactID)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range accs {
+		if a.RunID != runID {
+			continue
+		}
+		var issues []any
+		if json.Unmarshal([]byte(a.IssuesJSON), &issues) != nil {
+			return clipRunes(a.IssuesJSON, 400), nil
+		}
+		parts := make([]string, 0, len(issues))
+		for _, i := range issues {
+			if text, ok := i.(string); ok {
+				parts = append(parts, strings.TrimSpace(text))
+				continue
+			}
+			b, _ := json.Marshal(i)
+			parts = append(parts, string(b))
+		}
+		return clipRunes(strings.Join(parts, " | "), 400), nil
+	}
+	return "", nil
+}
+
+// clipRunes shortens s to at most n runes, marking the cut.
+func clipRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 func compact(body map[string]any) string {
 	keys := make([]string, 0, len(body))
 	for k, v := range body {

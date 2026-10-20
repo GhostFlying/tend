@@ -226,7 +226,7 @@ func TestFault_FirstUseKeepsResults(t *testing.T) {
 	e.op(owner, e.envelope("tasks.cancel", protocol.Target{Type: "task", ID: id}, &rev, map[string]any{}))
 	got := s.prompt()
 	unseen := sectionOf(got, "Since your last tend context")
-	if !strings.Contains(got, "kind=full") || !strings.Contains(unseen, id+" task.cancelled") || !strings.Contains(unseen, "answered by owner: "+decision) {
+	if !strings.Contains(got, "kind=full") || !strings.Contains(unseen, id+` "fix windows" task.cancelled`) || !strings.Contains(unseen, "answered by owner: "+decision) {
 		t.Errorf("first prompt after the task ended and the decision was answered:\n%s", got)
 	}
 	// Questions opened meanwhile are all told, whatever the budget.
@@ -339,7 +339,7 @@ func TestFault_OwnWritesFiltered(t *testing.T) {
 	if got := a.prompt(); got != "" {
 		t.Errorf("A hears of its own task:\n%s", got)
 	}
-	if got := b.prompt(); !strings.Contains(got, id+" task.created") {
+	if got := b.prompt(); !strings.Contains(got, id+` "fix windows" task.created`) {
 		t.Errorf("B does not hear of A's task:\n%s", got)
 	}
 	// What follows from A's task comes from tend, not from A.
@@ -354,7 +354,7 @@ func TestFault_OwnWritesFiltered(t *testing.T) {
 	nameless := &session{e: e, tok: a.tok, agent: a.agent}
 	other := created(t, nameless.call("tasks_create", createArgs("fix linux", "fix-linux"), ""))
 	for _, s := range []*session{a, b} {
-		if got := s.prompt(); !strings.Contains(got, other+" task.created") {
+		if got := s.prompt(); !strings.Contains(got, other+` "fix linux" task.created`) {
 			t.Errorf("%s does not hear of the sessionless task:\n%s", s.id, got)
 		}
 	}

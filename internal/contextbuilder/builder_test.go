@@ -308,7 +308,7 @@ func TestDeltaGroupsChangesAndTiesRunsToTasks(t *testing.T) {
 	}
 	delta := e.prepare(0)
 	attention := sectionOf(delta.Text, "Needs attention")
-	if !strings.Contains(attention, "opened: "+opened.DecisionID) || !strings.Contains(attention, "run_x of "+id+" run.unknown") {
+	if !strings.Contains(attention, "opened: "+opened.DecisionID) || !strings.Contains(attention, "run_x of "+id+` "fix windows" run.unknown`) {
 		t.Errorf("the new decision and the unknown run need attention:\n%s", attention)
 	}
 	changes := sectionOf(delta.Text, "Changes")
@@ -386,5 +386,34 @@ func TestUnseenAttentionSurvivesTheBudget(t *testing.T) {
 	got := Render(s, 1000)
 	if !strings.Contains(got, "Act on the answer yourself") {
 		t.Errorf("the answer to act on was cut:\n%s", got)
+	}
+}
+
+func TestDeltaSaysWhyAcceptanceFailed(t *testing.T) {
+	e := newEnv(t)
+	id, _ := e.task("fix windows")
+	_ = e.b.Confirm(context.Background(), e.prepare(0).ID)
+	if err := e.store.Write(context.Background(), func(tx *store.Tx) error {
+		for _, stmt := range []string{
+			`INSERT INTO runs (run_id, task_id, action_id, generation, role, desired_state, observed_state, created_at, updated_at)
+				SELECT 'run_a', task_id, action_id, 1, 'accept', 'run', 'finished', 0, 0 FROM plan_actions WHERE task_id = ?`,
+			`INSERT INTO artifacts (artifact_id, task_id, run_id, kind, ref_json, digest, created_at) VALUES ('art_1', ?, 'run_a', 'git', '{}', 'd', 0)`,
+			`INSERT INTO acceptances (acceptance_id, task_id, run_id, spec_version, artifact_id, verdict, evidence_json, issues_json, created_at)
+				VALUES ('acc_1', ?, 'run_a', 1, 'art_1', 'changes_required', '{}', '["the build still fails on arm64", {"check": 2}]', 0)`,
+		} {
+			if _, err := tx.Exec(context.Background(), stmt, id); err != nil {
+				return err
+			}
+		}
+		_, err := tx.InsertEvent(context.Background(), store.EventRow{EventID: "evt_a", Source: "app", ObjectType: "task", ObjectID: id, Kind: "acceptance.submitted",
+			BodyJSON: `{"run_id":"run_a","artifact_id":"art_1","spec_version":1,"verdict":"changes_required"}`})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	attention := sectionOf(e.prepare(0).Text, "Needs attention")
+	if !strings.Contains(attention, id+` "fix windows" acceptance.submitted`) ||
+		!strings.Contains(attention, `verdict=changes_required; issues: the build still fails on arm64 | {"check":2} (by tend)`) {
+		t.Errorf("the verdict line names the task and the issues:\n%s", attention)
 	}
 }
