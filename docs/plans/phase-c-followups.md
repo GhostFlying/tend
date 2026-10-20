@@ -1,4 +1,4 @@
-# 阶段 C 预验收的后续修改（C12–C15）
+# 阶段 C 验收的后续修改（C12–C20）
 
 **依据：`docs/findings/phase-c-acceptance.md` 的未决问题 2–6 与 owner 的取舍。**
 
@@ -44,6 +44,15 @@ Codex 的记忆整理会另起后台会话，它同样触发 hook，tend 给它�
 - 值不在 `owners` 里时，服务端拒绝启动。
 - 优先写机器名：一个 tag 往往覆盖多台机器，写 tag 等于把这些机器都交给 owner。
 
+## C17–C20 真机验收的小问题
+
+依据：`docs/findings/phase-c-acceptance.md` 真机验收的未决问题 1–4。
+
+- **C17 取消时清掉阻塞原因。** `domain.Cancel` 把 `Block` 置为 `none`，和完成时一致。迁移把已经结束的任务的阻塞原因清掉。
+- **C18 `tend logs` 接受任务 ID。** 参数是任务 ID 时，按顺序显示这个任务每个 run 的日志，每个 run 前有一行标题（run、角色、代次、状态）；`-f` 跟随最后一个 run。用法写明参数可以是 run 或任务。
+- **C19 runner 记录 run 的经过。** 领取 run 时记一条 info（run、任务、角色、代次），结束时记一条 info，写明结果（提交了 artifact、结论、失败原因）；失败时原有的 warn 不变。
+- **C20 增量写明任务和验收意见。** 每行的任务带上标题；验收结论不是 passed 时，附上验收意见的摘要，agent 不必再读一次任务。
+
 ## 提交拆分
 
 | 步骤 | commit | 内容 |
@@ -53,3 +62,7 @@ Codex 的记忆整理会另起后台会话，它同样触发 hook，tend 给它�
 | 3 | `feat: name who made each change in deltas` | C14，D55 |
 | 4 | `feat: give context only to sessions that use tend` | C15，D54 |
 | 5 | `feat: let named tagged nodes act as an owner` | C16，D56 |
+| 6 | `fix: clear the block reason when a task is cancelled` | C17 |
+| 7 | `feat: show a task's run logs in tend logs` | C18 |
+| 8 | `feat: log each run the runner takes` | C19 |
+| 9 | `feat: name the task and the review issues in deltas` | C20 |

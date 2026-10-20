@@ -495,3 +495,12 @@ func TestDecisionEffectsNameOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestCancelClearsTheBlock(t *testing.T) {
+	task := taskIn(protocol.TaskQueued)
+	task.Block = protocol.BlockWaitingDecision
+	d, err := Cancel(task, task.ControlRevision)
+	if err != nil || d.Task.Lifecycle != protocol.TaskCancelled || d.Task.Block != protocol.BlockNone {
+		t.Errorf("Cancel = %+v, %v; want cancelled and not blocked", d.Task, err)
+	}
+}
