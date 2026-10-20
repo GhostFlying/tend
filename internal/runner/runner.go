@@ -205,6 +205,10 @@ func (r *Runner) retry(ctx context.Context, fn func() error) error {
 		if err == nil || !isRetryable(err) {
 			return err
 		}
+		if ctx.Err() != nil {
+			// The runner is stopping; there is nothing to retry.
+			return ctx.Err()
+		}
 		r.cfg.Log.WarnContext(ctx, "request failed, retrying", "err", err)
 		select {
 		case <-ctx.Done():

@@ -94,7 +94,13 @@ var statusOf = map[protocol.Code]int{
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error, attrs ...any) {
 	pe, ok := errors.AsType[*protocol.Error](err)
 	if !ok {
-		s.log.ErrorContext(r.Context(), "owner request failed", append([]any{"path", r.URL.Path, "err", err}, attrs...)...)
+		attrs = append([]any{"path", r.URL.Path, "err", err}, attrs...)
+		if r.Context().Err() != nil {
+			// The caller hung up; nothing failed.
+			s.log.InfoContext(r.Context(), "owner request abandoned", attrs...)
+		} else {
+			s.log.ErrorContext(r.Context(), "owner request failed", attrs...)
+		}
 		pe = protocol.Errorf(protocol.CodeInternal, "internal error")
 	}
 	status, ok := statusOf[pe.Code]
