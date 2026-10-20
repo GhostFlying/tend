@@ -327,6 +327,8 @@ func (r *Runner) claimOnce(ctx context.Context, env *protocol.Envelope, sentAt t
 	if err := r.cfg.Journal.AcceptAssignment(ctx, *res.Assignment, env.RequestID); err != nil {
 		return err
 	}
+	as := res.Assignment
+	r.cfg.Log.InfoContext(ctx, "run claimed", "run_id", as.RunID, "task_id", as.TaskID, "role", as.Role, "generation", as.Generation)
 	r.setTTL(res.Assignment.LeaseTTLMillis)
 	if !sentAt.IsZero() {
 		r.start(ctx, *res.Assignment, sentAt)
