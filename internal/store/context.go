@@ -49,6 +49,14 @@ func GetBaseline(ctx context.Context, q Querier, threadKey string) (Baseline, er
 }
 
 // PutBaseline creates or replaces a thread's baseline.
+// InvalidateBaselines makes every thread's next context a full snapshot.
+func (t *Tx) InvalidateBaselines(ctx context.Context, now int64) error {
+	if _, err := t.Exec(ctx, `UPDATE thread_baselines SET valid = 0, updated_at = ? WHERE valid = 1`, now); err != nil {
+		return fmt.Errorf("store: invalidate baselines: %w", err)
+	}
+	return nil
+}
+
 func (t *Tx) PutBaseline(ctx context.Context, b Baseline, now int64) error {
 	_, err := t.Exec(ctx, `INSERT INTO thread_baselines (thread_key, epoch, watermark_seq, last_packet_id, valid, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (thread_key) DO UPDATE SET epoch = excluded.epoch,

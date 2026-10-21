@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,11 +13,13 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/api"
+	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/cli"
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runnerapi"
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
@@ -41,6 +44,10 @@ type addonAgent struct {
 	env     *cli.Env
 	out     *bytes.Buffer
 	vars    map[string]string
+	// cwd is where the agent works; remotes are the git remotes git
+	// reports there.
+	cwd     string
+	remotes []string
 }
 
 func newAddonAgent(t *testing.T, configDir, agent, session string) *addonAgent {
@@ -49,7 +56,17 @@ func newAddonAgent(t *testing.T, configDir, agent, session string) *addonAgent {
 		Stdin: strings.NewReader(""), Stdout: a.out, Stderr: &bytes.Buffer{},
 		Getenv: func(k string) string { return a.vars[k] }, Home: t.TempDir(), ConfigDir: configDir,
 		HTTP: &http.Client{Timeout: 10 * time.Second}, IDs: protocol.NewULIDGen(time.Now, nil), Executable: "tend",
-		Run: func(context.Context, string, ...string) error { return nil },
+		Run:   func(context.Context, string, ...string) error { return nil },
+		Getwd: func() (string, error) { return a.cwd, nil },
+		Output: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			var out strings.Builder
+			if name == "git" && len(args) > 1 && args[1] == a.cwd {
+				for i, r := range a.remotes {
+					fmt.Fprintf(&out, "r%d\t%s (fetch)\n", i, r)
+				}
+			}
+			return []byte(out.String()), nil
+		},
 	}
 	if agent == string(protocol.AgentClaude) {
 		a.vars["CLAUDE_CODE_SESSION_ID"] = session
@@ -70,7 +87,7 @@ func (a *addonAgent) run(stdin string, args ...string) string {
 // hook runs a hook and returns the context it adds.
 func (a *addonAgent) hook(event, source, prompt string) string {
 	a.t.Helper()
-	in, _ := json.Marshal(map[string]string{"session_id": a.session, "source": source, "prompt": prompt})
+	in, _ := json.Marshal(map[string]string{"session_id": a.session, "source": source, "prompt": prompt, "cwd": a.cwd})
 	out := a.run(string(in), "hook", a.agent, event)
 	if out == "" {
 		return ""
@@ -232,5 +249,70 @@ func TestEndToEnd_OwnerAnswersDecision(t *testing.T) {
 	if !strings.Contains(got, "answered by owner: ") || !strings.Contains(got, "tend carried it out (cancel), nothing left to do") ||
 		!strings.Contains(got, task+` "fix it" task.cancelled (by owner)`) {
 		t.Errorf("the agent does not hear what tend did:\n%s", got)
+	}
+}
+
+// TestEndToEnd_ProjectsScopeContext has two sessions work in the
+// repositories of two projects: each sees its own project's tasks, and
+// hears from the other only what needs attention (D59).
+func TestEndToEnd_ProjectsScopeContext(t *testing.T) {
+	srv := newServer(t, time.Minute)
+	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
+		Repos: []app.RepoConfig{
+			{Repo: "tend", RemoteURL: "https://example.com/tend.git"},
+			{Repo: "site", RemoteURL: "https://example.com/site.git"},
+		},
+		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend", "site"}, Slots: 2,
+			TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}},
+		Projects: []app.ProjectConfig{{Name: "core", Repos: []string{"tend"}}, {Name: "web", Repos: []string{"site"}}},
+	}, app.SyncConfig{})
+	url := srv.startAPI()
+	configDir := filepath.Join(t.TempDir(), "tend")
+	core := newAddonAgent(t, configDir, string(protocol.AgentClaude), "sess-core")
+	core.run("", "login", "--server", url)
+	core.cwd, core.remotes = "/work/tend", []string{"git@example.com:tend.git"}
+	web := newAddonAgent(t, configDir, string(protocol.AgentCodex), "sess-web")
+	web.cwd, web.remotes = "/work/site", []string{"https://example.com/site"}
+
+	create := func(a *addonAgent, title, workspace, repo string) string {
+		t.Helper()
+		var created struct {
+			Result struct {
+				Outcome struct {
+					TaskID string `json:"task_id"`
+				} `json:"outcome"`
+			} `json:"result"`
+		}
+		text := a.call("tasks_create", map[string]any{
+			"title": title, "workspace_name": workspace, "reason": "the owner asked for it",
+			"spec": domain.Spec{Goal: title, Acceptance: []string{"done"}, Delivery: domain.DeliveryCommit,
+				Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: repo}}}},
+		})
+		if err := json.Unmarshal([]byte(text), &created); err != nil || created.Result.Outcome.TaskID == "" {
+			t.Fatalf("tasks_create = %s", text)
+		}
+		return created.Result.Outcome.TaskID
+	}
+	coreTask := create(core, "speed up the ledger", "speed-up", "tend")
+	webTask := create(web, "redo the landing page", "landing", "site")
+	if p := srv.count(`SELECT COUNT(*) FROM tasks WHERE task_id = ? AND project = 'core'`, coreTask); p != 1 {
+		t.Errorf("the core session's task is not in core")
+	}
+	if p := srv.count(`SELECT COUNT(*) FROM tasks WHERE task_id = ? AND project = 'web'`, webTask); p != 1 {
+		t.Errorf("the web session's task is not in web")
+	}
+
+	got := core.hook("user-prompt-submit", "", "what is open?")
+	if !strings.Contains(got, "Project: core") || !strings.Contains(got, coreTask) || strings.Contains(got, webTask) {
+		t.Fatalf("the core session's first context:\n%s", got)
+	}
+	if got := web.hook("user-prompt-submit", "", "what is open?"); !strings.Contains(got, "Project: web") || !strings.Contains(got, webTask) || strings.Contains(got, coreTask) {
+		t.Fatalf("the web session's first context:\n%s", got)
+	}
+
+	// A question about the web task reaches the core session too.
+	web.call("decisions_open", map[string]any{"task_id": webTask, "question": "Keep the old hero image?", "options": []string{"keep", "replace"}})
+	if got := core.hook("user-prompt-submit", "", "anything new?"); !strings.Contains(got, "Other projects, needs attention") || !strings.Contains(got, "[web]") {
+		t.Errorf("the core session missed the web decision:\n%s", got)
 	}
 }

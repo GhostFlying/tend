@@ -27,9 +27,10 @@ func Summary(r store.TaskRow) protocol.TaskSummary {
 const maxTasks = 200
 
 // Tasks lists tasks, unfinished first, leaving out finished ones unless
-// asked for.
-func Tasks(ctx context.Context, q store.Querier, includeFinished bool) ([]protocol.TaskSummary, error) {
-	rows, err := store.ListTasks(ctx, q, maxTasks)
+// asked for. A project limits the listing to its tasks; empty lists every
+// project.
+func Tasks(ctx context.Context, q store.Querier, includeFinished bool, project string) ([]protocol.TaskSummary, error) {
+	rows, err := store.ListTasks(ctx, q, project, maxTasks)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +192,7 @@ func Snapshot(ctx context.Context, q store.Querier) (protocol.Snapshot, error) {
 	if v.EventSeq, err = store.LatestEventSeq(ctx, q); err != nil {
 		return v, err
 	}
-	if v.Tasks, err = Tasks(ctx, q, false); err != nil {
+	if v.Tasks, err = Tasks(ctx, q, false, ""); err != nil {
 		return v, err
 	}
 	decs, err := store.ListDecisions(ctx, q, "")

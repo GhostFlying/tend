@@ -191,8 +191,7 @@ owner 确认等 cove，本阶段不做。
 | 步骤 | commit | 内容 |
 | --- | --- | --- |
 | 1 | `feat: define projects in the server config` | W1，D52、D58 写入 design.md |
-| 2 | `feat: bind agent sessions to a project` | W2，D59 |
-| 3 | `feat: scope context to the session's project` | W3 |
+| 2 | `feat: bind sessions to projects and scope their context` | W2、W3，D59（两项的 review 修复交织，合为一个提交） |
 | 4 | `feat: rate tasks and remind about unrated ones` | W4，D60 |
 | 5 | `feat: order the queue by project weight, rating and wait` | W5 |
 | 6 | `feat: show projects and the queue in tend status` | W6 |

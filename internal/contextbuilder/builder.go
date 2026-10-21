@@ -151,12 +151,17 @@ func (b *Builder) Prepare(ctx context.Context, threadKey string, messageSeq int6
 		}
 		snap = Snapshot{Full: !hasBase || !base.Valid, Epoch: base.Epoch, Watermark: latest}
 		from := base.Watermark
+		// The hosted main agent sees every project.
+		sc, _, err := scopeOf(ctx, q, protocol.Principal{})
+		if err != nil {
+			return err
+		}
 		if snap.Full {
 			snap.Epoch++
 			from = 0
-			err = b.gatherFull(ctx, q, &snap, messageSeq)
+			err = b.gatherFull(ctx, q, &snap, messageSeq, sc)
 		} else {
-			err = b.gatherDelta(ctx, q, &snap, base.Watermark, latest, protocol.Principal{})
+			err = b.gatherDelta(ctx, q, &snap, base.Watermark, latest, protocol.Principal{}, sc)
 			empty = snap.empty()
 		}
 		packet = store.Packet{ThreadKey: threadKey, Epoch: snap.Epoch, FromSeq: from + 1, ToSeq: latest}
@@ -226,18 +231,25 @@ func (b *Builder) Compose(ctx context.Context, q store.Querier, r app.ComposeReq
 	snap := Snapshot{PacketID: r.PacketID, Epoch: r.Epoch, Watermark: latest, Full: r.Full, Addon: true}
 	budget := b.cfg.HookFullBudget
 	if r.Full {
-		err = b.gatherFull(ctx, q, &snap, 0)
+		var sc *scope
+		sc, snap.Project, err = scopeOf(ctx, q, r.Self)
+		if err == nil {
+			err = b.gatherFull(ctx, q, &snap, 0, sc)
+		}
 		if err == nil && r.Watermark > 0 {
 			// Tasks that ended and decisions answered since the session
 			// last heard from tend are not in the snapshot; tell them. What
 			// needs attention is told in full, as a delta would.
 			var since Snapshot
-			err = b.gatherDelta(ctx, q, &since, r.Watermark, latest, r.Self)
-			snap.Unseen, snap.UnseenAttention = since.Unseen, since.Attention
+			err = b.gatherDelta(ctx, q, &since, r.Watermark, latest, r.Self, sc)
+			snap.Unseen, snap.UnseenAttention = since.Unseen, append(since.Attention, since.OtherAttention...)
 		}
 	} else {
 		budget = b.cfg.HookDeltaBudget
-		err = b.gatherDelta(ctx, q, &snap, r.Watermark, latest, r.Self)
+		var sc *scope
+		if sc, _, err = scopeOf(ctx, q, r.Self); err == nil {
+			err = b.gatherDelta(ctx, q, &snap, r.Watermark, latest, r.Self, sc)
+		}
 	}
 	if err != nil {
 		return app.Composed{}, err
@@ -248,30 +260,61 @@ func (b *Builder) Compose(ctx context.Context, q store.Querier, r app.ComposeReq
 	return app.Composed{Text: Render(snap, budget), ToSeq: latest}, nil
 }
 
-// Current returns a full snapshot for an agent the owner works in without
-// recording it or moving any watermark, for an agent that wants to refresh
-// its view.
-func (b *Builder) Current(ctx context.Context) (string, error) {
+// Current returns a full snapshot for an agent session the owner works in
+// without recording it or moving any watermark, for an agent that wants to
+// refresh its view.
+func (b *Builder) Current(ctx context.Context, self protocol.Principal) (string, error) {
 	var out string
 	err := b.store.Read(ctx, func(tx *store.ReadTx) error {
-		c, err := b.Compose(ctx, tx.Q(), app.ComposeRequest{Full: true})
+		c, err := b.Compose(ctx, tx.Q(), app.ComposeRequest{Self: self, Full: true})
 		out = c.Text
 		return err
 	})
 	return out, err
 }
 
-func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, messageSeq int64) error {
+func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, messageSeq int64, sc *scope) error {
+	tasks, err := store.ListTasks(ctx, q, sc.project, 500)
+	if err != nil {
+		return err
+	}
+	for _, t := range tasks {
+		sc.projects[t.TaskID] = t.Project
+	}
+	// What the other projects hold, counted for a summary.
+	type count struct{ tasks, decisions int }
+	others := map[string]*count{}
+	other := func(project string) *count {
+		if others[project] == nil {
+			others[project] = &count{}
+		}
+		return others[project]
+	}
+	if sc.project != "" {
+		open, err := store.CountOpenTasks(ctx, q)
+		if err != nil {
+			return err
+		}
+		for p, n := range open {
+			if p != sc.project {
+				other(p).tasks = n
+			}
+		}
+	}
 	decisions, err := store.ListDecisions(ctx, q, "")
 	if err != nil {
 		return err
 	}
 	for _, d := range decisions {
-		s.Decisions = append(s.Decisions, decisionLine(d))
-	}
-	tasks, err := store.ListTasks(ctx, q, 500)
-	if err != nil {
-		return err
+		p, err := sc.projectOf(ctx, q, d.TaskID)
+		if err != nil {
+			return err
+		}
+		if !sc.covers(p) {
+			other(p).decisions++
+			continue
+		}
+		s.Decisions = append(s.Decisions, sc.label(p, decisionLine(d)))
 	}
 	for _, t := range tasks {
 		if t.Lifecycle.Terminal() {
@@ -281,11 +324,16 @@ func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, 
 		if err != nil {
 			return err
 		}
+		line = sc.label(t.Project, line)
 		if attention {
 			s.Attention = append(s.Attention, line)
 		} else {
 			s.Tasks = append(s.Tasks, line)
 		}
+	}
+	for _, p := range slices.Sorted(maps.Keys(others)) {
+		c := others[p]
+		s.Others = append(s.Others, fmt.Sprintf("%s: %d open tasks, %d open decisions", p, c.tasks, c.decisions))
 	}
 	if messageSeq <= 1 {
 		return nil
@@ -303,7 +351,7 @@ func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, 
 // gatherDelta collects the changes after the watermark that an agent
 // should hear about. When self is an agent session, the events its own
 // requests recorded are left out: it already has their results.
-func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot, after, through int64, self protocol.Principal) error {
+func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot, after, through int64, self protocol.Principal, sc *scope) error {
 	events, err := store.ListEventsAfter(ctx, q, after, through, told)
 	if err != nil {
 		return err
@@ -335,6 +383,9 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			d, err := store.GetDecision(ctx, q, e.ObjectID)
 			if err != nil {
 				return err
+			}
+			if taskID == "" {
+				taskID = d.TaskID
 			}
 			line = fmt.Sprintf("#%d opened: %s (by %s)", e.Seq, decisionLine(d), actor(e.ActorJSON))
 			if e.Kind == "decision.answered" {
@@ -374,6 +425,20 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			line += " (by " + actor(e.ActorJSON) + ")"
 		}
 		c := classify(e.Kind, body)
+		project, err := sc.projectOf(ctx, q, taskID)
+		if err != nil {
+			return err
+		}
+		line = sc.label(project, line)
+		// A task moved away from the session's project is still news there.
+		from, _ := body["from"].(string)
+		if !sc.covers(project) && !(e.Kind == "task.project_changed" && sc.covers(from)) {
+			// Of another project, only what needs attention is told.
+			if c == attention {
+				s.OtherAttention = append(s.OtherAttention, line)
+			}
+			continue
+		}
 		if c != attention && (c == result || e.Kind == "decision.answered") {
 			s.Unseen = append(s.Unseen, line)
 		}
@@ -399,7 +464,7 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 		if err != nil {
 			return err
 		}
-		s.Changes = append(s.Changes, "now: "+line)
+		s.Changes = append(s.Changes, "now: "+sc.label(t.Project, line))
 	}
 	return nil
 }
@@ -642,4 +707,98 @@ func compact(body map[string]any) string {
 		out = out[:240] + "…"
 	}
 	return out
+}
+
+// scope is the part of the ledger a session's context covers (D59): the
+// project the session works in, with only what needs attention from the
+// others, or every project.
+type scope struct {
+	// project is the session's project; empty covers every project.
+	project string
+	// labels makes lines name their project, when tend has several.
+	labels bool
+	// projects caches the project of each task looked up.
+	projects map[string]string
+}
+
+// scopeOf returns the scope of a session's context, and the line that
+// tells the session about it when tend has several projects.
+func scopeOf(ctx context.Context, q store.Querier, self protocol.Principal) (*scope, string, error) {
+	sc := &scope{projects: map[string]string{}}
+	all, err := store.ListProjects(ctx, q)
+	if err != nil {
+		return nil, "", err
+	}
+	var names []string
+	for _, p := range all {
+		if !p.Retired {
+			names = append(names, p.Project)
+		}
+	}
+	var sp store.SessionProject
+	if self.Addon() && self.Thread != "" {
+		if sp, err = store.GetSessionProject(ctx, q, string(self.Agent), self.Thread); err != nil {
+			return nil, "", err
+		}
+	}
+	if slices.Contains(names, sp.Project) {
+		// The scope holds even with one active project: retired projects
+		// may still have open tasks.
+		sc.project = sp.Project
+	}
+	// Lines name their project whenever the context may hold more than
+	// one, retired projects with open tasks included.
+	open, err := store.CountOpenTasks(ctx, q)
+	if err != nil {
+		return nil, "", err
+	}
+	sc.labels = len(names) > 1 || sc.project != "" || len(open) > 1
+	if len(names) <= 1 {
+		return sc, "", nil
+	}
+	if sc.project == "" {
+		// Every project, as chosen, by default, or because the session's
+		// project was retired since.
+		return sc, fmt.Sprintf("Projects: %s. This session sees all of them; when the owner works on one, "+
+			"choose it with session_project.", strings.Join(names, ", ")), nil
+	}
+	how := "the project of the repository this session works in"
+	if sp.Source == store.ProjectExplicit {
+		how = "as chosen for this session"
+	}
+	others := slices.DeleteFunc(names, func(n string) bool { return n == sp.Project })
+	return sc, fmt.Sprintf("Project: %s, %s. Only its tasks are shown, and from the other projects (%s) only what needs attention. "+
+		"Switch with session_project when the owner asks; tasks_list with project \"*\" lists every project.",
+		sp.Project, how, strings.Join(others, ", ")), nil
+}
+
+// projectOf returns the project of a task, or "" for none.
+func (sc *scope) projectOf(ctx context.Context, q store.Querier, taskID string) (string, error) {
+	if taskID == "" {
+		return "", nil
+	}
+	if p, ok := sc.projects[taskID]; ok {
+		return p, nil
+	}
+	t, err := store.GetTask(ctx, q, taskID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return "", err
+	}
+	sc.projects[taskID] = t.Project
+	return t.Project, nil
+}
+
+// covers reports whether something in project belongs to the session's own
+// context. What concerns no task belongs to every project.
+func (sc *scope) covers(project string) bool {
+	return sc.project == "" || project == "" || project == sc.project
+}
+
+// label names a line's project when lines name theirs and it is not the
+// session's own.
+func (sc *scope) label(project, line string) string {
+	if !sc.labels || project == "" || project == sc.project {
+		return line
+	}
+	return "[" + project + "] " + line
 }

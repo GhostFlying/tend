@@ -17,6 +17,11 @@ type Snapshot struct {
 	// hosted main agent: a full snapshot then carries the standing
 	// instructions, which such an agent has no other place for.
 	Addon bool
+	// Project says, in a full snapshot, which project the session works
+	// in, when tend has more than one, and Others sums up what the other
+	// projects hold.
+	Project string
+	Others  []string
 	// Decisions are the open questions for the owner, in a full snapshot.
 	Decisions []string
 	// Attention lists, in a full snapshot, the tasks that are blocked or
@@ -42,10 +47,13 @@ type Snapshot struct {
 	// Changes are a delta's other changes to what the ledger wants, and
 	// the current state of the tasks the delta touched.
 	Changes []string
+	// OtherAttention is, for a session that works in one project, what
+	// needs attention in the others; like Attention, it is never cut.
+	OtherAttention []string
 }
 
 func (s Snapshot) empty() bool {
-	return len(s.Attention) == 0 && len(s.Results) == 0 && len(s.Changes) == 0
+	return len(s.Attention) == 0 && len(s.Results) == 0 && len(s.Changes) == 0 && len(s.OtherAttention) == 0
 }
 
 // section is a block of lines with a priority; under budget pressure the
@@ -77,6 +85,12 @@ func Render(s Snapshot, budget int) string {
 	case s.Full && s.Addon:
 		header += "This replaces all earlier tend context in this conversation, including any carried over in a summary. " +
 			"It is tend's ledger as of now and is authoritative over anything you remember.\n\n" + AddonInstructions + "\n"
+		if s.Project != "" {
+			header += "\n" + s.Project + "\n"
+		}
+		if len(s.Others) > 0 {
+			header += "Other projects: " + strings.Join(s.Others, "; ") + ".\n"
+		}
 		if len(s.Tasks) == 0 && len(s.Attention) == 0 {
 			header += "\nThere are no unfinished tasks.\n"
 		}
@@ -100,6 +114,7 @@ func Render(s Snapshot, budget int) string {
 	} else {
 		sections = []*section{
 			{title: "Needs attention", lines: s.Attention, protected: true},
+			{title: "Other projects, needs attention", lines: s.OtherAttention, protected: true},
 			{title: "Results", lines: s.Results, priority: 3, omitted: "(%d more results; see tasks_list)"},
 			{title: "Changes", lines: s.Changes, priority: 2, omitted: "(%d more changes; see tasks_list)"},
 		}

@@ -22,11 +22,12 @@ func (t *Tx) MapNativeRequest(ctx context.Context, source, nativeKey, newID stri
 	return id, nil
 }
 
-// ListTasks returns tasks, unfinished ones first, then the most recently
-// updated finished ones, up to limit in total.
-func ListTasks(ctx context.Context, q Querier, limit int) ([]TaskRow, error) {
-	rows, err := q.QueryContext(ctx, `SELECT task_id FROM tasks
-		ORDER BY lifecycle IN ('completed', 'cancelled'), priority DESC, updated_at DESC, task_id LIMIT ?`, limit)
+// ListTasks returns the tasks of a project, or of every project when
+// project is empty: unfinished ones first, then the most recently updated
+// finished ones, up to limit in total.
+func ListTasks(ctx context.Context, q Querier, project string, limit int) ([]TaskRow, error) {
+	rows, err := q.QueryContext(ctx, `SELECT task_id FROM tasks WHERE ? = '' OR project = ?
+		ORDER BY lifecycle IN ('completed', 'cancelled'), priority DESC, updated_at DESC, task_id LIMIT ?`, project, project, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: list tasks: %w", err)
 	}
@@ -55,6 +56,26 @@ func ListTasks(ctx context.Context, q Querier, limit int) ([]TaskRow, error) {
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// CountOpenTasks returns how many unfinished tasks each project holds.
+func CountOpenTasks(ctx context.Context, q Querier) (map[string]int, error) {
+	rows, err := q.QueryContext(ctx, `SELECT project, COUNT(*) FROM tasks
+		WHERE lifecycle NOT IN ('completed', 'cancelled') GROUP BY project`)
+	if err != nil {
+		return nil, fmt.Errorf("store: count tasks: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var p string
+		var n int
+		if err := rows.Scan(&p, &n); err != nil {
+			return nil, fmt.Errorf("store: scan task count: %w", err)
+		}
+		out[p] = n
+	}
+	return out, rows.Err()
 }
 
 // ListRunsByTask returns a task's runs in creation order.

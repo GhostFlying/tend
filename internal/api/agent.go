@@ -37,6 +37,18 @@ func agentPrincipal(v token, agent protocol.AgentKind, sessionID string) (protoc
 	return protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: v.ClientID, Agent: agent, Thread: sessionID}, nil
 }
 
+// boundedRemotes keeps the remotes a request may carry and drops the rest:
+// they only help bind the session to a project.
+func boundedRemotes(remotes []string) []string {
+	var out []string
+	for _, r := range remotes {
+		if r != "" && len(r) <= protocol.MaxRemoteLen && len(out) < protocol.MaxRemotes {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // hook answers an agent hook with the context to add, if any (D47).
 func (s *Server) hook(w http.ResponseWriter, r *http.Request) {
 	v, err := s.agentToken(r)
@@ -57,8 +69,14 @@ func (s *Server) hook(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	// The prompt is not part of the request: it is never stored.
-	payload, err := json.Marshal(map[string]any{"event": req.Event, "source": req.Source})
+	// The prompt is not part of the request: it is never stored. Without
+	// remotes the payload keeps its earlier shape, so a retry from before
+	// remotes existed still matches its record.
+	fields := map[string]any{"event": req.Event, "source": req.Source}
+	if remotes := boundedRemotes(req.Remotes); len(remotes) > 0 {
+		fields["remotes"] = remotes
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -112,7 +130,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 	}
 	// The call does not depend on the binding: a session that cannot be
 	// bound now still gets its answer and is bound by a later call.
-	if err := s.app.BindAgentSession(r.Context(), p); err != nil {
+	if err := s.app.BindAgentSession(r.Context(), p, boundedRemotes(req.Remotes)); err != nil {
 		s.log.WarnContext(r.Context(), "binding an agent session failed", "agent", p.Agent, "request_id", req.RequestID, "err", err)
 	}
 	res := s.tools.Handle(r.Context(), tools.Call{Principal: p, RequestID: req.RequestID, Tool: r.PathValue("name"), Arguments: req.Arguments})

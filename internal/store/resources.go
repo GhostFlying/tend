@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -274,6 +275,45 @@ func AgentSessionBound(ctx context.Context, q Querier, agent, sessionID string) 
 		return false, fmt.Errorf("store: read agent session: %w", err)
 	}
 	return n > 0, nil
+}
+
+// How a session's project was set (D59).
+const (
+	ProjectAuto     = "auto"
+	ProjectExplicit = "explicit"
+)
+
+// SessionProject is the project an agent session works in. An empty
+// Source means tend has not bound the session yet; a binding with an
+// empty Project means every project.
+type SessionProject struct {
+	Project string
+	Source  string
+}
+
+// GetSessionProject returns an agent session's project. A session tend has
+// not recorded has none.
+func GetSessionProject(ctx context.Context, q Querier, agent, sessionID string) (SessionProject, error) {
+	var project, source sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT project, project_source FROM agent_sessions WHERE agent = ? AND session_id = ?`,
+		agent, sessionID).Scan(&project, &source)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SessionProject{}, nil
+	}
+	if err != nil {
+		return SessionProject{}, fmt.Errorf("store: read session project: %w", err)
+	}
+	return SessionProject{Project: project.String, Source: source.String}, nil
+}
+
+// SetSessionProject records the project of a recorded agent session.
+func (t *Tx) SetSessionProject(ctx context.Context, agent, sessionID string, sp SessionProject) error {
+	_, err := t.Exec(ctx, `UPDATE agent_sessions SET project = ?, project_source = ? WHERE agent = ? AND session_id = ?`,
+		nullString(sp.Project), nullString(sp.Source), agent, sessionID)
+	if err != nil {
+		return fmt.Errorf("store: set session project: %w", err)
+	}
+	return nil
 }
 
 // UpsertAgentSession records that an agent session was seen.

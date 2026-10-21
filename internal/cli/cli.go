@@ -41,6 +41,12 @@ type Env struct {
 	LookPath   func(string) (string, error)
 	// Run runs an external command, for setup.
 	Run func(ctx context.Context, name string, args ...string) error
+	// Output runs an external command and returns its standard output,
+	// and Getwd returns the working directory; the hook and the MCP bridge
+	// use them to find the repository the agent works in. Either may be
+	// nil.
+	Output func(ctx context.Context, name string, args ...string) ([]byte, error)
+	Getwd  func() (string, error)
 }
 
 func (e *Env) addonOff() bool { return e.Getenv(AddonEnv) == "off" }

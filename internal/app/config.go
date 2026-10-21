@@ -253,6 +253,10 @@ func (SyncConfig) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := tx.PutTemplates(ctx, templates, now); err != nil {
 		return Outcome{}, err
 	}
+	before, err := activeProjects(ctx, tx.Q())
+	if err != nil {
+		return Outcome{}, err
+	}
 	var projectNames []string
 	for _, pr := range p.Projects {
 		if err := tx.UpsertProject(ctx, store.ProjectRow{
@@ -264,6 +268,13 @@ func (SyncConfig) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	}
 	if err := tx.RetireProjectsExcept(ctx, projectNames, now); err != nil {
 		return Outcome{}, err
+	}
+	// Sessions whose project came or went may now cover more or less of
+	// the ledger; they start over with a full snapshot.
+	if slices.Sort(projectNames); !slices.Equal(before, projectNames) {
+		if err := tx.InvalidateBaselines(ctx, now); err != nil {
+			return Outcome{}, err
+		}
 	}
 	counts := map[string]any{"hosts": len(p.Hosts), "repos": len(p.Repos), "templates": len(p.Templates), "projects": len(p.Projects)}
 	return Outcome{
