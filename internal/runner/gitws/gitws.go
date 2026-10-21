@@ -69,8 +69,9 @@ type Config struct {
 
 // Workspaces implements runner.Workspaces with git worktrees.
 type Workspaces struct {
-	cfg Config
-	git git
+	cfg    Config
+	git    git
+	layout layout
 
 	mu    sync.Mutex
 	locks map[string]chan struct{}
@@ -84,7 +85,59 @@ func New(cfg Config) *Workspaces {
 	if bin == "" {
 		bin = "git"
 	}
-	return &Workspaces{cfg: cfg, git: git{bin: bin, env: cfg.Env}, locks: map[string]chan struct{}{}}
+	w := &Workspaces{cfg: cfg, git: git{bin: bin, env: cfg.Env}, locks: map[string]chan struct{}{}}
+	w.layout = clones{w}
+	return w
+}
+
+// layout checks out a workspace's mounts and says where the worker
+// starts. Whatever the layout, the runner keeps its state for the
+// workspace in the workspace directory, home.
+type layout interface {
+	// add checks out mount m on the task branch and returns its state.
+	// Dir is set when the checkout is not home/m.Path.
+	add(ctx context.Context, as protocol.Assignment, m protocol.AssignedMount, home string) (mountState, error)
+	// root returns the directory the worker starts in.
+	root(home string, st state) string
+	// branch returns the branch the layout puts every mount on, or ""
+	// when the checkout names it.
+	branch(as protocol.Assignment) string
+}
+
+// clones is the runner's own layout: the workspace directory holds one
+// git worktree of the runner's bare clone per mount, and the worker starts
+// in the workspace directory.
+type clones struct{ w *Workspaces }
+
+func (clones) root(home string, _ state) string { return home }
+
+func (clones) branch(as protocol.Assignment) string { return as.Workspace.Branch }
+
+func (l clones) add(ctx context.Context, as protocol.Assignment, m protocol.AssignedMount, home string) (mountState, error) {
+	w := l.w
+	dir := filepath.Join(home, m.Path)
+	// New mounts start from the current remote (D36).
+	remote, err := w.ensureClone(ctx, m.Repo, m.RemoteURL, true)
+	if err != nil {
+		return mountState{}, err
+	}
+	if m.BaseCommit != "" && !w.hasCommit(ctx, m.Repo, m.BaseCommit) {
+		// Commits not reachable from a branch need fetching by hash.
+		_, _ = w.git.run(ctx, w.repoPath(m.Repo), "fetch", "--quiet", "origin", m.BaseCommit)
+	}
+	intent := BaseIntent{Branch: m.BaseBranch, Commit: m.BaseCommit, Candidates: m.BaseCandidates}
+	base, from, err := ResolveBase(intent, remote, func(sha string) bool { return w.hasCommit(ctx, m.Repo, sha) })
+	if err != nil {
+		return mountState{}, fmt.Errorf("mount %s: %w", m.Path, err)
+	}
+	if err := w.addWorktree(ctx, m.Repo, dir, as.Workspace.Branch, base); err != nil {
+		return mountState{}, err
+	}
+	head, err := w.git.run(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return mountState{}, err
+	}
+	return mountState{Repo: m.Repo, Base: base, From: from, Branch: as.Workspace.Branch, Head: head}, nil
 }
 
 // ErrWorkspaceMoved means a workspace is not as the artifact under
@@ -114,13 +167,14 @@ func (w *Workspaces) repoPath(repo string) string {
 	return filepath.Join(w.cfg.Home, "repos", repo+".git")
 }
 
-// root is the task's workspace. Acceptance runs there too (D41).
-func (w *Workspaces) root(as protocol.Assignment) string {
+// home is the task's workspace directory, where the runner keeps its
+// state for the workspace. Acceptance runs in the same workspace (D41).
+func (w *Workspaces) home(as protocol.Assignment) string {
 	return filepath.Join(w.cfg.Home, "workspaces", as.Workspace.Name)
 }
 
 // state is what the runner remembers about a workspace, kept in the
-// workspace root next to the mounts.
+// workspace directory.
 type state struct {
 	Mounts map[string]mountState `json:"mounts"`
 	// Prepared maps a profile's key to the hash of its inputs when it last
@@ -129,6 +183,9 @@ type state struct {
 }
 
 type mountState struct {
+	// Dir is where the mount is checked out when that is not under the
+	// workspace directory.
+	Dir    string `json:"dir,omitempty"`
 	Repo   string `json:"repo"`
 	Base   string `json:"base"`
 	From   string `json:"from"`
@@ -145,11 +202,19 @@ type mountState struct {
 	PrevTree string `json:"prev_tree,omitempty"`
 }
 
-func statePath(root string) string { return filepath.Join(root, ".tend", "state.json") }
+// dir returns where the mount at path is checked out.
+func (ms mountState) dir(home, path string) string {
+	if ms.Dir != "" {
+		return ms.Dir
+	}
+	return filepath.Join(home, path)
+}
 
-func loadState(root string) (state, error) {
+func statePath(home string) string { return filepath.Join(home, ".tend", "state.json") }
+
+func loadState(home string) (state, error) {
 	s := state{Mounts: map[string]mountState{}, Prepared: map[string]string{}}
-	b, err := os.ReadFile(statePath(root))
+	b, err := os.ReadFile(statePath(home))
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
 	}
@@ -162,19 +227,19 @@ func loadState(root string) (state, error) {
 	return s, nil
 }
 
-func saveState(root string, s state) error {
+func saveState(home string, s state) error {
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf("gitws: encode state: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(statePath(root)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(statePath(home)), 0o755); err != nil {
 		return fmt.Errorf("gitws: state dir: %w", err)
 	}
-	tmp := statePath(root) + ".tmp"
+	tmp := statePath(home) + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return fmt.Errorf("gitws: write state: %w", err)
 	}
-	return os.Rename(tmp, statePath(root))
+	return os.Rename(tmp, statePath(home))
 }
 
 // ensureClone makes sure the repository's bare clone exists, points at
@@ -270,34 +335,35 @@ func (w *Workspaces) hasCommit(ctx context.Context, repo, sha string) bool {
 
 // Prepare implements runner.Workspaces.
 func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {
-	root := w.root(as)
-	unlock, err := w.lock(ctx, "ws:"+root)
+	home := w.home(as)
+	unlock, err := w.lock(ctx, "ws:"+home)
 	if err != nil {
 		return runner.Prepared{}, err
 	}
 	defer unlock()
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(home, 0o755); err != nil {
 		return runner.Prepared{}, fmt.Errorf("gitws: workspace dir: %w", err)
 	}
-	st, err := loadState(root)
+	st, err := loadState(home)
 	if err != nil {
 		return runner.Prepared{}, err
 	}
 	if as.Role == protocol.RoleAccept {
-		err = w.layoutAcceptance(ctx, as, root, &st)
+		err = w.layoutAcceptance(ctx, as, home, &st)
 	} else {
-		err = w.layoutImplementation(ctx, as, root, &st)
+		err = w.layoutImplementation(ctx, as, home, &st)
 	}
 	if err != nil {
 		return runner.Prepared{}, err
 	}
+	root := w.layout.root(home, st)
 	if err := writeAgentsFile(root, as, st); err != nil {
 		return runner.Prepared{}, err
 	}
-	if err := w.runProfiles(ctx, as, root, &st); err != nil {
+	if err := w.runProfiles(ctx, as, home, root, &st); err != nil {
 		return runner.Prepared{}, err
 	}
-	if err := saveState(root, st); err != nil {
+	if err := saveState(home, st); err != nil {
 		return runner.Prepared{}, err
 	}
 	scratch := filepath.Join(w.cfg.Home, "scratch", as.Workspace.Name)
@@ -319,43 +385,24 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 	return p, nil
 }
 
-func (w *Workspaces) layoutImplementation(ctx context.Context, as protocol.Assignment, root string, st *state) error {
-	branch := as.Workspace.Branch
+func (w *Workspaces) layoutImplementation(ctx context.Context, as protocol.Assignment, home string, st *state) error {
 	for _, m := range as.Workspace.Mounts {
-		dir := filepath.Join(root, m.Path)
 		if ms, ok := st.Mounts[m.Path]; ok {
-			if ms.Repo != m.Repo || ms.Branch != branch {
+			if branch := w.layout.branch(as); ms.Repo != m.Repo || branch != "" && ms.Branch != branch {
 				return fmt.Errorf("gitws: mount %s holds %s on %s, not %s on %s", m.Path, ms.Repo, ms.Branch, m.Repo, branch)
 			}
-			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			if _, err := os.Stat(filepath.Join(ms.dir(home, m.Path), ".git")); err == nil {
 				continue
 			}
 		}
-		// New mounts start from the current remote (D36).
-		remote, err := w.ensureClone(ctx, m.Repo, m.RemoteURL, true)
+		ms, err := w.layout.add(ctx, as, m, home)
 		if err != nil {
 			return err
 		}
-		if m.BaseCommit != "" && !w.hasCommit(ctx, m.Repo, m.BaseCommit) {
-			// Commits not reachable from a branch need fetching by hash.
-			_, _ = w.git.run(ctx, w.repoPath(m.Repo), "fetch", "--quiet", "origin", m.BaseCommit)
-		}
-		intent := BaseIntent{Branch: m.BaseBranch, Commit: m.BaseCommit, Candidates: m.BaseCandidates}
-		base, from, err := ResolveBase(intent, remote, func(sha string) bool { return w.hasCommit(ctx, m.Repo, sha) })
-		if err != nil {
-			return fmt.Errorf("mount %s: %w", m.Path, err)
-		}
-		if err := w.addWorktree(ctx, m.Repo, dir, branch, base); err != nil {
-			return err
-		}
-		head, err := w.git.run(ctx, dir, "rev-parse", "HEAD")
-		if err != nil {
-			return err
-		}
-		st.Mounts[m.Path] = mountState{Repo: m.Repo, Base: base, From: from, Branch: branch, Head: head}
+		st.Mounts[m.Path] = ms
 		// Save each mount as it appears, so a later failure does not leave
 		// worktrees the next attempt cannot account for.
-		if err := saveState(root, *st); err != nil {
+		if err := saveState(home, *st); err != nil {
 			return err
 		}
 	}
@@ -397,16 +444,17 @@ func (w *Workspaces) addWorktree(ctx context.Context, repo, dir, branch, base st
 // artifact, and limits nothing the worker does. Uncommitted files are not
 // compared: prepare profiles regenerate files and an earlier acceptance
 // may leave build output, both of which D41 allows.
-func (w *Workspaces) layoutAcceptance(ctx context.Context, as protocol.Assignment, root string, st *state) error {
+func (w *Workspaces) layoutAcceptance(ctx context.Context, as protocol.Assignment, home string, st *state) error {
 	var artifact protocol.ArtifactPayload
 	if err := json.Unmarshal(as.Artifact, &artifact); err != nil {
 		return fmt.Errorf("gitws: decode artifact: %w", err)
 	}
 	for _, m := range artifact.Mounts {
-		dir := filepath.Join(root, m.Path)
-		if _, ok := st.Mounts[m.Path]; !ok {
+		ms, ok := st.Mounts[m.Path]
+		if !ok {
 			return fmt.Errorf("gitws: the workspace has no mount %s to review", m.Path)
 		}
+		dir := ms.dir(home, m.Path)
 		branch, _ := w.git.run(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 		head, err := w.git.run(ctx, dir, "rev-parse", "HEAD")
 		if err != nil {
@@ -429,9 +477,10 @@ type mountNow struct {
 }
 
 // read looks at a mount without changing it. The working tree is staged
-// into a scratch copy of the index, so the worktree's own index stays as
-// the worker left it; ignored files stay out, as git add leaves them.
-func (w *Workspaces) read(ctx context.Context, root, dir string) (mountNow, error) {
+// into a scratch copy of the index, kept in the workspace directory home,
+// so the worktree's own index stays as the worker left it; ignored files
+// stay out, as git add leaves them.
+func (w *Workspaces) read(ctx context.Context, home, dir string) (mountNow, error) {
 	var now mountNow
 	if b, err := w.git.run(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
 		now.branch = b
@@ -448,11 +497,11 @@ func (w *Workspaces) read(ctx context.Context, root, dir string) (mountNow, erro
 	if !filepath.IsAbs(index) {
 		index = filepath.Join(dir, index)
 	}
-	if err := os.MkdirAll(filepath.Join(root, ".tend"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".tend"), 0o755); err != nil {
 		return now, fmt.Errorf("gitws: state dir: %w", err)
 	}
 	sum := sha256.Sum256([]byte(dir))
-	scratch := filepath.Join(root, ".tend", "index-"+hex.EncodeToString(sum[:8]))
+	scratch := filepath.Join(home, ".tend", "index-"+hex.EncodeToString(sum[:8]))
 	defer os.Remove(scratch)
 	g := w.git.with("GIT_INDEX_FILE=" + scratch)
 	// Starting from the worktree's index lets git reuse what it already
@@ -487,25 +536,25 @@ func (w *Workspaces) read(ctx context.Context, root, dir string) (mountNow, erro
 // changes HEAD does not, a snapshot commit of them kept under the run's
 // ref. Neither the branch, the index nor the files are changed.
 func (w *Workspaces) Collect(ctx context.Context, as protocol.Assignment) (protocol.ArtifactPayload, error) {
-	root := w.root(as)
-	unlock, err := w.lock(ctx, "ws:"+root)
+	home := w.home(as)
+	unlock, err := w.lock(ctx, "ws:"+home)
 	if err != nil {
 		return protocol.ArtifactPayload{}, err
 	}
 	defer unlock()
-	st, err := loadState(root)
+	st, err := loadState(home)
 	if err != nil {
 		return protocol.ArtifactPayload{}, err
 	}
 	var out protocol.ArtifactPayload
 	changed := false
 	for _, m := range as.Workspace.Mounts {
-		dir := filepath.Join(root, m.Path)
 		ms, ok := st.Mounts[m.Path]
 		if !ok {
 			return protocol.ArtifactPayload{}, fmt.Errorf("gitws: the workspace has no mount %s", m.Path)
 		}
-		now, err := w.read(ctx, root, dir)
+		dir := ms.dir(home, m.Path)
+		now, err := w.read(ctx, home, dir)
 		if err != nil {
 			return protocol.ArtifactPayload{}, err
 		}
@@ -543,7 +592,7 @@ func (w *Workspaces) Collect(ctx context.Context, as protocol.Assignment) (proto
 		}
 		ms.PrevHead, ms.PrevTree, ms.Head, ms.Tree, ms.Run = prevHead, prevTree, now.head, now.tree, as.RunID
 		st.Mounts[m.Path] = ms
-		if err := saveState(root, st); err != nil {
+		if err := saveState(home, st); err != nil {
 			return protocol.ArtifactPayload{}, err
 		}
 		changed = changed || mountChanged

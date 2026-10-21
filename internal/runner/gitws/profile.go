@@ -19,9 +19,9 @@ import (
 )
 
 // runProfiles runs the prepare profiles of each mount and then of the
-// workspace (D35). A profile whose inputs are unchanged since it last
-// succeeded in this workspace is skipped.
-func (w *Workspaces) runProfiles(ctx context.Context, as protocol.Assignment, root string, st *state) error {
+// workspace, in root (D35). A profile whose inputs are unchanged since it
+// last succeeded in this workspace is skipped.
+func (w *Workspaces) runProfiles(ctx context.Context, as protocol.Assignment, home, root string, st *state) error {
 	type step struct {
 		key, dir string
 		p        Profile
@@ -35,7 +35,7 @@ func (w *Workspaces) runProfiles(ctx context.Context, as protocol.Assignment, ro
 		if !ok {
 			return fmt.Errorf("workspace_prepare_failed: repo %s has no profile %q on this runner", m.Repo, m.Profile)
 		}
-		steps = append(steps, step{"mount:" + m.Path + ":" + m.Profile, filepath.Join(root, m.Path), p})
+		steps = append(steps, step{"mount:" + m.Path + ":" + m.Profile, st.Mounts[m.Path].dir(home, m.Path), p})
 	}
 	if name := as.Workspace.Profile; name != "" {
 		p, ok := w.cfg.Profiles[name]
