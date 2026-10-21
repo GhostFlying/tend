@@ -59,6 +59,9 @@ func TestSkipRules(t *testing.T) {
 		{"implement on own host", nil, func(c *Candidate) { c.WorkspaceHost = "linux-1" }, implement, ""},
 		{"abandoned host", nil, func(c *Candidate) { c.AbandonedHosts = []string{"mac-1", "linux-1"} }, implement, "task gave up its workspace on this host"},
 		{"other host abandoned", nil, func(c *Candidate) { c.AbandonedHosts = []string{"mac-1"} }, implement, ""},
+		{"several mounts, single-mount worker", nil, func(c *Candidate) { c.Mounts = 2 }, implement, MultiMountUnsupported},
+		{"several mounts, multi-mount worker", func(h *Host) { h.Worker.MultiMount = true }, func(c *Candidate) { c.Mounts = 2 }, accept, ""},
+		{"one mount, single-mount worker", nil, func(c *Candidate) { c.Mounts = 1 }, implement, ""},
 	}
 	for _, tc := range cases {
 		h, c := linux, tc.base()

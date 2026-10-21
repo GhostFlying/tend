@@ -89,6 +89,9 @@ type Config struct {
 	Version    string
 	HTTPClient *http.Client
 	Journal    *journal.Journal
+	// Worker is the kind of Workers, reported to tend (D64). Default
+	// appserver.
+	Worker     protocol.WorkerKind
 	Workers    harness.Workers
 	Workspaces Workspaces
 	Now        func() time.Time
@@ -140,6 +143,9 @@ type Runner struct {
 
 // New returns a Runner.
 func New(cfg Config) *Runner {
+	if cfg.Worker == "" {
+		cfg.Worker = protocol.WorkerAppServer
+	}
 	if cfg.RetryDelay <= 0 {
 		cfg.RetryDelay = 2 * time.Second
 	}
@@ -289,7 +295,7 @@ func (r *Runner) resendClaims(ctx context.Context) error {
 // claims long-polls for work until ctx ends.
 func (r *Runner) claims(ctx context.Context) {
 	for ctx.Err() == nil {
-		env, err := r.newEnvelope(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: r.cfg.HostID}, map[string]any{})
+		env, err := r.newEnvelope(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.ClaimPayload{Worker: r.cfg.Worker})
 		if err == nil {
 			err = r.cfg.Journal.PutRequest(ctx, journal.Request{Envelope: *env})
 		}
@@ -359,7 +365,7 @@ func (r *Runner) hello(ctx context.Context) error {
 		held = append(held, protocol.HeldRun{RunID: run.Assignment.RunID, LeaseID: run.Assignment.LeaseID, Observed: r.observed(run)})
 		byID[run.Assignment.RunID] = run
 	}
-	env, err := r.newEnvelope(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HelloPayload{Held: held, Version: r.cfg.Version})
+	env, err := r.newEnvelope(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HelloPayload{Held: held, Version: r.cfg.Version, Worker: r.cfg.Worker})
 	if err != nil {
 		return err
 	}

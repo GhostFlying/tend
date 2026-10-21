@@ -22,6 +22,8 @@ type Host struct {
 	Slots  int64
 	// Busy counts the host's runs that have not finished.
 	Busy int64
+	// Worker is what the host's worker can do (D64).
+	Worker protocol.WorkerCapabilities
 }
 
 // Candidate is a pending action together with the facts the rules need.
@@ -52,6 +54,8 @@ type Candidate struct {
 
 	Requirements domain.Requirements
 	Repos        []string
+	// Mounts counts the mounts of the task's workspace.
+	Mounts int
 	// WorkspaceHost is the host holding the task's workspace, or empty
 	// before the workspace exists.
 	WorkspaceHost string
@@ -63,6 +67,10 @@ type Candidate struct {
 	// AbandonedHosts are the hosts the task gave up a workspace on (D62).
 	AbandonedHosts []string
 }
+
+// MultiMountUnsupported is why a host whose worker lays out only
+// single-repository workspaces passes over a task with several mounts.
+const MultiMountUnsupported = "host's worker does not support workspaces with more than one mount"
 
 // Skip explains why a candidate is not eligible on a host. The empty string
 // means it is eligible.
@@ -83,6 +91,8 @@ func Skip(h Host, c Candidate) string {
 		return "host lacks a required label"
 	case !containsAll(h.Repos, c.Repos):
 		return "host does not serve every repository"
+	case c.Mounts > 1 && !h.Worker.MultiMount:
+		return MultiMountUnsupported
 	case c.WorkspaceHost != "" && c.WorkspaceHost != h.ID:
 		// The workspace, and the artifact commits in its repositories,
 		// exist only on that host.

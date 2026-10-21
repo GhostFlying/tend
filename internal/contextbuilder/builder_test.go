@@ -460,3 +460,25 @@ func TestUnratedTasksAskForARating(t *testing.T) {
 		t.Errorf("unrated section of the delta = %q\n%s", got, delta.Text)
 	}
 }
+
+func TestFullSnapshotStatesWorkerLimits(t *testing.T) {
+	e := newEnv(t)
+	e.task("fix windows")
+	full := e.prepare(0)
+	if full == nil || strings.Contains(full.Text, "## Limits") {
+		t.Fatalf("limits without any host:\n%v", full)
+	}
+	if err := e.b.Confirm(context.Background(), full.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, nil, app.ConfigPayload{
+		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
+		Hosts: []app.HostConfig{{HostID: "h1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 1,
+			TokenHash: strings.Repeat("ab", 32), Nodes: []string{"tag:tend-runner"}, Worker: protocol.WorkerOrca}},
+	}, app.SyncConfig{})
+	// The new limit starts the session over.
+	full = e.prepare(0)
+	if full == nil || !full.Full || !strings.Contains(full.Text, "## Limits\n- No active host's worker supports a workspace with more than one mount") {
+		t.Fatalf("packet after the limit came = %v", full)
+	}
+}

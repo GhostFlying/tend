@@ -219,3 +219,35 @@ const (
 func (v Verdict) Valid() bool {
 	return slices.Contains([]Verdict{VerdictPassed, VerdictChangesRequired, VerdictBlocked, VerdictInconclusive}, v)
 }
+
+// WorkerKind is the harness a host runs its workers with (D64). The
+// server's configuration names it for every host, and the runner reports
+// the one it runs.
+type WorkerKind string
+
+// Worker kinds.
+const (
+	// WorkerAppServer drives traex through its app-server in workspaces
+	// the runner lays out itself (D38, D41).
+	WorkerAppServer WorkerKind = "appserver"
+	// WorkerOrca runs agent TUIs in orca worktrees (D63).
+	WorkerOrca WorkerKind = "orca"
+)
+
+// WorkerKinds lists the known worker kinds.
+var WorkerKinds = []WorkerKind{WorkerAppServer, WorkerOrca}
+
+// Valid reports whether k is a known worker kind.
+func (k WorkerKind) Valid() bool { return slices.Contains(WorkerKinds, k) }
+
+// WorkerCapabilities are what a worker kind can do that tend's own rules
+// depend on (D63, D64).
+type WorkerCapabilities struct {
+	// MultiMount means a workspace may hold more than one mount.
+	MultiMount bool
+}
+
+// Capabilities returns what the worker kind can do.
+func (k WorkerKind) Capabilities() WorkerCapabilities {
+	return WorkerCapabilities{MultiMount: k == WorkerAppServer}
+}

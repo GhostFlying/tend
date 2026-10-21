@@ -47,6 +47,9 @@ type HostConfig struct {
 	TokenHash string `json:"token_hash"`
 	// Nodes lists the tailnet nodes allowed to act as this host.
 	Nodes []string `json:"nodes"`
+	// Worker is the harness the host runs its workers with (D64).
+	// Default appserver.
+	Worker protocol.WorkerKind `json:"worker,omitempty"`
 }
 
 // RepoConfig registers a repository.
@@ -111,7 +114,10 @@ func (p *ConfigPayload) validate() error {
 		active[r.Repo] = !r.Retired
 	}
 	hosts := map[string]bool{}
-	for _, h := range p.Hosts {
+	for i, h := range p.Hosts {
+		if h.Worker == "" {
+			p.Hosts[i].Worker = protocol.WorkerAppServer
+		}
 		switch {
 		case !domain.NamePattern.MatchString(h.HostID):
 			return invalid("host id %q is malformed", h.HostID)
@@ -127,6 +133,8 @@ func (p *ConfigPayload) validate() error {
 			return invalid("token_hash of host %q must be a lowercase hex SHA-256", h.HostID)
 		case len(h.Nodes) == 0 || slices.Contains(h.Nodes, ""):
 			return invalid("host %q needs at least one tailnet node", h.HostID)
+		case h.Worker != "" && !h.Worker.Valid():
+			return invalid("host %q has unknown worker %q", h.HostID, h.Worker)
 		}
 		for _, l := range h.Labels {
 			if !domain.NamePattern.MatchString(l) {
@@ -230,10 +238,15 @@ func (SyncConfig) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := tx.RetireReposExcept(ctx, repoNames, now); err != nil {
 		return Outcome{}, err
 	}
+	// What the hosts' workers support shapes the context sessions hold.
+	limitedBefore, err := SingleMountOnly(ctx, tx.Q())
+	if err != nil {
+		return Outcome{}, err
+	}
 	for _, h := range p.Hosts {
 		if err := tx.UpsertHost(ctx, store.HostRow{
 			HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots,
-			TokenHash: h.TokenHash, Nodes: h.Nodes,
+			TokenHash: h.TokenHash, Nodes: h.Nodes, Worker: h.Worker,
 		}, now); err != nil {
 			return Outcome{}, err
 		}
@@ -269,9 +282,14 @@ func (SyncConfig) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := tx.RetireProjectsExcept(ctx, projectNames, now); err != nil {
 		return Outcome{}, err
 	}
+	limited, err := SingleMountOnly(ctx, tx.Q())
+	if err != nil {
+		return Outcome{}, err
+	}
 	// Sessions whose project came or went may now cover more or less of
-	// the ledger; they start over with a full snapshot.
-	if slices.Sort(projectNames); !slices.Equal(before, projectNames) {
+	// the ledger, and a limit on workspaces may have come or gone (D64);
+	// they start over with a full snapshot.
+	if slices.Sort(projectNames); !slices.Equal(before, projectNames) || limited != limitedBefore {
 		if err := tx.InvalidateBaselines(ctx, now); err != nil {
 			return Outcome{}, err
 		}

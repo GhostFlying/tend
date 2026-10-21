@@ -209,7 +209,8 @@ func TestReadTools(t *testing.T) {
 	if a := e.call("tasks_read", taskArgs{TaskID: "task_missing"}, ""); a.OK || a.Error.Code != protocol.CodeNotFound {
 		t.Errorf("missing task = %+v", a)
 	}
-	if a := e.call("repos_list", noArgs{}, ""); !a.OK || !strings.Contains(string(a.Result), `"hosts":["linux-1"]`) || !strings.Contains(string(a.Result), "tend-only") {
+	if a := e.call("repos_list", noArgs{}, ""); !a.OK || !strings.Contains(string(a.Result), `"hosts":["linux-1"]`) || !strings.Contains(string(a.Result), "tend-only") ||
+		!strings.Contains(string(a.Result), `"worker":"appserver"`) || strings.Contains(string(a.Result), "single_mount") {
 		t.Errorf("repos_list = %s", a.Result)
 	}
 	var r struct {

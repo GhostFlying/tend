@@ -238,7 +238,7 @@ func Snapshot(ctx context.Context, q store.Querier, queue []protocol.QueueEntry,
 		if err != nil {
 			return v, err
 		}
-		v.Hosts = append(v.Hosts, protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, OpenRuns: n})
+		v.Hosts = append(v.Hosts, protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, Worker: h.Worker, OpenRuns: n})
 	}
 	if v.Tasks == nil {
 		v.Tasks = []protocol.TaskSummary{}

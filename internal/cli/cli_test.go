@@ -498,8 +498,10 @@ func TestStatusGroupsByProject(t *testing.T) {
 		Queue: []protocol.QueueEntry{
 			{Place: 1, ActionID: "act_c", TaskID: "task_c", Title: "hotfix", Project: "web", Kind: protocol.ActionImplement, Rating: protocol.RatingP0, WaitedMillis: 30_000, Score: 2},
 			{Place: 2, ActionID: "act_a", TaskID: "task_a", Title: "fix login", Project: "app", Kind: protocol.ActionImplement, Rating: protocol.RatingP1, WaitedMillis: 7_500_000, Score: 6.21},
-			{Place: 3, ActionID: "act_b", TaskID: "task_b", Title: "tidy docs", Project: "web", Kind: protocol.ActionAccept, WaitedMillis: 60_000, Score: 2},
+			{Place: 3, ActionID: "act_b", TaskID: "task_b", Title: "tidy docs", Project: "web", Kind: protocol.ActionAccept, WaitedMillis: 60_000, Score: 2,
+				Unplaceable: "host's worker does not support workspaces with more than one mount"},
 		},
+		Hosts: []protocol.HostView{{HostID: "box", OS: "linux", Arch: "amd64", Slots: 2, Worker: protocol.WorkerOrca, OpenRuns: 1}},
 	}
 	f.on("GET /api/v1/snapshot", func(w http.ResponseWriter, r *http.Request, _ []byte) {
 		s := all
@@ -521,6 +523,8 @@ func TestStatusGroupsByProject(t *testing.T) {
 		"#1 task_c hotfix implement p0 waited <1m first", "#2 task_a fix login implement p1 waited 2h05m score 6.2",
 		"#3 task_b tidy docs accept unrated waited 1m score 2.0", "dec_1 v1 about task_b",
 		"(3 more unfinished tasks; see tend status --project app)",
+		"no host can take it: host's worker does not support workspaces with more than one mount",
+		"box (linux/amd64, orca): 1 of 2 slots busy",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status lacks %q:\n%s", want, out)

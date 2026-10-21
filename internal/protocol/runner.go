@@ -32,6 +32,17 @@ type HelloPayload struct {
 	Held []HeldRun `json:"held"`
 	// Version is the runner build, for diagnostics.
 	Version string `json:"version,omitempty"`
+	// Worker is the harness the runner runs; it must be the one the
+	// server's configuration names for the host (D64). Runners from
+	// before D64 leave it empty and run the app-server.
+	Worker WorkerKind `json:"worker,omitempty"`
+}
+
+// ClaimPayload asks for the next run. Worker is as in HelloPayload, so a
+// host whose configured worker changed while its runner kept running
+// does not take work it would run with the wrong harness.
+type ClaimPayload struct {
+	Worker WorkerKind `json:"worker,omitempty"`
 }
 
 // Reconciliation verdicts for held runs.

@@ -56,6 +56,9 @@ type Snapshot struct {
 	// Unrated lists the unfinished tasks no one has rated (D60): in a full
 	// snapshot all of them, in a delta those others just created.
 	Unrated []string
+	// Limits are, in a full snapshot, what tend currently refuses because
+	// no host's worker supports it (D64).
+	Limits []string
 }
 
 func (s Snapshot) empty() bool {
@@ -110,6 +113,7 @@ func Render(s Snapshot, budget int) string {
 	var sections []*section
 	if s.Full {
 		sections = []*section{
+			{title: "Limits", lines: s.Limits, protected: true},
 			{title: "Decisions", lines: s.Decisions, priority: 6, omitted: "(%d more decisions; see tasks_read)"},
 			{title: "Needs attention", lines: s.Attention, priority: 5, omitted: "(%d more tasks need attention; see tasks_list)"},
 			{title: "Recent conversation", lines: s.Focus, priority: 4, omitted: "(%d earlier messages omitted)"},

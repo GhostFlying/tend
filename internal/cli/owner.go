@@ -171,6 +171,9 @@ func (o owner) status(ctx context.Context, project string) error {
 				score = "first"
 			}
 			fmt.Fprintf(w, "    #%d\t%s\t%s\t%s\t%s\twaited %s\t%s\n", e.Place, e.TaskID, e.Title, e.Kind, e.Rating.Label(), waited(e.WaitedMillis), score)
+			if e.Unplaceable != "" {
+				fmt.Fprintf(w, "    \tno host can take it: %s\n", e.Unplaceable)
+			}
 		}
 		w.Flush()
 	}
@@ -183,7 +186,11 @@ func (o owner) status(ctx context.Context, project string) error {
 	if len(s.Hosts) > 0 {
 		fmt.Fprintln(out, "\nHosts:")
 		for _, h := range s.Hosts {
-			fmt.Fprintf(out, "  %s (%s/%s): %d of %d slots busy\n", h.HostID, h.OS, h.Arch, h.OpenRuns, h.Slots)
+			worker := ""
+			if h.Worker != "" {
+				worker = ", " + string(h.Worker)
+			}
+			fmt.Fprintf(out, "  %s (%s/%s%s): %d of %d slots busy\n", h.HostID, h.OS, h.Arch, worker, h.OpenRuns, h.Slots)
 		}
 	}
 	return nil

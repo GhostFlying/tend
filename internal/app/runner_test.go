@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -20,9 +21,26 @@ func runner(host string) protocol.Principal {
 // if any, together with the envelope for replays.
 func (h *harness) claim(host string) (protocol.Assignment, bool, *protocol.Envelope) {
 	h.t.Helper()
-	env := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: host}, map[string]any{}, nil)
+	env := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: host}, protocol.ClaimPayload{Worker: h.worker(host)}, nil)
 	as, ok := h.claimWith(host, env)
 	return as, ok, env
+}
+
+// worker returns the worker configured for host, which its runner runs.
+func (h *harness) worker(host string) protocol.WorkerKind {
+	h.t.Helper()
+	var w protocol.WorkerKind
+	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
+		hr, err := store.GetHost(context.Background(), tx.Q(), host)
+		w = hr.Worker
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	}); err != nil {
+		h.t.Fatal(err)
+	}
+	return w
 }
 
 func (h *harness) claimWith(host string, env *protocol.Envelope) (protocol.Assignment, bool) {
@@ -45,7 +63,7 @@ func (h *harness) claimWith(host string, env *protocol.Envelope) (protocol.Assig
 
 func (h *harness) hello(host string, held ...protocol.HeldRun) protocol.HelloResult {
 	h.t.Helper()
-	op := h.exec(runner(host), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: host}, protocol.HelloPayload{Held: held}, nil), Hello{})
+	op := h.exec(runner(host), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: host}, protocol.HelloPayload{Held: held, Worker: h.worker(host)}, nil), Hello{})
 	if op.Status != protocol.OpSucceeded {
 		h.t.Fatalf("hello: %+v", op)
 	}
