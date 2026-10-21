@@ -12,6 +12,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -49,7 +53,31 @@ type Env struct {
 	Getwd  func() (string, error)
 }
 
-func (e *Env) addonOff() bool { return e.Getenv(AddonEnv) == "off" }
+// addonOff reports whether the add-on must do nothing: in a worker, told
+// so by AddonEnv or by the marker in its worktree's git directory.
+func (e *Env) addonOff(ctx context.Context) bool {
+	return e.Getenv(AddonEnv) == "off" || e.inWorker(ctx)
+}
+
+// inWorker reports whether the working directory is a worktree a TUI
+// worker runs in (D66).
+func (e *Env) inWorker(ctx context.Context) bool {
+	if e.Getwd == nil || e.Output == nil {
+		return false
+	}
+	dir, err := e.Getwd()
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	out, err := e.Output(ctx, "git", "-C", dir, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(strings.TrimSpace(string(out)), protocol.WorkerMarker))
+	return err == nil
+}
 
 // Exit codes. The hook command always exits 0 (C5): any other code may
 // block the user's input.

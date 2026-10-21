@@ -13,6 +13,12 @@ import (
 // MCP and hook configuration, and must not act as the owner's agent.
 const AddonEnv = "TEND_ADDON"
 
+// WorkerMarker is the file tend-runner keeps in the git directory of a
+// worktree its TUI worker runs in (D66). An agent there may have been
+// started by another program and cannot be given AddonEnv, so the add-on
+// treats the marker the same way.
+const WorkerMarker = "tend-worker.json"
+
 // AgentKind is a supported agent.
 type AgentKind string
 

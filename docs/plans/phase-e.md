@@ -65,14 +65,15 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
 
 ## 4. worker 的 MCP 桥（E4）
 
-- runner 为每个 run 在自己的 home 下开一个 unix socket（0600），由一个随机 token 保护；harness 的 `ToolHandler`（现有的 `submit_verdict` 等）在 socket 上应答。
-- `tend-runner worker-mcp --socket … --token-file …` 是 stdio MCP server，把 `tools/list`、`tools/call` 转给 socket。它在 runner 的二进制里，不依赖服务端的任何包。
-- **写入 agent 的项目级配置**：在 Prepare 之后、启动 agent 之前写入工作区：
-  - Codex：`.codex/config.toml` 的 `mcp_servers.tend`；
-  - traex：它的项目级配置文件（实现时核对路径）。
-  - token 放在这个 worktree 自己的 git 目录下（`git rev-parse --git-dir`，0600），配置里只写路径。orca 的 worktree 是 linked worktree，工作区里的 `.git` 是指向文件，不能直接当目录用。
-- **排除**：这些文件写进 `git rev-parse --git-path info/exclude` 给出的文件（linked worktree 共用主仓库的这个文件），worker 不会把它们提交；验收的位置核对和快照也忽略它们。
-- worker 继续带 `TEND_ADDON=off`（D45），主 Agent 的 tend MCP 和 hook 不会在 worker 里生效；worker 模式的 MCP 是另一个 server 名。
+- **桥**（`internal/harness/bridge`）：worker 的工具（现有的 `submit_verdict`，由 harness 的 `ToolHandler` 在进程内应答）在 runner 本机的 unix socket（0600）上提供，每个请求带 run 的 token。`tend-runner worker-mcp --state … --run …` 是 stdio MCP server（initialize、ping、tools/list、tools/call），每个请求都重新读状态文件里的 socket 和 token 再转给 socket，runner 重启换了 socket 也能接上。状态文件记着所属的 run，和启动参数里的 run 不同（同一 worktree 已换成下一个 run）或文件已删除时只回错误，上一个 run 留下的 agent 碰不到后来的 run。它在 runner 的二进制里，不依赖服务端的任何包。token 由调用方注入的 ID 生成器产生（约束 5）。
+- **写入 agent 的项目级配置**（TUI worker 启动 agent 前，E5 调用）：
+  - Codex：worktree 的 `.codex/config.toml`；traex（orca 里的 `trae`，即 `traecli`）：`.trae/traecli.toml`。两者是同一格式，写一个 `[mcp_servers.tend_worker]`，command 是 runner 自己的可执行文件，`default_tools_approval_mode = "approve"`（否则无人值守时工具调用被拒）。orca 启动 agent 时不能传参数，D38 里 runner 要覆盖的无人值守设置（`approval_policy = "never"`、`sandbox_mode = "danger-full-access"`，D39）也写在这个文件里。
+  - 文件已存在且不是 tend 写的（仓库自己的或 owner 的）时失败并说明，不合并、不覆盖。
+  - run 的 token 和 socket 写在这个 worktree 自己的 git 目录下（`git rev-parse --absolute-git-dir`，0600 的 `tend-worker.json`），配置里只写路径。
+  - **排除**：配置文件写进 `git rev-parse --git-path info/exclude`（锚定路径，如 `/.codex/config.toml`），worker 的 `git add -A` 不会带上它们，收集的快照也不含它们。linked worktree 与主仓库共用这个排除文件，因此 owner 主 checkout 里同名的未跟踪文件也会被 `git status` 忽略，部署文档写明。
+  - run 结束时删除配置文件和 `tend-worker.json`；排除行保留（幂等）。
+  - Codex 和 traecli 只对受信任的项目加载项目级配置，worktree 的信任跟随仓库根目录：owner 需要事先在 agent 里信任这个仓库（部署前提）。
+- **worker 不是主 Agent**（D45）：orca 启动的 agent 继承 orca 的环境，runner 无法设置 `TEND_ADDON=off`。tend CLI 的 hook 和 MCP 另外检查当前目录所在 worktree 的 git 目录里有没有 `tend-worker.json`，有就和 `TEND_ADDON=off` 一样什么都不做。
 
 ## 5. orca 的 TUI worker（E5）
 

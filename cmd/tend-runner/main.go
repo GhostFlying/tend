@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
+	"github.com/GhostFlying/tend/internal/harness/bridge"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -72,6 +73,9 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == workerMCP {
+		os.Exit(runWorkerMCP(os.Args[2:]))
+	}
 	path := flag.String("config", "", "configuration file (HuJSON)")
 	version := flag.String("version", "dev", "build version reported to tend")
 	flag.Parse()
@@ -82,6 +86,29 @@ func main() {
 		log.Error("tend-runner stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+// workerMCP is the subcommand a TUI worker's agent starts as its MCP
+// server (D66).
+const workerMCP = "worker-mcp"
+
+// runWorkerMCP serves the run's tools to the agent on stdio:
+// `tend-runner worker-mcp --state <file> --run <run>`.
+func runWorkerMCP(args []string) int {
+	fs := flag.NewFlagSet(workerMCP, flag.ContinueOnError)
+	state := fs.String("state", "", "the run's state file, written by tend-runner")
+	run := fs.String("run", "", "the run the agent was started for")
+	if err := fs.Parse(args); err != nil || *state == "" || *run == "" || fs.NArg() > 0 {
+		fmt.Fprintln(os.Stderr, "usage: tend-runner worker-mcp --state <file> --run <run>")
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := bridge.ServeMCP(ctx, *state, *run, os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "tend-runner worker-mcp: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func run(ctx context.Context, path, version string, log *slog.Logger) error {
