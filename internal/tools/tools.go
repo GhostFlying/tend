@@ -70,7 +70,7 @@ var tools = []tool{
 	{"tasks_list", "List tasks with their state. Unfinished tasks come first.", (*Service).tasksList},
 	{"tasks_read", "Read one task in full: spec, actions, runs, artifacts, verdicts and decisions.", (*Service).tasksRead},
 	{"tasks_create", "Create a task from an explicit request of the owner.", (*Service).tasksCreate},
-	{"tasks_update_intent", "Change a task's spec or priority as the owner asked.", (*Service).tasksUpdateIntent},
+	{"tasks_update_intent", "Change a task's spec, rating or project as the owner asked.", (*Service).tasksUpdateIntent},
 	{"tasks_set_control", "Pause a task, or hand a paused task back to tend, as the owner asked. A paused task starts nothing new and its running work stops.", (*Service).tasksSetControl},
 	{"tasks_cancel", "Cancel a task as the owner asked. Its running work stops and it never runs again.", (*Service).tasksCancel},
 	{"actions_create", "Request another implementation or acceptance after the owner decided to retry.", (*Service).actionsCreate},
@@ -217,7 +217,7 @@ func decode(raw json.RawMessage, v any) error {
 
 // execute runs a write under the call's request ID, with the model's
 // reason for it.
-func (s *Service) execute(ctx context.Context, c Call, op string, target protocol.Target, revision *int64, reason string, payload any, cmd app.Command) (any, error) {
+func (s *Service) execute(ctx context.Context, c Call, op string, target protocol.Target, revision *int64, reason string, payload any, cmd app.Command) (map[string]any, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("tools: encode payload: %w", err)
@@ -255,13 +255,13 @@ func requireMessage(c Call) error {
 }
 
 type createArgs struct {
-	Title         string      `json:"title"`
-	Spec          domain.Spec `json:"spec"`
-	Priority      int64       `json:"priority"`
-	Project       string      `json:"project"`
-	WorkspaceName string      `json:"workspace_name"`
-	CommitSeq     int64       `json:"commit_seq"`
-	Reason        string      `json:"reason"`
+	Title         string          `json:"title"`
+	Spec          domain.Spec     `json:"spec"`
+	Rating        protocol.Rating `json:"rating"`
+	Project       string          `json:"project"`
+	WorkspaceName string          `json:"workspace_name"`
+	CommitSeq     int64           `json:"commit_seq"`
+	Reason        string          `json:"reason"`
 }
 
 func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
@@ -275,20 +275,30 @@ func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
 	if c.Principal.Addon() && a.WorkspaceName == "" {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "workspace_name is required")
 	}
-	return s.execute(ctx, c, "tasks.create", protocol.Target{Type: "task"}, nil, a.Reason, map[string]any{
-		"title": a.Title, "spec": a.Spec, "priority": a.Priority, "project": a.Project, "workspace_name": a.WorkspaceName,
+	res, err := s.execute(ctx, c, "tasks.create", protocol.Target{Type: "task"}, nil, a.Reason, map[string]any{
+		"title": a.Title, "spec": a.Spec, "rating": a.Rating, "project": a.Project, "workspace_name": a.WorkspaceName,
 		"source_message_id": c.SourceMessageID, "commit_seq": a.CommitSeq,
 	}, app.CreateTask{})
+	if err == nil && a.Rating == protocol.RatingNone {
+		// The owner is present while a task is dispatched (D52), so this
+		// is the time to ask.
+		res["note"] = unratedNote
+	}
+	return res, err
 }
 
+// unratedNote asks the agent to have the owner rate an unrated task.
+const unratedNote = "The task is unrated and queues as p2. Ask the owner how it ranks: " +
+	"p0 urgent, ahead of everything; p1 high; p2 normal; p3 low. Then set it with tasks_update_intent."
+
 type updateArgs struct {
-	TaskID                  string       `json:"task_id"`
-	ExpectedControlRevision int64        `json:"expected_control_revision"`
-	Spec                    *domain.Spec `json:"spec"`
-	Priority                *int64       `json:"priority"`
-	Project                 *string      `json:"project"`
-	CommitSeq               int64        `json:"commit_seq"`
-	Reason                  string       `json:"reason"`
+	TaskID                  string           `json:"task_id"`
+	ExpectedControlRevision int64            `json:"expected_control_revision"`
+	Spec                    *domain.Spec     `json:"spec"`
+	Rating                  *protocol.Rating `json:"rating"`
+	Project                 *string          `json:"project"`
+	CommitSeq               int64            `json:"commit_seq"`
+	Reason                  string           `json:"reason"`
 }
 
 func (s *Service) tasksUpdateIntent(ctx context.Context, c Call) (any, error) {
@@ -303,8 +313,8 @@ func (s *Service) tasksUpdateIntent(ctx context.Context, c Call) (any, error) {
 	if a.Spec != nil {
 		payload["spec"] = a.Spec
 	}
-	if a.Priority != nil {
-		payload["priority"] = *a.Priority
+	if a.Rating != nil {
+		payload["rating"] = *a.Rating
 	}
 	if a.Project != nil {
 		payload["project"] = *a.Project

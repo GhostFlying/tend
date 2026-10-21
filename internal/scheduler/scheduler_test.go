@@ -74,14 +74,16 @@ func TestSkipRules(t *testing.T) {
 
 func TestPickOrder(t *testing.T) {
 	low, high, older, sameOlderID := implement(), implement(), implement(), implement()
-	low.ActionID, low.Priority, low.CreatedAt = "act_low", 0, 1
-	high.ActionID, high.Priority, high.CreatedAt = "act_high_new", 5, 300
-	older.ActionID, older.Priority, older.CreatedAt = "act_high_old", 5, 200
-	sameOlderID.ActionID, sameOlderID.Priority, sameOlderID.CreatedAt = "act_high_aaa", 5, 200
+	low, unrated := implement(), implement()
+	low.ActionID, low.Rating, low.CreatedAt = "act_low", protocol.RatingP3, 1
+	unrated.ActionID, unrated.CreatedAt = "act_unrated", 2
+	high.ActionID, high.Rating, high.CreatedAt = "act_high_new", protocol.RatingP1, 300
+	older.ActionID, older.Rating, older.CreatedAt = "act_high_old", protocol.RatingP1, 200
+	sameOlderID.ActionID, sameOlderID.Rating, sameOlderID.CreatedAt = "act_high_aaa", protocol.RatingP1, 200
 	blocked := implement()
-	blocked.ActionID, blocked.Priority, blocked.Block = "act_blocked", 9, protocol.BlockWaitingDecision
+	blocked.ActionID, blocked.Rating, blocked.Block = "act_blocked", protocol.RatingP0, protocol.BlockWaitingDecision
 
-	got, ok := Pick(linux, []Candidate{low, high, older, blocked, sameOlderID})
+	got, ok := Pick(linux, []Candidate{low, high, older, blocked, sameOlderID, unrated})
 	if !ok || got.ActionID != "act_high_aaa" {
 		t.Errorf("Pick = %s (ok=%v), want act_high_aaa", got.ActionID, ok)
 	}

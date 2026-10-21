@@ -48,9 +48,17 @@ type command struct {
 	run  func(Task) (Decision, error)
 }
 
+// otherRating returns a rating different from r.
+func otherRating(r protocol.Rating) protocol.Rating {
+	if r == protocol.RatingP1 {
+		return protocol.RatingP2
+	}
+	return protocol.RatingP1
+}
+
 var commands = []command{
 	{"update spec", func(t Task) (Decision, error) { return UpdateSpec(t, changedSpec(), execSpec, t.ControlRevision) }},
-	{"set priority", func(t Task) (Decision, error) { return SetPriority(t, t.Priority+1, t.ControlRevision) }},
+	{"rate", func(t Task) (Decision, error) { return SetRating(t, otherRating(t.Rating), t.ControlRevision) }},
 	{"pause", func(t Task) (Decision, error) { return SetControlMode(t, protocol.ControlPaused, t.ControlRevision) }},
 	{"cancel", func(t Task) (Decision, error) { return Cancel(t, t.ControlRevision) }},
 	{"run started", func(t Task) (Decision, error) { return RunStarted(t, implementRun(t)), nil }},
@@ -77,7 +85,7 @@ func TestLifecycleTable(t *testing.T) {
 	)
 	invalid := protocol.CodeInvalidTransition
 	table := map[protocol.TaskLifecycle][]any{
-		//         update  priority pause    cancel     run      artifact  passed     changes  blocked
+		//         update  rate     pause    cancel     run      artifact  passed     changes  blocked
 		draft:     {queued, draft, draft, cancelled, draft, draft, draft, draft, draft},
 		queued:    {queued, queued, queued, cancelled, running, queued, queued, queued, queued},
 		running:   {queued, running, running, cancelled, running, awaiting, running, running, running},
@@ -109,7 +117,7 @@ func TestLifecycleTable(t *testing.T) {
 }
 
 func TestNewTask(t *testing.T) {
-	d, err := NewTask("task_1", "p", execSpec, 2)
+	d, err := NewTask("task_1", "p", execSpec, protocol.RatingP2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +125,7 @@ func TestNewTask(t *testing.T) {
 		t.Errorf("executable spec: stage %q, actions %+v", d.Task.Lifecycle, d.Actions)
 	}
 
-	d, err = NewTask("task_2", "p", Spec{Goal: "think about it", Delivery: DeliveryCommit, Workspace: testWorkspace}, 0)
+	d, err = NewTask("task_2", "p", Spec{Goal: "think about it", Delivery: DeliveryCommit, Workspace: testWorkspace}, protocol.RatingNone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,8 +133,27 @@ func TestNewTask(t *testing.T) {
 		t.Errorf("non-executable spec: stage %q, actions %+v", d.Task.Lifecycle, d.Actions)
 	}
 
-	if _, err := NewTask("task_3", "p", Spec{Goal: "x", Acceptance: []string{"y"}, Delivery: "release"}, 0); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+	if _, err := NewTask("task_3", "p", Spec{Goal: "x", Acceptance: []string{"y"}, Delivery: "release"}, protocol.RatingNone); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
 		t.Errorf("unsupported delivery: err = %v", err)
+	}
+}
+
+func TestRatings(t *testing.T) {
+	if _, err := NewTask("task_1", "p", execSpec, "high"); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+		t.Errorf("unknown rating: err = %v", err)
+	}
+	task := taskIn(protocol.TaskQueued)
+	for _, r := range []protocol.Rating{protocol.RatingNone, "p4"} {
+		if _, err := SetRating(task, r, task.ControlRevision); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+			t.Errorf("SetRating(%q): err = %v, want invalid_request", r, err)
+		}
+	}
+	d, err := SetRating(task, protocol.RatingP0, task.ControlRevision)
+	if err != nil || d.Task.Rating != protocol.RatingP0 || d.Task.ControlRevision != task.ControlRevision+1 || len(d.Events) != 1 {
+		t.Fatalf("SetRating(p0) = %+v, %v", d, err)
+	}
+	if again, err := SetRating(d.Task, protocol.RatingP0, d.Task.ControlRevision); err != nil || len(again.Events) != 0 || again.Task.ControlRevision != d.Task.ControlRevision {
+		t.Errorf("same rating again = %+v, %v; want a no-op", again, err)
 	}
 }
 
@@ -135,7 +162,7 @@ func TestStaleRevisionRejected(t *testing.T) {
 	stale := task.ControlRevision - 1
 	for name, run := range map[string]func() error{
 		"update spec": func() error { _, err := UpdateSpec(task, changedSpec(), execSpec, stale); return err },
-		"priority":    func() error { _, err := SetPriority(task, 9, stale); return err },
+		"rating":      func() error { _, err := SetRating(task, protocol.RatingP0, stale); return err },
 		"control":     func() error { _, err := SetControlMode(task, protocol.ControlHumanControl, stale); return err },
 		"cancel":      func() error { _, err := Cancel(task, stale); return err },
 	} {
@@ -275,7 +302,7 @@ func TestInvariantsUnderRandomCommands(t *testing.T) {
 		// A small budget lets the walk exhaust it within one sequence.
 		spec := execSpec
 		spec.MaxImplementAttempts = 2
-		d, err := NewTask("task_r", "p", spec, 0)
+		d, err := NewTask("task_r", "p", spec, protocol.RatingNone)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -316,7 +343,7 @@ func TestInvariantsUnderRandomCommands(t *testing.T) {
 					spec = s
 				}
 			case 1:
-				next, err = SetPriority(task, int64(rng.IntN(5)), task.ControlRevision)
+				next, err = SetRating(task, []protocol.Rating{protocol.RatingP0, protocol.RatingP1, protocol.RatingP2, protocol.RatingP3}[rng.IntN(4)], task.ControlRevision)
 			case 2:
 				r := implementRun(task)
 				r.SpecVersion, r.Generation = fuzz(r.SpecVersion), fuzz(r.Generation)

@@ -482,6 +482,28 @@ func TestPauseUsesTheRevisionItRead(t *testing.T) {
 	}
 }
 
+func TestRateSendsTheRating(t *testing.T) {
+	f := newFakeServer(t)
+	f.answer("GET /api/v1/tasks/task_1", protocol.TaskDetail{TaskSummary: protocol.TaskSummary{TaskID: "task_1", ControlRevision: 4}})
+	f.answer("POST /api/v1/ops", protocol.APIResponse{Operation: &protocol.Operation{RequestID: "req_1", Status: protocol.OpSucceeded}})
+	te := newTestEnv(t, f.srv.URL)
+	if code := te.main("rate", "task_1", "high"); code != exitUsage {
+		t.Errorf("rate high = %d, want %d", code, exitUsage)
+	}
+	if code := te.main("rate", "task_1", "p0"); code != exitOK {
+		t.Fatalf("rate p0 = %d: %s", code, te.errOut)
+	}
+	var env protocol.Envelope
+	var payload struct {
+		Rating protocol.Rating `json:"rating"`
+	}
+	ops := f.seen("POST /api/v1/ops")
+	if len(ops) != 1 || json.Unmarshal(ops[0].body, &env) != nil || json.Unmarshal(env.Payload, &payload) != nil ||
+		env.Operation != "tasks.rate" || env.ExpectedControlRevision == nil || *env.ExpectedControlRevision != 4 || payload.Rating != protocol.RatingP0 {
+		t.Errorf("rate sent %+v (%d writes)", env, len(ops))
+	}
+}
+
 func TestDecideAnswersTheOpenVersion(t *testing.T) {
 	f := newFakeServer(t)
 	f.answer("GET /api/v1/snapshot", protocol.Snapshot{Decisions: []protocol.DecisionView{{DecisionID: "dec_1", Version: 3, Status: "open"}}})

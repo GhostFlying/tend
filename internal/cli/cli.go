@@ -68,6 +68,7 @@ Owner commands:
   logs [-f] <run_id|task_id>       a run's logs, or all runs of a task; -f follows the last
   decide <decision_id> <option> [--note <text>]
   retry <task_id> --kind implement|accept
+  rate <task_id> <p0|p1|p2|p3>     rate a task: urgent, high, normal or low
   pause|resume|cancel <task_id>
 
 Agent add-on:
@@ -93,7 +94,7 @@ func Main(ctx context.Context, e *Env, args []string) int {
 		return report(e, runLogin(ctx, e, rest))
 	case "setup":
 		return report(e, runSetup(ctx, e, rest))
-	case "status", "task", "logs", "decide", "retry", "pause", "resume", "cancel":
+	case "status", "task", "logs", "decide", "retry", "rate", "pause", "resume", "cancel":
 		return report(e, runOwner(ctx, e, cmd, rest))
 	case "help", "-h", "--help":
 		fmt.Fprint(e.Stdout, usage)

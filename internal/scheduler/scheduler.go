@@ -42,7 +42,7 @@ type Candidate struct {
 	SpecVersion         int64
 	ImplementGeneration int64
 	CurrentArtifactID   string
-	Priority            int64
+	Rating              protocol.Rating
 	// DependenciesDone reports that every task this one depends on is
 	// completed.
 	DependenciesDone bool
@@ -103,7 +103,7 @@ func Skip(h Host, c Candidate) string {
 	return ""
 }
 
-// Pick returns the eligible candidate with the highest priority, oldest
+// Pick returns the eligible candidate with the highest rating, oldest
 // first among equals. Running work is never preempted.
 func Pick(h Host, candidates []Candidate) (Candidate, bool) {
 	var eligible []Candidate
@@ -116,8 +116,22 @@ func Pick(h Host, candidates []Candidate) (Candidate, bool) {
 		return Candidate{}, false
 	}
 	return slices.MinFunc(eligible, func(a, b Candidate) int {
-		return cmp.Or(cmp.Compare(b.Priority, a.Priority), cmp.Compare(a.CreatedAt, b.CreatedAt), cmp.Compare(a.ActionID, b.ActionID))
+		return cmp.Or(cmp.Compare(rank(a.Rating), rank(b.Rating)), cmp.Compare(a.CreatedAt, b.CreatedAt), cmp.Compare(a.ActionID, b.ActionID))
 	}), true
+}
+
+// rank orders ratings, most wanted first; an unrated task queues as p2
+// (D60).
+func rank(r protocol.Rating) int {
+	switch r {
+	case protocol.RatingP0:
+		return 0
+	case protocol.RatingP1:
+		return 1
+	case protocol.RatingP3:
+		return 3
+	}
+	return 2
 }
 
 func containsAll(have, want []string) bool {

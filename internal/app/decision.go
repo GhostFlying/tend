@@ -14,7 +14,7 @@ import (
 func toDomain(r store.TaskRow, budget int64) domain.Task {
 	return domain.Task{
 		ID: r.TaskID, Project: r.Project, Lifecycle: r.Lifecycle, Control: r.ControlMode, ControlRevision: r.ControlRevision,
-		SpecVersion: r.SpecVersion, Priority: r.Priority, Block: r.BlockReason,
+		SpecVersion: r.SpecVersion, Rating: r.Rating, Block: r.BlockReason,
 		ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Budget: budget,
 		WorkspaceAssigned: r.WorkspaceAssigned,
 	}
@@ -25,7 +25,7 @@ func toDomain(r store.TaskRow, budget int64) domain.Task {
 func fromDomain(t domain.Task, prev store.TaskRow, now int64) store.TaskRow {
 	r := prev
 	r.TaskID, r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision = t.ID, t.Project, t.Lifecycle, t.Control, t.ControlRevision
-	r.SpecVersion, r.Priority, r.BlockReason = t.SpecVersion, t.Priority, t.Block
+	r.SpecVersion, r.Rating, r.BlockReason = t.SpecVersion, t.Rating, t.Block
 	r.ImplementGeneration, r.CurrentArtifactID, r.UpdatedAt = t.ImplementGeneration, t.CurrentArtifactID, now
 	return r
 }
@@ -165,7 +165,7 @@ type taskResult struct {
 	ControlMode     protocol.ControlMode   `json:"control_mode"`
 	ControlRevision int64                  `json:"control_revision"`
 	SpecVersion     int64                  `json:"spec_version"`
-	Priority        int64                  `json:"priority"`
+	Rating          protocol.Rating        `json:"rating"`
 	BlockReason     protocol.BlockReason   `json:"block_reason"`
 	Actions         []actionResult         `json:"actions,omitempty"`
 }
@@ -173,6 +173,6 @@ type taskResult struct {
 func newTaskResult(t domain.Task, actions []actionResult) taskResult {
 	return taskResult{
 		TaskID: t.ID, Lifecycle: t.Lifecycle, ControlMode: t.Control, ControlRevision: t.ControlRevision,
-		SpecVersion: t.SpecVersion, Priority: t.Priority, BlockReason: t.Block, Actions: actions,
+		SpecVersion: t.SpecVersion, Rating: t.Rating, BlockReason: t.Block, Actions: actions,
 	}
 }

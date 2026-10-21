@@ -71,9 +71,9 @@ func (e *env) task(title string, constraints ...string) (string, int64) {
 	return r.TaskID, r.ControlRevision
 }
 
-func (e *env) reprioritize(id string, rev, priority int64) {
+func (e *env) rate(id string, rev int64, rating protocol.Rating) {
 	e.t.Helper()
-	e.exec(owner, "tasks.update_intent", protocol.Target{Type: "task", ID: id}, &rev, map[string]any{"priority": priority}, app.UpdateIntent{})
+	e.exec(owner, "tasks.update_intent", protocol.Target{Type: "task", ID: id}, &rev, map[string]any{"rating": rating}, app.UpdateIntent{})
 }
 
 // message stores a conversation message, as the main thread manager will.
@@ -134,12 +134,12 @@ func TestFullThenNothingThenDelta(t *testing.T) {
 	if p := e.prepare(0); p != nil {
 		t.Fatalf("packet with nothing new = %q", p.Text)
 	}
-	e.reprioritize(id, rev, 7)
+	e.rate(id, rev, protocol.RatingP3)
 	delta := e.prepare(0)
-	if delta == nil || delta.Full || !strings.Contains(delta.Text, "task.priority_changed") || !strings.Contains(delta.Text, "now: "+id) {
+	if delta == nil || delta.Full || !strings.Contains(delta.Text, "task.rating_changed") || !strings.Contains(delta.Text, "now: "+id) {
 		t.Fatalf("delta = %+v", delta)
 	}
-	if !strings.Contains(delta.Text, "priority 7") {
+	if !strings.Contains(delta.Text, "queued, p3,") {
 		t.Errorf("delta lacks the task's current state:\n%s", delta.Text)
 	}
 }
@@ -151,7 +151,7 @@ func TestFault_InjectFailureInvalidatesBaseline(t *testing.T) {
 	_ = e.b.Confirm(context.Background(), full.ID)
 	before := e.baseline()
 
-	e.reprioritize(id, rev, 3)
+	e.rate(id, rev, protocol.RatingP3)
 	delta := e.prepare(0)
 	if err := e.b.Fail(context.Background(), delta.ID, true); err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestUnconfirmedPacketAfterCrash(t *testing.T) {
 	e := newEnv(t)
 	id, rev := e.task("fix windows")
 	_ = e.b.Confirm(context.Background(), e.prepare(0).ID)
-	e.reprioritize(id, rev, 2)
+	e.rate(id, rev, protocol.RatingP1)
 	lost := e.prepare(0) // tend stops before injecting or confirming
 
 	restarted := New(e.app, e.store, e.ids, Config{})
@@ -221,7 +221,7 @@ func TestFault_BackgroundEventKeepsFocus(t *testing.T) {
 	_ = e.b.Confirm(context.Background(), e.prepare(3).ID)
 
 	// A background change arrives before the owner answers.
-	e.reprioritize(wpt, wptRev, 5)
+	e.rate(wpt, wptRev, protocol.RatingP1)
 	_, seq := e.message("owner", "Go with the second one.", "msg_2")
 
 	delta := e.prepare(seq)
@@ -433,5 +433,30 @@ func TestDeltaReportsProjectMove(t *testing.T) {
 	delta := e.prepare(0)
 	if delta == nil || !strings.Contains(delta.Text, "task.project_changed") {
 		t.Fatalf("delta after a move = %+v", delta)
+	}
+}
+
+func TestUnratedTasksAskForARating(t *testing.T) {
+	e := newEnv(t)
+	unrated, _ := e.task("fix windows")
+	rated, rev := e.task("fix linux")
+	e.rate(rated, rev, protocol.RatingP1)
+	full := e.prepare(0)
+	if got := sectionOf(full.Text, unratedTitle); !strings.Contains(got, unrated) || strings.Contains(got, rated) {
+		t.Fatalf("unrated section of the full snapshot = %q\n%s", got, full.Text)
+	}
+	if err := e.b.Confirm(context.Background(), full.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The owner dispatched one elsewhere and rated another right away.
+	fresh, _ := e.task("fix macos")
+	ratedNow, rev := e.task("fix bsd")
+	e.rate(ratedNow, rev, protocol.RatingP3)
+	delta := e.prepare(0)
+	if delta == nil {
+		t.Fatal("no delta")
+	}
+	if got := sectionOf(delta.Text, unratedTitle); !strings.Contains(got, fresh) || strings.Contains(got, ratedNow) || strings.Contains(got, unrated) {
+		t.Errorf("unrated section of the delta = %q\n%s", got, delta.Text)
 	}
 }

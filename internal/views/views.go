@@ -18,7 +18,7 @@ import (
 func Summary(r store.TaskRow) protocol.TaskSummary {
 	return protocol.TaskSummary{
 		TaskID: r.TaskID, Title: r.Title, Project: r.Project, Lifecycle: r.Lifecycle, ControlMode: r.ControlMode, ControlRevision: r.ControlRevision,
-		SpecVersion: r.SpecVersion, Priority: r.Priority, BlockReason: r.BlockReason, Workspace: r.WorkspaceName,
+		SpecVersion: r.SpecVersion, Rating: r.Rating, BlockReason: r.BlockReason, Workspace: r.WorkspaceName,
 		NextImplementGeneration: r.ImplementGeneration + 1,
 	}
 }

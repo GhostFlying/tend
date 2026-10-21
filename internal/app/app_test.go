@@ -432,7 +432,7 @@ func TestFault_AcceptanceEnvFailure(t *testing.T) {
 func TestFault_StaleRevisionRejected(t *testing.T) {
 	h := newHarness(t)
 	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
-	env := h.env("tasks.update_intent", taskTarget(res.TaskID), updateIntentPayload{Priority: rev(5)}, rev(res.ControlRevision-1))
+	env := h.env("tasks.update_intent", taskTarget(res.TaskID), updateIntentPayload{Rating: new(protocol.RatingP1)}, rev(res.ControlRevision-1))
 	first := h.exec(owner, env, UpdateIntent{})
 	if first.Status != protocol.OpFailed || first.Error.Code != protocol.CodeStaleRevision {
 		t.Fatalf("stale write: %+v", first)
@@ -440,7 +440,7 @@ func TestFault_StaleRevisionRejected(t *testing.T) {
 	if second := h.exec(owner, env, UpdateIntent{}); second.Status != first.Status || second.Error.Code != first.Error.Code {
 		t.Errorf("retry returned %+v, want the recorded failure", second)
 	}
-	if got := h.task(res.TaskID); got.Priority != 0 || got.ControlRevision != res.ControlRevision {
+	if got := h.task(res.TaskID); got.Rating != protocol.RatingNone || got.ControlRevision != res.ControlRevision {
 		t.Errorf("stale write changed the task: %+v", got)
 	}
 }

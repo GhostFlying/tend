@@ -79,7 +79,7 @@ type TaskRow struct {
 	ControlMode         protocol.ControlMode
 	ControlRevision     int64
 	SpecVersion         int64
-	Priority            int64
+	Rating              protocol.Rating
 	BlockReason         protocol.BlockReason
 	ImplementGeneration int64
 	CurrentArtifactID   string
@@ -96,11 +96,11 @@ type TaskRow struct {
 func GetTask(ctx context.Context, q Querier, taskID string) (TaskRow, error) {
 	r := TaskRow{TaskID: taskID}
 	var artifact, workspace sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT title, project, lifecycle, control_mode, control_revision, spec_version, priority,
+	err := q.QueryRowContext(ctx, `SELECT title, project, lifecycle, control_mode, control_revision, spec_version, rating,
 		block_reason, implement_generation, current_artifact_id, workspace_name,
 		EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = tasks.task_id), created_at, updated_at
 		FROM tasks WHERE task_id = ?`, taskID).
-		Scan(&r.Title, &r.Project, &r.Lifecycle, &r.ControlMode, &r.ControlRevision, &r.SpecVersion, &r.Priority, &r.BlockReason,
+		Scan(&r.Title, &r.Project, &r.Lifecycle, &r.ControlMode, &r.ControlRevision, &r.SpecVersion, &r.Rating, &r.BlockReason,
 			&r.ImplementGeneration, &artifact, &workspace, &r.WorkspaceAssigned, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return TaskRow{}, notFound(err, "task "+taskID)
@@ -112,9 +112,9 @@ func GetTask(ctx context.Context, q Querier, taskID string) (TaskRow, error) {
 // InsertTask stores a new task.
 func (t *Tx) InsertTask(ctx context.Context, r TaskRow) error {
 	_, err := t.Exec(ctx, `INSERT INTO tasks (task_id, title, project, lifecycle, control_mode, control_revision, spec_version,
-		priority, block_reason, implement_generation, current_artifact_id, workspace_name, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.TaskID, r.Title, r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision, r.SpecVersion, r.Priority, r.BlockReason,
+		priority, rating, block_reason, implement_generation, current_artifact_id, workspace_name, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+		r.TaskID, r.Title, r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision, r.SpecVersion, r.Rating, r.BlockReason,
 		r.ImplementGeneration, nullString(r.CurrentArtifactID), nullString(r.WorkspaceName), r.CreatedAt, r.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("store: insert task: %w", err)
@@ -125,8 +125,8 @@ func (t *Tx) InsertTask(ctx context.Context, r TaskRow) error {
 // UpdateTask overwrites the mutable fields of a task.
 func (t *Tx) UpdateTask(ctx context.Context, r TaskRow) error {
 	res, err := t.Exec(ctx, `UPDATE tasks SET project = ?, lifecycle = ?, control_mode = ?, control_revision = ?, spec_version = ?,
-		priority = ?, block_reason = ?, implement_generation = ?, current_artifact_id = ?, updated_at = ? WHERE task_id = ?`,
-		r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision, r.SpecVersion, r.Priority, r.BlockReason, r.ImplementGeneration,
+		rating = ?, block_reason = ?, implement_generation = ?, current_artifact_id = ?, updated_at = ? WHERE task_id = ?`,
+		r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision, r.SpecVersion, r.Rating, r.BlockReason, r.ImplementGeneration,
 		nullString(r.CurrentArtifactID), r.UpdatedAt, r.TaskID)
 	if err != nil {
 		return fmt.Errorf("store: update task: %w", err)

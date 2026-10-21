@@ -33,9 +33,10 @@ func claimPlanCommit(ctx context.Context, x *Exec, tx *store.Tx, sourceMessageID
 type CreateTask struct{}
 
 type createTaskPayload struct {
-	Title    string      `json:"title"`
-	Spec     domain.Spec `json:"spec"`
-	Priority int64       `json:"priority"`
+	Title string      `json:"title"`
+	Spec  domain.Spec `json:"spec"`
+	// Rating is empty for an unrated task.
+	Rating protocol.Rating `json:"rating,omitempty"`
 	// Project defaults to the calling session's project, or else to the
 	// only active project.
 	Project string `json:"project,omitempty"`
@@ -83,7 +84,7 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	}
 	p.Spec.Workspace = ws
 	p.Spec = p.Spec.Normalize()
-	d, err := domain.NewTask(taskID, project.Project, p.Spec, p.Priority)
+	d, err := domain.NewTask(taskID, project.Project, p.Spec, p.Rating)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -124,16 +125,16 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	return Outcome{Result: newTaskResult(d.Task, actions), Events: events}, nil
 }
 
-// UpdateIntent handles tasks.update_intent: a new spec, priority or
+// UpdateIntent handles tasks.update_intent: a new spec, rating or
 // project, or several of them, under one expected control revision.
 type UpdateIntent struct{}
 
 type updateIntentPayload struct {
-	Spec            *domain.Spec `json:"spec,omitempty"`
-	Priority        *int64       `json:"priority,omitempty"`
-	Project         *string      `json:"project,omitempty"`
-	SourceMessageID string       `json:"source_message_id,omitempty"`
-	CommitSeq       int64        `json:"commit_seq,omitempty"`
+	Spec            *domain.Spec     `json:"spec,omitempty"`
+	Rating          *protocol.Rating `json:"rating,omitempty"`
+	Project         *string          `json:"project,omitempty"`
+	SourceMessageID string           `json:"source_message_id,omitempty"`
+	CommitSeq       int64            `json:"commit_seq,omitempty"`
 }
 
 // Operation implements Command.
@@ -150,8 +151,8 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.Spec == nil && p.Priority == nil && p.Project == nil {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "spec, priority or project is required")
+	if p.Spec == nil && p.Rating == nil && p.Project == nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "spec, rating or project is required")
 	}
 	expected, err := requireRevision(x.Env)
 	if err != nil {
@@ -181,12 +182,12 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, err
 		}
 		merged = d
-		// The priority change below belongs to the same intent, so it is
+		// The rating change below belongs to the same intent, so it is
 		// checked against the revision this request started from.
 		expected = d.Task.ControlRevision
 	}
-	if p.Priority != nil {
-		d, err := domain.SetPriority(merged.Task, *p.Priority, expected)
+	if p.Rating != nil {
+		d, err := domain.SetRating(merged.Task, *p.Rating, expected)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -229,6 +230,43 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		return Outcome{}, err
 	}
 	return Outcome{Result: newTaskResult(merged.Task, actions), Events: events}, nil
+}
+
+// RateTask handles tasks.rate, the owner's way to rate a task without
+// planning it (D60). Agents rate through tasks.update_intent.
+type RateTask struct{}
+
+// Operation implements Command.
+func (RateTask) Operation() string { return "tasks.rate" }
+
+// Authorize implements Command.
+func (RateTask) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	return allowKinds(x.Principal, planners...)
+}
+
+// Apply implements Command.
+func (RateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p protocol.RateTaskPayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	expected, err := requireRevision(x.Env)
+	if err != nil {
+		return Outcome{}, err
+	}
+	row, spec, err := loadTask(ctx, tx.Q(), x.Env.Target.ID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	d, err := domain.SetRating(toDomain(row, spec.Budget()), p.Rating, expected)
+	if err != nil {
+		return Outcome{}, err
+	}
+	actions, events, err := applyDecision(ctx, x, tx, row, d, nil)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Result: newTaskResult(d.Task, actions), Events: events}, nil
 }
 
 // SetControlMode handles control.set_mode.

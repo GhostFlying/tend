@@ -165,7 +165,7 @@ func TestListTasksFiltersBeforeTheLimit(t *testing.T) {
 	h := newHarness(t)
 	h.syncConfig(withProjects())
 	for _, w := range []string{"a", "b", "c"} {
-		h.createTask(owner, createTaskPayload{Title: w, Spec: testSpec, Project: "video", Priority: 9, WorkspaceName: "video-" + w})
+		h.createTask(owner, createTaskPayload{Title: w, Spec: testSpec, Project: "video", Rating: protocol.RatingP0, WorkspaceName: "video-" + w})
 	}
 	_, res := h.createTask(owner, createTaskPayload{Title: "core", Spec: testSpec, Project: "tend"})
 	var got []store.TaskRow

@@ -186,7 +186,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			Generation: r.Action.Generation, TargetSpecVersion: r.Action.TargetSpecVersion,
 			TargetArtifactID: r.Action.TargetArtifactID, CreatedAt: r.Action.CreatedAt,
 			Lifecycle: r.Lifecycle, Control: r.Control, Block: r.Block, SpecVersion: r.SpecVersion,
-			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Priority: r.Priority,
+			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Rating: r.Rating,
 			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(),
 			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied,
 		})

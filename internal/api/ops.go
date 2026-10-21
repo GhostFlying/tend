@@ -17,6 +17,7 @@ var ownerCommands = commandMap(
 	app.AnswerDecision{},
 	app.CreateAction{},
 	app.SetControlMode{},
+	app.RateTask{},
 	app.CancelTask{},
 )
 

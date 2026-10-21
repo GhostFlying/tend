@@ -35,8 +35,8 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 	if err != nil {
 		return err
 	}
-	want := map[string]int{"status": 0, "decide": -1}[cmd]
-	if cmd != "status" && cmd != "decide" {
+	want, ok := map[string]int{"status": 0, "decide": -1, "rate": 2}[cmd]
+	if !ok {
 		want = 1
 	}
 	if want >= 0 && len(pos) != want {
@@ -65,6 +65,8 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 		return o.decide(ctx, pos[0], option, *note)
 	case "retry":
 		return o.retry(ctx, pos[0], protocol.ActionKind(*kind))
+	case "rate":
+		return o.rate(ctx, pos[0], protocol.Rating(pos[1]))
 	case "pause":
 		return o.setMode(ctx, pos[0], protocol.ControlPaused)
 	case "resume":
@@ -256,8 +258,8 @@ func (o owner) task(ctx context.Context, id string) error {
 }
 
 func printSummary(w io.Writer, t protocol.TaskSummary) {
-	fmt.Fprintf(w, "%s %q in %s: %s, control %s at revision %d, spec v%d, priority %d, workspace %s",
-		t.TaskID, t.Title, t.Project, t.Lifecycle, t.ControlMode, t.ControlRevision, t.SpecVersion, t.Priority, t.Workspace)
+	fmt.Fprintf(w, "%s %q in %s: %s, control %s at revision %d, spec v%d, %s, workspace %s",
+		t.TaskID, t.Title, t.Project, t.Lifecycle, t.ControlMode, t.ControlRevision, t.SpecVersion, t.Rating.Label(), t.Workspace)
 	if t.BlockReason != protocol.BlockNone && t.BlockReason != "" {
 		fmt.Fprintf(w, ", blocked: %s", t.BlockReason)
 	}
@@ -455,6 +457,18 @@ func (o owner) setMode(ctx context.Context, id string, mode protocol.ControlMode
 	}
 	rev := d.ControlRevision
 	return o.write(ctx, "control.set_mode", protocol.Target{Type: "task", ID: id}, &rev, protocol.SetControlModePayload{Mode: mode})
+}
+
+func (o owner) rate(ctx context.Context, id string, rating protocol.Rating) error {
+	if rating == protocol.RatingNone || !rating.Valid() {
+		return usagef("rate takes p0 (urgent), p1 (high), p2 (normal) or p3 (low)")
+	}
+	d, err := o.readTask(ctx, id)
+	if err != nil {
+		return err
+	}
+	rev := d.ControlRevision
+	return o.write(ctx, "tasks.rate", protocol.Target{Type: "task", ID: id}, &rev, protocol.RateTaskPayload{Rating: rating})
 }
 
 func (o owner) cancel(ctx context.Context, id string) error {
