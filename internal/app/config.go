@@ -12,10 +12,11 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// SyncConfig handles config.sync: tend brings the hosts, repositories and
-// workspace templates of its configuration file into the ledger at
-// startup. Hosts and repositories missing from the file are retired rather
-// than deleted, since runs and specs refer to them.
+// SyncConfig handles config.sync: tend brings the hosts, repositories,
+// workspace templates and projects of its configuration file into the
+// ledger at startup. Hosts, repositories and projects missing from the file
+// are retired rather than deleted, since runs, specs and tasks refer to
+// them.
 //
 // To stop new tasks from mounting a repository while existing tasks finish,
 // keep it in the file with retired set: hosts may go on serving it. A
@@ -28,6 +29,9 @@ type ConfigPayload struct {
 	Hosts     []HostConfig     `json:"hosts"`
 	Repos     []RepoConfig     `json:"repos"`
 	Templates []TemplateConfig `json:"templates"`
+	// Projects may be empty: tend then keeps every task in the implicit
+	// default project.
+	Projects []ProjectConfig `json:"projects"`
 }
 
 // HostConfig is a configured execution host.
@@ -62,6 +66,24 @@ type TemplateConfig struct {
 	Name      string           `json:"name"`
 	Workspace domain.Workspace `json:"workspace"`
 }
+
+// ProjectConfig defines a project (D52, D58).
+type ProjectConfig struct {
+	Name  string `json:"name"`
+	Title string `json:"title,omitempty"`
+	// Weight multiplies the rating of the project's tasks in the queue
+	// order. Default 1.
+	Weight int64 `json:"weight,omitempty"`
+	// Repos lists the registered repositories the project works in. An
+	// agent session in one of them is bound to the project.
+	Repos []string `json:"repos"`
+	// Template is the workspace template of tasks created without a
+	// workspace.
+	Template string `json:"template,omitempty"`
+}
+
+// DefaultProject is the project of every task when none is configured.
+const DefaultProject = "default"
 
 var (
 	hostOSes   = []string{"linux", "darwin", "windows"}
@@ -139,6 +161,40 @@ func (p *ConfigPayload) validate() error {
 		}
 		templates[t.Name] = true
 	}
+	projects := map[string]bool{}
+	for i, pr := range p.Projects {
+		switch {
+		case !domain.NamePattern.MatchString(pr.Name):
+			return invalid("project name %q is malformed", pr.Name)
+		case projects[pr.Name]:
+			return invalid("project %q is configured twice", pr.Name)
+		case pr.Weight < 0:
+			return invalid("project %q has a negative weight", pr.Name)
+		case pr.Template != "" && !templates[pr.Template]:
+			return invalid("project %q uses unknown template %q", pr.Name, pr.Template)
+		}
+		for _, r := range pr.Repos {
+			if !repos[r] {
+				return invalid("project %q works in unknown repo %q", pr.Name, r)
+			}
+		}
+		if pr.Title == "" {
+			p.Projects[i].Title = pr.Name
+		}
+		if pr.Weight == 0 {
+			p.Projects[i].Weight = 1
+		}
+		projects[pr.Name] = true
+	}
+	if len(p.Projects) == 0 {
+		// The implicit project holds every repository, so sessions in any
+		// of them are bound to it.
+		var all []string
+		for _, r := range p.Repos {
+			all = append(all, r.Repo)
+		}
+		p.Projects = []ProjectConfig{{Name: DefaultProject, Title: "Default", Weight: 1, Repos: all}}
+	}
 	return nil
 }
 
@@ -197,7 +253,19 @@ func (SyncConfig) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := tx.PutTemplates(ctx, templates, now); err != nil {
 		return Outcome{}, err
 	}
-	counts := map[string]any{"hosts": len(p.Hosts), "repos": len(p.Repos), "templates": len(p.Templates)}
+	var projectNames []string
+	for _, pr := range p.Projects {
+		if err := tx.UpsertProject(ctx, store.ProjectRow{
+			Project: pr.Name, Title: pr.Title, Weight: pr.Weight, Repos: pr.Repos, Template: pr.Template,
+		}, now); err != nil {
+			return Outcome{}, err
+		}
+		projectNames = append(projectNames, pr.Name)
+	}
+	if err := tx.RetireProjectsExcept(ctx, projectNames, now); err != nil {
+		return Outcome{}, err
+	}
+	counts := map[string]any{"hosts": len(p.Hosts), "repos": len(p.Repos), "templates": len(p.Templates), "projects": len(p.Projects)}
 	return Outcome{
 		Result: counts,
 		Events: []Event{{ObjectType: "config", ObjectID: "server", Kind: "config.synced", Body: counts}},

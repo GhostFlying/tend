@@ -67,6 +67,7 @@ type config struct {
 	Hosts     []app.HostConfig     `json:"hosts"`
 	Repos     []app.RepoConfig     `json:"repos"`
 	Templates []app.TemplateConfig `json:"templates"`
+	Projects  []app.ProjectConfig  `json:"projects"`
 }
 
 // mainAgentConfig runs the front thread with a dedicated traex home.
@@ -266,7 +267,7 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 
 // syncConfig brings hosts, repositories and templates into the ledger.
 func syncConfig(ctx context.Context, a *app.App, ids protocol.IDGen, cfg config) error {
-	payload, err := json.Marshal(app.ConfigPayload{Hosts: cfg.Hosts, Repos: cfg.Repos, Templates: cfg.Templates})
+	payload, err := json.Marshal(app.ConfigPayload{Hosts: cfg.Hosts, Repos: cfg.Repos, Templates: cfg.Templates, Projects: cfg.Projects})
 	if err != nil {
 		return err
 	}

@@ -875,6 +875,9 @@
         "priority": {
           "type": "integer"
         },
+        "project": {
+          "type": "string"
+        },
         "runs": {
           "anyOf": [
             {
@@ -908,6 +911,7 @@
       "required": [
         "task_id",
         "title",
+        "project",
         "lifecycle",
         "control_mode",
         "control_revision",
@@ -986,6 +990,9 @@
         "priority": {
           "type": "integer"
         },
+        "project": {
+          "type": "string"
+        },
         "spec_version": {
           "type": "integer"
         },
@@ -1002,6 +1009,7 @@
       "required": [
         "task_id",
         "title",
+        "project",
         "lifecycle",
         "control_mode",
         "control_revision",

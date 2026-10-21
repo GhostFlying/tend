@@ -59,6 +59,7 @@ var schemas = map[string]string{
     "title": {"type": "string"},
     "spec": ` + specSchema + `,
     "priority": {"type": "integer", "description": "Higher runs first. Default 0."},
+    "project": {"type": "string", "description": "The project the task belongs to. Required when tend has more than one project."},
     "workspace_name": {"type": "string", "description": "Short lowercase name for the workspace and branch, such as fix-windows-build."},
     "commit_seq": {"type": "integer", "minimum": 1, "description": "1 for the first planning write for this message, then 2, 3 and so on. Repeating a number repeats nothing."},
     "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
@@ -73,6 +74,7 @@ var schemas = map[string]string{
     "expected_control_revision": {"type": "integer", "description": "The control_revision you last read; stale values are rejected."},
     "spec": ` + specSchema + `,
     "priority": {"type": "integer"},
+    "project": {"type": "string", "description": "Move the task to this project."},
     "commit_seq": {"type": "integer", "minimum": 1},
     "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
   },

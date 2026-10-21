@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 )
@@ -134,6 +135,86 @@ func GetRepo(ctx context.Context, q Querier, repo string) (RepoRow, error) {
 		return RepoRow{}, err
 	}
 	return r, nil
+}
+
+// ProjectRow is a configured project (D58).
+type ProjectRow struct {
+	Project  string
+	Title    string
+	Weight   int64
+	Repos    []string
+	Template string
+	Retired  bool
+}
+
+// UpsertProject registers a project or updates its registration; a
+// project configured again is no longer retired.
+func (t *Tx) UpsertProject(ctx context.Context, p ProjectRow, now int64) error {
+	_, err := t.Exec(ctx, `INSERT INTO projects (project, title, weight, repos_json, template, retired, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 0, ?, ?) ON CONFLICT (project) DO UPDATE SET title = excluded.title,
+		weight = excluded.weight, repos_json = excluded.repos_json, template = excluded.template, retired = 0,
+		updated_at = excluded.updated_at`,
+		p.Project, p.Title, p.Weight, jsonList(p.Repos), nullString(p.Template), now, now)
+	if err != nil {
+		return fmt.Errorf("store: upsert project: %w", err)
+	}
+	return nil
+}
+
+// RetireProjectsExcept retires every project not in keep. Their tasks go
+// on; new tasks cannot join them.
+func (t *Tx) RetireProjectsExcept(ctx context.Context, keep []string, now int64) error {
+	_, err := t.Exec(ctx, `UPDATE projects SET retired = 1, updated_at = ?
+		WHERE retired = 0 AND project NOT IN (SELECT value FROM json_each(?))`, now, jsonList(keep))
+	if err != nil {
+		return fmt.Errorf("store: retire projects: %w", err)
+	}
+	return nil
+}
+
+// ListProjects returns every project, retired ones included, by name.
+func ListProjects(ctx context.Context, q Querier) ([]ProjectRow, error) {
+	rows, err := q.QueryContext(ctx, `SELECT project, title, weight, repos_json, template, retired FROM projects ORDER BY project`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list projects: %w", err)
+	}
+	defer rows.Close()
+	var out []ProjectRow
+	for rows.Next() {
+		p, err := scanProject(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GetProject returns a project, or ErrNotFound.
+func GetProject(ctx context.Context, q Querier, project string) (ProjectRow, error) {
+	p, err := scanProject(q.QueryRowContext(ctx, `SELECT project, title, weight, repos_json, template, retired
+		FROM projects WHERE project = ?`, project))
+	if err != nil {
+		return ProjectRow{}, notFound(err, "project "+project)
+	}
+	return p, nil
+}
+
+func scanProject(s interface{ Scan(...any) error }) (ProjectRow, error) {
+	var (
+		p        ProjectRow
+		repos    string
+		template sql.NullString
+	)
+	if err := s.Scan(&p.Project, &p.Title, &p.Weight, &repos, &template, &p.Retired); err != nil {
+		return ProjectRow{}, fmt.Errorf("store: scan project: %w", err)
+	}
+	p.Template = template.String
+	var err error
+	if p.Repos, err = parseList(repos); err != nil {
+		return ProjectRow{}, err
+	}
+	return p, nil
 }
 
 // PutTemplates replaces the workspace templates with the given set, keyed by

@@ -12,6 +12,7 @@ import (
 type TaskSummary struct {
 	TaskID          string        `json:"task_id"`
 	Title           string        `json:"title"`
+	Project         string        `json:"project"`
 	Lifecycle       TaskLifecycle `json:"lifecycle"`
 	ControlMode     ControlMode   `json:"control_mode"`
 	ControlRevision int64         `json:"control_revision"`

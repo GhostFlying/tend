@@ -42,7 +42,8 @@
 
 ## 2. W1 project 的定义（D58）
 
-- **配置**：服务端配置增加 `projects`，键是 project 名（小写字母、数字和 `-`），值包括：
+- **配置**：服务端配置增加 `projects` 列表，和 `repos`、`templates` 写法一致。每项包括：
+  - `name`：project 名，规则和仓库名相同；
   - `title`：显示名；
   - `weight`：正整数，默认 1，是任务分数里评级分的乘数（§6）；
   - `repos`：project 涉及的逻辑仓库名，必须已在 `repos` 里注册；用于会话绑定（§3）；
