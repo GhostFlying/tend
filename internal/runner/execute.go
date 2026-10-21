@@ -151,6 +151,10 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if err != nil {
 		return err
 	}
+	run, err := r.cfg.Journal.Run(ctx, as.RunID)
+	if err != nil {
+		return err
+	}
 	if attempt > 1 {
 		// The run resumes after a fence or a restart.
 		if err := r.cfg.Journal.AppendEvent(ctx, as.RunID, protocol.RunEvent{Kind: protocol.EventRunRunning}); err != nil {
@@ -159,7 +163,18 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}
 	w, err := r.cfg.Workers.Start(runCtx, harness.WorkerSpec{
 		RunID: as.RunID, Role: as.Role, Dir: p.Dir, ScratchDir: p.ScratchDir, Spec: as.Spec, Artifact: as.Artifact,
-		Feedback: as.Feedback, Attempt: attempt,
+		Feedback: as.Feedback, Attempt: attempt, Thread: run.Thread,
+		OnThread: func(thread string) error {
+			if thread == run.Thread {
+				return nil
+			}
+			if run.Thread != "" {
+				r.cfg.Log.InfoContext(ctx, "the worker started a new thread with the brief", "run_id", as.RunID, "previous_thread", run.Thread)
+			}
+			// Recorded before the thread's first turn, and even while
+			// shutting down, so the next attempt continues it (D61).
+			return r.cfg.Journal.SetThread(context.WithoutCancel(ctx), as.RunID, thread)
+		},
 	})
 	if err != nil {
 		return stopped(failed("worker_start_failed", err))

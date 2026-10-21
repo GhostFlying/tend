@@ -96,10 +96,19 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 			return harness.ToolResult{Success: true, Text: "verdict recorded"}
 		}
 	}
-	th, err := s.StartThread(ctx, cfg)
+	th, err := ws.thread(ctx, s, spec, cfg)
 	if err != nil {
 		_ = s.Close()
 		return nil, err
+	}
+	if spec.OnThread != nil {
+		if err := spec.OnThread(th.ID()); err != nil {
+			_ = s.Close()
+			return nil, err
+		}
+	}
+	if th.ID() == spec.Thread {
+		input = harness.Continuation(spec)
 	}
 	turnID, err := th.StartTurn(ctx, harness.TurnInput{Text: input})
 	if err != nil {
@@ -152,4 +161,24 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		}
 	}()
 	return w, nil
+}
+
+// thread continues the thread of an earlier attempt of the run, or starts
+// a new one when there is none or it cannot be resumed, for example
+// because its rollout is gone (D61).
+func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSpec, cfg harness.ThreadConfig) (harness.Thread, error) {
+	if spec.Thread != "" {
+		th, err := s.ResumeThread(ctx, spec.Thread, cfg)
+		if err == nil {
+			return th, nil
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		if log := ws.opts.Session.Log; log != nil {
+			log.InfoContext(ctx, "could not continue the worker's thread; starting over with the brief",
+				"run_id", spec.RunID, "thread_id", spec.Thread, "err", err)
+		}
+	}
+	return s.StartThread(ctx, cfg)
 }

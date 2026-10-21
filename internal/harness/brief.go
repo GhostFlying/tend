@@ -36,6 +36,19 @@ type briefSpec struct {
 	Acceptance  []string `json:"acceptance"`
 }
 
+// Continuation is the turn input that continues a worker's thread after
+// its attempt was interrupted (D61). The thread holds the task and the
+// work so far, so it only says what happened.
+func Continuation(spec WorkerSpec) string {
+	s := "Your work on this task was interrupted: tend or its runner stopped, or the task was paused. " +
+		"The workspace is as it was when you stopped; anything running then was stopped too. " +
+		"Check the state of the working trees, then continue with the same task where you left off."
+	if spec.Role == protocol.RoleAccept {
+		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before the interruption: that call was lost."
+	}
+	return s
+}
+
 // Brief returns a worker's developer instructions and its turn input. The
 // spec's own words are passed on in full: workers get the complete
 // requirements, never a summary (v0.1 §16).

@@ -430,6 +430,33 @@ func TestFault_HeartbeatLostRunnerAlive_Runner(t *testing.T) {
 	}
 }
 
+func TestFault_RunnerRestartContinuesWorkerThread(t *testing.T) {
+	srv := newServer(t, time.Minute)
+	hold := make(chan struct{})
+	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
+		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
+			return testkit.WorkerScript{Gate: hold}
+		}
+		return passing(spec)
+	})
+	n.start()
+	task := srv.createTask()
+	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
+	n.stop()
+
+	n.start()
+	eventually(t, "the task completes after the restart", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
+	started := n.workers.Started()
+	first := started[0]
+	if again := started[1]; again.RunID != first.RunID || again.Thread != fmt.Sprintf("th_%s_1", first.RunID) {
+		t.Errorf("after the restart: run %s in thread %q, want run %s continuing its first thread", again.RunID, again.Thread, first.RunID)
+	}
+	// Acceptance is a run of its own, in a thread of its own.
+	if accept := started[2]; accept.Role != protocol.RoleAccept || accept.Thread != "" {
+		t.Errorf("acceptance started in thread %q", accept.Thread)
+	}
+}
+
 func TestRunnerStopsCancelledRun(t *testing.T) {
 	srv := newServer(t, 400*time.Millisecond)
 	n := newNode(t, srv, func(harness.WorkerSpec) testkit.WorkerScript { return testkit.WorkerScript{Gate: make(chan struct{})} })
@@ -629,8 +656,9 @@ func TestPauseStopsWorkerAndResumes(t *testing.T) {
 
 	srv.setMode(task, protocol.ControlManaged)
 	eventually(t, "the task completes after resuming", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
-	if started := n.workers.Started(); started[1].Role != protocol.RoleImplement || started[1].Attempt != 2 {
-		t.Errorf("after resuming: %+v, want implementation attempt 2", started[1])
+	if started := n.workers.Started(); started[1].Role != protocol.RoleImplement || started[1].Attempt != 2 ||
+		started[1].Thread != fmt.Sprintf("th_%s_1", started[0].RunID) {
+		t.Errorf("after resuming: %+v, want implementation attempt 2 continuing the first thread", started[1])
 	}
 }
 

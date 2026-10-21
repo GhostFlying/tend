@@ -1,7 +1,9 @@
 package testkit
 
 import (
+	"cmp"
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -15,6 +17,9 @@ type WorkerScript struct {
 	// Gate, when set, holds the worker after its events until the gate is
 	// closed or the worker is stopped.
 	Gate <-chan struct{}
+	// Thread is the thread the worker works in. By default it continues
+	// the spec's thread, or starts one named after the run and attempt.
+	Thread string
 }
 
 // Workers is a scriptable harness.Workers. Script decides what each worker
@@ -29,10 +34,15 @@ type Workers struct {
 
 // Start implements harness.Workers.
 func (w *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.Worker, error) {
+	script := w.Script(spec)
+	if spec.OnThread != nil {
+		if err := spec.OnThread(cmp.Or(script.Thread, spec.Thread, fmt.Sprintf("th_%s_%d", spec.RunID, spec.Attempt))); err != nil {
+			return nil, err
+		}
+	}
 	w.mu.Lock()
 	w.started = append(w.started, spec)
 	w.mu.Unlock()
-	script := w.Script(spec)
 	fw := &fakeWorker{events: make(chan harness.WorkerEvent), done: make(chan struct{})}
 	go func() {
 		defer close(fw.done)

@@ -39,6 +39,8 @@ type Run struct {
 	Phase      string
 	Fenced     bool
 	Attempts   int
+	// Thread is the harness thread of the run's last worker, if any.
+	Thread string
 }
 
 // Request is a request whose ID must survive restarts.
@@ -227,7 +229,8 @@ func (j *Journal) AcceptAssignment(ctx context.Context, as protocol.Assignment, 
 
 // Runs returns the runs that are not done.
 func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
-	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json, phase, fenced, attempts FROM runs WHERE phase <> 'done' ORDER BY run_id`)
+	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json, phase, fenced, attempts, COALESCE(thread_id, '') FROM runs
+		WHERE phase <> 'done' ORDER BY run_id`)
 	if err != nil {
 		return nil, fmt.Errorf("journal: list runs: %w", err)
 	}
@@ -238,7 +241,7 @@ func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
 			r    Run
 			body string
 		)
-		if err := rows.Scan(&body, &r.Phase, &r.Fenced, &r.Attempts); err != nil {
+		if err := rows.Scan(&body, &r.Phase, &r.Fenced, &r.Attempts, &r.Thread); err != nil {
 			return nil, fmt.Errorf("journal: scan run: %w", err)
 		}
 		if err := json.Unmarshal([]byte(body), &r.Assignment); err != nil {
@@ -274,6 +277,11 @@ func (j *Journal) SetPhase(ctx context.Context, runID, phase string) error {
 // SetFenced marks or clears a run's fence.
 func (j *Journal) SetFenced(ctx context.Context, runID string, fenced bool) error {
 	return j.exec(ctx, `UPDATE runs SET fenced = ?, updated_at = ? WHERE run_id = ?`, fenced, j.now().UnixMilli(), runID)
+}
+
+// SetThread records the harness thread the run's worker works in.
+func (j *Journal) SetThread(ctx context.Context, runID, threadID string) error {
+	return j.exec(ctx, `UPDATE runs SET thread_id = ?, updated_at = ? WHERE run_id = ?`, nullString(threadID), j.now().UnixMilli(), runID)
 }
 
 // NextAttempt counts another start of the run's worker and returns it.
