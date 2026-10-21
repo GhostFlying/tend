@@ -257,6 +257,42 @@ func TestHookOffForWorkers(t *testing.T) {
 	}
 }
 
+func TestAddonOffInWorkerWorktrees(t *testing.T) {
+	f := newFakeServer(t)
+	gitDir := t.TempDir()
+	worker := func() *testEnv {
+		te := newTestEnv(t, f.srv.URL)
+		te.Getwd = func() (string, error) { return "/work/tend", nil }
+		te.Output = func(_ context.Context, name string, args ...string) ([]byte, error) {
+			if name == "git" && slices.Equal(args, []string{"-C", "/work/tend", "rev-parse", "--absolute-git-dir"}) {
+				return []byte(gitDir + "\n"), nil
+			}
+			return nil, os.ErrNotExist
+		}
+		return te
+	}
+	if te := worker(); te.addonOff(context.Background()) {
+		t.Fatal("add-on off in a worktree without the marker")
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, protocol.WorkerMarker), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	te := worker()
+	te.Stdin = strings.NewReader(`{"session_id":"s-1"}`)
+	if code := te.main("hook", "codex", "session-start"); code != exitOK || te.out.Len() != 0 {
+		t.Errorf("hook in a worker's worktree = %d %q", code, te.out)
+	}
+	got := mcpSession(t, worker(), "codex", map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+	if list := result[struct {
+		Tools []mcpTool `json:"tools"`
+	}](t, got["1"]); len(list.Tools) != 0 {
+		t.Errorf("tools in a worker's worktree = %+v", list.Tools)
+	}
+	if len(f.requests) != 0 {
+		t.Errorf("the add-on asked tend %d times in a worker's worktree", len(f.requests))
+	}
+}
+
 // mcpSession runs the bridge over a list of messages and returns its
 // answers by ID.
 func mcpSession(t *testing.T, te *testEnv, agent string, msgs ...any) map[string]rpcMessage {
@@ -964,7 +1000,7 @@ func TestHookSendsTheRepositoryRemotes(t *testing.T) {
 	te := newTestEnv(t, f.srv.URL)
 	var dirs []string
 	te.Output = func(_ context.Context, name string, args ...string) ([]byte, error) {
-		if name != "git" || len(args) < 2 || args[0] != "-C" {
+		if name != "git" || len(args) < 3 || args[0] != "-C" || args[2] != "remote" {
 			return nil, os.ErrNotExist
 		}
 		dirs = append(dirs, args[1])

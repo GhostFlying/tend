@@ -45,7 +45,7 @@ const unreachable = "[tend] tend is unreachable right now: there are no ledger r
 // understand. Exit code 2 would make every agent block the user's input
 // (C5).
 func runHook(ctx context.Context, e *Env, args []string) int {
-	if e.addonOff() {
+	if e.addonOff(ctx) {
 		// A worker that inherited the owner's configuration.
 		ctx, cancel := context.WithTimeout(ctx, defaultHookTimeout)
 		defer cancel()

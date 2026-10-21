@@ -73,7 +73,7 @@ func runMCP(ctx context.Context, e *Env, args []string) int {
 		fmt.Fprintln(e.Stderr, "usage: tend mcp --agent <claude|codex|traex>")
 		return exitUsage
 	}
-	b := &bridge{e: e, agent: protocol.AgentKind(*agent), off: e.addonOff(), retry: 500 * time.Millisecond, out: json.NewEncoder(e.Stdout)}
+	b := &bridge{e: e, agent: protocol.AgentKind(*agent), off: e.addonOff(ctx), retry: 500 * time.Millisecond, out: json.NewEncoder(e.Stdout)}
 	if err := b.serve(ctx, e.Stdin); err != nil {
 		fmt.Fprintf(e.Stderr, "tend mcp: %v\n", err)
 		return exitError
