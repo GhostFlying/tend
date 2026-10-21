@@ -113,7 +113,7 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
 - **记录**：worker 调用 `WorkerSpec.OnTakeover`，runner 报告 `runs.report_takeover`（run 自己的凭据，载荷是察觉的原因）。这是事实而不是 owner 的控制请求，不带 `expected_control_revision`（约束 3 针对控制类写入），由领域规则决定：
   - 当前的 run（实现 run 是当前 spec 版本的当前代次，验收 run 是正在验收的产物）：任务转为 `human_control`，控制版本加一，产生 `task.taken_over`（需要处理的一类）；已经是 `human_control` 时不重复记录；
   - 过时的 run（包括 start over 之后的旧代次）或已结束的任务：只记一条 stale 的 `task.taken_over`。
-  - 请求不进 journal：没送到时，下一次尝试会再次察觉并报告。
+  - 请求先进 runner 的 journal 再发（见下文“被接管”由 runner 记）。
   - owner 也可以用 `tend takeover <task>` 显式接管（`control.set_mode human_control`，主 Agent 不能这样做，见现有授权）。
 - **接管期间**：`human_control` 下 run 的 desired 是新的 `held`（之前和暂停一样是 `paused`，那会让 worker 发 Esc 打断 owner）。runner 以 `harness.ErrHeld` 停下这次尝试，等到 desired 变回 `run`。
   - **“被接管”由 runner 记**（journal 的 `held`），不由 worker 记：runner 从 tend 看到 `held`（包括暂停期间、没有 worker 在跑时 owner 用 `tend takeover`），或自己的接管报告被 tend 收下时，都记下来。报告被收下后 runner 立即在本地当作 `held` 停下这次尝试，不等心跳（owner 可能在下一次心跳前就已交还）；比这次报告更早发出的心跳带回的 desired 不会把它改回去。接管报告先进 journal 再发：tend 可能已经收下而 runner 没收到回执，下一次尝试先用原来的请求 ID 重发它（tend 按 ID 去重，不会再记一次接管，也就不会撤销这期间 owner 的交还），收下后才记 `held`。从没被 tend 收下的报告不算接管，下一次尝试会再次察觉并报告，而不是把还在 owner 手里的 agent 交还给 worker。`held` 在 runner 接受 tend 发来的 `held` 时立即记下，不依赖之后读到的 desired。已知限制：owner 在 runner 离线时（或两次心跳之间）先 `tend takeover` 再 `tend resume`，runner 从没看到 `held`，接上 agent 时会把 owner 的提示当作新的接管，任务回到 `human_control`；结果是保守的（tend 再次让开，owner 再 resume 一次），要完全避免需要服务端按 run 记录交还，暂不做。
@@ -129,6 +129,7 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
 - 在 orca（桌面或手机）里给正在工作的 worker 发一句话：tend 察觉接管、任务转为 `human_control`、主 Agent 提到；`tend resume` 后 worker 继续并完成。
 - runner 中途重启：worker 续接或按 D61 的说明重新开始；回执丢失时启动不会重复。
 - 两台 host 中一台改回 `appserver`：多仓库任务又可以建，只由这台 host 领取。
+- 集成测试 `TestIntegration_OrcaWorkers`（`make it`）：`TEND_ORCA_REPO` 指向 owner 在 orca 里登记的一个临时仓库（`TEND_ORCA_AGENT`、`TEND_ORCA_MODEL` 可选），实现和验收各由一个 orca 里的 agent 完成，验收结论经 MCP 桥交回；测试结束删除它建的 worktree 和终端。没有设置时跳过。
 
 ## 8. 测试
 

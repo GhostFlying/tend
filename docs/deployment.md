@@ -32,6 +32,26 @@ TEND_HOST_TOKEN=... TS_AUTHKEY=... ./tend-runner -config tend-runner.hujson
 - 这台机器上即使也按下文接入了 tend，worker 也不会把自己当作主 Agent：runner 为 worker 设置 `TEND_ADDON=off`，tend 的 hook 和 MCP 看到它时什么都不做（D45）。
 - runner 的 tailnet 节点必须匹配服务端为该 host 配置的 `nodes`（tag 或机器名）。
 
+### orca worker（`worker.kind: orca`）
+
+worker 是 orca 里的 agent TUI（D63、D66）：runner 在 orca 里建 worktree、启动 agent，owner 可以在 orca（桌面或手机）里看着它工作，也可以直接接手（D67）。部署前 owner 在这台机器上准备好：
+
+- **orca**：已安装并运行，`orca` 在 PATH 上（或用 `worker.orca_bin` 指定）。
+- **仓库登记在 orca 里**：tend 不登记、不删除仓库，只在里面为任务建 worktree（D65），之后也不删除它们。runner 配置里每个仓库用 `repos.<name>.orca` 指明它在 orca 里的登记，例如 `"name:tend"`、`"path:/abs/path"`、`"id:<repoId>"`。tend 建的 worktree 和分支用 orca 的命名，产物记录实际的分支。
+- **为 worker 用的 agent 关闭 orca 的 Chat UI**：orca 在 Chat UI 打开时以 chat 启动 agent，tend 只能驱动终端里的 TUI；否则 run 以明确的错误失败。
+- **agent 信任这个仓库**：Codex 和 traecli 只对受信任的项目加载项目级配置，worktree 的信任跟随仓库根目录。tend 通过项目级配置给 worker 接上 `submit_verdict` 等工具，并设置无人值守（`approval_policy = "never"`、`sandbox_mode = "danger-full-access"`、tend 工具免批准），不受信任时验收拿不到结论。
+- **runner 配置**：`worker.kind: "orca"`，`worker.agent` 为 `codex` 或 `traex`；`model`、`effort` 可选（orca 只在给了 model 时接受 effort）。
+
+tend 在仓库里留下的东西：
+
+- 每个 run 期间，worktree 里有 `.codex/config.toml` 或 `.trae/traecli.toml`，worktree 的 git 目录里有 `tend-worker.json`；run 结束时删除。仓库里已有同名而不是 tend 写的文件时，run 失败，不会覆盖。
+- 仓库共用的 `info/exclude`（`git rev-parse --git-path info/exclude`）里加了 `/.codex/config.toml`、`/.trae/traecli.toml` 两行，worker 的提交和产物不会带上它们。linked worktree 与主 checkout 共用这个文件，所以 owner 主 checkout 里同名的未跟踪文件也会被 `git status` 忽略。
+- 任务的 worktree 和 worker 的终端在 run 结束后保留，owner 可以在 orca 里查看；取消或放弃的 run 的终端会被关闭。
+
+orca 里启动的 agent 继承 orca 的环境而不是 runner 的，runner 无法给它设置 `TEND_ADDON=off`；tend 的 hook 和 MCP 看到当前 worktree 的 git 目录里有 `tend-worker.json` 时同样什么都不做（D45）。
+
+owner 在 orca 里给 worker 的 agent 发一句话或按 Esc，就是接管（D67）：tend 察觉后任务转为 `human_control`，不再判断、打断或推进这个 agent；`tend takeover <task>` 可以显式接管。处理完后 `tend resume <task>` 交还，worker 先检查工作区再完成任务。
+
 ## tend CLI 与 agent 接入
 
 在 owner 的设备上：
