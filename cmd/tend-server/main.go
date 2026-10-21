@@ -61,6 +61,12 @@ type config struct {
 	// listens off the tailnet, for development.
 	LocalOwner string           `json:"local_owner"`
 	LeaseTTL   cfgfile.Duration `json:"lease_ttl"`
+	// Queue tunes the order in which queued work is claimed (D60).
+	Queue struct {
+		// WaitPerHour is what an hour in the queue adds to an action's
+		// score; 0 turns waiting off.
+		WaitPerHour *float64 `json:"wait_per_hour"`
+	} `json:"queue"`
 	// MainAgent runs the hosted main thread; without it the owner works
 	// in their own agent through the add-on (D45).
 	MainAgent *mainAgentConfig     `json:"main_agent"`
@@ -123,6 +129,12 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	opts := []app.Option{app.WithNotifier(wake)}
 	if cfg.LeaseTTL > 0 {
 		opts = append(opts, app.WithLeaseTTL(time.Duration(cfg.LeaseTTL)))
+	}
+	if w := cfg.Queue.WaitPerHour; w != nil {
+		if *w < 0 {
+			return errors.New("queue.wait_per_hour must not be negative")
+		}
+		opts = append(opts, app.WithWaitPerHour(*w))
 	}
 	a := app.New(s, ids, time.Now, opts...)
 	if err := syncConfig(ctx, a, ids, cfg); err != nil {
