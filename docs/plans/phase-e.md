@@ -51,12 +51,17 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
 
 ## 3. orca 工作区（E3）
 
-- **仓库映射**：runner 配置 `repos.<repo>.orca`，写 orca 里的仓库（`id:` 或 `path:` 选择器）。tend 不在 orca 里登记新仓库（orca 没有移除仓库的 CLI），由 owner 事先加入 orca。
-- **建工作区**：实现 run 第一次 Prepare 时，`orca worktree create --repo … --name <工作区名> --base-branch <基点> --no-parent --setup skip --json`。先按名字查找已有的 worktree，保证重试和续接是幂等的。基点按 spec 的 mount 解析：分支或 commit。
-- **工作区事实**：由返回的路径、`head`、分支生成 `WorkspaceReport`。按 D65，服务端在第一次报告时记录 orca 建出的分支，不再要求 `tend/<名字>`；之后同一工作区的报告必须一致。这是工作区的准备事实；产物照旧记录 worker 实际所在的分支和 HEAD，worker 换分支或 detach 仍按 D57 处理，不要求与这个分支一致。
-- **准备命令**：profile 的命令照常在 worktree 里执行（D35）。
-- **收集和验收**：读取 HEAD、未提交改动的快照、验收前的位置核对，和 gitws 相同，抽成共用代码（先做一个纯重构提交）。
-- **清理**：和 gitws 相同的时机；删除时用 `orca worktree rm`，只删 tend 建的 worktree。
+- **仓库映射**：runner 配置 `repos.<repo>.orca`，写 orca 里的仓库选择器（`id:`、`name:` 或 `path:`）；runner 用 `orca repo show` 得到它的本地路径。tend 不在 orca 里登记新仓库（orca 没有移除仓库的 CLI），由 owner 事先加入 orca。
+- **实现方式**：orca 是 gitws 的另一种布局，不是另一个包。gitws 现在假定工作区根目录下每个 mount 一个子目录、状态放在根目录的 `.tend/`；先做一个纯重构提交，把“worker 从哪里开始”“mount 在哪里”“状态放在哪里”“新 mount 怎么建出来”抽成布局，读取、快照、验收前核对和准备命令都只经过布局拿目录。现有布局（runner 自己的 bare clone 加 git worktree）行为不变。
+- **orca 布局**：
+  - 只接受单个 mount（E1 已保证）。worker 从 orca worktree 的根目录开始；状态放在 `$TEND_HOME/workspaces/<工作区名>/.tend/`，不写进 worktree；不写工作区根目录的 `AGENTS.md`（worktree 就是仓库本身，仓库自己的 `AGENTS.md` 照常生效）。原来 `AGENTS.md` 里关于基点和规则的说明改由 `Prepared.Guide` 带给 worker，E5 放进 brief。
+  - **建 mount**：先在 owner 的仓库里 `git fetch --prune origin`，用同一个 `ResolveBase` 把 spec 的基点解析成 commit（D36），再 `orca worktree create --repo … --name <工作区名> --base-branch <sha> --no-parent --setup skip`（已验证 `--base-branch` 接受 sha）。
+  - **幂等**：orca 对重名不报错，而是建出 `<名字>-2`。所以建之前先按显示名找已有的 worktree：找到一个就接着用（上一次建好后没来得及保存状态），找到多个时失败并说明，交给 owner。worktree 的路径记进状态。
+  - **工作区事实**：路径、`head`、去掉 `refs/heads/` 的分支。按 D65，服务端在第一次报告时记录 orca 建出的分支，不再要求 `tend/<名字>`；之后同一工作区的报告必须一致。这是工作区的准备事实；产物照旧记录 worker 实际所在的分支和 HEAD，worker 换分支或 detach 仍按 D57 处理。
+  - 产物的提交照旧用 `refs/tend/runs/…` 保持可达；对 orca 来说这些 ref 在 owner 的仓库里。
+- **准备命令**：mount 的 profile 在 worktree 里执行；工作区级的 profile 也在 worktree 里执行（单仓库时两者是同一个目录）。
+- **清理**：和 gitws 相同：任务的工作区不由 runner 删除，只删除验收用的 scratch 目录。`orca worktree rm` 留给以后的工作区清理。
+- **启用**：runner 配置 `worker.kind: orca` 选择这个布局；在 E5 的 TUI worker 落地前，runner 仍拒绝 `orca`。
 
 ## 4. worker 的 MCP 桥（E4）
 
@@ -134,7 +139,7 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
 | --- | --- | --- |
 | 1 | `feat: declare each host's worker and let its capabilities shape tend` | E1（D64） |
 | 2 | `feat: add an orca CLI client` | E2 |
-| 3 | `refactor: share workspace reading between providers` | E3 的前置重构 |
+| 3 | `refactor: route workspace paths through a layout` | E3 的前置重构 |
 | 4 | `feat: build single-repository workspaces in orca` | E3（D65） |
 | 5 | `feat: let workers deliver through a runner-local MCP bridge` | E4（D66） |
 | 6 | `feat: run agent TUI workers in orca` | E5（D66） |
