@@ -42,6 +42,27 @@ func RunStarted(t Task, r RunFact) Decision {
 	return Decision{Task: t, Events: []EventDraft{{Kind: "run.started", Body: body}}}
 }
 
+// TakenOver records that the owner took over a run's agent (D67). The task
+// of a current run (its implement generation, or the artifact under
+// acceptance) passes to human control, which holds its runs until the
+// owner hands it back; a stale run's takeover is only recorded.
+func TakenOver(t Task, r RunFact, reason string) Decision {
+	body := map[string]any{"run_id": r.RunID, "role": r.Role, "reason": reason}
+	current := currentImplement(t, r)
+	if r.Role == protocol.RoleAccept {
+		current = r.SpecVersion == t.SpecVersion && r.ArtifactID == t.CurrentArtifactID && t.Lifecycle == protocol.TaskAwaitingAcceptance
+	}
+	if t.Lifecycle.Terminal() || !current {
+		return Decision{Task: t, Events: []EventDraft{staleEvent("task.taken_over", body)}}
+	}
+	if t.Control == protocol.ControlHumanControl {
+		return Decision{Task: t}
+	}
+	t.Control = protocol.ControlHumanControl
+	t.ControlRevision++
+	return Decision{Task: t, Events: []EventDraft{{Kind: "task.taken_over", Body: body}}}
+}
+
 // ArtifactSubmitted records an artifact produced by an implement run. When
 // it belongs to the current spec version and generation, the task awaits
 // acceptance and an independent acceptance action is derived.

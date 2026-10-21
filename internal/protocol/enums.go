@@ -116,11 +116,14 @@ const (
 	DesiredRun     RunDesired = "run"
 	DesiredPaused  RunDesired = "paused"
 	DesiredStopped RunDesired = "stopped"
+	// DesiredHeld is a run the owner has taken over (D67): its worker
+	// leaves the agent to them, untouched, and waits.
+	DesiredHeld RunDesired = "held"
 )
 
 // Valid reports whether d is a known desired state.
 func (d RunDesired) Valid() bool {
-	return d == DesiredRun || d == DesiredPaused || d == DesiredStopped
+	return d == DesiredRun || d == DesiredPaused || d == DesiredStopped || d == DesiredHeld
 }
 
 // MessageState is how far the main agent got with an owner message.

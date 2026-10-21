@@ -91,8 +91,8 @@ func checkWorker(ctx context.Context, x *Exec, q store.Querier) error {
 }
 
 // desiredFor derives what tend wants a run to do from the current ledger:
-// work that no longer matches the task stops, and a task that is not
-// managed pauses its runs.
+// work that no longer matches the task stops, a task under human control
+// holds its runs, and a paused task pauses them.
 func desiredFor(run store.RunRow, action store.ActionRow, task store.TaskRow) protocol.RunDesired {
 	switch {
 	case run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed,
@@ -100,6 +100,8 @@ func desiredFor(run store.RunRow, action store.ActionRow, task store.TaskRow) pr
 		action.Status == protocol.ActionCancelled || action.Status == protocol.ActionSuperseded,
 		action.TargetSpecVersion != task.SpecVersion:
 		return protocol.DesiredStopped
+	case task.ControlMode == protocol.ControlHumanControl:
+		return protocol.DesiredHeld
 	case task.ControlMode != protocol.ControlManaged:
 		return protocol.DesiredPaused
 	}

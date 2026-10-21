@@ -199,7 +199,15 @@ const (
 	// OpRunsRelease gives up a run that will not produce a result, for
 	// example after a stop verdict. The run ends as failed.
 	OpRunsRelease = "runs.release"
+	// OpRunsReportTakeover reports that the owner took over the run's
+	// agent (D67).
+	OpRunsReportTakeover = "runs.report_takeover"
 )
+
+// TakeoverPayload says how the runner noticed a takeover.
+type TakeoverPayload struct {
+	Reason string `json:"reason"`
+}
 
 // ArtifactPayload submits the result of an implement run: the commit of
 // every mount of the workspace, changed or not, so acceptance can rebuild

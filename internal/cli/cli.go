@@ -98,6 +98,7 @@ Owner commands:
   retry <task_id> --kind implement|accept
   rate <task_id> <p0|p1|p2|p3>     rate a task: urgent, high, normal or low
   pause|resume|cancel <task_id>
+  takeover <task_id>               work in the task's agent yourself; resume hands it back
 
 Agent add-on:
   setup <claude|codex|traex> [--write]   show or write the agent's configuration
@@ -122,7 +123,7 @@ func Main(ctx context.Context, e *Env, args []string) int {
 		return report(e, runLogin(ctx, e, rest))
 	case "setup":
 		return report(e, runSetup(ctx, e, rest))
-	case "status", "task", "logs", "decide", "retry", "rate", "pause", "resume", "cancel":
+	case "status", "task", "logs", "decide", "retry", "rate", "pause", "resume", "cancel", "takeover":
 		return report(e, runOwner(ctx, e, cmd, rest))
 	case "help", "-h", "--help":
 		fmt.Fprint(e.Stdout, usage)

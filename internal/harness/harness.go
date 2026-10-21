@@ -42,6 +42,13 @@ type WorkerSpec struct {
 	// recorded before any work happens in it, and again whenever the
 	// harness changes it. An error stops the worker from starting.
 	OnThread func(threadID string) error
+	// OnTakeover, when set, is called when the worker notices that the
+	// owner works in its agent (D67). The worker then neither judges nor
+	// touches the agent until it is stopped, normally with ErrHeld.
+	OnTakeover func(reason string) error
+	// HandBack says the owner took the run's agent over and has handed
+	// it back: the worker tells the agent so before anything else.
+	HandBack bool
 }
 
 // WorkerEvent is a fact the worker produced, in the harness's own terms.
@@ -81,6 +88,9 @@ var (
 	ErrPaused = errors.New("the run is paused")
 	// ErrStopped stops a worker whose run tend no longer wants.
 	ErrStopped = errors.New("tend no longer wants the run")
+	// ErrHeld stops a worker whose run the owner has taken over (D67): an
+	// agent that outlives the worker is left to the owner untouched.
+	ErrHeld = errors.New("the owner has taken the run over")
 )
 
 // Releaser is implemented by Workers whose agents outlive the worker

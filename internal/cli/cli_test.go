@@ -518,6 +518,23 @@ func TestPauseUsesTheRevisionItRead(t *testing.T) {
 	}
 }
 
+func TestTakeoverTakesHumanControl(t *testing.T) {
+	f := newFakeServer(t)
+	f.answer("GET /api/v1/tasks/task_1", protocol.TaskDetail{TaskSummary: protocol.TaskSummary{TaskID: "task_1", ControlRevision: 2}})
+	f.answer("POST /api/v1/ops", protocol.APIResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
+	te := newTestEnv(t, f.srv.URL)
+	if code := te.main("takeover", "task_1"); code != exitOK {
+		t.Fatalf("takeover = %d: %s", code, te.errOut)
+	}
+	var env protocol.Envelope
+	var p protocol.SetControlModePayload
+	ops := f.seen("POST /api/v1/ops")
+	if len(ops) != 1 || json.Unmarshal(ops[0].body, &env) != nil || json.Unmarshal(env.Payload, &p) != nil ||
+		env.Operation != "control.set_mode" || p.Mode != protocol.ControlHumanControl || *env.ExpectedControlRevision != 2 {
+		t.Errorf("takeover sent %+v", env)
+	}
+}
+
 func TestStatusGroupsByProject(t *testing.T) {
 	f := newFakeServer(t)
 	all := protocol.Snapshot{

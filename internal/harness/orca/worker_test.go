@@ -590,7 +590,9 @@ func TestFault_ContinuationReplyLost(t *testing.T) {
 
 	// A later attempt replays a send an earlier one lost.
 	st := f.state()
-	st.Send, st.SendText, st.Interrupted = "req-1", f.orca.prompt("tab:1"), false
+	// It sent the continuation, lost the answer, then interrupted the
+	// agent as it stopped.
+	st.Send, st.SendText, st.Interrupted = "req-1", f.orca.prompt("tab:1"), true
 	b, _ := json.Marshal(st)
 	f.thread = string(b)
 	f.orca.interrupt("term_1")
@@ -673,4 +675,146 @@ func TestFault_LaunchLookupFails(t *testing.T) {
 	if err := f.ws.Release(context.Background(), "run_1", f.thread); err == nil {
 		t.Error("release succeeded without seeing orca")
 	}
+}
+
+// owner types into the agent's terminal as the owner would in orca.
+func (f *liveOrca) owner(handle string, args ...string) {
+	if _, err := f.exec(context.Background(), "", append([]string{"terminal", "send", "--terminal", handle}, args...)); err != nil {
+		panic(err)
+	}
+}
+
+func TestOrcaWorkerNoticesTheOwnersPrompt(t *testing.T) {
+	f := newWorkerFixture(t)
+	taken := make(chan string, 1)
+	spec := f.spec(protocol.RoleImplement)
+	spec.OnTakeover = func(reason string) error { taken <- reason; return nil }
+	ctx, cancel := context.WithCancelCause(context.Background())
+	w, events, drained := f.start(ctx, spec)
+	f.orca.owner("term_1", "--text", "use the other flag parser", "--enter")
+	if reason := <-taken; !strings.Contains(reason, "prompt tend did not give") {
+		t.Fatalf("reason = %q", reason)
+	}
+	// The owner's turn ends: that is not the worker's to judge.
+	f.orca.finish("term_1", "switched parsers")
+	cancel(fmt.Errorf("runner: %w", harness.ErrHeld))
+	if _, err := w.Wait(); !errors.Is(err, harness.ErrHeld) {
+		t.Fatalf("wait = %v, want held", err)
+	}
+	<-drained
+	if !slices.Contains(kinds(*events), "worker.taken_over") || slices.Contains(kinds(*events), "turn.completed") {
+		t.Errorf("events = %q", kinds(*events))
+	}
+	if n := f.orca.count("terminal send", func(c []string) bool { return flag(c, "--text") == esc }); n != 0 || f.orca.count("terminal close", nil) != 0 {
+		t.Fatalf("%d escapes, %d closes; want the agent left to the owner", n, f.orca.count("terminal close", nil))
+	}
+	// tend resume: the agent gets the hand-back turn and finishes.
+	spec = f.spec(protocol.RoleImplement)
+	spec.HandBack = true
+	w, _, drained = f.start(context.Background(), spec)
+	if p := f.orca.prompt("tab:1"); !strings.Contains(p, "handed the task back") {
+		t.Fatalf("prompt = %q, want the hand-back", p)
+	}
+	f.orca.finish("term_1", "finished with the owner's parser")
+	if res, err := w.Wait(); err != nil || res.Summary != "finished with the owner's parser" {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	<-drained
+}
+
+func TestOrcaWorkerNoticesTheOwnersInterruption(t *testing.T) {
+	f := newWorkerFixture(t)
+	taken := make(chan string, 1)
+	spec := f.spec(protocol.RoleImplement)
+	spec.OnTakeover = func(reason string) error { taken <- reason; return nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	w, _, drained := f.start(ctx, spec)
+	f.orca.owner("term_1", "--text", esc)
+	if reason := <-taken; !strings.Contains(reason, "interrupted") {
+		t.Fatalf("reason = %q", reason)
+	}
+	// Even a shutdown leaves a taken-over agent alone.
+	cancel()
+	w.Wait()
+	<-drained
+	if n := f.orca.count("terminal send", func(c []string) bool { return flag(c, "--text") == esc }); n != 1 {
+		t.Errorf("%d escapes, want only the owner's", n)
+	}
+}
+
+func TestOrcaWorkerNoticesATakeoverWhilePaused(t *testing.T) {
+	f := newWorkerFixture(t)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	w, _, drained := f.start(ctx, f.spec(protocol.RoleImplement))
+	cancel(fmt.Errorf("runner: %w", harness.ErrPaused))
+	w.Wait()
+	<-drained
+	// While paused, the owner works in the agent; then resumes the task.
+	f.orca.owner("term_1", "--text", "look at the failing test first", "--enter")
+	taken := make(chan string, 1)
+	spec := f.spec(protocol.RoleImplement)
+	spec.OnTakeover = func(reason string) error { taken <- reason; return nil }
+	ctx, cancel = context.WithCancelCause(context.Background())
+	w, _, drained = f.start(ctx, spec)
+	<-taken
+	if p := f.orca.prompt("tab:1"); p != "look at the failing test first" {
+		t.Errorf("prompt = %q, want the owner's left alone", p)
+	}
+	cancel(fmt.Errorf("runner: %w", harness.ErrHeld))
+	w.Wait()
+	<-drained
+}
+
+func TestOrcaWorkerHandsBackAfterAPendingTurn(t *testing.T) {
+	f := newWorkerFixture(t)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	w, _, drained := f.start(ctx, f.spec(protocol.RoleImplement))
+	cancel(fmt.Errorf("runner: %w", harness.ErrHeld))
+	w.Wait()
+	<-drained
+	// A continuation's answer was lost before the owner took over.
+	st := f.state()
+	st.Send, st.SendText = "req-1", "go on"
+	b, _ := json.Marshal(st)
+	f.thread = string(b)
+	spec := f.spec(protocol.RoleImplement)
+	spec.HandBack = true
+	w, _, drained = f.start(context.Background(), spec)
+	if n := f.orca.count("terminal send", func(c []string) bool { return flag(c, "--retry-request") == "req-1" }); n != 1 {
+		t.Errorf("%d replays, want the pending turn settled", n)
+	}
+	if p := f.orca.prompt("tab:1"); !strings.Contains(p, "handed the task back") {
+		t.Fatalf("prompt = %q, want the hand-back as its own turn", p)
+	}
+	f.orca.finish("term_1", "done")
+	w.Wait()
+	<-drained
+}
+
+func TestOrcaWorkerReplaysAPendingHandBackOnce(t *testing.T) {
+	f := newWorkerFixture(t)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	w, _, drained := f.start(ctx, f.spec(protocol.RoleImplement))
+	cancel(fmt.Errorf("runner: %w", harness.ErrHeld))
+	w.Wait()
+	<-drained
+	spec := f.spec(protocol.RoleImplement)
+	spec.HandBack = true
+	// The hand-back went out, but its answer was lost before the runner
+	// could clear the hold.
+	f.orca.owner("term_1", "--text", harness.HandBack(spec), "--enter")
+	st := f.state()
+	st.Send, st.SendText, st.Said = "req-1", harness.HandBack(spec), said(harness.HandBack(spec))
+	b, _ := json.Marshal(st)
+	f.thread = string(b)
+	spec = f.spec(protocol.RoleImplement)
+	spec.HandBack = true
+	sends := f.orca.count("terminal send", nil)
+	w, _, drained = f.start(context.Background(), spec)
+	if n := f.orca.count("terminal send", nil) - sends; n != 1 {
+		t.Errorf("%d sends, want only the replay of the hand-back", n)
+	}
+	f.orca.finish("term_1", "done")
+	w.Wait()
+	<-drained
 }

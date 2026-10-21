@@ -17,6 +17,9 @@ type WorkerScript struct {
 	// Gate, when set, holds the worker after its events until the gate is
 	// closed or the worker is stopped.
 	Gate <-chan struct{}
+	// Takeover, when set, is reported through OnTakeover after the
+	// events, as if the owner took the agent over.
+	Takeover string
 	// Thread is the thread the worker works in. By default it continues
 	// the spec's thread, or starts one named after the run and attempt.
 	Thread string
@@ -26,6 +29,9 @@ type WorkerScript struct {
 // does; it is called once per start.
 type Workers struct {
 	Script func(spec harness.WorkerSpec) WorkerScript
+	// AfterTakeover, when set, runs once a scripted takeover was
+	// reported.
+	AfterTakeover func()
 
 	mu       sync.Mutex
 	started  []harness.WorkerSpec
@@ -72,6 +78,11 @@ func (w *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.W
 				fw.err = ctx.Err()
 				w.recordStop(spec)
 				return
+			}
+		}
+		if script.Takeover != "" && spec.OnTakeover != nil {
+			if spec.OnTakeover(script.Takeover) == nil && w.AfterTakeover != nil {
+				w.AfterTakeover()
 			}
 		}
 		if script.Gate != nil {

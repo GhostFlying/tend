@@ -17,7 +17,7 @@ func APIEnums() []any {
 		[]Rating{RatingNone, RatingP0, RatingP1, RatingP2, RatingP3},
 		[]BlockReason{BlockNone, BlockWaitingResource, BlockWaitingDecision, BlockWaitingApproval, BlockAcceptanceEnvUnavailable, BlockBudgetExhausted, BlockWorkspaceUnavailable},
 		[]RunObserved{RunStarting, RunRunning, RunWaiting, RunFinished, RunFailed, RunInterrupted, RunUnknown},
-		[]RunDesired{DesiredRun, DesiredPaused, DesiredStopped},
+		[]RunDesired{DesiredRun, DesiredPaused, DesiredStopped, DesiredHeld},
 		[]MessageState{MessageQueued, MessageProcessing, MessageReplied, MessageInterrupted, MessageFailed, MessageUnknown},
 		[]RunRole{RoleImplement, RoleAccept},
 		[]ActionKind{ActionImplement, ActionAccept, ActionDeliver},

@@ -102,6 +102,43 @@ func (ReportRunStarted) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	return Outcome{Result: newTaskResult(d.Task, nil), Events: events}, nil
 }
 
+// ReportTakeover handles runs.report_takeover: the runner noticed the owner
+// working in the run's agent (D67). It is a fact, not an owner's request,
+// so it carries no control revision; the rules decide what it changes.
+type ReportTakeover struct{}
+
+// Operation implements Command.
+func (ReportTakeover) Operation() string { return protocol.OpRunsReportTakeover }
+
+// Authorize implements Command.
+func (ReportTakeover) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	if x.Principal.Kind != protocol.PrincipalRun || x.Principal.Subject != x.Env.Target.ID {
+		return protocol.Errorf(protocol.CodeForbidden, "only the run itself may report its takeover")
+	}
+	return nil
+}
+
+// Apply implements Command.
+func (ReportTakeover) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p protocol.TakeoverPayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	rc, err := loadRun(ctx, tx.Q(), x.Env.Target.ID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if rc.run.ObservedState == protocol.RunFinished || rc.run.ObservedState == protocol.RunFailed {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run is %s", rc.run.ObservedState)
+	}
+	d := domain.TakenOver(toDomain(rc.task, rc.spec.Budget()), rc.fact(), p.Reason)
+	_, events, err := applyDecision(ctx, x, tx, rc.task, d, nil)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Result: newTaskResult(d.Task, nil), Events: events}, nil
+}
+
 // SubmitArtifact handles runs.submit_artifact: an implement run reports
 // the commits it produced. The artifact covers every mount of the run's
 // workspace, changed or not, so acceptance can rebuild the combination.
