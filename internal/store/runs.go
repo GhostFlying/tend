@@ -23,10 +23,12 @@ type CandidateRow struct {
 	ImplementGeneration int64
 	CurrentArtifactID   string
 	Rating              protocol.Rating
-	DependenciesDone    bool
-	WorkspaceHost       string
-	WorkspaceOccupied   bool
-	SpecJSON            string
+	// Weight is the weight of the task's project.
+	Weight            int64
+	DependenciesDone  bool
+	WorkspaceHost     string
+	WorkspaceOccupied bool
+	SpecJSON          string
 }
 
 // ListClaimCandidates returns every pending implement or accept action.
@@ -36,6 +38,7 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		a.created_request_id, a.created_at,
 		t.lifecycle, t.control_mode, t.block_reason, t.spec_version, t.implement_generation,
 		COALESCE(t.current_artifact_id, ''), t.rating,
+		COALESCE((SELECT p.weight FROM projects p WHERE p.project = t.project), 1),
 		NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dt ON dt.task_id = d.depends_on
 			WHERE d.task_id = t.task_id AND dt.lifecycle <> 'completed'),
 		COALESCE((SELECT w.host_id FROM workspaces w WHERE w.task_id = t.task_id), ''),
@@ -56,7 +59,7 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		a := &c.Action
 		if err := rows.Scan(&a.ActionID, &a.TaskID, &a.Kind, &a.EffectKey, &a.TriggerJSON, &a.TargetSpecVersion, &artifact,
 			&a.AuthorizationJSON, &a.Generation, &a.Status, &commit, &a.CreatedRequestID, &a.CreatedAt,
-			&c.Lifecycle, &c.Control, &c.Block, &c.SpecVersion, &c.ImplementGeneration, &c.CurrentArtifactID, &c.Rating,
+			&c.Lifecycle, &c.Control, &c.Block, &c.SpecVersion, &c.ImplementGeneration, &c.CurrentArtifactID, &c.Rating, &c.Weight,
 			&c.DependenciesDone, &c.WorkspaceHost, &c.WorkspaceOccupied, &c.SpecJSON); err != nil {
 			return nil, fmt.Errorf("store: scan claim candidate: %w", err)
 		}

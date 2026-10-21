@@ -6,6 +6,7 @@ package scheduler
 import (
 	"cmp"
 	"slices"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -43,6 +44,8 @@ type Candidate struct {
 	ImplementGeneration int64
 	CurrentArtifactID   string
 	Rating              protocol.Rating
+	// Weight is the weight of the task's project (D60).
+	Weight int64
 	// DependenciesDone reports that every task this one depends on is
 	// completed.
 	DependenciesDone bool
@@ -103,9 +106,47 @@ func Skip(h Host, c Candidate) string {
 	return ""
 }
 
-// Pick returns the eligible candidate with the highest rating, oldest
-// first among equals. Running work is never preempted.
-func Pick(h Host, candidates []Candidate) (Candidate, bool) {
+// Order is how candidates are ranked against each other (D60).
+type Order struct {
+	// Now is the time, in Unix milliseconds, waiting is measured up to.
+	Now int64
+	// WaitPerHour is what an hour in the queue adds to a score.
+	WaitPerHour float64
+}
+
+// Score is a candidate's place in the queue apart from p0: its project's
+// weight times its rating's value, plus what its waiting time adds.
+func Score(c Candidate, o Order) float64 {
+	weight := max(c.Weight, 1)
+	waited := float64(max(o.Now-c.CreatedAt, 0)) / float64(time.Hour.Milliseconds())
+	return float64(weight*value(c.Rating)) + waited*o.WaitPerHour
+}
+
+// Compare orders two candidates, the one to run first first: p0 ahead of
+// everything, oldest first; then the higher score; among equal scores
+// acceptance before implementation, since it moves along a task that
+// already has a result, and then the older action.
+func Compare(a, b Candidate, o Order) int {
+	ap, bp := a.Rating == protocol.RatingP0, b.Rating == protocol.RatingP0
+	switch {
+	case ap && !bp:
+		return -1
+	case bp && !ap:
+		return 1
+	case !ap:
+		if c := cmp.Compare(Score(b, o), Score(a, o)); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(kindRank(a.Kind), kindRank(b.Kind)); c != 0 {
+			return c
+		}
+	}
+	return cmp.Or(cmp.Compare(a.CreatedAt, b.CreatedAt), cmp.Compare(a.ActionID, b.ActionID))
+}
+
+// Pick returns the eligible candidate that comes first in the order.
+// Running work is never preempted.
+func Pick(h Host, candidates []Candidate, o Order) (Candidate, bool) {
 	var eligible []Candidate
 	for _, c := range candidates {
 		if Skip(h, c) == "" {
@@ -116,20 +157,26 @@ func Pick(h Host, candidates []Candidate) (Candidate, bool) {
 		return Candidate{}, false
 	}
 	return slices.MinFunc(eligible, func(a, b Candidate) int {
-		return cmp.Or(cmp.Compare(rank(a.Rating), rank(b.Rating)), cmp.Compare(a.CreatedAt, b.CreatedAt), cmp.Compare(a.ActionID, b.ActionID))
+		return Compare(a, b, o)
 	}), true
 }
 
-// rank orders ratings, most wanted first; an unrated task queues as p2
-// (D60).
-func rank(r protocol.Rating) int {
-	switch r {
-	case protocol.RatingP0:
+// kindRank puts acceptance ahead of implementation.
+func kindRank(k protocol.ActionKind) int {
+	if k == protocol.ActionAccept {
 		return 0
+	}
+	return 1
+}
+
+// value is what a rating is worth in a score; an unrated task counts as
+// p2 (D60). p0 is ordered ahead of scores and has no value of its own.
+func value(r protocol.Rating) int64 {
+	switch r {
 	case protocol.RatingP1:
-		return 1
-	case protocol.RatingP3:
 		return 3
+	case protocol.RatingP3:
+		return 1
 	}
 	return 2
 }

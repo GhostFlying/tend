@@ -21,6 +21,12 @@
 
   "lease_ttl": "60s",
 
+  // Queued work is claimed p0 first, then by score: project weight times
+  // the rating (p1 3, p2 2, p3 1; unrated as p2), plus this much for every
+  // hour in the queue (D60). The default, 0.1, makes ten hours of waiting
+  // worth one rating step at weight 1.
+  "queue": {"wait_per_hour": 0.1},
+
   // The main agent is the agent you work in, connected with `tend setup`.
   // "main_agent" runs a hosted one instead, which is not developed for
   // now (D45); with it, the owner API also accepts conversation messages.

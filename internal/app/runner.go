@@ -24,6 +24,16 @@ func WithLeaseTTL(d time.Duration) Option {
 	return func(a *App) { a.leaseTTL = d }
 }
 
+// DefaultWaitPerHour is what an hour in the queue adds to an action's
+// score: with weight 1, ten hours make up one rating step (D60).
+const DefaultWaitPerHour = 0.1
+
+// WithWaitPerHour sets what an hour in the queue adds to an action's
+// score.
+func WithWaitPerHour(w float64) Option {
+	return func(a *App) { a.waitPer = w }
+}
+
 // LeaseTTL returns the lease duration of claimed runs.
 func (a *App) LeaseTTL() time.Duration { return a.leaseTTL }
 
@@ -186,14 +196,14 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			Generation: r.Action.Generation, TargetSpecVersion: r.Action.TargetSpecVersion,
 			TargetArtifactID: r.Action.TargetArtifactID, CreatedAt: r.Action.CreatedAt,
 			Lifecycle: r.Lifecycle, Control: r.Control, Block: r.Block, SpecVersion: r.SpecVersion,
-			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Rating: r.Rating,
+			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Rating: r.Rating, Weight: r.Weight,
 			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(),
 			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied,
 		})
 	}
 	pick, ok := scheduler.Pick(scheduler.Host{
 		ID: host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
-	}, candidates)
+	}, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
 	}

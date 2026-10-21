@@ -73,6 +73,7 @@ func TestSkipRules(t *testing.T) {
 }
 
 func TestPickOrder(t *testing.T) {
+	o := Order{Now: 1000, WaitPerHour: 0.1}
 	low, high, older, sameOlderID := implement(), implement(), implement(), implement()
 	low, unrated := implement(), implement()
 	low.ActionID, low.Rating, low.CreatedAt = "act_low", protocol.RatingP3, 1
@@ -83,14 +84,58 @@ func TestPickOrder(t *testing.T) {
 	blocked := implement()
 	blocked.ActionID, blocked.Rating, blocked.Block = "act_blocked", protocol.RatingP0, protocol.BlockWaitingDecision
 
-	got, ok := Pick(linux, []Candidate{low, high, older, blocked, sameOlderID, unrated})
+	got, ok := Pick(linux, []Candidate{low, high, older, blocked, sameOlderID, unrated}, o)
 	if !ok || got.ActionID != "act_high_aaa" {
 		t.Errorf("Pick = %s (ok=%v), want act_high_aaa", got.ActionID, ok)
 	}
-	if _, ok := Pick(linux, []Candidate{blocked}); ok {
+	if _, ok := Pick(linux, []Candidate{blocked}, o); ok {
 		t.Error("Pick returned an ineligible candidate")
 	}
-	if _, ok := Pick(linux, nil); ok {
+	if _, ok := Pick(linux, nil, o); ok {
 		t.Error("Pick returned a candidate from nothing")
+	}
+}
+
+// TestScoreOrder walks through the examples of the phase D plan (§6).
+func TestScoreOrder(t *testing.T) {
+	const hour = int64(3_600_000)
+	o := Order{Now: 100 * hour, WaitPerHour: 0.1}
+	queued := func(id string, weight int64, r protocol.Rating, waited int64) Candidate {
+		c := implement()
+		c.ActionID, c.Weight, c.Rating, c.CreatedAt = id, weight, r, o.Now-waited
+		return c
+	}
+	cases := []struct {
+		name  string
+		order Order
+		a, b  Candidate
+		want  string
+	}{
+		{"weight multiplies the rating", o, queued("a", 3, protocol.RatingP3, 0), queued("b", 1, protocol.RatingP2, 0), "a"},
+		{"waiting raises a score", o, queued("a", 3, protocol.RatingP3, 0), queued("b", 1, protocol.RatingP2, 11*hour), "b"},
+		{"unrated counts as p2", o, queued("a", 1, protocol.RatingP2, 0), queued("b", 1, protocol.RatingNone, hour), "b"},
+		{"p0 comes first", o, queued("a", 9, protocol.RatingP1, 50*hour), queued("b", 1, protocol.RatingP0, 0), "b"},
+		{"older p0 first", o, queued("a", 1, protocol.RatingP0, 0), queued("b", 9, protocol.RatingP0, hour), "b"},
+		// Without aging, equal scores go by waiting time.
+		{"equal scores, older first", Order{Now: o.Now}, queued("a", 3, protocol.RatingP3, 0), queued("b", 1, protocol.RatingP1, hour), "b"},
+		{"same score and age", o, queued("b", 3, protocol.RatingP3, 0), queued("a", 1, protocol.RatingP1, 0), "a"},
+	}
+	for _, tc := range cases {
+		got := tc.b.ActionID
+		if Compare(tc.a, tc.b, tc.order) < 0 {
+			got = tc.a.ActionID
+		}
+		if got != tc.want {
+			t.Errorf("%s: %s first (scores %.2f, %.2f), want %s", tc.name, got, Score(tc.a, tc.order), Score(tc.b, tc.order), tc.want)
+		}
+		if Compare(tc.a, tc.b, tc.order) != -Compare(tc.b, tc.a, tc.order) {
+			t.Errorf("%s: Compare is not antisymmetric", tc.name)
+		}
+	}
+	// Among equal scores, acceptance moves a task along first.
+	impl, acc := queued("act_0", 1, protocol.RatingP2, hour), accept()
+	acc.Weight, acc.CreatedAt = 1, impl.CreatedAt+1
+	if Compare(acc, impl, Order{Now: o.Now}) >= 0 {
+		t.Error("equal scores: implementation before acceptance")
 	}
 }

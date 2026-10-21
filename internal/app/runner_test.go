@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -566,5 +567,29 @@ func TestResumedInterruptedRunDeliversResult(t *testing.T) {
 	}
 	if op := h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(res.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatalf("artifact from the resumed run: %+v", op.Error)
+	}
+}
+
+func TestClaimOrdersByScore(t *testing.T) {
+	h := newHarness(t)
+	h.syncConfig(withProjects())
+	create := func(title, project string, r protocol.Rating) string {
+		_, res := h.createTask(owner, createTaskPayload{Title: title, Spec: testSpec, Project: project, Rating: r, WorkspaceName: title})
+		h.clock.Advance(time.Hour)
+		return res.TaskID
+	}
+	create("older", "tend", protocol.RatingP2)               // 2 + 0.3 by the claims
+	weighty := create("weighty", "video", protocol.RatingP3) // 3 × 1 + 0.2
+	urgent := create("urgent", "tend", protocol.RatingP0)
+	var got []string
+	for range 2 {
+		as, ok, _ := h.claim("linux-1")
+		if !ok {
+			t.Fatal("nothing claimed")
+		}
+		got = append(got, as.TaskID)
+	}
+	if want := []string{urgent, weighty}; !slices.Equal(got, want) {
+		t.Errorf("claimed %v, want %v", got, want)
 	}
 }
