@@ -191,6 +191,15 @@ func (c *Client) Worktrees(ctx context.Context, repo string) ([]Worktree, error)
 	return res.Worktrees, nil
 }
 
+// Worktree returns the worktree a selector such as path:<dir> names.
+func (c *Client) Worktree(ctx context.Context, selector string) (Worktree, error) {
+	var res struct {
+		Worktree Worktree `json:"worktree"`
+	}
+	err := c.call(ctx, "", &res, "worktree", "show", "--worktree", selector)
+	return res.Worktree, err
+}
+
 // CreateWorktree describes a new worktree.
 type CreateWorktree struct {
 	// Repo is the repository selector, such as id:<repoId>.
@@ -370,7 +379,12 @@ type Terminal struct {
 	Handle     string `json:"handle"`
 	WorktreeID string `json:"worktreeId"`
 	Connected  bool   `json:"connected"`
+	TabID      string `json:"tabId"`
+	LeafID     string `json:"leafId"`
 }
+
+// PaneKey is the key orca's agents name their terminal by.
+func (t Terminal) PaneKey() string { return t.TabID + ":" + t.LeafID }
 
 // Terminals lists the live terminals of a worktree.
 func (c *Client) Terminals(ctx context.Context, worktree string) ([]Terminal, error) {

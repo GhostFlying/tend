@@ -77,22 +77,32 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
 
 ## 5. orca 的 TUI worker（E5）
 
-- **启动**：`orca agent launch --agent <codex|trae> --worktree id:… --prompt <brief> [--model … --effort …] --json`。模型和推理强度来自 runner 配置。
-  - 启动前先在 journal 记下这次启动（尝试编号和写进 brief 的一个随机标记）。CLI 报告回执丢失时，错误里带 `operationId`，记下后用 `--retry-launch` 重放，不重新启动。
-  - runner 在启动途中退出、没拿到 `operationId` 时，不直接重新启动：先在这个 worktree 的 agent 里找带这个标记的那一个，找到就接上；找不到时这次启动的结果未知（约束 4），稍等后再查一次，仍没有才重新启动，之后若又出现带旧标记的 agent，关闭它的终端。
-  - 返回的终端 handle 记进 journal，作为这次尝试的标识（类似 D61 的 thread）。
-  - **必须是终端**：orca 在 Chat UI 打开时会以 chat 启动（`outcome.kind` 不是终端）。runner 检查启动结果，不是终端时关闭它，run 以明确的错误失败，提示在这台 host 的 orca 里为该 agent 关闭 Chat UI。部署文档把这列为前提。
-- **一轮结束**：
-  - Codex：`terminal wait --for tui-idle`；
-  - traex：同样（orca fork 的上游已修复）；
-  - orca 的 agent 状态（`worktree ps` 的 `done`）作为第二个依据。
-  - 实现 run 的一轮结束后，runner 照常收集产物；验收 run 以 `submit_verdict` 的调用为准，一轮结束仍没有结论时记为 inconclusive，和现在相同。
-- **日志**：上传 agent 状态的变化、每一轮的提示和最后一条回复（§9 的选择 3）。
-- **中断与续接**：
-  - 暂停时发 Esc 中断当前一轮、保留终端，恢复时发一轮继续的说明（§9 的选择 2）；
-  - 下一次尝试优先续接原来的 agent 会话（orca 有 agent 的 resume 记录，实现时核对），不能续接时启动新的 agent，带 D61 的“之前被中断”的说明。
-- **停止**：run 取消时关闭 tend 启动的那个终端（`terminal close --terminal <handle>`），不动 worktree 里其他人的终端。
-- **信任**：traex 的目录信任由 orca fork 处理（owner 确认上游已修复），实现时在集成测试里确认不会停在确认上。
+`internal/harness/orca` 的 `Workers` 实现 `harness.Workers`；runner 配置 `worker.kind: orca` 时使用它和 `gitws.NewOrca`，`worker.agent` 选 codex 或 traex（orca 里叫 `codex`、`trae`），`model`、`effort` 可选，每个仓库用 `repos.<name>.orca` 指明 orca 里的登记。
+
+- **worker 的状态**：agent 活在 orca 里，比 worker 活得长。worker 把找到它所需的东西作为 run 的 thread 记进 journal（D61 的 thread 由此变成 harness 自己的状态，`OnThread` 可以多次调用）：启动标记和发起时间、回执丢失时的 `operationId`、终端 handle 和 pane key、tend 最近一轮的开始时间。traex 的 thread ID 解析不了，视为没有状态，重新开始。
+- **启动**：`orca agent launch --agent <codex|trae> --worktree id:… --prompt <brief> [--model … --effort …]`。
+  - 先在 journal 记下标记（写在 brief 开头）和发起时间，再启动。CLI 报告回执丢失时记下 `operationId`，用 `--retry-launch` 重放，不重新启动。
+  - 有标记而没有终端和 `operationId`（runner 在启动途中退出）时，按标记在这个 worktree 的 agent 里找；在发起后的 settle 时间（默认 2 分钟）内一直找不到，才换新标记重新启动（约束 4）；读不到 orca 不算找不到，这次尝试失败，启动保持未知。
+  - orca 明确拒绝时清掉标记；结果无法确认时保留，下一次尝试按上面处理。
+  - **必须是终端**：结果不是终端时关闭它，run 以明确的错误失败，提示在这台 host 的 orca 里为该 agent 关闭 Chat UI。
+  - TUI 没有单独的 developer instructions，角色说明放在 brief 前面。agent 在仓库的 worktree 里启动，brief 用 gitws 给出的 `Guide` 描述工作区（D65），不提 AGENTS.md。
+- **续接**：下一次尝试时终端还在：
+  - agent 还在 tend 的那一轮里（working），只等它结束，不发新的输入；
+  - 这一轮已经在 worker 不在时结束（done、没有被中断、晚于这一轮的开始），实现 run 直接当作结束；验收 run 的结论只在上一个 worker 的内存里，不当作结束，发一轮继续的说明请它重新调用 `submit_verdict`；
+  - 否则发 `harness.Continuation`（`terminal send --enter --wait-submit`）。回执丢失时把 orca 的请求 ID 和这一轮的文本记进 journal，用 `--retry-request` 和原来的文本重放，下一次尝试也先重放它，不发新的一轮；重放沿用原来这一轮的开始时间和中断标记。
+  - tend 发 Esc 前先在 journal 记下“已中断、未续接”；orca 晚些才报告中断时（续接时还显示 working），等到它报告 done 且被中断，再发继续的说明。
+  - 终端不在了就启动新的 agent，带完整 brief 和“之前被中断”的说明。
+- **一轮结束**：`terminal wait --for tui-idle`（分段等待；一段内没等到时 orca 回 `timeout` 错误，不算读取失败），并且 `worktree ps` 里这个 pane 的 agent 是 done、没有被中断、状态开始于这一轮之后。waiting、blocked 不算结束（等人处理，E6 会把它们和接管联系起来），orca 立即返回时按轮询间隔再看；被中断的一轮也不算。终端消失或 agent 退出时 run 失败；连续多次读 orca 失败时 run 失败。
+  - 实现 run 结束时照常收集产物；验收 run 以经 MCP 桥的 `submit_verdict` 为准。结论只在这个 worker 的内存里，接上的一轮可能已经把结论交给了之前的 worker，所以一轮结束仍没有结论时先发一轮提醒（`harness.VerdictReminder`）请它重新调用，仍没有才记为 inconclusive。
+- **日志**：`turn.started`（提示）、`agent.state`（状态变化）、`turn.completed`（最后一条回复）。完整过程在 orca 里看。
+- **中断与停止**：worker 的 context 结束时按原因处理：
+  - `harness.ErrStopped`（tend 不再需要这个 run）关闭 tend 启动的那个终端，不动 worktree 里其他人的终端；
+  - 启动的回执还没到就被停下时，先按标记找一会儿（最多 10 秒），找到就按下面处理。
+  - 其他原因（暂停、fencing、runner 退出）发 Esc（原始字节，不带回车；orca 的 `--interrupt` 发的是 Ctrl-C，会让 Codex 退出）中断这一轮、保留终端，下一次尝试按上面续接。
+  - 正常结束时终端保留，owner 可以在 orca 里查看；worktree 随任务保留（D65）。
+  - **释放**：runner 放弃一个没有结果的 run（取消、失败、hello 时被 tend 停掉）时，在发出 release 之前调用 harness 的 `Releaser`：按 journal 里的状态关闭这个 run 的终端（只有标记时按标记找，等到这次启动的 settle 时间过去）。这样暂停后取消、worker 失败等没有 worker 在跑的情况也不会留下继续写工作区的 agent；关闭失败只记日志，release 照常发出。
+- **MCP 桥**：每次尝试开 socket、写配置（E4），结束时关闭并删除，Esc 后的 agent 在下一次尝试重新写入状态后接上。
+- **信任**：traex 的目录信任由 orca fork 处理（owner 确认上游已修复），E7 在真机上确认不会停在确认上；Esc 的效果、`worktree show` 和 agent 状态的取值同样在 E7 核对。
 
 ## 6. 人工接管（E6）
 

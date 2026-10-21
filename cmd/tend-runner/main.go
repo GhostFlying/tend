@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
+	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/bridge"
+	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -52,14 +54,19 @@ type config struct {
 		Hostname  string `json:"hostname"`
 		Ephemeral bool   `json:"ephemeral"`
 	} `json:"tailnet"`
-	// Worker uses the machine's traex and its own configuration (D38);
-	// Model only overrides the default model. Kind must be the worker
-	// the server's configuration names for this host (D64); default
-	// appserver.
+	// Worker uses the machine's agent and its own configuration (D38);
+	// Model and Effort only override the defaults. Kind must be the
+	// worker the server's configuration names for this host (D64);
+	// default appserver, which runs traex's app-server. orca runs Agent,
+	// codex or traex, as a TUI in orca (D66); OrcaBin defaults to orca on
+	// PATH.
 	Worker struct {
 		Kind     protocol.WorkerKind `json:"kind"`
 		TraexBin string              `json:"traex_bin"`
+		Agent    protocol.AgentKind  `json:"agent"`
+		OrcaBin  string              `json:"orca_bin"`
 		Model    string              `json:"model"`
+		Effort   string              `json:"effort"`
 	} `json:"worker"`
 	Git struct {
 		Bin string   `json:"bin"`
@@ -68,6 +75,9 @@ type config struct {
 	Repos map[string]struct {
 		Reference string             `json:"reference"`
 		Profiles  map[string]profile `json:"profiles"`
+		// Orca selects the repository registered in orca, such as
+		// name:<name>; the orca worker needs it (D65).
+		Orca string `json:"orca"`
 	} `json:"repos"`
 	Profiles map[string]profile `json:"profiles"`
 }
@@ -129,7 +139,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if cfg.Worker.Kind == "" {
 		cfg.Worker.Kind = protocol.WorkerAppServer
 	}
-	if cfg.Worker.Kind != protocol.WorkerAppServer {
+	if !cfg.Worker.Kind.Valid() {
 		return fmt.Errorf("worker kind %q is not supported by this runner", cfg.Worker.Kind)
 	}
 	home, err := cfgfile.Path(cfg.Home)
@@ -170,18 +180,46 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		for pn, p := range r.Profiles {
 			profiles[pn] = p.gitws()
 		}
-		repos[name] = gitws.Repo{Reference: ref, Profiles: profiles}
+		repos[name] = gitws.Repo{Reference: ref, Profiles: profiles, Orca: r.Orca}
 	}
 	profiles := map[string]gitws.Profile{}
 	for pn, p := range cfg.Profiles {
 		profiles[pn] = p.gitws()
 	}
+	ids := protocol.NewULIDGen(time.Now, nil)
+	wsCfg := gitws.Config{Home: home, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
+	var (
+		workers    harness.Workers
+		workspaces runner.Workspaces
+	)
+	switch cfg.Worker.Kind {
+	case protocol.WorkerOrca:
+		if cfg.Worker.Agent != protocol.AgentCodex && cfg.Worker.Agent != protocol.AgentTraex {
+			return fmt.Errorf("worker.agent must be codex or traex for the orca worker, not %q", cfg.Worker.Agent)
+		}
+		for name, r := range repos {
+			if r.Orca == "" {
+				return fmt.Errorf("repos.%s.orca is required for the orca worker", name)
+			}
+		}
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		oc := &orca.Client{Bin: cfg.Worker.OrcaBin}
+		workers = orca.NewWorkers(orca.WorkerOptions{
+			Client: oc, Agent: cfg.Worker.Agent, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort,
+			BridgeCommand: self, BridgeArgs: []string{workerMCP}, IDs: ids, Now: time.Now, Log: log,
+		})
+		workspaces = gitws.NewOrca(wsCfg, oc)
+	default:
+		workers = traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: cfg.Worker.TraexBin, Version: version, Log: log}, Model: cfg.Worker.Model})
+		workspaces = gitws.New(wsCfg)
+	}
 	r := runner.New(runner.Config{
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
-		Worker:     cfg.Worker.Kind,
-		Workers:    traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: cfg.Worker.TraexBin, Version: version, Log: log}, Model: cfg.Worker.Model}),
-		Workspaces: gitws.New(gitws.Config{Home: home, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}),
-		Now:        time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: log,
+		Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
+		Now: time.Now, IDs: ids, Log: log,
 	})
 	log.Info("tend-runner running", "host", cfg.HostID, "home", home)
 	return r.Run(ctx)
