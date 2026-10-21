@@ -67,6 +67,11 @@ type briefSpec struct {
 	Acceptance  []string `json:"acceptance"`
 }
 
+// VerdictReminder is the turn input for an acceptance worker that ended
+// its turn without a verdict tend received.
+const VerdictReminder = "tend did not receive a verdict from you. Call " + VerdictTool + " now with your verdict and evidence, " +
+	"even if you called it before: that call may have been lost. Do not repeat the review unless you have to."
+
 // Continuation is the turn input that continues a worker's thread after
 // its attempt was interrupted (D61). The thread holds the task and the
 // work so far, so it only says what happened.
@@ -103,6 +108,9 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 	}
 	common := "You work in " + spec.Dir + ". Its AGENTS.md describes the workspace: one sub-directory per repository. " +
 		"Read each repository's own AGENTS.md before working in it. Keep temporary files in " + spec.ScratchDir + ". "
+	if spec.Guide != "" {
+		common = "You work in " + spec.Dir + ".\n\n" + spec.Guide + "\nKeep temporary files in " + spec.ScratchDir + ". "
+	}
 	if spec.Role == protocol.RoleAccept {
 		instructions = "You are an independent reviewer for tend. " + common +
 			"The workspace is the task's own, holding the work to review exactly as submitted. Do not fix it: judge it. " +

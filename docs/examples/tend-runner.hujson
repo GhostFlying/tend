@@ -11,11 +11,18 @@
   // Workers use this machine's traex and its own configuration. kind must
   // be the worker the server configures for this host.
   "worker": {"kind": "appserver", "traex_bin": "traex"},
+  // Or an agent TUI in this machine's orca: agent is codex or traex, and
+  // each repository names its orca registration below. model and effort
+  // optionally override the agent's defaults; orca takes effort only with
+  // a model.
+  // "worker": {"kind": "orca", "agent": "codex"},
 
   "repos": {
     "tend": {
       // An existing clone to borrow objects from on the first clone.
       // "reference": "~/src/tend",
+      // With the orca worker: the repository as registered in orca.
+      // "orca": "name:tend",
       "profiles": {
         // A prepare step a mount can select, rerun when its inputs change.
         "deps": {"commands": [["go", "mod", "download"]], "rerun_if_changed": ["go.sum"], "timeout": "10m"},

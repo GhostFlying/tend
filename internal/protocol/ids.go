@@ -33,6 +33,10 @@ const (
 	PrefixLease      Prefix = "lse"
 	PrefixWorkspace  Prefix = "wsp"
 	PrefixPacket     Prefix = "pkt"
+	// Runner-local identifiers of a TUI worker (D66): the marker in a
+	// launch's brief, and the token of its tool bridge.
+	PrefixLaunch Prefix = "lch"
+	PrefixToken  Prefix = "tok"
 )
 
 // bodyLen is the length of the Crockford base32 body: 48 bits of milliseconds

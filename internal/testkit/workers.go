@@ -27,9 +27,27 @@ type WorkerScript struct {
 type Workers struct {
 	Script func(spec harness.WorkerSpec) WorkerScript
 
-	mu      sync.Mutex
-	started []harness.WorkerSpec
-	stopped []harness.WorkerSpec
+	mu       sync.Mutex
+	started  []harness.WorkerSpec
+	stopped  []harness.WorkerSpec
+	released []string
+}
+
+var _ harness.Releaser = (*Workers)(nil)
+
+// Release implements harness.Releaser and records the thread.
+func (w *Workers) Release(_ context.Context, _, thread string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.released = append(w.released, thread)
+	return nil
+}
+
+// Released returns the threads of the runs released so far.
+func (w *Workers) Released() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.released...)
 }
 
 // Start implements harness.Workers.

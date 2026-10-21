@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -659,6 +660,29 @@ func TestPauseStopsWorkerAndResumes(t *testing.T) {
 	if started := n.workers.Started(); started[1].Role != protocol.RoleImplement || started[1].Attempt != 2 ||
 		started[1].Thread != fmt.Sprintf("th_%s_1", started[0].RunID) {
 		t.Errorf("after resuming: %+v, want implementation attempt 2 continuing the first thread", started[1])
+	}
+}
+
+func TestCancelWhilePausedReleasesTheAgent(t *testing.T) {
+	srv := newServer(t, 400*time.Millisecond)
+	n := newNode(t, srv, func(harness.WorkerSpec) testkit.WorkerScript { return testkit.WorkerScript{Gate: make(chan struct{})} })
+	n.start()
+	task := srv.createTask()
+	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
+	srv.setMode(task, protocol.ControlPaused)
+	eventually(t, "the paused worker is stopped", func() bool { return len(n.workers.Stopped()) == 1 })
+	// No worker runs now; an agent that outlives it still must stop.
+	rev := srv.task(task).ControlRevision
+	b, _ := json.Marshal(map[string]any{})
+	env := &protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: "tasks.cancel",
+		Target: protocol.Target{Type: "task", ID: task}, ExpectedControlRevision: &rev, Payload: b}
+	if op, err := srv.app.Execute(context.Background(), owner, env, app.CancelTask{}); err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatalf("cancel: %+v, %v", op, err)
+	}
+	eventually(t, "the run is released", func() bool { return srv.runState(protocol.RoleImplement) == protocol.RunFailed })
+	run := n.workers.Started()[0].RunID
+	if got := n.workers.Released(); !slices.Equal(got, []string{fmt.Sprintf("th_%s_1", run)}) {
+		t.Errorf("released %q, want the run's thread", got)
 	}
 }
 

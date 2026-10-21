@@ -162,17 +162,16 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 	}
 	w, err := r.cfg.Workers.Start(runCtx, harness.WorkerSpec{
-		RunID: as.RunID, Role: as.Role, Dir: p.Dir, ScratchDir: p.ScratchDir, Spec: as.Spec, Artifact: as.Artifact,
+		RunID: as.RunID, Role: as.Role, Dir: p.Dir, Guide: p.Guide, ScratchDir: p.ScratchDir, Spec: as.Spec, Artifact: as.Artifact,
 		Feedback: as.Feedback, Attempt: attempt, Thread: run.Thread,
 		OnThread: func(thread string) error {
 			if thread == run.Thread {
 				return nil
 			}
-			if run.Thread != "" {
-				r.cfg.Log.InfoContext(ctx, "the worker started a new thread with the brief", "run_id", as.RunID, "previous_thread", run.Thread)
-			}
 			// Recorded before the thread's first turn, and even while
-			// shutting down, so the next attempt continues it (D61).
+			// shutting down, so the next attempt continues it (D61). The
+			// harness says when it could not continue the old one.
+			run.Thread = thread
 			return r.cfg.Journal.SetThread(context.WithoutCancel(ctx), as.RunID, thread)
 		},
 	})
@@ -284,6 +283,9 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 	if err != nil {
 		return err
 	}
+	if ok && req.Envelope.Operation == protocol.OpRunsRelease {
+		r.releaseAgent(ctx, as)
+	}
 	if ok {
 		// Facts go out before the result that ends the run's credential.
 		if err := r.retry(ctx, func() error { return r.flushEvents(ctx, as) }); err != nil {
@@ -319,6 +321,24 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 		r.cfg.Log.WarnContext(ctx, "workspace cleanup failed", "run_id", as.RunID, "err", err)
 	}
 	return r.cfg.Journal.Done(ctx, as.RunID)
+}
+
+// releaseAgent stops the agent of a run given up without a result, when
+// the harness's agents outlive their workers. A failure is logged: the
+// release still goes out, as holding the run would not stop the agent
+// either.
+func (r *Runner) releaseAgent(ctx context.Context, as protocol.Assignment) {
+	rel, ok := r.cfg.Workers.(harness.Releaser)
+	if !ok {
+		return
+	}
+	run, err := r.cfg.Journal.Run(ctx, as.RunID)
+	if err == nil {
+		err = rel.Release(ctx, as.RunID, run.Thread)
+	}
+	if err != nil && ctx.Err() == nil {
+		r.cfg.Log.WarnContext(ctx, "could not stop the agent of a released run", "run_id", as.RunID, "err", err)
+	}
 }
 
 // uploadEvents uploads a run's events every EventFlush until ctx ends.

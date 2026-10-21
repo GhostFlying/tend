@@ -17,6 +17,9 @@ type WorkerSpec struct {
 	Role  protocol.RunRole
 	// Dir is the workspace root; the worker starts there.
 	Dir string
+	// Guide describes the workspace when Dir is inside the only
+	// repository, where tend writes no AGENTS.md (D65); empty otherwise.
+	Guide string
 	// ScratchDir is where the worker may keep temporary copies.
 	ScratchDir string
 	// Spec is the immutable task spec version the run works on.
@@ -31,12 +34,13 @@ type WorkerSpec struct {
 	Attempt int
 	// Thread is the thread an earlier attempt of the run worked in. The
 	// worker continues it when the harness can, and otherwise starts a
-	// new thread with the full brief (D61).
+	// new thread with the full brief (D61). A harness may keep more than
+	// an ID here, such as how to find an agent that outlives the worker.
 	Thread string
 	// OnThread, when set, is called with the worker's thread once it
 	// exists and before the worker's first turn, so that the thread can be
-	// recorded before any work happens in it. An error stops the worker
-	// from starting.
+	// recorded before any work happens in it, and again whenever the
+	// harness changes it. An error stops the worker from starting.
 	OnThread func(threadID string) error
 }
 
@@ -78,6 +82,15 @@ var (
 	// ErrStopped stops a worker whose run tend no longer wants.
 	ErrStopped = errors.New("tend no longer wants the run")
 )
+
+// Releaser is implemented by Workers whose agents outlive the worker
+// (D66). Before a runner gives up a run without a result, it calls Release
+// with the run's thread, so that no agent keeps working on a run tend has
+// let go, even when no worker attempt is running. Release may run more
+// than once for a run.
+type Releaser interface {
+	Release(ctx context.Context, runID, thread string) error
+}
 
 // Workers starts workers. Cancelling the context passed to Start stops the
 // worker and its writes to the workspace; Wait then returns the context's
