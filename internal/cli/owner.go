@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -18,7 +20,7 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 	fs := newFlags(e, cmd)
 	asJSON := fs.Bool("json", false, "print the server's answer as JSON")
 	var follow *bool
-	var note, kind *string
+	var note, kind, project *string
 	switch cmd {
 	case "logs":
 		follow = fs.Bool("f", false, "keep following new logs until the run ends")
@@ -30,6 +32,8 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 		note = fs.String("note", "", "a free-form answer, with or instead of an option")
 	case "retry":
 		kind = fs.String("kind", "implement", "implement or accept")
+	case "status":
+		project = fs.String("project", "", "show only this project")
 	}
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -49,7 +53,7 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 	o := owner{e: e, c: c, json: *asJSON}
 	switch cmd {
 	case "status":
-		return o.status(ctx)
+		return o.status(ctx, *project)
 	case "task":
 		return o.task(ctx, pos[0])
 	case "logs":
@@ -91,37 +95,111 @@ func (o owner) printJSON(v any) error {
 	return err
 }
 
-func (o owner) status(ctx context.Context) error {
+func (o owner) status(ctx context.Context, project string) error {
+	path := "/api/v1/snapshot"
+	if project != "" {
+		path += "?project=" + url.QueryEscape(project)
+	}
 	var s protocol.Snapshot
-	if err := o.c.do(ctx, "GET", "/api/v1/snapshot", nil, &s); err != nil {
+	if err := o.c.do(ctx, "GET", path, nil, &s); err != nil {
 		return err
+	}
+	if len(s.Projects) == 0 {
+		if project != "" {
+			return errors.New("the server does not know projects yet; update it")
+		}
+		// A server from before projects: group by what the tasks say.
+		for _, t := range s.Tasks {
+			if !slices.ContainsFunc(s.Projects, func(p protocol.ProjectView) bool { return p.Project == t.Project }) {
+				s.Projects = append(s.Projects, protocol.ProjectView{Project: t.Project, Title: t.Project})
+			}
+		}
 	}
 	if o.json {
 		return o.printJSON(s)
 	}
-	w := tabwriter.NewWriter(o.e.Stdout, 0, 4, 2, ' ', 0)
-	if len(s.Tasks) == 0 {
-		fmt.Fprintln(w, "No unfinished tasks.")
-	} else {
-		fmt.Fprintln(w, "TASK\tTITLE\tSTATE\tCONTROL\tBLOCKED")
-		for _, t := range s.Tasks {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s r%d\t%s\n", t.TaskID, t.Title, t.Lifecycle, t.ControlMode, t.ControlRevision, blocked(t.BlockReason))
-		}
+	out := o.e.Stdout
+	// With one project and nothing in it, there is nothing to group.
+	idle := len(s.Projects) == 0 || len(s.Projects) == 1 && s.Projects[0].OpenRuns == 0
+	if idle && len(s.Tasks) == 0 && len(s.Queue) == 0 {
+		fmt.Fprintln(out, "No unfinished tasks.")
+		s.Projects = nil
 	}
-	w.Flush()
+	for i, p := range s.Projects {
+		var tasks []protocol.TaskSummary
+		for _, t := range s.Tasks {
+			if t.Project == p.Project {
+				tasks = append(tasks, t)
+			}
+		}
+		if i > 0 {
+			fmt.Fprintln(out)
+		}
+		retired := ""
+		if p.Retired {
+			retired = ", retired"
+		}
+		if p.Weight == 0 {
+			fmt.Fprintf(out, "%s:\n", p.Project) // the server did not say more
+		} else {
+			fmt.Fprintf(out, "%s %q: weight %d, %d running, %d queued%s\n", p.Project, p.Title, p.Weight, p.OpenRuns, p.Queued, retired)
+		}
+		w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+		if len(tasks) == 0 && p.OpenTasks == 0 {
+			fmt.Fprintln(w, "  No unfinished tasks.")
+		} else if len(tasks) > 0 {
+			fmt.Fprintln(w, "  TASK\tTITLE\tSTATE\tRATING\tCONTROL\tBLOCKED")
+			for _, t := range tasks {
+				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s r%d\t%s\n", t.TaskID, t.Title, t.Lifecycle, t.Rating.Label(), t.ControlMode, t.ControlRevision, blocked(t.BlockReason))
+			}
+		}
+		w.Flush()
+		if more := p.OpenTasks - int64(len(tasks)); more > 0 {
+			fmt.Fprintf(out, "  (%d more unfinished tasks; see tend status --project %s)\n", more, p.Project)
+		}
+		if p.Queued == 0 {
+			continue
+		}
+		fmt.Fprintln(out, "  Queue:")
+		w = tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+		for _, e := range s.Queue {
+			if e.Project != p.Project {
+				continue
+			}
+			score := fmt.Sprintf("score %.1f", e.Score)
+			if e.Rating == protocol.RatingP0 {
+				score = "first"
+			}
+			fmt.Fprintf(w, "    #%d\t%s\t%s\t%s\t%s\twaited %s\t%s\n", e.Place, e.TaskID, e.Title, e.Kind, e.Rating.Label(), waited(e.WaitedMillis), score)
+		}
+		w.Flush()
+	}
 	if len(s.Decisions) > 0 {
-		fmt.Fprintln(o.e.Stdout, "\nOpen decisions:")
+		fmt.Fprintln(out, "\nOpen decisions:")
 		for _, d := range s.Decisions {
-			printDecision(o.e.Stdout, d)
+			printDecision(out, d)
 		}
 	}
 	if len(s.Hosts) > 0 {
-		fmt.Fprintln(o.e.Stdout, "\nHosts:")
+		fmt.Fprintln(out, "\nHosts:")
 		for _, h := range s.Hosts {
-			fmt.Fprintf(o.e.Stdout, "  %s (%s/%s): %d of %d slots busy\n", h.HostID, h.OS, h.Arch, h.OpenRuns, h.Slots)
+			fmt.Fprintf(out, "  %s (%s/%s): %d of %d slots busy\n", h.HostID, h.OS, h.Arch, h.OpenRuns, h.Slots)
 		}
 	}
 	return nil
+}
+
+// waited says how long something has waited, to the minute.
+func waited(ms int64) string {
+	d := time.Duration(ms) * time.Millisecond
+	if d < time.Minute {
+		return "<1m"
+	}
+	h, m := int64(d.Hours()), int64(d.Minutes())%60
+	if h == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	return fmt.Sprintf("%dh%02dm", h, m)
 }
 
 func blocked(b protocol.BlockReason) string {

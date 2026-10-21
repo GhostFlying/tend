@@ -184,15 +184,22 @@ func Request(ctx context.Context, q store.Querier, domain, requestID string) (pr
 	return v, nil
 }
 
-// Snapshot reads the owner's overview. q should be a single read
-// transaction, so the event sequence matches what is shown.
-func Snapshot(ctx context.Context, q store.Querier) (protocol.Snapshot, error) {
+// Snapshot reads the owner's overview, of one project or, when project is
+// empty, of all. queue is the whole queue in claim order; the projects'
+// loads are counted over all of it.
+func Snapshot(ctx context.Context, q store.Querier, queue []protocol.QueueEntry, project string) (protocol.Snapshot, error) {
 	var v protocol.Snapshot
 	var err error
+	if project != "" {
+		if _, err := store.GetProject(ctx, q, project); err != nil {
+			return v, err
+		}
+	}
 	if v.EventSeq, err = store.LatestEventSeq(ctx, q); err != nil {
 		return v, err
 	}
-	if v.Tasks, err = Tasks(ctx, q, false, ""); err != nil {
+	// Scoped before the cap on the number of tasks.
+	if v.Tasks, err = Tasks(ctx, q, false, project); err != nil {
 		return v, err
 	}
 	decs, err := store.ListDecisions(ctx, q, "")
@@ -200,8 +207,26 @@ func Snapshot(ctx context.Context, q store.Querier) (protocol.Snapshot, error) {
 		return v, err
 	}
 	v.Decisions = make([]protocol.DecisionView, 0, len(decs))
+	projectOf := map[string]string{}
+	asking := map[string]bool{} // projects with open decisions
 	for _, x := range decs {
-		v.Decisions = append(v.Decisions, Decision(x))
+		d := Decision(x)
+		if x.TaskID != "" {
+			p, ok := projectOf[x.TaskID]
+			if !ok {
+				t, err := store.GetTask(ctx, q, x.TaskID)
+				if err != nil {
+					return v, err
+				}
+				p, projectOf[x.TaskID] = t.Project, t.Project
+			}
+			d.Project = p
+			asking[p] = true
+		}
+		// A decision about no task concerns every project.
+		if project == "" || d.Project == "" || d.Project == project {
+			v.Decisions = append(v.Decisions, d)
+		}
 	}
 	hosts, err := store.ListActiveHosts(ctx, q)
 	if err != nil {
@@ -218,7 +243,53 @@ func Snapshot(ctx context.Context, q store.Querier) (protocol.Snapshot, error) {
 	if v.Tasks == nil {
 		v.Tasks = []protocol.TaskSummary{}
 	}
+	if v.Projects, err = projects(ctx, q, queue, asking, project); err != nil {
+		return v, err
+	}
+	v.Queue = []protocol.QueueEntry{}
+	for _, e := range queue {
+		if project == "" || e.Project == project {
+			v.Queue = append(v.Queue, e)
+		}
+	}
+	if project != "" {
+		v.Projects = slices.DeleteFunc(v.Projects, func(p protocol.ProjectView) bool { return p.Project != project })
+	}
 	return v, nil
+}
+
+// projects lists the active projects, the retired ones that still have
+// unfinished tasks, open runs or, as asking says, open decisions, and the
+// project asked for.
+func projects(ctx context.Context, q store.Querier, queue []protocol.QueueEntry, asking map[string]bool, asked string) ([]protocol.ProjectView, error) {
+	rows, err := store.ListProjects(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	runs, err := store.CountOpenRunsByProject(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	// Counted in full: the snapshot's task list is capped.
+	open, err := store.CountOpenTasks(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	queued := map[string]int64{}
+	for _, e := range queue {
+		queued[e.Project]++
+	}
+	out := []protocol.ProjectView{}
+	for _, p := range rows {
+		if p.Retired && open[p.Project] == 0 && runs[p.Project] == 0 && !asking[p.Project] && p.Project != asked {
+			continue
+		}
+		out = append(out, protocol.ProjectView{
+			Project: p.Project, Title: p.Title, Weight: p.Weight, Retired: p.Retired,
+			OpenTasks: int64(open[p.Project]), OpenRuns: runs[p.Project], Queued: queued[p.Project],
+		})
+	}
+	return out, nil
 }
 
 // RunLogs reads up to limit of a run's logs after seq. A missing run is

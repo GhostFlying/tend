@@ -482,6 +482,83 @@ func TestPauseUsesTheRevisionItRead(t *testing.T) {
 	}
 }
 
+func TestStatusGroupsByProject(t *testing.T) {
+	f := newFakeServer(t)
+	all := protocol.Snapshot{
+		Tasks: []protocol.TaskSummary{
+			{TaskID: "task_a", Title: "fix login", Project: "app", Lifecycle: protocol.TaskQueued, Rating: protocol.RatingP1, ControlMode: protocol.ControlManaged, BlockReason: protocol.BlockNone},
+			{TaskID: "task_b", Title: "tidy docs", Project: "web", Lifecycle: protocol.TaskQueued, ControlMode: protocol.ControlManaged, BlockReason: protocol.BlockNone},
+			{TaskID: "task_c", Title: "hotfix", Project: "web", Lifecycle: protocol.TaskQueued, Rating: protocol.RatingP0, ControlMode: protocol.ControlManaged, BlockReason: protocol.BlockNone},
+		},
+		Decisions: []protocol.DecisionView{{DecisionID: "dec_1", TaskID: "task_b", Project: "web", Version: 1, Status: "open", Question: "which docs?"}},
+		Projects: []protocol.ProjectView{
+			{Project: "app", Title: "The app", Weight: 2, OpenTasks: 4, Queued: 1},
+			{Project: "web", Title: "Web", Weight: 1, OpenTasks: 2, OpenRuns: 1, Queued: 2},
+		},
+		Queue: []protocol.QueueEntry{
+			{Place: 1, ActionID: "act_c", TaskID: "task_c", Title: "hotfix", Project: "web", Kind: protocol.ActionImplement, Rating: protocol.RatingP0, WaitedMillis: 30_000, Score: 2},
+			{Place: 2, ActionID: "act_a", TaskID: "task_a", Title: "fix login", Project: "app", Kind: protocol.ActionImplement, Rating: protocol.RatingP1, WaitedMillis: 7_500_000, Score: 6.21},
+			{Place: 3, ActionID: "act_b", TaskID: "task_b", Title: "tidy docs", Project: "web", Kind: protocol.ActionAccept, WaitedMillis: 60_000, Score: 2},
+		},
+	}
+	f.on("GET /api/v1/snapshot", func(w http.ResponseWriter, r *http.Request, _ []byte) {
+		s := all
+		if p := r.URL.Query().Get("project"); p != "" {
+			// The server scopes; the places stay those of the whole queue.
+			s.Tasks, s.Projects, s.Queue = all.Tasks[1:], all.Projects[1:], []protocol.QueueEntry{all.Queue[0], all.Queue[2]}
+		}
+		_ = json.NewEncoder(w).Encode(s)
+	})
+	te := newTestEnv(t, f.srv.URL)
+	if code := te.main("status"); code != exitOK {
+		t.Fatalf("status = %d: %s", code, te.errOut)
+	}
+	// Columns are aligned with spaces; compare words.
+	words := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	out := words(te.out.String())
+	for _, want := range []string{
+		`app "The app": weight 2, 0 running, 1 queued`, `web "Web": weight 1, 1 running, 2 queued`,
+		"#1 task_c hotfix implement p0 waited <1m first", "#2 task_a fix login implement p1 waited 2h05m score 6.2",
+		"#3 task_b tidy docs accept unrated waited 1m score 2.0", "dec_1 v1 about task_b",
+		"(3 more unfinished tasks; see tend status --project app)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status lacks %q:\n%s", want, out)
+		}
+	}
+	te = newTestEnv(t, f.srv.URL)
+	if code := te.main("status", "--project", "web"); code != exitOK {
+		t.Fatalf("status --project = %d: %s", code, te.errOut)
+	}
+	if out := words(te.out.String()); strings.Contains(out, "task_a") || !strings.Contains(out, "#3 task_b") {
+		t.Errorf("status --project web:\n%s", out)
+	}
+	// An older server answers without projects.
+	f.answer("GET /api/v1/snapshot", protocol.Snapshot{Tasks: all.Tasks})
+	te = newTestEnv(t, f.srv.URL)
+	if code := te.main("status", "--project", "web"); code != exitError {
+		t.Errorf("status --project against an older server = %d, want %d", code, exitError)
+	}
+	te = newTestEnv(t, f.srv.URL)
+	if code := te.main("status"); code != exitOK || !strings.Contains(te.out.String(), "task_a") {
+		t.Errorf("status against an older server = %d:\n%s", code, te.out)
+	}
+}
+
+func TestStatusShowsRunsOfFinishedTasks(t *testing.T) {
+	f := newFakeServer(t)
+	f.answer("GET /api/v1/snapshot", protocol.Snapshot{Projects: []protocol.ProjectView{{Project: "default", Title: "Default", Weight: 1, OpenRuns: 1}}})
+	te := newTestEnv(t, f.srv.URL)
+	if code := te.main("status"); code != exitOK || !strings.Contains(te.out.String(), "1 running") {
+		t.Errorf("status with a run left = %d:\n%s", code, te.out)
+	}
+	f.answer("GET /api/v1/snapshot", protocol.Snapshot{Projects: []protocol.ProjectView{{Project: "default", Title: "Default", Weight: 1}}})
+	te = newTestEnv(t, f.srv.URL)
+	if code := te.main("status"); code != exitOK || strings.TrimSpace(te.out.String()) != "No unfinished tasks." {
+		t.Errorf("idle status = %d:\n%s", code, te.out)
+	}
+}
+
 func TestRateSendsTheRating(t *testing.T) {
 	f := newFakeServer(t)
 	f.answer("GET /api/v1/tasks/task_1", protocol.TaskDetail{TaskSummary: protocol.TaskSummary{TaskID: "task_1", ControlRevision: 4}})

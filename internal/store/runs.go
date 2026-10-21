@@ -23,6 +23,8 @@ type CandidateRow struct {
 	ImplementGeneration int64
 	CurrentArtifactID   string
 	Rating              protocol.Rating
+	Project             string
+	Title               string
 	// Weight is the weight of the task's project.
 	Weight            int64
 	DependenciesDone  bool
@@ -37,7 +39,7 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		a.target_spec_version, a.target_artifact_id, a.authorization_json, a.generation, a.status, a.plan_commit_ref,
 		a.created_request_id, a.created_at,
 		t.lifecycle, t.control_mode, t.block_reason, t.spec_version, t.implement_generation,
-		COALESCE(t.current_artifact_id, ''), t.rating,
+		COALESCE(t.current_artifact_id, ''), t.rating, t.project, t.title,
 		COALESCE((SELECT p.weight FROM projects p WHERE p.project = t.project), 1),
 		NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dt ON dt.task_id = d.depends_on
 			WHERE d.task_id = t.task_id AND dt.lifecycle <> 'completed'),
@@ -59,7 +61,7 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		a := &c.Action
 		if err := rows.Scan(&a.ActionID, &a.TaskID, &a.Kind, &a.EffectKey, &a.TriggerJSON, &a.TargetSpecVersion, &artifact,
 			&a.AuthorizationJSON, &a.Generation, &a.Status, &commit, &a.CreatedRequestID, &a.CreatedAt,
-			&c.Lifecycle, &c.Control, &c.Block, &c.SpecVersion, &c.ImplementGeneration, &c.CurrentArtifactID, &c.Rating, &c.Weight,
+			&c.Lifecycle, &c.Control, &c.Block, &c.SpecVersion, &c.ImplementGeneration, &c.CurrentArtifactID, &c.Rating, &c.Project, &c.Title, &c.Weight,
 			&c.DependenciesDone, &c.WorkspaceHost, &c.WorkspaceOccupied, &c.SpecJSON); err != nil {
 			return nil, fmt.Errorf("store: scan claim candidate: %w", err)
 		}
@@ -77,6 +79,27 @@ func CountOpenRuns(ctx context.Context, q Querier, hostID string) (int64, error)
 		return 0, fmt.Errorf("store: count open runs: %w", err)
 	}
 	return n, nil
+}
+
+// CountOpenRunsByProject counts, by project, the runs that may still be
+// working.
+func CountOpenRunsByProject(ctx context.Context, q Querier) (map[string]int64, error) {
+	rows, err := q.QueryContext(ctx, `SELECT t.project, COUNT(*) FROM runs r JOIN tasks t ON t.task_id = r.task_id
+		WHERE r.observed_state IN `+openRunStates+` GROUP BY t.project`)
+	if err != nil {
+		return nil, fmt.Errorf("store: count open runs by project: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var p string
+		var n int64
+		if err := rows.Scan(&p, &n); err != nil {
+			return nil, fmt.Errorf("store: scan open runs: %w", err)
+		}
+		out[p] = n
+	}
+	return out, rows.Err()
 }
 
 // ListOpenRunsOnHost returns the runs allocated to a host that may still be

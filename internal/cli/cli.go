@@ -63,7 +63,7 @@ const usage = `usage: tend <command> [arguments]
 
 Owner commands:
   login --server <url>             get tokens for this machine
-  status [--json]                  unfinished tasks, open decisions and hosts
+  status [--project <p>] [--json]  projects with their tasks and queue, open decisions and hosts
   task <task_id> [--json]          one task in full
   logs [-f] <run_id|task_id>       a run's logs, or all runs of a task; -f follows the last
   decide <decision_id> <option> [--note <text>]
