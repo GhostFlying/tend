@@ -156,7 +156,7 @@
 
 ### 9.1 W8 实施细节
 
-- **判定**：服务端每分钟检查一次（和租约清扫并列）。任务的工作区所在 host 已退役，或 `last_seen_at` 早于 `host_lost_after`（默认 24 小时，`0` 关闭失联判定，退役仍然生效），并且任务受托管、没有其他阻塞、有待执行的实现或验收动作时，任务以 `workspace_unavailable` 阻塞，开出待决事项，产生 `task.workspace_unavailable` 事件（需要处理的一类）。检查由系统 principal 执行的命令 `workspaces.check` 完成，什么都没变时不留请求记录。
+- **判定**：服务端每分钟检查一次（和租约清扫并列）。任务的工作区所在 host 已退役，或 `last_seen_at` 早于 `host_lost_after`（默认 24 小时，`0` 关闭失联判定，退役仍然生效），并且任务受托管、没有其他阻塞、有待执行的实现或验收动作、或者在那台 host 上有状态未知的 run（执行中途 host 不可用）时，任务以 `workspace_unavailable` 阻塞，开出待决事项，产生 `task.workspace_unavailable` 事件（需要处理的一类）。检查由系统 principal 执行的命令 `workspaces.check` 完成，什么都没变时不留请求记录。
 - **待决事项**：选项为 “wait for the host”（无效果）、“start over on another host”（效果 `start_over`）、“cancel the task”（效果 `cancel`），按 D53 只对提问时的版本生效。
 - **再问一次**：回答“start over”时任务若已经变过（例如改了评级、暂停后恢复），按 D53 效果不执行，而 start over 没有单独的命令。所以检查时，仍然以 `workspace_unavailable` 阻塞、host 仍不可用、既没有开着的这类待决事项、也没有在当前版本问过的任务，会再开一个（事件带 `asked_again`）。owner 在当前版本选了等待，就不再问。
 - **重来**（`domain.StartOver`）：版本加一，实现代次加一，任务回到排队，清掉验收中的产物，取消所有未完成的动作，新建下一代实现动作，事件 `task.started_over`。app 把旧工作区的记录移到 `abandoned_workspaces`（保留工作区 ID、名称和 host），删除工作区和挂载的记录；下一个领取的 host 按原来的规则新建工作区，但不能是放弃了工作区的 host：那里的工作区目录和任务分支还在，回来后会被接着用。旧 host 上的目录不动。旧工作区里的 run 迟到的 `report_workspace` 被拒绝：工作区不在这个 run 的 host 上（或任务还没有新工作区）时不记录挂载。

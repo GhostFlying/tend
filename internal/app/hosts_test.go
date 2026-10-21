@@ -171,6 +171,36 @@ func TestFault_WorkspaceQuestionAskedAgain(t *testing.T) {
 	}
 }
 
+func TestFault_WorkspaceHostRetiredMidRun(t *testing.T) {
+	h := newHarness(t)
+	h.withHosts("linux-1", "linux-2")
+	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
+	old, _, _ := h.claim("linux-1")
+	h.runAs(old, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+
+	// The host goes away mid-run: its lease runs out and nothing is left to
+	// claim, but the run can only be found out on the retired host.
+	h.withHosts("linux-2")
+	h.clock.Advance(DefaultLeaseTTL + time.Second)
+	if _, err := h.app.ExpireLeases(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.checkWorkspaces(); !slices.Equal(got, []string{res.TaskID}) {
+		t.Fatalf("check blocked %v, want %s", got, res.TaskID)
+	}
+	decs := h.openDecisions(res.TaskID)
+	if len(decs) != 1 {
+		t.Fatalf("decisions = %+v", decs)
+	}
+	if r := h.answer(decs[0], domain.StartOverOption); r.Effect == nil || !r.Effect.Applied {
+		t.Fatalf("start over = %+v", r.Effect)
+	}
+	as, ok, _ := h.claim("linux-2")
+	if !ok || as.TaskID != res.TaskID || as.Role != protocol.RoleImplement || as.Generation != 2 {
+		t.Errorf("claim on linux-2 = %+v (ok %v), want implementation 2", as, ok)
+	}
+}
+
 func TestFault_WorkspaceHostReturns(t *testing.T) {
 	h := newHarness(t)
 	h.hello("linux-1")

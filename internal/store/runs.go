@@ -299,9 +299,10 @@ type WorkspaceHostRow struct {
 	// LastSeenAt is 0 for a host never heard from.
 	LastSeenAt int64
 	Block      protocol.BlockReason
-	// Pending reports that the task has an implementation or acceptance
-	// waiting to be claimed.
-	Pending bool
+	// Waiting reports that the task's work waits on the host: an
+	// implementation or acceptance to be claimed, or a run on the host
+	// that tend lost track of.
+	Waiting bool
 }
 
 // ListWorkspaceHosts returns the unfinished tasks that have a workspace,
@@ -309,6 +310,7 @@ type WorkspaceHostRow struct {
 func ListWorkspaceHosts(ctx context.Context, q Querier) ([]WorkspaceHostRow, error) {
 	rows, err := q.QueryContext(ctx, `SELECT t.task_id, w.host_id, h.status, COALESCE(h.last_seen_at, 0), t.block_reason,
 		EXISTS (SELECT 1 FROM plan_actions a WHERE a.task_id = t.task_id AND a.status = 'pending' AND a.kind IN ('implement', 'accept'))
+		OR EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.host_id = w.host_id AND r.observed_state = 'unknown')
 		FROM tasks t JOIN workspaces w ON w.task_id = t.task_id JOIN hosts h ON h.host_id = w.host_id
 		WHERE t.lifecycle NOT IN ('completed', 'cancelled') ORDER BY t.task_id`)
 	if err != nil {
@@ -318,7 +320,7 @@ func ListWorkspaceHosts(ctx context.Context, q Querier) ([]WorkspaceHostRow, err
 	var out []WorkspaceHostRow
 	for rows.Next() {
 		var r WorkspaceHostRow
-		if err := rows.Scan(&r.TaskID, &r.HostID, &r.HostStatus, &r.LastSeenAt, &r.Block, &r.Pending); err != nil {
+		if err := rows.Scan(&r.TaskID, &r.HostID, &r.HostStatus, &r.LastSeenAt, &r.Block, &r.Waiting); err != nil {
 			return nil, fmt.Errorf("store: scan workspace host: %w", err)
 		}
 		out = append(out, r)
