@@ -41,9 +41,29 @@
 
 ## 真机验收
 
-待和 owner 一起在实际部署的多台 runner 上完成：
+**环境：**
 
-- 两台以上的真实 runner，排队顺序与分数一致；
-- 让一台 host 退役或断网超过 `host_lost_after`，确认待决事项、“start over” 和 host 回来后的自动解除；
-- 两个 agent 会话分别在各自的仓库目录里启动，确认上下文按 project 划分；
-- runner 在 run 中途重启，worker 续接原 thread。
+- 两台真实的 Linux 开发机，各运行一个 runner（1 个 slot），都通过 tsnet 加入 tailnet；服务端和其中一台 runner 在同一台机器上。两台机器出网都经过 HTTP 代理。
+- 两个 project：tend 自身（权重 2）和 owner 的另一个公开 Go 仓库（权重 1），两台 runner 都服务这两个仓库。
+- 会话：两个 Claude Code `-p` 会话，分别在两个仓库的 clone 里启动，使用单独的配置目录、owner 的 tend 登录。其余任务直接调用 `tend mcp` 创建。
+- worker 使用 traex，模型 GPT-5.6-Sol。任务都是很小的测试性改动，要求在任务分支上提交、不推送；验收结束后确认两个仓库的远端都没有任务分支。
+- 宕机用 SIGKILL 停掉一台机器的 runner 来模拟（worker 的进程树随之退出），恢复用重新启动。为了在合理时间内看到失联判定，`host_lost_after` 临时设为下限 `10m`，结束后恢复默认。
+
+### 结果
+
+| 项 | 结果 |
+| --- | --- |
+| 会话按仓库绑定 project | 通过：两个会话建的任务分别归入各自的 project，不需要指定 |
+| 两台 runner 的排队顺序 | 通过：跨 project 的队列与分数一致（`p0` 最先，其后分数 3.0、2.0）；两台 host 的领取顺序相同。工作区亲和正确：一台 host 空出来时先领 `p0` 的实现，自己工作区里分数较低的验收继续等它 |
+| host 宕机，验收 run 正在执行 | 通过：租约到期后 run 变为 unknown；失联满 10 分钟时任务以 `workspace_unavailable` 阻塞，问题写明 host 最后一次有消息的时间。另一台 host 照常领取其他任务 |
+| 另一 project 的提醒 | 通过：另一个 project 的会话在回答无关问题时主动提出这个待决事项，并说明它不属于本 project |
+| host 恢复 | 通过：重新启动后约 50 秒解除阻塞，tend 以 “wait for the host” 回答；被打断的验收 run 续接原 thread，worker 说明了中断发生在 `make check` 的哪一步、还没有提交结论，随后完成验收 |
+| host 宕机，实现 run 正在执行，选择重来 | 通过：会话里按 owner 的指示回答 “start over on another host”，tend 执行；旧工作区记入 `abandoned_workspaces`，第二代实现在另一台 host 上从远端新建工作区，验收通过 |
+| 放弃了工作区的 host 回来 | 通过：hello 时 tend 让它停掉旧的 run（“the run is no longer wanted”），这台 host 不会把任务领回去 |
+
+真机验收没有发现新的缺陷。
+
+### 观察
+
+- 待决事项里的时间是 UTC（RFC 3339）。服务端不知道 owner 的时区，暂不处理。
+- host 宕机期间，状态未知的 run 仍占着那台 host 的 slot，`tend status` 显示它在忙。这与实际情况一致：run 可能还在运行。

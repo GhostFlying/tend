@@ -197,6 +197,8 @@ owner 确认等 cove，本阶段不做。
 - 多台 runner。确认排队顺序与分数一致；让一个 host 退役，确认待决事项和 “start over” 的效果。
 - runner 在 run 中途重启，确认 worker 续接原 thread，不再从头执行。
 
+结论见 `docs/findings/phase-d-acceptance.md`：本地预验收和两台真实 runner 上的验收都已完成，发现的一个缺陷已修复（#71）。
+
 ## 13. 实施顺序与提交拆分
 
 | 步骤 | commit | 内容 |
