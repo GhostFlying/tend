@@ -341,6 +341,14 @@ func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, 
 		c := others[p]
 		s.Others = append(s.Others, fmt.Sprintf("%s: %d open tasks, %d open decisions", p, c.tasks, c.decisions))
 	}
+	single, err := app.SingleMountOnly(ctx, q)
+	if err != nil {
+		return err
+	}
+	if single {
+		s.Limits = append(s.Limits, "No active host's worker supports a workspace with more than one mount: "+
+			"give every task a single repository, and tasks_create refuses more.")
+	}
 	if messageSeq <= 1 {
 		return nil
 	}

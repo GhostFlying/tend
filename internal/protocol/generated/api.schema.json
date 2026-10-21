@@ -471,6 +471,9 @@
         },
         "slots": {
           "type": "integer"
+        },
+        "worker": {
+          "$ref": "#/definitions/WorkerKind"
         }
       },
       "required": [
@@ -479,6 +482,7 @@
         "arch",
         "labels",
         "slots",
+        "worker",
         "open_runs"
       ],
       "title": "HostView",
@@ -607,6 +611,9 @@
           "type": "string"
         },
         "title": {
+          "type": "string"
+        },
+        "unplaceable": {
           "type": "string"
         },
         "waited_millis": {
@@ -1246,6 +1253,14 @@
         "inconclusive"
       ],
       "title": "Verdict",
+      "type": "string"
+    },
+    "WorkerKind": {
+      "enum": [
+        "appserver",
+        "orca"
+      ],
+      "title": "WorkerKind",
       "type": "string"
     },
     "WorkspaceView": {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -32,6 +33,10 @@ func Queue(ctx context.Context, q store.Querier, o scheduler.Order) ([]protocol.
 	for _, r := range rows {
 		tasks[r.Action.TaskID] = r
 	}
+	hosts, err := schedulingHosts(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	candidates = slices.DeleteFunc(candidates, func(c scheduler.Candidate) bool { return scheduler.Held(c) != "" })
 	slices.SortFunc(candidates, func(a, b scheduler.Candidate) int { return scheduler.Compare(a, b, o) })
 	out := make([]protocol.QueueEntry, 0, len(candidates))
@@ -39,10 +44,46 @@ func Queue(ctx context.Context, q store.Querier, o scheduler.Order) ([]protocol.
 		t := tasks[c.TaskID]
 		out = append(out, protocol.QueueEntry{
 			Place: i + 1, ActionID: c.ActionID, TaskID: c.TaskID, Title: t.Title, Project: t.Project, Kind: c.Kind, Rating: c.Rating,
-			WaitedMillis: max(o.Now-c.CreatedAt, 0), Score: scheduler.Score(c, o),
+			WaitedMillis: max(o.Now-c.CreatedAt, 0), Score: scheduler.Score(c, o), Unplaceable: unplaceable(hosts, c),
 		})
 	}
 	return out, nil
+}
+
+// schedulingHosts returns the active hosts as the scheduler sees them,
+// each with every slot free.
+func schedulingHosts(ctx context.Context, q store.Querier) ([]scheduler.Host, error) {
+	rows, err := store.ListActiveHosts(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]scheduler.Host, 0, len(rows))
+	for _, h := range rows {
+		out = append(out, scheduler.Host{
+			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots,
+			Worker: h.Worker.Capabilities(),
+		})
+	}
+	return out, nil
+}
+
+// unplaceable says why none of hosts would take c even with a free slot,
+// or "" when one would.
+func unplaceable(hosts []scheduler.Host, c scheduler.Candidate) string {
+	if len(hosts) == 0 {
+		return "no host is active"
+	}
+	var why []string
+	for _, h := range hosts {
+		reason := scheduler.Skip(h, c)
+		if reason == "" {
+			return ""
+		}
+		if !slices.Contains(why, reason) {
+			why = append(why, reason)
+		}
+	}
+	return strings.Join(why, "; ")
 }
 
 // candidatesOf turns the claim candidates read from the store into the
@@ -60,7 +101,7 @@ func candidatesOf(rows []store.CandidateRow) ([]scheduler.Candidate, error) {
 			TargetArtifactID: r.Action.TargetArtifactID, CreatedAt: r.Action.CreatedAt,
 			Lifecycle: r.Lifecycle, Control: r.Control, Block: r.Block, SpecVersion: r.SpecVersion,
 			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Rating: r.Rating, Weight: r.Weight,
-			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(),
+			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(), Mounts: len(spec.Workspace.Mounts),
 			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied, AbandonedHosts: r.AbandonedHosts,
 		})
 	}

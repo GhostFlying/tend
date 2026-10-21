@@ -52,10 +52,13 @@ type config struct {
 		Ephemeral bool   `json:"ephemeral"`
 	} `json:"tailnet"`
 	// Worker uses the machine's traex and its own configuration (D38);
-	// Model only overrides the default model.
+	// Model only overrides the default model. Kind must be the worker
+	// the server's configuration names for this host (D64); default
+	// appserver.
 	Worker struct {
-		TraexBin string `json:"traex_bin"`
-		Model    string `json:"model"`
+		Kind     protocol.WorkerKind `json:"kind"`
+		TraexBin string              `json:"traex_bin"`
+		Model    string              `json:"model"`
 	} `json:"worker"`
 	Git struct {
 		Bin string   `json:"bin"`
@@ -95,6 +98,12 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	}
 	if cfg.Home == "" {
 		cfg.Home = "~/.tend"
+	}
+	if cfg.Worker.Kind == "" {
+		cfg.Worker.Kind = protocol.WorkerAppServer
+	}
+	if cfg.Worker.Kind != protocol.WorkerAppServer {
+		return fmt.Errorf("worker kind %q is not supported by this runner", cfg.Worker.Kind)
 	}
 	home, err := cfgfile.Path(cfg.Home)
 	if err != nil {
@@ -142,6 +151,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	}
 	r := runner.New(runner.Config{
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
+		Worker:     cfg.Worker.Kind,
 		Workers:    traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: cfg.Worker.TraexBin, Version: version, Log: log}, Model: cfg.Worker.Model}),
 		Workspaces: gitws.New(gitws.Config{Home: home, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}),
 		Now:        time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: log,

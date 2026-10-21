@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -63,6 +64,30 @@ func requireActiveHost(ctx context.Context, x *Exec, q store.Querier) (store.Hos
 		return store.HostRow{}, protocol.Errorf(protocol.CodeForbidden, "host %s is retired", h.HostID)
 	}
 	return h, nil
+}
+
+// checkWorker refuses a runner whose harness is not the one the server's
+// configuration names for its host (D64): tend runs neither side's choice
+// in place of the other. It runs in Authorize, which also guards a resent
+// request answered from its record, so a claim replayed after the host's
+// worker changed hands out nothing.
+func checkWorker(ctx context.Context, x *Exec, q store.Querier) error {
+	h, err := requireActiveHost(ctx, x, q)
+	if err != nil {
+		return err
+	}
+	var p struct {
+		Worker protocol.WorkerKind `json:"worker"`
+	}
+	if len(x.Env.Payload) > 0 {
+		// The payload is validated in full by Apply.
+		_ = json.Unmarshal(x.Env.Payload, &p)
+	}
+	if got := cmp.Or(p.Worker, protocol.WorkerAppServer); got != h.Worker {
+		return protocol.Errorf(protocol.CodeInvalidRequest,
+			"host %s is configured for the %s worker, but its runner runs %s", h.HostID, h.Worker, got)
+	}
+	return nil
 }
 
 // desiredFor derives what tend wants a run to do from the current ledger:
@@ -166,12 +191,17 @@ func (Claim) Operation() string { return protocol.OpRunnerClaim }
 
 // Authorize implements Command.
 func (Claim) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
-	_, err := requireActiveHost(ctx, x, q)
-	return err
+	return checkWorker(ctx, x, q)
 }
 
 // Apply implements Command.
 func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p protocol.ClaimPayload
+	if len(x.Env.Payload) > 0 {
+		if err := decodePayload(x.Env, &p); err != nil {
+			return Outcome{}, err
+		}
+	}
 	q := tx.Q()
 	host, err := requireActiveHost(ctx, x, q)
 	if err != nil {
@@ -191,6 +221,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	}
 	pick, ok := scheduler.Pick(scheduler.Host{
 		ID: host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
+		Worker: host.Worker.Capabilities(),
 	}, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
@@ -245,8 +276,7 @@ func (Hello) Operation() string { return protocol.OpRunnerHello }
 
 // Authorize implements Command.
 func (Hello) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
-	_, err := requireActiveHost(ctx, x, q)
-	return err
+	return checkWorker(ctx, x, q)
 }
 
 // Apply implements Command.

@@ -8,8 +8,9 @@
   "home": "~/.tend",
   "tailnet": {"hostname": "tend-runner-linux-1"},
 
-  // Workers use this machine's traex and its own configuration.
-  "worker": {"traex_bin": "traex"},
+  // Workers use this machine's traex and its own configuration. kind must
+  // be the worker the server configures for this host.
+  "worker": {"kind": "appserver", "traex_bin": "traex"},
 
   "repos": {
     "tend": {

@@ -44,7 +44,7 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
   - `appserver`：多仓库工作区；
   - `orca`：单仓库工作区；可接管。
 - **向上约束**：
-  - **建任务和改需求**：spec 的 mount 多于一个、而没有任何活动 host 支持多仓库时，`tasks_create`、`tasks_update_intent` 以 `invalid_request` 拒绝，消息写明“当前的 worker 只支持单仓库工作区”；引用多仓库模板同样拒绝。
+  - **建任务和改需求**：spec 的 mount 多于一个、而有活动 host 且都不支持多仓库时，`tasks_create`、`tasks_update_intent` 以 `invalid_request` 拒绝，消息写明“当前的 worker 只支持单仓库工作区”；引用多仓库模板同样拒绝。
   - **调度**：`scheduler.Candidate` 带上是否需要多仓库，host 带上能力；不支持的 host 跳过，原因“host's worker does not support multi-repository workspaces”，`tend status` 可见。
   - **上下文**：没有 host 支持多仓库时，完整快照和 `tasks_create` 的工具说明写明这项限制；`repos_list` 的模板标明不可用。
 - 能力随配置变化：host 改配置、退役或新增后，限制在下一次配置同步时更新；已经建好的多仓库任务不受影响，只是在没有合适 host 时排队等待，原因可见。

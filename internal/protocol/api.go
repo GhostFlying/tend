@@ -30,5 +30,6 @@ func APIEnums() []any {
 		[]TokenScope{ScopeOwner, ScopeAgent},
 		Agents,
 		[]HookEvent{HookSessionStart, HookUserPromptSubmit},
+		WorkerKinds,
 	}
 }

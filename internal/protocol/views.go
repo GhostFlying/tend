@@ -130,6 +130,8 @@ type HostView struct {
 	Arch   string   `json:"arch"`
 	Labels []string `json:"labels"`
 	Slots  int64    `json:"slots"`
+	// Worker is the harness the host runs its workers with (D64).
+	Worker WorkerKind `json:"worker"`
 	// OpenRuns counts the runs on the host that may still be working.
 	OpenRuns int64 `json:"open_runs"`
 }
@@ -164,6 +166,10 @@ type QueueEntry struct {
 	WaitedMillis int64 `json:"waited_millis"`
 	// Score is the action's score, what orders everything but p0 (D60).
 	Score float64 `json:"score"`
+	// Unplaceable says why no active host can take the action, such as
+	// a workspace no host's worker supports (D64); it is empty when some
+	// host can once it has a free slot.
+	Unplaceable string `json:"unplaceable,omitempty"`
 }
 
 // Snapshot is the owner's overview of the ledger, read at one point.

@@ -65,6 +65,9 @@
       "token_hash": "0000000000000000000000000000000000000000000000000000000000000000",
       // Tailnet nodes allowed to act as this host: tags or machine names.
       "nodes": ["tag:tend-runner"],
+      // The harness that runs this host's workers: appserver (default) or
+      // orca, which takes single-repository tasks only.
+      "worker": "appserver",
     },
   ],
 

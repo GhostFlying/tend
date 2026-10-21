@@ -1,11 +1,14 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // HostRow is a configured execution host.
@@ -18,7 +21,9 @@ type HostRow struct {
 	Slots     int64
 	TokenHash string
 	Nodes     []string
-	Status    string
+	// Worker is the host's harness; empty means the app-server.
+	Worker protocol.WorkerKind
+	Status string
 }
 
 // Host states.
@@ -49,11 +54,11 @@ func parseList(s string) ([]string, error) {
 // UpsertHost creates or updates a configured host and marks it active.
 func (t *Tx) UpsertHost(ctx context.Context, h HostRow, now int64) error {
 	_, err := t.Exec(ctx, `INSERT INTO hosts (host_id, os, arch, labels_json, repos_json, slots, token_hash, nodes_json,
-		status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+		worker, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
 		ON CONFLICT (host_id) DO UPDATE SET os = excluded.os, arch = excluded.arch, labels_json = excluded.labels_json,
 		repos_json = excluded.repos_json, slots = excluded.slots, token_hash = excluded.token_hash,
-		nodes_json = excluded.nodes_json, status = 'active', updated_at = excluded.updated_at`,
-		h.HostID, h.OS, h.Arch, jsonList(h.Labels), jsonList(h.Repos), h.Slots, h.TokenHash, jsonList(h.Nodes), now, now)
+		nodes_json = excluded.nodes_json, worker = excluded.worker, status = 'active', updated_at = excluded.updated_at`,
+		h.HostID, h.OS, h.Arch, jsonList(h.Labels), jsonList(h.Repos), h.Slots, h.TokenHash, jsonList(h.Nodes), cmp.Or(h.Worker, protocol.WorkerAppServer), now, now)
 	if err != nil {
 		return fmt.Errorf("store: upsert host: %w", err)
 	}
@@ -74,8 +79,8 @@ func (t *Tx) RetireHostsExcept(ctx context.Context, keep []string, now int64) er
 func GetHost(ctx context.Context, q Querier, hostID string) (HostRow, error) {
 	h := HostRow{HostID: hostID}
 	var labels, repos, nodes string
-	err := q.QueryRowContext(ctx, `SELECT os, arch, labels_json, repos_json, slots, token_hash, nodes_json, status
-		FROM hosts WHERE host_id = ?`, hostID).Scan(&h.OS, &h.Arch, &labels, &repos, &h.Slots, &h.TokenHash, &nodes, &h.Status)
+	err := q.QueryRowContext(ctx, `SELECT os, arch, labels_json, repos_json, slots, token_hash, nodes_json, worker, status
+		FROM hosts WHERE host_id = ?`, hostID).Scan(&h.OS, &h.Arch, &labels, &repos, &h.Slots, &h.TokenHash, &nodes, &h.Worker, &h.Status)
 	if err != nil {
 		return HostRow{}, notFound(err, "host "+hostID)
 	}

@@ -54,6 +54,44 @@ func checkRepos(ctx context.Context, q store.Querier, repos []string) error {
 	return nil
 }
 
+// MultiMountRefused is why a workspace with more than one mount is
+// refused while no active host's worker can lay one out (D64).
+const MultiMountRefused = "no active host's worker supports a workspace with more than one mount; give the task a single repository"
+
+// checkMounts refuses a workspace with more than one mount when no active
+// host's worker supports it (D64), so a task is not created only to wait
+// for a host that cannot exist under the current configuration.
+func checkMounts(ctx context.Context, q store.Querier, w domain.Workspace) error {
+	if len(w.Mounts) <= 1 {
+		return nil
+	}
+	only, err := SingleMountOnly(ctx, q)
+	if err != nil || !only {
+		return err
+	}
+	return protocol.Errorf(protocol.CodeInvalidRequest, MultiMountRefused)
+}
+
+// SingleMountOnly reports whether there are active hosts and none of
+// their workers lays out a workspace with more than one mount. Without
+// any active host nothing is known about the workers yet, and nothing is
+// refused for them.
+func SingleMountOnly(ctx context.Context, q store.Querier) (bool, error) {
+	hosts, err := store.ListActiveHosts(ctx, q)
+	if err != nil {
+		return false, err
+	}
+	return len(hosts) > 0 && !slices.ContainsFunc(hosts, func(h store.HostRow) bool { return h.Worker.Capabilities().MultiMount }), nil
+}
+
+// addsMounts reports whether next has a mount current does not, by
+// repository and path.
+func addsMounts(current, next domain.Workspace) bool {
+	return slices.ContainsFunc(next.Mounts, func(m domain.Mount) bool {
+		return !slices.ContainsFunc(current.Mounts, func(c domain.Mount) bool { return c.Repo == m.Repo && c.Path == m.Path })
+	})
+}
+
 // addedRepos returns the repositories of next that current does not mount.
 // Repositories a task already uses stay usable after they are retired.
 func addedRepos(current, next domain.Workspace) []string {
