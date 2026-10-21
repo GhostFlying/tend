@@ -14,7 +14,7 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 - 监听：加入 tailnet 后，同一组接口同时在 443（https，证书由 tailnet 签发）和 80（http）上提供。启动后会预取一次证书；tailnet 没有开启 HTTPS 证书时日志里有一条警告，这时客户端使用 `http://<hostname>`，WireGuard 仍然加密流量（design.md §6.4）。
 - `owners`：可以使用 owner API 的 tailnet 登录名，也就是可以运行 `tend login` 的人（D49）。不加入 tailnet、只用 `listen` 时，用 `local_owner` 指定本地开发的 owner。owner 在 tagged 机器上工作时（tagged 节点没有登录名），用 `owner_nodes` 把这台机器的名字映射到 `owners` 里的登录名（D56）。
 - `projects`：可选。project 是 tend 对任务的分组（D52、D58），不等于仓库：`repos` 列出它涉及的仓库，`weight` 是它的任务在排队时的权重（默认 1），`template` 是没有给出工作区的任务使用的工作区模板。不配置时所有任务属于隐含的 `default` project。从配置中删掉的 project 变为 retired：已有任务照常进行，不能再建新任务。修改后重启服务端生效。
-- `host_lost_after`：可选，默认 `24h`。任务的工作区只在一台 host 上；这台 host 退役，或超过这段时间没有消息（hello、心跳或领取）时，有待执行动作的任务以 `workspace_unavailable` 阻塞，并请 owner 选择等待、换一台 host 从头再来或取消（D62）。host 回来后一分钟内自动解除。设为 `0s` 时只对退役的 host 生效；不设为 `0s` 时至少 `10m`，因为空闲 runner 只在领取时被记下，而且每分钟最多记一次。
+- `host_lost_after`：可选，默认 `24h`。任务的工作区只在一台 host 上；这台 host 退役，或超过这段时间没有消息（hello、心跳或领取）时，有待执行动作、或者在那台 host 上有状态未知的 run 的任务以 `workspace_unavailable` 阻塞，并请 owner 选择等待、换一台 host 从头再来或取消（D62）。host 回来后一分钟内自动解除。设为 `0s` 时只对退役的 host 生效；不设为 `0s` 时至少 `10m`，因为空闲 runner 只在领取时被记下，而且每分钟最多记一次。
 - `queue.wait_per_hour`：可选，默认 0.1。排队的动作按分数领取（D60）：`p0` 最先；其余的分数是 project 权重 × 评级分（`p1` 3、`p2` 2、`p3` 1，未评级按 `p2`）加上排队小时数 × 这个系数。默认值下，权重为 1 时等 10 小时相当于升一级；设为 0 则不考虑等待时间。
 - `main_agent`：可选，默认不配置。主 Agent 是 owner 自己使用的 agent（见下文 `tend` CLI）；配置了 `main_agent` 时服务端另外运行一个托管的主 Agent（D45，目前不再开发）。它使用专用的 traex home（`main_agent.traex_home`），需要在那个 home 下完成一次 traex 鉴权。
 

@@ -59,8 +59,9 @@ type checkResult struct {
 
 // CheckWorkspaces handles workspaces.check (D62). A task whose workspace
 // is on a host that is retired or has not been heard from for too long,
-// and that has work waiting to be claimed, is blocked with a decision for
-// the owner; once the host is back, the block is lifted and tend answers
+// and whose work waits on that host (an implementation or acceptance to
+// claim, or a run there that tend lost track of), is blocked with a
+// decision for the owner; once the host is back, the block is lifted and tend answers
 // the decision itself. Finding nothing to change has no effect.
 type CheckWorkspaces struct{}
 
@@ -92,7 +93,7 @@ func (CheckWorkspaces) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		}
 		var d domain.Decision
 		switch {
-		case why != "" && r.Pending && r.Block == protocol.BlockNone:
+		case why != "" && r.Waiting && r.Block == protocol.BlockNone:
 			row, spec, err := loadTask(ctx, tx.Q(), r.TaskID)
 			if err != nil {
 				return Outcome{}, err
