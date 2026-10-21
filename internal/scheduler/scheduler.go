@@ -70,6 +70,29 @@ func Skip(h Host, c Candidate) string {
 		return "host is retired"
 	case h.Busy >= h.Slots:
 		return "host has no free slot"
+	}
+	if reason := Held(c); reason != "" {
+		return reason
+	}
+	switch {
+	case c.Requirements.OS != "" && c.Requirements.OS != h.OS:
+		return "host OS does not match"
+	case !containsAll(h.Labels, c.Requirements.Labels):
+		return "host lacks a required label"
+	case !containsAll(h.Repos, c.Repos):
+		return "host does not serve every repository"
+	case c.WorkspaceHost != "" && c.WorkspaceHost != h.ID:
+		// The workspace, and the artifact commits in its repositories,
+		// exist only on that host.
+		return "task workspace is on another host"
+	}
+	return ""
+}
+
+// Held returns why a candidate cannot run on any host, or "" when only
+// the hosts decide.
+func Held(c Candidate) string {
+	switch {
 	case c.Status != protocol.ActionPending:
 		return "action is not pending"
 	case c.Kind != protocol.ActionImplement && c.Kind != protocol.ActionAccept:
@@ -88,16 +111,6 @@ func Skip(h Host, c Candidate) string {
 		return "implement action is not the current generation"
 	case c.Kind == protocol.ActionAccept && (c.Lifecycle != protocol.TaskAwaitingAcceptance || c.TargetArtifactID != c.CurrentArtifactID):
 		return "acceptance targets an artifact that is no longer under acceptance"
-	case c.Requirements.OS != "" && c.Requirements.OS != h.OS:
-		return "host OS does not match"
-	case !containsAll(h.Labels, c.Requirements.Labels):
-		return "host lacks a required label"
-	case !containsAll(h.Repos, c.Repos):
-		return "host does not serve every repository"
-	case c.WorkspaceHost != "" && c.WorkspaceHost != h.ID:
-		// The workspace, and the artifact commits in its repositories,
-		// exist only on that host.
-		return "task workspace is on another host"
 	case c.WorkspaceOccupied:
 		// Includes unknown runs: losing contact does not prove the old
 		// run stopped writing.

@@ -286,6 +286,9 @@
           "type": "object"
         },
         "options": {},
+        "project": {
+          "type": "string"
+        },
         "question": {
           "type": "string"
         },
@@ -541,6 +544,87 @@
       "title": "Operation",
       "type": "object"
     },
+    "ProjectView": {
+      "additionalProperties": false,
+      "properties": {
+        "open_runs": {
+          "type": "integer"
+        },
+        "open_tasks": {
+          "type": "integer"
+        },
+        "project": {
+          "type": "string"
+        },
+        "queued": {
+          "type": "integer"
+        },
+        "retired": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        },
+        "weight": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project",
+        "title",
+        "weight",
+        "open_tasks",
+        "open_runs",
+        "queued"
+      ],
+      "title": "ProjectView",
+      "type": "object"
+    },
+    "QueueEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ActionKind"
+        },
+        "place": {
+          "type": "integer"
+        },
+        "project": {
+          "type": "string"
+        },
+        "rating": {
+          "$ref": "#/definitions/Rating"
+        },
+        "score": {
+          "type": "number"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "waited_millis": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "place",
+        "action_id",
+        "task_id",
+        "title",
+        "project",
+        "kind",
+        "rating",
+        "waited_millis",
+        "score"
+      ],
+      "title": "QueueEntry",
+      "type": "object"
+    },
     "RateTaskPayload": {
       "additionalProperties": false,
       "properties": {
@@ -793,6 +877,32 @@
             }
           ]
         },
+        "projects": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ProjectView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "queue": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/QueueEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tasks": {
           "anyOf": [
             {
@@ -811,7 +921,9 @@
         "event_seq",
         "tasks",
         "decisions",
-        "hosts"
+        "hosts",
+        "projects",
+        "queue"
       ],
       "title": "Snapshot",
       "type": "object"

@@ -93,10 +93,12 @@ type AcceptanceView struct {
 
 // DecisionView is a question for the owner.
 type DecisionView struct {
-	DecisionID string          `json:"decision_id"`
-	TaskID     string          `json:"task_id,omitempty"`
-	Question   string          `json:"question"`
-	Options    json.RawMessage `json:"options"`
+	DecisionID string `json:"decision_id"`
+	TaskID     string `json:"task_id,omitempty"`
+	// Project is the project of the task, in the snapshot.
+	Project  string          `json:"project,omitempty"`
+	Question string          `json:"question"`
+	Options  json.RawMessage `json:"options"`
 	// Effects maps the options tend carries out itself to what it does
 	// (D53).
 	Effects map[string]DecisionEffect `json:"effects,omitempty"`
@@ -132,6 +134,38 @@ type HostView struct {
 	OpenRuns int64 `json:"open_runs"`
 }
 
+// ProjectView is a project with its current load.
+type ProjectView struct {
+	Project string `json:"project"`
+	Title   string `json:"title"`
+	// Weight multiplies the rating of the project's tasks in the queue.
+	Weight  int64 `json:"weight"`
+	Retired bool  `json:"retired,omitempty"`
+	// OpenTasks counts the project's unfinished tasks, of which a
+	// snapshot may list only some.
+	OpenTasks int64 `json:"open_tasks"`
+	// OpenRuns counts the project's runs that may still be working.
+	OpenRuns int64 `json:"open_runs"`
+	// Queued counts the project's entries in the queue.
+	Queued int64 `json:"queued"`
+}
+
+// QueueEntry is a queued action that waits only for a host to take it.
+type QueueEntry struct {
+	// Place is the entry's place in the whole queue, from 1.
+	Place    int        `json:"place"`
+	ActionID string     `json:"action_id"`
+	TaskID   string     `json:"task_id"`
+	Title    string     `json:"title"`
+	Project  string     `json:"project"`
+	Kind     ActionKind `json:"kind"`
+	Rating   Rating     `json:"rating"`
+	// WaitedMillis is how long the action has been queued.
+	WaitedMillis int64 `json:"waited_millis"`
+	// Score is the action's score, what orders everything but p0 (D60).
+	Score float64 `json:"score"`
+}
+
 // Snapshot is the owner's overview of the ledger, read at one point.
 type Snapshot struct {
 	// EventSeq is the last event the snapshot reflects.
@@ -141,6 +175,12 @@ type Snapshot struct {
 	// Decisions are the open decisions.
 	Decisions []DecisionView `json:"decisions"`
 	Hosts     []HostView     `json:"hosts"`
+	// Projects are the active projects and the retired ones that still
+	// have unfinished tasks.
+	Projects []ProjectView `json:"projects"`
+	// Queue lists the queued actions in the order hosts take them; one a
+	// host cannot run is passed over for the next it can.
+	Queue []QueueEntry `json:"queue"`
 }
 
 // TaskPage is one page of a task listing.

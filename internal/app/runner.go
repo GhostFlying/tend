@@ -185,21 +185,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
-	candidates := make([]scheduler.Candidate, 0, len(rows))
-	for _, r := range rows {
-		var spec domain.Spec
-		if err := json.Unmarshal([]byte(r.SpecJSON), &spec); err != nil {
-			return Outcome{}, fmt.Errorf("app: decode spec of %s: %w", r.Action.TaskID, err)
-		}
-		candidates = append(candidates, scheduler.Candidate{
-			ActionID: r.Action.ActionID, TaskID: r.Action.TaskID, Kind: r.Action.Kind, Status: r.Action.Status,
-			Generation: r.Action.Generation, TargetSpecVersion: r.Action.TargetSpecVersion,
-			TargetArtifactID: r.Action.TargetArtifactID, CreatedAt: r.Action.CreatedAt,
-			Lifecycle: r.Lifecycle, Control: r.Control, Block: r.Block, SpecVersion: r.SpecVersion,
-			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Rating: r.Rating, Weight: r.Weight,
-			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(),
-			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied,
-		})
+	candidates, err := candidatesOf(rows)
+	if err != nil {
+		return Outcome{}, err
 	}
 	pick, ok := scheduler.Pick(scheduler.Host{
 		ID: host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,

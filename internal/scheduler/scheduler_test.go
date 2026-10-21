@@ -84,7 +84,13 @@ func TestPickOrder(t *testing.T) {
 	blocked := implement()
 	blocked.ActionID, blocked.Rating, blocked.Block = "act_blocked", protocol.RatingP0, protocol.BlockWaitingDecision
 
-	got, ok := Pick(linux, []Candidate{low, high, older, blocked, sameOlderID, unrated}, o)
+	occupied := implement()
+	occupied.ActionID, occupied.Rating, occupied.WorkspaceOccupied = "act_occupied", protocol.RatingP0, true
+	if Held(occupied) == "" {
+		t.Error("a busy workspace does not hold its task on every host")
+	}
+
+	got, ok := Pick(linux, []Candidate{low, high, older, blocked, sameOlderID, unrated, occupied}, o)
 	if !ok || got.ActionID != "act_high_aaa" {
 		t.Errorf("Pick = %s (ok=%v), want act_high_aaa", got.ActionID, ok)
 	}

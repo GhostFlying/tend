@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
@@ -53,7 +54,11 @@ func notFound(err error) error {
 
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.Snapshot(r.Context(), q)
+		queue, err := app.Queue(r.Context(), q, s.app.QueueOrder())
+		if err != nil {
+			return nil, err
+		}
+		return views.Snapshot(r.Context(), q, queue, r.URL.Query().Get("project"))
 	})
 }
 

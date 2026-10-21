@@ -48,7 +48,7 @@ tend setup claude --write          # 写入；codex、traex 同理
 - hook 命令按路径写入：`tend` 在 PATH 上时写 `tend`，否则写绝对路径。Codex 和 traex 按命令记录信任，换了路径要重新信任，所以升级时放回同一个位置。
 - 只有用过 tend 的会话才会收到 tend 的上下文（D54）：会话第一次调用 tend 的工具之后，hook 才开始注入快照和增量。在一个会话里让 agent 使用 tend 时，它会先调用 `tend_context`。agent 的后台会话和与 tend 无关的会话不受影响。
 - hook 等 tend 最多 3 秒（`TEND_HOOK_TIMEOUT` 可调），超时或 tend 不可达时只注入一行提示，不会挡住输入。
-- owner 命令：`tend status`、`tend task <id>`、`tend logs <run_id> [-f]`、`tend decide`、`tend retry`、`tend pause|resume|cancel`，都支持 `--json`。
+- owner 命令：`tend status [--project <p>]`、`tend task <id>`、`tend logs <run_id> [-f]`、`tend decide`、`tend retry`、`tend rate <id> <p0..p3>`、`tend pause|resume|cancel`，都支持 `--json`。`tend status` 按 project 分组，列出每个 project 的权重、运行中和排队的数量、未结束的任务，以及排队的动作在整个队列里的位置、评级、等待时间和分数（D60）。
 
 ## tailnet ACL
 
