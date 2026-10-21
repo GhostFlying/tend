@@ -69,6 +69,19 @@ func SendRetryID(err error) string {
 	return ""
 }
 
+// Unconfirmed reports whether err leaves open whether orca carried out the
+// request: anything but a reply in which orca refused it. The CLI reports
+// a lost or late answer from orca's runtime as a runtime_* error, and an
+// unconfirmed mutation with the ID to replay it with.
+func Unconfirmed(err error) bool {
+	e, ok := errors.AsType[*Error](err)
+	if !ok {
+		return true
+	}
+	return strings.HasPrefix(e.Code, "runtime_") || e.Code == "agent_session_operation_unknown" ||
+		e.field("operationId") != "" || e.field("orchestrationRequestId") != ""
+}
+
 type reply struct {
 	OK     bool            `json:"ok"`
 	Result json.RawMessage `json:"result"`
@@ -127,6 +140,22 @@ func (c *Client) runCLI(ctx context.Context, dir string, args []string) ([]byte,
 	return stdout.Bytes(), err
 }
 
+// Repo is a repository registered in orca.
+type Repo struct {
+	ID          string `json:"id"`
+	Path        string `json:"path"`
+	DisplayName string `json:"displayName"`
+}
+
+// Repo returns the repository a selector such as name:<name> names.
+func (c *Client) Repo(ctx context.Context, selector string) (Repo, error) {
+	var res struct {
+		Repo Repo `json:"repo"`
+	}
+	err := c.call(ctx, "", &res, "repo", "show", "--repo", selector)
+	return res.Repo, err
+}
+
 // Worktree is an orca-managed checkout.
 type Worktree struct {
 	// ID selects the worktree as id:<ID>.
@@ -137,6 +166,8 @@ type Worktree struct {
 	Branch      string `json:"branch"`
 	DisplayName string `json:"displayName"`
 	BaseRef     string `json:"baseRef,omitempty"`
+	// IsMainWorktree marks the repository's own checkout.
+	IsMainWorktree bool `json:"isMainWorktree"`
 }
 
 // BranchName returns the worktree's branch without the refs/heads/ prefix.

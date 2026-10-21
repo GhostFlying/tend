@@ -34,6 +34,33 @@ func writeAgentsFile(root string, as protocol.Assignment, st state) error {
 	}
 	b.WriteString("\n## Rules\n\n")
 	b.WriteString("- Before working in a repository, read its own `AGENTS.md` (or `CLAUDE.md`) if it has one, and follow it inside that directory.\n")
+	writeRules(&b, as)
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(b.String()), 0o644); err != nil {
+		return fmt.Errorf("gitws: write AGENTS.md: %w", err)
+	}
+	return nil
+}
+
+// repoGuide describes a workspace whose worker starts inside the only
+// repository (D65). tend writes no AGENTS.md there, which would shadow
+// the repository's own; the worker gets this in its brief instead.
+func repoGuide(as protocol.Assignment, st state) string {
+	var b strings.Builder
+	for _, m := range as.Workspace.Mounts {
+		ms := st.Mounts[m.Path]
+		fmt.Fprintf(&b, "You work in a git worktree of %s that tend set up for this task, on branch `%s`. ", m.Repo, ms.Branch)
+		fmt.Fprintf(&b, "The task's work starts from base commit `%s`, %s. ", ms.Base, baseOrigin(ms.From))
+		b.WriteString("A check that compares with the base, such as \"the diff against main\", means this commit: ")
+		b.WriteString("`git log <base commit>..HEAD` lists the commits made since, `git diff <base commit>` shows all changes to tracked files, committed or not, and `git status` lists new files that are not committed.\n\n")
+	}
+	b.WriteString("Rules:\n\n")
+	b.WriteString("- Follow the repository's own `AGENTS.md` (or `CLAUDE.md`) if it has one.\n")
+	writeRules(&b, as)
+	return b.String()
+}
+
+// writeRules writes the rules of the run's role.
+func writeRules(b *strings.Builder, as protocol.Assignment) {
 	if as.Role == protocol.RoleAccept {
 		b.WriteString("- You are reviewing the work in this task's workspace, as the implementation left it. Judge whether the task is done; do not fix it.\n")
 		b.WriteString("- You may build and run tests, but do not edit the code, clean the working trees, or commit, switch branches or otherwise change git history: the next implementation continues from here.\n")
@@ -42,10 +69,6 @@ func writeAgentsFile(root string, as protocol.Assignment, st state) error {
 		b.WriteString("- Make your changes in the working trees. Whether and how to commit is yours to decide, as the task and the repository's own rules ask; tend does not commit for you. When the run ends, tend records each mount's HEAD and working tree as they are, and acceptance and the next implementation start from there.\n")
 	}
 	b.WriteString("- Keep temporary copies and experiments out of the repositories; use the scratch directory you were given.\n")
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(b.String()), 0o644); err != nil {
-		return fmt.Errorf("gitws: write AGENTS.md: %w", err)
-	}
-	return nil
 }
 
 // baseOrigin says where a base commit came from, given how ResolveBase

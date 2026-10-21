@@ -52,6 +52,9 @@ type Repo struct {
 	Reference string `json:"reference,omitempty"`
 	// Profiles are the prepare steps mounts of this repository can select.
 	Profiles map[string]Profile `json:"profiles,omitempty"`
+	// Orca selects the repository in orca, such as name:<name>, for the
+	// orca layout (D65).
+	Orca string `json:"orca,omitempty"`
 }
 
 // Config configures the workspaces of one runner.
@@ -65,6 +68,8 @@ type Config struct {
 	Repos    map[string]Repo
 	Profiles map[string]Profile // workspace-level profiles
 	Log      *slog.Logger
+	// Now is the clock; default time.Now.
+	Now func() time.Time
 }
 
 // Workspaces implements runner.Workspaces with git worktrees.
@@ -85,6 +90,9 @@ func New(cfg Config) *Workspaces {
 	if bin == "" {
 		bin = "git"
 	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	w := &Workspaces{cfg: cfg, git: git{bin: bin, env: cfg.Env}, locks: map[string]chan struct{}{}}
 	w.layout = clones{w}
 	return w
@@ -95,8 +103,9 @@ func New(cfg Config) *Workspaces {
 // workspace in the workspace directory, home.
 type layout interface {
 	// add checks out mount m on the task branch and returns its state.
-	// Dir is set when the checkout is not home/m.Path.
-	add(ctx context.Context, as protocol.Assignment, m protocol.AssignedMount, home string) (mountState, error)
+	// Dir is set when the checkout is not home/m.Path. st holds what an
+	// earlier attempt recorded, if anything, and add may save it.
+	add(ctx context.Context, as protocol.Assignment, m protocol.AssignedMount, home string, st *state) (mountState, error)
 	// root returns the directory the worker starts in.
 	root(home string, st state) string
 	// branch returns the branch the layout puts every mount on, or ""
@@ -113,7 +122,7 @@ func (clones) root(home string, _ state) string { return home }
 
 func (clones) branch(as protocol.Assignment) string { return as.Workspace.Branch }
 
-func (l clones) add(ctx context.Context, as protocol.Assignment, m protocol.AssignedMount, home string) (mountState, error) {
+func (l clones) add(ctx context.Context, as protocol.Assignment, m protocol.AssignedMount, home string, _ *state) (mountState, error) {
 	w := l.w
 	dir := filepath.Join(home, m.Path)
 	// New mounts start from the current remote (D36).
@@ -195,6 +204,10 @@ type mountState struct {
 	// one. An empty Tree means Head's.
 	Head string `json:"head"`
 	Tree string `json:"tree,omitempty"`
+	// Asked is when the runner asked a layout that creates checkouts
+	// elsewhere, orca, for this one, in Unix milliseconds; zero once the
+	// checkout is known.
+	Asked int64 `json:"asked,omitempty"`
 	// Run is the run that recorded them and Prev* what they were before
 	// it, so that run's collection can be repeated with the same result.
 	Run      string `json:"run,omitempty"`
@@ -270,7 +283,14 @@ func (w *Workspaces) ensureClone(ctx context.Context, repo, remoteURL string, fe
 	if !fetch {
 		return Remote{}, nil
 	}
-	if _, err := w.git.run(ctx, path, "fetch", "--prune", "--quiet", "origin"); err != nil {
+	return w.fetch(ctx, path)
+}
+
+// fetch fetches origin into the repository at path and returns what the
+// remote has. refspecs, when given, replace the repository's configured
+// ones for this fetch.
+func (w *Workspaces) fetch(ctx context.Context, path string, refspecs ...string) (Remote, error) {
+	if _, err := w.git.run(ctx, path, append([]string{"fetch", "--prune", "--quiet", "origin"}, refspecs...)...); err != nil {
 		return Remote{}, fmt.Errorf("%w: %w", runner.ErrFetchFailed, err)
 	}
 	remote := Remote{Branches: map[string]string{}}
@@ -329,7 +349,11 @@ func (w *Workspaces) clone(ctx context.Context, repo, remoteURL, path string) er
 }
 
 func (w *Workspaces) hasCommit(ctx context.Context, repo, sha string) bool {
-	ok, err := w.git.test(ctx, w.repoPath(repo), "cat-file", "-e", sha+"^{commit}")
+	return w.hasCommitIn(ctx, w.repoPath(repo), sha)
+}
+
+func (w *Workspaces) hasCommitIn(ctx context.Context, path, sha string) bool {
+	ok, err := w.git.test(ctx, path, "cat-file", "-e", sha+"^{commit}")
 	return err == nil && ok
 }
 
@@ -357,8 +381,13 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 		return runner.Prepared{}, err
 	}
 	root := w.layout.root(home, st)
-	if err := writeAgentsFile(root, as, st); err != nil {
-		return runner.Prepared{}, err
+	guide := ""
+	if root == home {
+		if err := writeAgentsFile(root, as, st); err != nil {
+			return runner.Prepared{}, err
+		}
+	} else {
+		guide = repoGuide(as, st)
 	}
 	if err := w.runProfiles(ctx, as, home, root, &st); err != nil {
 		return runner.Prepared{}, err
@@ -373,7 +402,7 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 	if err := os.MkdirAll(scratch, 0o755); err != nil {
 		return runner.Prepared{}, fmt.Errorf("gitws: scratch dir: %w", err)
 	}
-	p := runner.Prepared{Dir: root, ScratchDir: scratch}
+	p := runner.Prepared{Dir: root, ScratchDir: scratch, Guide: guide}
 	if as.Role == protocol.RoleImplement {
 		for _, m := range as.Workspace.Mounts {
 			ms := st.Mounts[m.Path]
@@ -395,7 +424,7 @@ func (w *Workspaces) layoutImplementation(ctx context.Context, as protocol.Assig
 				continue
 			}
 		}
-		ms, err := w.layout.add(ctx, as, m, home)
+		ms, err := w.layout.add(ctx, as, m, home, st)
 		if err != nil {
 			return err
 		}
