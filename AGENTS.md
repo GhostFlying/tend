@@ -34,6 +34,7 @@ tend/
     contextbuilder/        ContextPacket、快照、delta、水位
     harness/               harness 抽象接口
     harness/traex/         traex app-server 客户端；generated/ 存放生成的协议类型
+    harness/orca/          orca CLI 客户端与 orca 里的 TUI worker（D63、D66）
     runner/                runner 客户端：journal、租约、自我 fencing、worker 驱动
     cli/                   tend CLI：login、MCP 桥、hook 命令、setup、owner 命令（D46）
     netx/                  tsnet 封装（listener、WhoIs）；测试时替换为本地 listener
@@ -59,7 +60,7 @@ cmd → api / tools / runnerapi / dispatch / contextbuilder
           → store → protocol
 runner → harness, protocol, netx（runner 不 import 服务端的任何包）
 cmd/tend → cli → protocol（cli 只用标准库，不 import 服务端的任何包）
-harness/traex → harness, protocol
+harness/traex, harness/orca → harness, protocol
 ```
 
 - `domain` 不依赖 `store`、网络、时钟或随机数：所有输入通过参数传入，输出是决定（新状态、事件、待创建动作），方便穷举测试。
