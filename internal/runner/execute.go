@@ -61,9 +61,9 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 		case errors.Is(cause, errFenced):
 			r.cfg.Log.WarnContext(ctx, "run fenced; waiting for reconciliation", "run_id", runID)
 			return r.cfg.Journal.SetFenced(ctx, runID, true)
-		case errors.Is(err, errPaused):
-			// The worker was stopped for a pause; the next attempt
-			// waits until tend wants the run again.
+		case errors.Is(err, errPaused), errors.Is(err, errHeld):
+			// The worker was stopped for a pause or a takeover; the next
+			// attempt waits until tend wants the run again.
 			continue
 		case errors.Is(cause, errStopped):
 			err = r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "stopped by tend"})
@@ -115,7 +115,10 @@ func runTarget(as protocol.Assignment) protocol.Target {
 
 // work runs the worker and journals the run's final report.
 func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *active) error {
-	if err := r.waitUntilWanted(runCtx, a); err != nil {
+	if err := r.settleTakeover(runCtx, as, a); err != nil {
+		return err
+	}
+	if err := r.waitUntilWanted(runCtx, as, a); err != nil {
 		return err
 	}
 	// Each attempt can be stopped on its own, so a pause interrupts the
@@ -124,15 +127,18 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	defer stopAttempt(nil)
 	r.mu.Lock()
 	a.stopAttempt = stopAttempt
-	paused := a.desired == protocol.DesiredPaused
+	desired := a.desired
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		a.stopAttempt = nil
 		r.mu.Unlock()
 	}()
-	if paused {
+	switch desired {
+	case protocol.DesiredPaused:
 		return errPaused
+	case protocol.DesiredHeld:
+		return errHeld
 	}
 	runCtx = attemptCtx
 	// When the attempt was stopped, its cause explains the failure better
@@ -174,9 +180,17 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			run.Thread = thread
 			return r.cfg.Journal.SetThread(context.WithoutCancel(ctx), as.RunID, thread)
 		},
+		OnTakeover: func(reason string) error { return r.reportTakeover(runCtx, as, a, reason) },
+		HandBack:   run.Held,
 	})
 	if err != nil {
 		return stopped(failed("worker_start_failed", err))
+	}
+	if run.Held {
+		// The worker has told the agent it is tend's again.
+		if err := r.cfg.Journal.SetHeld(ctx, as.RunID, false); err != nil {
+			return err
+		}
 	}
 	uploaded := make(chan struct{})
 	uploaderCtx, stopUploader := context.WithCancel(ctx)
@@ -194,8 +208,8 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	stopUploader()
 	<-uploaded
 	if cause := context.Cause(runCtx); cause != nil {
-		// errFenced or errStopped from the run, or errPaused from this
-		// attempt.
+		// errFenced or errStopped from the run, or errPaused or errHeld
+		// from this attempt.
 		return cause
 	}
 	if appendErr != nil {
@@ -223,14 +237,20 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	return r.finish(ctx, as, journal.PhaseSubmitting, protocol.OpRunsSubmitArtifact, artifact)
 }
 
-// waitUntilWanted holds a run whose task is paused until tend wants it to
-// run.
-func (r *Runner) waitUntilWanted(ctx context.Context, a *active) error {
+// waitUntilWanted holds a run whose task is paused or under human control
+// until tend wants it to run. A takeover seen meanwhile is journaled, so
+// the next worker hands the agent back even after a restart.
+func (r *Runner) waitUntilWanted(ctx context.Context, as protocol.Assignment, a *active) error {
 	for {
 		r.mu.Lock()
 		desired := a.desired
 		r.mu.Unlock()
-		if desired != protocol.DesiredPaused {
+		if desired == protocol.DesiredHeld {
+			if err := r.cfg.Journal.SetHeld(ctx, as.RunID, true); err != nil {
+				return err
+			}
+		}
+		if desired != protocol.DesiredPaused && desired != protocol.DesiredHeld {
 			return nil
 		}
 		select {
@@ -239,6 +259,68 @@ func (r *Runner) waitUntilWanted(ctx context.Context, a *active) error {
 		case <-a.resume:
 		}
 	}
+}
+
+// reportTakeover tells tend the owner took over the run's agent (D67). The
+// request is journaled first: one tend may have recorded is resent under
+// its ID by the next attempt, never noticed and reported afresh, which
+// could undo a hand-back that came meanwhile.
+func (r *Runner) reportTakeover(ctx context.Context, as protocol.Assignment, a *active, reason string) error {
+	r.cfg.Log.InfoContext(ctx, "the owner took over the run's agent", "run_id", as.RunID, "reason", reason)
+	env, err := r.newEnvelope(protocol.OpRunsReportTakeover, runTarget(as), protocol.TakeoverPayload{Reason: reason})
+	if err != nil {
+		return err
+	}
+	if err := r.cfg.Journal.PutRequest(ctx, journal.Request{Envelope: *env, RunID: as.RunID}); err != nil {
+		return err
+	}
+	return r.sendTakeover(ctx, as, a, env)
+}
+
+// settleTakeover resends a takeover report an earlier attempt or process
+// journaled but did not see answered.
+func (r *Runner) settleTakeover(ctx context.Context, as protocol.Assignment, a *active) error {
+	reqs, err := r.cfg.Journal.Requests(ctx)
+	if err != nil {
+		return err
+	}
+	for _, req := range reqs {
+		if req.RunID == as.RunID && req.Envelope.Operation == protocol.OpRunsReportTakeover {
+			env := req.Envelope
+			if err := r.sendTakeover(ctx, as, a, &env); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// sendTakeover sends a journaled takeover report. Once tend has it, the
+// run is held here without waiting for a heartbeat to say so, which may
+// never come if the owner hands it back first; heartbeats sent before
+// then cannot undo it.
+func (r *Runner) sendTakeover(ctx context.Context, as protocol.Assignment, a *active, env *protocol.Envelope) error {
+	_, err := r.send(ctx, runCredential(as), env)
+	if err != nil && !isRetryable(err) {
+		// tend refused it, as for a run that has ended: nothing to hold.
+		r.cfg.Log.WarnContext(ctx, "tend refused the takeover report", "run_id", as.RunID, "err", err)
+		return r.cfg.Journal.DeleteRequest(ctx, env.RequestID)
+	}
+	if err != nil {
+		return err
+	}
+	if err := r.cfg.Journal.SetHeld(context.WithoutCancel(ctx), as.RunID, true); err != nil {
+		return err
+	}
+	if err := r.cfg.Journal.DeleteRequest(context.WithoutCancel(ctx), env.RequestID); err != nil {
+		return err
+	}
+	now := r.cfg.Now()
+	r.mu.Lock()
+	a.heldAt = now
+	r.mu.Unlock()
+	r.applyDesired(ctx, a, protocol.DesiredHeld, now)
+	return nil
 }
 
 // finish journals the run's final report and moves it to phase, so the

@@ -531,3 +531,33 @@ func TestCancelClearsTheBlock(t *testing.T) {
 		t.Errorf("Cancel = %+v, %v; want cancelled and not blocked", d.Task, err)
 	}
 }
+
+func TestTakenOverOnlyByCurrentRuns(t *testing.T) {
+	running := taskIn(protocol.TaskRunning)
+	if d := TakenOver(running, implementRun(running), "typed"); d.Task.Control != protocol.ControlHumanControl ||
+		d.Task.ControlRevision != running.ControlRevision+1 || len(d.Events) != 1 || d.Events[0].Kind != "task.taken_over" {
+		t.Errorf("current run: %+v", d)
+	}
+	// The run of a generation the task started over from.
+	old := implementRun(running)
+	running.ImplementGeneration++
+	if d := TakenOver(running, old, "typed"); d.Task.Control != protocol.ControlManaged || d.Events[0].Body["stale"] != true {
+		t.Errorf("superseded run: %+v", d)
+	}
+	// Acceptance of the artifact under review, and of an older one.
+	review := taskIn(protocol.TaskAwaitingAcceptance)
+	acc := RunFact{RunID: "run_a", Role: protocol.RoleAccept, SpecVersion: 1, ArtifactID: "art_1"}
+	if d := TakenOver(review, acc, "typed"); d.Task.Control != protocol.ControlHumanControl {
+		t.Errorf("current acceptance: %+v", d)
+	}
+	acc.ArtifactID = "art_0"
+	if d := TakenOver(review, acc, "typed"); d.Task.Control != protocol.ControlManaged {
+		t.Errorf("old acceptance: %+v", d)
+	}
+	// Already held: nothing new.
+	held := taskIn(protocol.TaskRunning)
+	held.Control = protocol.ControlHumanControl
+	if d := TakenOver(held, implementRun(held), "again"); len(d.Events) != 0 || d.Task.ControlRevision != held.ControlRevision {
+		t.Errorf("already held: %+v", d)
+	}
+}

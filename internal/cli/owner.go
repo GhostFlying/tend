@@ -75,6 +75,8 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 		return o.setMode(ctx, pos[0], protocol.ControlPaused)
 	case "resume":
 		return o.setMode(ctx, pos[0], protocol.ControlManaged)
+	case "takeover":
+		return o.setMode(ctx, pos[0], protocol.ControlHumanControl)
 	default:
 		return o.cancel(ctx, pos[0])
 	}

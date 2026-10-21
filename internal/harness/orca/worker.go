@@ -153,6 +153,9 @@ type workerState struct {
 	// Interrupted says tend interrupted the agent's turn and has not
 	// continued it yet; orca may report the interruption late.
 	Interrupted bool `json:"interrupted,omitempty"`
+	// Said is the start of tend's latest prompt; an agent working on
+	// another one was given it by someone else.
+	Said string `json:"said,omitempty"`
 }
 
 // Agent states as orca reports them.
@@ -176,6 +179,9 @@ type worker struct {
 
 	srv      *bridge.Server
 	verdicts harness.Verdicts
+	// holding is why the worker leaves the agent to the owner, once it
+	// noticed a takeover.
+	holding string
 	// askedVerdict is set once an acceptance agent that finished without
 	// a verdict this worker received was asked for it again.
 	askedVerdict bool
@@ -274,7 +280,24 @@ func (w *worker) begin(ctx context.Context, agent string) error {
 		if err != nil {
 			return err
 		}
+		if alive && w.spec.HandBack {
+			// The owner handed the run back (D67). A turn whose answer
+			// was lost is settled first, so the hand-back is a turn of
+			// its own.
+			handBack := harness.HandBack(w.spec)
+			if w.st.Send != "" {
+				pending := w.st.SendText
+				if err := w.send(ctx, ""); err != nil || pending == handBack {
+					return err // the hand-back itself was pending
+				}
+			}
+			return w.send(ctx, handBack)
+		}
 		if alive {
+			if reason := w.takenOver(a); reason != "" {
+				w.holding = reason // run reports it and waits
+				return nil
+			}
 			// A verdict from an earlier attempt is not journaled: an
 			// acceptance agent done meanwhile is asked to give it again.
 			doneMeanwhile := answered(a, w.st.Turn) && w.spec.Role != protocol.RoleAccept
@@ -325,6 +348,12 @@ func (w *worker) launch(ctx context.Context, agent string) error {
 		}
 	}
 	prompt := w.prompt()
+	if w.st.Said != said(prompt) {
+		w.st.Said = said(prompt)
+		if err := w.save(); err != nil {
+			return err
+		}
+	}
 	for i := 0; ; i++ {
 		l, err := w.ws.opts.Client.LaunchAgent(ctx, LaunchOptions{
 			Dir: w.spec.Dir, Agent: agent, Worktree: "id:" + w.wt, Prompt: prompt,
@@ -454,7 +483,7 @@ func (w *worker) send(ctx context.Context, text string) error {
 		text = w.st.SendText
 	} else {
 		w.st.Turn = w.ws.opts.Now().UnixMilli()
-		w.st.Interrupted = false
+		w.st.Interrupted, w.st.Said = false, said(text)
 		if err := w.save(); err != nil {
 			return err
 		}
@@ -524,6 +553,10 @@ func (w *worker) run(ctx context.Context) {
 	}
 	w.pending = nil
 	for {
+		if w.holding != "" {
+			w.hold(ctx)
+			return
+		}
 		a, done, err := w.step(ctx)
 		if cause := context.Cause(ctx); cause != nil {
 			w.stop(ctx, cause)
@@ -590,6 +623,10 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 			w.state = a.State
 			w.emit(ctx, "agent.state", map[string]string{"state": a.State, "blocked_reason": wait.BlockedReason})
 		}
+		if reason := w.takenOver(a); reason != "" {
+			w.holding = reason
+			return a, false, nil
+		}
 		if wait.Satisfied && answered(a, w.st.Turn) {
 			return a, true, nil
 		}
@@ -606,6 +643,55 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 		return a, false, nil
 	}
 	return Agent{}, false, fmt.Errorf("orca: lost track of the worker: %w", lastErr)
+}
+
+// takenOver says why the agent is no longer in tend's hands, or "" while
+// it is: someone gave it a prompt tend did not, or interrupted a turn tend
+// did not interrupt (D67).
+func (w *worker) takenOver(a Agent) string {
+	if a.StateStartedAt < w.st.Turn || a.State == "" {
+		return ""
+	}
+	if a.Prompt != "" && w.st.Said != "" && !samePrompt(said(a.Prompt), w.st.Said) {
+		return "the agent works on a prompt tend did not give"
+	}
+	if a.State == stateDone && a.Interrupted && !w.st.Interrupted {
+		return "someone interrupted the agent's turn"
+	}
+	return ""
+}
+
+// hold reports the takeover and leaves the agent to the owner until the
+// worker is stopped. Whether the owner holds the run is the runner's to
+// keep: it learns so from tend, and tells the next worker to hand back.
+func (w *worker) hold(ctx context.Context) {
+	w.emit(ctx, "worker.taken_over", map[string]string{"reason": w.holding})
+	if w.spec.OnTakeover != nil {
+		if err := w.spec.OnTakeover(w.holding); err != nil && ctx.Err() == nil {
+			w.ws.opts.Log.WarnContext(ctx, "could not report the takeover", "run_id", w.spec.RunID, "err", err)
+		}
+	}
+	<-ctx.Done()
+	w.err = context.Cause(ctx)
+}
+
+// saidLen is how much of a prompt identifies it: orca may keep less than
+// the whole of a long one.
+const saidLen = 200
+
+// said is the start of a prompt, with its spacing evened out.
+func said(prompt string) string {
+	s := strings.Join(strings.Fields(prompt), " ")
+	if r := []rune(s); len(r) > saidLen {
+		s = string(r[:saidLen])
+	}
+	return s
+}
+
+// samePrompt reports whether two prompts' starts agree as far as both go.
+func samePrompt(a, b string) bool {
+	n := min(len(a), len(b))
+	return a[:n] == b[:n]
 }
 
 // codeTimeout is the error code of a wait whose condition did not hold in
@@ -633,9 +719,12 @@ func (w *worker) stop(ctx context.Context, cause error) {
 		return
 	}
 	var err error
-	if errors.Is(cause, harness.ErrStopped) {
+	switch {
+	case errors.Is(cause, harness.ErrStopped):
 		err = w.ws.opts.Client.CloseTerminal(stopCtx, w.st.Terminal)
-	} else {
+	case errors.Is(cause, harness.ErrHeld), w.holding != "":
+		// The owner works in the agent: leave it alone.
+	default:
 		w.st.Interrupted = true
 		if err = w.save(); err == nil {
 			_, err = w.ws.opts.Client.SendInput(stopCtx, SendOptions{Terminal: w.st.Terminal, Text: esc})

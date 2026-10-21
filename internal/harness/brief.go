@@ -72,6 +72,17 @@ type briefSpec struct {
 const VerdictReminder = "tend did not receive a verdict from you. Call " + VerdictTool + " now with your verdict and evidence, " +
 	"even if you called it before: that call may have been lost. Do not repeat the review unless you have to."
 
+// HandBack is the turn input that returns a worker's agent to tend after
+// the owner worked in it (D67).
+func HandBack(spec WorkerSpec) string {
+	s := "The owner worked with you in this terminal and has handed the task back to tend. " +
+		"Check the state of the working trees and anything the owner changed or asked for, then finish the same task."
+	if spec.Role == protocol.RoleAccept {
+		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before."
+	}
+	return s
+}
+
 // Continuation is the turn input that continues a worker's thread after
 // its attempt was interrupted (D61). The thread holds the task and the
 // work so far, so it only says what happened.

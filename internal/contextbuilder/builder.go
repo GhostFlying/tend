@@ -85,7 +85,8 @@ var classes = map[string]class{
 	"task.started_over": intent, "task.workspace_abandoned": intent, "task.workspace_available": intent,
 	"task.completed": result, "task.cancelled": result,
 	"decision.opened": attention, "run.failed": attention, "run.unknown": attention, "run.lost": attention, "task.workspace_unavailable": attention,
-	"outbox.failed": attention, "outbox.unknown": attention,
+	"task.taken_over": attention,
+	"outbox.failed":   attention, "outbox.unknown": attention,
 	// A passed verdict is a result; any other needs attention.
 	"acceptance.submitted": result,
 	// Recorded before ratings (D60); a session may not have heard of it yet.

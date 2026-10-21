@@ -207,8 +207,19 @@ func (w *workspaces) Finish(context.Context, protocol.Assignment) error { return
 type network struct {
 	mu   sync.Mutex
 	down bool
-	// drop counts how many more requests of an operation to fail.
+	// drop counts how many more requests of an operation to fail, and
+	// lose how many more answers to lose after tend handled the request.
 	drop map[string]int
+	lose map[string]int
+}
+
+func (n *network) loseNext(op string, times int) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.lose == nil {
+		n.lose = map[string]int{}
+	}
+	n.lose[op] += times
 }
 
 // allow stops dropping requests of an operation.
@@ -253,7 +264,18 @@ func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
 	if down || drop {
 		return nil, errors.New("network is down")
 	}
-	return http.DefaultTransport.RoundTrip(req)
+	res, err := http.DefaultTransport.RoundTrip(req)
+	n.mu.Lock()
+	lose := n.lose[env.Operation] > 0
+	if lose {
+		n.lose[env.Operation]--
+	}
+	n.mu.Unlock()
+	if err == nil && lose {
+		res.Body.Close()
+		return nil, errors.New("connection reset")
+	}
+	return res, err
 }
 
 // node is one runner process; restart replaces it with a new process on
@@ -683,6 +705,99 @@ func TestCancelWhilePausedReleasesTheAgent(t *testing.T) {
 	run := n.workers.Started()[0].RunID
 	if got := n.workers.Released(); !slices.Equal(got, []string{fmt.Sprintf("th_%s_1", run)}) {
 		t.Errorf("released %q, want the run's thread", got)
+	}
+}
+
+func TestTakeoverHoldsTheRunUntilHandedBack(t *testing.T) {
+	srv := newServer(t, 400*time.Millisecond)
+	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
+		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
+			return testkit.WorkerScript{Takeover: "the owner typed", Gate: make(chan struct{})}
+		}
+		return passing(spec)
+	})
+	n.start()
+	task := srv.createTask()
+	eventually(t, "the task passes to human control", func() bool { return srv.task(task).ControlMode == protocol.ControlHumanControl })
+	eventually(t, "the held worker is stopped", func() bool { return len(n.workers.Stopped()) == 1 })
+	holdFor(t, 500*time.Millisecond, "a worker started while the owner holds the task", func() bool { return len(n.workers.Started()) > 1 })
+
+	srv.setMode(task, protocol.ControlManaged)
+	eventually(t, "the task completes after the hand-back", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
+	if started := n.workers.Started(); started[1].Role != protocol.RoleImplement || started[1].Attempt != 2 || !started[1].HandBack {
+		t.Errorf("after the hand-back: %+v, want implementation attempt 2 handing back", started[1])
+	}
+}
+
+func TestTakeoverHandedBackBeforeAHeartbeat(t *testing.T) {
+	srv := newServer(t, 4*time.Second)
+	var task string
+	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
+		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
+			// The owner hands the run back as soon as tend records the
+			// takeover, before any heartbeat could carry it.
+			return testkit.WorkerScript{Takeover: "the owner typed", Gate: make(chan struct{})}
+		}
+		return passing(spec)
+	})
+	n.workers.AfterTakeover = func() { srv.setMode(task, protocol.ControlManaged) }
+	n.start()
+	task = srv.createTask()
+	eventually(t, "the task completes after the hand-back", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
+	if started := n.workers.Started(); len(started) < 2 || !started[1].HandBack {
+		t.Errorf("started %+v, want a second attempt handing back", started)
+	}
+}
+
+func TestFault_TakeoverReplyLostThenHandedBack(t *testing.T) {
+	srv := newServer(t, 400*time.Millisecond)
+	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
+		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
+			return testkit.WorkerScript{Takeover: "the owner typed", Gate: make(chan struct{})}
+		}
+		return passing(spec)
+	})
+	// tend records the takeover, but the runner never hears so.
+	n.net.loseNext(protocol.OpRunsReportTakeover, 1000)
+	n.start()
+	task := srv.createTask()
+	eventually(t, "the task passes to human control", func() bool { return srv.task(task).ControlMode == protocol.ControlHumanControl })
+	n.stop()
+	// The owner hands the run back while the runner is down.
+	srv.setMode(task, protocol.ControlManaged)
+	n.net.lose = nil
+	n.start()
+	eventually(t, "the task completes after the hand-back", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
+	if got := srv.count(`SELECT COUNT(*) FROM events WHERE kind = 'task.taken_over'`); got != 1 {
+		t.Errorf("%d takeovers recorded, want the one, not undoing the hand-back", got)
+	}
+	started := n.workers.Started()
+	i := slices.IndexFunc(started, func(s harness.WorkerSpec) bool { return s.Role == protocol.RoleImplement && s.Attempt == 2 })
+	if i < 0 || !started[i].HandBack {
+		t.Errorf("started %+v, want the second implementation attempt handing back", started)
+	}
+}
+
+func TestTakeoverWhilePausedIsHandedBack(t *testing.T) {
+	srv := newServer(t, 400*time.Millisecond)
+	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
+		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
+			return testkit.WorkerScript{Gate: make(chan struct{})}
+		}
+		return passing(spec)
+	})
+	n.start()
+	task := srv.createTask()
+	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
+	srv.setMode(task, protocol.ControlPaused)
+	eventually(t, "the paused worker is stopped", func() bool { return len(n.workers.Stopped()) == 1 })
+	// No worker runs when the owner takes over and later hands back.
+	srv.setMode(task, protocol.ControlHumanControl)
+	time.Sleep(300 * time.Millisecond)
+	srv.setMode(task, protocol.ControlManaged)
+	eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
+	if started := n.workers.Started(); !started[1].HandBack {
+		t.Errorf("after the hand-back: %+v, want the agent handed back", started[1])
 	}
 }
 

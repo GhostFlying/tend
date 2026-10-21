@@ -208,6 +208,7 @@ var runCommands = map[string]app.Command{
 	protocol.OpRunsReportStarted:   app.ReportRunStarted{},
 	protocol.OpRunsSubmitArtifact:  app.SubmitArtifact{},
 	protocol.OpRunsRelease:         app.Release{},
+	protocol.OpRunsReportTakeover:  app.ReportTakeover{},
 	protocol.OpAcceptancesSubmit:   app.SubmitAcceptance{},
 }
 

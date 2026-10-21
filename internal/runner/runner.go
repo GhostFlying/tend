@@ -115,6 +115,7 @@ var (
 	errFenced  = errors.New("runner: the lease could not be renewed in time")
 	errStopped = fmt.Errorf("runner: %w", harness.ErrStopped)
 	errPaused  = fmt.Errorf("runner: %w", harness.ErrPaused)
+	errHeld    = fmt.Errorf("runner: %w", harness.ErrHeld)
 )
 
 // active is a run with a live executor.
@@ -124,7 +125,10 @@ type active struct {
 	cancel   context.CancelCauseFunc
 	deadline time.Time
 	desired  protocol.RunDesired
-	resume   chan struct{}
+	// heldAt is when the runner itself learned of a takeover; a desired
+	// state tend sent before then does not undo it.
+	heldAt time.Time
+	resume chan struct{}
 	// stopAttempt stops the current worker attempt, for example to pause
 	// the run; nil while no worker runs.
 	stopAttempt context.CancelCauseFunc
@@ -460,7 +464,7 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 		a.deadline = deadline
 		r.mu.Unlock()
 		if as.Desired != "" {
-			r.applyDesired(a, as.Desired)
+			r.applyDesired(ctx, a, as.Desired, renewedAt)
 		}
 		return
 	}
@@ -499,24 +503,42 @@ func (r *Runner) heartbeats(ctx context.Context) {
 	}
 }
 
-// applyDesired acts on what tend wants a run to do: stop it, pause its
-// worker, or let a paused run go on.
-func (r *Runner) applyDesired(a *active, desired protocol.RunDesired) {
+// applyDesired acts on what tend wants a run to do, as tend saw it at
+// observed: stop it, pause or hold its worker, or let a paused or held run
+// go on.
+func (r *Runner) applyDesired(ctx context.Context, a *active, desired protocol.RunDesired, observed time.Time) {
 	r.mu.Lock()
+	if desired != protocol.DesiredStopped && observed.Before(a.heldAt) {
+		// Sent before the takeover this runner reported was recorded.
+		r.mu.Unlock()
+		return
+	}
 	prev := a.desired
 	a.desired = desired
 	stopAttempt := a.stopAttempt
 	r.mu.Unlock()
+	if desired == protocol.DesiredHeld && prev != desired {
+		// Journaled as soon as it is seen: the owner may hand the run
+		// back before the next worker starts, which must still say so.
+		if err := r.cfg.Journal.SetHeld(context.WithoutCancel(ctx), a.as.RunID, true); err != nil {
+			r.cfg.Log.ErrorContext(ctx, "could not journal the takeover", "run_id", a.as.RunID, "err", err)
+		}
+	}
+	if desired != prev {
+		// A run waiting for tend sees every change, such as a pause
+		// becoming a takeover.
+		select {
+		case a.resume <- struct{}{}:
+		default:
+		}
+	}
 	switch {
 	case desired == protocol.DesiredStopped:
 		a.cancel(errStopped)
 	case desired == protocol.DesiredPaused && stopAttempt != nil:
 		stopAttempt(errPaused)
-	case desired == protocol.DesiredRun && prev != protocol.DesiredRun:
-		select {
-		case a.resume <- struct{}{}:
-		default:
-		}
+	case desired == protocol.DesiredHeld && stopAttempt != nil:
+		stopAttempt(errHeld)
 	}
 }
 
@@ -564,7 +586,7 @@ func (r *Runner) heartbeat(ctx context.Context) {
 		r.mu.Lock()
 		a.deadline = deadline
 		r.mu.Unlock()
-		r.applyDesired(a, s.Desired)
+		r.applyDesired(ctx, a, s.Desired, sent)
 	}
 }
 

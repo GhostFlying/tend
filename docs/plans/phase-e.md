@@ -106,10 +106,20 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
 
 ## 6. 人工接管（E6）
 
-- **察觉**：runner 记下 tend 自己发出的每一轮（启动时的提示、`terminal send` 的请求 ID 和 orca 的轮次序号）。agent 状态里出现一轮不是 tend 发起的工作（提示不同，或轮次序号前进而没有对应的请求），就视为 owner 接管。
-- **记录**：runner 报告 `runs.report_takeover`，服务端把任务转为 `human_control`，产生 `task.taken_over` 事件（需要处理的一类，主 Agent 下一次会提到）。不需要 owner 先执行命令，但 owner 也可以用 `tend takeover <task>` 显式接管（用于“我想先接手，再动手”）。
-- **接管期间**：runner 不再把空闲当作完成，不收集产物，不发任何输入；终端保持原样，worker 的租约照常续期。和 owner 主动暂停不同，接管不打断 agent。
-- **交还**：`tend resume <task>`，按 §9 的选择 1 继续。
+- **察觉**（orca worker）：worker 在 journal 里记下 tend 最近一轮提示的开头（空白归一后的前 200 个字符；orca 可能不保存长提示的全部）和这一轮的开始时间。这一轮开始之后，orca 的 agent 状态里出现下面任何一种，就视为 owner 接管：
+  - agent 在做的提示和 tend 的不同（两者开头在共同长度内不一致）；
+  - 这一轮被中断，而 tend 没有发过 Esc（journal 里的中断标记）。
+  - worker 在两处检查：等一轮结束时，以及下一次尝试接上 agent 时（覆盖“暂停期间 owner 在 orca 里操作，然后恢复”）。
+- **记录**：worker 调用 `WorkerSpec.OnTakeover`，runner 报告 `runs.report_takeover`（run 自己的凭据，载荷是察觉的原因）。这是事实而不是 owner 的控制请求，不带 `expected_control_revision`（约束 3 针对控制类写入），由领域规则决定：
+  - 当前的 run（实现 run 是当前 spec 版本的当前代次，验收 run 是正在验收的产物）：任务转为 `human_control`，控制版本加一，产生 `task.taken_over`（需要处理的一类）；已经是 `human_control` 时不重复记录；
+  - 过时的 run（包括 start over 之后的旧代次）或已结束的任务：只记一条 stale 的 `task.taken_over`。
+  - 请求不进 journal：没送到时，下一次尝试会再次察觉并报告。
+  - owner 也可以用 `tend takeover <task>` 显式接管（`control.set_mode human_control`，主 Agent 不能这样做，见现有授权）。
+- **接管期间**：`human_control` 下 run 的 desired 是新的 `held`（之前和暂停一样是 `paused`，那会让 worker 发 Esc 打断 owner）。runner 以 `harness.ErrHeld` 停下这次尝试，等到 desired 变回 `run`。
+  - **“被接管”由 runner 记**（journal 的 `held`），不由 worker 记：runner 从 tend 看到 `held`（包括暂停期间、没有 worker 在跑时 owner 用 `tend takeover`），或自己的接管报告被 tend 收下时，都记下来。报告被收下后 runner 立即在本地当作 `held` 停下这次尝试，不等心跳（owner 可能在下一次心跳前就已交还）；比这次报告更早发出的心跳带回的 desired 不会把它改回去。接管报告先进 journal 再发：tend 可能已经收下而 runner 没收到回执，下一次尝试先用原来的请求 ID 重发它（tend 按 ID 去重，不会再记一次接管，也就不会撤销这期间 owner 的交还），收下后才记 `held`。从没被 tend 收下的报告不算接管，下一次尝试会再次察觉并报告，而不是把还在 owner 手里的 agent 交还给 worker。`held` 在 runner 接受 tend 发来的 `held` 时立即记下，不依赖之后读到的 desired。已知限制：owner 在 runner 离线时（或两次心跳之间）先 `tend takeover` 再 `tend resume`，runner 从没看到 `held`，接上 agent 时会把 owner 的提示当作新的接管，任务回到 `human_control`；结果是保守的（tend 再次让开，owner 再 resume 一次），要完全避免需要服务端按 run 记录交还，暂不做。
+  - orca worker 察觉后不判断完成、不收集、不发任何输入；被停下时（`ErrHeld`、runner 退出、fencing）都不碰 agent，只有 tend 不再需要这个 run（取消）时才关闭终端。租约照常续期。
+  - app-server worker 不会被接管；它的任务被 owner 设为 `human_control` 时，`held` 和暂停一样打断 worker。
+- **交还**：`tend resume <task>`。runner 记着 `held` 时，下一次尝试的 `WorkerSpec.HandBack` 为真，worker 接上 agent 后（有回执丢失的一轮时先把它重放完）发 `harness.HandBack` 作为单独的一轮（“owner 和你一起处理过，检查工作区后完成任务”，验收 run 另要求重新调用 `submit_verdict`），之后照常等一轮结束、收集、验收；worker 启动成功后 runner 清掉 `held`。
 - **cove 之后**：察觉换成 cove 的控制者变化，其余不变。
 
 ## 7. 真机验收（E7）
