@@ -55,8 +55,8 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
 - **实现方式**：orca 是 gitws 的另一种布局，不是另一个包。gitws 现在假定工作区根目录下每个 mount 一个子目录、状态放在根目录的 `.tend/`；先做一个纯重构提交，把“worker 从哪里开始”“mount 在哪里”“状态放在哪里”“新 mount 怎么建出来”抽成布局，读取、快照、验收前核对和准备命令都只经过布局拿目录。现有布局（runner 自己的 bare clone 加 git worktree）行为不变。
 - **orca 布局**：
   - 只接受单个 mount（E1 已保证）。worker 从 orca worktree 的根目录开始；状态放在 `$TEND_HOME/workspaces/<工作区名>/.tend/`，不写进 worktree；不写工作区根目录的 `AGENTS.md`（worktree 就是仓库本身，仓库自己的 `AGENTS.md` 照常生效）。原来 `AGENTS.md` 里关于基点和规则的说明改由 `Prepared.Guide` 带给 worker，E5 放进 brief。
-  - **建 mount**：先在 owner 的仓库里 `git fetch --prune origin`，用同一个 `ResolveBase` 把 spec 的基点解析成 commit（D36），再 `orca worktree create --repo … --name <工作区名> --base-branch <sha> --no-parent --setup skip`（已验证 `--base-branch` 接受 sha）。
-  - **幂等**：orca 对重名不报错，而是建出 `<名字>-2`。所以建之前先按显示名找已有的 worktree：找到一个就接着用（上一次建好后没来得及保存状态），找到多个时失败并说明，交给 owner。worktree 的路径记进状态。
+  - **建 mount**：先在 owner 的仓库里 fetch origin 的所有分支（显式 refspec，不依赖也不改动 owner 仓库的 fetch 配置），用同一个 `ResolveBase` 把 spec 的基点解析成 commit（D36），再 `orca worktree create --repo … --name <工作区名> --base-branch <sha> --no-parent --setup skip`（已验证 `--base-branch` 接受 sha）。
+  - **幂等**：orca 对重名不报错，而是建出 `<名字>-2`。所以在请求 orca 之前，先把解析好的基点作为待建的 mount 记进状态。重试时沿用记下的基点，按显示名找 worktree：找到一个且基点一致就接着用；没有记录却已有同名 worktree（例如 owner 自己建的）、基点不一致或有多个同名时失败并说明，交给 owner。请求的回执丢失时（CLI 中断不会中止 orca 里的创建），重试先等待一段时间（2 分钟）看 worktree 是否出现，期间不重新请求（约束 4）；orca 明确拒绝时才立即重试。建好后 worktree 的路径记进状态。
   - **工作区事实**：路径、`head`、去掉 `refs/heads/` 的分支。按 D65，服务端在第一次报告时记录 orca 建出的分支，不再要求 `tend/<名字>`；之后同一工作区的报告必须一致。这是工作区的准备事实；产物照旧记录 worker 实际所在的分支和 HEAD，worker 换分支或 detach 仍按 D57 处理。
   - 产物的提交照旧用 `refs/tend/runs/…` 保持可达；对 orca 来说这些 ref 在 owner 的仓库里。
 - **准备命令**：mount 的 profile 在 worktree 里执行；工作区级的 profile 也在 worktree 里执行（单仓库时两者是同一个目录）。

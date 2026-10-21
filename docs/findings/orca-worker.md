@@ -23,6 +23,14 @@
 - 一个 worktree 里可以同时有多个 agent 终端；tend 要只认自己启动的那个 handle。
 - orca 没有移除仓库的 CLI 或 RPC，只能在界面上移除。tend 用 orca 时只建 worktree、不登记新仓库，仓库由 owner 事先加入 orca。
 
+## 阶段 E 中的补充验证（2026-10-21）
+
+在同一台机器上，用同一个 scratch 仓库（验证后已删除）补充确认了 E3 依赖的三点：
+
+- `orca worktree create --base-branch <commit sha>` 可行：worktree 从这个 commit 开始，`baseRef` 记为这个 sha。
+- 重名不报错：再建一个同名 worktree 时，orca 建出 `<名字>-2`（路径和分支都加后缀，显示名不变）。幂等只能靠建之前按显示名查找。
+- `orca worktree rm --force` 同时删除 worktree 和它的分支。
+
 ## 对阶段 E 的影响
 
 - worker 的启动、输入、空闲判断都有现成接口；需要 tend 自己做的是：工作区事实的映射、项目级 MCP 配置的写入和排除、agent 的信任处理、按 agent 选择空闲判断方式，以及接管的识别规则。

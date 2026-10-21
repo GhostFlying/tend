@@ -455,11 +455,13 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	if err != nil {
 		return Outcome{}, err
 	}
-	branch := domain.TaskBranch(ws.Name)
+	// The workspace provider names the branch: the runner's own layout
+	// uses the task branch, orca its own (D65). The first report records
+	// it, and later ones must agree.
 	reported := map[string]protocol.ResolvedMount{}
 	for _, m := range p.Mounts {
-		if !shaPattern.MatchString(m.ResolvedBaseSHA) || m.ResolvedFrom == "" || m.Branch != branch {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "mount %q needs a full base sha, its source and branch %s", m.Path, branch)
+		if !shaPattern.MatchString(m.ResolvedBaseSHA) || m.ResolvedFrom == "" || !domain.ValidBranch(m.Branch) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "mount %q needs a full base sha, its source and a valid branch", m.Path)
 		}
 		reported[m.Path] = m
 	}
@@ -473,7 +475,7 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		delete(reported, m.Path)
 		if prev, ok := recorded[m.Path]; ok {
 			if prev.ResolvedBaseSHA != r.ResolvedBaseSHA || prev.Branch != r.Branch {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "mount %q was already recorded with base %s", m.Path, prev.ResolvedBaseSHA)
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "mount %q was already recorded with base %s on %s", m.Path, prev.ResolvedBaseSHA, prev.Branch)
 			}
 			continue
 		}

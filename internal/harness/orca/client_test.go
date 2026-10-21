@@ -134,3 +134,22 @@ func TestFailures(t *testing.T) {
 		t.Error("a truncated listing passed for complete")
 	}
 }
+
+func TestUnconfirmed(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{errors.New("signal: killed"), true},
+		{&Error{Code: "runtime_timeout", Message: "Timed out waiting for the Orca runtime to respond."}, true},
+		{&Error{Code: "runtime_unavailable"}, true},
+		{&Error{Code: "agent_session_operation_unknown"}, true},
+		{&Error{Code: "invalid_argument", Data: []byte(`{"orchestrationRequestId":"req-1"}`)}, true},
+		{&Error{Code: "repo_not_found"}, false},
+		{&Error{Code: "invalid_argument", Data: []byte(`{"suggestions":[]}`)}, false},
+	} {
+		if got := Unconfirmed(tc.err); got != tc.want {
+			t.Errorf("Unconfirmed(%v) = %v, want %v", tc.err, got, tc.want)
+		}
+	}
+}

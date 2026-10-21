@@ -425,6 +425,26 @@ func TestReportWorkspace(t *testing.T) {
 	}
 }
 
+func TestReportWorkspaceRecordsTheProvidersBranch(t *testing.T) {
+	h := newHarness(t)
+	h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
+	as, _, _ := h.claim("linux-1")
+	report := func(branch string) protocol.Operation {
+		return h.runAs(as, protocol.OpRunsReportWorkspace, protocol.WorkspaceReport{Mounts: []protocol.ResolvedMount{
+			{Path: "tend", ResolvedBaseSHA: baseSHA, ResolvedFrom: "candidate:main", Branch: branch}}}, ReportWorkspace{})
+	}
+	if op := report("bad..branch"); op.Status != protocol.OpFailed {
+		t.Errorf("malformed branch: %+v", op)
+	}
+	// orca names the branch itself (D65).
+	if op := report("me/task-1"); op.Status != protocol.OpSucceeded {
+		t.Fatalf("report: %+v", op.Error)
+	}
+	if op := report("tend/task-1"); op.Status != protocol.OpFailed || !strings.Contains(op.Error.Message, "on me/task-1") {
+		t.Errorf("report on another branch: %+v", op)
+	}
+}
+
 func TestHeartbeatDesiredState(t *testing.T) {
 	h := newHarness(t)
 	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})

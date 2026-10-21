@@ -49,6 +49,9 @@ type Prepared struct {
 	Dir        string
 	ScratchDir string
 	Report     protocol.WorkspaceReport
+	// Guide describes the workspace to a worker that starts inside a
+	// repository, where tend writes no AGENTS.md (D37, D65).
+	Guide string
 }
 
 // Workspace errors with their own release reasons.
