@@ -79,9 +79,17 @@ func applyDecision(ctx context.Context, x *Exec, tx *store.Tx, prev store.TaskRo
 	if err != nil {
 		return nil, nil, err
 	}
-	events := make([]Event, 0, len(d.Events)+len(d.OpenDecisions))
+	events := make([]Event, 0, len(d.Events)+len(d.OpenDecisions)+1)
 	for _, e := range d.Events {
 		events = append(events, Event{ObjectType: "task", ObjectID: d.Task.ID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
+	}
+	if d.AbandonWorkspace && prev.WorkspaceAssigned {
+		w, err := tx.AbandonWorkspace(ctx, d.Task.ID, now)
+		if err != nil {
+			return nil, nil, err
+		}
+		events = append(events, Event{ObjectType: "task", ObjectID: d.Task.ID, ObjectVersion: d.Task.ControlRevision, Kind: "task.workspace_abandoned",
+			Body: map[string]any{"workspace_id": w.WorkspaceID, "host_id": w.HostID}})
 	}
 	for _, q := range d.OpenDecisions {
 		options, err := json.Marshal(q.Options)

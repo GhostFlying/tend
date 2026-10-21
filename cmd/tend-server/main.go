@@ -61,6 +61,10 @@ type config struct {
 	// listens off the tailnet, for development.
 	LocalOwner string           `json:"local_owner"`
 	LeaseTTL   cfgfile.Duration `json:"lease_ttl"`
+	// HostLostAfter is how long a host may go unheard before the tasks
+	// whose workspace is on it are blocked for the owner (D62); "0s"
+	// turns that off, while retired hosts still count.
+	HostLostAfter *cfgfile.Duration `json:"host_lost_after"`
 	// Queue tunes the order in which queued work is claimed (D60).
 	Queue struct {
 		// WaitPerHour is what an hour in the queue adds to an action's
@@ -129,6 +133,12 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	opts := []app.Option{app.WithNotifier(wake)}
 	if cfg.LeaseTTL > 0 {
 		opts = append(opts, app.WithLeaseTTL(time.Duration(cfg.LeaseTTL)))
+	}
+	if d := cfg.HostLostAfter; d != nil {
+		if *d < 0 || *d > 0 && time.Duration(*d) < app.MinHostLostAfter {
+			return fmt.Errorf("host_lost_after must be 0s or at least %s", app.MinHostLostAfter)
+		}
+		opts = append(opts, app.WithHostLostAfter(time.Duration(*d)))
 	}
 	if w := cfg.Queue.WaitPerHour; w != nil {
 		if *w < 0 {
@@ -218,6 +228,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	}
 	wg.Go(func() { _ = d.Run(runCtx) })
 	wg.Go(func() { runners.SweepLeases(runCtx, a.LeaseTTL()/4) })
+	wg.Go(func() { runners.SweepWorkspaces(runCtx, time.Minute) })
 	wg.Go(func() {
 		<-runCtx.Done()
 		shutdown, cancel := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)

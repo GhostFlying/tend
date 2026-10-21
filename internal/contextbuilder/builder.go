@@ -82,8 +82,9 @@ const (
 var classes = map[string]class{
 	"task.created": intent, "task.spec_updated": intent, "task.rating_changed": intent, "task.project_changed": intent, "task.control_changed": intent,
 	"task.implement_requested": intent, "task.acceptance_requested": intent, "decision.answered": intent,
+	"task.started_over": intent, "task.workspace_abandoned": intent, "task.workspace_available": intent,
 	"task.completed": result, "task.cancelled": result,
-	"decision.opened": attention, "run.failed": attention, "run.unknown": attention, "run.lost": attention,
+	"decision.opened": attention, "run.failed": attention, "run.unknown": attention, "run.lost": attention, "task.workspace_unavailable": attention,
 	"outbox.failed": attention, "outbox.unknown": attention,
 	// A passed verdict is a result; any other needs attention.
 	"acceptance.submitted": result,

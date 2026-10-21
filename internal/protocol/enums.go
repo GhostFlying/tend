@@ -77,11 +77,15 @@ const (
 	BlockWaitingApproval          BlockReason = "waiting_approval"
 	BlockAcceptanceEnvUnavailable BlockReason = "acceptance_env_unavailable"
 	BlockBudgetExhausted          BlockReason = "budget_exhausted"
+	// BlockWorkspaceUnavailable: the host holding the task's workspace is
+	// retired or has not been seen for too long (D62).
+	BlockWorkspaceUnavailable BlockReason = "workspace_unavailable"
 )
 
 // Valid reports whether r is a known block reason.
 func (r BlockReason) Valid() bool {
-	return slices.Contains([]BlockReason{BlockNone, BlockWaitingResource, BlockWaitingDecision, BlockWaitingApproval, BlockAcceptanceEnvUnavailable, BlockBudgetExhausted}, r)
+	return slices.Contains([]BlockReason{BlockNone, BlockWaitingResource, BlockWaitingDecision, BlockWaitingApproval, BlockAcceptanceEnvUnavailable,
+		BlockBudgetExhausted, BlockWorkspaceUnavailable}, r)
 }
 
 // RunObserved is the last confirmed fact about a run.
@@ -177,6 +181,9 @@ const (
 	EffectAccept DecisionEffect = "accept"
 	// EffectCancel cancels the task.
 	EffectCancel DecisionEffect = "cancel"
+	// EffectStartOver gives up the task's workspace and starts the next
+	// implement generation in a new one on another host (D62).
+	EffectStartOver DecisionEffect = "start_over"
 )
 
 // ActionStatus is the progress of a plan action.

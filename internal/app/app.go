@@ -45,6 +45,9 @@ type Exec struct {
 	// WaitPerHour is what an hour in the queue adds to an action's score
 	// (D60).
 	WaitPerHour float64
+	// HostLostAfter is how long a host may go unheard before the
+	// workspaces on it count as unavailable; 0 never (D62).
+	HostLostAfter time.Duration
 }
 
 // Outcome is what a successful Apply produced besides its direct writes.
@@ -91,6 +94,7 @@ type App struct {
 	logs     *Broadcast
 	leaseTTL time.Duration
 	waitPer  float64
+	hostLost time.Duration
 }
 
 // Option configures an App.
@@ -103,7 +107,7 @@ func WithNotifier(n Notifier) Option {
 
 // New returns an App.
 func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Option) *App {
-	a := &App{store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, changes: NewBroadcast(), logs: NewBroadcast()}
+	a := &App{store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, changes: NewBroadcast(), logs: NewBroadcast()}
 	for _, o := range opts {
 		o(a)
 	}
@@ -148,7 +152,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer}
+	x := &Exec{Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	if x.TraceID == "" {
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}

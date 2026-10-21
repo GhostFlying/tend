@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -30,7 +31,9 @@ type CandidateRow struct {
 	DependenciesDone  bool
 	WorkspaceHost     string
 	WorkspaceOccupied bool
-	SpecJSON          string
+	// AbandonedHosts are the hosts the task gave up a workspace on.
+	AbandonedHosts []string
+	SpecJSON       string
 }
 
 // ListClaimCandidates returns every pending implement or accept action.
@@ -44,7 +47,9 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dt ON dt.task_id = d.depends_on
 			WHERE d.task_id = t.task_id AND dt.lifecycle <> 'completed'),
 		COALESCE((SELECT w.host_id FROM workspaces w WHERE w.task_id = t.task_id), ''),
-		EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.observed_state IN `+openRunStates+`),
+		EXISTS (SELECT 1 FROM runs r JOIN workspaces w ON w.task_id = r.task_id AND w.host_id = r.host_id
+			WHERE r.task_id = t.task_id AND r.observed_state IN `+openRunStates+`),
+		(SELECT json_group_array(ab.host_id) FROM abandoned_workspaces ab WHERE ab.task_id = t.task_id),
 		s.body_json
 		FROM plan_actions a
 		JOIN tasks t ON t.task_id = a.task_id
@@ -58,12 +63,16 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 	for rows.Next() {
 		var c CandidateRow
 		var artifact, commit sql.NullString
+		var abandoned string
 		a := &c.Action
 		if err := rows.Scan(&a.ActionID, &a.TaskID, &a.Kind, &a.EffectKey, &a.TriggerJSON, &a.TargetSpecVersion, &artifact,
 			&a.AuthorizationJSON, &a.Generation, &a.Status, &commit, &a.CreatedRequestID, &a.CreatedAt,
 			&c.Lifecycle, &c.Control, &c.Block, &c.SpecVersion, &c.ImplementGeneration, &c.CurrentArtifactID, &c.Rating, &c.Project, &c.Title, &c.Weight,
-			&c.DependenciesDone, &c.WorkspaceHost, &c.WorkspaceOccupied, &c.SpecJSON); err != nil {
+			&c.DependenciesDone, &c.WorkspaceHost, &c.WorkspaceOccupied, &abandoned, &c.SpecJSON); err != nil {
 			return nil, fmt.Errorf("store: scan claim candidate: %w", err)
+		}
+		if c.AbandonedHosts, err = parseList(abandoned); err != nil {
+			return nil, err
 		}
 		a.TargetArtifactID, a.PlanCommitRef = artifact.String, commit.String
 		out = append(out, c)
@@ -201,6 +210,17 @@ func ListExpiredLeases(ctx context.Context, q Querier, now int64) ([]LeaseRow, e
 	return out, rows.Err()
 }
 
+// SeeHost records that the host was heard from, unless that was recorded
+// less than a minute ago. Claims call it on every poll.
+func (t *Tx) SeeHost(ctx context.Context, hostID string, now int64) error {
+	_, err := t.Exec(ctx, `UPDATE hosts SET last_seen_at = ? WHERE host_id = ? AND COALESCE(last_seen_at, 0) < ?`,
+		now, hostID, now-time.Minute.Milliseconds())
+	if err != nil {
+		return fmt.Errorf("store: see host: %w", err)
+	}
+	return nil
+}
+
 // TouchHost records that the host was heard from.
 func (t *Tx) TouchHost(ctx context.Context, hostID string, now int64) error {
 	_, err := t.Exec(ctx, `UPDATE hosts SET last_seen_at = ? WHERE host_id = ?`, now, hostID)
@@ -244,6 +264,66 @@ func GetWorkspaceByTask(ctx context.Context, q Querier, taskID string) (Workspac
 		return WorkspaceRow{}, notFound(err, "workspace of task "+taskID)
 	}
 	return w, nil
+}
+
+// AbandonWorkspace moves a task's workspace, with its mounts, to the
+// abandoned workspaces and returns it; the task has none afterwards.
+func (t *Tx) AbandonWorkspace(ctx context.Context, taskID string, now int64) (WorkspaceRow, error) {
+	w, err := GetWorkspaceByTask(ctx, t.Q(), taskID)
+	if err != nil {
+		return WorkspaceRow{}, err
+	}
+	if _, err := t.Exec(ctx, `INSERT INTO abandoned_workspaces (workspace_id, task_id, name, host_id, mounts_json, created_at, abandoned_at)
+		SELECT w.workspace_id, w.task_id, w.name, w.host_id,
+			(SELECT json_group_array(json_object('path', m.path, 'repo', m.repo, 'branch', m.branch,
+				'resolved_base_sha', m.resolved_base_sha)) FROM workspace_mounts m WHERE m.workspace_id = w.workspace_id),
+			w.created_at, ?
+		FROM workspaces w WHERE w.workspace_id = ?`, now, w.WorkspaceID); err != nil {
+		return WorkspaceRow{}, fmt.Errorf("store: keep abandoned workspace: %w", err)
+	}
+	if _, err := t.Exec(ctx, `DELETE FROM workspace_mounts WHERE workspace_id = ?`, w.WorkspaceID); err != nil {
+		return WorkspaceRow{}, fmt.Errorf("store: delete mounts: %w", err)
+	}
+	if _, err := t.Exec(ctx, `DELETE FROM workspaces WHERE workspace_id = ?`, w.WorkspaceID); err != nil {
+		return WorkspaceRow{}, fmt.Errorf("store: delete workspace: %w", err)
+	}
+	return w, nil
+}
+
+// WorkspaceHostRow is an unfinished task with a workspace, and that
+// workspace's host.
+type WorkspaceHostRow struct {
+	TaskID     string
+	HostID     string
+	HostStatus string
+	// LastSeenAt is 0 for a host never heard from.
+	LastSeenAt int64
+	Block      protocol.BlockReason
+	// Pending reports that the task has an implementation or acceptance
+	// waiting to be claimed.
+	Pending bool
+}
+
+// ListWorkspaceHosts returns the unfinished tasks that have a workspace,
+// with what their workspace's host looks like.
+func ListWorkspaceHosts(ctx context.Context, q Querier) ([]WorkspaceHostRow, error) {
+	rows, err := q.QueryContext(ctx, `SELECT t.task_id, w.host_id, h.status, COALESCE(h.last_seen_at, 0), t.block_reason,
+		EXISTS (SELECT 1 FROM plan_actions a WHERE a.task_id = t.task_id AND a.status = 'pending' AND a.kind IN ('implement', 'accept'))
+		FROM tasks t JOIN workspaces w ON w.task_id = t.task_id JOIN hosts h ON h.host_id = w.host_id
+		WHERE t.lifecycle NOT IN ('completed', 'cancelled') ORDER BY t.task_id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list workspace hosts: %w", err)
+	}
+	defer rows.Close()
+	var out []WorkspaceHostRow
+	for rows.Next() {
+		var r WorkspaceHostRow
+		if err := rows.Scan(&r.TaskID, &r.HostID, &r.HostStatus, &r.LastSeenAt, &r.Block, &r.Pending); err != nil {
+			return nil, fmt.Errorf("store: scan workspace host: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // SetWorkspaceStatus changes a workspace's status.
