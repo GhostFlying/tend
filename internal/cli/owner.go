@@ -256,8 +256,8 @@ func (o owner) task(ctx context.Context, id string) error {
 }
 
 func printSummary(w io.Writer, t protocol.TaskSummary) {
-	fmt.Fprintf(w, "%s %q: %s, control %s at revision %d, spec v%d, priority %d, workspace %s",
-		t.TaskID, t.Title, t.Lifecycle, t.ControlMode, t.ControlRevision, t.SpecVersion, t.Priority, t.Workspace)
+	fmt.Fprintf(w, "%s %q in %s: %s, control %s at revision %d, spec v%d, priority %d, workspace %s",
+		t.TaskID, t.Title, t.Project, t.Lifecycle, t.ControlMode, t.ControlRevision, t.SpecVersion, t.Priority, t.Workspace)
 	if t.BlockReason != protocol.BlockNone && t.BlockReason != "" {
 		fmt.Fprintf(w, ", blocked: %s", t.BlockReason)
 	}

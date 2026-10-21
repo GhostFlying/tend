@@ -109,7 +109,7 @@ func TestLifecycleTable(t *testing.T) {
 }
 
 func TestNewTask(t *testing.T) {
-	d, err := NewTask("task_1", execSpec, 2)
+	d, err := NewTask("task_1", "p", execSpec, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestNewTask(t *testing.T) {
 		t.Errorf("executable spec: stage %q, actions %+v", d.Task.Lifecycle, d.Actions)
 	}
 
-	d, err = NewTask("task_2", Spec{Goal: "think about it", Delivery: DeliveryCommit, Workspace: testWorkspace}, 0)
+	d, err = NewTask("task_2", "p", Spec{Goal: "think about it", Delivery: DeliveryCommit, Workspace: testWorkspace}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestNewTask(t *testing.T) {
 		t.Errorf("non-executable spec: stage %q, actions %+v", d.Task.Lifecycle, d.Actions)
 	}
 
-	if _, err := NewTask("task_3", Spec{Goal: "x", Acceptance: []string{"y"}, Delivery: "release"}, 0); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+	if _, err := NewTask("task_3", "p", Spec{Goal: "x", Acceptance: []string{"y"}, Delivery: "release"}, 0); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
 		t.Errorf("unsupported delivery: err = %v", err)
 	}
 }
@@ -275,7 +275,7 @@ func TestInvariantsUnderRandomCommands(t *testing.T) {
 		// A small budget lets the walk exhaust it within one sequence.
 		spec := execSpec
 		spec.MaxImplementAttempts = 2
-		d, err := NewTask("task_r", spec, 0)
+		d, err := NewTask("task_r", "p", spec, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

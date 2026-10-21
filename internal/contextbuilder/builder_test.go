@@ -417,3 +417,21 @@ func TestDeltaSaysWhyAcceptanceFailed(t *testing.T) {
 		t.Errorf("the verdict line names the task and the issues:\n%s", attention)
 	}
 }
+
+func TestDeltaReportsProjectMove(t *testing.T) {
+	e := newEnv(t)
+	id, rev := e.task("fix windows")
+	e.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, nil, app.ConfigPayload{
+		Repos:    []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
+		Projects: []app.ProjectConfig{{Name: "core", Repos: []string{"tend"}}},
+	}, app.SyncConfig{})
+	full := e.prepare(0)
+	if err := e.b.Confirm(context.Background(), full.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.exec(owner, "tasks.update_intent", protocol.Target{Type: "task", ID: id}, &rev, map[string]any{"project": "core"}, app.UpdateIntent{})
+	delta := e.prepare(0)
+	if delta == nil || !strings.Contains(delta.Text, "task.project_changed") {
+		t.Fatalf("delta after a move = %+v", delta)
+	}
+}

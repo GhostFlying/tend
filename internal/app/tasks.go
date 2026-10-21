@@ -36,6 +36,8 @@ type createTaskPayload struct {
 	Title    string      `json:"title"`
 	Spec     domain.Spec `json:"spec"`
 	Priority int64       `json:"priority"`
+	// Project defaults to the only active project.
+	Project string `json:"project,omitempty"`
 	// SourceMessageID and CommitSeq identify the planning commit that
 	// produced this task, when it came from a conversation message.
 	SourceMessageID string `json:"source_message_id,omitempty"`
@@ -67,13 +69,20 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	taskID := x.IDs.New(protocol.PrefixTask)
+	project, err := resolveProject(ctx, tx.Q(), p.Project)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if w := p.Spec.Workspace; w.Template == "" && len(w.Mounts) == 0 && w.Profile == "" {
+		p.Spec.Workspace.Template = project.Template
+	}
 	ws, err := expandTemplate(ctx, tx.Q(), p.Spec.Workspace)
 	if err != nil {
 		return Outcome{}, err
 	}
 	p.Spec.Workspace = ws
 	p.Spec = p.Spec.Normalize()
-	d, err := domain.NewTask(taskID, p.Spec, p.Priority)
+	d, err := domain.NewTask(taskID, project.Project, p.Spec, p.Priority)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -114,13 +123,14 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	return Outcome{Result: newTaskResult(d.Task, actions), Events: events}, nil
 }
 
-// UpdateIntent handles tasks.update_intent: a new spec, a new priority, or
-// both, under one expected control revision.
+// UpdateIntent handles tasks.update_intent: a new spec, priority or
+// project, or several of them, under one expected control revision.
 type UpdateIntent struct{}
 
 type updateIntentPayload struct {
 	Spec            *domain.Spec `json:"spec,omitempty"`
 	Priority        *int64       `json:"priority,omitempty"`
+	Project         *string      `json:"project,omitempty"`
 	SourceMessageID string       `json:"source_message_id,omitempty"`
 	CommitSeq       int64        `json:"commit_seq,omitempty"`
 }
@@ -139,8 +149,8 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.Spec == nil && p.Priority == nil {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "spec or priority is required")
+	if p.Spec == nil && p.Priority == nil && p.Project == nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "spec, priority or project is required")
 	}
 	expected, err := requireRevision(x.Env)
 	if err != nil {
@@ -176,6 +186,22 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	if p.Priority != nil {
 		d, err := domain.SetPriority(merged.Task, *p.Priority, expected)
+		if err != nil {
+			return Outcome{}, err
+		}
+		merged.Task = d.Task
+		merged.Events = append(merged.Events, d.Events...)
+		expected = d.Task.ControlRevision
+	}
+	if p.Project != nil {
+		// Staying in a project that has since been retired is no move,
+		// but the revision is still checked.
+		if *p.Project != row.Project {
+			if _, err := resolveProject(ctx, tx.Q(), *p.Project); err != nil {
+				return Outcome{}, err
+			}
+		}
+		d, err := domain.SetProject(merged.Task, *p.Project, expected)
 		if err != nil {
 			return Outcome{}, err
 		}

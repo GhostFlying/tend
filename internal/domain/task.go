@@ -82,7 +82,10 @@ func (s Spec) Equal(o Spec) bool {
 
 // Task is the projection of a task that the rules operate on.
 type Task struct {
-	ID              string
+	ID string
+	// Project is the project the task belongs to (D52). Which projects
+	// exist is the caller's concern.
+	Project         string
 	Lifecycle       protocol.TaskLifecycle
 	Control         protocol.ControlMode
 	ControlRevision int64
@@ -212,12 +215,13 @@ func implementAction(t Task) ActionDraft {
 // NewTask creates a task from its first spec. An executable spec queues the
 // task and commits to its first implement action; otherwise it stays a
 // draft until the spec is completed.
-func NewTask(id string, spec Spec, priority int64) (Decision, error) {
+func NewTask(id, project string, spec Spec, priority int64) (Decision, error) {
 	if err := spec.Validate(); err != nil {
 		return Decision{}, err
 	}
 	t := Task{
 		ID:              id,
+		Project:         project,
 		Lifecycle:       protocol.TaskDraft,
 		Control:         protocol.ControlManaged,
 		ControlRevision: 1,
@@ -226,7 +230,7 @@ func NewTask(id string, spec Spec, priority int64) (Decision, error) {
 		Block:           protocol.BlockNone,
 		Budget:          spec.Budget(),
 	}
-	d := Decision{Events: []EventDraft{{Kind: "task.created", Body: map[string]any{"spec_version": 1, "priority": priority}}}}
+	d := Decision{Events: []EventDraft{{Kind: "task.created", Body: map[string]any{"spec_version": 1, "priority": priority, "project": project}}}}
 	if spec.Executable() {
 		t.Lifecycle = protocol.TaskQueued
 		t.ImplementGeneration = 1
@@ -293,6 +297,24 @@ func SetPriority(t Task, priority int64, expectedRevision int64) (Decision, erro
 	t.Priority = priority
 	t.ControlRevision++
 	return Decision{Task: t, Events: []EventDraft{{Kind: "task.priority_changed", Body: map[string]any{"priority": priority}}}}, nil
+}
+
+// SetProject moves the task to another project. Like the priority, the
+// project affects context and queueing only.
+func SetProject(t Task, project string, expectedRevision int64) (Decision, error) {
+	if err := checkRevision(t, expectedRevision); err != nil {
+		return Decision{}, err
+	}
+	if project == t.Project {
+		return Decision{Task: t}, nil
+	}
+	if t.Lifecycle.Terminal() {
+		return Decision{}, errTransition(t, "move")
+	}
+	from := t.Project
+	t.Project = project
+	t.ControlRevision++
+	return Decision{Task: t, Events: []EventDraft{{Kind: "task.project_changed", Body: map[string]any{"project": project, "from": from}}}}, nil
 }
 
 // SetControlMode switches between managed, paused and human control. Actions

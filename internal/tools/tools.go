@@ -257,6 +257,7 @@ type createArgs struct {
 	Title         string      `json:"title"`
 	Spec          domain.Spec `json:"spec"`
 	Priority      int64       `json:"priority"`
+	Project       string      `json:"project"`
 	WorkspaceName string      `json:"workspace_name"`
 	CommitSeq     int64       `json:"commit_seq"`
 	Reason        string      `json:"reason"`
@@ -274,7 +275,7 @@ func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "workspace_name is required")
 	}
 	return s.execute(ctx, c, "tasks.create", protocol.Target{Type: "task"}, nil, a.Reason, map[string]any{
-		"title": a.Title, "spec": a.Spec, "priority": a.Priority, "workspace_name": a.WorkspaceName,
+		"title": a.Title, "spec": a.Spec, "priority": a.Priority, "project": a.Project, "workspace_name": a.WorkspaceName,
 		"source_message_id": c.SourceMessageID, "commit_seq": a.CommitSeq,
 	}, app.CreateTask{})
 }
@@ -284,6 +285,7 @@ type updateArgs struct {
 	ExpectedControlRevision int64        `json:"expected_control_revision"`
 	Spec                    *domain.Spec `json:"spec"`
 	Priority                *int64       `json:"priority"`
+	Project                 *string      `json:"project"`
 	CommitSeq               int64        `json:"commit_seq"`
 	Reason                  string       `json:"reason"`
 }
@@ -302,6 +304,9 @@ func (s *Service) tasksUpdateIntent(ctx context.Context, c Call) (any, error) {
 	}
 	if a.Priority != nil {
 		payload["priority"] = *a.Priority
+	}
+	if a.Project != nil {
+		payload["project"] = *a.Project
 	}
 	return s.execute(ctx, c, "tasks.update_intent", protocol.Target{Type: "task", ID: a.TaskID}, &a.ExpectedControlRevision, a.Reason, payload, app.UpdateIntent{})
 }

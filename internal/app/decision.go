@@ -13,7 +13,7 @@ import (
 
 func toDomain(r store.TaskRow, budget int64) domain.Task {
 	return domain.Task{
-		ID: r.TaskID, Lifecycle: r.Lifecycle, Control: r.ControlMode, ControlRevision: r.ControlRevision,
+		ID: r.TaskID, Project: r.Project, Lifecycle: r.Lifecycle, Control: r.ControlMode, ControlRevision: r.ControlRevision,
 		SpecVersion: r.SpecVersion, Priority: r.Priority, Block: r.BlockReason,
 		ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Budget: budget,
 		WorkspaceAssigned: r.WorkspaceAssigned,
@@ -24,7 +24,7 @@ func toDomain(r store.TaskRow, budget int64) domain.Task {
 // not own, such as the title and workspace, are kept from prev.
 func fromDomain(t domain.Task, prev store.TaskRow, now int64) store.TaskRow {
 	r := prev
-	r.TaskID, r.Lifecycle, r.ControlMode, r.ControlRevision = t.ID, t.Lifecycle, t.Control, t.ControlRevision
+	r.TaskID, r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision = t.ID, t.Project, t.Lifecycle, t.Control, t.ControlRevision
 	r.SpecVersion, r.Priority, r.BlockReason = t.SpecVersion, t.Priority, t.Block
 	r.ImplementGeneration, r.CurrentArtifactID, r.UpdatedAt = t.ImplementGeneration, t.CurrentArtifactID, now
 	return r

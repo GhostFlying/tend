@@ -80,7 +80,7 @@ const (
 )
 
 var classes = map[string]class{
-	"task.created": intent, "task.spec_updated": intent, "task.priority_changed": intent, "task.control_changed": intent,
+	"task.created": intent, "task.spec_updated": intent, "task.priority_changed": intent, "task.project_changed": intent, "task.control_changed": intent,
 	"task.implement_requested": intent, "task.acceptance_requested": intent, "decision.answered": intent,
 	"task.completed": result, "task.cancelled": result,
 	"decision.opened": attention, "run.failed": attention, "run.unknown": attention, "run.lost": attention,

@@ -59,4 +59,13 @@
   "templates": [
     // {"name": "app-with-lib", "workspace": {"mounts": [{"repo": "app"}, {"repo": "lib"}], "profile": "link"}},
   ],
+
+  // Projects group tasks (D52). Leave this out to keep every task in one
+  // implicit "default" project. An agent session working in one of a
+  // project's repos sees that project; weight multiplies the rating of its
+  // tasks in the queue; template is the workspace of tasks created without
+  // one.
+  "projects": [
+    // {"name": "app", "title": "The app", "weight": 2, "repos": ["app", "lib"], "template": "app-with-lib"},
+  ],
 }
