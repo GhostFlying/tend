@@ -5,7 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{Envelope{}, APIResponse{}, Snapshot{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ArtifactDetail{}, RequestView{},
-		SessionRequest{}, SessionView{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, CreateActionPayload{},
+		SessionRequest{}, SessionView{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
 		HookRequest{}, HookResponse{}, ToolSpec{}, ToolRequest{}, ToolResponse{}}
 }
 
@@ -14,6 +14,7 @@ func APIEnums() []any {
 	return []any{
 		[]TaskLifecycle{TaskDraft, TaskQueued, TaskRunning, TaskAwaitingAcceptance, TaskChangesRequired, TaskCompleted, TaskCancelled},
 		[]ControlMode{ControlManaged, ControlPaused, ControlHumanControl},
+		[]Rating{RatingNone, RatingP0, RatingP1, RatingP2, RatingP3},
 		[]BlockReason{BlockNone, BlockWaitingResource, BlockWaitingDecision, BlockWaitingApproval, BlockAcceptanceEnvUnavailable, BlockBudgetExhausted},
 		[]RunObserved{RunStarting, RunRunning, RunWaiting, RunFinished, RunFailed, RunInterrupted, RunUnknown},
 		[]RunDesired{DesiredRun, DesiredPaused, DesiredStopped},

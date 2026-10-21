@@ -80,13 +80,15 @@ const (
 )
 
 var classes = map[string]class{
-	"task.created": intent, "task.spec_updated": intent, "task.priority_changed": intent, "task.project_changed": intent, "task.control_changed": intent,
+	"task.created": intent, "task.spec_updated": intent, "task.rating_changed": intent, "task.project_changed": intent, "task.control_changed": intent,
 	"task.implement_requested": intent, "task.acceptance_requested": intent, "decision.answered": intent,
 	"task.completed": result, "task.cancelled": result,
 	"decision.opened": attention, "run.failed": attention, "run.unknown": attention, "run.lost": attention,
 	"outbox.failed": attention, "outbox.unknown": attention,
 	// A passed verdict is a result; any other needs attention.
 	"acceptance.submitted": result,
+	// Recorded before ratings (D60); a session may not have heard of it yet.
+	"task.priority_changed": intent,
 }
 
 // told lists the event kinds a delta may tell.
@@ -330,6 +332,9 @@ func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, 
 		} else {
 			s.Tasks = append(s.Tasks, line)
 		}
+		if t.Rating == protocol.RatingNone {
+			s.Unrated = append(s.Unrated, sc.label(t.Project, unratedLine(t)))
+		}
 	}
 	for _, p := range slices.Sorted(maps.Keys(others)) {
 		c := others[p]
@@ -439,6 +444,16 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			}
 			continue
 		}
+		if e.Kind == "task.created" {
+			// Someone else dispatched it; the owner may not have rated it.
+			t, err := store.GetTask(ctx, q, taskID)
+			if err != nil {
+				return err
+			}
+			if t.Rating == protocol.RatingNone && !t.Lifecycle.Terminal() {
+				s.Unrated = append(s.Unrated, sc.label(project, unratedLine(t)))
+			}
+		}
 		if c != attention && (c == result || e.Kind == "decision.answered") {
 			s.Unseen = append(s.Unseen, line)
 		}
@@ -543,6 +558,11 @@ func taskOf(ctx context.Context, q store.Querier, e store.EventView, body map[st
 	return id, nil
 }
 
+// unratedLine names a task that still needs a rating.
+func unratedLine(t store.TaskRow) string {
+	return fmt.Sprintf("%s %q, revision %d", t.TaskID, clipRunes(t.Title, 80), t.ControlRevision)
+}
+
 // taskLine describes a task and reports whether it needs attention.
 func taskLine(ctx context.Context, q store.Querier, t store.TaskRow) (string, bool, error) {
 	var spec struct {
@@ -565,8 +585,8 @@ func taskLine(ctx context.Context, q store.Querier, t store.TaskRow) (string, bo
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %q: %s, priority %d, control %s rev %d, spec v%d, workspace %s",
-		t.TaskID, t.Title, t.Lifecycle, t.Priority, t.ControlMode, t.ControlRevision, t.SpecVersion, t.WorkspaceName)
+	fmt.Fprintf(&b, "%s %q: %s, %s, control %s rev %d, spec v%d, workspace %s",
+		t.TaskID, t.Title, t.Lifecycle, t.Rating.Label(), t.ControlMode, t.ControlRevision, t.SpecVersion, t.WorkspaceName)
 	if t.BlockReason != protocol.BlockNone {
 		fmt.Fprintf(&b, "; blocked: %s", t.BlockReason)
 	}

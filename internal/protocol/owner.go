@@ -99,6 +99,11 @@ type SetControlModePayload struct {
 	Mode ControlMode `json:"mode"`
 }
 
+// RateTaskPayload is the payload of tasks.rate.
+type RateTaskPayload struct {
+	Rating Rating `json:"rating"`
+}
+
 // CreateActionPayload is the payload of actions.create.
 type CreateActionPayload struct {
 	Kind       ActionKind `json:"kind"`

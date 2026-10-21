@@ -122,6 +122,29 @@ func TestFault_ClientRetrySameRequest(t *testing.T) {
 	}
 }
 
+func TestOwnerRatesATask(t *testing.T) {
+	e := newEnv(t)
+	tok := e.login(protocol.ScopeOwner)
+	e.configure()
+	taskID := e.task("fix it")
+	target := protocol.Target{Type: "task", ID: taskID}
+	rev := int64(1)
+	if st, res := e.op(tok, e.envelope("tasks.rate", target, &rev, protocol.RateTaskPayload{Rating: protocol.RatingP0})); st != http.StatusOK ||
+		res.Operation == nil || res.Operation.Status != protocol.OpSucceeded {
+		t.Fatalf("rate = %d %+v", st, res)
+	}
+	var d protocol.TaskDetail
+	if st := e.do("GET", "/api/v1/tasks/"+taskID, tok, nil, &d); st != http.StatusOK || d.Rating != protocol.RatingP0 || d.ControlRevision != 2 {
+		t.Errorf("task after rating = %d %+v", st, d.TaskSummary)
+	}
+	// A rating cannot be taken back.
+	rev = 2
+	if _, res := e.op(tok, e.envelope("tasks.rate", target, &rev, protocol.RateTaskPayload{})); res.Operation == nil || res.Operation.Error == nil ||
+		res.Operation.Error.Code != protocol.CodeInvalidRequest {
+		t.Errorf("unrating = %+v, want invalid_request", res)
+	}
+}
+
 func TestOwnerOpsWhitelist(t *testing.T) {
 	e := newEnv(t)
 	tok := e.login(protocol.ScopeOwner)

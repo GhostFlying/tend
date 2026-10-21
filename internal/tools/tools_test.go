@@ -138,20 +138,40 @@ func createdTask(t *testing.T, a answerView) (string, int64) {
 	return r.Outcome.TaskID, r.Outcome.ControlRevision
 }
 
+func TestCreateAsksForARating(t *testing.T) {
+	e := newEnv(t)
+	note := func(a answerView) string {
+		var r struct {
+			Note string `json:"note"`
+		}
+		if !a.OK || json.Unmarshal(a.Result, &r) != nil {
+			t.Fatalf("create = %+v", a)
+		}
+		return r.Note
+	}
+	if got := note(e.call("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, "")); got != unratedNote {
+		t.Errorf("unrated create note = %q", got)
+	}
+	if got := note(e.call("tasks_create", createArgs{Title: "fix", Spec: spec, Rating: protocol.RatingP1, CommitSeq: 2}, "")); got != "" {
+		t.Errorf("rated create note = %q, want none", got)
+	}
+	if a := e.call("tasks_create", createArgs{Title: "fix", Spec: spec, Rating: "urgent", CommitSeq: 3}, ""); a.OK || a.Error.Code != protocol.CodeInvalidRequest {
+		t.Errorf("unknown rating = %+v, want invalid_request", a)
+	}
+}
+
 func TestStaleWriteReturnsCurrentState(t *testing.T) {
 	e := newEnv(t)
 	id, rev := createdTask(t, e.call("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, ""))
-	p := int64(5)
-	if a := e.call("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Priority: &p, CommitSeq: 2}, ""); !a.OK {
+	if a := e.call("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Rating: new(protocol.RatingP1), CommitSeq: 2}, ""); !a.OK {
 		t.Fatalf("update: %+v", a.Error)
 	}
-	q := int64(9)
-	a := e.call("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Priority: &q, CommitSeq: 3}, "")
+	a := e.call("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Rating: new(protocol.RatingP3), CommitSeq: 3}, "")
 	if a.OK || a.Error.Code != protocol.CodeStaleRevision {
 		t.Fatalf("stale update = %+v", a)
 	}
 	var cur protocol.TaskSummary
-	if err := json.Unmarshal(a.Current, &cur); err != nil || cur.ControlRevision != rev+1 || cur.Priority != 5 {
+	if err := json.Unmarshal(a.Current, &cur); err != nil || cur.ControlRevision != rev+1 || cur.Rating != protocol.RatingP1 {
 		t.Errorf("current = %s (%v)", a.Current, err)
 	}
 }

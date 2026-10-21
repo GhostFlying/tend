@@ -23,11 +23,12 @@ func (t *Tx) MapNativeRequest(ctx context.Context, source, nativeKey, newID stri
 }
 
 // ListTasks returns the tasks of a project, or of every project when
-// project is empty: unfinished ones first, then the most recently updated
-// finished ones, up to limit in total.
+// project is empty: unfinished ones first, by rating, then the most
+// recently updated finished ones, up to limit in total.
 func ListTasks(ctx context.Context, q Querier, project string, limit int) ([]TaskRow, error) {
 	rows, err := q.QueryContext(ctx, `SELECT task_id FROM tasks WHERE ? = '' OR project = ?
-		ORDER BY lifecycle IN ('completed', 'cancelled'), priority DESC, updated_at DESC, task_id LIMIT ?`, project, project, limit)
+		ORDER BY lifecycle IN ('completed', 'cancelled'), CASE rating WHEN 'p0' THEN 0 WHEN 'p1' THEN 1 WHEN 'p3' THEN 3 ELSE 2 END,
+		updated_at DESC, task_id LIMIT ?`, project, project, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: list tasks: %w", err)
 	}

@@ -2,11 +2,13 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
 
+	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
@@ -33,6 +35,36 @@ func mustExec(t *testing.T, s *Store, query string, args ...any) {
 	t.Helper()
 	if err := exec(t, s, query, args...); err != nil {
 		t.Fatalf("exec %q: %v", query, err)
+	}
+}
+
+func TestMigrationRatesTasksByPriority(t *testing.T) {
+	ctx := context.Background()
+	p := filepath.Join(t.TempDir(), "tend.db")
+	write, err := sql.Open("sqlite", dsn(p, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := &Store{write: write, read: write, now: testkit.NewClock().Now}
+	if err := old.migrate(ctx, 15); err != nil {
+		t.Fatal(err)
+	}
+	for id, priority := range map[string]int{"task_high": 5, "task_normal": 0, "task_low": -1} {
+		if _, err := write.ExecContext(ctx, `INSERT INTO tasks (task_id, title, lifecycle, control_mode, control_revision, spec_version,
+			priority, block_reason, created_at, updated_at) VALUES (?, 't', 'draft', 'managed', 1, 1, ?, 'none', 0, 0)`, id, priority); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write.Close()
+	s, err := Open(ctx, p, testkit.NewClock().Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for id, want := range map[string]protocol.Rating{"task_high": protocol.RatingP1, "task_normal": protocol.RatingP2, "task_low": protocol.RatingP3} {
+		if got, err := GetTask(ctx, s.read, id); err != nil || got.Rating != want {
+			t.Errorf("%s: rating %q (%v), want %q", id, got.Rating, err, want)
+		}
 	}
 }
 

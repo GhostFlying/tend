@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// unratedTitle heads the tasks that need a rating, saying what to do.
+const unratedTitle = "Unrated, ask the owner to rate them (p0 urgent, p1 high, p2 normal, p3 low) when it fits"
+
 // Snapshot is what a packet says, gathered from the ledger.
 type Snapshot struct {
 	// PacketID is empty for a snapshot that is shown but not recorded.
@@ -50,6 +53,9 @@ type Snapshot struct {
 	// OtherAttention is, for a session that works in one project, what
 	// needs attention in the others; like Attention, it is never cut.
 	OtherAttention []string
+	// Unrated lists the unfinished tasks no one has rated (D60): in a full
+	// snapshot all of them, in a delta those others just created.
+	Unrated []string
 }
 
 func (s Snapshot) empty() bool {
@@ -110,6 +116,7 @@ func Render(s Snapshot, budget int) string {
 			{title: "Since your last tend context, needs attention", lines: s.UnseenAttention, protected: true},
 			{title: "Since your last tend context", lines: s.Unseen, priority: 3, omitted: "(%d more; see tasks_list)"},
 			{title: "Open tasks", lines: s.Tasks, priority: 2, omitted: "(%d more open tasks; see tasks_list)"},
+			{title: unratedTitle, lines: s.Unrated, priority: 3, omitted: "(%d more unrated tasks; see tasks_list)"},
 		}
 	} else {
 		sections = []*section{
@@ -117,6 +124,7 @@ func Render(s Snapshot, budget int) string {
 			{title: "Other projects, needs attention", lines: s.OtherAttention, protected: true},
 			{title: "Results", lines: s.Results, priority: 3, omitted: "(%d more results; see tasks_list)"},
 			{title: "Changes", lines: s.Changes, priority: 2, omitted: "(%d more changes; see tasks_list)"},
+			{title: unratedTitle, lines: s.Unrated, priority: 3, omitted: "(%d more unrated tasks; see tasks_list)"},
 		}
 	}
 	focus := func(sec *section) bool { return sec.title == "Recent conversation" }

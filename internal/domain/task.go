@@ -90,7 +90,7 @@ type Task struct {
 	Control         protocol.ControlMode
 	ControlRevision int64
 	SpecVersion     int64
-	Priority        int64
+	Rating          protocol.Rating
 	Block           protocol.BlockReason
 	// ImplementGeneration is the generation of the latest implement action
 	// for the current spec version.
@@ -215,8 +215,11 @@ func implementAction(t Task) ActionDraft {
 // NewTask creates a task from its first spec. An executable spec queues the
 // task and commits to its first implement action; otherwise it stays a
 // draft until the spec is completed.
-func NewTask(id, project string, spec Spec, priority int64) (Decision, error) {
+func NewTask(id, project string, spec Spec, rating protocol.Rating) (Decision, error) {
 	if err := spec.Validate(); err != nil {
+		return Decision{}, err
+	}
+	if err := checkRating(rating); err != nil {
 		return Decision{}, err
 	}
 	t := Task{
@@ -226,11 +229,11 @@ func NewTask(id, project string, spec Spec, priority int64) (Decision, error) {
 		Control:         protocol.ControlManaged,
 		ControlRevision: 1,
 		SpecVersion:     1,
-		Priority:        priority,
+		Rating:          rating,
 		Block:           protocol.BlockNone,
 		Budget:          spec.Budget(),
 	}
-	d := Decision{Events: []EventDraft{{Kind: "task.created", Body: map[string]any{"spec_version": 1, "priority": priority, "project": project}}}}
+	d := Decision{Events: []EventDraft{{Kind: "task.created", Body: map[string]any{"spec_version": 1, "rating": rating, "project": project}}}}
 	if spec.Executable() {
 		t.Lifecycle = protocol.TaskQueued
 		t.ImplementGeneration = 1
@@ -282,24 +285,38 @@ func UpdateSpec(t Task, spec Spec, current Spec, expectedRevision int64) (Decisi
 	return d, nil
 }
 
-// SetPriority changes the task's priority. Priority affects queueing only;
-// running work is never preempted.
-func SetPriority(t Task, priority int64, expectedRevision int64) (Decision, error) {
+// SetRating rates the task. The rating affects queueing only; running work
+// is never preempted. A task once rated cannot become unrated.
+func SetRating(t Task, rating protocol.Rating, expectedRevision int64) (Decision, error) {
 	if err := checkRevision(t, expectedRevision); err != nil {
 		return Decision{}, err
 	}
-	if t.Lifecycle.Terminal() {
-		return Decision{}, errTransition(t, "reprioritize")
+	if rating == protocol.RatingNone {
+		return Decision{}, protocol.Errorf(protocol.CodeInvalidRequest, "rating must be one of p0, p1, p2 or p3")
 	}
-	if priority == t.Priority {
+	if err := checkRating(rating); err != nil {
+		return Decision{}, err
+	}
+	if rating == t.Rating {
 		return Decision{Task: t}, nil
 	}
-	t.Priority = priority
+	if t.Lifecycle.Terminal() {
+		return Decision{}, errTransition(t, "rate")
+	}
+	from := t.Rating
+	t.Rating = rating
 	t.ControlRevision++
-	return Decision{Task: t, Events: []EventDraft{{Kind: "task.priority_changed", Body: map[string]any{"priority": priority}}}}, nil
+	return Decision{Task: t, Events: []EventDraft{{Kind: "task.rating_changed", Body: map[string]any{"rating": rating, "from": from}}}}, nil
 }
 
-// SetProject moves the task to another project. Like the priority, the
+func checkRating(r protocol.Rating) error {
+	if !r.Valid() {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "unknown rating %q; use p0, p1, p2 or p3", r)
+	}
+	return nil
+}
+
+// SetProject moves the task to another project. Like the rating, the
 // project affects context and queueing only.
 func SetProject(t Task, project string, expectedRevision int64) (Decision, error) {
 	if err := checkRevision(t, expectedRevision); err != nil {

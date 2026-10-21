@@ -39,6 +39,32 @@ func (m ControlMode) Valid() bool {
 	return m == ControlManaged || m == ControlPaused || m == ControlHumanControl
 }
 
+// Rating is how much the owner wants a task done (D60). It orders the
+// queue; an unrated task queues as p2 until someone rates it.
+type Rating string
+
+// Ratings.
+const (
+	RatingNone Rating = ""
+	RatingP0   Rating = "p0" // urgent: ahead of everything else
+	RatingP1   Rating = "p1" // high
+	RatingP2   Rating = "p2" // normal
+	RatingP3   Rating = "p3" // low
+)
+
+// Valid reports whether r is a known rating, including none.
+func (r Rating) Valid() bool {
+	return slices.Contains([]Rating{RatingNone, RatingP0, RatingP1, RatingP2, RatingP3}, r)
+}
+
+// Label names the rating for people, "unrated" for none.
+func (r Rating) Label() string {
+	if r == RatingNone {
+		return "unrated"
+	}
+	return string(r)
+}
+
 // BlockReason explains why a task cannot progress, independently of its
 // lifecycle stage.
 type BlockReason string

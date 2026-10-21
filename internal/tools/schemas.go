@@ -59,7 +59,7 @@ var schemas = map[string]string{
   "properties": {
     "title": {"type": "string"},
     "spec": ` + specSchema + `,
-    "priority": {"type": "integer", "description": "Higher runs first. Default 0."},
+    "rating": {"type": "string", "enum": ["p0", "p1", "p2", "p3"], "description": "How the owner ranks the task: p0 urgent, ahead of everything; p1 high; p2 normal; p3 low. Ask the owner; leave it out if they have not said."},
     "project": {"type": "string", "description": "The project the task belongs to. Required when tend has more than one project."},
     "workspace_name": {"type": "string", "description": "Short lowercase name for the workspace and branch, such as fix-windows-build."},
     "commit_seq": {"type": "integer", "minimum": 1, "description": "1 for the first planning write for this message, then 2, 3 and so on. Repeating a number repeats nothing."},
@@ -74,7 +74,7 @@ var schemas = map[string]string{
     "task_id": {"type": "string"},
     "expected_control_revision": {"type": "integer", "description": "The control_revision you last read; stale values are rejected."},
     "spec": ` + specSchema + `,
-    "priority": {"type": "integer"},
+    "rating": {"type": "string", "enum": ["p0", "p1", "p2", "p3"], "description": "Rate the task: p0 urgent, p1 high, p2 normal, p3 low."},
     "project": {"type": "string", "description": "Move the task to this project."},
     "commit_seq": {"type": "integer", "minimum": 1},
     "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}

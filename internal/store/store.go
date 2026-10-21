@@ -48,7 +48,7 @@ func Open(ctx context.Context, dbPath string, now func() time.Time) (*Store, err
 		return nil, fmt.Errorf("store: open reader: %w", err)
 	}
 	s := &Store{write: write, read: read, now: now}
-	if err := s.migrate(ctx); err != nil {
+	if err := s.migrate(ctx, 0); err != nil {
 		s.Close()
 		return nil, err
 	}
@@ -170,10 +170,15 @@ func loadMigrations() ([]migration, error) {
 	return out, nil
 }
 
-func (s *Store) migrate(ctx context.Context) error {
+// migrate applies the pending migrations up to version upTo, or all of
+// them when upTo is 0. Only tests stop early.
+func (s *Store) migrate(ctx context.Context, upTo int) error {
 	migrations, err := loadMigrations()
 	if err != nil {
 		return err
+	}
+	if upTo > 0 {
+		migrations = migrations[:upTo]
 	}
 	return s.Write(ctx, func(tx *Tx) error {
 		if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (

@@ -166,7 +166,7 @@ func TestContextIsScopedToTheSessionsProject(t *testing.T) {
 	// Of the web project, the core session hears only what needs
 	// attention.
 	rev := e.taskRow(webTask).ControlRevision
-	e.exec("tasks.update_intent", protocol.Target{Type: "task", ID: webTask}, &rev, map[string]any{"priority": 3}, app.UpdateIntent{})
+	e.exec("tasks.update_intent", protocol.Target{Type: "task", ID: webTask}, &rev, map[string]any{"rating": "p1"}, app.UpdateIntent{})
 	if got := core.prompt(); got != "" {
 		t.Errorf("the core session heard of a web change:\n%s", got)
 	}

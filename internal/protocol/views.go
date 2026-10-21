@@ -17,7 +17,7 @@ type TaskSummary struct {
 	ControlMode     ControlMode   `json:"control_mode"`
 	ControlRevision int64         `json:"control_revision"`
 	SpecVersion     int64         `json:"spec_version"`
-	Priority        int64         `json:"priority"`
+	Rating          Rating        `json:"rating"`
 	BlockReason     BlockReason   `json:"block_reason"`
 	Workspace       string        `json:"workspace"`
 	// NextImplementGeneration is the generation a retry of the

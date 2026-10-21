@@ -541,6 +541,30 @@
       "title": "Operation",
       "type": "object"
     },
+    "RateTaskPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "rating": {
+          "$ref": "#/definitions/Rating"
+        }
+      },
+      "required": [
+        "rating"
+      ],
+      "title": "RateTaskPayload",
+      "type": "object"
+    },
+    "Rating": {
+      "enum": [
+        "",
+        "p0",
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "title": "Rating",
+      "type": "string"
+    },
     "RequestView": {
       "additionalProperties": false,
       "properties": {
@@ -878,11 +902,11 @@
         "next_implement_generation": {
           "type": "integer"
         },
-        "priority": {
-          "type": "integer"
-        },
         "project": {
           "type": "string"
+        },
+        "rating": {
+          "$ref": "#/definitions/Rating"
         },
         "runs": {
           "anyOf": [
@@ -922,7 +946,7 @@
         "control_mode",
         "control_revision",
         "spec_version",
-        "priority",
+        "rating",
         "block_reason",
         "workspace",
         "next_implement_generation",
@@ -993,11 +1017,11 @@
         "next_implement_generation": {
           "type": "integer"
         },
-        "priority": {
-          "type": "integer"
-        },
         "project": {
           "type": "string"
+        },
+        "rating": {
+          "$ref": "#/definitions/Rating"
         },
         "spec_version": {
           "type": "integer"
@@ -1020,7 +1044,7 @@
         "control_mode",
         "control_revision",
         "spec_version",
-        "priority",
+        "rating",
         "block_reason",
         "workspace",
         "next_implement_generation"
@@ -1166,6 +1190,9 @@
     },
     "HookResponse": {
       "$ref": "#/definitions/HookResponse"
+    },
+    "RateTaskPayload": {
+      "$ref": "#/definitions/RateTaskPayload"
     },
     "RequestView": {
       "$ref": "#/definitions/RequestView"
