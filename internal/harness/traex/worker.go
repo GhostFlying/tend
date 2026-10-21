@@ -2,10 +2,8 @@ package traex
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -72,29 +70,14 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		return nil, err
 	}
 	instructions, input := harness.Brief(spec)
-	var (
-		mu      sync.Mutex
-		verdict *protocol.VerdictPayload
-	)
+	var verdicts harness.Verdicts
 	cfg := harness.ThreadConfig{
 		Cwd: spec.Dir, Model: ws.opts.Model, Sandbox: ws.opts.Sandbox, ApprovalPolicy: ws.opts.ApprovalPolicy,
 		DeveloperInstructions: instructions,
 	}
 	if spec.Role == protocol.RoleAccept {
 		cfg.Tools = []harness.ToolSpec{harness.VerdictToolSpec}
-		cfg.OnToolCall = func(_ context.Context, c harness.ToolCall) harness.ToolResult {
-			if c.Tool != harness.VerdictTool {
-				return harness.ToolResult{Text: "unknown tool"}
-			}
-			var v protocol.VerdictPayload
-			if err := json.Unmarshal(c.Arguments, &v); err != nil || !v.Verdict.Valid() {
-				return harness.ToolResult{Text: "the verdict must be passed, changes_required, blocked or inconclusive"}
-			}
-			mu.Lock()
-			verdict = &v
-			mu.Unlock()
-			return harness.ToolResult{Success: true, Text: "verdict recorded"}
-		}
+		cfg.OnToolCall = verdicts.Handle
 	}
 	th, err := ws.thread(ctx, s, spec, cfg)
 	if err != nil {
@@ -149,9 +132,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					case <-ctx.Done():
 					}
 				case harness.EventTurnCompleted:
-					mu.Lock()
-					w.res = harness.WorkerResult{Verdict: verdict, Summary: summary}
-					mu.Unlock()
+					w.res = harness.WorkerResult{Verdict: verdicts.Verdict(), Summary: summary}
 					if ev.TurnStatus != "completed" {
 						w.err = fmt.Errorf("traex: the worker's turn ended %s", ev.TurnStatus)
 					}

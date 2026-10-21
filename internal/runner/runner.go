@@ -109,10 +109,12 @@ type Config struct {
 	RequestTimeout time.Duration
 }
 
+// Why a worker is stopped, as the cause of its context. The harness's
+// causes tell a worker whose agent outlives it what to do with the agent.
 var (
 	errFenced  = errors.New("runner: the lease could not be renewed in time")
-	errStopped = errors.New("runner: tend no longer wants the run")
-	errPaused  = errors.New("runner: the run is paused")
+	errStopped = fmt.Errorf("runner: %w", harness.ErrStopped)
+	errPaused  = fmt.Errorf("runner: %w", harness.ErrPaused)
 )
 
 // active is a run with a live executor.
