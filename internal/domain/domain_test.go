@@ -506,7 +506,7 @@ func TestRequestAcceptance(t *testing.T) {
 }
 
 func TestDecisionEffectsNameOptions(t *testing.T) {
-	for _, d := range []DecisionDraft{failedImplementDecision("q"), budgetDecision("q"), acceptanceDecision("q")} {
+	for _, d := range []DecisionDraft{failedImplementDecision("q"), budgetDecision("q"), acceptanceDecision("q"), workspaceDecision("q")} {
 		for option := range d.Effects {
 			if !slices.Contains(d.Options, option) {
 				t.Errorf("effect on %q, which is not an option of %v", option, d.Options)

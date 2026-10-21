@@ -57,6 +57,8 @@ func TestSkipRules(t *testing.T) {
 		{"workspace occupied", nil, func(c *Candidate) { c.WorkspaceOccupied = true }, implement, "a run may still be using the workspace"},
 		{"accept in occupied workspace", nil, func(c *Candidate) { c.WorkspaceOccupied = true }, accept, "a run may still be using the workspace"},
 		{"implement on own host", nil, func(c *Candidate) { c.WorkspaceHost = "linux-1" }, implement, ""},
+		{"abandoned host", nil, func(c *Candidate) { c.AbandonedHosts = []string{"mac-1", "linux-1"} }, implement, "task gave up its workspace on this host"},
+		{"other host abandoned", nil, func(c *Candidate) { c.AbandonedHosts = []string{"mac-1"} }, implement, ""},
 	}
 	for _, tc := range cases {
 		h, c := linux, tc.base()

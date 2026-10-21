@@ -154,6 +154,17 @@
   - host 回来（hello）时自动解除阻塞，未回答的待决事项由 tend 以“host 已恢复”关闭，进入增量。
 - **验证**：实际部署会有不止一台 runner。测试和开发期验证可以在同一台机器上运行第二个 runner（不同的 host ID 和 home）；真机验收用实际的多台 runner。
 
+### 9.1 W8 实施细节
+
+- **判定**：服务端每分钟检查一次（和租约清扫并列）。任务的工作区所在 host 已退役，或 `last_seen_at` 早于 `host_lost_after`（默认 24 小时，`0` 关闭失联判定，退役仍然生效），并且任务受托管、没有其他阻塞、有待执行的实现或验收动作时，任务以 `workspace_unavailable` 阻塞，开出待决事项，产生 `task.workspace_unavailable` 事件（需要处理的一类）。检查由系统 principal 执行的命令 `workspaces.check` 完成，什么都没变时不留请求记录。
+- **待决事项**：选项为 “wait for the host”（无效果）、“start over on another host”（效果 `start_over`）、“cancel the task”（效果 `cancel`），按 D53 只对提问时的版本生效。
+- **再问一次**：回答“start over”时任务若已经变过（例如改了评级、暂停后恢复），按 D53 效果不执行，而 start over 没有单独的命令。所以检查时，仍然以 `workspace_unavailable` 阻塞、host 仍不可用、既没有开着的这类待决事项、也没有在当前版本问过的任务，会再开一个（事件带 `asked_again`）。owner 在当前版本选了等待，就不再问。
+- **重来**（`domain.StartOver`）：版本加一，实现代次加一，任务回到排队，清掉验收中的产物，取消所有未完成的动作，新建下一代实现动作，事件 `task.started_over`。app 把旧工作区的记录移到 `abandoned_workspaces`（保留工作区 ID、名称和 host），删除工作区和挂载的记录；下一个领取的 host 按原来的规则新建工作区，但不能是放弃了工作区的 host：那里的工作区目录和任务分支还在，回来后会被接着用。旧 host 上的目录不动。旧工作区里的 run 迟到的 `report_workspace` 被拒绝：工作区不在这个 run 的 host 上（或任务还没有新工作区）时不记录挂载。
+- **工作区占用**：只看当前工作区所在 host 上未结束的 run。重来后旧 host 上状态未知的 run 不再阻止新工作区；旧 host 回来时，这些 run 的动作已取消，hello 让 runner 停止。
+- **在线**：hello、心跳和领取都记下 host 的 `last_seen_at`（领取每分钟最多记一次）。空闲的 runner 不发心跳，只在长轮询领取，所以领取也要算。
+- **恢复**：同一个检查也处理反方向：工作区所在 host 重新可用后，以 `workspace_unavailable` 阻塞的任务解除阻塞（`task.workspace_available`），并以 tend 的名义回答还开着的这类待决事项（选项 “wait for the host”，说明 host 已恢复），进入增量。这样不论 host 是重启后 hello、还是网络恢复后继续领取，都能在一分钟内解除。
+- **配置**：服务端配置 `host_lost_after`，时长；不为 0 时至少 10 分钟，因为领取每分钟最多记一次在线、检查也是每分钟一次，更短会把空闲的 runner 误判为失联。
+
 ## 10. 人工接管（本阶段不做）
 
 按 D51，人工接管是在 cove 里对同一工作区开终端，接口在 cove M1 合入后设计。

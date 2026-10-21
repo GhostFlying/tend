@@ -259,6 +259,11 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 // effect, so it is safe to run again under the same request ID whenever
 // the ledger changes.
 func (s *Server) claim(ctx context.Context, p protocol.Principal, env *protocol.Envelope) (protocol.Operation, error) {
+	// An idle runner is heard from only through its claims (D62). A host
+	// that may not claim is refused by the claim itself.
+	if err := s.app.SeeHost(ctx, p.Subject); err != nil {
+		return protocol.Operation{}, err
+	}
 	deadline := time.NewTimer(s.cfg.ClaimWait)
 	defer deadline.Stop()
 	for {
@@ -303,6 +308,25 @@ func decodeStrict(raw json.RawMessage, v any) error {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "payload is malformed")
 	}
 	return nil
+}
+
+// SweepWorkspaces checks every interval, until ctx is cancelled, for
+// tasks whose workspace host became unavailable or came back (D62).
+func (s *Server) SweepWorkspaces(ctx context.Context, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if tasks, err := s.app.CheckWorkspaces(ctx); err != nil && ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "workspace check failed", "err", err)
+		} else if len(tasks) > 0 {
+			s.log.InfoContext(ctx, "workspace availability changed", "tasks", tasks)
+		}
+	}
 }
 
 // SweepLeases expires lapsed leases every interval until ctx is cancelled.

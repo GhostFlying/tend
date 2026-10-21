@@ -21,6 +21,12 @@
 
   "lease_ttl": "60s",
 
+  // A task's workspace lives on one host. When that host is retired, or
+  // has not been heard from for this long, tasks with work waiting there
+  // are blocked and you are asked whether to wait, start over on another
+  // host or cancel (D62). "0s" only reacts to retired hosts.
+  "host_lost_after": "24h",
+
   // Queued work is claimed p0 first, then by score: project weight times
   // the rating (p1 3, p2 2, p3 1; unrated as p2), plus this much for every
   // hour in the queue (D60). The default, 0.1, makes ten hours of waiting

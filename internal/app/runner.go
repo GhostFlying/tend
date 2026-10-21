@@ -414,7 +414,11 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		return Outcome{}, err
 	}
 	ws, err := store.GetWorkspaceByTask(ctx, q, rc.task.TaskID)
-	if err != nil {
+	if errors.Is(err, store.ErrNotFound) || err == nil && ws.HostID != rc.run.HostID {
+		// The task started over and gave up the workspace this run was
+		// laid out in (D62).
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "the task gave up the workspace of run %s", rc.run.RunID)
+	} else if err != nil {
 		return Outcome{}, err
 	}
 	recorded, err := store.ListMountFacts(ctx, q, ws.WorkspaceID)

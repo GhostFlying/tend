@@ -209,7 +209,8 @@
         "waiting_decision",
         "waiting_approval",
         "acceptance_env_unavailable",
-        "budget_exhausted"
+        "budget_exhausted",
+        "workspace_unavailable"
       ],
       "title": "BlockReason",
       "type": "string"
@@ -267,7 +268,8 @@
       "enum": [
         "implement",
         "accept",
-        "cancel"
+        "cancel",
+        "start_over"
       ],
       "title": "DecisionEffect",
       "type": "string"

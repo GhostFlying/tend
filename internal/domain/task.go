@@ -148,6 +148,8 @@ const (
 	optionReviseSpec     = "revise the spec"
 	optionFixAcceptEnv   = "fix the acceptance environment"
 	optionCancel         = "cancel the task"
+	optionWaitForHost    = "wait for the host"
+	optionStartOver      = "start over on another host"
 )
 
 // failedImplementDecision asks how to go on after an implementation could
@@ -180,6 +182,16 @@ func acceptanceDecision(question string) DecisionDraft {
 	}
 }
 
+// workspaceDecision asks how to go on while the host holding the task's
+// workspace is unavailable (D62).
+func workspaceDecision(question string) DecisionDraft {
+	return DecisionDraft{
+		Question: question,
+		Options:  []string{optionWaitForHost, optionStartOver, optionCancel},
+		Effects:  map[string]protocol.DecisionEffect{optionStartOver: protocol.EffectStartOver, optionCancel: protocol.EffectCancel},
+	}
+}
+
 // Decision is the outcome of applying a command to a task.
 type Decision struct {
 	// Task is the new task state; it equals the input when only facts were
@@ -192,7 +204,10 @@ type Decision struct {
 	SupersedeOpenActions bool
 	// CancelOpenActions asks the caller to cancel every open action.
 	CancelOpenActions bool
-	OpenDecisions     []DecisionDraft
+	// AbandonWorkspace asks the caller to give up the task's workspace, so
+	// that the next implementation lays out a new one (D62).
+	AbandonWorkspace bool
+	OpenDecisions    []DecisionDraft
 }
 
 func errTransition(t Task, op string) error {

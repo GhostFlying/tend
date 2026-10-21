@@ -60,6 +60,8 @@ type Candidate struct {
 	// interrupted or unknown. Implementation and acceptance share the
 	// workspace (D41).
 	WorkspaceOccupied bool
+	// AbandonedHosts are the hosts the task gave up a workspace on (D62).
+	AbandonedHosts []string
 }
 
 // Skip explains why a candidate is not eligible on a host. The empty string
@@ -85,6 +87,10 @@ func Skip(h Host, c Candidate) string {
 		// The workspace, and the artifact commits in its repositories,
 		// exist only on that host.
 		return "task workspace is on another host"
+	case c.WorkspaceHost == "" && slices.Contains(c.AbandonedHosts, h.ID):
+		// The abandoned workspace and its branches are still there and
+		// would be taken up again.
+		return "task gave up its workspace on this host"
 	}
 	return ""
 }

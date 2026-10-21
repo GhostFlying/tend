@@ -212,6 +212,8 @@ func answerEffect(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRo
 		dec, err = domain.RequestAcceptance(task, latest, latest+1, row.ControlRevision)
 	case protocol.EffectCancel:
 		dec, err = domain.Cancel(task, row.ControlRevision)
+	case protocol.EffectStartOver:
+		dec, err = domain.StartOver(task, row.ControlRevision)
 	default:
 		res.Reason = fmt.Sprintf("unknown effect %q", kind)
 		return res, nil, nil

@@ -61,7 +61,7 @@ func candidatesOf(rows []store.CandidateRow) ([]scheduler.Candidate, error) {
 			Lifecycle: r.Lifecycle, Control: r.Control, Block: r.Block, SpecVersion: r.SpecVersion,
 			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Rating: r.Rating, Weight: r.Weight,
 			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(),
-			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied,
+			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied, AbandonedHosts: r.AbandonedHosts,
 		})
 	}
 	return out, nil
