@@ -28,6 +28,15 @@ type WorkerSpec struct {
 	// Attempt counts how often the worker was started for this run; it is
 	// above 1 when a run resumes after fencing or a restart.
 	Attempt int
+	// Thread is the thread an earlier attempt of the run worked in. The
+	// worker continues it when the harness can, and otherwise starts a
+	// new thread with the full brief (D61).
+	Thread string
+	// OnThread, when set, is called with the worker's thread once it
+	// exists and before the worker's first turn, so that the thread can be
+	// recorded before any work happens in it. An error stops the worker
+	// from starting.
+	OnThread func(threadID string) error
 }
 
 // WorkerEvent is a fact the worker produced, in the harness's own terms.
