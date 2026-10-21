@@ -88,8 +88,10 @@ func (CheckWorkspaces) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		case r.HostStatus != store.HostActive:
 			why = "was retired"
 		case x.HostLostAfter > 0 && r.LastSeenAt > 0 && r.LastSeenAt < now-x.HostLostAfter.Milliseconds():
-			// A host never heard from gives nothing to go by.
-			why = fmt.Sprintf("has not been heard from since %s", time.UnixMilli(r.LastSeenAt).UTC().Format(time.RFC3339))
+			// A host never heard from gives nothing to go by. The time is
+			// the server's local time, which is usually the owner's, with
+			// its offset so it stays unambiguous otherwise.
+			why = fmt.Sprintf("has not been heard from since %s", time.UnixMilli(r.LastSeenAt).Format("2006-01-02 15:04 -07:00"))
 		}
 		var d domain.Decision
 		switch {
