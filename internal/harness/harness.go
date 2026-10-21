@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -66,6 +67,17 @@ type Worker interface {
 	// without a result.
 	Wait() (WorkerResult, error)
 }
+
+// Causes a runner stops a worker with, wrapped in the cause of the context
+// passed to Start. Any other cause, such as the runner shutting down, only
+// stops the worker's writes to the workspace.
+var (
+	// ErrPaused stops a worker whose run will continue once its task is
+	// resumed.
+	ErrPaused = errors.New("the run is paused")
+	// ErrStopped stops a worker whose run tend no longer wants.
+	ErrStopped = errors.New("tend no longer wants the run")
+)
 
 // Workers starts workers. Cancelling the context passed to Start stops the
 // worker and its writes to the workspace; Wait then returns the context's

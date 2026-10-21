@@ -1,9 +1,11 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -26,6 +28,35 @@ var VerdictToolSpec = ToolSpec{
   "required": ["verdict", "evidence"],
   "additionalProperties": false
 }`),
+}
+
+// Verdicts records the verdict an acceptance worker reports through
+// VerdictTool; the last valid call counts.
+type Verdicts struct {
+	mu      sync.Mutex
+	verdict *protocol.VerdictPayload
+}
+
+// Handle answers a call of VerdictTool.
+func (v *Verdicts) Handle(_ context.Context, c ToolCall) ToolResult {
+	if c.Tool != VerdictTool {
+		return ToolResult{Text: "unknown tool"}
+	}
+	var p protocol.VerdictPayload
+	if err := json.Unmarshal(c.Arguments, &p); err != nil || !p.Verdict.Valid() {
+		return ToolResult{Text: "the verdict must be passed, changes_required, blocked or inconclusive"}
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.verdict = &p
+	return ToolResult{Success: true, Text: "verdict recorded"}
+}
+
+// Verdict is the recorded verdict, nil when there is none.
+func (v *Verdicts) Verdict() *protocol.VerdictPayload {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.verdict
 }
 
 // briefSpec is the part of a task spec a worker reads.
