@@ -32,6 +32,8 @@ type hookInput struct {
 	SessionID string `json:"session_id"`
 	Source    string `json:"source"`
 	Prompt    string `json:"prompt"`
+	// Cwd is the session's working directory, when the agent passes it.
+	Cwd string `json:"cwd"`
 }
 
 // unreachable is the context added when tend cannot answer, so the model
@@ -110,6 +112,7 @@ func hook(ctx context.Context, e *Env, args []string) (string, error) {
 	}
 	req := protocol.HookRequest{
 		RequestID: e.IDs.New(protocol.PrefixRequest), Agent: agent, Event: ev.tend, SessionID: in.SessionID, Source: in.Source, Prompt: in.Prompt,
+		Remotes: e.remotes(ctx, in.Cwd),
 	}
 	var res protocol.HookResponse
 	// Resend under the same request ID while time is left: tend answers a

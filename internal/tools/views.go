@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
@@ -22,6 +23,8 @@ func notFound(err error, format string, args ...any) error {
 
 type listArgs struct {
 	IncludeFinished bool `json:"include_finished"`
+	// Project defaults to the session's project; "*" is every project.
+	Project *string `json:"project"`
 }
 
 type taskArgs struct {
@@ -45,8 +48,18 @@ func (s *Service) tasksList(ctx context.Context, c Call) (any, error) {
 	}
 	var out []protocol.TaskSummary
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+		project := ""
+		switch {
+		case a.Project != nil && *a.Project != "*":
+			project = *a.Project
+		case a.Project == nil:
+			var err error
+			if project, err = app.SessionScope(ctx, tx.Q(), c.Principal); err != nil {
+				return err
+			}
+		}
 		var err error
-		out, err = views.Tasks(ctx, tx.Q(), a.IncludeFinished)
+		out, err = views.Tasks(ctx, tx.Q(), a.IncludeFinished, project)
 		return err
 	})
 	return map[string]any{"tasks": out}, err
@@ -168,5 +181,19 @@ func (s *Service) tendContext(ctx context.Context, c Call) (any, error) {
 	if err := decode(c.Arguments, &noArgs{}); err != nil {
 		return nil, err
 	}
-	return s.snapshots.Current(ctx)
+	return s.snapshots.Current(ctx, c.Principal)
+}
+
+type sessionProjectArgs struct {
+	Project string `json:"project"`
+	Reason  string `json:"reason"`
+}
+
+func (s *Service) sessionProject(ctx context.Context, c Call) (any, error) {
+	var a sessionProjectArgs
+	if err := decode(c.Arguments, &a); err != nil {
+		return nil, err
+	}
+	target := protocol.Target{Type: "agent_session", ID: app.SessionKey(c.Principal.Agent, c.Principal.Thread)}
+	return s.execute(ctx, c, "agent.select_project", target, nil, a.Reason, map[string]any{"project": a.Project}, app.SelectProject{})
 }

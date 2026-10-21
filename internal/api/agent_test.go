@@ -20,6 +20,8 @@ type session struct {
 	tok   string
 	agent protocol.AgentKind
 	id    string
+	// remotes are those of the repository the session works in.
+	remotes []string
 }
 
 // session returns an agent session that has used tend, so its hooks get
@@ -41,7 +43,7 @@ func (e *env) unboundSession(agent protocol.AgentKind, id string) *session {
 func (s *session) hook(event protocol.HookEvent, source string) string {
 	s.e.t.Helper()
 	var res protocol.HookResponse
-	req := protocol.HookRequest{RequestID: s.e.ids.New(protocol.PrefixRequest), Agent: s.agent, Event: event, SessionID: s.id, Source: source, Prompt: "hello"}
+	req := protocol.HookRequest{RequestID: s.e.ids.New(protocol.PrefixRequest), Agent: s.agent, Event: event, SessionID: s.id, Source: source, Prompt: "hello", Remotes: s.remotes}
 	if st := s.e.do("POST", "/api/v1/agent/hook", s.tok, req, &res); st != http.StatusOK {
 		s.e.t.Fatalf("%s hook of %s = %d", event, s.id, st)
 	}
@@ -70,7 +72,7 @@ func (s *session) call(tool string, args any, requestID string) toolAnswer {
 	}
 	raw, _ := json.Marshal(args)
 	var res protocol.ToolResponse
-	req := protocol.ToolRequest{RequestID: requestID, Agent: s.agent, SessionID: s.id, Arguments: raw}
+	req := protocol.ToolRequest{RequestID: requestID, Agent: s.agent, SessionID: s.id, Arguments: raw, Remotes: s.remotes}
 	if st := s.e.do("POST", "/api/v1/agent/tools/"+tool, s.tok, req, &res); st != http.StatusOK {
 		s.e.t.Fatalf("%s = %d", tool, st)
 	}

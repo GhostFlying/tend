@@ -58,6 +58,11 @@ type bridge struct {
 
 	mu  sync.Mutex // guards out
 	out *json.Encoder
+
+	// remotes are those of the repository the agent started the bridge
+	// in, read on the first tool call.
+	remotesOnce sync.Once
+	remotes     []string
 }
 
 // runMCP serves MCP on stdio until stdin closes: `tend mcp --agent <a>`.
@@ -241,7 +246,11 @@ func (b *bridge) call(ctx context.Context, params json.RawMessage) any {
 	if len(p.Arguments) == 0 {
 		p.Arguments = json.RawMessage("{}")
 	}
-	req := protocol.ToolRequest{RequestID: b.e.IDs.New(protocol.PrefixRequest), Agent: b.agent, SessionID: b.session(p.Meta.Turn.SessionID, p.Meta.SessionID), Arguments: p.Arguments}
+	b.remotesOnce.Do(func() { b.remotes = b.e.remotes(ctx, "") })
+	req := protocol.ToolRequest{
+		RequestID: b.e.IDs.New(protocol.PrefixRequest), Agent: b.agent, SessionID: b.session(p.Meta.Turn.SessionID, p.Meta.SessionID),
+		Arguments: p.Arguments, Remotes: b.remotes,
+	}
 	var res protocol.ToolResponse
 	for attempt := 1; ; attempt++ {
 		err = c.do(ctx, "POST", "/api/v1/agent/tools/"+url.PathEscape(p.Name), req, &res)

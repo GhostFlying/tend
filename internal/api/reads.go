@@ -69,7 +69,7 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	if query.Get("finished") != "1" {
 		s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-			list, err := views.Tasks(r.Context(), q, false)
+			list, err := views.Tasks(r.Context(), q, false, "")
 			if list == nil {
 				list = []protocol.TaskSummary{}
 			}

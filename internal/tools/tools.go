@@ -45,7 +45,7 @@ type Call struct {
 
 // Snapshots shows the ledger as a full snapshot, for tend_context.
 type Snapshots interface {
-	Current(ctx context.Context) (string, error)
+	Current(ctx context.Context, self protocol.Principal) (string, error)
 }
 
 // Service answers the main agent's tool calls.
@@ -80,6 +80,7 @@ var tools = []tool{
 	{"requests_read", "Look up the outcome of one of your earlier requests instead of repeating it.", (*Service).requestsRead},
 	{"repos_list", "List the registered repositories, workspace templates and hosts.", (*Service).reposList},
 	{"tend_context", "Show tend's whole ledger again as a full snapshot.", (*Service).tendContext},
+	{"session_project", "Choose the project this session works in, as the owner asked, in place of the one tend chose from the repository you are in. An empty project shows every project.", (*Service).sessionProject},
 }
 
 // Specs returns the tools to register with the hosted main agent's

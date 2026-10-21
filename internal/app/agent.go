@@ -56,6 +56,9 @@ type AgentHook struct {
 type hookPayload struct {
 	Event  protocol.HookEvent `json:"event"`
 	Source string             `json:"source,omitempty"`
+	// Remotes are the git remotes of the repository the session works in,
+	// which bind it to a project (D59).
+	Remotes []string `json:"remotes,omitempty"`
 }
 
 // Operation implements Command.
@@ -94,11 +97,17 @@ func (c AgentHook) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, e
 	if err := tx.UpsertAgentSession(ctx, string(self.Agent), self.Thread, self.Subject, now); err != nil {
 		return Outcome{}, err
 	}
+	// A session that moved to another project starts over with a full
+	// snapshot of that project.
+	moved, err := bindSessionProject(ctx, tx, self, p.Remotes, false)
+	if err != nil {
+		return Outcome{}, err
+	}
 	base, err := store.GetBaseline(ctx, tx.Q(), key)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
 	}
-	full := p.Event == protocol.HookSessionStart || err != nil || !base.Valid
+	full := p.Event == protocol.HookSessionStart || moved || err != nil || !base.Valid
 	if err != nil {
 		base = store.Baseline{ThreadKey: key}
 	}
@@ -136,34 +145,108 @@ func (c AgentHook) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, e
 }
 
 // BindAgentSession records that an agent session called a tend tool, so
-// its hooks get context from now on (D54). Binding is idempotent
-// bookkeeping, like a heartbeat: it records no request and no event.
+// its hooks get context from now on (D54), and binds it to the project of
+// the repository at remotes (D59). Binding is idempotent bookkeeping, like
+// a heartbeat: it records no request and no event.
 //
 // A newly bound session starts with a watermark at the end of the ledger
 // but no valid baseline: its next hook gets a full snapshot, and the
 // results since binding with it, so a task it created and that finished
 // before that hook is not lost.
-func (a *App) BindAgentSession(ctx context.Context, p protocol.Principal) error {
+func (a *App) BindAgentSession(ctx context.Context, p protocol.Principal, remotes []string) error {
 	if !p.Addon() || p.Thread == "" {
 		return nil
 	}
 	now := a.now().UnixMilli()
+	key := SessionKey(p.Agent, p.Thread)
 	return a.store.Write(ctx, func(tx *store.Tx) error {
 		bound, err := store.AgentSessionBound(ctx, tx.Q(), string(p.Agent), p.Thread)
-		if err != nil || bound {
-			return err
-		}
-		if err := tx.BindAgentSession(ctx, string(p.Agent), p.Thread, p.Subject, now); err != nil {
-			return err
-		}
-		key := SessionKey(p.Agent, p.Thread)
-		if _, err := store.GetBaseline(ctx, tx.Q(), key); !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-		latest, err := store.LatestEventSeq(ctx, tx.Q())
 		if err != nil {
 			return err
 		}
-		return tx.PutBaseline(ctx, store.Baseline{ThreadKey: key, Watermark: latest}, now)
+		if !bound {
+			if err := bindNewSession(ctx, tx, p, now); err != nil {
+				return err
+			}
+		}
+		// The bridge's remotes are those of where the agent started it.
+		moved, err := bindSessionProject(ctx, tx, p, remotes, true)
+		if err != nil || !moved {
+			return err
+		}
+		return invalidateBaseline(ctx, tx, key, now)
 	})
+}
+
+func bindNewSession(ctx context.Context, tx *store.Tx, p protocol.Principal, now int64) error {
+	if err := tx.BindAgentSession(ctx, string(p.Agent), p.Thread, p.Subject, now); err != nil {
+		return err
+	}
+	key := SessionKey(p.Agent, p.Thread)
+	if _, err := store.GetBaseline(ctx, tx.Q(), key); !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	latest, err := store.LatestEventSeq(ctx, tx.Q())
+	if err != nil {
+		return err
+	}
+	return tx.PutBaseline(ctx, store.Baseline{ThreadKey: key, Watermark: latest}, now)
+}
+
+// SelectProject handles agent.select_project: an agent session chooses the
+// project it works in, or every project, in place of the one tend bound
+// from its repository (D59). The choice lasts as long as the session, and
+// its next hook answers with a full snapshot. Like binding, the choice is
+// bookkeeping and records no event.
+type SelectProject struct{}
+
+type selectProjectPayload struct {
+	// Project is empty for every project.
+	Project string `json:"project"`
+}
+
+// Operation implements Command.
+func (SelectProject) Operation() string { return "agent.select_project" }
+
+// Authorize implements Command.
+func (SelectProject) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	if !x.Principal.Addon() || x.Principal.Thread == "" {
+		return protocol.Errorf(protocol.CodeForbidden, "only an agent session may choose its project")
+	}
+	return nil
+}
+
+// Apply implements Command.
+func (SelectProject) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p selectProjectPayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	self := x.Principal
+	key := SessionKey(self.Agent, self.Thread)
+	if x.Env.Target.ID != key {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "the target must be the calling session %s", key)
+	}
+	if p.Project != "" {
+		if _, err := resolveProject(ctx, tx.Q(), p.Project, protocol.Principal{}); err != nil {
+			return Outcome{}, err
+		}
+	}
+	now := x.Now.UnixMilli()
+	bound, err := store.AgentSessionBound(ctx, tx.Q(), string(self.Agent), self.Thread)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !bound {
+		if err := bindNewSession(ctx, tx, self, now); err != nil {
+			return Outcome{}, err
+		}
+	}
+	if err := tx.SetSessionProject(ctx, string(self.Agent), self.Thread, store.SessionProject{Project: p.Project, Source: store.ProjectExplicit}); err != nil {
+		return Outcome{}, err
+	}
+	if err := invalidateBaseline(ctx, tx, key, now); err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Result: map[string]any{"project": p.Project}}, nil
 }

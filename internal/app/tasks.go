@@ -36,7 +36,8 @@ type createTaskPayload struct {
 	Title    string      `json:"title"`
 	Spec     domain.Spec `json:"spec"`
 	Priority int64       `json:"priority"`
-	// Project defaults to the only active project.
+	// Project defaults to the calling session's project, or else to the
+	// only active project.
 	Project string `json:"project,omitempty"`
 	// SourceMessageID and CommitSeq identify the planning commit that
 	// produced this task, when it came from a conversation message.
@@ -69,7 +70,7 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	taskID := x.IDs.New(protocol.PrefixTask)
-	project, err := resolveProject(ctx, tx.Q(), p.Project)
+	project, err := resolveProject(ctx, tx.Q(), p.Project, x.Principal)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -196,8 +197,11 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if p.Project != nil {
 		// Staying in a project that has since been retired is no move,
 		// but the revision is still checked.
+		if *p.Project == "" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "name the project to move the task to")
+		}
 		if *p.Project != row.Project {
-			if _, err := resolveProject(ctx, tx.Q(), *p.Project); err != nil {
+			if _, err := resolveProject(ctx, tx.Q(), *p.Project, x.Principal); err != nil {
 				return Outcome{}, err
 			}
 		}

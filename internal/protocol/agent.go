@@ -56,7 +56,17 @@ type HookRequest struct {
 	// Prompt is the user's input for user_prompt_submit. It is used for
 	// this request only and never stored.
 	Prompt string `json:"prompt,omitempty"`
+	// Remotes are the URLs of the git remotes of the repository the
+	// session works in, which bind it to a project (D59). Local paths are
+	// never sent.
+	Remotes []string `json:"remotes,omitempty"`
 }
+
+// Bounds on the remotes a request may carry.
+const (
+	MaxRemotes   = 16
+	MaxRemoteLen = 1024
+)
 
 // HookResponse is the context to add for the agent; empty when there is
 // nothing to add.
@@ -78,6 +88,8 @@ type ToolRequest struct {
 	// SessionID is the agent's session, when the bridge knows it.
 	SessionID string          `json:"session_id,omitempty"`
 	Arguments json.RawMessage `json:"arguments"`
+	// Remotes are as in HookRequest.
+	Remotes []string `json:"remotes,omitempty"`
 }
 
 // ToolResponse is a tool's answer for the model. Content is JSON text.

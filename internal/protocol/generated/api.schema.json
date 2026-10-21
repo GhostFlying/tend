@@ -401,6 +401,12 @@
         "prompt": {
           "type": "string"
         },
+        "remotes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "request_id": {
           "type": "string"
         },
@@ -1037,6 +1043,12 @@
           "$ref": "#/definitions/AgentKind"
         },
         "arguments": {},
+        "remotes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "request_id": {
           "type": "string"
         },

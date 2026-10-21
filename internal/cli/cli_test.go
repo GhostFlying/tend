@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -850,5 +852,73 @@ func TestLogsOfATaskWithoutRuns(t *testing.T) {
 	te := newTestEnv(t, f.srv.URL)
 	if code := te.main("logs", "--json", "task_1"); code != exitOK || te.out.Len() != 0 {
 		t.Errorf("logs --json of a task without runs = %d, %q; want no records", code, te.out)
+	}
+}
+
+func TestHookSendsTheRepositoryRemotes(t *testing.T) {
+	f := newFakeServer(t)
+	f.answer("POST /api/v1/agent/hook", protocol.HookResponse{})
+	te := newTestEnv(t, f.srv.URL)
+	var dirs []string
+	te.Output = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name != "git" || len(args) < 2 || args[0] != "-C" {
+			return nil, os.ErrNotExist
+		}
+		dirs = append(dirs, args[1])
+		if args[1] == "/outside" {
+			return nil, errors.New("not a git repository")
+		}
+		return []byte("origin\tgit@example.com:me/tend.git (fetch)\norigin\tgit@example.com:me/tend.git (push)\n" +
+			"mirror\thttps://bot:s3cret@example.com/me/tend.git (fetch)\nbackup\t/mnt/backup/tend.git (fetch)\n"), nil
+	}
+	te.Getwd = func() (string, error) { return "/work/tend", nil }
+	hook := func(input string) protocol.HookRequest {
+		t.Helper()
+		te.Stdin = strings.NewReader(input)
+		if code := te.main("hook", "claude", "user-prompt-submit"); code != exitOK {
+			t.Fatalf("hook = %d", code)
+		}
+		reqs := f.seen("POST /api/v1/agent/hook")
+		var req protocol.HookRequest
+		if err := json.Unmarshal(reqs[len(reqs)-1].body, &req); err != nil {
+			t.Fatal(err)
+		}
+		if body := string(reqs[len(reqs)-1].body); strings.Contains(body, "/work/") || strings.Contains(body, "/mnt/") || strings.Contains(body, "s3cret") {
+			t.Errorf("hook request carries a local path or a credential: %s", body)
+		}
+		return req
+	}
+	want := []string{"git@example.com:me/tend.git", "https://example.com/me/tend.git"}
+	if req := hook(`{"session_id":"s-1","prompt":"hi","cwd":"/work/other"}`); !slices.Equal(req.Remotes, want) {
+		t.Errorf("remotes = %q, want %q", req.Remotes, want)
+	}
+	// Without a cwd in the input, the hook's own working directory counts.
+	hook(`{"session_id":"s-1","prompt":"hi"}`)
+	if !slices.Equal(dirs, []string{"/work/other", "/work/tend"}) {
+		t.Errorf("git ran in %q", dirs)
+	}
+	if req := hook(`{"session_id":"s-1","prompt":"hi","cwd":"/outside"}`); len(req.Remotes) != 0 {
+		t.Errorf("remotes outside a repository = %q", req.Remotes)
+	}
+}
+
+func TestOnlyNetworkRemotesLeave(t *testing.T) {
+	for url, want := range map[string]bool{
+		"https://example.com/me/tend.git": true,
+		"ssh://git@example.com/me/tend":   true,
+		"git@example.com:me/tend.git":     true,
+		"example.com:me/tend":             true,
+		"/srv/git/tend.git":               false,
+		"../tend":                         false,
+		"~/src/tend":                      false,
+		"file:///srv/git/tend":            false,
+		"FILE:///srv/git/tend":            false,
+		`C:\src\tend`:                     false,
+		"C:/src/tend":                     false,
+		"./dir:with:colons":               false,
+	} {
+		if got := networkRemote(url); got != want {
+			t.Errorf("networkRemote(%q) = %v, want %v", url, got, want)
+		}
 	}
 }

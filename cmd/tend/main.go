@@ -41,6 +41,10 @@ func main() {
 			c.Stdout, c.Stderr = os.Stderr, os.Stderr
 			return c.Run()
 		},
+		Output: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return exec.CommandContext(ctx, name, args...).Output()
+		},
+		Getwd: os.Getwd,
 	}
 	os.Exit(cli.Main(ctx, e, os.Args[1:]))
 }
