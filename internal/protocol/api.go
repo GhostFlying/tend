@@ -5,7 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{Envelope{}, APIResponse{}, Snapshot{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ArtifactDetail{}, RequestView{},
-		SessionRequest{}, SessionView{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
+		SessionRequest{}, SessionView{}, SubmitMessagePayload{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
 		HookRequest{}, HookResponse{}, ToolSpec{}, ToolRequest{}, ToolResponse{}}
 }
 

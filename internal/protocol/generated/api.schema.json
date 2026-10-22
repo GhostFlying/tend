@@ -937,6 +937,25 @@
       "title": "Snapshot",
       "type": "object"
     },
+    "SubmitMessagePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "last_seen_seq": {
+          "type": "integer"
+        },
+        "reply_to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "title": "SubmitMessagePayload",
+      "type": "object"
+    },
     "Target": {
       "additionalProperties": false,
       "properties": {
@@ -1340,6 +1359,9 @@
     },
     "Snapshot": {
       "$ref": "#/definitions/Snapshot"
+    },
+    "SubmitMessagePayload": {
+      "$ref": "#/definitions/SubmitMessagePayload"
     },
     "TaskDetail": {
       "$ref": "#/definitions/TaskDetail"
