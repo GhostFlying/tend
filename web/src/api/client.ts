@@ -42,11 +42,59 @@ export class NetworkError extends Error {
   }
 }
 
-type KeyValueStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+export type KeyValueStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/**
+ * Storage that keeps working in memory when the browser's throws, as
+ * localStorage does when site data is blocked. Values then last only as
+ * long as the page: a reload signs in again under a new client ID.
+ */
+export class FallbackStorage implements KeyValueStorage {
+  private readonly backing: () => KeyValueStorage;
+  private readonly memory = new Map<string, string>();
+
+  /** backing is read on every call, so merely naming it cannot throw early. */
+  constructor(backing: () => KeyValueStorage) {
+    this.backing = backing;
+  }
+
+  getItem(key: string): string | null {
+    try {
+      const v = this.backing().getItem(key);
+      if (v !== null) {
+        return v;
+      }
+    } catch {
+      // Fall back to memory.
+    }
+    return this.memory.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.memory.set(key, value);
+    try {
+      this.backing().setItem(key, value);
+    } catch {
+      // Kept in memory only.
+    }
+  }
+
+  removeItem(key: string): void {
+    this.memory.delete(key);
+    try {
+      this.backing().removeItem(key);
+    } catch {
+      // Gone from memory, which is all there is.
+    }
+  }
+}
 
 export interface ClientOptions {
   fetch?: typeof fetch;
-  /** Keeps the client ID and token across reloads. Default localStorage. */
+  /**
+   * Keeps the client ID and token across reloads. Default localStorage,
+   * falling back to memory where it is unavailable.
+   */
   storage?: KeyValueStorage;
   random?: RandomBytes;
   /** Bounds each request. Default 20 seconds. */
@@ -68,7 +116,7 @@ export class ApiClient {
 
   constructor(options: ClientOptions = {}) {
     this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
-    this.storage = options.storage ?? localStorage;
+    this.storage = options.storage ?? new FallbackStorage(() => globalThis.localStorage);
     this.random = options.random ?? cryptoRandom;
     this.timeoutMs = options.timeoutMs ?? 20_000;
   }

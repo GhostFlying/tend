@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { ApiClient, ApiError, NetworkError } from "./client.ts";
+import { ApiClient, ApiError, FallbackStorage, NetworkError } from "./client.ts";
 
 interface Call {
   method: string;
@@ -173,5 +173,58 @@ describe("ApiClient", () => {
     expect(await client.lookup("req_missing")).toBeNull();
     expect(await client.lookup("req_known")).toMatchObject({ status: "accepted" });
     expect(tend.calls.at(-1)?.path).toBe("/api/v1/requests/req_known");
+  });
+});
+
+describe("blocked site storage", () => {
+  // What localStorage does when the browser blocks site data.
+  const blocked = (): Storage => {
+    throw new DOMException("The operation is insecure.", "SecurityError");
+  };
+
+  test("FallbackStorage keeps values in memory", () => {
+    const s = new FallbackStorage(blocked);
+    expect(s.getItem("k")).toBeNull();
+    s.setItem("k", "v");
+    expect(s.getItem("k")).toBe("v");
+    s.removeItem("k");
+    expect(s.getItem("k")).toBeNull();
+  });
+
+  test("FallbackStorage uses working storage", () => {
+    const backing = new MemoryStorage();
+    const s = new FallbackStorage(() => backing);
+    s.setItem("k", "v");
+    expect(backing.getItem("k")).toBe("v");
+    backing.setItem("other", "w");
+    expect(s.getItem("other")).toBe("w");
+  });
+
+  test("the client still signs in and keeps its token for the page", async () => {
+    const c = new ApiClient({ fetch: tend.fetch, storage: new FallbackStorage(blocked) });
+    await c.request("GET", "/api/v1/snapshot");
+    await c.request("GET", "/api/v1/snapshot");
+    expect(tend.calls.map((x) => `${x.method} ${x.path} ${x.auth}`)).toEqual([
+      "POST /api/v1/session null",
+      "GET /api/v1/snapshot Bearer token-1",
+      "GET /api/v1/snapshot Bearer token-1",
+    ]);
+  });
+
+  test("the default storage survives a localStorage that throws", async () => {
+    const saved = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", { get: blocked, configurable: true });
+    try {
+      const c = new ApiClient({ fetch: tend.fetch });
+      expect(c.clientId).toBe(c.clientId);
+      await c.request("GET", "/api/v1/snapshot");
+      expect(c.connection.get().status).toBe("online");
+    } finally {
+      if (saved) {
+        Object.defineProperty(globalThis, "localStorage", saved);
+      } else {
+        delete (globalThis as { localStorage?: Storage }).localStorage;
+      }
+    }
   });
 });
