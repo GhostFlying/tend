@@ -11,6 +11,7 @@ import { useStore } from "../state/store.ts";
 import { AgentTurn, Divider, OutgoingRow, OwnerMessage } from "./Messages.tsx";
 import { buildEntries, duration, processing } from "./model.ts";
 import styles from "./Transcript.module.css";
+import { captureAnchor, restoreAnchor, type ScrollAnchor } from "./scrollAnchor.ts";
 
 /** How close to the bottom still counts as reading the latest. */
 const nearBottomPx = 80;
@@ -36,24 +37,15 @@ export function Transcript({ jump }: { jump: number }) {
   const [atBottom, setAtBottom] = useState(true);
   const following = useRef(true);
   /** Where the reader was when the page before was asked for. */
-  const anchor = useRef<{ firstSeq: number; height: number; top: number } | null>(null);
-  const firstSeq = conversation.before ?? conversation.items[0]?.seq ?? 0;
+  const anchor = useRef<ScrollAnchor | null>(null);
 
   const loadEarlier = () => {
     const el = scroller.current;
     if (!el || !conversation.more || conversation.loadingEarlier || anchor.current) {
       return;
     }
-    anchor.current = { firstSeq, height: el.scrollHeight, top: el.scrollTop };
-    void live.loadEarlier().finally(() => {
-      // Nothing came: let the next scroll try again.
-      if (
-        anchor.current?.firstSeq ===
-        (live.conversation.get().before ?? live.conversation.get().items[0]?.seq)
-      ) {
-        anchor.current = null;
-      }
-    });
+    anchor.current = captureAnchor(el);
+    void live.loadEarlier();
   };
 
   const onScroll = () => {
@@ -62,6 +54,8 @@ export function Transcript({ jump }: { jump: number }) {
       return;
     }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < nearBottomPx;
+    if (near) anchor.current = null;
+    else if (anchor.current) anchor.current = captureAnchor(el);
     following.current = near;
     setAtBottom(near);
     if (el.scrollTop < nearTopPx) {
@@ -75,10 +69,10 @@ export function Transcript({ jump }: { jump: number }) {
       return;
     }
     const a = anchor.current;
-    if (a && a.firstSeq !== firstSeq) {
-      // Earlier items went in above: keep what was on screen in place.
-      el.scrollTop = el.scrollHeight - a.height + a.top;
-      anchor.current = null;
+    if (a) {
+      // Appended live output must not count as prepended page height.
+      restoreAnchor(el, a);
+      if (!conversation.loadingEarlier) anchor.current = null;
     } else if (following.current) {
       el.scrollTop = el.scrollHeight;
     }
@@ -95,6 +89,7 @@ export function Transcript({ jump }: { jump: number }) {
   const toLatest = () => {
     const el = scroller.current;
     if (el) {
+      anchor.current = null;
       following.current = true;
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
@@ -103,6 +98,7 @@ export function Transcript({ jump }: { jump: number }) {
   useEffect(() => {
     const el = scroller.current;
     if (jump > 0 && el) {
+      anchor.current = null;
       following.current = true;
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
