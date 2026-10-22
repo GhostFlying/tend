@@ -5,11 +5,21 @@ import { useStore } from "../state/store.ts";
 import { theme, themeLabels, toggleTheme } from "../theme/theme.ts";
 import { Note } from "./Chat.tsx";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
+import { RecentTasks } from "../tasks/Board.tsx";
+import controls from "./controls.module.css";
 import { Hosts, TaskOverview } from "../tasks/Overview.tsx";
 import styles from "./Sidebar.module.css";
 import type { View } from "./TabBar.tsx";
 
-export function Sidebar({ view, connection }: { view: View; connection: Connection }) {
+export function Sidebar({
+  view,
+  connection,
+  onBoard,
+}: {
+  view: View;
+  connection: Connection;
+  onBoard(): void;
+}) {
   const choice = useStore(theme);
   return (
     <div className={styles.root} data-view={view}>
@@ -31,7 +41,15 @@ export function Sidebar({ view, connection }: { view: View; connection: Connecti
           <Attention />
         </div>
         <section className={styles.tasks} aria-label="任务">
+          <button
+            type="button"
+            className={`${controls.chipBtn} ${styles.allTasks}`}
+            onClick={onBoard}
+          >
+            全部任务 · 阶段看板 ›
+          </button>
           <TaskOverview />
+          <RecentTasks />
           <Hosts />
         </section>
       </div>

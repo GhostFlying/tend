@@ -83,7 +83,7 @@
   }
 
   .app[data-view="chat"] .sidebar,
-  .app[data-view="tasks"] .chat,
+  .app[data-board="open"] .sidebar,
   .app[data-view="decisions"] .chat {
     visibility: hidden;
   }
@@ -100,4 +100,15 @@
   .app[data-details="open"] .details {
     transform: none;
   }
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.content[hidden] {
+  display: none;
 }
