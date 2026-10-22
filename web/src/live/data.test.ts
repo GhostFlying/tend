@@ -348,3 +348,78 @@ test("cumulative assistant text keeps its identity through replay, pagination an
   expect(processing(state.items)).toBeUndefined();
   await live.stop();
 });
+
+function assistant(
+  seq: number,
+  revision: number,
+  body: string,
+  state: ConversationItem["assistant_state"] = "streaming",
+): ConversationItem {
+  return {
+    seq,
+    message_id: `msg_${seq}`,
+    kind: "message",
+    author: "main_agent",
+    reply_to: `msg_${seq - 1}`,
+    body,
+    assistant_state: state,
+    assistant_revision: revision,
+    created_at: "2026-10-22T10:00:01Z",
+  };
+}
+
+test("a delayed held stream item cannot roll back a newer conversation snapshot", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  void live.reload();
+  await api.answer("/api/v1/snapshot", snapshot);
+  live.apply(messageEvent(2, assistant(2, 2, "older draft")));
+  const current = assistant(2, 3, "newer cumulative text");
+  await api.answer("/api/v1/conversation", {
+    items: [owner(1, "processing"), current],
+    more: false,
+  });
+  expect(live.conversation.get().items).toEqual([owner(1, "processing"), current]);
+  await live.stop();
+});
+
+test("a newer earlier-page item beats an older stream item already shown", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  void live.reload();
+  await api.answer("/api/v1/snapshot", snapshot);
+  await api.answer("/api/v1/conversation", { items: [owner(59, "processing")], more: true });
+  void live.loadEarlier();
+  live.apply(messageEvent(10, assistant(58, 2, "older live text")));
+  const current = assistant(58, 3, "newer saved text");
+  await api.answer("/api/v1/conversation?before", {
+    items: [owner(57, "replied"), current],
+    more: false,
+  });
+  expect(live.conversation.get().items.find((it) => it.message_id === current.message_id)).toEqual(
+    current,
+  );
+  expect(live.conversation.get().before).toBe(57);
+  await live.stop();
+});
+
+test("a shorter final reply stays terminal after late streaming or legacy items", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  void live.reload();
+  await api.answer("/api/v1/snapshot", snapshot);
+  await api.answer("/api/v1/conversation", {
+    items: [owner(1, "processing"), assistant(2, 3, "a longer streamed draft")],
+    more: false,
+  });
+  const final = assistant(2, 4, "done", "completed");
+  live.apply(messageEvent(4, final));
+  live.apply(messageEvent(5, assistant(2, 3, "a longer late draft")));
+  const legacy = assistant(2, 0, "unversioned stale text");
+  delete legacy.assistant_revision;
+  live.apply(messageEvent(6, legacy));
+  expect(live.conversation.get().items.filter((it) => it.message_id === final.message_id)).toEqual([
+    final,
+  ]);
+  await live.stop();
+});
