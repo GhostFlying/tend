@@ -52,32 +52,71 @@ type server struct {
 	ids    protocol.IDGen
 	url    string
 	signal *dispatch.Signal
+	// path and ttl are what the server was opened with.
+	path string
+	ttl  time.Duration
+	// stops stop what runs against the ledger, in the order started.
+	stops []func()
+	ended sync.Once
 }
 
 func newServer(t *testing.T, ttl time.Duration) *server {
 	t.Helper()
+	return openServer(t, ttl, filepath.Join(t.TempDir(), "tend.db"))
+}
+
+// openServer starts a server on the ledger at path.
+func openServer(t *testing.T, ttl time.Duration, path string) *server {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	s, err := store.Open(ctx, filepath.Join(t.TempDir(), "tend.db"), time.Now)
+	s, err := store.Open(ctx, path, time.Now)
 	if err != nil {
+		cancel()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
 	ids := protocol.NewULIDGen(time.Now, nil)
 	sig := dispatch.NewSignal()
 	a := app.New(s, ids, time.Now, app.WithLeaseTTL(ttl), app.WithNotifier(sig))
-	srv := &server{t: t, store: s, app: a, ids: ids, signal: sig}
+	srv := &server{t: t, store: s, app: a, ids: ids, signal: sig, path: path, ttl: ttl}
+	t.Cleanup(srv.shutdown)
+	srv.onStop(func() { s.Close() })
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 2,
 			TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}},
 	}, app.SyncConfig{})
 	api := runnerapi.New(a, netx.Static{Identity: &peer}, secret, runnerapi.Config{ClaimWait: 200 * time.Millisecond}, quiet())
-	go api.SweepLeases(ctx, 20*time.Millisecond)
+	var sweep sync.WaitGroup
+	sweep.Go(func() { api.SweepLeases(ctx, 20*time.Millisecond) })
+	srv.onStop(func() {
+		cancel()
+		sweep.Wait()
+	})
 	hs := httptest.NewServer(api.Handler())
-	t.Cleanup(hs.Close)
+	srv.onStop(hs.Close)
 	srv.url = hs.URL
 	return srv
+}
+
+// onStop has the server stop f when it shuts down, before what was
+// started earlier.
+func (s *server) onStop(f func()) { s.stops = append(s.stops, f) }
+
+// shutdown stops the server as tend-server does, the last started first,
+// and closes its ledger.
+func (s *server) shutdown() {
+	s.ended.Do(func() {
+		for i := len(s.stops) - 1; i >= 0; i-- {
+			s.stops[i]()
+		}
+	})
+}
+
+// restart shuts the server down and starts a new one on its ledger.
+func (s *server) restart() *server {
+	s.t.Helper()
+	s.shutdown()
+	return openServer(s.t, s.ttl, s.path)
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

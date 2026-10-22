@@ -23,7 +23,7 @@ import (
 func (s *server) startMainThread(h *testkit.Harness) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	s.t.Cleanup(func() {
+	s.onStop(func() {
 		cancel()
 		wg.Wait()
 	})
