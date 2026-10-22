@@ -1,0 +1,26 @@
+.root {
+  display: flex;
+  flex-direction: column;
+}
+
+/* On a phone the 待处理 tab answers right here, as cards. */
+.cards {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 4px 16px;
+}
+
+.cards > div {
+  box-shadow: none;
+}
+
+@media (max-width: 760px) {
+  .rows {
+    display: none;
+  }
+
+  .cards {
+    display: flex;
+  }
+}

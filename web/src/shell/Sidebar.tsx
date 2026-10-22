@@ -1,6 +1,6 @@
 // The work overview: what needs the owner, tasks by project and the hosts.
-// The sections are empty frames until the views are filled in (F7).
 import type { Connection } from "../api/client.ts";
+import { Attention } from "../decisions/Attention.tsx";
 import { useStore } from "../state/store.ts";
 import { theme, themeLabels, toggleTheme } from "../theme/theme.ts";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
@@ -23,10 +23,9 @@ export function Sidebar({ view, connection }: { view: View; connection: Connecti
       </div>
       <h2 className={styles.mobileTitle}>{view === "decisions" ? "待处理" : "任务"}</h2>
       <div className={styles.scroll}>
-        <section className={styles.decisions} aria-label="需要你处理">
-          <div className={styles.sectionTitle}>需要你处理</div>
-          <p className={controls.empty}>这里会列出待决事项和被接管的任务。</p>
-        </section>
+        <div className={styles.decisions}>
+          <Attention />
+        </div>
         <section className={styles.tasks} aria-label="任务">
           <div className={styles.sectionTitle}>任务</div>
           <p className={controls.empty}>这里会按 project 列出任务。</p>

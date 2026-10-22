@@ -1,0 +1,8 @@
+.dock {
+  display: flex;
+  flex-direction: column;
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}

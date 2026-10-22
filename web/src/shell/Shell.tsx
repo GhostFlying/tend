@@ -4,8 +4,10 @@
 import { useMemo, useState } from "react";
 import type { ApiClient, Connection } from "../api/client.ts";
 import { ServicesContext, type Services } from "../app/services.tsx";
+import { attentionCount } from "../decisions/Attention.tsx";
 import type { LiveData } from "../live/data.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
+import { useStore } from "../state/store.ts";
 import { Chat } from "./Chat.tsx";
 import { Details } from "./Details.tsx";
 import styles from "./Shell.module.css";
@@ -24,6 +26,7 @@ export function Shell({
   queue: SendQueue | null;
 }) {
   const [view, setView] = useState<View>("chat");
+  const snapshot = useStore(live.snapshot);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   const services = useMemo<Services>(
@@ -56,7 +59,7 @@ export function Shell({
         <section className={styles.details} inert={!detailsOpen} aria-label="任务详情">
           <Details onClose={closeDetails} />
         </section>
-        <TabBar view={view} onChange={setView} pending={0} />
+        <TabBar view={view} onChange={setView} pending={attentionCount(snapshot)} />
       </div>
     </ServicesContext>
   );

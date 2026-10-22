@@ -11,6 +11,7 @@
 import { ApiError, NetworkError } from "../api/client.ts";
 import type {
   APIResponse,
+  DecisionChoice,
   Envelope,
   OpStatus,
   RequestView,
@@ -44,6 +45,13 @@ export interface Draft {
   body: string;
   replyTo?: string;
   lastSeenSeq?: number;
+  /** The option of an open decision the message chooses (D71). */
+  decision?: DecisionChoice;
+}
+
+/** The decision option a message in the outbox chooses, if any. */
+export function choiceOf(m: OutgoingMessage): DecisionChoice | undefined {
+  return (m.envelope.payload as SubmitMessagePayload | undefined)?.decision;
 }
 
 /** How one try ended. */
@@ -122,6 +130,9 @@ export class SendQueue {
     }
     if (draft.lastSeenSeq) {
       payload.last_seen_seq = draft.lastSeenSeq;
+    }
+    if (draft.decision) {
+      payload.decision = draft.decision;
     }
     const message: OutgoingMessage = {
       requestId,
