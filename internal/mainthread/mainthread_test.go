@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -41,7 +42,7 @@ type env struct {
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-func newEnv(t *testing.T, h *testkit.Harness) *env {
+func newEnv(t *testing.T, h *testkit.Harness, opts ...func(*Config)) *env {
 	t.Helper()
 	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), time.Now)
 	if err != nil {
@@ -55,10 +56,14 @@ func newEnv(t *testing.T, h *testkit.Harness) *env {
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 	}, app.SyncConfig{})
 	cb := contextbuilder.New(a, s, ids, contextbuilder.Config{})
-	e.m = New(a, cb, tools.New(a, s, cb, quiet()), Config{
+	cfg := Config{
 		Instance: "main", Thread: harness.ThreadConfig{Cwd: "/agent", DeveloperInstructions: Instructions},
 		Open: h.Open, RestartDelay: 20 * time.Millisecond, Log: quiet(),
-	})
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	e.m = New(a, cb, tools.New(a, s, cb, quiet()), cfg)
 	e.start()
 	t.Cleanup(func() {
 		e.stop()
@@ -519,6 +524,54 @@ func TestInterruptReply(t *testing.T) {
 	if n := e.count(`SELECT COUNT(*) FROM outbox WHERE destination = ?`, app.MainThreadControlDestination); n != 1 {
 		t.Errorf("stops queued = %d, want still 1", n)
 	}
+}
+
+func TestInterruptRefusedWhileRunningIsRetried(t *testing.T) {
+	h := testkit.NewHarness()
+	gate := make(chan struct{})
+	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
+		<-gate
+		return ""
+	}
+	var mu sync.Mutex
+	refusals := 0
+	h.InterruptErr = func(context.Context, string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if refusals++; refusals == 1 {
+			return fmt.Errorf("%w: overloaded", harness.ErrRejected)
+		}
+		return nil
+	}
+	e := newEnv(t, h)
+	defer close(gate)
+	msg := e.say("long")
+	eventually(t, "the turn runs", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'started'`) == 1 })
+	e.exec(owner, "conversation.interrupt_reply", protocol.Target{Type: "message", ID: msg}, protocol.InterruptReplyPayload{MessageID: msg}, app.InterruptReply{})
+	eventually(t, "the turn is interrupted after a refusal", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id = ? AND status = 'interrupted'`, msg) == 1
+	})
+}
+
+func TestFault_InterruptUnanswered(t *testing.T) {
+	h := testkit.NewHarness()
+	gate := make(chan struct{})
+	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
+		<-gate
+		return "completed"
+	}
+	h.InterruptErr = func(ctx context.Context, _ string) error {
+		<-ctx.Done() // the answer never comes
+		return ctx.Err()
+	}
+	e := newEnv(t, h, func(c *Config) { c.InterruptTimeout = 50 * time.Millisecond })
+	defer close(gate)
+	msg := e.say("long")
+	eventually(t, "the turn runs", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'started'`) == 1 })
+	e.exec(owner, "conversation.interrupt_reply", protocol.Target{Type: "message", ID: msg}, protocol.InterruptReplyPayload{MessageID: msg}, app.InterruptReply{})
+	eventually(t, "the stop is marked unknown, not resent", func() bool {
+		return e.count(`SELECT COUNT(*) FROM outbox WHERE destination = ? AND status = 'unknown'`, app.MainThreadControlDestination) == 1
+	})
 }
 
 func TestFault_InterruptReplyLost(t *testing.T) {

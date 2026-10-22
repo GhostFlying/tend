@@ -23,6 +23,9 @@ type Harness struct {
 	Turn func(t *FakeThread, turnID string, in harness.TurnInput) string
 	// StartTurnErr, when set, decides whether turn/start fails.
 	StartTurnErr func(in harness.TurnInput) error
+	// InterruptErr, when set, decides whether turn/interrupt fails; a
+	// failed one stops nothing.
+	InterruptErr func(ctx context.Context, turnID string) error
 	// BeforeAnswer, when set, runs inside turn/start before it returns,
 	// so its events can reach the consumer ahead of the response.
 	BeforeAnswer func(t *FakeThread, turnID string)
@@ -218,7 +221,12 @@ func (t *FakeThread) StartTurn(_ context.Context, in harness.TurnInput) (string,
 }
 
 // Interrupt implements harness.Thread.
-func (t *FakeThread) Interrupt(_ context.Context, turnID string) error {
+func (t *FakeThread) Interrupt(ctx context.Context, turnID string) error {
+	if f := t.s.h.InterruptErr; f != nil {
+		if err := f(ctx, turnID); err != nil {
+			return err
+		}
+	}
 	t.Emit(harness.Event{Kind: harness.EventTurnCompleted, TurnID: turnID, TurnStatus: "interrupted"})
 	return nil
 }

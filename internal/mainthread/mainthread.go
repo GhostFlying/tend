@@ -40,7 +40,11 @@ type Config struct {
 	Open func(ctx context.Context) (harness.Session, error)
 	// RestartDelay separates attempts to bring a session back. Default 2s.
 	RestartDelay time.Duration
-	Log          *slog.Logger
+	// InterruptTimeout bounds a turn/interrupt, so a lost answer cannot
+	// hold the control destination and the stops queued after it.
+	// Default 10s.
+	InterruptTimeout time.Duration
+	Log              *slog.Logger
 }
 
 // Manager runs the front thread.
@@ -70,6 +74,9 @@ type turn struct {
 func New(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg Config) *Manager {
 	if cfg.RestartDelay <= 0 {
 		cfg.RestartDelay = 2 * time.Second
+	}
+	if cfg.InterruptTimeout <= 0 {
+		cfg.InterruptTimeout = 10 * time.Second
 	}
 	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, ready: make(chan struct{}), settled: map[string]string{}}
 }
@@ -503,16 +510,28 @@ func (c Control) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult
 	case turnID == "":
 		return app.DeliveryResult{Outcome: app.Retry, Reason: "the message's turn is starting"}
 	}
-	err := th.Interrupt(ctx, turnID)
+	callCtx, cancel := context.WithTimeout(ctx, m.cfg.InterruptTimeout)
+	err := th.Interrupt(callCtx, turnID)
+	cancel()
 	switch {
 	case err == nil:
 		return app.DeliveryResult{Outcome: app.Delivered}
+	case errors.Is(err, harness.ErrRejected) && !m.running(turnID):
+		return app.DeliveryResult{Outcome: app.Delivered, Reason: "the turn ended before it was stopped"}
 	case errors.Is(err, harness.ErrRejected):
-		// The harness had nothing to stop: the turn ended meanwhile.
-		return app.DeliveryResult{Outcome: app.Delivered, Reason: err.Error()}
+		// The harness refused, so nothing happened; try again while the
+		// turn runs.
+		return app.DeliveryResult{Outcome: app.Retry, Reason: err.Error()}
 	}
 	// The turn may or may not have been stopped; its final state tells.
 	return app.DeliveryResult{Outcome: app.Unknown, Reason: "turn/interrupt did not answer: " + err.Error()}
+}
+
+// running reports whether turnID is the turn the front thread works on.
+func (m *Manager) running(turnID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.active != nil && m.active.turnID == turnID
 }
 
 // Reconcile implements dispatch.Handler for a stop a previous process left
