@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>tend</title>
+<style>
+/* Tokens follow dsh's ui-theme: neutral surfaces, one blue accent, system type. */
+:root {
+  --bg: #ffffff; --bg-l1: #f9fafb; --bg-l2: #f2f3f5; --sidebar: #f9fafb;
+  --label: rgb(15,17,21); --label-2: rgba(15,17,21,.72); --label-3: rgba(15,17,21,.52); --caption: rgba(15,17,21,.38);
+  --border: rgba(15,17,21,.1); --border-soft: rgba(15,17,21,.06);
+  --hover: rgba(38,49,72,.06); --bubble: #f0f2f5; --input: #ffffff;
+  --accent: rgb(65,118,230); --accent-soft: rgba(65,118,230,.1);
+  --ok: #22a06b; --warn: #e5a000; --warn-soft: rgba(229,160,0,.12); --err: #d93c3c; --idle: rgba(15,17,21,.28);
+  --shadow-2: 0 2px 6px rgba(15,17,21,.04), 0 8px 24px rgba(15,17,21,.08);
+  --ease: cubic-bezier(.4,0,.2,1);
+  --mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+body[data-dark] {
+  --bg: rgb(21,21,23); --bg-l1: rgb(27,27,28); --bg-l2: rgb(36,36,38); --sidebar: rgb(27,27,28);
+  --label: rgb(236,237,240); --label-2: rgba(236,237,240,.74); --label-3: rgba(236,237,240,.54); --caption: rgba(236,237,240,.4);
+  --border: rgba(255,255,255,.1); --border-soft: rgba(255,255,255,.06);
+  --hover: rgba(255,255,255,.06); --bubble: rgb(44,44,47); --input: rgb(36,36,38);
+  --accent-soft: rgba(65,118,230,.2); --warn-soft: rgba(229,160,0,.16);
+  --shadow-2: 0 2px 6px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.4);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font: 14px/22px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  color: var(--label); background: var(--bg); -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+
+/* ---------- shell: sidebar | chat | details ---------- */
+.app { display: grid; grid-template-columns: 288px minmax(0,1fr) 0; height: 100%; transition: grid-template-columns .3s var(--ease); }
+.app.details-open { grid-template-columns: 288px minmax(0,1fr) 380px; }
+
+/* ---------- sidebar ---------- */
+.sidebar { background: var(--sidebar); border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; min-height: 0; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 16px 16px 10px; }
+.logo { width: 26px; height: 26px; border-radius: 8px; background: var(--label); color: var(--bg); display: grid; place-items: center; font-weight: 700; font-size: 14px; }
+.brand b { font-size: 16px; letter-spacing: .2px; }
+.brand .conn { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--label-3); }
+.side-scroll { flex: 1; overflow: auto; padding: 4px 10px 12px; }
+.section-title { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--label-3); padding: 14px 8px 6px; }
+.count { font-size: 11px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; display: inline-grid; place-items: center; background: var(--warn-soft); color: #9a6b00; font-weight: 600; }
+body[data-dark] .count { color: #f2c14e; }
+.row { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; border-radius: 8px; color: var(--label-2); cursor: pointer; }
+.row:hover { background: var(--hover); }
+.row.active { background: var(--hover); color: var(--label); }
+.row .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .meta { font-size: 12px; color: var(--caption); }
+.proj { display: flex; align-items: center; gap: 8px; padding: 10px 8px 4px; font-size: 12px; color: var(--label-3); }
+.proj .w { margin-left: auto; font-size: 11px; color: var(--caption); }
+.side-foot { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.host { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--label-3); }
+.host .meta { margin-left: auto; }
+.foot-actions { display: flex; gap: 6px; margin-top: 4px; }
+.chip-btn { height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; color: var(--label-2); border: 1px solid var(--border); }
+.chip-btn:hover { background: var(--hover); }
+
+/* status dots, as dsh's StateDot */
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--idle); }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); }
+.dot.run { background: var(--accent); box-shadow: 0 0 0 0 rgba(65,118,230,.5); animation: pulse 1.6s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(65,118,230,.45); } 70% { box-shadow: 0 0 0 6px rgba(65,118,230,0); } 100% { box-shadow: 0 0 0 0 rgba(65,118,230,0); } }
+
+/* ---------- chat column ---------- */
+.chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+.chat-head { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 1px solid var(--border-soft); }
+.chat-head h1 { font-size: 15px; font-weight: 600; margin: 0; }
+.chat-head .sub { font-size: 12px; color: var(--label-3); }
+.chat-head .spacer { flex: 1; }
+.icon-btn { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--label-2); }
+.icon-btn:hover { background: var(--hover); }
+.icon-btn svg { width: 18px; height: 18px; }
+.only-mobile { display: none !important; }
+
+.transcript { flex: 1; overflow: auto; }
+.lane { max-width: 760px; margin: 0 auto; padding: 24px 24px 12px; display: flex; flex-direction: column; gap: 18px; }
+.day { align-self: center; font-size: 12px; color: var(--caption); }
+
+.msg-user { align-self: flex-end; max-width: min(540px, 84%); display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.bubble { background: var(--bubble); border-radius: 22px; padding: 10px 16px; font-size: 15px; line-height: 24px; white-space: pre-wrap; }
+.msg-state { font-size: 12px; color: var(--caption); display: flex; align-items: center; gap: 6px; }
+.msg-state.unknown { color: #9a6b00; }
+body[data-dark] .msg-state.unknown { color: #f2c14e; }
+.msg-state a { color: var(--accent); text-decoration: none; cursor: pointer; }
+
+.msg-agent { font-size: 15px; line-height: 26px; display: flex; flex-direction: column; gap: 8px; }
+.msg-agent p { margin: 0; }
+.msg-agent ul { margin: 0; padding-left: 20px; }
+.msg-agent code { font-family: var(--mono); font-size: 13px; background: var(--bg-l2); padding: 1px 5px; border-radius: 5px; }
+.agent-foot { font-size: 12px; color: var(--caption); }
+
+/* one-line tool rows, as dsh's DisclosureRow */
+.tool { border-radius: 8px; }
+.tool-row { display: flex; align-items: center; gap: 8px; height: 26px; font-size: 13px; color: var(--label-3); cursor: pointer; padding: 0 4px; border-radius: 6px; }
+.tool-row:hover { background: var(--hover); color: var(--label-2); }
+.tool-row .name { font-family: var(--mono); font-size: 12.5px; color: var(--label-2); }
+.tool-row .sum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-row svg { width: 14px; height: 14px; flex: none; transition: transform .2s var(--ease); }
+.tool.open .tool-row svg { transform: rotate(90deg); }
+.tool-body { display: none; margin: 4px 0 2px 22px; padding: 10px 12px; background: var(--bg-l1); border: 1px solid var(--border-soft); border-radius: 12px; font-family: var(--mono); font-size: 12px; line-height: 19px; color: var(--label-2); white-space: pre-wrap; }
+.tool.open .tool-body { display: block; }
+
+/* task chip inside replies: opens the details panel */
+.task-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); font-size: 13px; cursor: pointer; vertical-align: middle; background: var(--bg); }
+.task-chip:hover { background: var(--hover); }
+
+.turn-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--label-3); }
+.shimmer { background: linear-gradient(90deg, var(--label-3) 0%, var(--accent) 45%, var(--label-3) 90%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sh 2s linear infinite; }
+@keyframes sh { to { background-position: -200% 0; } }
+
+/* ---------- dock above the composer: pending decisions ---------- */
+.seat { padding: 0 24px 18px; background: linear-gradient(to bottom, transparent, var(--bg) 22px); }
+.seat-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+.decision { border: 1px solid rgba(229,160,0,.35); background: var(--bg); border-radius: 20px; padding: 12px 14px; box-shadow: var(--shadow-2); }
+.decision-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9a6b00; font-weight: 600; }
+body[data-dark] .decision-head { color: #f2c14e; }
+.decision-head .more { margin-left: auto; color: var(--label-3); font-weight: 400; }
+.decision q { display: block; quotes: none; font-size: 14px; line-height: 22px; margin: 6px 0 10px; color: var(--label); }
+.decision .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.opt { height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); font-size: 13px; }
+.opt:hover { background: var(--hover); }
+.opt.primary { background: var(--label); color: var(--bg); border-color: transparent; }
+.opt .eff { font-size: 11px; opacity: .6; margin-left: 4px; }
+
+.composer { background: var(--input); border: 1px solid var(--border); border-radius: 22px; box-shadow: var(--shadow-2); padding: 12px 12px 10px 16px; }
+.composer textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; color: var(--label); font: 15px/24px inherit; font-family: inherit; min-height: 48px; }
+.composer textarea::placeholder { color: var(--caption); }
+.composer-bar { display: flex; align-items: center; gap: 8px; }
+.composer-bar .hint { font-size: 12px; color: var(--caption); }
+.send { margin-left: auto; width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; }
+.send.stop { border-radius: 10px; background: var(--label); color: var(--bg); }
+.send svg { width: 18px; height: 18px; }
+
+/* ---------- details panel ---------- */
+.details { border-left: 1px solid var(--border-soft); background: var(--bg); overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.details-head { height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--border-soft); }
+.details-head .t { font-weight: 600; font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.details-body { flex: 1; overflow: auto; padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 16px; }
+.kv { display: grid; grid-template-columns: 76px 1fr; gap: 6px 10px; font-size: 13px; }
+.kv dt { color: var(--label-3); } .kv dd { margin: 0; }
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 12px; background: var(--bg-l2); color: var(--label-2); }
+.pill.run { background: var(--accent-soft); color: var(--accent); }
+.block-title { font-size: 12px; color: var(--label-3); margin-bottom: 6px; }
+.goal { font-size: 13.5px; line-height: 21px; }
+.checks { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--label-2); }
+.timeline { display: flex; flex-direction: column; gap: 2px; }
+.tl { display: flex; align-items: center; gap: 8px; height: 30px; font-size: 13px; padding: 0 6px; border-radius: 6px; }
+.tl:hover { background: var(--hover); }
+.tl .meta { margin-left: auto; font-size: 12px; color: var(--caption); }
+.logs { background: var(--bg-l1); border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 12px; font-family: var(--mono); font-size: 12px; line-height: 19px; color: var(--label-2); }
+.logs div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.logs .ts { color: var(--caption); margin-right: 8px; }
+.ctl { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- medium widths: details float over the chat ---------- */
+@media (min-width: 761px) and (max-width: 1180px) {
+  .app.details-open { grid-template-columns: 288px minmax(0,1fr) 0; }
+  .details { position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 100% - 300px); z-index: 30; box-shadow: var(--shadow-2); transform: translateX(100%); transition: transform .3s var(--ease); }
+  .app.details-open .details { transform: none; }
+}
+
+/* ---------- mobile ---------- */
+.tabbar { display: none; }
+.sheet-back { display: none; }
+@media (max-width: 760px) {
+  .app, .app.details-open { grid-template-columns: 100% 0 0; }
+  .only-mobile { display: grid !important; }
+  .sidebar, .chat, .details { grid-column: 1; grid-row: 1; }
+  .app { grid-template-rows: 100%; padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+  .sidebar { border-right: 0; background: var(--bg); }
+  .sidebar .brand { display: none; }
+  .view-chat .sidebar, .view-tasks .chat, .view-decisions .chat { visibility: hidden; }
+  .view-tasks .sidebar, .view-decisions .sidebar { visibility: visible; }
+  .view-decisions .side-tasks, .view-tasks .side-decisions { display: none; }
+  .mobile-title { display: flex !important; height: 52px; align-items: center; padding: 0 16px; font-size: 17px; font-weight: 600; border-bottom: 1px solid var(--border-soft); }
+  .side-foot { display: none; }
+  .row { height: 48px; }
+  .chat-head { padding: 0 8px 0 16px; padding-top: env(safe-area-inset-top); }
+  .chat-head .sub { display: none; }
+  .lane { padding: 16px 14px 8px; }
+  .msg-agent, .bubble { font-size: 16px; }
+  .seat { padding: 0 10px 10px; }
+  .decision { padding: 10px 12px; }
+  .decision q { margin: 4px 0 8px; }
+  .opt { height: 36px; padding: 0 12px; }
+  .view-decisions .side-decisions .row { display: none; }
+  .view-decisions .side-decision-cards { display: flex; }
+  /* details become a full-screen sheet over everything */
+  .details { position: fixed; inset: 0; z-index: 30; transform: translateX(100%); transition: transform .3s var(--ease); border: 0; }
+  .app.details-open .details { transform: none; }
+  .sheet-back { display: grid; }
+  .tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; height: calc(56px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); border-top: 1px solid var(--border-soft); background: var(--bg); z-index: 20; }
+  .tab { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; color: var(--label-3); position: relative; }
+  .tab svg { width: 22px; height: 22px; }
+  .tab.on { color: var(--label); }
+  .tab .badge { position: absolute; top: 6px; left: calc(50% + 6px); min-width: 16px; height: 16px; border-radius: 999px; background: var(--warn); color: #fff; font-size: 10px; display: grid; place-items: center; padding: 0 4px; font-weight: 700; }
+}
+.mobile-title { display: none; }
+.side-decision-cards { display: none; flex-direction: column; gap: 10px; padding: 4px 4px 16px; }
+.side-decision-cards .decision { box-shadow: none; }
+.decision .ctx { font-size: 12.5px; color: var(--label-3); margin: -4px 0 10px; }
+</style>
+</head>
+<body>
+<div class="app view-chat" id="app">
+
+  <!-- ===== sidebar: what needs the owner, then tasks by project ===== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">t</div><b>tend</b>
+      <span class="conn"><span class="dot ok"></span>已连接</span>
+    </div>
+    <div class="mobile-title" id="mtitle">任务</div>
+    <div class="side-scroll">
+      <div class="side-decisions">
+        <div class="section-title"><span>需要你处理</span><span class="count">2</span></div>
+        <div class="row" onclick="openTask()"><span class="dot warn"></span><span class="title">CLI 输出加版本号：实现失败</span><span class="meta">待决</span></div>
+        <div class="row" onclick="openTask()"><span class="dot warn"></span><span class="title">修 Windows 构建：等你交还</span><span class="meta">接管中</span></div>
+        <div class="side-decision-cards">
+          <div class="decision">
+            <div class="decision-head"><span class="dot warn"></span>待决 · CLI 输出加版本号<span class="more" onclick="openTask()">详情 ›</span></div>
+            <q>第一次实现失败（no_changes）。这个任务接下来怎么办？</q>
+            <div class="ctx">worker：<code>tend version</code> 子命令已经存在，没有可改的。</div>
+            <div class="opts">
+              <button class="opt primary">重新实现<span class="eff">tend 执行</span></button>
+              <button class="opt">修改 spec</button>
+              <button class="opt">取消任务<span class="eff">tend 执行</span></button>
+            </div>
+          </div>
+          <div class="decision">
+            <div class="decision-head"><span class="dot warn"></span>接管中 · 修 Windows 构建<span class="more" onclick="openTask()">详情 ›</span></div>
+            <q>你在 orca 里接手了 worker 的终端，tend 暂停推进。处理完后交还。</q>
+            <div class="ctx">host-2 · 被接管于 09:48</div>
+            <div class="opts">
+              <button class="opt primary">交还给 tend</button>
+              <button class="opt">在 orca 里打开</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="side-tasks">
+        <div class="proj">tend itself<span class="w">权重 2 · 1 运行 · 1 排队</span></div>
+        <div class="row active" onclick="openTask()"><span class="dot run"></span><span class="title">runner 日志带上 trace_id</span><span class="meta">实现中</span></div>
+        <div class="row" onclick="openTask()"><span class="dot warn"></span><span class="title">CLI 输出加版本号</span><span class="meta">p2</span></div>
+        <div class="row" onclick="openTask()"><span class="dot"></span><span class="title">清理 spike 目录</span><span class="meta">排队 #1</span></div>
+        <div class="row" onclick="openTask()"><span class="dot ok"></span><span class="title">hook 超时可配置</span><span class="meta">今天</span></div>
+        <div class="proj">notes<span class="w">权重 1 · 1 运行</span></div>
+        <div class="row" onclick="openTask()"><span class="dot run"></span><span class="title">picker 支持多选</span><span class="meta">验收中</span></div>
+        <div class="row" onclick="openTask()"><span class="dot warn"></span><span class="title">修 Windows 构建</span><span class="meta">接管中</span></div>
+        <div class="row" style="color:var(--label-3)"><span class="dot" style="background:transparent"></span><span class="title">显示已完成的 12 个任务</span></div>
+      </div>
+    </div>
+    <div class="side-foot">
+      <div class="host"><span class="dot run"></span>host-1 · orca<span class="meta">1/1</span></div>
+      <div class="host"><span class="dot run"></span>host-2 · orca<span class="meta">1/1</span></div>
+      <div class="foot-actions">
+        <button class="chip-btn" onclick="toggleTheme()">浅色 / 深色</button>
+        <button class="chip-btn">设置</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== the one conversation with the main agent ===== -->
+  <main class="chat">
+    <header class="chat-head">
+      <h1>主 Agent</h1><span class="sub">traex · 一个会话，所有设备共享</span>
+      <span class="spacer"></span>
+      <span class="only-mobile" style="font-size:12px;color:var(--label-3);display:flex;align-items:center;gap:6px"><span class="dot ok"></span></span>
+      <button class="icon-btn" title="跳到最新"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg></button>
+    </header>
+
+    <div class="transcript">
+      <div class="lane">
+        <div class="day">今天 10:12</div>
+
+        <div class="msg-user">
+          <div class="bubble">把 runner 的日志都带上 trace_id，tend 这个项目，p1。</div>
+          <div class="msg-state">已投递 · 10:12</div>
+        </div>
+
+        <div class="msg-agent">
+          <div class="tool" onclick="this.classList.toggle('open')">
+            <div class="tool-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg><span class="name">tasks_create</span><span class="sum">runner 日志带上 trace_id · tend · p1</span></div>
+            <div class="tool-body">goal: runner 的所有 slog 日志带上 trace_id 和 request_id
+acceptance:
+  - make check 通过
+  - runner 日志里每条 run 相关的记录都有 trace_id
+workspace: tend · base main</div>
+          </div>
+          <p>建好了 <span class="task-chip" onclick="openTask()"><span class="dot run"></span>runner 日志带上 trace_id</span>，评级 p1，排在队列第一位，host-1 已经领取开始实现。</p>
+          <div class="agent-foot">10:12 · 用了 6 秒</div>
+        </div>
+
+        <div class="msg-user">
+          <div class="bubble">另外 CLI 那个版本号的任务怎么样了？</div>
+          <div class="msg-state">已投递 · 10:31</div>
+        </div>
+
+        <div class="msg-agent">
+          <div class="tool" onclick="this.classList.toggle('open')">
+            <div class="tool-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg><span class="name">tasks_read</span><span class="sum">CLI 输出加版本号</span></div>
+            <div class="tool-body">lifecycle: queued · block: waiting_decision
+run_01M5…  implement gen 1 on host-2: failed (no_changes)</div>
+          </div>
+          <p><span class="task-chip" onclick="openTask()"><span class="dot warn"></span>CLI 输出加版本号</span> 的第一次实现失败了：worker 说 <code>tend version</code> 子命令已经存在，没有可改的，所以没有改动。</p>
+          <p>我理解你要的是 <code>tend status</code> 的输出里也带上版本号？如果是，我改一下 spec 再让它重做；否则可以直接取消。下面有对应的待决事项。</p>
+          <div class="agent-foot">10:31 · 用了 9 秒</div>
+        </div>
+
+        <div class="msg-user">
+          <div class="bubble">对，status 里带上，顺便 --json 也加个字段</div>
+          <div class="msg-state unknown">发送结果未知 · <a>查看</a> · <a>重发</a></div>
+        </div>
+
+        <div class="turn-status"><span class="dot run"></span><span class="shimmer">正在处理…</span><span style="color:var(--caption)">· 12 秒</span></div>
+      </div>
+    </div>
+
+    <div class="seat">
+      <div class="seat-inner">
+        <div class="decision">
+          <div class="decision-head"><span class="dot warn"></span>待决 · CLI 输出加版本号<span class="more">1 / 2 ›</span></div>
+          <q>第一次实现失败（no_changes）。这个任务接下来怎么办？</q>
+          <div class="opts">
+            <button class="opt primary">重新实现<span class="eff">tend 执行</span></button>
+            <button class="opt">修改 spec</button>
+            <button class="opt">取消任务<span class="eff">tend 执行</span></button>
+          </div>
+        </div>
+        <div class="composer">
+          <textarea rows="2" placeholder="和主 Agent 说…（Enter 发送，Shift+Enter 换行）"></textarea>
+          <div class="composer-bar">
+            <span class="hint">回复 10:31 的消息</span>
+            <button class="send stop" title="停止回复"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===== details: one task ===== -->
+  <section class="details">
+    <div class="details-head">
+      <button class="icon-btn sheet-back" onclick="closeTask()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <span class="dot run"></span><span class="t">runner 日志带上 trace_id</span>
+      <button class="icon-btn" onclick="closeTask()" title="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="details-body">
+      <dl class="kv">
+        <dt>状态</dt><dd><span class="pill run"><span class="dot run"></span>实现中 · 第 1 代</span></dd>
+        <dt>项目</dt><dd>tend itself · p1</dd>
+        <dt>控制</dt><dd>托管 · 版本 3</dd>
+        <dt>工作区</dt><dd>host-1 · <span class="mono">tend/runner-trace-id</span></dd>
+      </dl>
+      <div>
+        <div class="block-title">目标</div>
+        <div class="goal">runner 的所有 slog 日志带上 trace_id 和 request_id。</div>
+        <ul class="checks"><li>make check 通过</li><li>run 相关的每条日志都有 trace_id</li></ul>
+      </div>
+      <div>
+        <div class="block-title">进展</div>
+        <div class="timeline">
+          <div class="tl"><span class="dot ok"></span>创建，评级 p1<span class="meta">10:12</span></div>
+          <div class="tl"><span class="dot ok"></span>host-1 领取实现<span class="meta">10:12</span></div>
+          <div class="tl"><span class="dot run"></span>实现中：第 3 轮<span class="meta">现在</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="block-title">最近日志</div>
+        <div class="logs">
+          <div><span class="ts">10:14</span>turn.started 执行被中断…</div>
+          <div><span class="ts">10:15</span>agent.state working</div>
+          <div><span class="ts">10:21</span>turn.completed 已提交 4f2a91c…</div>
+        </div>
+      </div>
+      <div class="ctl">
+        <button class="chip-btn">暂停</button>
+        <button class="chip-btn">接管</button>
+        <button class="chip-btn">在 orca 里打开</button>
+        <button class="chip-btn" style="color:var(--err)">取消</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== mobile tab bar ===== -->
+  <nav class="tabbar">
+    <button class="tab on" data-v="chat" onclick="view('chat')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H9l-5 4z"/></svg>对话</button>
+    <button class="tab" data-v="tasks" onclick="view('tasks')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg>任务</button>
+    <button class="tab" data-v="decisions" onclick="view('decisions')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 8v5M12 16h.01"/></svg>待处理<span class="badge">2</span></button>
+  </nav>
+</div>
+<script>
+const app = document.getElementById('app');
+function openTask() { app.classList.add('details-open'); }
+function closeTask() { app.classList.remove('details-open'); }
+function toggleTheme() { document.body.toggleAttribute('data-dark'); }
+function view(v) {
+  app.className = app.className.replace(/view-\w+/, 'view-' + v);
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.v === v));
+  document.getElementById('mtitle').textContent = v === 'decisions' ? '待处理' : '任务';
+}
+const q = new URLSearchParams(location.search);
+if (q.has('dark')) document.body.setAttribute('data-dark', '');
+if (q.has('details')) openTask();
+if (q.get('view')) view(q.get('view'));
+</script>
+</body>
+</html>
