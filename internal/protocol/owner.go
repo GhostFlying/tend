@@ -62,6 +62,12 @@ type SubmitMessagePayload struct {
 	LastSeenSeq int64  `json:"last_seen_seq,omitempty"`
 }
 
+// InterruptReplyPayload is the payload of conversation.interrupt_reply:
+// stop the main agent's reply to an owner message (D69).
+type InterruptReplyPayload struct {
+	MessageID string `json:"message_id"`
+}
+
 // AnswerDecisionPayload is the payload of decisions.respond and
 // decisions.resolve_from_message.
 type AnswerDecisionPayload struct {

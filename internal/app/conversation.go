@@ -18,6 +18,19 @@ const (
 	OpHandleMessage       = "main_thread.handle_message"
 )
 
+// The main thread's control destination and the operation that stops the
+// turn handling a message (D69). Control has a destination of its own so
+// it is not queued behind the turn it stops.
+const (
+	MainThreadControlDestination = "main_thread_control"
+	OpInterruptTurn              = "main_thread.interrupt_turn"
+)
+
+// InterruptTurn is the payload of a delivery to the control destination.
+type InterruptTurn struct {
+	MessageID string `json:"message_id"`
+}
+
 // HandleMessage is the payload of a delivery to the main thread.
 type HandleMessage struct {
 	MessageID string `json:"message_id"`
@@ -65,6 +78,54 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		Result:   map[string]any{"message_id": id, "seq": seq},
 		Events:   []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": "owner", "seq": seq}}},
 		Outbox:   []OutboxMessage{{Destination: MainThreadDestination, Operation: OpHandleMessage, Payload: HandleMessage{MessageID: id}}},
+		Accepted: true,
+	}, nil
+}
+
+// InterruptReply handles conversation.interrupt_reply: the owner stops the
+// main agent's reply to one of their messages (D69). When the message's
+// turn is starting or running, stopping it is queued for the main thread;
+// otherwise nothing changes. Either way the result is the message's state.
+type InterruptReply struct{}
+
+// Operation implements Command.
+func (InterruptReply) Operation() string { return "conversation.interrupt_reply" }
+
+// Authorize implements Command.
+func (InterruptReply) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	return allowKinds(x.Principal, protocol.PrincipalOwner)
+}
+
+// Apply implements Command.
+func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p protocol.InterruptReplyPayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	msg, err := store.GetMessage(ctx, tx.Q(), p.MessageID)
+	if err != nil {
+		return Outcome{}, errNotFound(err, "message %s does not exist", p.MessageID)
+	}
+	if msg.Author != "owner" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "message %s is not the owner's", p.MessageID)
+	}
+	item, err := store.GetConversationItem(ctx, tx.Q(), p.MessageID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	state := protocol.MessageState(item.State)
+	if state == "" {
+		state = protocol.MessageQueued
+	}
+	result := map[string]any{"message_id": p.MessageID, "state": state}
+	if _, err := store.GetOpenTurn(ctx, tx.Q(), p.MessageID); errors.Is(err, store.ErrNotFound) {
+		return Outcome{Result: result}, nil
+	} else if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{
+		Result:   result,
+		Outbox:   []OutboxMessage{{Destination: MainThreadControlDestination, Operation: OpInterruptTurn, Payload: InterruptTurn{MessageID: p.MessageID}}},
 		Accepted: true,
 	}, nil
 }
@@ -370,4 +431,17 @@ func clipText(s string) string {
 		cut--
 	}
 	return s[:cut] + fmt.Sprintf("\n[truncated: %d of %d bytes shown]", cut, len(s))
+}
+
+// TurnOpen reports whether the turn handling a message is starting or
+// running.
+func (a *App) TurnOpen(ctx context.Context, messageID string) (bool, error) {
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		_, err := store.GetOpenTurn(ctx, tx.Q(), messageID)
+		return err
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }

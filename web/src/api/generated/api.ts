@@ -128,6 +128,7 @@ export interface TendAPI {
   Envelope?: Envelope;
   HookRequest?: HookRequest;
   HookResponse?: HookResponse;
+  InterruptReplyPayload?: InterruptReplyPayload;
   LedgerEvent?: LedgerEvent;
   RateTaskPayload?: RateTaskPayload;
   RequestView?: RequestView;
@@ -334,6 +335,13 @@ export interface HookRequest {
  */
 export interface HookResponse {
   context?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "InterruptReplyPayload".
+ */
+export interface InterruptReplyPayload {
+  message_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

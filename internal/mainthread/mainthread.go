@@ -474,3 +474,61 @@ func input(msg store.MessageView) string {
 	}
 	return head + "]\n" + msg.Body
 }
+
+// Control handles the main thread's control destination: it stops the
+// turn handling a message when the owner asks (D69).
+type Control struct{ m *Manager }
+
+// Control returns the handler of the control destination.
+func (m *Manager) Control() Control { return Control{m} }
+
+// Deliver implements dispatch.Handler. A turn that is not running, because
+// it ended or belongs to an earlier harness, needs nothing.
+func (c Control) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	var p app.InterruptTurn
+	if err := json.Unmarshal(d.Payload, &p); err != nil || p.MessageID == "" {
+		return app.DeliveryResult{Outcome: app.Failed, Reason: "the delivery names no message"}
+	}
+	m := c.m
+	m.mu.Lock()
+	a, th := m.active, m.thread
+	turnID := ""
+	if a != nil {
+		turnID = a.turnID
+	}
+	m.mu.Unlock()
+	switch {
+	case a == nil || a.messageID != p.MessageID || th == nil:
+		return app.DeliveryResult{Outcome: app.Delivered, Reason: "the message's turn is not running"}
+	case turnID == "":
+		return app.DeliveryResult{Outcome: app.Retry, Reason: "the message's turn is starting"}
+	}
+	err := th.Interrupt(ctx, turnID)
+	switch {
+	case err == nil:
+		return app.DeliveryResult{Outcome: app.Delivered}
+	case errors.Is(err, harness.ErrRejected):
+		// The harness had nothing to stop: the turn ended meanwhile.
+		return app.DeliveryResult{Outcome: app.Delivered, Reason: err.Error()}
+	}
+	// The turn may or may not have been stopped; its final state tells.
+	return app.DeliveryResult{Outcome: app.Unknown, Reason: "turn/interrupt did not answer: " + err.Error()}
+}
+
+// Reconcile implements dispatch.Handler for a stop a previous process left
+// in the middle. It is not sent again: whether it took effect shows in
+// the turn's final state.
+func (c Control) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	var p app.InterruptTurn
+	if err := json.Unmarshal(d.Payload, &p); err != nil || p.MessageID == "" {
+		return app.DeliveryResult{Outcome: app.Failed, Reason: "the delivery names no message"}
+	}
+	open, err := c.m.app.TurnOpen(ctx, p.MessageID)
+	switch {
+	case err != nil:
+		return app.DeliveryResult{Outcome: app.Unknown, Reason: "the turn record could not be read"}
+	case open:
+		return app.DeliveryResult{Outcome: app.Unknown, Reason: "tend stopped while stopping the turn"}
+	}
+	return app.DeliveryResult{Outcome: app.Delivered, Reason: "the turn has ended"}
+}

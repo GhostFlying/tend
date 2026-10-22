@@ -557,6 +557,19 @@
       "title": "HostView",
       "type": "object"
     },
+    "InterruptReplyPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id"
+      ],
+      "title": "InterruptReplyPayload",
+      "type": "object"
+    },
     "LedgerEvent": {
       "additionalProperties": false,
       "properties": {
@@ -1510,6 +1523,9 @@
     },
     "HookResponse": {
       "$ref": "#/definitions/HookResponse"
+    },
+    "InterruptReplyPayload": {
+      "$ref": "#/definitions/InterruptReplyPayload"
     },
     "LedgerEvent": {
       "$ref": "#/definitions/LedgerEvent"

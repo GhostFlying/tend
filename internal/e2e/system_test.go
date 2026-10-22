@@ -32,7 +32,7 @@ func (s *server) startMainThread(h *testkit.Harness) {
 		Instance: "main", Thread: harness.ThreadConfig{Cwd: "/agent", DeveloperInstructions: mainthread.Instructions},
 		Open: h.Open, RestartDelay: 20 * time.Millisecond, Log: quiet(),
 	})
-	d := dispatch.New(s.app, map[string]dispatch.Handler{app.MainThreadDestination: m}, s.signal, time.Now, dispatch.Config{PollInterval: 50 * time.Millisecond}, quiet())
+	d := dispatch.New(s.app, map[string]dispatch.Handler{app.MainThreadDestination: m, app.MainThreadControlDestination: m.Control()}, s.signal, time.Now, dispatch.Config{PollInterval: 50 * time.Millisecond}, quiet())
 	wg.Go(func() { _ = m.Run(ctx) })
 	wg.Go(func() { _ = d.Run(ctx) })
 }
