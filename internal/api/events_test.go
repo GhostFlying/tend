@@ -152,6 +152,7 @@ func TestEventStreamHeartbeatAndHangUp(t *testing.T) {
 	defer hs.Close()
 
 	s := openStream(t, hs.URL, tok, "")
+	defer s.cancel() // before hs.Close, which waits for the handler
 	if ev := s.next(); ev.name != "start" {
 		t.Fatalf("first event = %+v", ev)
 	}
@@ -175,5 +176,36 @@ func TestEventStreamHeartbeatAndHangUp(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the stream's handler did not return after the client hung up")
+	}
+}
+
+func TestEventStreamEndsAtShutdown(t *testing.T) {
+	e := newEnv(t)
+	tok := e.login(protocol.ScopeOwner)
+
+	// HEAD answers with headers only instead of holding the connection.
+	req, _ := http.NewRequest("HEAD", e.url+"/api/v1/events", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("HEAD = %v %v", resp, err)
+	}
+	resp.Body.Close()
+
+	s := openStream(t, e.url, tok, "")
+	if ev := s.next(); ev.name != "start" {
+		t.Fatalf("first event = %+v", ev)
+	}
+	e.server.EndStreams()
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case _, ok := <-s.events:
+			if !ok {
+				return
+			}
+		case <-timeout:
+			t.Fatal("the stream did not end at shutdown")
+		}
 	}
 }
