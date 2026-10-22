@@ -67,14 +67,26 @@ func (m *Manager) Settings(ctx context.Context) (protocol.ConversationSettingsVi
 	}
 	selection := m.defaults(th)
 	view.Model, view.Effort = selection.Model, selection.Effort
-	for _, model := range models {
-		if (model.ID == selection.Model || model.Name == selection.Model) &&
-			(selection.Provider == "" || selection.Provider == model.Provider) {
-			view.Model = model.ID
-			if view.Effort == "" {
-				view.Effort = model.DefaultEffort
-			}
+	var selected *harness.Model
+	for i := range models {
+		model := &models[i]
+		if (model.ID != selection.Model && model.Name != selection.Model) ||
+			(selection.Provider != "" && model.Provider != "" && selection.Provider != model.Provider) {
+			continue
+		}
+		// An omitted catalog provider inherits the configured provider. Prefer
+		// an explicit matching namespace when both forms are present.
+		if selected == nil || model.Provider == selection.Provider {
+			selected = model
+		}
+		if model.Provider == selection.Provider {
 			break
+		}
+	}
+	if selected != nil {
+		view.Model = selected.ID
+		if view.Effort == "" {
+			view.Effort = selected.DefaultEffort
 		}
 	}
 	return view, nil

@@ -82,3 +82,26 @@ func TestSettingsUseResolvedDefaultsAndApplyOnlyToNextTurn(t *testing.T) {
 		t.Fatalf("restarted model settings = %+v", starts)
 	}
 }
+
+func TestSettingsResolveInheritedProviderDefaults(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "inherited", true: "prefer explicit"}[explicit], func(t *testing.T) {
+			h := testkit.NewHarness()
+			h.Defaults = harness.ModelSelection{Model: "provider-model", Provider: "configured-provider", Effort: "medium"}
+			h.Models = []harness.Model{
+				{ID: "wrong-provider", Name: "provider-model", Provider: "another-provider", DefaultEffort: "low", SupportedEfforts: []string{"low"}},
+				{ID: "inherited-model", Name: "provider-model", DefaultEffort: "low", SupportedEfforts: []string{"low", "medium"}},
+			}
+			want := "inherited-model"
+			if explicit {
+				h.Models = append(h.Models, harness.Model{ID: "explicit-model", Name: "provider-model", Provider: "configured-provider", DefaultEffort: "low", SupportedEfforts: []string{"low", "medium"}})
+				want = "explicit-model"
+			}
+			e := newEnv(t, h)
+			eventually(t, "resolved catalog identity", func() bool {
+				view, err := e.m.Settings(context.Background())
+				return err == nil && view.Available && view.Model == want && view.Effort == "medium"
+			})
+		})
+	}
+}
