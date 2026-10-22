@@ -17,7 +17,7 @@ export function Divider({ at }: { at: number }) {
 export function OwnerMessage({ item }: { item: ConversationItem }) {
   const state = item.state ?? "queued";
   return (
-    <div className={styles.user}>
+    <div className={styles.user} data-scroll-id={item.message_id}>
       <div className={styles.bubble}>{item.body}</div>
       <div className={styles.state} data-state={state}>
         {messageStateLabels[state]} · {clock(Date.parse(item.created_at))}
@@ -36,7 +36,7 @@ export function OutgoingRow({
 }) {
   const { requestId } = message;
   return (
-    <div className={styles.user}>
+    <div className={styles.user} data-scroll-id={`outbox:${requestId}`}>
       <div className={styles.bubble}>{message.body}</div>
       <div className={styles.state} data-state={message.state}>
         {message.state === "sending" && "发送中…"}
@@ -89,13 +89,11 @@ export function OutgoingRow({
 export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> }) {
   return (
     <div className={styles.agent}>
-      {entry.items.map((it) =>
-        it.tool ? (
-          <ToolRow key={it.message_id} tool={it.tool} />
-        ) : (
-          <Markdown key={it.message_id} text={it.body ?? ""} />
-        ),
-      )}
+      {entry.items.map((it) => (
+        <div key={it.message_id} data-scroll-id={it.message_id}>
+          {it.tool ? <ToolRow tool={it.tool} /> : <Markdown text={it.body ?? ""} />}
+        </div>
+      ))}
       {entry.done && (
         <div className={styles.foot}>
           {clock(entry.done.at)}
