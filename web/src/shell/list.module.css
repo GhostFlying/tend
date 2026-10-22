@@ -1,0 +1,61 @@
+/* Sidebar lists: section titles and one-line rows, as in the mock. */
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-s);
+  color: var(--label-3);
+  padding: 14px 8px 6px;
+}
+
+.count {
+  font-size: var(--text-xs);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  display: inline-grid;
+  place-items: center;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-weight: 600;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-m);
+  color: var(--label-2);
+  text-align: left;
+}
+
+.row:hover,
+.row[aria-current="true"] {
+  background: var(--hover);
+  color: var(--label);
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  flex: none;
+  font-size: var(--text-s);
+  color: var(--caption);
+}
+
+@media (max-width: 760px) {
+  .row {
+    height: 48px;
+  }
+}

@@ -1,0 +1,109 @@
+.card {
+  border: 1px solid var(--warn-line);
+  background: var(--bg);
+  border-radius: var(--radius-xl);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-2);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-s);
+  color: var(--warn-text);
+  font-weight: 600;
+  min-width: 0;
+}
+
+.what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--label-3);
+  font-weight: 400;
+}
+
+.more button {
+  color: inherit;
+  padding: 2px 4px;
+  border-radius: var(--radius-s);
+}
+
+.more button:hover {
+  background: var(--hover);
+}
+
+.question {
+  display: block;
+  quotes: none;
+  font-size: var(--text-base);
+  line-height: 22px;
+  margin: 6px 0 10px;
+  color: var(--label);
+  overflow-wrap: anywhere;
+}
+
+.ctx {
+  font-size: 12.5px;
+  color: var(--label-3);
+  margin: -4px 0 10px;
+}
+
+.opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.opt {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  font-size: var(--text-m);
+}
+
+.opt:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.opt[data-primary] {
+  background: var(--label);
+  color: var(--bg);
+  border-color: transparent;
+}
+
+.opt[data-primary]:hover:not(:disabled) {
+  background: var(--label-2);
+}
+
+.eff {
+  font-size: var(--text-xs);
+  opacity: 0.6;
+  margin-left: 4px;
+}
+
+@media (max-width: 760px) {
+  .card {
+    padding: 10px 12px;
+  }
+
+  .question {
+    margin: 4px 0 8px;
+  }
+
+  .opt {
+    height: 36px;
+    padding: 0 12px;
+  }
+}

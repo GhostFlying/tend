@@ -5,6 +5,7 @@ import type { Connection } from "../api/client.ts";
 import { dismissNotice, notice } from "../app/notice.ts";
 import { Composer } from "../conversation/Composer.tsx";
 import { Transcript } from "../conversation/Transcript.tsx";
+import { DecisionDock } from "../decisions/DecisionDock.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Chat.module.css";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
@@ -38,6 +39,7 @@ export function Chat({ connection }: { connection: Connection }) {
       <div className={styles.seat}>
         <div className={styles.seatInner}>
           <Note />
+          <DecisionDock />
           <Composer connection={connection} />
         </div>
       </div>

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { ApiError, NetworkError } from "../api/client.ts";
 import type { APIResponse, Envelope, RequestView } from "../api/generated/api.ts";
 import { openOutbox, type OutgoingMessage } from "./outbox.ts";
-import { SendQueue, type QueueOptions, type Sender } from "./sendQueue.ts";
+import { choiceOf, SendQueue, type QueueOptions, type Sender } from "./sendQueue.ts";
 
 type Answer = APIResponse | Error | Promise<APIResponse>;
 
@@ -106,6 +106,15 @@ describe("SendQueue", () => {
     answer.resolve(accepted(m.requestId, "msg_10", 10));
     await q.idle();
     expect(sender.submitted).toEqual([m.envelope]);
+  });
+
+  test("a message can choose a decision option", async () => {
+    const q = await open();
+    const decision = { decision_id: "dec_1", version: 2, option: "revise the spec" };
+    const m = await q.enqueue({ body: "关于『x』：修改 spec", decision });
+    await q.idle();
+    expect(sender.submitted[0]?.payload).toEqual({ body: "关于『x』：修改 spec", decision });
+    expect(choiceOf(m)).toEqual(decision);
   });
 
   test("a receipt marks the message sent", async () => {
