@@ -287,15 +287,17 @@ type node struct {
 	workers *testkit.Workers
 	ws      *workspaces
 	net     *network
-	cancel  context.CancelFunc
-	done    chan error
+	// flush is how often the runner uploads run events.
+	flush  time.Duration
+	cancel context.CancelFunc
+	done   chan error
 }
 
 func newNode(t *testing.T, srv *server, script func(harness.WorkerSpec) testkit.WorkerScript) *node {
 	t.Helper()
 	n := &node{
 		t: t, srv: srv, path: filepath.Join(t.TempDir(), "journal.db"),
-		workers: &testkit.Workers{Script: script}, ws: &workspaces{dir: t.TempDir()}, net: &network{},
+		workers: &testkit.Workers{Script: script}, ws: &workspaces{dir: t.TempDir()}, net: &network{}, flush: 20 * time.Millisecond,
 	}
 	t.Cleanup(n.stop)
 	return n
@@ -319,7 +321,7 @@ func (n *node) start() {
 		ServerURL: n.srv.url, HostID: "linux-1", HostToken: hostToken, Version: "test",
 		HTTPClient: &http.Client{Transport: n.net}, Journal: j, Workers: n.workers, Workspaces: n.ws,
 		Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: quiet(),
-		RetryDelay: 20 * time.Millisecond, EventFlush: 20 * time.Millisecond,
+		RetryDelay: 20 * time.Millisecond, EventFlush: n.flush,
 	})
 	go func() {
 		err := r.Run(ctx)
@@ -712,14 +714,21 @@ func TestTakeoverHoldsTheRunUntilHandedBack(t *testing.T) {
 	srv := newServer(t, 400*time.Millisecond)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
-			return testkit.WorkerScript{Takeover: "the owner typed", Gate: make(chan struct{})}
+			return testkit.WorkerScript{Takeover: "the owner typed", Gate: make(chan struct{}),
+				Events: []harness.WorkerEvent{{Kind: "worker.taken_over", Body: json.RawMessage(`{"reason":"the owner typed"}`)}}}
 		}
 		return passing(spec)
 	})
+	// Only the upload as the attempt stops can deliver the worker's
+	// last events before the hand-back.
+	n.flush = time.Hour
 	n.start()
 	task := srv.createTask()
 	eventually(t, "the task passes to human control", func() bool { return srv.task(task).ControlMode == protocol.ControlHumanControl })
 	eventually(t, "the held worker is stopped", func() bool { return len(n.workers.Stopped()) == 1 })
+	eventually(t, "the takeover is in the run's log", func() bool {
+		return srv.count(`SELECT COUNT(*) FROM run_logs WHERE kind = 'worker.taken_over'`) == 1
+	})
 	holdFor(t, 500*time.Millisecond, "a worker started while the owner holds the task", func() bool { return len(n.workers.Started()) > 1 })
 
 	srv.setMode(task, protocol.ControlManaged)

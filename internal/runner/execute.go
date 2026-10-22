@@ -209,7 +209,14 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	<-uploaded
 	if cause := context.Cause(runCtx); cause != nil {
 		// errFenced or errStopped from the run, or errPaused or errHeld
-		// from this attempt.
+		// from this attempt. What the worker said as it stopped, such as
+		// that the owner took over, would otherwise wait for the run's
+		// next attempt or its report.
+		if ctx.Err() == nil && appendErr == nil {
+			flushCtx, cancel := context.WithTimeout(ctx, stopFlush)
+			_ = r.flushEvents(flushCtx, as)
+			cancel()
+		}
 		return cause
 	}
 	if appendErr != nil {
@@ -422,6 +429,10 @@ func (r *Runner) releaseAgent(ctx context.Context, as protocol.Assignment) {
 		r.cfg.Log.WarnContext(ctx, "could not stop the agent of a released run", "run_id", as.RunID, "err", err)
 	}
 }
+
+// stopFlush bounds the upload of a run's last events when its attempt
+// stops; whatever it misses goes with the next attempt or the report.
+const stopFlush = 5 * time.Second
 
 // uploadEvents uploads a run's events every EventFlush until ctx ends.
 func (r *Runner) uploadEvents(ctx context.Context, as protocol.Assignment) {
