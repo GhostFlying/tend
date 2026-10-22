@@ -1,7 +1,8 @@
 // The transcript's rows: the owner's messages as right-hand bubbles with
 // their state below, and what the main agent did for each as full-width
 // Markdown with its tool uses.
-import type { ConversationItem } from "../api/generated/api.ts";
+import { memo } from "react";
+import type { AssistantState, ConversationItem } from "../api/generated/api.ts";
 import type { OutgoingMessage } from "../queue/outbox.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
 import controls from "../shell/controls.module.css";
@@ -90,9 +91,7 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
   return (
     <div className={styles.agent}>
       {entry.items.map((it) => (
-        <div key={it.message_id} data-scroll-id={it.message_id}>
-          {it.tool ? <ToolRow tool={it.tool} /> : <Markdown text={it.body ?? ""} />}
-        </div>
+        <AgentItem key={it.message_id} item={it} />
       ))}
       {entry.done && (
         <div className={styles.foot}>
@@ -103,3 +102,30 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
     </div>
   );
 }
+
+const assistantLabels: Record<Exclude<AssistantState, "completed">, string> = {
+  streaming: "正在生成…",
+  interrupted: "回复已停止",
+  failed: "回复失败，保留已生成内容",
+  unknown: "回复结果未知，保留已生成内容",
+};
+
+const AgentItem = memo(function AgentItem({ item }: { item: ConversationItem }) {
+  const status = item.assistant_state;
+  return (
+    <div data-scroll-id={item.message_id}>
+      {item.tool ? (
+        <ToolRow tool={item.tool} />
+      ) : (
+        <>
+          <Markdown text={item.body ?? ""} />
+          {status && status !== "completed" && (
+            <div className={styles.assistantState} data-state={status} role="status">
+              {assistantLabels[status]}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+});

@@ -3,6 +3,7 @@
 // events carry their item, which replaces the one shown; any other event
 // only says something changed, and the affected views are read again. The
 // client never rebuilds ledger state from events itself.
+import { ConversationSettings } from "../conversation/settings.ts";
 import { ApiError } from "../api/client.ts";
 import type {
   ConversationItem,
@@ -61,6 +62,7 @@ const maxLogPages = 20;
 const noProcessing: ReadonlyMap<string, number> = new Map();
 
 export class LiveData {
+  readonly settings: ConversationSettings;
   private readonly api: Reader;
   private readonly snapshotStore = new Store<Snapshot | null>(null);
   private readonly conversationStore = new Store<ConversationState>({
@@ -95,6 +97,7 @@ export class LiveData {
 
   constructor(api: Reader) {
     this.api = api;
+    this.settings = new ConversationSettings(api);
     this.snapshotReads = new Coalesced(() => this.readSnapshot());
     this.detailReads = new Coalesced(() => this.readDetail());
     this.latestReads = new Coalesced(() => this.readLatest());
@@ -118,6 +121,7 @@ export class LiveData {
 
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
+    void this.settings.refresh();
     this.detailController?.abort();
     void this.stopLogs();
     this.logCache = null;
@@ -131,6 +135,10 @@ export class LiveData {
 
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
+    if (event.kind === "conversation.settings") {
+      void this.settings.refresh();
+      return;
+    }
     switch (event.object_type) {
       case "message":
         if (this.held) {
@@ -389,7 +397,7 @@ export class LiveData {
     this.detailController?.abort();
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
-    await this.stopLogs();
+    await Promise.all([this.stopLogs(), this.settings.stop()]);
   }
 
   private recovered(view: "snapshot" | "conversation" | "detail"): void {

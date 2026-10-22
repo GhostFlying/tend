@@ -123,3 +123,27 @@ test("duration reads in Chinese", () => {
   expect(duration(125_000)).toBe("2 分 5 秒");
   expect(duration(3_780_000)).toBe("1 小时 3 分");
 });
+
+test("a streamed reply timestamp does not claim to measure completion duration", () => {
+  const owner: ConversationItem = {
+    seq: 1,
+    message_id: "msg_owner",
+    kind: "message",
+    author: "owner",
+    body: "hello",
+    state: "replied",
+    created_at: "2026-10-22T10:00:00Z",
+  };
+  const reply: ConversationItem = {
+    seq: 2,
+    message_id: "msg_reply",
+    kind: "message",
+    author: "main_agent",
+    reply_to: owner.message_id,
+    body: "complete",
+    assistant_state: "completed",
+    created_at: "2026-10-22T10:00:01Z",
+  };
+  const entry = buildEntries([owner, reply], []).find((e) => e.kind === "agent");
+  expect(entry?.done).toEqual({ at: Date.parse(reply.created_at) });
+});

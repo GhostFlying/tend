@@ -4,7 +4,7 @@
 // chips (D72); code blocks are monospace with a copy button.
 import MarkdownIt from "markdown-it";
 import type { Token } from "markdown-it";
-import { createElement, Fragment, useMemo, useState, type ReactNode } from "react";
+import { createElement, Fragment, memo, useMemo, useState, type ReactNode } from "react";
 import { splitTaskIds } from "./model.ts";
 import styles from "./Markdown.module.css";
 import { TaskRef } from "./TaskRef.tsx";
@@ -40,10 +40,10 @@ const tags = new Set([
   "br",
 ]);
 
-export function Markdown({ text }: { text: string }) {
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
   const nodes = useMemo(() => render(md.parse(text, {}), { next: 0 }), [text]);
   return <div className={styles.md}>{nodes}</div>;
-}
+});
 
 /** Hands out element keys, unique within one reply. */
 interface Keys {
