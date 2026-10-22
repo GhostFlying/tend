@@ -4,7 +4,7 @@ package protocol
 // clients' types are generated (D22). Types they refer to are
 // included through them.
 func APITypes() []any {
-	return []any{Envelope{}, APIResponse{}, Snapshot{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ArtifactDetail{}, RequestView{},
+	return []any{Envelope{}, APIResponse{}, Snapshot{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ConversationPage{}, ArtifactDetail{}, RequestView{},
 		SessionRequest{}, SessionView{}, SubmitMessagePayload{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
 		HookRequest{}, HookResponse{}, ToolSpec{}, ToolRequest{}, ToolResponse{}}
 }
@@ -19,6 +19,7 @@ func APIEnums() []any {
 		[]RunObserved{RunStarting, RunRunning, RunWaiting, RunFinished, RunFailed, RunInterrupted, RunUnknown},
 		[]RunDesired{DesiredRun, DesiredPaused, DesiredStopped, DesiredHeld},
 		[]MessageState{MessageQueued, MessageProcessing, MessageReplied, MessageInterrupted, MessageFailed, MessageUnknown},
+		[]ToolStatus{ToolRunning, ToolCompleted, ToolFailed},
 		[]RunRole{RoleImplement, RoleAccept},
 		[]ActionKind{ActionImplement, ActionAccept, ActionDeliver},
 		[]DecisionEffect{EffectImplement, EffectAccept, EffectCancel, EffectStartOver},

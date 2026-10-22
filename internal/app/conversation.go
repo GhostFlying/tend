@@ -258,3 +258,88 @@ func (a *App) Message(ctx context.Context, messageID string) (store.MessageView,
 	})
 	return m, err
 }
+
+// maxToolText bounds a tool use's input and output in the conversation;
+// the rest is cut off with a note.
+const maxToolText = 8 << 10
+
+// RecordToolUse handles conversation.record_tool_use: the main agent
+// started or finished using a tool in a turn (D69). The first record of
+// an item adds it to the conversation; later ones update it in place.
+// Its request ID is derived from the item and the phase, so a repeated
+// event records it once.
+type RecordToolUse struct{}
+
+type recordToolUsePayload struct {
+	TurnID  string              `json:"turn_id"`
+	ItemID  string              `json:"item_id"`
+	ReplyTo string              `json:"reply_to"`
+	Tool    string              `json:"tool"`
+	Input   string              `json:"input"`
+	Output  string              `json:"output"`
+	Status  protocol.ToolStatus `json:"status"`
+}
+
+// Operation implements Command.
+func (RecordToolUse) Operation() string { return "conversation.record_tool_use" }
+
+// Authorize implements Command.
+func (RecordToolUse) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	return allowKinds(x.Principal, protocol.PrincipalMainAgent, protocol.PrincipalSystem)
+}
+
+// Apply implements Command.
+func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p recordToolUsePayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	switch {
+	case p.TurnID == "" || p.ItemID == "" || p.Tool == "":
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "turn_id, item_id and tool are required")
+	case p.Status != protocol.ToolRunning && p.Status != protocol.ToolCompleted && p.Status != protocol.ToolFailed:
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown tool status %q", p.Status)
+	}
+	now := x.Now.UnixMilli()
+	u, err := store.GetToolUse(ctx, tx.Q(), p.TurnID, p.ItemID)
+	var seq int64
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		u = store.ToolUseRow{MessageID: x.IDs.New(protocol.PrefixMessage), TurnID: p.TurnID, ItemID: p.ItemID}
+		if seq, err = tx.InsertMessage(ctx, store.MessageRow{Kind: store.KindToolUse, MessageID: u.MessageID, Author: "main_agent",
+			ReplyTo: p.ReplyTo, RequestID: x.Env.RequestID, CreatedAt: now}); err != nil {
+			return Outcome{}, err
+		}
+	case err != nil:
+		return Outcome{}, err
+	case u.Status != string(protocol.ToolRunning):
+		// A late start does not take back a finished use.
+		return Outcome{Result: map[string]any{"message_id": u.MessageID, "status": u.Status}}, nil
+	default:
+		if seq, err = store.GetConversationSeq(ctx, tx.Q(), u.MessageID); err != nil {
+			return Outcome{}, err
+		}
+	}
+	u.Tool, u.Input, u.Output, u.Status, u.UpdatedAt = p.Tool, clipText(p.Input), clipText(p.Output), string(p.Status), now
+	if err := tx.PutToolUse(ctx, u); err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{
+		Result: map[string]any{"message_id": u.MessageID, "seq": seq, "status": u.Status},
+		Events: []Event{{ObjectType: "message", ObjectID: u.MessageID, ObjectVersion: seq, Kind: "conversation.tool_use",
+			Body: map[string]any{"author": "main_agent", "seq": seq, "status": u.Status, "turn_id": p.TurnID}}},
+	}, nil
+}
+
+// clipText cuts s to maxToolText bytes on a character boundary and says
+// how much was left out.
+func clipText(s string) string {
+	if len(s) <= maxToolText {
+		return s
+	}
+	cut := maxToolText
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + fmt.Sprintf("\n[truncated: %d of %d bytes shown]", cut, len(s))
+}

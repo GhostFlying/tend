@@ -241,6 +241,75 @@
       "title": "ControlMode",
       "type": "string"
     },
+    "ConversationItem": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "reply_to": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/definitions/MessageState"
+        },
+        "tool": {
+          "$ref": "#/definitions/ToolUseView"
+        }
+      },
+      "required": [
+        "seq",
+        "kind",
+        "message_id",
+        "author",
+        "created_at"
+      ],
+      "title": "ConversationItem",
+      "type": "object"
+    },
+    "ConversationPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConversationItem"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "ConversationPage",
+      "type": "object"
+    },
     "CreateActionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -487,6 +556,18 @@
       ],
       "title": "HostView",
       "type": "object"
+    },
+    "MessageState": {
+      "enum": [
+        "queued",
+        "processing",
+        "replied",
+        "interrupted",
+        "failed",
+        "unknown"
+      ],
+      "title": "MessageState",
+      "type": "string"
     },
     "MountView": {
       "additionalProperties": false,
@@ -1264,6 +1345,47 @@
       "title": "ToolSpec",
       "type": "object"
     },
+    "ToolStatus": {
+      "enum": [
+        "running",
+        "completed",
+        "failed"
+      ],
+      "title": "ToolStatus",
+      "type": "string"
+    },
+    "ToolUseView": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ToolStatus"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "turn_id",
+        "updated_at"
+      ],
+      "title": "ToolUseView",
+      "type": "object"
+    },
     "Verdict": {
       "enum": [
         "passed",
@@ -1326,6 +1448,9 @@
     },
     "ArtifactDetail": {
       "$ref": "#/definitions/ArtifactDetail"
+    },
+    "ConversationPage": {
+      "$ref": "#/definitions/ConversationPage"
     },
     "CreateActionPayload": {
       "$ref": "#/definitions/CreateActionPayload"

@@ -6,8 +6,17 @@ import (
 	"fmt"
 )
 
-// MessageRow is a conversation message to store.
+// Conversation item kinds: a message, or a tool use of the main agent
+// that takes a place in the conversation's order (D69).
+const (
+	KindMessage = "message"
+	KindToolUse = "tool_use"
+)
+
+// MessageRow is a conversation item to store.
 type MessageRow struct {
+	// Kind is KindMessage when empty.
+	Kind        string
 	MessageID   string
 	Author      string
 	ClientID    string
@@ -18,12 +27,15 @@ type MessageRow struct {
 	CreatedAt   int64
 }
 
-// InsertMessage appends a conversation message and returns its sequence
+// InsertMessage appends a conversation item and returns its sequence
 // number, which orders the conversation.
 func (t *Tx) InsertMessage(ctx context.Context, m MessageRow) (int64, error) {
-	res, err := t.Exec(ctx, `INSERT INTO conversation_messages (message_id, author, client_id, body, reply_to, last_seen_seq,
-		request_id, created_at) VALUES (?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?)`,
-		m.MessageID, m.Author, nullString(m.ClientID), m.Body, nullString(m.ReplyTo), m.LastSeenSeq, nullString(m.RequestID), m.CreatedAt)
+	if m.Kind == "" {
+		m.Kind = KindMessage
+	}
+	res, err := t.Exec(ctx, `INSERT INTO conversation_messages (kind, message_id, author, client_id, body, reply_to, last_seen_seq,
+		request_id, created_at) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?)`,
+		m.Kind, m.MessageID, m.Author, nullString(m.ClientID), m.Body, nullString(m.ReplyTo), m.LastSeenSeq, nullString(m.RequestID), m.CreatedAt)
 	if err != nil {
 		return 0, fmt.Errorf("store: insert message: %w", err)
 	}
@@ -34,7 +46,7 @@ func (t *Tx) InsertMessage(ctx context.Context, m MessageRow) (int64, error) {
 func GetMessage(ctx context.Context, q Querier, messageID string) (MessageView, error) {
 	m := MessageView{MessageID: messageID}
 	err := q.QueryRowContext(ctx, `SELECT seq, author, body, COALESCE(reply_to, ''), created_at, COALESCE(last_seen_seq, 0)
-		FROM conversation_messages WHERE message_id = ?`, messageID).
+		FROM conversation_messages WHERE message_id = ? AND kind = 'message'`, messageID).
 		Scan(&m.Seq, &m.Author, &m.Body, &m.ReplyTo, &m.CreatedAt, &m.LastSeenSeq)
 	if err != nil {
 		return MessageView{}, notFound(err, "message "+messageID)

@@ -22,6 +22,9 @@ const (
 	logPageSize = 500
 	// maxLogWait bounds how long a run log read waits for new logs.
 	maxLogWait = 25 * time.Second
+	// conversationPageSize is the default and the most conversation
+	// items a page holds.
+	conversationPageSize = 100
 )
 
 // read runs fn in a read transaction for an owner, mapping a missing row
@@ -50,6 +53,33 @@ func notFound(err error) error {
 		return protocol.Errorf(protocol.CodeNotFound, "%s not found", strings.TrimSuffix(err.Error(), ": "+store.ErrNotFound.Error()))
 	}
 	return err
+}
+
+// conversation reads the conversation in pages (D69): ?before=<seq> pages
+// back, ?after=<seq> reads what came later, and neither reads the latest.
+func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	before, err := intParam(query.Get("before"))
+	if err != nil {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "before must be a sequence number"))
+		return
+	}
+	after, err := intParam(query.Get("after"))
+	if err != nil {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "after must be a sequence number"))
+		return
+	}
+	limit, err := intParam(query.Get("limit"))
+	if err != nil || before > 0 && after > 0 {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "give a limit as a number and at most one of before and after"))
+		return
+	}
+	if limit == 0 || limit > conversationPageSize {
+		limit = conversationPageSize
+	}
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		return views.Conversation(r.Context(), q, before, after, int(limit))
+	})
 }
 
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {

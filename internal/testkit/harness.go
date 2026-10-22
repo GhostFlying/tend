@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // Harness is a scriptable harness that survives "restarts": Open returns a
@@ -240,6 +241,16 @@ func (t *FakeThread) Emit(ev harness.Event) {
 // Say emits an agent message item.
 func (t *FakeThread) Say(turnID, itemID, text string) {
 	t.Emit(harness.Event{Kind: harness.EventItemCompleted, TurnID: turnID, ItemID: itemID, ItemType: harness.ItemAgentMessage, Text: text})
+}
+
+// UseTool emits the item event of a tool use: started, or completed when
+// the use is no longer running.
+func (t *FakeThread) UseTool(turnID, itemID string, u harness.ToolUse) {
+	kind := harness.EventItemStarted
+	if u.Status != protocol.ToolRunning {
+		kind = harness.EventItemCompleted
+	}
+	t.Emit(harness.Event{Kind: kind, TurnID: turnID, ItemID: itemID, ItemType: "dynamicToolCall", Tool: &u})
 }
 
 // Compact emits a context compaction item.

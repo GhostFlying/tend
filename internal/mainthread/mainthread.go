@@ -198,6 +198,10 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 		if err := m.recordReply(ctx, th, ev); err != nil {
 			m.cfg.Log.ErrorContext(ctx, "could not record the agent's message", "turn", ev.TurnID, "err", err)
 		}
+	case ev.Tool != nil:
+		if err := m.recordToolUse(ctx, th, ev); err != nil {
+			m.cfg.Log.ErrorContext(ctx, "could not record the agent's tool use", "turn", ev.TurnID, "item", ev.ItemID, "err", err)
+		}
 	case ev.Kind == harness.EventTurnStarted:
 		// One turn at a time: the first turn to start after a turn/start
 		// is that delivery's, even before the start response arrives.
@@ -224,23 +228,46 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 // recordReply stores an agent message, keyed by its item so a repeated
 // event records it once.
 func (m *Manager) recordReply(ctx context.Context, th harness.Thread, ev harness.Event) error {
+	payload := map[string]string{"body": ev.Text, "reply_to": m.replyTo(ev.TurnID), "turn_id": ev.TurnID, "item_id": ev.ItemID}
+	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID, "conversation.record_agent_message", payload, app.RecordAgentMessage{})
+}
+
+// recordToolUse stores a tool use as it starts and as it ends, keyed by
+// its item and the event so a repeated event records it once (D69).
+func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harness.Event) error {
+	phase := "started"
+	if ev.Kind == harness.EventItemCompleted {
+		phase = "completed"
+	}
+	payload := map[string]any{"turn_id": ev.TurnID, "item_id": ev.ItemID, "reply_to": m.replyTo(ev.TurnID),
+		"tool": ev.Tool.Name, "input": ev.Tool.Input, "output": ev.Tool.Output, "status": ev.Tool.Status}
+	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID+"/"+phase, "conversation.record_tool_use", payload, app.RecordToolUse{})
+}
+
+// replyTo is the message the turn handles, when it is the active one.
+func (m *Manager) replyTo(turnID string) string {
 	m.mu.Lock()
-	replyTo := ""
-	if m.active != nil && m.active.turnID == ev.TurnID {
-		replyTo = m.active.messageID
+	defer m.mu.Unlock()
+	if m.active != nil && m.active.turnID == turnID {
+		return m.active.messageID
 	}
-	m.mu.Unlock()
-	requestID, err := m.app.NativeRequestID(ctx, "harness:"+m.cfg.Instance, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID)
+	return ""
+}
+
+// record executes a conversation write of the main agent under a request
+// ID derived from native.
+func (m *Manager) record(ctx context.Context, th harness.Thread, native, op string, payload any, cmd app.Command) error {
+	requestID, err := m.app.NativeRequestID(ctx, "harness:"+m.cfg.Instance, native)
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(map[string]string{"body": ev.Text, "reply_to": replyTo, "turn_id": ev.TurnID, "item_id": ev.ItemID})
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	env := &protocol.Envelope{RequestID: requestID, Operation: "conversation.record_agent_message", Target: protocol.Target{Type: "message"}, Payload: payload}
+	env := &protocol.Envelope{RequestID: requestID, Operation: op, Target: protocol.Target{Type: "message"}, Payload: body}
 	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.cfg.Instance, Thread: th.ID()}
-	_, err = m.app.Execute(ctx, principal, env, app.RecordAgentMessage{})
+	_, err = m.app.Execute(ctx, principal, env, cmd)
 	return err
 }
 

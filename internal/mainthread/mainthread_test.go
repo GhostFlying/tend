@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/tools"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 var owner = protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "me", Client: "phone"}
@@ -182,6 +184,54 @@ func TestMessageBecomesTask(t *testing.T) {
 		t.Errorf("injected = %q, want one full snapshot", inj)
 	}
 	eventually(t, "the delivery is recorded", func() bool { return e.outboxStatus() == store.OutboxDelivered })
+}
+
+func TestToolUsesJoinTheConversation(t *testing.T) {
+	h := testkit.NewHarness()
+	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
+		th.UseTool(turn, "item_1", harness.ToolUse{Name: "tasks_list", Input: "{}", Status: protocol.ToolRunning})
+		th.UseTool(turn, "item_1", harness.ToolUse{Name: "tasks_list", Input: "{}", Output: "no tasks", Status: protocol.ToolCompleted})
+		th.UseTool(turn, "item_2", harness.ToolUse{Name: "shell", Input: "cat big", Output: strings.Repeat("x", 9000), Status: protocol.ToolFailed})
+		// A start that arrives after the end does not take it back.
+		th.UseTool(turn, "item_2", harness.ToolUse{Name: "shell", Input: "cat big", Status: protocol.ToolRunning})
+		th.Say(turn, "item_3", "Nothing to do.")
+		return "completed"
+	}
+	e := newEnv(t, h)
+	msg := e.say("Anything open?")
+	eventually(t, "the turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+
+	var page protocol.ConversationPage
+	_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
+		var err error
+		page, err = views.Conversation(context.Background(), tx.Q(), 0, 0, 10)
+		return err
+	})
+	var got []string
+	for _, it := range page.Items {
+		s := it.Kind + ":" + it.Author
+		if it.Tool != nil {
+			s += ":" + it.Tool.Name + ":" + string(it.Tool.Status)
+		}
+		got = append(got, s)
+		if it.Author == "main_agent" && it.ReplyTo != msg {
+			t.Errorf("%s replies to %q, want the owner's message", s, it.ReplyTo)
+		}
+	}
+	want := []string{"message:owner", "tool_use:main_agent:tasks_list:completed", "tool_use:main_agent:shell:failed", "message:main_agent"}
+	if !slices.Equal(got, want) || page.More {
+		t.Errorf("conversation = %v (more %v), want %v", got, page.More, want)
+	}
+	if out := page.Items[2].Tool.Output; len(out) > 8<<10+64 || !strings.Contains(out, "[truncated: 8192 of 9000 bytes shown]") {
+		t.Errorf("long output kept %d bytes: ...%q", len(out), out[max(0, len(out)-60):])
+	}
+	if page.Items[0].State != protocol.MessageReplied {
+		t.Errorf("owner message state = %q, want replied", page.Items[0].State)
+	}
+	// Recall and replies see messages only.
+	if _, err := e.app.Message(context.Background(), page.Items[1].MessageID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("a tool use reads as a message: %v", err)
+	}
 }
 
 func TestTurnsAreSerial(t *testing.T) {
