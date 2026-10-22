@@ -346,6 +346,34 @@ describe("SendQueue", () => {
     });
   });
 
+  test("messages written in the same millisecond keep their order across a reload", async () => {
+    // Request IDs whose random part sorts against the order of writing.
+    let n = 100;
+    const newId = () => `req_${String(--n).padStart(26, "0")}`;
+    online = false;
+    const offline = () => new NetworkError(new TypeError("offline"));
+    sender.answers = [offline(), offline()];
+    const first = await open({ newId });
+    const a = await first.enqueue({ body: "one" });
+    const b = await first.enqueue({ body: "two" });
+    await first.idle();
+    expect(a.requestId > b.requestId).toBe(true);
+
+    online = true;
+    const reloaded = await open({ newId });
+    expect(reloaded.list.get().map((m) => m.body)).toEqual(["one", "two"]);
+    await reloaded.resume();
+    // Offline, each enqueue tried the oldest message once.
+    expect(sender.submitted.slice(2).map((e) => e.request_id)).toEqual([a.requestId, b.requestId]);
+
+    // New messages come after the stored ones even if the clock went back.
+    clock -= 60_000;
+    const c = await reloaded.enqueue({ body: "three" });
+    await reloaded.idle();
+    expect(c.order).toBeGreaterThan(b.order);
+    expect(reloaded.list.get().map((m) => m.body)).toEqual(["one", "two", "three"]);
+  });
+
   test("discarding removes a message", async () => {
     sender.answers = [new ApiError(400, { code: "invalid_request", message: "no" })];
     const q = await open();
