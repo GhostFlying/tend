@@ -10,23 +10,25 @@ import "encoding/json"
 
 // Request methods and notifications tend sends or handles.
 const (
-	methodInitialize      = "initialize"
-	methodInitialized     = "initialized"
-	methodThreadStart     = "thread/start"
-	methodThreadResume    = "thread/resume"
-	methodThreadInject    = "thread/inject_items"
-	methodTurnStart       = "turn/start"
-	methodTurnInterrupt   = "turn/interrupt"
-	methodToolCall        = "item/tool/call"
-	notifyTurnStarted     = "turn/started"
-	notifyTurnCompleted   = "turn/completed"
-	notifyItemStarted     = "item/started"
-	notifyItemCompleted   = "item/completed"
-	toolContentInputText  = "inputText"
-	userInputText         = "text"
-	dynamicToolTypeFunc   = "function"
-	developerMessageRole  = "developer"
-	developerContentInput = "input_text"
+	methodInitialize        = "initialize"
+	methodInitialized       = "initialized"
+	methodThreadStart       = "thread/start"
+	methodThreadResume      = "thread/resume"
+	methodThreadInject      = "thread/inject_items"
+	methodTurnStart         = "turn/start"
+	methodTurnInterrupt     = "turn/interrupt"
+	methodModelList         = "model/list"
+	methodToolCall          = "item/tool/call"
+	notifyTurnStarted       = "turn/started"
+	notifyTurnCompleted     = "turn/completed"
+	notifyItemStarted       = "item/started"
+	notifyItemCompleted     = "item/completed"
+	notifyAgentMessageDelta = "item/agentMessage/delta"
+	toolContentInputText    = "inputText"
+	userInputText           = "text"
+	dynamicToolTypeFunc     = "function"
+	developerMessageRole    = "developer"
+	developerContentInput   = "input_text"
 )
 
 // InitializeParams opens a connection.
@@ -75,6 +77,8 @@ type ThreadResumeParams struct {
 type ThreadStartResponse struct {
 	Thread             Thread   `json:"thread"`
 	Model              string   `json:"model"`
+	ModelProvider      string   `json:"modelProvider"`
+	ReasoningEffort    *string  `json:"reasoningEffort"`
 	InstructionSources []string `json:"instructionSources"`
 }
 
@@ -103,6 +107,46 @@ type TurnStartParams struct {
 	ThreadID      string      `json:"threadId"`
 	Input         []UserInput `json:"input"`
 	UserMessageID string      `json:"userMessageId,omitempty"`
+	Model         string      `json:"model,omitempty"`
+	ModelProvider string      `json:"modelProvider,omitempty"`
+	Effort        string      `json:"effort,omitempty"`
+}
+
+// ModelListParams pages the visible model catalog without changing settings.
+type ModelListParams struct {
+	Cursor        *string `json:"cursor,omitempty"`
+	Limit         uint32  `json:"limit,omitempty"`
+	IncludeHidden bool    `json:"includeHidden"`
+}
+
+// ModelListResponse is one page of models.
+type ModelListResponse struct {
+	Data       []CatalogModel `json:"data"`
+	NextCursor *string        `json:"nextCursor"`
+}
+
+// CatalogModel keeps identity, routing and reasoning capabilities separate.
+type CatalogModel struct {
+	ID                        string                  `json:"id"`
+	Model                     string                  `json:"model"`
+	DisplayName               string                  `json:"displayName"`
+	ModelProviderID           *string                 `json:"modelProviderId"`
+	IsDefault                 bool                    `json:"isDefault"`
+	DefaultReasoningEffort    string                  `json:"defaultReasoningEffort"`
+	SupportedReasoningEfforts []ReasoningEffortOption `json:"supportedReasoningEfforts"`
+}
+
+// ReasoningEffortOption is a reasoning setting the model supports.
+type ReasoningEffortOption struct {
+	ReasoningEffort string `json:"reasoningEffort"`
+}
+
+// AgentMessageDeltaNotification carries an ordered fragment of one item.
+type AgentMessageDeltaNotification struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
+	ItemID   string `json:"itemId"`
+	Delta    string `json:"delta"`
 }
 
 // UserInput is one piece of user input (the text variant).

@@ -27,6 +27,29 @@ type Session interface {
 	Close() error
 }
 
+// Model is a selectable entry from a harness's live model catalog.
+type Model struct {
+	ID, Name, Label, Provider string
+	DefaultEffort             string
+	SupportedEfforts          []string
+	Default                   bool
+}
+
+// ModelCatalog is implemented by sessions that expose model capabilities.
+type ModelCatalog interface {
+	Models(ctx context.Context) ([]Model, error)
+}
+
+// ModelSelection is the actual provider configuration of a turn.
+type ModelSelection struct {
+	Model, Provider, Effort string
+}
+
+// ConfiguredThread reports the defaults the harness actually selected.
+type ConfiguredThread interface {
+	ModelDefaults() ModelSelection
+}
+
 // ThreadConfig configures a thread.
 type ThreadConfig struct {
 	Cwd                   string
@@ -78,6 +101,10 @@ type ToolHandler func(ctx context.Context, call ToolCall) ToolResult
 // TurnInput is a user turn.
 type TurnInput struct {
 	Text string
+	// Model, ModelProvider and Effort override the defaults for this turn.
+	Model         string
+	ModelProvider string
+	Effort        string
 	// UserMessageID, when set, is recorded with the turn's user message so
 	// the turn can be found again after an uncertain start.
 	UserMessageID string
@@ -104,10 +131,11 @@ type EventKind string
 
 // Event kinds.
 const (
-	EventTurnStarted   EventKind = "turn_started"
-	EventTurnCompleted EventKind = "turn_completed"
-	EventItemStarted   EventKind = "item_started"
-	EventItemCompleted EventKind = "item_completed"
+	EventTurnStarted       EventKind = "turn_started"
+	EventTurnCompleted     EventKind = "turn_completed"
+	EventItemStarted       EventKind = "item_started"
+	EventItemCompleted     EventKind = "item_completed"
+	EventAgentMessageDelta EventKind = "agent_message_delta"
 )
 
 // Item types tend acts on. Other types pass through as they are.
@@ -124,7 +152,7 @@ type Event struct {
 	// ItemID and ItemType describe the item of item events.
 	ItemID   string
 	ItemType string
-	// Text is an agent message's text.
+	// Text is an agent message's text, or an incremental fragment for a delta.
 	Text string
 	// TurnStatus is the final status of a completed turn: completed,
 	// interrupted or failed.
