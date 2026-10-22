@@ -5,6 +5,7 @@
 ## tend-server
 
 ```sh
+make web                           # 构建 Web 客户端，嵌入 tend-server；需要 Node 24 和 pnpm
 go build -o tend-server ./cmd/tend-server
 TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 ```
@@ -22,6 +23,17 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
   - owner 的 traex 里接入了 tend（`tend setup`）时，托管会话不会把自己当作外挂会话：服务端为它设置 `TEND_ADDON=off`，不需要另外配置。
   - 权限：sandbox 是 `workspace-write`，可以读整台机器（例如仓库），只能写自己的工作目录（`main_agent.cwd`，默认 `data_dir/main-agent`，必须在任何仓库之外）；需要更多权限的操作由 traex 的 `auto_review` 自动审查，不等人确认。编辑文件、浏览器、插件、应用、skill 和 memory 是关掉的。
   - 模型默认用 traex 的默认模型，`main_agent.model` 可以指定。
+
+## Web 客户端
+
+owner 在浏览器里打开 tend-server 的地址（`https://<hostname>.<tailnet>.ts.net`）就是 Web 客户端（D70），手机上可以装成 PWA。
+
+- tend-server 在 `/` 提供 Web，`/api/` 仍是 owner API，两者同源，不需要 CORS。Web 是 `web/` 构建出来的静态文件，用 `go:embed` 嵌进 tend-server 的二进制（`internal/webui`），不需要另外部署。
+- 先 `make web` 再构建 tend-server。没有构建 Web 时 tend-server 照常构建和运行，页面只显示一条“Web 未构建”的说明；Go 的构建和测试不需要 Node。
+- 登录沿用 owner token（D49）：页面打开时按这台设备的 tailnet 身份调用 `POST /api/v1/session` 领取 token，存在浏览器本地，失效后自动重新领取，不需要密码。不是 owner 的设备看到明确的说明。
+- 装成 PWA 和离线打开页面外壳需要 HTTPS（service worker 只在安全上下文里可用），也就是 tailnet 开启 HTTPS 证书后的 `https://<hostname>.<tailnet>.ts.net`。只有 http 时 Web 仍可用，只是不能安装。service worker 只缓存页面外壳，API 请求一律走网络。
+- 发出的消息先存进浏览器的 IndexedDB 再发送，断网或关掉页面后重新打开时用原来的 request_id 重发，不会重复也不会丢。
+- 开发时在 `web/` 里运行 `pnpm dev`，它把 `/api` 代理到本地以 `listen` 和 `local_owner` 运行的 tend-server（默认 `http://127.0.0.1:8640`，可用 `TEND_DEV_SERVER` 指定）。
 
 ## tend-runner
 
