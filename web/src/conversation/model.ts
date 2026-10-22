@@ -89,8 +89,10 @@ export function buildEntries(
     if (owner && owner.state !== "processing" && owner.state !== "queued") {
       const at = Date.parse(e.items.at(-1)!.created_at);
       const took = at - Date.parse(owner.created_at);
-      // Only a completed turn took the time its last item says.
-      e.done = owner.state === "replied" && took >= 0 ? { at, tookMs: took } : { at };
+      // Streaming items keep their first-created timestamp, which cannot
+      // tell how long the completed turn took.
+      const streamed = e.items.some((it) => it.assistant_state !== undefined);
+      e.done = owner.state === "replied" && took >= 0 && !streamed ? { at, tookMs: took } : { at };
     }
   }
   const lastSeq = items.at(-1)?.seq ?? 0;

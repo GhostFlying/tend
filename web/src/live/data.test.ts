@@ -315,3 +315,36 @@ describe("LiveData", () => {
     expect(api.pending()).toEqual([]);
   });
 });
+
+test("cumulative assistant text keeps its identity through replay, pagination and a terminal state", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  void live.reload();
+  await api.answer("/api/v1/snapshot", snapshot);
+  const partial: ConversationItem = {
+    ...owner(60),
+    author: "main_agent",
+    reply_to: "msg_59",
+    body: "正在写",
+    assistant_state: "streaming",
+  };
+  delete partial.state;
+  await api.answer("/api/v1/conversation", {
+    items: [owner(59, "processing"), partial],
+    more: true,
+  });
+  void live.loadEarlier();
+  live.apply(messageEvent(61, { ...partial, body: "正在写一段完整的正文" }));
+  await api.answer("/api/v1/conversation?before", { items: [owner(58, "replied")], more: false });
+  live.apply(
+    messageEvent(62, { ...partial, body: "正在写一段完整的正文", assistant_state: "interrupted" }),
+  );
+  live.apply(messageEvent(63, { ...owner(59, "interrupted") }, "conversation.message_state"));
+  const state = live.conversation.get();
+  expect(state.items.filter((it) => it.message_id === partial.message_id)).toEqual([
+    { ...partial, body: "正在写一段完整的正文", assistant_state: "interrupted" },
+  ]);
+  expect(state.before).toBe(58);
+  expect(processing(state.items)).toBeUndefined();
+  await live.stop();
+});

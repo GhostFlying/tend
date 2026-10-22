@@ -1,0 +1,50 @@
+.settings {
+  padding: 0 4px;
+  min-width: 0;
+}
+.fields {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.fields label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-s);
+  color: var(--label-3);
+}
+.fields select {
+  max-width: 240px;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-m);
+  padding: 5px 8px;
+  background: var(--bg);
+  color: var(--label);
+  font: inherit;
+}
+.fields select:disabled {
+  opacity: 0.6;
+}
+.hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 5px;
+  font-size: var(--text-s);
+  color: var(--caption);
+  line-height: 18px;
+}
+.error {
+  color: var(--warn-text);
+}
+@media (max-width: 760px) {
+  .fields {
+    gap: 6px 12px;
+  }
+  .fields select {
+    max-width: 190px;
+  }
+}

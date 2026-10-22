@@ -46,7 +46,7 @@ export async function runOp(
     try {
       const view = await sender.lookup(envelope.request_id);
       if (view) {
-        return settle(view.status, view.result, view.error);
+        return settleOp(view.status, view.result, view.error);
       }
       return { kind: "unknown", message: "tend 没有收到这个操作，可以再试一次" };
     } catch {
@@ -56,14 +56,14 @@ export async function runOp(
   if (!res.operation) {
     return { kind: "unknown", message: "tend 的回答里没有结果" };
   }
-  const outcome = settle(res.operation.status, res.operation.result, res.operation.error);
+  const outcome = settleOp(res.operation.status, res.operation.result, res.operation.error);
   if (outcome.kind === "stale" && res.current) {
     outcome.current = res.current;
   }
   return outcome;
 }
 
-function settle(
+export function settleOp(
   status: OpStatus,
   result: unknown,
   error: { code: Code; message: string } | undefined,
