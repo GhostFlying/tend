@@ -153,6 +153,9 @@ const (
 	ToolRunning   ToolStatus = "running"
 	ToolCompleted ToolStatus = "completed"
 	ToolFailed    ToolStatus = "failed"
+	// ToolInterrupted: the harness went away before the use ended, so
+	// whether it finished cannot be told.
+	ToolInterrupted ToolStatus = "interrupted"
 )
 
 // RunRole is the responsibility of a run.

@@ -19,7 +19,7 @@ func APIEnums() []any {
 		[]RunObserved{RunStarting, RunRunning, RunWaiting, RunFinished, RunFailed, RunInterrupted, RunUnknown},
 		[]RunDesired{DesiredRun, DesiredPaused, DesiredStopped, DesiredHeld},
 		[]MessageState{MessageQueued, MessageProcessing, MessageReplied, MessageInterrupted, MessageFailed, MessageUnknown},
-		[]ToolStatus{ToolRunning, ToolCompleted, ToolFailed},
+		[]ToolStatus{ToolRunning, ToolCompleted, ToolFailed, ToolInterrupted},
 		[]RunRole{RoleImplement, RoleAccept},
 		[]ActionKind{ActionImplement, ActionAccept, ActionDeliver},
 		[]DecisionEffect{EffectImplement, EffectAccept, EffectCancel, EffectStartOver},

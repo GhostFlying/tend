@@ -232,12 +232,14 @@ func (m *Manager) recordReply(ctx context.Context, th harness.Thread, ev harness
 	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID, "conversation.record_agent_message", payload, app.RecordAgentMessage{})
 }
 
-// recordToolUse stores a tool use as it starts and as it ends, keyed by
-// its item and the event so a repeated event records it once (D69).
+// recordToolUse stores a tool use as it starts and as it changes, keyed by
+// its item, the event and the status, so a repeated event records it once
+// while a command moved to the background and later finished records both
+// (D69).
 func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harness.Event) error {
 	phase := "started"
 	if ev.Kind == harness.EventItemCompleted {
-		phase = "completed"
+		phase = "completed:" + string(ev.Tool.Status)
 	}
 	payload := map[string]any{"turn_id": ev.TurnID, "item_id": ev.ItemID, "reply_to": m.replyTo(ev.TurnID),
 		"tool": ev.Tool.Name, "input": ev.Tool.Input, "output": ev.Tool.Output, "status": ev.Tool.Status}

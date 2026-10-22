@@ -75,7 +75,7 @@ export type MessageState =
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ToolStatus".
  */
-export type ToolStatus = "running" | "completed" | "failed";
+export type ToolStatus = "running" | "completed" | "failed" | "interrupted";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ActionKind".

@@ -187,6 +187,24 @@ func (a *App) insertMessageState(ctx context.Context, tx *store.Tx, messageID st
 	return err
 }
 
+// insertToolUseEvent records that a tool use was settled outside a
+// request, as a request's record would.
+func (a *App) insertToolUseEvent(ctx context.Context, tx *store.Tx, messageID string, status protocol.ToolStatus, now int64) error {
+	seq, err := store.GetConversationSeq(ctx, tx.Q(), messageID)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]any{"author": "main_agent", "seq": seq, "status": status})
+	if err != nil {
+		return fmt.Errorf("app: encode tool use event: %w", err)
+	}
+	_, err = tx.InsertEvent(ctx, store.EventRow{
+		EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: messageID,
+		ObjectVersion: seq, Kind: "conversation.tool_use", BodyJSON: string(body), CreatedAt: now,
+	})
+	return err
+}
+
 // PutMainTurn records the progress of a delivery's turn, and the state its
 // message reached when that changes.
 func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
@@ -224,8 +242,8 @@ func (a *App) TurnDelivery(ctx context.Context, threadID, turnID string) (store.
 	return m, err == nil, err
 }
 
-// SettleOpenTurns marks a thread's running turns as interrupted after its
-// harness went away.
+// SettleOpenTurns marks a thread's running turns, and the tool uses still
+// running in its turns, as interrupted after its harness went away.
 func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 	now := a.now().UnixMilli()
 	settled := 0
@@ -234,12 +252,21 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		if err != nil {
 			return err
 		}
-		settled = len(ids)
 		for _, id := range ids {
 			if err := a.insertMessageState(ctx, tx, id, protocol.MessageInterrupted, now); err != nil {
 				return err
 			}
 		}
+		uses, err := tx.SettleToolUses(ctx, threadID, now)
+		if err != nil {
+			return err
+		}
+		for _, id := range uses {
+			if err := a.insertToolUseEvent(ctx, tx, id, protocol.ToolInterrupted, now); err != nil {
+				return err
+			}
+		}
+		settled = len(ids) + len(uses)
 		return nil
 	})
 	if err == nil && settled > 0 {
@@ -312,8 +339,9 @@ func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		}
 	case err != nil:
 		return Outcome{}, err
-	case u.Status != string(protocol.ToolRunning):
-		// A late start does not take back a finished use.
+	case u.Status != string(protocol.ToolRunning) && (u.Status != string(protocol.ToolInterrupted) || p.Status == protocol.ToolRunning):
+		// A late start does not take back a finished use; a result that
+		// arrives after the use was settled as interrupted still counts.
 		return Outcome{Result: map[string]any{"message_id": u.MessageID, "status": u.Status}}, nil
 	default:
 		if seq, err = store.GetConversationSeq(ctx, tx.Q(), u.MessageID); err != nil {
@@ -327,7 +355,7 @@ func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	return Outcome{
 		Result: map[string]any{"message_id": u.MessageID, "seq": seq, "status": u.Status},
 		Events: []Event{{ObjectType: "message", ObjectID: u.MessageID, ObjectVersion: seq, Kind: "conversation.tool_use",
-			Body: map[string]any{"author": "main_agent", "seq": seq, "status": u.Status, "turn_id": p.TurnID}}},
+			Body: map[string]any{"author": "main_agent", "seq": seq, "status": u.Status}}},
 	}, nil
 }
 
