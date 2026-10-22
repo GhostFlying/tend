@@ -25,4 +25,4 @@
 
 - `GET /api/v1/conversation/settings` 返回 `ConversationSettingsView`：`enabled`、`available`、`revision`、目录模型 ID `model`、`effort`、`models`。每个模型含 `id`、`label`、`supported_efforts`、`default_effort`。未启用隐藏设置；暂不可用禁用修改并有限退避重读，不伪造有效模型。
 - `conversation.set_settings` 的 target 为 `conversation`，信封 `expected_control_revision` 对应设置 revision，payload 为 `model`、`effort`。成功或 stale revision 后重新读取设置；`conversation.settings` 事件触发重读。无可调 effort 的模型只显示其默认值。
-- 正文仍用 `conversation.message` 账本事件携带累计 `ConversationItem`；新增 `assistant_state`：`streaming`、`completed`、`interrupted`、`failed`、`unknown`。稳定 `message_id` 和 `seq`，不增加 SSE 类型，不改变历史分页游标。
+- 正文仍用 `conversation.message` 账本事件携带累计 `ConversationItem`；新增 `assistant_state`：`streaming`、`completed`、`interrupted`、`failed`、`unknown`。稳定 `message_id` 和 `seq`，`assistant_revision` 随累计正文或状态更新单调递增，客户端按 revision 合并，避免延迟旧片段覆盖较新快照或终态；不增加 SSE 类型，不改变历史分页游标。
