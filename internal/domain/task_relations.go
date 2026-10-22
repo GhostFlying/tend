@@ -47,5 +47,5 @@ func UpdateRelations(t Task, refs, current []protocol.TaskRelation, expected int
 		return Decision{Task: t}, nil
 	}
 	t.ControlRevision++
-	return Decision{Task: t, Events: []EventDraft{{Kind: "task.relations_updated", Body: map[string]any{"relations": next}}}}, nil
+	return Decision{Task: t, Events: []EventDraft{{Kind: "task.relations_updated", Body: map[string]any{"relations": next, "previous_relations": prev}}}}, nil
 }

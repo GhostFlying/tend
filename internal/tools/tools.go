@@ -283,10 +283,15 @@ func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
 	if c.Principal.Addon() && a.WorkspaceName == "" {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "workspace_name is required")
 	}
-	res, err := s.execute(ctx, c, "tasks.create", protocol.Target{Type: "task"}, nil, a.Reason, map[string]any{
-		"relations": a.Relations, "title": a.Title, "spec": a.Spec, "rating": a.Rating, "project": a.Project, "workspace_name": a.WorkspaceName,
+	payload := map[string]any{
+		"title": a.Title, "spec": a.Spec, "rating": a.Rating, "project": a.Project, "workspace_name": a.WorkspaceName,
 		"source_message_id": c.SourceMessageID, "commit_seq": a.CommitSeq,
-	}, app.CreateTask{})
+	}
+	// Preserve the payload identity of requests emitted before relations existed.
+	if len(a.Relations) > 0 {
+		payload["relations"] = a.Relations
+	}
+	res, err := s.execute(ctx, c, "tasks.create", protocol.Target{Type: "task"}, nil, a.Reason, payload, app.CreateTask{})
 	if err == nil && a.Rating == protocol.RatingNone {
 		// The owner is present while a task is dispatched (D52), so this
 		// is the time to ask.

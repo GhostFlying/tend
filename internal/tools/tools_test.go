@@ -404,3 +404,37 @@ func TestTaskRelationToolsCreateReadAndReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLegacyCreateRequestReplayAfterRelationsUpgrade(t *testing.T) {
+	e := newEnv(t)
+	a := createArgs{Title: "fix", Spec: spec, CommitSeq: 1}
+	raw, _ := json.Marshal(a)
+	call := Call{Principal: hosted, Native: "th_1/tu_1/call_prior", SourceMessageID: "msg_1", Tool: "tasks_create", Arguments: raw}
+	prior, err := e.svc.execute(t.Context(), call, "tasks.create", protocol.Target{Type: "task"}, nil, a.Reason, map[string]any{
+		"title": a.Title, "spec": a.Spec, "rating": a.Rating, "project": a.Project, "workspace_name": a.WorkspaceName,
+		"source_message_id": call.SourceMessageID, "commit_seq": a.CommitSeq,
+	}, app.CreateTask{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := e.svc.Handle(t.Context(), call)
+	if !result.Success {
+		t.Fatalf("legacy retry rejected: %s", result.Text)
+	}
+	if e.tasks() != 1 {
+		t.Fatal("legacy replay created another task")
+	}
+	var outcome struct {
+		Outcome json.RawMessage `json:"outcome"`
+	}
+	var answer answerView
+	if err := json.Unmarshal([]byte(result.Text), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(answer.Result, &outcome); err != nil {
+		t.Fatal(err)
+	}
+	if string(outcome.Outcome) != string(prior["outcome"].(json.RawMessage)) {
+		t.Fatal("legacy replay changed its result")
+	}
+}

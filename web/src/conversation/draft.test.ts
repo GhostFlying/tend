@@ -7,6 +7,14 @@ test("follow-up intentions preserve drafts and do not duplicate after owner edit
   const draft = new ComposerDraft();
   draft.write("已有草稿");
   draft.followUp(task);
+  expect(draft.state.get().text.split("\n")).toEqual([
+    "已有草稿",
+    "",
+    "跟进 / 修改任务 task_example（原任务）。",
+    "",
+    "需要补充或修改的内容：",
+    "",
+  ]);
   expect(draft.state.get().text).toMatch(/^已有草稿\n\n跟进 \/ 修改任务 task_example/);
   draft.write(draft.state.get().text + "修改按钮位置");
   const edited = draft.state.get().text;
