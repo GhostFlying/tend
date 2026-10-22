@@ -202,6 +202,17 @@
       "title": "ArtifactView",
       "type": "object"
     },
+    "AssistantState": {
+      "enum": [
+        "streaming",
+        "completed",
+        "interrupted",
+        "failed",
+        "unknown"
+      ],
+      "title": "AssistantState",
+      "type": "string"
+    },
     "BlockReason": {
       "enum": [
         "none",
@@ -244,6 +255,9 @@
     "ConversationItem": {
       "additionalProperties": false,
       "properties": {
+        "assistant_state": {
+          "$ref": "#/definitions/AssistantState"
+        },
         "author": {
           "type": "string"
         },
@@ -286,6 +300,41 @@
       "title": "ConversationItem",
       "type": "object"
     },
+    "ConversationModel": {
+      "additionalProperties": false,
+      "properties": {
+        "default_effort": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "supported_efforts": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "supported_efforts",
+        "default_effort"
+      ],
+      "title": "ConversationModel",
+      "type": "object"
+    },
     "ConversationPage": {
       "additionalProperties": false,
       "properties": {
@@ -311,6 +360,49 @@
         "more"
       ],
       "title": "ConversationPage",
+      "type": "object"
+    },
+    "ConversationSettingsView": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        },
+        "models": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConversationModel"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled",
+        "available",
+        "revision",
+        "model",
+        "effort",
+        "models"
+      ],
+      "title": "ConversationSettingsView",
       "type": "object"
     },
     "CreateActionPayload": {
@@ -1005,6 +1097,23 @@
       "title": "SetControlModePayload",
       "type": "object"
     },
+    "SetConversationSettingsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "effort": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model",
+        "effort"
+      ],
+      "title": "SetConversationSettingsPayload",
+      "type": "object"
+    },
     "Snapshot": {
       "additionalProperties": false,
       "properties": {
@@ -1539,6 +1648,9 @@
     "ConversationPage": {
       "$ref": "#/definitions/ConversationPage"
     },
+    "ConversationSettingsView": {
+      "$ref": "#/definitions/ConversationSettingsView"
+    },
     "CreateActionPayload": {
       "$ref": "#/definitions/CreateActionPayload"
     },
@@ -1574,6 +1686,9 @@
     },
     "SetControlModePayload": {
       "$ref": "#/definitions/SetControlModePayload"
+    },
+    "SetConversationSettingsPayload": {
+      "$ref": "#/definitions/SetConversationSettingsPayload"
     },
     "Snapshot": {
       "$ref": "#/definitions/Snapshot"

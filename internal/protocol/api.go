@@ -6,6 +6,7 @@ package protocol
 func APITypes() []any {
 	return []any{Envelope{}, APIResponse{}, Snapshot{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ConversationPage{}, LedgerEvent{}, StreamStart{}, ArtifactDetail{}, RequestView{},
 		SessionRequest{}, SessionView{}, InterruptReplyPayload{}, SubmitMessagePayload{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
+		ConversationSettingsView{}, SetConversationSettingsPayload{},
 		HookRequest{}, HookResponse{}, ToolSpec{}, ToolRequest{}, ToolResponse{}}
 }
 
@@ -19,6 +20,7 @@ func APIEnums() []any {
 		[]RunObserved{RunStarting, RunRunning, RunWaiting, RunFinished, RunFailed, RunInterrupted, RunUnknown},
 		[]RunDesired{DesiredRun, DesiredPaused, DesiredStopped, DesiredHeld},
 		[]MessageState{MessageQueued, MessageProcessing, MessageReplied, MessageInterrupted, MessageFailed, MessageUnknown},
+		[]AssistantState{AssistantStreaming, AssistantCompleted, AssistantInterrupted, AssistantFailed, AssistantUnknown},
 		[]ToolStatus{ToolRunning, ToolCompleted, ToolFailed, ToolInterrupted},
 		[]RunRole{RoleImplement, RoleAccept},
 		[]ActionKind{ActionImplement, ActionAccept, ActionDeliver},
