@@ -242,6 +242,8 @@ type ConversationItem struct {
 	CreatedAt time.Time `json:"created_at"`
 	// State is how far the main agent got with an owner message.
 	State MessageState `json:"state,omitempty"`
+	// Decision is the decision option an owner message chooses (D71).
+	Decision *DecisionChoice `json:"decision,omitempty"`
 	// Tool is set for a tool use.
 	Tool *ToolUseView `json:"tool,omitempty"`
 }

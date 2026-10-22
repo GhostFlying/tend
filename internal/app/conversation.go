@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -66,13 +67,28 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 			return Outcome{}, errNotFound(err, "message %s does not exist", p.ReplyTo)
 		}
 	}
+	var choice []byte
+	if p.Decision != nil {
+		if err := checkChoice(ctx, tx.Q(), *p.Decision); err != nil {
+			return Outcome{}, err
+		}
+		var err error
+		if choice, err = json.Marshal(p.Decision); err != nil {
+			return Outcome{}, fmt.Errorf("app: encode decision choice: %w", err)
+		}
+	}
 	id := x.IDs.New(protocol.PrefixMessage)
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{
 		MessageID: id, Author: "owner", ClientID: x.Principal.Client, Body: p.Body, ReplyTo: p.ReplyTo,
-		LastSeenSeq: p.LastSeenSeq, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(),
+		LastSeenSeq: p.LastSeenSeq, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(), DecisionJSON: string(choice),
 	})
 	if err != nil {
 		return Outcome{}, err
+	}
+	if p.Decision != nil {
+		if err := tx.BindMessage(ctx, id, "decision", p.Decision.DecisionID, "answers"); err != nil {
+			return Outcome{}, err
+		}
 	}
 	return Outcome{
 		Result:   map[string]any{"message_id": id, "seq": seq},
@@ -80,6 +96,38 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		Outbox:   []OutboxMessage{{Destination: MainThreadDestination, Operation: OpHandleMessage, Payload: HandleMessage{MessageID: id}}},
 		Accepted: true,
 	}, nil
+}
+
+// checkChoice accepts a message's choice of a decision option only for an
+// open decision as the owner saw it, and only for an option tend does not
+// carry out itself: those are answered with decisions.respond (D71).
+func checkChoice(ctx context.Context, q store.Querier, c protocol.DecisionChoice) error {
+	d, err := store.GetDecision(ctx, q, c.DecisionID)
+	if err != nil {
+		return errNotFound(err, "decision %s does not exist", c.DecisionID)
+	}
+	if d.Status != store.DecisionOpen || d.Version != c.Version {
+		pe := protocol.Errorf(protocol.CodeStaleRevision, "decision %s changed since version %d", c.DecisionID, c.Version)
+		if b, err := json.Marshal(map[string]any{"version": d.Version, "status": d.Status}); err == nil {
+			pe.Details = b
+		}
+		return pe
+	}
+	var options []string
+	if err := json.Unmarshal([]byte(d.OptionsJSON), &options); err != nil {
+		return fmt.Errorf("app: decode options of %s: %w", d.DecisionID, err)
+	}
+	if !slices.Contains(options, c.Option) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "%q is not an option of decision %s", c.Option, c.DecisionID)
+	}
+	var effects map[string]protocol.DecisionEffect
+	if err := json.Unmarshal([]byte(d.EffectsJSON), &effects); err != nil {
+		return fmt.Errorf("app: decode effects of %s: %w", d.DecisionID, err)
+	}
+	if _, ok := effects[c.Option]; ok {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "tend carries out %q itself; answer it with decisions.respond", c.Option)
+	}
+	return nil
 }
 
 // InterruptReply handles conversation.interrupt_reply: the owner stops the

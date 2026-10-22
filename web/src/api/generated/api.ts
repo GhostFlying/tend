@@ -265,12 +265,22 @@ export interface ConversationItem {
   author: string;
   body?: string;
   created_at: string;
+  decision?: DecisionChoice;
   kind: string;
   message_id: string;
   reply_to?: string;
   seq: number;
   state?: MessageState;
   tool?: ToolUseView;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DecisionChoice".
+ */
+export interface DecisionChoice {
+  decision_id: string;
+  option: string;
+  version: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -504,6 +514,7 @@ export interface StreamStart {
  */
 export interface SubmitMessagePayload {
   body: string;
+  decision?: DecisionChoice;
   last_seen_seq?: number;
   reply_to?: string;
 }
