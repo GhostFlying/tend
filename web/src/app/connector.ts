@@ -1,82 +1,93 @@
-// Keeps the link to tend up: checks the session on start, retries with a
-// growing pause while tend cannot be reached, and checks again at once when
-// the network comes back or the page is shown. Each time the link comes up
-// it calls onOnline, which resends what the outbox holds. The event stream
-// (F3) will take over noticing a lost link.
-import type { ApiClient } from "../api/client.ts";
+// Keeps the link to tend up through the event stream (D69): the stream
+// reconnects by itself, resuming after the last event it received, and a
+// fresh start reads every view again. Each time the link comes up the
+// outbox is sent; the network coming back or the page being shown again
+// cuts a reconnection pause short.
+import type { ApiClient, Connection } from "../api/client.ts";
+import type { LiveData } from "../live/data.ts";
+import { EventStream } from "../live/eventStream.ts";
+import { Store, type Readable } from "../state/store.ts";
 
-const firstPause = 1_000;
-const maxPause = 30_000;
+export interface Link {
+  /** What the page shows: connected only while the event stream is live. */
+  connection: Readable<Connection>;
+  stop(): Promise<void>;
+}
 
-export function startConnector(client: ApiClient, onOnline: () => void): () => void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let pause = firstPause;
-  let running = false;
-  let stopped = false;
+export function startConnector(client: ApiClient, live: LiveData, onOnline: () => void): Link {
+  const stream = new EventStream({
+    open: (after, signal) =>
+      client.openStream(
+        after === undefined ? "/api/v1/events" : `/api/v1/events?after=${after}`,
+        signal,
+      ),
+    onStart: (_seq, fresh) => {
+      if (fresh) {
+        void live.reload();
+      }
+    },
+    onEvent: (event) => live.apply(event),
+    onAlive: () => client.noteAlive(),
+    onLost: (reason) => client.markOffline(reason),
+  });
 
-  const status = () => client.connection.get().status;
-
-  const schedule = () => {
-    if (stopped || running || timer !== undefined || status() === "not-owner") {
-      return;
-    }
-    timer = setTimeout(() => {
-      timer = undefined;
-      void attempt();
-    }, pause);
-    pause = Math.min(pause * 2, maxPause);
-  };
-
-  const attempt = async () => {
-    if (stopped || running) {
-      return;
-    }
-    running = true;
-    try {
-      await client.connect();
-    } catch {
-      // The client recorded why; a refusal (not an owner) is not retried.
-    } finally {
-      running = false;
-    }
-    if (status() !== "online") {
-      schedule();
-    }
-  };
-
-  const wake = () => {
-    if (status() !== "online" && document.visibilityState === "visible") {
-      clearTimeout(timer);
-      timer = undefined;
-      pause = firstPause;
-      void attempt();
+  const shown = new Store<Connection>({ status: "connecting" });
+  let everLive = false;
+  const update = () => {
+    const c = client.connection.get();
+    const s = stream.state.get();
+    everLive ||= s === "live";
+    if (c.status === "not-owner" || (s === "live" && c.status === "online")) {
+      shown.set(same(shown.get(), c) ? shown.get() : c);
+    } else if (!everLive) {
+      shown.set(shown.get().status === "connecting" ? shown.get() : { status: "connecting" });
+    } else {
+      const reason = c.status === "offline" ? c.reason : "事件流断开";
+      const now = shown.get();
+      if (now.status !== "offline" || now.reason !== reason) {
+        shown.set({ status: "offline", reason });
+      }
     }
   };
 
-  // Any request can change the link: one without an answer starts the
-  // retries, and the first answer after that sends the outbox.
-  let last = status();
-  const unsubscribe = client.connection.subscribe(() => {
-    const now = status();
-    if (now === "offline") {
-      schedule();
-    } else if (now === "online" && last !== "online") {
-      clearTimeout(timer);
-      timer = undefined;
-      pause = firstPause;
+  // Any answer can bring the link up, and the first one after it was down
+  // sends the outbox.
+  let last = client.connection.get().status;
+  const unsubscribeClient = client.connection.subscribe(() => {
+    const now = client.connection.get().status;
+    if (now === "online" && last !== "online") {
       onOnline();
+      stream.wake();
     }
     last = now;
+    update();
   });
+  const unsubscribeStream = stream.state.subscribe(update);
+
+  const wake = () => {
+    if (document.visibilityState === "visible") {
+      stream.wake();
+    }
+  };
   window.addEventListener("online", wake);
   document.addEventListener("visibilitychange", wake);
-  void attempt();
 
-  return () => {
-    stopped = true;
-    clearTimeout(timer);
-    unsubscribe();
-    window.removeEventListener("online", wake);
-    document.removeEventListener("visibilitychange", wake);
+  // The session check names the owner; the stream signs in if needed.
+  void client.connect().catch(() => {});
+  stream.start();
+
+  return {
+    connection: shown,
+    async stop() {
+      unsubscribeClient();
+      unsubscribeStream();
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", wake);
+      await stream.stop();
+    },
   };
+}
+
+function same(a: Connection, b: Connection): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }

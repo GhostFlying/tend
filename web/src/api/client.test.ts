@@ -174,6 +174,35 @@ describe("ApiClient", () => {
     expect(await client.lookup("req_known")).toMatchObject({ status: "accepted" });
     expect(tend.calls.at(-1)?.path).toBe("/api/v1/requests/req_known");
   });
+
+  test("a stream opens with the token and hands back the response", async () => {
+    tend.handle = () => new Response("event: start\ndata: {}\n\n", { status: 200 });
+    const res = await client.openStream("/api/v1/events", new AbortController().signal);
+    expect(await res.text()).toBe("event: start\ndata: {}\n\n");
+    expect(tend.calls.at(-1)).toMatchObject({ path: "/api/v1/events", auth: "Bearer token-1" });
+    expect(client.connection.get().status).toBe("online");
+  });
+
+  test("a refused stream throws the protocol error", async () => {
+    tend.handle = () => json(400, { error: { code: "invalid_request", message: "after is past" } });
+    const err = await client
+      .openStream("/api/v1/events?after=9", new AbortController().signal)
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 400, code: "invalid_request" });
+  });
+
+  test("giving up on a stream does not mark the link offline", async () => {
+    await client.connect();
+    const ctrl = new AbortController();
+    tend.handle = () => {
+      ctrl.abort();
+      return new DOMException("aborted", "AbortError");
+    };
+    await expect(client.openStream("/api/v1/events", ctrl.signal)).rejects.toBeInstanceOf(
+      NetworkError,
+    );
+    expect(client.connection.get().status).toBe("online");
+  });
 });
 
 describe("blocked site storage", () => {
