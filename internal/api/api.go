@@ -37,6 +37,9 @@ type Config struct {
 	// HostedMainAgent accepts the conversation operations, which only the
 	// hosted main thread handles (D45).
 	HostedMainAgent bool
+	// Heartbeat is how often a quiet event stream sends a heartbeat.
+	// Default 15s.
+	Heartbeat time.Duration
 }
 
 // Server serves the owner API.
@@ -57,6 +60,9 @@ func New(a *app.App, s *store.Store, ts *tools.Service, cb *contextbuilder.Build
 	if cfg.TokenTTL <= 0 {
 		cfg.TokenTTL = 30 * 24 * time.Hour
 	}
+	if cfg.Heartbeat <= 0 {
+		cfg.Heartbeat = 15 * time.Second
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -75,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs", s.runLogs)
 	mux.HandleFunc("GET /api/v1/requests/{id}", s.request)
 	mux.HandleFunc("GET /api/v1/conversation", s.conversation)
+	mux.HandleFunc("GET /api/v1/events", s.events)
 	mux.HandleFunc("POST /api/v1/agent/hook", s.hook)
 	mux.HandleFunc("GET /api/v1/agent/tools", s.listTools)
 	mux.HandleFunc("POST /api/v1/agent/tools/{name}", s.callTool)

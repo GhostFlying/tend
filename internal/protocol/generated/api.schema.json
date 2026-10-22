@@ -557,6 +557,39 @@
       "title": "HostView",
       "type": "object"
     },
+    "LedgerEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "item": {
+          "$ref": "#/definitions/ConversationItem"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "object_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_seq",
+        "object_type",
+        "object_id",
+        "kind",
+        "created_at"
+      ],
+      "title": "LedgerEvent",
+      "type": "object"
+    },
     "MessageState": {
       "enum": [
         "queued",
@@ -1018,6 +1051,19 @@
       "title": "Snapshot",
       "type": "object"
     },
+    "StreamStart": {
+      "additionalProperties": false,
+      "properties": {
+        "event_seq": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_seq"
+      ],
+      "title": "StreamStart",
+      "type": "object"
+    },
     "SubmitMessagePayload": {
       "additionalProperties": false,
       "properties": {
@@ -1465,6 +1511,9 @@
     "HookResponse": {
       "$ref": "#/definitions/HookResponse"
     },
+    "LedgerEvent": {
+      "$ref": "#/definitions/LedgerEvent"
+    },
     "RateTaskPayload": {
       "$ref": "#/definitions/RateTaskPayload"
     },
@@ -1485,6 +1534,9 @@
     },
     "Snapshot": {
       "$ref": "#/definitions/Snapshot"
+    },
+    "StreamStart": {
+      "$ref": "#/definitions/StreamStart"
     },
     "SubmitMessagePayload": {
       "$ref": "#/definitions/SubmitMessagePayload"

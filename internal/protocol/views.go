@@ -265,3 +265,26 @@ type ConversationPage struct {
 	// ones for a page read after a seq.
 	More bool `json:"more"`
 }
+
+// LedgerEvent tells an owner's client that something in the ledger
+// changed (D69). It names what changed and leaves reading it to the
+// client, except for the conversation, whose events carry the item as it
+// is now.
+type LedgerEvent struct {
+	// EventSeq orders the events; a client resumes the stream after the
+	// last one it received.
+	EventSeq   int64     `json:"event_seq"`
+	ObjectType string    `json:"object_type"`
+	ObjectID   string    `json:"object_id"`
+	Kind       string    `json:"kind"`
+	CreatedAt  time.Time `json:"created_at"`
+	// Item is the conversation item a conversation event is about.
+	Item *ConversationItem `json:"item,omitempty"`
+}
+
+// StreamStart is the first message of the event stream: the cursor the
+// stream continues from. A client that connected without a cursor reads
+// the views it shows after receiving it, so it misses nothing.
+type StreamStart struct {
+	EventSeq int64 `json:"event_seq"`
+}
