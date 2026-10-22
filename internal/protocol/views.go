@@ -217,3 +217,51 @@ type RunLogPage struct {
 	// returned, or the given one if the page is empty.
 	Next int64 `json:"next"`
 }
+
+// Conversation item kinds (D69).
+const (
+	ItemMessage = "message"
+	ItemToolUse = "tool_use"
+)
+
+// ConversationItem is one item of the conversation: a message of the
+// owner or the main agent, or a tool the main agent used. Items share
+// one order, by seq.
+type ConversationItem struct {
+	Seq int64 `json:"seq"`
+	// Kind is "message" or "tool_use".
+	Kind      string `json:"kind"`
+	MessageID string `json:"message_id"`
+	// Author is "owner" or "main_agent".
+	Author string `json:"author"`
+	// Body is a message's text; empty for a tool use.
+	Body string `json:"body,omitempty"`
+	// ReplyTo is the message an owner message replies to, or the owner
+	// message whose turn produced an item of the main agent.
+	ReplyTo   string    `json:"reply_to,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	// State is how far the main agent got with an owner message.
+	State MessageState `json:"state,omitempty"`
+	// Tool is set for a tool use.
+	Tool *ToolUseView `json:"tool,omitempty"`
+}
+
+// ToolUseView is a tool the main agent used. Input and output are cut off
+// with a note past a size limit.
+type ToolUseView struct {
+	Name      string     `json:"name"`
+	Input     string     `json:"input,omitempty"`
+	Output    string     `json:"output,omitempty"`
+	Status    ToolStatus `json:"status"`
+	TurnID    string     `json:"turn_id"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// ConversationPage is a run of conversation items in order.
+type ConversationPage struct {
+	Items []ConversationItem `json:"items"`
+	// More tells whether further items exist in the direction read:
+	// earlier ones for a page read before a seq or the latest page, later
+	// ones for a page read after a seq.
+	More bool `json:"more"`
+}

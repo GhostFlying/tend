@@ -74,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/tasks/{id}", s.task)
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs", s.runLogs)
 	mux.HandleFunc("GET /api/v1/requests/{id}", s.request)
+	mux.HandleFunc("GET /api/v1/conversation", s.conversation)
 	mux.HandleFunc("POST /api/v1/agent/hook", s.hook)
 	mux.HandleFunc("GET /api/v1/agent/tools", s.listTools)
 	mux.HandleFunc("POST /api/v1/agent/tools/{name}", s.callTool)

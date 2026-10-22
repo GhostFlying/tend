@@ -178,7 +178,7 @@ type MessageView struct {
 // and including the message with seq through when through is positive.
 func RecentMessages(ctx context.Context, q Querier, n int, through int64) ([]MessageView, error) {
 	rows, err := q.QueryContext(ctx, `SELECT seq, message_id, author, body, COALESCE(reply_to, ''), created_at FROM (
-		SELECT * FROM conversation_messages WHERE ? <= 0 OR seq <= ? ORDER BY seq DESC LIMIT ?) ORDER BY seq`, through, through, n)
+		SELECT * FROM conversation_messages WHERE kind = 'message' AND (? <= 0 OR seq <= ?) ORDER BY seq DESC LIMIT ?) ORDER BY seq`, through, through, n)
 	if err != nil {
 		return nil, fmt.Errorf("store: recent messages: %w", err)
 	}
@@ -224,7 +224,7 @@ func RecentMessages(ctx context.Context, q Querier, n int, through int64) ([]Mes
 // ErrNotFound.
 func GetMessageSeq(ctx context.Context, q Querier, messageID string) (int64, error) {
 	var seq int64
-	if err := q.QueryRowContext(ctx, `SELECT seq FROM conversation_messages WHERE message_id = ?`, messageID).Scan(&seq); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT seq FROM conversation_messages WHERE message_id = ? AND kind = 'message'`, messageID).Scan(&seq); err != nil {
 		return 0, notFound(err, "message "+messageID)
 	}
 	return seq, nil

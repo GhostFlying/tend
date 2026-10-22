@@ -312,3 +312,37 @@ func RunLogs(ctx context.Context, q store.Querier, runID string, after int64, li
 	}
 	return page, nil
 }
+
+// Conversation reads up to limit conversation items: after seq after when
+// after is positive, else before seq before when before is positive, else
+// the latest (D69).
+func Conversation(ctx context.Context, q store.Querier, before, after int64, limit int) (protocol.ConversationPage, error) {
+	rows, err := store.ListConversation(ctx, q, before, after, limit+1)
+	if err != nil {
+		return protocol.ConversationPage{}, err
+	}
+	page := protocol.ConversationPage{Items: make([]protocol.ConversationItem, 0, min(len(rows), limit))}
+	if len(rows) > limit {
+		page.More = true
+		if after > 0 {
+			rows = rows[:limit]
+		} else {
+			rows = rows[1:]
+		}
+	}
+	for _, r := range rows {
+		it := protocol.ConversationItem{Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
+			ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC()}
+		switch {
+		case r.Tool != nil:
+			it.Tool = &protocol.ToolUseView{Name: r.Tool.Tool, Input: r.Tool.Input, Output: r.Tool.Output,
+				Status: protocol.ToolStatus(r.Tool.Status), TurnID: r.Tool.TurnID, UpdatedAt: time.UnixMilli(r.Tool.UpdatedAt).UTC()}
+		case r.Author == "owner" && r.State == "":
+			it.State = protocol.MessageQueued
+		case r.Author == "owner":
+			it.State = protocol.MessageState(r.State)
+		}
+		page.Items = append(page.Items, it)
+	}
+	return page, nil
+}

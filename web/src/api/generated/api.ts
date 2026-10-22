@@ -67,6 +67,17 @@ export type DecisionEffect = "implement" | "accept" | "cancel" | "start_over";
 export type Verdict = "passed" | "changes_required" | "blocked" | "inconclusive";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessageState".
+ */
+export type MessageState =
+  "queued" | "processing" | "replied" | "interrupted" | "failed" | "unknown";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ToolStatus".
+ */
+export type ToolStatus = "running" | "completed" | "failed";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ActionKind".
  */
 export type ActionKind = "implement" | "accept" | "deliver";
@@ -112,6 +123,7 @@ export interface TendAPI {
   AnswerDecisionPayload?: AnswerDecisionPayload;
   AnswerResult?: AnswerResult;
   ArtifactDetail?: ArtifactDetail;
+  ConversationPage?: ConversationPage;
   CreateActionPayload?: CreateActionPayload;
   Envelope?: Envelope;
   HookRequest?: HookRequest;
@@ -233,6 +245,41 @@ export interface ArtifactView {
   artifact_id: string;
   ref: unknown;
   run_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationPage".
+ */
+export interface ConversationPage {
+  items: ConversationItem[] | null;
+  more: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationItem".
+ */
+export interface ConversationItem {
+  author: string;
+  body?: string;
+  created_at: string;
+  kind: string;
+  message_id: string;
+  reply_to?: string;
+  seq: number;
+  state?: MessageState;
+  tool?: ToolUseView;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ToolUseView".
+ */
+export interface ToolUseView {
+  input?: string;
+  name: string;
+  output?: string;
+  status: ToolStatus;
+  turn_id: string;
+  updated_at: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
