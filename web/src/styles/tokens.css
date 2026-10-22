@@ -1,0 +1,105 @@
+/*
+ * Design tokens, from the phase F mock (docs/plans/phase-f/app.html), which
+ * follows dsh's ui-theme: neutral surfaces, one blue accent, system type.
+ * The light theme is the default; body[data-dark] switches to the dark one
+ * (src/theme/theme.ts follows the system unless the owner picks a theme).
+ */
+:root {
+  /* surfaces */
+  --bg: #ffffff;
+  --bg-l1: #f9fafb;
+  --bg-l2: #f2f3f5;
+  --sidebar: #f9fafb;
+  --bubble: #f0f2f5;
+  --input: #ffffff;
+  --hover: rgba(38, 49, 72, 0.06);
+
+  /* text */
+  --label: rgb(15, 17, 21);
+  --label-2: rgba(15, 17, 21, 0.72);
+  --label-3: rgba(15, 17, 21, 0.52);
+  --caption: rgba(15, 17, 21, 0.38);
+
+  /* lines */
+  --border: rgba(15, 17, 21, 0.1);
+  --border-soft: rgba(15, 17, 21, 0.06);
+
+  /* accent and states */
+  --accent: rgb(65, 118, 230);
+  --accent-soft: rgba(65, 118, 230, 0.1);
+  --accent-ring: rgba(65, 118, 230, 0.45);
+  --ok: #22a06b;
+  --warn: #e5a000;
+  --warn-soft: rgba(229, 160, 0, 0.12);
+  --warn-line: rgba(229, 160, 0, 0.35);
+  --warn-text: #9a6b00;
+  --err: #d93c3c;
+  --idle: rgba(15, 17, 21, 0.28);
+
+  /* elevation */
+  --shadow-2: 0 2px 6px rgba(15, 17, 21, 0.04), 0 8px 24px rgba(15, 17, 21, 0.08);
+
+  /* shape */
+  --radius-xs: 5px;
+  --radius-s: 6px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --radius-xl: 20px;
+  --radius-bubble: 22px;
+  --radius-pill: 999px;
+
+  /* type */
+  --font:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+  --mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --text-xs: 11px;
+  --text-s: 12px;
+  --text-m: 13px;
+  --text-base: 14px;
+  --text-l: 15px;
+  --text-xl: 17px;
+  --leading-base: 22px;
+  --leading-l: 24px;
+
+  /* motion */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 0.2s;
+  --dur: 0.3s;
+
+  /* layout */
+  --sidebar-width: 288px;
+  --details-width: 380px;
+  --lane-width: 760px;
+  --head-height: 52px;
+  --tabbar-height: 56px;
+
+  color-scheme: light;
+}
+
+body[data-dark] {
+  --bg: rgb(21, 21, 23);
+  --bg-l1: rgb(27, 27, 28);
+  --bg-l2: rgb(36, 36, 38);
+  --sidebar: rgb(27, 27, 28);
+  --bubble: rgb(44, 44, 47);
+  --input: rgb(36, 36, 38);
+  --hover: rgba(255, 255, 255, 0.06);
+
+  --label: rgb(236, 237, 240);
+  --label-2: rgba(236, 237, 240, 0.74);
+  --label-3: rgba(236, 237, 240, 0.54);
+  --caption: rgba(236, 237, 240, 0.4);
+
+  --border: rgba(255, 255, 255, 0.1);
+  --border-soft: rgba(255, 255, 255, 0.06);
+
+  --accent-soft: rgba(65, 118, 230, 0.2);
+  --warn-soft: rgba(229, 160, 0, 0.16);
+  --warn-text: #f2c14e;
+  --idle: rgba(236, 237, 240, 0.28);
+
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  color-scheme: dark;
+}

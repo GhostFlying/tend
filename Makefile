@@ -1,13 +1,15 @@
 # Single entry point for local checks and CI.
 
 GO ?= go
+PNPM ?= pnpm
 STATICCHECK_VERSION ?= v0.8.2
 PKGS := ./...
+WEB := web
 
-.PHONY: check fmt-check vet staticcheck test it build gen
+.PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check
 
 ## check: everything that must pass before a commit is merged
-check: fmt-check vet staticcheck test
+check: fmt-check vet staticcheck test web-check
 
 fmt-check:
 	@out="$$(gofmt -l $$(git ls-files '*.go'))"; \
@@ -32,6 +34,19 @@ it:
 build:
 	$(GO) build $(PKGS)
 
-## gen: regenerate the owner API schema
-gen:
+## gen: regenerate the owner API schema and the web client's types from it
+gen: web-deps
 	$(GO) run ./internal/protocol/schemagen
+	$(PNPM) --dir $(WEB) gen
+
+## web: build the web client into internal/webui/dist/app, which tend-server
+## embeds; build it before building tend-server
+web: web-deps
+	$(PNPM) --dir $(WEB) build
+
+web-deps:
+	$(PNPM) --dir $(WEB) install --frozen-lockfile
+
+## web-check: the web client's typecheck, lint, format check, unit tests and build
+web-check: web-deps
+	$(PNPM) --dir $(WEB) check

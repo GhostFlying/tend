@@ -1,0 +1,207 @@
+// The owner API client (D49, D70). The device's tailnet identity is the
+// credential: the client asks POST /api/v1/session for an owner token when
+// it has none or the server stops accepting it, so there is no password.
+// A device that is not an owner's gets 403 and stays in that state.
+import { Store, type Readable } from "../state/store.ts";
+import type {
+  APIResponse,
+  Code,
+  Envelope,
+  Error as ErrorBody,
+  RequestView,
+  SessionRequest,
+  SessionView,
+} from "./generated/api.ts";
+import { cryptoRandom, newClientId, type RandomBytes } from "./ids.ts";
+
+/** What the client knows about its link to tend. */
+export type Connection =
+  | { status: "connecting" }
+  | { status: "online"; login: string }
+  | { status: "offline"; reason: string }
+  | { status: "not-owner"; reason: string };
+
+/** A request that reached tend and was refused. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: Code | undefined;
+
+  constructor(status: number, body: ErrorBody | undefined) {
+    super(body?.message ?? `HTTP ${status}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = body?.code;
+  }
+}
+
+/** A request with no answer: tend may or may not have received it. */
+export class NetworkError extends Error {
+  constructor(cause: unknown) {
+    super("tend did not answer", { cause });
+    this.name = "NetworkError";
+  }
+}
+
+type KeyValueStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+export interface ClientOptions {
+  fetch?: typeof fetch;
+  /** Keeps the client ID and token across reloads. Default localStorage. */
+  storage?: KeyValueStorage;
+  random?: RandomBytes;
+  /** Bounds each request. Default 20 seconds. */
+  timeoutMs?: number;
+}
+
+const clientIdKey = "tend.client_id";
+const tokenKey = "tend.token";
+
+export class ApiClient {
+  private readonly fetch: typeof fetch;
+  private readonly storage: KeyValueStorage;
+  private readonly random: RandomBytes;
+  private readonly timeoutMs: number;
+  private readonly state = new Store<Connection>({ status: "connecting" });
+  private signingIn: Promise<string> | null = null;
+  /** The owner's login, from the last session answer. */
+  private login = "";
+
+  constructor(options: ClientOptions = {}) {
+    this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.storage = options.storage ?? localStorage;
+    this.random = options.random ?? cryptoRandom;
+    this.timeoutMs = options.timeoutMs ?? 20_000;
+  }
+
+  get connection(): Readable<Connection> {
+    return this.state;
+  }
+
+  /** The ID this browser identifies itself with, created on first use. */
+  get clientId(): string {
+    let id = this.storage.getItem(clientIdKey);
+    if (!id) {
+      id = newClientId(this.random);
+      this.storage.setItem(clientIdKey, id);
+    }
+    return id;
+  }
+
+  /** Checks the session, signing in when there is no valid token. */
+  async connect(): Promise<SessionView> {
+    const view = await this.request<SessionView>("GET", "/api/v1/session");
+    this.login = view.login;
+    this.markOnline();
+    return view;
+  }
+
+  /** Executes one owner write (POST /api/v1/ops). */
+  async submit(envelope: Envelope): Promise<APIResponse> {
+    return this.request<APIResponse>("POST", "/api/v1/ops", envelope);
+  }
+
+  /** Reads the record of an earlier write, or null if tend has none. */
+  async lookup(requestId: string): Promise<RequestView | null> {
+    try {
+      return await this.request<RequestView>(
+        "GET",
+        `/api/v1/requests/${encodeURIComponent(requestId)}`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "not_found") {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /** Sends an authenticated request, signing in again once on 401. */
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    let token = this.storage.getItem(tokenKey) ?? (await this.signIn());
+    let res = await this.send(method, path, body, token);
+    if (res.status === 401) {
+      this.storage.removeItem(tokenKey);
+      token = await this.signIn();
+      res = await this.send(method, path, body, token);
+    }
+    return this.answer<T>(res);
+  }
+
+  /** Asks for an owner token; concurrent callers share one request. */
+  private signIn(): Promise<string> {
+    this.signingIn ??= (async () => {
+      try {
+        const req: SessionRequest = { client_id: this.clientId, scope: "owner" };
+        const res = await this.send("POST", "/api/v1/session", req);
+        const view = await this.answer<SessionView>(res);
+        if (!view.token) {
+          throw new ApiError(res.status, { code: "internal", message: "no token in the session" });
+        }
+        this.storage.setItem(tokenKey, view.token);
+        this.login = view.login;
+        this.markOnline();
+        return view.token;
+      } finally {
+        this.signingIn = null;
+      }
+    })();
+    return this.signingIn;
+  }
+
+  private async send(
+    method: string,
+    path: string,
+    body: unknown,
+    token?: string,
+  ): Promise<Response> {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
+    try {
+      return await this.fetch(path, {
+        method,
+        headers,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (err) {
+      this.state.set({ status: "offline", reason: "连不上 tend" });
+      throw new NetworkError(err);
+    }
+  }
+
+  /** Any answer proves the link works. */
+  private markOnline(): void {
+    const current = this.state.get();
+    if (current.status !== "online" || current.login !== this.login) {
+      this.state.set({ status: "online", login: this.login });
+    }
+  }
+
+  private async answer<T>(res: Response): Promise<T> {
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch (err) {
+      if (res.ok) {
+        // A cut-off answer leaves the outcome unknown.
+        this.state.set({ status: "offline", reason: "tend 的回答不完整" });
+        throw new NetworkError(err);
+      }
+    }
+    if (res.ok) {
+      this.markOnline();
+      return body as T;
+    }
+    const error = (body as APIResponse | undefined)?.error;
+    if (res.status === 403) {
+      this.state.set({ status: "not-owner", reason: error?.message ?? "这台设备不是 owner" });
+    }
+    throw new ApiError(res.status, error);
+  }
+}

@@ -1,0 +1,53 @@
+.page {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg-l1);
+}
+
+.card {
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.card h1 {
+  font-size: var(--text-xl);
+  margin: 12px 0 4px;
+}
+
+.card p {
+  margin: 4px 0;
+  color: var(--label-2);
+}
+
+.card code {
+  font-size: var(--text-m);
+  background: var(--bg-l2);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+}
+
+.card button {
+  margin-top: 12px;
+}
+
+.logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--label);
+  color: var(--bg);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.reason {
+  font-size: var(--text-s);
+  color: var(--caption);
+}
