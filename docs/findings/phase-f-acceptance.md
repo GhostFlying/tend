@@ -49,7 +49,7 @@ CI 还暴露了既有 orca 故障测试的同步竞态：测试可能在 worker 
 
 在真实部署上，两个独立 Chromium context 分别验证桌面与手机尺寸的自动登录、会话读取、SSE 已连接及 service worker 注册；浏览器运行时错误为空。
 
-通过托管主会话创建了真实文档任务，目标是补充 Mac/iPhone 快速开始。第一轮因 runner 注册的空仓库没有 origin 而 fetch 失败，补齐账本中登记的远程后，在真实 Web 页面点击“重新实现”：操作 succeeded，原待决事项已回答并实际应用 implement 效果，第二代实现交付 commit `e5a53021`（快速开始、部署链接及计划），随后独立 acceptance run 完成。owner API 和只读账本分别确认任务 completed，独立验收 passed、issues 为空。产物按任务约束保留在工作区，未推送、未开 PR、未合入主分支。Git 作者沿用已有用户身份。
+通过托管主会话创建了真实文档任务，目标是补充 Mac/iPhone 快速开始。第一轮因 runner 注册的空仓库没有 origin 而 fetch 失败，补齐账本中登记的远程后，在真实 Web 页面点击“重新实现”：操作 succeeded，原待决事项已回答并实际应用 implement 效果，第二代实现交付 commit `e5a53021`（快速开始、部署链接及计划），随后独立 acceptance run 完成。owner API 和只读账本分别确认任务 completed，独立验收 passed、issues 为空。产物未推送、未开 PR、未合入主分支，Git 作者沿用已有用户身份。owner 后续要求测试后清理 orca 工作区：已先保存产物补丁与验收证据，再删除本次创建的工作区及三个终端，并独立确认目录、工作区列表和终端列表均已无这些资源；未操作其他会话。
 
 部署保留原配置与二进制、SQLite 一致性备份和构建来源。账本从 schema 18 升级至 20；原二进制拒绝新版 schema。回退使用支持 schema 20 的兼容服务端并关闭托管主会话，保留新账本；不能直接换回旧二进制或覆盖已接受新写入的账本。兼容版本已在账本副本验证升级、完整性和 owner 登录。
 
