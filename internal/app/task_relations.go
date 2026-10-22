@@ -45,3 +45,24 @@ func declaredRelations(ctx context.Context, q store.Querier, taskID string) ([]p
 	}
 	return refs, nil
 }
+
+// backlinkEvents notify the tasks whose derived incoming references changed.
+// Their control revisions remain unchanged because the source owns the write.
+func backlinkEvents(ctx context.Context, q store.Querier, source string, previous, next []protocol.TaskRelation) ([]Event, error) {
+	seen := map[string]bool{}
+	var out []Event
+	for _, refs := range [][]protocol.TaskRelation{previous, next} {
+		for _, r := range refs {
+			if seen[r.TaskID] {
+				continue
+			}
+			seen[r.TaskID] = true
+			task, err := store.GetTask(ctx, q, r.TaskID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, Event{ObjectType: "task", ObjectID: task.TaskID, ObjectVersion: task.ControlRevision, Kind: "task.relations_backlinks_updated", Body: map[string]any{"source_task_id": source}})
+		}
+	}
+	return out, nil
+}

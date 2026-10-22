@@ -130,11 +130,16 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	events := []Event{}
-	if len(refs) > 0 {
-		events = append(events, Event{ObjectType: "task", ObjectID: taskID, ObjectVersion: d.Task.ControlRevision, Kind: "task.relations_updated", Body: map[string]any{"relations": refs}})
-	}
 	for _, e := range d.Events {
 		events = append(events, Event{ObjectType: "task", ObjectID: taskID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
+	}
+	if len(refs) > 0 {
+		events = append(events, Event{ObjectType: "task", ObjectID: taskID, ObjectVersion: d.Task.ControlRevision, Kind: "task.relations_updated", Body: map[string]any{"relations": refs}})
+		backlinks, err := backlinkEvents(ctx, tx.Q(), taskID, nil, refs)
+		if err != nil {
+			return Outcome{}, err
+		}
+		events = append(events, backlinks...)
 	}
 	return Outcome{Result: newTaskResult(d.Task, actions), Events: events}, nil
 }
@@ -238,6 +243,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		merged.Task = d.Task
 		merged.Events = append(merged.Events, d.Events...)
 	}
+	var backlinks []Event
 	if p.Relations != nil {
 		refs, err := validateRelations(ctx, tx.Q(), row.TaskID, *p.Relations)
 		if err != nil {
@@ -254,6 +260,10 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		merged.Task = d.Task
 		merged.Events = append(merged.Events, d.Events...)
 		if len(d.Events) > 0 {
+			backlinks, err = backlinkEvents(ctx, tx.Q(), row.TaskID, currentRefs, refs)
+			if err != nil {
+				return Outcome{}, err
+			}
 			if err := tx.ReplaceTaskRelations(ctx, row.TaskID, refs, x.Now.UnixMilli()); err != nil {
 				return Outcome{}, err
 			}
@@ -275,6 +285,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err := bindSource(ctx, tx, p.SourceMessageID, "task", row.TaskID); err != nil {
 		return Outcome{}, err
 	}
+	events = append(events, backlinks...)
 	return Outcome{Result: newTaskResult(merged.Task, actions), Events: events}, nil
 }
 
