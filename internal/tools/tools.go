@@ -83,11 +83,18 @@ var tools = []tool{
 	{"session_project", "Choose the project this session works in, as the owner asked, in place of the one tend chose from the repository you are in. An empty project shows every project.", (*Service).sessionProject},
 }
 
+// addonOnly names the tools that have meaning only in a session the owner
+// works in; the hosted main agent does not get them.
+var addonOnly = map[string]bool{"session_project": true}
+
 // Specs returns the tools to register with the hosted main agent's
 // harness.
 func Specs() []harness.ToolSpec {
 	out := make([]harness.ToolSpec, 0, len(tools))
 	for _, t := range tools {
+		if addonOnly[t.name] {
+			continue
+		}
 		out = append(out, harness.ToolSpec{Name: t.name, Description: t.description, InputSchema: json.RawMessage(schemas[t.name])})
 	}
 	return out
@@ -143,7 +150,7 @@ type answer struct {
 func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
 	var t *tool
 	for i := range tools {
-		if tools[i].name == c.Tool {
+		if tools[i].name == c.Tool && (c.Principal.Addon() || !addonOnly[c.Tool]) {
 			t = &tools[i]
 		}
 	}

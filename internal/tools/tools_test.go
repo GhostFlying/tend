@@ -275,18 +275,18 @@ func TestSchemasMatchArgs(t *testing.T) {
 		"tasks_set_control": controlArgs{}, "tasks_cancel": cancelArgs{}, "actions_create": actionArgs{}, "decisions_open": openArgs{}, "decisions_resolve": resolveArgs{},
 		"artifacts_read": artifactArgs{}, "requests_read": requestArgs{}, "repos_list": noArgs{}, "tend_context": noArgs{}, "session_project": sessionProjectArgs{},
 	}
-	if len(args) != len(Specs()) {
-		t.Fatalf("%d tools but %d argument types", len(Specs()), len(args))
+	if len(args) != len(tools) {
+		t.Fatalf("%d tools but %d argument types", len(tools), len(args))
 	}
-	for _, spec := range Specs() {
-		props, required, _ := schemaFields(t, string(spec.InputSchema))
-		want := tags(args[spec.Name])
+	for _, tl := range tools {
+		props, required, _ := schemaFields(t, schemas[tl.name])
+		want := tags(args[tl.name])
 		if !slices.Equal(props, want) {
-			t.Errorf("%s: schema properties %v, argument fields %v", spec.Name, props, want)
+			t.Errorf("%s: schema properties %v, argument fields %v", tl.name, props, want)
 		}
 		for _, r := range required {
 			if !slices.Contains(want, r) {
-				t.Errorf("%s requires unknown %s", spec.Name, r)
+				t.Errorf("%s requires unknown %s", tl.name, r)
 			}
 		}
 	}
@@ -308,6 +308,21 @@ func TestSchemasMatchArgs(t *testing.T) {
 	}
 	if rProps, _, _ := schemaFields(t, string(nested["requirements"])); !slices.Equal(rProps, tags(domain.Requirements{})) {
 		t.Errorf("requirements schema %v, domain.Requirements %v", rProps, tags(domain.Requirements{}))
+	}
+}
+
+func TestHostedMainAgentLacksAddonTools(t *testing.T) {
+	for _, spec := range Specs() {
+		if spec.Name == "session_project" {
+			t.Error("the hosted main agent is given session_project")
+		}
+	}
+	if !slices.ContainsFunc(AddonSpecs(), func(s protocol.ToolSpec) bool { return s.Name == "session_project" }) {
+		t.Error("add-on sessions are not given session_project")
+	}
+	e := newEnv(t)
+	if a := e.call("session_project", sessionProjectArgs{Project: "default"}, "c1"); a.OK || a.Error == nil || a.Error.Code != protocol.CodeInvalidRequest {
+		t.Errorf("hosted session_project = %+v", a)
 	}
 }
 
