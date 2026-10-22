@@ -479,6 +479,11 @@ func input(msg store.MessageView) string {
 		// Messages arrived that the sender's client had not shown.
 		head += fmt.Sprintf(", written having seen messages up to #%d of #%d", msg.LastSeenSeq, msg.Seq-1)
 	}
+	var c protocol.DecisionChoice
+	if msg.DecisionJSON != "" && json.Unmarshal([]byte(msg.DecisionJSON), &c) == nil {
+		// The owner chose an option the agent carries out (D71).
+		head += fmt.Sprintf(", choosing option %q of decision %s version %d", c.Option, c.DecisionID, c.Version)
+	}
 	return head + "]\n" + msg.Body
 }
 

@@ -137,3 +137,56 @@ func TestDecisionEffects(t *testing.T) {
 		}
 	})
 }
+
+func TestMessageChoosesDecisionOption(t *testing.T) {
+	h := newHarness(t)
+	_, d := h.failImplementation()
+	say := func(c protocol.DecisionChoice) protocol.Operation {
+		t.Helper()
+		return h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "message"},
+			protocol.SubmitMessagePayload{Body: "about the task: " + c.Option, Decision: &c}, nil), SubmitMessage{})
+	}
+	refused := []struct {
+		name string
+		c    protocol.DecisionChoice
+		code protocol.Code
+	}{
+		{"an option tend carries out", protocol.DecisionChoice{DecisionID: d.DecisionID, Version: d.Version, Option: "retry the implementation"}, protocol.CodeInvalidRequest},
+		{"no such option", protocol.DecisionChoice{DecisionID: d.DecisionID, Version: d.Version, Option: "something else"}, protocol.CodeInvalidRequest},
+		{"an older version", protocol.DecisionChoice{DecisionID: d.DecisionID, Version: d.Version - 1, Option: "revise the spec"}, protocol.CodeStaleRevision},
+		{"no such decision", protocol.DecisionChoice{DecisionID: "dec_x", Version: 1, Option: "revise the spec"}, protocol.CodeNotFound},
+	}
+	for _, r := range refused {
+		if op := say(r.c); op.Status != protocol.OpFailed || op.Error == nil || op.Error.Code != r.code {
+			t.Errorf("%s: %+v, want %s", r.name, op, r.code)
+		}
+	}
+	c := protocol.DecisionChoice{DecisionID: d.DecisionID, Version: d.Version, Option: "revise the spec"}
+	op := say(c)
+	var res struct {
+		MessageID string `json:"message_id"`
+	}
+	if op.Status != protocol.OpAccepted || json.Unmarshal(op.Result, &res) != nil {
+		t.Fatalf("choice = %+v", op)
+	}
+	var m store.MessageView
+	var bound int
+	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
+		var err error
+		if m, err = store.GetMessage(context.Background(), tx.Q(), res.MessageID); err != nil {
+			return err
+		}
+		return tx.Q().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM conversation_bindings WHERE message_id = ? AND object_id = ?`,
+			res.MessageID, d.DecisionID).Scan(&bound)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var got protocol.DecisionChoice
+	if json.Unmarshal([]byte(m.DecisionJSON), &got) != nil || got != c || bound != 1 {
+		t.Errorf("message keeps %q, bound %d; want the choice and a binding", m.DecisionJSON, bound)
+	}
+	// The decision itself waits for the main agent to record the answer.
+	if d2 := h.openDecision(d.TaskID); d2.Version != d.Version {
+		t.Errorf("decision moved to version %d", d2.Version)
+	}
+}

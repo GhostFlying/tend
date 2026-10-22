@@ -25,6 +25,9 @@ type MessageRow struct {
 	LastSeenSeq int64
 	RequestID   string
 	CreatedAt   int64
+	// DecisionJSON is the decision option an owner message chooses, if
+	// any.
+	DecisionJSON string
 }
 
 // InsertMessage appends a conversation item and returns its sequence
@@ -34,8 +37,9 @@ func (t *Tx) InsertMessage(ctx context.Context, m MessageRow) (int64, error) {
 		m.Kind = KindMessage
 	}
 	res, err := t.Exec(ctx, `INSERT INTO conversation_messages (kind, message_id, author, client_id, body, reply_to, last_seen_seq,
-		request_id, created_at) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?)`,
-		m.Kind, m.MessageID, m.Author, nullString(m.ClientID), m.Body, nullString(m.ReplyTo), m.LastSeenSeq, nullString(m.RequestID), m.CreatedAt)
+		request_id, created_at, decision_json) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?)`,
+		m.Kind, m.MessageID, m.Author, nullString(m.ClientID), m.Body, nullString(m.ReplyTo), m.LastSeenSeq, nullString(m.RequestID), m.CreatedAt,
+		nullString(m.DecisionJSON))
 	if err != nil {
 		return 0, fmt.Errorf("store: insert message: %w", err)
 	}
@@ -45,9 +49,9 @@ func (t *Tx) InsertMessage(ctx context.Context, m MessageRow) (int64, error) {
 // GetMessage returns a conversation message, or ErrNotFound.
 func GetMessage(ctx context.Context, q Querier, messageID string) (MessageView, error) {
 	m := MessageView{MessageID: messageID}
-	err := q.QueryRowContext(ctx, `SELECT seq, author, body, COALESCE(reply_to, ''), created_at, COALESCE(last_seen_seq, 0)
-		FROM conversation_messages WHERE message_id = ? AND kind = 'message'`, messageID).
-		Scan(&m.Seq, &m.Author, &m.Body, &m.ReplyTo, &m.CreatedAt, &m.LastSeenSeq)
+	err := q.QueryRowContext(ctx, `SELECT seq, author, body, COALESCE(reply_to, ''), created_at, COALESCE(last_seen_seq, 0),
+		COALESCE(decision_json, '') FROM conversation_messages WHERE message_id = ? AND kind = 'message'`, messageID).
+		Scan(&m.Seq, &m.Author, &m.Body, &m.ReplyTo, &m.CreatedAt, &m.LastSeenSeq, &m.DecisionJSON)
 	if err != nil {
 		return MessageView{}, notFound(err, "message "+messageID)
 	}

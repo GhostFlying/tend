@@ -172,6 +172,9 @@ type MessageView struct {
 	LastSeenSeq int64
 	// Bindings are the objects the message was tied to, as type:id.
 	Bindings []string
+	// DecisionJSON is the decision option an owner message chooses, if
+	// any; read by GetMessage.
+	DecisionJSON string
 }
 
 // RecentMessages returns the last n conversation messages in order, up to

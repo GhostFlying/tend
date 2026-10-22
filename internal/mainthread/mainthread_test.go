@@ -152,6 +152,15 @@ func TestThreadConfigWritesOnlyInCwd(t *testing.T) {
 	}
 }
 
+func TestInputNamesTheChosenOption(t *testing.T) {
+	msg := store.MessageView{MessageID: "msg_2", Seq: 2, Body: "About the task: revise the spec",
+		DecisionJSON: `{"decision_id":"dec_1","version":3,"option":"revise the spec"}`}
+	want := `[message msg_2, choosing option "revise the spec" of decision dec_1 version 3]` + "\n" + msg.Body
+	if got := input(msg); got != want {
+		t.Errorf("input = %q, want %q", got, want)
+	}
+}
+
 func TestMessageBecomesTask(t *testing.T) {
 	h := testkit.NewHarness()
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {

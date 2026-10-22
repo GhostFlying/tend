@@ -254,6 +254,9 @@
           "format": "date-time",
           "type": "string"
         },
+        "decision": {
+          "$ref": "#/definitions/DecisionChoice"
+        },
         "kind": {
           "type": "string"
         },
@@ -331,6 +334,27 @@
         "generation"
       ],
       "title": "CreateActionPayload",
+      "type": "object"
+    },
+    "DecisionChoice": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_id": {
+          "type": "string"
+        },
+        "option": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "decision_id",
+        "version",
+        "option"
+      ],
+      "title": "DecisionChoice",
       "type": "object"
     },
     "DecisionEffect": {
@@ -1082,6 +1106,9 @@
       "properties": {
         "body": {
           "type": "string"
+        },
+        "decision": {
+          "$ref": "#/definitions/DecisionChoice"
         },
         "last_seen_seq": {
           "type": "integer"

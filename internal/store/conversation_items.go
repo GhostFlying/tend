@@ -91,13 +91,15 @@ type ConversationRow struct {
 	State string
 	// Tool is set for a tool use.
 	Tool *ToolUseRow
+	// DecisionJSON is the decision option an owner message chooses.
+	DecisionJSON string
 }
 
 // conversationCols selects a ConversationRow from conversation_messages m.
 const conversationCols = `m.seq, m.kind, m.message_id, m.author, m.body, COALESCE(m.reply_to, ''), m.created_at,
 	COALESCE((SELECT json_extract(e.body_json, '$.state') FROM events e WHERE e.object_type = 'message'
 		AND e.object_id = m.message_id AND e.kind = 'conversation.message_state' ORDER BY e.event_seq DESC LIMIT 1), ''),
-	u.turn_id, u.item_id, u.tool, u.input, u.output, u.status, u.updated_at
+	u.turn_id, u.item_id, u.tool, u.input, u.output, u.status, u.updated_at, COALESCE(m.decision_json, '')
 	FROM conversation_messages m LEFT JOIN conversation_tool_uses u ON u.message_id = m.message_id`
 
 // ListConversation returns up to limit conversation items in order:
@@ -144,7 +146,7 @@ func scanConversation(row interface{ Scan(...any) error }) (ConversationRow, err
 	var turn, item, tool, input, output, status sql.NullString
 	var updated sql.NullInt64
 	if err := row.Scan(&r.Seq, &r.Kind, &r.MessageID, &r.Author, &r.Body, &r.ReplyTo, &r.CreatedAt, &r.State,
-		&turn, &item, &tool, &input, &output, &status, &updated); err != nil {
+		&turn, &item, &tool, &input, &output, &status, &updated, &r.DecisionJSON); err != nil {
 		return ConversationRow{}, fmt.Errorf("store: scan conversation: %w", err)
 	}
 	if tool.Valid {

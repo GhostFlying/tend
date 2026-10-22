@@ -60,6 +60,16 @@ type SubmitMessagePayload struct {
 	// §6.2, D27).
 	ReplyTo     string `json:"reply_to,omitempty"`
 	LastSeenSeq int64  `json:"last_seen_seq,omitempty"`
+	// Decision is the option of an open decision the message chooses,
+	// when the option is one tend does not carry out itself (D71).
+	Decision *DecisionChoice `json:"decision,omitempty"`
+}
+
+// DecisionChoice is an option of a decision, as the owner saw it.
+type DecisionChoice struct {
+	DecisionID string `json:"decision_id"`
+	Version    int64  `json:"version"`
+	Option     string `json:"option"`
 }
 
 // InterruptReplyPayload is the payload of conversation.interrupt_reply:

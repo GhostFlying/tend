@@ -349,6 +349,12 @@ func conversationItem(r store.ConversationRow) protocol.ConversationItem {
 	case r.Author == "owner":
 		it.State = protocol.MessageState(r.State)
 	}
+	if r.DecisionJSON != "" {
+		var c protocol.DecisionChoice
+		if json.Unmarshal([]byte(r.DecisionJSON), &c) == nil {
+			it.Decision = &c
+		}
+	}
 	return it
 }
 
