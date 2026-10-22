@@ -27,6 +27,13 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
+	if r.Method == http.MethodHead {
+		// ServeMux routes HEAD to GET handlers; a stream without a body
+		// would only hold the connection.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	query := r.URL.Query()
 	after, err := intParam(query.Get("after"))
 	if err != nil {
@@ -98,6 +105,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 		select {
 		case <-ctx.Done():
+			return
+		case <-s.ending:
 			return
 		case <-changed:
 		case <-heartbeat.C:

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -52,7 +53,14 @@ type Server struct {
 	key     []byte
 	cfg     Config
 	log     *slog.Logger
+	// ending is closed when the server shuts down, ending event streams.
+	ending    chan struct{}
+	endStream sync.Once
 }
+
+// EndStreams ends the event streams, for a server that is shutting down:
+// unlike other requests they never finish by themselves.
+func (s *Server) EndStreams() { s.endStream.Do(func() { close(s.ending) }) }
 
 // New returns a Server. The store is used for reads only; secret is the
 // server secret tokens are signed with.
@@ -66,7 +74,7 @@ func New(a *app.App, s *store.Store, ts *tools.Service, cb *contextbuilder.Build
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Server{app: a, store: s, tools: ts, context: cb, whois: whois, key: tokenKey(secret), cfg: cfg, log: log}
+	return &Server{app: a, store: s, tools: ts, context: cb, whois: whois, key: tokenKey(secret), cfg: cfg, log: log, ending: make(chan struct{})}
 }
 
 // Handler returns the API's routes, all under /api/v1/.

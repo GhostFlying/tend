@@ -225,10 +225,13 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	runners := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
 	mux := http.NewServeMux()
 	mux.Handle(runnerapi.Path, runners.Handler())
-	mux.Handle("/api/", api.New(a, s, ts, cb, whois, secret, api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}, log).Handler())
+	owner := api.New(a, s, ts, cb, whois, secret, api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}, log)
+	mux.Handle("/api/", owner.Handler())
 	// The web client, on the same origin as the owner API (D70).
 	mux.Handle("/", webui.Handler())
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	// Shutdown waits for requests to finish; event streams never do.
+	server.RegisterOnShutdown(owner.EndStreams)
 
 	// The workers stop with the process or when serving fails.
 	runCtx, stop := context.WithCancel(ctx)
