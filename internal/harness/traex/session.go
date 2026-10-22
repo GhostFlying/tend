@@ -170,7 +170,9 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	if err != nil {
 		return nil, err
 	}
-	return s.register(res.Thread.ID, cfg.OnToolCall), nil
+	t := s.register(res.Thread.ID, cfg.OnToolCall)
+	t.setModelDefaults(res)
+	return t, nil
 }
 
 // ResumeThread implements harness.Session.
@@ -190,6 +192,7 @@ func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness
 		t.close()
 		return nil, err
 	}
+	t.setModelDefaults(res)
 	return t, nil
 }
 
@@ -244,6 +247,15 @@ func (s *Session) notification(method string, params json.RawMessage) {
 	var ev harness.Event
 	var threadID string
 	switch method {
+	case notifyAgentMessageDelta:
+		var n AgentMessageDeltaNotification
+		if err := json.Unmarshal(params, &n); err != nil {
+			s.log.Warn("undecodable assistant delta", "err", err)
+			return
+		}
+		threadID = n.ThreadID
+		ev = harness.Event{Kind: harness.EventAgentMessageDelta, TurnID: n.TurnID, ItemID: n.ItemID,
+			ItemType: harness.ItemAgentMessage, Text: n.Delta, Raw: params}
 	case notifyTurnStarted, notifyTurnCompleted:
 		var n TurnNotification
 		if err := json.Unmarshal(params, &n); err != nil {
@@ -292,11 +304,12 @@ type thread struct {
 	id     string
 	onTool harness.ToolHandler
 
-	mu     sync.Mutex
-	queue  []harness.Event
-	wake   chan struct{}
-	ended  bool
-	events chan harness.Event
+	mu       sync.Mutex
+	queue    []harness.Event
+	wake     chan struct{}
+	ended    bool
+	events   chan harness.Event
+	defaults harness.ModelSelection
 }
 
 func newThread(s *Session, id string, onTool harness.ToolHandler) *thread {
@@ -375,6 +388,7 @@ func (t *thread) StartTurn(ctx context.Context, in harness.TurnInput) (string, e
 	var res TurnStartResponse
 	err := t.s.conn.call(ctx, methodTurnStart, TurnStartParams{
 		ThreadID: t.id, UserMessageID: in.UserMessageID,
+		Model: in.Model, ModelProvider: in.ModelProvider, Effort: in.Effort,
 		Input: []UserInput{{Type: userInputText, Text: in.Text, TextElements: []any{}}},
 	}, &res)
 	if err != nil {

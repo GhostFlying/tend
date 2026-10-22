@@ -2,6 +2,59 @@
   "traex_version": "0.210.1",
   "generator": "traex app-server generate-json-schema --experimental",
   "messages": {
+    "AgentMessageDeltaNotification": {
+      "properties": [
+        "delta",
+        "itemId",
+        "threadId",
+        "turnId"
+      ],
+      "required": [
+        "delta",
+        "itemId",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "CatalogModel": {
+      "properties": [
+        "additionalSpeedTiers",
+        "autoCompactTokenLimit",
+        "availabilityNux",
+        "businessMetadata",
+        "configName",
+        "contextWindow",
+        "defaultReasoningEffort",
+        "defaultServiceTier",
+        "description",
+        "displayName",
+        "harnessMode",
+        "hidden",
+        "id",
+        "inputModalities",
+        "isDefault",
+        "maxContextWindow",
+        "model",
+        "modelFamily",
+        "modelProviderId",
+        "multiAgentVersion",
+        "serviceTiers",
+        "supportedReasoningEfforts",
+        "supportsPersonality",
+        "upgrade",
+        "upgradeInfo"
+      ],
+      "required": [
+        "defaultReasoningEffort",
+        "description",
+        "displayName",
+        "hidden",
+        "id",
+        "isDefault",
+        "model",
+        "supportedReasoningEfforts"
+      ]
+    },
     "ClientInfo": {
       "properties": [
         "name",
@@ -215,6 +268,34 @@
       ],
       "required": [
         "content"
+      ]
+    },
+    "ModelListParams": {
+      "properties": [
+        "cursor",
+        "forceRefresh",
+        "includeHidden",
+        "limit"
+      ],
+      "required": null
+    },
+    "ModelListResponse": {
+      "properties": [
+        "data",
+        "nextCursor"
+      ],
+      "required": [
+        "data"
+      ]
+    },
+    "ReasoningEffortOption": {
+      "properties": [
+        "description",
+        "reasoningEffort"
+      ],
+      "required": [
+        "description",
+        "reasoningEffort"
       ]
     },
     "Thread": {
