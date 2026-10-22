@@ -9,6 +9,10 @@ import (
 // ToolUseRow is a tool use of the main agent in the conversation.
 type ToolUseRow struct {
 	MessageID string
+	// ThreadID is the main agent's thread, so the uses of a thread whose
+	// harness went away are found even when tend never learned the
+	// turn's ID.
+	ThreadID  string
 	TurnID    string
 	ItemID    string
 	Tool      string
@@ -21,8 +25,8 @@ type ToolUseRow struct {
 // GetToolUse returns the tool use of a turn's item, or ErrNotFound.
 func GetToolUse(ctx context.Context, q Querier, turnID, itemID string) (ToolUseRow, error) {
 	u := ToolUseRow{TurnID: turnID, ItemID: itemID}
-	err := q.QueryRowContext(ctx, `SELECT message_id, tool, input, output, status, updated_at FROM conversation_tool_uses
-		WHERE turn_id = ? AND item_id = ?`, turnID, itemID).Scan(&u.MessageID, &u.Tool, &u.Input, &u.Output, &u.Status, &u.UpdatedAt)
+	err := q.QueryRowContext(ctx, `SELECT message_id, thread_id, tool, input, output, status, updated_at FROM conversation_tool_uses
+		WHERE turn_id = ? AND item_id = ?`, turnID, itemID).Scan(&u.MessageID, &u.ThreadID, &u.Tool, &u.Input, &u.Output, &u.Status, &u.UpdatedAt)
 	if err != nil {
 		return ToolUseRow{}, notFound(err, "tool use "+itemID)
 	}
@@ -32,10 +36,10 @@ func GetToolUse(ctx context.Context, q Querier, turnID, itemID string) (ToolUseR
 // PutToolUse records a tool use's details; its conversation item must
 // exist.
 func (t *Tx) PutToolUse(ctx context.Context, u ToolUseRow) error {
-	_, err := t.Exec(ctx, `INSERT INTO conversation_tool_uses (message_id, turn_id, item_id, tool, input, output, status, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (message_id) DO UPDATE SET tool = excluded.tool, input = excluded.input,
+	_, err := t.Exec(ctx, `INSERT INTO conversation_tool_uses (message_id, thread_id, turn_id, item_id, tool, input, output, status, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (message_id) DO UPDATE SET tool = excluded.tool, input = excluded.input,
 		output = excluded.output, status = excluded.status, updated_at = excluded.updated_at`,
-		u.MessageID, u.TurnID, u.ItemID, u.Tool, u.Input, u.Output, u.Status, u.UpdatedAt)
+		u.MessageID, u.ThreadID, u.TurnID, u.ItemID, u.Tool, u.Input, u.Output, u.Status, u.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("store: put tool use: %w", err)
 	}
@@ -56,7 +60,7 @@ func GetConversationSeq(ctx context.Context, q Querier, messageID string) (int64
 // running as interrupted, after the harness went away, and returns them.
 func (t *Tx) SettleToolUses(ctx context.Context, threadID string, now int64) ([]string, error) {
 	rows, err := t.Q().QueryContext(ctx, `UPDATE conversation_tool_uses SET status = 'interrupted', updated_at = ?
-		WHERE status = 'running' AND turn_id IN (SELECT turn_id FROM main_turns WHERE thread_id = ? AND turn_id IS NOT NULL)
+		WHERE status = 'running' AND thread_id = ?
 		RETURNING message_id`, now, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("store: settle tool uses: %w", err)
