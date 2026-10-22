@@ -577,13 +577,15 @@ func TestOrcaWorkerContinuesALateInterruption(t *testing.T) {
 
 func TestFault_ContinuationReplyLost(t *testing.T) {
 	f := newWorkerFixture(t)
-	ctx, cancel := context.WithCancelCause(context.Background())
+	testCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(stop)
+	ctx, cancel := context.WithCancelCause(testCtx)
 	w, _, drained := f.start(ctx, f.spec(protocol.RoleImplement))
 	cancel(fmt.Errorf("runner: %w", harness.ErrPaused))
 	w.Wait()
 	<-drained
 	f.orca.loseSend = 1
-	w, _, drained = f.start(context.Background(), f.spec(protocol.RoleImplement))
+	w, _, drained = f.start(testCtx, f.spec(protocol.RoleImplement))
 	if n := f.orca.count("terminal send", func(c []string) bool { return flag(c, "--retry-request") == "req-1" }); n != 1 {
 		t.Fatalf("%d replays, want the lost send replayed", n)
 	}
@@ -603,13 +605,36 @@ func TestFault_ContinuationReplyLost(t *testing.T) {
 	f.thread = string(b)
 	f.orca.interrupt("term_1")
 	sends := f.orca.count("terminal send", func(c []string) bool { return flag(c, "--retry-request") == "req-1" })
-	w, _, drained = f.start(context.Background(), f.spec(protocol.RoleImplement))
+	spec := f.spec(protocol.RoleImplement)
+	isContinuation := func(c []string) bool {
+		return slices.Contains(c, "--enter") && flag(c, "--retry-request") == "" && flag(c, "--text") == harness.Continuation(spec)
+	}
+	continuations := f.orca.count("terminal send", isContinuation)
+	w, _, drained = f.start(testCtx, spec)
 	if n := f.orca.count("terminal send", func(c []string) bool { return flag(c, "--retry-request") == "req-1" }); n != sends+1 {
 		t.Errorf("%d replays, want the journaled request replayed", n-sends)
 	}
+	// Replaying the old request leaves the fake interrupted. Wait for the
+	// worker to observe that state and deliver a NEW continuation before
+	// finishing it; otherwise that send can reset an early finish to working.
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for f.orca.count("terminal send", isContinuation) == continuations {
+		select {
+		case <-testCtx.Done():
+			t.Fatalf("new continuation was not delivered: %v", testCtx.Err())
+		case <-tick.C:
+		}
+	}
+	if n := f.orca.count("terminal send", isContinuation); n != continuations+1 {
+		t.Fatalf("%d new continuations, want one after replay", n-continuations)
+	}
 	f.orca.finish("term_1", "ok")
-	w.Wait()
+	res, err := w.Wait()
 	<-drained
+	if err != nil || res.Summary != "ok" {
+		t.Fatalf("continued result = %+v, %v", res, err)
+	}
 }
 
 func TestFault_StoppedDuringLaunch(t *testing.T) {
