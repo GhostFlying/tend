@@ -45,7 +45,7 @@ worker 是 orca 里的 agent TUI（D63、D66）：runner 在 orca 里建 worktre
 
 tend 在仓库里留下的东西：
 
-- 每个 run 期间，worktree 里有 `.codex/config.toml` 或 `.trae/traecli.toml`，worktree 的 git 目录里有 `tend-worker.json`；run 结束时删除。仓库里已有同名而不是 tend 写的文件时，run 失败，不会覆盖。
+- 每个 run 期间，worktree 里有 `.codex/config.toml` 或 `.trae/traecli.toml`（无人值守设置、关闭启动时的更新检查、tend 的 MCP server），worktree 的 git 目录里有 `tend-worker.json`；run 结束时删除。仓库里已有同名而不是 tend 写的文件时，run 失败，不会覆盖。
 - 仓库共用的 `info/exclude`（`git rev-parse --git-path info/exclude`）里加了 `/.codex/config.toml`、`/.trae/traecli.toml` 两行，worker 的提交和产物不会带上它们。linked worktree 与主 checkout 共用这个文件，所以 owner 主 checkout 里同名的未跟踪文件也会被 `git status` 忽略。
 - 任务的 worktree 和 worker 的终端在 run 结束后保留，owner 可以在 orca 里查看；取消或放弃的 run 的终端会被关闭。
 

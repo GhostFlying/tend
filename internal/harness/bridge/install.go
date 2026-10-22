@@ -132,7 +132,8 @@ func config(command string, args []string) string {
 	for i, a := range args {
 		quoted[i] = q(a)
 	}
-	return configHeader + "\napproval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n" +
+	// An agent waiting at its update prompt would never start the turn.
+	return configHeader + "\napproval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\ncheck_for_update_on_startup = false\n" +
 		"\n[mcp_servers.tend_worker]\ncommand = " + q(command) + "\nargs = [" + strings.Join(quoted, ", ") + "]\n" +
 		"default_tools_approval_mode = \"approve\"\n"
 }

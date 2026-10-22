@@ -257,7 +257,7 @@ func TestInstallConfiguresTheAgent(t *testing.T) {
 		t.Errorf("state = %v, %v; want mode 0600", fi, err)
 	}
 	b, _ := os.ReadFile(filepath.Join(wt, ".codex", "config.toml"))
-	want := configHeader + "\napproval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n" +
+	want := configHeader + "\napproval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\ncheck_for_update_on_startup = false\n" +
 		"\n[mcp_servers.tend_worker]\ncommand = \"/opt/tend \\\"runner\\\"\"\nargs = [\"worker-mcp\", \"--state\", \"" + state + "\", \"--run\", \"run_1\"]\n" +
 		"default_tools_approval_mode = \"approve\"\n"
 	if string(b) != want {

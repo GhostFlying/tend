@@ -625,11 +625,12 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 		}
 		if a.PaneKey == "" {
 			// orca learns an agent's state from the agent's hooks; without
-			// them it never sees a turn end.
+			// them, or with the agent stuck at a startup prompt, it never
+			// sees a turn end.
 			if w.unseen.IsZero() {
 				w.unseen = w.ws.opts.Now()
 			} else if w.ws.opts.Now().Sub(w.unseen) >= w.ws.opts.Settle {
-				return Agent{}, false, fmt.Errorf("orca: no state for the worker's %s agent after %s; check that its hooks for orca are enabled and trusted on this host",
+				return Agent{}, false, fmt.Errorf("orca: no state for the worker's %s agent after %s; check its terminal in orca for a prompt it waits at, and that its hooks for orca are enabled and trusted on this host",
 					w.ws.opts.Agent, w.ws.opts.Settle)
 			}
 		} else {
