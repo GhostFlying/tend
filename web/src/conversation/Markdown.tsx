@@ -75,7 +75,7 @@ function render(tokens: readonly Token[], keys: Keys): ReactNode[] {
         add(...withTaskRefs(token.content, keys));
         break;
       case "code_inline":
-        add(<code key={keys.next++}>{token.content}</code>);
+        add(<code key={keys.next++}>{withTaskRefs(token.content, keys)}</code>);
         break;
       case "softbreak":
         add("\n");
