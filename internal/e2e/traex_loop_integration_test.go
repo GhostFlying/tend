@@ -13,23 +13,19 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
-	"github.com/GhostFlying/tend/internal/contextbuilder"
-	"github.com/GhostFlying/tend/internal/dispatch"
-	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/traex"
-	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
 	"github.com/GhostFlying/tend/internal/runner/gitws"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 	"github.com/GhostFlying/tend/internal/runnerapi"
 	"github.com/GhostFlying/tend/internal/store"
-	"github.com/GhostFlying/tend/internal/tools"
 )
 
 // TestIntegration_TraexLoop runs the whole loop with real traex: the owner
-// asks in plain words, the main agent plans a task, a runner implements it
-// in a git workspace and an independent run accepts it.
+// asks through the web client's API, the main agent plans a task, a runner
+// implements it in a git workspace, an independent run accepts it and the
+// client observes completion over its event stream.
 func TestIntegration_TraexLoop(t *testing.T) {
 	env := gitIdentity(t)
 	url := calcRemote(t, env)
@@ -42,29 +38,19 @@ func TestIntegration_TraexLoop(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	defer func() {
-		cancel()
-		wg.Wait()
-	}()
-	cb := contextbuilder.New(srv.app, srv.store, srv.ids, contextbuilder.Config{})
-	front := mainthread.New(srv.app, cb, tools.New(srv.app, srv.store, cb, quiet()), mainthread.Config{
-		Instance: "main",
-		Thread:   mainthread.ThreadConfig(t.TempDir(), traexModel()),
-		Open: func(ctx context.Context) (harness.Session, error) {
-			return traex.Start(ctx, traex.Options{Version: "it", Env: []string{protocol.AddonEnv + "=off"}})
-		},
-		Log: quiet(),
-	})
-	d := dispatch.New(srv.app, map[string]dispatch.Handler{app.MainThreadDestination: front}, srv.signal, time.Now, dispatch.Config{}, quiet())
-	wg.Go(func() { _ = front.Run(ctx) })
-	wg.Go(func() { _ = d.Run(ctx) })
+	srv.startHostedTraex()
 
 	home := t.TempDir()
 	j, err := journal.Open(ctx, filepath.Join(home, "journal.db"), time.Now)
 	if err != nil {
+		cancel()
 		t.Fatal(err)
 	}
-	defer j.Close()
+	srv.onStop(func() {
+		cancel()
+		wg.Wait()
+		j.Close()
+	})
 	r := runner.New(runner.Config{
 		ServerURL: srv.url, HostID: "linux-1", HostToken: hostToken, Version: "it", HTTPClient: http.DefaultClient, Journal: j,
 		Workers:    traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Version: "it"}, Model: traexModel()}),
@@ -73,18 +59,39 @@ func TestIntegration_TraexLoop(t *testing.T) {
 	})
 	wg.Go(func() { _ = r.Run(ctx) })
 
-	srv.say("In the calc repository, please add a function Sub(a, b int) int that returns a - b, with a unit test. " +
-		"Accept it when go test ./... passes.")
-	deadline := time.Now().Add(40 * time.Minute)
-	for time.Now().Before(deadline) {
-		if srv.count(`SELECT COUNT(*) FROM tasks WHERE lifecycle = 'completed'`) == 1 {
-			t.Logf("completed: %d runs, %d agent messages", srv.count(`SELECT COUNT(*) FROM runs`),
+	web := srv.webLogin(srv.startWeb().URL)
+	events := web.stream("")
+	web.send(protocol.SubmitMessagePayload{Body: "In the calc repository, please add a function Sub(a, b int) int that returns a - b, with a unit test. " +
+		"Accept it when go test ./... passes. Deliver it as a commit in workspace add-sub; do not push."})
+	deadline := time.NewTimer(40 * time.Minute)
+	defer deadline.Stop()
+	for {
+		select {
+		case ev, open := <-events.events:
+			if !open {
+				t.Fatal("the owner's event stream ended before task completion")
+			}
+			if ev.EventSeq != events.last+1 {
+				t.Fatalf("event %d follows %d", ev.EventSeq, events.last)
+			}
+			events.last = ev.EventSeq
+			if ev.Kind != "task.completed" {
+				continue
+			}
+			var detail protocol.TaskDetail
+			if st := web.do("GET", "/api/v1/tasks/"+ev.ObjectID, nil, &detail); st != http.StatusOK {
+				t.Fatalf("read the completed task = %d", st)
+			}
+			if detail.Lifecycle != protocol.TaskCompleted || len(detail.Acceptances) == 0 || len(detail.Artifacts) == 0 {
+				t.Fatalf("task.completed has no accepted artifact: %+v", detail)
+			}
+			t.Logf("owner API and SSE completed: %d real runs, %d agent messages", len(detail.Runs),
 				srv.count(`SELECT COUNT(*) FROM conversation_messages WHERE author = 'main_agent'`))
 			return
+		case <-deadline.C:
+			t.Fatalf("the task did not complete in time:\n%s", srv.describe())
 		}
-		time.Sleep(2 * time.Second)
 	}
-	t.Fatalf("the task did not complete in time:\n%s", srv.describe())
 }
 
 // describe summarizes the ledger for a failing test.
