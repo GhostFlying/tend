@@ -30,3 +30,12 @@ func TestBrief(t *testing.T) {
 		t.Error("verdict tool schema is not JSON")
 	}
 }
+
+func TestBriefCarriesTaskRelationsWithoutWorkspaceInheritance(t *testing.T) {
+	_, input := Brief(WorkerSpec{Relations: []protocol.TaskRelationView{{Kind: protocol.RelationFollowUp, Direction: protocol.RelationOutgoing, Task: protocol.TaskSummary{TaskID: "task_original", Title: "original delivery", SpecVersion: 3, Lifecycle: protocol.TaskCompleted}}}})
+	for _, want := range []string{"follow_up outgoing", "task_original", "spec 3", "completed", "configured workspace base"} {
+		if !strings.Contains(input, want) {
+			t.Fatalf("brief lacks %q: %s", want, input)
+		}
+	}
+}

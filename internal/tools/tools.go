@@ -262,13 +262,14 @@ func requireMessage(c Call) error {
 }
 
 type createArgs struct {
-	Title         string          `json:"title"`
-	Spec          domain.Spec     `json:"spec"`
-	Rating        protocol.Rating `json:"rating"`
-	Project       string          `json:"project"`
-	WorkspaceName string          `json:"workspace_name"`
-	CommitSeq     int64           `json:"commit_seq"`
-	Reason        string          `json:"reason"`
+	Relations     []protocol.TaskRelation `json:"relations,omitempty"`
+	Title         string                  `json:"title"`
+	Spec          domain.Spec             `json:"spec"`
+	Rating        protocol.Rating         `json:"rating"`
+	Project       string                  `json:"project"`
+	WorkspaceName string                  `json:"workspace_name"`
+	CommitSeq     int64                   `json:"commit_seq"`
+	Reason        string                  `json:"reason"`
 }
 
 func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
@@ -283,7 +284,7 @@ func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "workspace_name is required")
 	}
 	res, err := s.execute(ctx, c, "tasks.create", protocol.Target{Type: "task"}, nil, a.Reason, map[string]any{
-		"title": a.Title, "spec": a.Spec, "rating": a.Rating, "project": a.Project, "workspace_name": a.WorkspaceName,
+		"relations": a.Relations, "title": a.Title, "spec": a.Spec, "rating": a.Rating, "project": a.Project, "workspace_name": a.WorkspaceName,
 		"source_message_id": c.SourceMessageID, "commit_seq": a.CommitSeq,
 	}, app.CreateTask{})
 	if err == nil && a.Rating == protocol.RatingNone {
@@ -299,13 +300,14 @@ const unratedNote = "The task is unrated and queues as p2. Ask the owner how it 
 	"p0 urgent, ahead of everything; p1 high; p2 normal; p3 low. Then set it with tasks_update_intent."
 
 type updateArgs struct {
-	TaskID                  string           `json:"task_id"`
-	ExpectedControlRevision int64            `json:"expected_control_revision"`
-	Spec                    *domain.Spec     `json:"spec"`
-	Rating                  *protocol.Rating `json:"rating"`
-	Project                 *string          `json:"project"`
-	CommitSeq               int64            `json:"commit_seq"`
-	Reason                  string           `json:"reason"`
+	Relations               *[]protocol.TaskRelation `json:"relations,omitempty"`
+	TaskID                  string                   `json:"task_id"`
+	ExpectedControlRevision int64                    `json:"expected_control_revision"`
+	Spec                    *domain.Spec             `json:"spec"`
+	Rating                  *protocol.Rating         `json:"rating"`
+	Project                 *string                  `json:"project"`
+	CommitSeq               int64                    `json:"commit_seq"`
+	Reason                  string                   `json:"reason"`
 }
 
 func (s *Service) tasksUpdateIntent(ctx context.Context, c Call) (any, error) {
@@ -317,6 +319,9 @@ func (s *Service) tasksUpdateIntent(ctx context.Context, c Call) (any, error) {
 		return nil, err
 	}
 	payload := map[string]any{"source_message_id": c.SourceMessageID, "commit_seq": a.CommitSeq}
+	if a.Relations != nil {
+		payload["relations"] = *a.Relations
+	}
 	if a.Spec != nil {
 		payload["spec"] = a.Spec
 	}

@@ -39,6 +39,12 @@ const specSchema = `{
   "additionalProperties": false
 }`
 
+const relationsSchema = `{
+ "type":"array",
+ "description":"Outgoing task references. follow_up continues another task; related records a general reference. References do not inherit code or create scheduling dependencies. On update, replaces outgoing declarations; [] clears them. Backlinks remain owned by their declaring task.",
+ "items":{"type":"object","properties":{"kind":{"type":"string","enum":["follow_up","related"]},"task_id":{"type":"string"}},"required":["kind","task_id"],"additionalProperties":false}
+}`
+
 var schemas = map[string]string{
 	"tasks_list": `{
   "type": "object",
@@ -58,6 +64,7 @@ var schemas = map[string]string{
   "type": "object",
   "properties": {
     "title": {"type": "string"},
+    "relations": ` + relationsSchema + `,
     "spec": ` + specSchema + `,
     "rating": {"type": "string", "enum": ["p0", "p1", "p2", "p3"], "description": "How the owner ranks the task: p0 urgent, ahead of everything; p1 high; p2 normal; p3 low. Ask the owner; leave it out if they have not said."},
     "project": {"type": "string", "description": "The project the task belongs to. Required when tend has more than one project."},
@@ -73,6 +80,7 @@ var schemas = map[string]string{
   "properties": {
     "task_id": {"type": "string"},
     "expected_control_revision": {"type": "integer", "description": "The control_revision you last read; stale values are rejected."},
+    "relations": ` + relationsSchema + `,
     "spec": ` + specSchema + `,
     "rating": {"type": "string", "enum": ["p0", "p1", "p2", "p3"], "description": "Rate the task: p0 urgent, p1 high, p2 normal, p3 low."},
     "project": {"type": "string", "description": "Move the task to this project."},

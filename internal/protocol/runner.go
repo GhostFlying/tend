@@ -88,6 +88,7 @@ type Assignment struct {
 	Generation  int64      `json:"generation"`
 	SpecVersion int64      `json:"spec_version"`
 	// Spec is the immutable task spec version the run works on.
+	Relations []TaskRelationView  `json:"relations,omitempty"`
 	Spec      json.RawMessage     `json:"spec"`
 	Workspace AssignmentWorkspace `json:"workspace"`
 	// Artifact is the artifact reference an acceptance run judges.

@@ -376,3 +376,31 @@ func TestControlAndCancel(t *testing.T) {
 		t.Errorf("lifecycle after cancel = %q, %v", lifecycle, err)
 	}
 }
+
+func TestTaskRelationToolsCreateReadAndReplace(t *testing.T) {
+	e := newEnv(t)
+	parent, _ := createdTask(t, e.call("tasks_create", createArgs{Title: "original", Spec: spec, CommitSeq: 1}, ""))
+	refs := []protocol.TaskRelation{{Kind: protocol.RelationFollowUp, TaskID: parent}}
+	child, revision := createdTask(t, e.call("tasks_create", createArgs{Title: "followup", Spec: spec, Relations: refs, CommitSeq: 2}, ""))
+	read := e.call("tasks_read", taskArgs{TaskID: parent}, "")
+	if !read.OK || !strings.Contains(string(read.Result), child) || !strings.Contains(string(read.Result), "incoming") {
+		t.Fatalf("backlink not visible: %+v", read)
+	}
+	refs = []protocol.TaskRelation{{Kind: protocol.RelationRelated, TaskID: parent}}
+	update := e.call("tasks_update_intent", updateArgs{TaskID: child, ExpectedControlRevision: revision, Relations: &refs, CommitSeq: 3}, "")
+	if !update.OK {
+		t.Fatalf("update relation: %+v", update)
+	}
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		rows, err := store.ListTaskRelations(t.Context(), tx.Q(), child)
+		if err != nil {
+			return err
+		}
+		if len(rows) != 1 || rows[0].Kind != protocol.RelationRelated || rows[0].TargetTaskID != parent {
+			t.Fatalf("updated refs=%+v", rows)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
