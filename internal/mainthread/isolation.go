@@ -18,10 +18,13 @@ func ThreadConfig(cwd, model string) harness.ThreadConfig {
 // Isolation turns off the harness features the main agent must not use:
 // editing, browsers and computer use, image generation, plugins, apps,
 // skills and memories, which would act outside tend or bring in the
-// owner's own setup, and asking the user, which no client answers. The
-// shell stays so the main agent can read repositories (D68). Keys are
-// dotted configuration paths, the form of `-c key=value`.
+// owner's own setup, and asking the user, which no client answers. It also
+// drops writable roots the owner configured, so the sandbox lets the agent
+// write only in its directory. The shell stays so the main agent can read
+// repositories (D68). Keys are dotted configuration paths, the form of
+// `-c key=value`.
 var Isolation = map[string]any{
+	"sandbox_workspace_write.writable_roots":        []string{},
 	"features.apply_patch_freeform":                 false,
 	"features.code_mode_host":                       false,
 	"features.browser_use":                          false,

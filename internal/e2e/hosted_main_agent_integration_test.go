@@ -77,5 +77,6 @@ func TestIntegration_HostedMainAgentReads(t *testing.T) {
 		}
 		return rows.Err()
 	})
-	t.Fatalf("the main agent did not report the code word; replies: %q", replies)
+	t.Fatalf("the main agent did not report the code word; %d turns, %d ended; replies: %q",
+		srv.count(`SELECT COUNT(*) FROM main_turns`), srv.count(`SELECT COUNT(*) FROM main_turns WHERE status != 'started'`), replies)
 }
