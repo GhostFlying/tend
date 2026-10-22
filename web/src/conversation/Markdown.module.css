@@ -1,0 +1,150 @@
+.md {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md blockquote,
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 0;
+}
+
+.md ul,
+.md ol {
+  padding-left: 22px;
+}
+
+.md li + li {
+  margin-top: 2px;
+}
+
+.md li > ul,
+.md li > ol {
+  margin-top: 2px;
+}
+
+.md h1,
+.md h2,
+.md h3 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.md h4,
+.md h5,
+.md h6 {
+  font-size: var(--text-l);
+  font-weight: 600;
+}
+
+.md a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.md a:hover {
+  text-decoration: underline;
+}
+
+.md code {
+  font-family: var(--mono);
+  font-size: var(--text-m);
+  background: var(--bg-l2);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+}
+
+.md blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--label-2);
+}
+
+.md hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
+.md table {
+  border-collapse: collapse;
+  font-size: var(--text-base);
+  line-height: 20px;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.md th {
+  background: var(--bg-l1);
+  font-weight: 600;
+}
+
+/* code blocks: monospace, scrolling sideways, with a copy button */
+.code {
+  position: relative;
+  background: var(--bg-l1);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-l);
+}
+
+.code pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 19px;
+}
+
+.code pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  border-radius: 0;
+}
+
+.copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-s);
+  font-size: var(--text-s);
+  color: var(--label-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.code:hover .copy,
+.copy:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .copy {
+    opacity: 1;
+  }
+}

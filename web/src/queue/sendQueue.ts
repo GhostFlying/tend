@@ -56,6 +56,9 @@ type Outcome =
 
 const defaultBackoff = [1_000, 3_000, 8_000];
 
+/** The list of a browser without an outbox. */
+export const noOutbox: Readable<readonly OutgoingMessage[]> = new Store([]);
+
 export class SendQueue {
   private readonly outbox: Outbox;
   private readonly sender: Sender;
