@@ -109,6 +109,39 @@ describe("durable interrupt", () => {
     expect(sender.submissions).toHaveLength(1);
   });
 
+  test("an old receipt never delays a new turn's stop or overwrites its state", async () => {
+    const submissions: Envelope[] = [];
+    const answers = new Map<string, (value: APIResponse) => void>();
+    const sender: OpSender = {
+      submit: (envelope) => {
+        submissions.push(envelope);
+        return new Promise((resolve) => {
+          answers.set(envelope.request_id, resolve);
+        });
+      },
+      lookup: async () => null,
+    };
+    let nextId = 0;
+    const interrupt = new Interrupt(sender, { storage: storage(), newId: () => `req_${++nextId}` });
+    const first = interrupt.start("msg_1");
+    await Promise.resolve();
+    expect(submissions).toHaveLength(1);
+    interrupt.observe([terminal]);
+    const second = interrupt.start("msg_2");
+    await Promise.resolve();
+    // The first HTTP call is deliberately unresolved: the second must
+    // already have reached the sender rather than waiting for its timeout.
+    expect(submissions).toHaveLength(2);
+    expect(submissions[1]?.target?.id).toBe("msg_2");
+    expect(interrupt.state.get()).toMatchObject({ messageId: "msg_2", phase: "unconfirmed" });
+    answers.get("req_1")!({ operation: { request_id: "req_1", status: "unknown" } });
+    await first;
+    expect(interrupt.state.get()).toMatchObject({ messageId: "msg_2", phase: "unconfirmed" });
+    answers.get("req_2")!({ operation: { request_id: "req_2", status: "accepted" } });
+    await second;
+    expect(interrupt.state.get()).toMatchObject({ messageId: "msg_2", phase: "recorded" });
+  });
+
   test("a terminal message cannot be resurrected by a late HTTP response", async () => {
     let answer!: (value: APIResponse) => void;
     const sender: OpSender = {
