@@ -128,6 +128,7 @@ export interface TendAPI {
   Envelope?: Envelope;
   HookRequest?: HookRequest;
   HookResponse?: HookResponse;
+  LedgerEvent?: LedgerEvent;
   RateTaskPayload?: RateTaskPayload;
   RequestView?: RequestView;
   RunLogPage?: RunLogPage;
@@ -135,6 +136,7 @@ export interface TendAPI {
   SessionView?: SessionView;
   SetControlModePayload?: SetControlModePayload;
   Snapshot?: Snapshot;
+  StreamStart?: StreamStart;
   SubmitMessagePayload?: SubmitMessagePayload;
   TaskDetail?: TaskDetail;
   TaskPage?: TaskPage;
@@ -335,6 +337,18 @@ export interface HookResponse {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LedgerEvent".
+ */
+export interface LedgerEvent {
+  created_at: string;
+  event_seq: number;
+  item?: ConversationItem;
+  kind: string;
+  object_id: string;
+  object_type: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RateTaskPayload".
  */
 export interface RateTaskPayload {
@@ -468,6 +482,13 @@ export interface QueueEntry {
   title: string;
   unplaceable?: string;
   waited_millis: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "StreamStart".
+ */
+export interface StreamStart {
+  event_seq: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

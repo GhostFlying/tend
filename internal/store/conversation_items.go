@@ -153,3 +153,22 @@ func scanConversation(row interface{ Scan(...any) error }) (ConversationRow, err
 	}
 	return r, nil
 }
+
+// ListEvents returns up to limit events after seq, in order.
+func ListEvents(ctx context.Context, q Querier, after int64, limit int) ([]EventView, error) {
+	rows, err := q.QueryContext(ctx, `SELECT event_seq, object_type, object_id, kind, created_at FROM events
+		WHERE event_seq > ? ORDER BY event_seq LIMIT ?`, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list events: %w", err)
+	}
+	defer rows.Close()
+	var out []EventView
+	for rows.Next() {
+		var e EventView
+		if err := rows.Scan(&e.Seq, &e.ObjectType, &e.ObjectID, &e.Kind, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("store: scan event: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

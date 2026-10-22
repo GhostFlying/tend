@@ -351,3 +351,28 @@ func conversationItem(r store.ConversationRow) protocol.ConversationItem {
 	}
 	return it
 }
+
+// Events reads up to limit ledger events after seq for the owner's event
+// stream, with the current conversation item of conversation events.
+func Events(ctx context.Context, q store.Querier, after int64, limit int) ([]protocol.LedgerEvent, error) {
+	rows, err := store.ListEvents(ctx, q, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.LedgerEvent, 0, len(rows))
+	for _, e := range rows {
+		ev := protocol.LedgerEvent{EventSeq: e.Seq, ObjectType: e.ObjectType, ObjectID: e.ObjectID, Kind: e.Kind, CreatedAt: time.UnixMilli(e.CreatedAt).UTC()}
+		if e.ObjectType == "message" {
+			r, err := store.GetConversationItem(ctx, q, e.ObjectID)
+			switch {
+			case err == nil:
+				it := conversationItem(r)
+				ev.Item = &it
+			case !errors.Is(err, store.ErrNotFound):
+				return nil, err
+			}
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}
