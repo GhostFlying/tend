@@ -6,17 +6,8 @@ import { Back, Chevron } from "../shell/icons.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Settings.module.css";
 
-const effortLabels: Record<string, string> = {
-  none: "无",
-  minimal: "最低",
-  low: "低",
-  medium: "中",
-  high: "高",
-  xhigh: "更高",
-  max: "最高",
-};
 type Pane = "root" | "model" | "effort";
-const effortLabel = (effort: string) => effortLabels[effort] ?? (effort || "默认");
+const effortLabel = (effort: string) => effort || "默认";
 
 export function Settings({ connection }: { connection: Connection }) {
   const { client, live } = useServices();
