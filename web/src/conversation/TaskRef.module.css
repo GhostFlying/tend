@@ -1,0 +1,26 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  max-width: 100%;
+  padding: 0 10px;
+  margin: 0 2px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  font-size: var(--text-m);
+  line-height: 20px;
+  vertical-align: middle;
+  background: var(--bg);
+}
+
+.chip:hover {
+  background: var(--hover);
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

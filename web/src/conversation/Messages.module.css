@@ -1,0 +1,63 @@
+.divider {
+  align-self: center;
+  font-size: var(--text-s);
+  color: var(--caption);
+}
+
+/* the owner's messages: right-hand bubbles with their state below */
+.user {
+  align-self: flex-end;
+  max-width: min(540px, 84%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.bubble {
+  background: var(--bubble);
+  border-radius: var(--radius-bubble);
+  padding: 10px 16px;
+  font-size: var(--text-l);
+  line-height: var(--leading-l);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.state {
+  font-size: var(--text-s);
+  color: var(--caption);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.state[data-state="unknown"],
+.state[data-state="failed"] {
+  color: var(--warn-text);
+}
+
+/* the main agent's turn: tool rows and replies, no bubble */
+.agent {
+  font-size: var(--text-l);
+  line-height: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.foot {
+  font-size: var(--text-s);
+  line-height: 18px;
+  color: var(--caption);
+}
+
+@media (max-width: 760px) {
+  .bubble,
+  .agent {
+    font-size: 16px;
+  }
+}

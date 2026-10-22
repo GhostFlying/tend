@@ -51,7 +51,7 @@ export function Shell({
           <Sidebar view={view} connection={connection} />
         </aside>
         <main className={styles.chat}>
-          <Chat connection={connection} queue={queue} />
+          <Chat connection={connection} />
         </main>
         <section className={styles.details} inert={!detailsOpen} aria-label="任务详情">
           <Details onClose={closeDetails} />

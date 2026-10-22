@@ -1,0 +1,93 @@
+.tool {
+  border-radius: var(--radius-m);
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 26px;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  font-size: var(--text-m);
+  color: var(--label-3);
+  text-align: left;
+}
+
+.row:hover {
+  background: var(--hover);
+  color: var(--label-2);
+}
+
+.chevron {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.tool[data-open] .chevron {
+  transform: rotate(90deg);
+}
+
+.name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--label-2);
+  flex: none;
+}
+
+.sum {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: var(--text-s);
+}
+
+.status[data-status="failed"] {
+  color: var(--err);
+}
+
+.status[data-status="interrupted"] {
+  color: var(--warn-text);
+}
+
+.body {
+  margin: 4px 0 2px 22px;
+  padding: 10px 12px;
+  background: var(--bg-l1);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-l);
+  font-family: var(--mono);
+  font-size: var(--text-s);
+  line-height: 19px;
+  color: var(--label-2);
+  max-height: 360px;
+  overflow: auto;
+}
+
+.label {
+  font-family: var(--font);
+  color: var(--caption);
+  margin-bottom: 2px;
+}
+
+.label:not(:first-child) {
+  margin-top: 8px;
+}
+
+.text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

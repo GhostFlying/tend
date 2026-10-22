@@ -1,0 +1,94 @@
+.wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript {
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.lane {
+  max-width: var(--lane-width);
+  margin: 0 auto;
+  padding: 24px 24px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.note {
+  align-self: center;
+  font-size: var(--text-s);
+  color: var(--caption);
+}
+
+.empty {
+  align-self: center;
+  max-width: 420px;
+  margin: 48px 0 0;
+  text-align: center;
+  font-size: var(--text-m);
+  line-height: 21px;
+  color: var(--caption);
+}
+
+.working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-m);
+  color: var(--label-3);
+}
+
+.shimmer {
+  background: linear-gradient(90deg, var(--label-3) 0%, var(--accent) 45%, var(--label-3) 90%);
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2s linear infinite;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.elapsed {
+  color: var(--caption);
+}
+
+.jump {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-s);
+  color: var(--label-2);
+  z-index: 5;
+}
+
+.jump svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 760px) {
+  .lane {
+    padding: 16px 14px 8px;
+  }
+}

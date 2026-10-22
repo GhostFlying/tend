@@ -41,6 +41,18 @@ export const Tasks = (p: IconProps) => (
   </svg>
 );
 
+export const Chevron = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <path d="M9 6l6 6-6 6" />
+  </svg>
+);
+
+export const Stop = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden {...p}>
+    <rect x="7" y="7" width="10" height="10" rx="2" />
+  </svg>
+);
+
 export const Pending = (p: IconProps) => (
   <svg viewBox="0 0 24 24" {...line} strokeWidth={1.8} {...p}>
     <circle cx="12" cy="12" r="8" />
