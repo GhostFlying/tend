@@ -81,7 +81,7 @@ D45 把托管主 Agent 往后放，先做外挂；D50 把 Web 延后。现在把
 
 - **停止回复**（F4）：
   - owner 控制命令 `conversation.interrupt_reply`，参数是消息 ID：这条消息的轮次正在进行时，经 `harness.Thread.Interrupt` 中断，消息状态记为被停止；已经结束的轮次不受影响，返回当前状态。
-  - 带 request_id 去重（约束 1）。中断请求没有回执时不重发，按轮次最终的状态为准（约束 4）。
+  - 带 request_id 去重（约束 1）。停止请求先持久化完整 envelope 和 request_id。HTTP 回执丢失时先查询原请求；无记录时只允许沿用同一 request_id 恢复原 HTTP 投递（D11）。已有 accepted、succeeded 或业务 unknown 记录时，不创建新中断、不重放外部副作用，只查询既有请求并观察消息最终状态（约束 4、D69）。
   - 阶段 C 未合入的 #31（`control.interrupt_reply`）作为参考，重新实现。
 - **在 Web 里回答待决事项**（F5，D71）：
   - 带效果的选项（tend 自己开出的“重新实现”“提高预算”“重新验收”“换一台从头再来”“取消任务”）：直接 `decisions.respond`，tend 在同一个事务里记录回答并执行效果（D53），不经过主 Agent。主 Agent 下一次处理消息时，从增量里知道 tend 做了什么。

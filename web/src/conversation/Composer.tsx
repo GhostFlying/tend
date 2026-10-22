@@ -2,10 +2,10 @@
 // when writing it: the reply it answers and the last item shown (v0.1
 // §6.2). While a reply is in progress and nothing is written, the send
 // button stops the reply instead (D69).
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { Connection } from "../api/client.ts";
 import { notify } from "../app/notice.ts";
-import { runOp } from "../app/ops.ts";
+import { Interrupt } from "./interrupt.ts";
 import { useServices } from "../app/services.tsx";
 import { Send, Stop } from "../shell/icons.tsx";
 import { useStore } from "../state/store.ts";
@@ -19,22 +19,39 @@ export function Composer({ connection }: { connection: Connection }) {
   const { client, live, queue } = useServices();
   const conversation = useStore(live.conversation);
   const [draft, setDraft] = useState("");
-  const [stopping, setStopping] = useState<string | null>(readInterrupt);
-  const [stopUnknown, setStopUnknown] = useState(() => readInterrupt() !== null);
+  const interrupt = useMemo(() => new Interrupt(client), [client]);
+  const pending = useStore(interrupt.state);
   const blocked = queue === null || connection.status === "not-owner";
   const body = draft.trim();
   const reply = latestReply(conversation.items);
   const busy = processing(conversation.items);
 
   useEffect(() => {
-    const message = conversation.items.find((m) => m.message_id === stopping);
-    if (
-      message &&
-      (message.state === "replied" || message.state === "interrupted" || message.state === "failed")
-    ) {
-      saveInterrupt(null);
-    }
-  }, [conversation.items, stopping]);
+    interrupt.observe(conversation.items);
+  }, [interrupt, conversation.items]);
+
+  useEffect(() => {
+    if (pending?.phase === "failed") notify(`没能停止回复：${pending.error}`, "warn");
+  }, [pending?.phase, pending?.error]);
+
+  useEffect(() => {
+    if (connection.status !== "online") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let delay = 1_000;
+    const recover = async () => {
+      await interrupt.resume();
+      if (!cancelled && interrupt.state.get()?.phase === "unconfirmed") {
+        timer = setTimeout(() => void recover(), delay);
+        delay = Math.min(delay * 2, 30_000);
+      }
+    };
+    void recover();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [interrupt, connection.status, pending?.envelope.request_id]);
 
   const send = async () => {
     if (queue === null || blocked || body === "") {
@@ -54,33 +71,11 @@ export function Composer({ connection }: { connection: Connection }) {
     }
   };
 
+  const stopping =
+    pending !== null && pending.messageId === busy?.message_id && pending.phase !== "failed";
   const stop = async () => {
-    if (!busy || stopping === busy.message_id) {
-      return;
-    }
-    saveInterrupt(busy.message_id);
-    setStopping(busy.message_id);
-    setStopUnknown(false);
-    const outcome = await runOp(client, {
-      operation: "conversation.interrupt_reply",
-      target: { type: "message", id: busy.message_id },
-      payload: { message_id: busy.message_id },
-    });
-    if (outcome.kind === "unknown") {
-      // No receipt: keep this turn fenced until its recorded state changes.
-      // Another interrupt would create a new request for an unconfirmed effect.
-      setStopUnknown(true);
-      notify("停止结果未知，以这条消息的最终状态为准", "warn");
-      void live.reload();
-      return;
-    }
-    if (outcome.kind !== "done") {
-      saveInterrupt(null);
-      setStopping(null);
-      notify(`没能停止回复：${outcome.message}`, "warn");
-      return;
-    }
-    // The recorded message state, not a timeout, settles the interrupt.
+    if (!busy || stopping) return;
+    await interrupt.start(busy.message_id);
     void live.reload();
   };
 
@@ -95,10 +90,13 @@ export function Composer({ connection }: { connection: Connection }) {
   let hint = "";
   if (queue === null) {
     hint = "这个浏览器不能保存待发送的消息，暂时不能发送";
+  } else if (busy && stopping) {
+    hint =
+      pending?.phase === "unknown"
+        ? "停止结果未知，等待消息的最终状态"
+        : (pending?.error ?? "正在停止…");
   } else if (connection.status === "offline") {
     hint = "离线：消息先存在这台设备上，连上后自动发送";
-  } else if (busy && stopping === busy.message_id) {
-    hint = stopUnknown ? "停止结果未知，等待消息的最终状态" : "正在停止…";
   } else if (reply) {
     hint = `回复 ${clock(Date.parse(reply.created_at))} 的消息`;
   }
@@ -122,7 +120,7 @@ export function Composer({ connection }: { connection: Connection }) {
             type="button"
             className={`${styles.send} ${styles.stop}`}
             onClick={() => void stop()}
-            disabled={stopping === busy.message_id}
+            disabled={stopping}
             title="停止回复"
             aria-label="停止回复"
           >
@@ -143,23 +141,4 @@ export function Composer({ connection }: { connection: Connection }) {
       </div>
     </div>
   );
-}
-
-// Preserve an unconfirmed interrupt across a page reload; only a recorded
-// terminal message state or an explicit refusal releases this fence.
-const interruptKey = "tend.interrupt-message";
-function readInterrupt(): string | null {
-  try {
-    return localStorage.getItem(interruptKey);
-  } catch {
-    return null;
-  }
-}
-function saveInterrupt(messageId: string | null): void {
-  try {
-    if (messageId) localStorage.setItem(interruptKey, messageId);
-    else localStorage.removeItem(interruptKey);
-  } catch {
-    /* The mounted composer still fences the interrupt. */
-  }
 }
