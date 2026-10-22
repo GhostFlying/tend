@@ -408,6 +408,22 @@ func TestFault_ClaimReceiptLost_Runner(t *testing.T) {
 			t.Errorf("implement runs = %d, want 1", got)
 		}
 	})
+	t.Run("journaled claim refused since is dropped", func(t *testing.T) {
+		srv := newServer(t, time.Minute)
+		n := newNode(t, srv, passing)
+		task := srv.createTask()
+		// A claim journaled while the runner ran another worker, which
+		// tend refuses now that the runner runs the host's.
+		j := n.journal()
+		if err := j.PutRequest(context.Background(), journal.Request{Envelope: protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest),
+			Operation: protocol.OpRunnerClaim, Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: json.RawMessage(`{"worker":"orca"}`)}}); err != nil {
+			t.Fatal(err)
+		}
+		j.Close()
+
+		n.start()
+		eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
+	})
 	t.Run("unjournaled claim is handed over again", func(t *testing.T) {
 		srv := newServer(t, time.Minute)
 		n := newNode(t, srv, passing)
