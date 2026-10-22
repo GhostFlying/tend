@@ -35,7 +35,8 @@ type WorkerOptions struct {
 	Now       func() time.Time
 	Log       *slog.Logger
 	// Settle is how long a launch whose outcome is unknown may take to
-	// show up in orca. Default 2m.
+	// show up in orca, and how long orca may go without any state for a
+	// running agent before the worker gives up on it. Default 2m.
 	Settle time.Duration
 	// Poll is how often the agent's state is read while waiting. Default
 	// 5s.
@@ -186,7 +187,10 @@ type worker struct {
 	// a verdict this worker received was asked for it again.
 	askedVerdict bool
 	state        string // the agent state last reported
-	seq          int
+	// unseen is when the worker first found the agent's terminal with no
+	// state for the agent in orca.
+	unseen time.Time
+	seq    int
 	// pending holds the facts of starting, until run delivers them.
 	pending []harness.WorkerEvent
 	running bool
@@ -618,6 +622,18 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 		}
 		if !alive {
 			return Agent{}, false, errors.New("orca: the worker's terminal was closed")
+		}
+		if a.PaneKey == "" {
+			// orca learns an agent's state from the agent's hooks; without
+			// them it never sees a turn end.
+			if w.unseen.IsZero() {
+				w.unseen = w.ws.opts.Now()
+			} else if w.ws.opts.Now().Sub(w.unseen) >= w.ws.opts.Settle {
+				return Agent{}, false, fmt.Errorf("orca: no state for the worker's %s agent after %s; check that its hooks for orca are enabled and trusted on this host",
+					w.ws.opts.Agent, w.ws.opts.Settle)
+			}
+		} else {
+			w.unseen = time.Time{}
 		}
 		if a.State != "" && a.State != w.state {
 			w.state = a.State
