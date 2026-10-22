@@ -18,3 +18,6 @@ spikes/**/out/
 
 # Web client build output (make web)
 /internal/webui/dist/app/
+
+# pnpm store, which pnpm puts at the root of the mount it runs in
+/.pnpm-store/
