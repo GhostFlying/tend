@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // ErrRejected marks an error the harness answered with: the request
@@ -127,6 +129,21 @@ type Event struct {
 	// TurnStatus is the final status of a completed turn: completed,
 	// interrupted or failed.
 	TurnStatus string
+	// Tool is set on the item events of a tool the agent used.
+	Tool *ToolUse
 	// Raw is the harness's own payload.
 	Raw json.RawMessage
+}
+
+// ToolUse is a tool the agent used, as one item of its turn shows it: one
+// of tend's tools, a shell command, an MCP tool, a web search and so on.
+type ToolUse struct {
+	// Name is the tool: the name of one of tend's or an MCP server's
+	// tools, or the harness's own, such as shell or web_search.
+	Name string
+	// Input and Output show the call's arguments and result as text;
+	// either may be empty.
+	Input  string
+	Output string
+	Status protocol.ToolStatus
 }

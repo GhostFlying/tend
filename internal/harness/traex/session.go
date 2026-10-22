@@ -270,6 +270,7 @@ func (s *Session) notification(method string, params json.RawMessage) {
 		if item.Type == harness.ItemAgentMessage {
 			ev.Text = item.Text
 		}
+		ev.Tool = toolUse(item.Type, n.Item, method == notifyItemCompleted)
 	default:
 		return
 	}

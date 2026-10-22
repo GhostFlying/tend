@@ -171,3 +171,75 @@ type ThreadItem struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
 }
+
+// Tool item types, and the parts of them tend reads to show what the
+// agent did.
+const (
+	itemDynamicToolCall = "dynamicToolCall"
+	itemMcpToolCall     = "mcpToolCall"
+	itemCommand         = "commandExecution"
+	itemWebSearch       = "webSearch"
+	itemImageView       = "imageView"
+	itemCollabAgent     = "collabAgentToolCall"
+)
+
+// DynamicToolCallItem is a call of one of tend's tools.
+type DynamicToolCallItem struct {
+	Tool         string             `json:"tool"`
+	Arguments    json.RawMessage    `json:"arguments"`
+	ContentItems []ToolResponseItem `json:"contentItems"`
+	Success      *bool              `json:"success"`
+	Status       string             `json:"status"`
+}
+
+// McpToolCallItem is a call of an MCP server's tool.
+type McpToolCallItem struct {
+	Server    string          `json:"server"`
+	Tool      string          `json:"tool"`
+	Arguments json.RawMessage `json:"arguments"`
+	Result    *McpToolResult  `json:"result"`
+	Error     *McpToolError   `json:"error"`
+	Status    string          `json:"status"`
+}
+
+// McpToolResult is an MCP tool's result.
+type McpToolResult struct {
+	Content []McpContent `json:"content"`
+	IsError *bool        `json:"isError"`
+}
+
+// McpContent is one part of an MCP tool's result; tend shows the text.
+type McpContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// McpToolError is a failed MCP tool call.
+type McpToolError struct {
+	Message string `json:"message"`
+}
+
+// CommandItem is a shell command.
+type CommandItem struct {
+	Command          string  `json:"command"`
+	AggregatedOutput *string `json:"aggregatedOutput"`
+	ExitCode         *int    `json:"exitCode"`
+	Status           string  `json:"status"`
+}
+
+// WebSearchItem is a web search.
+type WebSearchItem struct {
+	Query string `json:"query"`
+}
+
+// ImageViewItem is the agent looking at an image file.
+type ImageViewItem struct {
+	Path string `json:"path"`
+}
+
+// CollabAgentItem is the agent working with one of its sub-agents.
+type CollabAgentItem struct {
+	Tool   string  `json:"tool"`
+	Prompt *string `json:"prompt"`
+	Status string  `json:"status"`
+}

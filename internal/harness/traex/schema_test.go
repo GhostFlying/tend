@@ -48,6 +48,14 @@ var checked = []struct {
 	{"TurnNotification", "v2/TurnCompletedNotification.json", "", "", TurnNotification{}, false},
 	{"ItemNotification", "v2/ItemCompletedNotification.json", "", "", ItemNotification{}, false},
 	{"ThreadItem", "v2/ItemCompletedNotification.json", "ThreadItem", "type=agentMessage", ThreadItem{}, false},
+	{"DynamicToolCallItem", "v2/ItemCompletedNotification.json", "ThreadItem", "type=dynamicToolCall", DynamicToolCallItem{}, false},
+	{"McpToolCallItem", "v2/ItemCompletedNotification.json", "ThreadItem", "type=mcpToolCall", McpToolCallItem{}, false},
+	{"McpToolResult", "v2/ItemCompletedNotification.json", "McpToolCallResult", "", McpToolResult{}, false},
+	{"McpToolError", "v2/ItemCompletedNotification.json", "McpToolCallError", "", McpToolError{}, false},
+	{"CommandItem", "v2/ItemCompletedNotification.json", "ThreadItem", "type=commandExecution", CommandItem{}, false},
+	{"WebSearchItem", "v2/ItemCompletedNotification.json", "ThreadItem", "type=webSearch", WebSearchItem{}, false},
+	{"ImageViewItem", "v2/ItemCompletedNotification.json", "ThreadItem", "type=imageView", ImageViewItem{}, false},
+	{"CollabAgentItem", "v2/ItemCompletedNotification.json", "ThreadItem", "type=collabAgentToolCall", CollabAgentItem{}, false},
 }
 
 type subset struct {

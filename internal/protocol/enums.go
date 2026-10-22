@@ -145,6 +145,16 @@ const (
 	MessageUnknown MessageState = "unknown"
 )
 
+// ToolStatus is how far a tool use of the main agent got (D69).
+type ToolStatus string
+
+// Tool use states.
+const (
+	ToolRunning   ToolStatus = "running"
+	ToolCompleted ToolStatus = "completed"
+	ToolFailed    ToolStatus = "failed"
+)
+
 // RunRole is the responsibility of a run.
 type RunRole string
 
