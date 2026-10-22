@@ -79,7 +79,7 @@ export function Shell({
         </aside>
         <main className={styles.chat}>
           <div className={styles.content} hidden={boardOpen}>
-            <Chat connection={connection} />
+            <Chat connection={connection} visible={!boardOpen} />
           </div>
           {boardVisited && (
             <div className={styles.content} hidden={!boardOpen}>

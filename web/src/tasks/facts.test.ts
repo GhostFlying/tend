@@ -124,8 +124,9 @@ test("implementation generations reused across specs never associate an old arti
   expect(currentWork(t).artifacts.map((a) => a.artifact_id)).toEqual(["new"]);
 });
 
-test("an explicit current acceptance target beats generation numbers from another spec", () => {
+test("the authoritative artifact beats unrelated implementation and acceptance generations", () => {
   const t = detail();
+  t.current_artifact_id = "old";
   t.runs![0]!.generation = 8;
   t.actions!.push({
     action_id: "accept-current",
@@ -144,6 +145,35 @@ test("an explicit current acceptance target beats generation numbers from anothe
   expect(currentWork(t).artifacts.map((a) => a.artifact_id)).toEqual(["old"]);
   expect(currentWork(t).issues.map((v) => v.issues)).toEqual([["explicit current target"]]);
   t.lifecycle = "completed";
+  t.current_artifact_id = "current";
   t.acceptances!.push({ artifact_id: "current", spec_version: 2, verdict: "passed", issues: [] });
   expect(currentWork(t).artifacts.map((a) => a.artifact_id)).toEqual(["current"]);
+});
+
+test("acceptance generations never rank distinct artifacts of the same spec", () => {
+  const t = detail();
+  t.runs![0]!.spec_version = 2;
+  t.actions!.push(
+    {
+      action_id: "accept-old",
+      kind: "accept",
+      status: "done",
+      generation: 7,
+      spec_version: 2,
+      artifact_id: "old",
+    },
+    {
+      action_id: "accept-new",
+      kind: "accept",
+      status: "done",
+      generation: 1,
+      spec_version: 2,
+      artifact_id: "current",
+    },
+  );
+  expect(currentWork(t).artifacts.map((a) => a.artifact_id)).toEqual(["current"]);
+  t.current_artifact_id = "old";
+  expect(currentWork(t).artifacts.map((a) => a.artifact_id)).toEqual(["old"]);
+  t.current_artifact_id = "missing";
+  expect(currentWork(t).artifacts).toEqual([]);
 });

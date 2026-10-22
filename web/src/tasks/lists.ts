@@ -29,6 +29,7 @@ export class TaskFeed {
   private generation = 0;
   private controller: AbortController | null = null;
   private running: Promise<void> | null = null;
+  private dirty = false;
 
   constructor(
     private readonly api: Reader,
@@ -38,6 +39,7 @@ export class TaskFeed {
   start(): void {
     if (!this.enabled) {
       this.enabled = true;
+      this.generation++;
       void this.refresh();
     }
   }
@@ -68,69 +70,86 @@ export class TaskFeed {
   }
   private read(append: boolean): Promise<void> {
     if (!this.enabled) return Promise.resolve();
-    const previous = this.state.get();
-    this.cancel();
+    if (this.running) {
+      if (!append) this.dirty = true;
+      return this.running;
+    }
     const generation = this.generation;
-    const controller = new AbortController();
-    this.controller = controller;
-    this.state.set({ ...previous, loading: !append, paging: append, error: undefined });
     const done = (async () => {
-      try {
-        let before = append ? previous.next : undefined;
-        const byId = new Map<string, TaskSummary>(
-          append ? previous.items.map((t) => [t.task_id, t]) : [],
-        );
-        const target = append ? 1 : Math.max(1, previous.pages);
-        let pages = append ? previous.pages : 0;
-        for (let i = 0; i < target; i++) {
-          const page = await this.api.get<TaskPage>(this.path(before), controller.signal);
-          if (controller.signal.aborted || generation !== this.generation) return;
-          for (const task of page.tasks ?? []) {
-            // The first occurrence belongs to the newer page. Never duplicate
-            // a row that moved across a pagination boundary while reading.
-            if (
-              !byId.has(task.task_id) &&
-              this.lifecycle.includes(task.lifecycle) &&
-              (!this.project || task.project === this.project)
-            )
-              byId.set(task.task_id, task);
-          }
-          pages++;
-          const next = page.next || undefined;
-          if (next && next === before) throw new Error("任务分页游标没有前进，请重试");
-          before = next;
-          if (!before) break;
-        }
-        if (!controller.signal.aborted && generation === this.generation)
-          this.state.set({
-            items: [...byId.values()],
-            pages,
-            next: before,
-            loading: false,
-            paging: false,
-          });
-      } catch (err) {
-        if (!controller.signal.aborted && generation === this.generation)
-          this.state.set({
-            ...this.state.get(),
-            loading: false,
-            paging: false,
-            error: err instanceof Error ? err.message : String(err),
-          });
-      }
-    })();
+      let nextAppend = append;
+      do {
+        this.dirty = false;
+        await this.readPage(nextAppend, generation);
+        nextAppend = false;
+      } while (this.enabled && generation === this.generation && this.dirty);
+    })().finally(() => {
+      if (this.running === done) this.running = null;
+    });
     this.running = done;
     return done;
   }
-  private cancel(): void {
+  private async readPage(append: boolean, generation: number): Promise<void> {
+    const previous = this.state.get();
+    const controller = new AbortController();
+    this.controller = controller;
+    this.state.set({ ...previous, loading: !append, paging: append, error: undefined });
+    try {
+      let before = append ? previous.next : undefined;
+      const byId = new Map<string, TaskSummary>(
+        append ? previous.items.map((t) => [t.task_id, t]) : [],
+      );
+      const target = append ? 1 : Math.max(1, previous.pages);
+      let pages = append ? previous.pages : 0;
+      for (let i = 0; i < target; i++) {
+        const page = await this.api.get<TaskPage>(this.path(before), controller.signal);
+        if (controller.signal.aborted || generation !== this.generation) return;
+        for (const task of page.tasks ?? []) {
+          // The first occurrence belongs to the newer page. Never duplicate
+          // a row that moved across a pagination boundary while reading.
+          if (
+            !byId.has(task.task_id) &&
+            this.lifecycle.includes(task.lifecycle) &&
+            (!this.project || task.project === this.project)
+          )
+            byId.set(task.task_id, task);
+        }
+        pages++;
+        const next = page.next || undefined;
+        if (next && next === before) throw new Error("任务分页游标没有前进，请重试");
+        before = next;
+        if (!before) break;
+      }
+      if (!controller.signal.aborted && generation === this.generation)
+        this.state.set({
+          items: [...byId.values()],
+          pages,
+          next: before,
+          loading: false,
+          paging: false,
+        });
+    } catch (err) {
+      if (!controller.signal.aborted && generation === this.generation)
+        this.state.set({
+          ...this.state.get(),
+          loading: false,
+          paging: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+    }
+  }
+  private cancel(): Promise<void> | null {
     this.generation++;
+    this.dirty = false;
     this.controller?.abort();
+    const running = this.running;
+    this.running = null;
+    return running;
   }
   async stop(): Promise<void> {
     this.enabled = false;
-    this.cancel();
+    const running = this.cancel();
     const generation = this.generation;
-    await this.running;
+    await running;
     if (generation !== this.generation) return;
     this.state.set({ ...this.state.get(), loading: false, paging: false });
   }
@@ -157,15 +176,16 @@ export class TaskLists {
   }
   refresh(): void {
     clearTimeout(this.timer);
+    this.timer = undefined;
     for (const column of this.columns) void column.refresh();
     void this.recent.refresh();
   }
   changed(): void {
-    clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.refresh(), 100);
+    if (this.timer === undefined) this.timer = setTimeout(() => this.refresh(), 100);
   }
   async stop(): Promise<void> {
     clearTimeout(this.timer);
+    this.timer = undefined;
     await Promise.all([...this.columns.map((column) => column.stop()), this.recent.stop()]);
   }
 }
