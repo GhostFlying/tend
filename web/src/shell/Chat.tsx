@@ -6,6 +6,7 @@ import { dismissNotice, notice } from "../app/notice.ts";
 import { Composer } from "../conversation/Composer.tsx";
 import { Transcript } from "../conversation/Transcript.tsx";
 import { DecisionDock } from "../decisions/DecisionDock.tsx";
+import { theme, themeLabels, toggleTheme } from "../theme/theme.ts";
 import { useStore } from "../state/store.ts";
 import styles from "./Chat.module.css";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
@@ -13,6 +14,7 @@ import controls from "./controls.module.css";
 import { ArrowDown } from "./icons.tsx";
 
 export function Chat({ connection }: { connection: Connection }) {
+  const choice = useStore(theme);
   const [jump, setJump] = useState(0);
   const toLatest = () => setJump((n) => n + 1);
 
@@ -22,6 +24,14 @@ export function Chat({ connection }: { connection: Connection }) {
         <h1>主 Agent</h1>
         <span className={styles.sub}>一个会话，所有设备共享</span>
         <span className={styles.spacer} />
+        <button
+          type="button"
+          className={controls.chipBtn}
+          onClick={toggleTheme}
+          aria-label={`切换主题：${themeLabels[choice]}`}
+        >
+          {themeLabels[choice]}
+        </button>
         <span className={styles.mobileOnly}>
           <ConnectionBadge connection={connection} compact />
         </span>
@@ -47,7 +57,7 @@ export function Chat({ connection }: { connection: Connection }) {
   );
 }
 
-function Note() {
+export function Note() {
   const n = useStore(notice);
   if (!n) {
     return null;

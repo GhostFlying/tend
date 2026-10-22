@@ -44,7 +44,7 @@ export interface DetailState {
   task: TaskDetail | null;
   error?: string;
   /** The latest run's most recent logs, oldest first. */
-  logs: { runId: string; entries: readonly RunLogView[] } | null;
+  logs: { runId: string; entries: readonly RunLogView[]; more: boolean } | null;
 }
 
 /** A task looked up for a reference outside the snapshot; null if tend has none. */
@@ -71,6 +71,8 @@ export class LiveData {
   private readonly detailStore = new Store<DetailState | null>(null);
   private readonly lookupStore = new Store<TaskLookup>(new Map());
   private readonly lookingUp = new Set<string>();
+  private logCache: { runId: string; entries: RunLogView[]; next: number; more: boolean } | null =
+    null;
   /** Conversation events that arrived while the latest page was being read. */
   private held: LedgerEvent[] | null = null;
   private readonly snapshotReads: Coalesced;
@@ -100,6 +102,7 @@ export class LiveData {
 
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
+    this.logCache = null;
     this.lookupStore.set(new Map());
     await Promise.all([
       this.refreshSnapshot(),
@@ -286,24 +289,32 @@ export class LiveData {
     if (now?.taskId !== taskId) {
       return;
     }
-    const withTask: DetailState = { taskId, task, logs: now.logs };
-    this.detailStore.set(withTask);
     const run = task.runs?.at(-1);
+    const withTask: DetailState = {
+      taskId,
+      task,
+      logs: now.logs?.runId === run?.run_id ? now.logs : null,
+    };
+    this.detailStore.set(withTask);
     if (!run) {
       this.detailStore.set({ ...withTask, logs: null });
       return;
     }
-    const entries = await this.readLogTail(run.run_id);
+    const logs = await this.readLogTail(run.run_id);
     const latest = this.detailStore.get();
-    if (latest?.taskId === taskId && entries) {
-      this.detailStore.set({ ...latest, logs: { runId: run.run_id, entries } });
+    if (latest?.taskId === taskId && logs) {
+      this.detailStore.set({ ...latest, logs: { runId: run.run_id, ...logs } });
     }
   }
 
   /** Reads a run's logs to the end, keeping the tail; null if it failed. */
-  private async readLogTail(runId: string): Promise<RunLogView[] | null> {
-    const tail: RunLogView[] = [];
-    let after = 0;
+  private async readLogTail(
+    runId: string,
+  ): Promise<{ entries: RunLogView[]; more: boolean } | null> {
+    const previous = this.logCache?.runId === runId ? this.logCache : null;
+    const tail: RunLogView[] = [...(previous?.entries ?? [])];
+    let after = previous?.next ?? 0;
+    let more = true;
     try {
       for (let i = 0; i < maxLogPages; i++) {
         const page = await this.api.get<RunLogPage>(
@@ -313,6 +324,7 @@ export class LiveData {
         tail.push(...logs);
         tail.splice(0, Math.max(0, tail.length - logTail));
         if (logs.length === 0 || page.next <= after) {
+          more = false;
           break;
         }
         after = page.next;
@@ -320,7 +332,8 @@ export class LiveData {
     } catch {
       return null;
     }
-    return tail;
+    this.logCache = { runId, entries: tail, next: after, more };
+    return { entries: tail, more };
   }
 }
 

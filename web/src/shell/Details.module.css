@@ -41,3 +41,103 @@
     display: grid;
   }
 }
+
+.kv {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 10px 12px;
+  margin: 0;
+  font-size: var(--text-m);
+  line-height: 1.5;
+}
+.kv dt,
+.caption {
+  color: var(--caption);
+}
+.kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.section h2 {
+  font-size: var(--text-s);
+  color: var(--label-3);
+  margin: 0 0 10px;
+  font-weight: 500;
+}
+.section {
+  min-width: 0;
+}
+.fact,
+.logs {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-s);
+  line-height: 1.6;
+  margin: 6px 0 12px;
+}
+.logs {
+  background: var(--sidebar);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-m);
+  padding: 10px;
+  max-height: 320px;
+  overflow: auto;
+}
+.mount {
+  background: var(--sidebar);
+  padding: 10px;
+  border-radius: var(--radius-m);
+  font-size: var(--text-s);
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--text-s);
+}
+.progress b {
+  font-weight: 500;
+  flex: 1;
+}
+.progress small {
+  width: 100%;
+  color: var(--caption);
+  overflow-wrap: anywhere;
+}
+.verdict {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+}
+.section small {
+  color: var(--caption);
+  overflow-wrap: anywhere;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.danger {
+  color: var(--err);
+}
+.confirm {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0;
+}
+.confirm span {
+  width: 100%;
+}
+
+.checks {
+  padding-left: 20px;
+  margin: 8px 0 12px;
+  font-size: var(--text-m);
+  line-height: 1.7;
+}

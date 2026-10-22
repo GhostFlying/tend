@@ -2,7 +2,7 @@
 // when writing it: the reply it answers and the last item shown (v0.1
 // §6.2). While a reply is in progress and nothing is written, the send
 // button stops the reply instead (D69).
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Connection } from "../api/client.ts";
 import { notify } from "../app/notice.ts";
 import { runOp } from "../app/ops.ts";
@@ -19,11 +19,22 @@ export function Composer({ connection }: { connection: Connection }) {
   const { client, live, queue } = useServices();
   const conversation = useStore(live.conversation);
   const [draft, setDraft] = useState("");
-  const [stopping, setStopping] = useState<string | null>(null);
+  const [stopping, setStopping] = useState<string | null>(readInterrupt);
+  const [stopUnknown, setStopUnknown] = useState(() => readInterrupt() !== null);
   const blocked = queue === null || connection.status === "not-owner";
   const body = draft.trim();
   const reply = latestReply(conversation.items);
   const busy = processing(conversation.items);
+
+  useEffect(() => {
+    const message = conversation.items.find((m) => m.message_id === stopping);
+    if (
+      message &&
+      (message.state === "replied" || message.state === "interrupted" || message.state === "failed")
+    ) {
+      saveInterrupt(null);
+    }
+  }, [conversation.items, stopping]);
 
   const send = async () => {
     if (queue === null || blocked || body === "") {
@@ -47,20 +58,30 @@ export function Composer({ connection }: { connection: Connection }) {
     if (!busy || stopping === busy.message_id) {
       return;
     }
+    saveInterrupt(busy.message_id);
     setStopping(busy.message_id);
+    setStopUnknown(false);
     const outcome = await runOp(client, {
       operation: "conversation.interrupt_reply",
       target: { type: "message", id: busy.message_id },
       payload: { message_id: busy.message_id },
     });
+    if (outcome.kind === "unknown") {
+      // No receipt: keep this turn fenced until its recorded state changes.
+      // Another interrupt would create a new request for an unconfirmed effect.
+      setStopUnknown(true);
+      notify("停止结果未知，以这条消息的最终状态为准", "warn");
+      void live.reload();
+      return;
+    }
     if (outcome.kind !== "done") {
+      saveInterrupt(null);
       setStopping(null);
       notify(`没能停止回复：${outcome.message}`, "warn");
       return;
     }
-    // The message's state shows when the turn stops; if it has not after
-    // a while, the button can be pressed again.
-    setTimeout(() => setStopping(null), 15_000);
+    // The recorded message state, not a timeout, settles the interrupt.
+    void live.reload();
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -77,7 +98,7 @@ export function Composer({ connection }: { connection: Connection }) {
   } else if (connection.status === "offline") {
     hint = "离线：消息先存在这台设备上，连上后自动发送";
   } else if (busy && stopping === busy.message_id) {
-    hint = "正在停止…";
+    hint = stopUnknown ? "停止结果未知，等待消息的最终状态" : "正在停止…";
   } else if (reply) {
     hint = `回复 ${clock(Date.parse(reply.created_at))} 的消息`;
   }
@@ -122,4 +143,23 @@ export function Composer({ connection }: { connection: Connection }) {
       </div>
     </div>
   );
+}
+
+// Preserve an unconfirmed interrupt across a page reload; only a recorded
+// terminal message state or an explicit refusal releases this fence.
+const interruptKey = "tend.interrupt-message";
+function readInterrupt(): string | null {
+  try {
+    return localStorage.getItem(interruptKey);
+  } catch {
+    return null;
+  }
+}
+function saveInterrupt(messageId: string | null): void {
+  try {
+    if (messageId) localStorage.setItem(interruptKey, messageId);
+    else localStorage.removeItem(interruptKey);
+  } catch {
+    /* The mounted composer still fences the interrupt. */
+  }
 }

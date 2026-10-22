@@ -94,3 +94,22 @@
     display: none;
   }
 }
+
+.themeButton {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  font-size: var(--text-s);
+  color: var(--label-2);
+}
+
+.mobileNotice {
+  display: none;
+}
+@media (max-width: 760px) {
+  .mobileNotice {
+    display: block;
+    padding: 0 12px;
+  }
+}
