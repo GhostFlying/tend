@@ -528,7 +528,7 @@ class Coalesced {
   }
 }
 
-/** Merges items into a conversation; the later version of an item wins. */
+/** Merges items in conversation order, preserving the newest assistant revision. */
 export function merge(
   items: readonly ConversationItem[],
   incoming: readonly ConversationItem[],
@@ -538,6 +538,10 @@ export function merge(
     byId.set(it.message_id, it);
   }
   for (const it of incoming) {
+    const current = byId.get(it.message_id);
+    // Reads and delayed stream events may arrive in either order. A final
+    // body can be shorter than a draft, so only its revision orders them.
+    if ((current?.assistant_revision ?? 0) > (it.assistant_revision ?? 0)) continue;
     byId.set(it.message_id, it);
   }
   return [...byId.values()].sort((a, b) => a.seq - b.seq);
