@@ -1349,7 +1349,8 @@
       "enum": [
         "running",
         "completed",
-        "failed"
+        "failed",
+        "interrupted"
       ],
       "title": "ToolStatus",
       "type": "string"

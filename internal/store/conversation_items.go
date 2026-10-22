@@ -52,6 +52,27 @@ func GetConversationSeq(ctx context.Context, q Querier, messageID string) (int64
 	return seq, nil
 }
 
+// SettleToolUses marks the tool uses of a thread's turns that were still
+// running as interrupted, after the harness went away, and returns them.
+func (t *Tx) SettleToolUses(ctx context.Context, threadID string, now int64) ([]string, error) {
+	rows, err := t.Q().QueryContext(ctx, `UPDATE conversation_tool_uses SET status = 'interrupted', updated_at = ?
+		WHERE status = 'running' AND turn_id IN (SELECT turn_id FROM main_turns WHERE thread_id = ? AND turn_id IS NOT NULL)
+		RETURNING message_id`, now, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("store: settle tool uses: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: settle tool uses: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ConversationRow is one item of the conversation as the owner reads it.
 type ConversationRow struct {
 	Seq       int64

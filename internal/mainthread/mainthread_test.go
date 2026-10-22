@@ -194,6 +194,11 @@ func TestToolUsesJoinTheConversation(t *testing.T) {
 		th.UseTool(turn, "item_2", harness.ToolUse{Name: "shell", Input: "cat big", Output: strings.Repeat("x", 9000), Status: protocol.ToolFailed})
 		// A start that arrives after the end does not take it back.
 		th.UseTool(turn, "item_2", harness.ToolUse{Name: "shell", Input: "cat big", Status: protocol.ToolRunning})
+		// A command moved to the background ends later.
+		th.UseTool(turn, "item_4", harness.ToolUse{Name: "shell", Input: "make", Status: protocol.ToolRunning})
+		th.Emit(harness.Event{Kind: harness.EventItemCompleted, TurnID: turn, ItemID: "item_4", ItemType: "commandExecution",
+			Tool: &harness.ToolUse{Name: "shell", Input: "make", Output: "building", Status: protocol.ToolRunning}})
+		th.UseTool(turn, "item_4", harness.ToolUse{Name: "shell", Input: "make", Output: "built", Status: protocol.ToolCompleted})
 		th.Say(turn, "item_3", "Nothing to do.")
 		return "completed"
 	}
@@ -218,12 +223,16 @@ func TestToolUsesJoinTheConversation(t *testing.T) {
 			t.Errorf("%s replies to %q, want the owner's message", s, it.ReplyTo)
 		}
 	}
-	want := []string{"message:owner", "tool_use:main_agent:tasks_list:completed", "tool_use:main_agent:shell:failed", "message:main_agent"}
+	want := []string{"message:owner", "tool_use:main_agent:tasks_list:completed", "tool_use:main_agent:shell:failed",
+		"tool_use:main_agent:shell:completed", "message:main_agent"}
 	if !slices.Equal(got, want) || page.More {
 		t.Errorf("conversation = %v (more %v), want %v", got, page.More, want)
 	}
 	if out := page.Items[2].Tool.Output; len(out) > 8<<10+64 || !strings.Contains(out, "[truncated: 8192 of 9000 bytes shown]") {
 		t.Errorf("long output kept %d bytes: ...%q", len(out), out[max(0, len(out)-60):])
+	}
+	if out := page.Items[3].Tool.Output; out != "built" {
+		t.Errorf("backgrounded command output = %q, want its final output", out)
 	}
 	if page.Items[0].State != protocol.MessageReplied {
 		t.Errorf("owner message state = %q, want replied", page.Items[0].State)
@@ -411,6 +420,30 @@ func TestFault_TurnRunningAtCrash(t *testing.T) {
 	}
 	if n := e.count(`SELECT COUNT(*) FROM events WHERE kind = 'conversation.message_state' AND object_id = ? AND body_json LIKE '%interrupted%'`, id); n != 1 {
 		t.Errorf("interrupted state events = %d, want the owner told once", n)
+	}
+}
+
+func TestFault_ToolRunningAtCrash(t *testing.T) {
+	h := testkit.NewHarness()
+	gate := make(chan struct{})
+	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
+		th.UseTool(turn, "item_1", harness.ToolUse{Name: "shell", Input: "sleep 100", Status: protocol.ToolRunning})
+		<-gate
+		return "completed"
+	}
+	e := newEnv(t, h)
+	defer close(gate)
+	e.say("wait")
+	running := func() bool {
+		return e.count(`SELECT COUNT(*) FROM conversation_tool_uses WHERE status = 'running'`) == 1
+	}
+	eventually(t, "the tool use is recorded", running)
+	h.Crash()
+	eventually(t, "the tool use is settled", func() bool {
+		return e.count(`SELECT COUNT(*) FROM conversation_tool_uses WHERE status = 'interrupted'`) == 1
+	})
+	if n := e.count(`SELECT COUNT(*) FROM events WHERE kind = 'conversation.tool_use' AND body_json LIKE '%interrupted%'`); n != 1 {
+		t.Errorf("interrupted tool use events = %d, want 1", n)
 	}
 }
 
