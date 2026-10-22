@@ -603,6 +603,7 @@ export interface RunView {
   observed: RunObserved;
   role: RunRole;
   run_id: string;
+  spec_version?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

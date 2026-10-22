@@ -68,11 +68,14 @@ type ActionView struct {
 
 // RunView is a run of a task.
 type RunView struct {
-	RunID      string      `json:"run_id"`
-	Role       RunRole     `json:"role"`
-	Generation int64       `json:"generation"`
-	Host       string      `json:"host"`
-	Observed   RunObserved `json:"observed"`
+	RunID      string  `json:"run_id"`
+	Role       RunRole `json:"role"`
+	Generation int64   `json:"generation"`
+	// SpecVersion is the immutable spec of the run's action. A generation
+	// alone cannot identify it, since each spec starts at generation one.
+	SpecVersion int64       `json:"spec_version,omitempty"`
+	Host        string      `json:"host"`
+	Observed    RunObserved `json:"observed"`
 }
 
 // ArtifactView is an artifact a run submitted.
@@ -225,14 +228,14 @@ const (
 )
 
 // ConversationItem is one item of the conversation: a message of the
-// owner or the main agent, or a tool the main agent used. Items share
+// owner, main agent or system, or a tool the main agent used. Items share
 // one order, by seq.
 type ConversationItem struct {
 	Seq int64 `json:"seq"`
 	// Kind is "message" or "tool_use".
 	Kind      string `json:"kind"`
 	MessageID string `json:"message_id"`
-	// Author is "owner" or "main_agent".
+	// Author is "owner", "main_agent" or "system" (a factual notification).
 	Author string `json:"author"`
 	// Body is a message's text; empty for a tool use.
 	Body string `json:"body,omitempty"`

@@ -165,6 +165,31 @@ func TestFault_InjectFailureInvalidatesBaseline(t *testing.T) {
 	}
 }
 
+func TestHostedRebuildPreservesCompletionNotInVisibleConversation(t *testing.T) {
+	e := newEnv(t)
+	id, _ := e.task("finish while the client is disconnected")
+	_ = e.b.Confirm(t.Context(), e.prepare(0).ID)
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		if _, err := tx.Exec(t.Context(), "UPDATE tasks SET lifecycle='completed' WHERE task_id=?", id); err != nil {
+			return err
+		}
+		_, err := tx.InsertEvent(t.Context(), store.EventRow{EventID: "evt_completion", Source: "app", ObjectType: "task", ObjectID: id,
+			Kind: "task.completed", BodyJSON: `{"spec_version":1}`})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.b.Invalidate(t.Context(), thread); err != nil {
+		t.Fatal(err)
+	}
+	// No conversation is recalled at focus zero. The completion must still
+	// be in the rebuilt ledger context, despite leaving the active list.
+	full := e.prepare(0)
+	if full == nil || !full.Full || !strings.Contains(full.Text, "task.completed") || !strings.Contains(full.Text, id) {
+		t.Fatalf("rebuilt context lost the completion: %+v", full)
+	}
+}
+
 func TestFault_CompactionMidTurn(t *testing.T) {
 	e := newEnv(t)
 	e.task("fix windows", "do not touch the installer")
