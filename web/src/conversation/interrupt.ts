@@ -19,7 +19,7 @@ export class Interrupt {
   private readonly storage: KeyValueStorage;
   private readonly newId: () => string;
   private readonly store: Store<InterruptState | null>;
-  private inFlight: Promise<void> | null = null;
+  private readonly inFlight = new Map<string, Promise<void>>();
 
   constructor(sender: OpSender, options: { storage?: KeyValueStorage; newId?: () => string } = {}) {
     this.sender = sender;
@@ -46,16 +46,14 @@ export class Interrupt {
       phase: "unconfirmed",
     };
     this.write(request);
-    // A preceding turn can finish while its HTTP response is still pending.
-    if (this.inFlight) await this.inFlight;
-    if (!this.current(request)) return;
-    return this.run(() => this.transmit(request));
+    // Receipts from an ended turn must not delay the next turn's stop.
+    return this.run(request, () => this.transmit(request));
   }
 
   resume(): Promise<void> {
     const request = this.store.get();
     if (!request || request.phase === "failed") return Promise.resolve();
-    return this.run(async () => {
+    return this.run(request, async () => {
       try {
         const recorded = await this.sender.lookup(request.envelope.request_id);
         if (!this.current(request)) return;
@@ -117,14 +115,16 @@ export class Interrupt {
     return this.store.get()?.envelope.request_id === request.envelope.request_id;
   }
 
-  private run(action: () => Promise<void>): Promise<void> {
-    if (this.inFlight) return this.inFlight;
+  private run(request: InterruptState, action: () => Promise<void>): Promise<void> {
+    const id = request.envelope.request_id;
+    const existing = this.inFlight.get(id);
+    if (existing) return existing;
     const running = Promise.resolve()
       .then(action)
       .finally(() => {
-        if (this.inFlight === running) this.inFlight = null;
+        if (this.inFlight.get(id) === running) this.inFlight.delete(id);
       });
-    this.inFlight = running;
+    this.inFlight.set(id, running);
     return running;
   }
 
