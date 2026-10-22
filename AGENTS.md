@@ -39,8 +39,11 @@ tend/
     runner/                runner 客户端：journal、租约、自我 fencing、worker 驱动
     cli/                   tend CLI：login、MCP 桥、hook 命令、setup、owner 命令（D46）
     netx/                  tsnet 封装（listener、WhoIs）；测试时替换为本地 listener
+    webui/                 嵌入并提供 Web 客户端的构建产物（D70）；dist/app/ 由 make web 生成，不提交
     testkit/               fake harness、fake runner、可控时钟、ID 生成器、故障注入
     e2e/                   服务端与 runner 的端到端测试（只有测试代码，可以 import 任何包）
+  web/                     Web 客户端（D70）：Vite + React + TypeScript，pnpm；构建到 internal/webui/dist/app/
+    src/api/generated/     由 owner API 的 JSON Schema 生成的类型
   spikes/                  阶段性验证脚本，每个子目录有 README；正式代码不得 import
   docs/
     design-v0.1.md         基线设计，只读
@@ -62,6 +65,7 @@ cmd → api / tools / runnerapi / dispatch / contextbuilder
 runner → harness, protocol, netx（runner 不 import 服务端的任何包）
 cmd/tend → cli → protocol（cli 只用标准库，不 import 服务端的任何包）
 harness/traex, harness/orca, harness/bridge → harness, protocol
+cmd/tend-server → webui（webui 只用标准库，不 import 其他包）
 ```
 
 - `domain` 不依赖 `store`、网络、时钟或随机数：所有输入通过参数传入，输出是决定（新状态、事件、待创建动作），方便穷举测试。
@@ -97,7 +101,7 @@ harness/traex, harness/orca, harness/bridge → harness, protocol
 
 ## 4. 测试
 
-- `make check` = 格式检查 + vet + staticcheck + `go test -race ./...`，提交前必须通过；CI 在每个 PR 上执行同样的检查，外加 Windows 和 macOS 的交叉编译。
+- `make check` = 格式检查 + vet + staticcheck + `go test -race ./...`，加上 Web 的类型检查、lint、prettier 检查、vitest 和构建，提交前必须通过；CI 在每个 PR 上执行同样的检查，外加 Windows 和 macOS 的交叉编译。
 - 单元测试默认不联网、不调用模型，使用 `testkit` 替身。
 - 需要真实 traex 或 tailnet 的集成测试使用 build tag `integration`，通过 `make it` 显式运行；测试模型使用 `TEND_TRAEX_MODEL`（默认 GPT-5.6-Sol）。
 - v0.1 §17.2 的故障场景对应的测试命名为 `TestFault_*`，便于对照检查。
