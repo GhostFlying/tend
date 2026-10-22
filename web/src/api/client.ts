@@ -163,16 +163,60 @@ export class ApiClient {
     }
   }
 
+  /** Reads an owner API view. */
+  async get<T>(path: string): Promise<T> {
+    return this.request<T>("GET", path);
+  }
+
   /** Sends an authenticated request, signing in again once on 401. */
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return this.answer<T>(await this.authorized(method, path, body));
+  }
+
+  /**
+   * Opens a streaming GET, such as the event stream, and returns the
+   * response once tend accepts it; the caller reads the body. Only the
+   * caller's signal ends it: the stream has no time limit of its own.
+   */
+  async openStream(path: string, signal: AbortSignal): Promise<Response> {
+    const res = await this.authorized("GET", path, undefined, signal, "text/event-stream");
+    if (!res.ok) {
+      // Throws the protocol error.
+      await this.answer(res);
+    }
+    this.markOnline();
+    return res;
+  }
+
+  /** Records that tend still answers, as bytes on an open stream show. */
+  noteAlive(): void {
+    if (this.state.get().status !== "not-owner") {
+      this.markOnline();
+    }
+  }
+
+  /** Records that the link is down, as a stream that went quiet shows. */
+  markOffline(reason: string): void {
+    if (this.state.get().status !== "not-owner") {
+      this.state.set({ status: "offline", reason });
+    }
+  }
+
+  private async authorized(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+    accept?: string,
+  ): Promise<Response> {
     let token = this.storage.getItem(tokenKey) ?? (await this.signIn());
-    let res = await this.send(method, path, body, token);
+    let res = await this.send(method, path, body, token, signal, accept);
     if (res.status === 401) {
       this.storage.removeItem(tokenKey);
       token = await this.signIn();
-      res = await this.send(method, path, body, token);
+      res = await this.send(method, path, body, token, signal, accept);
     }
-    return this.answer<T>(res);
+    return res;
   }
 
   /** Asks for an owner token; concurrent callers share one request. */
@@ -201,8 +245,10 @@ export class ApiClient {
     path: string,
     body: unknown,
     token?: string,
+    signal?: AbortSignal,
+    accept = "application/json",
   ): Promise<Response> {
-    const headers: Record<string, string> = { Accept: "application/json" };
+    const headers: Record<string, string> = { Accept: accept };
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
@@ -215,10 +261,13 @@ export class ApiClient {
         headers,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         cache: "no-store",
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: signal ?? AbortSignal.timeout(this.timeoutMs),
       });
     } catch (err) {
-      this.state.set({ status: "offline", reason: "连不上 tend" });
+      if (!signal?.aborted) {
+        // A caller that gave up learns nothing about the link.
+        this.markOffline("连不上 tend");
+      }
       throw new NetworkError(err);
     }
   }
