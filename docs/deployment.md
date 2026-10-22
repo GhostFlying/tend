@@ -39,6 +39,7 @@ worker 是 orca 里的 agent TUI（D63、D66）：runner 在 orca 里建 worktre
 - **orca**：已安装并运行，`orca` 在 PATH 上（或用 `worker.orca_bin` 指定）。
 - **仓库登记在 orca 里**：tend 不登记、不删除仓库，只在里面为任务建 worktree（D65），之后也不删除它们。runner 配置里每个仓库用 `repos.<name>.orca` 指明它在 orca 里的登记，例如 `"name:tend"`、`"path:/abs/path"`、`"id:<repoId>"`。tend 建的 worktree 和分支用 orca 的命名，产物记录实际的分支。
 - **为 worker 用的 agent 关闭 orca 的 Chat UI**：orca 在 Chat UI 打开时以 chat 启动 agent，tend 只能驱动终端里的 TUI；否则 run 以明确的错误失败。
+- **agent 的 orca hook 生效**：orca 从 agent 的 hook 得知它的状态（在做、等待、一轮结束），tend 据此判断一轮是否结束。agent 的配置关掉了 hook 时（例如 Codex 的 `[features]` 里 `hooks = false`），或 orca 的 hook 没有被信任时，orca 看不到 agent，worker 在启动后约两分钟以明确的错误失败。
 - **agent 信任这个仓库**：Codex 和 traecli 只对受信任的项目加载项目级配置，worktree 的信任跟随仓库根目录。tend 通过项目级配置给 worker 接上 `submit_verdict` 等工具，并设置无人值守（`approval_policy = "never"`、`sandbox_mode = "danger-full-access"`、tend 工具免批准），不受信任时验收拿不到结论。
 - **runner 配置**：`worker.kind: "orca"`，`worker.agent` 为 `codex` 或 `traex`；`model`、`effort` 可选（orca 只在给了 model 时接受 effort）。
 

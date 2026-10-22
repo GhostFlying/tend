@@ -39,7 +39,10 @@ type liveOrca struct {
 	failPs   bool
 	onLaunch func() error
 	lateEsc  bool
-	calls    [][]string
+	// noState keeps orca from learning the agents' state, as when the
+	// agent's hooks are off.
+	noState bool
+	calls   [][]string
 }
 
 func newLiveOrca() *liveOrca {
@@ -74,7 +77,9 @@ func (f *liveOrca) exec(_ context.Context, dir string, args []string) ([]byte, e
 			handle = fmt.Sprintf("term_%d", f.next)
 			t := Terminal{Handle: handle, WorktreeID: f.wt, Connected: true, TabID: "tab", LeafID: fmt.Sprint(f.next)}
 			f.terms = append(f.terms, t)
-			f.agents[t.PaneKey()] = &Agent{PaneKey: t.PaneKey(), State: stateWorking, Prompt: flag(args, "--prompt"), StateStartedAt: now()}
+			if !f.noState {
+				f.agents[t.PaneKey()] = &Agent{PaneKey: t.PaneKey(), State: stateWorking, Prompt: flag(args, "--prompt"), StateStartedAt: now()}
+			}
 			op := fmt.Sprintf("op-%d", f.next)
 			f.ops[op] = handle
 			if f.loseLaunch > 0 {
@@ -124,11 +129,12 @@ func (f *liveOrca) exec(_ context.Context, dir string, args []string) ([]byte, e
 		}
 		return ok(map[string]any{"send": map[string]any{"handle": flag(args, "--terminal"), "accepted": true}}), nil
 	case "terminal wait":
-		a := f.agents[f.term(flag(args, "--terminal")).PaneKey()]
-		if a == nil {
+		t := f.term(flag(args, "--terminal"))
+		if t.Handle == "" {
 			return nil, errors.New("no such terminal")
 		}
-		if a.State == stateWorking {
+		a := f.agents[t.PaneKey()]
+		if a == nil || a.State == stateWorking {
 			// orca fails a wait whose condition did not hold in time.
 			b, _ := json.Marshal(map[string]any{"id": "r", "ok": false, "error": map[string]any{"code": "timeout", "message": "timed out"}})
 			return b, nil
@@ -816,5 +822,15 @@ func TestOrcaWorkerReplaysAPendingHandBackOnce(t *testing.T) {
 	}
 	f.orca.finish("term_1", "done")
 	w.Wait()
+	<-drained
+}
+
+func TestOrcaWorkerGivesUpOnAnAgentOrcaHasNoStateFor(t *testing.T) {
+	f := newWorkerFixture(t)
+	f.orca.noState = true
+	w, _, drained := f.start(context.Background(), f.spec(protocol.RoleImplement))
+	if _, err := w.Wait(); err == nil || !strings.Contains(err.Error(), "hooks") {
+		t.Fatalf("wait = %v, want a failure pointing at the agent's hooks", err)
+	}
 	<-drained
 }

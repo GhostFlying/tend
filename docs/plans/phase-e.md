@@ -103,6 +103,7 @@ D63 定了方向：接入 cove 之后，worker 是 cove tab 里的 agent TUI，�
   - **释放**：runner 放弃一个没有结果的 run（取消、失败、hello 时被 tend 停掉）时，在发出 release 之前调用 harness 的 `Releaser`：按 journal 里的状态关闭这个 run 的终端（只有标记时按标记找，等到这次启动的 settle 时间过去）。这样暂停后取消、worker 失败等没有 worker 在跑的情况也不会留下继续写工作区的 agent；关闭失败只记日志，release 照常发出。
 - **MCP 桥**：每次尝试开 socket、写配置（E4），结束时关闭并删除，Esc 后的 agent 在下一次尝试重新写入状态后接上。
 - **信任**：traex 的目录信任由 orca fork 处理（owner 确认上游已修复），E7 在真机上确认不会停在确认上；Esc 的效果、`worktree show` 和 agent 状态的取值同样在 E7 核对。
+- **agent 的状态来自它的 hook**：orca 靠 agent 的 hook 得知状态，hook 被关掉（E7 在一台 host 上遇到 Codex 的 `[features] hooks = false`）或未被信任时，orca 里一直没有这个 agent。worker 发现终端还在、orca 却持续 `Settle`（默认两分钟）没有它的状态时，以指明 hook 的错误失败，而不是一直等下去。
 
 ## 6. 人工接管（E6）
 
