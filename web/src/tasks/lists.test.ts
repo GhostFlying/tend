@@ -1,6 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { TaskPage, TaskSummary } from "../api/generated/api.ts";
-import { TaskFeed } from "./lists.ts";
+import { TaskFeed, TaskLists } from "./lists.ts";
 
 function task(id: string, project = "demo"): TaskSummary {
   return {
@@ -123,4 +123,35 @@ describe("independent task pages", () => {
     expect(feed.state.get().items).toEqual([task("new")]);
     await feed.stop();
   });
+});
+
+test.each([25, 150])("continuous %ims events cannot starve slow task reads", async (interval) => {
+  vi.useFakeTimers();
+  const calls: AbortSignal[] = [];
+  let completed = 0;
+  const api = {
+    get: async <T>(_path: string, signal?: AbortSignal) => {
+      calls.push(signal!);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      completed++;
+      return { tasks: [task(`visible-${completed}`)] } as T;
+    },
+  };
+  const lists = new TaskLists(api);
+  lists.open();
+  try {
+    for (let elapsed = 0; elapsed < 1500; elapsed += interval) {
+      lists.changed();
+      await vi.advanceTimersByTimeAsync(interval);
+    }
+    expect(lists.columns[1]!.state.get().items.length).toBe(1);
+    expect(completed).toBeGreaterThanOrEqual(12);
+    expect(calls.length).toBeLessThanOrEqual(24);
+    expect(calls.every((s) => !s.aborted)).toBe(true);
+    const stopped = lists.stop();
+    await vi.advanceTimersByTimeAsync(500);
+    await stopped;
+  } finally {
+    vi.useRealTimers();
+  }
 });

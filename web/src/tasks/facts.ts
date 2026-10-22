@@ -13,6 +13,7 @@ export function currentWork(task: TaskDetail) {
     task.lifecycle === "completed"
       ? acceptances.filter((a) => a.verdict === "passed").at(-1)?.artifact_id
       : undefined;
+  // Acceptance generations restart for each artifact and cannot rank artifacts.
   const target = actions
     .filter(
       (a) =>
@@ -22,8 +23,8 @@ export function currentWork(task: TaskDetail) {
         a.status !== "superseded" &&
         a.status !== "cancelled",
     )
-    .sort((a, b) => b.generation - a.generation)[0]?.artifact_id;
-  const selected = passed ?? target;
+    .at(-1)?.artifact_id;
+  const selected = task.current_artifact_id;
   let artifacts = selected ? all.filter((a) => a.artifact_id === selected) : [];
   if (!selected) {
     // Generations are comparable only within this spec. An older spec's
@@ -42,11 +43,14 @@ export function currentWork(task: TaskDetail) {
         (artifact) => runs.find((r) => r.run_id === artifact.run_id)?.generation ?? 0,
       ),
     );
-    artifacts = produced.filter(
-      (artifact) => runs.find((r) => r.run_id === artifact.run_id)?.generation === generation,
-    );
+    const newest = produced
+      .filter(
+        (artifact) => runs.find((r) => r.run_id === artifact.run_id)?.generation === generation,
+      )
+      .at(-1);
+    artifacts = newest ? [newest] : [];
     if (!artifacts.length) {
-      const explicit = acceptances.at(-1)?.artifact_id;
+      const explicit = passed ?? target ?? acceptances.at(-1)?.artifact_id;
       artifacts = all.filter((a) => a.artifact_id === explicit);
     }
   }

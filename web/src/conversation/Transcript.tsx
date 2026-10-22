@@ -23,7 +23,7 @@ const emptyNote =
   "断网或关掉页面也不会丢。";
 
 /** jump counts requests to jump to the latest, such as the header's button. */
-export function Transcript({ jump }: { jump: number }) {
+export function Transcript({ jump, visible }: { jump: number; visible: boolean }) {
   const { live, queue } = useServices();
   const scroller = useRef<HTMLDivElement>(null);
   const conversation = useStore(live.conversation);
@@ -34,14 +34,17 @@ export function Transcript({ jump }: { jump: number }) {
   );
   const busy = processing(conversation.items);
 
+  const lastJump = useRef(jump);
   const [atBottom, setAtBottom] = useState(true);
   const following = useRef(true);
+  const wasVisible = useRef(visible);
+  const readingAnchor = useRef<ScrollAnchor | null>(null);
   /** Where the reader was when the page before was asked for. */
   const anchor = useRef<ScrollAnchor | null>(null);
 
   const loadEarlier = () => {
     const el = scroller.current;
-    if (!el || !conversation.more || conversation.loadingEarlier || anchor.current) {
+    if (!visible || !el || !conversation.more || conversation.loadingEarlier || anchor.current) {
       return;
     }
     anchor.current = captureAnchor(el);
@@ -50,14 +53,13 @@ export function Transcript({ jump }: { jump: number }) {
 
   const onScroll = () => {
     const el = scroller.current;
-    if (!el) {
-      return;
-    }
+    if (!visible || !el || el.clientHeight === 0) return;
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < nearBottomPx;
     if (near) anchor.current = null;
     else if (anchor.current) anchor.current = captureAnchor(el);
     following.current = near;
     setAtBottom(near);
+    readingAnchor.current = captureAnchor(el);
     if (el.scrollTop < nearTopPx) {
       loadEarlier();
     }
@@ -65,9 +67,13 @@ export function Transcript({ jump }: { jump: number }) {
 
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (!el) {
+    if (!visible || !el || el.clientHeight === 0) {
+      wasVisible.current = false;
       return;
     }
+    if (!wasVisible.current && !following.current && readingAnchor.current)
+      restoreAnchor(el, readingAnchor.current);
+    wasVisible.current = true;
     const a = anchor.current;
     if (a) {
       // Appended live output must not count as prepended page height.
@@ -76,12 +82,19 @@ export function Transcript({ jump }: { jump: number }) {
     } else if (following.current) {
       el.scrollTop = el.scrollHeight;
     }
+    readingAnchor.current = captureAnchor(el);
   });
 
   useEffect(() => {
     // A first page too short to scroll cannot be scrolled up to load more.
     const el = scroller.current;
-    if (el && conversation.loaded && el.scrollHeight <= el.clientHeight) {
+    if (
+      visible &&
+      el &&
+      el.clientHeight > 0 &&
+      conversation.loaded &&
+      el.scrollHeight <= el.clientHeight
+    ) {
       loadEarlier();
     }
   });
@@ -97,12 +110,13 @@ export function Transcript({ jump }: { jump: number }) {
 
   useEffect(() => {
     const el = scroller.current;
-    if (jump > 0 && el) {
+    if (visible && jump !== lastJump.current && el) {
+      lastJump.current = jump;
       anchor.current = null;
       following.current = true;
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
-  }, [jump]);
+  }, [jump, visible]);
 
   return (
     <div className={styles.wrap}>

@@ -13,7 +13,7 @@ import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import controls from "./controls.module.css";
 import { ArrowDown } from "./icons.tsx";
 
-export function Chat({ connection }: { connection: Connection }) {
+export function Chat({ connection, visible }: { connection: Connection; visible: boolean }) {
   const choice = useStore(theme);
   const [jump, setJump] = useState(0);
   const toLatest = () => setJump((n) => n + 1);
@@ -45,7 +45,7 @@ export function Chat({ connection }: { connection: Connection }) {
           <ArrowDown />
         </button>
       </header>
-      <Transcript jump={jump} />
+      <Transcript jump={jump} visible={visible} />
       <div className={styles.seat}>
         <div className={styles.seatInner}>
           <Note />
