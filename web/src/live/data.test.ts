@@ -148,6 +148,28 @@ describe("LiveData", () => {
     expect(api.pending()).toEqual(["/api/v1/snapshot", "/api/v1/tasks/task_1"]);
   });
 
+  test("run logs resume from their cursor and expose an unfinished read", async () => {
+    const api = new FakeApi();
+    const live = new LiveData(api);
+    const task = { task_id: "task_1", title: "t", runs: [{ run_id: "run_1" }] };
+    void live.open("task_1");
+    await api.answer("/api/v1/tasks/task_1", task);
+    for (let seq = 1; seq <= 20; seq++) {
+      expect(api.pending()).toContain(`/api/v1/runs/run_1/logs?after=${seq - 1}`);
+      await api.answer("/api/v1/runs/run_1/logs", {
+        logs: [{ seq, kind: "output", created_at: "2026-10-22T10:00:00Z", body: `line ${seq}` }],
+        next: seq,
+      });
+    }
+    expect(live.detail.get()?.logs).toMatchObject({ more: true });
+    void live.refreshDetail();
+    await api.answer("/api/v1/tasks/task_1", task);
+    expect(api.pending()).toContain("/api/v1/runs/run_1/logs?after=20");
+    await api.answer("/api/v1/runs/run_1/logs", { logs: [], next: 20 });
+    expect(live.detail.get()?.logs?.more).toBe(false);
+    expect(live.detail.get()?.logs?.entries).toHaveLength(20);
+  });
+
   test("tasks outside the snapshot are looked up once; unknown ones are remembered", async () => {
     const api = new FakeApi();
     const live = new LiveData(api);
