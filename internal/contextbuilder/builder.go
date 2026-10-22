@@ -80,7 +80,7 @@ const (
 )
 
 var classes = map[string]class{
-	"task.created": intent, "task.spec_updated": intent, "task.rating_changed": intent, "task.project_changed": intent, "task.control_changed": intent,
+	"task.relations_updated": intent, "task.created": intent, "task.spec_updated": intent, "task.rating_changed": intent, "task.project_changed": intent, "task.control_changed": intent,
 	"task.implement_requested": intent, "task.acceptance_requested": intent, "decision.answered": intent,
 	"task.started_over": intent, "task.workspace_abandoned": intent, "task.workspace_available": intent,
 	"task.completed": result, "task.cancelled": result,
@@ -617,6 +617,17 @@ func taskLine(ctx context.Context, q store.Querier, t store.TaskRow) (string, bo
 	}
 	if len(spec.Constraints) > 0 {
 		fmt.Fprintf(&b, "; constraints: %s", strings.Join(spec.Constraints, " | "))
+	}
+	refs, err := store.ListTaskRelations(ctx, q, t.TaskID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, r := range refs {
+		direction, other := "outgoing", r.TargetTaskID
+		if r.TargetTaskID == t.TaskID {
+			direction, other = "incoming", r.SourceTaskID
+		}
+		fmt.Fprintf(&b, "; %s %s: %s", r.Kind, direction, other)
 	}
 	return b.String(), t.BlockReason != protocol.BlockNone || len(unknown) > 0, nil
 }

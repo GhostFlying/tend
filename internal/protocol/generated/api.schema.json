@@ -904,6 +904,14 @@
       "title": "Rating",
       "type": "string"
     },
+    "RelationDirection": {
+      "enum": [
+        "outgoing",
+        "incoming"
+      ],
+      "title": "RelationDirection",
+      "type": "string"
+    },
     "RequestView": {
       "additionalProperties": false,
       "properties": {
@@ -1305,6 +1313,9 @@
         "control_revision": {
           "type": "integer"
         },
+        "current_artifact_id": {
+          "type": "string"
+        },
         "decisions": {
           "anyOf": [
             {
@@ -1329,6 +1340,12 @@
         },
         "rating": {
           "$ref": "#/definitions/Rating"
+        },
+        "relations": {
+          "items": {
+            "$ref": "#/definitions/TaskRelationView"
+          },
+          "type": "array"
         },
         "runs": {
           "anyOf": [
@@ -1419,6 +1436,35 @@
         "tasks"
       ],
       "title": "TaskPage",
+      "type": "object"
+    },
+    "TaskRelationKind": {
+      "enum": [
+        "follow_up",
+        "related"
+      ],
+      "title": "TaskRelationKind",
+      "type": "string"
+    },
+    "TaskRelationView": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "$ref": "#/definitions/RelationDirection"
+        },
+        "kind": {
+          "$ref": "#/definitions/TaskRelationKind"
+        },
+        "task": {
+          "$ref": "#/definitions/TaskSummary"
+        }
+      },
+      "required": [
+        "kind",
+        "direction",
+        "task"
+      ],
+      "title": "TaskRelationView",
       "type": "object"
     },
     "TaskSummary": {

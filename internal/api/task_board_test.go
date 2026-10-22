@@ -134,3 +134,24 @@ func TestTaskDetailAssociatesRunsWithTheirImmutableSpec(t *testing.T) {
 		t.Fatalf("run spec identity = %+v", versions)
 	}
 }
+
+func TestTaskDetailReadsReferencesAndBacklinks(t *testing.T) {
+	e := newEnv(t)
+	tok := e.login(protocol.ScopeOwner)
+	e.configure()
+	parent := e.task("original")
+	child := e.task("followup")
+	e.exec("tasks.update_intent", protocol.Target{Type: "task", ID: child}, new(int64(1)), map[string]any{"relations": []protocol.TaskRelation{{Kind: protocol.RelationFollowUp, TaskID: parent}}}, app.UpdateIntent{})
+	for _, tc := range []struct {
+		id, other string
+		direction protocol.RelationDirection
+	}{{parent, child, protocol.RelationIncoming}, {child, parent, protocol.RelationOutgoing}} {
+		var d protocol.TaskDetail
+		if st := e.do("GET", "/api/v1/tasks/"+tc.id, tok, nil, &d); st != http.StatusOK {
+			t.Fatal(st)
+		}
+		if len(d.Relations) != 1 || d.Relations[0].Task.TaskID != tc.other || d.Relations[0].Direction != tc.direction || d.Relations[0].Kind != protocol.RelationFollowUp {
+			t.Fatalf("relations=%+v", d.Relations)
+		}
+	}
+}

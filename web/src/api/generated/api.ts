@@ -119,6 +119,16 @@ export type WorkerKind = "appserver" | "orca";
 export type ActionStatus = "pending" | "ready" | "dispatched" | "done" | "cancelled" | "superseded";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RelationDirection".
+ */
+export type RelationDirection = "outgoing" | "incoming";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskRelationKind".
+ */
+export type TaskRelationKind = "follow_up" | "related";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RunRole".
  */
 export type RunRole = "implement" | "accept";
@@ -568,11 +578,13 @@ export interface TaskDetail {
   block_reason: BlockReason;
   control_mode: ControlMode;
   control_revision: number;
+  current_artifact_id?: string;
   decisions: DecisionView[] | null;
   lifecycle: TaskLifecycle;
   next_implement_generation: number;
   project: string;
   rating: Rating;
+  relations?: TaskRelationView[];
   runs: RunView[] | null;
   spec: unknown;
   spec_version: number;
@@ -592,6 +604,15 @@ export interface ActionView {
   kind: ActionKind;
   spec_version: number;
   status: ActionStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskRelationView".
+ */
+export interface TaskRelationView {
+  direction: RelationDirection;
+  kind: TaskRelationKind;
+  task: TaskSummary;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

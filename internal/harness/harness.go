@@ -24,6 +24,8 @@ type WorkerSpec struct {
 	ScratchDir string
 	// Spec is the immutable task spec version the run works on.
 	Spec json.RawMessage
+	// Relations provide task provenance without inheriting another workspace.
+	Relations []protocol.TaskRelationView
 	// Artifact is what an acceptance run judges.
 	Artifact json.RawMessage
 	// Feedback is what the last acceptance asked to change, for an

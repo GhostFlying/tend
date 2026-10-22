@@ -507,3 +507,28 @@ func TestFullSnapshotStatesWorkerLimits(t *testing.T) {
 		t.Fatalf("packet after the limit came = %v", full)
 	}
 }
+
+func TestTaskRelationsAppearInFullAndDeltaContext(t *testing.T) {
+	e := newEnv(t)
+	parent, _ := e.task("original delivery")
+	child, revision := e.task("follow-up repair")
+	full := e.prepare(0)
+	if err := e.b.Confirm(t.Context(), full.ID); err != nil {
+		t.Fatal(err)
+	}
+	refs := []protocol.TaskRelation{{Kind: protocol.RelationFollowUp, TaskID: parent}}
+	e.exec(owner, "tasks.update_intent", protocol.Target{Type: "task", ID: child}, &revision, map[string]any{"relations": refs}, app.UpdateIntent{})
+	delta := e.prepare(0)
+	body, _ := json.Marshal(delta)
+	if !strings.Contains(string(body), "task.relations_updated") || !strings.Contains(string(body), parent) {
+		t.Fatalf("delta lost task reference: %s", body)
+	}
+	if err := e.b.Invalidate(t.Context(), thread); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt := e.prepare(0)
+	body, _ = json.Marshal(rebuilt)
+	if !strings.Contains(string(body), "follow_up outgoing: "+parent) || !strings.Contains(string(body), "follow_up incoming: "+child) {
+		t.Fatalf("full context lost task references: %s", body)
+	}
+}

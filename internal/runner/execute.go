@@ -168,7 +168,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 	}
 	w, err := r.cfg.Workers.Start(runCtx, harness.WorkerSpec{
-		RunID: as.RunID, Role: as.Role, Dir: p.Dir, Guide: p.Guide, ScratchDir: p.ScratchDir, Spec: as.Spec, Artifact: as.Artifact,
+		RunID: as.RunID, Role: as.Role, Dir: p.Dir, Guide: p.Guide, ScratchDir: p.ScratchDir, Spec: as.Spec, Artifact: as.Artifact, Relations: as.Relations,
 		Feedback: as.Feedback, Attempt: attempt, Thread: run.Thread,
 		OnThread: func(thread string) error {
 			if thread == run.Thread {

@@ -15,6 +15,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // DefaultLeaseTTL is how long a run lease lasts without renewal.
@@ -146,8 +147,13 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 			BaseCandidates: repo.BaseCandidates, Profile: m.Profile,
 		})
 	}
+	relations, err := views.TaskRelations(ctx, q, task.TaskID)
+	if err != nil {
+		return protocol.Assignment{}, err
+	}
 	as := protocol.Assignment{
-		RunID: run.RunID, LeaseID: lease.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: run.TaskID,
+		Relations: relations,
+		RunID:     run.RunID, LeaseID: lease.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: run.TaskID,
 		ActionID: run.ActionID, Role: run.Role, Desired: desiredFor(run, action, task), Generation: run.Generation,
 		SpecVersion: action.TargetSpecVersion,
 		Spec:        json.RawMessage(specJSON), Workspace: ws,

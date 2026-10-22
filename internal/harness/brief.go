@@ -104,6 +104,12 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 	_ = json.Unmarshal(spec.Spec, &s)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Goal:\n%s\n", s.Goal)
+	if len(spec.Relations) > 0 {
+		b.WriteString("\nTask references (provenance only; use this task spec and configured workspace base):\n")
+		for _, r := range spec.Relations {
+			fmt.Fprintf(&b, "- %s %s: %s (%s), spec %d, %s\n", r.Kind, r.Direction, r.Task.TaskID, r.Task.Title, r.Task.SpecVersion, r.Task.Lifecycle)
+		}
+	}
 	if s.Scope != "" {
 		fmt.Fprintf(&b, "\nScope:\n%s\n", s.Scope)
 	}

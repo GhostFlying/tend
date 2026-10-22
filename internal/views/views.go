@@ -51,6 +51,10 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		return d, err
 	}
 	d.TaskSummary = Summary(row)
+	d.CurrentArtifactID = row.CurrentArtifactID
+	if d.Relations, err = TaskRelations(ctx, q, taskID); err != nil {
+		return d, err
+	}
 	spec, err := store.GetSpec(ctx, q, row.TaskID, row.SpecVersion)
 	if err != nil {
 		return d, err
@@ -382,6 +386,27 @@ func Events(ctx context.Context, q store.Querier, after int64, limit int) ([]pro
 			}
 		}
 		out = append(out, ev)
+	}
+	return out, nil
+}
+
+// TaskRelations reads declarations and backlinks without recursively expanding them.
+func TaskRelations(ctx context.Context, q store.Querier, taskID string) ([]protocol.TaskRelationView, error) {
+	rows, err := store.ListTaskRelations(ctx, q, taskID)
+	if err != nil {
+		return nil, err
+	}
+	var out []protocol.TaskRelationView
+	for _, r := range rows {
+		other, direction := r.TargetTaskID, protocol.RelationOutgoing
+		if r.TargetTaskID == taskID {
+			other, direction = r.SourceTaskID, protocol.RelationIncoming
+		}
+		t, err := store.GetTask(ctx, q, other)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, protocol.TaskRelationView{Kind: r.Kind, Direction: direction, Task: Summary(t)})
 	}
 	return out, nil
 }

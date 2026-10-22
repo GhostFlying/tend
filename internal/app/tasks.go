@@ -33,8 +33,9 @@ func claimPlanCommit(ctx context.Context, x *Exec, tx *store.Tx, sourceMessageID
 type CreateTask struct{}
 
 type createTaskPayload struct {
-	Title string      `json:"title"`
-	Spec  domain.Spec `json:"spec"`
+	Relations []protocol.TaskRelation `json:"relations,omitempty"`
+	Title     string                  `json:"title"`
+	Spec      domain.Spec             `json:"spec"`
 	// Rating is empty for an unrated task.
 	Rating protocol.Rating `json:"rating,omitempty"`
 	// Project defaults to the calling session's project, or else to the
@@ -71,6 +72,10 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	taskID := x.IDs.New(protocol.PrefixTask)
+	refs, err := validateRelations(ctx, tx.Q(), taskID, p.Relations)
+	if err != nil {
+		return Outcome{}, err
+	}
 	project, err := resolveProject(ctx, tx.Q(), p.Project, x.Principal)
 	if err != nil {
 		return Outcome{}, err
@@ -103,6 +108,9 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := tx.InsertTask(ctx, row); err != nil {
 		return Outcome{}, err
 	}
+	if err := tx.ReplaceTaskRelations(ctx, taskID, refs, now); err != nil {
+		return Outcome{}, err
+	}
 	spec, err := json.Marshal(p.Spec)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("app: encode spec: %w", err)
@@ -122,6 +130,9 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	events := []Event{}
+	if len(refs) > 0 {
+		events = append(events, Event{ObjectType: "task", ObjectID: taskID, ObjectVersion: d.Task.ControlRevision, Kind: "task.relations_updated", Body: map[string]any{"relations": refs}})
+	}
 	for _, e := range d.Events {
 		events = append(events, Event{ObjectType: "task", ObjectID: taskID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
 	}
@@ -133,11 +144,12 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 type UpdateIntent struct{}
 
 type updateIntentPayload struct {
-	Spec            *domain.Spec     `json:"spec,omitempty"`
-	Rating          *protocol.Rating `json:"rating,omitempty"`
-	Project         *string          `json:"project,omitempty"`
-	SourceMessageID string           `json:"source_message_id,omitempty"`
-	CommitSeq       int64            `json:"commit_seq,omitempty"`
+	Relations       *[]protocol.TaskRelation `json:"relations,omitempty"`
+	Spec            *domain.Spec             `json:"spec,omitempty"`
+	Rating          *protocol.Rating         `json:"rating,omitempty"`
+	Project         *string                  `json:"project,omitempty"`
+	SourceMessageID string                   `json:"source_message_id,omitempty"`
+	CommitSeq       int64                    `json:"commit_seq,omitempty"`
 }
 
 // Operation implements Command.
@@ -154,8 +166,8 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.Spec == nil && p.Rating == nil && p.Project == nil {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "spec, rating or project is required")
+	if p.Spec == nil && p.Rating == nil && p.Project == nil && p.Relations == nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "spec, rating, project or relations is required")
 	}
 	expected, err := requireRevision(x.Env)
 	if err != nil {
@@ -169,6 +181,9 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		return Outcome{}, err
 	}
 	task := toDomain(row, current.Budget())
+	if expected != row.ControlRevision {
+		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "control revision is %d, request expected %d", row.ControlRevision, expected)
+	}
 	merged := domain.Decision{Task: task}
 	if p.Spec != nil {
 		ws, err := expandTemplate(ctx, tx.Q(), p.Spec.Workspace)
@@ -222,6 +237,27 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		}
 		merged.Task = d.Task
 		merged.Events = append(merged.Events, d.Events...)
+	}
+	if p.Relations != nil {
+		refs, err := validateRelations(ctx, tx.Q(), row.TaskID, *p.Relations)
+		if err != nil {
+			return Outcome{}, err
+		}
+		currentRefs, err := declaredRelations(ctx, tx.Q(), row.TaskID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		d, err := domain.UpdateRelations(merged.Task, refs, currentRefs, merged.Task.ControlRevision)
+		if err != nil {
+			return Outcome{}, err
+		}
+		merged.Task = d.Task
+		merged.Events = append(merged.Events, d.Events...)
+		if len(d.Events) > 0 {
+			if err := tx.ReplaceTaskRelations(ctx, row.TaskID, refs, x.Now.UnixMilli()); err != nil {
+				return Outcome{}, err
+			}
+		}
 	}
 	if p.Spec != nil && merged.Task.SpecVersion != row.SpecVersion {
 		spec, err := json.Marshal(p.Spec)

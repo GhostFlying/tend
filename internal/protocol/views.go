@@ -28,12 +28,14 @@ type TaskSummary struct {
 // TaskDetail is one task in full.
 type TaskDetail struct {
 	TaskSummary
-	Spec        json.RawMessage  `json:"spec"`
-	Actions     []ActionView     `json:"actions"`
-	Runs        []RunView        `json:"runs"`
-	Artifacts   []ArtifactView   `json:"artifacts"`
-	Acceptances []AcceptanceView `json:"acceptances"`
-	Decisions   []DecisionView   `json:"decisions"`
+	CurrentArtifactID string             `json:"current_artifact_id,omitempty"`
+	Relations         []TaskRelationView `json:"relations,omitempty"`
+	Spec              json.RawMessage    `json:"spec"`
+	Actions           []ActionView       `json:"actions"`
+	Runs              []RunView          `json:"runs"`
+	Artifacts         []ArtifactView     `json:"artifacts"`
+	Acceptances       []AcceptanceView   `json:"acceptances"`
+	Decisions         []DecisionView     `json:"decisions"`
 	// WorkspaceState is where the workspace was placed and how its mounts
 	// resolved, once a runner has laid it out.
 	WorkspaceState *WorkspaceView `json:"workspace_state,omitempty"`
