@@ -47,6 +47,14 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd, ok := ownerCommands[env.Operation]
+	if env.Operation == (app.SetConversationSettings{}).Operation() {
+		if !s.cfg.HostedMainAgent {
+			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "conversation settings need the hosted main agent"))
+			return
+		}
+		view := s.settings(r.Context())
+		cmd, ok = app.SetConversationSettings{Available: view.Available, Models: view.Models}, true
+	}
 	if hosted, isHosted := hostedCommands[env.Operation]; isHosted {
 		if !s.cfg.HostedMainAgent {
 			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q needs the hosted main agent, which this server does not run", env.Operation))

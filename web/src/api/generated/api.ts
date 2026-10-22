@@ -269,6 +269,7 @@ export interface ConversationPage {
  * via the `definition` "ConversationItem".
  */
 export interface ConversationItem {
+  assistant_revision?: number;
   assistant_state?: AssistantState;
   author: string;
   body?: string;

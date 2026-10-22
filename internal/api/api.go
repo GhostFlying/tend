@@ -6,6 +6,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -38,6 +39,8 @@ type Config struct {
 	// HostedMainAgent accepts the conversation operations, which only the
 	// hosted main thread handles (D45).
 	HostedMainAgent bool
+	// ConversationSettings reads the hosted harness catalog and shared settings.
+	ConversationSettings func(context.Context) (protocol.ConversationSettingsView, error)
 	// Heartbeat is how often a quiet event stream sends a heartbeat.
 	// Default 15s.
 	Heartbeat time.Duration
@@ -89,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs", s.runLogs)
 	mux.HandleFunc("GET /api/v1/requests/{id}", s.request)
 	mux.HandleFunc("GET /api/v1/conversation", s.conversation)
+	mux.HandleFunc("GET /api/v1/conversation/settings", s.conversationSettings)
 	mux.HandleFunc("GET /api/v1/events", s.events)
 	mux.HandleFunc("POST /api/v1/agent/hook", s.hook)
 	mux.HandleFunc("GET /api/v1/agent/tools", s.listTools)

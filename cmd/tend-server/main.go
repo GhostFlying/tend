@@ -226,7 +226,11 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	runners := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
 	mux := http.NewServeMux()
 	mux.Handle(runnerapi.Path, runners.Handler())
-	owner := api.New(a, s, ts, cb, whois, secret, api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}, log)
+	ownerConfig := api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}
+	if front != nil {
+		ownerConfig.ConversationSettings = front.Settings
+	}
+	owner := api.New(a, s, ts, cb, whois, secret, ownerConfig, log)
 	mux.Handle("/api/", owner.Handler())
 	// The web client, on the same origin as the owner API (D70).
 	mux.Handle("/", webui.Handler())

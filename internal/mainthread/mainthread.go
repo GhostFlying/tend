@@ -347,6 +347,13 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		return retry(err)
 	}
 	key := m.threadKey(th.ID())
+	selection, settingsRevision, err := m.turnModel(ctx, th)
+	if err != nil {
+		if protocol.CodeOf(err) == protocol.CodeInvalidRequest {
+			return app.DeliveryResult{Outcome: app.Failed, Reason: err.Error()}
+		}
+		return retry(err)
+	}
 	// Recall the conversation as the sender's client showed it (D27).
 	focus := msg.Seq
 	if msg.LastSeenSeq > 0 && msg.LastSeenSeq < msg.Seq {
@@ -376,14 +383,16 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		}
 		m.mu.Unlock()
 	}()
-	rec = store.MainTurn{RequestID: d.RequestID, MessageID: msg.MessageID, ThreadID: th.ID(), Status: store.TurnStarting}
+	rec = store.MainTurn{RequestID: d.RequestID, MessageID: msg.MessageID, ThreadID: th.ID(), Status: store.TurnStarting,
+		Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort, SettingsRevision: settingsRevision}
 	if err := m.app.PutMainTurn(ctx, rec); err != nil {
 		if packet != nil {
 			_ = m.context.Fail(ctx, packet.ID, false)
 		}
 		return retry(err)
 	}
-	turnID, err := th.StartTurn(ctx, harness.TurnInput{Text: input(msg), UserMessageID: msg.MessageID})
+	turnID, err := th.StartTurn(ctx, harness.TurnInput{Text: input(msg), UserMessageID: msg.MessageID,
+		Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort})
 	if err != nil {
 		rejected := errors.Is(err, harness.ErrRejected)
 		if packet != nil {

@@ -255,6 +255,9 @@
     "ConversationItem": {
       "additionalProperties": false,
       "properties": {
+        "assistant_revision": {
+          "type": "integer"
+        },
         "assistant_state": {
           "$ref": "#/definitions/AssistantState"
         },

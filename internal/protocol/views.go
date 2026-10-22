@@ -244,6 +244,8 @@ type ConversationItem struct {
 	State MessageState `json:"state,omitempty"`
 	// AssistantState is set on a streamed main-agent message (D74).
 	AssistantState AssistantState `json:"assistant_state,omitempty"`
+	// AssistantRevision increases with each cumulative body or state update.
+	AssistantRevision int64 `json:"assistant_revision,omitempty"`
 	// Decision is the decision option an owner message chooses (D71).
 	Decision *DecisionChoice `json:"decision,omitempty"`
 	// Tool is set for a tool use.

@@ -103,19 +103,21 @@ const (
 
 // MainTurn is a delivery of a message to the front thread.
 type MainTurn struct {
-	RequestID string
-	MessageID string
-	ThreadID  string
-	TurnID    string
-	Status    string
+	RequestID                    string
+	MessageID                    string
+	ThreadID                     string
+	TurnID                       string
+	Status                       string
+	Model, ModelProvider, Effort string
+	SettingsRevision             int64
 }
 
 // GetMainTurn returns a delivery's turn, or ErrNotFound.
 func GetMainTurn(ctx context.Context, q Querier, requestID string) (MainTurn, error) {
 	m := MainTurn{RequestID: requestID}
 	var turn sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT message_id, thread_id, turn_id, status FROM main_turns WHERE request_id = ?`, requestID).
-		Scan(&m.MessageID, &m.ThreadID, &turn, &m.Status)
+	err := q.QueryRowContext(ctx, `SELECT message_id, thread_id, turn_id, status, model, model_provider, effort, settings_revision FROM main_turns WHERE request_id = ?`, requestID).
+		Scan(&m.MessageID, &m.ThreadID, &turn, &m.Status, &m.Model, &m.ModelProvider, &m.Effort, &m.SettingsRevision)
 	if err != nil {
 		return MainTurn{}, notFound(err, "main turn "+requestID)
 	}
@@ -148,10 +150,13 @@ func GetOpenTurn(ctx context.Context, q Querier, messageID string) (MainTurn, er
 
 // PutMainTurn records or updates a delivery's turn.
 func (t *Tx) PutMainTurn(ctx context.Context, m MainTurn, now int64) error {
-	_, err := t.Exec(ctx, `INSERT INTO main_turns (request_id, message_id, thread_id, turn_id, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (request_id) DO UPDATE SET thread_id = excluded.thread_id,
-		turn_id = excluded.turn_id, status = excluded.status, updated_at = excluded.updated_at`,
-		m.RequestID, m.MessageID, m.ThreadID, nullString(m.TurnID), m.Status, now, now)
+	_, err := t.Exec(ctx, `INSERT INTO main_turns (request_id, message_id, thread_id, turn_id, status, created_at, updated_at,
+		model, model_provider, effort, settings_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (request_id) DO UPDATE SET thread_id = excluded.thread_id, turn_id = excluded.turn_id,
+		status = excluded.status, updated_at = excluded.updated_at, model = excluded.model,
+		model_provider = excluded.model_provider, effort = excluded.effort, settings_revision = excluded.settings_revision`,
+		m.RequestID, m.MessageID, m.ThreadID, nullString(m.TurnID), m.Status, now, now,
+		m.Model, m.ModelProvider, m.Effort, m.SettingsRevision)
 	if err != nil {
 		return fmt.Errorf("store: put main turn: %w", err)
 	}

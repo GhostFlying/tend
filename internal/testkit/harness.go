@@ -29,6 +29,10 @@ type Harness struct {
 	// BeforeAnswer, when set, runs inside turn/start before it returns,
 	// so its events can reach the consumer ahead of the response.
 	BeforeAnswer func(t *FakeThread, turnID string)
+	// Models and Defaults describe the fake's catalog and resolved defaults.
+	// Configure them before opening a session.
+	Models   []harness.Model
+	Defaults harness.ModelSelection
 
 	mu       sync.Mutex
 	persist  map[string]bool
@@ -100,6 +104,18 @@ type FakeSession struct {
 	threads map[string]*FakeThread
 }
 
+// Models implements harness.ModelCatalog.
+func (s *FakeSession) Models(context.Context) ([]harness.Model, error) {
+	s.h.mu.Lock()
+	defer s.h.mu.Unlock()
+	models := make([]harness.Model, 0, len(s.h.Models))
+	for _, model := range s.h.Models {
+		model.SupportedEfforts = append([]string{}, model.SupportedEfforts...)
+		models = append(models, model)
+	}
+	return models, nil
+}
+
 func (s *FakeSession) end() {
 	s.once.Do(func() {
 		close(s.done)
@@ -168,6 +184,20 @@ type FakeThread struct {
 
 // ID implements harness.Thread.
 func (t *FakeThread) ID() string { return t.id }
+
+// ModelDefaults implements harness.ConfiguredThread.
+func (t *FakeThread) ModelDefaults() harness.ModelSelection {
+	t.s.h.mu.Lock()
+	defer t.s.h.mu.Unlock()
+	defaults := t.s.h.Defaults
+	if t.Config.Model != "" {
+		defaults.Model = t.Config.Model
+	}
+	if effort, ok := t.Config.Config["model_reasoning_effort"].(string); ok {
+		defaults.Effort = effort
+	}
+	return defaults
+}
 
 // Events implements harness.Thread.
 func (t *FakeThread) Events() <-chan harness.Event { return t.events }
