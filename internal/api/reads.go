@@ -16,7 +16,7 @@ import (
 
 // Read limits.
 const (
-	// taskPageSize is the length of a page of finished tasks.
+	// taskPageSize is the length of a paginated task listing.
 	taskPageSize = 50
 	// logPageSize is the most run logs a page holds.
 	logPageSize = 500
@@ -98,11 +98,32 @@ func (s *Server) task(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// tasks lists the unfinished tasks, or with finished=1 a page of the
-// finished ones, newest first.
+// tasks lists unfinished tasks, finished=1 pages finished tasks, and all=1
+// pages every lifecycle with optional project and lifecycle filters.
 func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	if query.Get("finished") != "1" {
+	all := query.Get("all") == "1"
+	pageSize := taskPageSize
+	if all && query.Has("limit") {
+		limit, err := strconv.Atoi(query.Get("limit"))
+		if err != nil || limit < 1 || limit > taskPageSize {
+			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "limit must be between 1 and 50"))
+			return
+		}
+		pageSize = limit
+	}
+	filter := store.TaskFilter{Project: query.Get("project")}
+	if all && query.Has("lifecycle") {
+		for _, value := range strings.Split(query.Get("lifecycle"), ",") {
+			state := protocol.TaskLifecycle(value)
+			if !state.Valid() {
+				s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "lifecycle must name known task stages"))
+				return
+			}
+			filter.Lifecycles = append(filter.Lifecycles, state)
+		}
+	}
+	if !all && query.Get("finished") != "1" {
 		s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
 			list, err := views.Tasks(r.Context(), q, false, "")
 			if list == nil {
@@ -124,15 +145,26 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 		updated, id = n, rest
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		rows, err := store.ListFinishedTasks(r.Context(), q, updated, id, taskPageSize)
+		var rows []store.TaskRow
+		var err error
+		if all {
+			rows, err = store.ListTaskPage(r.Context(), q, filter, updated, id, pageSize+1)
+		} else {
+			rows, err = store.ListFinishedTasks(r.Context(), q, updated, id, taskPageSize)
+		}
 		if err != nil {
 			return nil, err
+		}
+		more := len(rows) == taskPageSize && !all
+		if all && len(rows) > pageSize {
+			more = true
+			rows = rows[:pageSize]
 		}
 		page := protocol.TaskPage{Tasks: make([]protocol.TaskSummary, 0, len(rows))}
 		for _, row := range rows {
 			page.Tasks = append(page.Tasks, views.Summary(row))
 		}
-		if len(rows) == taskPageSize {
+		if more {
 			last := rows[len(rows)-1]
 			page.Next = fmt.Sprintf("%d:%s", last.UpdatedAt, last.TaskID)
 		}

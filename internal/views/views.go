@@ -60,7 +60,9 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 	if err != nil {
 		return d, err
 	}
+	versions := make(map[string]int64, len(actions))
 	for _, x := range actions {
+		versions[x.ActionID] = x.TargetSpecVersion
 		d.Actions = append(d.Actions, protocol.ActionView{
 			ActionID: x.ActionID, Kind: x.Kind, Status: x.Status, Generation: x.Generation, SpecVersion: x.TargetSpecVersion, ArtifactID: x.TargetArtifactID,
 		})
@@ -70,7 +72,7 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		return d, err
 	}
 	for _, r := range runs {
-		d.Runs = append(d.Runs, protocol.RunView{RunID: r.RunID, Role: r.Role, Generation: r.Generation, Host: r.HostID, Observed: r.ObservedState})
+		d.Runs = append(d.Runs, protocol.RunView{RunID: r.RunID, Role: r.Role, Generation: r.Generation, SpecVersion: versions[r.ActionID], Host: r.HostID, Observed: r.ObservedState})
 	}
 	arts, err := store.ListArtifactsByTask(ctx, q, row.TaskID)
 	if err != nil {

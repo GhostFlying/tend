@@ -164,6 +164,15 @@ func (b *Builder) Prepare(ctx context.Context, threadKey string, messageSeq int6
 			snap.Epoch++
 			from = 0
 			err = b.gatherFull(ctx, q, &snap, messageSeq, sc)
+			if err == nil && hasBase && base.Watermark > 0 {
+				// A completed task is absent from the active snapshot, and
+				// a stale client may not have seen its notice yet. Preserve
+				// outcomes since the last confirmed packet when rebuilding.
+				var since Snapshot
+				err = b.gatherDelta(ctx, q, &since, base.Watermark, latest, protocol.Principal{}, sc)
+				snap.Unseen = since.Unseen
+				snap.UnseenAttention = append(since.Attention, since.OtherAttention...)
+			}
 		} else {
 			err = b.gatherDelta(ctx, q, &snap, base.Watermark, latest, protocol.Principal{}, sc)
 			empty = snap.empty()

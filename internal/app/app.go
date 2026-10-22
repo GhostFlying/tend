@@ -254,12 +254,18 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		if err != nil {
 			return fmt.Errorf("app: encode event: %w", err)
 		}
+		eventID := x.IDs.New(protocol.PrefixEvent)
 		if _, err := tx.InsertEvent(ctx, store.EventRow{
-			EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: e.ObjectType, ObjectID: e.ObjectID,
+			EventID: eventID, Source: "app", ObjectType: e.ObjectType, ObjectID: e.ObjectID,
 			ObjectVersion: e.ObjectVersion, Kind: e.Kind, BodyJSON: string(body), RequestID: x.Env.RequestID,
 			TraceID: x.TraceID, ActorJSON: string(actor), CreatedAt: now,
 		}); err != nil {
 			return err
+		}
+		if e.Kind == "task.completed" {
+			if err := recordCompletionNotice(ctx, x, tx, e.ObjectID, eventID); err != nil {
+				return err
+			}
 		}
 	}
 	for _, m := range out.Outbox {
