@@ -141,3 +141,70 @@
   font-size: var(--text-m);
   line-height: 1.7;
 }
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.summary strong {
+  font-size: var(--text-l);
+}
+.summary > span {
+  font-size: var(--text-s);
+  color: var(--label-3);
+}
+.badge {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  padding: 1px 6px;
+}
+.problem {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+.fold {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 12px;
+  min-width: 0;
+}
+.fold > summary {
+  cursor: pointer;
+  font-size: var(--text-s);
+  color: var(--label-3);
+}
+.fold > div {
+  margin-top: 12px;
+}
+.artifact {
+  padding: 8px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.artifact details {
+  margin-top: 8px;
+  font-size: var(--text-s);
+  color: var(--label-3);
+}
+.commits {
+  margin: 0 0 12px;
+}
+.commits > div {
+  margin-bottom: 8px;
+}
+.commits dt {
+  color: var(--label-3);
+  font-size: var(--text-s);
+}
+.commits dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+.issueField {
+  display: contents;
+}

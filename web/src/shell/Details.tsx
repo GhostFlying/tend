@@ -1,14 +1,24 @@
 // A task's ledger facts and revision-checked owner controls (D70).
 import { useState, type ReactNode } from "react";
-import type { TaskDetail } from "../api/generated/api.ts";
+import type { TaskDetail, ArtifactView, AcceptanceView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
+import { DecisionCard } from "../decisions/DecisionCard.tsx";
+import { currentWork } from "../tasks/facts.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { useStore } from "../state/store.ts";
 import { cancelTask, setControl } from "../tasks/actions.ts";
-import { controlLabels, isFinished, ratingLabels, taskLook } from "../tasks/status.ts";
+import {
+  blockLabels,
+  controlLabels,
+  isFinished,
+  lifecycleLabels,
+  ratingLabels,
+  taskLook,
+} from "../tasks/status.ts";
 import controls from "./controls.module.css";
 import styles from "./Details.module.css";
 import { Back, Close } from "./icons.tsx";
+import { Note } from "./Chat.tsx";
 import { StatusDot } from "./StatusDot.tsx";
 
 export function Details({ onClose }: { onClose: () => void }) {
@@ -33,6 +43,7 @@ export function Details({ onClose }: { onClose: () => void }) {
         </button>
       </div>
       <div className={styles.body}>
+        <Note />
         {state?.error && (
           <div role="alert">
             读取失败：{state.error}{" "}
@@ -47,42 +58,161 @@ export function Details({ onClose }: { onClose: () => void }) {
           </p>
         )}
         {task && <TaskContent key={task.task_id} task={task} />}
-        {task && (
-          <Section title={state?.logs?.more ? "执行日志（尚未读到末尾）" : "最近日志"}>
-            {!state?.logs ? (
-              <p className={controls.empty}>
-                {task.runs?.length
-                  ? "正在读取日志，暂时无法读取时会随更新重试。"
-                  : "尚未开始执行。"}
-              </p>
-            ) : (
-              <>
-                <small>
-                  {state.logs.runId} · {state.logs.more ? "已读取" : "最近"}{" "}
-                  {state.logs.entries.length} 条
-                </small>
-                {state.logs.more && (
-                  <button className={controls.link} onClick={() => void live.refreshDetail()}>
-                    继续读取较新日志
-                  </button>
-                )}
-                <pre className={styles.logs}>
-                  {state.logs.entries.length
-                    ? state.logs.entries
-                        .map((l) => `${l.created_at} ${l.kind}\n${text(l.body)}`)
-                        .join("\n\n")
-                    : "暂无日志。"}
-                </pre>
-              </>
-            )}
-          </Section>
-        )}
       </div>
     </>
   );
 }
 
 function TaskContent({ task: t }: { task: TaskDetail }) {
+  const current = currentWork(t);
+  const spec = t.spec && typeof t.spec === "object" ? (t.spec as Record<string, unknown>) : null;
+  const decisions = (t.decisions ?? []).filter((d) => d.status === "open");
+  return (
+    <>
+      <div className={styles.summary}>
+        <strong>{lifecycleLabels[t.lifecycle]}</strong>
+        <span>
+          {t.project || "未分组"} · {ratingLabels[t.rating]} · spec {t.spec_version}
+        </span>
+        {t.control_mode !== "managed" && (
+          <span className={styles.badge}>{controlLabels[t.control_mode]}</span>
+        )}
+      </div>
+      {t.block_reason !== "none" && (
+        <Section title="当前阻塞">
+          <p className={styles.problem}>{blockLabels[t.block_reason]}</p>
+        </Section>
+      )}
+      {current.issues.length > 0 && (
+        <Section title="当前验收问题">
+          {current.issues.map((v) => (
+            <div className={styles.problem} key={v.artifact_id}>
+              <b>{verdictLabels[v.verdict]}</b>
+              <IssueList value={v.issues} />
+            </div>
+          ))}
+        </Section>
+      )}
+      {decisions.map((decision) => (
+        <DecisionCard
+          key={`${decision.decision_id}@${decision.version}`}
+          decision={decision}
+          task={t}
+          more={<span>待你选择</span>}
+        />
+      ))}
+      <TaskControls task={t} />
+      {t.lifecycle === "completed" && (
+        <Section title={`本版交付与验收 · spec ${t.spec_version}`}>
+          <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
+        </Section>
+      )}
+      {typeof spec?.goal === "string" && (
+        <Section title="任务目标">
+          <Markdown text={spec.goal} />
+        </Section>
+      )}
+      {t.lifecycle !== "completed" && current.artifacts.length > 0 && (
+        <Section title={`本版产物 · spec ${t.spec_version}`}>
+          <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
+        </Section>
+      )}
+      <Section title="本版执行进展">
+        {!t.runs?.some((r) => r.spec_version === t.spec_version) && (
+          <p className={controls.empty}>暂无本版执行记录。</p>
+        )}
+        {t.runs
+          ?.filter((r) => r.spec_version === t.spec_version)
+          .slice(-3)
+          .reverse()
+          .map((r) => (
+            <div className={styles.progress} key={r.run_id}>
+              <b>
+                {r.role === "implement" ? "实现" : "验收"} · 第 {r.generation} 代
+              </b>
+              <span>{statusLabels[r.observed] ?? r.observed}</span>
+              <small>{r.host}</small>
+            </div>
+          ))}
+      </Section>
+      <LogSection task={t} />
+      <Fold title={`完整目标与验收条件 · spec ${t.spec_version}`}>
+        {spec ? (
+          Object.entries(spec).map(([key, value]) => (
+            <div key={key}>
+              <div className={styles.caption}>
+                {key === "goal" ? "目标" : (specLabels[key] ?? key)}
+              </div>
+              <SpecValue value={value} />
+            </div>
+          ))
+        ) : (
+          <pre className={styles.fact}>{text(t.spec)}</pre>
+        )}
+      </Fold>
+      <Fold title="工作区与分支">
+        <p>
+          {t.workspace || "尚未分配"}
+          {t.workspace_state &&
+            ` · ${t.workspace_state.host} · ${workspaceLabels[t.workspace_state.status] ?? t.workspace_state.status}`}
+        </p>
+        {t.workspace_state?.mounts?.map((m) => (
+          <div className={styles.mount} key={`${m.repo}:${m.path}`}>
+            <dl className={styles.kv}>
+              {m.repo === m.path ? (
+                <>
+                  <dt>仓库 / 路径</dt>
+                  <dd>
+                    <code>{m.repo}</code>
+                  </dd>
+                </>
+              ) : (
+                <>
+                  <dt>仓库</dt>
+                  <dd>{m.repo}</dd>
+                  <dt>相对路径</dt>
+                  <dd>
+                    <code>{m.path}</code>
+                  </dd>
+                </>
+              )}
+              <dt>分支</dt>
+              <dd>
+                <code>{m.branch}</code>
+              </dd>
+            </dl>
+          </div>
+        ))}
+      </Fold>
+      <Fold title="标识与原始记录">
+        <dl className={styles.kv}>
+          <dt>任务 ID</dt>
+          <dd>
+            <code>{t.task_id}</code>
+          </dd>
+          <dt>控制版本</dt>
+          <dd>{t.control_revision}</dd>
+          <dt>实现代次</dt>
+          <dd>{t.next_implement_generation}</dd>
+        </dl>
+        <pre className={styles.fact}>
+          {text({
+            actions: t.actions,
+            runs: t.runs,
+            artifacts: t.artifacts,
+            acceptances: t.acceptances,
+            decisions: t.decisions,
+          })}
+        </pre>
+      </Fold>
+      <Fold title="历史产物与验收">
+        <Artifacts artifacts={t.artifacts ?? []} verdicts={t.acceptances ?? []} historical />
+      </Fold>
+    </>
+  );
+}
+
+function TaskControls({ task: t }: { task: TaskDetail }) {
   const s = useServices();
   const [busy, setBusy] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -105,101 +235,8 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
       setConfirmCancel(false);
     }
   };
-  const spec = t.spec && typeof t.spec === "object" ? (t.spec as Record<string, unknown>) : null;
   return (
     <>
-      <dl className={styles.kv}>
-        <dt>状态</dt>
-        <dd>
-          {taskLook(t).label} · 第 {t.next_implement_generation} 代
-        </dd>
-        <dt>项目 / 评级</dt>
-        <dd>
-          {t.project || "未分组"} · {ratingLabels[t.rating]}
-        </dd>
-        <dt>控制</dt>
-        <dd>
-          {controlLabels[t.control_mode]} · 版本 {t.control_revision}
-        </dd>
-        <dt>任务 ID</dt>
-        <dd>
-          <code>{t.task_id}</code>
-        </dd>
-        <dt>工作区</dt>
-        <dd>
-          {t.workspace || "尚未分配"}
-          {t.workspace_state &&
-            ` · ${t.workspace_state.host} · ${workspaceLabels[t.workspace_state.status] ?? t.workspace_state.status}`}
-        </dd>
-      </dl>
-      {t.workspace_state?.mounts?.map((m) => (
-        <div className={styles.mount} key={`${m.repo}:${m.path}`}>
-          <div>{m.repo}</div>
-          <code>{m.path}</code>
-          <div>
-            分支 <code>{m.branch}</code>
-          </div>
-        </div>
-      ))}
-      <Section title={`目标与验收条件 · spec ${t.spec_version}`}>
-        {typeof spec?.goal === "string" ? <Markdown text={spec.goal} /> : null}
-        {spec ? (
-          Object.entries(spec)
-            .filter(([key]) => key !== "goal")
-            .map(([key, value]) => (
-              <div key={key}>
-                <div className={styles.caption}>{specLabels[key] ?? key}</div>
-                <SpecValue value={value} />
-              </div>
-            ))
-        ) : (
-          <pre className={styles.fact}>{text(t.spec)}</pre>
-        )}
-      </Section>
-      <Section title="进展">
-        {!(t.actions?.length || t.runs?.length) && <p className={controls.empty}>尚无执行记录。</p>}
-        {t.actions?.map((a) => (
-          <div className={styles.progress} key={a.action_id}>
-            <b>
-              {kindLabels[a.kind] ?? a.kind} · 第 {a.generation} 代
-            </b>
-            <span>{statusLabels[a.status] ?? a.status}</span>
-            <small>
-              {a.action_id} · spec {a.spec_version}
-            </small>
-          </div>
-        ))}
-        {t.runs?.map((r) => (
-          <div className={styles.progress} key={r.run_id}>
-            <b>
-              {r.role === "implement" ? "实现" : "验收"} · {r.host}
-            </b>
-            <span>{statusLabels[r.observed] ?? r.observed}</span>
-            <small>
-              {r.run_id} · 第 {r.generation} 代
-            </small>
-          </div>
-        ))}
-      </Section>
-      <Section title="产物与结论">
-        {!t.artifacts?.length && <p className={controls.empty}>尚无产物。</p>}
-        {t.artifacts?.map((a) => (
-          <div key={a.artifact_id}>
-            <small>{a.artifact_id}</small>
-            <pre className={styles.fact}>{text(a.ref)}</pre>
-            {t.acceptances
-              ?.filter((v) => v.artifact_id === a.artifact_id)
-              .map((v, index) => (
-                <div className={styles.verdict} key={index}>
-                  <b>{verdictLabels[v.verdict] ?? v.verdict}</b>
-                  <pre className={styles.fact}>
-                    {text({ issues: v.issues, evidence: v.evidence })}
-                  </pre>
-                </div>
-              ))}
-          </div>
-        ))}
-      </Section>
       {!isFinished(t) && (
         <div className={styles.actions}>
           {t.control_mode === "managed" && (
@@ -266,6 +303,158 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
   );
 }
 
+function LogSection({ task }: { task: TaskDetail }) {
+  const { live } = useServices();
+  const state = useStore(live.detail);
+  return (
+    <Fold title="最近日志">
+      {!state?.logs ? (
+        <p className={controls.empty}>
+          {task.runs?.length ? "正在读取日志，暂时无法读取时会随更新重试。" : "尚未开始执行。"}
+        </p>
+      ) : (
+        <>
+          <small>
+            {state.logs.runId} · 最近 {state.logs.entries.length} 条
+          </small>
+          {state.logs.more && (
+            <button className={controls.link} onClick={() => void live.refreshDetail()}>
+              继续读取较新日志
+            </button>
+          )}
+          <pre className={styles.logs}>
+            {state.logs.entries.length
+              ? state.logs.entries
+                  .map((l) => `${l.created_at} ${l.kind}\n${text(l.body)}`)
+                  .join("\n\n")
+              : "暂无日志。"}
+          </pre>
+        </>
+      )}
+    </Fold>
+  );
+}
+function Artifacts({
+  artifacts,
+  verdicts,
+  historical = false,
+}: {
+  artifacts: readonly ArtifactView[];
+  verdicts: readonly AcceptanceView[];
+  historical?: boolean;
+}) {
+  return (
+    <>
+      {!artifacts.length && <p className={controls.empty}>暂无可关联到本版的产物。</p>}
+      {artifacts.map((artifact) => (
+        <div className={styles.artifact} key={artifact.artifact_id}>
+          <ArtifactRef value={artifact.ref} />
+          {verdicts
+            .filter((v) => v.artifact_id === artifact.artifact_id)
+            .map((v, i) => (
+              <div className={styles.verdict} key={i}>
+                <b>{verdictLabels[v.verdict]}</b>
+                <span className={styles.caption}>
+                  {" "}
+                  · spec {v.spec_version}
+                  {historical ? " · 历史记录" : ""}
+                </span>
+                {historical && <IssueList value={v.issues} />}
+              </div>
+            ))}
+          <details>
+            <summary>原始产物与证据</summary>
+            <small>{artifact.artifact_id}</small>
+            <pre className={styles.fact}>{text(artifact.ref)}</pre>
+            {verdicts
+              .filter((v) => v.artifact_id === artifact.artifact_id && v.evidence !== undefined)
+              .map((v, i) => (
+                <pre key={i} className={styles.fact}>
+                  {text(v.evidence)}
+                </pre>
+              ))}
+          </details>
+        </div>
+      ))}
+    </>
+  );
+}
+function ArtifactRef({ value }: { value: unknown }) {
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    if (Array.isArray(object.mounts)) {
+      const mounts = object.mounts.filter(
+        (mount): mount is Record<string, unknown> =>
+          !!mount &&
+          typeof mount === "object" &&
+          typeof (mount as Record<string, unknown>).commit_sha === "string",
+      );
+      if (mounts.length)
+        return (
+          <dl className={styles.commits}>
+            {mounts.map((mount, index) => (
+              <div key={index}>
+                <dt>
+                  {text(mount.repo)}
+                  {mount.path !== mount.repo && ` · ${text(mount.path)}`}
+                </dt>
+                <dd>
+                  <code>{text(mount.commit_sha)}</code>
+                </dd>
+                {typeof mount.snapshot_sha === "string" && mount.snapshot_sha && (
+                  <dd>
+                    未提交变更快照 <code>{mount.snapshot_sha}</code>
+                  </dd>
+                )}
+              </div>
+            ))}
+          </dl>
+        );
+    }
+    const commits = object.commits;
+    if (commits && typeof commits === "object" && !Array.isArray(commits))
+      return (
+        <dl className={styles.commits}>
+          {Object.entries(commits).map(([repo, sha]) => (
+            <div key={repo}>
+              <dt>{repo}</dt>
+              <dd>
+                <code>{text(sha)}</code>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      );
+  }
+  return <pre className={styles.fact}>{text(value)}</pre>;
+}
+function IssueList({ value }: { value: unknown }) {
+  if (Array.isArray(value))
+    return value.length ? (
+      <ul className={styles.checks}>
+        {value.map((issue, i) => (
+          <li key={i}>
+            <IssueList value={issue} />
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p className={styles.caption}>无问题。</p>
+    );
+  if (typeof value === "string") return <Markdown text={value} />;
+  if (value && typeof value === "object")
+    return (
+      <dl className={styles.kv}>
+        {Object.entries(value).map(([key, body]) => (
+          <div className={styles.issueField} key={key}>
+            <dt>{issueLabels[key] ?? key}</dt>
+            <dd>{text(body)}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  return value === null || value === undefined ? null : <span>{text(value)}</span>;
+}
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className={styles.section}>
@@ -274,8 +463,16 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
     </section>
   );
 }
+function Fold({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className={styles.fold}>
+      <summary>{title}</summary>
+      <div>{children}</div>
+    </details>
+  );
+}
 function SpecValue({ value }: { value: unknown }) {
-  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+  if (Array.isArray(value) && value.every((item) => typeof item === "string"))
     return (
       <ul className={styles.checks}>
         {value.map((item, i) => (
@@ -283,7 +480,6 @@ function SpecValue({ value }: { value: unknown }) {
         ))}
       </ul>
     );
-  }
   return <pre className={styles.fact}>{value === "commit" ? "提交代码" : text(value)}</pre>;
 }
 function text(value: unknown): string {
@@ -302,7 +498,6 @@ const specLabels: Record<string, string> = {
   context: "上下文",
   non_goals: "范围以外",
 };
-const kindLabels: Record<string, string> = { implement: "实现", accept: "验收", deliver: "交付" };
 const statusLabels: Record<string, string> = {
   ready: "就绪",
   dispatched: "已派发",
@@ -331,4 +526,15 @@ const verdictLabels: Record<string, string> = {
   changes_required: "需要修改",
   blocked: "验收受阻",
   inconclusive: "验收无结论",
+};
+
+const issueLabels: Record<string, string> = {
+  severity: "严重程度",
+  message: "问题",
+  description: "说明",
+  file: "文件",
+  line: "行",
+  suggestion: "建议",
+  code: "编号",
+  title: "标题",
 };

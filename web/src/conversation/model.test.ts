@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
 import type { ConversationItem } from "../api/generated/api.ts";
 import type { OutgoingMessage } from "../queue/outbox.ts";
-import { buildEntries, duration, processing, splitTaskIds, toolSummary } from "./model.ts";
+import {
+  buildEntries,
+  processing,
+  latestReply,
+  duration,
+  splitTaskIds,
+  toolSummary,
+} from "./model.ts";
 
 const id = "task_01M5HDDQEKB89928CHASWS8QND";
 
@@ -146,4 +153,42 @@ test("a streamed reply timestamp does not claim to measure completion duration",
   };
   const entry = buildEntries([owner, reply], []).find((e) => e.kind === "agent");
   expect(entry?.done).toEqual({ at: Date.parse(reply.created_at) });
+});
+
+test("system completion cards stay independent of owners and agent turns", () => {
+  const owner: ConversationItem = {
+    seq: 1,
+    message_id: "owner",
+    kind: "message",
+    author: "owner",
+    body: "work",
+    state: "processing",
+    created_at: "2026-10-23T10:00:00Z",
+  };
+  const first: ConversationItem = {
+    seq: 2,
+    message_id: "first",
+    kind: "message",
+    author: "main_agent",
+    reply_to: "owner",
+    body: "first",
+    assistant_state: "streaming",
+    created_at: "2026-10-23T10:00:01Z",
+  };
+  const system: ConversationItem = {
+    seq: 3,
+    message_id: "notice",
+    kind: "message",
+    author: "system",
+    body: `任务 ${id} 完成`,
+    created_at: "2026-10-23T10:00:02Z",
+  };
+  const next = { ...first, seq: 4, message_id: "next", body: "continued" };
+  const entries = buildEntries([owner, first, system, next], []).filter(
+    (e) => e.kind !== "divider",
+  );
+  expect(entries.map((e) => e.kind)).toEqual(["owner", "agent", "system", "agent"]);
+  expect(entries[2]).toMatchObject({ key: "notice", item: system });
+  expect(processing([owner, first, system])).toEqual(owner);
+  expect(latestReply([owner, first, system])).toEqual(first);
 });

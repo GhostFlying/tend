@@ -129,3 +129,14 @@ const AgentItem = memo(function AgentItem({ item }: { item: ConversationItem }) 
     </div>
   );
 });
+
+export function SystemMessage({ item }: { item: ConversationItem }) {
+  return (
+    <section className={styles.system} data-scroll-id={item.message_id} aria-label="任务完成通知">
+      <div className={styles.systemHead}>
+        任务完成 <time dateTime={item.created_at}>{clock(Date.parse(item.created_at))}</time>
+      </div>
+      <Markdown text={item.body ?? ""} />
+    </section>
+  );
+}
