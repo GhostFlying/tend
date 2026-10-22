@@ -68,6 +68,8 @@ export class SendQueue {
   private readonly messages = new Store<readonly OutgoingMessage[]>([]);
   private draining: Promise<void> | null = null;
   private kicked = false;
+  /** The order the next message gets: one past the highest stored. */
+  private nextOrder = 1;
 
   private constructor(options: QueueOptions) {
     this.outbox = options.outbox;
@@ -86,6 +88,7 @@ export class SendQueue {
     const cutoff = q.now() - q.keepSentMs;
     const kept: OutgoingMessage[] = [];
     for (const m of await q.outbox.all()) {
+      q.nextOrder = Math.max(q.nextOrder, m.order + 1);
       if (m.state === "sent" && m.updatedAt < cutoff) {
         await q.outbox.delete(m.requestId);
       } else {
@@ -106,6 +109,8 @@ export class SendQueue {
    * outbox, before tend answers.
    */
   async enqueue(draft: Draft): Promise<OutgoingMessage> {
+    // Taken before any await, so concurrent calls keep their call order.
+    const order = this.nextOrder++;
     const now = this.now();
     const requestId = this.newId(now);
     const payload: SubmitMessagePayload = { body: draft.body };
@@ -117,6 +122,7 @@ export class SendQueue {
     }
     const message: OutgoingMessage = {
       requestId,
+      order,
       envelope: {
         request_id: requestId,
         operation: "conversation.submit_message",
@@ -354,7 +360,8 @@ function settle(status: OpStatus, result: unknown, error: string | undefined): O
 }
 
 function sorted(messages: OutgoingMessage[]): OutgoingMessage[] {
-  return messages.sort((a, b) => a.createdAt - b.createdAt || cmp(a.requestId, b.requestId));
+  // Two tabs may hand out the same order; the request ID breaks the tie.
+  return messages.sort((a, b) => a.order - b.order || cmp(a.requestId, b.requestId));
 }
 
 function cmp(a: string, b: string): number {

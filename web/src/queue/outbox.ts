@@ -13,6 +13,12 @@ export type SendState = "sending" | "sent" | "unknown" | "failed";
 export interface OutgoingMessage {
   /** The envelope's request ID; every resend uses it again (D11). */
   requestId: string;
+  /**
+   * Where the message stands among this browser's messages, increasing in
+   * the order they were written. The send order follows it, not the clock,
+   * which can repeat or go back.
+   */
+  order: number;
   /** Exactly what is sent, every time, so tend can deduplicate it. */
   envelope: Envelope;
   body: string;
