@@ -281,6 +281,10 @@ func (r *Runner) fenceDeadline(sent time.Time) time.Time {
 	return sent.Add(ttl - ttl/4)
 }
 
+// errClaimRefused marks a claim tend rejected for good; it is gone from
+// the journal.
+var errClaimRefused = errors.New("runner: claim refused")
+
 // resendClaims finishes claims a previous process sent but did not see
 // answered: the same request ID returns the same assignment. Its lease may
 // have lapsed meanwhile, so the run only starts once hello confirms it.
@@ -295,7 +299,12 @@ func (r *Runner) resendClaims(ctx context.Context) error {
 		}
 		env := req.Envelope
 		if err := r.claimOnce(ctx, &env, time.Time{}); err != nil {
-			return err
+			if !errors.Is(err, errClaimRefused) {
+				return err
+			}
+			// Such as a claim for the worker the host ran before it
+			// changed: it had no effect, and the runner goes on.
+			r.cfg.Log.WarnContext(ctx, "tend refused a claim sent before the runner restarted", "request_id", env.RequestID, "err", err)
 		}
 	}
 	return nil
@@ -339,7 +348,10 @@ func (r *Runner) claimOnce(ctx context.Context, env *protocol.Envelope, sentAt t
 			return ctx.Err()
 		}
 		// Rejected for good: the claim had no effect.
-		return errors.Join(err, r.cfg.Journal.DeleteRequest(ctx, env.RequestID))
+		if derr := r.cfg.Journal.DeleteRequest(ctx, env.RequestID); derr != nil {
+			return errors.Join(err, derr)
+		}
+		return fmt.Errorf("%w: %w", errClaimRefused, err)
 	}
 	var res struct {
 		Assignment *protocol.Assignment `json:"assignment"`
