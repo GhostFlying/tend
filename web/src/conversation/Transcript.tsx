@@ -37,7 +37,7 @@ export function Transcript({ jump }: { jump: number }) {
   const following = useRef(true);
   /** Where the reader was when the page before was asked for. */
   const anchor = useRef<{ firstSeq: number; height: number; top: number } | null>(null);
-  const firstSeq = conversation.items[0]?.seq ?? 0;
+  const firstSeq = conversation.before ?? conversation.items[0]?.seq ?? 0;
 
   const loadEarlier = () => {
     const el = scroller.current;
@@ -47,7 +47,10 @@ export function Transcript({ jump }: { jump: number }) {
     anchor.current = { firstSeq, height: el.scrollHeight, top: el.scrollTop };
     void live.loadEarlier().finally(() => {
       // Nothing came: let the next scroll try again.
-      if (anchor.current?.firstSeq === live.conversation.get().items[0]?.seq) {
+      if (
+        anchor.current?.firstSeq ===
+        (live.conversation.get().before ?? live.conversation.get().items[0]?.seq)
+      ) {
         anchor.current = null;
       }
     });

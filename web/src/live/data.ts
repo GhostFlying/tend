@@ -18,7 +18,7 @@ import { Store, type Readable } from "../state/store.ts";
 
 /** The part of the API client the views read with. */
 export interface Reader {
-  get<T>(path: string): Promise<T>;
+  get<T>(path: string, signal?: AbortSignal): Promise<T>;
 }
 
 export interface ConversationState {
@@ -29,6 +29,8 @@ export interface ConversationState {
   /** Whether the latest page has been read at least once. */
   loaded: boolean;
   loadingEarlier: boolean;
+  /** Oldest sequence in the contiguous history, independent of live item updates. */
+  before?: number | undefined;
   error?: string;
   /**
    * When each owner message was seen to start processing, in ms. Read from
@@ -71,17 +73,31 @@ export class LiveData {
   private readonly detailStore = new Store<DetailState | null>(null);
   private readonly lookupStore = new Store<TaskLookup>(new Map());
   private readonly lookingUp = new Set<string>();
+  private historyGeneration = 0;
   private logCache: { runId: string; entries: RunLogView[]; next: number; more: boolean } | null =
     null;
   /** Conversation events that arrived while the latest page was being read. */
   private held: LedgerEvent[] | null = null;
   private readonly snapshotReads: Coalesced;
   private readonly detailReads: Coalesced;
+  private readonly latestReads: Coalesced;
+  private readonly failed = new Set<"snapshot" | "conversation" | "detail">();
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private retryDelay = 1_000;
+  private stopped = false;
+  private detailController: AbortController | null = null;
+  private logWatch: {
+    taskId: string;
+    runId: string;
+    controller: AbortController;
+    done: Promise<void>;
+  } | null = null;
 
   constructor(api: Reader) {
     this.api = api;
     this.snapshotReads = new Coalesced(() => this.readSnapshot());
     this.detailReads = new Coalesced(() => this.readDetail());
+    this.latestReads = new Coalesced(() => this.readLatest());
   }
 
   get snapshot(): Readable<Snapshot | null> {
@@ -102,11 +118,13 @@ export class LiveData {
 
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
+    this.detailController?.abort();
+    void this.stopLogs();
     this.logCache = null;
     this.lookupStore.set(new Map());
     await Promise.all([
       this.refreshSnapshot(),
-      this.readLatest(),
+      this.latestReads.run(),
       this.detailStore.get() ? this.refreshDetail() : Promise.resolve(),
     ]);
   }
@@ -147,23 +165,27 @@ export class LiveData {
   /** Reads the page before the first item held. */
   async loadEarlier(): Promise<void> {
     const state = this.conversationStore.get();
-    const first = state.items[0];
+    const first = state.before ?? state.items[0]?.seq;
     if (!state.more || state.loadingEarlier || !first) {
       return;
     }
+    const generation = this.historyGeneration;
     this.conversationStore.set({ ...state, loadingEarlier: true });
     try {
       const page = await this.api.get<ConversationPage>(
-        `/api/v1/conversation?before=${first.seq}&limit=${pageSize}`,
+        `/api/v1/conversation?before=${first}&limit=${pageSize}`,
       );
+      if (generation !== this.historyGeneration) return;
       const now = this.conversationStore.get();
       this.conversationStore.set({
         ...now,
         items: merge(page.items ?? [], now.items),
         more: page.more,
+        before: page.items?.[0]?.seq ?? now.before,
         loadingEarlier: false,
       });
     } catch (err) {
+      if (generation !== this.historyGeneration) return;
       this.conversationStore.set({
         ...this.conversationStore.get(),
         loadingEarlier: false,
@@ -176,12 +198,17 @@ export class LiveData {
   open(taskId: string): Promise<void> {
     const current = this.detailStore.get();
     if (current?.taskId !== taskId) {
+      this.detailController?.abort();
+      void this.stopLogs();
       this.detailStore.set({ taskId, task: null, logs: null });
     }
     return this.refreshDetail();
   }
 
   close(): void {
+    this.detailController?.abort();
+    void this.stopLogs();
+    this.failed.delete("detail");
     this.detailStore.set(null);
   }
 
@@ -214,28 +241,55 @@ export class LiveData {
   }
 
   private async readSnapshot(): Promise<void> {
+    if (this.stopped) return;
     try {
       this.snapshotStore.set(await this.api.get<Snapshot>("/api/v1/snapshot"));
+      this.recovered("snapshot");
     } catch {
-      // The next event or reconnection reads it again.
+      this.retry("snapshot");
     }
   }
 
   private async readLatest(): Promise<void> {
+    if (this.stopped) return;
+    this.historyGeneration++;
     this.held = [];
     try {
       const page = await this.api.get<ConversationPage>(`/api/v1/conversation?limit=${pageSize}`);
-      const items = page.items ?? [];
+      let items = page.items ?? [];
+      let more = page.more;
+      // A long active turn or a queue of owner messages can push the owner
+      // whose turn is running out of the latest page. Find the closest
+      // non-queued owner before rendering the stop control.
+      while (
+        more &&
+        items.length &&
+        !items.some((it) => it.author === "owner" && it.state !== "queued")
+      ) {
+        const earlier = await this.api.get<ConversationPage>(
+          `/api/v1/conversation?before=${items[0]!.seq}&limit=${pageSize}`,
+        );
+        const previous = earlier.items ?? [];
+        if (!previous.length) {
+          more = false;
+          break;
+        }
+        items = merge(previous, items);
+        more = earlier.more;
+      }
+      this.recovered("conversation");
       // Items before the page's first one are dropped: the page may have
       // moved past them while the stream was down, so they could be stale.
       this.conversationStore.set({
         items,
-        more: page.more,
+        more,
+        before: items[0]?.seq,
         loaded: true,
         loadingEarlier: false,
         processingSince: keepFor(this.conversationStore.get().processingSince, items),
       });
     } catch (err) {
+      this.retry("conversation");
       this.conversationStore.set({ ...this.conversationStore.get(), error: describe(err) });
     } finally {
       // Applied in order, the held events end at each item's newest state,
@@ -267,21 +321,31 @@ export class LiveData {
   }
 
   private async readDetail(): Promise<void> {
+    if (this.stopped) return;
     const open = this.detailStore.get();
     if (!open) {
+      this.recovered("detail");
       return;
     }
     const { taskId } = open;
+    const controller = new AbortController();
+    this.detailController = controller;
     let task: TaskDetail;
     try {
-      task = await this.api.get<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
+      task = await this.api.get<TaskDetail>(
+        `/api/v1/tasks/${encodeURIComponent(taskId)}`,
+        controller.signal,
+      );
     } catch (err) {
+      if (controller.signal.aborted) return;
       const now = this.detailStore.get();
       if (now?.taskId === taskId) {
+        this.retry("detail");
         this.detailStore.set({ ...now, error: describe(err) });
       }
       return;
     }
+    this.recovered("detail");
     if (this.lookupStore.get().has(taskId)) {
       this.remember(taskId, summary(task));
     }
@@ -290,6 +354,7 @@ export class LiveData {
       return;
     }
     const run = task.runs?.at(-1);
+    if (this.logWatch && this.logWatch.runId !== run?.run_id) void this.stopLogs();
     const withTask: DetailState = {
       taskId,
       task,
@@ -300,16 +365,104 @@ export class LiveData {
       this.detailStore.set({ ...withTask, logs: null });
       return;
     }
-    const logs = await this.readLogTail(run.run_id);
+    if (this.logWatch?.runId === run.run_id) return;
+    const logs = await this.readLogTail(run.run_id, controller.signal);
+    if (controller.signal.aborted) return;
+    if (!logs) this.retry("detail");
     const latest = this.detailStore.get();
     if (latest?.taskId === taskId && logs) {
       this.detailStore.set({ ...latest, logs: { runId: run.run_id, ...logs } });
     }
+    if (
+      this.detailStore.get()?.taskId === taskId &&
+      run.observed &&
+      run.observed !== "finished" &&
+      run.observed !== "failed"
+    ) {
+      this.watchLogs(taskId, run.run_id);
+    }
+  }
+
+  /** Stops all owned timers and the pending log request. */
+  async stop(): Promise<void> {
+    this.stopped = true;
+    this.detailController?.abort();
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    await this.stopLogs();
+  }
+
+  private recovered(view: "snapshot" | "conversation" | "detail"): void {
+    this.failed.delete(view);
+    if (!this.failed.size) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+      this.retryDelay = 1_000;
+    }
+  }
+
+  private retry(view: "snapshot" | "conversation" | "detail"): void {
+    this.failed.add(view);
+    if (this.stopped || this.retryTimer !== undefined) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      if (this.failed.has("snapshot")) void this.refreshSnapshot();
+      if (this.failed.has("conversation")) void this.latestReads.run();
+      if (this.failed.has("detail")) void this.refreshDetail();
+    }, this.retryDelay);
+    this.retryDelay = Math.min(this.retryDelay * 2, 30_000);
+  }
+
+  private stopLogs(): Promise<void> {
+    const watch = this.logWatch;
+    this.logWatch = null;
+    watch?.controller.abort();
+    return watch?.done ?? Promise.resolve();
+  }
+
+  private watchLogs(taskId: string, runId: string): void {
+    if (this.stopped) return;
+    const controller = new AbortController();
+    const watch = { taskId, runId, controller, done: Promise.resolve() };
+    this.logWatch = watch;
+    watch.done = (async () => {
+      let delay = 1_000;
+      while (!controller.signal.aborted) {
+        const after = this.logCache?.runId === runId ? this.logCache.next : 0;
+        try {
+          const page = await this.api.get<RunLogPage>(
+            `/api/v1/runs/${encodeURIComponent(runId)}/logs?after=${after}&wait=${this.logCache?.more ? 0 : 15}`,
+            controller.signal,
+          );
+          if (controller.signal.aborted || this.logWatch !== watch) return;
+          const entries = [
+            ...(this.logCache?.runId === runId ? this.logCache.entries : []),
+            ...(page.logs ?? []),
+          ].slice(-logTail);
+          const more = (page.logs?.length ?? 0) > 0;
+          this.logCache = { runId, entries, next: page.next, more };
+          const current = this.detailStore.get();
+          if (current?.taskId === taskId)
+            this.detailStore.set({ ...current, logs: { runId, entries, more } });
+          if (!more && (page.observed === "finished" || page.observed === "failed")) return;
+          delay = 1_000;
+          // A server may answer an empty poll immediately when run state changes.
+          if (!page.logs?.length) await abortablePause(250, controller.signal);
+        } catch {
+          if (controller.signal.aborted) return;
+          await abortablePause(delay, controller.signal);
+          delay = Math.min(delay * 2, 30_000);
+        }
+      }
+    })().finally(() => {
+      if (this.logWatch === watch) this.logWatch = null;
+    });
   }
 
   /** Reads a run's logs to the end, keeping the tail; null if it failed. */
   private async readLogTail(
     runId: string,
+    signal?: AbortSignal,
   ): Promise<{ entries: RunLogView[]; more: boolean } | null> {
     const previous = this.logCache?.runId === runId ? this.logCache : null;
     const tail: RunLogView[] = [...(previous?.entries ?? [])];
@@ -319,6 +472,7 @@ export class LiveData {
       for (let i = 0; i < maxLogPages; i++) {
         const page = await this.api.get<RunLogPage>(
           `/api/v1/runs/${encodeURIComponent(runId)}/logs?after=${after}`,
+          signal,
         );
         const logs = page.logs ?? [];
         tail.push(...logs);
@@ -413,4 +567,20 @@ export function summary(t: TaskDetail): TaskSummary {
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function abortablePause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener("abort", finish, { once: true });
+  });
 }
