@@ -1,6 +1,7 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { ApiError } from "../api/client.ts";
 import type { ConversationItem, LedgerEvent } from "../api/generated/api.ts";
+import { processing } from "../conversation/model.ts";
 import { LiveData, type Reader } from "./data.ts";
 
 /** A fake owner API whose answers the test releases one by one. */
@@ -9,10 +10,29 @@ class FakeApi implements Reader {
   private waiting: { path: string; resolve: (v: unknown) => void; reject: (e: unknown) => void }[] =
     [];
 
-  get<T>(path: string): Promise<T> {
+  get<T>(path: string, signal?: AbortSignal): Promise<T> {
     this.calls.push(path);
     return new Promise<T>((resolve, reject) => {
-      this.waiting.push({ path, resolve: resolve as (v: unknown) => void, reject });
+      const clean = () => signal?.removeEventListener("abort", abort);
+      const item = {
+        path,
+        resolve: (v: unknown) => {
+          clean();
+          resolve(v as T);
+        },
+        reject: (e: unknown) => {
+          clean();
+          reject(e);
+        },
+      };
+      const abort = () => {
+        const index = this.waiting.indexOf(item);
+        if (index >= 0) this.waiting.splice(index, 1);
+        item.reject(new DOMException("aborted", "AbortError"));
+      };
+      this.waiting.push(item);
+      if (signal?.aborted) abort();
+      else signal?.addEventListener("abort", abort, { once: true });
     });
   }
 
@@ -74,9 +94,13 @@ describe("LiveData", () => {
     void live.reload();
     expect(api.pending()).toEqual(["/api/v1/snapshot", "/api/v1/conversation?limit=50"]);
     await api.answer("/api/v1/snapshot", snapshot);
-    await api.answer("/api/v1/conversation", { items: [owner(1)], more: true });
+    await api.answer("/api/v1/conversation", { items: [owner(1, "replied")], more: true });
     expect(live.snapshot.get()).toEqual(snapshot);
-    expect(live.conversation.get()).toMatchObject({ items: [owner(1)], more: true, loaded: true });
+    expect(live.conversation.get()).toMatchObject({
+      items: [owner(1, "replied")],
+      more: true,
+      loaded: true,
+    });
   });
 
   test("conversation events update their item in place", async () => {
@@ -168,6 +192,109 @@ describe("LiveData", () => {
     await api.answer("/api/v1/runs/run_1/logs", { logs: [], next: 20 });
     expect(live.detail.get()?.logs?.more).toBe(false);
     expect(live.detail.get()?.logs?.entries).toHaveLength(20);
+  });
+
+  test("failed view reads retry without a stream event and stop owns retries", async () => {
+    const api = new FakeApi();
+    const live = new LiveData(api);
+    void live.reload();
+    await api.answer("/api/v1/snapshot", new Error("temporary"));
+    await api.answer("/api/v1/conversation", new Error("temporary"));
+    await vi.waitFor(() => expect(api.pending()).toHaveLength(2), { timeout: 1800 });
+    await api.answer("/api/v1/snapshot", snapshot);
+    await api.answer("/api/v1/conversation", { items: [owner(1, "replied")], more: false });
+    expect(live.snapshot.get()).toEqual(snapshot);
+    expect(live.conversation.get().loaded).toBe(true);
+    expect(live.conversation.get().error).toBeUndefined();
+    void live.refreshSnapshot();
+    await api.answer("/api/v1/snapshot", new Error("temporary again"));
+    await live.stop();
+    const reads = api.calls.length;
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(api.calls).toHaveLength(reads);
+  });
+
+  test("an old live item never moves the contiguous history cursor", async () => {
+    const api = new FakeApi();
+    const live = new LiveData(api);
+    void live.reload();
+    await api.answer("/api/v1/snapshot", snapshot);
+    await api.answer("/api/v1/conversation", {
+      items: Array.from({ length: 50 }, (_, i) => owner(i + 51, "replied")),
+      more: true,
+    });
+    live.apply(messageEvent(101, owner(1, "interrupted"), "conversation.message_state"));
+    expect(live.conversation.get().before).toBe(51);
+    void live.loadEarlier();
+    expect(api.pending()).toContain("/api/v1/conversation?before=51&limit=50");
+    await api.answer("/api/v1/conversation", {
+      items: Array.from({ length: 50 }, (_, i) => owner(i + 1, "replied")),
+      more: false,
+    });
+    expect(live.conversation.get().items).toHaveLength(100);
+    // A live update must survive an overlapping page read.
+    expect(live.conversation.get().items[0]?.state).toBe("interrupted");
+    await live.stop();
+  });
+
+  test.each(["tools", "queued"])("latest %s page reads back to the active owner", async (kind) => {
+    const api = new FakeApi();
+    const live = new LiveData(api);
+    void live.reload();
+    await api.answer("/api/v1/snapshot", snapshot);
+    const recent = Array.from({ length: 50 }, (_, i) =>
+      kind === "queued"
+        ? owner(i + 2)
+        : {
+            ...owner(i + 2),
+            author: "main_agent",
+            kind: "tool_use",
+            reply_to: "msg_1",
+            state: undefined,
+          },
+    );
+    await api.answer("/api/v1/conversation", { items: recent, more: true });
+    expect(api.pending()).toContain("/api/v1/conversation?before=2&limit=50");
+    live.apply(messageEvent(103, owner(1, "processing"), "conversation.message_state"));
+    await api.answer("/api/v1/conversation", { items: [owner(1)], more: false });
+    expect(processing(live.conversation.get().items)?.message_id).toBe("msg_1");
+    await live.stop();
+  });
+
+  test("active logs update without ledger events and cancel on run, task, close and stop", async () => {
+    const api = new FakeApi();
+    const live = new LiveData(api);
+    const detail = (runId: string) => ({
+      task_id: "task_1",
+      runs: [{ run_id: runId, observed: "running" }],
+    });
+    void live.open("task_1");
+    await api.answer("/api/v1/tasks/task_1", detail("run_1"));
+    await api.answer("/api/v1/runs/run_1/logs", { logs: [], next: 0 });
+    expect(api.pending()).toContain("/api/v1/runs/run_1/logs?after=0&wait=15");
+    await api.answer("/api/v1/runs/run_1/logs", {
+      logs: [{ seq: 1, body: "new log" }],
+      next: 1,
+      observed: "running",
+    });
+    expect(live.detail.get()?.logs?.entries).toMatchObject([{ seq: 1, body: "new log" }]);
+    expect(api.pending()).toContain("/api/v1/runs/run_1/logs?after=1&wait=0");
+    void live.refreshDetail();
+    await api.answer("/api/v1/tasks/task_1", detail("run_2"));
+    expect(api.pending().some((p) => p.includes("run_1"))).toBe(false);
+    await api.answer("/api/v1/runs/run_2/logs", { logs: [], next: 0 });
+    expect(api.pending()).toContain("/api/v1/runs/run_2/logs?after=0&wait=15");
+    void live.open("task_2");
+    expect(api.pending().some((p) => p.includes("run_2"))).toBe(false);
+    await api.answer("/api/v1/tasks/task_2", { ...detail("run_3"), task_id: "task_2" });
+    await api.answer("/api/v1/runs/run_3/logs", { logs: [], next: 0 });
+    live.close();
+    expect(api.pending()).toEqual([]);
+    void live.open("task_1");
+    await api.answer("/api/v1/tasks/task_1", detail("run_4"));
+    await api.answer("/api/v1/runs/run_4/logs", { logs: [], next: 0 });
+    await live.stop();
+    expect(api.pending()).toEqual([]);
   });
 
   test("tasks outside the snapshot are looked up once; unknown ones are remembered", async () => {

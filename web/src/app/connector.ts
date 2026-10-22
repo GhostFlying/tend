@@ -21,10 +21,8 @@ export function startConnector(client: ApiClient, live: LiveData, onOnline: () =
         after === undefined ? "/api/v1/events" : `/api/v1/events?after=${after}`,
         signal,
       ),
-    onStart: (_seq, fresh) => {
-      if (fresh) {
-        void live.reload();
-      }
+    onStart: () => {
+      void live.reload();
     },
     onEvent: (event) => live.apply(event),
     onAlive: () => client.noteAlive(),
@@ -83,7 +81,7 @@ export function startConnector(client: ApiClient, live: LiveData, onOnline: () =
       unsubscribeStream();
       window.removeEventListener("online", wake);
       document.removeEventListener("visibilitychange", wake);
-      await stream.stop();
+      await Promise.all([stream.stop(), live.stop()]);
     },
   };
 }

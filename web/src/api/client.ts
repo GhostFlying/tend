@@ -164,13 +164,20 @@ export class ApiClient {
   }
 
   /** Reads an owner API view. */
-  async get<T>(path: string): Promise<T> {
-    return this.request<T>("GET", path);
+  async get<T>(path: string, signal?: AbortSignal): Promise<T> {
+    return this.request<T>("GET", path, undefined, signal);
   }
 
   /** Sends an authenticated request, signing in again once on 401. */
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    return this.answer<T>(await this.authorized(method, path, body));
+  async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return this.answer<T>(
+      await this.authorized(
+        method,
+        path,
+        body,
+        signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]) : undefined,
+      ),
+    );
   }
 
   /**
