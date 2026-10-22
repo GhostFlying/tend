@@ -93,24 +93,26 @@ type ConversationRow struct {
 	Tool *ToolUseRow
 }
 
+// conversationCols selects a ConversationRow from conversation_messages m.
+const conversationCols = `m.seq, m.kind, m.message_id, m.author, m.body, COALESCE(m.reply_to, ''), m.created_at,
+	COALESCE((SELECT json_extract(e.body_json, '$.state') FROM events e WHERE e.object_type = 'message'
+		AND e.object_id = m.message_id AND e.kind = 'conversation.message_state' ORDER BY e.event_seq DESC LIMIT 1), ''),
+	u.turn_id, u.item_id, u.tool, u.input, u.output, u.status, u.updated_at
+	FROM conversation_messages m LEFT JOIN conversation_tool_uses u ON u.message_id = m.message_id`
+
 // ListConversation returns up to limit conversation items in order:
 // those after seq after when after is positive, else those before seq
 // before when before is positive, else the latest.
 func ListConversation(ctx context.Context, q Querier, before, after int64, limit int) ([]ConversationRow, error) {
-	const cols = `m.seq, m.kind, m.message_id, m.author, m.body, COALESCE(m.reply_to, ''), m.created_at,
-		COALESCE((SELECT json_extract(e.body_json, '$.state') FROM events e WHERE e.object_type = 'message'
-			AND e.object_id = m.message_id AND e.kind = 'conversation.message_state' ORDER BY e.event_seq DESC LIMIT 1), ''),
-		u.turn_id, u.item_id, u.tool, u.input, u.output, u.status, u.updated_at
-		FROM conversation_messages m LEFT JOIN conversation_tool_uses u ON u.message_id = m.message_id`
 	var query string
 	var args []any
 	switch {
 	case after > 0:
-		query, args = `SELECT `+cols+` WHERE m.seq > ? ORDER BY m.seq LIMIT ?`, []any{after, limit}
+		query, args = `SELECT `+conversationCols+` WHERE m.seq > ? ORDER BY m.seq LIMIT ?`, []any{after, limit}
 	case before > 0:
-		query, args = `SELECT * FROM (SELECT `+cols+` WHERE m.seq < ? ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{before, limit}
+		query, args = `SELECT * FROM (SELECT `+conversationCols+` WHERE m.seq < ? ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{before, limit}
 	default:
-		query, args = `SELECT * FROM (SELECT `+cols+` ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{limit}
+		query, args = `SELECT * FROM (SELECT `+conversationCols+` ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{limit}
 	}
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -119,18 +121,35 @@ func ListConversation(ctx context.Context, q Querier, before, after int64, limit
 	defer rows.Close()
 	var out []ConversationRow
 	for rows.Next() {
-		var r ConversationRow
-		var turn, item, tool, input, output, status sql.NullString
-		var updated sql.NullInt64
-		if err := rows.Scan(&r.Seq, &r.Kind, &r.MessageID, &r.Author, &r.Body, &r.ReplyTo, &r.CreatedAt, &r.State,
-			&turn, &item, &tool, &input, &output, &status, &updated); err != nil {
-			return nil, fmt.Errorf("store: scan conversation: %w", err)
-		}
-		if tool.Valid {
-			r.Tool = &ToolUseRow{MessageID: r.MessageID, TurnID: turn.String, ItemID: item.String, Tool: tool.String,
-				Input: input.String, Output: output.String, Status: status.String, UpdatedAt: updated.Int64}
+		r, err := scanConversation(rows)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// GetConversationItem returns one conversation item, or ErrNotFound.
+func GetConversationItem(ctx context.Context, q Querier, messageID string) (ConversationRow, error) {
+	r, err := scanConversation(q.QueryRowContext(ctx, `SELECT `+conversationCols+` WHERE m.message_id = ?`, messageID))
+	if err != nil {
+		return ConversationRow{}, notFound(err, "conversation item "+messageID)
+	}
+	return r, nil
+}
+
+func scanConversation(row interface{ Scan(...any) error }) (ConversationRow, error) {
+	var r ConversationRow
+	var turn, item, tool, input, output, status sql.NullString
+	var updated sql.NullInt64
+	if err := row.Scan(&r.Seq, &r.Kind, &r.MessageID, &r.Author, &r.Body, &r.ReplyTo, &r.CreatedAt, &r.State,
+		&turn, &item, &tool, &input, &output, &status, &updated); err != nil {
+		return ConversationRow{}, fmt.Errorf("store: scan conversation: %w", err)
+	}
+	if tool.Valid {
+		r.Tool = &ToolUseRow{MessageID: r.MessageID, TurnID: turn.String, ItemID: item.String, Tool: tool.String,
+			Input: input.String, Output: output.String, Status: status.String, UpdatedAt: updated.Int64}
+	}
+	return r, nil
 }
