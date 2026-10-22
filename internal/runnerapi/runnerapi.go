@@ -28,8 +28,11 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// Path is the single endpoint of the runner protocol.
-const Path = "/runner/v1/rpc"
+// Prefix contains the RPC and binary file endpoints of the runner protocol.
+const Prefix = "/runner/v1/"
+
+// Path is the RPC endpoint of the runner protocol.
+const Path = Prefix + "rpc"
 
 // Request headers naming the credential's subject.
 const (
@@ -58,6 +61,9 @@ func HashToken(token string) string {
 type Config struct {
 	// ClaimWait bounds how long a claim waits for work. Default 25s.
 	ClaimWait time.Duration
+	// FileLimit and ResultFileLimit bound durable binary uploads.
+	FileLimit       int64
+	ResultFileLimit int64
 }
 
 // Server handles runner requests.
@@ -81,6 +87,8 @@ func New(a *app.App, whois netx.WhoIs, secret []byte, cfg Config, log *slog.Logg
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+Path, s.serve)
+	mux.HandleFunc("POST /runner/v1/files", s.uploadFile)
+	mux.HandleFunc("GET /runner/v1/files/{id}", s.downloadFile)
 	return mux
 }
 
@@ -204,12 +212,16 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 // runCommands are the operations a run performs through the ledger.
 var runCommands = map[string]app.Command{
-	protocol.OpRunsReportWorkspace: app.ReportWorkspace{},
-	protocol.OpRunsReportStarted:   app.ReportRunStarted{},
-	protocol.OpRunsSubmitArtifact:  app.SubmitArtifact{},
-	protocol.OpRunsRelease:         app.Release{},
-	protocol.OpRunsReportTakeover:  app.ReportTakeover{},
-	protocol.OpAcceptancesSubmit:   app.SubmitAcceptance{},
+	protocol.OpWorkspaceReconcile:   app.ReconcileWorkspaces{},
+	protocol.OpWorkspaceRelease:     app.ReleaseWorkspace{},
+	protocol.OpWorkspaceCleanup:     app.ReserveWorkspaceCleanup{},
+	protocol.OpWorkspaceCleanupDone: app.CompleteWorkspaceCleanup{},
+	protocol.OpRunsReportWorkspace:  app.ReportWorkspace{},
+	protocol.OpRunsReportStarted:    app.ReportRunStarted{},
+	protocol.OpRunsSubmitArtifact:   app.SubmitArtifact{},
+	protocol.OpRunsRelease:          app.Release{},
+	protocol.OpRunsReportTakeover:   app.ReportTakeover{},
+	protocol.OpAcceptancesSubmit:    app.SubmitAcceptance{},
 }
 
 func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protocol.Envelope) (protocol.Operation, error) {

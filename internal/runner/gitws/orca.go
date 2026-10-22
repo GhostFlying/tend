@@ -71,11 +71,14 @@ func (l orcaLayout) add(ctx context.Context, as protocol.Assignment, m protocol.
 			return mountState{}, err
 		}
 	}
-	wt, found, err := l.find(ctx, repo, as.Workspace.Name)
+	wt, found, err := l.findResource(ctx, repo, as, pending)
 	if err == nil && !found && pending.Asked != 0 {
 		// The request may have reached orca and still be running: stopping
 		// the CLI does not stop orca. Look again for a while before asking
 		// for another, which orca would create beside it (invariant 4).
+		if as.Workspace.ID != "" {
+			return mountState{}, fmt.Errorf("workspace_prepare_failed: create outcome unknown; reconcile provider before retry")
+		}
 		wt, found, err = l.await(ctx, repo, as.Workspace.Name, pending.Asked)
 	}
 	switch {
@@ -93,7 +96,7 @@ func (l orcaLayout) add(ctx context.Context, as protocol.Assignment, m protocol.
 		}
 		// orca does not refuse a name it already has but picks another, so
 		// the record above and the lookup are what keep this idempotent.
-		wt, err = l.orca.CreateWorktree(ctx, orca.CreateWorktree{Repo: "id:" + repo.ID, Name: as.Workspace.Name, BaseBranch: pending.Base})
+		wt, err = l.orca.CreateWorktree(ctx, orca.CreateWorktree{Repo: "id:" + repo.ID, Name: as.Workspace.Name, BaseBranch: pending.Base, Comment: resourceMarker(as)})
 		if err != nil {
 			if !orca.Unconfirmed(err) {
 				// orca refused it: nothing was created.
@@ -113,6 +116,7 @@ func (l orcaLayout) add(ctx context.Context, as protocol.Assignment, m protocol.
 	}
 	ms := pending
 	ms.Dir, ms.Branch, ms.Head, ms.Asked = wt.Path, wt.BranchName(), head, 0
+	ms.ProviderID, ms.ProviderInstanceID = wt.ID, wt.InstanceID
 	return ms, nil
 }
 
@@ -189,4 +193,44 @@ func (l orcaLayout) find(ctx context.Context, repo orca.Repo, name string) (orca
 	}
 	return orca.Worktree{}, false, fmt.Errorf("workspace_prepare_failed: orca has %d worktrees named %s (%s); remove the extra ones",
 		len(found), name, strings.Join(paths, ", "))
+}
+
+func resourceMarker(as protocol.Assignment) string {
+	if as.Workspace.ID == "" {
+		return ""
+	}
+	return "tend workspace " + as.Workspace.ID
+}
+
+func (l orcaLayout) findResource(ctx context.Context, repo orca.Repo, as protocol.Assignment, pending mountState) (orca.Worktree, bool, error) {
+	if as.Workspace.ID == "" {
+		return l.find(ctx, repo, as.Workspace.Name)
+	}
+	if pending.ProviderID != "" {
+		wt, err := l.orca.Worktree(ctx, "id:"+pending.ProviderID)
+		if err != nil {
+			return orca.Worktree{}, false, err
+		}
+		if wt.Path != pending.Dir || pending.ProviderInstanceID != "" && wt.InstanceID != pending.ProviderInstanceID {
+			return orca.Worktree{}, false, fmt.Errorf("workspace_prepare_failed: provider identity changed")
+		}
+		return wt, true, nil
+	}
+	if as.Workspace.ID == "" {
+		return l.find(ctx, repo, as.Workspace.Name)
+	}
+	all, err := l.orca.Worktrees(ctx, "id:"+repo.ID)
+	if err != nil {
+		return orca.Worktree{}, false, err
+	}
+	var found orca.Worktree
+	for _, wt := range all {
+		if !wt.IsMainWorktree && wt.Comment == resourceMarker(as) {
+			if found.ID != "" {
+				return orca.Worktree{}, false, fmt.Errorf("workspace_prepare_failed: duplicate provider resource marker")
+			}
+			found = wt
+		}
+	}
+	return found, found.ID != "", nil
 }

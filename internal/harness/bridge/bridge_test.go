@@ -315,3 +315,34 @@ func TestInstallLeavesOthersConfigurationAlone(t *testing.T) {
 		t.Error("install for claude succeeded")
 	}
 }
+
+func TestInstallPrivateInOrdinaryDirectory(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	private := t.TempDir()
+	st := State{Run: "run_plain", Socket: "/run/s", Token: "secret-run-token"}
+	if err := InstallPrivate(ctx, dir, protocol.AgentCodex, "tend-runner", []string{"worker-mcp"}, st, private); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(private, protocol.WorkerMarker)
+	b, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), st.Token) {
+		t.Fatal("private state missing token")
+	}
+	cfg, err := os.ReadFile(filepath.Join(dir, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cfg), st.Token) || !strings.Contains(string(cfg), state) {
+		t.Fatal("credentials must stay in private state")
+	}
+	if err := UninstallPrivate(ctx, dir, protocol.AgentCodex, private); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatalf("private state remains: %v", err)
+	}
+}

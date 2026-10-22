@@ -1,0 +1,1 @@
+ALTER TABLE runs ADD COLUMN stopped_confirmed INTEGER NOT NULL DEFAULT 0;

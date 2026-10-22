@@ -29,7 +29,8 @@ type HeldRun struct {
 // HelloPayload opens a runner session. The runner reports every run it
 // holds before claiming new work.
 type HelloPayload struct {
-	Held []HeldRun `json:"held"`
+	WorkspaceProtocol int64     `json:"workspace_protocol,omitempty"`
+	Held              []HeldRun `json:"held"`
 	// Version is the runner build, for diagnostics.
 	Version string `json:"version,omitempty"`
 	// Worker is the harness the runner runs; it must be the one the
@@ -42,7 +43,8 @@ type HelloPayload struct {
 // host whose configured worker changed while its runner kept running
 // does not take work it would run with the wrong harness.
 type ClaimPayload struct {
-	Worker WorkerKind `json:"worker,omitempty"`
+	WorkspaceProtocol int64      `json:"workspace_protocol,omitempty"`
+	Worker            WorkerKind `json:"worker,omitempty"`
 }
 
 // Reconciliation verdicts for held runs.
@@ -107,10 +109,19 @@ type Feedback struct {
 
 // AssignmentWorkspace tells the runner how to lay out the workspace.
 type AssignmentWorkspace struct {
-	Name    string          `json:"name"`
-	Branch  string          `json:"branch"`
-	Profile string          `json:"profile,omitempty"`
-	Mounts  []AssignedMount `json:"mounts"`
+	ID                 string          `json:"id,omitempty"`
+	Kind               string          `json:"kind,omitempty"`
+	Reused             bool            `json:"reused,omitempty"`
+	TaskTitle          string          `json:"task_title,omitempty"`
+	ShortTaskID        string          `json:"short_task_id,omitempty"`
+	ProviderID         string          `json:"provider_id,omitempty"`
+	ProviderInstanceID string          `json:"provider_instance_id,omitempty"`
+	Path               string          `json:"path,omitempty"`
+	Baseline           json.RawMessage `json:"baseline,omitempty"`
+	Name               string          `json:"name"`
+	Branch             string          `json:"branch"`
+	Profile            string          `json:"profile,omitempty"`
+	Mounts             []AssignedMount `json:"mounts"`
 }
 
 // AssignedMount is one repository of an assigned workspace.
@@ -182,7 +193,11 @@ type EventsResult struct {
 
 // WorkspaceReport records how the runner laid out a run's workspace.
 type WorkspaceReport struct {
-	Mounts []ResolvedMount `json:"mounts"`
+	ProviderID         string          `json:"provider_id,omitempty"`
+	ProviderInstanceID string          `json:"provider_instance_id,omitempty"`
+	Path               string          `json:"path,omitempty"`
+	Baseline           json.RawMessage `json:"baseline,omitempty"`
+	Mounts             []ResolvedMount `json:"mounts"`
 }
 
 // ResolvedMount is the fact of where one mount started.
@@ -210,11 +225,12 @@ type TakeoverPayload struct {
 	Reason string `json:"reason"`
 }
 
-// ArtifactPayload submits the result of an implement run: the commit of
-// every mount of the workspace, changed or not, so acceptance can rebuild
-// the same combination.
+// ArtifactPayload submits immutable outputs of an implement run. Commit
+// deliverables list every mount; reports and files are independently optional.
 type ArtifactPayload struct {
 	Mounts []ArtifactMount `json:"mounts"`
+	Report *ResultReport   `json:"report,omitempty"`
+	Files  []ArtifactFile  `json:"files,omitempty"`
 }
 
 // ArtifactMount is one repository's state in an artifact.
@@ -242,4 +258,19 @@ type VerdictPayload struct {
 // ReleasePayload explains why a run is given up.
 type ReleasePayload struct {
 	Reason string `json:"reason"`
+}
+
+// ResultReport is a durable Markdown investigation or operation report.
+type ResultReport struct {
+	Body          string   `json:"body"`
+	Evidence      []string `json:"evidence,omitempty"`
+	Uncertainties []string `json:"uncertainties,omitempty"`
+}
+
+// ArtifactFile identifies a durable immutable uploaded file.
+type ArtifactFile struct {
+	FileID string `json:"file_id"`
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
 }

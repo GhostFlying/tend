@@ -257,3 +257,33 @@ describe("blocked site storage", () => {
     }
   });
 });
+
+describe("delivery file authorization", () => {
+  test("downloads bytes and renews expired owner credentials without a URL token", async () => {
+    tend.handle = () =>
+      new Response(new Uint8Array([0, 255, 10]), {
+        headers: { "Content-Type": "application/octet-stream" },
+      });
+    expect(new Uint8Array(await (await client.file("file_id")).arrayBuffer())).toEqual(
+      new Uint8Array([0, 255, 10]),
+    );
+    tend.valid.clear();
+    await client.file("file_id");
+    expect(tend.calls.slice(-3).map((c) => [c.path, c.auth])).toEqual([
+      ["/api/v1/files/file_id", "Bearer token-1"],
+      ["/api/v1/session", null],
+      ["/api/v1/files/file_id", "Bearer token-2"],
+    ]);
+    expect(tend.calls.every((c) => !c.path.includes("token="))).toBe(true);
+  });
+  test("refused download preserves the owner's authorization failure", async () => {
+    tend.handle = () => json(403, { error: { code: "forbidden", message: "not permitted" } });
+    await expect(client.file("file_id")).rejects.toBeInstanceOf(ApiError);
+    expect(client.connection.get().status).toBe("not-owner");
+  });
+  test("encodes file identities as one same-origin path segment", async () => {
+    tend.handle = () => new Response("text");
+    await client.file("../external?token=ignored");
+    expect(tend.calls.at(-1)?.path).toBe("/api/v1/files/..%2Fexternal%3Ftoken%3Dignored");
+  });
+});

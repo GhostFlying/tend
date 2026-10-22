@@ -20,6 +20,13 @@ func toDomain(r store.TaskRow, budget int64) domain.Task {
 	}
 }
 
+// toDomainWithWorkspace supplies the fixed binding policy to recovery rules.
+func toDomainWithWorkspace(r store.TaskRow, spec domain.Spec) domain.Task {
+	t := toDomain(r, spec.Budget())
+	t.WorkspaceReused = spec.Workspace.ModeValue() == domain.WorkspaceReuse
+	return t
+}
+
 // fromDomain applies the task state to the stored row. Fields the rules do
 // not own, such as the title and workspace, are kept from prev.
 func fromDomain(t domain.Task, prev store.TaskRow, now int64) store.TaskRow {

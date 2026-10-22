@@ -71,13 +71,27 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	}
 	instructions, input := harness.Brief(spec)
 	var verdicts harness.Verdicts
+	results := harness.Results{Spec: spec}
+	if err := results.Restore(); err != nil {
+		_ = s.Close()
+		return nil, err
+	}
 	cfg := harness.ThreadConfig{
 		Cwd: spec.Dir, Model: ws.opts.Model, Sandbox: ws.opts.Sandbox, ApprovalPolicy: ws.opts.ApprovalPolicy,
 		DeveloperInstructions: instructions,
+		Tools:                 []harness.ToolSpec{harness.ResultToolSpec}, OnToolCall: results.Handle,
 	}
 	if spec.Role == protocol.RoleAccept {
 		cfg.Tools = []harness.ToolSpec{harness.VerdictToolSpec}
-		cfg.OnToolCall = verdicts.Handle
+		if spec.DownloadFile != nil {
+			cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
+		}
+		cfg.OnToolCall = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
+			if c.Tool == harness.VerdictTool {
+				return verdicts.Handle(ctx, c)
+			}
+			return results.Handle(ctx, c)
+		}
 	}
 	th, err := ws.thread(ctx, s, spec, cfg)
 	if err != nil {
@@ -132,7 +146,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					case <-ctx.Done():
 					}
 				case harness.EventTurnCompleted:
-					w.res = harness.WorkerResult{Verdict: verdicts.Verdict(), Summary: summary}
+					w.res = harness.WorkerResult{Verdict: verdicts.Verdict(), Result: results.Result(), Summary: summary}
 					if ev.TurnStatus != "completed" {
 						w.err = fmt.Errorf("traex: the worker's turn ended %s", ev.TurnStatus)
 					}

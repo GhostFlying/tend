@@ -37,6 +37,12 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 			fmt.Fprintf(&body, " · 工作树快照：`%s`", mount.SnapshotSHA)
 		}
 	}
+	if artifact.Report != nil {
+		fmt.Fprint(&body, "\n\n报告已保存，可在任务详情查看。")
+	}
+	for _, file := range artifact.Files {
+		fmt.Fprintf(&body, "\n\n交付文件：%s（%d 字节）。", file.Name, file.Size)
+	}
 	now := x.Now.UnixMilli()
 	id := x.IDs.New(protocol.PrefixMessage)
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "system", Body: body.String(), CreatedAt: now})

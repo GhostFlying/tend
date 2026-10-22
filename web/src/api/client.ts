@@ -168,6 +168,29 @@ export class ApiClient {
     return this.request<T>("GET", path, undefined, signal);
   }
 
+  /** Reads an immutable delivery file through owner authorization. */
+  async file(fileId: string, signal?: AbortSignal): Promise<Blob> {
+    const bounded = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)])
+      : AbortSignal.timeout(this.timeoutMs);
+    const response = await this.authorized(
+      "GET",
+      `/api/v1/files/${encodeURIComponent(fileId)}`,
+      undefined,
+      bounded,
+      "application/octet-stream",
+    );
+    if (!response.ok) await this.answer(response);
+    try {
+      const blob = await response.blob();
+      this.markOnline();
+      return blob;
+    } catch (err) {
+      if (!bounded.aborted) this.markOffline("文件下载未完成");
+      throw new NetworkError(err);
+    }
+  }
+
   /** Sends an authenticated request, signing in again once on 401. */
   async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     return this.answer<T>(

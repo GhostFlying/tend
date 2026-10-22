@@ -3,8 +3,8 @@ package domain
 import "github.com/GhostFlying/tend/internal/protocol"
 
 // Options of the decision about an unavailable workspace: tend answers
-// WaitForHostOption itself once the host is back, and StartOverOption
-// identifies the decision.
+// WaitForHostOption itself once the host is back. StartOverOption is
+// available only for workspaces created by this task.
 const (
 	WaitForHostOption = optionWaitForHost
 	StartOverOption   = optionStartOver
@@ -23,13 +23,19 @@ func WorkspaceUnavailable(t Task, hostID, why string) Decision {
 	return Decision{
 		Task:          t,
 		Events:        []EventDraft{{Kind: "task.workspace_unavailable", Body: map[string]any{"host_id": hostID, "reason": why}}},
-		OpenDecisions: []DecisionDraft{workspaceQuestion(hostID, why)},
+		OpenDecisions: []DecisionDraft{workspaceQuestion(t, hostID, why)},
 	}
 }
 
-func workspaceQuestion(hostID, why string) DecisionDraft {
-	return workspaceDecision("The task's workspace is on host " + hostID + ", which " + why +
+func workspaceQuestion(t Task, hostID, why string) DecisionDraft {
+	d := workspaceDecision("The task's workspace is on host " + hostID + ", which " + why +
 		". Its work can only go on there. How should this task proceed?")
+	if t.WorkspaceReused {
+		d.Question += " This task reuses a fixed workspace and cannot start over on another host. Wait for its host, or cancel and create a new task with workspace.mode=new or temporary."
+		d.Options = []string{optionWaitForHost, optionCancel}
+		d.Effects = map[string]protocol.DecisionEffect{optionCancel: protocol.EffectCancel}
+	}
+	return d
 }
 
 // AskAboutWorkspaceAgain asks the owner again how a task blocked on its
@@ -42,7 +48,7 @@ func AskAboutWorkspaceAgain(t Task, hostID, why string) Decision {
 	return Decision{
 		Task:          t,
 		Events:        []EventDraft{{Kind: "task.workspace_unavailable", Body: map[string]any{"host_id": hostID, "reason": why, "asked_again": true}}},
-		OpenDecisions: []DecisionDraft{workspaceQuestion(hostID, why)},
+		OpenDecisions: []DecisionDraft{workspaceQuestion(t, hostID, why)},
 	}
 }
 
@@ -69,6 +75,9 @@ func StartOver(t Task, expectedRevision int64) (Decision, error) {
 	}
 	if t.Block != protocol.BlockWorkspaceUnavailable {
 		return Decision{}, protocol.Errorf(protocol.CodeInvalidTransition, "a task starts over only while its workspace is unavailable")
+	}
+	if t.WorkspaceReused {
+		return Decision{}, protocol.Errorf(protocol.CodeInvalidTransition, "a reused workspace is pinned to its original resource; wait for its host, or cancel and create a new task with workspace.mode=new or temporary")
 	}
 	t.ControlRevision++
 	t.ImplementGeneration++

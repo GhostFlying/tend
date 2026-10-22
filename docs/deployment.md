@@ -16,6 +16,7 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 - `owners`：可以使用 owner API 的 tailnet 登录名，也就是可以运行 `tend login` 的人（D49）。不加入 tailnet、只用 `listen` 时，用 `local_owner` 指定本地开发的 owner。owner 在 tagged 机器上工作时（tagged 节点没有登录名），用 `owner_nodes` 把这台机器的名字映射到 `owners` 里的登录名（D56）。
 - `projects`：可选。project 是 tend 对任务的分组（D52、D58），不等于仓库：`repos` 列出它涉及的仓库，`weight` 是它的任务在排队时的权重（默认 1），`template` 是没有给出工作区的任务使用的工作区模板。不配置时所有任务属于隐含的 `default` project。从配置中删掉的 project 变为 retired：已有任务照常进行，不能再建新任务。修改后重启服务端生效。
 - `host_lost_after`：可选，默认 `24h`。任务的工作区只在一台 host 上；这台 host 退役，或超过这段时间没有消息（hello、心跳或领取）时，有待执行动作、或者在那台 host 上有状态未知的 run 的任务以 `workspace_unavailable` 阻塞，并请 owner 选择等待、换一台 host 从头再来或取消（D62）。host 回来后一分钟内自动解除。设为 `0s` 时只对退役的 host 生效；不设为 `0s` 时至少 `10m`，因为空闲 runner 只在领取时被记下，而且每分钟最多记一次。
+- `deliverables.file_limit_bytes` 与 `deliverables.result_limit_bytes`：交付文件上传限制，默认分别为 20 MiB 和 100 MiB，`0` 使用默认值，不能为负，单文件限制不能超过结果总限制。总限制按一个 run 的持久化上传累计计算，包括尚未引用的上传；传输重试沿用原 `request_id`，不会重复占用额度。文件内容与不可变清单保存在账本数据库中，需计入容量规划与备份。
 - `hosts[].worker`：可选，默认 `appserver`。这台 host 用哪种 harness 运行 worker（D63、D64）：`appserver` 是 traex app-server 加 runner 自建的工作区；`orca` 在 orca 的 worktree 里运行 agent TUI，只支持单仓库工作区。有活动 host 而它们都不支持多仓库时，tend 拒绝建多个 mount 的任务；已有的这类任务在 `tend status` 里显示没有 host 能领取的原因。runner 配置的 `worker.kind` 必须与它一致，否则 runner 的 hello 和领取被拒绝。
 - `queue.wait_per_hour`：可选，默认 0.1。排队的动作按分数领取（D60）：`p0` 最先；其余的分数是 project 权重 × 评级分（`p1` 3、`p2` 2、`p3` 1，未评级按 `p2`）加上排队小时数 × 这个系数。默认值下，权重为 1 时等 10 小时相当于升一级；设为 0 则不考虑等待时间。
 - `main_agent`：可选，默认不配置。主 Agent 是 owner 自己使用的 agent（见下文 `tend` CLI）；配置了 `main_agent`（可以是空对象 `{}`）时，服务端另外运行一个托管的主 Agent，Web 客户端和它对话，与外挂的主 Agent 并存（D68）。
@@ -53,6 +54,7 @@ TEND_HOST_TOKEN=... TS_AUTHKEY=... ./tend-runner -config tend-runner.hujson
 worker 是 orca 里的 agent TUI（D63、D66）：runner 在 orca 里建 worktree、启动 agent，owner 可以在 orca（桌面或手机）里看着它工作，也可以直接接手（D67）。部署前 owner 在这台机器上准备好：
 
 - **orca**：已安装并运行，`orca` 在 PATH 上（或用 `worker.orca_bin` 指定）。
+- **Workspace CLI 能力（D78–D80）**：CLI 必须支持 `folder-workspace list/create/show/update/rm` 和 `project-group list/create/rm`。可用独立版本的 CLI，通过 `worker.orca_bin` 指定，无需替换已运行的桌面应用。runner 启动时只读检查能力，成功后才声明 workspace protocol 1；旧 runner 不领取临时目录、复用或显式组合交付任务。
 - **仓库登记在 orca 里**：tend 不登记、不删除仓库，只在里面为任务建 worktree（D65），之后也不删除它们。runner 配置里每个仓库用 `repos.<name>.orca` 指明它在 orca 里的登记，例如 `"name:tend"`、`"path:/abs/path"`、`"id:<repoId>"`。tend 建的 worktree 和分支用 orca 的命名，产物记录实际的分支。
 - **为 worker 用的 agent 关闭 orca 的 Chat UI**：orca 在 Chat UI 打开时以 chat 启动 agent，tend 只能驱动终端里的 TUI；否则 run 以明确的错误失败。
 - **agent 的 orca hook 生效**：orca 从 agent 的 hook 得知它的状态（在做、等待、一轮结束），tend 据此判断一轮是否结束。agent 的配置关掉了 hook 时（例如 Codex 的 `[features]` 里 `hooks = false`），或 orca 的 hook 没有被信任时，orca 看不到 agent，worker 在启动后约两分钟以明确的错误失败。
@@ -63,7 +65,17 @@ tend 在仓库里留下的东西：
 
 - 每个 run 期间，worktree 里有 `.codex/config.toml` 或 `.trae/traecli.toml`（无人值守设置、关闭启动时的更新检查、tend 的 MCP server），worktree 的 git 目录里有 `tend-worker.json`；run 结束时删除。仓库里已有同名而不是 tend 写的文件时，run 失败，不会覆盖。
 - 仓库共用的 `info/exclude`（`git rev-parse --git-path info/exclude`）里加了 `/.codex/config.toml`、`/.trae/traecli.toml` 两行，worker 的提交和产物不会带上它们。linked worktree 与主 checkout 共用这个文件，所以 owner 主 checkout 里同名的未跟踪文件也会被 `git status` 忽略。
-- 任务的 worktree 和 worker 的终端在 run 结束后保留，owner 可以在 orca 里查看；取消或放弃的 run 的终端会被关闭。
+- 任务的 Git worktree 保留，owner 可以在 orca 里查看；run 结束时关闭并确认停止该 run 的 agent。人工接管或无法确认身份、停止状态时保留占用，不能把资源交给另一个任务。
+
+### Workspace 资源与升级（D78–D80）
+
+升级顺序是具备 folder workspace 能力的 Orca CLI、兼容服务端、runner，最后使用新任务能力。迁移前停止写入，备份服务端 SQLite 数据库及每台 runner 的 journal；恢复时使用匹配数据库版本的二进制和备份，不能用旧二进制直接打开升级后的账本。
+
+`temporary` 任务不需要登记仓库，每个资源在 `<runner.home>/temporary-workspaces/<workspace_id>/` 使用独立目录，并在 Orca 里保留可接手的 folder workspace。非 Git 任务的 MCP 凭据放在 runner 私有目录，不写入交付目录。临时资源在最后一个任务终止、所有运行确认停止后保留七天；排队复用、人工接管、待决和未知运行会阻止清理。文件和报告持久保存在服务端，目录清理不删除交付物。
+
+`reuse` 按来源任务绑定稳定资源并固定原主机，保留分支、文件和脏状态；资源缺失时进入待决，不静默重建。Orca 显示名为当前任务标题和短任务 ID，身份匹配使用持久化的 provider ID、路径与实例信息。
+
+历史任务迁移时保留原占用，即使账本已完成。runner 根据 journal 和提供方记录核对所有历史运行，只在能确认属于对应 run 且已停止时释放；无法确认或已有人接手的终端继续保留。升级后应检查 host 的 `workspace_protocol` 为 1、原任务和资源数量、待决原因及运行状态；不能仅凭任务完成状态人工清空占用。切换 harness 不授予新 harness 删除旧 provider 资源的权限；找不到原适配器或目录已有其他注册时暂停清理，其他资源的释放继续进行。已完成 worker 的结果会先存入 journal，恢复时不重新启动该 worker。
 
 orca 里启动的 agent 继承 orca 的环境而不是 runner 的，runner 无法给它设置 `TEND_ADDON=off`；tend 的 hook 和 MCP 看到当前 worktree 的 git 目录里有 `tend-worker.json` 时同样什么都不做（D45）。
 

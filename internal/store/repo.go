@@ -98,7 +98,7 @@ func GetTask(ctx context.Context, q Querier, taskID string) (TaskRow, error) {
 	var artifact, workspace sql.NullString
 	err := q.QueryRowContext(ctx, `SELECT title, project, lifecycle, control_mode, control_revision, spec_version, rating,
 		block_reason, implement_generation, current_artifact_id, workspace_name,
-		EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = tasks.task_id), created_at, updated_at
+		EXISTS (SELECT 1 FROM task_workspace_bindings w WHERE w.task_id = tasks.task_id), created_at, updated_at
 		FROM tasks WHERE task_id = ?`, taskID).
 		Scan(&r.Title, &r.Project, &r.Lifecycle, &r.ControlMode, &r.ControlRevision, &r.SpecVersion, &r.Rating, &r.BlockReason,
 			&r.ImplementGeneration, &artifact, &workspace, &r.WorkspaceAssigned, &r.CreatedAt, &r.UpdatedAt)

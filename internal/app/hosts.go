@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/domain"
@@ -100,7 +101,7 @@ func (CheckWorkspaces) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 			if err != nil {
 				return Outcome{}, err
 			}
-			d = domain.WorkspaceUnavailable(toDomain(row, spec.Budget()), r.HostID, why)
+			d = domain.WorkspaceUnavailable(toDomainWithWorkspace(row, spec), r.HostID, why)
 		case why != "" && r.Block == protocol.BlockWorkspaceUnavailable:
 			row, spec, err := loadTask(ctx, tx.Q(), r.TaskID)
 			if err != nil {
@@ -113,13 +114,13 @@ func (CheckWorkspaces) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 			if asked {
 				continue
 			}
-			d = domain.AskAboutWorkspaceAgain(toDomain(row, spec.Budget()), r.HostID, why)
+			d = domain.AskAboutWorkspaceAgain(toDomainWithWorkspace(row, spec), r.HostID, why)
 		case why == "" && r.Block == protocol.BlockWorkspaceUnavailable:
 			row, spec, err := loadTask(ctx, tx.Q(), r.TaskID)
 			if err != nil {
 				return Outcome{}, err
 			}
-			d = domain.WorkspaceAvailable(toDomain(row, spec.Budget()), r.HostID)
+			d = domain.WorkspaceAvailable(toDomainWithWorkspace(row, spec), r.HostID)
 			answered, err := answerForHost(ctx, x, tx, r.TaskID)
 			if err != nil {
 				return Outcome{}, err
@@ -169,7 +170,20 @@ func askedAboutWorkspace(ctx context.Context, q store.Querier, task store.TaskRo
 func isWorkspaceDecision(d store.DecisionRow) bool {
 	var effects map[string]protocol.DecisionEffect
 	_ = json.Unmarshal([]byte(d.EffectsJSON), &effects)
-	return effects[domain.StartOverOption] == protocol.EffectStartOver
+	if effects[domain.StartOverOption] == protocol.EffectStartOver {
+		return true
+	}
+	var options []string
+	_ = json.Unmarshal([]byte(d.OptionsJSON), &options)
+	if !slices.Contains(options, domain.WaitForHostOption) {
+		return false
+	}
+	for _, effect := range effects {
+		if effect == protocol.EffectCancel {
+			return true
+		}
+	}
+	return false
 }
 
 // answerForHost answers, for the owner, the open decisions about a task's

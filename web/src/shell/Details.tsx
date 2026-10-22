@@ -4,6 +4,8 @@ import type { TaskDetail, ArtifactView, AcceptanceView } from "../api/generated/
 import { useServices } from "../app/services.tsx";
 import { DecisionCard } from "../decisions/DecisionCard.tsx";
 import { currentWork } from "../tasks/facts.ts";
+import { WorkspaceFacts } from "../tasks/WorkspaceFacts.tsx";
+import { ArtifactDelivery } from "../tasks/ArtifactDelivery.tsx";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { useStore } from "../state/store.ts";
 import { cancelTask, setControl } from "../tasks/actions.ts";
@@ -154,6 +156,7 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
           <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
         </Section>
       )}
+      <WorkspaceFacts task={t} />
       <Section title="本版执行进展">
         {!t.runs?.some((r) => r.spec_version === t.spec_version) && (
           <p className={controls.empty}>暂无本版执行记录。</p>
@@ -180,7 +183,7 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
               <div className={styles.caption}>
                 {key === "goal" ? "目标" : (specLabels[key] ?? key)}
               </div>
-              <SpecValue value={value} />
+              <SpecValue value={value} field={key} />
             </div>
           ))
         ) : (
@@ -386,6 +389,7 @@ function Artifacts({
       {!artifacts.length && <p className={controls.empty}>暂无可关联到本版的产物。</p>}
       {artifacts.map((artifact) => (
         <div className={styles.artifact} key={artifact.artifact_id}>
+          <ArtifactDelivery value={artifact.ref} />
           <ArtifactRef value={artifact.ref} />
           {verdicts
             .filter((v) => v.artifact_id === artifact.artifact_id)
@@ -464,6 +468,7 @@ function ArtifactRef({ value }: { value: unknown }) {
         </dl>
       );
   }
+  if (value && typeof value === "object" && ("report" in value || "files" in value)) return null;
   return <pre className={styles.fact}>{text(value)}</pre>;
 }
 function IssueList({ value }: { value: unknown }) {
@@ -509,7 +514,20 @@ function Fold({ title, children }: { title: string; children: ReactNode }) {
     </details>
   );
 }
-function SpecValue({ value }: { value: unknown }) {
+function SpecValue({ value, field }: { value: unknown; field?: string }) {
+  const deliverableLabels: Record<string, string> = {
+    commit: "提交代码",
+    report: "报告",
+    files: "文件",
+  };
+  if (field === "deliverables" && Array.isArray(value))
+    return (
+      <p>
+        {value
+          .map((v) => (typeof v === "string" ? (deliverableLabels[v] ?? v) : text(v)))
+          .join("、")}
+      </p>
+    );
   if (Array.isArray(value) && value.every((item) => typeof item === "string"))
     return (
       <ul className={styles.checks}>
@@ -531,6 +549,7 @@ const workspaceLabels: Record<string, string> = {
 };
 const specLabels: Record<string, string> = {
   delivery: "交付方式",
+  deliverables: "交付要求",
   acceptance: "验收条件",
   constraints: "约束",
   context: "上下文",

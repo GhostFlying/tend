@@ -1,0 +1,74 @@
+.section,
+.report {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.section h2,
+.section h3,
+.report h3,
+.report h4 {
+  font-size: var(--text-s);
+  color: var(--label-3);
+  margin: 0 0 10px;
+  font-weight: 500;
+}
+.report h4 {
+  margin-top: 14px;
+}
+.report,
+.files {
+  margin: 0 0 14px;
+}
+.facts {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px 12px;
+  font-size: var(--text-m);
+  margin: 10px 0;
+}
+.facts dt,
+.caption {
+  color: var(--caption);
+  font-size: var(--text-s);
+}
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.files {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+}
+.files li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-m);
+  background: var(--sidebar);
+  padding: 10px;
+}
+.files li strong,
+.files li details {
+  flex-basis: 100%;
+  min-width: 0;
+}
+.files li strong {
+  font-size: var(--text-m);
+}
+.files li details {
+  font-size: var(--text-s);
+}
+.files li code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 6px;
+}
+.notes {
+  margin: 0;
+  padding-left: 20px;
+}

@@ -33,6 +33,11 @@ var configPaths = map[protocol.AgentKind]string{
 // configuration file is added to the repository's exclude file, which
 // linked worktrees share. Install may run again for the same worktree.
 func Install(ctx context.Context, dir string, agent protocol.AgentKind, command string, args []string, st State) error {
+	return InstallPrivate(ctx, dir, agent, command, args, st, "")
+}
+
+// InstallPrivate keeps credentials outside the workspace when privateDir is supplied.
+func InstallPrivate(ctx context.Context, dir string, agent protocol.AgentKind, command string, args []string, st State, privateDir string) error {
 	if st.Run == "" || st.Socket == "" || st.Token == "" {
 		return errors.New("bridge: the state needs a run, a socket and a token")
 	}
@@ -44,7 +49,15 @@ func Install(ctx context.Context, dir string, agent protocol.AgentKind, command 
 	if err := checkOwn(cfg); err != nil {
 		return err
 	}
-	state, err := StatePath(ctx, dir)
+	var state string
+	var err error
+	if privateDir == "" {
+		state, err = StatePath(ctx, dir)
+	}
+	if privateDir != "" {
+		err = os.MkdirAll(privateDir, 0o700)
+		state = filepath.Join(privateDir, protocol.WorkerMarker)
+	}
 	if err != nil {
 		return err
 	}
@@ -59,8 +72,14 @@ func Install(ctx context.Context, dir string, agent protocol.AgentKind, command 
 	if err := os.Chmod(state, 0o600); err != nil {
 		return fmt.Errorf("bridge: restrict the run's state: %w", err)
 	}
-	if err := exclude(ctx, dir, "/"+rel); err != nil {
-		return err
+	if privateDir == "" {
+		if err := exclude(ctx, dir, "/"+rel); err != nil {
+			return err
+		}
+	} else if _, err := git(ctx, dir, "rev-parse", "--git-dir"); err == nil {
+		if err := exclude(ctx, dir, "/"+rel); err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
 		return fmt.Errorf("bridge: %w", err)
@@ -76,6 +95,11 @@ func Install(ctx context.Context, dir string, agent protocol.AgentKind, command 
 // except the exclude line. It may run when Install never did, or did
 // only in part.
 func Uninstall(ctx context.Context, dir string, agent protocol.AgentKind) error {
+	return UninstallPrivate(ctx, dir, agent, "")
+}
+
+// UninstallPrivate removes only the configuration and private credentials it owns.
+func UninstallPrivate(ctx context.Context, dir string, agent protocol.AgentKind, privateDir string) error {
 	var errs []error
 	if rel, ok := configPaths[agent]; ok {
 		cfg := filepath.Join(dir, rel)
@@ -86,7 +110,14 @@ func Uninstall(ctx context.Context, dir string, agent protocol.AgentKind) error 
 			_ = os.Remove(filepath.Dir(cfg)) // only when it is empty
 		}
 	}
-	state, err := StatePath(ctx, dir)
+	var state string
+	var err error
+	if privateDir == "" {
+		state, err = StatePath(ctx, dir)
+	}
+	if privateDir != "" {
+		state, err = filepath.Join(privateDir, protocol.WorkerMarker), nil
+	}
 	if err == nil {
 		err = os.Remove(state)
 	}

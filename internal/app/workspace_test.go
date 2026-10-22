@@ -183,9 +183,7 @@ func TestPinnedWorkspaceRejectsMountChanges(t *testing.T) {
 	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
 	// Stand in for the claim that creates the workspace (B7).
 	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
-		_, err := tx.Exec(context.Background(), `INSERT INTO workspaces (workspace_id, task_id, name, host_id, status, created_at, updated_at)
-			VALUES ('wsp_1', ?, ?, 'linux-1', 'assigned', 0, 0)`, res.TaskID, h.task(res.TaskID).WorkspaceName)
-		return err
+		return tx.InsertWorkspace(context.Background(), store.WorkspaceRow{WorkspaceID: "wsp_1", TaskID: res.TaskID, Name: h.task(res.TaskID).WorkspaceName, HostID: "linux-1", Status: store.WorkspaceAssigned}, 0)
 	}); err != nil {
 		t.Fatal(err)
 	}

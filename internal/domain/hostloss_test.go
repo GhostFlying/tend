@@ -82,3 +82,38 @@ func TestStartOver(t *testing.T) {
 		t.Errorf("cancelled: %v", err)
 	}
 }
+
+func TestReusedWorkspaceCannotStartOverOrOfferInvalidRecovery(t *testing.T) {
+	task := taskIn(protocol.TaskQueued)
+	task.WorkspaceAssigned, task.WorkspaceReused = true, true
+	unavailable := WorkspaceUnavailable(task, "linux-1", "was retired")
+	if len(unavailable.OpenDecisions) != 1 {
+		t.Fatal("missing owner decision")
+	}
+	checkQuestion := func(q DecisionDraft) {
+		t.Helper()
+		for _, option := range q.Options {
+			if option == StartOverOption {
+				t.Fatal("fixed reuse offered a fresh workspace")
+			}
+		}
+		if _, ok := q.Effects[StartOverOption]; ok {
+			t.Fatal("fixed reuse retained start-over effect")
+		}
+		if len(q.Options) != 2 || !strings.Contains(q.Question, "workspace.mode=new") {
+			t.Fatalf("missing actionable alternatives: %+v", q)
+		}
+	}
+	checkQuestion(unavailable.OpenDecisions[0])
+	again := AskAboutWorkspaceAgain(unavailable.Task, "linux-1", "was retired")
+	if len(again.OpenDecisions) != 1 {
+		t.Fatal("missing refreshed decision")
+	}
+	checkQuestion(again.OpenDecisions[0])
+	if _, err := StartOver(unavailable.Task, unavailable.Task.ControlRevision); protocol.CodeOf(err) != protocol.CodeInvalidTransition || !strings.Contains(err.Error(), "reused workspace is pinned") {
+		t.Fatalf("start over reused workspace: %v", err)
+	}
+	if unavailable.Task.WorkspaceAssigned != true || unavailable.Task.ImplementGeneration != task.ImplementGeneration {
+		t.Fatal("rejected recovery changed resource state")
+	}
+}

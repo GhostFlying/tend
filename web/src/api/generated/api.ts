@@ -138,6 +138,7 @@ export interface TendAPI {
   AnswerDecisionPayload?: AnswerDecisionPayload;
   AnswerResult?: AnswerResult;
   ArtifactDetail?: ArtifactDetail;
+  ArtifactPayload?: ArtifactPayload;
   ConversationPage?: ConversationPage;
   ConversationSettingsView?: ConversationSettingsView;
   CreateActionPayload?: CreateActionPayload;
@@ -265,6 +266,47 @@ export interface ArtifactView {
   artifact_id: string;
   ref: unknown;
   run_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArtifactPayload".
+ */
+export interface ArtifactPayload {
+  files?: ArtifactFile[];
+  mounts: ArtifactMount[] | null;
+  report?: ResultReport;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArtifactFile".
+ */
+export interface ArtifactFile {
+  file_id: string;
+  name: string;
+  sha256: string;
+  size: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArtifactMount".
+ */
+export interface ArtifactMount {
+  base_sha: string;
+  branch: string;
+  changed: boolean;
+  commit_sha: string;
+  path: string;
+  repo: string;
+  snapshot_sha?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ResultReport".
+ */
+export interface ResultReport {
+  body: string;
+  evidence?: string[];
+  uncertainties?: string[];
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -520,6 +562,7 @@ export interface HostView {
   os: string;
   slots: number;
   worker: WorkerKind;
+  workspace_protocol?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -632,7 +675,15 @@ export interface RunView {
  */
 export interface WorkspaceView {
   host: string;
+  kind?: string;
+  mode?: string;
   mounts: MountView[] | null;
+  name?: string;
+  occupied_by?: string;
+  path?: string;
+  provider_id?: string;
+  resource_id?: string;
+  source_task_id?: string;
   status: string;
 }
 /**

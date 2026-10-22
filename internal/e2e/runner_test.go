@@ -334,6 +334,13 @@ type node struct {
 
 func newNode(t *testing.T, srv *server, script func(harness.WorkerSpec) testkit.WorkerScript) *node {
 	t.Helper()
+	// The fake keeps agent threads after Wait and supports owner handback,
+	// matching an external terminal worker rather than a closed app-server.
+	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
+		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
+		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 2,
+			TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}, Worker: protocol.WorkerOrca}},
+	}, app.SyncConfig{})
 	n := &node{
 		t: t, srv: srv, path: filepath.Join(t.TempDir(), "journal.db"),
 		workers: &testkit.Workers{Script: script}, ws: &workspaces{dir: t.TempDir()}, net: &network{}, flush: 20 * time.Millisecond,
@@ -358,7 +365,7 @@ func (n *node) start() {
 	n.cancel, n.done = cancel, make(chan error, 1)
 	r := runner.New(runner.Config{
 		ServerURL: n.srv.url, HostID: "linux-1", HostToken: hostToken, Version: "test",
-		HTTPClient: &http.Client{Transport: n.net}, Journal: j, Workers: n.workers, Workspaces: n.ws,
+		HTTPClient: &http.Client{Transport: n.net}, Journal: j, Worker: protocol.WorkerOrca, Workers: n.workers, Workspaces: n.ws,
 		Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: quiet(),
 		RetryDelay: 20 * time.Millisecond, EventFlush: n.flush,
 	})
@@ -433,7 +440,7 @@ func TestFault_ClaimReceiptLost_Runner(t *testing.T) {
 		task := srv.createTask()
 		// The runner journaled a claim and crashed before the answer.
 		env := &protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: protocol.OpRunnerClaim,
-			Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: json.RawMessage(`{}`)}
+			Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: json.RawMessage(`{"worker":"orca"}`)}
 		j := n.journal()
 		if err := j.PutRequest(context.Background(), journal.Request{Envelope: *env}); err != nil {
 			t.Fatal(err)
@@ -455,7 +462,7 @@ func TestFault_ClaimReceiptLost_Runner(t *testing.T) {
 		// tend refuses now that the runner runs the host's.
 		j := n.journal()
 		if err := j.PutRequest(context.Background(), journal.Request{Envelope: protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest),
-			Operation: protocol.OpRunnerClaim, Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: json.RawMessage(`{"worker":"orca"}`)}}); err != nil {
+			Operation: protocol.OpRunnerClaim, Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: json.RawMessage(`{"worker":"appserver"}`)}}); err != nil {
 			t.Fatal(err)
 		}
 		j.Close()
@@ -468,7 +475,7 @@ func TestFault_ClaimReceiptLost_Runner(t *testing.T) {
 		n := newNode(t, srv, passing)
 		task := srv.createTask()
 		srv.claimDirectly(&protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: protocol.OpRunnerClaim,
-			Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: json.RawMessage(`{}`)})
+			Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: json.RawMessage(`{"worker":"orca"}`)})
 
 		n.start()
 		eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
@@ -909,7 +916,7 @@ func TestRunnerReturnsStartupRejection(t *testing.T) {
 	defer j.Close()
 	r := runner.New(runner.Config{
 		ServerURL: srv.url, HostID: "linux-1", HostToken: "wrong", HTTPClient: &http.Client{Transport: n.net}, Journal: j,
-		Workers: n.workers, Workspaces: n.ws, Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: quiet(),
+		Worker: protocol.WorkerOrca, Workers: n.workers, Workspaces: n.ws, Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: quiet(),
 		RetryDelay: 20 * time.Millisecond,
 	})
 	done := make(chan error, 1)

@@ -22,9 +22,10 @@ type Spec struct {
 	Scope       string   `json:"scope,omitempty"`
 	Constraints []string `json:"constraints,omitempty"`
 	Acceptance  []string `json:"acceptance"`
-	// Delivery describes what completes the task. The MVP supports only
-	// "commit": an accepted commit on the task branch.
+	// Delivery preserves the legacy commit-only wire representation.
 	Delivery string `json:"delivery"`
+	// Deliverables lists required outputs; absent means legacy Delivery.
+	Deliverables []string `json:"deliverables,omitempty"`
 	// MaxImplementAttempts bounds implement generations for this version;
 	// zero means DefaultMaxImplementAttempts.
 	MaxImplementAttempts int64 `json:"max_implement_attempts,omitempty"`
@@ -41,8 +42,27 @@ func (s Spec) Normalize() Spec {
 	return s
 }
 
-// DeliveryCommit is the only delivery kind in the MVP.
-const DeliveryCommit = "commit"
+// Supported independently composable delivery kinds.
+const (
+	DeliveryCommit = "commit"
+	DeliveryReport = "report"
+	DeliveryFiles  = "files"
+)
+
+// RequiredDeliverables returns a canonical set without changing legacy JSON.
+func (s Spec) RequiredDeliverables() []string {
+	if len(s.Deliverables) == 0 {
+		return []string{s.Delivery}
+	}
+	out := slices.Clone(s.Deliverables)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// RequiresDelivery reports whether a result must contain this output.
+func (s Spec) RequiresDelivery(kind string) bool {
+	return slices.Contains(s.RequiredDeliverables(), kind)
+}
 
 // Executable reports whether the spec is concrete enough to start work.
 func (s Spec) Executable() bool {
@@ -52,10 +72,21 @@ func (s Spec) Executable() bool {
 // Validate checks the spec for values the ledger cannot act on.
 func (s Spec) Validate() error {
 	switch {
-	case s.Delivery != DeliveryCommit:
+	case s.Delivery != "" && s.Delivery != DeliveryCommit:
 		return protocol.Errorf(protocol.CodeInvalidRequest, "delivery %q is not supported", s.Delivery)
 	case s.MaxImplementAttempts < 0:
 		return protocol.Errorf(protocol.CodeInvalidRequest, "max_implement_attempts must not be negative")
+	}
+	if len(s.Deliverables) == 0 && s.Delivery == "" {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "at least one deliverable is required")
+	}
+	for _, kind := range s.Deliverables {
+		if kind != DeliveryCommit && kind != DeliveryReport && kind != DeliveryFiles {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "deliverable %q is not supported", kind)
+		}
+	}
+	if s.RequiresDelivery(DeliveryCommit) && len(s.Workspace.Mounts) == 0 {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "commit delivery requires at least one mount")
 	}
 	for _, l := range s.Requirements.Labels {
 		if !NamePattern.MatchString(l) {
@@ -75,7 +106,7 @@ func (s Spec) Budget() int64 {
 
 // Equal reports whether two specs ask for the same thing.
 func (s Spec) Equal(o Spec) bool {
-	return s.Goal == o.Goal && s.Scope == o.Scope && s.Delivery == o.Delivery &&
+	return s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
 		s.Budget() == o.Budget() && slices.Equal(s.Constraints, o.Constraints) && slices.Equal(s.Acceptance, o.Acceptance) &&
 		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements)
 }
@@ -103,6 +134,8 @@ type Task struct {
 	// WorkspaceAssigned reports that the task's workspace exists on a host.
 	// From then on its mounts can only be added to.
 	WorkspaceAssigned bool
+	// WorkspaceReused preserves a fixed source binding during host recovery.
+	WorkspaceReused bool
 }
 
 // ActionDraft is a follow-up action the caller must create.
@@ -247,6 +280,7 @@ func NewTask(id, project string, spec Spec, rating protocol.Rating) (Decision, e
 		Rating:          rating,
 		Block:           protocol.BlockNone,
 		Budget:          spec.Budget(),
+		WorkspaceReused: spec.Workspace.ModeValue() == WorkspaceReuse,
 	}
 	d := Decision{Events: []EventDraft{{Kind: "task.created", Body: map[string]any{"spec_version": 1, "rating": rating, "project": project}}}}
 	if spec.Executable() {
