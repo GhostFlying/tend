@@ -71,7 +71,7 @@ func newEnv(t *testing.T, h *testkit.Harness) *env {
 func (e *env) start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
-	d := dispatch.New(e.app, map[string]dispatch.Handler{app.MainThreadDestination: e.m}, e.signal, time.Now, dispatch.Config{PollInterval: 50 * time.Millisecond}, quiet())
+	d := dispatch.New(e.app, map[string]dispatch.Handler{app.MainThreadDestination: e.m, app.MainThreadControlDestination: e.m.Control()}, e.signal, time.Now, dispatch.Config{PollInterval: 50 * time.Millisecond}, quiet())
 	e.stopped.Go(func() { _ = e.m.Run(ctx) })
 	e.stopped.Go(func() { _ = d.Run(ctx) })
 }
@@ -460,6 +460,85 @@ func TestFault_ToolRunningInATurnNeverAcknowledged(t *testing.T) {
 	}
 	if n := e.count(`SELECT COUNT(*) FROM conversation_tool_uses WHERE status = 'interrupted'`); n != 1 {
 		t.Errorf("interrupted tool uses = %d, want 1", n)
+	}
+}
+
+func TestInterruptReply(t *testing.T) {
+	h := testkit.NewHarness()
+	gate := make(chan struct{})
+	var once sync.Once
+	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
+		if strings.Contains(in.Text, "long") {
+			<-gate
+			return "" // stopped by the interrupt
+		}
+		th.Say(turn, "item_"+turn, "done")
+		return "completed"
+	}
+	e := newEnv(t, h)
+	defer once.Do(func() { close(gate) })
+	stop := func(msg, requestID string) json.RawMessage {
+		t.Helper()
+		b, _ := json.Marshal(protocol.InterruptReplyPayload{MessageID: msg})
+		res, err := e.app.Execute(context.Background(), owner, &protocol.Envelope{RequestID: requestID, Operation: "conversation.interrupt_reply",
+			Target: protocol.Target{Type: "message", ID: msg}, Payload: b}, app.InterruptReply{})
+		if err != nil || res.Status == protocol.OpFailed {
+			t.Fatalf("interrupt_reply: %+v %v", res, err)
+		}
+		return res.Result
+	}
+
+	long := e.say("a long one")
+	eventually(t, "the turn runs", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'started'`) == 1 })
+	retried := e.ids.New(protocol.PrefixRequest)
+	stop(long, retried)
+	stop(long, retried) // a retry of the same request
+	eventually(t, "the turn is interrupted", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id = ? AND status = 'interrupted'`, long) == 1
+	})
+	if n := e.count(`SELECT COUNT(*) FROM outbox WHERE destination = ?`, app.MainThreadControlDestination); n != 1 {
+		t.Errorf("stops queued = %d, want 1", n)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM events WHERE kind = 'conversation.message_state' AND object_id = ? AND body_json LIKE '%interrupted%'`, long); n != 1 {
+		t.Errorf("interrupted state events = %d, want 1", n)
+	}
+	once.Do(func() { close(gate) })
+
+	// The next message is handled as usual, and stopping its finished
+	// reply changes nothing.
+	next := e.say("a short one")
+	eventually(t, "the next turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id = ? AND status = 'completed'`, next) == 1
+	})
+	var res struct {
+		State protocol.MessageState `json:"state"`
+	}
+	if err := json.Unmarshal(stop(next, e.ids.New(protocol.PrefixRequest)), &res); err != nil || res.State != protocol.MessageReplied {
+		t.Errorf("stopping a finished reply = %+v %v, want its state replied", res, err)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM outbox WHERE destination = ?`, app.MainThreadControlDestination); n != 1 {
+		t.Errorf("stops queued = %d, want still 1", n)
+	}
+}
+
+func TestFault_InterruptReplyLost(t *testing.T) {
+	h := testkit.NewHarness()
+	e := newEnv(t, h)
+	msg := e.say("one")
+	eventually(t, "the turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	payload, _ := json.Marshal(app.InterruptTurn{MessageID: msg})
+	d := app.Delivery{Destination: app.MainThreadControlDestination, Operation: app.OpInterruptTurn, Payload: payload}
+	if r := e.m.Control().Reconcile(context.Background(), d); r.Outcome != app.Delivered {
+		t.Errorf("reconcile after the turn ended = %+v, want delivered", r)
+	}
+	// A stop cut short while its turn still looks open is not sent again.
+	if err := e.store.Write(context.Background(), func(tx *store.Tx) error {
+		return tx.PutMainTurn(context.Background(), store.MainTurn{RequestID: "x", MessageID: msg, ThreadID: "th", TurnID: "t", Status: store.TurnStarted}, 0)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.m.Control().Reconcile(context.Background(), d); r.Outcome != app.Unknown {
+		t.Errorf("reconcile of an open turn = %+v, want unknown", r)
 	}
 }
 

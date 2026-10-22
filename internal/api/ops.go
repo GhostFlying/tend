@@ -23,7 +23,7 @@ var ownerCommands = commandMap(
 
 // hostedCommands are the conversation writes, accepted only when the
 // server runs the hosted main thread (D45).
-var hostedCommands = commandMap(app.SubmitMessage{})
+var hostedCommands = commandMap(app.SubmitMessage{}, app.InterruptReply{})
 
 func commandMap(cmds ...app.Command) map[string]app.Command {
 	m := make(map[string]app.Command, len(cmds))

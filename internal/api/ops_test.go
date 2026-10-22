@@ -478,6 +478,10 @@ func TestFault_HostedMainThreadDisabled(t *testing.T) {
 	if st != http.StatusBadRequest || res.Error == nil || res.Error.Code != protocol.CodeInvalidRequest || !strings.Contains(res.Error.Message, "hosted main agent") {
 		t.Errorf("message without the hosted main agent = %d %+v", st, res.Error)
 	}
+	stop := e.envelope("conversation.interrupt_reply", protocol.Target{Type: "message"}, nil, protocol.InterruptReplyPayload{MessageID: "msg_x"})
+	if st, res := e.op(tok, stop); st != http.StatusBadRequest || res.Error == nil || !strings.Contains(res.Error.Message, "hosted main agent") {
+		t.Errorf("stop without the hosted main agent = %d %+v", st, res.Error)
+	}
 	for _, table := range []string{"request_records", "conversation_messages", "outbox"} {
 		if n := e.count(`SELECT COUNT(*) FROM ` + table); n != 0 {
 			t.Errorf("%s has %d rows after a refused message", table, n)

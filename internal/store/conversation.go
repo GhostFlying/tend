@@ -130,6 +130,18 @@ func GetMainTurnByTurn(ctx context.Context, q Querier, threadID, turnID string) 
 	return GetMainTurn(ctx, q, requestID)
 }
 
+// GetOpenTurn returns the delivery of a message whose turn is starting or
+// running, or ErrNotFound.
+func GetOpenTurn(ctx context.Context, q Querier, messageID string) (MainTurn, error) {
+	var requestID string
+	err := q.QueryRowContext(ctx, `SELECT request_id FROM main_turns WHERE message_id = ? AND status IN ('starting', 'started')
+		ORDER BY created_at DESC LIMIT 1`, messageID).Scan(&requestID)
+	if err != nil {
+		return MainTurn{}, notFound(err, "open turn of "+messageID)
+	}
+	return GetMainTurn(ctx, q, requestID)
+}
+
 // PutMainTurn records or updates a delivery's turn.
 func (t *Tx) PutMainTurn(ctx context.Context, m MainTurn, now int64) error {
 	_, err := t.Exec(ctx, `INSERT INTO main_turns (request_id, message_id, thread_id, turn_id, status, created_at, updated_at)

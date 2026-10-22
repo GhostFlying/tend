@@ -219,6 +219,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 			return err
 		}
 		handlers[app.MainThreadDestination] = front
+		handlers[app.MainThreadControlDestination] = front.Control()
 		log.Info("running the hosted main agent", "instance", cfg.MainAgent.Instance)
 	}
 	d := dispatch.New(a, handlers, wake, time.Now, dispatch.Config{}, log)
