@@ -34,6 +34,9 @@ type ThreadConfig struct {
 	// "danger-full-access" and "never".
 	Sandbox        string
 	ApprovalPolicy string
+	// ApprovalsReviewer is who reviews the requests ApprovalPolicy asks
+	// for, such as "auto_review"; empty leaves the harness default.
+	ApprovalsReviewer string
 	// Config overrides harness configuration by dotted key, the form of
 	// `-c key=value`.
 	Config map[string]any

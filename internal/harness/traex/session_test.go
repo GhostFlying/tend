@@ -109,13 +109,13 @@ func TestThreadLifecycle(t *testing.T) {
 		return map[string]any{"turn": map[string]any{"id": "tu_1", "status": "inProgress"}}
 	})
 
-	th, err := s.StartThread(context.Background(), harness.ThreadConfig{Cwd: "/w", Model: "m", Sandbox: "read-only",
+	th, err := s.StartThread(context.Background(), harness.ThreadConfig{Cwd: "/w", Model: "m", Sandbox: "read-only", ApprovalsReviewer: "auto_review",
 		Tools: []harness.ToolSpec{{Name: "tasks_list", Description: "d", InputSchema: json.RawMessage(`{"type":"object"}`)}}})
 	if err != nil || th.ID() != "th_1" {
 		t.Fatalf("StartThread = %v, %v", th, err)
 	}
 	var start ThreadStartParams
-	if err := json.Unmarshal(f.params(methodThreadStart), &start); err != nil || start.Cwd != "/w" || len(start.DynamicTools) != 1 || start.DynamicTools[0].Type != "function" {
+	if err := json.Unmarshal(f.params(methodThreadStart), &start); err != nil || start.Cwd != "/w" || start.ApprovalsReviewer != "auto_review" || len(start.DynamicTools) != 1 || start.DynamicTools[0].Type != "function" {
 		t.Errorf("thread/start params = %s", f.params(methodThreadStart))
 	}
 
