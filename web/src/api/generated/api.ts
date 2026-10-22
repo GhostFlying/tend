@@ -67,6 +67,11 @@ export type DecisionEffect = "implement" | "accept" | "cancel" | "start_over";
 export type Verdict = "passed" | "changes_required" | "blocked" | "inconclusive";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AssistantState".
+ */
+export type AssistantState = "streaming" | "completed" | "interrupted" | "failed" | "unknown";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "MessageState".
  */
 export type MessageState =
@@ -124,6 +129,7 @@ export interface TendAPI {
   AnswerResult?: AnswerResult;
   ArtifactDetail?: ArtifactDetail;
   ConversationPage?: ConversationPage;
+  ConversationSettingsView?: ConversationSettingsView;
   CreateActionPayload?: CreateActionPayload;
   Envelope?: Envelope;
   HookRequest?: HookRequest;
@@ -136,6 +142,7 @@ export interface TendAPI {
   SessionRequest?: SessionRequest;
   SessionView?: SessionView;
   SetControlModePayload?: SetControlModePayload;
+  SetConversationSettingsPayload?: SetConversationSettingsPayload;
   Snapshot?: Snapshot;
   StreamStart?: StreamStart;
   SubmitMessagePayload?: SubmitMessagePayload;
@@ -262,6 +269,7 @@ export interface ConversationPage {
  * via the `definition` "ConversationItem".
  */
 export interface ConversationItem {
+  assistant_state?: AssistantState;
   author: string;
   body?: string;
   created_at: string;
@@ -293,6 +301,28 @@ export interface ToolUseView {
   status: ToolStatus;
   turn_id: string;
   updated_at: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationSettingsView".
+ */
+export interface ConversationSettingsView {
+  available: boolean;
+  effort: string;
+  enabled: boolean;
+  model: string;
+  models: ConversationModel[] | null;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationModel".
+ */
+export interface ConversationModel {
+  default_effort: string;
+  id: string;
+  label: string;
+  supported_efforts: string[] | null;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -429,6 +459,14 @@ export interface SessionView {
  */
 export interface SetControlModePayload {
   mode: ControlMode;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SetConversationSettingsPayload".
+ */
+export interface SetConversationSettingsPayload {
+  effort: string;
+  model: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
