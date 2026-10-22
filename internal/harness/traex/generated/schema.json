@@ -1,5 +1,5 @@
 {
-  "traex_version": "0.209.1",
+  "traex_version": "0.210.1",
   "generator": "traex app-server generate-json-schema --experimental",
   "messages": {
     "ClientInfo": {
@@ -11,6 +11,79 @@
       "required": [
         "name",
         "version"
+      ]
+    },
+    "CollabAgentItem": {
+      "properties": [
+        "agentNickname",
+        "agentRole",
+        "agentsStates",
+        "id",
+        "model",
+        "prompt",
+        "reasoningEffort",
+        "receiverThreadIds",
+        "runInBackground",
+        "senderThreadId",
+        "status",
+        "tool",
+        "type"
+      ],
+      "required": [
+        "agentsStates",
+        "id",
+        "receiverThreadIds",
+        "senderThreadId",
+        "status",
+        "tool",
+        "type"
+      ]
+    },
+    "CommandItem": {
+      "properties": [
+        "aggregatedOutput",
+        "command",
+        "commandActions",
+        "cwd",
+        "durationMs",
+        "exitCode",
+        "id",
+        "processId",
+        "rawOutput",
+        "skill",
+        "source",
+        "status",
+        "type",
+        "yieldTimeMs"
+      ],
+      "required": [
+        "command",
+        "commandActions",
+        "cwd",
+        "id",
+        "status",
+        "type"
+      ]
+    },
+    "DynamicToolCallItem": {
+      "properties": [
+        "arguments",
+        "contentItems",
+        "durationMs",
+        "id",
+        "namespace",
+        "rawResponse",
+        "status",
+        "success",
+        "tool",
+        "type"
+      ],
+      "required": [
+        "arguments",
+        "id",
+        "status",
+        "tool",
+        "type"
       ]
     },
     "DynamicToolCallParams": {
@@ -55,6 +128,18 @@
         "type"
       ]
     },
+    "ImageViewItem": {
+      "properties": [
+        "id",
+        "path",
+        "type"
+      ],
+      "required": [
+        "id",
+        "path",
+        "type"
+      ]
+    },
     "InitializeCapabilities": {
       "properties": [
         "experimentalApi",
@@ -86,6 +171,50 @@
         "item",
         "threadId",
         "turnId"
+      ]
+    },
+    "McpToolCallItem": {
+      "properties": [
+        "appContext",
+        "arguments",
+        "durationMs",
+        "error",
+        "id",
+        "mcpAppResourceUri",
+        "pluginId",
+        "readOnlyHint",
+        "result",
+        "server",
+        "status",
+        "tool",
+        "type"
+      ],
+      "required": [
+        "arguments",
+        "id",
+        "server",
+        "status",
+        "tool",
+        "type"
+      ]
+    },
+    "McpToolError": {
+      "properties": [
+        "message"
+      ],
+      "required": [
+        "message"
+      ]
+    },
+    "McpToolResult": {
+      "properties": [
+        "_meta",
+        "content",
+        "isError",
+        "structuredContent"
+      ],
+      "required": [
+        "content"
       ]
     },
     "Thread": {
@@ -341,6 +470,21 @@
       ],
       "required": [
         "text",
+        "type"
+      ]
+    },
+    "WebSearchItem": {
+      "properties": [
+        "action",
+        "id",
+        "query",
+        "results",
+        "type"
+      ],
+      "required": [
+        "id",
+        "query",
+        "results",
         "type"
       ]
     }
