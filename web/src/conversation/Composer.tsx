@@ -2,7 +2,7 @@
 // when writing it: the reply it answers and the last item shown (v0.1
 // §6.2). While a reply is in progress and nothing is written, the send
 // button stops the reply instead (D69).
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import type { Connection } from "../api/client.ts";
 import { notify } from "../app/notice.ts";
 import { Settings } from "./Settings.tsx";
@@ -17,9 +17,19 @@ import { clock, latestReply, processing } from "./model.ts";
 const touch = window.matchMedia("(pointer: coarse)").matches;
 
 export function Composer({ connection }: { connection: Connection }) {
-  const { client, live, queue } = useServices();
+  const { client, live, queue, draft: composerDraft } = useServices();
   const conversation = useStore(live.conversation);
-  const [draft, setDraft] = useState("");
+  const { text: draft, focus } = useStore(composerDraft.state);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!focus) return;
+    const frame = requestAnimationFrame(() => {
+      const el = textarea.current;
+      el?.focus();
+      el?.setSelectionRange(el.value.length, el.value.length);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focus]);
   const interrupt = useMemo(() => new Interrupt(client), [client]);
   const pending = useStore(interrupt.state);
   const blocked = queue === null || connection.status === "not-owner";
@@ -58,7 +68,7 @@ export function Composer({ connection }: { connection: Connection }) {
     if (queue === null || blocked || body === "") {
       return;
     }
-    setDraft("");
+    composerDraft.write("");
     const lastSeq = conversation.items.at(-1)?.seq;
     try {
       await queue.enqueue({
@@ -68,7 +78,7 @@ export function Composer({ connection }: { connection: Connection }) {
       });
     } catch {
       // Not written down, so not sent either; give the text back.
-      setDraft(draft);
+      composerDraft.restore(draft);
     }
   };
 
@@ -106,9 +116,10 @@ export function Composer({ connection }: { connection: Connection }) {
   return (
     <div className={styles.composer}>
       <textarea
+        ref={textarea}
         rows={2}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => composerDraft.write(e.target.value)}
         onKeyDown={onKeyDown}
         placeholder={touch ? "和主 Agent 说…" : "和主 Agent 说…（Enter 发送，Shift+Enter 换行）"}
         aria-label="消息"

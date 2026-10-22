@@ -208,3 +208,45 @@
 .issueField {
   display: contents;
 }
+
+.followUp {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.followUp span {
+  font-size: var(--text-s);
+  color: var(--caption);
+}
+.relations {
+  display: grid;
+  gap: 8px;
+}
+.relation {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  text-align: left;
+  color: var(--label);
+  background: var(--sidebar);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-m);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.relation span,
+.relation small {
+  font-size: var(--text-s);
+  color: var(--caption);
+}
+.relation strong {
+  font-size: var(--text-m);
+}
+.relation:hover {
+  border-color: var(--caption);
+}

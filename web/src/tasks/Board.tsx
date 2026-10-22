@@ -157,8 +157,7 @@ function TaskCard({ task }: { task: TaskSummary }) {
     >
       <strong>{task.title}</strong>
       <span className={styles.meta}>
-        {task.project || "未分组"} · {ratingLabels[task.rating]} · 第{" "}
-        {task.next_implement_generation} 代
+        {task.project || "未分组"} · {ratingLabels[task.rating]} · spec {task.spec_version}
       </span>
       <span className={styles.badges}>
         {task.control_mode !== "managed" && <span>{controlLabels[task.control_mode]}</span>}

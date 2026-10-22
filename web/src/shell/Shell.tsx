@@ -2,6 +2,7 @@
 // details side by side on a desktop; the details float over the
 // conversation at medium widths; one column with a tab bar on a phone.
 import { useMemo, useRef, useState } from "react";
+import { ComposerDraft } from "../conversation/draft.ts";
 import type { ApiClient, Connection } from "../api/client.ts";
 import { ServicesContext, type Services } from "../app/services.tsx";
 import { attentionCount } from "../decisions/Attention.tsx";
@@ -26,6 +27,7 @@ export function Shell({
   connection: Connection;
   queue: SendQueue | null;
 }) {
+  const [draft] = useState(() => new ComposerDraft());
   const returnFocus = useRef<HTMLElement | null>(null);
   const [view, setView] = useState<View>("chat");
   const snapshot = useStore(live.snapshot);
@@ -47,6 +49,14 @@ export function Shell({
       client,
       live,
       queue,
+      draft,
+      followUp(task) {
+        live.close();
+        setDetailsOpen(false);
+        setBoardOpen(false);
+        setView("chat");
+        draft.followUp(task);
+      },
       openTask(taskId) {
         const active = document.activeElement;
         if (active instanceof HTMLElement && !active.closest('[aria-label="任务详情"]'))
@@ -55,7 +65,7 @@ export function Shell({
         setDetailsOpen(true);
       },
     }),
-    [client, live, queue],
+    [client, live, queue, draft],
   );
 
   const closeDetails = () => {
