@@ -15,3 +15,6 @@ node_modules/
 
 # Spike outputs
 spikes/**/out/
+
+# Web client build output (make web) and caches
+/internal/webui/dist/app/

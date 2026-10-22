@@ -37,6 +37,7 @@ import (
 	"github.com/GhostFlying/tend/internal/runnerapi"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/tools"
+	"github.com/GhostFlying/tend/internal/webui"
 )
 
 // config is the server's configuration file.
@@ -225,6 +226,8 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	mux := http.NewServeMux()
 	mux.Handle(runnerapi.Path, runners.Handler())
 	mux.Handle("/api/", api.New(a, s, ts, cb, whois, secret, api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}, log).Handler())
+	// The web client, on the same origin as the owner API (D70).
+	mux.Handle("/", webui.Handler())
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	// The workers stop with the process or when serving fails.
