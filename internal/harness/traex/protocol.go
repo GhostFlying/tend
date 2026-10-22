@@ -52,6 +52,7 @@ type ThreadStartParams struct {
 	Model                 string            `json:"model,omitempty"`
 	Cwd                   string            `json:"cwd,omitempty"`
 	ApprovalPolicy        string            `json:"approvalPolicy,omitempty"`
+	ApprovalsReviewer     string            `json:"approvalsReviewer,omitempty"`
 	Sandbox               string            `json:"sandbox,omitempty"`
 	DeveloperInstructions string            `json:"developerInstructions,omitempty"`
 	Config                map[string]any    `json:"config,omitempty"`
@@ -64,6 +65,7 @@ type ThreadResumeParams struct {
 	Model                 string         `json:"model,omitempty"`
 	Cwd                   string         `json:"cwd,omitempty"`
 	ApprovalPolicy        string         `json:"approvalPolicy,omitempty"`
+	ApprovalsReviewer     string         `json:"approvalsReviewer,omitempty"`
 	Sandbox               string         `json:"sandbox,omitempty"`
 	DeveloperInstructions string         `json:"developerInstructions,omitempty"`
 	Config                map[string]any `json:"config,omitempty"`

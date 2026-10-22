@@ -164,7 +164,7 @@ func dynamicTools(specs []harness.ToolSpec) []DynamicToolSpec {
 func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (harness.Thread, error) {
 	var res ThreadStartResponse
 	err := s.conn.call(ctx, methodThreadStart, ThreadStartParams{
-		Model: cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, Sandbox: cfg.Sandbox,
+		Model: cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
 		DeveloperInstructions: cfg.DeveloperInstructions, Config: cfg.Config, DynamicTools: dynamicTools(cfg.Tools),
 	}, &res)
 	if err != nil {
@@ -180,7 +180,7 @@ func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness
 	t := s.register(threadID, cfg.OnToolCall)
 	var res ThreadStartResponse
 	err := s.conn.call(ctx, methodThreadResume, ThreadResumeParams{
-		ThreadID: threadID, Model: cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, Sandbox: cfg.Sandbox,
+		ThreadID: threadID, Model: cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
 		DeveloperInstructions: cfg.DeveloperInstructions, Config: cfg.Config,
 	}, &res)
 	if err != nil {
