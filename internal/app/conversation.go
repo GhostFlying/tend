@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -184,10 +185,11 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 type RecordAgentMessage struct{}
 
 type recordAgentMessagePayload struct {
-	Body    string `json:"body"`
-	ReplyTo string `json:"reply_to"`
-	TurnID  string `json:"turn_id"`
-	ItemID  string `json:"item_id"`
+	Body    string                  `json:"body"`
+	ReplyTo string                  `json:"reply_to"`
+	TurnID  string                  `json:"turn_id"`
+	ItemID  string                  `json:"item_id"`
+	Status  protocol.AssistantState `json:"status,omitempty"`
 }
 
 // Operation implements Command.
@@ -204,20 +206,64 @@ func (RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.Body == "" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body is required")
+	status := p.Status
+	if status == "" {
+		status = protocol.AssistantCompleted
 	}
-	id := x.IDs.New(protocol.PrefixMessage)
-	seq, err := tx.InsertMessage(ctx, store.MessageRow{
-		MessageID: id, Author: "main_agent", Body: p.Body, ReplyTo: p.ReplyTo, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(),
-	})
-	if err != nil {
-		return Outcome{}, err
+	switch status {
+	case protocol.AssistantStreaming, protocol.AssistantCompleted, protocol.AssistantInterrupted, protocol.AssistantFailed, protocol.AssistantUnknown:
+	default:
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown assistant status")
+	}
+	if !utf8.ValidString(p.Body) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body must be UTF-8")
+	}
+	var id string
+	var seq int64
+	var row store.AgentMessageRow
+	identified := p.TurnID != "" && p.ItemID != "" && x.Principal.Thread != ""
+	if identified {
+		var err error
+		row, err = store.GetAgentMessage(ctx, tx.Q(), x.Principal.Thread, p.TurnID, p.ItemID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return Outcome{}, err
+		}
+		if err == nil {
+			old, err := store.GetConversationItem(ctx, tx.Q(), row.MessageID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			id, seq = old.MessageID, old.Seq
+			result := Outcome{Result: map[string]any{"message_id": id, "seq": seq}}
+			// Terminal text cannot be revived by a delayed delta. A streaming
+			// update is cumulative and must extend the committed prefix; the
+			// authoritative completed item may replace it with shorter text.
+			if row.Status != string(protocol.AssistantStreaming) || (status == protocol.AssistantStreaming && !strings.HasPrefix(p.Body, old.Body)) || (old.Body == p.Body && row.Status == string(status)) {
+				return result, nil
+			}
+		}
+	}
+	if id == "" {
+		if p.Body == "" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body is required")
+		}
+		id = x.IDs.New(protocol.PrefixMessage)
+		var err error
+		seq, err = tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "main_agent", Body: p.Body, ReplyTo: p.ReplyTo, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
+		if err != nil {
+			return Outcome{}, err
+		}
+		row = store.AgentMessageRow{MessageID: id, ThreadID: x.Principal.Thread, TurnID: p.TurnID, ItemID: p.ItemID}
+	}
+	if identified {
+		row.Status, row.Revision = string(status), row.Revision+1
+		if err := tx.PutAgentMessage(ctx, row, p.Body); err != nil {
+			return Outcome{}, err
+		}
 	}
 	return Outcome{
 		Result: map[string]any{"message_id": id, "seq": seq},
-		Events: []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message",
-			Body: map[string]any{"author": "main_agent", "seq": seq, "reply_to": p.ReplyTo, "turn_id": p.TurnID}}},
+		Events: []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": "main_agent", "seq": seq, "reply_to": p.ReplyTo, "turn_id": p.TurnID}}},
 	}, nil
 }
 
@@ -375,7 +421,20 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 				return err
 			}
 		}
-		settled = len(ids) + len(uses)
+		messages, err := tx.SettleAgentMessages(ctx, threadID)
+		if err != nil {
+			return err
+		}
+		for _, id := range messages {
+			seq, err := store.GetConversationSeq(ctx, tx.Q(), id)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{}`, CreatedAt: now}); err != nil {
+				return err
+			}
+		}
+		settled = len(ids) + len(uses) + len(messages)
 		return nil
 	})
 	if err == nil && settled > 0 {

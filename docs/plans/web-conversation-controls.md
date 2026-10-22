@@ -26,3 +26,9 @@
 - `GET /api/v1/conversation/settings` 返回 `ConversationSettingsView`：`enabled`、`available`、`revision`、目录模型 ID `model`、`effort`、`models`。每个模型含 `id`、`label`、`supported_efforts`、`default_effort`。未启用隐藏设置；暂不可用禁用修改并有限退避重读，不伪造有效模型。
 - `conversation.set_settings` 的 target 为 `conversation`，信封 `expected_control_revision` 对应设置 revision，payload 为 `model`、`effort`。成功或 stale revision 后重新读取设置；`conversation.settings` 事件触发重读。无可调 effort 的模型只显示其默认值。
 - 正文仍用 `conversation.message` 账本事件携带累计 `ConversationItem`；新增 `assistant_state`：`streaming`、`completed`、`interrupted`、`failed`、`unknown`。稳定 `message_id` 和 `seq`，`assistant_revision` 随累计正文或状态更新单调递增，客户端按 revision 合并，避免延迟旧片段覆盖较新快照或终态；不增加 SSE 类型，不改变历史分页游标。
+
+## C3 实现约定
+
+- migration 22 记录 thread/turn/item 对应的唯一 message 身份、正文状态及单调 revision，正文仍保存在 conversation_messages，不改变 seq 与历史位置。
+- 主会话事件循环以 100ms 为批次保存累计正文；完整 item、工具出现前及轮次结束时立即保存，保持会话先后顺序。正文先落账本再经 SSE 读取，重连与刷新读回相同内容。
+- 完整 item 可用更短的最终正文替换草稿；迟到的累计前缀和终态后的片段不回退正文。轮次结束却缺少完整 item 时记录 unknown，不伪造完整回复；停止、失败和进程恢复保留部分正文。
