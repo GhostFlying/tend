@@ -339,7 +339,8 @@ func Conversation(ctx context.Context, q store.Querier, before, after int64, lim
 // conversationItem shows a conversation row to the owner.
 func conversationItem(r store.ConversationRow) protocol.ConversationItem {
 	it := protocol.ConversationItem{Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
-		ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC()}
+		ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC(),
+		AssistantState: protocol.AssistantState(r.AssistantState), AssistantRevision: r.AssistantRevision}
 	switch {
 	case r.Tool != nil:
 		it.Tool = &protocol.ToolUseView{Name: r.Tool.Tool, Input: r.Tool.Input, Output: r.Tool.Output,

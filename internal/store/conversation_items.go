@@ -88,7 +88,9 @@ type ConversationRow struct {
 	CreatedAt int64
 	// State is the latest state recorded for an owner message, empty
 	// when none was.
-	State string
+	State             string
+	AssistantState    string
+	AssistantRevision int64
 	// Tool is set for a tool use.
 	Tool *ToolUseRow
 	// DecisionJSON is the decision option an owner message chooses.
@@ -99,8 +101,8 @@ type ConversationRow struct {
 const conversationCols = `m.seq, m.kind, m.message_id, m.author, m.body, COALESCE(m.reply_to, ''), m.created_at,
 	COALESCE((SELECT json_extract(e.body_json, '$.state') FROM events e WHERE e.object_type = 'message'
 		AND e.object_id = m.message_id AND e.kind = 'conversation.message_state' ORDER BY e.event_seq DESC LIMIT 1), ''),
-	u.turn_id, u.item_id, u.tool, u.input, u.output, u.status, u.updated_at, COALESCE(m.decision_json, '')
-	FROM conversation_messages m LEFT JOIN conversation_tool_uses u ON u.message_id = m.message_id`
+	u.turn_id, u.item_id, u.tool, u.input, u.output, u.status, u.updated_at, COALESCE(m.decision_json, ''), COALESCE(a.status, ''), COALESCE(a.revision, 0)
+	FROM conversation_messages m LEFT JOIN conversation_tool_uses u ON u.message_id = m.message_id LEFT JOIN conversation_agent_messages a ON a.message_id = m.message_id`
 
 // ListConversation returns up to limit conversation items in order:
 // those after seq after when after is positive, else those before seq
@@ -146,7 +148,7 @@ func scanConversation(row interface{ Scan(...any) error }) (ConversationRow, err
 	var turn, item, tool, input, output, status sql.NullString
 	var updated sql.NullInt64
 	if err := row.Scan(&r.Seq, &r.Kind, &r.MessageID, &r.Author, &r.Body, &r.ReplyTo, &r.CreatedAt, &r.State,
-		&turn, &item, &tool, &input, &output, &status, &updated, &r.DecisionJSON); err != nil {
+		&turn, &item, &tool, &input, &output, &status, &updated, &r.DecisionJSON, &r.AssistantState, &r.AssistantRevision); err != nil {
 		return ConversationRow{}, fmt.Errorf("store: scan conversation: %w", err)
 	}
 	if tool.Valid {

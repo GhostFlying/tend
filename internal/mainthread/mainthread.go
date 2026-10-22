@@ -113,7 +113,15 @@ func (m *Manager) serve(ctx context.Context) error {
 	m.session, m.thread = s, th
 	close(m.ready)
 	m.mu.Unlock()
+	drafts := replyDrafts{}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if err := m.flushReplies(cleanup, th, drafts, "", protocol.AssistantInterrupted); err != nil {
+			m.cfg.Log.ErrorContext(cleanup, "could not preserve partial replies", "err", err)
+		}
 		m.detach(th)
 		m.mu.Lock()
 		a := m.active
@@ -124,7 +132,7 @@ func (m *Manager) serve(ctx context.Context) error {
 			default:
 			}
 		}
-		if err := m.app.SettleOpenTurns(context.WithoutCancel(ctx), th.ID()); err != nil {
+		if err := m.app.SettleOpenTurns(cleanup, th.ID()); err != nil {
 			m.cfg.Log.ErrorContext(ctx, "could not settle interrupted turns", "err", err)
 		}
 	}()
@@ -132,9 +140,44 @@ func (m *Manager) serve(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-ticker.C:
+			if err := m.flushReplies(ctx, th, drafts, "", ""); err != nil {
+				return fmt.Errorf("mainthread: flush replies: %w", err)
+			}
 		case ev, ok := <-th.Events():
 			if !ok {
 				return errors.New("mainthread: the harness ended the thread")
+			}
+			if ev.Kind == harness.EventAgentMessageDelta || (ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemAgentMessage) {
+				drafts.consume(ev)
+				if ev.Kind == harness.EventItemCompleted {
+					if err := m.flushReplies(ctx, th, drafts, ev.TurnID, ""); err != nil {
+						return fmt.Errorf("mainthread: finish reply: %w", err)
+					}
+				}
+				continue
+			}
+			if ev.Kind == harness.EventTurnCompleted {
+				state := protocol.AssistantUnknown
+				switch ev.TurnStatus {
+				case "interrupted":
+					state = protocol.AssistantInterrupted
+				case "failed":
+					state = protocol.AssistantFailed
+				}
+				if err := m.flushReplies(ctx, th, drafts, ev.TurnID, state); err != nil {
+					return fmt.Errorf("mainthread: settle replies: %w", err)
+				}
+				for key := range drafts {
+					if key.turn == ev.TurnID {
+						delete(drafts, key)
+					}
+				}
+			}
+			if ev.Tool != nil {
+				if err := m.flushReplies(ctx, th, drafts, "", ""); err != nil {
+					return fmt.Errorf("mainthread: preserve reply order: %w", err)
+				}
 			}
 			m.handle(ctx, th, ev)
 		}
@@ -201,10 +244,6 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 		if err := m.context.Invalidate(ctx, m.threadKey(th.ID())); err != nil {
 			m.cfg.Log.ErrorContext(ctx, "could not invalidate the context baseline", "err", err)
 		}
-	case ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemAgentMessage && ev.Text != "":
-		if err := m.recordReply(ctx, th, ev); err != nil {
-			m.cfg.Log.ErrorContext(ctx, "could not record the agent's message", "turn", ev.TurnID, "err", err)
-		}
 	case ev.Tool != nil:
 		if err := m.recordToolUse(ctx, th, ev); err != nil {
 			m.cfg.Log.ErrorContext(ctx, "could not record the agent's tool use", "turn", ev.TurnID, "item", ev.ItemID, "err", err)
@@ -230,13 +269,6 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 		}
 		m.mu.Unlock()
 	}
-}
-
-// recordReply stores an agent message, keyed by its item so a repeated
-// event records it once.
-func (m *Manager) recordReply(ctx context.Context, th harness.Thread, ev harness.Event) error {
-	payload := map[string]string{"body": ev.Text, "reply_to": m.replyTo(ev.TurnID), "turn_id": ev.TurnID, "item_id": ev.ItemID}
-	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID, "conversation.record_agent_message", payload, app.RecordAgentMessage{})
 }
 
 // recordToolUse stores a tool use as it starts and as it changes, keyed by
@@ -276,8 +308,14 @@ func (m *Manager) record(ctx context.Context, th harness.Thread, native, op stri
 	}
 	env := &protocol.Envelope{RequestID: requestID, Operation: op, Target: protocol.Target{Type: "message"}, Payload: body}
 	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.cfg.Instance, Thread: th.ID()}
-	_, err = m.app.Execute(ctx, principal, env, cmd)
-	return err
+	result, err := m.app.Execute(ctx, principal, env, cmd)
+	if err != nil {
+		return err
+	}
+	if result.Error != nil {
+		return result.Error
+	}
+	return nil
 }
 
 // onToolCall answers the main agent's tool calls with the identity of the
