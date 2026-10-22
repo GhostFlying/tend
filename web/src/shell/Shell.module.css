@@ -1,0 +1,103 @@
+/* Desktop, wider than 1180px: sidebar | conversation | details. */
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0;
+  height: 100%;
+  transition: grid-template-columns var(--dur) var(--ease);
+}
+
+.app[data-details="open"] {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--details-width);
+}
+
+.sidebar {
+  background: var(--sidebar);
+  border-right: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.details {
+  border-left: 1px solid var(--border-soft);
+  background: var(--bg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Medium widths: the details float over the conversation instead of
+   squeezing it. */
+@media (min-width: 761px) and (max-width: 1180px) {
+  .app[data-details="open"] {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0;
+  }
+
+  .details {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(var(--details-width), 100% - 300px);
+    z-index: 30;
+    transform: translateX(100%);
+    transition: transform var(--dur) var(--ease);
+  }
+
+  .app[data-details="open"] .details {
+    transform: none;
+    /* only while open, so no shadow peeks in from the right edge */
+    box-shadow: var(--shadow-2);
+  }
+}
+
+/* Phones: one column, the tab bar picks it; the details are a full-screen
+   sheet over everything. */
+@media (max-width: 760px) {
+  .app,
+  .app[data-details="open"] {
+    grid-template-columns: 100% 0 0;
+    grid-template-rows: 100%;
+    padding-bottom: calc(var(--tabbar-height) + env(safe-area-inset-bottom));
+  }
+
+  .sidebar,
+  .chat,
+  .details {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .sidebar {
+    border-right: 0;
+    background: var(--bg);
+  }
+
+  .app[data-view="chat"] .sidebar,
+  .app[data-view="tasks"] .chat,
+  .app[data-view="decisions"] .chat {
+    visibility: hidden;
+  }
+
+  .details {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    border: 0;
+    transform: translateX(100%);
+    transition: transform var(--dur) var(--ease);
+  }
+
+  .app[data-details="open"] .details {
+    transform: none;
+  }
+}

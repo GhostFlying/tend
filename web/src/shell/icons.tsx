@@ -1,0 +1,49 @@
+// Line icons from the design mock, drawn with the current text color.
+import type { SVGProps } from "react";
+
+type IconProps = SVGProps<SVGSVGElement>;
+
+const line = { fill: "none", stroke: "currentColor", strokeWidth: 2, "aria-hidden": true } as const;
+
+export const ArrowDown = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <path d="M12 5v14M5 12l7 7 7-7" />
+  </svg>
+);
+
+export const Close = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </svg>
+);
+
+export const Back = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <path d="M15 6l-6 6 6 6" />
+  </svg>
+);
+
+export const Send = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <path d="M12 19V5M5 12l7-7 7 7" />
+  </svg>
+);
+
+export const Chat = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} strokeWidth={1.8} {...p}>
+    <path d="M4 5h16v11H9l-5 4z" />
+  </svg>
+);
+
+export const Tasks = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} strokeWidth={1.8} {...p}>
+    <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" />
+  </svg>
+);
+
+export const Pending = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} strokeWidth={1.8} {...p}>
+    <circle cx="12" cy="12" r="8" />
+    <path d="M12 8v5M12 16h.01" />
+  </svg>
+);

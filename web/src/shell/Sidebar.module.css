@@ -1,0 +1,96 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 16px 10px;
+}
+
+.brand b {
+  font-size: 16px;
+  letter-spacing: 0.2px;
+}
+
+.logo {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-m);
+  background: var(--label);
+  color: var(--bg);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: var(--text-base);
+}
+
+.conn {
+  margin-left: auto;
+}
+
+.mobileTitle {
+  display: none;
+}
+
+.scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 10px 12px;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-s);
+  color: var(--label-3);
+  padding: 14px 8px 6px;
+}
+
+.foot {
+  border-top: 1px solid var(--border-soft);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hosts {
+  font-size: var(--text-s);
+  color: var(--caption);
+}
+
+.footActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+@media (max-width: 760px) {
+  .brand,
+  .foot {
+    display: none;
+  }
+
+  .mobileTitle {
+    display: flex;
+    align-items: center;
+    height: var(--head-height);
+    margin: 0;
+    padding: 0 16px;
+    padding-top: env(safe-area-inset-top);
+    font-size: var(--text-xl);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .root[data-view="decisions"] .tasks,
+  .root[data-view="tasks"] .decisions {
+    display: none;
+  }
+}
