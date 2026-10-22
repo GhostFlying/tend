@@ -331,18 +331,23 @@ func Conversation(ctx context.Context, q store.Querier, before, after int64, lim
 		}
 	}
 	for _, r := range rows {
-		it := protocol.ConversationItem{Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
-			ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC()}
-		switch {
-		case r.Tool != nil:
-			it.Tool = &protocol.ToolUseView{Name: r.Tool.Tool, Input: r.Tool.Input, Output: r.Tool.Output,
-				Status: protocol.ToolStatus(r.Tool.Status), TurnID: r.Tool.TurnID, UpdatedAt: time.UnixMilli(r.Tool.UpdatedAt).UTC()}
-		case r.Author == "owner" && r.State == "":
-			it.State = protocol.MessageQueued
-		case r.Author == "owner":
-			it.State = protocol.MessageState(r.State)
-		}
-		page.Items = append(page.Items, it)
+		page.Items = append(page.Items, conversationItem(r))
 	}
 	return page, nil
+}
+
+// conversationItem shows a conversation row to the owner.
+func conversationItem(r store.ConversationRow) protocol.ConversationItem {
+	it := protocol.ConversationItem{Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
+		ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC()}
+	switch {
+	case r.Tool != nil:
+		it.Tool = &protocol.ToolUseView{Name: r.Tool.Tool, Input: r.Tool.Input, Output: r.Tool.Output,
+			Status: protocol.ToolStatus(r.Tool.Status), TurnID: r.Tool.TurnID, UpdatedAt: time.UnixMilli(r.Tool.UpdatedAt).UTC()}
+	case r.Author == "owner" && r.State == "":
+		it.State = protocol.MessageQueued
+	case r.Author == "owner":
+		it.State = protocol.MessageState(r.State)
+	}
+	return it
 }
