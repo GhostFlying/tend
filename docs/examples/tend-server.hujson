@@ -34,14 +34,16 @@
   "queue": {"wait_per_hour": 0.1},
 
   // The main agent is the agent you work in, connected with `tend setup`.
-  // "main_agent" runs a hosted one instead, which is not developed for
-  // now (D45); with it, the owner API also accepts conversation messages.
+  // "main_agent" also runs a hosted one, which the Web client talks to
+  // (D68); with it, the owner API accepts conversation messages. Every
+  // field is optional: by default it uses traex on PATH with your own
+  // traex home and the default model, and works in data_dir/main-agent.
   // "main_agent": {
   //   "instance": "main",
   //   "traex_bin": "traex",
-  //   // A home of its own, so the main agent does not load your skills
-  //   // and plugins.
+  //   // A traex home of its own instead of yours.
   //   "traex_home": "~/.local/share/tend/traex-home",
+  //   "model": "",
   //   // Outside any repository, so no project AGENTS.md is loaded.
   //   "cwd": "~/.local/share/tend/main-agent",
   // },

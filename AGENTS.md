@@ -27,7 +27,7 @@ tend/
     api/                   owner 与 agent 的 HTTP API（bearer token，D49）
     tools/                 主 Agent 工具面（外挂经 MCP 桥，托管经 app-server 动态工具）
     views/                 账本的只读视图（主 Agent 工具与 owner API 共用）
-    mainthread/            托管主会话（默认不启用，D45）：前台 thread、逐条消息的 turn、上下文注入、工具回调
+    mainthread/            托管主会话（默认不启用，D45、D68）：前台 thread、逐条消息的 turn、上下文注入、工具回调
     runnerapi/             runner 协议的服务端
     scheduler/             排队与资源分配
     dispatch/              outbox 投递

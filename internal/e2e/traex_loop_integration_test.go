@@ -49,10 +49,9 @@ func TestIntegration_TraexLoop(t *testing.T) {
 	cb := contextbuilder.New(srv.app, srv.store, srv.ids, contextbuilder.Config{})
 	front := mainthread.New(srv.app, cb, tools.New(srv.app, srv.store, cb, quiet()), mainthread.Config{
 		Instance: "main",
-		Thread: harness.ThreadConfig{Cwd: t.TempDir(), Model: traexModel(), DeveloperInstructions: mainthread.Instructions,
-			Sandbox: "danger-full-access", ApprovalPolicy: "never", Config: mainthread.Isolation},
+		Thread:   mainthread.ThreadConfig(t.TempDir(), traexModel()),
 		Open: func(ctx context.Context) (harness.Session, error) {
-			return traex.Start(ctx, traex.Options{Version: "it"})
+			return traex.Start(ctx, traex.Options{Version: "it", Env: []string{protocol.AddonEnv + "=off"}})
 		},
 		Log: quiet(),
 	})

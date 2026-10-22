@@ -1,15 +1,27 @@
 package mainthread
 
+import "github.com/GhostFlying/tend/internal/harness"
+
+// ThreadConfig is the front thread's configuration in cwd (D68). The
+// sandbox lets the main agent read anything, such as the repositories it
+// plans work for, and write only in cwd; what needs more is asked for on
+// request and reviewed automatically, since nobody watches the thread to
+// approve it. An empty model leaves the harness default.
+func ThreadConfig(cwd, model string) harness.ThreadConfig {
+	return harness.ThreadConfig{
+		Cwd: cwd, Model: model, DeveloperInstructions: Instructions,
+		Sandbox: "workspace-write", ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review",
+		Config: Isolation,
+	}
+}
+
 // Isolation turns off the harness features the main agent must not use:
-// shell and patch tools, browsing, plugins, apps, skills and memories
-// (spike A5). Sub-agents stay available. Keys are dotted configuration
-// paths, the form of `-c key=value`; the model catalog still adds a few
-// tools these cannot remove, which is acceptable since the main agent
-// changes nothing except through tend's tools.
+// editing, browsers and computer use, image generation, plugins, apps,
+// skills and memories, which would act outside tend or bring in the
+// owner's own setup, and asking the user, which no client answers. The
+// shell stays so the main agent can read repositories (D68). Keys are
+// dotted configuration paths, the form of `-c key=value`.
 var Isolation = map[string]any{
-	"features.shell_tool":                           false,
-	"features.unified_exec":                         false,
-	"features.shell_snapshot":                       false,
 	"features.apply_patch_freeform":                 false,
 	"features.code_mode_host":                       false,
 	"features.browser_use":                          false,
@@ -27,10 +39,8 @@ var Isolation = map[string]any{
 	"features.workspace_undo":                       false,
 	"skills.bundled.enabled":                        false,
 	"skills.include_instructions":                   false,
-	"web_search":                                    "disabled",
 	"tools.update_plan.enabled":                     false,
 	"tools.experimental_request_user_input.enabled": false,
-	"features.view_image":                           false,
 	"features.code_mode":                            false,
 	"features.code_mode_only":                       false,
 }
