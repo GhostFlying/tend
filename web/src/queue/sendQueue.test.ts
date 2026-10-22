@@ -294,6 +294,58 @@ describe("SendQueue", () => {
     expect(q.list.get().map((m) => m.state)).toEqual(["sent", "sent"]);
   });
 
+  describe("an unknown message holds back the ones after it", () => {
+    async function heldBack() {
+      const lost = () => new NetworkError(new TypeError("reset"));
+      sender.answers = [lost(), lost(), lost()];
+      const q = await open();
+      const a = await q.enqueue({ body: "one" });
+      await q.idle();
+      clock++;
+      const b = await q.enqueue({ body: "two" });
+      await q.idle();
+      expect(q.list.get().map((m) => m.state)).toEqual(["unknown", "sending"]);
+      expect(sender.submitted.map((e) => e.request_id)).toEqual([
+        a.requestId,
+        a.requestId,
+        a.requestId,
+      ]);
+      return { q, a, b };
+    }
+
+    test("until a reconnect finds tend never got it and resends it first", async () => {
+      const { q, a, b } = await heldBack();
+      await q.resume();
+      expect(sender.submitted.slice(3).map((e) => e.request_id)).toEqual([
+        a.requestId,
+        b.requestId,
+      ]);
+      expect(q.list.get().map((m) => m.state)).toEqual(["sent", "sent"]);
+    });
+
+    test("until a reconnect finds tend has it", async () => {
+      const { q, a, b } = await heldBack();
+      sender.records.set(a.requestId, {
+        request_id: a.requestId,
+        operation: "conversation.submit_message",
+        status: "accepted",
+        result: { message_id: "msg_7", seq: 7 },
+      });
+      await q.resume();
+      await q.idle();
+      expect(sender.submitted.slice(3).map((e) => e.request_id)).toEqual([b.requestId]);
+      expect(q.list.get().map((m) => m.state)).toEqual(["sent", "sent"]);
+    });
+
+    test("until the owner deletes it", async () => {
+      const { q, a, b } = await heldBack();
+      await q.discard(a.requestId);
+      await q.idle();
+      expect(sender.submitted.slice(3).map((e) => e.request_id)).toEqual([b.requestId]);
+      expect(q.list.get()).toMatchObject([{ requestId: b.requestId, state: "sent" }]);
+    });
+  });
+
   test("discarding removes a message", async () => {
     sender.answers = [new ApiError(400, { code: "invalid_request", message: "no" })];
     const q = await open();

@@ -90,6 +90,14 @@ function Outgoing({ message, queue }: { message: OutgoingMessage; queue: SendQue
               onClick={() => queue?.resend(requestId)}
             >
               重发
+            </button>{" "}
+            ·{" "}
+            <button
+              type="button"
+              className={controls.link}
+              onClick={() => queue?.discard(requestId)}
+            >
+              删除
             </button>
           </>
         )}

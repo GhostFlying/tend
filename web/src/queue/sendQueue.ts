@@ -7,6 +7,7 @@
 // the order they were written. A try without an answer is retried a few
 // times; after that the message is unknown and waits for the owner, or for
 // a reconnect to look its request up (invariant 4: reconcile, do not guess).
+// Until then the messages written after it wait too, so their order holds.
 import { ApiError, NetworkError } from "../api/client.ts";
 import type {
   APIResponse,
@@ -169,6 +170,8 @@ export class SendQueue {
     const outcome = settle(view.status, view.result, view.error?.message);
     if (outcome.kind === "settled") {
       await this.update(requestId, outcome);
+      // Settled, it no longer holds back the messages after it.
+      void this.kick();
     }
   }
 
@@ -190,10 +193,14 @@ export class SendQueue {
     return this.draining ?? Promise.resolve();
   }
 
-  /** Drops a message from the outbox. */
+  /**
+   * Drops a message from the outbox. Dropping an unknown message lets the
+   * messages after it go.
+   */
   async discard(requestId: string): Promise<void> {
     await this.outbox.delete(requestId);
     this.messages.set(this.messages.get().filter((m) => m.requestId !== requestId));
+    void this.kick();
   }
 
   /** Starts sending if it is not already; resolves when it stops. */
@@ -217,14 +224,18 @@ export class SendQueue {
     return this.draining;
   }
 
-  /** Sends pending messages in order; false if it had to stop. */
+  /**
+   * Sends pending messages in order; false if it had to stop. An unknown
+   * message holds back the ones after it: sending them first and the
+   * unknown one later, if tend never got it, would reverse their order.
+   */
   private async drain(): Promise<boolean> {
     for (;;) {
-      const next = this.messages.get().find((m) => m.state === "sending");
+      const next = this.messages.get().find((m) => m.state === "sending" || m.state === "unknown");
       if (!next) {
         return true;
       }
-      if (!(await this.deliver(next))) {
+      if (next.state === "unknown" || !(await this.deliver(next))) {
         return false;
       }
     }
