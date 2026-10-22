@@ -133,6 +133,18 @@ func eventually(t *testing.T, what string, cond func() bool) {
 var spec = domain.Spec{Goal: "fix the build", Acceptance: []string{"build passes"}, Delivery: domain.DeliveryCommit,
 	Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}}}
 
+func TestThreadConfigWritesOnlyInCwd(t *testing.T) {
+	cfg := ThreadConfig("/agent", "")
+	if cfg.Sandbox != "workspace-write" || cfg.ApprovalPolicy != "on-request" || cfg.ApprovalsReviewer != "auto_review" {
+		t.Errorf("sandbox %q, approvals %q by %q", cfg.Sandbox, cfg.ApprovalPolicy, cfg.ApprovalsReviewer)
+	}
+	// The owner's configuration may add writable roots for their own
+	// sessions; the hosted thread must not inherit them.
+	if roots, ok := cfg.Config["sandbox_workspace_write.writable_roots"].([]string); !ok || len(roots) != 0 {
+		t.Errorf("writable roots override = %v", cfg.Config["sandbox_workspace_write.writable_roots"])
+	}
+}
+
 func TestMessageBecomesTask(t *testing.T) {
 	h := testkit.NewHarness()
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
