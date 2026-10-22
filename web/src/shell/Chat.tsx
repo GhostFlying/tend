@@ -3,7 +3,6 @@
 import { useState } from "react";
 import type { Connection } from "../api/client.ts";
 import { dismissNotice, notice } from "../app/notice.ts";
-import { Settings } from "../conversation/Settings.tsx";
 import { Composer } from "../conversation/Composer.tsx";
 import { Transcript } from "../conversation/Transcript.tsx";
 import { DecisionDock } from "../decisions/DecisionDock.tsx";
@@ -51,7 +50,6 @@ export function Chat({ connection }: { connection: Connection }) {
         <div className={styles.seatInner}>
           <Note />
           <DecisionDock />
-          <Settings connection={connection} />
           <Composer connection={connection} />
         </div>
       </div>

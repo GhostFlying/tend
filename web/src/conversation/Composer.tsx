@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { Connection } from "../api/client.ts";
 import { notify } from "../app/notice.ts";
+import { Settings } from "./Settings.tsx";
 import { Interrupt } from "./interrupt.ts";
 import { useServices } from "../app/services.tsx";
 import { Send, Stop } from "../shell/icons.tsx";
@@ -115,6 +116,7 @@ export function Composer({ connection }: { connection: Connection }) {
       />
       <div className={styles.bar}>
         <span className={styles.hint}>{hint}</span>
+        <Settings connection={connection} />
         {showStop ? (
           <button
             type="button"
