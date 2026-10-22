@@ -1,5 +1,7 @@
 // What the views reach for: the API client, the live views, the send
 // queue, and opening a task's details.
+import type { TaskSummary } from "../api/generated/api.ts";
+import type { ComposerDraft } from "../conversation/draft.ts";
 import { createContext, useContext } from "react";
 import type { ApiClient } from "../api/client.ts";
 import type { LiveData } from "../live/data.ts";
@@ -11,6 +13,8 @@ export interface Services {
   /** null while the outbox opens, or where the browser has none. */
   queue: SendQueue | null;
   openTask(taskId: string): void;
+  draft: ComposerDraft;
+  followUp(task: TaskSummary): void;
 }
 
 export const ServicesContext = createContext<Services | null>(null);

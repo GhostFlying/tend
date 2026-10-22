@@ -64,6 +64,7 @@ export function Details({ onClose }: { onClose: () => void }) {
 }
 
 function TaskContent({ task: t }: { task: TaskDetail }) {
+  const { followUp, openTask } = useServices();
   const current = currentWork(t);
   const spec = t.spec && typeof t.spec === "object" ? (t.spec as Record<string, unknown>) : null;
   const decisions = (t.decisions ?? []).filter((d) => d.status === "open");
@@ -103,8 +104,44 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
       ))}
       <TaskControls task={t} />
       {t.lifecycle === "completed" && (
+        <div className={styles.followUp}>
+          <button type="button" className={controls.chipBtn} onClick={() => followUp(t)}>
+            跟进 / 修改
+          </button>
+          <span>回到聊天补充意向，确认后手动发送</span>
+        </div>
+      )}
+      {t.lifecycle === "completed" && (
         <Section title={`本版交付与验收 · spec ${t.spec_version}`}>
           <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
+        </Section>
+      )}
+      {!!t.relations?.length && (
+        <Section title="任务关系">
+          <div className={styles.relations}>
+            {t.relations.map((relation) => (
+              <button
+                type="button"
+                className={styles.relation}
+                key={`${relation.kind}:${relation.direction}:${relation.task.task_id}`}
+                onClick={() => openTask(relation.task.task_id)}
+              >
+                <span>
+                  {relation.kind === "follow_up"
+                    ? relation.direction === "outgoing"
+                      ? "跟进自"
+                      : "后续跟进"
+                    : relation.direction === "outgoing"
+                      ? "关联 · 本任务声明"
+                      : "关联 · 对方声明"}
+                </span>
+                <strong>{relation.task.title}</strong>
+                <small>
+                  {lifecycleLabels[relation.task.lifecycle]} · {relation.task.task_id}
+                </small>
+              </button>
+            ))}
+          </div>
         </Section>
       )}
       {typeof spec?.goal === "string" && (
@@ -197,6 +234,7 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
         </dl>
         <pre className={styles.fact}>
           {text({
+            relations: t.relations,
             actions: t.actions,
             runs: t.runs,
             artifacts: t.artifacts,
