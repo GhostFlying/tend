@@ -11,6 +11,12 @@ import (
 // Workspace describes the repositories a task works on. Each mount becomes
 // one worktree, in its own sub-directory of the task's workspace.
 type Workspace struct {
+	// Mode chooses a new Git workspace, an existing resource, or a plain directory.
+	Mode string `json:"mode,omitempty"`
+	// SourceTaskID identifies the task whose managed workspace is reused.
+	SourceTaskID string `json:"source_task_id,omitempty"`
+	// IncludeExistingChanges authorizes committing inherited uncommitted changes.
+	IncludeExistingChanges bool `json:"include_existing_changes,omitempty"`
 	// Template names the configured template the mounts were expanded
 	// from. It records provenance only; the mounts are always explicit.
 	Template string  `json:"template,omitempty"`
@@ -67,7 +73,23 @@ func (w Workspace) Normalize() Workspace {
 // Validate checks a normalized workspace. Whether the repositories are
 // registered is checked by the caller, which has the registry.
 func (w Workspace) Validate() error {
-	if len(w.Mounts) == 0 {
+	switch w.ModeValue() {
+	case WorkspaceNew:
+		if w.SourceTaskID != "" || w.IncludeExistingChanges {
+			return invalid("new workspaces cannot reference an existing task or its changes")
+		}
+	case WorkspaceTemporary:
+		if len(w.Mounts) != 0 || w.Template != "" || w.SourceTaskID != "" || w.IncludeExistingChanges {
+			return invalid("temporary workspaces cannot have repository mounts or a source task")
+		}
+	case WorkspaceReuse:
+		if strings.TrimSpace(w.SourceTaskID) == "" {
+			return invalid("reuse requires source_task_id")
+		}
+	default:
+		return invalid("workspace mode %q is not supported", w.Mode)
+	}
+	if len(w.Mounts) == 0 && w.ModeValue() == WorkspaceNew {
 		return invalid("workspace needs at least one mount")
 	}
 	if w.Profile != "" && !NamePattern.MatchString(w.Profile) {
@@ -100,6 +122,20 @@ func (w Workspace) Validate() error {
 		repos[m.Repo] = true
 	}
 	return nil
+}
+
+const (
+	WorkspaceNew       = "new"
+	WorkspaceReuse     = "reuse"
+	WorkspaceTemporary = "temporary"
+)
+
+// ModeValue preserves the legacy wire representation while applying its default.
+func (w Workspace) ModeValue() string {
+	if w.Mode == "" {
+		return WorkspaceNew
+	}
+	return w.Mode
 }
 
 // ValidBranch rejects branch names git would refuse (the rules of git
@@ -144,7 +180,8 @@ func (w Workspace) Repos() []string {
 // Equal reports whether two workspaces ask for the same thing. Template is
 // provenance and does not count.
 func (w Workspace) Equal(o Workspace) bool {
-	return w.Profile == o.Profile && slices.Equal(w.Mounts, o.Mounts)
+	return w.ModeValue() == o.ModeValue() && w.SourceTaskID == o.SourceTaskID &&
+		w.IncludeExistingChanges == o.IncludeExistingChanges && w.Profile == o.Profile && slices.Equal(w.Mounts, o.Mounts)
 }
 
 // Equal reports whether two requirement sets are the same.
@@ -156,6 +193,9 @@ func (r Requirements) Equal(o Requirements) bool {
 // exists on a host: removing or changing a mount would discard or silently
 // rebase work, and new requirements could exclude the host that holds it.
 func checkPinnedWorkspace(current, next Spec) error {
+	if current.Workspace.ModeValue() != next.Workspace.ModeValue() || current.Workspace.SourceTaskID != next.Workspace.SourceTaskID {
+		return invalid("workspace binding cannot change once assigned; create a new task instead")
+	}
 	if !current.Requirements.Equal(next.Requirements) {
 		return invalid("requirements cannot change once the task's workspace exists; create a new task instead")
 	}

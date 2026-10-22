@@ -80,15 +80,15 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err != nil {
 		return Outcome{}, err
 	}
-	if w := p.Spec.Workspace; w.Template == "" && len(w.Mounts) == 0 && w.Profile == "" {
-		p.Spec.Workspace.Template = project.Template
-	}
-	ws, err := expandTemplate(ctx, tx.Q(), p.Spec.Workspace)
+	ws, resource, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, project.Template, taskID)
 	if err != nil {
 		return Outcome{}, err
 	}
 	p.Spec.Workspace = ws
 	p.Spec = p.Spec.Normalize()
+	if err := checkWorkspaceProtocol(ctx, tx.Q(), p.Spec); err != nil {
+		return Outcome{}, err
+	}
 	d, err := domain.NewTask(taskID, project.Project, p.Spec, p.Rating)
 	if err != nil {
 		return Outcome{}, err
@@ -107,6 +107,11 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	row := fromDomain(d.Task, store.TaskRow{Title: p.Title, WorkspaceName: name, CreatedAt: now}, now)
 	if err := tx.InsertTask(ctx, row); err != nil {
 		return Outcome{}, err
+	}
+	if resource != nil {
+		if err := tx.BindWorkspace(ctx, taskID, resource.WorkspaceID, domain.WorkspaceReuse, p.Spec.Workspace.SourceTaskID, now); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if err := tx.ReplaceTaskRelations(ctx, taskID, refs, now); err != nil {
 		return Outcome{}, err
@@ -190,13 +195,18 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "control revision is %d, request expected %d", row.ControlRevision, expected)
 	}
 	merged := domain.Decision{Task: task}
+	var pendingResource *store.WorkspaceRow
 	if p.Spec != nil {
-		ws, err := expandTemplate(ctx, tx.Q(), p.Spec.Workspace)
+		ws, resource, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, "", row.TaskID)
+		pendingResource = resource
 		if err != nil {
 			return Outcome{}, err
 		}
 		p.Spec.Workspace = ws
 		*p.Spec = p.Spec.Normalize()
+		if err := checkWorkspaceProtocol(ctx, tx.Q(), *p.Spec); err != nil {
+			return Outcome{}, err
+		}
 		if err := checkRepos(ctx, tx.Q(), addedRepos(current.Workspace, p.Spec.Workspace)); err != nil {
 			return Outcome{}, err
 		}
@@ -275,6 +285,11 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, fmt.Errorf("app: encode spec: %w", err)
 		}
 		if err := tx.InsertSpec(ctx, row.TaskID, merged.Task.SpecVersion, string(spec), p.SourceMessageID, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
+	}
+	if pendingResource != nil && !row.WorkspaceAssigned {
+		if err := tx.BindWorkspace(ctx, row.TaskID, pendingResource.WorkspaceID, domain.WorkspaceReuse, p.Spec.Workspace.SourceTaskID, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
 		}
 	}

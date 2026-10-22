@@ -43,9 +43,17 @@ type TaskDetail struct {
 
 // WorkspaceView is a task's workspace on a host.
 type WorkspaceView struct {
-	Host   string      `json:"host"`
-	Status string      `json:"status"`
-	Mounts []MountView `json:"mounts"`
+	Mode         string      `json:"mode,omitempty"`
+	SourceTaskID string      `json:"source_task_id,omitempty"`
+	ResourceID   string      `json:"resource_id,omitempty"`
+	Kind         string      `json:"kind,omitempty"`
+	Name         string      `json:"name,omitempty"`
+	Path         string      `json:"path,omitempty"`
+	ProviderID   string      `json:"provider_id,omitempty"`
+	OccupiedBy   string      `json:"occupied_by,omitempty"`
+	Host         string      `json:"host"`
+	Status       string      `json:"status"`
+	Mounts       []MountView `json:"mounts"`
 }
 
 // MountView is how one mount of a workspace was laid out.
@@ -130,11 +138,12 @@ type RequestView struct {
 
 // HostView is an active execution host.
 type HostView struct {
-	HostID string   `json:"host_id"`
-	OS     string   `json:"os"`
-	Arch   string   `json:"arch"`
-	Labels []string `json:"labels"`
-	Slots  int64    `json:"slots"`
+	WorkspaceProtocol int64    `json:"workspace_protocol,omitempty"`
+	HostID            string   `json:"host_id"`
+	OS                string   `json:"os"`
+	Arch              string   `json:"arch"`
+	Labels            []string `json:"labels"`
+	Slots             int64    `json:"slots"`
 	// Worker is the harness the host runs its workers with (D64).
 	Worker WorkerKind `json:"worker"`
 	// OpenRuns counts the runs on the host that may still be working.

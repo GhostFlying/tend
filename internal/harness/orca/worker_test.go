@@ -859,3 +859,45 @@ func TestOrcaWorkerGivesUpOnAnAgentOrcaHasNoStateFor(t *testing.T) {
 	}
 	<-drained
 }
+
+func TestDirectoryWorkerSubmitsReportThroughPrivateBridge(t *testing.T) {
+	f := newWorkerFixture(t)
+	f.dir = t.TempDir()
+	f.orca.wt = "folder:folder-native"
+	spec := f.spec(protocol.RoleImplement)
+	spec.ProviderID = f.orca.wt
+	spec.StateDir = t.TempDir()
+	spec.Spec = json.RawMessage(`{"goal":"investigate","acceptance":["evidence is clear"],"deliverables":["report"]}`)
+	w, _, drained := f.start(context.Background(), spec)
+	state := filepath.Join(spec.StateDir, protocol.WorkerMarker)
+	var out bytes.Buffer
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submit_result","arguments":{"report":{"body":"investigated","evidence":["observed state"]}}}}` + "\n"
+	if err := bridge.ServeMCP(context.Background(), state, spec.RunID, strings.NewReader(input), &out); err != nil || strings.Contains(out.String(), "isError") {
+		t.Fatalf("report call = %s %v", out.String(), err)
+	}
+	f.orca.finish("term_1", "report delivered")
+	res, err := w.Wait()
+	<-drained
+	if err != nil || res.Result == nil || res.Result.Report.Body != "investigated" {
+		t.Fatalf("result = %+v %v", res, err)
+	}
+	if err := f.ws.Release(context.Background(), spec.RunID, f.thread); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.orca.terms) != 0 {
+		t.Fatal("native folder terminal remains after release")
+	}
+	for _, args := range f.orca.calls {
+		if args[0] == "worktree" && args[1] == "show" {
+			t.Fatal("directory worker depended on Git worktree lookup")
+		}
+		if args[0] == "agent" && args[1] == "launch" || args[0] == "terminal" && args[1] == "list" {
+			if got := flag(args, "--worktree"); got != "id:folder:folder-native" {
+				t.Fatalf("native selector = %q", got)
+			}
+		}
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatalf("bridge credentials remain: %v", err)
+	}
+}

@@ -61,10 +61,12 @@ func (v *Verdicts) Verdict() *protocol.VerdictPayload {
 
 // briefSpec is the part of a task spec a worker reads.
 type briefSpec struct {
-	Goal        string   `json:"goal"`
-	Scope       string   `json:"scope"`
-	Constraints []string `json:"constraints"`
-	Acceptance  []string `json:"acceptance"`
+	Goal         string   `json:"goal"`
+	Scope        string   `json:"scope"`
+	Constraints  []string `json:"constraints"`
+	Acceptance   []string `json:"acceptance"`
+	Deliverables []string `json:"deliverables"`
+	Delivery     string   `json:"delivery"`
 }
 
 // VerdictReminder is the turn input for an acceptance worker that ended
@@ -123,6 +125,20 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 	for _, c := range s.Acceptance {
 		fmt.Fprintf(&b, "- %s\n", c)
 	}
+	if len(s.Deliverables) > 0 {
+		fmt.Fprintf(&b, "\nRequired deliverables: %s\n", strings.Join(s.Deliverables, ", "))
+	} else if s.Delivery != "" {
+		fmt.Fprintf(&b, "\nRequired deliverable: %s\n", s.Delivery)
+	}
+	if len(spec.Baseline) > 0 {
+		b.WriteString("\nTask starting commits (use these for task-scoped commit and diff checks):\n")
+		for _, m := range spec.Baseline {
+			fmt.Fprintf(&b, "- %s: task starts at %s; resource original base %s.\n", m.Path, m.StartHEAD, m.ResourceBase)
+		}
+	}
+	if len(spec.Artifact) > 0 {
+		fmt.Fprintf(&b, "\nSubmitted artifact (report and file references included):\n%s\n", string(spec.Artifact))
+	}
 	common := "You work in " + spec.Dir + ". Its AGENTS.md describes the workspace: one sub-directory per repository. " +
 		"Read each repository's own AGENTS.md before working in it. Keep temporary files in " + spec.ScratchDir + ". "
 	if spec.Guide != "" {
@@ -132,6 +148,7 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		instructions = "You are an independent reviewer for tend. " + common +
 			"The workspace is the task's own, holding the work to review exactly as submitted. Do not fix it: judge it. " +
 			"You may build and run tests, but do not edit code, clean the working trees, commit or otherwise change git history. " +
+			"For operational tasks verify resulting state and evidence without repeating mutations. Use download_file for submitted files. " +
 			"Run whatever the acceptance checks need, then call " + VerdictTool + " exactly once with your verdict and evidence. " +
 			"If you cannot run the checks because the environment fails, the verdict is blocked, not changes_required."
 		input = "Review the submitted work against this task.\n\n" + b.String()
@@ -141,7 +158,7 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		"Change the files in the working trees so the goal is met and the acceptance checks pass; run them yourself. " +
 		"Whether and how to commit is yours to decide, as the task and each repository's own rules ask; tend does not commit for you, " +
 		"and records each repository's HEAD and working tree as you leave them. " +
-		"An independent reviewer will check your work, so say plainly in your final message what you changed and what you verified."
+		"An independent reviewer will check your work. For report or file delivery, call submit_result with the requested report and explicitly selected files before ending your turn. Report-only work does not require Git changes. State evidence and uncertainties honestly."
 	input = "Implement this task.\n\n" + b.String()
 	if spec.Feedback != nil {
 		input += "\nThe last review asked for changes:\n" + string(spec.Feedback.Issues) + "\n"

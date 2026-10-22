@@ -199,7 +199,7 @@ func answerEffect(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRo
 		res.Reason = fmt.Sprintf("the task changed after the question was asked (control revision %d, now %d)", d.AskedRevision.Int64, row.ControlRevision)
 		return res, nil, nil
 	}
-	task := toDomain(row, spec.Budget())
+	task := toDomainWithWorkspace(row, spec)
 	var dec domain.Decision
 	switch kind {
 	case protocol.EffectImplement:
@@ -220,6 +220,17 @@ func answerEffect(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRo
 	}
 	if pe := (*protocol.Error)(nil); errors.As(err, &pe) {
 		res.Reason = pe.Message
+		if kind == protocol.EffectStartOver && task.WorkspaceReused && task.Block == protocol.BlockWorkspaceUnavailable && !task.Lifecycle.Terminal() {
+			// A persisted question from an older server can still offer this
+			// effect. Keep its answer as a fact and replace it with valid choices.
+			resource, loadErr := store.GetWorkspaceByTask(ctx, tx.Q(), task.ID)
+			if loadErr != nil {
+				return nil, nil, loadErr
+			}
+			replacement := domain.AskAboutWorkspaceAgain(task, resource.HostID, "holds its fixed workspace")
+			_, events, applyErr := applyDecision(ctx, x, tx, row, replacement, map[string]any{"on": "unsupported_reuse_recovery", "decision_id": d.DecisionID})
+			return res, events, applyErr
+		}
 		return res, nil, nil
 	} else if err != nil {
 		return nil, nil, err

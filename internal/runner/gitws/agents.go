@@ -16,17 +16,17 @@ func writeAgentsFile(root string, as protocol.Assignment, st state) error {
 	var b strings.Builder
 	b.WriteString("# Workspace\n\n")
 	b.WriteString("This directory was laid out by tend, not by a repository. Each sub-directory below is a git worktree of one repository.\n\n")
-	b.WriteString("| Directory | Repository | Branch | Base commit |\n| --- | --- | --- | --- |\n")
+	b.WriteString("| Directory | Repository | Branch | Task starting commit | Resource original base |\n| --- | --- | --- | --- | --- |\n")
 	for _, m := range as.Workspace.Mounts {
 		ms := st.Mounts[m.Path]
 		branch := ms.Branch
 		if branch == "" {
 			branch = "(detached)"
 		}
-		fmt.Fprintf(&b, "| `%s/` | %s | `%s` | `%s` |\n", m.Path, m.Repo, branch, ms.Base)
+		fmt.Fprintf(&b, "| `%s/` | %s | `%s` | `%s` | `%s` |\n", m.Path, m.Repo, branch, taskBase(as, ms), ms.Base)
 	}
 	b.WriteString("\n## Base\n\n")
-	b.WriteString("The task's work starts from each mount's base commit above. There are no local branches besides the task branch, so a check that compares with the base, such as \"the diff against main\", means the base commit. ")
+	b.WriteString("The task's work starts from each mount's task starting commit above. For task-scoped checks, the base commit means this task starting commit, not the resource's original base. A reused workspace may contain other branches and inherited changes. ")
 	b.WriteString("`git log <base commit>..HEAD` lists the commits made since, `git diff <base commit>` shows all changes to tracked files, committed or not, and `git status` lists new files that are not committed.\n\n")
 	for _, m := range as.Workspace.Mounts {
 		ms := st.Mounts[m.Path]
@@ -49,8 +49,8 @@ func repoGuide(as protocol.Assignment, st state) string {
 	for _, m := range as.Workspace.Mounts {
 		ms := st.Mounts[m.Path]
 		fmt.Fprintf(&b, "You work in a git worktree of %s that tend set up for this task, on branch `%s`. ", m.Repo, ms.Branch)
-		fmt.Fprintf(&b, "The task's work starts from base commit `%s`, %s. ", ms.Base, baseOrigin(ms.From))
-		b.WriteString("A check that compares with the base, such as \"the diff against main\", means this commit: ")
+		fmt.Fprintf(&b, "The task's work starts from base commit `%s`, recorded when this task acquired the workspace. The resource original base is `%s` (%s), retained only as historical provenance. ", taskBase(as, ms), ms.Base, baseOrigin(ms.From))
+		fmt.Fprintf(&b, "For task-scoped checks, <base commit> means the task starting commit `%s`, not the resource original base. ", taskBase(as, ms))
 		b.WriteString("`git log <base commit>..HEAD` lists the commits made since, `git diff <base commit>` shows all changes to tracked files, committed or not, and `git status` lists new files that are not committed.\n\n")
 	}
 	b.WriteString("Rules:\n\n")
@@ -82,4 +82,11 @@ func baseOrigin(from string) string {
 		return "the tip of `origin/" + branch + "` when the workspace was laid out; `origin/" + branch + "` may have moved since"
 	}
 	return "resolved by tend"
+}
+
+func taskBase(as protocol.Assignment, ms mountState) string {
+	if ms.BaselineTask == as.TaskID && ms.TaskBase != "" {
+		return ms.TaskBase
+	}
+	return ms.Base
 }

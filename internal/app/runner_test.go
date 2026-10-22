@@ -21,7 +21,7 @@ func runner(host string) protocol.Principal {
 // if any, together with the envelope for replays.
 func (h *harness) claim(host string) (protocol.Assignment, bool, *protocol.Envelope) {
 	h.t.Helper()
-	env := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: host}, protocol.ClaimPayload{Worker: h.worker(host)}, nil)
+	env := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: host}, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1}, nil)
 	as, ok := h.claimWith(host, env)
 	return as, ok, env
 }

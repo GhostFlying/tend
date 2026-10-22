@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
 )
@@ -60,7 +61,8 @@ type Repo struct {
 // Config configures the workspaces of one runner.
 type Config struct {
 	// Home is TEND_HOME.
-	Home string
+	Home      string
+	ServerURL string
 	// Git is the git binary; empty means "git" on PATH.
 	Git string
 	// Env is added to the environment of git and prepare commands.
@@ -179,19 +181,31 @@ func (w *Workspaces) repoPath(repo string) string {
 // home is the task's workspace directory, where the runner keeps its
 // state for the workspace. Acceptance runs in the same workspace (D41).
 func (w *Workspaces) home(as protocol.Assignment) string {
+	if as.Workspace.Kind == "directory" {
+		return filepath.Join(w.cfg.Home, "temporary-workspaces", as.Workspace.ID)
+	}
 	return filepath.Join(w.cfg.Home, "workspaces", as.Workspace.Name)
 }
 
 // state is what the runner remembers about a workspace, kept in the
 // workspace directory.
 type state struct {
-	Mounts map[string]mountState `json:"mounts"`
+	ResourceID         string                `json:"resource_id,omitempty"`
+	ProviderID         string                `json:"provider_id,omitempty"`
+	ProviderInstanceID string                `json:"provider_instance_id,omitempty"`
+	FolderAsked        bool                  `json:"folder_asked,omitempty"`
+	DisplayTask        string                `json:"display_task,omitempty"`
+	Mounts             map[string]mountState `json:"mounts"`
 	// Prepared maps a profile's key to the hash of its inputs when it last
 	// ran successfully.
 	Prepared map[string]string `json:"prepared"`
 }
 
 type mountState struct {
+	TaskBase           string `json:"task_base,omitempty"`
+	BaselineTask       string `json:"baseline_task,omitempty"`
+	ProviderID         string `json:"provider_id,omitempty"`
+	ProviderInstanceID string `json:"provider_instance_id,omitempty"`
 	// Dir is where the mount is checked out when that is not under the
 	// workspace directory.
 	Dir    string `json:"dir,omitempty"`
@@ -360,11 +374,19 @@ func (w *Workspaces) hasCommitIn(ctx context.Context, path, sha string) bool {
 // Prepare implements runner.Workspaces.
 func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {
 	home := w.home(as)
+	if as.Workspace.Kind == "directory" {
+		return w.prepareDirectory(ctx, as, home)
+	}
 	unlock, err := w.lock(ctx, "ws:"+home)
 	if err != nil {
 		return runner.Prepared{}, err
 	}
 	defer unlock()
+	if as.Workspace.Reused || as.Role == protocol.RoleAccept {
+		if _, err := os.Stat(statePath(home)); err != nil {
+			return runner.Prepared{}, fmt.Errorf("gitws: reused workspace state is missing: %w", err)
+		}
+	}
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		return runner.Prepared{}, fmt.Errorf("gitws: workspace dir: %w", err)
 	}
@@ -372,6 +394,10 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 	if err != nil {
 		return runner.Prepared{}, err
 	}
+	if st.ResourceID != "" && st.ResourceID != as.Workspace.ID {
+		return runner.Prepared{}, fmt.Errorf("gitws: workspace resource identity changed")
+	}
+	st.ResourceID = as.Workspace.ID
 	if as.Role == protocol.RoleAccept {
 		err = w.layoutAcceptance(ctx, as, home, &st)
 	} else {
@@ -381,6 +407,19 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 		return runner.Prepared{}, err
 	}
 	root := w.layout.root(home, st)
+	if as.Workspace.Path != "" && filepath.Clean(as.Workspace.Path) != filepath.Clean(root) {
+		return runner.Prepared{}, fmt.Errorf("gitws: assigned workspace path changed")
+	}
+	if err := w.runProfiles(ctx, as, home, root, &st); err != nil {
+		return runner.Prepared{}, err
+	}
+	var fullBaseline json.RawMessage
+	if as.Workspace.ID != "" && as.Role == protocol.RoleImplement {
+		fullBaseline, err = w.baseline(ctx, as, home, &st)
+		if err != nil {
+			return runner.Prepared{}, err
+		}
+	}
 	guide := ""
 	if root == home {
 		if err := writeAgentsFile(root, as, st); err != nil {
@@ -388,9 +427,6 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 		}
 	} else {
 		guide = repoGuide(as, st)
-	}
-	if err := w.runProfiles(ctx, as, home, root, &st); err != nil {
-		return runner.Prepared{}, err
 	}
 	if err := saveState(home, st); err != nil {
 		return runner.Prepared{}, err
@@ -402,7 +438,38 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 	if err := os.MkdirAll(scratch, 0o755); err != nil {
 		return runner.Prepared{}, fmt.Errorf("gitws: scratch dir: %w", err)
 	}
-	p := runner.Prepared{Dir: root, ScratchDir: scratch, Guide: guide}
+	p := runner.Prepared{Dir: root, ScratchDir: scratch, Guide: guide, StateDir: filepath.Join(w.cfg.Home, "runs", as.RunID)}
+	for _, ms := range st.Mounts {
+		if ms.ProviderID != "" {
+			p.ProviderID = ms.ProviderID
+			st.ProviderID = ms.ProviderID
+			st.ProviderInstanceID = ms.ProviderInstanceID
+			break
+		}
+	}
+	if as.Workspace.ProviderID != "" && as.Workspace.ProviderID != p.ProviderID {
+		return runner.Prepared{}, fmt.Errorf("gitws: assigned provider identity changed")
+	}
+	if as.Workspace.ProviderInstanceID != "" && as.Workspace.ProviderInstanceID != st.ProviderInstanceID {
+		return runner.Prepared{}, fmt.Errorf("gitws: assigned provider instance changed")
+	}
+	if l, ok := w.layout.(orcaLayout); ok && as.Workspace.ID != "" && p.ProviderID != "" && st.DisplayTask != as.TaskID {
+		if err := l.orca.RenameWorkspace(ctx, p.ProviderID, workspaceTitle(as), w.workspaceComment(as)); err != nil {
+			return runner.Prepared{}, err
+		}
+		st.DisplayTask = as.TaskID
+	}
+	p.Report.ProviderID, p.Report.ProviderInstanceID, p.Report.Path = st.ProviderID, st.ProviderInstanceID, root
+	if len(fullBaseline) > 0 {
+		p.Report.Baseline = baselineReport(fullBaseline, "git", as.TaskID)
+	}
+	for _, m := range as.Workspace.Mounts {
+		ms := st.Mounts[m.Path]
+		p.Baseline = append(p.Baseline, harness.MountBaseline{Path: m.Path, StartHEAD: taskBase(as, ms), ResourceBase: ms.Base})
+	}
+	if err := saveState(home, st); err != nil {
+		return runner.Prepared{}, err
+	}
 	if as.Role == protocol.RoleImplement {
 		for _, m := range as.Workspace.Mounts {
 			ms := st.Mounts[m.Path]
@@ -415,13 +482,38 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 }
 
 func (w *Workspaces) layoutImplementation(ctx context.Context, as protocol.Assignment, home string, st *state) error {
+	if as.Workspace.Reused {
+		for _, m := range as.Workspace.Mounts {
+			if _, ok := st.Mounts[m.Path]; !ok {
+				return fmt.Errorf("%w: reused mount %s has no recorded identity", ErrWorkspaceMoved, m.Path)
+			}
+		}
+	}
 	for _, m := range as.Workspace.Mounts {
 		if ms, ok := st.Mounts[m.Path]; ok {
 			if branch := w.layout.branch(as); ms.Repo != m.Repo || branch != "" && ms.Branch != branch {
 				return fmt.Errorf("gitws: mount %s holds %s on %s, not %s on %s", m.Path, ms.Repo, ms.Branch, m.Repo, branch)
 			}
 			if _, err := os.Stat(filepath.Join(ms.dir(home, m.Path), ".git")); err == nil {
+				if l, ok := w.layout.(orcaLayout); ok && as.Workspace.ID != "" {
+					selector := "id:" + ms.ProviderID
+					if ms.ProviderID == "" {
+						selector = "path:" + ms.dir(home, m.Path)
+					}
+					wt, err := l.orca.Worktree(ctx, selector)
+					if err != nil {
+						return err
+					}
+					if wt.Path != ms.Dir || ms.ProviderInstanceID != "" && wt.InstanceID != ms.ProviderInstanceID {
+						return fmt.Errorf("gitws: provider resource identity changed")
+					}
+					ms.ProviderID, ms.ProviderInstanceID = wt.ID, wt.InstanceID
+					st.Mounts[m.Path] = ms
+				}
 				continue
+			}
+			if as.Workspace.Reused {
+				return fmt.Errorf("%w: reused mount %s is missing", ErrWorkspaceMoved, m.Path)
 			}
 		}
 		ms, err := w.layout.add(ctx, as, m, home, st)
@@ -474,6 +566,24 @@ func (w *Workspaces) addWorktree(ctx context.Context, repo, dir, branch, base st
 // compared: prepare profiles regenerate files and an earlier acceptance
 // may leave build output, both of which D41 allows.
 func (w *Workspaces) layoutAcceptance(ctx context.Context, as protocol.Assignment, home string, st *state) error {
+	for _, m := range as.Workspace.Mounts {
+		ms, ok := st.Mounts[m.Path]
+		if !ok || ms.Repo != m.Repo {
+			return fmt.Errorf("%w: assigned mount %s is missing or changed", ErrWorkspaceMoved, m.Path)
+		}
+		if _, err := os.Stat(filepath.Join(ms.dir(home, m.Path), ".git")); err != nil {
+			return fmt.Errorf("%w: assigned mount %s no longer exists: %w", ErrWorkspaceMoved, m.Path, err)
+		}
+		if l, ok := w.layout.(orcaLayout); ok && ms.ProviderID != "" {
+			wt, err := l.orca.Worktree(ctx, "id:"+ms.ProviderID)
+			if err != nil {
+				return fmt.Errorf("%w: query assigned provider: %w", ErrWorkspaceMoved, err)
+			}
+			if wt.Path != ms.Dir || ms.ProviderInstanceID != "" && wt.InstanceID != ms.ProviderInstanceID {
+				return fmt.Errorf("%w: assigned provider identity changed", ErrWorkspaceMoved)
+			}
+		}
+	}
 	var artifact protocol.ArtifactPayload
 	if err := json.Unmarshal(as.Artifact, &artifact); err != nil {
 		return fmt.Errorf("gitws: decode artifact: %w", err)
@@ -565,6 +675,15 @@ func (w *Workspaces) read(ctx context.Context, home, dir string) (mountNow, erro
 // changes HEAD does not, a snapshot commit of them kept under the run's
 // ref. Neither the branch, the index nor the files are changed.
 func (w *Workspaces) Collect(ctx context.Context, as protocol.Assignment) (protocol.ArtifactPayload, error) {
+	return w.collect(ctx, as, true)
+}
+
+// Snapshot records Git state for reports without requiring a change.
+func (w *Workspaces) Snapshot(ctx context.Context, as protocol.Assignment) (protocol.ArtifactPayload, error) {
+	return w.collect(ctx, as, false)
+}
+
+func (w *Workspaces) collect(ctx context.Context, as protocol.Assignment, requireChanges bool) (protocol.ArtifactPayload, error) {
 	home := w.home(as)
 	unlock, err := w.lock(ctx, "ws:"+home)
 	if err != nil {
@@ -630,7 +749,7 @@ func (w *Workspaces) Collect(ctx context.Context, as protocol.Assignment) (proto
 			CommitSHA: now.head, SnapshotSHA: snapshot, Changed: mountChanged,
 		})
 	}
-	if !changed {
+	if requireChanges && !changed {
 		return protocol.ArtifactPayload{}, runner.ErrNoChanges
 	}
 	return out, nil

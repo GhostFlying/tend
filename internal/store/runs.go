@@ -46,9 +46,12 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		COALESCE((SELECT p.weight FROM projects p WHERE p.project = t.project), 1),
 		NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dt ON dt.task_id = d.depends_on
 			WHERE d.task_id = t.task_id AND dt.lifecycle <> 'completed'),
-		COALESCE((SELECT w.host_id FROM workspaces w WHERE w.task_id = t.task_id), ''),
-		EXISTS (SELECT 1 FROM runs r JOIN workspaces w ON w.task_id = r.task_id AND w.host_id = r.host_id
-			WHERE r.task_id = t.task_id AND r.observed_state IN `+openRunStates+`),
+		COALESCE((SELECT w.host_id FROM task_workspace_bindings b JOIN workspaces w ON w.workspace_id=b.workspace_id WHERE b.task_id=t.task_id), ''),
+		EXISTS (SELECT 1 FROM task_workspace_bindings b JOIN workspaces w ON w.workspace_id=b.workspace_id
+			WHERE b.task_id=t.task_id AND (w.status IN ('removing','removed') OR (w.occupied_by IS NOT NULL AND w.occupied_by<>t.task_id)))
+		OR EXISTS (SELECT 1 FROM runs r JOIN workspace_runs rb ON rb.run_id=r.run_id
+			JOIN task_workspace_bindings tb ON tb.workspace_id=rb.workspace_id
+			WHERE tb.task_id=t.task_id AND r.observed_state IN `+openRunStates+`),
 		(SELECT json_group_array(ab.host_id) FROM abandoned_workspaces ab WHERE ab.task_id = t.task_id),
 		s.body_json
 		FROM plan_actions a
@@ -230,66 +233,6 @@ func (t *Tx) TouchHost(ctx context.Context, hostID string, now int64) error {
 	return nil
 }
 
-// WorkspaceRow is a task's workspace on a host.
-type WorkspaceRow struct {
-	WorkspaceID string
-	TaskID      string
-	Name        string
-	HostID      string
-	Status      string
-}
-
-// Workspace states.
-const (
-	WorkspaceAssigned = "assigned"
-	WorkspaceReady    = "ready"
-)
-
-// InsertWorkspace records a task's workspace on a host.
-func (t *Tx) InsertWorkspace(ctx context.Context, w WorkspaceRow, now int64) error {
-	_, err := t.Exec(ctx, `INSERT INTO workspaces (workspace_id, task_id, name, host_id, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, w.WorkspaceID, w.TaskID, w.Name, w.HostID, w.Status, now, now)
-	if err != nil {
-		return fmt.Errorf("store: insert workspace: %w", err)
-	}
-	return nil
-}
-
-// GetWorkspaceByTask returns a task's workspace, or ErrNotFound.
-func GetWorkspaceByTask(ctx context.Context, q Querier, taskID string) (WorkspaceRow, error) {
-	w := WorkspaceRow{TaskID: taskID}
-	err := q.QueryRowContext(ctx, `SELECT workspace_id, name, host_id, status FROM workspaces WHERE task_id = ?`, taskID).
-		Scan(&w.WorkspaceID, &w.Name, &w.HostID, &w.Status)
-	if err != nil {
-		return WorkspaceRow{}, notFound(err, "workspace of task "+taskID)
-	}
-	return w, nil
-}
-
-// AbandonWorkspace moves a task's workspace, with its mounts, to the
-// abandoned workspaces and returns it; the task has none afterwards.
-func (t *Tx) AbandonWorkspace(ctx context.Context, taskID string, now int64) (WorkspaceRow, error) {
-	w, err := GetWorkspaceByTask(ctx, t.Q(), taskID)
-	if err != nil {
-		return WorkspaceRow{}, err
-	}
-	if _, err := t.Exec(ctx, `INSERT INTO abandoned_workspaces (workspace_id, task_id, name, host_id, mounts_json, created_at, abandoned_at)
-		SELECT w.workspace_id, w.task_id, w.name, w.host_id,
-			(SELECT json_group_array(json_object('path', m.path, 'repo', m.repo, 'branch', m.branch,
-				'resolved_base_sha', m.resolved_base_sha)) FROM workspace_mounts m WHERE m.workspace_id = w.workspace_id),
-			w.created_at, ?
-		FROM workspaces w WHERE w.workspace_id = ?`, now, w.WorkspaceID); err != nil {
-		return WorkspaceRow{}, fmt.Errorf("store: keep abandoned workspace: %w", err)
-	}
-	if _, err := t.Exec(ctx, `DELETE FROM workspace_mounts WHERE workspace_id = ?`, w.WorkspaceID); err != nil {
-		return WorkspaceRow{}, fmt.Errorf("store: delete mounts: %w", err)
-	}
-	if _, err := t.Exec(ctx, `DELETE FROM workspaces WHERE workspace_id = ?`, w.WorkspaceID); err != nil {
-		return WorkspaceRow{}, fmt.Errorf("store: delete workspace: %w", err)
-	}
-	return w, nil
-}
-
 // WorkspaceHostRow is an unfinished task with a workspace, and that
 // workspace's host.
 type WorkspaceHostRow struct {
@@ -311,7 +254,7 @@ func ListWorkspaceHosts(ctx context.Context, q Querier) ([]WorkspaceHostRow, err
 	rows, err := q.QueryContext(ctx, `SELECT t.task_id, w.host_id, h.status, COALESCE(h.last_seen_at, 0), t.block_reason,
 		EXISTS (SELECT 1 FROM plan_actions a WHERE a.task_id = t.task_id AND a.status = 'pending' AND a.kind IN ('implement', 'accept'))
 		OR EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.host_id = w.host_id AND r.observed_state = 'unknown')
-		FROM tasks t JOIN workspaces w ON w.task_id = t.task_id JOIN hosts h ON h.host_id = w.host_id
+		FROM tasks t JOIN task_workspace_bindings b ON b.task_id = t.task_id JOIN workspaces w ON w.workspace_id = b.workspace_id JOIN hosts h ON h.host_id = w.host_id
 		WHERE t.lifecycle NOT IN ('completed', 'cancelled') ORDER BY t.task_id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list workspace hosts: %w", err)

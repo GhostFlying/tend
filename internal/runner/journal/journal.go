@@ -28,6 +28,7 @@ var migrationFS embed.FS
 const (
 	PhaseClaimed    = "claimed"
 	PhaseStarted    = "started"
+	PhaseWorkerDone = "worker_done"
 	PhaseSubmitting = "submitting"
 	PhaseReleasing  = "releasing"
 	PhaseDone       = "done"
@@ -35,10 +36,15 @@ const (
 
 // Run is a run the runner holds.
 type Run struct {
-	Assignment protocol.Assignment
-	Phase      string
-	Fenced     bool
-	Attempts   int
+	WorkerDoneAtMillis int64
+	WorkerKind         protocol.WorkerKind
+	WorkerResult       json.RawMessage
+	UpdatedAtMillis    int64
+	StoppedConfirmed   bool
+	Assignment         protocol.Assignment
+	Phase              string
+	Fenced             bool
+	Attempts           int
 	// Thread is the harness thread of the run's last worker, if any.
 	Thread string
 	// Held says the owner took the run's agent over and has not handed
@@ -48,7 +54,8 @@ type Run struct {
 
 // Request is a request whose ID must survive restarts.
 type Request struct {
-	Envelope protocol.Envelope
+	CreatedAtMillis int64
+	Envelope        protocol.Envelope
 	// RunID is set when the request is sent with the run's credential.
 	RunID string
 }
@@ -165,7 +172,7 @@ func (j *Journal) DeleteRequest(ctx context.Context, requestID string) error {
 
 // Requests returns the journaled requests, oldest first.
 func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
-	rows, err := j.db.QueryContext(ctx, `SELECT request_id, operation, run_id, target_json, payload_json
+	rows, err := j.db.QueryContext(ctx, `SELECT request_id, operation, run_id, target_json, payload_json, created_at
 		FROM requests ORDER BY created_at, request_id`)
 	if err != nil {
 		return nil, fmt.Errorf("journal: list requests: %w", err)
@@ -178,7 +185,7 @@ func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
 			runID           sql.NullString
 			target, payload string
 		)
-		if err := rows.Scan(&r.Envelope.RequestID, &r.Envelope.Operation, &runID, &target, &payload); err != nil {
+		if err := rows.Scan(&r.Envelope.RequestID, &r.Envelope.Operation, &runID, &target, &payload, &r.CreatedAtMillis); err != nil {
 			return nil, fmt.Errorf("journal: scan request: %w", err)
 		}
 		if err := json.Unmarshal([]byte(target), &r.Envelope.Target); err != nil {
@@ -212,14 +219,23 @@ func (j *Journal) RequestForRun(ctx context.Context, runID string) (Request, boo
 // request that produced it, in one transaction. claimID may be empty for
 // runs handed over by hello.
 func (j *Journal) AcceptAssignment(ctx context.Context, as protocol.Assignment, claimID string) error {
+	return j.AcceptAssignmentFromWorker(ctx, as, claimID, "")
+}
+
+// AcceptAssignmentFromWorker records origin on first receipt only. Reconnects
+// must not relabel existing runs with the runner's current harness.
+func (j *Journal) AcceptAssignmentFromWorker(ctx context.Context, as protocol.Assignment, claimID string, worker protocol.WorkerKind) error {
+	if worker != "" && worker != protocol.WorkerAppServer && worker != protocol.WorkerOrca {
+		return errors.New("journal: invalid worker origin")
+	}
 	body, err := json.Marshal(as)
 	if err != nil {
 		return fmt.Errorf("journal: encode assignment: %w", err)
 	}
 	return j.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, lease_id, run_token, assignment_json, phase, updated_at)
-			VALUES (?, ?, ?, ?, 'claimed', ?) ON CONFLICT (run_id) DO NOTHING`,
-			as.RunID, as.LeaseID, as.RunToken, string(body), j.now().UnixMilli()); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, lease_id, run_token, assignment_json, phase, updated_at, worker_kind)
+			VALUES (?, ?, ?, ?, 'claimed', ?, ?) ON CONFLICT (run_id) DO NOTHING`,
+			as.RunID, as.LeaseID, as.RunToken, string(body), j.now().UnixMilli(), worker); err != nil {
 			return fmt.Errorf("journal: put run: %w", err)
 		}
 		if claimID != "" {
@@ -231,9 +247,19 @@ func (j *Journal) AcceptAssignment(ctx context.Context, as protocol.Assignment, 
 	})
 }
 
+// BindUnstartedWorkerOrigin labels an old receipt only before any possible worker
+// launch. Attempts and thread identity make all started or ambiguous runs immutable.
+// Callers must reload the run and verify its resulting origin before acting.
+func (j *Journal) BindUnstartedWorkerOrigin(ctx context.Context, runID string, worker protocol.WorkerKind) error {
+	if worker != protocol.WorkerAppServer && worker != protocol.WorkerOrca {
+		return errors.New("journal: invalid worker origin")
+	}
+	return j.exec(ctx, `UPDATE runs SET worker_kind=? WHERE run_id=? AND worker_kind='' AND attempts=0 AND COALESCE(thread_id,'')=''`, worker, runID)
+}
+
 // Runs returns the runs that are not done.
 func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
-	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json, phase, fenced, attempts, COALESCE(thread_id, ''), held FROM runs
+	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json, phase, fenced, attempts, COALESCE(thread_id, ''), held, COALESCE(worker_result_json,''), COALESCE(worker_done_at,0), stopped_confirmed, worker_kind FROM runs
 		WHERE phase <> 'done' ORDER BY run_id`)
 	if err != nil {
 		return nil, fmt.Errorf("journal: list runs: %w", err)
@@ -242,12 +268,14 @@ func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
 	var out []Run
 	for rows.Next() {
 		var (
-			r    Run
-			body string
+			r      Run
+			body   string
+			result string
 		)
-		if err := rows.Scan(&body, &r.Phase, &r.Fenced, &r.Attempts, &r.Thread, &r.Held); err != nil {
+		if err := rows.Scan(&body, &r.Phase, &r.Fenced, &r.Attempts, &r.Thread, &r.Held, &result, &r.WorkerDoneAtMillis, &r.StoppedConfirmed, &r.WorkerKind); err != nil {
 			return nil, fmt.Errorf("journal: scan run: %w", err)
 		}
+		r.WorkerResult = json.RawMessage(result)
 		if err := json.Unmarshal([]byte(body), &r.Assignment); err != nil {
 			return nil, fmt.Errorf("journal: decode assignment: %w", err)
 		}
@@ -278,6 +306,15 @@ func (j *Journal) SetPhase(ctx context.Context, runID, phase string) error {
 	return j.exec(ctx, `UPDATE runs SET phase = ?, updated_at = ? WHERE run_id = ?`, phase, j.now().UnixMilli(), runID)
 }
 
+// WorkerDone persists the observed final result before any external agent is stopped.
+func (j *Journal) WorkerDone(ctx context.Context, runID string, result json.RawMessage) error {
+	if !json.Valid(result) {
+		return errors.New("journal: invalid completed worker result")
+	}
+	now := j.now().UnixMilli()
+	return j.exec(ctx, `UPDATE runs SET phase='worker_done',worker_result_json=?,worker_done_at=COALESCE(worker_done_at,?),updated_at=? WHERE run_id=?`, string(result), now, now, runID)
+}
+
 // SetFenced marks or clears a run's fence.
 func (j *Journal) SetFenced(ctx context.Context, runID string, fenced bool) error {
 	return j.exec(ctx, `UPDATE runs SET fenced = ?, updated_at = ? WHERE run_id = ?`, fenced, j.now().UnixMilli(), runID)
@@ -297,7 +334,7 @@ func (j *Journal) SetHeld(ctx context.Context, runID string, held bool) error {
 func (j *Journal) NextAttempt(ctx context.Context, runID string) (int, error) {
 	var n int
 	err := j.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET attempts = attempts + 1, updated_at = ? WHERE run_id = ?`, j.now().UnixMilli(), runID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET attempts = attempts + 1, stopped_confirmed = 0, updated_at = ? WHERE run_id = ?`, j.now().UnixMilli(), runID); err != nil {
 			return fmt.Errorf("journal: count attempt: %w", err)
 		}
 		return tx.QueryRowContext(ctx, `SELECT attempts FROM runs WHERE run_id = ?`, runID).Scan(&n)

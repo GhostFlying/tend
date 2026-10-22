@@ -183,6 +183,99 @@
       "title": "ArtifactDetail",
       "type": "object"
     },
+    "ArtifactFile": {
+      "additionalProperties": false,
+      "properties": {
+        "file_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file_id",
+        "name",
+        "size",
+        "sha256"
+      ],
+      "title": "ArtifactFile",
+      "type": "object"
+    },
+    "ArtifactMount": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "commit_sha": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "snapshot_sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo",
+        "path",
+        "base_sha",
+        "branch",
+        "commit_sha",
+        "changed"
+      ],
+      "title": "ArtifactMount",
+      "type": "object"
+    },
+    "ArtifactPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/definitions/ArtifactFile"
+          },
+          "type": "array"
+        },
+        "mounts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ArtifactMount"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "$ref": "#/definitions/ResultReport"
+        }
+      },
+      "required": [
+        "mounts"
+      ],
+      "title": "ArtifactPayload",
+      "type": "object"
+    },
     "ArtifactView": {
       "additionalProperties": false,
       "properties": {
@@ -662,6 +755,9 @@
         },
         "worker": {
           "$ref": "#/definitions/WorkerKind"
+        },
+        "workspace_protocol": {
+          "type": "integer"
         }
       },
       "required": [
@@ -935,6 +1031,31 @@
         "status"
       ],
       "title": "RequestView",
+      "type": "object"
+    },
+    "ResultReport": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "uncertainties": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "title": "ResultReport",
       "type": "object"
     },
     "RunLogPage": {
@@ -1658,6 +1779,12 @@
         "host": {
           "type": "string"
         },
+        "kind": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
         "mounts": {
           "anyOf": [
             {
@@ -1670,6 +1797,24 @@
               "type": "null"
             }
           ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "occupied_by": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "resource_id": {
+          "type": "string"
+        },
+        "source_task_id": {
+          "type": "string"
         },
         "status": {
           "type": "string"
@@ -1696,6 +1841,9 @@
     },
     "ArtifactDetail": {
       "$ref": "#/definitions/ArtifactDetail"
+    },
+    "ArtifactPayload": {
+      "$ref": "#/definitions/ArtifactPayload"
     },
     "ConversationPage": {
       "$ref": "#/definitions/ConversationPage"

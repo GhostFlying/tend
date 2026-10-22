@@ -139,10 +139,9 @@ func (ReportTakeover) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	return Outcome{Result: newTaskResult(d.Task, nil), Events: events}, nil
 }
 
-// SubmitArtifact handles runs.submit_artifact: an implement run reports
-// the commits it produced. The artifact covers every mount of the run's
-// workspace, changed or not, so acceptance can rebuild the combination.
-// Submitting ends the run.
+// SubmitArtifact handles runs.submit_artifact: an implement run submits its
+// required outputs and optional report or files. Commit deliverables cover
+// every mount so acceptance can rebuild the combination. Submission ends the run.
 type SubmitArtifact struct{}
 
 // Operation implements Command.
@@ -167,7 +166,7 @@ func (SubmitArtifact) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := checkArtifactMounts(spec.Workspace, p.Mounts); err != nil {
+	if err := checkResultDeliverables(ctx, tx.Q(), spec, rc.run.RunID, p); err != nil {
 		return Outcome{}, err
 	}
 	slices.SortFunc(p.Mounts, func(a, b protocol.ArtifactMount) int { return strings.Compare(a.Path, b.Path) })
@@ -184,7 +183,11 @@ func (SubmitArtifact) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	artifactID := x.IDs.New(protocol.PrefixArtifact)
 	// The artifact is kept as a fact even when it is stale.
-	if err := tx.InsertArtifact(ctx, artifactID, rc.task.TaskID, rc.run.RunID, "git_commits", string(ref), hex.EncodeToString(digest[:]), x.Now.UnixMilli()); err != nil {
+	kind := "git_commits"
+	if p.Report != nil || len(p.Files) > 0 {
+		kind = "result"
+	}
+	if err := tx.InsertArtifact(ctx, artifactID, rc.task.TaskID, rc.run.RunID, kind, string(ref), hex.EncodeToString(digest[:]), x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
 	task := toDomain(rc.task, rc.spec.Budget())
@@ -295,4 +298,52 @@ func (SubmitAcceptance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		return Outcome{}, err
 	}
 	return Outcome{Result: map[string]any{"acceptance_id": acceptanceID, "task": newTaskResult(d.Task, actions)}, Events: events}, nil
+}
+
+// checkResult validates required deliverables and immutable uploaded manifests.
+func checkResultDeliverables(ctx context.Context, q store.Querier, spec domain.Spec, runID string, p protocol.ArtifactPayload) error {
+	if spec.RequiresDelivery(domain.DeliveryCommit) {
+		if err := checkArtifactMounts(spec.Workspace, p.Mounts); err != nil {
+			return err
+		}
+	} else if len(p.Mounts) > 0 {
+		if err := checkArtifactMountState(spec.Workspace, p.Mounts); err != nil {
+			return err
+		}
+	}
+	if spec.RequiresDelivery(domain.DeliveryReport) && (p.Report == nil || strings.TrimSpace(p.Report.Body) == "") {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "a report is required")
+	}
+	if p.Report != nil && strings.TrimSpace(p.Report.Body) == "" {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "report body must not be empty")
+	}
+	if spec.RequiresDelivery(domain.DeliveryFiles) && len(p.Files) == 0 {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "delivery files are required")
+	}
+	seen := map[string]bool{}
+	names := map[string]bool{}
+	for _, file := range p.Files {
+		if seen[file.FileID] || names[file.Name] {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "file is listed twice")
+		}
+		seen[file.FileID] = true
+		names[file.Name] = true
+		stored, err := store.GetDeliverableFile(ctx, q, file.FileID)
+		if err != nil {
+			return errNotFound(err, "delivery file does not exist")
+		}
+		if stored.RunID != runID || stored.ArtifactFile != file {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "file does not match this run's immutable upload")
+		}
+	}
+	return nil
+}
+
+// checkArtifactMountState allows unchanged repository evidence in report results.
+func checkArtifactMountState(w domain.Workspace, mounts []protocol.ArtifactMount) error {
+	copyMounts := slices.Clone(mounts)
+	if len(copyMounts) > 0 {
+		copyMounts[0].Changed = true
+	}
+	return checkArtifactMounts(w, copyMounts)
 }

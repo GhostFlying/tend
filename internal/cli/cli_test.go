@@ -1078,3 +1078,27 @@ func TestOnlyNetworkRemotesLeave(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkerDetectionWithoutGit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte("# Written by tend-runner for the run in this worktree; removed when the run ends.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(dir, "notes")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e := Env{Getwd: func() (string, error) { return child, nil }}
+	if !e.inWorker(context.Background()) {
+		t.Fatal("ordinary directory worker was not recognized")
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte("# User config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if e.inWorker(context.Background()) {
+		t.Fatal("user config mistaken for worker")
+	}
+}

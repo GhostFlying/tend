@@ -11,10 +11,22 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
+// MountBaseline separates this task's starting commit from resource history.
+type MountBaseline struct {
+	Path         string
+	StartHEAD    string
+	ResourceBase string
+}
+
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
-	RunID string
-	Role  protocol.RunRole
+	Baseline     []MountBaseline
+	RunID        string
+	ProviderID   string
+	StateDir     string
+	UploadFile   func(context.Context, string, string) (protocol.ArtifactFile, error)
+	DownloadFile func(context.Context, string) (string, error)
+	Role         protocol.RunRole
 	// Dir is the workspace root; the worker starts there.
 	Dir string
 	// Guide describes the workspace when Dir is inside the only
@@ -63,6 +75,8 @@ type WorkerEvent struct {
 
 // WorkerResult is how a worker ended.
 type WorkerResult struct {
+	Result *protocol.ArtifactPayload
+
 	// Verdict is an acceptance run's conclusion; nil when the worker gave
 	// none, which counts as inconclusive.
 	Verdict *protocol.VerdictPayload
@@ -80,6 +94,12 @@ type Worker interface {
 	// without a result.
 	Wait() (WorkerResult, error)
 }
+
+// ErrWorkerNotStarted marks a Start failure which proves no worker was
+// created, resumed or adopted, and no earlier attempt can still own one.
+// A runner may persist stopped proof before releasing that failed run.
+// Ordinary Start errors provide no such process-lifetime guarantee.
+var ErrWorkerNotStarted = errors.New("the worker was not started")
 
 // Causes a runner stops a worker with, wrapped in the cause of the context
 // passed to Start. Any other cause, such as the runner shutting down, only
@@ -102,6 +122,22 @@ var (
 // than once for a run.
 type Releaser interface {
 	Release(ctx context.Context, runID, thread string) error
+}
+
+// HistoricalReleaser refuses to stop a terminal that has passed to its owner.
+type HistoricalReleaser interface {
+	ReleaseHistorical(ctx context.Context, runID, thread string, held bool, completedAt int64) error
+}
+
+// FinalizingReleaser checks ownership before stopping a failed or legacy run.
+// intentAt is the immutable time its final request was first journaled.
+type FinalizingReleaser interface {
+	ReleaseFinalizing(ctx context.Context, runID, thread string, intentAt int64, handBack bool, saveThread func(string) error) error
+}
+
+// CompletedReleaser verifies that a saved result still owns its external terminal.
+type CompletedReleaser interface {
+	ReleaseCompleted(ctx context.Context, runID, thread string, completedAt int64, handBack bool) error
 }
 
 // Workers starts workers. Cancelling the context passed to Start stops the

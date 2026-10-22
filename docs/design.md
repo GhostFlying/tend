@@ -74,6 +74,9 @@
 
 | D76 | 唯一 owner 主会话中的完成通知：每个新的 task.completed 事件同事务写入 author=system 的持久化会话消息，绑定任务、被验收产物和源事件，并经原 SSE 同步；复用请求去重及领域完成转换，不回灌历史，不自动调用模型。通知有独立呈现，主 Agent 下一轮沿账本 delta 获得事实，完整重建可从近期消息回忆。详见 `docs/plans/web-task-workflow.md`。 | 已实现（2026-10-23） |
 | D77 | 任务定义支持 follow_up 和 related 关系：新任务显式跟进原任务，双向读取和导航；关系为独立元数据，带 revision 的声明关系替换不重开终态或改变 spec，不自动继承 workspace/base 或调度依赖。创建、变更、事件和请求去重同事务，后续关系拒绝成环。详见 `docs/plans/task-relations.md`。 | 已实现（2026-10-23） |
+| D78 | Workspace 作为独立资源由任务绑定顺序使用（细化 D33、D41）：任务选择 new、reuse 或 temporary；reuse 通过来源任务解析后固定资源身份与主机，不改变目录、分支或继承改动。复用任务失去原主机时只提供等待或取消，不支持原地 start-over；需要独立新环境时取消后创建 new 或 temporary 任务，禁止悄悄替换绑定资源。临时目录位于 runner 数据根下的 temporary-workspaces/<workspace_id>，不要求 Git。资源占用覆盖实现、验收、返工、暂停、待决及人工接管；任务终止且 runner 确认进程停止后才释放，未知运行继续占用。单个资源清理受阻不阻塞其他资源释放；删除前必须核对原提供方及目录的全部注册身份。排队复用引用阻止清理；最后一次使用释放后七天可清理临时目录，清理预留与新引用互斥。各次任务基线与历史产物独立保存。runner 在 hello/claim 显式报告 workspace_protocol，旧 runner 不领取新任务形式。详见 `docs/plans/workspace-reuse-and-deliverables.md`。 | 已实现（2026-10-23） |
+| D79 | 交付与 workspace 模式正交：deliverables 可组合 commit、report、files，保留旧 delivery=commit；所有任务可附带报告，只有要求 commit 时检查 Git 变更。实现者显式提交结果，服务端持久化后独立验收；runner 在关闭已完成 worker 前持久化完成结果，重启后先对账终端控制权，再恢复停止、收集及提交，不重新执行该 worker；人工接管和停止暂时失败保留完成结果，等待归还或确认停止；文件通过按 run 鉴权和请求去重的二进制端点上传，runner 原子保存上传重放身份，提交工具在确认完成前拒绝重复文件名及身份；SQLite 保存内容和不可变清单，默认单文件 20 MiB、单轮累计 100 MiB，可配置。报告及文件不随 workspace 清理删除；操作验收核对证据，不重复副作用，不确定结果进入待决。工具有界读取已交付文本文件，Web 经 owner 鉴权下载。 | 已实现（2026-10-23） |
+| D80 | 人工接手所需的 provider 身份与显示分离（细化 D51、D63、D66）：Orca 原生 folder workspace 承载临时目录，Git worktree 保持原仓库上下文；显示名只有当前任务标题与短任务 ID，实际取得占用后更新，不改目录和分支。恢复与回收核对持久化资源 ID、路径及实例，不按显示名认领；凭据与运行状态置于 runner 私有目录，不依赖 .git。未来一个 Cove task/workspace 对应一个 tend 资源，各 tend 任务用新 tab，入口路径由 provider 返回；完整 Cove 后端及安全回收等待集成接口，不在本阶段实施。 | 已实现（2026-10-23） |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

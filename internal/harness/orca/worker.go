@@ -84,7 +84,7 @@ func (ws *Workers) Release(ctx context.Context, runID, thread string) error {
 	if json.Unmarshal([]byte(thread), &st) != nil || st.Worktree == "" {
 		return nil
 	}
-	terms, err := ws.opts.Client.Terminals(ctx, "id:"+st.Worktree)
+	terms, err := ws.opts.Client.Terminals(ctx, workspaceSelector(st.Worktree))
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,10 @@ func (ws *Workers) Release(ctx context.Context, runID, thread string) error {
 	handle := ""
 	switch {
 	case st.Terminal != "":
-		if _, ok := panes[st.Pane]; ok {
+		if current, ok := panes[st.Pane]; ok {
+			if current != st.Terminal {
+				return errors.New("orca: terminal identity changed before release")
+			}
 			handle = st.Terminal
 		}
 	case st.Marker != "":
@@ -116,10 +119,25 @@ func (ws *Workers) Release(ctx context.Context, runID, thread string) error {
 		}
 	}
 	if handle == "" {
+		if st.Terminal == "" && st.Marker != "" {
+			return errors.New("orca: launch outcome is unknown; no stopped process proof")
+		}
 		return nil
 	}
 	ws.opts.Log.InfoContext(ctx, "closing the agent of a run tend gave up", "run_id", runID, "terminal", handle)
-	return ws.opts.Client.CloseTerminal(ctx, handle)
+	if err := ws.opts.Client.CloseTerminal(ctx, handle); err != nil {
+		return err
+	}
+	terms, err = ws.opts.Client.Terminals(ctx, workspaceSelector(st.Worktree))
+	if err != nil {
+		return err
+	}
+	for _, t := range terms {
+		if t.Handle == handle {
+			return errors.New("orca: agent terminal still exists after close")
+		}
+	}
+	return nil
 }
 
 // orcaAgents are orca's names for the agents a worker can be.
@@ -180,6 +198,7 @@ type worker struct {
 
 	srv      *bridge.Server
 	verdicts harness.Verdicts
+	results  harness.Results
 	// holding is why the worker leaves the agent to the owner, once it
 	// noticed a takeover.
 	holding string
@@ -205,21 +224,35 @@ func (w *worker) Wait() (harness.WorkerResult, error) {
 
 // Start implements harness.Workers.
 func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.Worker, error) {
+	// Only a fresh run can prove an early failure left no external worker.
+	// A resumed or ambiguous attempt may still have an older native agent.
+	prelaunchFailure := func(err error) (harness.Worker, error) {
+		if spec.Attempt == 1 && spec.Thread == "" {
+			err = fmt.Errorf("%w: %w", harness.ErrWorkerNotStarted, err)
+		}
+		return nil, err
+	}
 	agent, ok := orcaAgents[ws.opts.Agent]
 	if !ok {
-		return nil, fmt.Errorf("orca: agent %q cannot be a worker", ws.opts.Agent)
+		return prelaunchFailure(fmt.Errorf("orca: agent %q cannot be a worker", ws.opts.Agent))
 	}
-	wt, err := ws.opts.Client.Worktree(ctx, "path:"+spec.Dir)
-	if err != nil {
-		return nil, fmt.Errorf("orca: find the worker's worktree: %w", err)
+	wt := Worktree{ID: spec.ProviderID}
+	if wt.ID == "" {
+		var err error
+		wt, err = ws.opts.Client.Worktree(ctx, "path:"+spec.Dir)
+		if err != nil {
+			return prelaunchFailure(fmt.Errorf("orca: find the worker's worktree: %w", err))
+		}
 	}
 	w := &worker{ws: ws, spec: spec, wt: wt.ID, events: make(chan harness.WorkerEvent), done: make(chan struct{})}
 	// A thread from another harness, such as a traex thread ID from
 	// before the host moved to orca, does not decode and starts over.
 	_ = json.Unmarshal([]byte(spec.Thread), &w.st)
 	if err := w.openBridge(ctx); err != nil {
-		return nil, err
+		return prelaunchFailure(err)
 	}
+	// From begin onward, launch/send/recovery outcomes can be unknown. Never
+	// attach the prelaunch proof to those errors, even if the thread is empty.
 	if err := w.begin(ctx, agent); err != nil {
 		w.closeBridge(ctx)
 		if cause := context.Cause(ctx); cause != nil {
@@ -238,18 +271,32 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 // configuration at them (D66). The worktree's marker also keeps the
 // owner's tend add-on out of the agent.
 func (w *worker) openBridge(ctx context.Context) error {
-	var tools []harness.ToolSpec
+	w.results.Spec = w.spec
+	if err := w.results.Restore(); err != nil {
+		return err
+	}
+	tools := []harness.ToolSpec{harness.ResultToolSpec}
+	handle := w.results.Handle
 	if w.spec.Role == protocol.RoleAccept {
 		tools = []harness.ToolSpec{harness.VerdictToolSpec}
+		if w.spec.DownloadFile != nil {
+			tools = append(tools, harness.DownloadFileToolSpec)
+		}
+		handle = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
+			if c.Tool == harness.VerdictTool {
+				return w.verdicts.Handle(ctx, c)
+			}
+			return w.results.Handle(ctx, c)
+		}
 	}
 	sock := filepath.Join(w.ws.opts.SocketDir, "tend-"+w.spec.RunID+".sock")
 	token := w.ws.opts.IDs.New(protocol.PrefixToken)
-	srv, err := bridge.Listen(sock, token, tools, w.verdicts.Handle)
+	srv, err := bridge.Listen(sock, token, tools, handle)
 	if err != nil {
 		return err
 	}
 	st := bridge.State{Run: w.spec.RunID, Socket: sock, Token: token}
-	if err := bridge.Install(ctx, w.spec.Dir, w.ws.opts.Agent, w.ws.opts.BridgeCommand, w.ws.opts.BridgeArgs, st); err != nil {
+	if err := bridge.InstallPrivate(ctx, w.spec.Dir, w.ws.opts.Agent, w.ws.opts.BridgeCommand, w.ws.opts.BridgeArgs, st, w.spec.StateDir); err != nil {
 		_ = srv.Close()
 		return err
 	}
@@ -259,7 +306,7 @@ func (w *worker) openBridge(ctx context.Context) error {
 
 func (w *worker) closeBridge(ctx context.Context) {
 	_ = w.srv.Close()
-	if err := bridge.Uninstall(context.WithoutCancel(ctx), w.spec.Dir, w.ws.opts.Agent); err != nil {
+	if err := bridge.UninstallPrivate(context.WithoutCancel(ctx), w.spec.Dir, w.ws.opts.Agent, w.spec.StateDir); err != nil {
 		w.ws.opts.Log.WarnContext(ctx, "could not remove the worker's tool bridge", "run_id", w.spec.RunID, "err", err)
 	}
 }
@@ -360,7 +407,7 @@ func (w *worker) launch(ctx context.Context, agent string) error {
 	}
 	for i := 0; ; i++ {
 		l, err := w.ws.opts.Client.LaunchAgent(ctx, LaunchOptions{
-			Dir: w.spec.Dir, Agent: agent, Worktree: "id:" + w.wt, Prompt: prompt,
+			Dir: w.spec.Dir, Agent: agent, Worktree: workspaceSelector(w.wt), Prompt: prompt,
 			Model: w.ws.opts.Model, Effort: w.ws.opts.Effort, RetryLaunch: w.st.Launch,
 		})
 		if err == nil {
@@ -520,7 +567,7 @@ func (w *worker) send(ctx context.Context, text string) error {
 
 // agent returns the worker's agent and whether its terminal still runs.
 func (w *worker) agent(ctx context.Context) (Agent, bool, error) {
-	terms, err := w.ws.opts.Client.Terminals(ctx, "id:"+w.wt)
+	terms, err := w.ws.opts.Client.Terminals(ctx, workspaceSelector(w.wt))
 	if err != nil {
 		return Agent{}, false, err
 	}
@@ -583,7 +630,7 @@ func (w *worker) run(ctx context.Context) {
 				}
 				continue
 			}
-			w.res = harness.WorkerResult{Verdict: w.verdicts.Verdict(), Summary: a.LastAssistantMessage}
+			w.res = harness.WorkerResult{Verdict: w.verdicts.Verdict(), Result: w.results.Result(), Summary: a.LastAssistantMessage}
 			return
 		}
 	}

@@ -137,6 +137,21 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 	ws := protocol.AssignmentWorkspace{
 		Name: task.WorkspaceName, Branch: domain.TaskBranch(task.WorkspaceName), Profile: spec.Workspace.Profile,
 	}
+	resource, err := store.GetWorkspaceByTask(ctx, q, run.TaskID)
+	if err != nil {
+		return protocol.Assignment{}, err
+	}
+	ws.ID, ws.Kind, ws.Reused, ws.TaskTitle = resource.WorkspaceID, resource.Kind, resource.Mode == domain.WorkspaceReuse, task.Title
+	if ws.ShortTaskID, err = shortTaskID(ctx, q, run.TaskID); err != nil {
+		return protocol.Assignment{}, err
+	}
+	ws.Name, ws.Branch = resource.Name, domain.TaskBranch(resource.Name)
+	ws.ProviderID, ws.ProviderInstanceID, ws.Path = resource.ProviderID, resource.ProviderInstanceID, resource.Path
+	if baseline, e := store.WorkspaceBaseline(ctx, q, resource.WorkspaceID, run.TaskID); e == nil {
+		ws.Baseline = json.RawMessage(baseline)
+	} else if !errors.Is(e, store.ErrNotFound) {
+		return protocol.Assignment{}, e
+	}
 	for _, m := range spec.Workspace.Mounts {
 		repo, err := store.GetRepo(ctx, q, m.Repo)
 		if err != nil {
@@ -215,6 +230,17 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if p.WorkspaceProtocol < 0 || p.WorkspaceProtocol > 1 {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported workspace_protocol")
+	}
+	if _, err := tx.Exec(ctx, `UPDATE hosts SET workspace_protocol=? WHERE host_id=?`, p.WorkspaceProtocol, host.HostID); err != nil {
+		return Outcome{}, fmt.Errorf("app: report claim capabilities: %w", err)
+	}
+	if host.WorkspaceProtocol != p.WorkspaceProtocol {
+		if err := tx.InvalidateBaselines(ctx, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
+	}
 	busy, err := store.CountOpenRuns(ctx, q, host.HostID)
 	if err != nil {
 		return Outcome{}, err
@@ -229,7 +255,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	}
 	pick, ok := scheduler.Pick(scheduler.Host{
 		ID: host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
-		Worker: host.Worker.Capabilities(),
+		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
 	}, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
@@ -258,10 +284,20 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		}
 		if err := tx.InsertWorkspace(ctx, store.WorkspaceRow{
 			WorkspaceID: x.IDs.New(protocol.PrefixWorkspace), TaskID: pick.TaskID, Name: task.WorkspaceName,
-			HostID: host.HostID, Status: store.WorkspaceAssigned,
+			HostID: host.HostID, Status: store.WorkspaceAssigned, Kind: workspaceKind(pick), Mode: workspaceMode(pick),
 		}, now); err != nil {
 			return Outcome{}, err
 		}
+	}
+	resource, err := store.GetWorkspaceByTask(ctx, q, run.TaskID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if err = tx.AcquireWorkspace(ctx, resource.WorkspaceID, run.TaskID, now); err != nil {
+		return Outcome{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO workspace_runs(run_id,workspace_id) VALUES(?,?)`, run.RunID, resource.WorkspaceID); err != nil {
+		return Outcome{}, fmt.Errorf("app: bind workspace run: %w", err)
 	}
 	as, err := buildAssignment(ctx, q, run, lease, x.LeaseTTL)
 	if err != nil {
@@ -298,6 +334,12 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if p.WorkspaceProtocol < 0 || p.WorkspaceProtocol > 1 {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported workspace_protocol")
+	}
+	if _, err := tx.Exec(ctx, `UPDATE hosts SET workspace_protocol=? WHERE host_id=?`, p.WorkspaceProtocol, host.HostID); err != nil {
+		return Outcome{}, fmt.Errorf("app: report runner capabilities: %w", err)
+	}
 	now := x.Now.UnixMilli()
 	expires := x.Now.Add(x.LeaseTTL).UnixMilli()
 	if err := tx.TouchHost(ctx, host.HostID, now); err != nil {
@@ -305,6 +347,12 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	}
 	res := protocol.HelloResult{LeaseTTLMillis: x.LeaseTTL.Milliseconds(), Runs: []protocol.RunVerdict{}, Reassigned: []protocol.Assignment{}}
 	var events []Event
+	if host.WorkspaceProtocol != p.WorkspaceProtocol {
+		if err := tx.InvalidateBaselines(ctx, now); err != nil {
+			return Outcome{}, err
+		}
+		events = append(events, Event{ObjectType: "host", ObjectID: host.HostID, Kind: "host.worker_capabilities_changed", Body: map[string]any{"workspace_protocol": p.WorkspaceProtocol}})
+	}
 	held := map[string]bool{}
 	stop := func(runID, reason string) {
 		res.Runs = append(res.Runs, protocol.RunVerdict{RunID: runID, Verdict: protocol.VerdictStop, Desired: protocol.DesiredStopped, Reason: reason})
@@ -459,6 +507,25 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	} else if err != nil {
 		return Outcome{}, err
 	}
+	if ws.OccupiedBy != "" && ws.OccupiedBy != rc.task.TaskID {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "workspace is occupied by another task")
+	}
+	if ws.ProviderID != "" && p.ProviderID != ws.ProviderID || ws.ProviderInstanceID != "" && p.ProviderInstanceID != ws.ProviderInstanceID || ws.Path != "" && p.Path != ws.Path {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "workspace provider identity or path changed")
+	}
+	if p.Path != "" {
+		if err := tx.RecordWorkspaceLocation(ctx, ws.WorkspaceID, p.ProviderID, p.ProviderInstanceID, p.Path, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
+	}
+	if len(p.Baseline) > 0 {
+		if !json.Valid(p.Baseline) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid workspace baseline")
+		}
+		if err := tx.RecordWorkspaceBaseline(ctx, ws.WorkspaceID, rc.task.TaskID, string(p.Baseline), x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
+	}
 	recorded, err := store.ListMountFacts(ctx, q, ws.WorkspaceID)
 	if err != nil {
 		return Outcome{}, err
@@ -482,7 +549,7 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		}
 		delete(reported, m.Path)
 		if prev, ok := recorded[m.Path]; ok {
-			if prev.ResolvedBaseSHA != r.ResolvedBaseSHA || prev.Branch != r.Branch {
+			if ws.Mode != domain.WorkspaceReuse && (prev.ResolvedBaseSHA != r.ResolvedBaseSHA || prev.Branch != r.Branch) {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "mount %q was already recorded with base %s on %s", m.Path, prev.ResolvedBaseSHA, prev.Branch)
 			}
 			continue

@@ -1,7 +1,8 @@
 // The app's frame, after the design mock: sidebar, conversation and task
 // details side by side on a desktop; the details float over the
 // conversation at medium widths; one column with a tab bar on a phone.
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { splitTaskIds } from "../conversation/model.ts";
 import { ComposerDraft } from "../conversation/draft.ts";
 import type { ApiClient, Connection } from "../api/client.ts";
 import { ServicesContext, type Services } from "../app/services.tsx";
@@ -67,6 +68,16 @@ export function Shell({
     }),
     [client, live, queue, draft],
   );
+
+  const openedInitialTask = useRef(false);
+  useEffect(() => {
+    if (openedInitialTask.current) return;
+    openedInitialTask.current = true;
+    const taskId = new URLSearchParams(window.location.search).get("task");
+    if (!taskId) return;
+    const parts = splitTaskIds(taskId);
+    if (parts.length === 1 && typeof parts[0] !== "string") services.openTask(parts[0]!.taskId);
+  }, [services]);
 
   const closeDetails = () => {
     setDetailsOpen(false);

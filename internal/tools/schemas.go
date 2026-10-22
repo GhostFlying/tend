@@ -11,12 +11,16 @@ const specSchema = `{
     "scope": {"type": "string"},
     "constraints": {"type": "array", "items": {"type": "string"}},
     "acceptance": {"type": "array", "items": {"type": "string"}, "description": "Checks an independent reviewer applies. Required before work can start."},
-    "delivery": {"type": "string", "enum": ["commit"]},
+    "delivery": {"type": "string", "enum": ["commit"], "description": "Legacy commit-only output. Prefer deliverables for new tasks."},
+    "deliverables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["commit", "report", "files"]}, "description": "Required outputs, independently accepted. Combine commit/report/files as needed; report does not require Git changes."},
     "max_implement_attempts": {"type": "integer", "minimum": 0},
     "workspace": {
       "type": "object",
-      "description": "Repositories to work in. Give either a template name or mounts.",
+      "description": "Choose new repository worktrees, reuse of a managed resource identified by source_task_id, or an independent temporary directory for report/file work. A task relation alone does not reuse a workspace.",
       "properties": {
+        "mode": {"type": "string", "enum": ["new", "reuse", "temporary"], "description": "Omitted means new. reuse preserves the managed directory and dirty state; temporary is an independent directory, not a repository worktree."},
+        "source_task_id": {"type": "string", "description": "For reuse, resolve the owner's referenced task and read its resource first; do not guess an unrelated task or use a relation as implicit inheritance."},
+        "include_existing_changes": {"type": "boolean", "description": "Reuse only: explicitly include inherited dirty workspace changes in the task's commit scope. Set only when the owner's requested scope carries those changes forward; otherwise leave false and ask about any blocked inherited changes."},
         "template": {"type": "string"},
         "mounts": {"type": "array", "items": {
           "type": "object",
@@ -35,7 +39,8 @@ const specSchema = `{
     },
     "requirements": {"type": "object", "properties": {"os": {"type": "string"}, "labels": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}
   },
-  "required": ["goal", "acceptance", "delivery", "workspace"],
+  "required": ["goal", "acceptance", "workspace"],
+  "anyOf": [{"required": ["delivery"]}, {"required": ["deliverables"]}],
   "additionalProperties": false
 }`
 
@@ -68,7 +73,7 @@ var schemas = map[string]string{
     "spec": ` + specSchema + `,
     "rating": {"type": "string", "enum": ["p0", "p1", "p2", "p3"], "description": "How the owner ranks the task: p0 urgent, ahead of everything; p1 high; p2 normal; p3 low. Ask the owner; leave it out if they have not said."},
     "project": {"type": "string", "description": "The project the task belongs to. Required when tend has more than one project."},
-    "workspace_name": {"type": "string", "description": "Short lowercase name for the workspace and branch, such as fix-windows-build."},
+    "workspace_name": {"type": "string", "description": "Optional short task alias for hosted calls; required for add-on task identity. For reuse this names the new task only, and does not create or rename its physical resource."},
     "commit_seq": {"type": "integer", "minimum": 1, "description": "1 for the first planning write for this message, then 2, 3 and so on. Repeating a number repeats nothing."},
     "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
   },
@@ -153,6 +158,16 @@ var schemas = map[string]string{
   "type": "object",
   "properties": {"artifact_id": {"type": "string"}},
   "required": ["artifact_id"],
+  "additionalProperties": false
+}`,
+	"files_read": `{
+  "type": "object",
+  "properties": {
+    "file_id": {"type": "string", "description": "Immutable file identity from a finalized artifact manifest."},
+    "offset": {"type": "integer", "minimum": 0, "description": "Zero-based byte offset; use next_offset from the last read."},
+    "max_bytes": {"type": "integer", "minimum": 4, "maximum": 65536, "description": "Bounded UTF-8 text window, default 16384 bytes. Binary files return metadata and a binary marker without raw content."}
+  },
+  "required": ["file_id"],
   "additionalProperties": false
 }`,
 	"requests_read": `{

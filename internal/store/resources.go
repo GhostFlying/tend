@@ -22,8 +22,9 @@ type HostRow struct {
 	TokenHash string
 	Nodes     []string
 	// Worker is the host's harness; empty means the app-server.
-	Worker protocol.WorkerKind
-	Status string
+	Worker            protocol.WorkerKind
+	WorkspaceProtocol int64
+	Status            string
 }
 
 // Host states.
@@ -79,8 +80,8 @@ func (t *Tx) RetireHostsExcept(ctx context.Context, keep []string, now int64) er
 func GetHost(ctx context.Context, q Querier, hostID string) (HostRow, error) {
 	h := HostRow{HostID: hostID}
 	var labels, repos, nodes string
-	err := q.QueryRowContext(ctx, `SELECT os, arch, labels_json, repos_json, slots, token_hash, nodes_json, worker, status
-		FROM hosts WHERE host_id = ?`, hostID).Scan(&h.OS, &h.Arch, &labels, &repos, &h.Slots, &h.TokenHash, &nodes, &h.Worker, &h.Status)
+	err := q.QueryRowContext(ctx, `SELECT os, arch, labels_json, repos_json, slots, token_hash, nodes_json, worker, status, workspace_protocol
+		FROM hosts WHERE host_id = ?`, hostID).Scan(&h.OS, &h.Arch, &labels, &repos, &h.Slots, &h.TokenHash, &nodes, &h.Worker, &h.Status, &h.WorkspaceProtocol)
 	if err != nil {
 		return HostRow{}, notFound(err, "host "+hostID)
 	}

@@ -72,6 +72,11 @@ type config struct {
 		// score; 0 turns waiting off.
 		WaitPerHour *float64 `json:"wait_per_hour"`
 	} `json:"queue"`
+	// Deliverables bounds durable binary uploads; zero selects defaults.
+	Deliverables struct {
+		FileLimitBytes   int64 `json:"file_limit_bytes"`
+		ResultLimitBytes int64 `json:"result_limit_bytes"`
+	} `json:"deliverables"`
 	// MainAgent runs the hosted main agent alongside the agents the owner
 	// works in (D68).
 	MainAgent *mainAgentConfig     `json:"main_agent"`
@@ -95,6 +100,15 @@ type mainAgentConfig struct {
 	// outside any repository, so no project AGENTS.md is loaded (spike
 	// A1); the main agent can write only there.
 	Cwd string `json:"cwd"`
+}
+
+func serverHandler(runners, owner http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle(runnerapi.Prefix, runners)
+	mux.Handle("/api/", owner)
+	// The web client, on the same origin as the owner API (D70).
+	mux.Handle("/", webui.Handler())
+	return mux
 }
 
 func main() {
@@ -223,18 +237,26 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		log.Info("running the hosted main agent", "instance", cfg.MainAgent.Instance)
 	}
 	d := dispatch.New(a, handlers, wake, time.Now, dispatch.Config{}, log)
-	runners := runnerapi.New(a, whois, secret, runnerapi.Config{}, log)
-	mux := http.NewServeMux()
-	mux.Handle(runnerapi.Path, runners.Handler())
+	fileLimit, resultLimit := cfg.Deliverables.FileLimitBytes, cfg.Deliverables.ResultLimitBytes
+	if fileLimit < 0 || resultLimit < 0 {
+		return errors.New("deliverables limits must not be negative")
+	}
+	if fileLimit == 0 {
+		fileLimit = app.DefaultFileLimit
+	}
+	if resultLimit == 0 {
+		resultLimit = app.DefaultResultFileLimit
+	}
+	if fileLimit > resultLimit {
+		return errors.New("deliverables.file_limit_bytes must not exceed result_limit_bytes")
+	}
+	runners := runnerapi.New(a, whois, secret, runnerapi.Config{FileLimit: fileLimit, ResultFileLimit: resultLimit}, log)
 	ownerConfig := api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
 	}
 	owner := api.New(a, s, ts, cb, whois, secret, ownerConfig, log)
-	mux.Handle("/api/", owner.Handler())
-	// The web client, on the same origin as the owner API (D70).
-	mux.Handle("/", webui.Handler())
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: serverHandler(runners.Handler(), owner.Handler()), ReadHeaderTimeout: 10 * time.Second}
 	// Shutdown waits for requests to finish; event streams never do.
 	server.RegisterOnShutdown(owner.EndStreams)
 

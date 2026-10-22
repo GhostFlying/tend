@@ -585,8 +585,15 @@ func unratedLine(t store.TaskRow) string {
 // taskLine describes a task and reports whether it needs attention.
 func taskLine(ctx context.Context, q store.Querier, t store.TaskRow) (string, bool, error) {
 	var spec struct {
-		Scope       string   `json:"scope"`
-		Constraints []string `json:"constraints"`
+		Scope        string   `json:"scope"`
+		Constraints  []string `json:"constraints"`
+		Delivery     string   `json:"delivery"`
+		Deliverables []string `json:"deliverables"`
+		Workspace    struct {
+			Mode                   string `json:"mode"`
+			SourceTaskID           string `json:"source_task_id"`
+			IncludeExistingChanges bool   `json:"include_existing_changes"`
+		} `json:"workspace"`
 	}
 	body, err := store.GetSpec(ctx, q, t.TaskID, t.SpecVersion)
 	if err != nil {
@@ -604,8 +611,37 @@ func taskLine(ctx context.Context, q store.Querier, t store.TaskRow) (string, bo
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %q: %s, %s, control %s rev %d, spec v%d, workspace %s",
+	fmt.Fprintf(&b, "%s %q: %s, %s, control %s rev %d, spec v%d, workspace alias %s",
 		t.TaskID, t.Title, t.Lifecycle, t.Rating.Label(), t.ControlMode, t.ControlRevision, t.SpecVersion, t.WorkspaceName)
+	resource, resourceErr := store.GetWorkspaceByTask(ctx, q, t.TaskID)
+	if resourceErr != nil && !errors.Is(resourceErr, store.ErrNotFound) {
+		return "", false, resourceErr
+	}
+	if resourceErr == nil {
+		fmt.Fprintf(&b, "; resource %s (%s), host %s, status %s", resource.WorkspaceID, resource.Name, resource.HostID, resource.Status)
+		if resource.OccupiedBy != "" {
+			fmt.Fprintf(&b, "; resource occupied by %s", resource.OccupiedBy)
+		}
+		if resource.Path != "" {
+			fmt.Fprintf(&b, "; resource path %q", resource.Path)
+		}
+	}
+	if spec.Workspace.Mode != "" {
+		fmt.Fprintf(&b, "; workspace mode %s", spec.Workspace.Mode)
+	}
+	if spec.Workspace.SourceTaskID != "" {
+		fmt.Fprintf(&b, "; reuse source %s", spec.Workspace.SourceTaskID)
+	}
+	if spec.Workspace.IncludeExistingChanges {
+		b.WriteString("; inherited changes explicitly in scope")
+	}
+	outputs := spec.Deliverables
+	if len(outputs) == 0 && spec.Delivery != "" {
+		outputs = []string{spec.Delivery}
+	}
+	if len(outputs) > 0 {
+		fmt.Fprintf(&b, "; deliverables %s", strings.Join(outputs, ", "))
+	}
 	if t.BlockReason != protocol.BlockNone {
 		fmt.Fprintf(&b, "; blocked: %s", t.BlockReason)
 	}

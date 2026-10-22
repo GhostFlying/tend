@@ -166,6 +166,8 @@ type Worktree struct {
 	Branch      string `json:"branch"`
 	DisplayName string `json:"displayName"`
 	BaseRef     string `json:"baseRef,omitempty"`
+	Comment     string `json:"comment,omitempty"`
+	InstanceID  string `json:"instanceId,omitempty"`
 	// IsMainWorktree marks the repository's own checkout.
 	IsMainWorktree bool `json:"isMainWorktree"`
 }
@@ -203,8 +205,9 @@ func (c *Client) Worktree(ctx context.Context, selector string) (Worktree, error
 // CreateWorktree describes a new worktree.
 type CreateWorktree struct {
 	// Repo is the repository selector, such as id:<repoId>.
-	Repo string
-	Name string
+	Repo    string
+	Name    string
+	Comment string
 	// BaseBranch is the ref the worktree starts from; empty means the
 	// repository's default.
 	BaseBranch string
@@ -214,6 +217,9 @@ type CreateWorktree struct {
 // the repository's setup, which tend's profiles take care of.
 func (c *Client) CreateWorktree(ctx context.Context, o CreateWorktree) (Worktree, error) {
 	args := []string{"worktree", "create", "--repo", o.Repo, "--name", o.Name, "--no-parent", "--setup", "skip"}
+	if o.Comment != "" {
+		args = append(args, "--comment", o.Comment)
+	}
 	if o.BaseBranch != "" {
 		args = append(args, "--base-branch", o.BaseBranch)
 	}

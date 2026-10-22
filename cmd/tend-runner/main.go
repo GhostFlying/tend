@@ -187,7 +187,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		profiles[pn] = p.gitws()
 	}
 	ids := protocol.NewULIDGen(time.Now, nil)
-	wsCfg := gitws.Config{Home: home, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
+	wsCfg := gitws.Config{Home: home, ServerURL: cfg.ServerURL, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
 	var (
 		workers    harness.Workers
 		workspaces runner.Workspaces
@@ -207,6 +207,12 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 			return err
 		}
 		oc := &orca.Client{Bin: cfg.Worker.OrcaBin}
+		preflightCtx, cancelPreflight := context.WithTimeout(ctx, 30*time.Second)
+		preflightErr := oc.CheckWorkspaceProtocol(preflightCtx)
+		cancelPreflight()
+		if preflightErr != nil {
+			return fmt.Errorf("upgrade worker.orca_bin to an Orca CLI supporting folder-workspace and project-group commands before enabling workspace protocol 1: %w", preflightErr)
+		}
 		workers = orca.NewWorkers(orca.WorkerOptions{
 			Client: oc, Agent: cfg.Worker.Agent, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort,
 			BridgeCommand: self, BridgeArgs: []string{workerMCP}, IDs: ids, Now: time.Now, Log: log,

@@ -7,6 +7,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -62,11 +63,25 @@ func (e *Env) addonOff(ctx context.Context) bool {
 // inWorker reports whether the working directory is a worktree a TUI
 // worker runs in (D66).
 func (e *Env) inWorker(ctx context.Context) bool {
-	if e.Getwd == nil || e.Output == nil {
+	if e.Getwd == nil {
 		return false
 	}
 	dir, err := e.Getwd()
 	if err != nil {
+		return false
+	}
+	for parent := dir; ; parent = filepath.Dir(parent) {
+		for _, rel := range []string{".codex/config.toml", ".trae/traecli.toml"} {
+			b, err := os.ReadFile(filepath.Join(parent, rel))
+			if err == nil && bytes.HasPrefix(b, []byte("# Written by tend-runner for the run in this worktree; removed when the run ends.\n")) {
+				return true
+			}
+		}
+		if filepath.Dir(parent) == parent {
+			break
+		}
+	}
+	if e.Output == nil {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)

@@ -117,7 +117,8 @@ func workspace(ctx context.Context, q store.Querier, taskID string) (*protocol.W
 	if err != nil {
 		return nil, err
 	}
-	v := &protocol.WorkspaceView{Host: w.HostID, Status: w.Status, Mounts: []protocol.MountView{}}
+	v := &protocol.WorkspaceView{Host: w.HostID, Status: w.Status, Mounts: []protocol.MountView{},
+		Mode: w.Mode, SourceTaskID: w.SourceTaskID, ResourceID: w.WorkspaceID, Kind: w.Kind, Name: w.Name, Path: w.Path, ProviderID: w.ProviderID, OccupiedBy: w.OccupiedBy}
 	for _, path := range slices.Sorted(maps.Keys(facts)) {
 		m := facts[path]
 		v.Mounts = append(v.Mounts, protocol.MountView{
@@ -244,7 +245,7 @@ func Snapshot(ctx context.Context, q store.Querier, queue []protocol.QueueEntry,
 		if err != nil {
 			return v, err
 		}
-		v.Hosts = append(v.Hosts, protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, Worker: h.Worker, OpenRuns: n})
+		v.Hosts = append(v.Hosts, protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, Worker: h.Worker, WorkspaceProtocol: h.WorkspaceProtocol, OpenRuns: n})
 	}
 	if v.Tasks == nil {
 		v.Tasks = []protocol.TaskSummary{}

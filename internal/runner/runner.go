@@ -46,9 +46,12 @@ type Workspaces interface {
 
 // Prepared is a laid-out workspace.
 type Prepared struct {
+	Baseline   []harness.MountBaseline
 	Dir        string
 	ScratchDir string
 	Report     protocol.WorkspaceReport
+	StateDir   string
+	ProviderID string
 	// Guide describes the workspace to a worker that starts inside a
 	// repository, where tend writes no AGENTS.md (D37, D65).
 	Guide string
@@ -139,9 +142,10 @@ type active struct {
 
 // Runner pulls and executes runs for one host.
 type Runner struct {
-	cfg       Config
-	c         *client
-	reconcile chan struct{}
+	cfg           Config
+	c             *client
+	reconcile     chan struct{}
+	workspaceWake chan struct{}
 
 	mu      sync.Mutex
 	ttl     time.Duration
@@ -171,10 +175,11 @@ func New(cfg Config) *Runner {
 		cfg: cfg,
 		c: &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now,
 			timeout: cfg.RequestTimeout},
-		reconcile: make(chan struct{}, 1),
-		ttl:       time.Minute,
-		ttlWake:   make(chan struct{}),
-		active:    map[string]*active{},
+		reconcile:     make(chan struct{}, 1),
+		workspaceWake: make(chan struct{}, 1),
+		ttl:           time.Minute,
+		ttlWake:       make(chan struct{}),
+		active:        map[string]*active{},
 	}
 }
 
@@ -196,6 +201,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.retry(ctx, func() error { return r.hello(ctx) }); err != nil {
 		return err
 	}
+	r.wg.Go(func() { r.workspaceLifecycle(ctx) })
 	r.claims(ctx)
 	return ctx.Err()
 }
@@ -313,7 +319,7 @@ func (r *Runner) resendClaims(ctx context.Context) error {
 // claims long-polls for work until ctx ends.
 func (r *Runner) claims(ctx context.Context) {
 	for ctx.Err() == nil {
-		env, err := r.newEnvelope(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.ClaimPayload{Worker: r.cfg.Worker})
+		env, err := r.newEnvelope(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.ClaimPayload{Worker: r.cfg.Worker, WorkspaceProtocol: 1})
 		if err == nil {
 			err = r.cfg.Journal.PutRequest(ctx, journal.Request{Envelope: *env})
 		}
@@ -362,7 +368,7 @@ func (r *Runner) claimOnce(ctx context.Context, env *protocol.Envelope, sentAt t
 	if res.Assignment == nil {
 		return r.cfg.Journal.DeleteRequest(ctx, env.RequestID)
 	}
-	if err := r.cfg.Journal.AcceptAssignment(ctx, *res.Assignment, env.RequestID); err != nil {
+	if err := r.cfg.Journal.AcceptAssignmentFromWorker(ctx, *res.Assignment, env.RequestID, r.cfg.Worker); err != nil {
 		return err
 	}
 	as := res.Assignment
@@ -386,7 +392,7 @@ func (r *Runner) hello(ctx context.Context) error {
 		held = append(held, protocol.HeldRun{RunID: run.Assignment.RunID, LeaseID: run.Assignment.LeaseID, Observed: r.observed(run)})
 		byID[run.Assignment.RunID] = run
 	}
-	env, err := r.newEnvelope(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HelloPayload{Held: held, Version: r.cfg.Version, Worker: r.cfg.Worker})
+	env, err := r.newEnvelope(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HelloPayload{Held: held, Version: r.cfg.Version, Worker: r.cfg.Worker, WorkspaceProtocol: 1})
 	if err != nil {
 		return err
 	}
@@ -411,7 +417,7 @@ func (r *Runner) hello(ctx context.Context) error {
 				return err
 			}
 			r.start(ctx, as, sent)
-		case run.Phase == journal.PhaseSubmitting || run.Phase == journal.PhaseReleasing:
+		case run.Phase == journal.PhaseWorkerDone || run.Phase == journal.PhaseSubmitting || run.Phase == journal.PhaseReleasing:
 			// The final report is a fact either way; let it go out.
 			r.start(ctx, as, sent)
 		default:
@@ -426,7 +432,7 @@ func (r *Runner) hello(ctx context.Context) error {
 		}
 	}
 	for _, as := range res.Reassigned {
-		if err := r.cfg.Journal.AcceptAssignment(ctx, as, ""); err != nil {
+		if err := r.cfg.Journal.AcceptAssignmentFromWorker(ctx, as, "", r.cfg.Worker); err != nil {
 			return err
 		}
 		r.start(ctx, as, sent)
@@ -451,7 +457,9 @@ func (r *Runner) dropOrRelease(ctx context.Context, run journal.Run, reason stri
 	if err := r.finish(ctx, run.Assignment, journal.PhaseReleasing, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: reason}); err != nil {
 		return err
 	}
-	r.start(ctx, run.Assignment, r.cfg.Now())
+	as := run.Assignment
+	as.Desired = protocol.DesiredStopped
+	r.start(ctx, as, r.cfg.Now())
 	return nil
 }
 
@@ -494,6 +502,10 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 			r.mu.Lock()
 			delete(r.active, runID)
 			r.mu.Unlock()
+			select {
+			case r.workspaceWake <- struct{}{}:
+			default:
+			}
 		}()
 		if err := r.execute(ctx, runCtx, runID, a); err != nil && ctx.Err() == nil {
 			r.cfg.Log.ErrorContext(ctx, "run executor failed", "run_id", runID, "err", err)
@@ -520,6 +532,11 @@ func (r *Runner) heartbeats(ctx context.Context) {
 // go on.
 func (r *Runner) applyDesired(ctx context.Context, a *active, desired protocol.RunDesired, observed time.Time) {
 	r.mu.Lock()
+	if desired != protocol.DesiredStopped && (a.desired == protocol.DesiredStopped || a.ctx != nil && errors.Is(context.Cause(a.ctx), errStopped)) {
+		// A late takeover acknowledgement or heartbeat cannot undo a stop.
+		r.mu.Unlock()
+		return
+	}
 	if desired != protocol.DesiredStopped && observed.Before(a.heldAt) {
 		// Sent before the takeover this runner reported was recorded.
 		r.mu.Unlock()
