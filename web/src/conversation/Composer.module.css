@@ -31,6 +31,7 @@
 }
 
 .hint {
+  flex: 1 1 0;
   font-size: var(--text-s);
   color: var(--caption);
   min-width: 0;
@@ -40,7 +41,6 @@
 }
 
 .send {
-  margin-left: auto;
   width: 34px;
   height: 34px;
   border-radius: 50%;
