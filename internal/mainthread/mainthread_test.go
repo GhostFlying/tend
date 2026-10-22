@@ -447,6 +447,22 @@ func TestFault_ToolRunningAtCrash(t *testing.T) {
 	}
 }
 
+func TestFault_ToolRunningInATurnNeverAcknowledged(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	// The tool use was recorded, but turn/start never answered, so tend
+	// has no turn ID for it.
+	agent := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "main", Thread: "th_lost"}
+	e.exec(agent, "conversation.record_tool_use", protocol.Target{Type: "message"},
+		map[string]any{"turn_id": "turn_unknown", "item_id": "item_1", "tool": "shell", "input": "ls", "status": "running"}, app.RecordToolUse{})
+	if err := e.app.SettleOpenTurns(context.Background(), "th_lost"); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM conversation_tool_uses WHERE status = 'interrupted'`); n != 1 {
+		t.Errorf("interrupted tool uses = %d, want 1", n)
+	}
+}
+
 func TestReplayedToolCallKeepsItsMessage(t *testing.T) {
 	h := testkit.NewHarness()
 	var first string

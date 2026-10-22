@@ -332,7 +332,7 @@ func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	var seq int64
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		u = store.ToolUseRow{MessageID: x.IDs.New(protocol.PrefixMessage), TurnID: p.TurnID, ItemID: p.ItemID}
+		u = store.ToolUseRow{MessageID: x.IDs.New(protocol.PrefixMessage), ThreadID: x.Principal.Thread, TurnID: p.TurnID, ItemID: p.ItemID}
 		if seq, err = tx.InsertMessage(ctx, store.MessageRow{Kind: store.KindToolUse, MessageID: u.MessageID, Author: "main_agent",
 			ReplyTo: p.ReplyTo, RequestID: x.Env.RequestID, CreatedAt: now}); err != nil {
 			return Outcome{}, err

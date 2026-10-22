@@ -5,6 +5,7 @@ ALTER TABLE conversation_messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'message
 
 CREATE TABLE conversation_tool_uses (
   message_id TEXT    NOT NULL PRIMARY KEY REFERENCES conversation_messages (message_id),
+  thread_id  TEXT    NOT NULL,
   turn_id    TEXT    NOT NULL,
   item_id    TEXT    NOT NULL,
   tool       TEXT    NOT NULL,
