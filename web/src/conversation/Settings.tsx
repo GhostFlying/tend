@@ -284,7 +284,12 @@ export function Settings({ connection }: { connection: Connection }) {
                   title={choice.label || choice.id}
                   className={styles.option}
                   disabled={disabled}
-                  onClick={() => choose(choice.id, choice.default_effort)}
+                  onClick={() =>
+                    choose(
+                      choice.id,
+                      choice.id === view.model ? view.effort : choice.default_effort,
+                    )
+                  }
                 >
                   <span className={styles.optionLabel}>{choice.label || choice.id}</span>
                   <span className={styles.check} aria-hidden>
