@@ -247,14 +247,15 @@ func (r *Runner) releaseWorkspace(ctx context.Context, env *protocol.Envelope) e
 	if err := json.Unmarshal(op.Result, &result); err != nil {
 		return err
 	}
-	if result.Released {
-		var p protocol.WorkspaceRelease
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
-			return err
-		}
-		if err := r.cfg.Journal.ForgetWorkspaceRelease(ctx, p); err != nil {
-			return err
-		}
+	var p protocol.WorkspaceRelease
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		return err
+	}
+	// A confirmed deferred response ends this attempt without releasing the
+	// resource. Terminal or detached ownership is rediscovered by reconciliation;
+	// retaining this attempt would block maintenance ahead of queued acceptance.
+	if err := r.cfg.Journal.ForgetWorkspaceRelease(ctx, p); err != nil {
+		return err
 	}
 	return r.cfg.Journal.DeleteRequest(ctx, env.RequestID)
 }
