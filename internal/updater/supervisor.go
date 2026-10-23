@@ -20,11 +20,14 @@ type Options struct {
 	BootClock func() (string, int64, error)
 }
 type Supervisor struct {
-	mu    sync.Mutex
-	cfg   Config
-	opts  Options
-	state State
-	lock  *os.File
+	durable        State
+	persistenceErr error
+	writeState     func(string, State) error
+	mu             sync.Mutex
+	cfg            Config
+	opts           Options
+	state          State
+	lock           *os.File
 }
 
 func Open(cfg Config, opts Options) (*Supervisor, error) {
@@ -79,7 +82,7 @@ func Open(cfg Config, opts Options) (*Supervisor, error) {
 	if cfg.HealthTimeoutSeconds <= 0 {
 		cfg.HealthTimeoutSeconds = 120
 	}
-	s := &Supervisor{cfg: cfg, opts: opts, lock: lock}
+	s := &Supervisor{cfg: cfg, opts: opts, lock: lock, writeState: func(path string, state State) error { return writeJSON(path, state) }}
 	state, err := readState(s.statePath())
 	if os.IsNotExist(err) {
 		state = State{Format: 1, InstanceID: cfg.InstanceID}
@@ -89,7 +92,11 @@ func Open(cfg Config, opts Options) (*Supervisor, error) {
 	if state.Format != 1 || state.InstanceID != cfg.InstanceID {
 		return fail(errors.New("updater: durable state belongs to a different instance"))
 	}
+	if err := s.writeState(s.statePath(), state); err != nil {
+		return fail(err)
+	}
 	s.state = state
+	s.durable = cloneState(state)
 	return s, nil
 }
 func (s *Supervisor) Close() error {
@@ -100,9 +107,23 @@ func (s *Supervisor) Close() error {
 	return err
 }
 func (s *Supervisor) statePath() string { return filepath.Join(s.cfg.StateDir, "state.json") }
+func (s *Supervisor) durabilityError() error {
+	if s.persistenceErr != nil {
+		return fmt.Errorf("updater: durability unknown; reopen supervisor before further action: %w", s.persistenceErr)
+	}
+	return nil
+}
 func (s *Supervisor) save() error {
+	if err := s.durabilityError(); err != nil {
+		return err
+	}
 	if receipt := operationRollbackReceipt(s.state); receipt != nil {
 		s.state.RollbackProof = &RollbackProof{Binding: receipt.Binding, Version: s.state.Current, Process: s.state.Process}
+		s.state.CommittedProof = nil
+	}
+	if op := s.state.Operation; op != nil && op.Kind == "upgrade" && op.Phase == "committed" && op.Irreversible && s.state.Current == op.Candidate {
+		s.state.CommittedProof = &CommittedProof{Binding: op.Binding, Version: s.state.Current, Process: s.state.Process}
+		s.state.RollbackProof = nil
 	}
 	if op := s.state.Operation; op != nil && op.Kind == "upgrade" && done(op) {
 		if s.state.Terminals == nil {
@@ -110,9 +131,18 @@ func (s *Supervisor) save() error {
 		}
 		s.state.Terminals[op.ID] = TerminalReceipt{Binding: op.Binding, Phase: op.Phase}
 	}
-	return writeJSON(s.statePath(), s.state)
+	if err := s.writeState(s.statePath(), cloneState(s.state)); err != nil {
+		s.persistenceErr = err
+		return s.durabilityError()
+	}
+	s.durable = cloneState(s.state)
+	return nil
 }
 func cloneState(v State) State { // no aliases to internal mutable operation state
+	if v.CommittedProof != nil {
+		proof := *v.CommittedProof
+		v.CommittedProof = &proof
+	}
 	if v.RollbackProof != nil {
 		proof := *v.RollbackProof
 		v.RollbackProof = &proof
@@ -126,6 +156,10 @@ func cloneState(v State) State { // no aliases to internal mutable operation sta
 	}
 	if v.Operation != nil {
 		o := *v.Operation
+		if o.RollbackAuthorization != nil {
+			auth := *o.RollbackAuthorization
+			o.RollbackAuthorization = &auth
+		}
 		o.Backups = append([]BackupFile(nil), o.Backups...)
 		if o.Grant != nil {
 			g := *o.Grant
@@ -135,13 +169,24 @@ func cloneState(v State) State { // no aliases to internal mutable operation sta
 	}
 	return v
 }
-func (s *Supervisor) Status() State { s.mu.Lock(); defer s.mu.Unlock(); return cloneState(s.state) }
+func (s *Supervisor) Status() State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := cloneState(s.durable)
+	if s.persistenceErr != nil {
+		result.LastError = "updater: durability unknown; reopen supervisor before further action"
+	}
+	return result
+}
 
 // Bootstrap adopts a previously launched idle process. The caller must first
 // complete the coordinator's idle bootstrap preflight. It does not stop it.
 func (s *Supervisor) Bootstrap(ctx context.Context, pid int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.durabilityError(); err != nil {
+		return err
+	}
 	if s.state.Current.Binary != "" {
 		return errors.New("updater: service is already bootstrapped")
 	}
@@ -201,6 +246,9 @@ func (s *Supervisor) Upgrade(ctx context.Context, id, dir string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.durabilityError(); err != nil {
+		return err
+	}
 	if s.state.Current.Binary == "" {
 		return errors.New("updater: bootstrap required")
 	}
@@ -253,6 +301,9 @@ func (s *Supervisor) Cancel(id string) error { return s.CancelExpected(id, "") }
 func (s *Supervisor) CancelExpected(id, expectedPhase string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.durabilityError(); err != nil {
+		return err
+	}
 	if !release.ValidID(id) {
 		return errors.New("updater: invalid operation identity")
 	}
@@ -290,6 +341,9 @@ func (s *Supervisor) CancelExpected(id, expectedPhase string) error {
 func (s *Supervisor) Retry(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.durabilityError(); err != nil {
+		return err
+	}
 	if s.state.Operation == nil || s.state.Operation.ID != id {
 		return errors.New("updater: unknown operation")
 	}
@@ -332,6 +386,9 @@ func (s *Supervisor) authorize(ctx context.Context, op *Operation) error {
 func (s *Supervisor) Step(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.durabilityError(); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -369,6 +426,7 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 		// the manifest identity is preserved as the selected release.
 		if op.Candidate.Artifact.SHA256 == s.state.Current.Artifact.SHA256 {
 			s.state.Current = op.Candidate
+			op.Irreversible = true
 			op.Phase = "committed"
 			return s.save()
 		}
@@ -409,17 +467,20 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 	case "checking":
 		return s.check(ctx, op)
 	case "rollback_stopping":
-		if op.Irreversible {
-			return errors.New("updater: rollback prohibited after new work")
-		}
-		if err := s.opts.Process.Stop(ctx, op.CandidateProcess, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second); err != nil {
+		if err := s.stopRollbackCandidate(ctx, op); err != nil {
 			return err
 		}
 		op.Phase = "restoring"
 		return s.save()
 	case "restoring":
-		if err := restoreData(s.cfg, op); err != nil {
-			return err
+		noLaunch := op.CandidateNotStarted && op.CandidateProcess.PID == 0
+		if op.Irreversible || s.hasCommittedProof(op) || (!noLaunch && (op.RollbackAuthorization == nil || !validRollbackAuthorization(op, *op.RollbackAuthorization))) {
+			return errors.New("updater: restore lacks persistent admission fence")
+		}
+		if !noLaunch {
+			if err := restoreData(s.cfg, op); err != nil {
+				return err
+			}
 		}
 		op.Phase = "rollback_starting"
 		launch, err := s.opts.NewID()
@@ -476,6 +537,7 @@ func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) 
 					op.Phase = "rollback_ready"
 				}
 				if op.Kind == "upgrade" && !rollback {
+					op.CandidateNotStarted = true
 					op.Phase = "restoring"
 				} else if !rollback {
 					op.Phase = "backed_up"
@@ -495,6 +557,9 @@ func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) 
 		s.state.Process = id
 		op.Phase = "rolled_back"
 		return s.save()
+	}
+	if proof := s.state.CommittedProof; op.Kind == "restart" && proof != nil && proof.Version == op.Previous && op.Candidate == op.Previous && proof.Process == op.PreviousProcess {
+		proof.Process = id
 	}
 	if proof := s.state.RollbackProof; op.Kind == "restart" && proof != nil && proof.Version == op.Previous && op.Candidate == op.Previous && proof.Process == op.PreviousProcess {
 		proof.Process = id
@@ -537,6 +602,7 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) error {
 		if op.HealthCount >= 2 {
 			s.state.Current = op.Candidate
 			s.state.Process = op.CandidateProcess
+			op.Irreversible = true
 			op.Phase = "committed"
 		}
 		return s.save()
@@ -545,7 +611,9 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) error {
 		op.HealthCount = 0
 	}
 	timedOut := s.opts.Now().Sub(op.HealthStartedAt) >= time.Duration(s.cfg.HealthTimeoutSeconds)*time.Second
-	if (!running || timedOut) && !op.Irreversible && h.RollbackSafe {
+	if (!running || timedOut) && !op.Irreversible && validRollbackAuthorization(op, h) {
+		authorization := h
+		op.RollbackAuthorization = &authorization
 		op.Phase = "rollback_stopping"
 		return s.save()
 	}
@@ -627,4 +695,48 @@ func (s *Supervisor) recoverStopping(ctx context.Context, op *Operation) error {
 func Cancelled(state State, id string) bool {
 	receipt, ok := state.Terminals[id]
 	return ok && receipt.Phase == "cancelled" && receipt.Binding.UpgradeID == id && receipt.Binding.InstanceID == state.InstanceID
+}
+
+func validRollbackAuthorization(op *Operation, h Health) bool {
+	return h.Binding == op.Binding && h.ServerConfirmed && h.ServerRevision > 0 && h.ControlRevision > 0 && h.AdmissionFenced && h.RollbackSafe && !h.NewWorkAccepted
+}
+func (s *Supervisor) hasCommittedProof(op *Operation) bool {
+	return s.state.CommittedProof != nil && s.state.CommittedProof.Binding == op.Binding
+}
+func (s *Supervisor) stopRollbackCandidate(ctx context.Context, op *Operation) error {
+	if op.Irreversible || s.hasCommittedProof(op) || op.RollbackAuthorization == nil || !validRollbackAuthorization(op, *op.RollbackAuthorization) {
+		return errors.New("updater: rollback lacks persistent admission fence")
+	}
+	id, err := s.opts.Process.Inspect(ctx, op.CandidateProcess.PID)
+	if errors.Is(err, ErrNotRunning) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if id != op.CandidateProcess {
+		return ErrUnknown
+	}
+	if s.opts.Authority == nil {
+		return errors.New("updater: rollback authority unavailable")
+	}
+	h, err := s.opts.Authority.Health(ctx, op.Binding)
+	if err != nil {
+		return err
+	}
+	if h.Binding == op.Binding && h.ServerConfirmed && h.ServerRevision > 0 && h.NewWorkAccepted {
+		op.Irreversible = true
+		if err := s.save(); err != nil {
+			return err
+		}
+	}
+	if op.Irreversible || !validRollbackAuthorization(op, h) || h.ControlRevision < op.RollbackAuthorization.ControlRevision || h.ServerRevision < op.RollbackAuthorization.ServerRevision {
+		return errors.New("updater: rollback admission fence changed")
+	}
+	authorization := h
+	op.RollbackAuthorization = &authorization
+	if err := s.save(); err != nil {
+		return err
+	}
+	return s.opts.Process.Stop(ctx, op.CandidateProcess, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second)
 }

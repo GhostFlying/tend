@@ -95,7 +95,7 @@ func (a *fakeAuthority) Health(_ context.Context, b Binding) (Health, error) {
 		return Health{}, errors.New("authority unavailable")
 	}
 	a.sequence++
-	return Health{Binding: b, ServerConfirmed: !a.unconfirmed, ServerRevision: 2, Healthy: !a.unhealthy, HeartbeatSequence: a.sequence, NewWorkAccepted: a.accepted, RollbackSafe: a.rollback}, nil
+	return Health{Binding: b, ServerConfirmed: !a.unconfirmed, ServerRevision: 2, ControlRevision: 2, AdmissionFenced: !a.accepted, Healthy: !a.unhealthy, HeartbeatSequence: a.sequence, NewWorkAccepted: a.accepted, RollbackSafe: a.rollback}, nil
 }
 
 type harness struct {

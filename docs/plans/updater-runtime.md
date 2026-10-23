@@ -20,3 +20,11 @@
 - 将最新有效回退的完整 binding、恢复版本与已证明进程单独持久化，不依赖当前 operation。自动重启只在前驱进程和同一版本精确匹配时推进证明；未知启动不推进，换版本后旧证明不再适用。
 - SIGTERM 已发给已固定的进程后，临时观察失败不作为退出，也不中断等待；继续等到明确退出、context 取消或停止期限。信号前检查仍严格失败，不重复发送未知信号。
 - 依赖 Linux supervisor fixture 的测试加构建约束，纯 receipt 测试继续跨平台编译；增加确定性观察故障及真实进程重复验证。
+
+## Review 4：提交证明与 admission fence
+
+- 候选健康达标只允许本机提交；提交持久化 irreversible 和完整 binding/version/process 的 committed proof。协调器只有收到当前实例的提交证明后才恢复 admission。同版本自动重启沿已验证前驱推进证明，原候选 binding 保持不变。
+- 选择回滚时保存完整授权，要求 server/control revision 为正、admission 持久 fenced、rollback safe 且未接收新工作。每次停止活候选前重新获取并保存授权；确认候选已停和恢复数据阶段只使用已有持久 fence，不依赖已停止的本机桥。
+- 未知观察/授权保持暂停；已提交或 irreversible 不可恢复旧数据。增加重启、陈旧授权和停止前 admission 变化回归。
+- 原子状态写入报错（包括 rename 后结果不确定）时，不对外发布内存中的 commit、rollback 或取消证明，也不继续下一外部步骤；状态接口只报告最近成功持久化的快照及错误。修复存储后重启 updater，重新读取并 checkpoint 实际文件再对账；受管服务不因此被终止。
+- 本切片信任同用户的 server、runner 和 updater；身份/版本关联用于处理合法重启、消息延迟/重复和 admission 并发，不防御恶意同 UID、伪造本地状态或 root。

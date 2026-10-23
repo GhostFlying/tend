@@ -182,9 +182,9 @@ func (r *Runner) updaterHandler() http.Handler {
 	})
 }
 
-// Only a terminal proof from the configured supervisor, matching this exact
-// restored process, can be forwarded to the authenticated server heartbeat.
-func (r *Runner) updaterRollbackReceipt(ctx context.Context) *protocol.UpdaterReceipt {
+// Only a durable terminal proof from the configured supervisor, matching this
+// exact process, can be forwarded to the authenticated server heartbeat.
+func (r *Runner) updaterProcessReceipt(ctx context.Context) *protocol.UpdaterReceipt {
 	if r.cfg.UpdaterControlSocket == "" {
 		return nil
 	}
@@ -194,7 +194,7 @@ func (r *Runner) updaterRollbackReceipt(ctx context.Context) *protocol.UpdaterRe
 	if err != nil {
 		return nil
 	}
-	receipt := updater.RollbackReceipt(state)
+	receipt := updater.ProcessReceipt(state)
 	if receipt == nil {
 		return nil
 	}

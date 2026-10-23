@@ -113,6 +113,8 @@ func TestUpgradeLateRunnerHealthRestoresOnlyPinnedCandidate(t *testing.T) {
 	h.clock.Advance(15 * time.Second)
 	upgradeAck(h, "linux-1", protocol.RunnerReady)
 	upgradeTick(h, ServerObservation{})
+	upgradeCommitAck(h, b)
+	upgradeTick(h, ServerObservation{})
 	if got := upgradeCtl(h, "linux-1"); got.Mode != protocol.RunnerNormal {
 		t.Fatal("late healthy candidate remained in maintenance", got)
 	}

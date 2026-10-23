@@ -46,7 +46,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		return nil, err
 	}
 	r.maybeCancelStaged(ctx)
-	receipt := r.updaterRollbackReceipt(ctx)
+	receipt := r.updaterProcessReceipt(ctx)
 	r.controlMu.Lock()
 	defer r.controlMu.Unlock()
 	if err := r.loadControlLocked(ctx); err != nil {

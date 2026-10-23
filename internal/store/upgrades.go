@@ -30,6 +30,8 @@ type UpgradeRow struct {
 	Hosts               []UpgradeHost            `json:"hosts"`
 }
 type UpgradeHost struct {
+	Committed         *protocol.UpdaterReceipt `json:"committed,omitempty"`
+	HealthInstance    string                   `json:"health_instance,omitempty"`
 	Rollback          *protocol.UpdaterReceipt `json:"rollback,omitempty"`
 	HostID            string                   `json:"host_id"`
 	PreviousHash      string                   `json:"previous_hash"`

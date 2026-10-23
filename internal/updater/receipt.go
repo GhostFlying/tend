@@ -38,3 +38,24 @@ func operationRollbackReceipt(s State) *protocol.UpdaterReceipt {
 	}
 	return &protocol.UpdaterReceipt{Binding: b, Phase: op.Phase, CurrentProcessInstanceID: p.LaunchID, CurrentSHA256: p.SHA256, RollbackConfirmed: true}
 }
+
+// CommittedReceipt describes only a locally persisted commit of this version.
+func CommittedReceipt(s State) *protocol.UpdaterReceipt {
+	proof := s.CommittedProof
+	if proof == nil || proof.Version != s.Current || proof.Process != s.Process {
+		return nil
+	}
+	b, p := proof.Binding, proof.Process
+	if !validRollbackBinding(b, s.InstanceID) || b.ArtifactSHA256 != s.Current.Artifact.SHA256 || b.ReleaseID != s.Current.ReleaseID || b.ManifestSHA256 != s.Current.ManifestSHA256 || p.PID <= 0 || p.StartTicks == 0 || p.LaunchID == "" || p.SHA256 != s.Current.Artifact.SHA256 {
+		return nil
+	}
+	return &protocol.UpdaterReceipt{Binding: b, Phase: "committed", CurrentProcessInstanceID: p.LaunchID, CurrentSHA256: p.SHA256, CommittedConfirmed: true}
+}
+
+// ProcessReceipt returns the current terminal proof, never an old version's.
+func ProcessReceipt(s State) *protocol.UpdaterReceipt {
+	if receipt := CommittedReceipt(s); receipt != nil {
+		return receipt
+	}
+	return RollbackReceipt(s)
+}

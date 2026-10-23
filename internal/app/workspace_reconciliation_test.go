@@ -42,7 +42,7 @@ func TestWorkspaceReconcileRequiresEveryActualTerminalRunAndHost(t *testing.T) {
 		t.Fatalf("completed resource absent: %+v", candidates)
 	}
 	item := candidates[0]
-	if item.WorkspaceID != as.Workspace.ID || item.TaskID != first.TaskID || len(item.RunIDs) != 2 || !slices.Contains(item.RunIDs, as.RunID) {
+	if item.WorkspaceID != as.Workspace.ID || item.TaskID != first.TaskID || !item.TaskTerminal || len(item.RunIDs) != 2 || !slices.Contains(item.RunIDs, as.RunID) {
 		t.Fatalf("all implementation and acceptance agents must be checked: %+v", item)
 	}
 	if !slices.Equal(item.FinishedRunIDs, item.RunIDs) {
@@ -85,7 +85,7 @@ func TestWorkspaceReconcileNeverTreatsCancelledUnknownRunAsStopped(t *testing.T)
 		t.Fatal(op)
 	}
 	got := h.reconcileResources("linux-1")
-	if len(got) != 1 || !slices.Equal(got[0].RunIDs, []string{as.RunID}) || len(got[0].FinishedRunIDs) != 0 {
+	if len(got) != 1 || !got[0].TaskTerminal || !slices.Equal(got[0].RunIDs, []string{as.RunID}) || len(got[0].FinishedRunIDs) != 0 {
 		t.Fatalf("resolved run missing from reconciliation: %+v", got)
 	}
 }
@@ -115,7 +115,7 @@ func TestWorkspaceReconcileSeparatesAbandonedAndReplacementRuns(t *testing.T) {
 	}
 	h.withHosts("linux-1", "linux-2")
 	got := h.reconcileResources("linux-1")
-	if len(got) != 1 || got[0].WorkspaceID != old.Workspace.ID || !slices.Equal(got[0].RunIDs, []string{old.RunID}) {
+	if len(got) != 1 || got[0].TaskTerminal || got[0].WorkspaceID != old.Workspace.ID || !slices.Equal(got[0].RunIDs, []string{old.RunID}) {
 		t.Fatalf("old run mapped to replacement resource: %+v", got)
 	}
 	if got := h.reconcileResources("linux-2"); len(got) != 0 {

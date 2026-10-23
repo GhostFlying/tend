@@ -120,13 +120,20 @@ func (a *App) RunnerUpgradeHealth(ctx context.Context, p protocol.Principal, b p
 				return err
 			}
 			health.ServerRevision = r.View.Revision
-			health.ServerConfirmed = rt.Runtime.InstanceID == b.ProcessInstanceID && rt.Runtime.Build.BinarySHA256 == b.ArtifactSHA256 && rt.Online && a.now().UnixMilli()-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds()
-			health.Healthy = health.ServerConfirmed && len(rt.Runtime.Blockers) == 0 && (rt.Runtime.Mode == protocol.RunnerReady || rt.Runtime.Mode == protocol.RunnerNormal)
+			health.ControlRevision = ctl.Revision
+			runs, err := store.CountOpenRuns(ctx, tx.Q(), h.HostID)
+			if err != nil {
+				return err
+			}
+			health.ServerConfirmed = runnerCandidateMatches(r, h, rt.Runtime) && rt.Runtime.Build.BinarySHA256 == b.ArtifactSHA256 && rt.Online && a.now().UnixMilli()-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds()
+			health.AdmissionFenced = health.ServerConfirmed && h.Committed == nil && !committedMatches(r, h, rt.Runtime.UpdaterReceipt, rt.Runtime) && rt.Runtime.InstanceID == h.CandidateInstance && ctl.UpgradeID == r.View.UpgradeID && rt.Runtime.UpgradeID == r.View.UpgradeID && ctl.Mode == protocol.RunnerMaintenance && rt.Runtime.AppliedControlRevision == ctl.Revision
+			admitted := h.Committed != nil && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal
+			health.Healthy = health.ServerConfirmed && h.HealthInstance == rt.Runtime.InstanceID && h.Healthy >= 2 && installedRunnerMatches(rt.Runtime, r.Manifest) && rt.Runtime.AppliedControlRevision == ctl.Revision && (admitted || runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && rt.Runtime.Mode == protocol.RunnerReady)
 			health.HeartbeatSequence = uint64(max(0, rt.Runtime.Sequence))
 			// Once claims are enabled, an old journal is never restored, even if no
 			// claim was observed yet: a request may already be in flight.
 			health.NewWorkAccepted = ctl.Mode == protocol.RunnerNormal || r.View.Hosts[i].Status == "completed"
-			health.RollbackSafe = health.ServerConfirmed && !health.NewWorkAccepted && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0
+			health.RollbackSafe = health.AdmissionFenced && !health.NewWorkAccepted && installedRunnerMatches(rt.Runtime, r.Manifest) && runs == 0 && len(rt.Runtime.Blockers) == 0 && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0
 			return nil
 		}
 		return protocol.Errorf(protocol.CodeNotFound, "host is not in upgrade")
@@ -312,6 +319,13 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 
 		for _, h := range r.Hosts {
+			rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if h.CandidateInstance != "" && h.Rollback == nil && (!committedMatches(r, h, h.Committed, rt.Runtime) || h.HealthInstance != rt.Runtime.InstanceID || h.Healthy < 2 || !rt.Online || x.Now.UnixMilli()-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || !installedRunnerMatches(rt.Runtime, r.Manifest)) {
+				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "candidate commitment must reconcile before cancellation")
+			}
 			ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
 			if err != nil {
 				return Outcome{}, err
@@ -327,13 +341,6 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 					}
 				}
 				continue
-			}
-			rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
-			if err != nil {
-				return Outcome{}, err
-			}
-			if h.CandidateInstance != "" && (rt.Runtime.InstanceID != h.CandidateInstance || h.Healthy < 2) {
-				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "candidate installation must reconcile before cancellation")
 			}
 			if !rt.Online || x.Now.UnixMilli()-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "offline runner must reconcile before cancellation")

@@ -30,6 +30,11 @@ type UpgradeHealth struct {
 	HeartbeatSequence uint64         `json:"heartbeat_sequence"`
 	NewWorkAccepted   bool           `json:"new_work_accepted"`
 	RollbackSafe      bool           `json:"rollback_safe"`
+	// AdmissionFenced promises that this candidate cannot accept new work until
+	// its supervisor publishes an irreversible committed receipt. ControlRevision
+	// binds that promise to the host control observed in the same transaction.
+	AdmissionFenced bool  `json:"admission_fenced"`
+	ControlRevision int64 `json:"control_revision"`
 }
 
 // UpgradeStartRequest is accepted only over the service user's local control socket.
@@ -44,13 +49,15 @@ type UpgradeChangeRequest struct {
 	ExpectedControlRevision int64  `json:"expected_control_revision"`
 }
 
-// UpdaterReceipt is local supervisor proof of a completed reversible rollback.
+// UpdaterReceipt is local supervisor proof of an irreversible commit or a
+// completed reversible rollback, including a proven same-version successor.
 // The authenticated reporting runtime must match CurrentProcessInstanceID and
-// CurrentSHA256; Binding still identifies the original failed candidate.
+// CurrentSHA256; Binding still identifies the original installation candidate.
 type UpdaterReceipt struct {
 	Binding                  UpgradeBinding `json:"binding"`
 	Phase                    string         `json:"phase"`
 	CurrentProcessInstanceID string         `json:"current_process_instance_id"`
 	CurrentSHA256            string         `json:"current_sha256"`
 	RollbackConfirmed        bool           `json:"rollback_confirmed"`
+	CommittedConfirmed       bool           `json:"committed_confirmed"`
 }
