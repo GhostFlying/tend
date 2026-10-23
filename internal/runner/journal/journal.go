@@ -62,8 +62,9 @@ type Request struct {
 
 // Journal is the runner's journal file.
 type Journal struct {
-	db  *sql.DB
-	now func() time.Time
+	path string
+	db   *sql.DB
+	now  func() time.Time
 }
 
 // Open opens or creates the journal at path.
@@ -78,7 +79,7 @@ func Open(ctx context.Context, path string, now func() time.Time) (*Journal, err
 		return nil, fmt.Errorf("journal: open: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	j := &Journal{db: db, now: now}
+	j := &Journal{db: db, now: now, path: path}
 	if err := j.migrate(ctx); err != nil {
 		db.Close()
 		return nil, err

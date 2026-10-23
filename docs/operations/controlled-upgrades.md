@@ -87,3 +87,16 @@ tend upgrade cancel --socket "$SERVER_CONTROL_SOCKET" \
 过期授权不能靠 retry 或重复心跳续期。取消不反向降级已经完成的主机，且不能在候选状态未知时把主机直接恢复接单。运行中的新 server 一旦确认响应，就不能恢复旧数据库；新 runner 一旦恢复领取，就不能恢复旧 journal。日志、任务、交付物及历史会话继续保留，无法确认的外部操作按 unknown 对账。
 
 演练需要核对实际 PID、程序哈希、批次和 run 身份，以及两台主机之间没有重叠维护。每次测试只清理本次创建的 Orca workspace 与临时目录，先确认 run 释放，保留任务账本和交付证据。
+
+## Runner 进程代次文件
+
+runner 在 journal 旁维护 `<journal>.incarnation` companion SQLite 文件，分配
+跨进程严格递增的 Generation。该文件不含业务数据或凭据；必须跨候选回滚保留，
+不得加入 updater 的业务 `data_files` 恢复集合，也不要为重试启动而删除它。
+
+文件丢失或损坏时，先停止该服务的 runner/updater 启动重试并保留现场。优先
+恢复较新的 companion 备份；无备份时，管理员确认旧服务进程均已停止后读取
+server 当前 Runtime.Generation，离线恢复 companion 计数至不小于该高水位，
+下一次启动会分配更高代次。不得通过自动追赶 server 代次重试旧进程，否则
+迟到的旧进程也可重新抢占。具体实现和回归边界见
+[进程代次计划](../plans/runner-incarnation-ordering.md)。

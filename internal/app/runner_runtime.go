@@ -25,7 +25,7 @@ func validateRuntime(r *protocol.RunnerRuntime) error {
 	if negotiated != r.Protocol {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "runner protocol does not match negotiation")
 	}
-	if r.InstanceID == "" || len(r.InstanceID) > 128 || r.Sequence < 1 || r.Protocol < protocol.PreviousRunnerProtocol || r.Protocol > protocol.CurrentRunnerProtocol || r.ProtocolMin > r.Protocol || r.ProtocolMax < r.Protocol || r.ProtocolMin < 0 || r.PendingClaims < 0 || r.PendingOperations < 0 || !slices.Contains([]string{protocol.RunnerNormal, protocol.RunnerMaintenance, protocol.RunnerReady}, r.Mode) {
+	if r.InstanceID == "" || len(r.InstanceID) > 128 || r.Sequence < 1 || r.Generation < 1 || r.Protocol < protocol.PreviousRunnerProtocol || r.Protocol > protocol.CurrentRunnerProtocol || r.ProtocolMin > r.Protocol || r.ProtocolMax < r.Protocol || r.ProtocolMin < 0 || r.PendingClaims < 0 || r.PendingOperations < 0 || !slices.Contains([]string{protocol.RunnerNormal, protocol.RunnerMaintenance, protocol.RunnerReady}, r.Mode) {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid or unsupported runner runtime")
 	}
 	return nil
@@ -53,6 +53,14 @@ func checkRuntime(ctx context.Context, q store.Querier, host string, r *protocol
 	}
 	if retired {
 		return protocol.Errorf(protocol.CodeConflictPayload, "runner instance has been superseded")
+	}
+	if err == nil {
+		if old.Runtime.InstanceID == r.InstanceID && old.Runtime.Generation != r.Generation {
+			return protocol.Errorf(protocol.CodeConflictPayload, "runner instance generation changed")
+		}
+		if old.Runtime.InstanceID != r.InstanceID && r.Generation <= old.Runtime.Generation {
+			return protocol.Errorf(protocol.CodeConflictPayload, "runner process generation is stale")
+		}
 	}
 	if !hello && (err != nil || old.Runtime.InstanceID != r.InstanceID) {
 		return protocol.Errorf(protocol.CodeConflictPayload, "runner must reconcile through hello")

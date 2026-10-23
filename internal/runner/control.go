@@ -30,6 +30,11 @@ func (r *Runner) loadControlLocked(ctx context.Context) error {
 	if value.Mode == "" {
 		value.Mode = protocol.RunnerNormal
 	}
+	generation, err := r.cfg.Journal.NextProcessGeneration(ctx)
+	if err != nil {
+		return err
+	}
+	r.generation = generation
 	r.control = value
 	r.controlLoaded = true
 	r.instanceID = r.cfg.InstanceID
@@ -130,7 +135,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		confirmedCancelled = r.cancelledUpdaterID
 	}
 	r.sequence++
-	return &protocol.RunnerRuntime{JournalVersion: 9, InstanceID: r.instanceID, Sequence: r.sequence, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests) + len(releases)), Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
+	return &protocol.RunnerRuntime{JournalVersion: 9, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests) + len(releases)), Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
 }
 
 func sameGrant(a, b *protocol.MaintenanceAuthorization) bool {

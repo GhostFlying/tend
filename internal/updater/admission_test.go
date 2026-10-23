@@ -8,6 +8,28 @@ import (
 	"testing"
 )
 
+func TestUnhealthyCandidateResetSurvivesUpdaterRestart(t *testing.T) {
+	h := newHarness(t)
+	h.upgrade(t)
+	h.until(t, "checking")
+	h.step(t)
+	h.a.unhealthy = true
+	h.step(t)
+	h.reopen(t)
+	if h.s.Status().Operation.HealthCount != 0 {
+		t.Fatal("unhealthy observation did not persist the health counter reset")
+	}
+	h.a.unhealthy = false
+	h.step(t)
+	if h.s.Status().Operation.Phase == "committed" {
+		t.Fatal("candidate committed after only one healthy observation following reset")
+	}
+	h.step(t)
+	if h.s.Status().Operation.Phase != "committed" {
+		t.Fatal("candidate did not commit after two consecutive healthy observations")
+	}
+}
+
 func plannedRollback(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
