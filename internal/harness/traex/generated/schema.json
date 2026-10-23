@@ -344,6 +344,37 @@
         "updatedAt"
       ]
     },
+    "ThreadForkParams": {
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "beforeTurnId",
+        "config",
+        "cwd",
+        "deferGoalContinuation",
+        "developerInstructions",
+        "ephemeral",
+        "excludeTurns",
+        "experimentalRawEvents",
+        "lastTurnId",
+        "model",
+        "modelProvider",
+        "name",
+        "path",
+        "permissions",
+        "runtimeWorkspaceRoots",
+        "sandbox",
+        "serviceTier",
+        "terminalVisualizationInstructions",
+        "threadId",
+        "threadSource",
+        "traeChatConversationId"
+      ],
+      "required": [
+        "threadId"
+      ]
+    },
     "ThreadInjectItemsParams": {
       "properties": [
         "items",
@@ -452,6 +483,22 @@
         "modelProvider",
         "sandbox",
         "thread"
+      ]
+    },
+    "ThreadUnsubscribeParams": {
+      "properties": [
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ]
+    },
+    "ThreadUnsubscribeResponse": {
+      "properties": [
+        "status"
+      ],
+      "required": [
+        "status"
       ]
     },
     "ToolResponseItem": {

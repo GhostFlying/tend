@@ -24,6 +24,8 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
   - owner 的 traex 里接入了 tend（`tend setup`）时，托管会话不会把自己当作外挂会话：服务端为它设置 `TEND_ADDON=off`，不需要另外配置。
   - 权限：sandbox 是 `workspace-write`，可以读整台机器（例如仓库），只能写自己的工作目录（`main_agent.cwd`，默认 `data_dir/main-agent`，必须在任何仓库之外）；需要更多权限的操作由 traex 的 `auto_review` 自动审查，不等人确认。编辑文件、浏览器、插件、应用、skill 和 memory 是关掉的。
   - 模型默认用 traex 的默认模型，`main_agent.model` 可以指定。
+  - `main_agent.summary_idle_minutes` 设置预备摘要的空闲分钟，省略默认 50，0 关闭自动准备，范围 0..10080。Web 的独立 owner 设置持久化覆盖该默认值，不依赖模型目录。交接维护仍启用；工具 schema 升级会使用 fresh native thread，Web 对话历史与原 native 历史保留（D81）。
+  - `tend conversation handoff --prepare-only` 只准备摘要，`tend conversation handoff` 排队执行交接，`tend conversation handoff --status [--json]` 读取共享设置与摘要状态。网络重试沿用原请求 ID；结果未知时先核对原请求，不重复发起交接。
 
 ## Web 客户端
 

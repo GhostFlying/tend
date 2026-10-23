@@ -5,7 +5,7 @@ import { useStore } from "../state/store.ts";
 import controls from "../shell/controls.module.css";
 import list from "../shell/list.module.css";
 import { Hosts } from "./Overview.tsx";
-import { Back } from "../shell/icons.tsx";
+import { Back, Gear } from "../shell/icons.tsx";
 import { stages, type TaskFeed } from "./lists.ts";
 import { blockLabels, controlLabels, ratingLabels } from "./status.ts";
 import styles from "./Board.module.css";
@@ -47,7 +47,15 @@ export function RecentTasks() {
   );
 }
 
-export function TaskBoard({ active, onChat }: { active: boolean; onChat(): void }) {
+export function TaskBoard({
+  active,
+  onChat,
+  onSettings,
+}: {
+  active: boolean;
+  onChat(): void;
+  onSettings(): void;
+}) {
   const { live } = useServices();
   const snapshot = useStore(live.snapshot);
   const project = useStore(live.tasks.project);
@@ -64,6 +72,15 @@ export function TaskBoard({ active, onChat }: { active: boolean; onChat(): void 
           返回聊天
         </button>
         <h1>任务看板</h1>
+        <button
+          type="button"
+          className={controls.iconBtn}
+          aria-label="设置"
+          title="设置"
+          onClick={onSettings}
+        >
+          <Gear />
+        </button>
         <label className={styles.filter}>
           项目
           <input

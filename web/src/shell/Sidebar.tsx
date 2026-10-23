@@ -15,10 +15,12 @@ export function Sidebar({
   view,
   connection,
   onBoard,
+  onSettings,
 }: {
   view: View;
   connection: Connection;
   onBoard(): void;
+  onSettings(): void;
 }) {
   const choice = useStore(theme);
   return (
@@ -55,6 +57,9 @@ export function Sidebar({
       </div>
       <div className={styles.foot}>
         <div className={styles.footActions}>
+          <button type="button" className={styles.themeButton} onClick={onSettings}>
+            设置
+          </button>
           <button type="button" className={styles.themeButton} onClick={toggleTheme}>
             主题：{themeLabels[choice]}
           </button>

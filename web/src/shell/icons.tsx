@@ -59,3 +59,10 @@ export const Pending = (p: IconProps) => (
     <path d="M12 8v5M12 16h.01" />
   </svg>
 );
+
+export const Gear = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <path d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h4l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3z" />
+    <circle cx="11" cy="12" r="3" />
+  </svg>
+);

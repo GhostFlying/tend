@@ -10,6 +10,7 @@ import { attentionCount } from "../decisions/Attention.tsx";
 import type { LiveData } from "../live/data.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
 import { useStore } from "../state/store.ts";
+import { Handoff } from "../conversation/Handoff.tsx";
 import { Chat } from "./Chat.tsx";
 import { Details } from "./Details.tsx";
 import styles from "./Shell.module.css";
@@ -28,6 +29,17 @@ export function Shell({
   connection: Connection;
   queue: SendQueue | null;
 }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsFocus = useRef<HTMLElement | null>(null);
+  const showSettings = () => {
+    settingsFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSettingsOpen(true);
+  };
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    queueMicrotask(() => settingsFocus.current?.focus());
+  };
   const [draft] = useState(() => new ComposerDraft());
   const returnFocus = useRef<HTMLElement | null>(null);
   const [view, setView] = useState<View>("chat");
@@ -96,15 +108,20 @@ export function Shell({
         data-details={detailsOpen ? "open" : "closed"}
       >
         <aside className={styles.sidebar}>
-          <Sidebar view={view} connection={connection} onBoard={showBoard} />
+          <Sidebar
+            view={view}
+            connection={connection}
+            onBoard={showBoard}
+            onSettings={showSettings}
+          />
         </aside>
         <main className={styles.chat}>
           <div className={styles.content} hidden={boardOpen}>
-            <Chat connection={connection} visible={!boardOpen} />
+            <Chat connection={connection} visible={!boardOpen} onSettings={showSettings} />
           </div>
           {boardVisited && (
             <div className={styles.content} hidden={!boardOpen}>
-              <TaskBoard active={boardOpen} onChat={showChat} />
+              <TaskBoard active={boardOpen} onChat={showChat} onSettings={showSettings} />
             </div>
           )}
         </main>
@@ -123,6 +140,7 @@ export function Shell({
           pending={attentionCount(snapshot)}
         />
       </div>
+      {settingsOpen && <Handoff connection={connection} onClose={closeSettings} />}
     </ServicesContext>
   );
 }

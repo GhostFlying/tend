@@ -94,8 +94,9 @@ type mainAgentConfig struct {
 	TraexBin string `json:"traex_bin"`
 	// TraexHome defaults to the home traex uses for the server's user,
 	// so the main agent shares the owner's traex setup.
-	TraexHome string `json:"traex_home"`
-	Model     string `json:"model"`
+	TraexHome          string `json:"traex_home"`
+	Model              string `json:"model"`
+	SummaryIdleMinutes *int64 `json:"summary_idle_minutes"`
 	// Cwd defaults to main-agent in the data directory. It must be
 	// outside any repository, so no project AGENTS.md is loaded (spike
 	// A1); the main agent can write only there.
@@ -254,6 +255,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	ownerConfig := api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
+		ownerConfig.ConversationHandoff = front.HandoffStatus
 	}
 	owner := api.New(a, s, ts, cb, whois, secret, ownerConfig, log)
 	server := &http.Server{Handler: serverHandler(runners.Handler(), owner.Handler()), ReadHeaderTimeout: 10 * time.Second}
@@ -305,6 +307,10 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 
 // hostedMainThread prepares the hosted main agent (D68).
 func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg mainAgentConfig, dataDir string, log *slog.Logger) (*mainthread.Manager, error) {
+	idle, err := summaryIdleMinutes(cfg.SummaryIdleMinutes)
+	if err != nil {
+		return nil, err
+	}
 	cwd := filepath.Join(dataDir, "main-agent")
 	if cfg.Cwd != "" {
 		var err error
@@ -326,8 +332,11 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 		return nil, err
 	}
 	return mainthread.New(a, cb, ts, mainthread.Config{
-		Instance: cfg.Instance,
-		Thread:   mainthread.ThreadConfig(cwd, cfg.Model),
+		Instance:           cfg.Instance,
+		MaintenanceEnabled: true,
+		SummaryIdleMinutes: idle,
+		Now:                time.Now,
+		Thread:             mainthread.ThreadConfig(cwd, cfg.Model),
 		Open: func(ctx context.Context) (harness.Session, error) {
 			return traex.Start(ctx, traex.Options{Bin: cfg.TraexBin, Env: env, Dir: cwd, Version: "tend", Log: log})
 		},

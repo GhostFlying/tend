@@ -41,6 +41,8 @@ type Config struct {
 	HostedMainAgent bool
 	// ConversationSettings reads the hosted harness catalog and shared settings.
 	ConversationSettings func(context.Context) (protocol.ConversationSettingsView, error)
+	// ConversationHandoff reads policy and summary coverage independently of models.
+	ConversationHandoff func(context.Context) (protocol.ConversationHandoffView, error)
 	// Heartbeat is how often a quiet event stream sends a heartbeat.
 	// Default 15s.
 	Heartbeat time.Duration
@@ -94,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/requests/{id}", s.request)
 	mux.HandleFunc("GET /api/v1/conversation", s.conversation)
 	mux.HandleFunc("GET /api/v1/conversation/settings", s.conversationSettings)
+	mux.HandleFunc("GET /api/v1/conversation/handoff", s.conversationHandoff)
 	mux.HandleFunc("GET /api/v1/events", s.events)
 	mux.HandleFunc("POST /api/v1/agent/hook", s.hook)
 	mux.HandleFunc("GET /api/v1/agent/tools", s.listTools)

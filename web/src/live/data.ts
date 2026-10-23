@@ -4,6 +4,7 @@
 // only says something changed, and the affected views are read again. The
 // client never rebuilds ledger state from events itself.
 import { TaskLists } from "../tasks/lists.ts";
+import { ConversationHandoff } from "../conversation/handoff.ts";
 import { ConversationSettings } from "../conversation/settings.ts";
 import { ApiError } from "../api/client.ts";
 import type {
@@ -64,6 +65,7 @@ const noProcessing: ReadonlyMap<string, number> = new Map();
 
 export class LiveData {
   readonly settings: ConversationSettings;
+  readonly handoff: ConversationHandoff;
   readonly tasks: TaskLists;
   private readonly api: Reader;
   private readonly snapshotStore = new Store<Snapshot | null>(null);
@@ -100,6 +102,7 @@ export class LiveData {
   constructor(api: Reader) {
     this.api = api;
     this.settings = new ConversationSettings(api);
+    this.handoff = new ConversationHandoff(api);
     this.tasks = new TaskLists(api);
     this.snapshotReads = new Coalesced(() => this.readSnapshot());
     this.detailReads = new Coalesced(() => this.readDetail());
@@ -125,6 +128,7 @@ export class LiveData {
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
     void this.settings.refresh();
+    void this.handoff.refresh();
     this.tasks.refresh();
     this.detailController?.abort();
     void this.stopLogs();
@@ -139,12 +143,26 @@ export class LiveData {
 
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
+    if (
+      [
+        "conversation.handoff_settings",
+        "conversation.handoff_requested",
+        "conversation.handoff_completed",
+        "conversation.summary",
+        "conversation.summary_started",
+        "conversation.summary_failed",
+      ].includes(event.kind)
+    ) {
+      void this.handoff.refresh();
+      return;
+    }
     if (event.kind === "conversation.settings") {
       void this.settings.refresh();
       return;
     }
     switch (event.object_type) {
       case "message":
+        this.handoff.invalidate(event.event_seq);
         if (this.held) {
           this.held.push(event);
         } else {
@@ -402,7 +420,12 @@ export class LiveData {
     this.detailController?.abort();
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
-    await Promise.all([this.stopLogs(), this.settings.stop(), this.tasks.stop()]);
+    await Promise.all([
+      this.stopLogs(),
+      this.settings.stop(),
+      this.handoff.stop(),
+      this.tasks.stop(),
+    ]);
   }
 
   private recovered(view: "snapshot" | "conversation" | "detail"): void {
