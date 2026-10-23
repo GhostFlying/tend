@@ -93,6 +93,11 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 			m.workMu.Unlock()
 		}
 	}()
+	if paused, err := m.app.UpgradePausesMain(ctx); err != nil {
+		return err
+	} else if paused {
+		return nil
+	}
 	settings, err := m.app.HandoffSettings(ctx)
 	if err != nil {
 		return err

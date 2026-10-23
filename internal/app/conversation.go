@@ -369,6 +369,15 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
+		if m.Status == store.TurnStarting && (errors.Is(err, store.ErrNotFound) || prev.Status == store.TurnRejected) {
+			paused, err := upgradePausesMain(ctx, tx.Q())
+			if err != nil {
+				return err
+			}
+			if paused {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "main thread is draining for server upgrade")
+			}
+		}
 		if err := tx.PutMainTurn(ctx, m, now); err != nil {
 			return err
 		}

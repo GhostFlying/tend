@@ -89,12 +89,21 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
-	ServerURL  string
-	HostID     string
-	HostToken  string
-	Version    string
-	HTTPClient *http.Client
-	Journal    *journal.Journal
+	ServerURL            string
+	HostID               string
+	HostToken            string
+	Version              string
+	InstanceID           string
+	Build                protocol.RunnerBuild
+	HeartbeatInterval    time.Duration
+	UpdaterSocket        string
+	UpdaterControlSocket string
+	UpdaterBundleDir     string
+	UpdaterInstanceID    string
+	UpgradeID            string
+	InitialMaintenance   bool
+	HTTPClient           *http.Client
+	Journal              *journal.Journal
 	// Worker is the kind of Workers, reported to tend (D64). Default
 	// appserver.
 	Worker     protocol.WorkerKind
@@ -152,10 +161,39 @@ type Runner struct {
 	ttlWake chan struct{} // closed when the TTL changes
 	active  map[string]*active
 	wg      sync.WaitGroup
+
+	controlMu            sync.Mutex
+	control              protocol.RunnerControl
+	controlLoaded        bool
+	bootstrapMaintenance bool
+	updaterMu            sync.Mutex
+	cancelledUpdaterID   string
+	instanceID           string
+	sequence             int64
+	grantDeadlines       map[string]time.Time
+	helloConfirmed       bool
+	grantServerDeadline  int64
+	grantID              string
+	resourceReconciled   bool
+	resourceBusy         bool
+	resourceBlockers     []string
+	upgradePhase         string
+	upgradeError         string
+	downloadedBytes      int64
+	confirmedRuntime     protocol.RunnerRuntime
 }
 
 // New returns a Runner.
 func New(cfg Config) *Runner {
+	if cfg.HeartbeatInterval <= 0 {
+		cfg.HeartbeatInterval = 15 * time.Second
+	}
+	if cfg.Build.StartedAtMillis == 0 && cfg.Now != nil {
+		cfg.Build.StartedAtMillis = cfg.Now().UnixMilli()
+	}
+	if cfg.Build.Version == "" {
+		cfg.Build.Version = cfg.Version
+	}
 	if cfg.Worker == "" {
 		cfg.Worker = protocol.WorkerAppServer
 	}
@@ -172,14 +210,16 @@ func New(cfg Config) *Runner {
 		cfg.HTTPClient = http.DefaultClient
 	}
 	return &Runner{
-		cfg: cfg,
+		cfg:                  cfg,
+		bootstrapMaintenance: cfg.InitialMaintenance,
 		c: &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now,
 			timeout: cfg.RequestTimeout},
-		reconcile:     make(chan struct{}, 1),
-		workspaceWake: make(chan struct{}, 1),
-		ttl:           time.Minute,
-		ttlWake:       make(chan struct{}),
-		active:        map[string]*active{},
+		reconcile:      make(chan struct{}, 1),
+		workspaceWake:  make(chan struct{}, 1),
+		ttl:            time.Minute,
+		ttlWake:        make(chan struct{}),
+		active:         map[string]*active{},
+		grantDeadlines: map[string]time.Time{},
 	}
 }
 
@@ -188,9 +228,21 @@ func New(cfg Config) *Runner {
 // resume after the next start.
 func (r *Runner) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
+	if err := r.loadControl(ctx); err != nil {
+		cancel()
+		return err
+	}
 	// Deferred calls run in reverse: stop the goroutines, then join them.
 	defer r.wg.Wait()
 	defer cancel()
+	if r.cfg.UpdaterSocket != "" {
+		listener, err := r.updaterListener()
+		if err != nil {
+			return err
+		}
+		defer listener.Close()
+		r.wg.Go(func() { r.serveUpdater(ctx, listener) })
+	}
 	// Lease upkeep runs before anything can start a worker.
 	r.wg.Go(func() { r.heartbeats(ctx) })
 	r.wg.Go(func() { r.watchdog(ctx) })
@@ -198,7 +250,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.resendClaims(ctx); err != nil {
 		return err
 	}
-	if err := r.retry(ctx, func() error { return r.hello(ctx) }); err != nil {
+	if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil {
 		return err
 	}
 	r.wg.Go(func() { r.workspaceLifecycle(ctx) })
@@ -319,10 +371,31 @@ func (r *Runner) resendClaims(ctx context.Context) error {
 // claims long-polls for work until ctx ends.
 func (r *Runner) claims(ctx context.Context) {
 	for ctx.Err() == nil {
-		env, err := r.newEnvelope(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.ClaimPayload{Worker: r.cfg.Worker, WorkspaceProtocol: 1})
+		runtime, err := r.runtimeObservation(ctx)
+		if err != nil {
+			r.cfg.Log.ErrorContext(ctx, "could not inspect runner state", "err", err)
+			return
+		}
+		r.controlMu.Lock()
+		if r.control.Mode == protocol.RunnerMaintenance || r.bootstrapMaintenance {
+			r.controlMu.Unlock()
+			if runtime.PendingClaims > 0 {
+				if err := r.resendClaims(ctx); err == nil {
+					r.requestReconcile()
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(r.cfg.RetryDelay):
+			}
+			continue
+		}
+		env, err := r.newEnvelope(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.ClaimPayload{Worker: r.cfg.Worker, WorkspaceProtocol: 1, Runtime: runtime})
 		if err == nil {
 			err = r.cfg.Journal.PutRequest(ctx, journal.Request{Envelope: *env})
 		}
+		r.controlMu.Unlock()
 		if err == nil {
 			// A reply that arrives late, or a resent claim answered from
 			// the record, carries a lease that started no later than the
@@ -392,7 +465,11 @@ func (r *Runner) hello(ctx context.Context) error {
 		held = append(held, protocol.HeldRun{RunID: run.Assignment.RunID, LeaseID: run.Assignment.LeaseID, Observed: r.observed(run)})
 		byID[run.Assignment.RunID] = run
 	}
-	env, err := r.newEnvelope(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HelloPayload{Held: held, Version: r.cfg.Version, Worker: r.cfg.Worker, WorkspaceProtocol: 1})
+	runtime, err := r.runtimeObservation(ctx)
+	if err != nil {
+		return err
+	}
+	env, err := r.newEnvelope(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HelloPayload{Held: held, Version: r.cfg.Version, Worker: r.cfg.Worker, WorkspaceProtocol: 1, Runtime: runtime})
 	if err != nil {
 		return err
 	}
@@ -406,6 +483,12 @@ func (r *Runner) hello(ctx context.Context) error {
 		return fmt.Errorf("runner: decode hello: %w", err)
 	}
 	r.setTTL(res.LeaseTTLMillis)
+	if err := r.applyControl(ctx, res.Control, sent, true); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.confirmedRuntime = *runtime
+	r.mu.Unlock()
 	for _, v := range res.Runs {
 		run := byID[v.RunID]
 		// What tend wants now, not what it wanted when it assigned the run.
@@ -472,7 +555,11 @@ func (r *Runner) lookup(runID string) *active {
 // start launches the executor of a journaled run unless one is running.
 func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt time.Time) {
 	runID := as.RunID
-	deadline := r.fenceDeadline(renewedAt)
+	if !protocol.RunnerProtocolSupported(as.Protocol) {
+		r.cfg.Log.ErrorContext(ctx, "run protocol unsupported; preserving assignment", "run_id", as.RunID, "protocol", as.Protocol)
+		return
+	}
+	deadline := r.authorizedDeadline(as.RunID, r.fenceDeadline(renewedAt))
 	if !r.cfg.Now().Before(deadline) {
 		// The renewal is already too old to write on; reconcile first.
 		r.cfg.Log.WarnContext(ctx, "lease too old to start a run; reconciling", "run_id", runID)
@@ -521,7 +608,7 @@ func (r *Runner) heartbeats(ctx context.Context) {
 			return
 		case <-r.ttlChanged():
 			continue
-		case <-time.After(r.leaseTTL() / 4):
+		case <-time.After(min(r.cfg.HeartbeatInterval, r.leaseTTL()/4)):
 		}
 		r.heartbeat(ctx)
 	}
@@ -578,10 +665,11 @@ func (r *Runner) heartbeat(ctx context.Context) {
 		refs = append(refs, protocol.LeaseRef{RunID: id, LeaseID: a.as.LeaseID})
 	}
 	r.mu.Unlock()
-	if len(refs) == 0 {
+	runtime, err := r.runtimeObservation(ctx)
+	if err != nil {
 		return
 	}
-	env, err := r.newEnvelope(protocol.OpRunnerHeartbeat, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HeartbeatPayload{Runs: refs})
+	env, err := r.newEnvelope(protocol.OpRunnerHeartbeat, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HeartbeatPayload{Runs: refs, Runtime: runtime})
 	if err != nil {
 		return
 	}
@@ -600,6 +688,14 @@ func (r *Runner) heartbeat(ctx context.Context) {
 		return
 	}
 	r.setTTL(res.LeaseTTLMillis)
+	if err := r.applyControl(ctx, res.Control, sent, false); err != nil {
+		r.cfg.Log.WarnContext(ctx, "runner control rejected", "err", err)
+		return
+	}
+	r.mu.Lock()
+	r.confirmedRuntime = *runtime
+	r.mu.Unlock()
+	r.maybeUpgrade(ctx)
 	deadline := r.fenceDeadline(sent)
 	for _, s := range res.Runs {
 		a := r.lookup(s.RunID)
@@ -607,13 +703,21 @@ func (r *Runner) heartbeat(ctx context.Context) {
 			continue
 		}
 		if !s.Renewed {
+			if s.Desired == protocol.DesiredStopped {
+				r.applyDesired(ctx, a, s.Desired, sent)
+				continue
+			}
+			if r.authorizedDeadline(s.RunID, time.Time{}).After(r.cfg.Now()) {
+				continue
+			}
 			if !r.isReporting(a) {
 				r.fence(ctx, s.RunID, a)
 			}
 			continue
 		}
+		effectiveDeadline := r.authorizedDeadline(s.RunID, deadline)
 		r.mu.Lock()
-		a.deadline = deadline
+		a.deadline = effectiveDeadline
 		r.mu.Unlock()
 		r.applyDesired(ctx, a, s.Desired, sent)
 	}
@@ -678,7 +782,7 @@ func (r *Runner) reconciler(ctx context.Context) {
 		}
 		// Let fenced executors record the fence before reporting.
 		r.waitIdleFenced(ctx)
-		if err := r.retry(ctx, func() error { return r.hello(ctx) }); err != nil && ctx.Err() == nil {
+		if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil && ctx.Err() == nil {
 			r.cfg.Log.ErrorContext(ctx, "reconciliation failed", "err", err)
 		}
 	}

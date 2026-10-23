@@ -29,8 +29,9 @@ type HeldRun struct {
 // HelloPayload opens a runner session. The runner reports every run it
 // holds before claiming new work.
 type HelloPayload struct {
-	WorkspaceProtocol int64     `json:"workspace_protocol,omitempty"`
-	Held              []HeldRun `json:"held"`
+	Runtime           *RunnerRuntime `json:"runtime,omitempty"`
+	WorkspaceProtocol int64          `json:"workspace_protocol,omitempty"`
+	Held              []HeldRun      `json:"held"`
 	// Version is the runner build, for diagnostics.
 	Version string `json:"version,omitempty"`
 	// Worker is the harness the runner runs; it must be the one the
@@ -43,8 +44,9 @@ type HelloPayload struct {
 // host whose configured worker changed while its runner kept running
 // does not take work it would run with the wrong harness.
 type ClaimPayload struct {
-	WorkspaceProtocol int64      `json:"workspace_protocol,omitempty"`
-	Worker            WorkerKind `json:"worker,omitempty"`
+	Runtime           *RunnerRuntime `json:"runtime,omitempty"`
+	WorkspaceProtocol int64          `json:"workspace_protocol,omitempty"`
+	Worker            WorkerKind     `json:"worker,omitempty"`
 }
 
 // Reconciliation verdicts for held runs.
@@ -67,6 +69,7 @@ type RunVerdict struct {
 // that the runner did not report; they never started, so the runner takes
 // them over as if it had just claimed them.
 type HelloResult struct {
+	Control *RunnerControl `json:"control,omitempty"`
 	// LeaseTTLMillis is the lease duration tend currently grants.
 	LeaseTTLMillis int64        `json:"lease_ttl_ms"`
 	Runs           []RunVerdict `json:"runs"`
@@ -75,6 +78,7 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
+	Protocol       int64  `json:"protocol,omitempty"`
 	RunID          string `json:"run_id"`
 	LeaseID        string `json:"lease_id"`
 	LeaseTTLMillis int64  `json:"lease_ttl_ms"`
@@ -139,7 +143,8 @@ type AssignedMount struct {
 
 // HeartbeatPayload renews the leases of the runs a runner holds.
 type HeartbeatPayload struct {
-	Runs []LeaseRef `json:"runs"`
+	Runtime *RunnerRuntime `json:"runtime,omitempty"`
+	Runs    []LeaseRef     `json:"runs"`
 }
 
 // LeaseRef names a run and the lease the runner holds for it.
@@ -151,8 +156,9 @@ type LeaseRef struct {
 // HeartbeatResult reports, per run, whether the lease was renewed and what
 // tend wants the run to do.
 type HeartbeatResult struct {
-	LeaseTTLMillis int64        `json:"lease_ttl_ms"`
-	Runs           []LeaseState `json:"runs"`
+	Control        *RunnerControl `json:"control,omitempty"`
+	LeaseTTLMillis int64          `json:"lease_ttl_ms"`
+	Runs           []LeaseState   `json:"runs"`
 }
 
 // LeaseState is the outcome of renewing one lease. A lease that is no

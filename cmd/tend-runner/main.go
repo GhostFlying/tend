@@ -45,8 +45,11 @@ func (p profile) gitws() gitws.Profile {
 // config is the runner's configuration file.
 type config struct {
 	// ServerURL is tend's address, such as http://tend on the tailnet.
-	ServerURL string `json:"server_url"`
-	HostID    string `json:"host_id"`
+	ServerURL            string `json:"server_url"`
+	HostID               string `json:"host_id"`
+	UpdaterSocket        string `json:"updater_socket"`
+	UpdaterControlSocket string `json:"updater_control_socket"`
+	UpdaterBundleDir     string `json:"updater_bundle_dir"`
 	// Home is TEND_HOME: repositories, workspaces and the journal live
 	// there. Default ~/.tend.
 	Home    string `json:"home"`
@@ -89,6 +92,11 @@ func main() {
 	path := flag.String("config", "", "configuration file (HuJSON)")
 	version := flag.String("version", "dev", "build version reported to tend")
 	flag.Parse()
+	// Managed releases retain their original argv, so the updater's selected
+	// immutable release is authoritative over an older --version argument.
+	if releaseID := os.Getenv("TEND_UPDATER_RELEASE_ID"); releaseID != "" {
+		*version = releaseID
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -222,9 +230,35 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		workers = traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: cfg.Worker.TraexBin, Version: version, Log: log}, Model: cfg.Worker.Model})
 		workspaces = gitws.New(wsCfg)
 	}
+	build, err := runnerBuild(version)
+	if err != nil {
+		return err
+	}
+	instanceID := os.Getenv("TEND_UPDATER_PROCESS_INSTANCE_ID")
+	upgradeID := os.Getenv("TEND_UPGRADE_ID")
+	initialMaintenance := os.Getenv("TEND_UPDATER_MAINTENANCE") == "1"
+	updaterInstance := os.Getenv("TEND_UPDATER_INSTANCE_ID")
+	if updaterInstance == "" {
+		updaterInstance = cfg.HostID
+	}
+	if initialMaintenance && (instanceID == "" || upgradeID == "" || os.Getenv("TEND_RELEASE_SHA256") != build.BinarySHA256) {
+		return errors.New("updater candidate identity or executable digest mismatch")
+	}
+	for _, field := range []*string{&cfg.UpdaterSocket, &cfg.UpdaterControlSocket, &cfg.UpdaterBundleDir} {
+		if *field != "" {
+			value, err := cfgfile.Path(*field)
+			if err != nil {
+				return err
+			}
+			*field = value
+		}
+	}
+	if (cfg.UpdaterSocket != "" || cfg.UpdaterControlSocket != "" || cfg.UpdaterBundleDir != "") && (cfg.UpdaterSocket == "" || cfg.UpdaterControlSocket == "" || cfg.UpdaterBundleDir == "") {
+		return errors.New("updater bridge, control socket and bundle directory must be configured together")
+	}
 	r := runner.New(runner.Config{
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
-		Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
+		InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: cfg.UpdaterSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,
 	})
 	log.Info("tend-runner running", "host", cfg.HostID, "home", home)

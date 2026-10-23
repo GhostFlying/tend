@@ -11,6 +11,7 @@ import type { LiveData } from "../live/data.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
 import { useStore } from "../state/store.ts";
 import { Handoff } from "../conversation/Handoff.tsx";
+import { UpgradeDetails } from "../upgrades/Upgrade.tsx";
 import { Chat } from "./Chat.tsx";
 import { Details } from "./Details.tsx";
 import styles from "./Shell.module.css";
@@ -29,6 +30,8 @@ export function Shell({
   connection: Connection;
   queue: SendQueue | null;
 }) {
+  const [upgradeId, setUpgradeId] = useState<string | null>(null);
+  const upgradeFocus = useRef<HTMLElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsFocus = useRef<HTMLElement | null>(null);
   const showSettings = () => {
@@ -69,6 +72,11 @@ export function Shell({
         setBoardOpen(false);
         setView("chat");
         draft.followUp(task);
+      },
+      openUpgrade(id) {
+        upgradeFocus.current =
+          document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        setUpgradeId(id);
       },
       openTask(taskId) {
         const active = document.activeElement;
@@ -121,7 +129,12 @@ export function Shell({
           </div>
           {boardVisited && (
             <div className={styles.content} hidden={!boardOpen}>
-              <TaskBoard active={boardOpen} onChat={showChat} onSettings={showSettings} />
+              <TaskBoard
+                active={boardOpen}
+                connection={connection}
+                onChat={showChat}
+                onSettings={showSettings}
+              />
             </div>
           )}
         </main>
@@ -140,6 +153,16 @@ export function Shell({
           pending={attentionCount(snapshot)}
         />
       </div>
+      {upgradeId && (
+        <UpgradeDetails
+          id={upgradeId}
+          connection={connection}
+          onClose={() => {
+            setUpgradeId(null);
+            queueMicrotask(() => upgradeFocus.current?.isConnected && upgradeFocus.current.focus());
+          }}
+        />
+      )}
       {settingsOpen && <Handoff connection={connection} onClose={closeSettings} />}
     </ServicesContext>
   );

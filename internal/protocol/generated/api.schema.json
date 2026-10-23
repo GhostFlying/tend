@@ -429,10 +429,16 @@
         "decision": {
           "$ref": "#/definitions/DecisionChoice"
         },
+        "host_id": {
+          "type": "string"
+        },
         "kind": {
           "type": "string"
         },
         "message_id": {
+          "type": "string"
+        },
+        "notice_type": {
           "type": "string"
         },
         "reply_to": {
@@ -446,6 +452,9 @@
         },
         "tool": {
           "$ref": "#/definitions/ToolUseView"
+        },
+        "upgrade_id": {
+          "type": "string"
         }
       },
       "required": [
@@ -844,10 +853,41 @@
       "title": "HookResponse",
       "type": "object"
     },
+    "HostMaintenanceView": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "remaining_runs": {
+          "type": "integer"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "HostMaintenanceView",
+      "type": "object"
+    },
     "HostView": {
       "additionalProperties": false,
       "properties": {
         "arch": {
+          "type": "string"
+        },
+        "build_version": {
           "type": "string"
         },
         "host_id": {
@@ -866,11 +906,24 @@
             }
           ]
         },
+        "last_heartbeat_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "maintenance": {
+          "$ref": "#/definitions/HostMaintenanceView"
+        },
+        "online": {
+          "type": "boolean"
+        },
         "open_runs": {
           "type": "integer"
         },
         "os": {
           "type": "string"
+        },
+        "protocol_version": {
+          "type": "integer"
         },
         "slots": {
           "type": "integer"
@@ -1454,6 +1507,9 @@
               "type": "null"
             }
           ]
+        },
+        "upgrade": {
+          "$ref": "#/definitions/UpgradeView"
         }
       },
       "required": [
@@ -1888,6 +1944,105 @@
         "updated_at"
       ],
       "title": "ToolUseView",
+      "type": "object"
+    },
+    "UpgradeHostView": {
+      "additionalProperties": false,
+      "properties": {
+        "current_version": {
+          "type": "string"
+        },
+        "downloaded_bytes": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "protocol_version": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "remaining_runs": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
+        },
+        "total_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "host_id",
+        "status",
+        "phase",
+        "protocol_version"
+      ],
+      "title": "UpgradeHostView",
+      "type": "object"
+    },
+    "UpgradeView": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UpgradeHostView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "upgrade_id",
+        "release_id",
+        "revision",
+        "status",
+        "phase",
+        "created_at",
+        "updated_at",
+        "hosts"
+      ],
+      "title": "UpgradeView",
       "type": "object"
     },
     "Verdict": {

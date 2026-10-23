@@ -1,10 +1,13 @@
+import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 import { useEffect, useId } from "react";
+import type { Connection } from "../api/client.ts";
 import type { TaskSummary } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import controls from "../shell/controls.module.css";
 import list from "../shell/list.module.css";
-import { Hosts } from "./Overview.tsx";
+import { Hosts } from "../hosts/Hosts.tsx";
+import { hostMaintaining } from "../hosts/status.ts";
 import { Back, Gear } from "../shell/icons.tsx";
 import { stages, type TaskFeed } from "./lists.ts";
 import { blockLabels, controlLabels, ratingLabels } from "./status.ts";
@@ -49,10 +52,12 @@ export function RecentTasks() {
 
 export function TaskBoard({
   active,
+  connection,
   onChat,
   onSettings,
 }: {
   active: boolean;
+  connection: Connection;
   onChat(): void;
   onSettings(): void;
 }) {
@@ -107,14 +112,19 @@ export function TaskBoard({
           刷新看板
         </button>
       </header>
+      <UpgradeBanner connection={connection} />
       <div className={styles.mobileRecent}>
         <details>
           <summary>最近完成</summary>
           <RecentTasks />
         </details>
         <details>
-          <summary>执行主机</summary>
-          <Hosts />
+          <summary>
+            执行主机
+            {!!snapshot?.hosts?.filter(hostMaintaining).length &&
+              ` · ${snapshot.hosts.filter(hostMaintaining).length} 台维护`}
+          </summary>
+          <Hosts connection={connection} />
         </details>
       </div>
       <div className={styles.board} role="region" aria-label="分阶段任务看板" tabIndex={0}>

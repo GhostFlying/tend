@@ -18,6 +18,7 @@ tend/
   cmd/
     tend-server/           服务端入口：只做配置解析与组装
     tend-runner/           runner 入口：只做配置解析与组装
+    tend-updater/          固定更新器入口与本机控制命令（D84）
     tend/                  tend CLI 入口：只做组装
   internal/
     protocol/              线上协议：请求信封、错误码、payload_hash、领域枚举；导出 JSON Schema
@@ -37,6 +38,9 @@ tend/
     harness/orca/          orca CLI 客户端与 orca 里的 TUI worker（D63、D66）
     harness/bridge/        TUI worker 的 MCP 桥：runner 本机 socket、worker-mcp、agent 项目级配置（D66）
     runner/                runner 客户端：journal、租约、自我 fencing、worker 驱动
+    release/               不可变发布 manifest 与产物校验，只用标准库
+    updater/               单实例进程监督与受控安装，不访问业务数据库
+    upgradectl/            server 本机升级入口与更新器组装，业务写入经 app
     cli/                   tend CLI：login、MCP 桥、hook 命令、setup、owner 命令（D46）
     netx/                  tsnet 封装（listener、WhoIs）；测试时替换为本地 listener
     webui/                 嵌入并提供 Web 客户端的构建产物（D70）；dist/app/ 由 make web 生成，不提交
@@ -62,7 +66,10 @@ cmd → api / tools / runnerapi / dispatch / contextbuilder
     → app → scheduler → domain → protocol
           → domain
           → store → protocol
-runner → harness, protocol, netx（runner 不 import 服务端的任何包）
+runner → harness, protocol, netx, release, updater（updater 仅用于本机状态与回执校验；runner 不 import 服务端的任何包）
+upgradectl → app, protocol, release, updater
+updater → protocol, release（不 import app/store/runner）
+app, store → release（只使用不可变 manifest 数据类型）
 cmd/tend → cli → protocol（cli 只用标准库，不 import 服务端的任何包）
 harness/traex, harness/orca, harness/bridge → harness, protocol
 cmd/tend-server → webui（webui 只用标准库，不 import 其他包）
@@ -92,6 +99,8 @@ cmd/tend-server → webui（webui 只用标准库，不 import 其他包）
 13. **密钥**：任何密钥都不进仓库。开发用的 key 放在 `~/.config/tend/`，通过 env file 注入。
 14. **公开仓库，不暴露本地信息**：代码、文档、注释和 commit message 中不出现本地绝对路径、用户名、主机名或 ssh 别名、IP、tailnet 名称、账号标识和内部系统地址。机器相关的信息放在 `.local/`（已 ignore）；需要提到时用通用描述或环境变量。
 15. **先写计划**：非平凡的功能在编码前先在 `docs/plans/` 写计划；设计变化在同一个 commit 里更新 `docs/design.md`，并引用决策编号。
+16. **协议 breaking change 与退役**：server / runner 通信发生不兼容变更时必须递增协议版本，不能只改程序版本、任务 spec 或存储 schema。每代支持 N 和 N−1；提升到 N+1 的同一变更必须实现 N+1、保留 N 的适配与兼容测试、删除 N−1 的通信适配，并增加拒绝 N−1 的测试。删除/重命名字段、改变类型、增加必填条件、收紧旧有效请求校验或改变默认语义都必须评估为 breaking change。
+17. **兼容代码有期限**：旧协议适配集中放置，登记 ID、适配协议、退役版本及关联代码/测试，代码用 `tend:compat` 标记引用登记。`make check` 必须拒绝过期适配器或登记不一致；开发者在协议升级 PR 中删除代码并更新设计及发布元信息，不通过删除标记或延后期限逃避退役。通信适配退役不删除已提交迁移、历史任务或产物；旧持久化格式需先迁移或保留专用历史读取。发布前必须确认主机及未结束 run/待对账操作不再依赖已退役协议。
 
 ## 3. 代码风格
 

@@ -1,3 +1,5 @@
+import { useServices } from "../app/services.tsx";
+import { noticeTitle } from "../upgrades/status.ts";
 // The transcript's rows: the owner's messages as right-hand bubbles with
 // their state below, and what the main agent did for each as full-width
 // Markdown with its tool uses.
@@ -131,12 +133,19 @@ const AgentItem = memo(function AgentItem({ item }: { item: ConversationItem }) 
 });
 
 export function SystemMessage({ item }: { item: ConversationItem }) {
+  const { openUpgrade } = useServices();
+  const title = noticeTitle(item.notice_type);
   return (
-    <section className={styles.system} data-scroll-id={item.message_id} aria-label="任务完成通知">
+    <section className={styles.system} data-scroll-id={item.message_id} aria-label={`${title}通知`}>
       <div className={styles.systemHead}>
-        任务完成 <time dateTime={item.created_at}>{clock(Date.parse(item.created_at))}</time>
+        {title} <time dateTime={item.created_at}>{clock(Date.parse(item.created_at))}</time>
       </div>
       <Markdown text={item.body ?? ""} />
+      {item.upgrade_id && (
+        <button type="button" onClick={() => openUpgrade(item.upgrade_id!)}>
+          查看发布详情
+        </button>
+      )}
     </section>
   );
 }

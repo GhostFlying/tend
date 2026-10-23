@@ -489,6 +489,11 @@ func (m *Manager) deliverHandoff(ctx context.Context, d app.Delivery) app.Delive
 	}
 	m.workMu.Lock()
 	defer m.workMu.Unlock()
+	if paused, err := m.app.UpgradePausesMain(ctx); err != nil {
+		return retry(err)
+	} else if paused {
+		return retry(errors.New("mainthread: waiting for server upgrade"))
+	}
 	m.mu.Lock()
 	s := m.session
 	m.mu.Unlock()

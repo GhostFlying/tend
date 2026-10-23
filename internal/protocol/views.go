@@ -136,14 +136,29 @@ type RequestView struct {
 	Error     *Error          `json:"error,omitempty"`
 }
 
+// HostMaintenanceView separates maintenance from connectivity and slot capacity.
+type HostMaintenanceView struct {
+	Mode          string `json:"mode"`
+	Phase         string `json:"phase,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	ReleaseID     string `json:"release_id,omitempty"`
+	UpgradeID     string `json:"upgrade_id,omitempty"`
+	RemainingRuns int64  `json:"remaining_runs,omitempty"`
+}
+
 // HostView is an active execution host.
 type HostView struct {
-	WorkspaceProtocol int64    `json:"workspace_protocol,omitempty"`
-	HostID            string   `json:"host_id"`
-	OS                string   `json:"os"`
-	Arch              string   `json:"arch"`
-	Labels            []string `json:"labels"`
-	Slots             int64    `json:"slots"`
+	Online            *bool                `json:"online,omitempty"`
+	LastHeartbeatAt   *time.Time           `json:"last_heartbeat_at,omitempty"`
+	Maintenance       *HostMaintenanceView `json:"maintenance,omitempty"`
+	BuildVersion      string               `json:"build_version,omitempty"`
+	ProtocolVersion   *int64               `json:"protocol_version,omitempty"`
+	WorkspaceProtocol int64                `json:"workspace_protocol,omitempty"`
+	HostID            string               `json:"host_id"`
+	OS                string               `json:"os"`
+	Arch              string               `json:"arch"`
+	Labels            []string             `json:"labels"`
+	Slots             int64                `json:"slots"`
 	// Worker is the harness the host runs its workers with (D64).
 	Worker WorkerKind `json:"worker"`
 	// OpenRuns counts the runs on the host that may still be working.
@@ -188,6 +203,7 @@ type QueueEntry struct {
 
 // Snapshot is the owner's overview of the ledger, read at one point.
 type Snapshot struct {
+	Upgrade *UpgradeView `json:"upgrade,omitempty"`
 	// EventSeq is the last event the snapshot reflects.
 	EventSeq int64 `json:"event_seq"`
 	// Tasks are the unfinished tasks.
@@ -242,7 +258,10 @@ const (
 // owner, main agent or system, or a tool the main agent used. Items share
 // one order, by seq.
 type ConversationItem struct {
-	Seq int64 `json:"seq"`
+	NoticeType string `json:"notice_type,omitempty"`
+	UpgradeID  string `json:"upgrade_id,omitempty"`
+	HostID     string `json:"host_id,omitempty"`
+	Seq        int64  `json:"seq"`
 	// Kind is "message" or "tool_use".
 	Kind      string `json:"kind"`
 	MessageID string `json:"message_id"`

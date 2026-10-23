@@ -66,7 +66,7 @@ func TestJournalSevenMigrationPreservesUnknownLegacyOrigin(t *testing.T) {
 	}
 	defer j.Close()
 	var version int
-	if err := j.db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&version); err != nil || version != 8 {
+	if err := j.db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
 		t.Fatalf("version %d %v", version, err)
 	}
 	if err := j.AcceptAssignmentFromWorker(t.Context(), protocol.Assignment{RunID: "legacy"}, "", protocol.WorkerOrca); err != nil {

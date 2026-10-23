@@ -8,6 +8,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -205,6 +206,12 @@ func Snapshot(ctx context.Context, q store.Querier, queue []protocol.QueueEntry,
 	if v.EventSeq, err = store.LatestEventSeq(ctx, q); err != nil {
 		return v, err
 	}
+	latestUpgrade, upgradeErr := store.LatestUpgrade(ctx, q)
+	if upgradeErr == nil {
+		v.Upgrade = &latestUpgrade.View
+	} else if !errors.Is(upgradeErr, store.ErrNotFound) {
+		return v, upgradeErr
+	}
 	// Scoped before the cap on the number of tasks.
 	if v.Tasks, err = Tasks(ctx, q, false, project); err != nil {
 		return v, err
@@ -245,7 +252,33 @@ func Snapshot(ctx context.Context, q store.Querier, queue []protocol.QueueEntry,
 		if err != nil {
 			return v, err
 		}
-		v.Hosts = append(v.Hosts, protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, Worker: h.Worker, WorkspaceProtocol: h.WorkspaceProtocol, OpenRuns: n})
+		hv := protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, Worker: h.Worker, WorkspaceProtocol: h.WorkspaceProtocol, OpenRuns: n}
+		rt, err := store.GetHostRuntime(ctx, q, h.HostID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return v, err
+		}
+		if err == nil {
+			stamp := time.UnixMilli(rt.LastHeartbeatAt)
+			hv.Online = &rt.Online
+			hv.LastHeartbeatAt = &stamp
+			hv.BuildVersion = rt.Runtime.Build.Version
+			hv.ProtocolVersion = &rt.Runtime.Protocol
+		}
+		control, err := store.GetHostControl(ctx, q, h.HostID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return v, err
+		}
+		if control.Mode == protocol.RunnerMaintenance || rt.Runtime.Mode == protocol.RunnerMaintenance || rt.Runtime.Mode == protocol.RunnerReady {
+			hv.Maintenance = &protocol.HostMaintenanceView{Mode: protocol.RunnerMaintenance, Phase: "draining", ReleaseID: control.ReleaseID, UpgradeID: control.UpgradeID, RemainingRuns: n}
+			if rt.Runtime.Mode == protocol.RunnerReady && n == 0 && rt.Runtime.AppliedControlRevision == control.Revision {
+				hv.Maintenance.Mode = protocol.RunnerReady
+				hv.Maintenance.Phase = "ready"
+			}
+			if len(rt.Runtime.Blockers) > 0 {
+				hv.Maintenance.Reason = strings.Join(rt.Runtime.Blockers, ", ")
+			}
+		}
+		v.Hosts = append(v.Hosts, hv)
 	}
 	if v.Tasks == nil {
 		v.Tasks = []protocol.TaskSummary{}
@@ -338,13 +371,17 @@ func Conversation(ctx context.Context, q store.Querier, before, after int64, lim
 		}
 	}
 	for _, r := range rows {
-		page.Items = append(page.Items, conversationItem(r))
+		item, err := conversationItem(ctx, q, r)
+		if err != nil {
+			return protocol.ConversationPage{}, err
+		}
+		page.Items = append(page.Items, item)
 	}
 	return page, nil
 }
 
 // conversationItem shows a conversation row to the owner.
-func conversationItem(r store.ConversationRow) protocol.ConversationItem {
+func conversationItem(ctx context.Context, q store.Querier, r store.ConversationRow) (protocol.ConversationItem, error) {
 	it := protocol.ConversationItem{Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
 		ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC(),
 		AssistantState: protocol.AssistantState(r.AssistantState), AssistantRevision: r.AssistantRevision}
@@ -363,7 +400,15 @@ func conversationItem(r store.ConversationRow) protocol.ConversationItem {
 			it.Decision = &c
 		}
 	}
-	return it
+	notice, err := store.GetMessageNotice(ctx, q, r.MessageID)
+	if err == nil {
+		it.NoticeType = notice.NoticeType
+		it.UpgradeID = notice.UpgradeID
+		it.HostID = notice.HostID
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return protocol.ConversationItem{}, err
+	}
+	return it, nil
 }
 
 // Events reads up to limit ledger events after seq for the owner's event
@@ -380,7 +425,10 @@ func Events(ctx context.Context, q store.Querier, after int64, limit int) ([]pro
 			r, err := store.GetConversationItem(ctx, q, e.ObjectID)
 			switch {
 			case err == nil:
-				it := conversationItem(r)
+				it, err := conversationItem(ctx, q, r)
+				if err != nil {
+					return nil, err
+				}
 				ev.Item = &it
 			case !errors.Is(err, store.ErrNotFound):
 				return nil, err

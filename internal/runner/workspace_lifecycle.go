@@ -29,13 +29,51 @@ func (r *Runner) workspaceLifecycle(ctx context.Context) {
 	}
 }
 
-func (r *Runner) maintainWorkspaces(ctx context.Context) error {
+func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
+	var heldResources bool
+	maintenance := r.maintenance()
+	if maintenance {
+		r.mu.Lock()
+		safe := r.resourceReconciled && !r.resourceBusy && len(r.resourceBlockers) == 0
+		r.mu.Unlock()
+		if safe {
+			requests, err := r.cfg.Journal.Requests(ctx)
+			if err != nil {
+				return err
+			}
+			releases, err := r.cfg.Journal.WorkspaceReleases(ctx)
+			if err != nil {
+				return err
+			}
+			if len(requests) == 0 && len(releases) == 0 {
+				return nil
+			}
+		}
+	}
+	r.mu.Lock()
+	r.resourceBusy = true
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.resourceBusy = false
+		r.resourceReconciled = resultErr == nil && !heldResources
+		r.resourceBlockers = nil
+		if heldResources {
+			r.resourceBlockers = []string{"workspace_process_unconfirmed"}
+		}
+		if resultErr != nil {
+			r.resourceBlockers = []string{"workspace_reconciliation_failed"}
+		}
+		r.mu.Unlock()
+	}()
+
 	cleaner, ok := r.cfg.Workspaces.(workspaceCleaner)
 	if !ok {
 		return nil
 	}
 	var deferred []error
 	blocked, reconcileErr := r.reconcileWorkspaceProcesses(ctx)
+	heldResources = len(blocked) > 0
 	if reconcileErr != nil {
 		deferred = append(deferred, fmt.Errorf("reconcile workspace processes: %w", reconcileErr))
 	}
@@ -112,15 +150,25 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) error {
 	// responses retain their request identity; confirmed reservations live on
 	// the server and can rotate past deferred resources on the next pass.
 	if !attemptedReservation {
-		env, err := r.newEnvelope(protocol.OpWorkspaceCleanup, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.WorkspaceCleanupRequest{Limit: 10})
-		if err != nil {
-			deferred = append(deferred, err)
-		} else if err := r.cfg.Journal.PutRequest(ctx, journal.Request{Envelope: *env}); err != nil {
-			deferred = append(deferred, err)
-		} else if err := r.cleanupRequest(ctx, cleaner, env); err != nil {
-			deferred = append(deferred, err)
+		r.controlMu.Lock()
+		var env *protocol.Envelope
+		var reserveErr error
+		if r.control.Mode != protocol.RunnerMaintenance && !r.bootstrapMaintenance {
+			env, reserveErr = r.newEnvelope(protocol.OpWorkspaceCleanup, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.WorkspaceCleanupRequest{Limit: 10})
+			if reserveErr == nil {
+				reserveErr = r.cfg.Journal.PutRequest(ctx, journal.Request{Envelope: *env})
+			}
+		}
+		r.controlMu.Unlock()
+		if reserveErr != nil {
+			deferred = append(deferred, reserveErr)
+		} else if env != nil {
+			if err := r.cleanupRequest(ctx, cleaner, env); err != nil {
+				deferred = append(deferred, err)
+			}
 		}
 	}
+
 	return errors.Join(deferred...)
 }
 

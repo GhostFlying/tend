@@ -296,6 +296,7 @@ func (t *Tx) CancelOpenActions(ctx context.Context, taskID string, now int64) er
 
 // RunRow is a stored run.
 type RunRow struct {
+	Protocol      int64
 	RunID         string
 	TaskID        string
 	ActionID      string
@@ -311,21 +312,21 @@ type RunRow struct {
 // returns a unique violation.
 func (t *Tx) InsertRun(ctx context.Context, r RunRow) error {
 	_, err := t.Exec(ctx, `INSERT INTO runs (run_id, task_id, action_id, generation, role, host_id, desired_state,
-		observed_state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		observed_state, created_at, updated_at, protocol) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.RunID, r.TaskID, r.ActionID, r.Generation, r.Role, nullString(r.HostID), r.DesiredState, r.ObservedState,
-		r.CreatedAt, r.CreatedAt)
+		r.CreatedAt, r.CreatedAt, r.Protocol)
 	if err != nil {
 		return fmt.Errorf("store: insert run: %w", err)
 	}
 	return nil
 }
 
-const runColumns = `run_id, task_id, action_id, generation, role, host_id, desired_state, observed_state, created_at`
+const runColumns = `run_id, task_id, action_id, generation, role, host_id, desired_state, observed_state, created_at, protocol`
 
 func scanRun(row interface{ Scan(...any) error }) (RunRow, error) {
 	var r RunRow
 	var host sql.NullString
-	err := row.Scan(&r.RunID, &r.TaskID, &r.ActionID, &r.Generation, &r.Role, &host, &r.DesiredState, &r.ObservedState, &r.CreatedAt)
+	err := row.Scan(&r.RunID, &r.TaskID, &r.ActionID, &r.Generation, &r.Role, &host, &r.DesiredState, &r.ObservedState, &r.CreatedAt, &r.Protocol)
 	r.HostID = host.String
 	return r, err
 }

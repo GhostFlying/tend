@@ -377,12 +377,15 @@ export interface ConversationItem {
   body?: string;
   created_at: string;
   decision?: DecisionChoice;
+  host_id?: string;
   kind: string;
   message_id: string;
+  notice_type?: string;
   reply_to?: string;
   seq: number;
   state?: MessageState;
   tool?: ToolUseView;
+  upgrade_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -589,6 +592,7 @@ export interface Snapshot {
   projects: ProjectView[] | null;
   queue: QueueEntry[] | null;
   tasks: TaskSummary[] | null;
+  upgrade?: UpgradeView;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -613,13 +617,30 @@ export interface DecisionView {
  */
 export interface HostView {
   arch: string;
+  build_version?: string;
   host_id: string;
   labels: string[] | null;
+  last_heartbeat_at?: string;
+  maintenance?: HostMaintenanceView;
+  online?: boolean;
   open_runs: number;
   os: string;
+  protocol_version?: number;
   slots: number;
   worker: WorkerKind;
   workspace_protocol?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "HostMaintenanceView".
+ */
+export interface HostMaintenanceView {
+  mode: string;
+  phase?: string;
+  reason?: string;
+  release_id?: string;
+  remaining_runs?: number;
+  upgrade_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -649,6 +670,37 @@ export interface QueueEntry {
   title: string;
   unplaceable?: string;
   waited_millis: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpgradeView".
+ */
+export interface UpgradeView {
+  created_at: string;
+  hosts: UpgradeHostView[] | null;
+  phase: string;
+  reason?: string;
+  release_id: string;
+  revision: number;
+  status: string;
+  updated_at: string;
+  upgrade_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpgradeHostView".
+ */
+export interface UpgradeHostView {
+  current_version?: string;
+  downloaded_bytes?: number;
+  host_id: string;
+  phase: string;
+  protocol_version: number;
+  reason?: string;
+  remaining_runs?: number;
+  status: string;
+  target_version?: string;
+  total_bytes?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

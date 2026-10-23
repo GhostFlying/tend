@@ -1,3 +1,4 @@
+import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 // The one conversation with the main agent (D27): the transcript, and the
 // seat docked at the bottom with notes and the composer.
 import { useState } from "react";
@@ -62,6 +63,7 @@ export function Chat({
           <ArrowDown />
         </button>
       </header>
+      <UpgradeBanner connection={connection} />
       <Transcript jump={jump} visible={visible} />
       <div className={styles.seat}>
         <div className={styles.seatInner}>

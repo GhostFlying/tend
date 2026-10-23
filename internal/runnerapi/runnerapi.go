@@ -59,6 +59,7 @@ func HashToken(token string) string {
 
 // Config tunes the server. Zero values select the defaults.
 type Config struct {
+	ReleaseDir string
 	// ClaimWait bounds how long a claim waits for work. Default 25s.
 	ClaimWait time.Duration
 	// FileLimit and ResultFileLimit bound durable binary uploads.
@@ -87,6 +88,8 @@ func New(a *app.App, whois netx.WhoIs, secret []byte, cfg Config, log *slog.Logg
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+Path, s.serve)
+	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/manifest", s.releaseFile)
+	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/artifacts/{sha}", s.releaseFile)
 	mux.HandleFunc("POST /runner/v1/files", s.uploadFile)
 	mux.HandleFunc("GET /runner/v1/files/{id}", s.downloadFile)
 	return mux
@@ -239,6 +242,26 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 			res.Reassigned[i].RunToken = RunToken(s.secret, res.Reassigned[i].LeaseID)
 		}
 		return withResult(op, res)
+	case "runner.upgrade_authorize":
+		op, err := s.app.Execute(ctx, p, env, app.AuthorizeRunnerUpgrade{})
+		if err != nil || op.Status != protocol.OpSucceeded {
+			return op, err
+		}
+		var grant protocol.UpgradeGrant
+		if err := json.Unmarshal(op.Result, &grant); err != nil {
+			return op, err
+		}
+		return withResult(op, s.app.RefreshUpgradeGrant(grant))
+	case "runner.upgrade_health":
+		var b protocol.UpgradeBinding
+		if err := decodeStrict(env.Payload, &b); err != nil {
+			return protocol.Operation{}, err
+		}
+		health, err := s.app.RunnerUpgradeHealth(ctx, p, b)
+		if err != nil {
+			return protocol.Operation{}, err
+		}
+		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, health)
 	case protocol.OpRunnerClaim:
 		return s.claim(ctx, p, env)
 	case protocol.OpRunnerHeartbeat:
@@ -246,7 +269,7 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 		if err := decodeStrict(env.Payload, &pl); err != nil {
 			return protocol.Operation{}, err
 		}
-		res, err := s.app.Heartbeat(ctx, p, pl.Runs)
+		res, err := s.app.RuntimeHeartbeat(ctx, p, pl)
 		if err != nil {
 			return protocol.Operation{}, err
 		}
@@ -351,6 +374,9 @@ func (s *Server) SweepLeases(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+		if _, err := s.app.SweepRunnerPresence(ctx); err != nil && ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "runner presence sweep failed", "err", err)
 		}
 		if n, err := s.app.ExpireLeases(ctx); err != nil && ctx.Err() == nil {
 			s.log.ErrorContext(ctx, "lease sweep failed", "err", err)

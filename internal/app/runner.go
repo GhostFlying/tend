@@ -167,8 +167,8 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		return protocol.Assignment{}, err
 	}
 	as := protocol.Assignment{
-		Relations: relations,
-		RunID:     run.RunID, LeaseID: lease.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: run.TaskID,
+		Relations: relations, Protocol: run.Protocol,
+		RunID: run.RunID, LeaseID: lease.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: run.TaskID,
 		ActionID: run.ActionID, Role: run.Role, Desired: desiredFor(run, action, task), Generation: run.Generation,
 		SpecVersion: action.TargetSpecVersion,
 		Spec:        json.RawMessage(specJSON), Workspace: ws,
@@ -214,7 +214,7 @@ func (Claim) Operation() string { return protocol.OpRunnerClaim }
 
 // Authorize implements Command.
 func (Claim) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
-	return checkWorker(ctx, x, q)
+	return checkClaimRuntime(ctx, x, q)
 }
 
 // Apply implements Command.
@@ -229,6 +229,13 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	host, err := requireActiveHost(ctx, x, q)
 	if err != nil {
 		return Outcome{}, err
+	}
+	control, err := runnerControl(ctx, q, host.HostID, x.Now.UnixMilli())
+	if err != nil {
+		return Outcome{}, err
+	}
+	if control.Mode != protocol.RunnerNormal || (p.Runtime != nil && (p.Runtime.Mode != protocol.RunnerNormal || p.Runtime.AppliedControlRevision != control.Revision)) {
+		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
 	}
 	if p.WorkspaceProtocol < 0 || p.WorkspaceProtocol > 1 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported workspace_protocol")
@@ -266,6 +273,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		RunID: x.IDs.New(protocol.PrefixRun), TaskID: pick.TaskID, ActionID: pick.ActionID, Generation: pick.Generation,
 		Role: roleOf(pick.Kind), HostID: host.HostID, DesiredState: protocol.DesiredRun,
 		ObservedState: protocol.RunStarting, CreatedAt: now,
+	}
+	if p.Runtime != nil {
+		run.Protocol = p.Runtime.Protocol
 	}
 	if err := tx.InsertRun(ctx, run); err != nil {
 		return Outcome{}, err
@@ -320,7 +330,14 @@ func (Hello) Operation() string { return protocol.OpRunnerHello }
 
 // Authorize implements Command.
 func (Hello) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
-	return checkWorker(ctx, x, q)
+	if err := checkWorker(ctx, x, q); err != nil {
+		return err
+	}
+	var p protocol.HelloPayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return err
+	}
+	return checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, true)
 }
 
 // Apply implements Command.
@@ -346,7 +363,22 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 	res := protocol.HelloResult{LeaseTTLMillis: x.LeaseTTL.Milliseconds(), Runs: []protocol.RunVerdict{}, Reassigned: []protocol.Assignment{}}
+	changed, err := observeRuntime(ctx, tx, host.HostID, p.Runtime, now, true)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if p.Runtime != nil {
+		c, err := runnerControl(ctx, q, host.HostID, now)
+		if err != nil {
+			return Outcome{}, err
+		}
+		res.Control = &c
+	}
 	var events []Event
+	if changed {
+		events = append(events, Event{ObjectType: "host", ObjectID: host.HostID, Kind: "host.runtime_changed", Body: map[string]any{}})
+	}
+
 	if host.WorkspaceProtocol != p.WorkspaceProtocol {
 		if err := tx.InvalidateBaselines(ctx, now); err != nil {
 			return Outcome{}, err
@@ -391,7 +423,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			stop(h.RunID, "the run is no longer wanted")
 			continue
 		}
-		if err := tx.SetLease(ctx, lease.LeaseID, lease.Status, store.LeaseActive, expires, now); err != nil {
+		if err := tx.SetLease(ctx, lease.LeaseID, lease.Status, store.LeaseActive, max(expires, lease.ExpiresAt), now); err != nil {
 			return Outcome{}, err
 		}
 		// Only a live state is taken over from the runner. A run that
@@ -434,7 +466,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 				events = append(events, Event{ObjectType: "run", ObjectID: run.RunID, Kind: "run.abandoned", Body: map[string]any{"reason": "the run never started and is no longer wanted"}})
 				continue
 			}
-			if err := tx.SetLease(ctx, lease.LeaseID, lease.Status, store.LeaseActive, expires, now); err != nil {
+			if err := tx.SetLease(ctx, lease.LeaseID, lease.Status, store.LeaseActive, max(expires, lease.ExpiresAt), now); err != nil {
 				return Outcome{}, err
 			}
 			lease.ExpiresAt = expires
@@ -677,6 +709,12 @@ func endRun(ctx context.Context, x *Exec, tx *store.Tx, run store.RunRow, to pro
 // a request record. A lease that lapsed is not renewed; the runner must
 // fence itself and reconcile through hello.
 func (a *App) Heartbeat(ctx context.Context, p protocol.Principal, refs []protocol.LeaseRef) (protocol.HeartbeatResult, error) {
+	return a.RuntimeHeartbeat(ctx, p, protocol.HeartbeatPayload{Runs: refs})
+}
+
+func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payload protocol.HeartbeatPayload) (protocol.HeartbeatResult, error) {
+	refs := payload.Runs
+	changed := false
 	res := protocol.HeartbeatResult{LeaseTTLMillis: a.leaseTTL.Milliseconds(), Runs: []protocol.LeaseState{}}
 	if p.Kind != protocol.PrincipalRunner {
 		return res, protocol.Errorf(protocol.CodeForbidden, "only runners send heartbeats")
@@ -687,6 +725,22 @@ func (a *App) Heartbeat(ctx context.Context, p protocol.Principal, refs []protoc
 		host, err := store.GetHost(ctx, q, p.Subject)
 		if err != nil || host.Status != store.HostActive {
 			return protocol.Errorf(protocol.CodeForbidden, "host %s is not active", p.Subject)
+		}
+		changed, err = observeRuntime(ctx, tx, host.HostID, payload.Runtime, now.UnixMilli(), false)
+		if err != nil {
+			return err
+		}
+		if payload.Runtime != nil {
+			c, err := runnerControl(ctx, q, host.HostID, now.UnixMilli())
+			if err != nil {
+				return err
+			}
+			res.Control = &c
+		}
+		if changed {
+			if err := a.runtimeEvent(ctx, tx, host.HostID, "host.runtime_changed"); err != nil {
+				return err
+			}
 		}
 		if err := tx.TouchHost(ctx, host.HostID, now.UnixMilli()); err != nil {
 			return err
@@ -706,7 +760,7 @@ func (a *App) Heartbeat(ctx context.Context, p protocol.Principal, refs []protoc
 				return err
 			}
 			if err == nil && rc.run.HostID == host.HostID && lease.LeaseID == ref.LeaseID && lease.Status == store.LeaseActive {
-				if err := tx.SetLease(ctx, lease.LeaseID, store.LeaseActive, store.LeaseActive, now.Add(a.leaseTTL).UnixMilli(), now.UnixMilli()); err != nil {
+				if err := tx.SetLease(ctx, lease.LeaseID, store.LeaseActive, store.LeaseActive, max(now.Add(a.leaseTTL).UnixMilli(), lease.ExpiresAt), now.UnixMilli()); err != nil {
 					return err
 				}
 				state.Renewed = true
@@ -716,6 +770,9 @@ func (a *App) Heartbeat(ctx context.Context, p protocol.Principal, refs []protoc
 		}
 		return nil
 	})
+	if err == nil && changed {
+		a.notifyChange()
+	}
 	return res, err
 }
 

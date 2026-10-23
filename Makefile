@@ -9,7 +9,7 @@ WEB := web
 .PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check
 
 ## check: everything that must pass before a commit is merged
-check: fmt-check vet staticcheck test web-check
+check: protocol-check fmt-check vet staticcheck test web-check
 
 fmt-check:
 	@out="$$(gofmt -l $$(git ls-files '*.go'))"; \
@@ -50,3 +50,7 @@ web-deps:
 ## web-check: the web client's typecheck, lint, format check, unit tests and build
 web-check: web-deps
 	$(PNPM) --dir $(WEB) check
+
+.PHONY: protocol-check
+protocol-check:
+	$(GO) run ./internal/protocol/compatcheck/cmd
