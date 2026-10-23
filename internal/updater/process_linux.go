@@ -302,19 +302,23 @@ func (p LinuxProcess) Stop(ctx context.Context, id Identity, timeout time.Durati
 	if errno != 0 && errno != syscall.ESRCH {
 		return fmt.Errorf("updater: stop process: %w", errno)
 	}
+	return observeSignalledProcess(ctx, id, timeout, p.Inspect)
+}
+
+// Only Stop may enter this observation loop, after pinning and signalling once.
+func observeSignalledProcess(ctx context.Context, id Identity, timeout time.Duration, inspect func(context.Context, int) (Identity, error)) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		current, err := p.Inspect(ctx, id.PID)
+		current, err := inspect(ctx, id.PID)
 		if errors.Is(err, ErrNotRunning) {
 			return nil
 		}
-		if err != nil {
-			return err
-		}
-		if current.StartTicks != id.StartTicks {
+		// Observations may transiently fail while the pinned child exits. An
+		// unreadable process is not proof of exit; retain the stop deadline.
+		if err == nil && current.StartTicks != id.StartTicks {
 			return nil
 		}
 		select {

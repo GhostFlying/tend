@@ -138,3 +138,30 @@ func TestBootstrapVerifiesRuntimeAndLaunchIdentityMatch(t *testing.T) {
 		})
 	}
 }
+
+func TestSignalledProcessObservationRetriesPermissionErrors(t *testing.T) {
+	id := Identity{PID: 123, StartTicks: 7}
+	calls := 0
+	err := observeSignalledProcess(context.Background(), id, time.Second, func(context.Context, int) (Identity, error) {
+		calls++
+		if calls <= 2 {
+			return Identity{}, os.ErrPermission
+		}
+		return Identity{}, ErrNotRunning
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("transient observation abandoned: calls=%d err=%v", calls, err)
+	}
+}
+func TestSignalledProcessUnreadableIsNotExitProof(t *testing.T) {
+	err := observeSignalledProcess(context.Background(), Identity{PID: 123, StartTicks: 7}, 5*time.Millisecond, func(context.Context, int) (Identity, error) { return Identity{}, os.ErrPermission })
+	if err == nil || errors.Is(err, os.ErrPermission) {
+		t.Fatalf("expected bounded stop deadline, got %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = observeSignalledProcess(ctx, Identity{PID: 123}, time.Second, func(context.Context, int) (Identity, error) { return Identity{}, os.ErrPermission })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel ignored: %v", err)
+	}
+}

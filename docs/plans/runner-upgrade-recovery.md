@@ -16,3 +16,9 @@
 - 使用真实 Unix stub 验证投递失败跨重启、下一批次可 stage，以及非 staged/不同实例/无明确标记不发送取消。
 
 取消确认还必须包含按批次 ID 持久保存的 terminal receipt。操作暂时不存在不构成证明：显式取消写 tombstone，阻止此前超时的旧 `/upgrade` 在后续抵达时重新 stage。历史 committed/rolled_back/cancelled 凭据均可证明旧 ID 已不可重做；后续批次不能清除这些身份。
+
+## 第三轮评审：恢复 normal 指令的确认窗口
+
+- 编排区分可用主机与仅等待本批次 normal 控制确认的在线主机。后者必须有正槽位、fresh 心跳、normal 控制及严格较旧 applied revision；不把它当作可用主机授权或开始维护。
+- 等待不推进阶段、不重置截止时间；离线、别批次维护、控制仍维护或当前 revision 已确认但仍维护继续进入 attention。
+- 独立测试覆盖 server 恢复 normal 后的心跳窗口、单主机 restored 清 ID 后的元信息确认窗口及负例。

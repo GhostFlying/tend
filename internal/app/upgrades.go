@@ -227,13 +227,17 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		if err := attention("候选版本未启动，已确认回退旧版本；取消本批次后可重新升级"); err != nil {
 			return Outcome{}, err
 		}
-	} else if r.View.Status == "attention" {
-		return Outcome{Result: r.View, NoEffect: true}, nil
-	} else if r.Deadline > 0 && now >= r.Deadline {
-		if err := attention("等待当前阶段超时，已暂停后续升级"); err != nil {
+	} else if r.View.Status == "attention" || (r.Deadline > 0 && now >= r.Deadline) {
+		if r.View.Status != "attention" {
+			if err := attention("等待当前阶段超时，已暂停后续升级"); err != nil {
+				return Outcome{}, err
+			}
+		}
+		// Expired stop authority forbids another installation, but does not
+		// invalidate evidence from a candidate already bound to this batch.
+		if err := reconcilePausedCandidates(ctx, x, tx, &r, c.Observation); err != nil {
 			return Outcome{}, err
 		}
-
 	} else {
 		switch r.View.Phase {
 		case "server_draining":
@@ -290,39 +294,13 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 				r.Deadline = now + r.GrantMillis - r.RestartMillis
 			}
 		case "server_ready", "server_checking":
-			if r.ServerProcess != "" && c.Observation.ProcessInstanceID == r.ServerProcess && c.Observation.BinarySHA256 == r.ServerHash && c.Observation.Healthy && c.Observation.MainDrained {
-				matches, err := installedServerMatches(ctx, tx.Q(), r.Manifest)
-				if err != nil {
+			reason, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if reason != "" {
+				if err := attention(reason); err != nil {
 					return Outcome{}, err
-				}
-				if !matches {
-					if err := attention("候选 server 的协议或数据库版本与发布清单不一致"); err != nil {
-						return Outcome{}, err
-					}
-					break
-				}
-				r.View.Phase = "server_checking"
-				if now-r.ServerHealthAt >= 5000 {
-					r.ServerHealthy++
-					r.ServerHealthAt = now
-				}
-				if r.ServerHealthy >= 2 {
-					for _, h := range r.Hosts {
-						ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
-						if err != nil {
-							return Outcome{}, err
-						}
-						ctl.Revision++
-						ctl.Mode = protocol.RunnerNormal
-						ctl.Authorization = nil
-						ctl.UpgradeID = ""
-						ctl.ReleaseID = ""
-						if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
-							return Outcome{}, err
-						}
-					}
-					r.View.Phase = "runners"
-					r.Deadline = now + r.DrainMillis
 				}
 			}
 		case "runners":
@@ -378,6 +356,13 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				return err
 			}
 			if !available {
+				pending, err := anotherHostAwaitingNormal(ctx, tx.Q(), h.HostID, r.View.UpgradeID, now)
+				if err != nil {
+					return err
+				}
+				if pending {
+					return nil
+				}
 				return attention("其他执行主机不可用，已暂停后续升级")
 			}
 		}
@@ -416,46 +401,14 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			r.Deadline = now + r.DrainMillis
 			return nil
 		}
-		if v.Phase != "restored" && rt.Runtime.UpgradeID == r.View.UpgradeID && rt.Runtime.Build.BinarySHA256 == h.TargetHash && rt.Runtime.InstanceID == h.CandidateInstance {
-			if !installedRunnerMatches(rt.Runtime, r.Manifest) {
-				return attention("候选 runner 的协议或 journal 版本与发布清单不一致")
-			}
-			v.Phase = "checking"
-			healthy := rt.Online && now-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.AppliedControlRevision == ctl.Revision && runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0
-			if healthy && rt.Runtime.Sequence > h.LastSequence && rt.LastHeartbeatAt-h.LastHealthyAt >= 7500 {
-				h.Healthy++
-				h.LastSequence = rt.Runtime.Sequence
-				h.LastHealthyAt = rt.LastHeartbeatAt
-			}
-			if !healthy {
-				h.Healthy = 0
-			}
-			if h.Healthy >= 2 {
-				ctl.Revision++
-				ctl.Mode = protocol.RunnerNormal
-				ctl.Upgrade = nil
-				ctl.Authorization = nil
-				// Keep the upgrade identity until normal mode is acknowledged.
-				if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
-					return err
-				}
-				v.Phase = "restored"
-			}
+		handled, reason, err := reconcileRunnerCandidate(ctx, x, tx, r, i)
+		if err != nil {
+			return err
 		}
-		if v.Phase == "restored" {
-			if rt.Runtime.Mode == protocol.RunnerNormal && rt.Runtime.AppliedControlRevision == ctl.Revision {
-				v.Status = "completed"
-				v.CurrentVersion = rt.Runtime.Build.Version
-				v.ProtocolVersion = rt.Runtime.Protocol
-				r.Deadline = now + r.DrainMillis
-				ctl.Revision++
-				ctl.UpgradeID = ""
-				ctl.ReleaseID = ""
-				if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
-					return err
-				}
-				return upgradeNotice(ctx, x, tx, *r, "upgrade_host_restored", h.HostID, fmt.Sprintf("执行主机 `%s` 已升级并恢复接收任务。", h.HostID))
-			}
+		if reason != "" {
+			return attention(reason)
+		}
+		if handled {
 			return nil
 		}
 		if v.Phase == "draining" && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && runs == 0 {
@@ -494,6 +447,38 @@ func anotherAvailableHost(ctx context.Context, q store.Querier, exclude string, 
 			return false, err
 		}
 		if rt.Online && now-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal && rt.Runtime.AppliedControlRevision == ctl.Revision {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// anotherHostAwaitingNormal identifies only a bounded acknowledgment gap.
+// It never makes the host available to authorize installation or start drain.
+func anotherHostAwaitingNormal(ctx context.Context, q store.Querier, exclude, upgradeID string, now int64) (bool, error) {
+	hosts, err := store.ListActiveHosts(ctx, q)
+	if err != nil {
+		return false, err
+	}
+	for _, h := range hosts {
+		if h.HostID == exclude || h.Slots <= 0 {
+			continue
+		}
+		rt, err := store.GetHostRuntime(ctx, q, h.HostID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || rt.Runtime.UpgradeID != upgradeID {
+			continue
+		}
+		ctl, err := runnerControl(ctx, q, h.HostID, now)
+		if err != nil {
+			return false, err
+		}
+		if ctl.Mode == protocol.RunnerNormal && ctl.Upgrade == nil && (ctl.UpgradeID == "" || ctl.UpgradeID == upgradeID) && rt.Runtime.AppliedControlRevision < ctl.Revision {
 			return true, nil
 		}
 	}

@@ -9,6 +9,18 @@ import (
 // additionally bind the reporting service's actual process identity and hash.
 // A partial restore, ambiguous launch, or irreversible candidate is not proof.
 func RollbackReceipt(s State) *protocol.UpdaterReceipt {
+	if proof := s.RollbackProof; proof != nil && proof.Version == s.Current && proof.Process == s.Process {
+		b, p := proof.Binding, proof.Process
+		if validRollbackBinding(b, s.InstanceID) && p.PID > 0 && p.StartTicks > 0 && p.LaunchID != "" && p.LaunchID != b.ProcessInstanceID && p.SHA256 == s.Current.Artifact.SHA256 && release.ValidSHA(p.SHA256) {
+			return &protocol.UpdaterReceipt{Binding: b, Phase: "rolled_back", CurrentProcessInstanceID: p.LaunchID, CurrentSHA256: p.SHA256, RollbackConfirmed: true}
+		}
+	}
+	return operationRollbackReceipt(s)
+}
+func validRollbackBinding(b Binding, instance string) bool {
+	return b.UpgradeID != "" && b.InstanceID == instance && instance != "" && b.ProcessInstanceID != "" && b.ReleaseID != "" && release.ValidSHA(b.ManifestSHA256) && release.ValidSHA(b.ArtifactSHA256)
+}
+func operationRollbackReceipt(s State) *protocol.UpdaterReceipt {
 	op := s.Operation
 	if op == nil || op.Kind != "upgrade" || op.Phase != "rolled_back" || op.Irreversible || s.Current != op.Previous {
 		return nil

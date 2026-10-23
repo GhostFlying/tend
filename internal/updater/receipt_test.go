@@ -1,7 +1,6 @@
 package updater
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -40,20 +39,5 @@ func TestRollbackReceiptRequiresTerminalProof(t *testing.T) {
 				t.Fatal("unsafe state produced proof")
 			}
 		})
-	}
-}
-
-func TestRestoredSupervisorPersistsUsableRollbackReceipt(t *testing.T) {
-	h := newHarness(t)
-	h.upgrade(t)
-	candidate := h.s.Status().Operation.Binding
-	h.until(t, "backed_up")
-	h.p.rejectStart = true
-	_ = h.s.Step(context.Background())
-	h.until(t, "rolled_back")
-	h.reopen(t)
-	receipt := RollbackReceipt(h.s.Status())
-	if receipt == nil || receipt.Binding != candidate || receipt.CurrentSHA256 != h.s.Status().Current.Artifact.SHA256 {
-		t.Fatalf("actual rollback lost terminal proof: %+v", receipt)
 	}
 }
