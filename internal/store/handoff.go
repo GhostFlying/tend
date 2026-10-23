@@ -75,7 +75,7 @@ func GetHandoffSnapshot(ctx context.Context, q Querier, instance string) (Handof
 		return v, err
 	}
 	v.ThreadID, v.BindingGeneration = binding.ThreadID, binding.Generation
-	err = q.QueryRowContext(ctx, `SELECT version,MAX(last_activity,COALESCE((SELECT updated_at FROM main_threads WHERE instance=?),0)),COALESCE((SELECT MAX(seq) FROM conversation_messages),0),EXISTS(SELECT 1 FROM outbox WHERE destination='main_thread' AND operation='main_thread.handle_message' AND status IN ('pending','sending','unknown')) FROM conversation_coverage WHERE singleton=1`, instance).Scan(&v.Version, &v.LastActivityMillis, &v.MaxSeq, &v.Pending)
+	err = q.QueryRowContext(ctx, `SELECT version,MAX(last_activity,COALESCE((SELECT updated_at FROM main_threads WHERE instance=?),0)),COALESCE((SELECT MAX(seq) FROM conversation_messages),0),EXISTS(SELECT 1 FROM outbox WHERE destination='main_thread' AND operation='main_thread.handle_message' AND status IN ('pending','sending')) FROM conversation_coverage WHERE singleton=1`, instance).Scan(&v.Version, &v.LastActivityMillis, &v.MaxSeq, &v.Pending)
 	if err != nil {
 		return v, err
 	}

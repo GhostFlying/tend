@@ -189,6 +189,13 @@ func (m *Manager) reconcileHandoff(ctx context.Context, d app.Delivery) app.Deli
 		return retry(err)
 	}
 	if !exists {
+		pending, ok, err := m.app.PendingHandoff(ctx, m.cfg.Instance)
+		if err != nil {
+			return retry(err)
+		}
+		if ok && pending.ID != d.RequestID {
+			return conflictingHandoff()
+		}
 		return app.DeliveryResult{Outcome: app.Retry}
 	}
 	switch record.Phase {

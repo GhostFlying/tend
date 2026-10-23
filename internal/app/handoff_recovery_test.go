@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +45,30 @@ func TestHandoffOnlyIgnoresExactAbandonedStartingDelivery(t *testing.T) {
 			before, err := h.app.HandoffSnapshot(ctx, "main")
 			if err != nil || before.Active != tc.wantActive {
 				t.Fatalf("activity %+v %v", before, err)
+			}
+			if before.Pending != (tc.outcome == 0) {
+				t.Fatalf("unknown counted as running or live delivery omitted: %+v", before)
+			}
+			if tc.outcome == Unknown && tc.turnStatus == store.TurnStarting {
+				input, err := h.app.HandoffSummaryInput(ctx, "main", 256<<10)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(input.Observations), `"state":"unknown"`) || !strings.Contains(string(input.Observations), "original uncertain message") {
+					t.Fatalf("unknown reference state lost: %s", input.Observations)
+				}
+				claimed, err := h.app.ClaimSummaryAttempt(ctx, input.Snapshot, 1000)
+				if err != nil || !claimed {
+					t.Fatalf("historical unknown blocked summary %v %v", claimed, err)
+				}
+				summary, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: input.Snapshot, Body: "Original message outcome remains unknown; do not repeat the action.", FormatVersion: 2})
+				if err != nil {
+					t.Fatal(err)
+				}
+				latest, err := h.app.HandoffSnapshot(ctx, "main")
+				if err != nil || !summary.Snapshot.Covers(latest) {
+					t.Fatalf("unknown reference facts could not be current %+v %v", latest, err)
+				}
 			}
 			job, err := h.app.PrepareHandoff(ctx, store.ThreadHandoff{Instance: "main", SourceThreadID: "source", SourceGeneration: 1, SourceVersion: before.Version, ToolsetHash: "next", Prompt: "reference preserves unknown original message"})
 			if err != nil {

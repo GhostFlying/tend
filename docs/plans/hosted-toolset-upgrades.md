@@ -42,3 +42,5 @@
 - 旧 turn/start 结果未知时，保留原始 turn 与 outbox unknown；已明确关闭原进程的历史不确定性不等同于当前活跃 turn。
 - 连续升级遇到旧工具集的 prepared 意图时，在未发生外部调用的阶段重新准备当前工具集；已有确认 target 的 created/injected 意图先按已知阶段完成，再在隔离下迁移至当前工具集，最后才发布 readiness。不重放 creating/injecting/unknown。
 - source resume 明确拒绝时保留旧 ID/path，使用缓存摘要与账本恢复新 thread；传输不确定性不触发替代创建。
+
+- unknown 投递作为历史参考事实保留，不计入当前 pending 队列；摘要输入保留消息的未知状态。新人工交接若与另一个未结束 intent 冲突，明确失败并提示核对原请求，避免复用旧 intent 导致请求身份丢失或 FIFO 永久重试。
