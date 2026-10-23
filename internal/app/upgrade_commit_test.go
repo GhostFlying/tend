@@ -116,6 +116,7 @@ func TestUpgradeHealthNeedsCoordinatorAndDurableCommitBeforeAdmission(t *testing
 	// A new incarnation must prove continuity and build its own healthy window.
 	rt = upgradeAck(h, b.InstanceID, protocol.RunnerNormal)
 	rt.InstanceID = "restarted"
+	rt.Generation++
 	rt.Sequence = 1
 	rt.PendingClaims = 1
 	rt.PendingOperations = 1

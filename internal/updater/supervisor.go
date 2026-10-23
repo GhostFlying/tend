@@ -607,8 +607,11 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) error {
 		}
 		return s.save()
 	}
-	if !h.Healthy || !running {
+	if (!h.Healthy || !running) && op.HealthCount != 0 {
 		op.HealthCount = 0
+		if err := s.save(); err != nil {
+			return err
+		}
 	}
 	timedOut := s.opts.Now().Sub(op.HealthStartedAt) >= time.Duration(s.cfg.HealthTimeoutSeconds)*time.Second
 	if (!running || timedOut) && !op.Irreversible && validRollbackAuthorization(op, h) {

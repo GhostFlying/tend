@@ -443,6 +443,7 @@ func TestUpgradeChoosesIdleRunnerBeforeBusyRunner(t *testing.T) {
 	h, c := upgradeHarness(t)
 	h.createTask(owner, createTaskPayload{Title: "active during rolling upgrade", Spec: testSpec})
 	rt := testRuntime("old-linux-1")
+	rt.Generation = 1
 	rt.Capabilities = append(rt.Capabilities, capabilityUpdater)
 	if _, ok := h.claimWith("linux-1", h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Worker: h.worker("linux-1"), WorkspaceProtocol: 1, Runtime: rt}, nil)); !ok {
 		t.Fatal("missing active run")
@@ -462,6 +463,7 @@ func TestUpgradeActiveRunCoverageIsFixedAcrossHeartbeats(t *testing.T) {
 	h, c := upgradeHarness(t)
 	h.createTask(owner, createTaskPayload{Title: "work continues across server restart", Spec: testSpec})
 	rt := testRuntime("old-linux-1")
+	rt.Generation = 1
 	rt.Capabilities = append(rt.Capabilities, capabilityUpdater)
 	a, ok := h.claimWith("linux-1", h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Worker: h.worker("linux-1"), WorkspaceProtocol: 1, Runtime: rt}, nil))
 	if !ok {

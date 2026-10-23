@@ -33,22 +33,24 @@ type RunnerRuntime struct {
 	UpdaterReceipt              *UpdaterReceipt `json:"updater_receipt,omitempty"`
 	JournalVersion              int64           `json:"journal_version,omitempty"`
 	InstanceID                  string          `json:"instance_id"`
-	Sequence                    int64           `json:"sequence"`
-	Protocol                    int64           `json:"protocol"`
-	ProtocolMin                 int64           `json:"protocol_min"`
-	ProtocolMax                 int64           `json:"protocol_max"`
-	Build                       RunnerBuild     `json:"build"`
-	Capabilities                []string        `json:"capabilities"`
-	UpgradePhase                string          `json:"upgrade_phase,omitempty"`
-	UpgradeError                string          `json:"upgrade_error,omitempty"`
-	DownloadedBytes             int64           `json:"downloaded_bytes,omitempty"`
-	Mode                        string          `json:"mode"`
-	UpgradeID                   string          `json:"upgrade_id,omitempty"`
-	AppliedControlRevision      int64           `json:"applied_control_revision"`
-	PendingClaims               int64           `json:"pending_claims"`
-	PendingOperations           int64           `json:"pending_operations"`
-	Blockers                    []string        `json:"blockers,omitempty"`
-	AuthorizationID             string          `json:"authorization_id,omitempty"`
+	// Generation orders process starts using non-rollback local durable state.
+	Generation             int64       `json:"generation"`
+	Sequence               int64       `json:"sequence"`
+	Protocol               int64       `json:"protocol"`
+	ProtocolMin            int64       `json:"protocol_min"`
+	ProtocolMax            int64       `json:"protocol_max"`
+	Build                  RunnerBuild `json:"build"`
+	Capabilities           []string    `json:"capabilities"`
+	UpgradePhase           string      `json:"upgrade_phase,omitempty"`
+	UpgradeError           string      `json:"upgrade_error,omitempty"`
+	DownloadedBytes        int64       `json:"downloaded_bytes,omitempty"`
+	Mode                   string      `json:"mode"`
+	UpgradeID              string      `json:"upgrade_id,omitempty"`
+	AppliedControlRevision int64       `json:"applied_control_revision"`
+	PendingClaims          int64       `json:"pending_claims"`
+	PendingOperations      int64       `json:"pending_operations"`
+	Blockers               []string    `json:"blockers,omitempty"`
+	AuthorizationID        string      `json:"authorization_id,omitempty"`
 }
 
 // MaintenanceAuthorization is issued once for a fixed server deadline.

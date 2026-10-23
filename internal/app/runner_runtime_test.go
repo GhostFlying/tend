@@ -15,6 +15,22 @@ func testRuntime(instance string) *protocol.RunnerRuntime {
 	return &protocol.RunnerRuntime{InstanceID: instance, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
 }
 func (h *harness) versionedHello(host string, r *protocol.RunnerRuntime) protocol.Operation {
+	// A fake process allocates its durable generation when first registered.
+	if r != nil && r.Generation == 0 {
+		r.Generation = 1
+		if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
+			if old, err := store.GetHostRuntime(context.Background(), tx.Q(), host); err == nil {
+				if old.Runtime.InstanceID == r.InstanceID {
+					r.Generation = old.Runtime.Generation
+				} else {
+					r.Generation = old.Runtime.Generation + 1
+				}
+			}
+			return nil
+		}); err != nil {
+			h.t.Fatal(err)
+		}
+	}
 	op, err := h.app.Execute(context.Background(), runner(host), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: host}, protocol.HelloPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: r}, nil), Hello{})
 	if err != nil {
 		return protocol.Operation{Status: protocol.OpFailed, Error: &protocol.Error{Code: protocol.CodeOf(err), Message: err.Error()}}

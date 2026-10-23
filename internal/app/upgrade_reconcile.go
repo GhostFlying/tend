@@ -20,7 +20,13 @@ func reconcilePausedCandidates(ctx context.Context, x *Exec, tx *store.Tx, r *st
 		return nil
 	}
 	for i, h := range r.Hosts {
-		if h.CandidateInstance == "" || h.Rollback != nil || r.View.Hosts[i].Status == "completed" || r.View.Hosts[i].Status == "skipped" {
+		if r.View.Hosts[i].Status == "completed" {
+			if err := reconcileCompletedRunner(ctx, x, tx, r, i); err != nil {
+				return err
+			}
+			continue
+		}
+		if h.CandidateInstance == "" || h.Rollback != nil || r.View.Hosts[i].Status == "skipped" {
 			continue
 		}
 		if _, _, err := reconcileRunnerCandidate(ctx, x, tx, r, i); err != nil {

@@ -169,6 +169,7 @@ type Runner struct {
 	updaterMu            sync.Mutex
 	cancelledUpdaterID   string
 	instanceID           string
+	generation           int64
 	sequence             int64
 	grantDeadlines       map[string]time.Time
 	helloConfirmed       bool

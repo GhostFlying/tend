@@ -326,7 +326,13 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 	for i := range r.Hosts {
 		h := &r.Hosts[i]
 		v := &r.View.Hosts[i]
-		if v.Status == "completed" || v.Status == "skipped" {
+		if v.Status == "completed" {
+			if err := reconcileCompletedRunner(ctx, x, tx, r, i); err != nil {
+				return err
+			}
+			continue
+		}
+		if v.Status == "skipped" {
 			continue
 		}
 		rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
