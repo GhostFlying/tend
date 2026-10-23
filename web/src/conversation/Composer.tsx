@@ -2,7 +2,7 @@
 // when writing it: the reply it answers and the last item shown (v0.1
 // §6.2). While a reply is in progress and nothing is written, the send
 // button stops the reply instead (D69).
-import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Connection } from "../api/client.ts";
 import { notify } from "../app/notice.ts";
 import { Settings } from "./Settings.tsx";
@@ -12,6 +12,8 @@ import { Send, Stop } from "../shell/icons.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Composer.module.css";
 import { clock, latestReply, processing } from "./model.ts";
+import { imageSource, imageTypes, maxImages, readImages } from "./images.ts";
+import { Close } from "../shell/icons.tsx";
 
 /** A touch screen, where Enter starts a new line and the button sends. */
 const touch = window.matchMedia("(pointer: coarse)").matches;
@@ -19,8 +21,14 @@ const touch = window.matchMedia("(pointer: coarse)").matches;
 export function Composer({ connection }: { connection: Connection }) {
   const { client, live, queue, draft: composerDraft } = useServices();
   const conversation = useStore(live.conversation);
-  const { text: draft, focus } = useStore(composerDraft.state);
+  const { text: draft, images, focus } = useStore(composerDraft.state);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const saving = useRef(false);
+  const reading = useRef(false);
+  const [preparing, setPreparing] = useState(false);
+  const [persisting, setPersisting] = useState(false);
+  const [dragging, setDragging] = useState(false);
   useEffect(() => {
     if (!focus) return;
     const frame = requestAnimationFrame(() => {
@@ -65,20 +73,49 @@ export function Composer({ connection }: { connection: Connection }) {
   }, [interrupt, connection.status, pending?.envelope.request_id]);
 
   const send = async () => {
-    if (queue === null || blocked || body === "") {
+    if (
+      queue === null ||
+      blocked ||
+      saving.current ||
+      reading.current ||
+      (!body && !images.length)
+    ) {
       return;
     }
-    composerDraft.write("");
+    saving.current = true;
+    setPersisting(true);
+    composerDraft.clear();
     const lastSeq = conversation.items.at(-1)?.seq;
     try {
       await queue.enqueue({
         body,
+        images,
         ...(reply ? { replyTo: reply.message_id } : {}),
         ...(lastSeq ? { lastSeenSeq: lastSeq } : {}),
       });
     } catch {
-      // Not written down, so not sent either; give the text back.
-      composerDraft.restore(draft);
+      // Not written down, so not sent either; give the entire draft back.
+      composerDraft.restore(draft, images);
+      notify("消息未能保存到发送队列，文字和图片已恢复，请重试", "warn");
+    } finally {
+      saving.current = false;
+      setPersisting(false);
+    }
+  };
+
+  const addImages = async (files: File[]) => {
+    if (!files.length || blocked || saving.current || reading.current) return;
+    reading.current = true;
+    setPreparing(true);
+    try {
+      if (images.length + files.length > maxImages)
+        throw new Error(`每条消息最多添加 ${maxImages} 张图片`);
+      composerDraft.addImages(await readImages(files));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "无法读取图片，请重试", "warn");
+    } finally {
+      reading.current = false;
+      setPreparing(false);
     }
   };
 
@@ -112,21 +149,91 @@ export function Composer({ connection }: { connection: Connection }) {
     hint = `回复 ${clock(Date.parse(reply.created_at))} 的消息`;
   }
 
-  const showStop = busy !== undefined && body === "";
+  const showStop = busy !== undefined && body === "" && !images.length && !preparing;
   return (
-    <div className={styles.composer}>
+    <div
+      className={styles.composer}
+      data-dragging={dragging || undefined}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = blocked ? "none" : "copy";
+        setDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        setDragging(false);
+        void addImages(Array.from(event.dataTransfer.files));
+      }}
+    >
+      {!!images.length && (
+        <ul className={styles.images} aria-label="待发送图片">
+          {images.map((image, index) => (
+            <li key={index}>
+              <img src={imageSource(image)} alt={image.name} />
+              <button
+                type="button"
+                aria-label={`移除图片 ${image.name}`}
+                title={`移除图片 ${image.name}`}
+                onClick={() => composerDraft.removeImage(index)}
+              >
+                <Close />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <textarea
         ref={textarea}
         rows={2}
         value={draft}
         onChange={(e) => composerDraft.write(e.target.value)}
         onKeyDown={onKeyDown}
+        onPaste={(event) => {
+          const files = Array.from(event.clipboardData.files);
+          if (!files.length) return;
+          event.preventDefault();
+          void addImages(files);
+        }}
         placeholder={touch ? "和主 Agent 说…" : "和主 Agent 说…（Enter 发送，Shift+Enter 换行）"}
         aria-label="消息"
         disabled={queue === null}
       />
       <div className={styles.bar}>
-        <span className={styles.hint}>{hint}</span>
+        <input
+          ref={fileInput}
+          type="file"
+          accept={imageTypes.join(",")}
+          multiple
+          hidden
+          aria-label="选择图片"
+          onChange={(event) => {
+            const files = Array.from(event.currentTarget.files ?? []);
+            event.currentTarget.value = "";
+            void addImages(files);
+          }}
+        />
+        <button
+          type="button"
+          className={styles.attach}
+          aria-label="添加图片"
+          title="添加图片（PNG、JPEG、GIF，每张最多 5 MiB）"
+          onClick={() => fileInput.current?.click()}
+          disabled={blocked || preparing || persisting || images.length >= maxImages}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+            <rect x="3" y="3" width="18" height="18" rx="4" />
+            <circle cx="8" cy="8" r="1.5" />
+            <path d="m3 17 5-5 4 4 4-6 5 7" />
+          </svg>
+        </button>
+        <span className={styles.hint} role="status">
+          {preparing ? "正在读取图片…" : dragging ? "松开以添加图片" : hint}
+        </span>
         <Settings connection={connection} />
         {showStop ? (
           <button
@@ -144,7 +251,7 @@ export function Composer({ connection }: { connection: Connection }) {
             type="button"
             className={styles.send}
             onClick={() => void send()}
-            disabled={blocked || body === ""}
+            disabled={blocked || preparing || persisting || (!body && !images.length)}
             title="发送"
             aria-label="发送"
           >

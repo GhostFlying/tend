@@ -170,3 +170,13 @@
 .mobileRecent > details[open] {
   flex-basis: 100%;
 }
+
+.head > .settings {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .head > .settings {
+    display: inline-flex;
+  }
+}

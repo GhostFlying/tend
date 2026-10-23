@@ -407,6 +407,94 @@
       "title": "ConversationHandoffView",
       "type": "object"
     },
+    "ConversationImage": {
+      "additionalProperties": false,
+      "properties": {
+        "image_id": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "image_id",
+        "name",
+        "media_type",
+        "size"
+      ],
+      "title": "ConversationImage",
+      "type": "object"
+    },
+    "ConversationImageData": {
+      "additionalProperties": false,
+      "properties": {
+        "data_base64": {
+          "type": "string"
+        },
+        "image_id": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "image_id",
+        "name",
+        "media_type",
+        "size",
+        "data_base64"
+      ],
+      "title": "ConversationImageData",
+      "type": "object"
+    },
+    "ConversationImageInput": {
+      "additionalProperties": false,
+      "properties": {
+        "data_base64": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "media_type",
+        "data_base64"
+      ],
+      "title": "ConversationImageInput",
+      "type": "object"
+    },
+    "ConversationImageResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "$ref": "#/definitions/ConversationImageData"
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "title": "ConversationImageResponse",
+      "type": "object"
+    },
     "ConversationItem": {
       "additionalProperties": false,
       "properties": {
@@ -431,6 +519,12 @@
         },
         "host_id": {
           "type": "string"
+        },
+        "images": {
+          "items": {
+            "$ref": "#/definitions/ConversationImage"
+          },
+          "type": "array"
         },
         "kind": {
           "type": "string"
@@ -1545,6 +1639,12 @@
         "decision": {
           "$ref": "#/definitions/DecisionChoice"
         },
+        "images": {
+          "items": {
+            "$ref": "#/definitions/ConversationImageInput"
+          },
+          "type": "array"
+        },
         "last_seen_seq": {
           "type": "integer"
         },
@@ -2140,6 +2240,9 @@
     },
     "ConversationHandoffView": {
       "$ref": "#/definitions/ConversationHandoffView"
+    },
+    "ConversationImageResponse": {
+      "$ref": "#/definitions/ConversationImageResponse"
     },
     "ConversationPage": {
       "$ref": "#/definitions/ConversationPage"

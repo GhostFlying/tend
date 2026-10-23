@@ -77,3 +77,13 @@
     padding: 0 10px 10px;
   }
 }
+
+.head > .settings {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .head > .settings {
+    display: inline-flex;
+  }
+}

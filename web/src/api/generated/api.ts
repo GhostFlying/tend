@@ -141,6 +141,7 @@ export interface TendAPI {
   ArtifactPayload?: ArtifactPayload;
   ConversationHandoffPayload?: ConversationHandoffPayload;
   ConversationHandoffView?: ConversationHandoffView;
+  ConversationImageResponse?: ConversationImageResponse;
   ConversationPage?: ConversationPage;
   ConversationSettingsView?: ConversationSettingsView;
   CreateActionPayload?: CreateActionPayload;
@@ -360,6 +361,24 @@ export interface ConversationSummaryView {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationImageResponse".
+ */
+export interface ConversationImageResponse {
+  image: ConversationImageData;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationImageData".
+ */
+export interface ConversationImageData {
+  data_base64: string;
+  image_id: string;
+  media_type: string;
+  name: string;
+  size: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ConversationPage".
  */
 export interface ConversationPage {
@@ -378,6 +397,7 @@ export interface ConversationItem {
   created_at: string;
   decision?: DecisionChoice;
   host_id?: string;
+  images?: ConversationImage[];
   kind: string;
   message_id: string;
   notice_type?: string;
@@ -395,6 +415,16 @@ export interface DecisionChoice {
   decision_id: string;
   option: string;
   version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationImage".
+ */
+export interface ConversationImage {
+  image_id: string;
+  media_type: string;
+  name: string;
+  size: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -716,8 +746,18 @@ export interface StreamStart {
 export interface SubmitMessagePayload {
   body: string;
   decision?: DecisionChoice;
+  images?: ConversationImageInput[];
   last_seen_seq?: number;
   reply_to?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationImageInput".
+ */
+export interface ConversationImageInput {
+  data_base64: string;
+  media_type: string;
+  name: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

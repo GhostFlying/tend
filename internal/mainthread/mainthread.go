@@ -432,6 +432,10 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	if err != nil {
 		return app.DeliveryResult{Outcome: app.Failed, Reason: "the message does not exist"}
 	}
+	imageURLs, firstFrameOnly, err := m.app.MessageImageURLs(ctx, msg.MessageID)
+	if err != nil {
+		return retry(err)
+	}
 	th, err := m.waitThread(ctx)
 	if err != nil {
 		return retry(err)
@@ -481,7 +485,11 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		}
 		return retry(err)
 	}
-	turnID, err := th.StartTurn(ctx, harness.TurnInput{Text: input(msg), UserMessageID: msg.MessageID,
+	text := input(msg)
+	if firstFrameOnly {
+		text += "\n[GIF attachments are provided as their first frame only; do not infer animation.]"
+	}
+	turnID, err := th.StartTurn(ctx, harness.TurnInput{Text: text, ImageURLs: imageURLs, UserMessageID: msg.MessageID,
 		Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort})
 	if err != nil {
 		rejected := errors.Is(err, harness.ErrRejected)

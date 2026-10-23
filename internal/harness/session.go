@@ -114,7 +114,8 @@ type ToolHandler func(ctx context.Context, call ToolCall) ToolResult
 
 // TurnInput is a user turn.
 type TurnInput struct {
-	Text string
+	ImageURLs []string
+	Text      string
 	// Model, ModelProvider and Effort override the defaults for this turn.
 	Model         string
 	ModelProvider string

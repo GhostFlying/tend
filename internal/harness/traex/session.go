@@ -438,11 +438,15 @@ func (t *thread) StartTurn(ctx context.Context, in harness.TurnInput) (string, e
 	if t.toolsReleased() {
 		return "", fmt.Errorf("%w: disposable thread released", harness.ErrRejected)
 	}
+	inputs := []UserInput{{Type: userInputText, Text: in.Text, TextElements: []any{}}}
+	for _, image := range in.ImageURLs {
+		inputs = append(inputs, UserInput{Type: "image", imageURL: image})
+	}
 	var res TurnStartResponse
 	err := t.s.conn.call(ctx, methodTurnStart, TurnStartParams{
 		ThreadID: t.id, UserMessageID: in.UserMessageID,
 		Model: in.Model, ModelProvider: in.ModelProvider, Effort: in.Effort,
-		Input: []UserInput{{Type: userInputText, Text: in.Text, TextElements: []any{}}},
+		Input: inputs,
 	}, &res)
 	if err != nil {
 		return "", err

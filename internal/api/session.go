@@ -176,7 +176,11 @@ func (s *Server) readSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
+	return decodeBodyLimit(w, r, v, maxBody)
+}
+
+func decodeBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		var tooLarge *http.MaxBytesError

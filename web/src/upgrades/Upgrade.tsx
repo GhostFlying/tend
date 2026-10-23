@@ -9,7 +9,7 @@ import styles from "./Upgrade.module.css";
 export function UpgradeBanner({ connection }: { connection: Connection }) {
   const { live, openUpgrade } = useServices();
   const upgrade = useStore(live.snapshot)?.upgrade;
-  if (!upgrade) return null;
+  if (!upgrade || upgrade.status === "completed" || upgrade.status === "cancelled") return null;
   return (
     <button
       type="button"

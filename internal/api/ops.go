@@ -44,8 +44,12 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var env protocol.Envelope
-	if err := decodeBody(w, r, &env); err != nil {
+	if err := decodeBodyLimit(w, r, &env, 28<<20); err != nil {
 		s.writeError(w, r, err)
+		return
+	}
+	if env.Operation != "conversation.submit_message" && len(env.Payload) > maxBody {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "body is too large"))
 		return
 	}
 	cmd, ok := ownerCommands[env.Operation]

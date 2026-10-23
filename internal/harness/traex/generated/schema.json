@@ -181,6 +181,16 @@
         "type"
       ]
     },
+    "ImageUserInput": {
+      "properties": [
+        "type",
+        "url"
+      ],
+      "required": [
+        "type",
+        "url"
+      ]
+    },
     "ImageViewItem": {
       "properties": [
         "id",
