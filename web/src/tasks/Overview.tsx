@@ -52,28 +52,3 @@ export function TaskOverview() {
     </>
   );
 }
-
-export function Hosts() {
-  const { live } = useServices();
-  const snapshot = useStore(live.snapshot);
-  return (
-    <section aria-label="执行主机占用">
-      <div className={list.sectionTitle}>执行主机</div>
-      {(snapshot?.hosts ?? []).map((h) => (
-        <div
-          className={list.row}
-          key={h.host_id}
-          title={`槽位占用：${h.open_runs} / ${h.slots} · ${h.os} / ${h.arch} · ${h.worker}`}
-        >
-          <span className={list.label}>{h.host_id}</span>
-          <span className={list.meta}>
-            {h.open_runs > 0 ? "执行中" : "空闲"} · {h.open_runs} / {h.slots} 槽位
-          </span>
-        </div>
-      ))}
-      {snapshot && !snapshot.hosts?.length && (
-        <p className={controls.empty}>暂无可用的执行主机。</p>
-      )}
-    </section>
-  );
-}

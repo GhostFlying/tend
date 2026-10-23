@@ -31,6 +31,13 @@ func TestCompletionNoticeIsAtomicAndNotRepeated(t *testing.T) {
 		if len(rows) != 1 || rows[0].Author != "system" || rows[0].Kind != "message" || rows[0].ReplyTo != "" {
 			t.Fatalf("completion items = %+v", rows)
 		}
+		metadata, err := store.GetMessageNotice(t.Context(), tx.Q(), rows[0].MessageID)
+		if err != nil {
+			return err
+		}
+		if metadata.NoticeType != "task_completed" {
+			t.Fatalf("completion notice metadata = %+v", metadata)
+		}
 		body := rows[0].Body
 		if !strings.Contains(body, taskID) || !strings.Contains(body, "spec 1") || !strings.Contains(body, commitSHA) {
 			t.Fatalf("notice lost accepted facts: %s", body)

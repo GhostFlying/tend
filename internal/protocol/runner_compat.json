@@ -1,0 +1,1 @@
+{"current":1,"previous":0,"adapters":[{"id":"legacy-runner-v0","protocol":0,"remove_in":2,"file":"internal/protocol/runner_legacy.go","test":"internal/protocol/runner_legacy_test.go"}]}

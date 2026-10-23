@@ -79,6 +79,7 @@ type config struct {
 	} `json:"deliverables"`
 	// MainAgent runs the hosted main agent alongside the agents the owner
 	// works in (D68).
+	Upgrades  *upgradeConfig       `json:"upgrades"`
 	MainAgent *mainAgentConfig     `json:"main_agent"`
 	Hosts     []app.HostConfig     `json:"hosts"`
 	Repos     []app.RepoConfig     `json:"repos"`
@@ -141,6 +142,9 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		return err
 	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	if err := prepareUpgradeConfig(cfg.Upgrades, dataDir); err != nil {
 		return err
 	}
 
@@ -251,7 +255,15 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	if fileLimit > resultLimit {
 		return errors.New("deliverables.file_limit_bytes must not exceed result_limit_bytes")
 	}
-	runners := runnerapi.New(a, whois, secret, runnerapi.Config{FileLimit: fileLimit, ResultFileLimit: resultLimit}, log)
+	releaseDir := ""
+	if cfg.Upgrades != nil {
+		releaseDir = cfg.Upgrades.ReleaseDir
+	}
+	runners := runnerapi.New(a, whois, secret, runnerapi.Config{FileLimit: fileLimit, ResultFileLimit: resultLimit, ReleaseDir: releaseDir}, log)
+	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, ids, log)
+	if err != nil {
+		return err
+	}
 	ownerConfig := api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
@@ -266,6 +278,14 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	var wg sync.WaitGroup
+	if upgradeController != nil {
+		wg.Go(func() {
+			if err := upgradeController.Run(runCtx); err != nil && runCtx.Err() == nil {
+				log.Error("local upgrade controller stopped", "err", err)
+				stop()
+			}
+		})
+	}
 	if front != nil {
 		wg.Go(func() { _ = front.Run(runCtx) })
 	}

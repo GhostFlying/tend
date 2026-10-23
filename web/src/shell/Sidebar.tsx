@@ -7,7 +7,8 @@ import { Note } from "./Chat.tsx";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import { RecentTasks } from "../tasks/Board.tsx";
 import controls from "./controls.module.css";
-import { Hosts, TaskOverview } from "../tasks/Overview.tsx";
+import { TaskOverview } from "../tasks/Overview.tsx";
+import { Hosts } from "../hosts/Hosts.tsx";
 import styles from "./Sidebar.module.css";
 import type { View } from "./TabBar.tsx";
 
@@ -52,7 +53,7 @@ export function Sidebar({
           </button>
           <TaskOverview />
           <RecentTasks />
-          <Hosts />
+          <Hosts connection={connection} />
         </section>
       </div>
       <div className={styles.foot}>

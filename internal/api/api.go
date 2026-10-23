@@ -89,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/session", s.readSession)
 	mux.HandleFunc("POST /api/v1/ops", s.ops)
 	mux.HandleFunc("GET /api/v1/snapshot", s.snapshot)
+	mux.HandleFunc("GET /api/v1/upgrades/{id}", s.upgrade)
 	mux.HandleFunc("GET /api/v1/tasks", s.tasks)
 	mux.HandleFunc("GET /api/v1/tasks/{id}", s.task)
 	mux.HandleFunc("GET /api/v1/files/{id}", s.downloadFile)

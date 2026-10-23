@@ -223,6 +223,9 @@ func (SyncConfig) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := p.validate(); err != nil {
 		return Outcome{}, err
 	}
+	if err := checkUpgradeHostConfig(ctx, tx.Q(), p.Hosts); err != nil {
+		return Outcome{}, err
+	}
 	now := x.Now.UnixMilli()
 	var repoNames, hostIDs []string
 	for _, r := range p.Repos {

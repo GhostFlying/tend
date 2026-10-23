@@ -407,6 +407,11 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	}
 	m.workMu.Lock()
 	defer m.workMu.Unlock()
+	if paused, err := m.app.UpgradePausesMain(ctx); err != nil {
+		return retry(err)
+	} else if paused {
+		return retry(errors.New("mainthread: waiting for server upgrade"))
+	}
 	m.mu.Lock()
 	m.lastActivity = m.cfg.Now()
 	m.mu.Unlock()

@@ -49,6 +49,9 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 	if err != nil {
 		return err
 	}
+	if err := tx.PutMessageNotice(ctx, store.MessageNoticeRow{MessageID: id, NoticeType: "task_completed"}); err != nil {
+		return err
+	}
 	for _, binding := range []struct{ objectType, objectID string }{
 		{"task", taskID}, {"artifact", task.CurrentArtifactID}, {"event", sourceEventID},
 	} {

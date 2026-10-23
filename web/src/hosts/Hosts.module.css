@@ -1,0 +1,115 @@
+.title {
+  font-size: var(--text-s);
+  color: var(--label-3);
+  padding: 14px 8px 6px;
+}
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--radius-m);
+  text-align: left;
+}
+.row:hover {
+  background: var(--hover);
+}
+.identity,
+.facts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.online {
+  flex: none;
+  color: var(--label-3);
+  font-size: var(--text-s);
+}
+.online[data-online="true"] {
+  color: var(--ok);
+}
+.facts {
+  flex-wrap: wrap;
+  color: var(--label-3);
+  font-size: var(--text-s);
+}
+.maintenance {
+  color: var(--warn-text);
+  background: var(--warn-soft);
+  padding: 1px 5px;
+  border-radius: var(--radius-s);
+}
+.waiting {
+  color: var(--label-3);
+  font-size: var(--text-s);
+  margin: 6px 8px;
+}
+.panel {
+  margin: auto;
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 64px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--label);
+  box-shadow: var(--shadow-2);
+}
+.panel::backdrop {
+  background: rgb(0 0 0 / 30%);
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.header button {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 22px;
+}
+.header button:hover {
+  background: var(--hover);
+}
+.hostName {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  margin: 20px 0 12px;
+}
+.details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 16px;
+  font-size: 13px;
+}
+.details dt {
+  color: var(--label-3);
+}
+.details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.reason {
+  color: var(--warn-text);
+  background: var(--warn-soft);
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}

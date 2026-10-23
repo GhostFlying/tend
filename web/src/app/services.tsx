@@ -13,6 +13,7 @@ export interface Services {
   /** null while the outbox opens, or where the browser has none. */
   queue: SendQueue | null;
   openTask(taskId: string): void;
+  openUpgrade(upgradeId: string): void;
   draft: ComposerDraft;
   followUp(task: TaskSummary): void;
 }

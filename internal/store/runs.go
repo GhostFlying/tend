@@ -349,3 +349,15 @@ func (t *Tx) InsertRunLog(ctx context.Context, runID string, e protocol.RunEvent
 	}
 	return nil
 }
+
+// CountOpenRunsOnRetiredHosts prevents maintenance from excluding an execution
+// that still depends on a host omitted from the enabled upgrade participants.
+func CountOpenRunsOnRetiredHosts(ctx context.Context, q Querier) (int64, error) {
+	var n int64
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs r JOIN hosts h ON h.host_id=r.host_id
+ WHERE h.status <> 'active' AND r.observed_state IN `+openRunStates).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("store: count retired host runs: %w", err)
+	}
+	return n, nil
+}
