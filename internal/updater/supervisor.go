@@ -101,6 +101,9 @@ func (s *Supervisor) Close() error {
 }
 func (s *Supervisor) statePath() string { return filepath.Join(s.cfg.StateDir, "state.json") }
 func (s *Supervisor) save() error {
+	if receipt := operationRollbackReceipt(s.state); receipt != nil {
+		s.state.RollbackProof = &RollbackProof{Binding: receipt.Binding, Version: s.state.Current, Process: s.state.Process}
+	}
 	if op := s.state.Operation; op != nil && op.Kind == "upgrade" && done(op) {
 		if s.state.Terminals == nil {
 			s.state.Terminals = make(map[string]TerminalReceipt)
@@ -110,6 +113,10 @@ func (s *Supervisor) save() error {
 	return writeJSON(s.statePath(), s.state)
 }
 func cloneState(v State) State { // no aliases to internal mutable operation state
+	if v.RollbackProof != nil {
+		proof := *v.RollbackProof
+		v.RollbackProof = &proof
+	}
 	if v.Terminals != nil {
 		cloned := make(map[string]TerminalReceipt, len(v.Terminals))
 		for id, r := range v.Terminals {
@@ -489,6 +496,9 @@ func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) 
 		op.Phase = "rolled_back"
 		return s.save()
 	}
+	if proof := s.state.RollbackProof; op.Kind == "restart" && proof != nil && proof.Version == op.Previous && op.Candidate == op.Previous && proof.Process == op.PreviousProcess {
+		proof.Process = id
+	}
 	op.CandidateProcess = id
 	op.HealthStartedAt = s.opts.Now()
 	op.Phase = "checking"
@@ -563,7 +573,7 @@ func (s *Supervisor) monitor(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.state.Operation = &Operation{ID: "restart-" + id, Kind: "restart", Previous: s.state.Current, Candidate: s.state.Current, Phase: "backed_up", LaunchID: id, StartedAt: s.opts.Now()}
+	s.state.Operation = &Operation{ID: "restart-" + id, Kind: "restart", Previous: s.state.Current, PreviousProcess: s.state.Process, Candidate: s.state.Current, Phase: "backed_up", LaunchID: id, StartedAt: s.opts.Now()}
 	return s.save()
 }
 

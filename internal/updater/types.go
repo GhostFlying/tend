@@ -98,14 +98,22 @@ type TerminalReceipt struct {
 	Binding Binding `json:"binding"`
 	Phase   string  `json:"phase"`
 }
+
+// RollbackProof survives replacement of the active operation by crash recovery.
+type RollbackProof struct {
+	Binding Binding  `json:"binding"`
+	Version Version  `json:"version"`
+	Process Identity `json:"process"`
+}
 type State struct {
-	Terminals  map[string]TerminalReceipt `json:"terminals,omitempty"`
-	Format     int                        `json:"format"`
-	InstanceID string                     `json:"instance_id"`
-	Current    Version                    `json:"current"`
-	Process    Identity                   `json:"process"`
-	Operation  *Operation                 `json:"operation,omitempty"`
-	LastError  string                     `json:"last_error,omitempty"`
+	RollbackProof *RollbackProof             `json:"rollback_proof,omitempty"`
+	Terminals     map[string]TerminalReceipt `json:"terminals,omitempty"`
+	Format        int                        `json:"format"`
+	InstanceID    string                     `json:"instance_id"`
+	Current       Version                    `json:"current"`
+	Process       Identity                   `json:"process"`
+	Operation     *Operation                 `json:"operation,omitempty"`
+	LastError     string                     `json:"last_error,omitempty"`
 }
 
 type Process interface {
