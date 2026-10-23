@@ -12,9 +12,19 @@
   color: var(--label);
   font-size: 13px;
 }
+.sectionHeading {
+  margin: 0 0 16px;
+  color: var(--label);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 24px;
+}
 .heading {
+  margin: 0;
+  color: var(--label-2);
   font-weight: 600;
   font-size: 14px;
+  line-height: 20px;
 }
 .status {
   margin: 8px 0 4px;
@@ -101,12 +111,6 @@
 }
 .header button:hover {
   background: var(--hover);
-}
-.panel h3 {
-  color: var(--label-3);
-  font-size: 12px;
-  font-weight: 500;
-  margin: 0 0 10px;
 }
 .toggle {
   display: flex;
