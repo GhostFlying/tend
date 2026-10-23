@@ -345,6 +345,68 @@
       "title": "ControlMode",
       "type": "string"
     },
+    "ConversationHandoffPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "prepare_only": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "prepare_only"
+      ],
+      "title": "ConversationHandoffPayload",
+      "type": "object"
+    },
+    "ConversationHandoffView": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "idle_minutes": {
+          "type": "integer"
+        },
+        "last_activity_millis": {
+          "type": "integer"
+        },
+        "maintenance": {
+          "$ref": "#/definitions/ConversationMaintenanceView"
+        },
+        "pending": {
+          "type": "boolean"
+        },
+        "preparing": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "summary": {
+          "$ref": "#/definitions/ConversationSummaryView"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "toolset_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "idle_minutes",
+        "revision",
+        "generation",
+        "preparing",
+        "pending",
+        "last_activity_millis"
+      ],
+      "title": "ConversationHandoffView",
+      "type": "object"
+    },
     "ConversationItem": {
       "additionalProperties": false,
       "properties": {
@@ -394,6 +456,30 @@
         "created_at"
       ],
       "title": "ConversationItem",
+      "type": "object"
+    },
+    "ConversationMaintenanceView": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "operation",
+        "status"
+      ],
+      "title": "ConversationMaintenanceView",
       "type": "object"
     },
     "ConversationModel": {
@@ -499,6 +585,42 @@
         "models"
       ],
       "title": "ConversationSettingsView",
+      "type": "object"
+    },
+    "ConversationSummaryView": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at_millis": {
+          "type": "integer"
+        },
+        "current": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "last_completed_turn_id": {
+          "type": "string"
+        },
+        "max_seq": {
+          "type": "integer"
+        },
+        "source_thread_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "source_thread_id",
+        "version",
+        "max_seq",
+        "created_at_millis",
+        "current"
+      ],
+      "title": "ConversationSummaryView",
       "type": "object"
     },
     "CreateActionPayload": {
@@ -1232,6 +1354,19 @@
       "title": "SetControlModePayload",
       "type": "object"
     },
+    "SetConversationHandoffSettingsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "idle_minutes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "idle_minutes"
+      ],
+      "title": "SetConversationHandoffSettingsPayload",
+      "type": "object"
+    },
     "SetConversationSettingsPayload": {
       "additionalProperties": false,
       "properties": {
@@ -1845,6 +1980,12 @@
     "ArtifactPayload": {
       "$ref": "#/definitions/ArtifactPayload"
     },
+    "ConversationHandoffPayload": {
+      "$ref": "#/definitions/ConversationHandoffPayload"
+    },
+    "ConversationHandoffView": {
+      "$ref": "#/definitions/ConversationHandoffView"
+    },
     "ConversationPage": {
       "$ref": "#/definitions/ConversationPage"
     },
@@ -1886,6 +2027,9 @@
     },
     "SetControlModePayload": {
       "$ref": "#/definitions/SetControlModePayload"
+    },
+    "SetConversationHandoffSettingsPayload": {
+      "$ref": "#/definitions/SetConversationHandoffSettingsPayload"
     },
     "SetConversationSettingsPayload": {
       "$ref": "#/definitions/SetConversationSettingsPayload"

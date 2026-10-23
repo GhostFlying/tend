@@ -1,0 +1,126 @@
+.panel {
+  position: fixed;
+  margin: auto;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100dvh - 64px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  color: var(--label);
+  font-size: 13px;
+}
+.heading {
+  font-weight: 600;
+  font-size: 14px;
+}
+.status {
+  margin: 8px 0 4px;
+  color: var(--label-2);
+}
+.status[data-warning] {
+  color: var(--warn-text);
+}
+.note {
+  margin: 5px 0;
+  color: var(--label-3);
+  font-size: 12px;
+  line-height: 18px;
+}
+.label {
+  display: block;
+  margin: 14px 0 6px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.row input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input);
+  padding: 7px 8px;
+  color: var(--label);
+  font: inherit;
+}
+.save {
+  flex: none;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: white;
+}
+.save:disabled {
+  opacity: 0.45;
+}
+.feedback {
+  padding: 8px;
+  margin-top: 10px;
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  overflow-wrap: anywhere;
+}
+.feedback p {
+  margin: 0;
+  line-height: 18px;
+}
+.feedback button {
+  margin-top: 8px;
+  color: var(--accent);
+}
+@media (max-width: 760px) {
+  .row input {
+    font-size: 16px;
+  }
+}
+
+.panel::backdrop {
+  background: rgb(0 0 0 / 30%);
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.header button {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 22px;
+}
+.header button:hover {
+  background: var(--hover);
+}
+.panel h3 {
+  color: var(--label-3);
+  font-size: 12px;
+  font-weight: 500;
+  margin: 0 0 10px;
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+.prepare {
+  margin-top: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--label-2);
+}
+.prepare:disabled {
+  opacity: 0.45;
+}

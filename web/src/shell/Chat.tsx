@@ -11,9 +11,17 @@ import { useStore } from "../state/store.ts";
 import styles from "./Chat.module.css";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import controls from "./controls.module.css";
-import { ArrowDown } from "./icons.tsx";
+import { ArrowDown, Gear } from "./icons.tsx";
 
-export function Chat({ connection, visible }: { connection: Connection; visible: boolean }) {
+export function Chat({
+  connection,
+  visible,
+  onSettings,
+}: {
+  connection: Connection;
+  visible: boolean;
+  onSettings(): void;
+}) {
   const choice = useStore(theme);
   const [jump, setJump] = useState(0);
   const toLatest = () => setJump((n) => n + 1);
@@ -31,6 +39,15 @@ export function Chat({ connection, visible }: { connection: Connection; visible:
           aria-label={`切换主题：${themeLabels[choice]}`}
         >
           {themeLabels[choice]}
+        </button>
+        <button
+          type="button"
+          className={controls.iconBtn}
+          onClick={onSettings}
+          aria-label="设置"
+          title="设置"
+        >
+          <Gear />
         </button>
         <span className={styles.mobileOnly}>
           <ConnectionBadge connection={connection} compact />

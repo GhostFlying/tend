@@ -31,6 +31,13 @@ import (
 
 // Config configures the manager.
 type Config struct {
+	// MaintenanceEnabled enables private summaries and schema handoffs.
+	MaintenanceEnabled bool
+	// SummaryIdleMinutes is the default; zero disables automatic summaries.
+	SummaryIdleMinutes  int64
+	Now                 func() time.Time
+	MaintenanceInterval time.Duration
+	SummaryTimeout      time.Duration
 	// Instance names the harness instance; it is part of the main agent's
 	// identity and stays the same across restarts.
 	Instance string
@@ -54,12 +61,16 @@ type Manager struct {
 	tools   *tools.Service
 	cfg     Config
 
-	mu      sync.Mutex
-	session harness.Session
-	thread  harness.Thread
-	ready   chan struct{} // closed while a thread is up
-	active  *turn
-	settled map[string]string // turn ID -> final status, for turns that ended before Deliver saw them start
+	mu                 sync.Mutex
+	session            harness.Session
+	thread             harness.Thread
+	ready              chan struct{} // closed while a thread is up
+	active             *turn
+	maintenanceBlocked bool
+	summaryActive      bool
+	lastActivity       time.Time
+	workMu             sync.Mutex        // serializes deliveries with fork snapshot acquisition
+	settled            map[string]string // turn ID -> final status, for turns that ended before Deliver saw them start
 }
 
 // turn is the delivery the front thread is working on.
@@ -72,6 +83,15 @@ type turn struct {
 
 // New returns a Manager.
 func New(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg Config) *Manager {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.MaintenanceInterval <= 0 {
+		cfg.MaintenanceInterval = time.Minute
+	}
+	if cfg.SummaryTimeout <= 0 {
+		cfg.SummaryTimeout = 2 * time.Minute
+	}
 	if cfg.RestartDelay <= 0 {
 		cfg.RestartDelay = 2 * time.Second
 	}
@@ -85,6 +105,13 @@ func (m *Manager) threadKey(threadID string) string { return m.cfg.Instance + "/
 
 // Run keeps a session and the front thread up until ctx ends.
 func (m *Manager) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var background sync.WaitGroup
+	if m.cfg.MaintenanceEnabled {
+		background.Go(func() { m.idleSummaries(ctx) })
+	}
+	defer func() { cancel(); background.Wait() }()
 	for ctx.Err() == nil {
 		if err := m.serve(ctx); err != nil && ctx.Err() == nil {
 			m.cfg.Log.ErrorContext(ctx, "main thread session ended", "err", err)
@@ -148,6 +175,9 @@ func (m *Manager) serve(ctx context.Context) error {
 			if !ok {
 				return errors.New("mainthread: the harness ended the thread")
 			}
+			m.mu.Lock()
+			m.lastActivity = m.cfg.Now()
+			m.mu.Unlock()
 			if ev.Kind == harness.EventAgentMessageDelta || (ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemAgentMessage) {
 				drafts.consume(ev)
 				if ev.Kind == harness.EventItemCompleted {
@@ -209,6 +239,9 @@ func (m *Manager) threadConfig() harness.ThreadConfig {
 // when there is none or it cannot be resumed. A new thread has no
 // baseline, so its first turn gets a full snapshot.
 func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Thread, error) {
+	if m.cfg.MaintenanceEnabled {
+		return m.openManagedThread(ctx, s)
+	}
 	id, ok, err := m.app.MainThread(ctx, m.cfg.Instance)
 	if err != nil {
 		return nil, err
@@ -323,6 +356,12 @@ func (m *Manager) record(ctx context.Context, th harness.Thread, native, op stri
 // delivery of that turn, so a replayed call keeps its original identity,
 // or else the delivery whose turn is starting.
 func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.ToolResult {
+	m.mu.Lock()
+	blocked := m.maintenanceBlocked || (m.cfg.MaintenanceEnabled && (m.thread == nil || m.thread.ID() != c.ThreadID))
+	m.mu.Unlock()
+	if blocked {
+		return harness.ToolResult{Text: "Tend tools are disabled while preparing a conversation handoff."}
+	}
 	call := tools.Call{
 		Principal: protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.cfg.Instance, Thread: c.ThreadID},
 		Native:    c.ThreadID + "/" + c.TurnID + "/" + c.CallID, Tool: c.Tool, Arguments: c.Arguments,
@@ -363,6 +402,14 @@ func (m *Manager) waitThread(ctx context.Context) (harness.Thread, error) {
 // Deliver implements dispatch.Handler: it hands a message to the front
 // thread as one turn and returns when the turn ended.
 func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	if d.Operation == "conversation.handoff" {
+		return m.deliverHandoff(ctx, d)
+	}
+	m.workMu.Lock()
+	defer m.workMu.Unlock()
+	m.mu.Lock()
+	m.lastActivity = m.cfg.Now()
+	m.mu.Unlock()
 	var p app.HandleMessage
 	if err := json.Unmarshal(d.Payload, &p); err != nil || p.MessageID == "" {
 		return app.DeliveryResult{Outcome: app.Failed, Reason: "the delivery names no message"}
@@ -487,6 +534,9 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 // Reconcile implements dispatch.Handler for a delivery a previous process
 // left in the middle.
 func (m *Manager) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	if d.Operation == "conversation.handoff" {
+		return m.reconcileHandoff(ctx, d)
+	}
 	rec, ok, err := m.app.MainTurn(ctx, d.RequestID)
 	switch {
 	case err != nil:

@@ -40,6 +40,8 @@ type Session struct {
 
 	mu      sync.Mutex
 	threads map[string]*thread
+	// threadLifecycle serializes Resume and Release without blocking event delivery.
+	threadLifecycle chan struct{}
 	// orphans holds events of threads not registered yet, such as a new
 	// thread whose start response is still on its way to the caller.
 	orphans map[string][]harness.Event
@@ -110,7 +112,7 @@ func newSession(r io.Reader, w io.WriteCloser, log *slog.Logger) *Session {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	s := &Session{log: log, threads: map[string]*thread{}, orphans: map[string][]harness.Event{}, stopped: make(chan struct{})}
+	s := &Session{log: log, threads: map[string]*thread{}, orphans: map[string][]harness.Event{}, stopped: make(chan struct{}), threadLifecycle: make(chan struct{}, 1)}
 	s.conn = newConn(r, w, handlers{request: s.serverRequest, notify: s.notification}, log)
 	s.stop = w.Close
 	go func() {
@@ -172,35 +174,60 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	}
 	t := s.register(res.Thread.ID, cfg.OnToolCall)
 	t.setModelDefaults(res)
+	t.setRolloutPath(res.Thread.Path)
 	return t, nil
 }
 
 // ResumeThread implements harness.Session.
 func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness.ThreadConfig) (harness.Thread, error) {
-	// The ID is known, so the thread is registered before the call and
-	// sees every event that follows the response.
-	t := s.register(threadID, cfg.OnToolCall)
+	unlock, err := s.lockThreadLifecycle(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	// Reuse the event stream of a live registration. A rejected resume must
+	// neither close that stream nor replace its previously accepted handler.
+	t, created := s.registerIfAbsent(threadID, cfg.OnToolCall)
+	if t.toolsReleased() {
+		return nil, fmt.Errorf("%w: disposable thread released", harness.ErrRejected)
+	}
 	var res ThreadStartResponse
-	err := s.conn.call(ctx, methodThreadResume, ThreadResumeParams{
+	err = s.conn.call(ctx, methodThreadResume, ThreadResumeParams{
 		ThreadID: threadID, Model: cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
 		DeveloperInstructions: cfg.DeveloperInstructions, Config: cfg.Config,
 	}, &res)
 	if err != nil {
-		s.mu.Lock()
-		delete(s.threads, threadID)
-		s.mu.Unlock()
-		t.close()
+		if created {
+			s.mu.Lock()
+			if s.threads[threadID] == t {
+				delete(s.threads, threadID)
+			}
+			s.mu.Unlock()
+			t.releaseLocal()
+		}
 		return nil, err
 	}
+	t.setToolHandler(cfg.OnToolCall)
 	t.setModelDefaults(res)
+	t.setRolloutPath(res.Thread.Path)
 	return t, nil
 }
 
-// register adds a thread and hands it the events that arrived before it.
+// register adds or updates a thread without replacing its event stream.
 func (s *Session) register(id string, onTool harness.ToolHandler) *thread {
-	t := newThread(s, id, onTool)
+	t, _ := s.registerIfAbsent(id, onTool)
+	t.setToolHandler(onTool)
+	return t
+}
+
+// registerIfAbsent preserves an existing registration while a resume is pending.
+func (s *Session) registerIfAbsent(id string, onTool harness.ToolHandler) (*thread, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if t := s.threads[id]; t != nil {
+		return t, false
+	}
+	t := newThread(s, id, onTool)
 	s.threads[id] = t
 	for _, ev := range s.orphans[id] {
 		t.push(ev)
@@ -209,7 +236,7 @@ func (s *Session) register(id string, onTool harness.ToolHandler) *thread {
 	if s.ended {
 		t.close()
 	}
-	return t
+	return t, true
 }
 
 func (s *Session) thread(id string) *thread {
@@ -229,14 +256,18 @@ func (s *Session) serverRequest(ctx context.Context, method string, params json.
 		return nil, fmt.Errorf("traex: decode tool call: %w", err)
 	}
 	t := s.thread(p.ThreadID)
-	if t == nil || t.onTool == nil {
+	var handler harness.ToolHandler
+	if t != nil {
+		handler = t.toolHandler()
+	}
+	if handler == nil {
 		return toolResponse(harness.ToolResult{Text: "this thread has no tools"}), nil
 	}
 	call := harness.ToolCall{ThreadID: p.ThreadID, TurnID: p.TurnID, CallID: p.CallID, Tool: p.Tool, Arguments: p.Arguments}
 	if p.Namespace != nil {
 		call.Namespace = *p.Namespace
 	}
-	return toolResponse(t.onTool(ctx, call)), nil
+	return toolResponse(handler(ctx, call)), nil
 }
 
 func toolResponse(r harness.ToolResult) DynamicToolCallResponse {
@@ -304,22 +335,30 @@ type thread struct {
 	id     string
 	onTool harness.ToolHandler
 
-	mu       sync.Mutex
-	queue    []harness.Event
-	wake     chan struct{}
-	ended    bool
-	events   chan harness.Event
-	defaults harness.ModelSelection
+	mu          sync.Mutex
+	queue       []harness.Event
+	wake        chan struct{}
+	ended       bool
+	events      chan harness.Event
+	defaults    harness.ModelSelection
+	rolloutPath string
+	fork        bool
+	released    bool
+	releaseDone chan struct{}
 }
 
 func newThread(s *Session, id string, onTool harness.ToolHandler) *thread {
-	t := &thread{s: s, id: id, onTool: onTool, wake: make(chan struct{}, 1), events: make(chan harness.Event)}
+	t := &thread{s: s, id: id, onTool: onTool, wake: make(chan struct{}, 1), events: make(chan harness.Event), releaseDone: make(chan struct{})}
 	go t.pump()
 	return t
 }
 
 func (t *thread) push(ev harness.Event) {
 	t.mu.Lock()
+	if t.released {
+		t.mu.Unlock()
+		return
+	}
 	t.queue = append(t.queue, ev)
 	t.mu.Unlock()
 	t.signal()
@@ -349,7 +388,13 @@ func (t *thread) pump() {
 			if ended {
 				return
 			}
-			<-t.wake
+			select {
+			case <-t.wake:
+			case <-t.releaseDone:
+				return
+			case <-t.s.stopped:
+				return
+			}
 			continue
 		}
 		ev := t.queue[0]
@@ -357,6 +402,8 @@ func (t *thread) pump() {
 		t.mu.Unlock()
 		select {
 		case t.events <- ev:
+		case <-t.releaseDone:
+			return
 		case <-t.s.stopped:
 			// The owner closed the session and may no longer read.
 			return
@@ -369,6 +416,9 @@ func (t *thread) Events() <-chan harness.Event { return t.events }
 
 // InjectDeveloper implements harness.Thread.
 func (t *thread) InjectDeveloper(ctx context.Context, texts ...string) error {
+	if t.toolsReleased() {
+		return fmt.Errorf("%w: disposable thread released", harness.ErrRejected)
+	}
 	items := make([]json.RawMessage, 0, len(texts))
 	for _, text := range texts {
 		b, err := json.Marshal(map[string]any{
@@ -385,6 +435,9 @@ func (t *thread) InjectDeveloper(ctx context.Context, texts ...string) error {
 
 // StartTurn implements harness.Thread.
 func (t *thread) StartTurn(ctx context.Context, in harness.TurnInput) (string, error) {
+	if t.toolsReleased() {
+		return "", fmt.Errorf("%w: disposable thread released", harness.ErrRejected)
+	}
 	var res TurnStartResponse
 	err := t.s.conn.call(ctx, methodTurnStart, TurnStartParams{
 		ThreadID: t.id, UserMessageID: in.UserMessageID,

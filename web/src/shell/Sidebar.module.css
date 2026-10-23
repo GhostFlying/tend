@@ -72,8 +72,7 @@
 }
 
 @media (max-width: 760px) {
-  .brand,
-  .foot {
+  .brand {
     display: none;
   }
 

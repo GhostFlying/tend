@@ -27,6 +27,20 @@ type Session interface {
 	Close() error
 }
 
+// ThreadForker creates disposable isolated conversations without changing the source.
+// ReleaseThread releases only forks created by this session. Callers must interrupt
+// an unfinished turn before release; native unloading may follow an idle delay.
+type ThreadForker interface {
+	ForkThread(ctx context.Context, sourceThreadID string, cfg ThreadConfig) (Thread, error)
+	ReleaseThread(ctx context.Context, threadID string) error
+}
+
+// ThreadLocation exposes a native history location when the harness has one.
+// Disposable threads can have an empty path.
+type ThreadLocation interface {
+	RolloutPath() string
+}
+
 // Model is a selectable entry from a harness's live model catalog.
 type Model struct {
 	ID, Name, Label, Provider string

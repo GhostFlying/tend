@@ -139,6 +139,8 @@ export interface TendAPI {
   AnswerResult?: AnswerResult;
   ArtifactDetail?: ArtifactDetail;
   ArtifactPayload?: ArtifactPayload;
+  ConversationHandoffPayload?: ConversationHandoffPayload;
+  ConversationHandoffView?: ConversationHandoffView;
   ConversationPage?: ConversationPage;
   ConversationSettingsView?: ConversationSettingsView;
   CreateActionPayload?: CreateActionPayload;
@@ -153,6 +155,7 @@ export interface TendAPI {
   SessionRequest?: SessionRequest;
   SessionView?: SessionView;
   SetControlModePayload?: SetControlModePayload;
+  SetConversationHandoffSettingsPayload?: SetConversationHandoffSettingsPayload;
   SetConversationSettingsPayload?: SetConversationSettingsPayload;
   Snapshot?: Snapshot;
   StreamStart?: StreamStart;
@@ -307,6 +310,53 @@ export interface ResultReport {
   body: string;
   evidence?: string[];
   uncertainties?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationHandoffPayload".
+ */
+export interface ConversationHandoffPayload {
+  prepare_only: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationHandoffView".
+ */
+export interface ConversationHandoffView {
+  enabled: boolean;
+  generation: number;
+  idle_minutes: number;
+  last_activity_millis: number;
+  maintenance?: ConversationMaintenanceView;
+  pending: boolean;
+  preparing: boolean;
+  revision: number;
+  summary?: ConversationSummaryView;
+  thread_id?: string;
+  toolset_hash?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationMaintenanceView".
+ */
+export interface ConversationMaintenanceView {
+  operation: string;
+  reason?: string;
+  request_id: string;
+  status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationSummaryView".
+ */
+export interface ConversationSummaryView {
+  created_at_millis: number;
+  current: boolean;
+  id: string;
+  last_completed_turn_id?: string;
+  max_seq: number;
+  source_thread_id: string;
+  version: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -512,6 +562,13 @@ export interface SessionView {
  */
 export interface SetControlModePayload {
   mode: ControlMode;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SetConversationHandoffSettingsPayload".
+ */
+export interface SetConversationHandoffSettingsPayload {
+  idle_minutes: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

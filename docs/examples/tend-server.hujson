@@ -44,6 +44,9 @@
   //   // A traex home of its own instead of yours.
   //   "traex_home": "~/.local/share/tend/traex-home",
   //   "model": "",
+  //   // Prepare a handoff summary after this many idle minutes; 0 disables it.
+  //   // Default 50, maximum 10080. Web owner settings override this value.
+  //   "summary_idle_minutes": 50,
   //   // Outside any repository, so no project AGENTS.md is loaded.
   //   "cwd": "~/.local/share/tend/main-agent",
   // },
