@@ -41,3 +41,27 @@ func TestRollbackReceiptRequiresTerminalProof(t *testing.T) {
 		})
 	}
 }
+
+func TestCancelledReceiptRequiresCompleteCandidateAndCurrentSelf(t *testing.T) {
+	s := rollbackState()
+	binding := s.Operation.Binding
+	s.Terminals = map[string]TerminalReceipt{binding.UpgradeID: {Binding: binding, Phase: "cancelled"}}
+	s.Operation = nil
+	got := CancelledReceipt(s, binding.UpgradeID)
+	if got == nil || got.Phase != "cancelled" || got.Binding != binding || got.RollbackConfirmed || got.CommittedConfirmed {
+		t.Fatalf("incorrect no-start receipt: %+v", got)
+	}
+	partial := s
+	partial.Terminals = map[string]TerminalReceipt{binding.UpgradeID: {Binding: Binding{UpgradeID: binding.UpgradeID, InstanceID: s.InstanceID}, Phase: "cancelled"}}
+	if CancelledReceipt(partial, binding.UpgradeID) != nil {
+		t.Fatal("ID-only tombstone treated as candidate proof")
+	}
+	mismatched := s
+	mismatched.Process.LaunchID = binding.ProcessInstanceID
+	if CancelledReceipt(mismatched, binding.UpgradeID) != nil {
+		t.Fatal("candidate process treated as original service")
+	}
+	if CancelledReceipt(s, "different-batch") != nil {
+		t.Fatal("wrong batch selected")
+	}
+}

@@ -275,11 +275,20 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	switch p.Action {
 	case "retry":
 		if r.ServerRollback != nil {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "cancel the rolled-back batch before starting a new release attempt")
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "cancel this restored batch before starting a new release attempt")
 		}
 		for _, h := range r.Hosts {
 			if h.Rollback != nil {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "cancel the rolled-back batch before starting a new release attempt")
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "cancel this restored batch before starting a new release attempt")
+			}
+			if h.CandidateInstance != "" && h.Committed == nil {
+				ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
+				if err != nil {
+					return Outcome{}, err
+				}
+				if ctl.CancelledUpgradeID == r.View.UpgradeID {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "wait for candidate cancellation to reconcile, then cancel this batch before starting a new attempt")
+				}
 			}
 		}
 		if r.View.Status != "attention" {

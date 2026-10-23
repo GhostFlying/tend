@@ -194,13 +194,27 @@ func (r *Runner) updaterProcessReceipt(ctx context.Context) *protocol.UpdaterRec
 	if err != nil {
 		return nil
 	}
-	receipt := updater.ProcessReceipt(state)
+	r.controlMu.Lock()
+	instance := r.instanceID
+	upgradeID, cancelledID := r.control.UpgradeID, r.control.CancelledUpgradeID
+	r.controlMu.Unlock()
+	// A prior committed version can remain current while a new batch was
+	// cancelled before starting. Report that batch's durable no-start fact
+	// instead of allowing the old version's commit proof to hide it. A stale
+	// cancellation marker must not hide a different active batch's commit.
+	var receipt *protocol.UpdaterReceipt
+	if upgradeID != "" {
+		receipt = updater.CancelledReceipt(state, upgradeID)
+	}
+	if upgradeID == "" && cancelledID != "" {
+		receipt = updater.CancelledReceipt(state, cancelledID)
+	}
+	if receipt == nil {
+		receipt = updater.ProcessReceipt(state)
+	}
 	if receipt == nil {
 		return nil
 	}
-	r.controlMu.Lock()
-	instance := r.instanceID
-	r.controlMu.Unlock()
 	if receipt.CurrentProcessInstanceID != instance || receipt.CurrentSHA256 != r.cfg.Build.BinarySHA256 || receipt.Binding.InstanceID != r.cfg.UpdaterInstanceID {
 		return nil
 	}

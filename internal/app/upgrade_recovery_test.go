@@ -116,6 +116,7 @@ func TestUpgradeRunnerRollbackReceiptReconcilesAfterTimeout(t *testing.T) {
 			if v := upgradeTick(h, ServerObservation{}); v.Status != "attention" {
 				t.Fatal(v)
 			}
+			ctl = upgradeCtl(h, "linux-1")
 			restored := testRuntime("restored-old")
 			restored.Build.BinarySHA256 = strings.Repeat("a", 64)
 			restored.Mode = protocol.RunnerReady

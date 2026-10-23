@@ -309,8 +309,12 @@ func (s *Supervisor) CancelExpected(id, expectedPhase string) error {
 	}
 	op := s.state.Operation
 	if expectedPhase == "staged" && (op == nil || op.ID != id) {
-		if receipt, ok := s.state.Terminals[id]; ok && receipt.Phase != "cancelled" {
-			return errors.New("updater: historical operation already completed")
+		if receipt, ok := s.state.Terminals[id]; ok {
+			if receipt.Phase != "cancelled" {
+				return errors.New("updater: historical operation already completed")
+			}
+			// A repeated cancellation must retain the original complete candidate.
+			return s.save()
 		}
 		if s.state.Terminals == nil {
 			s.state.Terminals = make(map[string]TerminalReceipt)

@@ -101,6 +101,10 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "rolling upgrades require another online execution host")
 	}
 	r := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, Hosts: []protocol.UpgradeHostView{}}, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
+	totalBytes := c.ManifestSize
+	for _, artifact := range c.Manifest.Artifacts {
+		totalBytes += artifact.Size
+	}
 	for _, h := range hosts {
 		rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
 		if err != nil {
@@ -130,7 +134,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			}
 		}
 		r.Hosts = append(r.Hosts, store.UpgradeHost{HostID: h.HostID, PreviousHash: rt.Runtime.Build.BinarySHA256, TargetHash: artifact.SHA256})
-		r.View.Hosts = append(r.View.Hosts, protocol.UpgradeHostView{HostID: h.HostID, Status: "queued", Phase: "queued", CurrentVersion: rt.Runtime.Build.Version, TargetVersion: c.Manifest.ReleaseID, ProtocolVersion: rt.Runtime.Protocol, TotalBytes: artifact.Size})
+		r.View.Hosts = append(r.View.Hosts, protocol.UpgradeHostView{HostID: h.HostID, Status: "queued", Phase: "queued", CurrentVersion: rt.Runtime.Build.Version, TargetVersion: c.Manifest.ReleaseID, ProtocolVersion: rt.Runtime.Protocol, TotalBytes: totalBytes})
 	}
 	if err := tx.PutUpgrade(ctx, r); err != nil {
 		return Outcome{}, err
@@ -214,6 +218,9 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	attention := func(reason string) error {
 		r.View.Status = "attention"
 		r.View.Reason = reason
+		if err := cancelUncommittedRunners(ctx, x, tx, r); err != nil {
+			return err
+		}
 		if err := restoreUnchangedHosts(ctx, x, tx, r); err != nil {
 			return err
 		}
@@ -224,7 +231,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		return Outcome{}, err
 	}
 	if rolledBack {
-		if err := attention("候选版本未启动，已确认回退旧版本；取消本批次后可重新升级"); err != nil {
+		if err := attention(restorationReason(r)); err != nil {
 			return Outcome{}, err
 		}
 	} else if r.View.Status == "attention" || (r.Deadline > 0 && now >= r.Deadline) {
@@ -284,6 +291,9 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 					ctl.Revision++
 					ctl.Mode = protocol.RunnerMaintenance
 					ctl.UpgradeID = r.View.UpgradeID
+					if ctl.CancelledUpgradeID != r.View.UpgradeID {
+						ctl.CancelledUpgradeID = ""
+					}
 					ctl.ReleaseID = r.View.ReleaseID
 					ctl.Authorization = grant
 					if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
@@ -398,6 +408,9 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			ctl.Revision++
 			ctl.Mode = protocol.RunnerMaintenance
 			ctl.UpgradeID = r.View.UpgradeID
+			if ctl.CancelledUpgradeID != r.View.UpgradeID {
+				ctl.CancelledUpgradeID = ""
+			}
 			ctl.ReleaseID = r.View.ReleaseID
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
 				return err

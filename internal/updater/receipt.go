@@ -59,3 +59,18 @@ func ProcessReceipt(s State) *protocol.UpdaterReceipt {
 	}
 	return RollbackReceipt(s)
 }
+
+// CancelledReceipt proves that the specified candidate never left staging.
+// An ID-only tombstone fences late requests but cannot prove a candidate's
+// identity. The caller also matches the reporting process to the actual service.
+func CancelledReceipt(s State, id string) *protocol.UpdaterReceipt {
+	terminal, ok := s.Terminals[id]
+	if !ok || terminal.Phase != "cancelled" || terminal.Binding.UpgradeID != id || !validRollbackBinding(terminal.Binding, s.InstanceID) {
+		return nil
+	}
+	p := s.Process
+	if p.PID <= 0 || p.StartTicks == 0 || p.LaunchID == "" || p.LaunchID == terminal.Binding.ProcessInstanceID || !release.ValidSHA(p.SHA256) || p.SHA256 != s.Current.Artifact.SHA256 {
+		return nil
+	}
+	return &protocol.UpdaterReceipt{Binding: terminal.Binding, Phase: "cancelled", CurrentProcessInstanceID: p.LaunchID, CurrentSHA256: p.SHA256}
+}
