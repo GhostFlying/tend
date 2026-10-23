@@ -48,12 +48,26 @@ func (r *Runner) reconcileWorkspaceProcesses(ctx context.Context) (workspaceProc
 		}
 		if err := r.reconcileWorkspace(ctx, resource); err != nil {
 			resultState.blocked[resource.WorkspaceID] = true
-			resultState.maintenanceBlocked = true
-			r.cfg.Log.WarnContext(ctx, "workspace needs process reconciliation; retained for its owner", "workspace_id", resource.WorkspaceID, "task_id", resource.TaskID, "err", err)
+			quarantined := false
+			if errors.Is(err, errWorkspaceProcessUnconfirmed) {
+				var classificationErr error
+				quarantined, classificationErr = r.terminalResourceQuarantine(ctx, resource)
+				if classificationErr != nil {
+					return resultState, classificationErr
+				}
+			}
+			if !quarantined {
+				resultState.maintenanceBlocked = true
+			}
+			r.cfg.Log.WarnContext(ctx, "workspace needs process reconciliation; retained for its owner", "workspace_id", resource.WorkspaceID, "task_id", resource.TaskID, "maintenance_blocked", !quarantined, "err", err)
 		}
 	}
 	return resultState, nil
 }
+
+// Native proof failures retain the resource, whereas journal failures must also
+// prevent declaring the runner drained. They must not share an exception path.
+var errWorkspaceProcessUnconfirmed = errors.New("workspace process stop is unconfirmed")
 
 func (r *Runner) reconcileWorkspace(ctx context.Context, p protocol.WorkspaceReconcile) error {
 	r.mu.Lock()
@@ -93,28 +107,28 @@ func (r *Runner) reconcileWorkspace(ctx context.Context, p protocol.WorkspaceRec
 		}
 		origin, err := recordedWorkerOrigin(run)
 		if err != nil {
-			return err
+			return errors.Join(errWorkspaceProcessUnconfirmed, err)
 		}
 		if origin == protocol.WorkerAppServer {
 			if run.Assignment.Workspace.ProviderID != "" || run.Assignment.Workspace.ProviderInstanceID != "" {
-				return errors.New("historical app-server origin conflicts with an external provider")
+				return fmt.Errorf("%w: historical app-server origin conflicts with an external provider", errWorkspaceProcessUnconfirmed)
 			}
 			if !slices.Contains(p.FinishedRunIDs, id) {
-				return errors.New("historical app-server session closure lacks a successful final report")
+				return fmt.Errorf("%w: historical app-server session closure lacks a successful final report", errWorkspaceProcessUnconfirmed)
 			}
 			if err := traex.ReconcileCompletedSession(ctx, run.Thread, run.Held, run.UpdatedAtMillis); err != nil {
-				return err
+				return errors.Join(errWorkspaceProcessUnconfirmed, err)
 			}
 		} else {
 			if origin != protocol.WorkerOrca || r.cfg.Worker != protocol.WorkerOrca {
-				return errors.New("historical process proof requires its original harness")
+				return fmt.Errorf("%w: historical process proof requires its original harness", errWorkspaceProcessUnconfirmed)
 			}
 			rel, ok := r.cfg.Workers.(harness.HistoricalReleaser)
 			if !ok {
-				return errors.New("historical process proof is unavailable for this harness")
+				return fmt.Errorf("%w: historical process proof is unavailable for this harness", errWorkspaceProcessUnconfirmed)
 			}
 			if err := rel.ReleaseHistorical(ctx, id, run.Thread, run.Held, run.UpdatedAtMillis); err != nil {
-				return err
+				return errors.Join(errWorkspaceProcessUnconfirmed, err)
 			}
 		}
 		if err := r.cfg.Journal.ConfirmStopped(ctx, id); err != nil {
@@ -148,6 +162,19 @@ func recordedWorkerOrigin(run journal.Run) (protocol.WorkerKind, error) {
 // does not claim that an unrecorded process stopped. The server must positively
 // identify a terminal task; detached resources of live tasks do not qualify.
 func (r *Runner) legacyResourceWarning(ctx context.Context, p protocol.WorkspaceReconcile) (bool, error) {
+	return r.resourceQuarantine(ctx, p, true)
+}
+
+// terminalResourceQuarantine authorizes only retaining an uncertain resource.
+// It never turns missing native proof into confirmation or resource release.
+func (r *Runner) terminalResourceQuarantine(ctx context.Context, p protocol.WorkspaceReconcile) (bool, error) {
+	return r.resourceQuarantine(ctx, p, false)
+}
+
+func (r *Runner) resourceQuarantine(ctx context.Context, p protocol.WorkspaceReconcile, legacyOnly bool) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if !p.TaskTerminal || len(p.RunIDs) == 0 {
 		return false, nil
 	}
@@ -183,7 +210,10 @@ func (r *Runner) legacyResourceWarning(ctx context.Context, p protocol.Workspace
 			return false, err
 		}
 		ws := run.Assignment.Workspace
-		if run.Assignment.TaskID != p.TaskID || run.Phase != journal.PhaseDone || run.Held || run.Fenced || run.WorkerKind != "" || run.Thread != "" || run.Assignment.Protocol != 0 || ws.ID != "" || ws.Kind != "" || ws.ProviderID != "" || ws.ProviderInstanceID != "" || ws.Path != "" {
+		if run.Assignment.TaskID != p.TaskID || ws.ID != "" && ws.ID != p.WorkspaceID || run.Phase != journal.PhaseDone || run.Held || run.Fenced {
+			return false, nil
+		}
+		if legacyOnly && (run.WorkerKind != "" || run.Thread != "" || run.Assignment.Protocol != 0 || ws.ID != "" || ws.Kind != "" || ws.ProviderID != "" || ws.ProviderInstanceID != "" || ws.Path != "") {
 			return false, nil
 		}
 	}
