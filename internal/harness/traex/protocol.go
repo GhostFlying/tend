@@ -151,9 +151,25 @@ type AgentMessageDeltaNotification struct {
 
 // UserInput is one piece of user input (the text variant).
 type UserInput struct {
+	imageURL     string
 	Type         string `json:"type"`
 	Text         string `json:"text"`
 	TextElements []any  `json:"text_elements"`
+}
+
+// ImageUserInput is the native image URL variant (including data URLs).
+type ImageUserInput struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+// MarshalJSON preserves the native tagged union without text fields on images.
+func (in UserInput) MarshalJSON() ([]byte, error) {
+	if in.Type == "image" {
+		return json.Marshal(ImageUserInput{Type: in.Type, URL: in.imageURL})
+	}
+	type textInput UserInput
+	return json.Marshal(textInput(in))
 }
 
 // TurnStartResponse answers turn/start.

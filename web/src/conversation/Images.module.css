@@ -1,0 +1,104 @@
+.gallery {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.stored {
+  max-width: 100%;
+}
+
+.tile,
+.placeholder {
+  width: 180px;
+  max-width: 100%;
+  height: 135px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  overflow: hidden;
+  background: var(--bg-l1);
+}
+
+.tile {
+  display: block;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.placeholder {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  font-size: var(--text-s);
+  color: var(--label-3);
+}
+
+.placeholder span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeholder button {
+  text-align: left;
+  color: var(--accent);
+}
+
+.preview {
+  max-width: min(960px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--bg);
+  color: var(--label);
+}
+
+.preview::backdrop {
+  background: rgb(0 0 0 / 65%);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.header span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.header button {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.header svg {
+  width: 22px;
+  height: 22px;
+}
+
+.preview > img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100dvh - 120px);
+  object-fit: contain;
+  margin: auto;
+}

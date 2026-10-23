@@ -96,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs", s.runLogs)
 	mux.HandleFunc("GET /api/v1/requests/{id}", s.request)
 	mux.HandleFunc("GET /api/v1/conversation", s.conversation)
+	mux.HandleFunc("GET /api/v1/conversation/images/{id}", s.conversationImage)
 	mux.HandleFunc("GET /api/v1/conversation/settings", s.conversationSettings)
 	mux.HandleFunc("GET /api/v1/conversation/handoff", s.conversationHandoff)
 	mux.HandleFunc("GET /api/v1/events", s.events)

@@ -12,6 +12,8 @@ import { Markdown } from "./Markdown.tsx";
 import styles from "./Messages.module.css";
 import { clock, dayLabel, duration, messageStateLabels, type Entry } from "./model.ts";
 import { ToolRow } from "./ToolRow.tsx";
+import { MessageImages, OutgoingImages } from "./Images.tsx";
+import { outgoingImages } from "./images.ts";
 
 export function Divider({ at }: { at: number }) {
   return <div className={styles.divider}>{dayLabel(at)}</div>;
@@ -21,7 +23,8 @@ export function OwnerMessage({ item }: { item: ConversationItem }) {
   const state = item.state ?? "queued";
   return (
     <div className={styles.user} data-scroll-id={item.message_id}>
-      <div className={styles.bubble}>{item.body}</div>
+      {!!item.images?.length && <MessageImages images={item.images} />}
+      {item.body && <div className={styles.bubble}>{item.body}</div>}
       <div className={styles.state} data-state={state}>
         {messageStateLabels[state]} · {clock(Date.parse(item.created_at))}
       </div>
@@ -38,9 +41,11 @@ export function OutgoingRow({
   queue: SendQueue | null;
 }) {
   const { requestId } = message;
+  const images = outgoingImages(message);
   return (
     <div className={styles.user} data-scroll-id={`outbox:${requestId}`}>
-      <div className={styles.bubble}>{message.body}</div>
+      {!!images.length && <OutgoingImages images={images} />}
+      {message.body && <div className={styles.bubble}>{message.body}</div>}
       <div className={styles.state} data-state={message.state}>
         {message.state === "sending" && "发送中…"}
         {message.state === "sent" && `已收下 · ${clock(message.createdAt)}`}

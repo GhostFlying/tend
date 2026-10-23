@@ -6,7 +6,7 @@ package protocol
 func APITypes() []any {
 	return []any{Envelope{}, APIResponse{}, Snapshot{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ConversationPage{}, LedgerEvent{}, StreamStart{}, ArtifactDetail{}, RequestView{},
 		SessionRequest{}, SessionView{}, InterruptReplyPayload{}, SubmitMessagePayload{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
-		ConversationSettingsView{}, SetConversationSettingsPayload{}, ConversationHandoffView{}, SetConversationHandoffSettingsPayload{}, ConversationHandoffPayload{},
+		ConversationImageResponse{}, ConversationSettingsView{}, SetConversationSettingsPayload{}, ConversationHandoffView{}, SetConversationHandoffSettingsPayload{}, ConversationHandoffPayload{},
 		ArtifactPayload{}, HookRequest{}, HookResponse{}, ToolSpec{}, ToolRequest{}, ToolResponse{}}
 }
 

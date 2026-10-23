@@ -88,6 +88,27 @@ async function stored(): Promise<OutgoingMessage[]> {
 }
 
 describe("SendQueue", () => {
+  test("image-only messages keep exact bytes and request identity through offline reload and retry", async () => {
+    online = false;
+    sender.answers = [new NetworkError(new TypeError("offline"))];
+    const first = await open();
+    const image = { name: "capture.png", media_type: "image/png", data_base64: "AQIDBA==" };
+    const queued = await first.enqueue({ body: "", images: [image] });
+    await first.idle();
+    image.data_base64 = "changed after enqueue";
+    expect((await stored())[0]?.envelope.payload).toEqual({
+      body: "",
+      images: [{ ...image, data_base64: "AQIDBA==" }],
+    });
+    online = true;
+    sender.answers = [new NetworkError(new TypeError("lost receipt"))];
+    const reloaded = await open();
+    await reloaded.resume();
+    expect(sender.submitted).toHaveLength(3);
+    for (const envelope of sender.submitted) expect(envelope).toEqual(queued.envelope);
+    expect((await stored())[0]?.state).toBe("sent");
+  });
+
   test("writes a message down before sending it", async () => {
     const answer = deferred<APIResponse>();
     sender.answers = [answer.promise];

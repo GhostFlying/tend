@@ -6,6 +6,73 @@
   padding: 12px 12px 10px 16px;
 }
 
+.composer[data-dragging] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+
+.images li {
+  position: relative;
+  width: 72px;
+  height: 72px;
+}
+
+.images img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+}
+
+.images button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--label);
+}
+
+.images svg {
+  width: 14px;
+  height: 14px;
+}
+
+.attach {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-m);
+  color: var(--label-3);
+}
+
+.attach:hover:not(:disabled) {
+  background: var(--bg-l2);
+  color: var(--label);
+}
+
+.attach svg {
+  width: 20px;
+  height: 20px;
+}
+
 .composer textarea {
   display: block;
   width: 100%;

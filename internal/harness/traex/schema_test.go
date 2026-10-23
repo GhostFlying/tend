@@ -47,6 +47,7 @@ var checked = []struct {
 	{"ReasoningEffortOption", "v2/ModelListResponse.json", "ReasoningEffortOption", "", ReasoningEffortOption{}, false},
 	{"AgentMessageDeltaNotification", "v2/AgentMessageDeltaNotification.json", "", "", AgentMessageDeltaNotification{}, false},
 	{"UserInput", "v2/TurnStartParams.json", "UserInput", "type=text", UserInput{}, true},
+	{"ImageUserInput", "v2/TurnStartParams.json", "UserInput", "type=image", ImageUserInput{}, true},
 	{"TurnStartResponse", "v2/TurnStartResponse.json", "", "", TurnStartResponse{}, false},
 	{"Turn", "v2/TurnStartResponse.json", "Turn", "", Turn{}, false},
 	{"TurnInterruptParams", "v2/TurnInterruptParams.json", "", "", TurnInterruptParams{}, true},

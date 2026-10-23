@@ -60,8 +60,12 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.Body == "" || len(p.Body) > maxMessageBytes || !utf8.ValidString(p.Body) {
+	if (p.Body == "" && len(p.Images) == 0) || len(p.Body) > maxMessageBytes || !utf8.ValidString(p.Body) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body must be non-empty UTF-8 of at most %d bytes", maxMessageBytes)
+	}
+	images, err := validateConversationImages(p.Images)
+	if err != nil {
+		return Outcome{}, err
 	}
 	if p.ReplyTo != "" {
 		if _, err := store.GetMessage(ctx, tx.Q(), p.ReplyTo); err != nil {
@@ -85,6 +89,12 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	})
 	if err != nil {
 		return Outcome{}, err
+	}
+	for position, image := range images {
+		image.ImageID = x.IDs.New(protocol.PrefixFile)
+		if err := tx.InsertConversationImage(ctx, id, position, image); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if p.Decision != nil {
 		if err := tx.BindMessage(ctx, id, "decision", p.Decision.DecisionID, "answers"); err != nil {

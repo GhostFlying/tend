@@ -54,7 +54,8 @@ type APIResponse struct {
 
 // SubmitMessagePayload is the payload of conversation.submit_message.
 type SubmitMessagePayload struct {
-	Body string `json:"body"`
+	Images []ConversationImageInput `json:"images,omitempty"`
+	Body   string                   `json:"body"`
 	// ReplyTo and LastSeenSeq are what the client showed when the owner
 	// wrote: the message replied to and the last message seen (v0.1
 	// §6.2, D27).

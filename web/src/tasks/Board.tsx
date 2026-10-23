@@ -79,7 +79,7 @@ export function TaskBoard({
         <h1>任务看板</h1>
         <button
           type="button"
-          className={controls.iconBtn}
+          className={`${controls.iconBtn} ${styles.settings}`}
           aria-label="设置"
           title="设置"
           onClick={onSettings}

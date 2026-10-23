@@ -16,6 +16,7 @@ import type {
   OpStatus,
   RequestView,
   SubmitMessagePayload,
+  ConversationImageInput,
 } from "../api/generated/api.ts";
 import { newRequestId } from "../api/ids.ts";
 import { Store, type Readable } from "../state/store.ts";
@@ -43,6 +44,7 @@ export interface QueueOptions {
 
 export interface Draft {
   body: string;
+  images?: ConversationImageInput[];
   replyTo?: string;
   lastSeenSeq?: number;
   /** The option of an open decision the message chooses (D71). */
@@ -125,6 +127,9 @@ export class SendQueue {
     const now = this.now();
     const requestId = this.newId(now);
     const payload: SubmitMessagePayload = { body: draft.body };
+    if (draft.images?.length) {
+      payload.images = draft.images.map((image) => ({ ...image }));
+    }
     if (draft.replyTo) {
       payload.reply_to = draft.replyTo;
     }

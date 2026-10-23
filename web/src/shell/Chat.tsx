@@ -43,7 +43,7 @@ export function Chat({
         </button>
         <button
           type="button"
-          className={controls.iconBtn}
+          className={`${controls.iconBtn} ${styles.settings}`}
           onClick={onSettings}
           aria-label="设置"
           title="设置"

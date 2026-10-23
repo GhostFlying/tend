@@ -400,6 +400,11 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 			it.Decision = &c
 		}
 	}
+	images, err := store.ConversationImages(ctx, q, r.MessageID)
+	if err != nil {
+		return protocol.ConversationItem{}, err
+	}
+	it.Images = images
 	notice, err := store.GetMessageNotice(ctx, q, r.MessageID)
 	if err == nil {
 		it.NoticeType = notice.NoticeType
