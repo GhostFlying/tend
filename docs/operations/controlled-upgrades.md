@@ -106,10 +106,13 @@ server 当前 Runtime.Generation，离线恢复 companion 计数至不小于该�
 ## 终态资源隔离不等于 runner 未排空
 
 任务终态、所有关联 run 本地 done 且身份匹配，没有 held/fenced、活动 executor、
-待确认领取/交付/释放或其他资源操作时，历史原生停止证明不足只保留为资源隔离
-告警，不阻止 runner 自身替换。该判断不依赖 thread 或 worker 字段为空，也不
+待确认领取/交付/释放或其他资源操作时，已知旧 app-server UUID 缺成功最终报告的
+静态证明不足只保留为资源隔离告警，不阻止 runner 自身替换。该判断不要求 thread
+或 worker 字段为空，也不
 将旧失败 run 的缺失证明当作仍在执行。服务端有开放或 unknown run、任务未终态、
-缺少 journal、身份冲突或当前存在待确认操作时，维护仍被阻塞。
+缺少 journal、身份冲突、实际 harness 调用失败或当前存在待确认操作时，维护仍被
+阻塞。原生 thread 内保存的未确认 launch/send 同样是待确认操作，不能仅因
+journal requests 表为空而豁免。
 
 资源正常对账不变：能取得真实停止证明的资源继续释放；无法确认的资源仍由原
 任务占用，不能复用或清理。告警不表示原生进程已经停止，不会伪造 StoppedConfirmed

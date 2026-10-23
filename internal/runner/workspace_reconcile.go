@@ -49,7 +49,7 @@ func (r *Runner) reconcileWorkspaceProcesses(ctx context.Context) (workspaceProc
 		if err := r.reconcileWorkspace(ctx, resource); err != nil {
 			resultState.blocked[resource.WorkspaceID] = true
 			quarantined := false
-			if errors.Is(err, errWorkspaceProcessUnconfirmed) {
+			if errors.Is(err, errHistoricalSessionProofMissing) {
 				var classificationErr error
 				quarantined, classificationErr = r.terminalResourceQuarantine(ctx, resource)
 				if classificationErr != nil {
@@ -65,9 +65,9 @@ func (r *Runner) reconcileWorkspaceProcesses(ctx context.Context) (workspaceProc
 	return resultState, nil
 }
 
-// Native proof failures retain the resource, whereas journal failures must also
-// prevent declaring the runner drained. They must not share an exception path.
-var errWorkspaceProcessUnconfirmed = errors.New("workspace process stop is unconfirmed")
+// A known legacy app-server identity can lack a successful final report without
+// carrying an unresolved provider mutation. Harness errors are not this fact.
+var errHistoricalSessionProofMissing = errors.New("historical session stop proof is missing")
 
 func (r *Runner) reconcileWorkspace(ctx context.Context, p protocol.WorkspaceReconcile) error {
 	r.mu.Lock()
@@ -107,28 +107,31 @@ func (r *Runner) reconcileWorkspace(ctx context.Context, p protocol.WorkspaceRec
 		}
 		origin, err := recordedWorkerOrigin(run)
 		if err != nil {
-			return errors.Join(errWorkspaceProcessUnconfirmed, err)
+			return err
 		}
 		if origin == protocol.WorkerAppServer {
 			if run.Assignment.Workspace.ProviderID != "" || run.Assignment.Workspace.ProviderInstanceID != "" {
-				return fmt.Errorf("%w: historical app-server origin conflicts with an external provider", errWorkspaceProcessUnconfirmed)
+				return errors.New("historical app-server origin conflicts with an external provider")
 			}
 			if !slices.Contains(p.FinishedRunIDs, id) {
-				return fmt.Errorf("%w: historical app-server session closure lacks a successful final report", errWorkspaceProcessUnconfirmed)
+				if traex.IsLegacyThreadID(run.Thread) {
+					return fmt.Errorf("%w: historical app-server session closure lacks a successful final report", errHistoricalSessionProofMissing)
+				}
+				return errors.New("historical app-server session closure lacks a successful final report")
 			}
 			if err := traex.ReconcileCompletedSession(ctx, run.Thread, run.Held, run.UpdatedAtMillis); err != nil {
-				return errors.Join(errWorkspaceProcessUnconfirmed, err)
+				return err
 			}
 		} else {
 			if origin != protocol.WorkerOrca || r.cfg.Worker != protocol.WorkerOrca {
-				return fmt.Errorf("%w: historical process proof requires its original harness", errWorkspaceProcessUnconfirmed)
+				return errors.New("historical process proof requires its original harness")
 			}
 			rel, ok := r.cfg.Workers.(harness.HistoricalReleaser)
 			if !ok {
-				return fmt.Errorf("%w: historical process proof is unavailable for this harness", errWorkspaceProcessUnconfirmed)
+				return errors.New("historical process proof is unavailable for this harness")
 			}
 			if err := rel.ReleaseHistorical(ctx, id, run.Thread, run.Held, run.UpdatedAtMillis); err != nil {
-				return errors.Join(errWorkspaceProcessUnconfirmed, err)
+				return err
 			}
 		}
 		if err := r.cfg.Journal.ConfirmStopped(ctx, id); err != nil {
@@ -215,6 +218,15 @@ func (r *Runner) resourceQuarantine(ctx context.Context, p protocol.WorkspaceRec
 		}
 		if legacyOnly && (run.WorkerKind != "" || run.Thread != "" || run.Assignment.Protocol != 0 || ws.ID != "" || ws.Kind != "" || ws.ProviderID != "" || ws.ProviderInstanceID != "" || ws.Path != "") {
 			return false, nil
+		}
+		// Reconciliation can stop at an earlier run. Every remaining uncertain
+		// run must independently have the static app-server identity; otherwise
+		// a later provider launch/send could be hidden by the first error.
+		if !legacyOnly && !run.StoppedConfirmed && !(run.Thread == "" && run.Attempts == 0) {
+			origin, err := recordedWorkerOrigin(run)
+			if err != nil || origin != protocol.WorkerAppServer || !traex.IsLegacyThreadID(run.Thread) || ws.ProviderID != "" || ws.ProviderInstanceID != "" {
+				return false, nil
+			}
 		}
 	}
 	return true, nil
