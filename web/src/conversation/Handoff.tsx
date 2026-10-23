@@ -87,8 +87,8 @@ export function Handoff({ connection, onClose }: { connection: Connection; onClo
         </button>
       </div>
       <section aria-label="主 agent">
-        <h3>主 agent</h3>
-        <div className={styles.heading}>预备摘要</div>
+        <h2 className={styles.sectionHeading}>主 agent</h2>
+        <h3 className={styles.heading}>预备摘要</h3>
         <p className={styles.status} role="status" data-warning={warning || undefined}>
           {status}
         </p>
