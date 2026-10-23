@@ -281,6 +281,11 @@ func TestUpgradeServerFirstRestorationAndNoDatabaseRollback(t *testing.T) {
 	}
 	upgradeAck(h, "linux-1", protocol.RunnerReady)
 	v = upgradeTick(h, ServerObservation{})
+	if upgradeCtl(h, "linux-1").Mode != protocol.RunnerMaintenance {
+		t.Fatal("health admitted before commit")
+	}
+	upgradeCommitAck(h, rb)
+	v = upgradeTick(h, ServerObservation{})
 	if v.Hosts[0].Phase != "restored" {
 		t.Fatal("two real observations not restored", v)
 	}
@@ -326,6 +331,8 @@ func TestUpgradeServerFirstRestorationAndNoDatabaseRollback(t *testing.T) {
 	upgradeTick(h, ServerObservation{})
 	h.clock.Advance(8 * time.Second)
 	upgradeAck(h, "linux-2", protocol.RunnerReady)
+	upgradeTick(h, ServerObservation{})
+	upgradeCommitAck(h, rb2)
 	upgradeTick(h, ServerObservation{})
 	upgradeAck(h, "linux-2", protocol.RunnerNormal)
 	upgradeTick(h, ServerObservation{})

@@ -72,8 +72,9 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 		return nil
 	}
 	var deferred []error
-	blocked, reconcileErr := r.reconcileWorkspaceProcesses(ctx)
-	heldResources = len(blocked) > 0
+	reconciliation, reconcileErr := r.reconcileWorkspaceProcesses(ctx)
+	blocked := reconciliation.blocked
+	heldResources = reconciliation.maintenanceBlocked
 	if reconcileErr != nil {
 		deferred = append(deferred, fmt.Errorf("reconcile workspace processes: %w", reconcileErr))
 	}

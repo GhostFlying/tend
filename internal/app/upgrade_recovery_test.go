@@ -80,7 +80,7 @@ func TestUpgradeDownloadFailureRetryIgnoresPreviousControlError(t *testing.T) {
 }
 
 func TestUpgradeRunnerRollbackReceiptReconcilesAfterTimeout(t *testing.T) {
-	for _, invalid := range []string{"confirmed", "missing", "wrong-candidate", "wrong-current", "wrong-hash", "busy"} {
+	for _, invalid := range []string{"confirmed", "healthy-before-rollback", "missing", "wrong-candidate", "wrong-current", "wrong-hash", "busy"} {
 		t.Run(invalid, func(t *testing.T) {
 			h, c := upgradeHarness(t)
 			upgradeToRunners(h, c)
@@ -93,6 +93,24 @@ func TestUpgradeRunnerRollbackReceiptReconcilesAfterTimeout(t *testing.T) {
 			op := h.exec(runner("linux-1"), h.env("runner.upgrade_authorize", protocol.Target{Type: "host", ID: "linux-1"}, b, rev(ctl.Revision)), AuthorizeRunnerUpgrade{})
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
+			}
+			if invalid == "healthy-before-rollback" {
+				candidate := testRuntime(b.ProcessInstanceID)
+				candidate.Build.BinarySHA256 = b.ArtifactSHA256
+				candidate.JournalVersion = 9
+				candidate.Mode = protocol.RunnerReady
+				candidate.UpgradeID = b.UpgradeID
+				candidate.AppliedControlRevision = ctl.Revision
+				if op := h.versionedHello(b.InstanceID, candidate); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+				upgradeTick(h, ServerObservation{})
+				h.clock.Advance(8 * time.Second)
+				upgradeAck(h, b.InstanceID, protocol.RunnerReady)
+				upgradeTick(h, ServerObservation{})
+				if upgradeRead(h).Hosts[0].Healthy < 2 {
+					t.Fatal("candidate never reached commit-ready")
+				}
 			}
 			h.clock.Advance(31 * time.Minute)
 			if v := upgradeTick(h, ServerObservation{}); v.Status != "attention" {
@@ -120,7 +138,7 @@ func TestUpgradeRunnerRollbackReceiptReconcilesAfterTimeout(t *testing.T) {
 				t.Fatal(op)
 			}
 			upgradeTick(h, ServerObservation{})
-			if invalid != "confirmed" {
+			if invalid != "confirmed" && invalid != "healthy-before-rollback" {
 				if upgradeRead(h).Hosts[0].Rollback != nil || upgradeCtl(h, "linux-1").Mode != protocol.RunnerMaintenance {
 					t.Fatal("unproven rollback released maintenance")
 				}
@@ -301,6 +319,8 @@ func TestUpgradeCompletedHostGrantDoesNotBlockLaterRetry(t *testing.T) {
 	upgradeTick(h, ServerObservation{})
 	h.clock.Advance(8 * time.Second)
 	upgradeAck(h, "linux-1", protocol.RunnerReady)
+	upgradeTick(h, ServerObservation{})
+	upgradeCommitAck(h, b)
 	upgradeTick(h, ServerObservation{})
 	upgradeAck(h, "linux-1", protocol.RunnerNormal)
 	upgradeTick(h, ServerObservation{})

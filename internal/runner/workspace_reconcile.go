@@ -14,27 +14,45 @@ import (
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
 
-func (r *Runner) reconcileWorkspaceProcesses(ctx context.Context) (map[string]bool, error) {
+// workspaceProcessReconciliation keeps resource quarantine independent of
+// readiness: retaining an untouched legacy resource need not block replacement
+// of an otherwise drained runner.
+type workspaceProcessReconciliation struct {
+	blocked            map[string]bool
+	maintenanceBlocked bool
+}
+
+func (r *Runner) reconcileWorkspaceProcesses(ctx context.Context) (workspaceProcessReconciliation, error) {
 	env, err := r.newEnvelope(protocol.OpWorkspaceReconcile, protocol.Target{Type: "host", ID: r.cfg.HostID}, struct{}{})
 	if err != nil {
-		return nil, err
+		return workspaceProcessReconciliation{}, err
 	}
 	op, err := r.hostOperation(ctx, env)
 	if err != nil {
-		return nil, err
+		return workspaceProcessReconciliation{}, err
 	}
 	var result protocol.WorkspaceReconcileResult
 	if err := json.Unmarshal(op.Result, &result); err != nil {
-		return nil, err
+		return workspaceProcessReconciliation{}, err
 	}
-	blocked := map[string]bool{}
+	resultState := workspaceProcessReconciliation{blocked: map[string]bool{}}
 	for _, resource := range result.Workspaces {
+		legacy, legacyErr := r.legacyResourceWarning(ctx, resource)
+		if legacyErr != nil {
+			return resultState, legacyErr
+		}
+		if legacy {
+			resultState.blocked[resource.WorkspaceID] = true
+			r.cfg.Log.WarnContext(ctx, "legacy workspace retained without blocking runner maintenance", "workspace_id", resource.WorkspaceID, "task_id", resource.TaskID)
+			continue
+		}
 		if err := r.reconcileWorkspace(ctx, resource); err != nil {
-			blocked[resource.WorkspaceID] = true
+			resultState.blocked[resource.WorkspaceID] = true
+			resultState.maintenanceBlocked = true
 			r.cfg.Log.WarnContext(ctx, "workspace needs process reconciliation; retained for its owner", "workspace_id", resource.WorkspaceID, "task_id", resource.TaskID, "err", err)
 		}
 	}
-	return blocked, nil
+	return resultState, nil
 }
 
 func (r *Runner) reconcileWorkspace(ctx context.Context, p protocol.WorkspaceReconcile) error {
@@ -123,4 +141,51 @@ func recordedWorkerOrigin(run journal.Run) (protocol.WorkerKind, error) {
 	default:
 		return "", errors.New("historical worker origin is unknown")
 	}
+}
+
+// legacyResourceWarning recognizes only receipts from before worker/thread and
+// physical-resource metadata existed. It authorizes no resource mutation and
+// does not claim that an unrecorded process stopped. The server must positively
+// identify a terminal task; detached resources of live tasks do not qualify.
+func (r *Runner) legacyResourceWarning(ctx context.Context, p protocol.WorkspaceReconcile) (bool, error) {
+	if !p.TaskTerminal || len(p.RunIDs) == 0 {
+		return false, nil
+	}
+	r.mu.Lock()
+	active := false
+	for _, a := range r.active {
+		if a.as.TaskID == p.TaskID || a.as.Workspace.ID == p.WorkspaceID {
+			active = true
+			break
+		}
+	}
+	r.mu.Unlock()
+	if active {
+		return false, nil
+	}
+	requests, err := r.cfg.Journal.Requests(ctx)
+	if err != nil {
+		return false, err
+	}
+	releases, err := r.cfg.Journal.WorkspaceReleases(ctx)
+	if err != nil {
+		return false, err
+	}
+	if len(requests) != 0 || len(releases) != 0 {
+		return false, nil
+	}
+	for _, id := range p.RunIDs {
+		run, err := r.cfg.Journal.HistoricalRun(ctx, id)
+		if errors.Is(err, journal.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		ws := run.Assignment.Workspace
+		if run.Assignment.TaskID != p.TaskID || run.Phase != journal.PhaseDone || run.Held || run.Fenced || run.WorkerKind != "" || run.Thread != "" || run.Assignment.Protocol != 0 || ws.ID != "" || ws.Kind != "" || ws.ProviderID != "" || ws.ProviderInstanceID != "" || ws.Path != "" {
+			return false, nil
+		}
+	}
+	return true, nil
 }

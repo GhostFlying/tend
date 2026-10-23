@@ -70,27 +70,29 @@ type BackupFile struct {
 	Mode    uint32 `json:"mode"`
 }
 type Operation struct {
-	ID                  string       `json:"id"`
-	Kind                string       `json:"kind"`
-	Binding             Binding      `json:"binding"`
-	Previous            Version      `json:"previous"`
-	Candidate           Version      `json:"candidate"`
-	PreviousProcess     Identity     `json:"previous_process"`
-	CandidateProcess    Identity     `json:"candidate_process"`
-	LaunchID            string       `json:"launch_id"`
-	Phase               string       `json:"phase"`
-	Grant               *Grant       `json:"grant,omitempty"`
-	GrantBootID         string       `json:"grant_boot_id,omitempty"`
-	GrantDeadlineMillis int64        `json:"grant_deadline_millis,omitempty"`
-	Backups             []BackupFile `json:"backups,omitempty"`
-	BackupDir           string       `json:"backup_dir,omitempty"`
-	HealthCount         int          `json:"health_count"`
-	LastHealthSequence  uint64       `json:"last_health_sequence"`
-	Irreversible        bool         `json:"irreversible"`
-	CancelRequested     bool         `json:"cancel_requested"`
-	StartedAt           time.Time    `json:"started_at"`
-	HealthStartedAt     time.Time    `json:"health_started_at"`
-	LastError           string       `json:"last_error,omitempty"`
+	RollbackAuthorization *Health      `json:"rollback_authorization,omitempty"`
+	CandidateNotStarted   bool         `json:"candidate_not_started,omitempty"`
+	ID                    string       `json:"id"`
+	Kind                  string       `json:"kind"`
+	Binding               Binding      `json:"binding"`
+	Previous              Version      `json:"previous"`
+	Candidate             Version      `json:"candidate"`
+	PreviousProcess       Identity     `json:"previous_process"`
+	CandidateProcess      Identity     `json:"candidate_process"`
+	LaunchID              string       `json:"launch_id"`
+	Phase                 string       `json:"phase"`
+	Grant                 *Grant       `json:"grant,omitempty"`
+	GrantBootID           string       `json:"grant_boot_id,omitempty"`
+	GrantDeadlineMillis   int64        `json:"grant_deadline_millis,omitempty"`
+	Backups               []BackupFile `json:"backups,omitempty"`
+	BackupDir             string       `json:"backup_dir,omitempty"`
+	HealthCount           int          `json:"health_count"`
+	LastHealthSequence    uint64       `json:"last_health_sequence"`
+	Irreversible          bool         `json:"irreversible"`
+	CancelRequested       bool         `json:"cancel_requested"`
+	StartedAt             time.Time    `json:"started_at"`
+	HealthStartedAt       time.Time    `json:"health_started_at"`
+	LastError             string       `json:"last_error,omitempty"`
 }
 
 // TerminalReceipt fences delayed requests after the single active operation moves on.
@@ -105,15 +107,23 @@ type RollbackProof struct {
 	Version Version  `json:"version"`
 	Process Identity `json:"process"`
 }
+
+// CommittedProof retains the original upgrade across same-version restarts.
+type CommittedProof struct {
+	Binding Binding  `json:"binding"`
+	Version Version  `json:"version"`
+	Process Identity `json:"process"`
+}
 type State struct {
-	RollbackProof *RollbackProof             `json:"rollback_proof,omitempty"`
-	Terminals     map[string]TerminalReceipt `json:"terminals,omitempty"`
-	Format        int                        `json:"format"`
-	InstanceID    string                     `json:"instance_id"`
-	Current       Version                    `json:"current"`
-	Process       Identity                   `json:"process"`
-	Operation     *Operation                 `json:"operation,omitempty"`
-	LastError     string                     `json:"last_error,omitempty"`
+	CommittedProof *CommittedProof            `json:"committed_proof,omitempty"`
+	RollbackProof  *RollbackProof             `json:"rollback_proof,omitempty"`
+	Terminals      map[string]TerminalReceipt `json:"terminals,omitempty"`
+	Format         int                        `json:"format"`
+	InstanceID     string                     `json:"instance_id"`
+	Current        Version                    `json:"current"`
+	Process        Identity                   `json:"process"`
+	Operation      *Operation                 `json:"operation,omitempty"`
+	LastError      string                     `json:"last_error,omitempty"`
 }
 
 type Process interface {

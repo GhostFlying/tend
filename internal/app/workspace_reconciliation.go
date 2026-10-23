@@ -25,7 +25,7 @@ func (ReconcileWorkspaces) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, err
 		}
 	}
-	rows, err := tx.Q().QueryContext(ctx, `SELECT w.workspace_id,w.occupied_by
+	rows, err := tx.Q().QueryContext(ctx, `SELECT w.workspace_id,w.occupied_by,owner.lifecycle IN ('completed','cancelled')
  FROM workspaces w JOIN tasks owner ON owner.task_id=w.occupied_by
  WHERE w.host_id=? AND w.status NOT IN ('removing','removed')
  AND (owner.lifecycle IN ('completed','cancelled') OR NOT EXISTS
@@ -39,7 +39,7 @@ func (ReconcileWorkspaces) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	result := protocol.WorkspaceReconcileResult{Workspaces: []protocol.WorkspaceReconcile{}}
 	for rows.Next() {
 		var item protocol.WorkspaceReconcile
-		if err := rows.Scan(&item.WorkspaceID, &item.TaskID); err != nil {
+		if err := rows.Scan(&item.WorkspaceID, &item.TaskID, &item.TaskTerminal); err != nil {
 			rows.Close()
 			return Outcome{}, fmt.Errorf("app: scan workspace reconciliation: %w", err)
 		}

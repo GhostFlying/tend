@@ -31,7 +31,7 @@ func reconcileUpgradeRollbacks(ctx context.Context, x *Exec, tx *store.Tx, r *st
 	}
 	for i := range r.Hosts {
 		h := &r.Hosts[i]
-		if h.Rollback != nil || h.CandidateInstance == "" || h.Healthy >= 2 {
+		if h.Rollback != nil || h.CandidateInstance == "" || h.Committed != nil {
 			continue
 		}
 		rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)

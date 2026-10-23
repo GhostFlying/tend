@@ -86,11 +86,18 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 	if err != nil {
 		return false, "", err
 	}
-	if ctl.UpgradeID != r.View.UpgradeID || rt.Runtime.UpgradeID != r.View.UpgradeID || rt.Runtime.Build.BinarySHA256 != h.TargetHash || rt.Runtime.InstanceID != h.CandidateInstance {
+	if ctl.UpgradeID != r.View.UpgradeID || rt.Runtime.UpgradeID != r.View.UpgradeID || rt.Runtime.Build.BinarySHA256 != h.TargetHash || !runnerCandidateMatches(*r, *h, rt.Runtime) {
 		return false, "", nil
 	}
 	if !installedRunnerMatches(rt.Runtime, r.Manifest) {
 		return false, "候选 runner 的协议或 journal 版本与发布清单不一致", nil
+	}
+	if h.HealthInstance != rt.Runtime.InstanceID {
+		h.HealthInstance = rt.Runtime.InstanceID
+		h.Healthy, h.LastSequence, h.LastHealthyAt = 0, 0, 0
+		if h.Committed != nil {
+			v.Phase = "checking"
+		}
 	}
 	fresh := rt.Online && now-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && rt.Runtime.AppliedControlRevision == ctl.Revision
 	if v.Phase != "restored" {
@@ -99,7 +106,8 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 			return false, "", err
 		}
 		v.Phase = "checking"
-		healthy := fresh && ctl.Mode == protocol.RunnerMaintenance && rt.Runtime.Mode == protocol.RunnerReady && runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0
+		admitted := h.Committed != nil && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal
+		healthy := fresh && (admitted || ctl.Mode == protocol.RunnerMaintenance && rt.Runtime.Mode == protocol.RunnerReady && runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0)
 		if healthy && rt.Runtime.Sequence > h.LastSequence && rt.LastHeartbeatAt-h.LastHealthyAt >= 7500 {
 			h.Healthy++
 			h.LastSequence = rt.Runtime.Sequence
@@ -108,8 +116,12 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		if !healthy {
 			h.Healthy = 0
 		}
-		if h.Healthy >= 2 {
-			ctl.Revision++
+		if healthy && h.Healthy >= 2 && committedMatches(*r, *h, rt.Runtime.UpdaterReceipt, rt.Runtime) {
+			proof := *rt.Runtime.UpdaterReceipt
+			h.Committed = &proof
+			if ctl.Mode != protocol.RunnerNormal {
+				ctl.Revision++
+			}
 			ctl.Mode = protocol.RunnerNormal
 			ctl.Upgrade = nil
 			ctl.Authorization = nil
@@ -121,7 +133,7 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 			return true, "", nil
 		}
 	}
-	if v.Phase == "restored" && fresh && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal {
+	if v.Phase == "restored" && committedMatches(*r, *h, h.Committed, rt.Runtime) && fresh && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal {
 		v.Status = "completed"
 		v.CurrentVersion = rt.Runtime.Build.Version
 		v.ProtocolVersion = rt.Runtime.Protocol
