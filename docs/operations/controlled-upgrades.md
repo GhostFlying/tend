@@ -102,3 +102,17 @@ server 当前 Runtime.Generation，离线恢复 companion 计数至不小于该�
 下一次启动会分配更高代次。不得通过自动追赶 server 代次重试旧进程，否则
 迟到的旧进程也可重新抢占。具体实现和回归边界见
 [进程代次计划](../plans/runner-incarnation-ordering.md)。
+
+## 终态资源隔离不等于 runner 未排空
+
+任务终态、所有关联 run 本地 done 且身份匹配，没有 held/fenced、活动 executor、
+待确认领取/交付/释放或其他资源操作时，历史原生停止证明不足只保留为资源隔离
+告警，不阻止 runner 自身替换。该判断不依赖 thread 或 worker 字段为空，也不
+将旧失败 run 的缺失证明当作仍在执行。服务端有开放或 unknown run、任务未终态、
+缺少 journal、身份冲突或当前存在待确认操作时，维护仍被阻塞。
+
+资源正常对账不变：能取得真实停止证明的资源继续释放；无法确认的资源仍由原
+任务占用，不能复用或清理。告警不表示原生进程已经停止，不会伪造 StoppedConfirmed
+或为失败对账创建释放意图。journal 读写错误仍是维护故障，不因资源隔离而忽略。
+升级 runner 不会恢复已 done 的历史 run，也不能作为关闭原生终端的授权。
+具体边界及回归见[实施计划](../plans/terminal-resource-maintenance.md)。
