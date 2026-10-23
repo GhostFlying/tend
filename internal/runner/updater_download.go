@@ -30,7 +30,7 @@ func (r *Runner) maybeUpgrade(ctx context.Context) {
 	r.mu.Lock()
 	confirmed := r.confirmedRuntime
 	r.mu.Unlock()
-	if err != nil || observation.Mode != protocol.RunnerReady || control.Upgrade == nil || control.UpgradeID == "" || confirmed.Mode != protocol.RunnerReady || confirmed.AppliedControlRevision != control.Revision || confirmed.UpgradeID != control.UpgradeID {
+	if err != nil || observation.Mode != protocol.RunnerReady || control.Upgrade == nil || control.UpgradeID == "" || control.CancelledUpgradeID == control.UpgradeID || confirmed.Mode != protocol.RunnerReady || confirmed.AppliedControlRevision != control.Revision || confirmed.UpgradeID != control.UpgradeID {
 		r.updaterMu.Unlock()
 		return
 	}
@@ -207,6 +207,9 @@ func (r *Runner) submitUpdater(ctx context.Context, id, dir, digest string) erro
 	}
 	var status struct {
 		State struct {
+			Terminals map[string]struct {
+				Phase string `json:"phase"`
+			} `json:"terminals"`
 			Operation *struct {
 				ID        string `json:"id"`
 				Candidate struct {
@@ -220,6 +223,14 @@ func (r *Runner) submitUpdater(ctx context.Context, id, dir, digest string) erro
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK || decodeErr != nil || status.Error != "" {
 		return errors.New("updater status unavailable")
+	}
+	// Terminal IDs are durable fences even after Operation has moved to another
+	// batch. Never replay an installation already cancelled or completed.
+	if terminal, ok := status.State.Terminals[id]; ok {
+		switch terminal.Phase {
+		case "cancelled", "committed", "rolled_back":
+			return nil
+		}
 	}
 	if op := status.State.Operation; op != nil && op.ID == id {
 		if op.Candidate.ManifestSHA256 != digest {

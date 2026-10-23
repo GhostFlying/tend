@@ -95,6 +95,7 @@ func TestUpgradeLateRunnerHealthRestoresOnlyPinnedCandidate(t *testing.T) {
 	if v := upgradeTick(h, ServerObservation{}); v.Status != "attention" {
 		t.Fatal(v)
 	}
+	ctl = upgradeCtl(h, "linux-1")
 	other := upgradeCtl(h, "linux-2")
 	rt := testRuntime(b.ProcessInstanceID)
 	rt.Build.BinarySHA256 = b.ArtifactSHA256

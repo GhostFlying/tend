@@ -49,8 +49,9 @@ type UpgradeChangeRequest struct {
 	ExpectedControlRevision int64  `json:"expected_control_revision"`
 }
 
-// UpdaterReceipt is local supervisor proof of an irreversible commit or a
-// completed reversible rollback, including a proven same-version successor.
+// UpdaterReceipt is local supervisor proof of prelaunch cancellation, an
+// irreversible commit or a completed reversible rollback, including a proven
+// same-version successor.
 // The authenticated reporting runtime must match CurrentProcessInstanceID and
 // CurrentSHA256; Binding still identifies the original installation candidate.
 type UpdaterReceipt struct {

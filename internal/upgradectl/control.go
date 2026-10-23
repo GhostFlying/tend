@@ -32,6 +32,7 @@ type Backend interface {
 	ServerUpgradeHealth(context.Context, protocol.UpgradeBinding) (protocol.UpgradeHealth, error)
 }
 type Config struct {
+	Now             func() time.Time
 	Instance        string
 	ProcessInstance string
 	BinarySHA256    string
@@ -54,6 +55,9 @@ type Controller struct {
 func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context) (app.ServerObservation, error), log *slog.Logger) (*Controller, error) {
 	if cfg.Instance == "" || cfg.ProcessInstance == "" || !release.ValidSHA(cfg.BinarySHA256) || !filepath.IsAbs(cfg.ControlSocket) || !filepath.IsAbs(cfg.UpdaterSocket) || !filepath.IsAbs(cfg.ReleaseDir) || ids == nil || a == nil || observe == nil {
 		return nil, errors.New("upgradectl: invalid fixed upgrade configuration")
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Second
@@ -290,7 +294,13 @@ func (c *Controller) rollbackReceipt(ctx context.Context) *protocol.UpdaterRecei
 	if err != nil {
 		return nil
 	}
-	receipt := updater.RollbackReceipt(response)
+	var receipt *protocol.UpdaterReceipt
+	if view, err := c.app.CurrentUpgrade(ctx); err == nil {
+		receipt = updater.CancelledReceipt(response, view.UpgradeID)
+	}
+	if receipt == nil {
+		receipt = updater.RollbackReceipt(response)
+	}
 	if receipt == nil || receipt.Binding.InstanceID != c.cfg.Instance || receipt.CurrentProcessInstanceID != c.cfg.ProcessInstance || receipt.CurrentSHA256 != c.cfg.BinarySHA256 {
 		return nil
 	}
@@ -320,7 +330,8 @@ func (c *Controller) cancelStaged(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if batch.View.Status == "cancelled" {
+		expired := batch.View.Status == "attention" && batch.ServerGrantDeadline > 0 && batch.ServerGrantDeadline <= c.cfg.Now().UnixMilli() && batch.ServerProcess == op.Binding.ProcessInstanceID
+		if batch.View.Status == "cancelled" || expired {
 			found := false
 			for _, id := range ids {
 				if id == op.ID {
