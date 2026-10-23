@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"image"
+	"image/draw"
 	_ "image/gif"
 	_ "image/jpeg"
 	"image/png"
@@ -76,12 +77,21 @@ func (a *App) MessageImageURLs(ctx context.Context, messageID string) (out []str
 				return e
 			}
 			if r.MediaType == "image/gif" {
+				config, _, err := image.DecodeConfig(bytes.NewReader(r.Data))
+				if err != nil {
+					return err
+				}
 				frame, _, err := image.Decode(bytes.NewReader(r.Data))
 				if err != nil {
 					return err
 				}
+				// A GIF frame can cover only part of the logical screen. Browsers
+				// leave untouched pixels transparent, including when a global
+				// background palette index exists. Decode only the first frame.
+				canvas := image.NewNRGBA(image.Rect(0, 0, config.Width, config.Height))
+				draw.Draw(canvas, frame.Bounds(), frame, frame.Bounds().Min, draw.Over)
 				var encoded bytes.Buffer
-				if err := png.Encode(&encoded, frame); err != nil {
+				if err := png.Encode(&encoded, canvas); err != nil {
 					return err
 				}
 				r.Data, r.MediaType = encoded.Bytes(), "image/png"

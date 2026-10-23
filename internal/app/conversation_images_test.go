@@ -208,3 +208,63 @@ func TestCompressedImageDimensionsBoundDecode(t *testing.T) {
 		t.Fatalf("huge dimensions accepted: %v", err)
 	}
 }
+
+func TestGIFNativeInputPreservesLogicalCanvasAndFrameOffset(t *testing.T) {
+	for _, transparent := range []bool{false, true} {
+		name := "opaque"
+		if transparent {
+			name = "transparent"
+		}
+		t.Run(name, func(t *testing.T) {
+			palette := color.Palette{color.RGBA{R: 255, A: 255}, color.RGBA{G: 255, A: 255}}
+			if transparent {
+				palette = color.Palette{color.Transparent, color.RGBA{G: 255, A: 255}, color.RGBA{R: 255, A: 255}}
+			}
+			frame := image.NewPaletted(image.Rect(4, 4, 6, 6), palette)
+			if transparent {
+				frame.SetColorIndex(4, 4, 2)
+			}
+			var original bytes.Buffer
+			if err := gif.EncodeAll(&original, &gif.GIF{Image: []*image.Paletted{frame}, Delay: []int{0}, BackgroundIndex: 1, Config: image.Config{ColorModel: palette, Width: 10, Height: 10}}); err != nil {
+				t.Fatal(err)
+			}
+			h := newHarness(t)
+			ctx := context.Background()
+			raw := original.Bytes()
+			if err := h.store.Write(ctx, func(tx *store.Tx) error {
+				if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: "partial_gif", Author: "owner"}); err != nil {
+					return err
+				}
+				return tx.InsertConversationImage(ctx, "partial_gif", 0, store.ConversationImageRow{ConversationImage: protocol.ConversationImage{ImageID: "partial_image", Name: "partial.gif", MediaType: "image/gif"}, Data: raw})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			urls, firstOnly, err := h.app.MessageImageURLs(ctx, "partial_gif")
+			if err != nil || !firstOnly || len(urls) != 1 {
+				t.Fatalf("native GIF: %v %v %v", urls, firstOnly, err)
+			}
+			native, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(urls[0], "data:image/png;base64,"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := png.Decode(bytes.NewReader(native))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if decoded.Bounds() != image.Rect(0, 0, 10, 10) {
+				t.Fatalf("logical bounds=%v, want 10x10", decoded.Bounds())
+			}
+			for y := range 10 {
+				for x := range 10 {
+					expected := color.NRGBA{}
+					if x >= 4 && x < 6 && y >= 4 && y < 6 && (!transparent || (x == 4 && y == 4)) {
+						expected = color.NRGBA{R: 255, A: 255}
+					}
+					if actual := color.NRGBAModel.Convert(decoded.At(x, y)).(color.NRGBA); actual != expected {
+						t.Fatalf("pixel (%d,%d)=%v want %v", x, y, actual, expected)
+					}
+				}
+			}
+		})
+	}
+}
