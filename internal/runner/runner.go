@@ -89,6 +89,9 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
+	DeliveryObserver  DeliveryObserver
+	DeliveryProviders []string
+
 	ServerURL            string
 	HostID               string
 	HostToken            string
@@ -255,6 +258,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 	r.wg.Go(func() { r.workspaceLifecycle(ctx) })
+	if r.cfg.DeliveryObserver != nil && len(r.cfg.DeliveryProviders) > 0 {
+		r.wg.Go(func() { r.deliveryObservations(ctx) })
+	}
 	r.claims(ctx)
 	return ctx.Err()
 }

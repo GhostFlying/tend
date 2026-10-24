@@ -49,7 +49,8 @@ type APIResponse struct {
 	Error     *Error     `json:"error,omitempty"`
 	// Current is the task's state after a stale write about it, so the
 	// caller can decide again.
-	Current *TaskSummary `json:"current,omitempty"`
+	Current         *TaskSummary  `json:"current,omitempty"`
+	CurrentWorkItem *WorkItemView `json:"current_work_item,omitempty"`
 }
 
 // SubmitMessagePayload is the payload of conversation.submit_message.

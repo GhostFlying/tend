@@ -1,4 +1,6 @@
 // Shell-scoped composer text survives navigation without sending an intention.
+import { intentionText, type WorkItemIntention } from "../workitems/model.ts";
+import type { WorkItemView } from "../api/generated/api.ts";
 import type { TaskSummary } from "../api/generated/api.ts";
 import { Store } from "../state/store.ts";
 
@@ -33,6 +35,15 @@ export class ComposerDraft {
       text: current.text.includes(heading)
         ? current.text
         : current.text + (current.text.trim() ? "\n\n" : "") + intention,
+      focus: current.focus + 1,
+    });
+  }
+  workItem(item: WorkItemView, intention: WorkItemIntention): void {
+    const current = this.state.get();
+    const text = intentionText(item, intention);
+    this.state.set({
+      ...current,
+      text: current.text + (current.text.trim() ? "\n\n" : "") + text,
       focus: current.focus + 1,
     });
   }

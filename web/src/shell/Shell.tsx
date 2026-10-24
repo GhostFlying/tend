@@ -17,6 +17,9 @@ import { Details } from "./Details.tsx";
 import styles from "./Shell.module.css";
 import { TaskBoard } from "../tasks/Board.tsx";
 import { Repositories } from "../repos/Repositories.tsx";
+import { WorkItemBoard } from "../workitems/Board.tsx";
+import { WorkItemDetails } from "../workitems/Details.tsx";
+import { splitWorkItemIds } from "../workitems/model.ts";
 import { Sidebar } from "./Sidebar.tsx";
 import { TabBar, type View } from "./TabBar.tsx";
 
@@ -31,6 +34,8 @@ export function Shell({
   connection: Connection;
   queue: SendQueue | null;
 }) {
+  const workItemSelected = useStore(live.workItems.selected);
+  const workItemFocus = useRef<HTMLElement | null>(null);
   const [upgradeId, setUpgradeId] = useState<string | null>(null);
   const upgradeFocus = useRef<HTMLElement | null>(null);
   const [reposOpen, setReposOpen] = useState(false);
@@ -71,8 +76,17 @@ export function Shell({
   const snapshot = useStore(live.snapshot);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(false);
+  const [recordsVisited, setRecordsVisited] = useState(false);
   const [boardVisited, setBoardVisited] = useState(false);
+  const showRecords = () => {
+    setRecordsOpen(true);
+    setRecordsVisited(true);
+    setBoardOpen(true);
+    setView("tasks");
+  };
   const showBoard = () => {
+    setRecordsOpen(false);
     setBoardOpen(true);
     setBoardVisited(true);
     setView("tasks");
@@ -100,7 +114,19 @@ export function Shell({
           document.activeElement instanceof HTMLElement ? document.activeElement : null;
         setUpgradeId(id);
       },
+      openWorkItem(id) {
+        workItemFocus.current =
+          document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        void live.workItems.open(id);
+      },
+      discussWorkItem(item, intention) {
+        live.workItems.close();
+        setBoardOpen(false);
+        setView("chat");
+        draft.workItem(item, intention);
+      },
       openTask(taskId) {
+        live.workItems.close();
         const active = document.activeElement;
         if (active instanceof HTMLElement && !active.closest('[aria-label="任务详情"]'))
           returnFocus.current = active;
@@ -116,6 +142,12 @@ export function Shell({
     if (openedInitialTask.current) return;
     openedInitialTask.current = true;
     const taskId = new URLSearchParams(window.location.search).get("task");
+    const workItemId = new URLSearchParams(window.location.search).get("work_item");
+    if (workItemId) {
+      const parts = splitWorkItemIds(workItemId);
+      if (parts.length === 1 && typeof parts[0] !== "string")
+        services.openWorkItem(parts[0]!.workItemId);
+    }
     if (!taskId) return;
     const parts = splitTaskIds(taskId);
     if (parts.length === 1 && typeof parts[0] !== "string") services.openTask(parts[0]!.taskId);
@@ -142,6 +174,7 @@ export function Shell({
             view={view}
             connection={connection}
             onBoard={showBoard}
+            onRecords={showRecords}
             onSettings={showSettings}
             onRepos={showRepos}
           />
@@ -151,11 +184,23 @@ export function Shell({
             <Chat connection={connection} visible={!boardOpen} />
           </div>
           {boardVisited && (
-            <div className={styles.content} hidden={!boardOpen}>
-              <TaskBoard
-                active={boardOpen}
+            <div className={styles.content} hidden={!boardOpen || recordsOpen}>
+              <WorkItemBoard
+                active={boardOpen && !recordsOpen}
                 connection={connection}
                 onChat={showChat}
+                onRepos={showRepos}
+                onRecords={showRecords}
+              />
+            </div>
+          )}
+          {recordsVisited && (
+            <div className={styles.content} hidden={!boardOpen || !recordsOpen}>
+              <TaskBoard
+                active={boardOpen && recordsOpen}
+                connection={connection}
+                onChat={showBoard}
+                backLabel="返回工作项"
                 onRepos={showRepos}
               />
             </div>
@@ -176,6 +221,18 @@ export function Shell({
           pending={attentionCount(snapshot)}
         />
       </div>
+      {workItemSelected && (
+        <WorkItemDetails
+          key={workItemSelected}
+          connection={connection}
+          onClose={() => {
+            live.workItems.close();
+            queueMicrotask(
+              () => workItemFocus.current?.isConnected && workItemFocus.current.focus(),
+            );
+          }}
+        />
+      )}
       {upgradeId && (
         <UpgradeDetails
           id={upgradeId}

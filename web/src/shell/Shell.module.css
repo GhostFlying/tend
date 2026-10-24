@@ -112,3 +112,7 @@
 .content[hidden] {
   display: none;
 }
+
+.app:not([data-details="open"]) .details {
+  border-left: 0;
+}

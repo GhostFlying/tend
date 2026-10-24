@@ -21,6 +21,7 @@ const (
 	PrefixRequest          Prefix = "req"
 	PrefixTrace            Prefix = "trc"
 	PrefixTask             Prefix = "task"
+	PrefixWorkItem         Prefix = "wi"
 	PrefixAction           Prefix = "act"
 	PrefixRun              Prefix = "run"
 	PrefixArtifact         Prefix = "art"

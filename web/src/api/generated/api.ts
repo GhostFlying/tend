@@ -139,6 +139,7 @@ export interface TendAPI {
   AnswerResult?: AnswerResult;
   ArtifactDetail?: ArtifactDetail;
   ArtifactPayload?: ArtifactPayload;
+  CloseWorkItemPayload?: CloseWorkItemPayload;
   ConversationAttachment?: ConversationAttachment;
   ConversationHandoffPayload?: ConversationHandoffPayload;
   ConversationHandoffView?: ConversationHandoffView;
@@ -146,13 +147,17 @@ export interface TendAPI {
   ConversationPage?: ConversationPage;
   ConversationSettingsView?: ConversationSettingsView;
   CreateActionPayload?: CreateActionPayload;
+  CreateWorkItemPayload?: CreateWorkItemPayload;
   DownloadURLResponse?: DownloadURLResponse;
   Envelope?: Envelope;
   HookRequest?: HookRequest;
   HookResponse?: HookResponse;
   InterruptReplyPayload?: InterruptReplyPayload;
   LedgerEvent?: LedgerEvent;
+  LinkWorkItemTaskPayload?: LinkWorkItemTaskPayload;
   RateTaskPayload?: RateTaskPayload;
+  RefreshDeliveryPayload?: RefreshDeliveryPayload;
+  ReopenWorkItemPayload?: ReopenWorkItemPayload;
   RepoRegistry?: RepoRegistry;
   RequestView?: RequestView;
   RunLogPage?: RunLogPage;
@@ -169,6 +174,9 @@ export interface TendAPI {
   ToolRequest?: ToolRequest;
   ToolResponse?: ToolResponse;
   ToolSpec?: ToolSpec;
+  UpdateWorkItemPayload?: UpdateWorkItemPayload;
+  WorkItemPage?: WorkItemPage;
+  WorkItemView?: WorkItemView;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -176,6 +184,7 @@ export interface TendAPI {
  */
 export interface APIResponse {
   current?: TaskSummary;
+  current_work_item?: WorkItemView;
   error?: Error;
   operation?: Operation;
 }
@@ -195,6 +204,126 @@ export interface TaskSummary {
   task_id: string;
   title: string;
   workspace: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemView".
+ */
+export interface WorkItemView {
+  background?: SharedFact[];
+  closure?: WorkItemClosure;
+  column: string;
+  created_at: number;
+  default_workspace_task_id?: string;
+  deliveries?: WorkItemDelivery[];
+  follow_ons?: WorkItemFollowOn[];
+  intent: string;
+  observations?: DeliveryObservation[];
+  project: string;
+  revision: number;
+  stages: WorkItemStage[] | null;
+  status: string;
+  tasks?: TaskSummary[];
+  title: string;
+  updated_at: number;
+  work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedFact".
+ */
+export interface SharedFact {
+  kind: string;
+  source: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemClosure".
+ */
+export interface WorkItemClosure {
+  evidence: WorkItemEvidence[] | null;
+  kind: string;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemEvidence".
+ */
+export interface WorkItemEvidence {
+  kind: string;
+  observation?: DeliveryObservation;
+  reference: string;
+  summary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DeliveryObservation".
+ */
+export interface DeliveryObservation {
+  attempted_at?: number;
+  checked_at?: number;
+  closed_at?: string;
+  closed_by?: DeliveryActor;
+  delivery_id: string;
+  error_kind?: string;
+  generation: number;
+  head_sha?: string;
+  merge_sha?: string;
+  merged_at?: string;
+  merged_by?: DeliveryActor;
+  provider_updated_at?: string;
+  refresh_pending?: boolean;
+  state: string;
+  url?: string;
+  work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DeliveryActor".
+ */
+export interface DeliveryActor {
+  id?: string;
+  login?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemDelivery".
+ */
+export interface WorkItemDelivery {
+  delivery_id: string;
+  host_id?: string;
+  number: number;
+  provider: string;
+  repository: string;
+  url?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemFollowOn".
+ */
+export interface WorkItemFollowOn {
+  evidence?: WorkItemEvidence[];
+  follow_on_id: string;
+  kind: string;
+  source: string;
+  status: string;
+  text: string;
+  transferred_to?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemStage".
+ */
+export interface WorkItemStage {
+  depends_on?: string[];
+  evidence?: WorkItemEvidence[];
+  parent_id?: string;
+  reason?: string;
+  stage_id: string;
+  status: string;
+  task_ids?: string[];
+  title: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -314,6 +443,15 @@ export interface ResultReport {
   body: string;
   evidence?: string[];
   uncertainties?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CloseWorkItemPayload".
+ */
+export interface CloseWorkItemPayload {
+  closure: WorkItemClosure;
+  commit_seq?: number;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -487,6 +625,22 @@ export interface CreateActionPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CreateWorkItemPayload".
+ */
+export interface CreateWorkItemPayload {
+  background?: SharedFact[];
+  commit_seq?: number;
+  default_workspace_task_id?: string;
+  deliveries?: WorkItemDelivery[];
+  follow_ons?: WorkItemFollowOn[];
+  intent: string;
+  project: string;
+  source_message_id?: string;
+  stages: WorkItemStage[] | null;
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "DownloadURLResponse".
  */
 export interface DownloadURLResponse {
@@ -555,10 +709,36 @@ export interface LedgerEvent {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LinkWorkItemTaskPayload".
+ */
+export interface LinkWorkItemTaskPayload {
+  commit_seq?: number;
+  source_message_id?: string;
+  stage_ids: string[] | null;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RateTaskPayload".
  */
 export interface RateTaskPayload {
   rating: Rating;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RefreshDeliveryPayload".
+ */
+export interface RefreshDeliveryPayload {
+  delivery_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ReopenWorkItemPayload".
+ */
+export interface ReopenWorkItemPayload {
+  commit_seq?: number;
+  reason: string;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -834,6 +1014,7 @@ export interface TaskDetail {
   spec_version: number;
   task_id: string;
   title: string;
+  work_item_ids?: string[];
   workspace: string;
   workspace_state?: WorkspaceView;
 }
@@ -935,4 +1116,39 @@ export interface ToolSpec {
   description: string;
   input_schema: unknown;
   name: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdateWorkItemPayload".
+ */
+export interface UpdateWorkItemPayload {
+  background?: SharedFact[];
+  commit_seq?: number;
+  default_workspace_task_id?: string;
+  deliveries?: WorkItemDelivery[];
+  follow_ons?: WorkItemFollowOn[];
+  intent: string;
+  project: string;
+  source_message_id?: string;
+  stages: WorkItemStage[] | null;
+  status?: string;
+  task_dispositions?: WorkItemTaskDisposition[];
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemTaskDisposition".
+ */
+export interface WorkItemTaskDisposition {
+  action: string;
+  reason: string;
+  spec_version: number;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemPage".
+ */
+export interface WorkItemPage {
+  items: WorkItemView[] | null;
 }

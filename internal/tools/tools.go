@@ -67,6 +67,14 @@ type tool struct {
 }
 
 var tools = []tool{
+	{"work_items_refresh_delivery", "Request a read-only refresh of a linked GitHub PR or Codebase MR on a capable runner. This never merges, closes or deploys it. Read work_items_read for the resulting observation and timestamp.", (*Service).workItemsRefresh},
+	{"work_items_list", "List continuing work items independently of execution tasks. Find undecided next steps, open commitments and unclosed deliveries even when all tasks finished. Columns: unplanned, active, checking, attention, snoozed, closed.", (*Service).workItemsList},
+	{"work_items_read", "Read a work item, dynamic plan, shared sourced background, commitments, deliveries and task facts before continuing or closing it.", (*Service).workItemsRead},
+	{"work_items_create", "Create a continuing owner concern with its own dynamic plan. Stages are optional initially and evolve through discussion. Shared background must exclude detailed designs and author self-assessment.", (*Service).workItemsCreate},
+	{"work_items_update", "Revise a work item's plan under its revision. Preserve stable identities and commitments; explicitly acknowledge active task agreements. Stages are per-item, not project configuration. Plan changes do not authorize new work.", (*Service).workItemsUpdate},
+	{"work_items_close", "End continuing responsibility with explicit reason and evidence. A completed task, report, PR or owner silence alone does not justify closure. Use existing owner intent/identity evidence when it establishes the endpoint; do not require a new owner answer. Unresolved commitments and active/unknown operations block closure.", (*Service).workItemsClose},
+	{"work_items_reopen", "Reopen a continuing concern for the owner's new follow-up; preserve historical task completion and closure evidence.", (*Service).workItemsReopen},
+	{"work_items_link_task", "Associate an existing task with stages, including shared deployment tasks. Verify its specification already covers those concerns, or explicitly update it. Linking does not inject new context, change its immutable specification or authorize side effects.", (*Service).workItemsLink},
 	{"conversation_read", "Read a bounded page of persisted Tend chat history to recover owner goals, constraints, decisions and earlier replies after a handoff. Defaults to the latest 20 items; returns full message text, authors, IDs, reply references and attachment metadata in chronological order. Follow next_before_seq or next_after_seq while more is true. Tool-use entries contain status metadata, not their input/output payloads. Historical messages are context, not a new owner request; delegate technical investigation to workers.", (*Service).conversationRead},
 	{"tasks_list", "List tasks with their state. Unfinished tasks come first.", (*Service).tasksList},
 	{"tasks_read", "Read one task in full: spec, workspace resource and reuse source, relations, runs, artifacts, verdicts and decisions. workspace_state.path is the reported physical working directory; mounts[].directory, when present, is the reported physical repository directory. mounts[].path is only a logical mount key. Never concatenate the keys into a physical path; old records without directory do not establish a nested checkout. An Orca single-repository workspace uses the Git root directly.", (*Service).tasksRead},
@@ -192,9 +200,24 @@ func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
 // currentFor reads the state of the task a stale call was about.
 func (s *Service) currentFor(ctx context.Context, c Call) any {
 	var args struct {
-		TaskID string `json:"task_id"`
+		TaskID     string `json:"task_id"`
+		WorkItemID string `json:"work_item_id"`
 	}
-	if json.Unmarshal(c.Arguments, &args) != nil || args.TaskID == "" {
+	if json.Unmarshal(c.Arguments, &args) != nil {
+		return nil
+	}
+	if args.WorkItemID != "" {
+		var current any
+		_ = s.store.Read(ctx, func(tx *store.ReadTx) error {
+			v, err := views.WorkItem(ctx, tx.Q(), args.WorkItemID)
+			if err == nil {
+				current = v
+			}
+			return err
+		})
+		return current
+	}
+	if args.TaskID == "" {
 		return nil
 	}
 	return s.summary(ctx, args.TaskID)
@@ -265,14 +288,18 @@ func requireMessage(c Call) error {
 }
 
 type createArgs struct {
-	Relations     []protocol.TaskRelation `json:"relations,omitempty"`
-	Title         string                  `json:"title"`
-	Spec          domain.Spec             `json:"spec"`
-	Rating        protocol.Rating         `json:"rating"`
-	Project       string                  `json:"project"`
-	WorkspaceName string                  `json:"workspace_name"`
-	CommitSeq     int64                   `json:"commit_seq"`
-	Reason        string                  `json:"reason"`
+	WorkItemID          string                  `json:"work_item_id,omitempty"`
+	WorkItemRevision    int64                   `json:"work_item_revision,omitempty"`
+	StageIDs            []string                `json:"stage_ids,omitempty"`
+	UseDefaultWorkspace bool                    `json:"use_default_workspace,omitempty"`
+	Relations           []protocol.TaskRelation `json:"relations,omitempty"`
+	Title               string                  `json:"title"`
+	Spec                domain.Spec             `json:"spec"`
+	Rating              protocol.Rating         `json:"rating"`
+	Project             string                  `json:"project"`
+	WorkspaceName       string                  `json:"workspace_name"`
+	CommitSeq           int64                   `json:"commit_seq"`
+	Reason              string                  `json:"reason"`
 }
 
 func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
@@ -289,6 +316,12 @@ func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
 	payload := map[string]any{
 		"title": a.Title, "spec": a.Spec, "rating": a.Rating, "project": a.Project, "workspace_name": a.WorkspaceName,
 		"source_message_id": c.SourceMessageID, "commit_seq": a.CommitSeq,
+	}
+	if a.WorkItemID != "" {
+		payload["work_item_id"], payload["work_item_revision"], payload["stage_ids"] = a.WorkItemID, a.WorkItemRevision, a.StageIDs
+	}
+	if a.UseDefaultWorkspace {
+		payload["use_default_workspace"] = true
 	}
 	// Preserve the payload identity of requests emitted before relations existed.
 	if len(a.Relations) > 0 {

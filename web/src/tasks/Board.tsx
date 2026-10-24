@@ -51,15 +51,53 @@ export function RecentTasks() {
   );
 }
 
+/** Shared mobile resources, independent of either board's project filter. */
+export function BoardResources({
+  connection,
+  onRepos,
+  compact = false,
+}: {
+  connection: Connection;
+  onRepos(): void;
+  compact?: boolean;
+}) {
+  const { live } = useServices();
+  const snapshot = useStore(live.snapshot);
+  return (
+    <div className={styles.mobileRecent} data-compact={compact}>
+      <details>
+        <summary>
+          执行主机
+          {snapshot && ` · ${snapshot.hosts?.length ?? 0} 台`}
+          {!!snapshot?.hosts?.filter(hostMaintaining).length &&
+            ` · ${snapshot.hosts.filter(hostMaintaining).length} 台维护`}
+        </summary>
+        <div className={styles.mobileList}>
+          <Hosts connection={connection} />
+        </div>
+      </details>
+      <RepositoryEntry onOpen={onRepos} />
+      <details>
+        <summary>最近完成</summary>
+        <div className={styles.mobileList}>
+          <RecentTasks />
+        </div>
+      </details>
+    </div>
+  );
+}
+
 export function TaskBoard({
   active,
   connection,
   onChat,
   onRepos,
+  backLabel = "返回聊天",
 }: {
   active: boolean;
   connection: Connection;
   onChat(): void;
+  backLabel?: string;
   onRepos(): void;
 }) {
   const { live } = useServices();
@@ -75,9 +113,9 @@ export function TaskBoard({
       <header className={styles.head}>
         <button type="button" className={controls.chipBtn} onClick={onChat}>
           <Back width={14} height={14} />
-          返回聊天
+          {backLabel}
         </button>
-        <h1>任务看板</h1>
+        <h1>执行记录</h1>
         <label className={styles.filter}>
           项目
           <input
@@ -105,26 +143,7 @@ export function TaskBoard({
         </button>
       </header>
       <UpgradeBanner connection={connection} />
-      <div className={styles.mobileRecent}>
-        <details>
-          <summary>
-            执行主机
-            {snapshot && ` · ${snapshot.hosts?.length ?? 0} 台`}
-            {!!snapshot?.hosts?.filter(hostMaintaining).length &&
-              ` · ${snapshot.hosts.filter(hostMaintaining).length} 台维护`}
-          </summary>
-          <div className={styles.mobileList}>
-            <Hosts connection={connection} />
-          </div>
-        </details>
-        <RepositoryEntry onOpen={onRepos} />
-        <details>
-          <summary>最近完成</summary>
-          <div className={styles.mobileList}>
-            <RecentTasks />
-          </div>
-        </details>
-      </div>
+      <BoardResources connection={connection} onRepos={onRepos} />
       <div className={styles.board} role="region" aria-label="分阶段任务看板" tabIndex={0}>
         {stages.map((stage, i) => (
           <Column key={stage.id} title={stage.title} feed={live.tasks.columns[i]!} />

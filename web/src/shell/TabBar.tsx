@@ -7,7 +7,7 @@ export type View = "chat" | "tasks" | "decisions";
 
 const tabs: { view: View; label: string; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
   { view: "chat", label: "对话", Icon: Chat },
-  { view: "tasks", label: "任务", Icon: Tasks },
+  { view: "tasks", label: "工作项", Icon: Tasks },
   { view: "decisions", label: "待处理", Icon: Pending },
 ];
 

@@ -33,6 +33,8 @@ jobs:
           pnpm --dir web test:layout
       - name: repository layout regression
         run: pnpm --dir web test:repos-layout
+      - name: delivery refresh reconciliation
+        run: pnpm --dir web test:delivery-refresh
       - name: cross-compile
         run: |
           GOOS=windows GOARCH=amd64 go build ./...

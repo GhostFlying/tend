@@ -33,9 +33,13 @@ func claimPlanCommit(ctx context.Context, x *Exec, tx *store.Tx, sourceMessageID
 type CreateTask struct{}
 
 type createTaskPayload struct {
-	Relations []protocol.TaskRelation `json:"relations,omitempty"`
-	Title     string                  `json:"title"`
-	Spec      domain.Spec             `json:"spec"`
+	WorkItemID          string                  `json:"work_item_id,omitempty"`
+	WorkItemRevision    int64                   `json:"work_item_revision,omitempty"`
+	StageIDs            []string                `json:"stage_ids,omitempty"`
+	UseDefaultWorkspace bool                    `json:"use_default_workspace,omitempty"`
+	Relations           []protocol.TaskRelation `json:"relations,omitempty"`
+	Title               string                  `json:"title"`
+	Spec                domain.Spec             `json:"spec"`
 	// Rating is empty for an unrated task.
 	Rating protocol.Rating `json:"rating,omitempty"`
 	// Project defaults to the calling session's project, or else to the
@@ -80,6 +84,10 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err != nil {
 		return Outcome{}, err
 	}
+	item, itemEvents, err := taskWorkItem(ctx, x, tx, &p, project.Project)
+	if err != nil {
+		return Outcome{}, err
+	}
 	ws, resource, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, project.Template, taskID)
 	if err != nil {
 		return Outcome{}, err
@@ -111,6 +119,7 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := tx.InsertTask(ctx, row); err != nil {
 		return Outcome{}, err
 	}
+
 	if resource != nil {
 		if err := tx.BindWorkspace(ctx, taskID, resource.WorkspaceID, domain.WorkspaceReuse, p.Spec.Workspace.SourceTaskID, now); err != nil {
 			return Outcome{}, err
@@ -126,6 +135,11 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := tx.InsertSpec(ctx, taskID, d.Task.SpecVersion, string(spec), p.SourceMessageID, now); err != nil {
 		return Outcome{}, err
 	}
+	_, linkedEvents, err := BindWorkItemTask(ctx, x, tx, item.WorkItemID, item.Revision, taskID, p.StageIDs)
+	if err != nil {
+		return Outcome{}, err
+	}
+	itemEvents = append(itemEvents, linkedEvents...)
 	planRef := ""
 	if p.SourceMessageID != "" {
 		planRef = fmt.Sprintf("%s#%d", p.SourceMessageID, p.CommitSeq)
@@ -137,7 +151,7 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := bindSource(ctx, tx, p.SourceMessageID, "task", taskID); err != nil {
 		return Outcome{}, err
 	}
-	events := []Event{}
+	events := itemEvents
 	for _, e := range d.Events {
 		events = append(events, Event{ObjectType: "task", ObjectID: taskID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
 	}
@@ -200,6 +214,9 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	merged := domain.Decision{Task: task}
 	var pendingResource *store.WorkspaceRow
 	if p.Spec != nil {
+		if err := refreshTaskWorkContext(ctx, tx.Q(), row.TaskID, p.Spec, current.SharedContext); err != nil {
+			return Outcome{}, err
+		}
 		ws, resource, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, "", row.TaskID)
 		pendingResource = resource
 		if err != nil {

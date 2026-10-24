@@ -127,6 +127,16 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		upgradeID = r.cfg.UpgradeID
 	}
 	capabilities := []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions}
+	for _, provider := range r.cfg.DeliveryProviders {
+		if r.cfg.DeliveryObserver != nil {
+			switch provider {
+			case "github":
+				capabilities = append(capabilities, protocol.CapabilityDeliveryGitHub)
+			case "codebase":
+				capabilities = append(capabilities, protocol.CapabilityDeliveryCodebase)
+			}
+		}
+	}
 	if r.cfg.UpdaterSocket != "" && r.cfg.UpdaterControlSocket != "" && r.cfg.UpdaterBundleDir != "" {
 		capabilities = append(capabilities, "runner-updater-v1")
 	}
