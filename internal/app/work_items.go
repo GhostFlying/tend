@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -85,12 +86,12 @@ func (UpdateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := domain.ValidateWorkItem(p.WorkItemPlan, &w.WorkItemPlan); err != nil {
 		return Outcome{}, err
 	}
-	status := p.Status
+	if err := domain.ValidateWorkItemUpdateStatus(p.Status); err != nil {
+		return Outcome{}, err
+	}
+	status := protocol.WorkItemStatus(p.Status)
 	if status == "" {
 		status = w.Status
-	}
-	if status != "open" && status != "snoozed" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "use close to end responsibility")
 	}
 	if err := validateWorkItemDispositions(ctx, tx.Q(), w, p.WorkItemPlan, p.TaskDispositions); err != nil {
 		return Outcome{}, err
@@ -136,7 +137,7 @@ func (CloseWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	if err := workItemCloseGuard(ctx, tx.Q(), w.WorkItemID); err != nil {
 		return Outcome{}, err
 	}
-	if err := validateWorkItemEvidenceReferences(ctx, x, tx.Q(), w, p.Closure.Evidence, &w); err != nil {
+	if err := validateWorkItemEvidenceReferences(ctx, x, tx.Q(), w, p.Closure.Evidence, &w, "closure.evidence"); err != nil {
 		return Outcome{}, err
 	}
 	if err := claimWorkItemSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
@@ -220,7 +221,7 @@ func BindWorkItemTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string,
 		return w, nil, protocol.Errorf(protocol.CodeInvalidTransition, "reopen work item before linking a task")
 	}
 	if len(stageIDs) == 0 {
-		return w, nil, protocol.Errorf(protocol.CodeInvalidRequest, "stage_ids is required")
+		return w, nil, missingWorkItemStageIDs(w.WorkItemID, stageIDs)
 	}
 	task, spec, err := loadTask(ctx, tx.Q(), taskID)
 	if err != nil {
@@ -288,7 +289,7 @@ func claimWorkItemSource(ctx context.Context, x *Exec, tx *store.Tx, id, source 
 }
 
 func validateWorkItemReferences(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, previous *protocol.WorkItem) error {
-	for _, s := range w.Stages {
+	for i, s := range w.Stages {
 		for _, id := range s.TaskIDs {
 			task, err := store.GetTask(ctx, q, id)
 			if err != nil {
@@ -307,12 +308,12 @@ func validateWorkItemReferences(ctx context.Context, x *Exec, q store.Querier, w
 			}
 
 		}
-		if err := validateWorkItemEvidenceReferences(ctx, x, q, w, s.Evidence, previous); err != nil {
+		if err := validateWorkItemEvidenceReferences(ctx, x, q, w, s.Evidence, previous, fmt.Sprintf("stages[%d].evidence", i)); err != nil {
 			return err
 		}
 	}
-	for _, f := range w.FollowOns {
-		if err := validateWorkItemEvidenceReferences(ctx, x, q, w, f.Evidence, previous); err != nil {
+	for i, f := range w.FollowOns {
+		if err := validateWorkItemEvidenceReferences(ctx, x, q, w, f.Evidence, previous, fmt.Sprintf("follow_ons[%d].evidence", i)); err != nil {
 			return err
 		}
 	}
@@ -338,11 +339,11 @@ func validateWorkItemReferences(ctx context.Context, x *Exec, q store.Querier, w
 	return nil
 }
 
-func validateWorkItemEvidenceReferences(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, evidence []protocol.WorkItemEvidence, previous *protocol.WorkItem) error {
+func validateWorkItemEvidenceReferences(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, evidence []protocol.WorkItemEvidence, previous *protocol.WorkItem, field string) error {
 	if len(evidence) == 0 {
 		return nil
 	}
-	if err := domain.ValidateWorkItemEvidence(evidence); err != nil {
+	if err := domain.ValidateWorkItemEvidenceAt(evidence, field); err != nil {
 		return err
 	}
 	for i, e := range evidence {
@@ -404,11 +405,13 @@ func validateWorkItemDispositions(ctx context.Context, q store.Querier, item pro
 		}
 	}
 	byTask := map[string]protocol.WorkItemTaskDisposition{}
-	for _, d := range dispositions {
+	dispositionIndices := map[string]int{}
+	for i, d := range dispositions {
 		if _, ok := byTask[d.TaskID]; ok {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "duplicate task disposition")
 		}
 		byTask[d.TaskID] = d
+		dispositionIndices[d.TaskID] = i
 	}
 	for id := range affected {
 		task, err := store.GetTask(ctx, q, id)
@@ -428,7 +431,12 @@ func validateWorkItemDispositions(ctx context.Context, q store.Querier, item pro
 			continue
 		}
 		d, ok := byTask[id]
-		if !ok || d.Reason == "" || d.SpecVersion != task.SpecVersion || !slices.Contains([]string{"continue_existing", "updated", "stopped"}, d.Action) {
+		if ok {
+			if err := domain.ValidateWorkItemDispositionAction(d.Action, fmt.Sprintf("task_dispositions[%d].action", dispositionIndices[id])); err != nil {
+				return err
+			}
+		}
+		if !ok || d.Reason == "" || d.SpecVersion != task.SpecVersion {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "plan change requires current spec disposition for active task %s", id)
 		}
 		if domain.WorkItemTaskRetired(item.WorkItemPlan, next, id) && d.Action != "stopped" {

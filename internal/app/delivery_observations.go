@@ -77,7 +77,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	result.Assignments = append(result.Assignments, protocol.DeliveryAssignment{WorkItemID: selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce})
 	return Outcome{Result: result}, nil
 }
-func deliveryCapability(provider string) string {
+func deliveryCapability(provider protocol.WorkItemDeliveryProvider) string {
 	switch provider {
 	case "github":
 		return protocol.CapabilityDeliveryGitHub

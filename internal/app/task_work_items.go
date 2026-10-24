@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/domain"
@@ -77,7 +79,7 @@ func taskWorkItem(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPaylo
 			return item, nil, protocol.Errorf(protocol.CodeInvalidRequest, "task and primary work item must share a project")
 		}
 		if len(p.StageIDs) == 0 {
-			return item, nil, protocol.Errorf(protocol.CodeInvalidRequest, "stage_ids is required with work_item_id")
+			return item, nil, missingWorkItemStageIDs(item.WorkItemID, p.StageIDs)
 		}
 		if p.UseDefaultWorkspace {
 			if item.DefaultWorkspaceTaskID == "" {
@@ -104,6 +106,17 @@ func taskWorkItem(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPaylo
 	p.WorkItemID, p.WorkItemRevision, p.StageIDs = item.WorkItemID, item.Revision, []string{"initial"}
 	p.Spec.SharedContext = []protocol.TaskWorkContext{freezeWorkItemContext(item)}
 	return item, out.Events, nil
+}
+
+func missingWorkItemStageIDs(itemID string, values []string) *protocol.Error {
+	details, _ := json.Marshal(struct {
+		Field      string   `json:"field"`
+		Value      []string `json:"value"`
+		MinItems   int      `json:"min_items"`
+		WorkItemID string   `json:"work_item_id"`
+	}{"stage_ids", values, 1, itemID})
+	return &protocol.Error{Code: protocol.CodeInvalidRequest,
+		Message: fmt.Sprintf("stage_ids must contain at least one existing stage_id from work_item_id %q", itemID), Details: details}
 }
 
 func refreshTaskWorkContext(ctx context.Context, q store.Querier, taskID string, spec *domain.Spec, previous []protocol.TaskWorkContext) error {

@@ -37,7 +37,7 @@ type workItemUpdateArgs struct {
 	WorkItemID              string                             `json:"work_item_id"`
 	ExpectedControlRevision int64                              `json:"expected_control_revision"`
 	Plan                    protocol.WorkItemPlan              `json:"plan"`
-	Status                  string                             `json:"status,omitempty"`
+	Status                  protocol.WorkItemUpdateStatus      `json:"status,omitempty"`
 	TaskDispositions        []protocol.WorkItemTaskDisposition `json:"task_dispositions,omitempty"`
 	CommitSeq               int64                              `json:"commit_seq"`
 	Reason                  string                             `json:"reason"`
@@ -68,6 +68,9 @@ type workItemLinkArgs struct {
 // the owner API. Keep the actual root at the top level for MCP consumers.
 func argumentSchema(v any) string {
 	g := schema.New()
+	for _, values := range protocol.APIEnums() {
+		g.Enum(values)
+	}
 	g.Add(v)
 	b, err := g.Document("tool input")
 	if err != nil {

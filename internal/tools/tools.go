@@ -71,14 +71,14 @@ var tools = []tool{
 	{"work_items_list", "List continuing work items independently of execution tasks. Find undecided next steps, open commitments and unclosed deliveries even when all tasks finished. Columns: unplanned, active, checking, attention, snoozed, closed.", (*Service).workItemsList},
 	{"work_items_read", "Read a work item, dynamic plan, shared sourced background, commitments, deliveries and task facts before continuing or closing it.", (*Service).workItemsRead},
 	{"work_items_create", "Create a continuing owner concern with its own dynamic plan. Stages are optional initially and evolve through discussion. Shared background must exclude detailed designs and author self-assessment.", (*Service).workItemsCreate},
-	{"work_items_update", "Revise a work item's plan under its revision. Preserve stable identities and commitments; explicitly acknowledge active task agreements. Stages are per-item, not project configuration. Plan changes do not authorize new work.", (*Service).workItemsUpdate},
+	{"work_items_update", "Replace the complete work-item plan under its revision. Read the current plan first and retain unchanged background, stages, dependencies, commitments and deliveries. Fix rejected fields using the error details; never remove valid content merely to pass validation. Explicitly acknowledge active task agreements. Stages are per-item, not project configuration. Plan changes do not authorize new work.", (*Service).workItemsUpdate},
 	{"work_items_close", "End continuing responsibility with explicit reason and evidence. A completed task, report, PR or owner silence alone does not justify closure. Use existing owner intent/identity evidence when it establishes the endpoint; do not require a new owner answer. Unresolved commitments and active/unknown operations block closure.", (*Service).workItemsClose},
 	{"work_items_reopen", "Reopen a continuing concern for the owner's new follow-up; preserve historical task completion and closure evidence.", (*Service).workItemsReopen},
 	{"work_items_link_task", "Associate an existing task with stages, including shared deployment tasks. Verify its specification already covers those concerns, or explicitly update it. Linking does not inject new context, change its immutable specification or authorize side effects.", (*Service).workItemsLink},
 	{"conversation_read", "Read a bounded page of persisted Tend chat history to recover owner goals, constraints, decisions and earlier replies after a handoff. Defaults to the latest 20 items; returns full message text, authors, IDs, reply references and attachment metadata in chronological order. Follow next_before_seq or next_after_seq while more is true. Tool-use entries contain status metadata, not their input/output payloads. Historical messages are context, not a new owner request; delegate technical investigation to workers.", (*Service).conversationRead},
 	{"tasks_list", "List tasks with their state. Unfinished tasks come first.", (*Service).tasksList},
 	{"tasks_read", "Read one task in full: spec, workspace resource and reuse source, relations, runs, artifacts, verdicts and decisions. workspace_state.path is the reported physical working directory; mounts[].directory, when present, is the reported physical repository directory. mounts[].path is only a logical mount key. Never concatenate the keys into a physical path; old records without directory do not establish a nested checkout. An Orca single-repository workspace uses the Git root directly.", (*Service).tasksRead},
-	{"tasks_create", "Create a task for owner-authorized work, including a necessary next step within an approved goal. Choose workspace mode and composable deliverables; investigation can be report-only. Explicitly pass relevant attachment file IDs in spec.inputs for workers to download.", (*Service).tasksCreate},
+	{"tasks_create", "Create a task for owner-authorized work, including a necessary next step within an approved goal. To link an existing work item, provide work_item_id, its current work_item_revision and nonempty stage_ids together. spec.scope is one plain-text string, not a list; spec.constraints and spec.acceptance are arrays of strings. Choose workspace mode and a deliverables array such as [\"report\",\"files\"]; investigation can be report-only. Explicitly pass relevant attachment file IDs in spec.inputs for workers to download.", (*Service).tasksCreate},
 	{"tasks_update_intent", "Change a task's spec, rating or project as the owner asked.", (*Service).tasksUpdateIntent},
 	{"tasks_set_control", "Pause a task, or hand a paused task back to tend, as the owner asked. A paused task starts nothing new and its running work stops.", (*Service).tasksSetControl},
 	{"tasks_cancel", "Cancel a task as the owner asked. Its running work stops and it never runs again.", (*Service).tasksCancel},
@@ -243,6 +243,20 @@ func decode(raw json.RawMessage, v any) error {
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		if typed, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
+			field := typed.Field
+			if field == "" {
+				field = "arguments"
+			}
+			message := fmt.Sprintf("%s: expected %s, got %s", field, typed.Type, typed.Value)
+			if field == "spec.deliverables" {
+				message += `; use an array of output names, for example ["report","files"]`
+			} else if field == "spec.scope" {
+				message += "; use one plain-text string for the work boundary; constraints accepts a list of requirements"
+			}
+			details, _ := json.Marshal(map[string]string{"field": field, "expected_type": typed.Type.String(), "received_type": typed.Value})
+			return &protocol.Error{Code: protocol.CodeInvalidRequest, Message: message, Details: details}
+		}
 		return protocol.Errorf(protocol.CodeInvalidRequest, "arguments do not match the tool's schema: %v", err)
 	}
 	return nil

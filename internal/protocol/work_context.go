@@ -12,7 +12,7 @@ type TaskWorkContext struct {
 
 // SharedFact records the provenance of background given to every worker role.
 type SharedFact struct {
-	Kind   string `json:"kind"`
-	Text   string `json:"text"`
-	Source string `json:"source"`
+	Kind   SharedFactKind `json:"kind"`
+	Text   string         `json:"text"`
+	Source string         `json:"source"`
 }
