@@ -178,3 +178,8 @@
   overflow-y: auto;
   min-width: 0;
 }
+
+.mobileRecent > button {
+  width: 100%;
+  flex: none;
+}

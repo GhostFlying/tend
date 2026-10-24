@@ -4,7 +4,7 @@ package protocol
 // clients' types are generated (D22). Types they refer to are
 // included through them.
 func APITypes() []any {
-	return []any{Envelope{}, APIResponse{}, Snapshot{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ConversationPage{}, LedgerEvent{}, StreamStart{}, ArtifactDetail{}, RequestView{},
+	return []any{Envelope{}, APIResponse{}, Snapshot{}, RepoRegistry{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ConversationPage{}, LedgerEvent{}, StreamStart{}, ArtifactDetail{}, RequestView{},
 		SessionRequest{}, SessionView{}, InterruptReplyPayload{}, SubmitMessagePayload{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
 		ConversationAttachment{}, DownloadURLResponse{}, ConversationImageResponse{}, ConversationSettingsView{}, SetConversationSettingsPayload{}, ConversationHandoffView{}, SetConversationHandoffSettingsPayload{}, ConversationHandoffPayload{},
 		ArtifactPayload{}, HookRequest{}, HookResponse{}, ToolSpec{}, ToolRequest{}, ToolResponse{}}

@@ -334,3 +334,18 @@ type LedgerEvent struct {
 type StreamStart struct {
 	EventSeq int64 `json:"event_seq"`
 }
+
+// RegisteredRepoView is a safe ledger registration, independent of project,
+// connectivity, task mounts and resolved checkouts.
+type RegisteredRepoView struct {
+	Repo    string `json:"repo"`
+	Retired bool   `json:"retired,omitempty"`
+	// Hosts are registered, non-retired hosts configured to serve this repo.
+	// Membership does not imply online status or an existing checkout.
+	Hosts []string `json:"hosts"`
+}
+
+// RepoRegistry is the complete registration scope, including retired repos.
+type RepoRegistry struct {
+	Repos []RegisteredRepoView `json:"repos"`
+}

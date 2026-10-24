@@ -1,3 +1,4 @@
+import { RepositoryEntry } from "../repos/Repositories.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 import { useEffect, useId } from "react";
 import type { Connection } from "../api/client.ts";
@@ -54,10 +55,12 @@ export function TaskBoard({
   active,
   connection,
   onChat,
+  onRepos,
 }: {
   active: boolean;
   connection: Connection;
   onChat(): void;
+  onRepos(): void;
 }) {
   const { live } = useServices();
   const snapshot = useStore(live.snapshot);
@@ -114,6 +117,7 @@ export function TaskBoard({
             <Hosts connection={connection} />
           </div>
         </details>
+        <RepositoryEntry onOpen={onRepos} />
         <details>
           <summary>最近完成</summary>
           <div className={styles.mobileList}>
