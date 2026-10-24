@@ -1317,6 +1317,36 @@
       "title": "Rating",
       "type": "string"
     },
+    "RegisteredRepoView": {
+      "additionalProperties": false,
+      "properties": {
+        "hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repo": {
+          "type": "string"
+        },
+        "retired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "repo",
+        "hosts"
+      ],
+      "title": "RegisteredRepoView",
+      "type": "object"
+    },
     "RelationDirection": {
       "enum": [
         "outgoing",
@@ -1324,6 +1354,29 @@
       ],
       "title": "RelationDirection",
       "type": "string"
+    },
+    "RepoRegistry": {
+      "additionalProperties": false,
+      "properties": {
+        "repos": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RegisteredRepoView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "repos"
+      ],
+      "title": "RepoRegistry",
+      "type": "object"
     },
     "RequestView": {
       "additionalProperties": false,
@@ -2330,6 +2383,9 @@
     },
     "RateTaskPayload": {
       "$ref": "#/definitions/RateTaskPayload"
+    },
+    "RepoRegistry": {
+      "$ref": "#/definitions/RepoRegistry"
     },
     "RequestView": {
       "$ref": "#/definitions/RequestView"

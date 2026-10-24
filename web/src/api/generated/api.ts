@@ -153,6 +153,7 @@ export interface TendAPI {
   InterruptReplyPayload?: InterruptReplyPayload;
   LedgerEvent?: LedgerEvent;
   RateTaskPayload?: RateTaskPayload;
+  RepoRegistry?: RepoRegistry;
   RequestView?: RequestView;
   RunLogPage?: RunLogPage;
   SessionRequest?: SessionRequest;
@@ -558,6 +559,22 @@ export interface LedgerEvent {
  */
 export interface RateTaskPayload {
   rating: Rating;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RepoRegistry".
+ */
+export interface RepoRegistry {
+  repos: RegisteredRepoView[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RegisteredRepoView".
+ */
+export interface RegisteredRepoView {
+  hosts: string[] | null;
+  repo: string;
+  retired?: boolean;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
