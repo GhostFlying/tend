@@ -315,6 +315,7 @@ try {
       const settings = page
         .getByRole("button", { name: "设置", exact: true })
         .filter({ visible: true });
+      await settings.click({ trial: true });
       await usable(settings, page);
       await settings.click();
       await page.getByRole("dialog", { name: "设置", exact: true }).waitFor();
