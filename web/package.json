@@ -18,7 +18,8 @@
     "gen": "node scripts/genapi.ts",
     "icons": "node scripts/icons.ts",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build",
-    "test:layout": "pnpm build && node scripts/mobile-layout.ts"
+    "test:layout": "pnpm build && node scripts/mobile-layout.ts",
+    "test:repos-layout": "node scripts/repo-layout.ts"
   },
   "dependencies": {
     "markdown-it": "^15.0.3",

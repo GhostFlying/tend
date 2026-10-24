@@ -3,6 +3,7 @@
 // events carry their item, which replaces the one shown; any other event
 // only says something changed, and the affected views are read again. The
 // client never rebuilds ledger state from events itself.
+import { RepositoryRegistry } from "../repos/registry.ts";
 import { TaskLists } from "../tasks/lists.ts";
 import { ConversationHandoff } from "../conversation/handoff.ts";
 import { ConversationSettings } from "../conversation/settings.ts";
@@ -67,6 +68,7 @@ export class LiveData {
   readonly settings: ConversationSettings;
   readonly handoff: ConversationHandoff;
   readonly tasks: TaskLists;
+  readonly repos: RepositoryRegistry;
   private readonly api: Reader;
   private readonly snapshotStore = new Store<Snapshot | null>(null);
   private readonly conversationStore = new Store<ConversationState>({
@@ -104,6 +106,7 @@ export class LiveData {
     this.settings = new ConversationSettings(api);
     this.handoff = new ConversationHandoff(api);
     this.tasks = new TaskLists(api);
+    this.repos = new RepositoryRegistry(api);
     this.snapshotReads = new Coalesced(() => this.readSnapshot());
     this.detailReads = new Coalesced(() => this.readDetail());
     this.latestReads = new Coalesced(() => this.readLatest());
@@ -127,6 +130,7 @@ export class LiveData {
 
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
+    void this.repos.refresh();
     void this.settings.refresh();
     void this.handoff.refresh();
     this.tasks.refresh();
@@ -417,6 +421,7 @@ export class LiveData {
   /** Stops all owned timers and the pending log request. */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.repos.stop();
     this.detailController?.abort();
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;

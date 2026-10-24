@@ -1,3 +1,4 @@
+import { RepositoryEntry } from "../repos/Repositories.tsx";
 // The work overview: what needs the owner, tasks by project and the hosts.
 import type { Connection } from "../api/client.ts";
 import { Attention } from "../decisions/Attention.tsx";
@@ -17,11 +18,13 @@ export function Sidebar({
   connection,
   onBoard,
   onSettings,
+  onRepos,
 }: {
   view: View;
   connection: Connection;
   onBoard(): void;
   onSettings(): void;
+  onRepos(): void;
 }) {
   const choice = useStore(theme);
   return (
@@ -53,6 +56,7 @@ export function Sidebar({
           </button>
           <TaskOverview />
           <RecentTasks />
+          <RepositoryEntry onOpen={onRepos} />
           <Hosts connection={connection} />
         </section>
       </div>
