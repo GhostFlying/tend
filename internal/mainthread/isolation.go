@@ -2,28 +2,27 @@ package mainthread
 
 import "github.com/GhostFlying/tend/internal/harness"
 
-// ThreadConfig is the front thread's configuration in cwd (D68). The
-// sandbox lets the main agent read anything, such as the repositories it
-// plans work for, and write only in cwd; what needs more is asked for on
-// request and reviewed automatically, since nobody watches the thread to
-// approve it. An empty model leaves the harness default.
+// ThreadConfig gives the hosted dispatcher only tend coordination tools and
+// read-only presentation. Investigation and execution belong to workers (D88).
+// An empty model leaves the harness default.
 func ThreadConfig(cwd, model string) harness.ThreadConfig {
 	return harness.ThreadConfig{
 		Cwd: cwd, Model: model, DeveloperInstructions: Instructions,
-		Sandbox: "workspace-write", ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review",
+		Sandbox: "read-only", ApprovalPolicy: "never",
 		Config: Isolation,
 	}
 }
 
-// Isolation turns off the harness features the main agent must not use:
-// editing, browsers and computer use, image generation, plugins, apps,
-// skills and memories, which would act outside tend or bring in the
-// owner's own setup, and asking the user, which no client answers. It also
-// drops writable roots the owner configured, so the sandbox lets the agent
-// write only in its directory. The shell stays so the main agent can read
-// repositories (D68). Keys are dotted configuration paths, the form of
-// `-c key=value`.
+// Isolation disables native execution and independent research paths so the
+// hosted dispatcher delegates them through tend. Images and bounded ledger/file
+// reads remain useful for understanding the owner. Keys are dotted harness
+// configuration paths, also applied when a thread resumes or hands off.
 var Isolation = map[string]any{
+	"features.shell_tool":                           false,
+	"features.js_repl":                              false,
+	"features.multi_agent":                          false,
+	"features.multi_agent_v2":                       false,
+	"web_search":                                    "disabled",
 	"sandbox_workspace_write.writable_roots":        []string{},
 	"features.apply_patch_freeform":                 false,
 	"features.code_mode_host":                       false,

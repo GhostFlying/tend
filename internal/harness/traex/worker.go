@@ -83,15 +83,15 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	}
 	if spec.Role == protocol.RoleAccept {
 		cfg.Tools = []harness.ToolSpec{harness.VerdictToolSpec}
-		if spec.DownloadFile != nil {
-			cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
-		}
 		cfg.OnToolCall = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
 			if c.Tool == harness.VerdictTool {
 				return verdicts.Handle(ctx, c)
 			}
 			return results.Handle(ctx, c)
 		}
+	}
+	if spec.DownloadFile != nil {
+		cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
 	}
 	th, err := ws.thread(ctx, s, spec, cfg)
 	if err != nil {

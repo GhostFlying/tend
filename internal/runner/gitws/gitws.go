@@ -474,7 +474,7 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 		for _, m := range as.Workspace.Mounts {
 			ms := st.Mounts[m.Path]
 			p.Report.Mounts = append(p.Report.Mounts, protocol.ResolvedMount{
-				Path: m.Path, ResolvedBaseSHA: ms.Base, ResolvedFrom: ms.From, Branch: ms.Branch,
+				Path: m.Path, Directory: ms.dir(home, m.Path), ResolvedBaseSHA: ms.Base, ResolvedFrom: ms.From, Branch: ms.Branch,
 			})
 		}
 	}

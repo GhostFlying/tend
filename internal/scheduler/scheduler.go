@@ -24,7 +24,8 @@ type Host struct {
 	WorkspaceProtocol int64
 	Busy              int64
 	// Worker is what the host's worker can do (D64).
-	Worker protocol.WorkerCapabilities
+	Worker     protocol.WorkerCapabilities
+	TaskInputs bool
 }
 
 // Candidate is a pending action together with the facts the rules need.
@@ -58,6 +59,7 @@ type Candidate struct {
 	// Mounts counts the mounts of the task's workspace.
 	WorkspaceMode             string
 	RequiresWorkspaceProtocol bool
+	RequiresTaskInputs        bool
 	Mounts                    int
 	// WorkspaceHost is the host holding the task's workspace, or empty
 	// before the workspace exists.
@@ -94,6 +96,8 @@ func Skip(h Host, c Candidate) string {
 		return "host lacks a required label"
 	case !containsAll(h.Repos, c.Repos):
 		return "host does not serve every repository"
+	case c.RequiresTaskInputs && !h.TaskInputs:
+		return "runner does not support task input attachments"
 	case c.RequiresWorkspaceProtocol && h.WorkspaceProtocol < 1:
 		return "runner does not support workspace resources and composable deliverables"
 	case c.Mounts > 1 && !h.Worker.MultiMount:

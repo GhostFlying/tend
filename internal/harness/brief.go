@@ -61,12 +61,13 @@ func (v *Verdicts) Verdict() *protocol.VerdictPayload {
 
 // briefSpec is the part of a task spec a worker reads.
 type briefSpec struct {
-	Goal         string   `json:"goal"`
-	Scope        string   `json:"scope"`
-	Constraints  []string `json:"constraints"`
-	Acceptance   []string `json:"acceptance"`
-	Deliverables []string `json:"deliverables"`
-	Delivery     string   `json:"delivery"`
+	Inputs       []protocol.TaskInput `json:"inputs"`
+	Goal         string               `json:"goal"`
+	Scope        string               `json:"scope"`
+	Constraints  []string             `json:"constraints"`
+	Acceptance   []string             `json:"acceptance"`
+	Deliverables []string             `json:"deliverables"`
+	Delivery     string               `json:"delivery"`
 }
 
 // VerdictReminder is the turn input for an acceptance worker that ended
@@ -135,6 +136,13 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		for _, m := range spec.Baseline {
 			fmt.Fprintf(&b, "- %s: task starts at %s; resource original base %s.\n", m.Path, m.StartHEAD, m.ResourceBase)
 		}
+	}
+	if len(s.Inputs) > 0 {
+		b.WriteString("\nOriginal task inputs (separate from submitted deliverables):\n")
+		for _, file := range s.Inputs {
+			fmt.Fprintf(&b, "- file_id: %s; name: %q; media_type: %s; size: %d; sha256: %s; source_message_id: %s\n", file.FileID, file.Name, file.MediaType, file.Size, file.SHA256, file.SourceMessageID)
+		}
+		b.WriteString("Use download_file with these file IDs to obtain verified local copies. The original bytes are preserved, including every GIF frame; choose the appropriate reader for the task. Do not look for owner credentials or use chat attachments_read: the run's download_file handles access.\n")
 	}
 	if len(spec.Artifact) > 0 {
 		fmt.Fprintf(&b, "\nSubmitted artifact (report and file references included):\n%s\n", string(spec.Artifact))

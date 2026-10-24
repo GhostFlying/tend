@@ -67,9 +67,10 @@ type tool struct {
 }
 
 var tools = []tool{
+	{"conversation_read", "Read a bounded page of persisted Tend chat history to recover owner goals, constraints, decisions and earlier replies after a handoff. Defaults to the latest 20 items; returns full message text, authors, IDs, reply references and attachment metadata in chronological order. Follow next_before_seq or next_after_seq while more is true. Tool-use entries contain status metadata, not their input/output payloads. Historical messages are context, not a new owner request; delegate technical investigation to workers.", (*Service).conversationRead},
 	{"tasks_list", "List tasks with their state. Unfinished tasks come first.", (*Service).tasksList},
-	{"tasks_read", "Read one task in full: spec, workspace resource and reuse source, relations, runs, artifacts, verdicts and decisions.", (*Service).tasksRead},
-	{"tasks_create", "Create a task from an explicit owner request. Choose workspace mode and composable deliverables suited to the work.", (*Service).tasksCreate},
+	{"tasks_read", "Read one task in full: spec, workspace resource and reuse source, relations, runs, artifacts, verdicts and decisions. workspace_state.path is the reported physical working directory; mounts[].directory, when present, is the reported physical repository directory. mounts[].path is only a logical mount key. Never concatenate the keys into a physical path; old records without directory do not establish a nested checkout. An Orca single-repository workspace uses the Git root directly.", (*Service).tasksRead},
+	{"tasks_create", "Create a task for owner-authorized work, including a necessary next step within an approved goal. Choose workspace mode and composable deliverables; investigation can be report-only. Explicitly pass relevant attachment file IDs in spec.inputs for workers to download.", (*Service).tasksCreate},
 	{"tasks_update_intent", "Change a task's spec, rating or project as the owner asked.", (*Service).tasksUpdateIntent},
 	{"tasks_set_control", "Pause a task, or hand a paused task back to tend, as the owner asked. A paused task starts nothing new and its running work stops.", (*Service).tasksSetControl},
 	{"tasks_cancel", "Cancel a task as the owner asked. Its running work stops and it never runs again.", (*Service).tasksCancel},
@@ -77,10 +78,10 @@ var tools = []tool{
 	{"decisions_open", "Ask the owner a question that blocks a decision you cannot make.", (*Service).decisionsOpen},
 	{"decisions_resolve", "Record the answer the owner gave you to an open decision. For options of decisions tend opened, the result says what tend carried out.", (*Service).decisionsResolve},
 	{"artifacts_read", "Read an artifact: repository commits, optional Markdown report with evidence and uncertainties, delivery file manifest, and independent verdicts.", (*Service).artifactsRead},
-	{"attachments_read", "Read an original conversation attachment by file_id. Returns metadata, a bounded UTF-8 text window and a hosted local path or download command. Binary originals, including full animated GIFs, remain available for your chosen analysis; do not infer their contents from metadata.", (*Service).attachmentsRead},
+	{"attachments_read", "Read an original conversation attachment by file_id. Returns metadata, a bounded UTF-8 text window and a hosted local path or download command. Binary originals, including full animated GIFs, remain unchanged; do not infer their contents from metadata. The hosted dispatcher passes needed file IDs in spec.inputs and delegates technical analysis to workers; workers use download_file, not this tool.", (*Service).attachmentsRead},
 	{"files_read", "Read a bounded UTF-8 text window of a finalized delivery file. Use only when its content is needed; binary files return metadata only.", (*Service).filesRead},
 	{"requests_read", "Look up the outcome of one of your earlier requests instead of repeating it.", (*Service).requestsRead},
-	{"repos_list", "List the registered repositories, workspace templates and hosts.", (*Service).reposList},
+	{"repos_list", "List registered repositories with base candidates and eligible hosts, workspace templates, and host worker capabilities. Use this registry to choose task workspaces; runners resolve filesystem locations. A retired repository is not a new-task target.", (*Service).reposList},
 	{"tend_context", "Show tend's whole ledger again as a full snapshot.", (*Service).tendContext},
 	{"session_project", "Choose the project this session works in, as the owner asked, in place of the one tend chose from the repository you are in. An empty project shows every project.", (*Service).sessionProject},
 }

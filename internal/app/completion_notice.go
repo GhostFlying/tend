@@ -11,7 +11,7 @@ import (
 )
 
 // recordCompletionNotice appends a factual system message in the same
-// transaction as its completion event. It never queues a main-agent turn.
+// transaction as its completion event and queues its orchestration turn.
 // Request deduplication and the domain's completion transition make this
 // one notice per completion, including when an acceptance is reported again.
 func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, sourceEventID string) error {
@@ -64,5 +64,8 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 		ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"system"}`,
 		RequestID: x.Env.RequestID, TraceID: x.TraceID, ActorJSON: `{"kind":"system"}`, CreatedAt: now,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	return queueEventTurn(ctx, x, tx, id, sourceEventID, "task.completed", nil)
 }

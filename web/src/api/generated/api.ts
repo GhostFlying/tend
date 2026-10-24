@@ -864,6 +864,7 @@ export interface WorkspaceView {
 export interface MountView {
   base: unknown;
   branch: string;
+  directory?: string;
   path: string;
   repo: string;
   resolved_base_sha: string;

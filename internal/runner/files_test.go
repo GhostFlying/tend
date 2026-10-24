@@ -1,11 +1,15 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/gif"
 	"io"
 	"log/slog"
 	"net/http"
@@ -216,5 +220,100 @@ func TestFileHashingHonorsRunCancellation(t *testing.T) {
 	entries, err := os.ReadDir(p.StateDir)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("cancelled upload left intent: %v %v", entries, err)
+	}
+}
+
+// The runner has only run credentials, just as on a different host from the
+// server. The worker receives the original bytes rather than a model preview.
+func TestTaskInputsDownloadOriginalBytesForBothWorkerRoles(t *testing.T) {
+	var animated bytes.Buffer
+	frames := []*image.Paletted{
+		image.NewPaletted(image.Rect(0, 0, 2, 2), color.Palette{color.Black, color.White}),
+		image.NewPaletted(image.Rect(0, 0, 2, 2), color.Palette{color.White, color.Black}),
+	}
+	if err := gif.EncodeAll(&animated, &gif.GIF{Image: frames, Delay: []int{3, 7}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range []struct {
+		name, mediaType string
+		body            []byte
+	}{
+		{"animation.gif", "image/gif", animated.Bytes()},
+		{"opaque.bin", "application/octet-stream", []byte{0, 255, 128, 1, 0, 13, 10, 200}},
+	} {
+		for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+			t.Run(fixture.name+"/"+string(role), func(t *testing.T) {
+				digest := sha256.Sum256(fixture.body)
+				input := protocol.TaskInput{FileID: "file_input", Name: fixture.name, MediaType: fixture.mediaType, Size: int64(len(fixture.body)), SHA256: hex.EncodeToString(digest[:]), SourceMessageID: "msg_owner"}
+				calls := 0
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+					calls++
+					if q.URL.Path != "/runner/v1/files/file_input" || q.Header.Get(headerRun) != "run_input" || q.Header.Get("Authorization") != "Bearer run-only" {
+						t.Error("input download did not use its run identity")
+					}
+					_, _ = w.Write(fixture.body)
+				}))
+				defer srv.Close()
+				spec, _ := json.Marshal(struct {
+					Inputs []protocol.TaskInput `json:"inputs"`
+				}{[]protocol.TaskInput{input}})
+				as := protocol.Assignment{Role: role, RunID: "run_input", RunToken: "run-only", Spec: spec}
+				r := New(Config{ServerURL: srv.URL, HTTPClient: srv.Client()})
+				p := Prepared{ScratchDir: t.TempDir()}
+				if _, err := r.downloadFile(t.Context(), as, p, "file_unrelated"); err == nil || calls != 0 {
+					t.Fatalf("unrelated input reached server: calls=%d err=%v", calls, err)
+				}
+				path, err := r.downloadFile(t.Context(), as, p, input.FileID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(got, fixture.body) || filepath.Dir(path) != filepath.Join(p.ScratchDir, "inputs") {
+					t.Fatalf("original input changed: path=%s err=%v bytes=%x", path, err, got)
+				}
+				if fixture.mediaType == "image/gif" {
+					decoded, err := gif.DecodeAll(bytes.NewReader(got))
+					if err != nil || len(decoded.Image) != 2 {
+						t.Fatalf("GIF frames lost: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestTaskInputFailedDownloadPreservesPreviouslyVerifiedFile(t *testing.T) {
+	original := []byte("original input")
+	digest := sha256.Sum256(original)
+	input := protocol.TaskInput{FileID: "file_input", Name: "input.txt", Size: int64(len(original)), SHA256: hex.EncodeToString(digest[:])}
+	spec, _ := json.Marshal(struct {
+		Inputs []protocol.TaskInput `json:"inputs"`
+	}{[]protocol.TaskInput{input}})
+	for _, content := range [][]byte{[]byte("short"), []byte("corrupt! input"), append(bytes.Clone(original), '!')} {
+		t.Run(string(content), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(content) }))
+			defer srv.Close()
+			p := Prepared{ScratchDir: t.TempDir()}
+			dir := filepath.Join(p.ScratchDir, "inputs")
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, input.FileID)
+			if err := os.WriteFile(path, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			r := New(Config{ServerURL: srv.URL, HTTPClient: srv.Client()})
+			if _, err := r.downloadFile(t.Context(), protocol.Assignment{Spec: spec}, p, input.FileID); err == nil {
+				t.Fatal("corrupted input accepted")
+			}
+			got, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(got, original) {
+				t.Fatalf("previous input replaced: %q %v", got, err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("partial download retained: %v %v", entries, err)
+			}
+		})
 	}
 }

@@ -1,0 +1,129 @@
+//go:build integration
+
+package mainthread
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/traex"
+)
+
+// Check the actual native model request, rather than assuming the harness
+// recognizes a configuration key. The model endpoint is local and deterministic.
+func TestIntegrationDispatcherToolIsolation(t *testing.T) {
+	bin, err := exec.LookPath("traex")
+	if err != nil {
+		t.Skip("traex not installed")
+	}
+	var mu sync.Mutex
+	var requests []map[string]any
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		mu.Lock()
+		requests = append(requests, body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		send := func(v any) {
+			data, _ := json.Marshal(v)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+		}
+		send(map[string]any{"type": "response.created", "response": map[string]any{"id": "isolation-probe"}})
+		send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "message", "id": "reply", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "READY"}}}})
+		send(map[string]any{"type": "response.completed", "response": map[string]any{"id": "isolation-probe", "usage": map[string]any{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}})
+	}))
+	defer backend.Close()
+	home, cwd := t.TempDir(), t.TempDir()
+	config := fmt.Sprintf("model_provider = \"dispatcher_probe\"\n[model_providers.dispatcher_probe]\nname = \"dispatcher probe\"\nbase_url = %q\nwire_api = \"responses\"\nrequires_openai_auth = false\n", backend.URL+"/v1")
+	if err := os.WriteFile(filepath.Join(home, "traecli.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	cfg := ThreadConfig(cwd, "probe-model")
+	cfg.Tools = []harness.ToolSpec{{Name: "repos_list", Description: "List registered repositories", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}}
+	start := func() *traex.Session {
+		s, err := traex.Start(ctx, traex.Options{Bin: bin, Dir: cwd, Env: []string{"TRAE_HOME=" + home, "TEND_ADDON=off"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		return s
+	}
+	s := start()
+	th, err := s.StartThread(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(th harness.Thread) {
+		turn, err := th.StartTurn(ctx, harness.TurnInput{Text: "Reply READY"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case ev, ok := <-th.Events():
+				if !ok {
+					t.Fatal("thread closed")
+				}
+				if ev.Kind == harness.EventTurnCompleted && ev.TurnID == turn {
+					if ev.TurnStatus != "completed" {
+						t.Fatalf("turn status %s", ev.TurnStatus)
+					}
+					return
+				}
+			}
+		}
+	}
+	run(th)
+	id := th.ID()
+	_ = s.Close()
+	s = start()
+	th, err = s.ResumeThread(ctx, id, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(th)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d", len(requests))
+	}
+	for i, request := range requests {
+		foundRepos := false
+		toolList, _ := request["tools"].([]any)
+		for _, raw := range toolList {
+			tool, _ := raw.(map[string]any)
+			name, _ := tool["name"].(string)
+			if name == "repos_list" {
+				foundRepos = true
+			}
+			switch name {
+			case "exec_command", "shell", "shell_command", "write_stdin", "apply_patch", "js_repl", "spawn_agent":
+				t.Errorf("request %d exposes execution tool %s", i, name)
+			}
+			if tool["type"] == "local_shell" || tool["type"] == "web_search" || tool["type"] == "web_search_preview" {
+				t.Errorf("request %d exposes native research/execution tool %v", i, tool)
+			}
+		}
+		if !foundRepos {
+			t.Errorf("request %d missing repos_list", i)
+		}
+	}
+}

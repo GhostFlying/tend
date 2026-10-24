@@ -63,11 +63,11 @@ func deliveryOf(m store.OutboxMessage) Delivery {
 	}
 }
 
-// NextDelivery claims the oldest undelivered message of a destination for a
-// delivery attempt. Messages of a destination are delivered strictly in
-// order, so when the oldest one is not due yet, nothing is claimed and the
-// time it becomes due is returned instead. A zero time means there is
-// nothing to wait for.
+// NextDelivery claims the next undelivered message of a destination. The
+// main-thread destination prioritizes pending owner messages and handoffs
+// over background events; all other destinations retain commit order.
+// Within a priority group the head blocks later messages until it is due.
+// A zero wake time means there is nothing to wait for.
 //
 // The dispatcher's state changes are system maintenance: they are not
 // recorded as requests and stay idempotent through conditional updates.
@@ -78,7 +78,11 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 		ok   bool
 	)
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
-		m, err := store.HeadOutbox(ctx, tx.Q(), destination)
+		backgroundOperation := ""
+		if destination == MainThreadDestination {
+			backgroundOperation = OpHandleEvent
+		}
+		m, err := store.HeadOutboxPrioritized(ctx, tx.Q(), destination, backgroundOperation)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil
 		}
@@ -151,7 +155,7 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		if kind == "" {
 			return nil
 		}
-		if d.Destination == MainThreadDestination && d.Operation == OpHandleMessage {
+		if d.Destination == MainThreadDestination && (d.Operation == OpHandleMessage || d.Operation == OpHandleEvent) {
 			var m HandleMessage
 			if err := json.Unmarshal(d.Payload, &m); err != nil {
 				return fmt.Errorf("app: decode message delivery: %w", err)

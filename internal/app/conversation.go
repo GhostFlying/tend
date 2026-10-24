@@ -18,6 +18,8 @@ import (
 const (
 	MainThreadDestination = "main_thread"
 	OpHandleMessage       = "main_thread.handle_message"
+	// OpHandleEvent is lower priority than owner messages and handoffs.
+	OpHandleEvent = "main_thread.handle_event"
 )
 
 // The main thread's control destination and the operation that stops the
@@ -36,6 +38,11 @@ type InterruptTurn struct {
 // HandleMessage is the payload of a delivery to the main thread.
 type HandleMessage struct {
 	MessageID string `json:"message_id"`
+	EventID   string `json:"event_id,omitempty"`
+	EventKind string `json:"event_kind,omitempty"`
+	// DecisionAnswer preserves the authoritative answer for an event turn
+	// without exposing its protocol representation in the chat notice.
+	DecisionAnswer json.RawMessage `json:"decision_answer,omitempty"`
 }
 
 const maxMessageBytes = 64 << 10
@@ -157,7 +164,7 @@ func checkChoice(ctx context.Context, q store.Querier, c protocol.DecisionChoice
 }
 
 // InterruptReply handles conversation.interrupt_reply: the owner stops the
-// main agent's reply to one of their messages (D69). When the message's
+// main agent's reply to an owner message or a system event (D69, D88). When the message's
 // turn is starting or running, stopping it is queued for the main thread;
 // otherwise nothing changes. Either way the result is the message's state.
 type InterruptReply struct{}
@@ -181,7 +188,16 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, errNotFound(err, "message %s does not exist", p.MessageID)
 	}
 	if msg.Author != "owner" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "message %s is not the owner's", p.MessageID)
+		var eventTurn bool
+		if msg.Author == "system" {
+			eventTurn, err = store.HasMessageTurnOperation(ctx, tx.Q(), p.MessageID, OpHandleEvent)
+			if err != nil {
+				return Outcome{}, err
+			}
+		}
+		if !eventTurn {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "message %s did not initiate an owner or event turn", p.MessageID)
+		}
 	}
 	item, err := store.GetConversationItem(ctx, tx.Q(), p.MessageID)
 	if err != nil {
@@ -354,7 +370,7 @@ var turnStates = map[string]protocol.MessageState{
 	store.TurnFailed:      protocol.MessageFailed,
 }
 
-// insertMessageState records that an owner message reached a new state.
+// insertMessageState records that an owner or event message reached a new state.
 func (a *App) insertMessageState(ctx context.Context, tx *store.Tx, messageID string, state protocol.MessageState, now int64) error {
 	body, err := json.Marshal(map[string]any{"state": state})
 	if err != nil {

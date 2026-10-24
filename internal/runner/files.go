@@ -167,19 +167,9 @@ func syncUploadDirectory(path string) error {
 }
 
 func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Prepared, id string) (string, error) {
-	var artifact protocol.ArtifactPayload
-	if err := json.Unmarshal(as.Artifact, &artifact); err != nil {
+	file, category, err := assignmentFile(as, id)
+	if err != nil {
 		return "", err
-	}
-	var file *protocol.ArtifactFile
-	for i := range artifact.Files {
-		if artifact.Files[i].FileID == id {
-			file = &artifact.Files[i]
-			break
-		}
-	}
-	if file == nil {
-		return "", errors.New("file is not in the submitted artifact")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.c.base+"/runner/v1/files/"+url.PathEscape(id), nil)
 	if err != nil {
@@ -195,7 +185,7 @@ func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Pre
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download status %d", resp.StatusCode)
 	}
-	dir := filepath.Join(p.ScratchDir, "deliverables")
+	dir := filepath.Join(p.ScratchDir, category)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -206,7 +196,7 @@ func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Pre
 	}
 	defer os.Remove(f.Name())
 	digest := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(f, digest), io.LimitReader(resp.Body, file.Size+1))
+	n, copyErr := io.Copy(io.MultiWriter(f, digest), io.LimitReader(transferReader{ctx: ctx, r: resp.Body}, file.Size+1))
 	if copyErr == nil {
 		copyErr = f.Sync()
 	}
@@ -224,6 +214,36 @@ func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Pre
 		return "", err
 	}
 	return path, nil
+}
+
+// assignmentFile resolves only the immutable inputs or submitted output of this
+// run. No owner credentials or host-local attachment paths are involved.
+func assignmentFile(as protocol.Assignment, id string) (protocol.ArtifactFile, string, error) {
+	var spec struct {
+		Inputs []protocol.TaskInput `json:"inputs"`
+	}
+	if len(as.Spec) > 0 {
+		if err := json.Unmarshal(as.Spec, &spec); err != nil {
+			return protocol.ArtifactFile{}, "", fmt.Errorf("decode task inputs: %w", err)
+		}
+	}
+	for _, input := range spec.Inputs {
+		if input.FileID == id {
+			return protocol.ArtifactFile{FileID: input.FileID, Name: input.Name, Size: input.Size, SHA256: input.SHA256}, "inputs", nil
+		}
+	}
+	var artifact protocol.ArtifactPayload
+	if len(as.Artifact) > 0 {
+		if err := json.Unmarshal(as.Artifact, &artifact); err != nil {
+			return protocol.ArtifactFile{}, "", fmt.Errorf("decode submitted artifact: %w", err)
+		}
+	}
+	for _, file := range artifact.Files {
+		if file.FileID == id {
+			return file, "deliverables", nil
+		}
+	}
+	return protocol.ArtifactFile{}, "", errors.New("file is not a task input or submitted artifact")
 }
 
 // File transfers follow the caller's run lifetime rather than the short RPC

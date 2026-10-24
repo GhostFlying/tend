@@ -66,8 +66,8 @@ func TestWorkspaceResourcesMigrationPreservesPopulatedLedger(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if facts["repo"].Branch != "retained-branch" {
-				t.Fatalf("mount facts lost: %+v", facts)
+			if facts["repo"].Branch != "retained-branch" || facts["repo"].Directory != "" {
+				t.Fatalf("mount facts lost or physical directory invented: %+v", facts)
 			}
 			var resource string
 			if err := tx.Q().QueryRowContext(ctx, `SELECT workspace_id FROM workspace_runs WHERE run_id=?`, "run_"+id).Scan(&resource); err != nil {

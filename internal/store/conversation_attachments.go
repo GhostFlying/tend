@@ -50,3 +50,11 @@ func ConversationAttachments(ctx context.Context, q Querier, message string) ([]
 	}
 	return result, rows.Err()
 }
+
+// AttachmentSourceMessage returns the first message that attached the original.
+// An upload may be selected explicitly before it is bound to a message.
+func AttachmentSourceMessage(ctx context.Context, q Querier, id string) (string, error) {
+	var message string
+	err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT a.message_id FROM conversation_message_attachments a JOIN conversation_messages m ON m.message_id=a.message_id WHERE a.file_id=? ORDER BY m.seq LIMIT 1), '')`, id).Scan(&message)
+	return message, err
+}

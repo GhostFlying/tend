@@ -35,7 +35,7 @@ func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, nil, err)
 		return
 	}
-	f, body, err := s.app.OpenDeliverableFile(r.Context(), p, r.PathValue("id"))
+	f, body, err := s.app.OpenRunFile(r.Context(), p, r.PathValue("id"))
 	if err != nil {
 		s.writeError(w, r, nil, err)
 		return

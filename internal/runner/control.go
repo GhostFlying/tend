@@ -126,7 +126,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	if r.bootstrapMaintenance {
 		upgradeID = r.cfg.UpgradeID
 	}
-	capabilities := []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}
+	capabilities := []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityTaskInputs}
 	if r.cfg.UpdaterSocket != "" && r.cfg.UpdaterControlSocket != "" && r.cfg.UpdaterBundleDir != "" {
 		capabilities = append(capabilities, "runner-updater-v1")
 	}

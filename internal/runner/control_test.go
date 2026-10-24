@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -247,5 +248,16 @@ func TestMaintenanceLongResponseHasNoFalseRestartCoverage(t *testing.T) {
 	}
 	if r.authorizedDeadline("run", time.Time{}).After(now) {
 		t.Fatal("slow response created future local protection")
+	}
+}
+
+func TestRunnerAdvertisesOriginalTaskInputSupport(t *testing.T) {
+	r := controlRunner(t)
+	view, err := r.runtimeObservation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(view.Capabilities, protocol.CapabilityTaskInputs) {
+		t.Fatalf("task inputs capability missing: %+v", view.Capabilities)
 	}
 }

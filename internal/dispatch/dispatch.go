@@ -1,8 +1,9 @@
 // Package dispatch delivers outbox messages after their transaction has
 // committed.
 //
-// Messages of one destination are delivered one at a time and in order;
-// destinations are independent of each other. Every message keeps the child
+// Messages of one destination are delivered one at a time in queue order
+// (main-thread owner work precedes background events); destinations are
+// independent of each other. Every message keeps the child
 // request ID allocated when it was queued, so a receiver can deduplicate
 // redeliveries. A message found in the middle of a delivery attempt after a
 // restart is reconciled by its handler and never resent blindly: when the

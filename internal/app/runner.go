@@ -167,7 +167,8 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		return protocol.Assignment{}, err
 	}
 	as := protocol.Assignment{
-		Relations: relations, Protocol: run.Protocol,
+		MountDirectories: true,
+		Relations:        relations, Protocol: run.Protocol,
 		RunID: run.RunID, LeaseID: lease.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: run.TaskID,
 		ActionID: run.ActionID, Role: run.Role, Desired: desiredFor(run, action, task), Generation: run.Generation,
 		SpecVersion: action.TargetSpecVersion,
@@ -263,6 +264,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	pick, ok := scheduler.Pick(scheduler.Host{
 		ID: host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
+		TaskInputs: runtimeSupportsTaskInputs(p.Runtime),
 	}, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
@@ -337,7 +339,10 @@ func (Hello) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
 	if err := decodePayload(x.Env, &p); err != nil {
 		return err
 	}
-	return checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, true)
+	if err := checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, true); err != nil {
+		return err
+	}
+	return checkInputRunRecovery(ctx, q, x.Principal.Subject, p.Runtime)
 }
 
 // Apply implements Command.
@@ -584,6 +589,9 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 			if ws.Mode != domain.WorkspaceReuse && (prev.ResolvedBaseSHA != r.ResolvedBaseSHA || prev.Branch != r.Branch) {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "mount %q was already recorded with base %s on %s", m.Path, prev.ResolvedBaseSHA, prev.Branch)
 			}
+			if err := tx.RecordMountDirectory(ctx, ws.WorkspaceID, m.Path, r.Directory); err != nil {
+				return Outcome{}, err
+			}
 			continue
 		}
 		base, err := json.Marshal(m.Base)
@@ -592,7 +600,7 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		}
 		if err := tx.InsertMountFact(ctx, ws.WorkspaceID, store.MountFact{
 			Path: m.Path, Repo: m.Repo, BaseJSON: string(base), ResolvedBaseSHA: r.ResolvedBaseSHA,
-			ResolvedFrom: r.ResolvedFrom, Branch: r.Branch,
+			ResolvedFrom: r.ResolvedFrom, Branch: r.Branch, Directory: r.Directory,
 		}, now); err != nil {
 			return Outcome{}, err
 		}

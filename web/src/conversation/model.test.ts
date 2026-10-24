@@ -192,3 +192,41 @@ test("system completion cards stay independent of owners and agent turns", () =>
   expect(processing([owner, first, system])).toEqual(owner);
   expect(latestReply([owner, first, system])).toEqual(first);
 });
+
+test("background event replies retain their provenance and can be stopped", () => {
+  const event: ConversationItem = {
+    seq: 1,
+    message_id: "event",
+    kind: "message",
+    author: "system",
+    body: "Investigation completed",
+    state: "processing",
+    created_at: "2026-10-24T10:00:00Z",
+  };
+  const reply: ConversationItem = {
+    seq: 2,
+    message_id: "reply",
+    kind: "message",
+    author: "main_agent",
+    reply_to: "event",
+    body: "Reading findings",
+    assistant_state: "streaming",
+    created_at: "2026-10-24T10:00:01Z",
+  };
+  const ordinaryNotice: ConversationItem = { ...event, seq: 3, message_id: "upgrade" };
+  delete ordinaryNotice.state;
+  const items = [event, reply, ordinaryNotice];
+  expect(processing(items)).toEqual(event);
+  const entries = buildEntries(items, []).filter((entry) => entry.kind !== "divider");
+  expect(entries.map((entry) => entry.kind)).toEqual(["system", "agent", "system"]);
+  expect(entries[1]).toMatchObject({ replyTo: "event", items: [reply] });
+  const stopped = [
+    { ...event, state: "interrupted" as const },
+    { ...reply, assistant_state: "interrupted" as const },
+    ordinaryNotice,
+  ];
+  expect(processing(stopped)).toBeUndefined();
+  expect(buildEntries(stopped, []).find((entry) => entry.kind === "agent")?.done).toEqual({
+    at: Date.parse(reply.created_at),
+  });
+});
