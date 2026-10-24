@@ -217,6 +217,7 @@ export class ApiClient {
         body,
         signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]) : undefined,
       ),
+      signal,
     );
   }
 
@@ -328,17 +329,18 @@ export class ApiClient {
     }
   }
 
-  private async answer<T>(res: Response): Promise<T> {
+  private async answer<T>(res: Response, signal?: AbortSignal): Promise<T> {
     let body: unknown;
     try {
       body = await res.json();
     } catch (err) {
       if (res.ok) {
         // A cut-off answer leaves the outcome unknown.
-        this.state.set({ status: "offline", reason: "tend 的回答不完整" });
+        if (!signal?.aborted) this.state.set({ status: "offline", reason: "tend 的回答不完整" });
         throw new NetworkError(err);
       }
     }
+    if (signal?.aborted) throw new NetworkError(signal.reason);
     if (res.ok) {
       this.markOnline();
       return body as T;
