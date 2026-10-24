@@ -32,7 +32,9 @@ export function Hosts({ connection }: { connection: Connection }) {
   };
   return (
     <section aria-label="执行主机占用">
-      <div className={styles.title}>执行主机</div>
+      <div className={styles.title}>
+        执行主机{snapshot && ` · ${snapshot.hosts?.length ?? 0} 台`}
+      </div>
       {snapshot && waiting && (
         <p className={styles.waiting} role="status">
           等待连接恢复，显示最后观察状态。
@@ -67,7 +69,7 @@ export function Hosts({ connection }: { connection: Connection }) {
         </button>
       ))}
       {snapshot && !snapshot.hosts?.length && (
-        <p className={controls.empty}>暂无可用的执行主机。</p>
+        <p className={controls.empty}>暂无已登记的执行主机。</p>
       )}
       {host && <HostDetails host={host} waiting={waiting} onClose={close} />}
     </section>
