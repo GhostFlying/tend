@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,24 +19,27 @@ func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPla
 	if strings.TrimSpace(next.Title) == "" || strings.TrimSpace(next.Intent) == "" || next.Project == "" {
 		return workInvalid("title, intent and project are required")
 	}
-	for _, f := range next.Background {
-		if !slices.Contains([]string{"goal", "observation", "user_constraint", "decision", "input", "fact"}, f.Kind) || strings.TrimSpace(f.Text) == "" || strings.TrimSpace(f.Source) == "" {
-			return workInvalid("background requires a supported fact kind, text and source")
+	for i, f := range next.Background {
+		if err := validateWorkItemEnum(fmt.Sprintf("background[%d].kind", i), f.Kind, protocol.SharedFactKindValues()); err != nil {
+			return err
+		}
+		if strings.TrimSpace(f.Text) == "" || strings.TrimSpace(f.Source) == "" {
+			return workInvalid("background[%d] requires text and source", i)
 		}
 	}
 	stages := map[string]protocol.WorkItemStage{}
-	for _, s := range next.Stages {
+	for i, s := range next.Stages {
 		if s.StageID == "" || s.Title == "" {
 			return workInvalid("stage_id and title are required")
 		}
 		if _, ok := stages[s.StageID]; ok {
 			return workInvalid("duplicate stage_id %s", s.StageID)
 		}
-		if !slices.Contains([]string{"planned", "active", "done", "cancelled", "retired"}, s.Status) {
-			return workInvalid("invalid stage status")
+		if err := validateWorkItemEnum(fmt.Sprintf("stages[%d].status", i), s.Status, protocol.WorkItemStageStatusValues()); err != nil {
+			return err
 		}
 		if s.Status == "done" {
-			if err := ValidateWorkItemEvidence(s.Evidence); err != nil {
+			if err := ValidateWorkItemEvidenceAt(s.Evidence, fmt.Sprintf("stages[%d].evidence", i)); err != nil {
 				return err
 			}
 		}
@@ -51,7 +56,7 @@ func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPla
 		stages[s.StageID] = s
 	}
 	for _, stage := range next.Stages {
-		if stage.ParentID != "" && stages[stage.ParentID].Status == "done" && !slices.Contains([]string{"done", "cancelled", "retired"}, stage.Status) {
+		if stage.ParentID != "" && stages[stage.ParentID].Status == "done" && !slices.Contains([]protocol.WorkItemStageStatus{protocol.WorkItemStageDone, protocol.WorkItemStageCancelled, protocol.WorkItemStageRetired}, stage.Status) {
 			return workInvalid("complete or explicitly retire child stages before completing their parent")
 		}
 	}
@@ -125,18 +130,21 @@ func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPla
 		}
 	}
 	follows := map[string]protocol.WorkItemFollowOn{}
-	for _, f := range next.FollowOns {
+	for i, f := range next.FollowOns {
 		if f.FollowOnID == "" || f.Text == "" || f.Source == "" {
 			return workInvalid("follow-on requires stable id, text and source")
 		}
 		if _, ok := follows[f.FollowOnID]; ok {
 			return workInvalid("duplicate follow-on id")
 		}
-		if !slices.Contains([]string{"commitment", "problem", "suggestion"}, f.Kind) || !slices.Contains([]string{"open", "resolved", "transferred"}, f.Status) {
-			return workInvalid("invalid follow-on kind or status")
+		if err := validateWorkItemEnum(fmt.Sprintf("follow_ons[%d].kind", i), f.Kind, protocol.WorkItemFollowOnKindValues()); err != nil {
+			return err
+		}
+		if err := validateWorkItemEnum(fmt.Sprintf("follow_ons[%d].status", i), f.Status, protocol.WorkItemFollowOnStatusValues()); err != nil {
+			return err
 		}
 		if f.Status != "open" {
-			if err := ValidateWorkItemEvidence(f.Evidence); err != nil {
+			if err := ValidateWorkItemEvidenceAt(f.Evidence, fmt.Sprintf("follow_ons[%d].evidence", i)); err != nil {
 				return err
 			}
 		}
@@ -146,8 +154,11 @@ func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPla
 		follows[f.FollowOnID] = f
 	}
 	deliveries := map[string]protocol.WorkItemDelivery{}
-	for _, d := range next.Deliveries {
-		if d.DeliveryID == "" || !slices.Contains([]string{"github", "codebase"}, d.Provider) || d.Repository == "" || d.Number <= 0 {
+	for i, d := range next.Deliveries {
+		if err := validateWorkItemEnum(fmt.Sprintf("deliveries[%d].provider", i), d.Provider, protocol.WorkItemDeliveryProviderValues()); err != nil {
+			return err
+		}
+		if d.DeliveryID == "" || d.Repository == "" || d.Number <= 0 {
 			return workInvalid("invalid delivery identity")
 		}
 		if _, ok := deliveries[d.DeliveryID]; ok {
@@ -202,23 +213,60 @@ func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPla
 
 // ValidateWorkItemEvidence requires an explicit, attributable completion basis.
 func ValidateWorkItemEvidence(evidence []protocol.WorkItemEvidence) error {
+	return ValidateWorkItemEvidenceAt(evidence, "evidence")
+}
+
+// ValidateWorkItemEvidenceAt retains the containing field path for nested errors.
+func ValidateWorkItemEvidenceAt(evidence []protocol.WorkItemEvidence, field string) error {
 	if len(evidence) == 0 {
-		return workInvalid("completion requires evidence")
+		return workInvalid("%s: completion requires evidence", field)
 	}
-	for _, e := range evidence {
-		if !slices.Contains([]string{"acceptance", "delivery", "owner_decision"}, e.Kind) || strings.TrimSpace(e.Reference) == "" || strings.TrimSpace(e.Summary) == "" {
-			return workInvalid("evidence requires acceptance, delivery or owner_decision reference and summary")
+	for i, e := range evidence {
+		if err := validateWorkItemEnum(fmt.Sprintf("%s[%d].kind", field, i), e.Kind, protocol.WorkItemEvidenceKindValues()); err != nil {
+			return err
+		}
+		if strings.TrimSpace(e.Reference) == "" || strings.TrimSpace(e.Summary) == "" {
+			return workInvalid("%s[%d] requires reference and summary", field, i)
 		}
 	}
 	return nil
 }
 
+// ValidateWorkItemUpdateStatus preserves empty-as-unchanged update semantics.
+func ValidateWorkItemUpdateStatus(status protocol.WorkItemUpdateStatus) error {
+	return validateWorkItemEnum("status", status, protocol.WorkItemUpdateStatusValues())
+}
+
+// ValidateWorkItemDispositionAction checks an action when its task agreement is used.
+func ValidateWorkItemDispositionAction(action protocol.WorkItemTaskDispositionAction, field string) error {
+	return validateWorkItemEnum(field, action, protocol.WorkItemTaskDispositionActionValues())
+}
+
+func validateWorkItemEnum[T ~string](field string, value T, allowed []T) error {
+	if slices.Contains(allowed, value) {
+		return nil
+	}
+	// These values are strings, so encoding cannot fail. Both representations
+	// derive from the same list registered with the schema generator.
+	choices, _ := json.Marshal(allowed)
+	details, _ := json.Marshal(struct {
+		Field         string `json:"field"`
+		Value         T      `json:"value"`
+		AllowedValues []T    `json:"allowed_values"`
+	}{field, value, allowed})
+	return &protocol.Error{Code: protocol.CodeInvalidRequest,
+		Message: fmt.Sprintf("%s has invalid value %q; allowed values: %s", field, value, choices), Details: details}
+}
+
 // ValidateWorkItemClosure does not infer responsibility completion from task count.
 func ValidateWorkItemClosure(w protocol.WorkItem, c protocol.WorkItemClosure) error {
-	if !slices.Contains([]string{"completed", "declined", "handed_off", "superseded"}, c.Kind) || strings.TrimSpace(c.Reason) == "" {
-		return workInvalid("closure requires kind and reason")
+	if err := validateWorkItemEnum("closure.kind", c.Kind, protocol.WorkItemClosureKindValues()); err != nil {
+		return err
 	}
-	if err := ValidateWorkItemEvidence(c.Evidence); err != nil {
+	if strings.TrimSpace(c.Reason) == "" {
+		return workInvalid("closure.reason is required")
+	}
+	if err := ValidateWorkItemEvidenceAt(c.Evidence, "closure.evidence"); err != nil {
 		return err
 	}
 	hasOwner := false
@@ -278,7 +326,7 @@ func workItemTaskStages(plan protocol.WorkItemPlan, taskID string) map[string]pr
 func WorkItemTaskRetired(a, b protocol.WorkItemPlan, taskID string) bool {
 	old, next := workItemTaskStages(a, taskID), workItemTaskStages(b, taskID)
 	for id, stage := range next {
-		if slices.Contains([]string{"retired", "cancelled"}, stage.Status) && old[id].Status != stage.Status {
+		if slices.Contains([]protocol.WorkItemStageStatus{protocol.WorkItemStageRetired, protocol.WorkItemStageCancelled}, stage.Status) && old[id].Status != stage.Status {
 			return true
 		}
 	}
@@ -293,7 +341,7 @@ func WorkItemStageAcceptsWork(plan protocol.WorkItemPlan, id string) bool {
 	}
 	for id != "" {
 		stage, ok := stages[id]
-		if !ok || slices.Contains([]string{"done", "retired", "cancelled"}, stage.Status) {
+		if !ok || slices.Contains([]protocol.WorkItemStageStatus{protocol.WorkItemStageDone, protocol.WorkItemStageRetired, protocol.WorkItemStageCancelled}, stage.Status) {
 			return false
 		}
 		id = stage.ParentID
@@ -331,7 +379,7 @@ func ValidateWorkItemTaskDependencies(items []protocol.WorkItem, lifecycles map[
 		}
 		for _, stage := range item.Stages {
 			stageNode := node{item: item.WorkItemID, id: stage.StageID}
-			if stage.ParentID != "" && !slices.Contains([]string{"done", "cancelled", "retired"}, stage.Status) && stages[stage.ParentID].Status != "done" {
+			if stage.ParentID != "" && !slices.Contains([]protocol.WorkItemStageStatus{protocol.WorkItemStageDone, protocol.WorkItemStageCancelled, protocol.WorkItemStageRetired}, stage.Status) && stages[stage.ParentID].Status != "done" {
 				parent := node{item: item.WorkItemID, id: stage.ParentID}
 				edges[parent] = append(edges[parent], stageNode)
 			}

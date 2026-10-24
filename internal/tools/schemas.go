@@ -8,13 +8,13 @@ const specSchema = `{
   "description": "What the task must achieve. Immutable once created; changes make a new version.",
   "properties": {
     "goal": {"type": "string", "description": "The outcome, in the owner's terms."},
-    "scope": {"type": "string"},
+    "scope": {"type": "string", "description": "Optional plain-text description of the work boundary, as one string. Use constraints for a list of requirements; keep detailed designs in implementation_context."},
     "implementation_context": {"type":"string","description":"Detailed design or investigation input for implementation only. Never put this material in shared background, scope or acceptance checks to prime an independent reviewer."},
     "shared_context": {"type": "array", "description": "Server-frozen work-item facts. Do not supply on create; the server selects them from linked work items.", "items": {"type": "object", "properties": {"work_item_id": {"type": "string"}, "revision": {"type": "integer"}, "intent": {"type": "string"}, "constraints": {"type": "array", "items": {"type": "string"}}, "facts": {"type": "array", "items": {"type": "object", "properties": {"kind": {"type": "string"}, "text": {"type": "string"}, "source": {"type": "string"}}, "required": ["kind", "text", "source"], "additionalProperties": false}}}, "required": ["work_item_id", "revision", "intent"], "additionalProperties": false}},
     "constraints": {"type": "array", "items": {"type": "string"}},
     "acceptance": {"type": "array", "items": {"type": "string"}, "description": "Checks an independent reviewer applies. Required before work can start."},
     "delivery": {"type": "string", "enum": ["commit"], "description": "Legacy commit-only output. Prefer deliverables for new tasks."},
-    "deliverables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["commit", "report", "files"]}, "description": "Required outputs, independently accepted. Combine commit/report/files as needed; report does not require Git changes."},
+    "deliverables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["commit", "report", "files"]}, "description": "Required outputs as an array of names, e.g. [\"report\", \"files\"] for a report and downloadable prototype. Do not use a boolean object. Combine commit/report/files as needed; report does not require Git changes."},
     "inputs": {"type":"array","description":"Explicit original attachment inputs for both implementation and acceptance. Pass file_id from conversation attachments or a prior task input; metadata is frozen by the server. Follow-up relations do not inherit inputs.","items":{"type":"object","properties":{"file_id":{"type":"string"},"name":{"type":"string"},"media_type":{"type":"string"},"size":{"type":"integer"},"sha256":{"type":"string"},"source_message_id":{"type":"string"}},"required":["file_id"],"additionalProperties":false}},
     "max_implement_attempts": {"type": "integer", "minimum": 0},
     "workspace": {
@@ -88,9 +88,9 @@ var schemas = map[string]string{
 	"tasks_create": `{
   "type": "object",
   "properties": {
-    "work_item_id":{"type":"string","description":"Existing work item to continue. Omission creates a standalone concern; use an existing ID for follow-up."},
-    "work_item_revision":{"type":"integer","description":"The work item revision you read; creation links atomically under this revision."},
-    "stage_ids":{"type":"array","items":{"type":"string"},"description":"Existing stages this execution covers."},
+    "work_item_id":{"type":"string","description":"Existing work item to continue. When set, also provide work_item_revision and nonempty stage_ids. Omission creates a standalone concern; use an existing ID for follow-up."},
+    "work_item_revision":{"type":"integer","description":"Required with work_item_id: the revision returned by work_items_read/create/update. Creation links atomically under this revision."},
+    "stage_ids":{"type":"array","items":{"type":"string"},"description":"Required and nonempty with work_item_id: stable IDs of existing stages this execution covers. Read or create the stages first; do not omit the association to bypass an error."},
     "use_default_workspace":{"type":"boolean","description":"Explicitly reuse the item's verified default source task resource; otherwise use spec.workspace."},
     "title": {"type": "string"},
     "relations": ` + relationsSchema + `,
@@ -102,6 +102,8 @@ var schemas = map[string]string{
     "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
   },
   "required": ["title", "spec", "commit_seq"],
+  "if": {"required": ["work_item_id"], "properties": {"work_item_id": {"type": "string", "minLength": 1}}},
+  "then": {"required": ["work_item_revision", "stage_ids"], "properties": {"stage_ids": {"type": "array", "minItems": 1}}},
   "additionalProperties": false
 }`,
 	"tasks_update_intent": `{

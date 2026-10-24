@@ -1,6 +1,12 @@
 import { expect, test, vi } from "vitest";
 import { NetworkError } from "../api/client.ts";
-import type { APIResponse, Envelope, RequestView, WorkItemView } from "../api/generated/api.ts";
+import type {
+  APIResponse,
+  Envelope,
+  RequestView,
+  WorkItemDelivery,
+  WorkItemView,
+} from "../api/generated/api.ts";
 import { DeliveryRefresh } from "./refresh.ts";
 
 const item: WorkItemView = {
@@ -15,7 +21,12 @@ const item: WorkItemView = {
   created_at: 1,
   updated_at: 1,
 };
-const delivery = { delivery_id: "pr", provider: "github", repository: "example/repo", number: 1 };
+const delivery: WorkItemDelivery = {
+  delivery_id: "pr",
+  provider: "github",
+  repository: "example/repo",
+  number: 1,
+};
 
 test.each(["merged", "closed"])(
   "a lost terminal %s refresh recovers under its original request identity",

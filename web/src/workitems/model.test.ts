@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { WorkItemView } from "../api/generated/api.ts";
+import type { WorkItemDelivery, WorkItemStage, WorkItemView } from "../api/generated/api.ts";
 import { ComposerDraft } from "../conversation/draft.ts";
 import {
   columns,
@@ -38,7 +38,7 @@ describe("work-item presentation", () => {
     expect(observationErrorLabel("future_error")).toBe("未知错误（future_error）");
   });
   test("unknown refresh requires completed newer facts for its own delivery", () => {
-    const delivery = {
+    const delivery: WorkItemDelivery = {
       delivery_id: "pr",
       provider: "github",
       repository: "example/repo",
@@ -101,7 +101,7 @@ describe("work-item presentation", () => {
     ).toBe("需要 owner 决定范围");
   });
   test("grouping preserves dynamic stage identities and dependency order", () => {
-    const stages = [
+    const stages: WorkItemStage[] = [
       {
         stage_id: "web",
         parent_id: "build",
@@ -130,9 +130,14 @@ describe("work-item presentation", () => {
     expect([...parallelStages(stages)]).toEqual(["web", "api"]);
   });
   test("parallel children inherit ancestor dependencies and retired-group blocking", () => {
-    const dependency = { stage_id: "research", title: "调查", status: "planned" };
-    const group = { stage_id: "group", title: "实现", status: "planned", depends_on: ["research"] };
-    const children = ["api", "web"].map((id) => ({
+    const dependency: WorkItemStage = { stage_id: "research", title: "调查", status: "planned" };
+    const group: WorkItemStage = {
+      stage_id: "group",
+      title: "实现",
+      status: "planned",
+      depends_on: ["research"],
+    };
+    const children = ["api", "web"].map((id): WorkItemStage => ({
       stage_id: id,
       title: id,
       status: "planned",

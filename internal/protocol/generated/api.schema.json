@@ -1865,7 +1865,7 @@
       "additionalProperties": false,
       "properties": {
         "kind": {
-          "type": "string"
+          "$ref": "#/definitions/SharedFactKind"
         },
         "source": {
           "type": "string"
@@ -1881,6 +1881,18 @@
       ],
       "title": "SharedFact",
       "type": "object"
+    },
+    "SharedFactKind": {
+      "enum": [
+        "goal",
+        "observation",
+        "user_constraint",
+        "decision",
+        "input",
+        "fact"
+      ],
+      "title": "SharedFactKind",
+      "type": "string"
     },
     "Snapshot": {
       "additionalProperties": false,
@@ -2459,7 +2471,7 @@
           ]
         },
         "status": {
-          "type": "string"
+          "$ref": "#/definitions/WorkItemUpdateStatus"
         },
         "task_dispositions": {
           "items": {
@@ -2606,7 +2618,7 @@
           ]
         },
         "kind": {
-          "type": "string"
+          "$ref": "#/definitions/WorkItemClosureKind"
         },
         "reason": {
           "type": "string"
@@ -2619,6 +2631,16 @@
       ],
       "title": "WorkItemClosure",
       "type": "object"
+    },
+    "WorkItemClosureKind": {
+      "enum": [
+        "completed",
+        "declined",
+        "handed_off",
+        "superseded"
+      ],
+      "title": "WorkItemClosureKind",
+      "type": "string"
     },
     "WorkItemDelivery": {
       "additionalProperties": false,
@@ -2633,7 +2655,7 @@
           "type": "integer"
         },
         "provider": {
-          "type": "string"
+          "$ref": "#/definitions/WorkItemDeliveryProvider"
         },
         "repository": {
           "type": "string"
@@ -2651,11 +2673,19 @@
       "title": "WorkItemDelivery",
       "type": "object"
     },
+    "WorkItemDeliveryProvider": {
+      "enum": [
+        "github",
+        "codebase"
+      ],
+      "title": "WorkItemDeliveryProvider",
+      "type": "string"
+    },
     "WorkItemEvidence": {
       "additionalProperties": false,
       "properties": {
         "kind": {
-          "type": "string"
+          "$ref": "#/definitions/WorkItemEvidenceKind"
         },
         "observation": {
           "$ref": "#/definitions/DeliveryObservation"
@@ -2675,6 +2705,15 @@
       "title": "WorkItemEvidence",
       "type": "object"
     },
+    "WorkItemEvidenceKind": {
+      "enum": [
+        "acceptance",
+        "delivery",
+        "owner_decision"
+      ],
+      "title": "WorkItemEvidenceKind",
+      "type": "string"
+    },
     "WorkItemFollowOn": {
       "additionalProperties": false,
       "properties": {
@@ -2688,13 +2727,13 @@
           "type": "string"
         },
         "kind": {
-          "type": "string"
+          "$ref": "#/definitions/WorkItemFollowOnKind"
         },
         "source": {
           "type": "string"
         },
         "status": {
-          "type": "string"
+          "$ref": "#/definitions/WorkItemFollowOnStatus"
         },
         "text": {
           "type": "string"
@@ -2712,6 +2751,24 @@
       ],
       "title": "WorkItemFollowOn",
       "type": "object"
+    },
+    "WorkItemFollowOnKind": {
+      "enum": [
+        "commitment",
+        "problem",
+        "suggestion"
+      ],
+      "title": "WorkItemFollowOnKind",
+      "type": "string"
+    },
+    "WorkItemFollowOnStatus": {
+      "enum": [
+        "open",
+        "resolved",
+        "transferred"
+      ],
+      "title": "WorkItemFollowOnStatus",
+      "type": "string"
     },
     "WorkItemPage": {
       "additionalProperties": false,
@@ -2761,7 +2818,7 @@
           "type": "string"
         },
         "status": {
-          "type": "string"
+          "$ref": "#/definitions/WorkItemStageStatus"
         },
         "task_ids": {
           "items": {
@@ -2781,11 +2838,31 @@
       "title": "WorkItemStage",
       "type": "object"
     },
+    "WorkItemStageStatus": {
+      "enum": [
+        "planned",
+        "active",
+        "done",
+        "cancelled",
+        "retired"
+      ],
+      "title": "WorkItemStageStatus",
+      "type": "string"
+    },
+    "WorkItemStatus": {
+      "enum": [
+        "open",
+        "snoozed",
+        "closed"
+      ],
+      "title": "WorkItemStatus",
+      "type": "string"
+    },
     "WorkItemTaskDisposition": {
       "additionalProperties": false,
       "properties": {
         "action": {
-          "type": "string"
+          "$ref": "#/definitions/WorkItemTaskDispositionAction"
         },
         "reason": {
           "type": "string"
@@ -2805,6 +2882,24 @@
       ],
       "title": "WorkItemTaskDisposition",
       "type": "object"
+    },
+    "WorkItemTaskDispositionAction": {
+      "enum": [
+        "continue_existing",
+        "updated",
+        "stopped"
+      ],
+      "title": "WorkItemTaskDispositionAction",
+      "type": "string"
+    },
+    "WorkItemUpdateStatus": {
+      "enum": [
+        "",
+        "open",
+        "snoozed"
+      ],
+      "title": "WorkItemUpdateStatus",
+      "type": "string"
     },
     "WorkItemView": {
       "additionalProperties": false,
@@ -2868,7 +2963,7 @@
           ]
         },
         "status": {
-          "type": "string"
+          "$ref": "#/definitions/WorkItemStatus"
         },
         "tasks": {
           "items": {

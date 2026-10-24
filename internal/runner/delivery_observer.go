@@ -56,7 +56,7 @@ func (r *Runner) observeDelivery(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		observed, observeErr := r.cfg.DeliveryObserver.Observe(ctx, reviewwatch.Ref{Provider: assignment.Delivery.Provider, Repository: assignment.Delivery.Repository, Number: assignment.Delivery.Number})
+		observed, observeErr := r.cfg.DeliveryObserver.Observe(ctx, reviewwatch.Ref{Provider: string(assignment.Delivery.Provider), Repository: assignment.Delivery.Repository, Number: assignment.Delivery.Number})
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

@@ -33,7 +33,7 @@ func recordWorkItemNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, e
 	body := fmt.Sprintf("工作项：%s（%s）", item.WorkItemID, item.Title)
 	switch e.Kind {
 	case "work_item.closed":
-		label := map[string]string{"completed": "已完成", "declined": "决定不做", "handed_off": "已交接", "superseded": "被替代"}[item.Closure.Kind]
+		label := map[string]string{"completed": "已完成", "declined": "决定不做", "handed_off": "已交接", "superseded": "被替代"}[string(item.Closure.Kind)]
 		body += fmt.Sprintf("\n\n已结束跟进 · %s\n%s", label, item.Closure.Reason)
 	case "work_item.reopened":
 		body += "\n\n已重新打开，历史执行与验收记录保持不变。"

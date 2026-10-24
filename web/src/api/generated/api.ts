@@ -36,6 +36,47 @@ export type TaskLifecycle =
 export type Rating = "" | "p0" | "p1" | "p2" | "p3";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedFactKind".
+ */
+export type SharedFactKind =
+  "goal" | "observation" | "user_constraint" | "decision" | "input" | "fact";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemEvidenceKind".
+ */
+export type WorkItemEvidenceKind = "acceptance" | "delivery" | "owner_decision";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemClosureKind".
+ */
+export type WorkItemClosureKind = "completed" | "declined" | "handed_off" | "superseded";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemDeliveryProvider".
+ */
+export type WorkItemDeliveryProvider = "github" | "codebase";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemFollowOnKind".
+ */
+export type WorkItemFollowOnKind = "commitment" | "problem" | "suggestion";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemFollowOnStatus".
+ */
+export type WorkItemFollowOnStatus = "open" | "resolved" | "transferred";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemStageStatus".
+ */
+export type WorkItemStageStatus = "planned" | "active" | "done" | "cancelled" | "retired";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemStatus".
+ */
+export type WorkItemStatus = "open" | "snoozed" | "closed";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "Code".
  */
 export type Code =
@@ -132,6 +173,16 @@ export type RelationDirection = "outgoing" | "incoming";
  * via the `definition` "TaskRelationKind".
  */
 export type TaskRelationKind = "follow_up" | "related";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemUpdateStatus".
+ */
+export type WorkItemUpdateStatus = "" | "open" | "snoozed";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemTaskDispositionAction".
+ */
+export type WorkItemTaskDispositionAction = "continue_existing" | "updated" | "stopped";
 
 export interface TendAPI {
   APIResponse?: APIResponse;
@@ -222,7 +273,7 @@ export interface WorkItemView {
   project: string;
   revision: number;
   stages: WorkItemStage[] | null;
-  status: string;
+  status: WorkItemStatus;
   tasks?: TaskSummary[];
   title: string;
   updated_at: number;
@@ -233,7 +284,7 @@ export interface WorkItemView {
  * via the `definition` "SharedFact".
  */
 export interface SharedFact {
-  kind: string;
+  kind: SharedFactKind;
   source: string;
   text: string;
 }
@@ -243,7 +294,7 @@ export interface SharedFact {
  */
 export interface WorkItemClosure {
   evidence: WorkItemEvidence[] | null;
-  kind: string;
+  kind: WorkItemClosureKind;
   reason: string;
 }
 /**
@@ -251,7 +302,7 @@ export interface WorkItemClosure {
  * via the `definition` "WorkItemEvidence".
  */
 export interface WorkItemEvidence {
-  kind: string;
+  kind: WorkItemEvidenceKind;
   observation?: DeliveryObservation;
   reference: string;
   summary: string;
@@ -294,7 +345,7 @@ export interface WorkItemDelivery {
   delivery_id: string;
   host_id?: string;
   number: number;
-  provider: string;
+  provider: WorkItemDeliveryProvider;
   repository: string;
   url?: string;
 }
@@ -305,9 +356,9 @@ export interface WorkItemDelivery {
 export interface WorkItemFollowOn {
   evidence?: WorkItemEvidence[];
   follow_on_id: string;
-  kind: string;
+  kind: WorkItemFollowOnKind;
   source: string;
-  status: string;
+  status: WorkItemFollowOnStatus;
   text: string;
   transferred_to?: string;
 }
@@ -321,7 +372,7 @@ export interface WorkItemStage {
   parent_id?: string;
   reason?: string;
   stage_id: string;
-  status: string;
+  status: WorkItemStageStatus;
   task_ids?: string[];
   title: string;
 }
@@ -1131,7 +1182,7 @@ export interface UpdateWorkItemPayload {
   project: string;
   source_message_id?: string;
   stages: WorkItemStage[] | null;
-  status?: string;
+  status?: WorkItemUpdateStatus;
   task_dispositions?: WorkItemTaskDisposition[];
   title: string;
 }
@@ -1140,7 +1191,7 @@ export interface UpdateWorkItemPayload {
  * via the `definition` "WorkItemTaskDisposition".
  */
 export interface WorkItemTaskDisposition {
-  action: string;
+  action: WorkItemTaskDispositionAction;
   reason: string;
   spec_version: number;
   task_id: string;

@@ -18,7 +18,7 @@ type WorkItem struct {
 	WorkItemPlan
 	WorkItemID string           `json:"work_item_id"`
 	Revision   int64            `json:"revision"`
-	Status     string           `json:"status"`
+	Status     WorkItemStatus   `json:"status"`
 	Closure    *WorkItemClosure `json:"closure,omitempty"`
 	CreatedAt  int64            `json:"created_at"`
 	UpdatedAt  int64            `json:"updated_at"`
@@ -26,61 +26,61 @@ type WorkItem struct {
 
 // WorkItemEvidence cites an acceptance, external observation or owner decision.
 type WorkItemEvidence struct {
-	Kind      string `json:"kind"`
-	Reference string `json:"reference"`
-	Summary   string `json:"summary"`
+	Kind      WorkItemEvidenceKind `json:"kind"`
+	Reference string               `json:"reference"`
+	Summary   string               `json:"summary"`
 	// Observation is a server-frozen provider fact, never caller supplied proof.
 	Observation *DeliveryObservation `json:"observation,omitempty"`
 }
 
 // WorkItemStage has caller-chosen stable identity within its work item.
 type WorkItemStage struct {
-	StageID   string             `json:"stage_id"`
-	Title     string             `json:"title"`
-	ParentID  string             `json:"parent_id,omitempty"`
-	DependsOn []string           `json:"depends_on,omitempty"`
-	Status    string             `json:"status"`
-	Reason    string             `json:"reason,omitempty"`
-	Evidence  []WorkItemEvidence `json:"evidence,omitempty"`
-	TaskIDs   []string           `json:"task_ids,omitempty"`
+	StageID   string              `json:"stage_id"`
+	Title     string              `json:"title"`
+	ParentID  string              `json:"parent_id,omitempty"`
+	DependsOn []string            `json:"depends_on,omitempty"`
+	Status    WorkItemStageStatus `json:"status"`
+	Reason    string              `json:"reason,omitempty"`
+	Evidence  []WorkItemEvidence  `json:"evidence,omitempty"`
+	TaskIDs   []string            `json:"task_ids,omitempty"`
 }
 
 // WorkItemFollowOn preserves commitments even when their stage is retired.
 type WorkItemFollowOn struct {
-	FollowOnID    string             `json:"follow_on_id"`
-	Kind          string             `json:"kind"`
-	Text          string             `json:"text"`
-	Source        string             `json:"source"`
-	Status        string             `json:"status"`
-	TransferredTo string             `json:"transferred_to,omitempty"`
-	Evidence      []WorkItemEvidence `json:"evidence,omitempty"`
+	FollowOnID    string                 `json:"follow_on_id"`
+	Kind          WorkItemFollowOnKind   `json:"kind"`
+	Text          string                 `json:"text"`
+	Source        string                 `json:"source"`
+	Status        WorkItemFollowOnStatus `json:"status"`
+	TransferredTo string                 `json:"transferred_to,omitempty"`
+	Evidence      []WorkItemEvidence     `json:"evidence,omitempty"`
 }
 
 // WorkItemDelivery is an immutable external target identity. Observation facts
 // are stored independently so editing the plan cannot overwrite newer facts.
 type WorkItemDelivery struct {
-	DeliveryID string `json:"delivery_id"`
-	Provider   string `json:"provider"`
-	Repository string `json:"repository"`
-	Number     int64  `json:"number"`
-	URL        string `json:"url,omitempty"`
-	HostID     string `json:"host_id,omitempty"`
+	DeliveryID string                   `json:"delivery_id"`
+	Provider   WorkItemDeliveryProvider `json:"provider"`
+	Repository string                   `json:"repository"`
+	Number     int64                    `json:"number"`
+	URL        string                   `json:"url,omitempty"`
+	HostID     string                   `json:"host_id,omitempty"`
 }
 
 // WorkItemClosure records an explicit responsibility endpoint.
 type WorkItemClosure struct {
-	Kind     string             `json:"kind"`
-	Reason   string             `json:"reason"`
-	Evidence []WorkItemEvidence `json:"evidence"`
+	Kind     WorkItemClosureKind `json:"kind"`
+	Reason   string              `json:"reason"`
+	Evidence []WorkItemEvidence  `json:"evidence"`
 }
 
 // WorkItemTaskDisposition explicitly acknowledges the agreement of an active
 // task when the surrounding plan changes; it never mutates that task's spec.
 type WorkItemTaskDisposition struct {
-	TaskID      string `json:"task_id"`
-	Action      string `json:"action"`
-	SpecVersion int64  `json:"spec_version"`
-	Reason      string `json:"reason"`
+	TaskID      string                        `json:"task_id"`
+	Action      WorkItemTaskDispositionAction `json:"action"`
+	SpecVersion int64                         `json:"spec_version"`
+	Reason      string                        `json:"reason"`
 }
 
 // CreateWorkItemPayload supplies the initial plan; it always starts open.
@@ -95,7 +95,7 @@ type UpdateWorkItemPayload struct {
 	SourceMessageID string `json:"source_message_id,omitempty"`
 	CommitSeq       int64  `json:"commit_seq,omitempty"`
 	WorkItemPlan
-	Status           string                    `json:"status,omitempty"`
+	Status           WorkItemUpdateStatus      `json:"status,omitempty"`
 	TaskDispositions []WorkItemTaskDisposition `json:"task_dispositions,omitempty"`
 }
 
