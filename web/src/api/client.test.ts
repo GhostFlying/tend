@@ -320,3 +320,51 @@ test("attachment upload sends the original Blob with caller cancellation and no 
   await client.upload("req_original", blob, "a & b.pdf", controller.signal);
   expect(calls).toBe(1);
 });
+
+test("superseding a read after headers does not mark the healthy shared connection offline", async () => {
+  storage.setItem("tend.token", "valid");
+  let bodyStarted!: () => void;
+  const reading = new Promise<void>((resolve) => {
+    bodyStarted = resolve;
+  });
+  let first = true;
+  const api = new ApiClient({
+    storage,
+    fetch: async (path, init) => {
+      if (String(path) === "/api/v1/session") return json(200, { login: "owner" });
+      if (!first) return json(200, { repos: [{ repo: "replacement" }] });
+      first = false;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"repos":'));
+          init?.signal?.addEventListener(
+            "abort",
+            () => controller.error(new DOMException("superseded", "AbortError")),
+            { once: true },
+          );
+        },
+      });
+      const response = new Response(stream, { status: 200 });
+      const read = response.json.bind(response);
+      response.json = () => {
+        bodyStarted();
+        return read();
+      };
+      return response;
+    },
+  });
+  await api.connect();
+  const states: string[] = [];
+  const unsubscribe = api.connection.subscribe(() => states.push(api.connection.get().status));
+  const controller = new AbortController();
+  const oldRead = api.get("/api/v1/repos", controller.signal);
+  const rejected = expect(oldRead).rejects.toBeInstanceOf(NetworkError);
+  await reading;
+  controller.abort();
+  const nextRead = api.get("/api/v1/repos");
+  await rejected;
+  expect(await nextRead).toEqual({ repos: [{ repo: "replacement" }] });
+  expect(states).not.toContain("offline");
+  expect(api.connection.get().status).toBe("online");
+  unsubscribe();
+});

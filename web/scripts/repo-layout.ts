@@ -64,6 +64,8 @@ let registry = registrations;
 let fail = false;
 let pause = false;
 let reads = 0;
+let partial = false;
+const partialBodies: ServerResponse[] = [];
 const held: ServerResponse[] = [];
 const streams = new Set<ServerResponse>();
 function json(res: ServerResponse, body: unknown, status = 200) {
@@ -103,6 +105,13 @@ const server = await createServer({
           }
           if (path === "/api/v1/repos") {
             reads++;
+            if (partial) {
+              partial = false;
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.write('{"repos":');
+              partialBodies.push(res);
+              return;
+            }
             if (pause) {
               held.push(res);
               return;
@@ -299,6 +308,10 @@ try {
       await usable(page.getByRole("region", { name: "分阶段任务看板" }), page);
       await summary.click();
       await recent.click();
+      await page
+        .getByRole("navigation", { name: "视图" })
+        .getByRole("button", { name: "待处理", exact: true })
+        .click();
       const settings = page
         .getByRole("button", { name: "设置", exact: true })
         .filter({ visible: true });
@@ -344,6 +357,18 @@ try {
         .getByText("全部 32 个 · 含已退役仓库", { exact: true })
         .waitFor({ timeout: 15000 });
       await panel.getByText("已读取登记。", { exact: true }).waitFor();
+      // Superseding after headers must not make the healthy connection offline.
+      partial = true;
+      const partialResponse = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/repos",
+      );
+      await panel.getByRole("button", { name: "刷新仓库" }).click();
+      await partialResponse;
+      await panel.getByRole("button", { name: "刷新仓库" }).click();
+      await panel.getByText("已读取登记。", { exact: true }).waitFor();
+      assert.equal(await panel.getByRole("button", { name: "刷新仓库" }).isEnabled(), true);
+      assert.equal(await panel.getByText(/连接已断开/).count(), 0);
+      for (const response of partialBodies.splice(0)) response.end();
       registry = { repos: [] };
       await panel.getByRole("button", { name: "刷新仓库" }).click();
       await panel.getByText("账本中暂无已注册仓库。", { exact: true }).waitFor();
@@ -364,6 +389,7 @@ try {
     await context.close();
   }
 } finally {
+  for (const response of partialBodies) response.end();
   for (const response of held) response.end();
   for (const response of streams) response.end();
   await browser.close();
