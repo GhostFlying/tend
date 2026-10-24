@@ -405,6 +405,10 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 		return protocol.ConversationItem{}, err
 	}
 	it.Images = images
+	it.Attachments, err = store.ConversationAttachments(ctx, q, r.MessageID)
+	if err != nil {
+		return protocol.ConversationItem{}, err
+	}
 	notice, err := store.GetMessageNotice(ctx, q, r.MessageID)
 	if err == nil {
 		it.NoticeType = notice.NoticeType

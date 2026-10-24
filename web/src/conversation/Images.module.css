@@ -102,3 +102,16 @@
   object-fit: contain;
   margin: auto;
 }
+
+.previewError {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  color: var(--label-3);
+}
+
+.previewError button {
+  color: var(--accent);
+  text-align: left;
+}

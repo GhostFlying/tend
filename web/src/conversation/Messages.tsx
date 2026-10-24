@@ -13,6 +13,7 @@ import styles from "./Messages.module.css";
 import { clock, dayLabel, duration, messageStateLabels, type Entry } from "./model.ts";
 import { ToolRow } from "./ToolRow.tsx";
 import { MessageImages, OutgoingImages } from "./Images.tsx";
+import { MessageAttachments, OutgoingAttachments } from "./Attachments.tsx";
 import { outgoingImages } from "./images.ts";
 
 export function Divider({ at }: { at: number }) {
@@ -23,7 +24,11 @@ export function OwnerMessage({ item }: { item: ConversationItem }) {
   const state = item.state ?? "queued";
   return (
     <div className={styles.user} data-scroll-id={item.message_id}>
-      {!!item.images?.length && <MessageImages images={item.images} />}
+      {item.attachments?.length ? (
+        <MessageAttachments attachments={item.attachments} />
+      ) : (
+        !!item.images?.length && <MessageImages images={item.images} />
+      )}
       {item.body && <div className={styles.bubble}>{item.body}</div>}
       <div className={styles.state} data-state={state}>
         {messageStateLabels[state]} · {clock(Date.parse(item.created_at))}
@@ -44,14 +49,32 @@ export function OutgoingRow({
   const images = outgoingImages(message);
   return (
     <div className={styles.user} data-scroll-id={`outbox:${requestId}`}>
+      {!!message.uploads?.length && <OutgoingAttachments uploads={message.uploads} />}
       {!!images.length && <OutgoingImages images={images} />}
       {message.body && <div className={styles.bubble}>{message.body}</div>}
       <div className={styles.state} data-state={message.state}>
-        {message.state === "sending" && "发送中…"}
+        {message.state === "sending" &&
+          (message.uploads?.length && !message.attachmentsFrozen ? "正在上传附件…" : "发送中…")}
+        {message.state === "sending" && !!message.uploads?.length && !message.attachmentsFrozen && (
+          <>
+            {" "}
+            ·{" "}
+            <button
+              type="button"
+              className={controls.link}
+              onClick={() => void queue?.discard(requestId)}
+            >
+              取消发送
+            </button>
+          </>
+        )}
         {message.state === "sent" && `已收下 · ${clock(message.createdAt)}`}
         {message.state === "unknown" && (
           <>
-            发送结果未知 ·{" "}
+            {message.uploads?.length && !message.attachmentsFrozen
+              ? "附件上传结果待核对"
+              : "发送结果未知"}{" "}
+            ·{" "}
             <button
               type="button"
               className={controls.link}

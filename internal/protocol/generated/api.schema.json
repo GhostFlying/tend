@@ -345,6 +345,35 @@
       "title": "ControlMode",
       "type": "string"
     },
+    "ConversationAttachment": {
+      "additionalProperties": false,
+      "properties": {
+        "file_id": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file_id",
+        "name",
+        "media_type",
+        "size",
+        "sha256"
+      ],
+      "title": "ConversationAttachment",
+      "type": "object"
+    },
     "ConversationHandoffPayload": {
       "additionalProperties": false,
       "properties": {
@@ -503,6 +532,12 @@
         },
         "assistant_state": {
           "$ref": "#/definitions/AssistantState"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/definitions/ConversationAttachment"
+          },
+          "type": "array"
         },
         "author": {
           "type": "string"
@@ -818,6 +853,19 @@
         "status"
       ],
       "title": "DecisionView",
+      "type": "object"
+    },
+    "DownloadURLResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "DownloadURLResponse",
       "type": "object"
     },
     "EffectResult": {
@@ -1633,6 +1681,12 @@
     "SubmitMessagePayload": {
       "additionalProperties": false,
       "properties": {
+        "attachments": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "body": {
           "type": "string"
         },
@@ -2235,6 +2289,9 @@
     "ArtifactPayload": {
       "$ref": "#/definitions/ArtifactPayload"
     },
+    "ConversationAttachment": {
+      "$ref": "#/definitions/ConversationAttachment"
+    },
     "ConversationHandoffPayload": {
       "$ref": "#/definitions/ConversationHandoffPayload"
     },
@@ -2252,6 +2309,9 @@
     },
     "CreateActionPayload": {
       "$ref": "#/definitions/CreateActionPayload"
+    },
+    "DownloadURLResponse": {
+      "$ref": "#/definitions/DownloadURLResponse"
     },
     "Envelope": {
       "$ref": "#/definitions/Envelope"

@@ -139,12 +139,14 @@ export interface TendAPI {
   AnswerResult?: AnswerResult;
   ArtifactDetail?: ArtifactDetail;
   ArtifactPayload?: ArtifactPayload;
+  ConversationAttachment?: ConversationAttachment;
   ConversationHandoffPayload?: ConversationHandoffPayload;
   ConversationHandoffView?: ConversationHandoffView;
   ConversationImageResponse?: ConversationImageResponse;
   ConversationPage?: ConversationPage;
   ConversationSettingsView?: ConversationSettingsView;
   CreateActionPayload?: CreateActionPayload;
+  DownloadURLResponse?: DownloadURLResponse;
   Envelope?: Envelope;
   HookRequest?: HookRequest;
   HookResponse?: HookResponse;
@@ -314,6 +316,17 @@ export interface ResultReport {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationAttachment".
+ */
+export interface ConversationAttachment {
+  file_id: string;
+  media_type: string;
+  name: string;
+  sha256: string;
+  size: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ConversationHandoffPayload".
  */
 export interface ConversationHandoffPayload {
@@ -392,6 +405,7 @@ export interface ConversationPage {
 export interface ConversationItem {
   assistant_revision?: number;
   assistant_state?: AssistantState;
+  attachments?: ConversationAttachment[];
   author: string;
   body?: string;
   created_at: string;
@@ -469,6 +483,13 @@ export interface CreateActionPayload {
   generation: number;
   kind: ActionKind;
   source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DownloadURLResponse".
+ */
+export interface DownloadURLResponse {
+  url: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -744,6 +765,7 @@ export interface StreamStart {
  * via the `definition` "SubmitMessagePayload".
  */
 export interface SubmitMessagePayload {
+  attachments?: string[];
   body: string;
   decision?: DecisionChoice;
   images?: ConversationImageInput[];

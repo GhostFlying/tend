@@ -19,26 +19,26 @@ test("follow-up intentions preserve drafts and do not duplicate after owner edit
   draft.write(draft.state.get().text + "修改按钮位置");
   const edited = draft.state.get().text;
   draft.followUp({ ...task, title: "更新后的标题" });
-  expect(draft.state.get()).toEqual({ text: edited, images: [], focus: 2 });
+  expect(draft.state.get()).toEqual({ text: edited, files: [], focus: 2 });
   draft.followUp({ ...task, task_id: "task_another" });
   expect(draft.state.get().text).toContain("task_another");
   expect(draft.state.get().text).toContain("修改按钮位置");
 });
 
-test("images survive follow-up navigation and failed durable enqueue", () => {
+test("files survive follow-up navigation and failed durable enqueue", () => {
   const draft = new ComposerDraft();
-  const image = { name: "screenshot.png", media_type: "image/png", data_base64: "AQID" };
-  draft.addImages([image]);
+  const image = new File(["screenshot"], "screenshot.png", { type: "image/png" });
+  draft.addFiles([image]);
   draft.followUp(task);
-  expect(draft.state.get().images).toEqual([image]);
+  expect(draft.state.get().files).toEqual([image]);
   const sent = draft.state.get();
   draft.clear();
   draft.write("下一条消息");
-  draft.restore(sent.text, sent.images);
-  expect(draft.state.get().images).toEqual([image]);
+  draft.restore(sent.text, sent.files);
+  expect(draft.state.get().files).toEqual([image]);
   expect(draft.state.get().text).toContain("下一条消息");
-  draft.removeImage(0);
-  expect(draft.state.get().images).toEqual([]);
+  draft.removeFile(0);
+  expect(draft.state.get().files).toEqual([]);
 });
 test("failed enqueue restoration preserves text written while storage was pending", () => {
   const draft = new ComposerDraft();

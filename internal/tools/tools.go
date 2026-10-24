@@ -77,6 +77,7 @@ var tools = []tool{
 	{"decisions_open", "Ask the owner a question that blocks a decision you cannot make.", (*Service).decisionsOpen},
 	{"decisions_resolve", "Record the answer the owner gave you to an open decision. For options of decisions tend opened, the result says what tend carried out.", (*Service).decisionsResolve},
 	{"artifacts_read", "Read an artifact: repository commits, optional Markdown report with evidence and uncertainties, delivery file manifest, and independent verdicts.", (*Service).artifactsRead},
+	{"attachments_read", "Read an original conversation attachment by file_id. Returns metadata, a bounded UTF-8 text window and a hosted local path or download command. Binary originals, including full animated GIFs, remain available for your chosen analysis; do not infer their contents from metadata.", (*Service).attachmentsRead},
 	{"files_read", "Read a bounded UTF-8 text window of a finalized delivery file. Use only when its content is needed; binary files return metadata only.", (*Service).filesRead},
 	{"requests_read", "Look up the outcome of one of your earlier requests instead of repeating it.", (*Service).requestsRead},
 	{"repos_list", "List the registered repositories, workspace templates and hosts.", (*Service).reposList},

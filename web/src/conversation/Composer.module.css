@@ -11,30 +11,25 @@
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
-.images {
+.files {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   list-style: none;
-  padding: 0;
-  margin: 0 0 12px;
+  padding: 6px;
+  margin: -6px -6px 6px;
+  max-height: 32vh;
+  overflow-y: auto;
 }
 
-.images li {
+.files li {
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: 200px;
+  max-width: 100%;
+  min-width: 0;
 }
 
-.images img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-}
-
-.images button {
+.files li > button {
   position: absolute;
   top: -5px;
   right: -5px;
@@ -48,7 +43,7 @@
   color: var(--label);
 }
 
-.images svg {
+.files svg {
   width: 14px;
   height: 14px;
 }

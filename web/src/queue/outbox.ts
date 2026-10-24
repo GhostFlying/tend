@@ -1,6 +1,6 @@
 // The outbox: messages the owner wrote, kept in IndexedDB until tend has
 // them, so a closed page or a dropped network loses nothing (v0.1 §14.2).
-import type { Envelope } from "../api/generated/api.ts";
+import type { ConversationAttachment, Envelope } from "../api/generated/api.ts";
 
 /**
  * sending: written down and on its way, or waiting to be sent again.
@@ -10,7 +10,18 @@ import type { Envelope } from "../api/generated/api.ts";
  */
 export type SendState = "sending" | "sent" | "unknown" | "failed";
 
+export interface OutgoingAttachment {
+  requestId: string;
+  name: string;
+  blob: Blob;
+  /** Saved before starting transport, so reload first reconciles this ID. */
+  attempted?: boolean;
+  receipt?: ConversationAttachment;
+}
+
 export interface OutgoingMessage {
+  uploads?: OutgoingAttachment[];
+  attachmentsFrozen?: boolean;
   /** The envelope's request ID; every resend uses it again (D11). */
   requestId: string;
   /**

@@ -2,6 +2,8 @@ package runnerapi
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -95,5 +97,68 @@ func TestBinaryFileUploadReplayAndAcceptanceDownload(t *testing.T) {
 	}
 	if status, body := get(asRun(*accept)); status != http.StatusOK || !bytes.Equal(body, content) {
 		t.Fatalf("acceptance download: %d %q", status, body)
+	}
+}
+
+// repeatedFileBytes produces an arbitrary-size upload without allocating it.
+type repeatedFileBytes byte
+
+func (b repeatedFileBytes) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = byte(b)
+	}
+	return len(p), nil
+}
+
+func TestStreamingFileExceedsFormerUploadLimit(t *testing.T) {
+	e := newEnv(t, 10*time.Millisecond)
+	e.createTask()
+	as := e.claim(e.envelope(protocol.OpRunnerClaim, "", map[string]any{}))
+	if as == nil {
+		t.Fatal("no run")
+	}
+	const size = 21 << 20
+	endpoint := e.server.URL + "/runner/v1/files?request_id=" + url.QueryEscape(e.ids.New(protocol.PrefixRequest)) + "&name=large.bin"
+	req, err := http.NewRequest(http.MethodPost, endpoint, io.LimitReader(repeatedFileBytes(0xa5), size))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Unknown Content-Length exercises the actual streamed/chunked path.
+	req.Header.Set("Authorization", "Bearer "+as.RunToken)
+	req.Header.Set(HeaderRun, as.RunID)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var result response
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || result.Operation == nil || result.Operation.Status != protocol.OpSucceeded {
+		t.Fatalf("stream upload: %d %+v", resp.StatusCode, result)
+	}
+	var file protocol.ArtifactFile
+	if err := json.Unmarshal(result.Operation.Result, &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.Size != size {
+		t.Fatalf("size=%d", file.Size)
+	}
+	req, err = http.NewRequest(http.MethodGet, e.server.URL+"/runner/v1/files/"+file.FileID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+as.RunToken)
+	req.Header.Set(HeaderRun, as.RunID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	digest := sha256.New()
+	n, err := io.Copy(digest, resp.Body)
+	if err != nil || resp.StatusCode != http.StatusOK || n != size || hex.EncodeToString(digest.Sum(nil)) != file.SHA256 {
+		t.Fatalf("stream download: status=%d size=%d err=%v", resp.StatusCode, n, err)
 	}
 }

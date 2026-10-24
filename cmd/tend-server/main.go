@@ -72,8 +72,9 @@ type config struct {
 		// score; 0 turns waiting off.
 		WaitPerHour *float64 `json:"wait_per_hour"`
 	} `json:"queue"`
-	// Deliverables bounds durable binary uploads; zero selects defaults.
+	// Deliverables retains obsolete fields so existing configurations still load.
 	Deliverables struct {
+		// Deprecated: accepted for compatibility; original files are not size limited.
 		FileLimitBytes   int64 `json:"file_limit_bytes"`
 		ResultLimitBytes int64 `json:"result_limit_bytes"`
 	} `json:"deliverables"`
@@ -242,24 +243,11 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		log.Info("running the hosted main agent", "instance", cfg.MainAgent.Instance)
 	}
 	d := dispatch.New(a, handlers, wake, time.Now, dispatch.Config{}, log)
-	fileLimit, resultLimit := cfg.Deliverables.FileLimitBytes, cfg.Deliverables.ResultLimitBytes
-	if fileLimit < 0 || resultLimit < 0 {
-		return errors.New("deliverables limits must not be negative")
-	}
-	if fileLimit == 0 {
-		fileLimit = app.DefaultFileLimit
-	}
-	if resultLimit == 0 {
-		resultLimit = app.DefaultResultFileLimit
-	}
-	if fileLimit > resultLimit {
-		return errors.New("deliverables.file_limit_bytes must not exceed result_limit_bytes")
-	}
 	releaseDir := ""
 	if cfg.Upgrades != nil {
 		releaseDir = cfg.Upgrades.ReleaseDir
 	}
-	runners := runnerapi.New(a, whois, secret, runnerapi.Config{FileLimit: fileLimit, ResultFileLimit: resultLimit, ReleaseDir: releaseDir}, log)
+	runners := runnerapi.New(a, whois, secret, runnerapi.Config{ReleaseDir: releaseDir}, log)
 	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, ids, log)
 	if err != nil {
 		return err

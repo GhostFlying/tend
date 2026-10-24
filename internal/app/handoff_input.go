@@ -91,6 +91,10 @@ func (a *App) HandoffSummaryInput(ctx context.Context, instance string, maxBytes
 				if err != nil {
 					return err
 				}
+				it.Attachments, err = store.ConversationAttachments(ctx, tx.Q(), id)
+				if err != nil {
+					return err
+				}
 				item = it
 			}
 			encoded, err := json.Marshal(item)
