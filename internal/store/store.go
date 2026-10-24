@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/blobstore"
+
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
@@ -29,6 +31,7 @@ var migrationFS embed.FS
 // connection with BEGIN IMMEDIATE avoids lock upgrade deadlocks and makes
 // concurrent writers queue in order.
 type Store struct {
+	files *blobstore.Store
 	write *sql.DB
 	read  *sql.DB
 	now   func() time.Time
@@ -47,13 +50,26 @@ func Open(ctx context.Context, dbPath string, now func() time.Time) (*Store, err
 		write.Close()
 		return nil, fmt.Errorf("store: open reader: %w", err)
 	}
-	s := &Store{write: write, read: read, now: now}
+	files, err := blobstore.New(dbPath + ".files")
+	if err != nil {
+		write.Close()
+		read.Close()
+		return nil, err
+	}
+	s := &Store{write: write, read: read, now: now, files: files}
 	if err := s.migrate(ctx, 0); err != nil {
+		s.Close()
+		return nil, err
+	}
+	if err := s.exportLegacyBlobs(ctx); err != nil {
 		s.Close()
 		return nil, err
 	}
 	return s, nil
 }
+
+// FileStore returns the ledger's immutable original-file store.
+func (s *Store) FileStore() *blobstore.Store { return s.files }
 
 func dsn(dbPath string, writer bool) string {
 	q := url.Values{}
@@ -76,7 +92,8 @@ func (s *Store) Close() error {
 
 // Tx is a write transaction.
 type Tx struct {
-	tx *sql.Tx
+	files *blobstore.Store
+	tx    *sql.Tx
 }
 
 // ReadTx is a read-only transaction.
@@ -115,7 +132,7 @@ func (s *Store) Write(ctx context.Context, fn func(*Tx) error) (err error) {
 			}
 		}
 	}()
-	if err := fn(&Tx{tx: tx}); err != nil {
+	if err := fn(&Tx{tx: tx, files: s.files}); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

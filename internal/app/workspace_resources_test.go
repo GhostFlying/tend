@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"testing"
 	"time"
 
@@ -229,12 +230,17 @@ func TestWorkspaceRetentionPendingReuseAndExactCleanupReservation(t *testing.T) 
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	saved, err := h.app.DeliverableFile(context.Background(), owner, file.FileID)
-	if err != nil || string(saved.Content) != "retained evidence" {
-		t.Fatalf("cleanup removed delivery: %q %v", saved.Content, err)
+	_, reader, err := h.app.OpenDeliverableFile(context.Background(), owner, file.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil || string(saved) != "retained evidence" {
+		t.Fatalf("cleanup removed delivery: %q %v", saved, err)
 	}
 	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
-		_, err := store.ReadFinalizedDeliverableFile(context.Background(), tx.Q(), file.FileID, 0, 16)
+		_, err := store.ReadFinalizedDeliverableFile(context.Background(), tx.Q(), file.FileID, 0, 16, h.store.FileStore())
 		return err
 	}); err != nil {
 		t.Fatalf("cleanup removed finalized artifact reference: %v", err)

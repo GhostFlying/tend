@@ -37,11 +37,6 @@ func requiresDelivery(as protocol.Assignment, kind string) bool {
 }
 
 func (r *Runner) uploadFile(ctx context.Context, as protocol.Assignment, p Prepared, path, name string) (protocol.ArtifactFile, error) {
-	if r.c.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.c.timeout)
-		defer cancel()
-	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(p.Dir, path)
 	}
@@ -58,7 +53,7 @@ func (r *Runner) uploadFile(ctx context.Context, as protocol.Assignment, p Prepa
 		return protocol.ArtifactFile{}, errors.New("delivery file must be regular")
 	}
 	sum := sha256.New()
-	if _, err := io.Copy(sum, f); err != nil {
+	if _, err := io.Copy(sum, transferReader{ctx: ctx, r: f}); err != nil {
 		return protocol.ArtifactFile{}, err
 	}
 	digest := hex.EncodeToString(sum.Sum(nil))
@@ -172,11 +167,6 @@ func syncUploadDirectory(path string) error {
 }
 
 func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Prepared, id string) (string, error) {
-	if r.c.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.c.timeout)
-		defer cancel()
-	}
 	var artifact protocol.ArtifactPayload
 	if err := json.Unmarshal(as.Artifact, &artifact); err != nil {
 		return "", err
@@ -217,6 +207,9 @@ func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Pre
 	defer os.Remove(f.Name())
 	digest := sha256.New()
 	n, copyErr := io.Copy(io.MultiWriter(f, digest), io.LimitReader(resp.Body, file.Size+1))
+	if copyErr == nil {
+		copyErr = f.Sync()
+	}
 	closeErr := f.Close()
 	if err := errors.Join(copyErr, closeErr); err != nil {
 		return "", err
@@ -227,5 +220,22 @@ func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Pre
 	if err := os.Rename(f.Name(), path); err != nil {
 		return "", err
 	}
+	if err := syncUploadDirectory(dir); err != nil {
+		return "", err
+	}
 	return path, nil
+}
+
+// File transfers follow the caller's run lifetime rather than the short RPC
+// deadline. Check cancellation during local hashing as well as network IO.
+type transferReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r transferReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
 }

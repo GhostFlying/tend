@@ -1,31 +1,28 @@
 // Shell-scoped composer text survives navigation without sending an intention.
-import type { ConversationImageInput, TaskSummary } from "../api/generated/api.ts";
+import type { TaskSummary } from "../api/generated/api.ts";
 import { Store } from "../state/store.ts";
-import { maxImages } from "./images.ts";
 
 interface DraftState {
   text: string;
-  images: ConversationImageInput[];
+  files: File[];
   focus: number;
 }
 
 export class ComposerDraft {
-  readonly state = new Store<DraftState>({ text: "", images: [], focus: 0 });
+  readonly state = new Store<DraftState>({ text: "", files: [], focus: 0 });
   write(text: string): void {
     this.state.set({ ...this.state.get(), text });
   }
-  addImages(images: ConversationImageInput[]): void {
+  addFiles(files: File[]): void {
     const current = this.state.get();
-    if (current.images.length + images.length > maxImages)
-      throw new Error(`每条消息最多添加 ${maxImages} 张图片`);
-    this.state.set({ ...current, images: [...current.images, ...images] });
+    this.state.set({ ...current, files: [...current.files, ...files] });
   }
-  removeImage(index: number): void {
+  removeFile(index: number): void {
     const current = this.state.get();
-    this.state.set({ ...current, images: current.images.filter((_, i) => i !== index) });
+    this.state.set({ ...current, files: current.files.filter((_, i) => i !== index) });
   }
   clear(): void {
-    this.state.set({ ...this.state.get(), text: "", images: [] });
+    this.state.set({ ...this.state.get(), text: "", files: [] });
   }
   followUp(task: TaskSummary): void {
     const current = this.state.get();
@@ -39,12 +36,12 @@ export class ComposerDraft {
       focus: current.focus + 1,
     });
   }
-  restore(text: string, images: ConversationImageInput[] = []): void {
+  restore(text: string, files: File[] = []): void {
     const current = this.state.get();
     this.state.set({
       ...current,
       text: text && current.text ? `${text}\n\n${current.text}` : text || current.text,
-      images: [...images, ...current.images],
+      files: [...files, ...current.files],
     });
   }
 }

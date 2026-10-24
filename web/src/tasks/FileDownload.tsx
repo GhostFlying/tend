@@ -1,24 +1,24 @@
 // Delivery bytes stay behind owner authorization; manifests never supply URLs.
 import { useEffect, useRef, useState } from "react";
 import { useServices } from "../app/services.tsx";
+import type { DownloadURLResponse } from "../api/generated/api.ts";
 import controls from "../shell/controls.module.css";
 
-export function FileDownload({ fileId, name }: { fileId: string; name: string }) {
+export function FileDownload({
+  fileId,
+  name,
+  scope = "files",
+}: {
+  fileId: string;
+  name: string;
+  scope?: "files" | "conversation/attachments" | "conversation/images";
+}) {
   const { client } = useServices();
   const pending = useRef<AbortController | null>(null);
-  const urls = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   useEffect(() => {
-    const activeUrls = urls.current;
-    return () => {
-      pending.current?.abort();
-      for (const [url, timer] of activeUrls) {
-        clearTimeout(timer);
-        URL.revokeObjectURL(url);
-      }
-      activeUrls.clear();
-    };
+    return () => pending.current?.abort();
   }, []);
   const download = async () => {
     if (pending.current) return;
@@ -27,22 +27,17 @@ export function FileDownload({ fileId, name }: { fileId: string; name: string })
     setBusy(true);
     setMessage("");
     try {
-      const blob = await client.file(fileId, controller.signal);
+      const { url } = await client.get<DownloadURLResponse>(
+        `/api/v1/${scope}/${encodeURIComponent(fileId)}/download-url`,
+        controller.signal,
+      );
       if (controller.signal.aborted) return;
-      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = name;
       document.body.append(link);
       link.click();
       link.remove();
-      urls.current.set(
-        url,
-        setTimeout(() => {
-          URL.revokeObjectURL(url);
-          urls.current.delete(url);
-        }, 60_000),
-      );
       setMessage("已开始下载");
     } catch (err) {
       if (!controller.signal.aborted)

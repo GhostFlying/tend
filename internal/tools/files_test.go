@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -55,8 +56,8 @@ func TestFilesReadFinalizedWindowsAndBinaryMetadata(t *testing.T) {
 	e := newEnv(t)
 	taskID, _ := createdTask(t, e.call("tasks_create", createArgs{Title: "files", Spec: spec, CommitSeq: 1}, ""))
 	content := []byte(strings.Repeat("甲", 30000))
-	file := protocol.ArtifactFile{FileID: "file_text", Name: "调查.txt", Size: int64(len(content)), SHA256: strings.Repeat("a", 64)}
-	binaryFile := protocol.ArtifactFile{FileID: "file_binary", Name: "bytes.bin", Size: 4, SHA256: strings.Repeat("b", 64)}
+	file := protocol.ArtifactFile{FileID: "file_text", Name: "调查.txt", Size: int64(len(content)), SHA256: fmt.Sprintf("%x", sha256.Sum256(content))}
+	binaryFile := protocol.ArtifactFile{FileID: "file_binary", Name: "bytes.bin", Size: 4, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte{0, 1, 2, 255}))}
 	ctx := context.Background()
 	if err := e.store.Write(ctx, func(tx *store.Tx) error {
 		actions, err := store.ListActions(ctx, tx.Q(), taskID)

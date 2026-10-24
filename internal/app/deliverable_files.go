@@ -5,27 +5,47 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"os"
 	"path"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/GhostFlying/tend/internal/blobstore"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// DefaultFileLimit and DefaultResultFileLimit bound durable file uploads.
-const (
-	DefaultFileLimit       int64 = 20 << 20
-	DefaultResultFileLimit int64 = 100 << 20
-	OpRunsUploadFile             = "runs.upload_file"
-)
+const OpRunsUploadFile = "runs.upload_file"
 
-// UploadFile persists binary data through normal request deduplication. Only
-// the immutable manifest is hashed in the envelope, never a JSON base64 copy.
+// UploadFile registers an immutable stored file through normal request
+// deduplication. Content is a compatibility helper for in-process callers;
+// production uploads stream into Object before the ledger transaction.
 type UploadFile struct {
-	Content     []byte
+	Content []byte
+	Object  *blobstore.Object
+	// Deprecated: accepted for source compatibility, but no upload limits apply.
 	FileLimit   int64
 	ResultLimit int64
+}
+
+// UploadDeliverableFile streams the original bytes before committing their
+// manifest. The envelope retains the existing binary upload request identity.
+func (a *App) UploadDeliverableFile(ctx context.Context, p protocol.Principal, requestID, name string, body io.Reader) (protocol.Operation, error) {
+	if p.Kind != protocol.PrincipalRun || p.Role != protocol.RoleImplement {
+		return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "only an implementation run may upload files")
+	}
+	object, err := a.store.FileStore().Put(ctx, body)
+	if err != nil {
+		return protocol.Operation{}, err
+	}
+	manifest := protocol.ArtifactFile{Name: name, Size: object.Size, SHA256: object.SHA256}
+	payload, err := json.Marshal(manifest)
+	if err != nil {
+		return protocol.Operation{}, err
+	}
+	env := protocol.Envelope{RequestID: requestID, Operation: OpRunsUploadFile, Target: protocol.Target{Type: "run", ID: p.Subject}, Payload: payload}
+	return a.Execute(ctx, p, &env, UploadFile{Object: &object})
 }
 
 func (UploadFile) Operation() string { return OpRunsUploadFile }
@@ -37,19 +57,15 @@ func (c UploadFile) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err := decodePayload(x.Env, &manifest); err != nil {
 		return Outcome{}, err
 	}
-	digest := sha256.Sum256(c.Content)
-	if manifest.FileID != "" || strings.TrimSpace(manifest.Name) == "" || manifest.Name == "." || manifest.Name == ".." || path.Base(manifest.Name) != manifest.Name || strings.ContainsAny(manifest.Name, "\\\r\n\x00") || !utf8.ValidString(manifest.Name) || len(manifest.Name) > 255 || manifest.Size != int64(len(c.Content)) || manifest.SHA256 != hex.EncodeToString(digest[:]) {
+	size, digest := int64(len(c.Content)), ""
+	if c.Object != nil {
+		size, digest = c.Object.Size, c.Object.SHA256
+	} else {
+		sum := sha256.Sum256(c.Content)
+		digest = hex.EncodeToString(sum[:])
+	}
+	if manifest.FileID != "" || strings.TrimSpace(manifest.Name) == "" || manifest.Name == "." || manifest.Name == ".." || path.Base(manifest.Name) != manifest.Name || strings.ContainsAny(manifest.Name, "\\\r\n\x00") || !utf8.ValidString(manifest.Name) || len(manifest.Name) > 255 || manifest.Size != size || manifest.SHA256 != digest {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid file manifest")
-	}
-	fileLimit, resultLimit := c.FileLimit, c.ResultLimit
-	if fileLimit <= 0 {
-		fileLimit = DefaultFileLimit
-	}
-	if resultLimit <= 0 {
-		resultLimit = DefaultResultFileLimit
-	}
-	if manifest.Size > fileLimit {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "file exceeds configured limit")
 	}
 	rc, err := loadRun(ctx, tx.Q(), x.Env.Target.ID)
 	if err != nil {
@@ -58,12 +74,8 @@ func (c UploadFile) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if rc.run.ObservedState == protocol.RunFinished || rc.run.ObservedState == protocol.RunFailed {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run has ended")
 	}
-	used, err := store.RunFileBytes(ctx, tx.Q(), rc.run.RunID)
-	if err != nil {
-		return Outcome{}, err
-	}
-	if used+manifest.Size > resultLimit {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "result files exceed configured limit")
+	if c.Object == nil && c.Content == nil {
+		c.Content = []byte{}
 	}
 	manifest.FileID = x.IDs.New(protocol.PrefixFile)
 	if err := tx.InsertDeliverableFile(ctx, store.DeliverableFileRow{ArtifactFile: manifest, TaskID: rc.task.TaskID, RunID: rc.run.RunID, Content: c.Content, CreatedAt: x.Now.UnixMilli()}); err != nil {
@@ -116,4 +128,17 @@ func (a *App) DeliverableFile(ctx context.Context, p protocol.Principal, id stri
 		return store.DeliverableFileRow{}, err
 	}
 	return f, nil
+}
+
+// OpenDeliverableFile authorizes metadata before opening the immutable bytes.
+func (a *App) OpenDeliverableFile(ctx context.Context, p protocol.Principal, id string) (store.DeliverableFileRow, *os.File, error) {
+	file, err := a.DeliverableFile(ctx, p, id)
+	if err != nil {
+		return store.DeliverableFileRow{}, nil, err
+	}
+	body, err := a.store.FileStore().Open(file.SHA256)
+	if err != nil {
+		return store.DeliverableFileRow{}, nil, err
+	}
+	return file, body, nil
 }

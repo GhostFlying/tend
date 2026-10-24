@@ -1,0 +1,34 @@
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 100%;
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 200px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--bg-l1);
+  text-align: left;
+}
+.name {
+  font-size: var(--text-s);
+  overflow-wrap: anywhere;
+}
+.meta {
+  color: var(--label-3);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.retry {
+  color: var(--accent);
+  font-size: var(--text-s);
+  text-align: left;
+}

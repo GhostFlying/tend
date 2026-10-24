@@ -40,7 +40,7 @@ func (s *Service) filesRead(ctx context.Context, c Call) (any, error) {
 	var row store.DeliverableFileRow
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		row, err = store.ReadFinalizedDeliverableFile(ctx, tx.Q(), a.FileID, a.Offset, count)
+		row, err = store.ReadFinalizedDeliverableFile(ctx, tx.Q(), a.FileID, a.Offset, count, s.store.FileStore())
 		return notFound(err, "finalized file %s does not exist", a.FileID)
 	})
 	if err != nil {

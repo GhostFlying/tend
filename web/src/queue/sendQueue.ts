@@ -17,6 +17,7 @@ import type {
   RequestView,
   SubmitMessagePayload,
   ConversationImageInput,
+  ConversationAttachment,
 } from "../api/generated/api.ts";
 import { newRequestId } from "../api/ids.ts";
 import { Store, type Readable } from "../state/store.ts";
@@ -25,6 +26,7 @@ import type { Outbox, OutgoingMessage, SendState } from "./outbox.ts";
 /** The part of the API client the queue uses. */
 export interface Sender {
   submit(envelope: Envelope): Promise<APIResponse>;
+  upload?(requestId: string, blob: Blob, name: string, signal: AbortSignal): Promise<APIResponse>;
   lookup(requestId: string): Promise<RequestView | null>;
 }
 
@@ -45,6 +47,7 @@ export interface QueueOptions {
 export interface Draft {
   body: string;
   images?: ConversationImageInput[];
+  files?: File[];
   replyTo?: string;
   lastSeenSeq?: number;
   /** The option of an open decision the message chooses (D71). */
@@ -81,6 +84,8 @@ export class SendQueue {
   private readonly messages = new Store<readonly OutgoingMessage[]>([]);
   private draining: Promise<void> | null = null;
   private kicked = false;
+  private readonly discarded = new Set<string>();
+  private transfer: { requestId: string; controller: AbortController } | null = null;
   /** The order the next message gets: one past the highest stored. */
   private nextOrder = 1;
 
@@ -152,6 +157,15 @@ export class SendQueue {
       createdAt: now,
       updatedAt: now,
       state: "sending",
+      ...(draft.files?.length
+        ? {
+            uploads: draft.files.map((file) => ({
+              requestId: this.newId(now),
+              name: file.name,
+              blob: file,
+            })),
+          }
+        : {}),
     };
     await this.save(message);
     void this.kick();
@@ -178,6 +192,11 @@ export class SendQueue {
   async reconcile(requestId: string): Promise<void> {
     const m = this.find(requestId);
     if (!m || m.state !== "unknown") {
+      return;
+    }
+    if (m.uploads?.length && !m.attachmentsFrozen) {
+      await this.update(requestId, { state: "sending" });
+      await this.kick();
       return;
     }
     let view: RequestView | null;
@@ -209,6 +228,10 @@ export class SendQueue {
     if (!m || m.state !== "unknown") {
       return;
     }
+    if (m.uploads?.length && !m.attachmentsFrozen) {
+      await this.reconcile(requestId);
+      return;
+    }
     await this.update(requestId, { state: "sending" });
     await this.kick();
   }
@@ -223,8 +246,12 @@ export class SendQueue {
    * messages after it go.
    */
   async discard(requestId: string): Promise<void> {
-    await this.outbox.delete(requestId);
+    this.discarded.add(requestId);
+    // Remove the in-memory intent before aborting: the transfer may settle
+    // while the IndexedDB deletion is still committing.
     this.messages.set(this.messages.get().filter((m) => m.requestId !== requestId));
+    if (this.transfer?.requestId === requestId) this.transfer.controller.abort();
+    await this.outbox.delete(requestId);
     void this.kick();
   }
 
@@ -268,6 +295,13 @@ export class SendQueue {
 
   /** Sends one message until tend answers or the tries run out. */
   private async deliver(m: OutgoingMessage): Promise<boolean> {
+    if (m.uploads?.length && !m.attachmentsFrozen) {
+      if (!(await this.prepareAttachments(m.requestId))) return false;
+      const current = this.find(m.requestId);
+      if (!current || current.state !== "sending") return true;
+      if (!current.attachmentsFrozen) return false;
+      m = current;
+    }
     for (let attempt = 0; ; attempt++) {
       const outcome = await this.attempt(m.envelope);
       if (outcome.kind === "stop") {
@@ -290,6 +324,97 @@ export class SendQueue {
       if (this.find(m.requestId)?.state !== "sending") {
         // Discarded meanwhile.
         return true;
+      }
+    }
+  }
+
+  /** Upload receipts and the final reference list are committed before message delivery. */
+  private async prepareAttachments(requestId: string): Promise<boolean> {
+    for (let index = 0; ; index++) {
+      let m = this.find(requestId);
+      if (!m) return true;
+      const upload = m.uploads?.[index];
+      if (!upload) {
+        await this.save({
+          ...m,
+          attachmentsFrozen: true,
+          envelope: {
+            ...m.envelope,
+            payload: {
+              ...(m.envelope.payload as SubmitMessagePayload),
+              attachments: m.uploads!.map((entry) => entry.receipt!.file_id),
+            },
+          },
+        });
+        return true;
+      }
+      if (upload.receipt) continue;
+      for (let attempt = 0; ; attempt++) {
+        if (!this.online()) return false;
+        const controller = new AbortController();
+        this.transfer = { requestId, controller };
+        try {
+          let operation: APIResponse["operation"];
+          if (upload.attempted) {
+            const existing = await this.sender.lookup(upload.requestId);
+            if (existing) operation = existing;
+          }
+          if (!operation) {
+            upload.attempted = true;
+            m = this.find(requestId);
+            if (!m) return true;
+            await this.save({ ...m, uploads: [...m.uploads!] });
+            if (!this.sender.upload) throw new Error("附件上传不可用");
+            operation = (
+              await this.sender.upload(
+                upload.requestId,
+                upload.blob,
+                upload.name,
+                controller.signal,
+              )
+            ).operation;
+          }
+          if (operation?.status === "failed") {
+            await this.update(requestId, {
+              state: "failed",
+              error: operation.error?.message ?? "附件上传失败",
+            });
+            return true;
+          }
+          if (operation?.status === "unknown") {
+            await this.update(requestId, { state: "unknown", error: "附件上传结果待核对" });
+            return true;
+          }
+          const receipt = attachmentReceipt(operation?.result);
+          if (!receipt) throw new NetworkError("附件上传回执不完整");
+          m = this.find(requestId);
+          if (!m) return true;
+          const uploads = m.uploads!.map((entry, n) =>
+            n === index ? { ...entry, receipt } : entry,
+          );
+          await this.save({ ...m, uploads, updatedAt: this.now() });
+          break;
+        } catch (error) {
+          if (controller.signal.aborted || !this.find(requestId)) return true;
+          if (error instanceof ApiError && error.status === 403) return false;
+          if (error instanceof ApiError && error.status < 500 && error.status !== 401) {
+            await this.update(requestId, { state: "failed", error: error.message });
+            return true;
+          }
+          if (!this.online()) return false;
+          const pause = this.backoffMs[attempt];
+          if (pause === undefined) {
+            await this.update(requestId, {
+              state: "unknown",
+              error: "附件上传未收到回执，等待核对",
+            });
+            return true;
+          }
+          await this.sleep(pause);
+          if (!this.find(requestId)) return true;
+        } finally {
+          if (this.transfer?.controller === controller) this.transfer = null;
+        }
       }
     }
   }
@@ -322,6 +447,7 @@ export class SendQueue {
   }
 
   private find(requestId: string): OutgoingMessage | undefined {
+    if (this.discarded.has(requestId)) return undefined;
     return this.messages.get().find((m) => m.requestId === requestId);
   }
 
@@ -350,7 +476,9 @@ export class SendQueue {
   }
 
   private async save(m: OutgoingMessage): Promise<void> {
+    if (this.discarded.has(m.requestId)) return;
     await this.outbox.put(m);
+    if (this.discarded.has(m.requestId)) return;
     const others = this.messages.get().filter((o) => o.requestId !== m.requestId);
     this.messages.set(sorted([...others, m]));
   }
@@ -385,4 +513,17 @@ function sorted(messages: OutgoingMessage[]): OutgoingMessage[] {
 
 function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function attachmentReceipt(value: unknown): ConversationAttachment | undefined {
+  if (!value || typeof value !== "object") return;
+  const r = value as ConversationAttachment;
+  if (
+    typeof r.file_id === "string" &&
+    typeof r.name === "string" &&
+    typeof r.media_type === "string" &&
+    typeof r.size === "number" &&
+    typeof r.sha256 === "string"
+  )
+    return r;
 }

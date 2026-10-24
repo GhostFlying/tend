@@ -428,3 +428,188 @@ describe("SendQueue", () => {
     expect((await stored()).map((m) => m.body)).toEqual(["recent"]);
   });
 });
+
+describe("durable attachment uploads", () => {
+  const receipt = (id: string, blob: Blob) => ({
+    file_id: id,
+    name: "original.bin",
+    media_type: blob.type || "application/octet-stream",
+    size: blob.size,
+    sha256: "a".repeat(64),
+  });
+
+  test("offline reload preserves Blob bytes and freezes all receipts before submitting", async () => {
+    online = false;
+    const q = await open();
+    const bytes = new Uint8Array(6 * 1024 * 1024).fill(7);
+    const files = [new File([bytes], "large.bin"), new File([], "empty.unknown")];
+    const message = await q.enqueue({ body: "", files });
+    await q.idle();
+    const persisted = (await stored())[0]!;
+    expect(persisted.envelope.payload).toEqual({ body: "" });
+    expect(persisted.uploads!.map((entry) => entry.requestId)).toHaveLength(2);
+    expect(persisted.uploads![0]!.blob.size).toBe(bytes.length);
+    expect(
+      new Uint8Array(
+        await crypto.subtle.digest("SHA-256", await persisted.uploads![0]!.blob.arrayBuffer()),
+      ),
+    ).toEqual(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+    const uploaded: string[] = [];
+    const uploadSender: Sender = {
+      ...sender,
+      submit: async (envelope) => {
+        const durable = (await stored())[0]!;
+        expect(durable.attachmentsFrozen).toBe(true);
+        expect(durable.uploads!.every((entry) => entry.receipt)).toBe(true);
+        expect(envelope.request_id).toBe(message.requestId);
+        expect(envelope.payload).toEqual({ body: "", attachments: ["file_1", "file_2"] });
+        return sender.submit(envelope);
+      },
+      lookup: (id) => sender.lookup(id),
+      upload: async (id, blob) => {
+        uploaded.push(id);
+        return {
+          operation: {
+            request_id: id,
+            status: "succeeded",
+            result: receipt(`file_${uploaded.length}`, blob),
+          },
+        };
+      },
+    };
+    online = true;
+    const reloaded = await open({ sender: uploadSender });
+    await reloaded.resume();
+    expect(uploaded).toEqual(persisted.uploads!.map((entry) => entry.requestId));
+    expect(reloaded.list.get()[0]!.state).toBe("sent");
+  });
+
+  test("lost upload receipt is looked up after reload without uploading again or changing message identity", async () => {
+    let uploads = 0;
+    const uploadSender: Sender = {
+      submit: (e) => sender.submit(e),
+      lookup: (id) => sender.lookup(id),
+      upload: async (id, blob) => {
+        uploads++;
+        sender.records.set(id, {
+          request_id: id,
+          operation: "conversation.upload_attachment",
+          status: "succeeded",
+          result: receipt("file_existing", blob),
+        });
+        throw new NetworkError("response lost");
+      },
+    };
+    const q = await open({ sender: uploadSender, backoffMs: [] });
+    const original = await q.enqueue({ body: "caption", files: [new File(["bytes"], "text.txt")] });
+    await q.idle();
+    expect(q.list.get()[0]!.state).toBe("unknown");
+    expect(sender.submitted).toHaveLength(0);
+    const reloaded = await open({ sender: uploadSender });
+    await reloaded.resume();
+    expect(uploads).toBe(1);
+    expect(sender.looked).toEqual([original.uploads![0]!.requestId]);
+    expect(sender.submitted[0]!.request_id).toBe(original.requestId);
+    expect(sender.submitted[0]!.payload).toEqual({
+      body: "caption",
+      attachments: ["file_existing"],
+    });
+  });
+
+  test("business unknown upload is only reconciled, while absent records reuse the original upload ID", async () => {
+    const ids: string[] = [];
+    const uploadSender: Sender = {
+      submit: (e) => sender.submit(e),
+      lookup: (id) => sender.lookup(id),
+      upload: async (id) => {
+        ids.push(id);
+        sender.records.set(id, {
+          request_id: id,
+          operation: "conversation.upload_attachment",
+          status: "unknown",
+        });
+        return {
+          operation: {
+            request_id: id,
+            operation: "conversation.upload_attachment",
+            status: "unknown",
+          },
+        };
+      },
+    };
+    const q = await open({ sender: uploadSender });
+    const m = await q.enqueue({ body: "", files: [new File(["x"], "unknown.format")] });
+    await q.idle();
+    await q.resend(m.requestId);
+    await q.idle();
+    expect(ids).toEqual([m.uploads![0]!.requestId]);
+    expect(sender.submitted).toHaveLength(0);
+    sender.records.clear();
+    await q.reconcile(m.requestId);
+    await q.idle();
+    expect(ids).toEqual([m.uploads![0]!.requestId, m.uploads![0]!.requestId]);
+  });
+});
+
+test("discarding an active Blob upload aborts transport and never submits its message", async () => {
+  const started = deferred<AbortSignal>();
+  const uploadSender: Sender = {
+    submit: (e) => sender.submit(e),
+    lookup: (id) => sender.lookup(id),
+    upload: async (_id, _blob, _name, signal) => {
+      started.resolve(signal);
+      return new Promise((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(new NetworkError("cancelled")), {
+          once: true,
+        }),
+      );
+    },
+  };
+  const q = await open({ sender: uploadSender });
+  const m = await q.enqueue({ body: "", files: [new File(["bytes"], "original.dat")] });
+  const signal = await started.promise;
+  await q.discard(m.requestId);
+  await q.idle();
+  expect(signal.aborted).toBe(true);
+  expect(q.list.get()).toEqual([]);
+  expect(await stored()).toEqual([]);
+  expect(sender.submitted).toEqual([]);
+});
+
+test("message retries keep frozen attachment references and do not upload original files again", async () => {
+  let uploads = 0;
+  const uploadSender: Sender = {
+    submit: (e) => sender.submit(e),
+    lookup: (id) => sender.lookup(id),
+    upload: async (id, blob, name) => {
+      uploads++;
+      return {
+        operation: {
+          request_id: id,
+          status: "succeeded",
+          result: {
+            file_id: "file_frozen",
+            name,
+            size: blob.size,
+            media_type: blob.type,
+            sha256: "b".repeat(64),
+          },
+        },
+      };
+    },
+  };
+  sender.answers.push(new NetworkError("message response lost"));
+  const q = await open({ sender: uploadSender, backoffMs: [] });
+  const m = await q.enqueue({
+    body: "caption",
+    files: [new File(["bytes"], "original.txt", { type: "text/plain" })],
+  });
+  await q.idle();
+  const frozen = (await stored())[0]!.envelope;
+  expect(q.list.get()[0]!.state).toBe("unknown");
+  const reloaded = await open({ sender: uploadSender });
+  await reloaded.resume();
+  expect(uploads).toBe(1);
+  expect(sender.submitted).toEqual([frozen, frozen]);
+  expect(sender.looked).toEqual([m.requestId]);
+});

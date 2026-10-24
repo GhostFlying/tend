@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   ConversationImage,
-  ConversationImageData,
   ConversationImageInput,
+  DownloadURLResponse,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { Close } from "../shell/icons.tsx";
+import { FileDownload } from "../tasks/FileDownload.tsx";
 import { imageSource } from "./images.ts";
 import styles from "./Images.module.css";
 
@@ -54,12 +55,12 @@ function StoredImage({ image }: { image: ConversationImage }) {
     if (!visible) return;
     const controller = new AbortController();
     void client
-      .get<{ image: ConversationImageData }>(
-        `/api/v1/conversation/images/${encodeURIComponent(image.image_id)}`,
+      .get<DownloadURLResponse>(
+        `/api/v1/conversation/images/${encodeURIComponent(image.image_id)}/download-url?inline=1`,
         controller.signal,
       )
       .then((response) => {
-        if (!controller.signal.aborted) setSource(imageSource(response.image));
+        if (!controller.signal.aborted) setSource(response.url);
       })
       .catch(() => {
         if (!controller.signal.aborted) setFailed(true);
@@ -68,8 +69,13 @@ function StoredImage({ image }: { image: ConversationImage }) {
   }, [client, image.image_id, visible, attempt]);
   return (
     <div ref={tile} className={styles.stored}>
-      {source ? (
-        <ImageTile name={image.name} source={source} />
+      {source && !failed ? (
+        <ImageTile
+          name={image.name}
+          source={source}
+          previewPath={`/api/v1/conversation/images/${encodeURIComponent(image.image_id)}/download-url?inline=1`}
+          onError={() => setFailed(true)}
+        />
       ) : (
         <div className={styles.placeholder}>
           <span title={image.name}>{image.name}</span>
@@ -78,6 +84,7 @@ function StoredImage({ image }: { image: ConversationImage }) {
               type="button"
               onClick={() => {
                 setFailed(false);
+                setSource("");
                 setAttempt((n) => n + 1);
               }}
             >
@@ -88,11 +95,22 @@ function StoredImage({ image }: { image: ConversationImage }) {
           )}
         </div>
       )}
+      <FileDownload fileId={image.image_id} name={image.name} scope="conversation/images" />
     </div>
   );
 }
 
-function ImageTile({ source, name }: { source: string; name: string }) {
+export function ImageTile({
+  source,
+  name,
+  onError,
+  previewPath,
+}: {
+  source: string;
+  name: string;
+  onError?(): void;
+  previewPath?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   return (
     <>
@@ -102,9 +120,16 @@ function ImageTile({ source, name }: { source: string; name: string }) {
         aria-label={`查看图片 ${name}`}
         onClick={() => setExpanded(true)}
       >
-        <img src={source} alt={name} loading="lazy" />
+        <img src={source} alt={name} loading="lazy" onError={onError} />
       </button>
-      {expanded && <ImagePreview source={source} name={name} onClose={() => setExpanded(false)} />}
+      {expanded && (
+        <ImagePreview
+          source={source}
+          name={name}
+          {...(previewPath ? { previewPath } : {})}
+          onClose={() => setExpanded(false)}
+        />
+      )}
     </>
   );
 }
@@ -113,11 +138,32 @@ function ImagePreview({
   source,
   name,
   onClose,
+  previewPath,
 }: {
   source: string;
   name: string;
   onClose(): void;
+  previewPath?: string;
 }) {
+  const { client } = useServices();
+  const [previewSource, setPreviewSource] = useState(previewPath ? "" : source);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  // A long-lived thumbnail can outlast its grant. Expansion and retries each
+  // obtain a fresh grant, without replacing the already loaded thumbnail.
+  useEffect(() => {
+    if (!previewPath) return;
+    const controller = new AbortController();
+    void client
+      .get<DownloadURLResponse>(previewPath, controller.signal)
+      .then(({ url }) => {
+        if (!controller.signal.aborted) setPreviewSource(url);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFailed(true);
+      });
+    return () => controller.abort();
+  }, [client, previewPath, attempt]);
   const dialog = useRef<HTMLDialogElement>(null);
   useLayoutEffect(() => {
     dialog.current?.showModal();
@@ -136,7 +182,25 @@ function ImagePreview({
           <Close />
         </button>
       </div>
-      <img src={source} alt={name} />
+      {failed ? (
+        <div role="status" className={styles.previewError}>
+          <span>图片预览不可用</span>
+          <button
+            type="button"
+            onClick={() => {
+              setFailed(false);
+              setPreviewSource(previewPath ? "" : source);
+              setAttempt((n) => n + 1);
+            }}
+          >
+            重试图片预览
+          </button>
+        </div>
+      ) : previewSource ? (
+        <img src={previewSource} alt={name} onError={() => setFailed(true)} />
+      ) : (
+        <p role="status">正在读取图片…</p>
+      )}
     </dialog>
   );
 }

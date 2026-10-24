@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
@@ -78,6 +80,10 @@ func TestDownloadedArtifactVerifiesMembershipAndDigest(t *testing.T) {
 	}
 	if _, err := r.downloadFile(context.Background(), as, p, "file_1"); err == nil || !called {
 		t.Fatal("download accepted corrupted contents")
+	}
+	entries, err := os.ReadDir(filepath.Join(p.ScratchDir, "deliverables"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("corrupt download became visible: %v %v", entries, err)
 	}
 }
 
@@ -157,5 +163,58 @@ func TestUploadDirectorySyncPropagatesSupportedPlatformErrors(t *testing.T) {
 		}
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("directory flush error was swallowed: %v", err)
+	}
+}
+
+func TestFileTransfersOutliveRPCDeadline(t *testing.T) {
+	content := []byte("slow but progressing file")
+	digest := sha256.Sum256(content)
+	file := protocol.ArtifactFile{FileID: "file_slow", Name: "slow.txt", Size: int64(len(content)), SHA256: hex.EncodeToString(digest[:])}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		if q.Method == http.MethodPost {
+			_, _ = io.Copy(io.Discard, q.Body)
+			result, _ := json.Marshal(file)
+			_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: result}})
+			return
+		}
+		_, _ = w.Write(content)
+	}))
+	defer srv.Close()
+	clock := testkit.NewClock()
+	r := New(Config{ServerURL: srv.URL, HTTPClient: srv.Client(), Now: clock.Now, IDs: testkit.NewIDGen(clock, 1), RequestTimeout: time.Millisecond})
+	p := Prepared{Dir: t.TempDir(), StateDir: t.TempDir(), ScratchDir: t.TempDir()}
+	if err := os.WriteFile(filepath.Join(p.Dir, file.Name), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	artifact, _ := json.Marshal(protocol.ArtifactPayload{Files: []protocol.ArtifactFile{file}})
+	as := protocol.Assignment{RunID: "run_1", RunToken: "credential", Artifact: artifact}
+	if got, err := r.uploadFile(t.Context(), as, p, file.Name, file.Name); err != nil || got != file {
+		t.Fatalf("upload inherited short RPC timeout: %+v %v", got, err)
+	}
+	path, err := r.downloadFile(t.Context(), as, p, file.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(content) {
+		t.Fatalf("download: %q %v", got, err)
+	}
+}
+
+func TestFileHashingHonorsRunCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	p := Prepared{Dir: t.TempDir(), StateDir: t.TempDir()}
+	if err := os.WriteFile(filepath.Join(p.Dir, "file"), []byte("content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := New(Config{})
+	if _, err := r.uploadFile(ctx, protocol.Assignment{}, p, "file", "file"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled hashing: %v", err)
+	}
+	entries, err := os.ReadDir(p.StateDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("cancelled upload left intent: %v %v", entries, err)
 	}
 }

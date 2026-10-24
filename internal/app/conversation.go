@@ -60,12 +60,22 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if (p.Body == "" && len(p.Images) == 0) || len(p.Body) > maxMessageBytes || !utf8.ValidString(p.Body) {
+	if (p.Body == "" && len(p.Images) == 0 && len(p.Attachments) == 0) || len(p.Body) > maxMessageBytes || !utf8.ValidString(p.Body) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body must be non-empty UTF-8 of at most %d bytes", maxMessageBytes)
 	}
 	images, err := validateConversationImages(p.Images)
 	if err != nil {
 		return Outcome{}, err
+	}
+	seenAttachments := make(map[string]bool, len(p.Attachments))
+	for _, fileID := range p.Attachments {
+		if seenAttachments[fileID] {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "duplicate attachment reference")
+		}
+		seenAttachments[fileID] = true
+		if _, err := store.GetConversationAttachment(ctx, tx.Q(), fileID); err != nil {
+			return Outcome{}, errNotFound(err, "attachment does not exist")
+		}
 	}
 	if p.ReplyTo != "" {
 		if _, err := store.GetMessage(ctx, tx.Q(), p.ReplyTo); err != nil {
@@ -93,6 +103,11 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	for position, image := range images {
 		image.ImageID = x.IDs.New(protocol.PrefixFile)
 		if err := tx.InsertConversationImage(ctx, id, position, image); err != nil {
+			return Outcome{}, err
+		}
+	}
+	for position, fileID := range p.Attachments {
+		if err := tx.BindConversationAttachment(ctx, id, len(images)+position, fileID); err != nil {
 			return Outcome{}, err
 		}
 	}

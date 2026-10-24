@@ -62,7 +62,7 @@ type Config struct {
 	ReleaseDir string
 	// ClaimWait bounds how long a claim waits for work. Default 25s.
 	ClaimWait time.Duration
-	// FileLimit and ResultFileLimit bound durable binary uploads.
+	// Deprecated: these fields are accepted but no longer limit original files.
 	FileLimit       int64
 	ResultFileLimit int64
 }

@@ -12,7 +12,7 @@ import { Send, Stop } from "../shell/icons.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Composer.module.css";
 import { clock, latestReply, processing } from "./model.ts";
-import { imageSource, imageTypes, maxImages, readImages } from "./images.ts";
+import { LocalAttachment } from "./Attachments.tsx";
 import { Close } from "../shell/icons.tsx";
 
 /** A touch screen, where Enter starts a new line and the button sends. */
@@ -21,12 +21,10 @@ const touch = window.matchMedia("(pointer: coarse)").matches;
 export function Composer({ connection }: { connection: Connection }) {
   const { client, live, queue, draft: composerDraft } = useServices();
   const conversation = useStore(live.conversation);
-  const { text: draft, images, focus } = useStore(composerDraft.state);
+  const { text: draft, files, focus } = useStore(composerDraft.state);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const saving = useRef(false);
-  const reading = useRef(false);
-  const [preparing, setPreparing] = useState(false);
   const [persisting, setPersisting] = useState(false);
   const [dragging, setDragging] = useState(false);
   useEffect(() => {
@@ -73,13 +71,7 @@ export function Composer({ connection }: { connection: Connection }) {
   }, [interrupt, connection.status, pending?.envelope.request_id]);
 
   const send = async () => {
-    if (
-      queue === null ||
-      blocked ||
-      saving.current ||
-      reading.current ||
-      (!body && !images.length)
-    ) {
+    if (queue === null || blocked || saving.current || (!body && !files.length)) {
       return;
     }
     saving.current = true;
@@ -89,34 +81,23 @@ export function Composer({ connection }: { connection: Connection }) {
     try {
       await queue.enqueue({
         body,
-        images,
+        files,
         ...(reply ? { replyTo: reply.message_id } : {}),
         ...(lastSeq ? { lastSeenSeq: lastSeq } : {}),
       });
     } catch {
       // Not written down, so not sent either; give the entire draft back.
-      composerDraft.restore(draft, images);
-      notify("消息未能保存到发送队列，文字和图片已恢复，请重试", "warn");
+      composerDraft.restore(draft, files);
+      notify("消息未能保存到发送队列，文字和附件已恢复，请重试", "warn");
     } finally {
       saving.current = false;
       setPersisting(false);
     }
   };
 
-  const addImages = async (files: File[]) => {
-    if (!files.length || blocked || saving.current || reading.current) return;
-    reading.current = true;
-    setPreparing(true);
-    try {
-      if (images.length + files.length > maxImages)
-        throw new Error(`每条消息最多添加 ${maxImages} 张图片`);
-      composerDraft.addImages(await readImages(files));
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "无法读取图片，请重试", "warn");
-    } finally {
-      reading.current = false;
-      setPreparing(false);
-    }
+  const addFiles = (files: File[]) => {
+    if (!files.length || blocked || saving.current) return;
+    composerDraft.addFiles(files);
   };
 
   const stopping =
@@ -149,7 +130,7 @@ export function Composer({ connection }: { connection: Connection }) {
     hint = `回复 ${clock(Date.parse(reply.created_at))} 的消息`;
   }
 
-  const showStop = busy !== undefined && body === "" && !images.length && !preparing;
+  const showStop = busy !== undefined && body === "" && !files.length;
   return (
     <div
       className={styles.composer}
@@ -167,19 +148,19 @@ export function Composer({ connection }: { connection: Connection }) {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
         setDragging(false);
-        void addImages(Array.from(event.dataTransfer.files));
+        addFiles(Array.from(event.dataTransfer.files));
       }}
     >
-      {!!images.length && (
-        <ul className={styles.images} aria-label="待发送图片">
-          {images.map((image, index) => (
+      {!!files.length && (
+        <ul className={styles.files} aria-label="待发送附件">
+          {files.map((file, index) => (
             <li key={index}>
-              <img src={imageSource(image)} alt={image.name} />
+              <LocalAttachment blob={file} name={file.name} />
               <button
                 type="button"
-                aria-label={`移除图片 ${image.name}`}
-                title={`移除图片 ${image.name}`}
-                onClick={() => composerDraft.removeImage(index)}
+                aria-label={`移除附件 ${file.name}`}
+                title={`移除附件 ${file.name}`}
+                onClick={() => composerDraft.removeFile(index)}
               >
                 <Close />
               </button>
@@ -197,7 +178,7 @@ export function Composer({ connection }: { connection: Connection }) {
           const files = Array.from(event.clipboardData.files);
           if (!files.length) return;
           event.preventDefault();
-          void addImages(files);
+          addFiles(files);
         }}
         placeholder={touch ? "和主 Agent 说…" : "和主 Agent 说…（Enter 发送，Shift+Enter 换行）"}
         aria-label="消息"
@@ -207,23 +188,22 @@ export function Composer({ connection }: { connection: Connection }) {
         <input
           ref={fileInput}
           type="file"
-          accept={imageTypes.join(",")}
           multiple
           hidden
-          aria-label="选择图片"
+          aria-label="选择附件"
           onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = "";
-            void addImages(files);
+            addFiles(files);
           }}
         />
         <button
           type="button"
           className={styles.attach}
-          aria-label="添加图片"
-          title="添加图片（PNG、JPEG、GIF，每张最多 5 MiB）"
+          aria-label="添加附件"
+          title="选择文件或粘贴、拖入附件"
           onClick={() => fileInput.current?.click()}
-          disabled={blocked || preparing || persisting || images.length >= maxImages}
+          disabled={blocked || persisting}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
             <rect x="3" y="3" width="18" height="18" rx="4" />
@@ -232,7 +212,7 @@ export function Composer({ connection }: { connection: Connection }) {
           </svg>
         </button>
         <span className={styles.hint} role="status">
-          {preparing ? "正在读取图片…" : dragging ? "松开以添加图片" : hint}
+          {dragging ? "松开以添加附件" : hint}
         </span>
         <Settings connection={connection} />
         {showStop ? (
@@ -251,7 +231,7 @@ export function Composer({ connection }: { connection: Connection }) {
             type="button"
             className={styles.send}
             onClick={() => void send()}
-            disabled={blocked || preparing || persisting || (!body && !images.length)}
+            disabled={blocked || persisting || (!body && !files.length)}
             title="发送"
             aria-label="发送"
           >

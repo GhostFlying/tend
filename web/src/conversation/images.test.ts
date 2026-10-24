@@ -1,19 +1,15 @@
 import { expect, test } from "vitest";
-import { maxImageBytes, readImages } from "./images.ts";
+import { ComposerDraft } from "./draft.ts";
 
-test("unsupported, oversized and excessive files fail before reading into memory", async () => {
-  await expect(
-    readImages([new File(["<svg/>"], "image.svg", { type: "image/svg+xml" })]),
-  ).rejects.toThrow("支持 PNG、JPEG 和 GIF");
-  await expect(
-    readImages([new File([new Uint8Array(maxImageBytes + 1)], "huge.png", { type: "image/png" })]),
-  ).rejects.toThrow("5 MiB");
-  await expect(readImages([new File([], "empty.png", { type: "image/png" })])).rejects.toThrow(
-    "不能为空",
-  );
-  await expect(
-    readImages(
-      Array.from({ length: 5 }, () => new File(["bytes"], "image.png", { type: "image/png" })),
-    ),
-  ).rejects.toThrow("最多添加 4 张");
+test("the unified draft accepts arbitrary original files without reading or restricting bytes", () => {
+  const draft = new ComposerDraft();
+  const files = [
+    new File(["<svg/>"], "image.svg", { type: "image/svg+xml" }),
+    new File([new Uint8Array(21 * 1024 * 1024)], "large.bin"),
+    new File([], "empty.txt"),
+    ...Array.from({ length: 5 }, () => new File(["bytes"], "image.gif", { type: "image/gif" })),
+  ];
+  draft.addFiles(files);
+  expect(draft.state.get().files).toEqual(files);
+  expect(draft.state.get().files[1]).toBe(files[1]);
 });

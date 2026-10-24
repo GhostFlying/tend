@@ -258,11 +258,12 @@ const (
 // owner, main agent or system, or a tool the main agent used. Items share
 // one order, by seq.
 type ConversationItem struct {
-	Images     []ConversationImage `json:"images,omitempty"`
-	NoticeType string              `json:"notice_type,omitempty"`
-	UpgradeID  string              `json:"upgrade_id,omitempty"`
-	HostID     string              `json:"host_id,omitempty"`
-	Seq        int64               `json:"seq"`
+	Images      []ConversationImage      `json:"images,omitempty"`
+	Attachments []ConversationAttachment `json:"attachments,omitempty"`
+	NoticeType  string                   `json:"notice_type,omitempty"`
+	UpgradeID   string                   `json:"upgrade_id,omitempty"`
+	HostID      string                   `json:"host_id,omitempty"`
+	Seq         int64                    `json:"seq"`
 	// Kind is "message" or "tool_use".
 	Kind      string `json:"kind"`
 	MessageID string `json:"message_id"`

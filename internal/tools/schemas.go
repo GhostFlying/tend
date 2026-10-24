@@ -160,6 +160,16 @@ var schemas = map[string]string{
   "required": ["artifact_id"],
   "additionalProperties": false
 }`,
+	"attachments_read": `{
+  "type": "object",
+  "properties": {
+    "file_id": {"type": "string", "description": "Immutable file identity from a finalized artifact manifest."},
+    "offset": {"type": "integer", "minimum": 0, "description": "Zero-based byte offset; use next_offset from the last read."},
+    "max_bytes": {"type": "integer", "minimum": 4, "maximum": 65536, "description": "Bounded UTF-8 text window, default 16384 bytes. Binary files return metadata and a binary marker without raw content."}
+  },
+  "required": ["file_id"],
+  "additionalProperties": false
+}`,
 	"files_read": `{
   "type": "object",
   "properties": {

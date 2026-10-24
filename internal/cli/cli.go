@@ -115,6 +115,7 @@ Owner commands:
   pause|resume|cancel <task_id>
   upgrade [start|status|retry|cancel] [--release <directory>] [--json]
   conversation handoff [--prepare-only | --status] [--json]
+  attachment download <file_id> --out <path>  save an original attachment
   takeover <task_id>               work in the task's agent yourself; resume hands it back
 
 Agent add-on:
@@ -142,6 +143,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 		return report(e, runSetup(ctx, e, rest))
 	case "upgrade":
 		return report(e, runUpgrade(ctx, e, rest))
+	case "attachment":
+		return report(e, runAttachment(ctx, e, rest))
 	case "conversation":
 		return report(e, runConversation(ctx, e, rest))
 	case "status", "task", "logs", "decide", "retry", "rate", "pause", "resume", "cancel", "takeover":

@@ -24,6 +24,7 @@ tend/
     protocol/              线上协议：请求信封、错误码、payload_hash、领域枚举；导出 JSON Schema
     domain/                纯领域逻辑：状态机、完成条件派生、动作代次规则；不做 IO
     store/                 SQLite、嵌入式迁移、仓储、事务辅助
+    blobstore/             不可变原文件的独立目录与流式 IO（D87）
     app/                   用例层：请求去重 + 领域规则 + 存储 + outbox，在一个事务内完成
     api/                   owner 与 agent 的 HTTP API（bearer token，D49）
     tools/                 主 Agent 工具面（外挂经 MCP 桥，托管经 app-server 动态工具）
@@ -70,6 +71,7 @@ runner → harness, protocol, netx, release, updater（updater 仅用于本机�
 upgradectl → app, protocol, release, updater
 updater → protocol, release（不 import app/store/runner）
 app, store → release（只使用不可变 manifest 数据类型）
+app, store → blobstore（仅标准库；原文件不可变暂存与读取）
 cmd/tend → cli → protocol（cli 只用标准库，不 import 服务端的任何包）
 harness/traex, harness/orca, harness/bridge → harness, protocol
 cmd/tend-server → webui（webui 只用标准库，不 import 其他包）
@@ -85,7 +87,7 @@ cmd/tend-server → webui（webui 只用标准库，不 import 其他包）
 以下约束对应设计中的正确性要求，评审时逐条检查。
 
 1. **请求身份**：有副作用的入口都必须带 request_id，并经过 `app` 的去重。同一请求重试时沿用原 ID，新的业务动作使用新 ID（D11）。
-2. **单事务**：状态变化、领域事件、outbox 消息和请求记录在同一个事务里提交。外部副作用只能由 dispatcher 在事务提交后发出。
+2. **单事务**：状态变化、领域事件、outbox 消息和请求记录在同一个事务里提交。外部副作用只能由 dispatcher 在事务提交后发出。D87 的不可变文件内容可在事务前暂存；暂存不创建有效业务引用，元数据、引用和请求身份仍在同一事务提交。
 3. **版本校验**：控制类写入必须校验 `expected_control_revision`。旧版本的结果只作为事实保存，不能触发后续动作。
 4. **不伪造确定性**：结果无法确认时记为 `unknown` 并进入对账，禁止因为没收到回执就重发。
 5. **可注入的时钟与 ID**：业务代码不直接调用 `time.Now()`、`rand` 或 `uuid.New()`，通过接口注入，测试使用 `testkit` 里的实现。

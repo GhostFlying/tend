@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -103,7 +104,7 @@ func TestFilesAreImmutableDeduplicatedAndAcceptanceScoped(t *testing.T) {
 		var window store.DeliverableFileRow
 		err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
 			var err error
-			window, err = store.ReadFinalizedDeliverableFile(context.Background(), tx.Q(), file.FileID, offset, count)
+			window, err = store.ReadFinalizedDeliverableFile(context.Background(), tx.Q(), file.FileID, offset, count, h.store.FileStore())
 			return err
 		})
 		return window, err
@@ -154,9 +155,14 @@ func TestFilesAreImmutableDeduplicatedAndAcceptanceScoped(t *testing.T) {
 		t.Fatal("no acceptance")
 	}
 	for _, p := range []protocol.Principal{owner, runPrincipal(as.RunID, as.Role), runPrincipal(accept.RunID, accept.Role)} {
-		got, err := h.app.DeliverableFile(context.Background(), p, file.FileID)
-		if err != nil || string(got.Content) != string(bytes) {
-			t.Fatalf("read persisted file: %q %v", got.Content, err)
+		got, reader, err := h.app.OpenDeliverableFile(context.Background(), p, file.FileID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(reader)
+		_ = reader.Close()
+		if err != nil || string(data) != string(bytes) || len(got.Content) != 0 {
+			t.Fatalf("read persisted file: %q %v metadata bytes=%d", data, err, len(got.Content))
 		}
 	}
 	_, err = h.app.DeliverableFile(context.Background(), mainAgent, file.FileID)
@@ -178,7 +184,7 @@ func TestFilesAreImmutableDeduplicatedAndAcceptanceScoped(t *testing.T) {
 	}
 }
 
-func TestUploadLimitsAndNameValidation(t *testing.T) {
+func TestUploadIgnoresLegacyLimitsAndValidatesName(t *testing.T) {
 	h := newDeliverableHarness(t)
 	h.createTask(owner, createTaskPayload{Title: "files", Spec: testSpec})
 	as, _, _ := h.claimDeliverableRun()
@@ -195,13 +201,13 @@ func TestUploadLimitsAndNameValidation(t *testing.T) {
 	sum := sha256.Sum256(body)
 	payload := protocol.ArtifactFile{Name: "a.txt", Size: 3, SHA256: hex.EncodeToString(sum[:])}
 	op := h.exec(runPrincipal(as.RunID, as.Role), h.env(OpRunsUploadFile, runTarget(as.RunID), payload, nil), UploadFile{Content: body, FileLimit: 2})
-	if op.Status != protocol.OpFailed {
-		t.Fatalf("oversize accepted: %+v", op)
+	if op.Status != protocol.OpSucceeded {
+		t.Fatalf("legacy per-file limit rejected upload: %+v", op)
 	}
 	h.uploadResultFile(as, "first.txt", body)
 	op = h.exec(runPrincipal(as.RunID, as.Role), h.env(OpRunsUploadFile, runTarget(as.RunID), payload, nil), UploadFile{Content: body, ResultLimit: 5})
-	if op.Status != protocol.OpFailed {
-		t.Fatalf("aggregate limit exceeded: %+v", op)
+	if op.Status != protocol.OpSucceeded {
+		t.Fatalf("legacy aggregate limit rejected upload: %+v", op)
 	}
 }
 
@@ -219,4 +225,57 @@ func (h *harness) claimDeliverableRun() (protocol.Assignment, bool, *protocol.En
 	env := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{WorkspaceProtocol: 1}, nil)
 	as, ok := h.claimWith("linux-1", env)
 	return as, ok, env
+}
+
+// failedFileBody simulates a connection disappearing after some bytes arrived.
+type failedFileBody struct{ sent bool }
+
+func (r *failedFileBody) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, io.ErrUnexpectedEOF
+	}
+	r.sent = true
+	return copy(p, "partial file"), nil
+}
+
+func TestInterruptedDeliverableUploadNeverPublishesReference(t *testing.T) {
+	h := newDeliverableHarness(t)
+	h.createTask(owner, createTaskPayload{Title: "interrupted delivery", Spec: testSpec})
+	as, _, _ := h.claimDeliverableRun()
+	ctx := t.Context()
+	requestID := h.env(OpRunsUploadFile, runTarget(as.RunID), nil, nil).RequestID
+	p := runPrincipal(as.RunID, as.Role)
+	if _, err := h.app.UploadDeliverableFile(ctx, p, requestID, "file.txt", &failedFileBody{}); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("interrupted stream: %v", err)
+	}
+	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+		var n int
+		if err := tx.Q().QueryRowContext(ctx, "SELECT count(*) FROM deliverable_files").Scan(&n); err != nil {
+			return err
+		}
+		if n != 0 {
+			t.Fatalf("partial file published: %d", n)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		op, err := h.app.UploadDeliverableFile(ctx, p, requestID, "file.txt", strings.NewReader("complete file"))
+		if err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatalf("retry %d: %+v %v", i, op, err)
+		}
+	}
+	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+		var n, bytes int
+		if err := tx.Q().QueryRowContext(ctx, "SELECT count(*),coalesce(sum(length(content)),0) FROM deliverable_files").Scan(&n, &bytes); err != nil {
+			return err
+		}
+		if n != 1 || bytes != 0 {
+			t.Fatalf("retry stored %d references and %d database bytes", n, bytes)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

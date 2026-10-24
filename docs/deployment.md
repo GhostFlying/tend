@@ -16,7 +16,10 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 - `owners`：可以使用 owner API 的 tailnet 登录名，也就是可以运行 `tend login` 的人（D49）。不加入 tailnet、只用 `listen` 时，用 `local_owner` 指定本地开发的 owner。owner 在 tagged 机器上工作时（tagged 节点没有登录名），用 `owner_nodes` 把这台机器的名字映射到 `owners` 里的登录名（D56）。
 - `projects`：可选。project 是 tend 对任务的分组（D52、D58），不等于仓库：`repos` 列出它涉及的仓库，`weight` 是它的任务在排队时的权重（默认 1），`template` 是没有给出工作区的任务使用的工作区模板。不配置时所有任务属于隐含的 `default` project。从配置中删掉的 project 变为 retired：已有任务照常进行，不能再建新任务。修改后重启服务端生效。
 - `host_lost_after`：可选，默认 `24h`。任务的工作区只在一台 host 上；这台 host 退役，或超过这段时间没有消息（hello、心跳或领取）时，有待执行动作、或者在那台 host 上有状态未知的 run 的任务以 `workspace_unavailable` 阻塞，并请 owner 选择等待、换一台 host 从头再来或取消（D62）。host 回来后一分钟内自动解除。设为 `0s` 时只对退役的 host 生效；不设为 `0s` 时至少 `10m`，因为空闲 runner 只在领取时被记下，而且每分钟最多记一次。
-- `deliverables.file_limit_bytes` 与 `deliverables.result_limit_bytes`：交付文件上传限制，默认分别为 20 MiB 和 100 MiB，`0` 使用默认值，不能为负，单文件限制不能超过结果总限制。总限制按一个 run 的持久化上传累计计算，包括尚未引用的上传；传输重试沿用原 `request_id`，不会重复占用额度。文件内容与不可变清单保存在账本数据库中，需计入容量规划与备份。
+- 文件原件保存到 `<database-path>.files/`，SQLite 保存清单和关联（D87）。聊天附件和任务交付文件不设应用层文件大小、累计大小或图片分辨率门槛；旧 `deliverables.file_limit_bytes` / `deliverables.result_limit_bytes` 配置仍可读取但不再限制上传。上传与下载流式处理，实际磁盘/IO/网络错误会报告；文件传输不沿用短 RPC 的总时限。
+- 升级到存储版本 31 时，旧图片/交付 BLOB 逐个文件导出，在文件完整持久化和 hash 校验成功后才清除对应数据库原文，重启可以继续；SQLite 的旧 BLOB 读取可能加载一个完整历史文件，部署前核对最大旧 BLOB 与可用内存；逐文件迁移避免同时加载所有历史内容，新文件链路没有此限制。迁移期间需为数据库旧页、WAL 和导出文件保留磁盘空间。清空 BLOB 不意味着 SQLite 文件立即缩小，迁移不自动 VACUUM。
+- 备份必须包含数据库、`<database-path>.files/` 和原生 agent 历史。在线备份先获得 SQLite 一致快照，再复制快照引用的不可变原件；原件在本轮没有自动 GC。恢复必须将数据库和对应内容目录一起恢复，不得只恢复数据库。原生 session/rollout 继续使用 harness 自身存储，附件不是原生 session 的替代品。
+- 上传临时文件在正常失败/取消时清理；硬中断可能留下 `.upload-*`，未产生有效账本引用。清理硬中断遗留项应在确认没有在途上传的维护窗口执行，不按年龄删除可能仍在写入的文件。
 - `hosts[].worker`：可选，默认 `appserver`。这台 host 用哪种 harness 运行 worker（D63、D64）：`appserver` 是 traex app-server 加 runner 自建的工作区；`orca` 在 orca 的 worktree 里运行 agent TUI，只支持单仓库工作区。有活动 host 而它们都不支持多仓库时，tend 拒绝建多个 mount 的任务；已有的这类任务在 `tend status` 里显示没有 host 能领取的原因。runner 配置的 `worker.kind` 必须与它一致，否则 runner 的 hello 和领取被拒绝。
 - `queue.wait_per_hour`：可选，默认 0.1。排队的动作按分数领取（D60）：`p0` 最先；其余的分数是 project 权重 × 评级分（`p1` 3、`p2` 2、`p3` 1，未评级按 `p2`）加上排队小时数 × 这个系数。默认值下，权重为 1 时等 10 小时相当于升一级；设为 0 则不考虑等待时间。
 - `main_agent`：可选，默认不配置。主 Agent 是 owner 自己使用的 agent（见下文 `tend` CLI）；配置了 `main_agent`（可以是空对象 `{}`）时，服务端另外运行一个托管的主 Agent，Web 客户端和它对话，与外挂的主 Agent 并存（D68）。

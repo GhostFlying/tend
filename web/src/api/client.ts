@@ -168,6 +168,23 @@ export class ApiClient {
     return this.request<T>("GET", path, undefined, signal);
   }
 
+  /** Uploads original bytes without imposing a total transfer time limit. */
+  async upload(
+    requestId: string,
+    file: Blob,
+    name: string,
+    signal: AbortSignal,
+  ): Promise<APIResponse> {
+    const query = new URLSearchParams({
+      request_id: requestId,
+      name,
+      media_type: file.type || "application/octet-stream",
+    });
+    return this.answer<APIResponse>(
+      await this.authorized("POST", `/api/v1/conversation/attachments?${query}`, file, signal),
+    );
+  }
+
   /** Reads an immutable delivery file through owner authorization. */
   async file(fileId: string, signal?: AbortSignal): Promise<Blob> {
     const bounded = signal
@@ -283,13 +300,14 @@ export class ApiClient {
       headers.Authorization = `Bearer ${token}`;
     }
     if (body !== undefined) {
-      headers["Content-Type"] = "application/json";
+      headers["Content-Type"] =
+        body instanceof Blob ? body.type || "application/octet-stream" : "application/json";
     }
     try {
       return await this.fetch(path, {
         method,
         headers,
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(body === undefined ? {} : { body: body instanceof Blob ? body : JSON.stringify(body) }),
         cache: "no-store",
         signal: signal ?? AbortSignal.timeout(this.timeoutMs),
       });

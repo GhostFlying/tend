@@ -287,3 +287,36 @@ describe("delivery file authorization", () => {
     expect(tend.calls.at(-1)?.path).toBe("/api/v1/files/..%2Fexternal%3Ftoken%3Dignored");
   });
 });
+
+test("attachment upload sends the original Blob with caller cancellation and no JSON timeout", async () => {
+  const storage = new Map<string, string>([["tend.token", "owner-token"]]);
+  const blob = new Blob(["original bytes"], { type: "application/pdf" });
+  const controller = new AbortController();
+  let calls = 0;
+  const client = new ApiClient({
+    timeoutMs: 1,
+    storage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => {
+        storage.set(key, value);
+      },
+      removeItem: (key) => {
+        storage.delete(key);
+      },
+    },
+    fetch: async (path, init) => {
+      calls++;
+      expect(init?.signal).toBe(controller.signal);
+      expect(init?.body).toBe(blob);
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer owner-token");
+      const url = new URL(String(path), "https://example.test");
+      expect(url.searchParams.get("name")).toBe("a & b.pdf");
+      expect(url.searchParams.get("request_id")).toBe("req_original");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(init?.signal?.aborted).toBe(false);
+      return json(200, { operation: { request_id: "req_original", status: "succeeded" } });
+    },
+  });
+  await client.upload("req_original", blob, "a & b.pdf", controller.signal);
+  expect(calls).toBe(1);
+});
