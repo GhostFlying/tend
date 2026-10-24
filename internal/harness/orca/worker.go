@@ -175,6 +175,10 @@ type workerState struct {
 	// Said is the start of tend's latest prompt; an agent working on
 	// another one was given it by someone else.
 	Said string `json:"said,omitempty"`
+	// PromptOutcome is a settled launch receipt, not inferred from agent silence.
+	PromptOutcome string `json:"launch_prompt_outcome,omitempty"`
+	// PromptReceiptAt bounds startup state already observed when delivery settled.
+	PromptReceiptAt int64 `json:"launch_prompt_receipt_at,omitempty"`
 }
 
 // Agent states as orca reports them.
@@ -255,6 +259,15 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	// attach the prelaunch proof to those errors, even if the thread is empty.
 	if err := w.begin(ctx, agent); err != nil {
 		w.closeBridge(ctx)
+		// A negative receipt has no turn to interrupt. An uncertain receipt
+		// may have a real turn; stop checks ownership before interrupting it.
+		if launchPromptFailure(w.st.PromptOutcome) != nil {
+			if cause := context.Cause(ctx); cause != nil && w.st.PromptOutcome == promptUnconfirmed {
+				w.stop(ctx, cause)
+				return nil, cause
+			}
+			return nil, err
+		}
 		if cause := context.Cause(ctx); cause != nil {
 			// A turn, or a launch, may have started before the worker was
 			// stopped.
@@ -329,6 +342,9 @@ func (w *worker) save() error {
 // begin leaves the agent with a turn of tend's under way: the one an
 // earlier attempt left running, a continuation, or a new agent's brief.
 func (w *worker) begin(ctx context.Context, agent string) error {
+	if err := launchPromptFailure(w.st.PromptOutcome); err != nil {
+		return err
+	}
 	if w.st.Terminal != "" {
 		a, alive, err := w.agent(ctx)
 		if err != nil {
@@ -451,11 +467,36 @@ func (w *worker) launched(ctx context.Context, l Launch, prompt string) error {
 	}
 	w.st.Launch = ""
 	w.st.Terminal, w.st.Pane = l.Outcome.Handle, l.Outcome.PaneKey
+	w.st.PromptOutcome = l.Prompt.Outcome
+	w.st.PromptReceiptAt = w.ws.opts.Now().UnixMilli()
+	if w.st.PromptOutcome != promptHandedToTerminal && w.st.PromptOutcome != promptNotDelivered {
+		w.st.PromptOutcome = promptUnconfirmed
+	}
 	if err := w.save(); err != nil {
+		return err
+	}
+	if err := launchPromptFailure(w.st.PromptOutcome); err != nil {
 		return err
 	}
 	w.emit(ctx, "turn.started", map[string]string{"prompt": prompt})
 	return nil
+}
+
+const (
+	promptHandedToTerminal = "handed-to-terminal"
+	promptNotDelivered     = "not-delivered"
+	promptUnconfirmed      = "unconfirmed"
+)
+
+func launchPromptFailure(outcome string) error {
+	switch outcome {
+	case promptNotDelivered:
+		return errors.New("orca: worker launch prompt was not delivered")
+	case promptUnconfirmed:
+		return errors.New("orca: worker launch prompt delivery is unconfirmed; reconciliation required")
+	default:
+		return nil
+	}
 }
 
 // recover looks for the agent of a launch the runner did not see answered,
@@ -777,6 +818,9 @@ func answered(a Agent, turn int64) bool {
 func (w *worker) stop(ctx context.Context, cause error) {
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
+	if w.st.PromptOutcome == promptUnconfirmed && !w.ownsUnconfirmedTurn(stopCtx) {
+		return
+	}
 	if w.st.Terminal == "" && w.st.Marker != "" {
 		// The launch may have gone through without its answer: look for
 		// its agent for a while.
@@ -800,6 +844,44 @@ func (w *worker) stop(ctx context.Context, cause error) {
 	if err != nil {
 		w.ws.opts.Log.WarnContext(ctx, "could not stop the worker's agent", "run_id", w.spec.RunID, "terminal", w.st.Terminal, "err", err)
 	}
+}
+
+// ownsUnconfirmedTurn distinguishes a delivered original brief from startup or
+// owner activity. An uncertain receipt alone proves neither delivery nor safety
+// to interrupt, and must never cause a new prompt to be sent.
+func (w *worker) ownsUnconfirmedTurn(ctx context.Context) bool {
+	if w.st.Terminal == "" || w.st.Pane == "" || w.st.Worktree == "" || w.st.Said == "" || w.st.Turn <= 0 {
+		return false
+	}
+	terms, err := w.ws.opts.Client.Terminals(ctx, workspaceSelector(w.st.Worktree))
+	if err != nil {
+		return false
+	}
+	found := false
+	for _, t := range terms {
+		if t.PaneKey() == w.st.Pane && t.Handle != w.st.Terminal {
+			return false
+		}
+		if t.Handle == w.st.Terminal {
+			if t.PaneKey() != w.st.Pane || t.WorktreeID != w.st.Worktree {
+				return false
+			}
+			found = true
+		}
+	}
+	if !found {
+		return false
+	}
+	agents, err := w.ws.opts.Client.Agents(ctx, w.st.Worktree)
+	if err != nil {
+		return false
+	}
+	for _, a := range agents {
+		if a.PaneKey == w.st.Pane {
+			return a.State != "" && a.StateStartedAt >= w.st.Turn && a.Prompt != "" && samePrompt(said(a.Prompt), w.st.Said) && !a.Interrupted
+		}
+	}
+	return false
 }
 
 // emit reports a fact unless the worker is stopping. Facts of starting

@@ -30,6 +30,9 @@ func (ws *Workers) ReleaseFinalizing(ctx context.Context, runID, thread string, 
 	if st == (workerState{}) {
 		return nil
 	}
+	if st.PromptOutcome == promptNotDelivered {
+		return ws.releaseUndelivered(ctx, runID, st, false, handBack)
+	}
 	if st.Terminal == "" && st.Marker != "" && st.Worktree != "" {
 		handle, pane, err := ws.byMarker(ctx, st.Worktree, st.Marker)
 		if err != nil {
@@ -62,6 +65,9 @@ func (ws *Workers) releaseOwned(ctx context.Context, runID, thread string, held 
 	}
 	if st.Launch != "" || st.Send != "" {
 		return errors.New("orca: historical provider mutation is unresolved; manual reconciliation required")
+	}
+	if st.PromptOutcome == promptNotDelivered {
+		return ws.releaseUndelivered(ctx, runID, st, held, handBack)
 	}
 	terms, err := ws.opts.Client.Terminals(ctx, workspaceSelector(st.Worktree))
 	if err != nil {
@@ -107,4 +113,52 @@ func (ws *Workers) releaseOwned(ctx context.Context, runID, thread string, held 
 		}
 	}
 	return errors.New("orca: historical terminal agent state is unknown; manual reconciliation required")
+}
+
+// releaseUndelivered does not require hooks for a brief known never to have
+// reached its new terminal. Its own startup state can precede that receipt;
+// subsequent activity or evidence of a real turn belongs to someone else.
+func (ws *Workers) releaseUndelivered(ctx context.Context, runID string, st workerState, held, handBack bool) error {
+	if st.Terminal == "" || st.Pane == "" || st.Worktree == "" || st.Launch != "" || st.Send != "" {
+		return errors.New("orca: undelivered launch identity is incomplete or unresolved")
+	}
+	terms, err := ws.opts.Client.Terminals(ctx, workspaceSelector(st.Worktree))
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, t := range terms {
+		if t.PaneKey() == st.Pane && t.Handle != st.Terminal {
+			return fmt.Errorf("%w: the undelivered launch pane belongs to another terminal", harness.ErrHeld)
+		}
+		if t.Handle == st.Terminal {
+			if t.PaneKey() != st.Pane || t.WorktreeID != st.Worktree {
+				return fmt.Errorf("%w: undelivered launch terminal identity changed", harness.ErrHeld)
+			}
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	if held && !handBack {
+		return fmt.Errorf("%w: the undelivered launch terminal belongs to its owner", harness.ErrHeld)
+	}
+	if !handBack {
+		agents, err := ws.opts.Client.Agents(ctx, st.Worktree)
+		if err != nil {
+			return err
+		}
+		for _, a := range agents {
+			startup := st.PromptReceiptAt > 0 && a.StateStartedAt > 0 && a.StateStartedAt <= st.PromptReceiptAt && a.UpdatedAt <= st.PromptReceiptAt
+			if a.PaneKey == st.Pane && (a.Prompt != "" || a.State != "" && !startup || a.Interrupted || a.LastAssistantMessage != "" || a.ToolName != "" || a.ToolInput != "") {
+				return fmt.Errorf("%w: the undelivered launch terminal has agent activity", harness.ErrHeld)
+			}
+		}
+	}
+	body, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	return ws.Release(ctx, runID, string(body))
 }

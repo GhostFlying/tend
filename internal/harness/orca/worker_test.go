@@ -32,8 +32,11 @@ type liveOrca struct {
 	next   int
 	// loseLaunch loses the answer of this many launches; launchKind
 	// overrides the outcome.
-	loseLaunch int
-	launchKind string
+	loseLaunch          int
+	launchKind          string
+	launchPromptOutcome string
+	omitLaunchPrompt    bool
+	failClose           bool
 	// loseSend loses the answer of this many sends; onLaunch runs as a
 	// launch is taken; lateEsc delays reporting an interruption.
 	loseSend int
@@ -97,7 +100,11 @@ func (f *liveOrca) exec(_ context.Context, dir string, args []string) ([]byte, e
 		}
 		kind := cmpOr(f.launchKind, OutcomeTerminal)
 		t := f.term(handle)
-		return ok(map[string]any{"outcome": map[string]any{"kind": kind, "handle": handle, "paneKey": t.PaneKey()}, "worktreeId": f.wt}), nil
+		receipt := map[string]any{"outcome": map[string]any{"kind": kind, "handle": handle, "paneKey": t.PaneKey()}, "worktreeId": f.wt}
+		if !f.omitLaunchPrompt {
+			receipt["prompt"] = map[string]any{"outcome": cmpOr(f.launchPromptOutcome, promptHandedToTerminal)}
+		}
+		return ok(receipt), nil
 	case "terminal list":
 		return ok(map[string]any{"terminals": f.terms}), nil
 	case "worktree ps":
@@ -142,6 +149,9 @@ func (f *liveOrca) exec(_ context.Context, dir string, args []string) ([]byte, e
 		}
 		return ok(map[string]any{"wait": map[string]any{"satisfied": true, "status": a.State}}), nil
 	case "terminal close":
+		if f.failClose {
+			return nil, errors.New("close response unavailable")
+		}
 		h := flag(args, "--terminal")
 		delete(f.agents, f.term(h).PaneKey())
 		f.terms = slices.DeleteFunc(f.terms, func(t Terminal) bool { return t.Handle == h })
