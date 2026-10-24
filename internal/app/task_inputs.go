@@ -12,14 +12,23 @@ import (
 )
 
 // freezeTaskInputs resolves caller IDs into server-owned immutable metadata.
-// Explicitly reusing an input ID is allowed; relations never copy inputs.
-func freezeTaskInputs(ctx context.Context, q store.Querier, spec *domain.Spec) error {
+// Existing references keep the metadata frozen by the previous spec, even if
+// the original is attached to a chat message later. Relations never copy inputs.
+func freezeTaskInputs(ctx context.Context, q store.Querier, spec *domain.Spec, previous []protocol.TaskInput) error {
+	frozen := make(map[string]protocol.TaskInput, len(previous))
+	for _, input := range previous {
+		frozen[input.FileID] = input
+	}
 	seen := make(map[string]bool, len(spec.Inputs))
 	for i, input := range spec.Inputs {
 		if !protocol.ValidID(protocol.PrefixFile, input.FileID) || seen[input.FileID] {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "task inputs require distinct valid file_id values")
 		}
 		seen[input.FileID] = true
+		if retained, ok := frozen[input.FileID]; ok {
+			spec.Inputs[i] = retained
+			continue
+		}
 		f, err := store.GetConversationAttachment(ctx, q, input.FileID)
 		if err != nil {
 			return errNotFound(err, "input attachment does not exist")

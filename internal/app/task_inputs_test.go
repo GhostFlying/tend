@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -226,5 +227,70 @@ func TestTaskInputRecoveryRequiresOriginalCapability(t *testing.T) {
 	}
 	if len(result.Reassigned) != 1 || result.Reassigned[0].RunID != as.RunID {
 		t.Fatalf("input reassignment lost: %+v", result)
+	}
+}
+
+func TestTaskInputsRetainFrozenProvenanceAfterLaterChatAttachment(t *testing.T) {
+	h := newDeliverableHarness(t)
+	file := uploadChatFile(t, h, "input.txt", "text/plain", []byte("original"))
+	spec := testSpec
+	spec.Inputs = []protocol.TaskInput{{FileID: file.FileID}}
+	op, task := h.createTask(owner, createTaskPayload{Title: "original", Spec: spec})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	frozen := h.storedSpec(task.TaskID, 1).Inputs[0]
+	if frozen.SourceMessageID != "" {
+		t.Fatalf("unexpected initial source: %+v", frozen)
+	}
+	before := relationDetail(t, h, task.TaskID)
+	attach := func(fileID string) string {
+		t.Helper()
+		op := h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{Body: "the original input", Attachments: []string{fileID}}, nil), SubmitMessage{})
+		var message struct {
+			MessageID string `json:"message_id"`
+		}
+		if err := json.Unmarshal(op.Result, &message); err != nil || message.MessageID == "" {
+			t.Fatalf("attachment message: %+v %v", op, err)
+		}
+		return message.MessageID
+	}
+	attach(file.FileID)
+	// Neither caller metadata nor a later chat binding changes this frozen input.
+	spec.Inputs[0] = protocol.TaskInput{FileID: file.FileID, Name: "invented", Size: 999, SHA256: "invented", SourceMessageID: "invented"}
+	op = h.exec(owner, h.env("tasks.update_intent", taskTarget(task.TaskID), updateIntentPayload{Spec: &spec}, rev(before.ControlRevision)), UpdateIntent{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	after := relationDetail(t, h, task.TaskID)
+	if after.SpecVersion != before.SpecVersion || after.ControlRevision != before.ControlRevision || !slices.Equal(after.Actions, before.Actions) {
+		t.Fatalf("unchanged intent changed task or actions: before=%+v after=%+v", before, after)
+	}
+	if got := h.storedSpec(task.TaskID, 1).Inputs[0]; got != frozen {
+		t.Fatalf("frozen metadata changed: %+v", got)
+	}
+
+	// A genuine goal change still creates a version, retaining the original input.
+	spec.Goal += " and document the result"
+	op = h.exec(owner, h.env("tasks.update_intent", taskTarget(task.TaskID), updateIntentPayload{Spec: &spec}, rev(after.ControlRevision)), UpdateIntent{})
+	if op.Status != protocol.OpSucceeded || h.task(task.TaskID).SpecVersion != 2 {
+		t.Fatalf("goal update: %+v", op)
+	}
+	if got := h.storedSpec(task.TaskID, 2).Inputs[0]; got != frozen {
+		t.Fatalf("new spec changed retained provenance: %+v", got)
+	}
+
+	// Newly selected inputs freeze the source available when they enter the spec.
+	added := uploadChatFile(t, h, "additional.txt", "text/plain", []byte("new evidence"))
+	source := attach(added.FileID)
+	spec.Inputs = append(spec.Inputs, protocol.TaskInput{FileID: added.FileID, SourceMessageID: "invented"})
+	op = h.exec(owner, h.env("tasks.update_intent", taskTarget(task.TaskID), updateIntentPayload{Spec: &spec}, rev(h.task(task.TaskID).ControlRevision)), UpdateIntent{})
+	if op.Status != protocol.OpSucceeded || h.task(task.TaskID).SpecVersion != 3 {
+		t.Fatalf("new input update: %+v", op)
+	}
+	inputs := h.storedSpec(task.TaskID, 3).Inputs
+	want := protocol.TaskInput{FileID: added.FileID, Name: added.Name, MediaType: added.MediaType, Size: added.Size, SHA256: added.SHA256, SourceMessageID: source}
+	if len(inputs) != 2 || inputs[0] != frozen || inputs[1] != want {
+		t.Fatalf("mixed retained and new inputs: %+v", inputs)
 	}
 }

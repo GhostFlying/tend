@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -162,5 +163,105 @@ func TestQuestionRejectsInactiveAnswerAndRequiresNegotiation(t *testing.T) {
 	payload.QuestionKey = "next_scope"
 	if env, err := owner.envelope(payload); err != nil || env.RequestID == "" {
 		t.Fatalf("new question identity: %v", err)
+	}
+}
+
+func TestRejectedQuestionDoesNotPoisonRecovery(t *testing.T) {
+	for _, loseReceipt := range []bool{false, true} {
+		t.Run(map[bool]string{false: "recorded", true: "crash_before_receipt"}[loseReceipt], func(t *testing.T) {
+			var requests []protocol.Envelope
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Method == http.MethodGet {
+					_ = json.NewEncoder(w).Encode([]protocol.WorkerQuestion{})
+					return
+				}
+				var env protocol.Envelope
+				_ = json.NewDecoder(req.Body).Decode(&env)
+				requests = append(requests, env)
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpFailed, Error: protocol.Errorf(protocol.CodeInvalidRequest, "options must be distinct")}})
+			}))
+			defer server.Close()
+			owner := questionRunner(t, server)
+			payload := protocol.AskOwnerPayload{QuestionKey: "invalid", Question: "Scope?", Evidence: "evidence", Options: []string{"same", "same"}}
+			if _, err := owner.ask(t.Context(), payload); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+				t.Fatalf("expected definitive rejection: %v", err)
+			}
+			env, err := owner.envelope(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loseReceipt {
+				if err := os.Remove(owner.rejectionPath(env)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			restarted := &ownerQuestions{r: owner.r, as: owner.as, prepared: owner.prepared}
+			for range 2 {
+				if got, err := restarted.recover(t.Context()); err != nil || len(got) != 0 {
+					t.Fatalf("rejected question prevents restart: %+v %v", got, err)
+				}
+			}
+			want := 1
+			if loseReceipt {
+				want = 2
+			}
+			if len(requests) != want {
+				t.Fatalf("terminal rejection replayed: %d requests, want %d", len(requests), want)
+			}
+			if _, err := restarted.ask(t.Context(), payload); protocol.CodeOf(err) != protocol.CodeInvalidRequest || len(requests) != want {
+				t.Fatalf("saved rejection was not replayed: %v", err)
+			}
+			preserved, err := restarted.envelope(payload)
+			if err != nil || preserved.RequestID != env.RequestID || !bytes.Equal(preserved.Payload, env.Payload) {
+				t.Fatal("rejection destroyed original request evidence")
+			}
+			for _, got := range requests {
+				if got.RequestID != env.RequestID || !bytes.Equal(got.Payload, env.Payload) {
+					t.Fatal("recovery replaced rejected request identity")
+				}
+			}
+		})
+	}
+}
+
+func TestQuestionUnknownOutcomeRemainsRecoverableUnderOriginalIdentity(t *testing.T) {
+	var requests []protocol.Envelope
+	var unknown = true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode([]protocol.WorkerQuestion{})
+			return
+		}
+		var env protocol.Envelope
+		_ = json.NewDecoder(req.Body).Decode(&env)
+		requests = append(requests, env)
+		if unknown {
+			_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpUnknown, Error: protocol.Errorf(protocol.CodeUnknownOutcome, "receipt unavailable")}})
+			return
+		}
+		body, _ := json.Marshal(protocol.WorkerQuestion{DecisionID: "decision_recovered", QuestionKey: "scope", Status: "open"})
+		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: body}})
+	}))
+	defer server.Close()
+	owner := questionRunner(t, server)
+	payload := protocol.AskOwnerPayload{QuestionKey: "scope", Question: "Scope?", Evidence: "evidence"}
+	if _, err := owner.ask(t.Context(), payload); err == nil {
+		t.Fatal("unknown was treated as an answer")
+	}
+	env, err := owner.envelope(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(owner.rejectionPath(env)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unknown marked as terminal rejection: %v", err)
+	}
+	unknown = false
+	restarted := &ownerQuestions{r: owner.r, as: owner.as, prepared: owner.prepared}
+	questions, err := restarted.recover(t.Context())
+	if err != nil || len(questions) != 1 || questions[0].DecisionID != "decision_recovered" {
+		t.Fatalf("unknown intent lost: %+v %v", questions, err)
+	}
+	if len(requests) != 2 || requests[0].RequestID != requests[1].RequestID || !bytes.Equal(requests[0].Payload, requests[1].Payload) {
+		t.Fatal("unknown request identity changed on recovery")
 	}
 }

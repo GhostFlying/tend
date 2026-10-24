@@ -125,6 +125,11 @@ func (s *Server) serve(conn net.Conn) {
 	}()
 	defer func() { _ = conn.Close(); <-disconnected }()
 	res := s.answer(ctx, req)
+	if req.Name == harness.AskOwnerTool && s.ctx.Err() != nil {
+		// Shutdown interrupted the wait, not the owner's decision. Leave the
+		// socket exchange uncertain so only this durable tool reconnects.
+		return
+	}
 	b, _ := json.Marshal(res)
 	_, _ = conn.Write(append(b, '\n'))
 }

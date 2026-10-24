@@ -71,6 +71,50 @@ func (q *ownerQuestions) envelope(payload protocol.AskOwnerPayload) (*protocol.E
 	return env, nil
 }
 
+// questionRejection is proof that this exact request was definitively rejected.
+// The original intent remains intact; uncertain outcomes never get a receipt.
+type questionRejection struct {
+	RequestID     string             `json:"request_id"`
+	PayloadSHA256 string             `json:"payload_sha256"`
+	Operation     protocol.Operation `json:"operation"`
+}
+
+func (q *ownerQuestions) rejectionPath(env *protocol.Envelope) string {
+	digest := sha256.Sum256([]byte(env.RequestID))
+	return filepath.Join(q.prepared.StateDir, "owner-questions", hex.EncodeToString(digest[:])+".rejected")
+}
+
+func (q *ownerQuestions) submit(ctx context.Context, env *protocol.Envelope) (protocol.Operation, error) {
+	path := q.rejectionPath(env)
+	digest := sha256.Sum256(env.Payload)
+	payloadHash := hex.EncodeToString(digest[:])
+	body, err := os.ReadFile(path)
+	if err == nil {
+		var receipt questionRejection
+		if err := json.Unmarshal(body, &receipt); err != nil {
+			return protocol.Operation{}, fmt.Errorf("read question rejection: %w", err)
+		}
+		if receipt.RequestID != env.RequestID || receipt.PayloadSHA256 != payloadHash || receipt.Operation.Status != protocol.OpFailed || receipt.Operation.Error == nil {
+			return protocol.Operation{}, errors.New("question rejection does not match its request")
+		}
+		return receipt.Operation, receipt.Operation.Error
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return protocol.Operation{}, err
+	}
+	op, err := q.r.send(ctx, runCredential(q.as), env)
+	if op.Status == protocol.OpFailed && op.Error != nil {
+		body, marshalErr := json.Marshal(questionRejection{RequestID: env.RequestID, PayloadSHA256: payloadHash, Operation: op})
+		if marshalErr != nil {
+			return protocol.Operation{}, errors.Join(err, marshalErr)
+		}
+		if writeErr := replaceUploadState(path, func(f *os.File) error { _, err := f.Write(body); return err }); writeErr != nil {
+			return protocol.Operation{}, errors.Join(err, fmt.Errorf("save question rejection: %w", writeErr))
+		}
+	}
+	return op, err
+}
+
 func (q *ownerQuestions) ask(ctx context.Context, payload protocol.AskOwnerPayload) (protocol.WorkerQuestion, error) {
 	if !q.as.WorkerQuestions {
 		return protocol.WorkerQuestion{}, errors.New("server has not enabled owner questions for this run")
@@ -79,8 +123,11 @@ func (q *ownerQuestions) ask(ctx context.Context, payload protocol.AskOwnerPaylo
 	if err != nil {
 		return protocol.WorkerQuestion{}, err
 	}
-	op, err := q.r.send(ctx, runCredential(q.as), env)
+	op, err := q.submit(ctx, env)
 	if err != nil {
+		if op.Status == protocol.OpFailed {
+			return protocol.WorkerQuestion{}, fmt.Errorf("owner question was rejected; correct the request using a new question_key: %w", err)
+		}
 		return protocol.WorkerQuestion{}, err
 	}
 	var question protocol.WorkerQuestion
@@ -138,7 +185,10 @@ func (q *ownerQuestions) recover(ctx context.Context) ([]protocol.WorkerQuestion
 		if known[payload.QuestionKey] {
 			continue
 		}
-		op, err := q.r.send(ctx, runCredential(q.as), &env)
+		op, err := q.submit(ctx, &env)
+		if op.Status == protocol.OpFailed && op.Error != nil {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

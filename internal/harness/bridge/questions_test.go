@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -180,4 +181,33 @@ func TestOwnerQuestionReconnectCannotFollowAnotherRun(t *testing.T) {
 		t.Fatalf("wrong run was followed: %s", body)
 	}
 	pipe.finish(t)
+}
+
+// Exercise shutdown before the listener's connection-closing AfterFunc runs:
+// the cancelled handler must not serialize its application-error result.
+func TestOwnerQuestionShutdownLeavesSocketExchangeUncertain(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	entered := make(chan struct{})
+	server := &Server{ctx: ctx, token: "token", tools: []harness.ToolSpec{harness.AskOwnerToolSpec}, handle: func(ctx context.Context, _ harness.ToolCall) harness.ToolResult {
+		close(entered)
+		<-ctx.Done()
+		return harness.ToolResult{Text: "runner restarting"}
+	}}
+	serverConn, client := net.Pipe()
+	defer client.Close()
+	done := make(chan struct{})
+	go func() { defer close(done); server.serve(serverConn) }()
+	request, _ := json.Marshal(request{Token: "token", Method: "call", Name: harness.AskOwnerTool, CallID: "owner"})
+	if _, err := client.Write(append(request, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	cancel()
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	response, err := io.ReadAll(client)
+	if err != nil || len(response) != 0 {
+		t.Fatalf("shutdown sent an application result instead of closing transport: %s %v", response, err)
+	}
+	<-done
 }
