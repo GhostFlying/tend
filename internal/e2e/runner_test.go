@@ -221,7 +221,7 @@ func (w *workspaces) Prepare(_ context.Context, as protocol.Assignment) (runner.
 	if err := w.prepareErr[as.Role]; err != nil {
 		return runner.Prepared{}, err
 	}
-	p := runner.Prepared{Dir: filepath.Join(w.dir, as.Workspace.Name), ScratchDir: filepath.Join(w.dir, "scratch")}
+	p := runner.Prepared{Dir: filepath.Join(w.dir, as.Workspace.Name), ScratchDir: filepath.Join(w.dir, "scratch"), StateDir: filepath.Join(w.dir, "runs", as.RunID)}
 	for _, m := range as.Workspace.Mounts {
 		p.Report.Mounts = append(p.Report.Mounts, protocol.ResolvedMount{Path: m.Path, ResolvedBaseSHA: baseSHA, ResolvedFrom: "candidate:main", Branch: as.Workspace.Branch})
 	}
@@ -284,11 +284,16 @@ func (n *network) set(down bool) {
 }
 
 func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil, err
+	var body []byte
+	if req.Body != nil {
+		var err error
+		body, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		req.Body.Close()
+		req.Body = io.NopCloser(bytes.NewReader(body))
 	}
-	req.Body = io.NopCloser(bytes.NewReader(body))
 	var env struct {
 		Operation string `json:"operation"`
 	}

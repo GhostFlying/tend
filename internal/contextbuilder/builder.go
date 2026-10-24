@@ -678,6 +678,7 @@ func decisionLine(d store.DecisionRow) string {
 		task = " about " + d.TaskID
 	}
 	line := fmt.Sprintf("%s v%d%s: %s", d.DecisionID, d.Version, task, d.Question)
+	line += workerQuestionLine(d)
 	if len(options) > 0 {
 		for i, o := range options {
 			if _, ok := effects[o]; ok {
@@ -706,12 +707,31 @@ func answerLine(d store.DecisionRow) string {
 		answer = append(answer, "note "+strconv.Quote(a.Text))
 	}
 	line := fmt.Sprintf("%s %s -> %s", d.DecisionID, d.Question, strings.Join(answer, ", "))
+	line += workerQuestionLine(d)
+	if d.Worker != nil {
+		line += "; answer available to the original worker; do not retry merely to deliver it"
+	}
 	switch {
 	case a.Effect == nil:
 	case a.Effect.Applied:
 		line += fmt.Sprintf("; tend carried it out (%s), nothing left to do", a.Effect.Effect)
 	default:
 		line += fmt.Sprintf("; tend did not carry it out (%s): %s. Act on the answer yourself", a.Effect.Effect, a.Effect.Reason)
+	}
+	return line
+}
+
+func workerQuestionLine(d store.DecisionRow) string {
+	if d.Worker == nil {
+		return ""
+	}
+	w := d.Worker
+	line := fmt.Sprintf("; worker %s run %s, spec v%d, question_key %q, question message %s", w.Role, w.RunID, w.SpecVersion, w.QuestionKey, w.QuestionMessageID)
+	if d.Status == store.DecisionOpen {
+		line += "; waiting in the original run and holding its execution slot"
+	}
+	if w.Evidence != "" {
+		line += "; investigation evidence: " + w.Evidence
 	}
 	return line
 }

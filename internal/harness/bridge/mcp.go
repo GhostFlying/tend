@@ -10,6 +10,9 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
+
+	"github.com/GhostFlying/tend/internal/harness"
 )
 
 // mcpVersion is the protocol version offered when the client asks for
@@ -57,9 +60,16 @@ type callResult struct {
 }
 
 // mcpServer forwards MCP requests on stdio to a run's socket.
+type pendingCall struct {
+	cancel        context.CancelFunc
+	ownerQuestion bool
+}
+
 type mcpServer struct {
-	state string // path of the State file
-	run   string // the run the agent was started for
+	callsMu sync.Mutex
+	calls   map[string]pendingCall
+	state   string // path of the State file
+	run     string // the run the agent was started for
 
 	mu  sync.Mutex // guards out
 	out *json.Encoder
@@ -72,7 +82,11 @@ type mcpServer struct {
 // Once the file belongs to another run, or to none, requests fail: an
 // agent left over from an earlier run never reaches a later one.
 func ServeMCP(ctx context.Context, state, run string, in io.Reader, out io.Writer) error {
-	s := &mcpServer{state: state, run: run, out: json.NewEncoder(out)}
+	s := &mcpServer{state: state, run: run, out: json.NewEncoder(out), calls: make(map[string]pendingCall)}
+	if closer, ok := in.(io.ReadCloser); ok {
+		stop := context.AfterFunc(ctx, func() { _ = closer.Close() })
+		defer stop()
+	}
 	lines := make(chan []byte)
 	readErr := make(chan error, 1)
 	go func() {
@@ -91,6 +105,9 @@ func ServeMCP(ctx context.Context, state, run string, in io.Reader, out io.Write
 	}()
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	// EOF means the native client no longer waits for human answers. Ordinary
+	// finite calls still finish so a piped MCP request retains its response.
+	defer s.cancelQuestions()
 	for {
 		var line []byte
 		select {
@@ -107,14 +124,53 @@ func ServeMCP(ctx context.Context, state, run string, in io.Reader, out io.Write
 			s.send(rpcMessage{ID: json.RawMessage("null"), Error: &rpcError{Code: -32700, Message: "parse error"}})
 			continue
 		}
+		if m.Method == "notifications/cancelled" {
+			var p struct {
+				RequestID json.RawMessage `json:"requestId"`
+			}
+			if json.Unmarshal(m.Params, &p) == nil {
+				s.cancelCall(string(p.RequestID))
+			}
+			continue
+		}
 		if len(m.ID) == 0 || m.Method == "" {
 			continue // a notification, or an answer we never asked for
 		}
 		if m.Method == "tools/call" {
-			wg.Go(func() { s.reply(m, s.call(ctx, m)) })
+			callCtx, cancel := context.WithCancel(ctx)
+			var p struct {
+				Name string `json:"name"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			s.callsMu.Lock()
+			s.calls[string(m.ID)] = pendingCall{cancel: cancel, ownerQuestion: p.Name == harness.AskOwnerTool}
+			s.callsMu.Unlock()
+			wg.Go(func() {
+				defer cancel()
+				defer func() { s.callsMu.Lock(); delete(s.calls, string(m.ID)); s.callsMu.Unlock() }()
+				s.reply(m, s.call(callCtx, m))
+			})
 			continue
 		}
 		s.reply(m, s.handle(ctx, m))
+	}
+}
+
+func (s *mcpServer) cancelCall(id string) {
+	s.callsMu.Lock()
+	defer s.callsMu.Unlock()
+	if call, ok := s.calls[id]; ok {
+		call.cancel()
+	}
+}
+
+func (s *mcpServer) cancelQuestions() {
+	s.callsMu.Lock()
+	defer s.callsMu.Unlock()
+	for _, call := range s.calls {
+		if call.ownerQuestion {
+			call.cancel()
+		}
 	}
 }
 
@@ -172,7 +228,24 @@ func (s *mcpServer) call(ctx context.Context, m rpcMessage) any {
 	if err := json.Unmarshal(m.Params, &p); err != nil || p.Name == "" {
 		return &rpcError{Code: -32602, Message: "tools/call needs a name"}
 	}
-	res, err := s.do(ctx, request{Method: "call", Name: p.Name, CallID: string(m.ID), Arguments: p.Arguments})
+	req := request{Method: "call", Name: p.Name, CallID: string(m.ID), Arguments: p.Arguments}
+	res, err := s.do(ctx, req)
+	for err != nil && p.Name == harness.AskOwnerTool && ctx.Err() == nil {
+		var transport *transportError
+		if !errors.As(err, &transport) && !errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return callResult{Content: []content{{Type: "text", Text: ctx.Err().Error()}}, IsError: true}
+		case <-timer.C:
+		}
+		// Reload the state each time: reconnect only while the original run
+		// still owns the marker, and use its current socket credentials.
+		res, err = s.do(ctx, req)
+	}
 	if err != nil {
 		return callResult{Content: []content{{Type: "text", Text: err.Error()}}, IsError: true}
 	}

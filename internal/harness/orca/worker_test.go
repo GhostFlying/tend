@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -930,6 +931,57 @@ func TestOrcaBothWorkerRolesDownloadTaskInputsThroughBridge(t *testing.T) {
 				f.submit(protocol.VerdictPassed)
 			}
 			f.orca.finish("term_1", "downloaded input")
+			if _, err := w.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			<-drained
+		})
+	}
+}
+
+func TestOrcaBothWorkerRolesAskOwnerThroughBridge(t *testing.T) {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		t.Run(string(role), func(t *testing.T) {
+			f := newWorkerFixture(t)
+			spec := f.spec(role)
+			called := false
+			spec.AskOwner = func(_ context.Context, p protocol.AskOwnerPayload) (protocol.WorkerQuestion, error) {
+				called = true
+				return protocol.WorkerQuestion{QuestionKey: p.QuestionKey, Status: "answered", Answer: json.RawMessage(`{"text":"keep scope"}`)}, nil
+			}
+			w, _, drained := f.start(t.Context(), spec)
+			state, err := bridge.StatePath(t.Context(), f.dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reader, writer := io.Pipe()
+			outReader, outWriter := io.Pipe()
+			defer reader.Close()
+			defer writer.Close()
+			defer outReader.Close()
+			defer outWriter.Close()
+			done := make(chan error, 1)
+			go func() { done <- bridge.ServeMCP(t.Context(), state, spec.RunID, reader, outWriter) }()
+			_, err = io.WriteString(writer, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask_owner","arguments":{"question_key":"scope","question":"Which scope?","evidence":"Investigated scope"}}}`+"\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var answer map[string]any
+			if err := json.NewDecoder(outReader).Decode(&answer); err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(answer)
+			if !called || !strings.Contains(string(body), "keep scope") || strings.Contains(string(body), "isError") {
+				t.Errorf("question answer = %s", body)
+			}
+			_ = writer.Close()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if role == protocol.RoleAccept {
+				f.submit(protocol.VerdictPassed)
+			}
+			f.orca.finish("term_1", "continued after owner answer")
 			if _, err := w.Wait(); err != nil {
 				t.Fatal(err)
 			}

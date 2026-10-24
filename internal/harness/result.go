@@ -35,6 +35,9 @@ type Results struct {
 }
 
 func (r *Results) Handle(ctx context.Context, c ToolCall) ToolResult {
+	if c.Tool == AskOwnerTool {
+		return r.askOwner(ctx, c)
+	}
 	if c.Tool == "download_file" && r.Spec.DownloadFile != nil {
 		var p struct {
 			FileID string `json:"file_id"`

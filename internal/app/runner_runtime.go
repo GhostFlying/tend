@@ -119,7 +119,10 @@ func checkClaimRuntime(ctx context.Context, x *Exec, q store.Querier) error {
 	if err := decodePayload(x.Env, &p); err != nil {
 		return err
 	}
-	return checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, false)
+	if err := checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, false); err != nil {
+		return err
+	}
+	return checkQuestionRunRecovery(ctx, q, x.Principal.Subject, p.Runtime)
 }
 
 // SweepRunnerPresence persists online transitions so all clients see the same

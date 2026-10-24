@@ -164,9 +164,12 @@ func config(command string, args []string) string {
 		quoted[i] = q(a)
 	}
 	// An agent waiting at its update prompt would never start the turn.
+	// MCP waits may contain a human decision. A week-long transport budget
+	// avoids ordinary tool deadlines; cancellation still stops the call, and
+	// expiry never deletes or answers the durable question.
 	return configHeader + "\napproval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\ncheck_for_update_on_startup = false\n" +
 		"\n[mcp_servers.tend_worker]\ncommand = " + q(command) + "\nargs = [" + strings.Join(quoted, ", ") + "]\n" +
-		"default_tools_approval_mode = \"approve\"\n"
+		"default_tools_approval_mode = \"approve\"\ntool_timeout_sec = 604800\n"
 }
 
 // exclude adds line to the exclude file of the repository at dir unless

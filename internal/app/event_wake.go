@@ -48,6 +48,17 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 		state = "待决事项已有回答"
 	}
 	body := fmt.Sprintf("%s：%s\n\n%s", state, d.DecisionID, d.Question)
+	if d.Worker != nil && e.Kind == "decision.opened" {
+		role := "实现"
+		if d.Worker.Role == protocol.RoleAccept {
+			role = "验收"
+		}
+		body = fmt.Sprintf("%s worker 需要你的回答：\n\n%s", role, d.Question)
+		if d.Worker.Evidence != "" {
+			body += "\n\n调查证据与背景：\n" + d.Worker.Evidence
+		}
+		body += "\n\n回答后原任务继续；等待期间仍占用执行 slot。"
+	}
 	var recordedAnswer json.RawMessage
 	if e.Kind == "decision.answered" {
 		// A taskless answered decision may no longer appear in the current
@@ -80,7 +91,15 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 		}
 	}
 	id := x.IDs.New(protocol.PrefixMessage)
-	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "system", Body: body, CreatedAt: x.Now.UnixMilli()})
+	replyTo := ""
+	if d.Worker != nil {
+		if e.Kind == "decision.opened" {
+			id = d.AskedMessageID
+		} else {
+			replyTo = d.AnsweredMessageID
+		}
+	}
+	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "system", Body: body, ReplyTo: replyTo, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
 		return err
 	}

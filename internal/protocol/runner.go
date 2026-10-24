@@ -78,6 +78,9 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
+	// WorkerQuestions is negotiated before exposing ask_owner to the worker.
+	WorkerQuestions bool             `json:"worker_questions,omitempty"`
+	Questions       []WorkerQuestion `json:"questions,omitempty"`
 	// MountDirectories permits the optional physical-directory report field.
 	// Older servers omit this, so new runners retain their older request shape.
 	MountDirectories bool   `json:"mount_directories,omitempty"`

@@ -20,6 +20,8 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
+	AskOwner     func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
+	Questions    []protocol.WorkerQuestion
 	Baseline     []MountBaseline
 	RunID        string
 	ProviderID   string

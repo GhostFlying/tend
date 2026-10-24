@@ -289,6 +289,9 @@ func (w *worker) openBridge(ctx context.Context) error {
 	if w.spec.DownloadFile != nil {
 		tools = append(tools, harness.DownloadFileToolSpec)
 	}
+	if w.spec.AskOwner != nil {
+		tools = append(tools, harness.AskOwnerToolSpec)
+	}
 	sock := filepath.Join(w.ws.opts.SocketDir, "tend-"+w.spec.RunID+".sock")
 	token := w.ws.opts.IDs.New(protocol.PrefixToken)
 	srv, err := bridge.Listen(sock, token, tools, handle)

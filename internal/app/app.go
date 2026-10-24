@@ -247,6 +247,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 }
 
 func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Outcome, rec *store.RequestRecord) error {
+	if err := cancelObsoleteQuestions(ctx, x, tx, &out); err != nil {
+		return err
+	}
 	now := x.Now.UnixMilli()
 	actor, err := json.Marshal(x.Principal)
 	if err != nil {

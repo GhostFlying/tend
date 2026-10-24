@@ -144,7 +144,7 @@ func Acceptances(rows []store.AcceptanceRow, evidence bool) []protocol.Acceptanc
 
 // Decision shows a decision.
 func Decision(x store.DecisionRow) protocol.DecisionView {
-	v := protocol.DecisionView{DecisionID: x.DecisionID, TaskID: x.TaskID, Question: x.Question, Options: json.RawMessage(x.OptionsJSON), Version: x.Version, Status: x.Status}
+	v := protocol.DecisionView{Worker: x.Worker, DecisionID: x.DecisionID, TaskID: x.TaskID, Question: x.Question, Options: json.RawMessage(x.OptionsJSON), Version: x.Version, Status: x.Status}
 	if x.AnswerJSON != "" {
 		v.Answer = json.RawMessage(x.AnswerJSON)
 	}

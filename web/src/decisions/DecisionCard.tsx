@@ -1,6 +1,6 @@
-// A question for the owner, with its options as buttons (D71). Options
-// tend carries out itself are marked "tend 执行"; the others are sent to
-// the main agent as a message.
+// A question for the owner, with its options as buttons (D71, D89). Options
+// tend carries out itself are marked "tend 执行". Worker questions return
+// directly to their run; other questions go through the main-agent chat.
 import { useEffect, useState, type ReactNode } from "react";
 import type { DecisionView, TaskSummary } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
@@ -26,6 +26,7 @@ export function DecisionCard({
   const conversation = useStore(s.live.conversation);
   const outbox = useStore(s.queue?.list ?? noOutbox);
   const [busy, setBusy] = useState(false);
+  const [reply, setReply] = useState("");
   const byMessage = messageAnswer(d, conversation.items, outbox);
   const failed = byMessage?.state === "failed";
 
@@ -41,7 +42,9 @@ export function DecisionCard({
   const choose = async (option: string) => {
     setBusy(true);
     try {
-      await answer(s, d, option, task?.title);
+      if (await answer(s, d, option, task?.title, d.worker ? reply : undefined)) {
+        setReply("");
+      }
     } finally {
       setBusy(false);
     }
@@ -52,7 +55,10 @@ export function DecisionCard({
     <div className={styles.card}>
       <div className={styles.head}>
         <StatusDot tone="warn" />
-        <span className={styles.what}>待决{task ? ` · ${task.title}` : ""}</span>
+        <span className={styles.what}>
+          {d.worker ? "Worker 提问" : "待决"}
+          {task ? ` · ${task.title}` : ""}
+        </span>
         <span className={styles.more}>
           {more ??
             (d.task_id && (
@@ -63,6 +69,25 @@ export function DecisionCard({
         </span>
       </div>
       <q className={styles.question}>{question(d).text}</q>
+      {d.worker && (
+        <>
+          <div className={styles.ctx}>
+            {d.worker.role === "accept" ? "验收 worker" : "实现 worker"} · spec{" "}
+            {d.worker.spec_version}
+            <span className={styles.waiting}>等待回答期间占用执行 slot</span>
+          </div>
+          <details className={styles.evidence}>
+            <summary>调查依据与来源</summary>
+            {d.worker.evidence && <p>{d.worker.evidence}</p>}
+            <dl>
+              <dt>执行</dt>
+              <dd>{d.worker.run_id}</dd>
+              <dt>问题</dt>
+              <dd>{d.worker.question_key}</dd>
+            </dl>
+          </details>
+        </>
+      )}
       {pending ? (
         <div className={styles.ctx}>
           已回答「{optionLabel(d, byMessage.option)}」，等主 Agent 处理
@@ -83,6 +108,34 @@ export function DecisionCard({
             </button>
           ))}
         </div>
+      )}
+      {d.worker && !pending && (
+        <form
+          className={styles.reply}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void choose("");
+          }}
+        >
+          <label>
+            补充说明或其他回答
+            <textarea
+              value={reply}
+              onChange={(event) => setReply(event.target.value)}
+              placeholder="输入给 worker 的回答"
+              rows={3}
+              disabled={busy}
+            />
+          </label>
+          <button
+            type="submit"
+            className={styles.opt}
+            data-primary
+            disabled={busy || !reply.trim()}
+          >
+            {busy ? "正在发送…" : "发送给 worker"}
+          </button>
+        </form>
       )}
     </div>
   );

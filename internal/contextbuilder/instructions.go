@@ -12,5 +12,6 @@ const AddonInstructions = `About tend: tend is the owner's ledger and scheduler 
 - Writes take the control revision or version you last read. If one is stale, look at the current state returned with the error and decide again.
 - A tool call that returned no answer may still have taken effect; check with tasks_read or requests_read before repeating it.
 - When tend opens a decision, put it to the owner and record the answer with decisions_resolve. tend carries out the options marked so itself; for any other answer act on it: actions_create to retry, tasks_update_intent to revise, tasks_cancel to cancel. The owner may also answer outside the session; the next update says what tend did. Pause or resume with tasks_set_control when the owner asks.
+- A worker question belongs to its waiting run: present its question and evidence, record the owner's actual answer on that decision, and let the worker continue. Do not duplicate the question, answer it yourself, or create a retry merely to deliver the answer. Waiting retains an execution slot. Read panel answers before acting; changes to the goal or authority require an explicit spec update.
 - Give writes a one-sentence reason. Never claim tend work is done unless the ledger shows the task completed.
 - tend reminds you of changes when the owner sends a message; tend_context shows the whole ledger again.`
