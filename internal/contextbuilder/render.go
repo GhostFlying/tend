@@ -37,6 +37,8 @@ type Snapshot struct {
 	Focus []string
 	// Tasks lists the other unfinished tasks, most important first.
 	Tasks []string
+	// WorkItems remain visible after their current execution tasks finish.
+	WorkItems []string
 	// Results are the task outcomes in a delta.
 	Results []string
 	// Unseen lists, in a full snapshot, what the session has not heard of
@@ -101,7 +103,7 @@ func Render(s Snapshot, budget int) string {
 			header += "Other projects: " + strings.Join(s.Others, "; ") + ".\n"
 		}
 		if len(s.Tasks) == 0 && len(s.Attention) == 0 {
-			header += "\nThere are no unfinished tasks.\n"
+			header += "\nThere are no unfinished execution tasks. This does not mean work items or deliveries are settled.\n"
 		}
 	case s.Full:
 		header += "This is tend's ledger as of now. It is authoritative over anything you remember; read details with the tend tools.\n"
@@ -113,6 +115,7 @@ func Render(s Snapshot, budget int) string {
 	var sections []*section
 	if s.Full {
 		sections = []*section{
+			{title: "Open work items and follow-up", lines: s.WorkItems, priority: 5, omitted: "(%d more work items; see work_items_list)"},
 			{title: "Limits", lines: s.Limits, protected: true},
 			{title: "Decisions", lines: s.Decisions, priority: 6, omitted: "(%d more decisions; see tasks_read)"},
 			{title: "Needs attention", lines: s.Attention, priority: 5, omitted: "(%d more tasks need attention; see tasks_list)"},

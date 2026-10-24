@@ -4,6 +4,7 @@
 // only says something changed, and the affected views are read again. The
 // client never rebuilds ledger state from events itself.
 import { RepositoryRegistry } from "../repos/registry.ts";
+import { WorkItems } from "../workitems/live.ts";
 import { TaskLists } from "../tasks/lists.ts";
 import { ConversationHandoff } from "../conversation/handoff.ts";
 import { ConversationSettings } from "../conversation/settings.ts";
@@ -69,6 +70,7 @@ export class LiveData {
   readonly handoff: ConversationHandoff;
   readonly tasks: TaskLists;
   readonly repos: RepositoryRegistry;
+  readonly workItems: WorkItems;
   private readonly api: Reader;
   private readonly snapshotStore = new Store<Snapshot | null>(null);
   private readonly conversationStore = new Store<ConversationState>({
@@ -107,6 +109,7 @@ export class LiveData {
     this.handoff = new ConversationHandoff(api);
     this.tasks = new TaskLists(api);
     this.repos = new RepositoryRegistry(api);
+    this.workItems = new WorkItems(api);
     this.snapshotReads = new Coalesced(() => this.readSnapshot());
     this.detailReads = new Coalesced(() => this.readDetail());
     this.latestReads = new Coalesced(() => this.readLatest());
@@ -134,6 +137,7 @@ export class LiveData {
     void this.settings.refresh();
     void this.handoff.refresh();
     this.tasks.refresh();
+    this.workItems.refresh();
     this.detailController?.abort();
     void this.stopLogs();
     this.logCache = null;
@@ -183,6 +187,7 @@ export class LiveData {
         break;
     }
     this.tasks.changed();
+    this.workItems.changed();
     void this.refreshSnapshot();
     if (this.detailStore.get()) {
       void this.refreshDetail();
@@ -422,6 +427,7 @@ export class LiveData {
   async stop(): Promise<void> {
     this.stopped = true;
     this.repos.stop();
+    this.workItems.stop();
     this.detailController?.abort();
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;

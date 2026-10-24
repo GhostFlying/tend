@@ -14,6 +14,8 @@ import (
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
 var ownerCommands = commandMap(
+	app.UpdateWorkItem{}, app.CloseWorkItem{}, app.ReopenWorkItem{},
+	app.RefreshDelivery{},
 	app.HostMaintenance{},
 	app.ControlUpgrade{},
 	app.AnswerDecision{},
@@ -78,6 +80,15 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := protocol.APIResponse{Operation: &op}
+	if op.Status == protocol.OpFailed && op.Error != nil && op.Error.Code == protocol.CodeStaleRevision && env.Target.Type == "work_item" {
+		_ = s.store.Read(r.Context(), func(tx *store.ReadTx) error {
+			v, err := views.WorkItem(r.Context(), tx.Q(), env.Target.ID)
+			if err == nil {
+				res.CurrentWorkItem = &v
+			}
+			return err
+		})
+	}
 	if op.Status == protocol.OpFailed && op.Error != nil && op.Error.Code == protocol.CodeStaleRevision && env.Target.Type == "task" {
 		res.Current = s.currentTask(r.Context(), env.Target.ID)
 	}

@@ -1,5 +1,7 @@
 // What the views reach for: the API client, the live views, the send
 // queue, and opening a task's details.
+import type { WorkItemIntention } from "../workitems/model.ts";
+import type { WorkItemView } from "../api/generated/api.ts";
 import type { TaskSummary } from "../api/generated/api.ts";
 import type { ComposerDraft } from "../conversation/draft.ts";
 import { createContext, useContext } from "react";
@@ -13,6 +15,8 @@ export interface Services {
   /** null while the outbox opens, or where the browser has none. */
   queue: SendQueue | null;
   openTask(taskId: string): void;
+  openWorkItem(id: string): void;
+  discussWorkItem(item: WorkItemView, intention: WorkItemIntention): void;
   openUpgrade(upgradeId: string): void;
   draft: ComposerDraft;
   followUp(task: TaskSummary): void;

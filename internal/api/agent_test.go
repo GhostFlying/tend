@@ -163,7 +163,7 @@ func TestHookSnapshotAndRetry(t *testing.T) {
 	s := e.session(protocol.AgentClaude, "sess-a")
 	// An empty ledger still tells the agent that tend exists.
 	first := s.start("startup")
-	if !strings.Contains(first, "kind=full") || !strings.Contains(first, "There are no unfinished tasks.") || !strings.Contains(first, "About tend") {
+	if !strings.Contains(first, "kind=full") || !strings.Contains(first, "There are no unfinished execution tasks.") || !strings.Contains(first, "About tend") {
 		t.Errorf("snapshot of an empty ledger:\n%s", first)
 	}
 	if n := e.count(`SELECT COUNT(*) FROM agent_sessions WHERE agent = 'claude' AND session_id = 'sess-a' AND client_id = ?`, clientID); n != 1 {

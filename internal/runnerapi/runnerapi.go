@@ -217,6 +217,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 // runCommands are the operations a run performs through the ledger.
 var runCommands = map[string]app.Command{
+	protocol.OpDeliveriesPoll:       app.PollDeliveries{},
+	protocol.OpDeliveriesReport:     app.ReportDelivery{},
 	protocol.OpRunsAskOwner:         app.AskOwner{},
 	protocol.OpWorkspaceReconcile:   app.ReconcileWorkspaces{},
 	protocol.OpWorkspaceRelease:     app.ReleaseWorkspace{},

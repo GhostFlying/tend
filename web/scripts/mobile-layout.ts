@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import { workItemPage } from "./work-items-fixture.ts";
 // Exercise the built app with an isolated owner API, never a deployed server.
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
@@ -65,6 +66,9 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/api/")) reads.push(url.pathname + url.search);
   if (path === "/api/v1/session")
     return json({ token: "fixture-token", login: "Example owner", scope: "owner" });
+  if (path === "/api/v1/repos") return json({ repos: [] });
+  if (path === "/api/v1/work-items")
+    return json(workItemPage(url.searchParams.get("project") || "sample"));
   if (path === "/api/v1/snapshot") return json(snapshot);
   if (path === "/api/v1/conversation/settings") return json({ enabled: false });
   if (path === "/api/v1/conversation/handoff") return json(handoff);
@@ -159,9 +163,9 @@ try {
       await page.locator("header").getByRole("button", { name: "设置", exact: true }).count(),
       0,
     );
-    if (mobile) await tabs.getByRole("button", { name: "任务", exact: true }).click();
-    else await page.getByRole("button", { name: "全部任务 · 阶段看板 ›" }).click();
-    await page.getByRole("heading", { name: "任务看板" }).waitFor();
+    if (mobile) await tabs.getByRole("button", { name: "工作项", exact: true }).click();
+    else await page.getByRole("button", { name: "工作项 · 白板 ›" }).click();
+    await page.getByRole("heading", { name: "工作项" }).waitFor();
     assert.equal(
       await page.locator("header").getByRole("button", { name: "设置", exact: true }).count(),
       0,
@@ -220,7 +224,7 @@ try {
       "Example Host 24",
     );
     await page.getByRole("button", { name: "关闭主机详情" }).click();
-    const board = page.getByRole("region", { name: "分阶段任务看板" });
+    const board = page.getByRole("region", { name: "工作项白板" });
     assert((await board.boundingBox())!.height > 80);
     assert(await list.evaluate((el) => el.scrollWidth <= el.clientWidth));
     if (mobile)
@@ -241,7 +245,7 @@ try {
     const filtered = page.waitForResponse((response) =>
       response.url().includes("project=unrelated"),
     );
-    await page.getByLabel("按项目筛选").fill("unrelated");
+    await page.getByLabel("按项目筛选工作项").fill("unrelated");
     await filtered;
     assert.equal(await rows.count(), 2);
     assert(reads.some((path) => path.includes("project=unrelated")));

@@ -271,6 +271,8 @@ func tags(v any) []string {
 
 func TestSchemasMatchArgs(t *testing.T) {
 	args := map[string]any{
+		"work_items_refresh_delivery": workItemRefreshArgs{},
+		"work_items_list":             workItemsListArgs{}, "work_items_read": workItemReadArgs{}, "work_items_create": workItemCreateArgs{}, "work_items_update": workItemUpdateArgs{}, "work_items_close": workItemCloseArgs{}, "work_items_reopen": workItemReopenArgs{}, "work_items_link_task": workItemLinkArgs{},
 		"conversation_read": conversationArgs{},
 		"tasks_list":        listArgs{}, "tasks_read": taskArgs{}, "tasks_create": createArgs{}, "tasks_update_intent": updateArgs{},
 		"tasks_set_control": controlArgs{}, "tasks_cancel": cancelArgs{}, "actions_create": actionArgs{}, "decisions_open": openArgs{}, "decisions_resolve": resolveArgs{},

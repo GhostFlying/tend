@@ -26,6 +26,7 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // Config tunes the builder. Zero values select the defaults.
@@ -80,6 +81,8 @@ const (
 )
 
 var classes = map[string]class{
+	"work_item.created": intent, "work_item.updated": intent, "work_item.task_linked": intent,
+	"work_item.closed": result, "work_item.reopened": intent, "work_item.delivery_changed": result,
 	"task.relations_backlinks_updated": intent, "task.relations_updated": intent, "task.created": intent, "task.spec_updated": intent, "task.rating_changed": intent, "task.project_changed": intent, "task.control_changed": intent,
 	"task.implement_requested": intent, "task.acceptance_requested": intent, "decision.answered": intent,
 	"task.started_over": intent, "task.workspace_abandoned": intent, "task.workspace_available": intent,
@@ -98,6 +101,14 @@ var told = slices.Sorted(maps.Keys(classes))
 
 func classify(kind string, body map[string]any) class {
 	c := classes[kind]
+	if kind == "work_item.delivery_changed" {
+		if body["refresh_pending"] == true {
+			return intent
+		}
+		if failure, _ := body["error_kind"].(string); failure != "" {
+			return attention
+		}
+	}
 	if kind == "acceptance.submitted" && body["verdict"] != string(protocol.VerdictPassed) {
 		return attention
 	}
@@ -287,6 +298,9 @@ func (b *Builder) Current(ctx context.Context, self protocol.Principal) (string,
 }
 
 func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, messageSeq int64, sc *scope) error {
+	if err := gatherWorkItems(ctx, q, s, sc); err != nil {
+		return err
+	}
 	tasks, err := store.ListTasks(ctx, q, sc.project, 500)
 	if err != nil {
 		return err
@@ -395,6 +409,35 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			return err
 		}
 		if mine {
+			continue
+		}
+		if e.ObjectType == "work_item" {
+			item, err := views.WorkItem(ctx, q, e.ObjectID)
+			if err != nil {
+				return err
+			}
+			line := fmt.Sprintf("#%d %s: %s (by %s)", e.Seq, e.Kind, workItemLine(item), actor(e.ActorJSON))
+			if e.Kind == "work_item.delivery_changed" {
+				line += "; " + compact(body)
+			}
+			c := classify(e.Kind, body)
+			if item.Column == "attention" {
+				c = attention
+			}
+			if sc.covers(item.Project) {
+				line = sc.label(item.Project, line)
+				switch c {
+				case attention:
+					s.Attention = append(s.Attention, line)
+				case result:
+					s.Results = append(s.Results, line)
+					s.Unseen = append(s.Unseen, line)
+				default:
+					s.Changes = append(s.Changes, line)
+				}
+			} else if c == attention {
+				s.OtherAttention = append(s.OtherAttention, sc.label(item.Project, line))
+			}
 			continue
 		}
 		taskID, err := taskOf(ctx, q, e, body)

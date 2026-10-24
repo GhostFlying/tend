@@ -6,6 +6,7 @@ import { useStore } from "../state/store.ts";
 import { theme, themeLabels, toggleTheme } from "../theme/theme.ts";
 import { Note } from "./Chat.tsx";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
+import { WorkItemOverview } from "../workitems/Board.tsx";
 import { RecentTasks } from "../tasks/Board.tsx";
 import controls from "./controls.module.css";
 import { TaskOverview } from "../tasks/Overview.tsx";
@@ -17,12 +18,14 @@ export function Sidebar({
   view,
   connection,
   onBoard,
+  onRecords,
   onSettings,
   onRepos,
 }: {
   view: View;
   connection: Connection;
   onBoard(): void;
+  onRecords(): void;
   onSettings(): void;
   onRepos(): void;
 }) {
@@ -38,7 +41,7 @@ export function Sidebar({
           <ConnectionBadge connection={connection} />
         </span>
       </div>
-      <h2 className={styles.mobileTitle}>{view === "decisions" ? "待处理" : "任务"}</h2>
+      <h2 className={styles.mobileTitle}>{view === "decisions" ? "待处理" : "工作项"}</h2>
       <div className={styles.mobileNotice}>
         <Note />
       </div>
@@ -52,10 +55,17 @@ export function Sidebar({
             className={`${controls.chipBtn} ${styles.allTasks}`}
             onClick={onBoard}
           >
-            全部任务 · 阶段看板 ›
+            工作项 · 白板 ›
           </button>
-          <TaskOverview />
-          <RecentTasks />
+          <WorkItemOverview />
+          <details>
+            <summary>执行任务与记录</summary>
+            <button type="button" className={controls.chipBtn} onClick={onRecords}>
+              执行记录
+            </button>
+            <TaskOverview />
+            <RecentTasks />
+          </details>
           <RepositoryEntry onOpen={onRepos} />
           <Hosts connection={connection} />
         </section>

@@ -9,6 +9,8 @@ const specSchema = `{
   "properties": {
     "goal": {"type": "string", "description": "The outcome, in the owner's terms."},
     "scope": {"type": "string"},
+    "implementation_context": {"type":"string","description":"Detailed design or investigation input for implementation only. Never put this material in shared background, scope or acceptance checks to prime an independent reviewer."},
+    "shared_context": {"type": "array", "description": "Server-frozen work-item facts. Do not supply on create; the server selects them from linked work items.", "items": {"type": "object", "properties": {"work_item_id": {"type": "string"}, "revision": {"type": "integer"}, "intent": {"type": "string"}, "constraints": {"type": "array", "items": {"type": "string"}}, "facts": {"type": "array", "items": {"type": "object", "properties": {"kind": {"type": "string"}, "text": {"type": "string"}, "source": {"type": "string"}}, "required": ["kind", "text", "source"], "additionalProperties": false}}}, "required": ["work_item_id", "revision", "intent"], "additionalProperties": false}},
     "constraints": {"type": "array", "items": {"type": "string"}},
     "acceptance": {"type": "array", "items": {"type": "string"}, "description": "Checks an independent reviewer applies. Required before work can start."},
     "delivery": {"type": "string", "enum": ["commit"], "description": "Legacy commit-only output. Prefer deliverables for new tasks."},
@@ -52,6 +54,14 @@ const relationsSchema = `{
 }`
 
 var schemas = map[string]string{
+	"work_items_refresh_delivery": argumentSchema(workItemRefreshArgs{}),
+	"work_items_list":             argumentSchema(workItemsListArgs{}),
+	"work_items_read":             argumentSchema(workItemReadArgs{}),
+	"work_items_create":           argumentSchema(workItemCreateArgs{}),
+	"work_items_update":           argumentSchema(workItemUpdateArgs{}),
+	"work_items_close":            argumentSchema(workItemCloseArgs{}),
+	"work_items_reopen":           argumentSchema(workItemReopenArgs{}),
+	"work_items_link_task":        argumentSchema(workItemLinkArgs{}),
 	"conversation_read": `{
   "type":"object",
   "properties":{
@@ -78,6 +88,10 @@ var schemas = map[string]string{
 	"tasks_create": `{
   "type": "object",
   "properties": {
+    "work_item_id":{"type":"string","description":"Existing work item to continue. Omission creates a standalone concern; use an existing ID for follow-up."},
+    "work_item_revision":{"type":"integer","description":"The work item revision you read; creation links atomically under this revision."},
+    "stage_ids":{"type":"array","items":{"type":"string"},"description":"Existing stages this execution covers."},
+    "use_default_workspace":{"type":"boolean","description":"Explicitly reuse the item's verified default source task resource; otherwise use spec.workspace."},
     "title": {"type": "string"},
     "relations": ` + relationsSchema + `,
     "spec": ` + specSchema + `,

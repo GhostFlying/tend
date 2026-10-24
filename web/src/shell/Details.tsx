@@ -4,6 +4,7 @@ import type { TaskDetail, ArtifactView, AcceptanceView } from "../api/generated/
 import { useServices } from "../app/services.tsx";
 import { DecisionCard } from "../decisions/DecisionCard.tsx";
 import { currentWork } from "../tasks/facts.ts";
+import { WorkItemRef } from "../workitems/WorkItemRef.tsx";
 import { WorkspaceFacts } from "../tasks/WorkspaceFacts.tsx";
 import { ArtifactDelivery } from "../tasks/ArtifactDelivery.tsx";
 import { Markdown } from "../conversation/Markdown.tsx";
@@ -81,6 +82,13 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
           <span className={styles.badge}>{controlLabels[t.control_mode]}</span>
         )}
       </div>
+      {!!t.work_item_ids?.length && (
+        <Section title="所属工作项">
+          {t.work_item_ids.map((id) => (
+            <WorkItemRef key={id} id={id} />
+          ))}
+        </Section>
+      )}
       {t.block_reason !== "none" && (
         <Section title="当前阻塞">
           <p className={styles.problem}>{blockLabels[t.block_reason]}</p>

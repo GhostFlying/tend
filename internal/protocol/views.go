@@ -27,6 +27,7 @@ type TaskSummary struct {
 
 // TaskDetail is one task in full.
 type TaskDetail struct {
+	WorkItemIDs []string `json:"work_item_ids,omitempty"`
 	TaskSummary
 	CurrentArtifactID string             `json:"current_artifact_id,omitempty"`
 	Relations         []TaskRelationView `json:"relations,omitempty"`

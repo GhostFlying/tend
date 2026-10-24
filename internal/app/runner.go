@@ -134,6 +134,10 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
 		return protocol.Assignment{}, fmt.Errorf("app: decode spec of %s: %w", run.TaskID, err)
 	}
+	workerInput, err := workerSpec(spec, run.Role)
+	if err != nil {
+		return protocol.Assignment{}, fmt.Errorf("app: project worker spec: %w", err)
+	}
 	ws := protocol.AssignmentWorkspace{
 		Name: task.WorkspaceName, Branch: domain.TaskBranch(task.WorkspaceName), Profile: spec.Workspace.Profile,
 	}
@@ -172,7 +176,7 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		RunID: run.RunID, LeaseID: lease.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: run.TaskID,
 		ActionID: run.ActionID, Role: run.Role, Desired: desiredFor(run, action, task), Generation: run.Generation,
 		SpecVersion: action.TargetSpecVersion,
-		Spec:        json.RawMessage(specJSON), Workspace: ws,
+		Spec:        workerInput, Workspace: ws,
 	}
 	if err := assignmentQuestions(ctx, q, &as, run.HostID); err != nil {
 		return protocol.Assignment{}, err
@@ -182,7 +186,10 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		if err != nil {
 			return protocol.Assignment{}, err
 		}
-		as.Artifact = json.RawMessage(ref)
+		as.Artifact, err = acceptanceArtifact(ref, spec)
+		if err != nil {
+			return protocol.Assignment{}, fmt.Errorf("app: project acceptance artifact: %w", err)
+		}
 	}
 	if action.Kind == protocol.ActionImplement && action.Generation > 1 {
 		// A later generation should know what the last acceptance of this
@@ -262,6 +269,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	}
 	candidates, err := candidatesOf(rows)
 	if err != nil {
+		return Outcome{}, err
+	}
+	if err := applyWorkItemDependencies(ctx, q, candidates); err != nil {
 		return Outcome{}, err
 	}
 	pick, ok := scheduler.Pick(scheduler.Host{

@@ -29,10 +29,10 @@ export type OpOutcome =
 
 export async function runOp(
   sender: OpSender,
-  op: Omit<Envelope, "request_id">,
+  op: Omit<Envelope, "request_id"> & { request_id?: string },
   now: () => number = Date.now,
 ): Promise<OpOutcome> {
-  const envelope: Envelope = { ...op, request_id: newRequestId(now()) };
+  const envelope: Envelope = { ...op, request_id: op.request_id ?? newRequestId(now()) };
   let res: APIResponse;
   try {
     res = await sender.submit(envelope);

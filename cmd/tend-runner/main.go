@@ -44,6 +44,7 @@ func (p profile) gitws() gitws.Profile {
 
 // config is the runner's configuration file.
 type config struct {
+	DeliveryObserver deliveryObserverConfig `json:"delivery_observer"`
 	// ServerURL is tend's address, such as http://tend on the tailnet.
 	ServerURL            string `json:"server_url"`
 	HostID               string `json:"host_id"`
@@ -256,7 +257,12 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if (cfg.UpdaterSocket != "" || cfg.UpdaterControlSocket != "" || cfg.UpdaterBundleDir != "") && (cfg.UpdaterSocket == "" || cfg.UpdaterControlSocket == "" || cfg.UpdaterBundleDir == "") {
 		return errors.New("updater bridge, control socket and bundle directory must be configured together")
 	}
+	observer, providers, err := cfg.DeliveryObserver.build()
+	if err != nil {
+		return err
+	}
 	r := runner.New(runner.Config{
+		DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
 		InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: cfg.UpdaterSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,

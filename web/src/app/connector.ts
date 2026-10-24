@@ -65,6 +65,7 @@ export function startConnector(client: ApiClient, live: LiveData, onOnline: () =
   const wake = () => {
     if (document.visibilityState === "visible") {
       stream.wake();
+      live.workItems.refresh();
     }
   };
   window.addEventListener("online", wake);

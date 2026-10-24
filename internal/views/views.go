@@ -52,6 +52,13 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		return d, err
 	}
 	d.TaskSummary = Summary(row)
+	items, err := store.ListTaskWorkItems(ctx, q, taskID)
+	if err != nil {
+		return d, err
+	}
+	for _, item := range items {
+		d.WorkItemIDs = append(d.WorkItemIDs, item.WorkItemID)
+	}
 	d.CurrentArtifactID = row.CurrentArtifactID
 	if d.Relations, err = TaskRelations(ctx, q, taskID); err != nil {
 		return d, err

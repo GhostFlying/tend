@@ -29,6 +29,13 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 	}
 	var body strings.Builder
 	fmt.Fprintf(&body, "任务已完成：%s\n\n独立验收通过 · spec %d。\n\n产物：`%s`。", taskID, task.SpecVersion, task.CurrentArtifactID)
+	items, err := store.ListTaskWorkItems(ctx, tx.Q(), taskID)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		fmt.Fprintf(&body, "\n\n工作项：%s（%s）。本轮执行完成不代表后续跟进结束；请核对已有承诺、交付状态和下一步安排。", item.WorkItemID, item.Title)
+	}
 	for _, mount := range artifact.Mounts {
 		// Commit hashes are facts captured in the accepted artifact, not
 		// a claim about the current working tree or remote delivery.

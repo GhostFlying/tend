@@ -28,6 +28,10 @@ type Spec struct {
 	Deliverables []string `json:"deliverables,omitempty"`
 	// Inputs explicitly select original attachments; they never inherit implicitly.
 	Inputs []protocol.TaskInput `json:"inputs,omitempty"`
+	// SharedContext is frozen by the server, never copied from worker reports.
+	SharedContext []protocol.TaskWorkContext `json:"shared_context,omitempty"`
+	// ImplementationContext is visible only to the implementation role.
+	ImplementationContext string `json:"implementation_context,omitempty"`
 	// MaxImplementAttempts bounds implement generations for this version;
 	// zero means DefaultMaxImplementAttempts.
 	MaxImplementAttempts int64 `json:"max_implement_attempts,omitempty"`
@@ -117,7 +121,15 @@ func (s Spec) Budget() int64 {
 func (s Spec) Equal(o Spec) bool {
 	return s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
 		s.Budget() == o.Budget() && slices.Equal(s.Constraints, o.Constraints) && slices.Equal(s.Acceptance, o.Acceptance) &&
-		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements) && slices.Equal(s.Inputs, o.Inputs)
+		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements) && slices.Equal(s.Inputs, o.Inputs) &&
+		s.ImplementationContext == o.ImplementationContext && equalSharedContext(s.SharedContext, o.SharedContext)
+}
+
+func equalSharedContext(a, b []protocol.TaskWorkContext) bool {
+	return slices.EqualFunc(a, b, func(x, y protocol.TaskWorkContext) bool {
+		return x.WorkItemID == y.WorkItemID && x.Revision == y.Revision && x.Intent == y.Intent &&
+			slices.Equal(x.Constraints, y.Constraints) && slices.Equal(x.Facts, y.Facts)
+	})
 }
 
 // Task is the projection of a task that the rules operate on.

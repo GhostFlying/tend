@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import { workItemPage } from "./work-items-fixture.ts";
 // Real Chromium regression against the actual app and a generic owner API fixture.
 // Output is optional and must live outside the repository.
 import assert from "node:assert/strict";
@@ -122,19 +123,42 @@ const server = await createServer({
               fail ? 500 : 200,
             );
           }
+          if (path === "/api/v1/work-items")
+            return json(
+              res,
+              workItemPage(url.searchParams.get("project") || "sample-project", [
+                task("completed", "Completed sample 1", "sample-project"),
+              ]),
+            );
+          if (path.startsWith("/api/v1/tasks/")) {
+            const id = decodeURIComponent(path.split("/").at(-1)!);
+            const lifecycle = id.includes("cancelled") ? "cancelled" : "completed";
+            return json(res, {
+              ...task(lifecycle, `Unlinked historical ${lifecycle} page 2`, "sample-project"),
+              task_id: id,
+              runs: [],
+              artifacts: [],
+              acceptances: [],
+              decisions: [],
+            });
+          }
           if (path === "/api/v1/tasks") {
             const lifecycle =
               (url.searchParams.get("lifecycle")?.split(",").at(-1) as TaskSummary["lifecycle"]) ??
               "queued";
             const project = url.searchParams.get("project") || "sample-project";
             return json(res, {
-              tasks:
-                lifecycle === "completed"
+              tasks: url.searchParams.has("before")
+                ? [task(lifecycle, `Unlinked historical ${lifecycle} page 2`, project)]
+                : lifecycle === "completed"
                   ? Array.from({ length: 5 }, (_, i) =>
                       task("completed", `Completed sample ${i + 1}`, project),
                     )
                   : [task(lifecycle, `Sample ${lifecycle} task`, project)],
-              next: "",
+              next:
+                !url.searchParams.has("before") && ["completed", "cancelled"].includes(lifecycle)
+                  ? `page-2-${lifecycle}`
+                  : "",
             });
           }
           const views: Record<string, unknown> = {
@@ -212,12 +236,12 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "任务", exact: true })
+        .getByRole("button", { name: "工作项", exact: true })
         .click();
     const entry = page
       .locator(mobile ? "main" : "aside")
       .locator('button[aria-haspopup="dialog"]')
-      .filter({ hasText: "已注册仓库" });
+      .filter({ hasText: "已注册仓库", visible: true });
     await page.waitForFunction(() =>
       [...globalThis.document.querySelectorAll("button")].some(
         (b) =>
@@ -228,7 +252,8 @@ try {
     );
     await usable(entry, page);
     // Project filtering must not affect registration scope or count.
-    if (mobile) await page.getByRole("combobox", { name: "按项目筛选" }).fill("selected-project");
+    if (mobile)
+      await page.getByRole("combobox", { name: "按项目筛选工作项" }).fill("selected-project");
     const before = reads;
     await entry.click();
     const panel = page.getByRole("dialog", { name: "已注册仓库", exact: true });
@@ -294,18 +319,21 @@ try {
       // Both panels expanded with real task rows must leave usable board space.
       await usable(page.getByRole("button", { name: "Completed sample 5 已完成" }).last(), page);
       const queuedCard = page
-        .getByRole("region", { name: "待开始", exact: true })
-        .getByRole("button", { name: /Sample queued task/ });
+        .getByRole("region", { name: "待安排", exact: true })
+        .getByRole("button", { name: "Sample ongoing work item", exact: true });
       await usable(queuedCard, page);
-      const cardBox = await queuedCard.boundingBox();
-      assert(cardBox && cardBox.height >= 60, "expanded resources must not squeeze task cards");
+      const cardBox = await queuedCard.locator("..").boundingBox();
+      assert(
+        cardBox && cardBox.height >= 60,
+        "expanded resources must not squeeze work-item cards",
+      );
       const lastHost = page.getByRole("button", { name: "主机详情：host-l" }).last();
       await usable(lastHost, page);
       await lastHost.click();
       await page.getByRole("dialog", { name: "主机详情", exact: true }).waitFor();
       await page.getByRole("button", { name: "关闭主机详情" }).click();
       await usable(entry, page);
-      await usable(page.getByRole("region", { name: "分阶段任务看板" }), page);
+      await usable(page.getByRole("region", { name: "工作项白板" }), page);
       await summary.click();
       await recent.click();
       await page
@@ -321,12 +349,40 @@ try {
       await page.getByRole("dialog", { name: "设置", exact: true }).waitFor();
       await page.getByRole("button", { name: "关闭设置" }).click();
       const tabs = page.getByRole("navigation", { name: "视图" });
-      for (const name of ["对话", "待处理", "任务"]) {
+      for (const name of ["对话", "待处理", "工作项"]) {
         const tab = tabs.getByRole("button", { name, exact: true });
         await usable(tab, page);
         await tab.click();
       }
     }
+
+    if (!mobile) await page.getByRole("button", { name: "工作项 · 白板 ›", exact: true }).click();
+    // Historical tasks that predate work items must remain reachable and paginated.
+    await page
+      .locator("main header")
+      .getByRole("button", { name: "执行记录", exact: true })
+      .click();
+    await page.getByRole("heading", { name: "执行记录", exact: true }).waitFor();
+    const executions = page.getByRole("region", { name: "分阶段任务看板", exact: true });
+    for (const [lifecycle, label] of [
+      ["completed", "已完成"],
+      ["cancelled", "已取消"],
+    ] as const) {
+      const column = executions.getByRole("region", { name: label, exact: true });
+      const more = column.getByRole("button", { name: `加载更多${label}`, exact: true });
+      await more.scrollIntoViewIfNeeded();
+      await more.click();
+      const oldTask = column.getByRole("button", {
+        name: new RegExp(`Unlinked historical ${lifecycle} page 2`),
+      });
+      await oldTask.scrollIntoViewIfNeeded();
+      await oldTask.click();
+      const details = page.getByRole("region", { name: "任务详情", exact: true });
+      await details.getByText(`Unlinked historical ${lifecycle} page 2`, { exact: true }).waitFor();
+      await details.getByRole("button", { name: "关闭", exact: true }).click();
+    }
+    await page.getByRole("button", { name: "返回工作项", exact: true }).click();
+    await page.getByRole("region", { name: "工作项白板", exact: true }).waitFor();
 
     if (viewport.width === 390 && viewport.height === 844) {
       // Visible loading retains the last successful list; failures cannot become zero.
@@ -378,7 +434,7 @@ try {
       await page.reload();
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "任务", exact: true })
+        .getByRole("button", { name: "工作项", exact: true })
         .click();
       await entry.click();
       await panel.getByText("全部 30 个 · 含已退役仓库", { exact: true }).waitFor();
