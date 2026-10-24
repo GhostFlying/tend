@@ -205,3 +205,44 @@ func TestBothWorkerRolesExposeTaskInputDownload(t *testing.T) {
 		})
 	}
 }
+
+func TestBothWorkerRolesExposeNegotiatedOwnerQuestion(t *testing.T) {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		t.Run(string(role), func(t *testing.T) {
+			ws, servers := fakeWorkers(t)
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(context.Canceled)
+			called := false
+			w, err := ws.Start(ctx, harness.WorkerSpec{Role: role, Dir: "/w", Spec: json.RawMessage(`{}`), AskOwner: func(_ context.Context, p protocol.AskOwnerPayload) (protocol.WorkerQuestion, error) {
+				called = true
+				return protocol.WorkerQuestion{QuestionKey: p.QuestionKey, Status: "answered", Answer: json.RawMessage(`{"text":"continue"}`)}, nil
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := <-servers
+			var start ThreadStartParams
+			_ = json.Unmarshal(f.params(methodThreadStart), &start)
+			found := false
+			for _, tool := range start.DynamicTools {
+				if tool.Name == harness.AskOwnerTool {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("negotiated question tool missing")
+			}
+			f.send(map[string]any{"id": 8, "method": methodToolCall, "params": map[string]any{"threadId": "th_w", "turnId": "tu_w", "callId": "owner", "tool": harness.AskOwnerTool, "arguments": map[string]any{"question_key": "scope", "question": "Continue?", "evidence": "Investigated scope"}}})
+			<-f.answers
+			if !called {
+				t.Error("question callback not dispatched")
+			}
+			cancel(context.Canceled)
+			for range w.Events() {
+			}
+			if _, err := w.Wait(); !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+		})
+	}
+}

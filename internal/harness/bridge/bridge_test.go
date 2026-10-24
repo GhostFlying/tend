@@ -259,7 +259,7 @@ func TestInstallConfiguresTheAgent(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(wt, ".codex", "config.toml"))
 	want := configHeader + "\napproval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\ncheck_for_update_on_startup = false\n" +
 		"\n[mcp_servers.tend_worker]\ncommand = \"/opt/tend \\\"runner\\\"\"\nargs = [\"worker-mcp\", \"--state\", \"" + state + "\", \"--run\", \"run_1\"]\n" +
-		"default_tools_approval_mode = \"approve\"\n"
+		"default_tools_approval_mode = \"approve\"\ntool_timeout_sec = 604800\n"
 	if string(b) != want {
 		t.Errorf("config =\n%s\nwant\n%s", b, want)
 	}

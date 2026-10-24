@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -114,12 +115,21 @@ func (s *Server) serve(conn net.Conn) {
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
-	res := s.answer(req)
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+	disconnected := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, r)
+		cancel()
+		close(disconnected)
+	}()
+	defer func() { _ = conn.Close(); <-disconnected }()
+	res := s.answer(ctx, req)
 	b, _ := json.Marshal(res)
 	_, _ = conn.Write(append(b, '\n'))
 }
 
-func (s *Server) answer(req request) response {
+func (s *Server) answer(ctx context.Context, req request) response {
 	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(s.token)) != 1 {
 		return response{Error: "this run's token is required"}
 	}
@@ -138,18 +148,25 @@ func (s *Server) answer(req request) response {
 		if !known {
 			return response{Text: "there is no tool " + req.Name}
 		}
-		r := s.handle(s.ctx, harness.ToolCall{CallID: req.CallID, Tool: req.Name, Arguments: req.Arguments})
+		r := s.handle(ctx, harness.ToolCall{CallID: req.CallID, Tool: req.Name, Arguments: req.Arguments})
 		return response{Success: r.Success, Text: r.Text}
 	}
 	return response{Error: "unknown method " + req.Method}
 }
+
+// transportError identifies an uncertain socket exchange. Only durable owner
+// questions may be replayed automatically after such an error.
+type transportError struct{ err error }
+
+func (e *transportError) Error() string { return e.err.Error() }
+func (e *transportError) Unwrap() error { return e.err }
 
 // do sends one request to the socket at path.
 func do(ctx context.Context, path string, req request) (response, error) {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", path)
 	if err != nil {
-		return response{}, fmt.Errorf("bridge: the run's runner is not reachable: %w", err)
+		return response{}, &transportError{fmt.Errorf("bridge: the run's runner is not reachable: %w", err)}
 	}
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
@@ -159,11 +176,11 @@ func do(ctx context.Context, path string, req request) (response, error) {
 		return response{}, err
 	}
 	if _, err := conn.Write(append(b, '\n')); err != nil {
-		return response{}, fmt.Errorf("bridge: send: %w", err)
+		return response{}, &transportError{fmt.Errorf("bridge: send: %w", err)}
 	}
 	line, err := bufio.NewReader(conn).ReadBytes('\n')
 	if err != nil {
-		return response{}, fmt.Errorf("bridge: receive: %w", err)
+		return response{}, &transportError{fmt.Errorf("bridge: receive: %w", err)}
 	}
 	var res response
 	if err := json.Unmarshal(line, &res); err != nil {

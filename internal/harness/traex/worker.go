@@ -93,6 +93,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	if spec.DownloadFile != nil {
 		cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
 	}
+	if spec.AskOwner != nil {
+		cfg.Tools = append(cfg.Tools, harness.AskOwnerToolSpec)
+	}
 	th, err := ws.thread(ctx, s, spec, cfg)
 	if err != nil {
 		_ = s.Close()

@@ -843,6 +843,9 @@
         },
         "version": {
           "type": "integer"
+        },
+        "worker": {
+          "$ref": "#/definitions/WorkerQuestionSource"
         }
       },
       "required": [
@@ -2219,6 +2222,38 @@
       ],
       "title": "WorkerKind",
       "type": "string"
+    },
+    "WorkerQuestionSource": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "type": "string"
+        },
+        "question_key": {
+          "type": "string"
+        },
+        "question_message_id": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "role",
+        "spec_version",
+        "question_key",
+        "question_message_id"
+      ],
+      "title": "WorkerQuestionSource",
+      "type": "object"
     },
     "WorkspaceView": {
       "additionalProperties": false,

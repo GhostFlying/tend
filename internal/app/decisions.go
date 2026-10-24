@@ -153,6 +153,10 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		return Outcome{}, pe
 	}
+	sourceEvents, err := recordWorkerAnswerSource(ctx, x, tx, d, &p)
+	if err != nil {
+		return Outcome{}, err
+	}
 	effect, effectEvents, err := answerEffect(ctx, x, tx, d, p.Option)
 	if err != nil {
 		return Outcome{}, err
@@ -169,7 +173,7 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	}
 	events := append([]Event{{ObjectType: "decision", ObjectID: d.DecisionID, ObjectVersion: d.Version + 1, Kind: "decision.answered",
 		Body: map[string]any{"task_id": d.TaskID, "answer": json.RawMessage(answer)}}}, effectEvents...)
-	return Outcome{Result: answerResult(d, d.Version+1, answer, effect), Events: events}, nil
+	return Outcome{Result: answerResult(d, d.Version+1, answer, effect), Events: append(sourceEvents, events...)}, nil
 }
 
 func answerResult(d store.DecisionRow, version int64, answer []byte, effect *protocol.EffectResult) protocol.AnswerResult {

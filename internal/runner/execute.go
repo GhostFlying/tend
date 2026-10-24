@@ -221,8 +221,25 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return err
 		}
 	}
+	var askOwner func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
+	var questions []protocol.WorkerQuestion
+	if as.WorkerQuestions {
+		owner := &ownerQuestions{r: r, as: as, prepared: p}
+		questions, err = owner.recover(runCtx)
+		if err != nil {
+			return stopped(failed("owner_question_recovery_failed", err))
+		}
+		askOwner = func(ctx context.Context, payload protocol.AskOwnerPayload) (protocol.WorkerQuestion, error) {
+			callCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			stop := context.AfterFunc(runCtx, cancel)
+			defer stop()
+			return owner.ask(callCtx, payload)
+		}
+	}
 	w, err := r.cfg.Workers.Start(runCtx, harness.WorkerSpec{
 		RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
+		AskOwner: askOwner, Questions: questions,
 		UploadFile: func(ctx context.Context, path, name string) (protocol.ArtifactFile, error) {
 			return r.uploadFile(ctx, as, p, path, name)
 		},

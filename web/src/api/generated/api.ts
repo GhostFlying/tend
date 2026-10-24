@@ -109,6 +109,11 @@ export type RunObserved =
 export type TokenScope = "owner" | "agent";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunRole".
+ */
+export type RunRole = "implement" | "accept";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkerKind".
  */
 export type WorkerKind = "appserver" | "orca";
@@ -127,11 +132,6 @@ export type RelationDirection = "outgoing" | "incoming";
  * via the `definition` "TaskRelationKind".
  */
 export type TaskRelationKind = "follow_up" | "related";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunRole".
- */
-export type RunRole = "implement" | "accept";
 
 export interface TendAPI {
   APIResponse?: APIResponse;
@@ -661,6 +661,19 @@ export interface DecisionView {
   status: string;
   task_id?: string;
   version: number;
+  worker?: WorkerQuestionSource;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkerQuestionSource".
+ */
+export interface WorkerQuestionSource {
+  evidence?: string;
+  question_key: string;
+  question_message_id: string;
+  role: RunRole;
+  run_id: string;
+  spec_version: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

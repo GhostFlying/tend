@@ -110,8 +110,9 @@ type AcceptanceView struct {
 
 // DecisionView is a question for the owner.
 type DecisionView struct {
-	DecisionID string `json:"decision_id"`
-	TaskID     string `json:"task_id,omitempty"`
+	Worker     *WorkerQuestionSource `json:"worker,omitempty"`
+	DecisionID string                `json:"decision_id"`
+	TaskID     string                `json:"task_id,omitempty"`
 	// Project is the project of the task, in the snapshot.
 	Project  string          `json:"project,omitempty"`
 	Question string          `json:"question"`

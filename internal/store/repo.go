@@ -472,6 +472,7 @@ func (t *Tx) Release(ctx context.Context, name string) error {
 
 // DecisionRow is a question for the owner.
 type DecisionRow struct {
+	Worker            *protocol.WorkerQuestionSource
 	DecisionID        string
 	TaskID            string
 	Question          string
@@ -487,8 +488,9 @@ type DecisionRow struct {
 
 // Decision states.
 const (
-	DecisionOpen     = "open"
-	DecisionAnswered = "answered"
+	DecisionOpen      = "open"
+	DecisionAnswered  = "answered"
+	DecisionCancelled = "cancelled"
 )
 
 // GetDecision returns a decision, or ErrNotFound.
@@ -502,6 +504,16 @@ func GetDecision(ctx context.Context, q Querier, decisionID string) (DecisionRow
 		return DecisionRow{}, notFound(err, "decision "+decisionID)
 	}
 	d.TaskID, d.AskedMessageID, d.AnsweredMessageID, d.AnswerJSON = task.String, asked.String, answered.String, answer.String
+	w, workerErr := GetWorkerQuestionRow(ctx, q, decisionID)
+	if workerErr == nil {
+		run, err := GetRun(ctx, q, w.RunID)
+		if err != nil {
+			return DecisionRow{}, err
+		}
+		d.Worker = &protocol.WorkerQuestionSource{RunID: w.RunID, Role: run.Role, SpecVersion: w.SpecVersion, QuestionKey: w.QuestionKey, Evidence: w.Evidence, QuestionMessageID: d.AskedMessageID}
+	} else if !errors.Is(workerErr, ErrNotFound) {
+		return DecisionRow{}, workerErr
+	}
 	return d, nil
 }
 

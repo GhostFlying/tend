@@ -1,4 +1,5 @@
-// Answering a decision from a button (D71). An option tend carries out
+// Answering a decision from a button (D71, D89). Worker answers go directly
+// to their original decision. An option tend carries out
 // itself goes to decisions.respond, and tend records the answer and does
 // it in one transaction. Any other option becomes a conversation message
 // linked to the decision, which the main agent reads, records with
@@ -17,12 +18,17 @@ export async function answer(
   d: DecisionView,
   option: string,
   taskTitle: string | undefined,
-): Promise<void> {
+  text?: string,
+): Promise<boolean> {
+  const reply = text?.trim();
+  if (!option && !reply) {
+    return false;
+  }
   const effect = effectOf(d, option);
-  if (!effect) {
+  if (!effect && !d.worker) {
     if (!s.queue) {
       notify("这个浏览器不能保存待发送的消息，请在对话里回答", "warn");
-      return;
+      return false;
     }
     const lastSeq = s.live.conversation.get().items.at(-1)?.seq;
     await s.queue.enqueue({
@@ -30,17 +36,25 @@ export async function answer(
       decision: { decision_id: d.decision_id, version: d.version, option },
       ...(lastSeq ? { lastSeenSeq: lastSeq } : {}),
     });
-    return;
+    return true;
   }
   const outcome = await runOp(s.client, {
     operation: "decisions.respond",
     target: { type: "decision", id: d.decision_id },
-    payload: { version: d.version, option },
+    payload: {
+      version: d.version,
+      ...(option ? { option } : {}),
+      ...(reply ? { text: reply } : {}),
+    },
   });
   switch (outcome.kind) {
     case "done": {
       const result = outcome.result as AnswerResult | undefined;
-      const label = effectLabels[effect];
+      if (d.worker) {
+        notify("回答已发送给 worker");
+        break;
+      }
+      const label = effect ? effectLabels[effect] : option;
       if (result?.effect && !result.effect.applied) {
         const why = result.effect.reason ? `：${result.effect.reason}` : "";
         notify(`回答已记下，但 tend 没有执行「${label}」${why}`, "warn");
@@ -53,7 +67,10 @@ export async function answer(
       notify("这个待决事项已经变了，已重新读取", "warn");
       break;
     case "refused":
-      notify(`tend 没有接受「${optionLabel(d, option)}」：${outcome.message}`, "warn");
+      notify(
+        `tend 没有接受${option ? `「${optionLabel(d, option)}」` : "这条回答"}：${outcome.message}`,
+        "warn",
+      );
       break;
     case "unknown":
       notify(outcome.message, "warn");
@@ -63,6 +80,7 @@ export async function answer(
   if (d.task_id && s.live.detail.get()?.taskId === d.task_id) {
     void s.live.refreshDetail();
   }
+  return outcome.kind === "done";
 }
 
 /**

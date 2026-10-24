@@ -174,6 +174,9 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		SpecVersion: action.TargetSpecVersion,
 		Spec:        json.RawMessage(specJSON), Workspace: ws,
 	}
+	if err := assignmentQuestions(ctx, q, &as, run.HostID); err != nil {
+		return protocol.Assignment{}, err
+	}
 	if action.Kind == protocol.ActionAccept {
 		ref, err := store.GetArtifactRef(ctx, q, action.TargetArtifactID)
 		if err != nil {
@@ -342,7 +345,10 @@ func (Hello) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
 	if err := checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, true); err != nil {
 		return err
 	}
-	return checkInputRunRecovery(ctx, q, x.Principal.Subject, p.Runtime)
+	if err := checkInputRunRecovery(ctx, q, x.Principal.Subject, p.Runtime); err != nil {
+		return err
+	}
+	return checkQuestionRunRecovery(ctx, q, x.Principal.Subject, p.Runtime)
 }
 
 // Apply implements Command.

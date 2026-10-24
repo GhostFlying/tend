@@ -14,6 +14,9 @@ type WorkerScript struct {
 	Events []harness.WorkerEvent
 	Result harness.WorkerResult
 	Err    error
+	// Act exercises a worker callback after its events, with the worker's
+	// lifetime context. An error ends the worker before its scripted result.
+	Act func(context.Context) error
 	// Gate, when set, holds the worker after its events until the gate is
 	// closed or the worker is stopped.
 	Gate <-chan struct{}
@@ -77,6 +80,15 @@ func (w *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.W
 			case <-ctx.Done():
 				fw.err = ctx.Err()
 				w.recordStop(spec)
+				return
+			}
+		}
+		if script.Act != nil {
+			if err := script.Act(ctx); err != nil {
+				fw.err = err
+				if ctx.Err() != nil {
+					w.recordStop(spec)
+				}
 				return
 			}
 		}

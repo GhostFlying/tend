@@ -92,6 +92,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/artifacts/{sha}", s.releaseFile)
 	mux.HandleFunc("POST /runner/v1/files", s.uploadFile)
 	mux.HandleFunc("GET /runner/v1/files/{id}", s.downloadFile)
+	mux.HandleFunc("GET /runner/v1/questions", s.questions)
+	mux.HandleFunc("GET /runner/v1/questions/{id}", s.questions)
 	return mux
 }
 
@@ -215,6 +217,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 // runCommands are the operations a run performs through the ledger.
 var runCommands = map[string]app.Command{
+	protocol.OpRunsAskOwner:         app.AskOwner{},
 	protocol.OpWorkspaceReconcile:   app.ReconcileWorkspaces{},
 	protocol.OpWorkspaceRelease:     app.ReleaseWorkspace{},
 	protocol.OpWorkspaceCleanup:     app.ReserveWorkspaceCleanup{},
