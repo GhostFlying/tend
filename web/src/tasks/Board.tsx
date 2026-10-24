@@ -1,3 +1,4 @@
+import { RepositoryEntry } from "../repos/Repositories.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 import { useEffect, useId } from "react";
 import type { Connection } from "../api/client.ts";
@@ -55,11 +56,13 @@ export function TaskBoard({
   connection,
   onChat,
   onSettings,
+  onRepos,
 }: {
   active: boolean;
   connection: Connection;
   onChat(): void;
   onSettings(): void;
+  onRepos(): void;
 }) {
   const { live } = useServices();
   const snapshot = useStore(live.snapshot);
@@ -70,7 +73,7 @@ export function TaskBoard({
     else live.tasks.close();
   }, [live, active]);
   return (
-    <>
+    <div className={styles.page}>
       <header className={styles.head}>
         <button type="button" className={controls.chipBtn} onClick={onChat}>
           <Back width={14} height={14} />
@@ -114,9 +117,12 @@ export function TaskBoard({
       </header>
       <UpgradeBanner connection={connection} />
       <div className={styles.mobileRecent}>
+        <RepositoryEntry onOpen={onRepos} />
         <details>
           <summary>最近完成</summary>
-          <RecentTasks />
+          <div className={styles.mobileList}>
+            <RecentTasks />
+          </div>
         </details>
         <details>
           <summary>
@@ -124,7 +130,9 @@ export function TaskBoard({
             {!!snapshot?.hosts?.filter(hostMaintaining).length &&
               ` · ${snapshot.hosts.filter(hostMaintaining).length} 台维护`}
           </summary>
-          <Hosts connection={connection} />
+          <div className={styles.mobileList}>
+            <Hosts connection={connection} />
+          </div>
         </details>
       </div>
       <div className={styles.board} role="region" aria-label="分阶段任务看板" tabIndex={0}>
@@ -132,7 +140,7 @@ export function TaskBoard({
           <Column key={stage.id} title={stage.title} feed={live.tasks.columns[i]!} />
         ))}
       </div>
-    </>
+    </div>
   );
 }
 function Column({ title, feed }: { title: string; feed: TaskFeed }) {

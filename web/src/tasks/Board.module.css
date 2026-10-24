@@ -1,3 +1,10 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
 .head {
   display: flex;
   flex-wrap: wrap;
@@ -136,6 +143,9 @@
   display: none;
 }
 @media (max-width: 760px) {
+  .page {
+    overflow-y: auto;
+  }
   .head {
     padding-top: calc(12px + env(safe-area-inset-top));
     gap: 8px;
@@ -144,6 +154,8 @@
     font-size: var(--text-l);
   }
   .board {
+    min-height: 240px;
+    flex-shrink: 0;
     padding: 10px;
     gap: 10px;
   }
@@ -157,8 +169,6 @@
     padding: 8px 16px;
     font-size: var(--text-s);
     border-bottom: 1px solid var(--border-soft);
-    max-height: 180px;
-    overflow: auto;
     flex: none;
   }
 }
@@ -179,4 +189,14 @@
   .head > .settings {
     display: inline-flex;
   }
+}
+
+.mobileRecent > button {
+  flex-basis: 100%;
+  flex-shrink: 0;
+}
+.mobileList {
+  max-height: min(180px, 25dvh);
+  overflow-y: auto;
+  min-width: 0;
 }

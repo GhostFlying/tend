@@ -250,3 +250,11 @@ func intParam(v string) (int64, error) {
 	}
 	return n, nil
 }
+
+// repos reads all registrations, without project filtering or runner secrets.
+func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		repos, err := views.RegisteredRepos(r.Context(), q)
+		return protocol.RepoRegistry{Repos: repos}, err
+	})
+}

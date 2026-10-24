@@ -16,6 +16,7 @@ import { Chat } from "./Chat.tsx";
 import { Details } from "./Details.tsx";
 import styles from "./Shell.module.css";
 import { TaskBoard } from "../tasks/Board.tsx";
+import { Repositories } from "../repos/Repositories.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { TabBar, type View } from "./TabBar.tsx";
 
@@ -32,6 +33,27 @@ export function Shell({
 }) {
   const [upgradeId, setUpgradeId] = useState<string | null>(null);
   const upgradeFocus = useRef<HTMLElement | null>(null);
+  const [reposOpen, setReposOpen] = useState(false);
+  const reposFocus = useRef<HTMLElement | null>(null);
+  const showRepos = () => {
+    reposFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setReposOpen(true);
+  };
+  const closeRepos = () => {
+    setReposOpen(false);
+    queueMicrotask(() => reposFocus.current?.isConnected && reposFocus.current.focus());
+  };
+  useEffect(() => {
+    live.repos.setConnected(connection.status === "online");
+  }, [live, connection.status]);
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "visible") void live.repos.refresh();
+    };
+    document.addEventListener("visibilitychange", refresh);
+    return () => document.removeEventListener("visibilitychange", refresh);
+  }, [live]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsFocus = useRef<HTMLElement | null>(null);
   const showSettings = () => {
@@ -121,6 +143,7 @@ export function Shell({
             connection={connection}
             onBoard={showBoard}
             onSettings={showSettings}
+            onRepos={showRepos}
           />
         </aside>
         <main className={styles.chat}>
@@ -134,6 +157,7 @@ export function Shell({
                 connection={connection}
                 onChat={showChat}
                 onSettings={showSettings}
+                onRepos={showRepos}
               />
             </div>
           )}
@@ -163,6 +187,7 @@ export function Shell({
           }}
         />
       )}
+      {reposOpen && <Repositories connection={connection} onClose={closeRepos} />}
       {settingsOpen && <Handoff connection={connection} onClose={closeSettings} />}
     </ServicesContext>
   );

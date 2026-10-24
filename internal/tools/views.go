@@ -122,10 +122,8 @@ func (s *Service) reposList(ctx context.Context, c Call) (any, error) {
 		return nil, err
 	}
 	type repoView struct {
-		Repo           string   `json:"repo"`
-		Retired        bool     `json:"retired,omitempty"`
+		protocol.RegisteredRepoView
 		BaseCandidates []string `json:"base_candidates,omitempty"`
-		Hosts          []string `json:"hosts"`
 	}
 	type hostView struct {
 		HostID string              `json:"host_id"`
@@ -151,16 +149,17 @@ func (s *Service) reposList(ctx context.Context, c Call) (any, error) {
 		if err != nil {
 			return err
 		}
+		registered, err := views.RegisteredRepos(ctx, q)
+		if err != nil {
+			return err
+		}
+		out.Repos = make([]repoView, 0, len(registered))
+		candidates := make(map[string][]string, len(repos))
 		for _, r := range repos {
-			v := repoView{Repo: r.Repo, Retired: r.Retired, BaseCandidates: r.BaseCandidates, Hosts: []string{}}
-			for _, h := range hosts {
-				for _, name := range h.Repos {
-					if name == r.Repo {
-						v.Hosts = append(v.Hosts, h.HostID)
-					}
-				}
-			}
-			out.Repos = append(out.Repos, v)
+			candidates[r.Repo] = r.BaseCandidates
+		}
+		for _, r := range registered {
+			out.Repos = append(out.Repos, repoView{RegisteredRepoView: r, BaseCandidates: candidates[r.Repo]})
 		}
 		for _, h := range hosts {
 			out.Hosts = append(out.Hosts, hostView{h.HostID, h.OS, h.Labels, h.Worker})
