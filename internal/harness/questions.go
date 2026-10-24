@@ -28,7 +28,7 @@ func (r *Results) askOwner(ctx context.Context, call ToolCall) ToolResult {
 	}
 	question, err := r.Spec.AskOwner(ctx, payload)
 	if err != nil {
-		return ToolResult{Text: fmt.Sprintf("owner question did not finish: %v. If this run continues, reuse the same question_key and original content; do not create a replacement question.", err)}
+		return ToolResult{Text: fmt.Sprintf("owner question did not finish: %v. After an interruption or uncertain outcome, reuse the same question_key and original content. After a definitive rejection, correct the request with a new question_key.", err)}
 	}
 	body, err := json.Marshal(question)
 	if err != nil {

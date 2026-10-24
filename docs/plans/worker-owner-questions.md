@@ -14,6 +14,7 @@
 - 新增 worker_questions 关联表，保存 decision_id、run_id、action_id、spec_version、question_key、payload hash 和证据。问题与答案复用既有 decisions，保留来源消息、问题/答案的关联；不引入话题/tab 模型。
 - 创建问题带 request_id，由 app 在一个事务内持久化去重、关联、事件及通知。run 身份仅能问/读自己的问题；已结束、取消或 spec/action 失效的 run 不得继续。普通暂停保留问答以便恢复。
 - 通过可取消、有界长轮询取得答案，不占数据库事务等待，不消费答案。服务器/runner 重启或回执丢失不重复创建问题，不把未收到答案解释成默认同意。
+- 服务端明确拒绝的创建请求保存终态回执，恢复时不再作为未完成提问阻塞原 run；网络中断、取消等待及未知结果不算拒绝，仍保留原请求身份对账。Bridge 关闭时不把取消回调伪装为业务失败，等待中的幂等提问按传输断开续接。
 - Assignment 协商是否支持 worker 提问，新 runner 在旧 server 上不暴露该工具；旧 runner 恢复带问题的 run 时不得静默忽略问答。评估所有线上字段，保持旧有效请求语义；若无法通过可选协商兼容，则按协议规范递增版本。
 
 ## Runner 与 harness
