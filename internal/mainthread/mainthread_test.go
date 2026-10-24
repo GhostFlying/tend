@@ -140,10 +140,18 @@ func eventually(t *testing.T, what string, cond func() bool) {
 var spec = domain.Spec{Goal: "fix the build", Acceptance: []string{"build passes"}, Delivery: domain.DeliveryCommit,
 	Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}}}
 
-func TestThreadConfigWritesOnlyInCwd(t *testing.T) {
+func TestThreadConfigDelegatesExecution(t *testing.T) {
 	cfg := ThreadConfig("/agent", "")
-	if cfg.Sandbox != "workspace-write" || cfg.ApprovalPolicy != "on-request" || cfg.ApprovalsReviewer != "auto_review" {
+	if cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never" {
 		t.Errorf("sandbox %q, approvals %q by %q", cfg.Sandbox, cfg.ApprovalPolicy, cfg.ApprovalsReviewer)
+	}
+	for _, feature := range []string{"features.shell_tool", "features.apply_patch_freeform", "features.code_mode", "features.js_repl", "features.multi_agent", "features.multi_agent_v2"} {
+		if cfg.Config[feature] != false {
+			t.Errorf("execution feature %s = %v", feature, cfg.Config[feature])
+		}
+	}
+	if cfg.Config["web_search"] != "disabled" {
+		t.Error("research must be delegated")
 	}
 	// The owner's configuration may add writable roots for their own
 	// sessions; the hosted thread must not inherit them.

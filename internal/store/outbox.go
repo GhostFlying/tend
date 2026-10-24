@@ -41,8 +41,17 @@ func scanOutbox(row interface{ Scan(...any) error }) (OutboxMessage, error) {
 // that still awaits delivery, whether or not it is due. Failed and unknown messages do not
 // hold back the ones behind them.
 func HeadOutbox(ctx context.Context, q Querier, destination string) (OutboxMessage, error) {
+	return HeadOutboxPrioritized(ctx, q, destination, "")
+}
+
+// HeadOutboxPrioritized keeps in-flight work first, then foreground work,
+// then backgroundOperation. Each group retains commit order. An empty
+// backgroundOperation preserves the normal destination FIFO.
+func HeadOutboxPrioritized(ctx context.Context, q Querier, destination, backgroundOperation string) (OutboxMessage, error) {
 	m, err := scanOutbox(q.QueryRowContext(ctx, `SELECT `+outboxColumns+` FROM outbox
-		WHERE destination = ? AND status IN ('pending', 'sending') ORDER BY seq LIMIT 1`, destination))
+		WHERE destination = ? AND status IN ('pending', 'sending')
+		ORDER BY CASE WHEN status = 'sending' THEN 0 ELSE 1 END,
+		CASE WHEN operation = ? THEN 1 ELSE 0 END, seq LIMIT 1`, destination, backgroundOperation))
 	if err != nil {
 		return OutboxMessage{}, notFound(err, "outbox head")
 	}

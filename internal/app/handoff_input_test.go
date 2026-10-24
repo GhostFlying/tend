@@ -10,6 +10,46 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
+func TestSummaryInputPreservesUnknownBackgroundDeliveryState(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	if _, err := h.app.BindMainThread(ctx, "main", "source", "schema", "source.rollout"); err != nil {
+		t.Fatal(err)
+	}
+	h.failImplementation()
+	delivery, _, ok, err := h.app.NextDelivery(ctx, MainThreadDestination)
+	if err != nil || !ok {
+		t.Fatalf("claim background turn: %v, %v", ok, err)
+	}
+	var wake HandleMessage
+	if err := json.Unmarshal(delivery.Payload, &wake); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.PutMainTurn(ctx, store.MainTurn{RequestID: delivery.RequestID, MessageID: wake.MessageID, ThreadID: "source", Status: store.TurnStarting}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.FinishDelivery(ctx, delivery, DeliveryResult{Outcome: Unknown, Reason: "turn start receipt was lost"}); err != nil {
+		t.Fatal(err)
+	}
+	input, err := h.app.HandoffSummaryInput(ctx, "main", 256<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observations []protocol.ConversationItem
+	if err := json.Unmarshal(input.Observations, &observations); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range observations {
+		if item.MessageID == wake.MessageID {
+			if item.Author != "system" || item.State != protocol.MessageUnknown {
+				t.Fatalf("summary lost unknown background status: %+v", item)
+			}
+			return
+		}
+	}
+	t.Fatal("summary omitted background delivery observation")
+}
+
 func TestSummaryInputIncludesServerOnlyNoticesAndCompleteDeltas(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

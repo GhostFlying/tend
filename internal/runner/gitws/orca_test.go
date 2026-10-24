@@ -58,6 +58,15 @@ func (o *fakeOrca) exec(_ context.Context, _ string, args []string) ([]byte, err
 			}
 		}
 		return []byte(`{"ok":false,"error":{"code":"not_found","message":"missing worktree"}}`), nil
+	case "worktree set":
+		selector := flag("--worktree")
+		for i := range o.worktrees {
+			if selector == "id:"+o.worktrees[i].ID {
+				o.worktrees[i].DisplayName = flag("--display-name")
+				return json.Marshal(map[string]any{"id": "r", "ok": true, "result": map[string]any{"worktree": o.worktrees[i]}})
+			}
+		}
+		return []byte(`{"ok":false,"error":{"code":"not_found","message":"missing worktree"}}`), nil
 	case "worktree create":
 		o.creates++
 		name, path := flag("--name"), filepath.Join(o.dir, flag("--name"))

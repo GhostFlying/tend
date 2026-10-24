@@ -221,6 +221,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 				return err
 			}
 			queued = len(out.Outbox) > 0
+			for _, event := range out.Events {
+				queued = queued || wakesMain(x.Principal, event.Kind)
+			}
 			applied = true
 		}
 		if err := tx.InsertRequest(ctx, rec); err != nil {
@@ -264,6 +267,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		}
 		if e.Kind == "task.completed" {
 			if err := recordCompletionNotice(ctx, x, tx, e.ObjectID, eventID); err != nil {
+				return err
+			}
+		}
+		if e.Kind != "task.completed" && wakesMain(x.Principal, e.Kind) {
+			if err := recordDecisionWake(ctx, x, tx, e, eventID); err != nil {
 				return err
 			}
 		}

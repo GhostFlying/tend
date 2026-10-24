@@ -15,7 +15,7 @@ import (
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
-func TestEndToEnd_CompletionNoticePersistsAndReachesNextContext(t *testing.T) {
+func TestEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T) {
 	srv := newServer(t, time.Minute)
 	agent := testkit.NewHarness()
 	type observed struct{ thread, packet string }
@@ -44,15 +44,16 @@ func TestEndToEnd_CompletionNoticePersistsAndReachesNextContext(t *testing.T) {
 	})
 	noticeEvent := events[len(events)-1]
 	notice := *noticeEvent.Item
-	if notice.Kind != protocol.ItemMessage || notice.ReplyTo != "" || notice.State != "" ||
+	if notice.Kind != protocol.ItemMessage || notice.ReplyTo != "" ||
 		!strings.Contains(notice.Body, commitSHA) || !strings.Contains(notice.Body, "spec 1") {
 		t.Fatalf("notice = %+v", notice)
 	}
-	eventually(t, "initial owner turn settles", func() bool {
-		return srv.count("SELECT COUNT(*) FROM main_turns WHERE status='completed'") == 1
+	eventually(t, "owner and automatic completion turn settle", func() bool {
+		return srv.count("SELECT COUNT(*) FROM main_turns WHERE status='completed'") == 2
 	})
-	if len(agent.Starts()) != 1 {
-		t.Fatal("completion automatically started a model turn")
+	starts := agent.Starts()
+	if len(starts) != 2 || starts[1].UserMessageID != notice.MessageID || !strings.Contains(starts[1].Text, "Tend ledger event") || !strings.Contains(starts[1].Text, "not an owner request") {
+		t.Fatalf("completion did not initiate exactly one system event turn: %+v", starts)
 	}
 	var completed protocol.TaskPage
 	if st := web.do("GET", "/api/v1/tasks?all=1&lifecycle=completed", nil, &completed); st != http.StatusOK || len(completed.Tasks) != 1 {
@@ -77,14 +78,24 @@ func TestEndToEnd_CompletionNoticePersistsAndReachesNextContext(t *testing.T) {
 	}
 	assertNotice(web)
 	first := <-injected
+	completion := <-injected
+	if !strings.Contains(completion.packet, "task.completed") || !strings.Contains(completion.packet, taskID) {
+		t.Fatalf("automatic turn missed completion facts: %s", completion.packet)
+	}
+	var replies int
+	for _, item := range web.conversation("").Items {
+		if item.Author == "main_agent" && item.ReplyTo == notice.MessageID {
+			replies++
+		}
+	}
+	if replies != 1 {
+		t.Fatalf("background replies bound to completion notice = %d, want 1", replies)
+	}
 	web.send(protocol.SubmitMessagePayload{Body: "read completion facts"})
 	eventually(t, "next owner turn settles", func() bool {
-		return srv.count("SELECT COUNT(*) FROM main_turns WHERE status='completed'") == 2
+		return srv.count("SELECT COUNT(*) FROM main_turns WHERE status='completed'") == 3
 	})
-	delta := <-injected
-	if !strings.Contains(delta.packet, "task.completed") || !strings.Contains(delta.packet, taskID) {
-		t.Fatalf("next turn missed completion facts: %s", delta.packet)
-	}
+	<-injected // The completion facts were already confirmed by the background turn.
 	n.stop()
 	srv = srv.restart()
 	srv.startMainThread(agent)
@@ -94,8 +105,8 @@ func TestEndToEnd_CompletionNoticePersistsAndReachesNextContext(t *testing.T) {
 	replayed := replay.until("same completion notice after restart", func(e protocol.LedgerEvent) bool {
 		return e.Item != nil && e.Item.MessageID == notice.MessageID
 	})
-	if replayed[len(replayed)-1].Item.Body != notice.Body || len(agent.Starts()) != 2 {
-		t.Fatal("restart changed the notice or started an automatic turn")
+	if replayed[len(replayed)-1].Item.Body != notice.Body || len(agent.Starts()) != 3 {
+		t.Fatal("restart changed the notice or replayed an automatic turn")
 	}
 	cb := contextbuilder.New(srv.app, srv.store, srv.ids, contextbuilder.Config{})
 	if err := cb.Invalidate(t.Context(), "main/"+first.thread); err != nil {
@@ -103,7 +114,7 @@ func TestEndToEnd_CompletionNoticePersistsAndReachesNextContext(t *testing.T) {
 	}
 	reloaded.send(protocol.SubmitMessagePayload{Body: "read rebuilt history"})
 	eventually(t, "rebuilt-context turn settles", func() bool {
-		return srv.count("SELECT COUNT(*) FROM main_turns WHERE status='completed'") == 3
+		return srv.count("SELECT COUNT(*) FROM main_turns WHERE status='completed'") == 4
 	})
 	full := <-injected
 	if !strings.Contains(full.packet, "system") || !strings.Contains(full.packet, notice.Body) {

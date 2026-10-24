@@ -56,8 +56,12 @@ type WorkspaceView struct {
 	Mounts       []MountView `json:"mounts"`
 }
 
-// MountView is how one mount of a workspace was laid out.
+// MountView records a logical mount and its resolved Git facts. Path is the
+// spec mount key, not necessarily a subdirectory of WorkspaceView.Path: the
+// Orca single-repository layout runs directly at that working directory.
 type MountView struct {
+	// Directory is the physical worktree, absent until a runner reports it.
+	Directory       string          `json:"directory,omitempty"`
 	Path            string          `json:"path"`
 	Repo            string          `json:"repo"`
 	Base            json.RawMessage `json:"base"`

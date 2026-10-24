@@ -279,15 +279,15 @@ func (w *worker) openBridge(ctx context.Context) error {
 	handle := w.results.Handle
 	if w.spec.Role == protocol.RoleAccept {
 		tools = []harness.ToolSpec{harness.VerdictToolSpec}
-		if w.spec.DownloadFile != nil {
-			tools = append(tools, harness.DownloadFileToolSpec)
-		}
 		handle = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
 			if c.Tool == harness.VerdictTool {
 				return w.verdicts.Handle(ctx, c)
 			}
 			return w.results.Handle(ctx, c)
 		}
+	}
+	if w.spec.DownloadFile != nil {
+		tools = append(tools, harness.DownloadFileToolSpec)
 	}
 	sock := filepath.Join(w.ws.opts.SocketDir, "tend-"+w.spec.RunID+".sock")
 	token := w.ws.opts.IDs.New(protocol.PrefixToken)

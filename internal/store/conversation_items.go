@@ -86,7 +86,7 @@ type ConversationRow struct {
 	Body      string
 	ReplyTo   string
 	CreatedAt int64
-	// State is the latest state recorded for an owner message, empty
+	// State is the latest state recorded for an owner or event message, empty
 	// when none was.
 	State             string
 	AssistantState    string

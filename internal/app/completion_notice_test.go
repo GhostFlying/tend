@@ -53,8 +53,8 @@ func TestCompletionNoticeIsAtomicAndNotRepeated(t *testing.T) {
 		if err := tx.Q().QueryRowContext(t.Context(), "SELECT COUNT(*) FROM outbox WHERE destination = 'main_thread'").Scan(&turns); err != nil {
 			return err
 		}
-		if turns != 0 {
-			t.Fatal("a completion notice queued an automatic model turn")
+		if turns != 1 {
+			t.Fatalf("completion event turns = %d, want 1", turns)
 		}
 		var notices int
 		if err := tx.Q().QueryRowContext(t.Context(), "SELECT COUNT(*) FROM events WHERE kind='conversation.message'").Scan(&notices); err != nil {
@@ -106,7 +106,7 @@ func TestNonPassingAcceptanceDoesNotAnnounceCompletion(t *testing.T) {
 			h := newHarness(t)
 			_, acc := h.toAcceptanceClaim()
 			h.runAs(acc, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: verdict}, SubmitAcceptance{})
-			if h.count("conversation_messages") != 0 {
+			if h.count("message_notices WHERE notice_type='task_completed'") != 0 {
 				t.Fatal("non-passing verdict announced completion")
 			}
 		})

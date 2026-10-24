@@ -78,10 +78,13 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
-	Protocol       int64  `json:"protocol,omitempty"`
-	RunID          string `json:"run_id"`
-	LeaseID        string `json:"lease_id"`
-	LeaseTTLMillis int64  `json:"lease_ttl_ms"`
+	// MountDirectories permits the optional physical-directory report field.
+	// Older servers omit this, so new runners retain their older request shape.
+	MountDirectories bool   `json:"mount_directories,omitempty"`
+	Protocol         int64  `json:"protocol,omitempty"`
+	RunID            string `json:"run_id"`
+	LeaseID          string `json:"lease_id"`
+	LeaseTTLMillis   int64  `json:"lease_ttl_ms"`
 	// RunToken authenticates the run's own requests. It is derived from
 	// the lease when the assignment is sent and never stored.
 	RunToken string  `json:"run_token,omitempty"`
@@ -208,6 +211,8 @@ type WorkspaceReport struct {
 
 // ResolvedMount is the fact of where one mount started.
 type ResolvedMount struct {
+	// Directory is the actual repository worktree location reported by the runner.
+	Directory       string `json:"directory,omitempty"`
 	Path            string `json:"path"`
 	ResolvedBaseSHA string `json:"resolved_base_sha"`
 	// ResolvedFrom names the explicit base or the candidate that matched,

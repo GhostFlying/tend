@@ -25,6 +25,8 @@ export const hostPhases: Record<string, string> = {
 };
 export const noticeTitles: Record<string, string> = {
   task_completed: "任务完成",
+  decision_opened: "需要决策",
+  decision_answered: "决策已回答",
   upgrade_started: "发布开始",
   upgrade_host_restored: "主机已恢复",
   upgrade_completed: "发布完成",

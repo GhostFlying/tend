@@ -161,3 +161,47 @@ func TestWorkerDoesNotStartAnUnrecordedThread(t *testing.T) {
 		t.Errorf("Start = %v, turn/start = %s", err, f.params(methodTurnStart))
 	}
 }
+
+func TestBothWorkerRolesExposeTaskInputDownload(t *testing.T) {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		t.Run(string(role), func(t *testing.T) {
+			ws, servers := fakeWorkers(t)
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(context.Canceled)
+			called := false
+			w, err := ws.Start(ctx, harness.WorkerSpec{Role: role, Dir: "/w", Spec: json.RawMessage(`{}`), DownloadFile: func(_ context.Context, id string) (string, error) {
+				called = true
+				if id != "file_input" {
+					return "", errors.New("wrong input")
+				}
+				return "/scratch/inputs/file_input", nil
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := <-servers
+			var start ThreadStartParams
+			_ = json.Unmarshal(f.params(methodThreadStart), &start)
+			found := false
+			for _, tool := range start.DynamicTools {
+				if tool.Name == "download_file" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s worker has no download_file: %s", role, f.params(methodThreadStart))
+			}
+			f.send(map[string]any{"id": 7, "method": methodToolCall, "params": map[string]any{"threadId": "th_w", "turnId": "tu_w", "callId": "download", "tool": "download_file", "arguments": map[string]any{"file_id": "file_input"}}})
+			<-f.answers
+			if !called {
+				t.Error("download tool callback was not dispatched")
+			}
+			cancel(context.Canceled)
+			for range w.Events() {
+			}
+			if _, err := w.Wait(); !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+		})
+	}
+}

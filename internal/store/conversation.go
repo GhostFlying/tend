@@ -58,6 +58,18 @@ func GetMessage(ctx context.Context, q Querier, messageID string) (MessageView, 
 	return m, nil
 }
 
+// HasMessageTurnOperation identifies a system message that actually initiated
+// a turn through the named outbox operation, including a turn already settled.
+func HasMessageTurnOperation(ctx context.Context, q Querier, messageID, operation string) (bool, error) {
+	var found bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_turns t JOIN outbox o ON o.request_id=t.request_id
+		WHERE t.message_id=? AND o.operation=?)`, messageID, operation).Scan(&found)
+	if err != nil {
+		return false, fmt.Errorf("store: read message turn operation: %w", err)
+	}
+	return found, nil
+}
+
 // BindMessage ties a message to an object it concerns. Binding twice is a
 // no-op.
 func (t *Tx) BindMessage(ctx context.Context, messageID, objectType, objectID, kind string) error {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -59,9 +60,13 @@ func schedulingHosts(ctx context.Context, q store.Querier) ([]scheduler.Host, er
 	}
 	out := make([]scheduler.Host, 0, len(rows))
 	for _, h := range rows {
+		runtime, err := store.GetHostRuntime(ctx, q, h.HostID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
 		out = append(out, scheduler.Host{
 			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots,
-			Worker: h.Worker.Capabilities(), WorkspaceProtocol: h.WorkspaceProtocol,
+			Worker: h.Worker.Capabilities(), WorkspaceProtocol: h.WorkspaceProtocol, TaskInputs: runtimeSupportsTaskInputs(&runtime.Runtime),
 		})
 	}
 	return out, nil
@@ -102,7 +107,7 @@ func candidatesOf(rows []store.CandidateRow) ([]scheduler.Candidate, error) {
 			Lifecycle: r.Lifecycle, Control: r.Control, Block: r.Block, SpecVersion: r.SpecVersion,
 			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Rating: r.Rating, Weight: r.Weight,
 			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(), Mounts: len(spec.Workspace.Mounts),
-			WorkspaceMode: spec.Workspace.ModeValue(), RequiresWorkspaceProtocol: spec.Workspace.ModeValue() != domain.WorkspaceNew || len(spec.Deliverables) > 0,
+			RequiresTaskInputs: len(spec.Inputs) > 0, WorkspaceMode: spec.Workspace.ModeValue(), RequiresWorkspaceProtocol: spec.Workspace.ModeValue() != domain.WorkspaceNew || len(spec.Deliverables) > 0,
 			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied, AbandonedHosts: r.AbandonedHosts,
 		})
 	}

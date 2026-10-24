@@ -39,7 +39,7 @@ export type Entry =
   | { kind: "owner"; key: string; item: ConversationItem }
   /** A message of this device that tend has not shown in the conversation yet. */
   | { kind: "outgoing"; key: string; message: OutgoingMessage }
-  /** What the main agent did for one owner message: tool uses and replies. */
+  /** What the main agent did for one owner message or ledger event: tool uses and replies. */
   | {
       kind: "agent";
       key: string;
@@ -57,7 +57,7 @@ export function buildEntries(
   outbox: readonly OutgoingMessage[],
 ): Entry[] {
   const entries: Entry[] = [];
-  const owners = new Map<string, ConversationItem>();
+  const triggers = new Map<string, ConversationItem>();
   let lastAt = 0;
   const stamp = (at: number, key: string) => {
     if (at - lastAt >= dividerGapMs || !sameDay(at, lastAt)) {
@@ -68,12 +68,13 @@ export function buildEntries(
   for (const it of items) {
     const at = Date.parse(it.created_at);
     if (it.author === "system") {
+      triggers.set(it.message_id, it);
       stamp(at, it.message_id);
       entries.push({ kind: "system", key: it.message_id, item: it });
       continue;
     }
     if (it.author === "owner") {
-      owners.set(it.message_id, it);
+      triggers.set(it.message_id, it);
       stamp(at, it.message_id);
       entries.push({ kind: "owner", key: it.message_id, item: it });
       continue;
@@ -91,14 +92,15 @@ export function buildEntries(
     if (e.kind !== "agent") {
       continue;
     }
-    const owner = owners.get(e.replyTo);
-    if (owner && owner.state !== "processing" && owner.state !== "queued") {
+    const trigger = triggers.get(e.replyTo);
+    if (trigger?.state && trigger.state !== "processing" && trigger.state !== "queued") {
       const at = Date.parse(e.items.at(-1)!.created_at);
-      const took = at - Date.parse(owner.created_at);
+      const took = at - Date.parse(trigger.created_at);
       // Streaming items keep their first-created timestamp, which cannot
       // tell how long the completed turn took.
       const streamed = e.items.some((it) => it.assistant_state !== undefined);
-      e.done = owner.state === "replied" && took >= 0 && !streamed ? { at, tookMs: took } : { at };
+      e.done =
+        trigger.state === "replied" && took >= 0 && !streamed ? { at, tookMs: took } : { at };
     }
   }
   const lastSeq = items.at(-1)?.seq ?? 0;
@@ -117,11 +119,11 @@ export function buildEntries(
   return entries;
 }
 
-/** The owner message whose turn is running, if any: the one a stop stops. */
+/** The owner message or ledger event whose turn is running, if any: the one a stop stops. */
 export function processing(items: readonly ConversationItem[]): ConversationItem | undefined {
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i]!;
-    if (it.author === "owner" && it.state === "processing") {
+    if ((it.author === "owner" || it.author === "system") && it.state === "processing") {
       return it;
     }
   }

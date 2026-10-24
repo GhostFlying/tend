@@ -282,6 +282,7 @@ func (t *Tx) SetWorkspaceStatus(ctx context.Context, workspaceID, status string,
 
 // MountFact is the recorded start of one mount.
 type MountFact struct {
+	Directory       string
 	Path            string
 	Repo            string
 	BaseJSON        string
@@ -294,8 +295,8 @@ type MountFact struct {
 // once; a second record for the same path is a unique violation.
 func (t *Tx) InsertMountFact(ctx context.Context, workspaceID string, m MountFact, now int64) error {
 	_, err := t.Exec(ctx, `INSERT INTO workspace_mounts (workspace_id, path, repo, base_json, resolved_base_sha, resolved_from,
-		branch, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		workspaceID, m.Path, m.Repo, m.BaseJSON, m.ResolvedBaseSHA, m.ResolvedFrom, m.Branch, now)
+		branch, directory, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		workspaceID, m.Path, m.Repo, m.BaseJSON, m.ResolvedBaseSHA, m.ResolvedFrom, m.Branch, m.Directory, now)
 	if err != nil {
 		return fmt.Errorf("store: insert mount fact: %w", err)
 	}
@@ -304,7 +305,7 @@ func (t *Tx) InsertMountFact(ctx context.Context, workspaceID string, m MountFac
 
 // ListMountFacts returns the recorded mounts of a workspace by path.
 func ListMountFacts(ctx context.Context, q Querier, workspaceID string) (map[string]MountFact, error) {
-	rows, err := q.QueryContext(ctx, `SELECT path, repo, base_json, resolved_base_sha, resolved_from, branch
+	rows, err := q.QueryContext(ctx, `SELECT path, repo, base_json, resolved_base_sha, resolved_from, branch, directory
 		FROM workspace_mounts WHERE workspace_id = ?`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list mount facts: %w", err)
@@ -313,7 +314,7 @@ func ListMountFacts(ctx context.Context, q Querier, workspaceID string) (map[str
 	out := map[string]MountFact{}
 	for rows.Next() {
 		var m MountFact
-		if err := rows.Scan(&m.Path, &m.Repo, &m.BaseJSON, &m.ResolvedBaseSHA, &m.ResolvedFrom, &m.Branch); err != nil {
+		if err := rows.Scan(&m.Path, &m.Repo, &m.BaseJSON, &m.ResolvedBaseSHA, &m.ResolvedFrom, &m.Branch, &m.Directory); err != nil {
 			return nil, fmt.Errorf("store: scan mount fact: %w", err)
 		}
 		out[m.Path] = m
@@ -360,4 +361,17 @@ func CountOpenRunsOnRetiredHosts(ctx context.Context, q Querier) (int64, error) 
 		return 0, fmt.Errorf("store: count retired host runs: %w", err)
 	}
 	return n, nil
+}
+
+// RecordMountDirectory adds a physical location without erasing it when an older
+// runner reports only the original logical mount fields.
+func (t *Tx) RecordMountDirectory(ctx context.Context, workspaceID, path, directory string) error {
+	if directory == "" {
+		return nil
+	}
+	_, err := t.Exec(ctx, `UPDATE workspace_mounts SET directory=? WHERE workspace_id=? AND path=?`, directory, workspaceID, path)
+	if err != nil {
+		return fmt.Errorf("store: record mount directory: %w", err)
+	}
+	return nil
 }

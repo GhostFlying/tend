@@ -104,3 +104,57 @@ func TestReuseBaselinePreservesDirtyGitWorktree(t *testing.T) {
 		t.Fatalf("missing reused checkout = %v", err)
 	}
 }
+
+func TestReportedMountDirectoryUsesPhysicalLayoutAndSurvivesReuse(t *testing.T) {
+	for _, layout := range []string{"nested", "orca"} {
+		t.Run(layout, func(t *testing.T) {
+			var f *fixture
+			if layout == "orca" {
+				f, _ = newOrcaFixture(t)
+			} else {
+				f = newFixture(t, nil)
+			}
+			as := f.implement()
+			as.Workspace.ID = "ws_directory"
+			as.Spec = json.RawMessage(`{"deliverables":["report"]}`)
+			p := f.prepare(as)
+			want := filepath.Join(p.Dir, "tend")
+			if layout == "orca" {
+				want = p.Dir
+			}
+			check := func(mounts []protocol.ResolvedMount) {
+				t.Helper()
+				if len(mounts) != 1 || mounts[0].Path != "tend" || mounts[0].Directory != want {
+					t.Fatalf("logical and physical paths conflated: %+v, want directory %s", mounts, want)
+				}
+				if _, err := os.Stat(filepath.Join(mounts[0].Directory, ".git")); err != nil {
+					t.Fatalf("reported directory is not the checkout: %v", err)
+				}
+			}
+			check(p.Report.Mounts)
+			// The acceptance role reopens the same location, but must not emit
+			// a second implementation mount-resolution report.
+			write(t, filepath.Join(want, "evidence.txt"), "checked physical directory\n")
+			artifact, err := f.ws.Collect(t.Context(), as)
+			if err != nil {
+				t.Fatal(err)
+			}
+			acceptance := as
+			acceptance.Role, acceptance.RunID = protocol.RoleAccept, "run_accept"
+			acceptance.Artifact, _ = json.Marshal(artifact)
+			accepted := f.prepare(acceptance)
+			if accepted.Dir != p.Dir || len(accepted.Report.Mounts) != 0 {
+				t.Fatalf("acceptance location/report changed: %+v", accepted)
+			}
+			// A follow-up carries the resource identity and physical checkout,
+			// even when a different task takes over the resource.
+			as.TaskID, as.RunID = "task_followup", "run_followup"
+			as.Workspace.Reused, as.Workspace.Path = true, p.Dir
+			followup := f.prepare(as)
+			check(followup.Report.Mounts)
+			if followup.Dir != p.Dir {
+				t.Fatalf("reuse moved workspace: %s -> %s", p.Dir, followup.Dir)
+			}
+		})
+	}
+}

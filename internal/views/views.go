@@ -123,7 +123,7 @@ func workspace(ctx context.Context, q store.Querier, taskID string) (*protocol.W
 	for _, path := range slices.Sorted(maps.Keys(facts)) {
 		m := facts[path]
 		v.Mounts = append(v.Mounts, protocol.MountView{
-			Path: m.Path, Repo: m.Repo, Base: json.RawMessage(m.BaseJSON), ResolvedBaseSHA: m.ResolvedBaseSHA, ResolvedFrom: m.ResolvedFrom, Branch: m.Branch,
+			Directory: m.Directory, Path: m.Path, Repo: m.Repo, Base: json.RawMessage(m.BaseJSON), ResolvedBaseSHA: m.ResolvedBaseSHA, ResolvedFrom: m.ResolvedFrom, Branch: m.Branch,
 		})
 	}
 	return v, nil
@@ -392,6 +392,10 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 	case r.Author == "owner" && r.State == "":
 		it.State = protocol.MessageQueued
 	case r.Author == "owner":
+		it.State = protocol.MessageState(r.State)
+	case r.Author == "system" && r.State != "":
+		// Only notices that initiated an event turn have a recorded state.
+		// Other system notices remain facts without a queued/processing state.
 		it.State = protocol.MessageState(r.State)
 	}
 	if r.DecisionJSON != "" {

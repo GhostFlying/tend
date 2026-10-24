@@ -86,6 +86,9 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	}
 	p.Spec.Workspace = ws
 	p.Spec = p.Spec.Normalize()
+	if err := freezeTaskInputs(ctx, tx.Q(), &p.Spec); err != nil {
+		return Outcome{}, err
+	}
 	if err := checkWorkspaceProtocol(ctx, tx.Q(), p.Spec); err != nil {
 		return Outcome{}, err
 	}
@@ -204,6 +207,9 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		}
 		p.Spec.Workspace = ws
 		*p.Spec = p.Spec.Normalize()
+		if err := freezeTaskInputs(ctx, tx.Q(), p.Spec); err != nil {
+			return Outcome{}, err
+		}
 		if err := checkWorkspaceProtocol(ctx, tx.Q(), *p.Spec); err != nil {
 			return Outcome{}, err
 		}

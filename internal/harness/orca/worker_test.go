@@ -901,3 +901,39 @@ func TestDirectoryWorkerSubmitsReportThroughPrivateBridge(t *testing.T) {
 		t.Fatalf("bridge credentials remain: %v", err)
 	}
 }
+
+func TestOrcaBothWorkerRolesDownloadTaskInputsThroughBridge(t *testing.T) {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		t.Run(string(role), func(t *testing.T) {
+			f := newWorkerFixture(t)
+			spec := f.spec(role)
+			called := false
+			spec.DownloadFile = func(_ context.Context, id string) (string, error) {
+				called = true
+				if id != "file_input" {
+					return "", errors.New("wrong input")
+				}
+				return "/scratch/inputs/file_input", nil
+			}
+			w, _, drained := f.start(t.Context(), spec)
+			state, err := bridge.StatePath(t.Context(), f.dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			in := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n" +
+				`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"download_file","arguments":{"file_id":"file_input"}}}` + "\n"
+			if err := bridge.ServeMCP(t.Context(), state, spec.RunID, strings.NewReader(in), &out); err != nil || strings.Contains(out.String(), "isError") || !strings.Contains(out.String(), `"name":"download_file"`) || !strings.Contains(out.String(), "/scratch/inputs/file_input") || !called {
+				t.Errorf("download bridge = %s, %v", out.String(), err)
+			}
+			if role == protocol.RoleAccept {
+				f.submit(protocol.VerdictPassed)
+			}
+			f.orca.finish("term_1", "downloaded input")
+			if _, err := w.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			<-drained
+		})
+	}
+}

@@ -316,6 +316,12 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 	agent := testkit.NewHarness()
 	agent.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		ctx := context.Background()
+		if strings.HasPrefix(in.Text, "[Tend ledger event ") {
+			// A ledger notification is not another request to ship a release.
+			// The fake model acknowledges it without inventing a new question.
+			th.Say(turn, "item_"+turn, "The decision state changed; no new owner instruction.")
+			return "completed"
+		}
 		if m := chosen.FindStringSubmatch(in.Text); m != nil {
 			version, _ := strconv.Atoi(m[3])
 			res := th.CallTool(ctx, turn, "call_"+turn, "decisions_resolve", map[string]any{"decision_id": m[2], "version": version, "option": m[1]})
@@ -385,6 +391,23 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 	}
 	if n := srv.count(`SELECT COUNT(*) FROM decisions WHERE decision_id = ? AND json_extract(answer_json, '$.option') = 'release/1.x'`, q.DecisionID); n != 1 {
 		t.Errorf("decisions answered with the chosen option = %d, want 1", n)
+	}
+	// Rule-opened and owner-answered decisions wake the model once each.
+	// The hosted model's own open/resolve calls do not wake it again.
+	eventually(t, "two owner and two background turns settle", func() bool {
+		return srv.count("SELECT COUNT(*) FROM main_turns WHERE status='completed'") == 4
+	})
+	if len(agent.Starts()) != 4 || srv.count("SELECT COUNT(*) FROM decisions") != 2 || srv.count("SELECT COUNT(*) FROM outbox WHERE operation='main_thread.handle_event'") != 2 {
+		t.Fatal("decision coordination duplicated a question or woke itself")
+	}
+	var sawAppliedAnswer bool
+	for _, start := range agent.Starts() {
+		if strings.Contains(start.Text, "decision.answered") && strings.Contains(start.Text, `"effect":"cancel"`) && strings.Contains(start.Text, `"applied":true`) {
+			sawAppliedAnswer = true
+		}
+	}
+	if !sawAppliedAnswer {
+		t.Fatal("background answer turn omitted the canonical applied cancellation result")
 	}
 }
 

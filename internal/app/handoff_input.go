@@ -79,6 +79,8 @@ func (a *App) HandoffSummaryInput(ctx context.Context, instance string, maxBytes
 					if row.State == "" {
 						it.State = protocol.MessageQueued
 					}
+				} else if row.Author == "system" && row.State != "" {
+					it.State = protocol.MessageState(row.State)
 				}
 				if row.DecisionJSON != "" {
 					var choice protocol.DecisionChoice

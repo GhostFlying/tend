@@ -169,6 +169,11 @@ export function SystemMessage({ item }: { item: ConversationItem }) {
         {title} <time dateTime={item.created_at}>{clock(Date.parse(item.created_at))}</time>
       </div>
       <Markdown text={item.body ?? ""} />
+      {item.state && (
+        <div className={styles.state} data-state={item.state} role="status">
+          {messageStateLabels[item.state]}
+        </div>
+      )}
       {item.upgrade_id && (
         <button type="button" onClick={() => openUpgrade(item.upgrade_id!)}>
           查看发布详情

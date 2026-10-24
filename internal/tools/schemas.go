@@ -13,6 +13,7 @@ const specSchema = `{
     "acceptance": {"type": "array", "items": {"type": "string"}, "description": "Checks an independent reviewer applies. Required before work can start."},
     "delivery": {"type": "string", "enum": ["commit"], "description": "Legacy commit-only output. Prefer deliverables for new tasks."},
     "deliverables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["commit", "report", "files"]}, "description": "Required outputs, independently accepted. Combine commit/report/files as needed; report does not require Git changes."},
+    "inputs": {"type":"array","description":"Explicit original attachment inputs for both implementation and acceptance. Pass file_id from conversation attachments or a prior task input; metadata is frozen by the server. Follow-up relations do not inherit inputs.","items":{"type":"object","properties":{"file_id":{"type":"string"},"name":{"type":"string"},"media_type":{"type":"string"},"size":{"type":"integer"},"sha256":{"type":"string"},"source_message_id":{"type":"string"}},"required":["file_id"],"additionalProperties":false}},
     "max_implement_attempts": {"type": "integer", "minimum": 0},
     "workspace": {
       "type": "object",
@@ -51,6 +52,15 @@ const relationsSchema = `{
 }`
 
 var schemas = map[string]string{
+	"conversation_read": `{
+  "type":"object",
+  "properties":{
+   "before_seq":{"type":"integer","minimum":0,"description":"Read earlier than this sequence; omit to read the latest page. Mutually exclusive with after_seq."},
+   "after_seq":{"type":"integer","minimum":0,"description":"Read later than this sequence. Mutually exclusive with before_seq."},
+   "limit":{"type":"integer","minimum":1,"maximum":50,"description":"Maximum conversation items; default 20."}
+  },
+  "additionalProperties":false
+ }`,
 	"tasks_list": `{
   "type": "object",
   "properties": {

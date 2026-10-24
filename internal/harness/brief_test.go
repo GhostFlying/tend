@@ -39,3 +39,17 @@ func TestBriefCarriesTaskRelationsWithoutWorkspaceInheritance(t *testing.T) {
 		}
 	}
 }
+
+func TestBothWorkerBriefsExplainOriginalInputsAndProvenance(t *testing.T) {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		_, input := Brief(WorkerSpec{Role: role,
+			Spec:     json.RawMessage(`{"inputs":[{"file_id":"file_original","name":"animation.gif","media_type":"image/gif","size":147,"sha256":"original_digest","source_message_id":"msg_source"}]}`),
+			Artifact: json.RawMessage(`{"files":[{"file_id":"file_output","name":"report.txt"}]}`),
+		})
+		for _, want := range []string{"file_original", "animation.gif", "image/gif", "147", "original_digest", "msg_source", "download_file", "every GIF frame", "separate from submitted deliverables", "file_output"} {
+			if !strings.Contains(input, want) {
+				t.Errorf("%s brief lacks %q: %s", role, want, input)
+			}
+		}
+	}
+}

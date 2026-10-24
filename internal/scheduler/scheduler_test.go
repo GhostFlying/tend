@@ -35,6 +35,9 @@ func TestSkipRules(t *testing.T) {
 	}{
 		{"eligible implement", nil, nil, implement, ""},
 		{"eligible accept", nil, nil, accept, ""},
+		{"input implement unsupported", nil, func(c *Candidate) { c.RequiresTaskInputs = true }, implement, "runner does not support task input attachments"},
+		{"input acceptance unsupported", nil, func(c *Candidate) { c.RequiresTaskInputs = true }, accept, "runner does not support task input attachments"},
+		{"input capable", func(h *Host) { h.TaskInputs = true }, func(c *Candidate) { c.RequiresTaskInputs = true }, accept, ""},
 		{"retired host", func(h *Host) { h.Active = false }, nil, implement, "host is retired"},
 		{"no slot", func(h *Host) { h.Busy = 2 }, nil, implement, "host has no free slot"},
 		{"dispatched", nil, func(c *Candidate) { c.Status = protocol.ActionDispatched }, implement, "action is not pending"},

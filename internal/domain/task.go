@@ -26,6 +26,8 @@ type Spec struct {
 	Delivery string `json:"delivery"`
 	// Deliverables lists required outputs; absent means legacy Delivery.
 	Deliverables []string `json:"deliverables,omitempty"`
+	// Inputs explicitly select original attachments; they never inherit implicitly.
+	Inputs []protocol.TaskInput `json:"inputs,omitempty"`
 	// MaxImplementAttempts bounds implement generations for this version;
 	// zero means DefaultMaxImplementAttempts.
 	MaxImplementAttempts int64 `json:"max_implement_attempts,omitempty"`
@@ -93,6 +95,13 @@ func (s Spec) Validate() error {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "label %q is malformed", l)
 		}
 	}
+	seen := make(map[string]bool, len(s.Inputs))
+	for _, input := range s.Inputs {
+		if !protocol.ValidID(protocol.PrefixFile, input.FileID) || seen[input.FileID] {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "task inputs require distinct valid file_id values")
+		}
+		seen[input.FileID] = true
+	}
 	return s.Workspace.Normalize().Validate()
 }
 
@@ -108,7 +117,7 @@ func (s Spec) Budget() int64 {
 func (s Spec) Equal(o Spec) bool {
 	return s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
 		s.Budget() == o.Budget() && slices.Equal(s.Constraints, o.Constraints) && slices.Equal(s.Acceptance, o.Acceptance) &&
-		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements)
+		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements) && slices.Equal(s.Inputs, o.Inputs)
 }
 
 // Task is the projection of a task that the rules operate on.

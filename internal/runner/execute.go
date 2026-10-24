@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -131,7 +132,16 @@ func (r *Runner) prepare(ctx context.Context, as protocol.Assignment) error {
 	}
 	cred := runCredential(as)
 	if as.Role == protocol.RoleImplement {
-		env, err := r.newEnvelope(protocol.OpRunsReportWorkspace, runTarget(as), p.Report)
+		report := p.Report
+		if !as.MountDirectories {
+			// Older servers decode reports strictly. Keep the local facts,
+			// but omit the extension unless this assignment negotiated it.
+			report.Mounts = slices.Clone(report.Mounts)
+			for i := range report.Mounts {
+				report.Mounts[i].Directory = ""
+			}
+		}
+		env, err := r.newEnvelope(protocol.OpRunsReportWorkspace, runTarget(as), report)
 		if err != nil {
 			return err
 		}
