@@ -39,6 +39,7 @@
 
 .scroll {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 4px 10px 12px;
 }
@@ -53,6 +54,7 @@
 }
 
 .foot {
+  flex: none;
   border-top: 1px solid var(--border-soft);
   padding: 10px 12px;
   display: flex;
@@ -101,6 +103,11 @@
   border-radius: var(--radius-m);
   font-size: var(--text-s);
   color: var(--label-2);
+}
+@media (max-width: 760px) {
+  .themeButton {
+    min-height: 44px;
+  }
 }
 
 .mobileNotice {

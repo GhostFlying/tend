@@ -8,7 +8,7 @@ import controls from "../shell/controls.module.css";
 import list from "../shell/list.module.css";
 import { Hosts } from "../hosts/Hosts.tsx";
 import { hostMaintaining } from "../hosts/status.ts";
-import { Back, Gear } from "../shell/icons.tsx";
+import { Back } from "../shell/icons.tsx";
 import { stages, type TaskFeed } from "./lists.ts";
 import { blockLabels, controlLabels, ratingLabels } from "./status.ts";
 import styles from "./Board.module.css";
@@ -54,12 +54,10 @@ export function TaskBoard({
   active,
   connection,
   onChat,
-  onSettings,
 }: {
   active: boolean;
   connection: Connection;
   onChat(): void;
-  onSettings(): void;
 }) {
   const { live } = useServices();
   const snapshot = useStore(live.snapshot);
@@ -77,15 +75,6 @@ export function TaskBoard({
           返回聊天
         </button>
         <h1>任务看板</h1>
-        <button
-          type="button"
-          className={`${controls.iconBtn} ${styles.settings}`}
-          aria-label="设置"
-          title="设置"
-          onClick={onSettings}
-        >
-          <Gear />
-        </button>
         <label className={styles.filter}>
           项目
           <input
@@ -115,16 +104,21 @@ export function TaskBoard({
       <UpgradeBanner connection={connection} />
       <div className={styles.mobileRecent}>
         <details>
-          <summary>最近完成</summary>
-          <RecentTasks />
-        </details>
-        <details>
           <summary>
             执行主机
+            {snapshot && ` · ${snapshot.hosts?.length ?? 0} 台`}
             {!!snapshot?.hosts?.filter(hostMaintaining).length &&
               ` · ${snapshot.hosts.filter(hostMaintaining).length} 台维护`}
           </summary>
-          <Hosts connection={connection} />
+          <div className={styles.mobileList}>
+            <Hosts connection={connection} />
+          </div>
+        </details>
+        <details>
+          <summary>最近完成</summary>
+          <div className={styles.mobileList}>
+            <RecentTasks />
+          </div>
         </details>
       </div>
       <div className={styles.board} role="region" aria-label="分阶段任务看板" tabIndex={0}>

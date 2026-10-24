@@ -125,16 +125,11 @@ export function Shell({
         </aside>
         <main className={styles.chat}>
           <div className={styles.content} hidden={boardOpen}>
-            <Chat connection={connection} visible={!boardOpen} onSettings={showSettings} />
+            <Chat connection={connection} visible={!boardOpen} />
           </div>
           {boardVisited && (
             <div className={styles.content} hidden={!boardOpen}>
-              <TaskBoard
-                active={boardOpen}
-                connection={connection}
-                onChat={showChat}
-                onSettings={showSettings}
-              />
+              <TaskBoard active={boardOpen} connection={connection} onChat={showChat} />
             </div>
           )}
         </main>
