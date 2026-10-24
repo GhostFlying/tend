@@ -121,6 +121,8 @@ export function Shell({
       },
       discussWorkItem(item, intention) {
         live.workItems.close();
+        live.close();
+        setDetailsOpen(false);
         setBoardOpen(false);
         setView("chat");
         draft.workItem(item, intention);

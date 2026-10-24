@@ -106,6 +106,33 @@ func observationRow(ctx context.Context, q store.Querier, item, id string) (stor
 	return row, err
 }
 
+// cancelDeliveryQueries fences observations issued before responsibility closed.
+// The last provider facts remain intact; a later explicit refresh gets a new
+// query identity even when the work item stays closed.
+func cancelDeliveryQueries(ctx context.Context, tx *store.Tx, item protocol.WorkItem) error {
+	for _, delivery := range item.Deliveries {
+		row, err := store.GetDeliveryObservation(ctx, tx.Q(), item.WorkItemID, delivery.DeliveryID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if row.Nonce == "" && !row.RefreshRequested {
+			continue
+		}
+		row.Observation.Generation++
+		row.Nonce, row.HostID, row.InstanceID = "", "", ""
+		row.QueryUntil = 0
+		row.RefreshRequested = false
+		row.Observation.RefreshPending = false
+		if err := tx.PutDeliveryObservation(ctx, row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ReportDelivery applies only the latest server-issued query generation and
 // nonce, even when an older host's read finished later. Failures retain facts.
 type ReportDelivery struct{}
