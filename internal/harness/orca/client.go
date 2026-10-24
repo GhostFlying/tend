@@ -409,6 +409,8 @@ type Agent struct {
 	AgentType string `json:"agentType"`
 	// Prompt is the agent's latest prompt.
 	Prompt               string `json:"prompt"`
+	ToolName             string `json:"toolName"`
+	ToolInput            string `json:"toolInput"`
 	LastAssistantMessage string `json:"lastAssistantMessage"`
 	Interrupted          bool   `json:"interrupted"`
 	StateStartedAt       int64  `json:"stateStartedAt"`
