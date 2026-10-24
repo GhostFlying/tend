@@ -8,6 +8,25 @@ import { chromium, type Browser, type BrowserContext, type Page, type Locator } 
 import type { Envelope, WorkItemView } from "../src/api/generated/api.ts";
 
 const id = "wi_01M5M3ME31875GDA8F7P5XTD74";
+const taskId = "task_01M5M3ME31875GDA8F7P5XTD74";
+const task = {
+  task_id: taskId,
+  title: "Linked task",
+  project: "sample",
+  lifecycle: "completed",
+  control_mode: "managed",
+  control_revision: 1,
+  spec_version: 1,
+  rating: "p2",
+  block_reason: "none",
+  workspace: "sample",
+  next_implement_generation: 1,
+  work_item_ids: [id],
+  runs: [],
+  artifacts: [],
+  acceptances: [],
+  decisions: [],
+};
 const item: WorkItemView = {
   work_item_id: id,
   title: "Refresh reconciliation",
@@ -99,7 +118,21 @@ const server = await createServer({
               projects: [],
               queue: [],
             });
-          if (path === "/api/v1/conversation") return json(res, { items: [], more: false });
+          if (path === `/api/v1/tasks/${taskId}`) return json(res, task);
+          if (path === "/api/v1/conversation")
+            return json(res, {
+              items: [
+                {
+                  seq: 1,
+                  message_id: "message-fixture",
+                  author: "main_agent",
+                  kind: "message",
+                  body: `Linked task ${taskId}`,
+                  created_at: "2026-01-01T00:00:00Z",
+                },
+              ],
+              more: false,
+            });
           if (path === "/api/v1/conversation/settings" || path === "/api/v1/conversation/handoff")
             return json(res, { enabled: false, revision: 1 });
           if (path === "/api/v1/tasks") return json(res, { tasks: [], next: "" });
@@ -241,8 +274,64 @@ try {
     assert.equal(await refresh.isDisabled(), false);
     await terminalContext.close();
   }
+  for (const [label, status] of [
+    ["继续讨论", "open"],
+    ["提出暂缓安排", "open"],
+    ["讨论结束跟进", "open"],
+    ["提出恢复安排", "snoozed"],
+    ["提出重新跟进", "closed"],
+  ] as const) {
+    item.status = status;
+    const mobileContext = await browser.newContext({
+      viewport: { width: 390, height: 760 },
+      serviceWorkers: "block",
+    });
+    const mobilePage = await mobileContext.newPage();
+    mobilePage.setDefaultTimeout(10000);
+    await mobilePage.goto(`http://127.0.0.1:${address.port}/?task=${taskId}`);
+    const taskDrawer = mobilePage.getByRole("region", { name: "任务详情", exact: true });
+    await taskDrawer.getByText("Linked task", { exact: true }).waitFor();
+    await taskDrawer.getByRole("button", { name: "关闭", exact: true }).click();
+    const composer = mobilePage.getByRole("textbox", { name: "消息", exact: true });
+    await composer.fill("Existing unsent constraint");
+    await mobilePage.locator('input[type="file"]').setInputFiles({
+      name: "evidence.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("fixture evidence"),
+    });
+    const before: number = requests.size;
+    await mobilePage
+      .locator("main")
+      .getByRole("button", { name: "Linked task", exact: true })
+      .click();
+    await taskDrawer.getByRole("button", { name: item.title, exact: true }).click();
+    await mobilePage
+      .getByRole("dialog", { name: "工作项详情" })
+      .getByRole("button", { name: label, exact: true })
+      .click();
+    await composer.click({ trial: true });
+    const proof = await composer.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      const app = document.querySelector<HTMLElement>("[data-details]")!;
+      return {
+        details: app.dataset.details,
+        view: app.dataset.view,
+        covered: hit !== el && !el.contains(hit),
+      };
+    });
+    assert.deepEqual(proof, { details: "closed", view: "chat", covered: false });
+    assert((await composer.inputValue()).includes("Existing unsent constraint"));
+    assert((await composer.inputValue()).includes(id));
+    await mobilePage
+      .getByRole("list", { name: "待发送附件" })
+      .getByText("evidence.txt", { exact: true })
+      .waitFor();
+    assert.equal(requests.size, before, "discussion keeps text and files local without sending");
+    await mobileContext.close();
+  }
   console.log(
-    "PASS unknown refresh: unrelated facts remain blocked; completed observation restores explicit refresh; no automatic writes; terminal lost-before-server reconnect and same-ID recovery",
+    "PASS unknown refresh: unrelated facts remain blocked; completed observation restores explicit refresh; no automatic writes; terminal lost-before-server reconnect and same-ID recovery; mobile task-to-work-item discussion preserves a reachable draft and attachment",
   );
 } finally {
   if (browser) await browser.close();

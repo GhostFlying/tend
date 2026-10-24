@@ -148,6 +148,9 @@ func (CloseWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	w.Closure = &p.Closure
 	w.UpdatedAt = x.Now.UnixMilli()
 	freezeWorkItemCurrentEvidence(&w, x.Env.RequestID)
+	if err := cancelDeliveryQueries(ctx, tx, w); err != nil {
+		return Outcome{}, err
+	}
 	return saveWorkItem(ctx, tx, w, old, "work_item.closed", p)
 }
 

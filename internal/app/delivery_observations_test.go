@@ -353,3 +353,120 @@ func TestFault_DeliveryExpiredQueriesDoNotStarveUntouchedReferences(t *testing.T
 		t.Fatalf("expired queries starved new references: %v", seen)
 	}
 }
+
+func TestDeliveryCloseCancelsOutstandingQueries(t *testing.T) {
+	for _, mode := range []string{"automatic", "manual", "queued manual"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newHarness(t)
+			item := observerItem(t, h)
+			observerHello(t, h, "linux-1", "observer")
+			first := pollDelivery(t, h, "linux-1", "observer")[0]
+			accepted(t, reportDelivery(t, h, "linux-1", "observer", first, "open", ""))
+			verified := readObservations(t, h, item.WorkItemID)[0]
+			if mode == "automatic" {
+				h.clock.Advance(5 * time.Minute)
+			} else {
+				op := h.exec(owner, h.env(protocol.OpRefreshDelivery, workTarget(item.WorkItemID), protocol.RefreshDeliveryPayload{DeliveryID: "delivery-1"}, rev(1)), RefreshDelivery{})
+				if op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
+			var pending protocol.DeliveryAssignment
+			if mode != "queued manual" {
+				pending = pollDelivery(t, h, "linux-1", "observer")[0]
+			}
+			before := readObservations(t, h, item.WorkItemID)[0]
+			if !before.RefreshPending {
+				t.Fatal("fixture has no pending query")
+			}
+			closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "Owner ended responsibility", Evidence: []protocol.WorkItemEvidence{h.ownerEvidence(), {Kind: "delivery", Reference: "delivery-1", Summary: "Last verified provider state"}}}}
+			op := h.exec(owner, h.env("work_items.close", workTarget(item.WorkItemID), closure, rev(1)), CloseWorkItem{})
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			after := readObservations(t, h, item.WorkItemID)[0]
+			if after.RefreshPending || after.Generation <= before.Generation || after.State != verified.State || after.HeadSHA != verified.HeadSHA || after.CheckedAt != verified.CheckedAt || after.AttemptedAt != verified.AttemptedAt {
+				t.Fatalf("closure lost facts or left the query pending: %+v", after)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				row, err := store.GetDeliveryObservation(t.Context(), tx.Q(), item.WorkItemID, "delivery-1")
+				if err == nil && (row.Nonce != "" || row.QueryUntil != 0 || row.RefreshRequested || row.HostID != "" || row.InstanceID != "") {
+					t.Fatalf("query ownership not cleared: %+v", row)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if mode != "queued manual" && accepted(t, reportDelivery(t, h, "linux-1", "observer", pending, "merged", "")) {
+				t.Fatal("pre-closure report overwrote closed facts")
+			}
+			h.clock.Advance(3 * time.Minute)
+			if len(pollDelivery(t, h, "linux-1", "observer")) != 0 || readObservations(t, h, item.WorkItemID)[0].RefreshPending {
+				t.Fatal("closed item resumed periodic polling or retained an expired pending flag")
+			}
+			// A later explicit read may update the live observation, while the
+			// responsibility endpoint retains its original verified evidence.
+			op = h.exec(owner, h.env(protocol.OpRefreshDelivery, workTarget(item.WorkItemID), protocol.RefreshDeliveryPayload{DeliveryID: "delivery-1"}, rev(2)), RefreshDelivery{})
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			fresh := pollDelivery(t, h, "linux-1", "observer")[0]
+			if !accepted(t, reportDelivery(t, h, "linux-1", "observer", fresh, "closed", "")) {
+				t.Fatal("post-closure explicit refresh rejected")
+			}
+			frozen := h.work(item.WorkItemID).Closure.Evidence[1].Observation
+			if frozen == nil || frozen.State != "open" || frozen.CheckedAt != verified.CheckedAt {
+				t.Fatalf("closure evidence changed: %+v", frozen)
+			}
+		})
+	}
+}
+
+func TestDeliveryClosedItemManualRefreshRecoversFromTimeoutAndFailure(t *testing.T) {
+	h := newHarness(t)
+	item := observerItem(t, h)
+	observerHello(t, h, "linux-1", "observer")
+	old := pollDelivery(t, h, "linux-1", "observer")[0]
+	closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "Owner ended responsibility", Evidence: []protocol.WorkItemEvidence{h.ownerEvidence()}}}
+	op := h.exec(owner, h.env("work_items.close", workTarget(item.WorkItemID), closure, rev(1)), CloseWorkItem{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	refresh := func() {
+		t.Helper()
+		op := h.exec(owner, h.env(protocol.OpRefreshDelivery, workTarget(item.WorkItemID), protocol.RefreshDeliveryPayload{DeliveryID: "delivery-1"}, rev(2)), RefreshDelivery{})
+		if op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	refresh()
+	first := pollDelivery(t, h, "linux-1", "observer")[0]
+	if first.Generation <= old.Generation || accepted(t, reportDelivery(t, h, "linux-1", "observer", old, "merged", "")) {
+		t.Fatal("manual refresh did not fence the old automatic query")
+	}
+	h.clock.Advance(2 * time.Minute)
+	retry := pollDelivery(t, h, "linux-1", "observer")[0]
+	if retry.Generation <= first.Generation || accepted(t, reportDelivery(t, h, "linux-1", "observer", first, "merged", "")) {
+		t.Fatal("expired manual query was not fenced on retry")
+	}
+	if !accepted(t, reportDelivery(t, h, "linux-1", "observer", retry, "", "timeout")) {
+		t.Fatal("manual timeout report rejected")
+	}
+	failed := readObservations(t, h, item.WorkItemID)[0]
+	if failed.RefreshPending || failed.ErrorKind != "timeout" || failed.CheckedAt != 0 {
+		t.Fatalf("manual failure did not settle: %+v", failed)
+	}
+	h.clock.Advance(10 * time.Minute)
+	if len(pollDelivery(t, h, "linux-1", "observer")) != 0 {
+		t.Fatal("closed item started periodic polling after manual failure")
+	}
+	refresh()
+	success := pollDelivery(t, h, "linux-1", "observer")[0]
+	if !accepted(t, reportDelivery(t, h, "linux-1", "observer", success, "closed", "")) {
+		t.Fatal("manual refresh could not recover after failure")
+	}
+	current := readObservations(t, h, item.WorkItemID)[0]
+	if current.State != "closed" || current.ErrorKind != "" || current.CheckedAt == 0 || current.RefreshPending || h.work(item.WorkItemID).Status != "closed" || h.work(item.WorkItemID).Revision != 2 {
+		t.Fatalf("refresh changed closure or did not recover: %+v", current)
+	}
+}
