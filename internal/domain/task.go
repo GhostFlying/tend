@@ -26,7 +26,7 @@ type Spec struct {
 	Delivery string `json:"delivery"`
 	// Deliverables lists required outputs; absent means legacy Delivery.
 	Deliverables []string `json:"deliverables,omitempty"`
-	// Inputs explicitly select original attachments; they never inherit implicitly.
+	// Inputs explicitly select original files; they never inherit implicitly.
 	Inputs []protocol.TaskInput `json:"inputs,omitempty"`
 	// SharedContext is frozen by the server, never copied from worker reports.
 	SharedContext []protocol.TaskWorkContext `json:"shared_context,omitempty"`

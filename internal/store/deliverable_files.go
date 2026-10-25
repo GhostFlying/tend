@@ -47,6 +47,29 @@ func GetDeliverableFile(ctx context.Context, q Querier, id string) (DeliverableF
 	return f, nil
 }
 
+// GetFinalizedDeliverableFile resolves a file's immutable artifact provenance.
+// Uploads not included in a submitted artifact are not task inputs. Acceptance
+// is intentionally separate: a failed result can be evidence for later work.
+func GetFinalizedDeliverableFile(ctx context.Context, q Querier, id string) (DeliverableFileRow, string, error) {
+	f, err := GetDeliverableFile(ctx, q, id)
+	if err != nil {
+		return DeliverableFileRow{}, "", err
+	}
+	var artifactID string
+	err = q.QueryRowContext(ctx, `SELECT a.artifact_id
+ FROM artifacts a, json_each(a.ref_json, '$.files') entry
+ WHERE a.task_id=? AND a.run_id=?
+ AND json_extract(entry.value, '$.file_id')=?
+ AND json_extract(entry.value, '$.name')=?
+ AND json_extract(entry.value, '$.size')=?
+ AND json_extract(entry.value, '$.sha256')=?
+ ORDER BY a.created_at, a.artifact_id LIMIT 1`, f.TaskID, f.RunID, f.FileID, f.Name, f.Size, f.SHA256).Scan(&artifactID)
+	if err != nil {
+		return DeliverableFileRow{}, "", notFound(err, "finalized file "+id)
+	}
+	return f, artifactID, nil
+}
+
 // RunFileBytes bounds the complete durable upload set of one run.
 func RunFileBytes(ctx context.Context, q Querier, runID string) (int64, error) {
 	var size int64
