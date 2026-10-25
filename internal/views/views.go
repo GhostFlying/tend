@@ -466,6 +466,7 @@ func TaskRelations(ctx context.Context, q store.Querier, taskID string) ([]proto
 		return nil, err
 	}
 	var out []protocol.TaskRelationView
+	related := make([]store.TaskRow, 0, len(rows))
 	for _, r := range rows {
 		other, direction := r.TargetTaskID, protocol.RelationOutgoing
 		if r.TargetTaskID == taskID {
@@ -475,11 +476,15 @@ func TaskRelations(ctx context.Context, q store.Querier, taskID string) ([]proto
 		if err != nil {
 			return nil, err
 		}
-		summary, err := SummaryWithExecution(ctx, q, t)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, protocol.TaskRelationView{Kind: r.Kind, Direction: direction, Task: summary})
+		related = append(related, t)
+		out = append(out, protocol.TaskRelationView{Kind: r.Kind, Direction: direction})
+	}
+	summaries, err := SummariesWithExecution(ctx, q, related)
+	if err != nil {
+		return nil, err
+	}
+	for i, summary := range summaries {
+		out[i].Task = summary
 	}
 	return out, nil
 }
