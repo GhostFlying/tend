@@ -571,3 +571,174 @@ func TestRecoveryBriefUsesImmutableProvenance(t *testing.T) {
 		t.Fatal("mutable checkpoint fields changed recovery prompt")
 	}
 }
+
+func TestRecoveryRegressionHandbackAfterRootFailureBeforeRecovery(t *testing.T) {
+	f, w, a := failedWorker(t)
+	a.State = stateWorking
+	if _, _, err := w.step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if w.st.Recovery != nil {
+		t.Fatal("unexpected recovery before background settled")
+	}
+	a.Prompt = "owner reconciles failed turn"
+	w.spec.HandBack = true
+	w.pending = nil
+	if err := w.begin(t.Context(), "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if a.Prompt != harness.HandBack(w.spec) {
+		t.Fatal("not handed back")
+	}
+	if f.orca.count("terminal send", nil) != 1 {
+		t.Fatal("not sent")
+	}
+	for _, ev := range w.pending {
+		if ev.Kind == "worker.recovery_handed_back" {
+			return
+		}
+	}
+	t.Fatal("successful handback emits no fact to clear the root-failure execution projection")
+}
+
+func TestRecoveryRegressionRecoveryOwnershipConflictMustReportTakeover(t *testing.T) {
+	f, saved, a := failedWorker(t)
+	f.thread = mustState(saved.st)
+	original := f.ws.opts.Client.Exec
+	waits := 0
+	f.ws.opts.Client.Exec = func(ctx context.Context, dir string, args []string) ([]byte, error) {
+		if len(args) > 1 && args[0] == "terminal" && args[1] == "wait" {
+			waits++
+			if waits == 2 {
+				a.Prompt = "owner replacement turn"
+				a.State = stateWorking
+				a.MainAgent = &MainAgent{State: stateWorking, StateStartedAt: 300}
+				return ok(map[string]any{"wait": map[string]any{"satisfied": true}}), nil
+			}
+		}
+		return original(ctx, dir, args)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	spec := f.spec("implement")
+	taken := false
+	spec.OnTakeover = func(string) error { taken = true; cancel(); return nil }
+	worker, _, drained := f.start(ctx, spec)
+	_, err := worker.Wait()
+	<-drained
+	if !taken && errors.Is(err, harness.ErrHeld) {
+		t.Fatal("ownership conflict returned as a worker error without reporting takeover")
+	}
+	if !taken {
+		t.Fatalf("no takeover; err=%v", err)
+	}
+}
+
+func TestRecoveryStartupOwnershipConflictReportsTakeover(t *testing.T) {
+	f, saved, a := failedWorker(t)
+	saved.st.Recovery = &recoveryState{Attempts: 1, Phase: recoveryClosing, SessionID: a.ProviderSession.ID, TurnAt: a.MainAgent.StateStartedAt, OriginalPrompt: saved.st.Said, Terminal: saved.st.Terminal, Pane: saved.st.Pane}
+	f.thread = mustState(saved.st)
+	a.ProviderSession.ID = "owner-session"
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	spec := f.spec(protocol.RoleImplement)
+	taken := false
+	spec.OnTakeover = func(string) error { taken = true; cancel(); return nil }
+	worker, _, drained := f.start(ctx, spec)
+	_, _ = worker.Wait()
+	<-drained
+	if !taken {
+		t.Fatal("startup conflict did not report takeover")
+	}
+	if f.orca.count("terminal close", nil) != 0 || f.orca.count("terminal send", nil) != 0 {
+		t.Fatal("owner terminal mutated")
+	}
+}
+
+func TestHandbackWithoutRecoveryReplaysCheckpoint(t *testing.T) {
+	_, w, a := failedWorker(t)
+	a.State = stateWorking
+	if _, _, err := w.step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	w.spec.HandBack = true
+	w.pending = nil
+	if err := w.begin(t.Context(), "codex"); err != nil {
+		t.Fatal(err)
+	}
+	var first harness.WorkerEvent
+	for _, ev := range w.pending {
+		if ev.Kind == "worker.recovery_handed_back" {
+			first = ev
+		}
+	}
+	if first.Kind == "" {
+		t.Fatal("missing successful handback checkpoint")
+	}
+	restarted := &worker{st: w.st}
+	restarted.emitRecoveryPhase(t.Context())
+	if len(restarted.pending) != 1 || restarted.pending[0].NativeID != first.NativeID || string(restarted.pending[0].Body) != string(first.Body) {
+		t.Fatalf("unstable replay: %+v / %+v", first, restarted.pending)
+	}
+}
+
+func TestNewFailureSupersedesUnpublishedHandback(t *testing.T) {
+	for _, phase := range []string{"", "handed_back", recoveryRunning, recoveryCompleted} {
+		t.Run(phase, func(t *testing.T) {
+			_, w, a := failedWorker(t)
+			w.st.HandbackEventID = "previous-handback"
+			w.st.FailedTurn = 50
+			if phase != "" {
+				w.st.Recovery = &recoveryState{Attempts: 1, Phase: phase}
+			}
+			a.State = stateWorking
+			if _, _, err := w.step(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			restarted := &worker{st: w.st}
+			restarted.emitRecoveryPhase(t.Context())
+			if len(restarted.pending) != 0 {
+				t.Fatalf("replayed superseded phase: %+v", restarted.pending)
+			}
+			if restarted.st.Recovery != nil && restarted.st.Recovery.Attempts != 1 {
+				t.Fatal("recovery budget lost")
+			}
+		})
+	}
+}
+
+func TestProviderJSONRootFailureClassification(t *testing.T) {
+	for _, tc := range []struct{ name, code, message, info, want string }{
+		{"encrypted body", "", `{"error":{"code":"invalid_encrypted_content","message":"bad history"}}`, `"other"`, "invalid_encrypted_content"},
+		{"codex wrapped body", "", `unexpected status 400 Bad Request: {"error":{"code":"invalid_encrypted_content"}}, url: https://example.invalid/responses, request id: example`, `"other"`, "invalid_encrypted_content"},
+		{"rate body", "", `stream disconnected before completion: POST responses: 400 Bad Request {"error":{"code":"rate_limit_exceeded"}}`, `"other"`, "rate_limit_exceeded"},
+		{"direct rate body", "", `{"code":"rate_limit_exceeded"}`, `"other"`, "rate_limit_exceeded"},
+		{"unknown body", "", `{"error":{"code":"unknown_error"}}`, `"other"`, ""},
+		{"unrelated nesting", "", `{"metadata":{"code":"rate_limit_exceeded"}}`, `"other"`, ""},
+		{"malformed body", "", `{"error":{"code":"rate_limit_exceeded"`, `"other"`, ""},
+		{"auth body overrides prose", "", `{"error":{"code":"unauthorized","message":"code: rate_limit_exceeded; previous error"}}`, `"other"`, "unauthorized"},
+		{"quota body overrides typed retry", "", `{"error":{"code":"insufficient_quota"}}`, `"rate_limit_exceeded"`, "insufficient_quota"},
+		{"top auth overrides body", "unauthorized", `{"error":{"code":"invalid_encrypted_content"}}`, `"other"`, "unauthorized"},
+		{"typed auth overrides body", "", `{"error":{"code":"invalid_encrypted_content"}}`, `"unauthorized"`, "unauthorized"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := recoveryTranscript(t, "")
+			body, err := os.ReadFile(session.TranscriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			errorJSON, err := json.Marshal(map[string]any{"code": tc.code, "message": tc.message, "codex_error_info": json.RawMessage(tc.info)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = []byte(strings.ReplaceAll(string(body), `{"message":"stream disconnected: code: invalid_encrypted_content; message: encrypted history failed","codex_error_info":"other"}`, string(errorJSON)))
+			if err := os.WriteFile(session.TranscriptPath, body, 0600); err != nil {
+				t.Fatal(err)
+			}
+			fact, err := readFailedTurn(t.Context(), session, 1)
+			if err != nil || fact.Code != tc.want {
+				t.Fatalf("fact=%+v err=%v want=%q", fact, err, tc.want)
+			}
+		})
+	}
+}

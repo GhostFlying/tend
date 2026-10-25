@@ -182,7 +182,9 @@ type workerState struct {
 	PromptOutcome string `json:"launch_prompt_outcome,omitempty"`
 	// PromptReceiptAt bounds startup state already observed when delivery settled.
 	PromptReceiptAt int64 `json:"launch_prompt_receipt_at,omitempty"`
-	// FailedTurn is a root failure already reported, persisted across runner restarts.
+	// HandbackEventID replays a successful handback until the next root failure.
+	HandbackEventID string `json:"handback_event_id,omitempty"`
+	// FailedTurn checkpoints the latest root failure for replay after restart.
 	FailedTurn int64          `json:"failed_turn,omitempty"`
 	Recovery   *recoveryState `json:"recovery,omitempty"`
 	SessionID  string         `json:"session_id,omitempty"`
@@ -266,6 +268,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	// From begin onward, launch/send/recovery outcomes can be unknown. Never
 	// attach the prelaunch proof to those errors, even if the thread is empty.
 	if err := w.begin(ctx, agent); err != nil {
+		if errors.Is(err, harness.ErrHeld) {
+			w.holding = err.Error()
+			go w.run(ctx)
+			return w, nil
+		}
 		w.closeBridge(ctx)
 		// A negative receipt has no turn to interrupt. An uncertain receipt
 		// may have a real turn; stop checks ownership before interrupting it.
@@ -730,9 +737,16 @@ func (w *worker) run(ctx context.Context) {
 			return
 		}
 		a, done, err := w.step(ctx)
+		if errors.Is(err, harness.ErrHeld) {
+			w.holding = err.Error()
+		}
 		if cause := context.Cause(ctx); cause != nil {
 			w.stop(ctx, cause)
 			w.err = cause
+			return
+		}
+		if w.holding != "" {
+			w.hold(ctx)
 			return
 		}
 		if err != nil {
@@ -839,6 +853,14 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 		if rootFailed(a, w.st.Turn) || rootUnconfirmed(a, w.st.Turn) {
 			if w.st.FailedTurn != a.MainAgent.StateStartedAt {
 				w.st.FailedTurn = a.MainAgent.StateStartedAt
+				w.st.HandbackEventID = ""
+				if r := w.st.Recovery; r != nil {
+					// A new failure supersedes older successful phase facts.
+					switch r.Phase {
+					case recoveryRunning, recoveryCompleted, "handed_back":
+						r.Phase = "failed"
+					}
+				}
 				if err := w.save(); err != nil {
 					return a, false, err
 				}

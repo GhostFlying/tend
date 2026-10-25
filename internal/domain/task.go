@@ -157,6 +157,8 @@ type Task struct {
 	WorkspaceAssigned bool
 	// WorkspaceReused preserves a fixed source binding during host recovery.
 	WorkspaceReused bool
+	// RequiredHostID preserves a hard host constraint during workspace recovery.
+	RequiredHostID string
 }
 
 // ActionDraft is a follow-up action the caller must create.
@@ -302,6 +304,7 @@ func NewTask(id, project string, spec Spec, rating protocol.Rating) (Decision, e
 		Block:           protocol.BlockNone,
 		Budget:          spec.Budget(),
 		WorkspaceReused: spec.Workspace.ModeValue() == WorkspaceReuse,
+		RequiredHostID:  spec.Requirements.HostID,
 	}
 	d := Decision{Events: []EventDraft{{Kind: "task.created", Body: map[string]any{"spec_version": 1, "rating": rating, "project": project}}}}
 	if spec.Executable() {

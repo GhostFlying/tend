@@ -4,7 +4,7 @@ import "github.com/GhostFlying/tend/internal/protocol"
 
 // Options of the decision about an unavailable workspace: tend answers
 // WaitForHostOption itself once the host is back. StartOverOption is
-// available only for workspaces created by this task.
+// available only for workspaces created by this task without a required host.
 const (
 	WaitForHostOption = optionWaitForHost
 	StartOverOption   = optionStartOver
@@ -32,6 +32,11 @@ func workspaceQuestion(t Task, hostID, why string) DecisionDraft {
 		". Its work can only go on there. How should this task proceed?")
 	if t.WorkspaceReused {
 		d.Question += " This task reuses a fixed workspace and cannot start over on another host. Wait for its host, or cancel and create a new task with workspace.mode=new or temporary."
+	}
+	if t.RequiredHostID != "" {
+		d.Question += " This task requires host " + t.RequiredHostID + " and cannot start over on another host. Wait for that host, or cancel and create a new task with a suitable requirements.host_id and an independent workspace."
+	}
+	if t.WorkspaceReused || t.RequiredHostID != "" {
 		d.Options = []string{optionWaitForHost, optionCancel}
 		d.Effects = map[string]protocol.DecisionEffect{optionCancel: protocol.EffectCancel}
 	}
@@ -78,6 +83,9 @@ func StartOver(t Task, expectedRevision int64) (Decision, error) {
 	}
 	if t.WorkspaceReused {
 		return Decision{}, protocol.Errorf(protocol.CodeInvalidTransition, "a reused workspace is pinned to its original resource; wait for its host, or cancel and create a new task with workspace.mode=new or temporary")
+	}
+	if t.RequiredHostID != "" {
+		return Decision{}, protocol.Errorf(protocol.CodeInvalidTransition, "requirements.host_id pins this task to host %s; wait for that host, or cancel and create a new task with a suitable requirements.host_id and an independent workspace", t.RequiredHostID)
 	}
 	t.ControlRevision++
 	t.ImplementGeneration++

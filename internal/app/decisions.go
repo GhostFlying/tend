@@ -224,7 +224,7 @@ func answerEffect(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRo
 	}
 	if pe := (*protocol.Error)(nil); errors.As(err, &pe) {
 		res.Reason = pe.Message
-		if kind == protocol.EffectStartOver && task.WorkspaceReused && task.Block == protocol.BlockWorkspaceUnavailable && !task.Lifecycle.Terminal() {
+		if kind == protocol.EffectStartOver && (task.WorkspaceReused || task.RequiredHostID != "") && task.Block == protocol.BlockWorkspaceUnavailable && !task.Lifecycle.Terminal() {
 			// A persisted question from an older server can still offer this
 			// effect. Keep its answer as a fact and replace it with valid choices.
 			resource, loadErr := store.GetWorkspaceByTask(ctx, tx.Q(), task.ID)
@@ -232,7 +232,7 @@ func answerEffect(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRo
 				return nil, nil, loadErr
 			}
 			replacement := domain.AskAboutWorkspaceAgain(task, resource.HostID, "holds its fixed workspace")
-			_, events, applyErr := applyDecision(ctx, x, tx, row, replacement, map[string]any{"on": "unsupported_reuse_recovery", "decision_id": d.DecisionID})
+			_, events, applyErr := applyDecision(ctx, x, tx, row, replacement, map[string]any{"on": "unsupported_fixed_workspace_recovery", "decision_id": d.DecisionID})
 			return res, events, applyErr
 		}
 		return res, nil, nil

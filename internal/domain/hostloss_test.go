@@ -117,3 +117,26 @@ func TestReusedWorkspaceCannotStartOverOrOfferInvalidRecovery(t *testing.T) {
 		t.Fatal("rejected recovery changed resource state")
 	}
 }
+
+func TestRequiredHostCannotBeAbandonedByStartOver(t *testing.T) {
+	task := taskIn(protocol.TaskAwaitingAcceptance)
+	task.WorkspaceAssigned = true
+	task.RequiredHostID = "linux-1"
+	blocked := WorkspaceUnavailable(task, "linux-1", "was retired")
+	for _, q := range []DecisionDraft{blocked.OpenDecisions[0], AskAboutWorkspaceAgain(blocked.Task, "linux-1", "was retired").OpenDecisions[0]} {
+		if len(q.Options) != 2 || q.Effects[StartOverOption] != "" || !strings.Contains(q.Question, "requirements.host_id") {
+			t.Fatal(q)
+		}
+		for _, option := range q.Options {
+			if option == StartOverOption {
+				t.Fatal("pinned host offered migration")
+			}
+		}
+	}
+	if _, err := StartOver(blocked.Task, blocked.Task.ControlRevision); protocol.CodeOf(err) != protocol.CodeInvalidTransition || !strings.Contains(err.Error(), "requirements.host_id") {
+		t.Fatal(err)
+	}
+	if !strings.Contains(blocked.OpenDecisions[0].Question, "cancel and create a new task") {
+		t.Fatal("missing supported recovery path")
+	}
+}

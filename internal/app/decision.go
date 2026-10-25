@@ -24,6 +24,7 @@ func toDomain(r store.TaskRow, budget int64) domain.Task {
 func toDomainWithWorkspace(r store.TaskRow, spec domain.Spec) domain.Task {
 	t := toDomain(r, spec.Budget())
 	t.WorkspaceReused = spec.Workspace.ModeValue() == domain.WorkspaceReuse
+	t.RequiredHostID = spec.Requirements.HostID
 	return t
 }
 

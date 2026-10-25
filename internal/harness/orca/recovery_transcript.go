@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -85,13 +86,7 @@ func readFailedTurn(ctx context.Context, session ProviderSession, since int64) (
 			}
 			result = failedTurn{}
 			if p.Error != nil {
-				result = failedTurn{Code: p.Error.Code, TurnID: p.TurnID}
-				if result.Code == "" {
-					result.Code = temporaryModelError(p.Error.CodexErrorInfo)
-				}
-				if match := recoveryErrorCode.FindStringSubmatch(p.Error.Message); match != nil && result.Code != "unauthorized" && result.Code != "insufficient_quota" {
-					result.Code = match[1]
-				}
+				result = failedTurn{Code: classifyRootError(p.Error.Code, p.Error.Message, p.Error.CodexErrorInfo), TurnID: p.TurnID}
 			}
 		case "turn_aborted":
 			result = failedTurn{}
@@ -125,4 +120,49 @@ func temporaryModelError(raw json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// classifyRootError consumes only the trusted completion error, never model prose.
+func classifyRootError(code, message string, info json.RawMessage) string {
+	var typed string
+	_ = json.Unmarshal(info, &typed)
+	provider := providerBodyCode(message)
+	for _, candidate := range []string{code, typed, provider} {
+		if candidate == "unauthorized" || candidate == "insufficient_quota" {
+			return candidate
+		}
+	}
+	if code == "" {
+		code = temporaryModelError(info)
+	}
+	if provider == "invalid_encrypted_content" || provider == "rate_limit_exceeded" {
+		return provider
+	}
+	if match := recoveryErrorCode.FindStringSubmatch(message); match != nil {
+		return match[1]
+	}
+	return code
+}
+
+// Codex formats HTTP errors as "unexpected status <status>: <body>, url: ...".
+// Decode the body's first JSON object, allowing the diagnostic suffix. Provider
+// codes belong to the root object or its error envelope, not arbitrary nested text.
+func providerBodyCode(message string) string {
+	start := strings.IndexByte(message, '{')
+	if start < 0 {
+		return ""
+	}
+	var body struct {
+		Code  string `json:"code"`
+		Error *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if json.NewDecoder(strings.NewReader(message[start:])).Decode(&body) != nil {
+		return ""
+	}
+	if body.Error != nil && body.Error.Code != "" {
+		return body.Error.Code
+	}
+	return body.Code
 }
