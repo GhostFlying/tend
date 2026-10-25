@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 
@@ -30,6 +31,14 @@ func freezeTaskInputs(ctx context.Context, q store.Querier, spec *domain.Spec, p
 			continue
 		}
 		f, err := store.GetConversationAttachment(ctx, q, input.FileID)
+		if errors.Is(err, store.ErrNotFound) {
+			file, artifactID, err := store.GetFinalizedDeliverableFile(ctx, q, input.FileID)
+			if err != nil {
+				return errNotFound(err, "input file must be a conversation attachment or a file in a submitted artifact; pass its file_id in spec.inputs")
+			}
+			spec.Inputs[i] = protocol.TaskInput{FileID: file.FileID, Name: file.Name, Size: file.Size, SHA256: file.SHA256, SourceTaskID: file.TaskID, SourceArtifactID: artifactID}
+			continue
+		}
 		if err != nil {
 			return errNotFound(err, "input attachment does not exist")
 		}
