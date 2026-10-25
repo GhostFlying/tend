@@ -25,7 +25,7 @@ export function executionLook(execution: NonNullable<TaskSummary["execution"]>):
     case "cancelled":
       return { label: "已取消", tone: "idle" };
     default:
-      return { label: "尚未执行", tone: "idle" };
+      return { label: "当前未执行", tone: "idle" };
   }
 }
 const countLabels = [
@@ -35,7 +35,7 @@ const countLabels = [
   ["waiting_owner", "等待用户"],
   ["paused", "已暂停"],
   ["unknown", "执行待核对"],
-  ["idle", "尚未执行"],
+  ["idle", "当前未执行"],
   ["completed", "已完成"],
   ["cancelled", "已取消"],
 ] as const;
@@ -47,10 +47,24 @@ export function executionCounts(counts: ExecutionCounts): { state: string; text:
   );
 }
 
+const waitLabels = {
+  waiting_decision: "等待用户决定",
+  waiting_approval: "等待批准",
+  acceptance_env_unavailable: "等待验收环境恢复",
+  budget_exhausted: "等待调整实现次数",
+  workspace_unavailable: "等待工作区恢复",
+  waiting_resource: "等待资源",
+  none: "等待任务条件满足",
+};
+
 /** Translate the server's chosen constraint; do not repeat scheduler predicates here. */
 export function queueReasonText(task: Pick<TaskSummary, "execution" | "block_reason">): string {
   const reason = task.execution?.queue_reason;
-  if (!reason) return "";
+  if (!reason) {
+    return task.execution?.state === "waiting_owner" && task.block_reason !== "none"
+      ? waitLabels[task.block_reason]
+      : "";
+  }
   switch (reason.code) {
     case "ready":
       return "等待执行主机领取";
@@ -65,17 +79,7 @@ export function queueReasonText(task: Pick<TaskSummary, "execution" | "block_rea
     case "host_requirements":
       return "等待满足要求的执行主机";
     case "task_blocked":
-      return (
-        {
-          waiting_decision: "等待用户决定",
-          waiting_approval: "等待批准",
-          acceptance_env_unavailable: "等待验收环境恢复",
-          budget_exhausted: "等待调整实现次数",
-          workspace_unavailable: "等待工作区恢复",
-          waiting_resource: "等待资源",
-          none: "等待任务条件满足",
-        }[task.block_reason] ?? reason.message
-      );
+      return waitLabels[task.block_reason] ?? reason.message;
     default:
       return reason.message;
   }

@@ -4,6 +4,7 @@ import type { WorkItemView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { Back } from "../shell/icons.tsx";
+import { queueReasonText } from "../tasks/execution.ts";
 import { ExecutionSummary, TaskExecution } from "../tasks/Execution.tsx";
 import { BoardResources } from "../tasks/Board.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
@@ -218,10 +219,10 @@ function WorkItemCard({ item }: { item: WorkItemView }) {
         {openFollowOns > 0 && <span>{openFollowOns} 项后续待处理</span>}
         {!!item.deliveries?.length && <span>{item.deliveries.length} 项交付跟踪</span>}
       </div>
-      {tasks.some((task) => task.execution?.queue_reason) && (
-        <div className={styles.waitingTasks} aria-label="排队任务与原因">
+      {tasks.some((task) => queueReasonText(task)) && (
+        <div className={styles.waitingTasks} aria-label="执行等待与原因">
           {tasks
-            .filter((task) => task.execution?.queue_reason)
+            .filter((task) => queueReasonText(task))
             .slice(0, 2)
             .map((task) => (
               <div key={task.task_id}>
@@ -235,7 +236,7 @@ function WorkItemCard({ item }: { item: WorkItemView }) {
                 <TaskExecution task={task} />
               </div>
             ))}
-          {tasks.filter((task) => task.execution?.queue_reason).length > 2 && (
+          {tasks.filter((task) => queueReasonText(task)).length > 2 && (
             <span className={styles.meta}>更多等待原因可在阶段中查看</span>
           )}
         </div>

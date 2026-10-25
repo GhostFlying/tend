@@ -67,6 +67,12 @@ func ApplyWorkItemDependencies(ctx context.Context, q store.Querier, candidates 
 						dep := stages[dependency]
 						if dep.Status != "done" && !slices.Contains(dep.TaskIDs, c.TaskID) {
 							c.DependenciesDone = false
+							if c.DependencyTaskID == "" {
+								c.DependencyTaskID, err = unfinishedStageTask(ctx, q, item, dep.StageID, c.TaskID)
+								if err != nil {
+									return err
+								}
+							}
 						}
 					}
 					if ancestor.ParentID == "" {
@@ -77,4 +83,36 @@ func ApplyWorkItemDependencies(ctx context.Context, q store.Querier, candidates 
 		}
 	}
 	return nil
+}
+
+// unfinishedStageTask supplies navigation only when a prerequisite contains an
+// actual unfinished task. A stage awaiting manual completion has no invented
+// task blocker; a completed task is not evidence that the stage is complete.
+func unfinishedStageTask(ctx context.Context, q store.Querier, item protocol.WorkItem, stageID, dependentTask string) (string, error) {
+	stages := map[string]protocol.WorkItemStage{}
+	for _, stage := range item.Stages {
+		stages[stage.StageID] = stage
+	}
+	for _, stage := range item.Stages {
+		belongs := stage.StageID == stageID
+		for parent := stage.ParentID; parent != "" && !belongs; parent = stages[parent].ParentID {
+			belongs = parent == stageID
+		}
+		if !belongs {
+			continue
+		}
+		for _, id := range stage.TaskIDs {
+			if id == dependentTask {
+				continue
+			}
+			task, err := store.GetTask(ctx, q, id)
+			if err != nil {
+				return "", err
+			}
+			if task.Lifecycle != protocol.TaskCompleted {
+				return id, nil
+			}
+		}
+	}
+	return "", nil
 }

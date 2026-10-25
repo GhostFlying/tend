@@ -18,6 +18,34 @@ const counts: ExecutionCounts = {
   idle: 0,
 };
 describe("server execution facts", () => {
+  test("idle describes the present and never claims a task has no execution history", () => {
+    expect(executionLook({ state: "idle" })).toEqual({ label: "当前未执行", tone: "idle" });
+    expect(executionCounts({ ...counts, idle: 1 })).toEqual([
+      { state: "idle", text: "1 当前未执行" },
+    ]);
+  });
+  test("owner decisions take precedence over broad implementation and acceptance lifecycles", () => {
+    for (const [lifecycle, block_reason, reason] of [
+      ["changes_required", "budget_exhausted", "等待调整实现次数"],
+      ["awaiting_acceptance", "acceptance_env_unavailable", "等待验收环境恢复"],
+      ["running", "workspace_unavailable", "等待工作区恢复"],
+    ] as const) {
+      const task = {
+        lifecycle,
+        block_reason,
+        control_mode: "managed",
+        execution: {
+          state: "waiting_owner",
+          queue_reason: { code: "task_blocked", message: block_reason },
+        },
+      } satisfies Pick<TaskSummary, "lifecycle" | "control_mode" | "block_reason" | "execution">;
+      expect(taskLook(task)).toEqual({ label: "等待用户", tone: "warn" });
+      expect(queueReasonText(task)).toBe(reason);
+      const withoutQueueReason = { ...task, execution: { state: "waiting_owner" as const } };
+      expect(queueReasonText(withoutQueueReason)).toBe(reason);
+      expect(withoutQueueReason.execution).not.toHaveProperty("queue_reason");
+    }
+  });
   test("a lifecycle marked running can still be queued without a worker", () => {
     const task = {
       lifecycle: "running",
