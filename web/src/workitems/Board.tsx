@@ -4,6 +4,7 @@ import type { WorkItemView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { Back } from "../shell/icons.tsx";
+import { ExecutionSummary, TaskExecution } from "../tasks/Execution.tsx";
 import { BoardResources } from "../tasks/Board.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 import { columns, columnLabel, concern } from "./model.ts";
@@ -52,6 +53,7 @@ export function WorkItemOverview() {
               <span>{columnLabel(item.column)}</span>
             </span>
             <span className={styles.overviewHint}>{concern(item)}</span>
+            <ExecutionSummary counts={item.execution} />
           </button>
         ))}
       {!items.length && !state.error && (
@@ -189,7 +191,7 @@ export function WorkItemBoard({
   );
 }
 function WorkItemCard({ item }: { item: WorkItemView }) {
-  const { openWorkItem } = useServices();
+  const { openWorkItem, openTask } = useServices();
   const stages = item.stages ?? [];
   const tasks = item.tasks ?? [];
   const openFollowOns = item.follow_ons?.filter((next) => next.status === "open").length ?? 0;
@@ -205,6 +207,7 @@ function WorkItemCard({ item }: { item: WorkItemView }) {
       <span className={styles.meta}>
         {item.project || "未分组"} · 修订 {item.revision}
       </span>
+      <ExecutionSummary counts={item.execution} />
       <p className={styles.concern} data-attention={item.column === "attention"}>
         {concern(item)}
       </p>
@@ -215,6 +218,28 @@ function WorkItemCard({ item }: { item: WorkItemView }) {
         {openFollowOns > 0 && <span>{openFollowOns} 项后续待处理</span>}
         {!!item.deliveries?.length && <span>{item.deliveries.length} 项交付跟踪</span>}
       </div>
+      {tasks.some((task) => task.execution?.queue_reason) && (
+        <div className={styles.waitingTasks} aria-label="排队任务与原因">
+          {tasks
+            .filter((task) => task.execution?.queue_reason)
+            .slice(0, 2)
+            .map((task) => (
+              <div key={task.task_id}>
+                <button
+                  type="button"
+                  className={styles.waitingTaskTitle}
+                  onClick={() => openTask(task.task_id)}
+                >
+                  {task.title}
+                </button>
+                <TaskExecution task={task} />
+              </div>
+            ))}
+          {tasks.filter((task) => task.execution?.queue_reason).length > 2 && (
+            <span className={styles.meta}>更多等待原因可在阶段中查看</span>
+          )}
+        </div>
+      )}
       {!!stages.length && (
         <details className={styles.cardStages}>
           <summary>{stages.length} 个阶段</summary>

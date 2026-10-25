@@ -447,3 +447,23 @@
     flex-wrap: wrap;
   }
 }
+.waitingTasks {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border-soft);
+}
+.waitingTaskTitle {
+  padding: 0;
+  text-align: left;
+  color: var(--label-2);
+  font: inherit;
+  font-size: var(--text-s);
+  overflow-wrap: anywhere;
+}
+.waitingTaskTitle:hover {
+  color: var(--accent);
+}
+.linkedTask {
+  width: 100%;
+  min-width: 0;
+}

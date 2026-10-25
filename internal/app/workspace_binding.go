@@ -12,7 +12,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func prepareWorkspace(ctx context.Context, q store.Querier, w domain.Workspace, projectTemplate, taskID string) (domain.Workspace, *store.WorkspaceRow, error) {
+func prepareWorkspace(ctx context.Context, q store.Querier, w domain.Workspace, projectTemplate, taskID, ownerItemID string) (domain.Workspace, *store.WorkspaceRow, error) {
 	switch w.ModeValue() {
 	case domain.WorkspaceTemporary:
 		return w, nil, w.Validate()
@@ -23,9 +23,11 @@ func prepareWorkspace(ctx context.Context, q store.Querier, w domain.Workspace, 
 		if w.Template != "" {
 			return w, nil, protocol.Errorf(protocol.CodeInvalidRequest, "reuse inherits its workspace; do not give a template")
 		}
-		// An existing binding remains pinned even if its source task starts over.
+		// An existing reuse agreement remains pinned, including legacy ownership,
+		// even if its source task starts over. New links must prove both owners.
 		resource, err := store.GetWorkspaceByTask(ctx, q, taskID)
-		if errors.Is(err, store.ErrNotFound) {
+		pinned := err == nil && resource.Mode == domain.WorkspaceReuse && resource.SourceTaskID == w.SourceTaskID
+		if !pinned && (err == nil || errors.Is(err, store.ErrNotFound)) {
 			resource, err = store.GetWorkspaceByTask(ctx, q, w.SourceTaskID)
 		}
 		if errors.Is(err, store.ErrNotFound) {
@@ -33,6 +35,18 @@ func prepareWorkspace(ctx context.Context, q store.Querier, w domain.Workspace, 
 		}
 		if err != nil {
 			return w, nil, err
+		}
+		if !pinned {
+			sourceOwner, err := store.GetTaskWorkItemOwner(ctx, q, w.SourceTaskID)
+			if err != nil {
+				return w, nil, err
+			}
+			if ownerItemID == "" || resource.OwnerWorkItemID == "" || sourceOwner == "" {
+				return w, nil, protocol.Errorf(protocol.CodeInvalidRequest, "reuse requires verified primary work item ownership; use a new or temporary workspace")
+			}
+			if ownerItemID != resource.OwnerWorkItemID || ownerItemID != sourceOwner {
+				return w, nil, protocol.Errorf(protocol.CodeInvalidRequest, "reuse is limited to the same primary work item; cross-item task links do not share workspace ownership")
+			}
 		}
 		if resource.Status == store.WorkspaceRemoving || resource.Status == store.WorkspaceRemoved {
 			return w, nil, protocol.Errorf(protocol.CodeInvalidRequest, "source workspace has been removed or is being cleaned up")

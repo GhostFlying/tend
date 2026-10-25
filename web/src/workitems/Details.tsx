@@ -9,7 +9,8 @@ import type {
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
-import { lifecycleLabels } from "../tasks/status.ts";
+import { taskLook } from "../tasks/status.ts";
+import { ExecutionSummary, TaskExecution } from "../tasks/Execution.tsx";
 import {
   closureLabels,
   columnLabel,
@@ -107,6 +108,7 @@ export function WorkItemDetails({
               {item.project || "未分组"} · 修订 {item.revision} · <code>{item.work_item_id}</code>
             </p>
             {!historical && <DraftActions item={item} />}
+            {!historical && <ExecutionSummary counts={item.execution} />}
             <Section title="目标">
               <Markdown text={item.intent} />
             </Section>
@@ -265,8 +267,13 @@ export function StageList({ item, compact = false }: { item: WorkItemView; compa
         >
           <div className={styles.stageHeading}>
             <strong>{stage.title}</strong>
-            <span>{stageLabels[stage.status] ?? stage.status}</span>
+            <span>计划 · {stageLabels[stage.status] ?? stage.status}</span>
           </div>
+          <ExecutionSummary
+            counts={
+              item.stage_execution?.find((entry) => entry.stage_id === stage.stage_id)?.execution
+            }
+          />
           {stage.parent_id && (
             <p className={styles.meta}>属于 {titles.get(stage.parent_id) ?? stage.parent_id}</p>
           )}
@@ -275,7 +282,11 @@ export function StageList({ item, compact = false }: { item: WorkItemView; compa
               依赖：{stage.depends_on.map((id) => titles.get(id) ?? id).join("、")}
             </p>
           )}
-          {parallel.has(stage.stage_id) && <p className={styles.parallel}>可并行推进</p>}
+          {parallel.has(stage.stage_id) && (
+            <p className={styles.parallel} title="阶段依赖允许并行；执行仍由调度器分配资源">
+              计划可并行
+            </p>
+          )}
           {stage.reason && <p>{stage.reason}</p>}
           {!!stage.task_ids?.length && (
             <div className={styles.taskLinks}>
@@ -294,10 +305,13 @@ function TaskButton({ item, id }: { item: WorkItemView; id: string }) {
   const { openTask } = useServices();
   const task = item.tasks?.find((task) => task.task_id === id);
   return (
-    <button type="button" className={styles.taskLink} onClick={() => openTask(id)}>
-      {task?.title ?? id}
-      {task && <span>{lifecycleLabels[task.lifecycle]}</span>}
-    </button>
+    <div className={styles.linkedTask}>
+      <button type="button" className={styles.taskLink} onClick={() => openTask(id)}>
+        {task?.title ?? id}
+        {task && <span>{taskLook(task).label}</span>}
+      </button>
+      {task && <TaskExecution task={task} showState={false} />}
+    </div>
   );
 }
 function Evidence({ items }: { items: readonly WorkItemEvidence[] | null | undefined }) {

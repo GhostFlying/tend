@@ -19,6 +19,38 @@ export type BlockReason =
 export type ControlMode = "managed" | "paused" | "human_control";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "QueueWaitCode".
+ */
+export type QueueWaitCode =
+  | "ready"
+  | "workspace_busy"
+  | "dependency"
+  | "host_capacity"
+  | "host_unavailable"
+  | "host_requirements"
+  | "task_blocked";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunRole".
+ */
+export type RunRole = "implement" | "accept";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutionState".
+ */
+export type ExecutionState =
+  | "idle"
+  | "queued"
+  | "starting"
+  | "running"
+  | "accepting"
+  | "waiting_owner"
+  | "paused"
+  | "unknown"
+  | "completed"
+  | "cancelled";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "TaskLifecycle".
  */
 export type TaskLifecycle =
@@ -150,11 +182,6 @@ export type RunObserved =
 export type TokenScope = "owner" | "agent";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunRole".
- */
-export type RunRole = "implement" | "accept";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkerKind".
  */
 export type WorkerKind = "appserver" | "orca";
@@ -247,14 +274,37 @@ export interface TaskSummary {
   block_reason: BlockReason;
   control_mode: ControlMode;
   control_revision: number;
+  execution?: TaskExecutionView;
   lifecycle: TaskLifecycle;
   next_implement_generation: number;
+  primary_work_item_id?: string;
   project: string;
   rating: Rating;
   spec_version: number;
   task_id: string;
   title: string;
   workspace: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskExecutionView".
+ */
+export interface TaskExecutionView {
+  queue_reason?: QueueWaitReason;
+  role?: RunRole;
+  run_id?: string;
+  state: ExecutionState;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "QueueWaitReason".
+ */
+export interface QueueWaitReason {
+  code: QueueWaitCode;
+  host_id?: string;
+  message: string;
+  resource_id?: string;
+  task_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -267,11 +317,13 @@ export interface WorkItemView {
   created_at: number;
   default_workspace_task_id?: string;
   deliveries?: WorkItemDelivery[];
+  execution?: ExecutionCounts;
   follow_ons?: WorkItemFollowOn[];
   intent: string;
   observations?: DeliveryObservation[];
   project: string;
   revision: number;
+  stage_execution?: StageExecutionView[];
   stages: WorkItemStage[] | null;
   status: WorkItemStatus;
   tasks?: TaskSummary[];
@@ -351,6 +403,21 @@ export interface WorkItemDelivery {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutionCounts".
+ */
+export interface ExecutionCounts {
+  accepting: number;
+  cancelled: number;
+  completed: number;
+  idle: number;
+  paused: number;
+  queued: number;
+  running: number;
+  unknown: number;
+  waiting_owner: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkItemFollowOn".
  */
 export interface WorkItemFollowOn {
@@ -361,6 +428,14 @@ export interface WorkItemFollowOn {
   status: WorkItemFollowOnStatus;
   text: string;
   transferred_to?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "StageExecutionView".
+ */
+export interface StageExecutionView {
+  execution: ExecutionCounts;
+  stage_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1055,8 +1130,10 @@ export interface TaskDetail {
   control_revision: number;
   current_artifact_id?: string;
   decisions: DecisionView[] | null;
+  execution?: TaskExecutionView;
   lifecycle: TaskLifecycle;
   next_implement_generation: number;
+  primary_work_item_id?: string;
   project: string;
   rating: Rating;
   relations?: TaskRelationView[];
@@ -1113,6 +1190,7 @@ export interface WorkspaceView {
   mounts: MountView[] | null;
   name?: string;
   occupied_by?: string;
+  owner_work_item_id?: string;
   path?: string;
   provider_id?: string;
   resource_id?: string;

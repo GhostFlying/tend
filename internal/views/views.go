@@ -35,13 +35,10 @@ func Tasks(ctx context.Context, q store.Querier, includeFinished bool, project s
 	if err != nil {
 		return nil, err
 	}
-	var out []protocol.TaskSummary
-	for _, r := range rows {
-		if includeFinished || !r.Lifecycle.Terminal() {
-			out = append(out, Summary(r))
-		}
+	if !includeFinished {
+		rows = slices.DeleteFunc(rows, func(row store.TaskRow) bool { return row.Lifecycle.Terminal() })
 	}
-	return out, nil
+	return SummariesWithExecution(ctx, q, rows)
 }
 
 // Task reads one task in full. A missing task is store.ErrNotFound.
@@ -51,7 +48,10 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 	if err != nil {
 		return d, err
 	}
-	d.TaskSummary = Summary(row)
+	d.TaskSummary, err = SummaryWithExecution(ctx, q, row)
+	if err != nil {
+		return d, err
+	}
 	items, err := store.ListTaskWorkItems(ctx, q, taskID)
 	if err != nil {
 		return d, err
@@ -126,7 +126,7 @@ func workspace(ctx context.Context, q store.Querier, taskID string) (*protocol.W
 		return nil, err
 	}
 	v := &protocol.WorkspaceView{Host: w.HostID, Status: w.Status, Mounts: []protocol.MountView{},
-		Mode: w.Mode, SourceTaskID: w.SourceTaskID, ResourceID: w.WorkspaceID, Kind: w.Kind, Name: w.Name, Path: w.Path, ProviderID: w.ProviderID, OccupiedBy: w.OccupiedBy}
+		OwnerWorkItemID: w.OwnerWorkItemID, Mode: w.Mode, SourceTaskID: w.SourceTaskID, ResourceID: w.WorkspaceID, Kind: w.Kind, Name: w.Name, Path: w.Path, ProviderID: w.ProviderID, OccupiedBy: w.OccupiedBy}
 	for _, path := range slices.Sorted(maps.Keys(facts)) {
 		m := facts[path]
 		v.Mounts = append(v.Mounts, protocol.MountView{
@@ -475,7 +475,11 @@ func TaskRelations(ctx context.Context, q store.Querier, taskID string) ([]proto
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, protocol.TaskRelationView{Kind: r.Kind, Direction: direction, Task: Summary(t)})
+		summary, err := SummaryWithExecution(ctx, q, t)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, protocol.TaskRelationView{Kind: r.Kind, Direction: direction, Task: summary})
 	}
 	return out, nil
 }

@@ -1101,6 +1101,67 @@
       "title": "Error",
       "type": "object"
     },
+    "ExecutionCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "accepting": {
+          "type": "integer"
+        },
+        "cancelled": {
+          "type": "integer"
+        },
+        "completed": {
+          "type": "integer"
+        },
+        "idle": {
+          "type": "integer"
+        },
+        "paused": {
+          "type": "integer"
+        },
+        "queued": {
+          "type": "integer"
+        },
+        "running": {
+          "type": "integer"
+        },
+        "unknown": {
+          "type": "integer"
+        },
+        "waiting_owner": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "queued",
+        "running",
+        "accepting",
+        "waiting_owner",
+        "paused",
+        "unknown",
+        "completed",
+        "cancelled",
+        "idle"
+      ],
+      "title": "ExecutionCounts",
+      "type": "object"
+    },
+    "ExecutionState": {
+      "enum": [
+        "idle",
+        "queued",
+        "starting",
+        "running",
+        "accepting",
+        "waiting_owner",
+        "paused",
+        "unknown",
+        "completed",
+        "cancelled"
+      ],
+      "title": "ExecutionState",
+      "type": "string"
+    },
     "HookEvent": {
       "enum": [
         "session_start",
@@ -1488,6 +1549,45 @@
         "score"
       ],
       "title": "QueueEntry",
+      "type": "object"
+    },
+    "QueueWaitCode": {
+      "enum": [
+        "ready",
+        "workspace_busy",
+        "dependency",
+        "host_capacity",
+        "host_unavailable",
+        "host_requirements",
+        "task_blocked"
+      ],
+      "title": "QueueWaitCode",
+      "type": "string"
+    },
+    "QueueWaitReason": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/QueueWaitCode"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "resource_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "QueueWaitReason",
       "type": "object"
     },
     "RateTaskPayload": {
@@ -1980,6 +2080,23 @@
       "title": "Snapshot",
       "type": "object"
     },
+    "StageExecutionView": {
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "$ref": "#/definitions/ExecutionCounts"
+        },
+        "stage_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage_id",
+        "execution"
+      ],
+      "title": "StageExecutionView",
+      "type": "object"
+    },
     "StreamStart": {
       "additionalProperties": false,
       "properties": {
@@ -2110,11 +2227,17 @@
             }
           ]
         },
+        "execution": {
+          "$ref": "#/definitions/TaskExecutionView"
+        },
         "lifecycle": {
           "$ref": "#/definitions/TaskLifecycle"
         },
         "next_implement_generation": {
           "type": "integer"
+        },
+        "primary_work_item_id": {
+          "type": "string"
         },
         "project": {
           "type": "string"
@@ -2184,6 +2307,28 @@
         "decisions"
       ],
       "title": "TaskDetail",
+      "type": "object"
+    },
+    "TaskExecutionView": {
+      "additionalProperties": false,
+      "properties": {
+        "queue_reason": {
+          "$ref": "#/definitions/QueueWaitReason"
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/ExecutionState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "TaskExecutionView",
       "type": "object"
     },
     "TaskLifecycle": {
@@ -2266,11 +2411,17 @@
         "control_revision": {
           "type": "integer"
         },
+        "execution": {
+          "$ref": "#/definitions/TaskExecutionView"
+        },
         "lifecycle": {
           "$ref": "#/definitions/TaskLifecycle"
         },
         "next_implement_generation": {
           "type": "integer"
+        },
+        "primary_work_item_id": {
+          "type": "string"
         },
         "project": {
           "type": "string"
@@ -2928,6 +3079,9 @@
           },
           "type": "array"
         },
+        "execution": {
+          "$ref": "#/definitions/ExecutionCounts"
+        },
         "follow_ons": {
           "items": {
             "$ref": "#/definitions/WorkItemFollowOn"
@@ -2948,6 +3102,12 @@
         },
         "revision": {
           "type": "integer"
+        },
+        "stage_execution": {
+          "items": {
+            "$ref": "#/definitions/StageExecutionView"
+          },
+          "type": "array"
         },
         "stages": {
           "anyOf": [
@@ -3065,6 +3225,9 @@
           "type": "string"
         },
         "occupied_by": {
+          "type": "string"
+        },
+        "owner_work_item_id": {
           "type": "string"
         },
         "path": {

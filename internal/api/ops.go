@@ -100,7 +100,10 @@ func (s *Server) currentTask(ctx context.Context, taskID string) *protocol.TaskS
 	if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		row, err := store.GetTask(ctx, tx.Q(), taskID)
 		if err == nil {
-			v := views.Summary(row)
+			v, readErr := views.SummaryWithExecution(ctx, tx.Q(), row)
+			if readErr != nil {
+				return readErr
+			}
 			out = &v
 		}
 		return err

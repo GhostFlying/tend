@@ -88,7 +88,7 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err != nil {
 		return Outcome{}, err
 	}
-	ws, resource, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, project.Template, taskID)
+	ws, resource, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, project.Template, taskID, item.WorkItemID)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -133,6 +133,9 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, fmt.Errorf("app: encode spec: %w", err)
 	}
 	if err := tx.InsertSpec(ctx, taskID, d.Task.SpecVersion, string(spec), p.SourceMessageID, now); err != nil {
+		return Outcome{}, err
+	}
+	if err := tx.InsertTaskWorkItemOwner(ctx, taskID, item.WorkItemID); err != nil {
 		return Outcome{}, err
 	}
 	_, linkedEvents, err := BindWorkItemTask(ctx, x, tx, item.WorkItemID, item.Revision, taskID, p.StageIDs)
@@ -213,11 +216,25 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	merged := domain.Decision{Task: task}
 	var pendingResource *store.WorkspaceRow
+	var detachedResource *store.WorkspaceRow
 	if p.Spec != nil {
+		detachedResource, err = unusedWorkspaceRebind(ctx, tx.Q(), row, current.Workspace, p.Spec.Workspace)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if detachedResource != nil {
+			// The app proved there is no execution agreement to move. Domain
+			// validation now sees the same resource freedom as a new task.
+			task.WorkspaceAssigned = false
+		}
 		if err := refreshTaskWorkContext(ctx, tx.Q(), row.TaskID, p.Spec, current.SharedContext); err != nil {
 			return Outcome{}, err
 		}
-		ws, resource, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, "", row.TaskID)
+		owner, err := store.GetTaskWorkItemOwner(ctx, tx.Q(), row.TaskID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		ws, resource, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, "", row.TaskID, owner)
 		pendingResource = resource
 		if err != nil {
 			return Outcome{}, err
@@ -311,6 +328,11 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, err
 		}
 	}
+	if detachedResource != nil {
+		if err := tx.DetachUnusedWorkspace(ctx, row.TaskID, detachedResource.WorkspaceID); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if pendingResource != nil && !row.WorkspaceAssigned {
 		if err := tx.BindWorkspace(ctx, row.TaskID, pendingResource.WorkspaceID, domain.WorkspaceReuse, p.Spec.Workspace.SourceTaskID, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
@@ -322,6 +344,10 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	if err := bindSource(ctx, tx, p.SourceMessageID, "task", row.TaskID); err != nil {
 		return Outcome{}, err
+	}
+	if detachedResource != nil {
+		events = append(events, Event{ObjectType: "task", ObjectID: row.TaskID, ObjectVersion: merged.Task.ControlRevision, Kind: "task.workspace_detached",
+			Body: map[string]any{"workspace_id": detachedResource.WorkspaceID, "source_task_id": detachedResource.SourceTaskID, "previous_spec_version": row.SpecVersion, "spec_version": merged.Task.SpecVersion}})
 	}
 	events = append(events, backlinks...)
 	return Outcome{Result: newTaskResult(merged.Task, actions), Events: events}, nil

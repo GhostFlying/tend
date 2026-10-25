@@ -160,10 +160,11 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 			more = true
 			rows = rows[:pageSize]
 		}
-		page := protocol.TaskPage{Tasks: make([]protocol.TaskSummary, 0, len(rows))}
-		for _, row := range rows {
-			page.Tasks = append(page.Tasks, views.Summary(row))
+		summaries, err := views.SummariesWithExecution(r.Context(), q, rows)
+		if err != nil {
+			return nil, err
 		}
+		page := protocol.TaskPage{Tasks: summaries}
 		if more {
 			last := rows[len(rows)-1]
 			page.Next = fmt.Sprintf("%d:%s", last.UpdatedAt, last.TaskID)

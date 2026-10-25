@@ -19,7 +19,7 @@ const specSchema = `{
     "max_implement_attempts": {"type": "integer", "minimum": 0},
     "workspace": {
       "type": "object",
-      "description": "Choose new repository worktrees, reuse of a managed resource identified by source_task_id, or an independent temporary directory for report/file work. A task relation alone does not reuse a workspace.",
+      "description": "Choose new repository worktrees, reuse of a same-primary-work-item managed resource identified by source_task_id, or an independent temporary directory for report/file work. A task relation alone does not reuse a workspace.",
       "properties": {
         "mode": {"type": "string", "enum": ["new", "reuse", "temporary"], "description": "Omitted means new. reuse preserves the managed directory and dirty state; temporary is an independent directory, not a repository worktree."},
         "source_task_id": {"type": "string", "description": "For reuse, resolve the owner's referenced task and read its resource first; do not guess an unrelated task or use a relation as implicit inheritance."},
@@ -91,7 +91,7 @@ var schemas = map[string]string{
     "work_item_id":{"type":"string","description":"Existing work item to continue. When set, also provide work_item_revision and nonempty stage_ids. Omission creates a standalone concern; use an existing ID for follow-up."},
     "work_item_revision":{"type":"integer","description":"Required with work_item_id: the revision returned by work_items_read/create/update. Creation links atomically under this revision."},
     "stage_ids":{"type":"array","items":{"type":"string"},"description":"Required and nonempty with work_item_id: stable IDs of existing stages this execution covers. Read or create the stages first; do not omit the association to bypass an error."},
-    "use_default_workspace":{"type":"boolean","description":"Explicitly reuse the item's verified default source task resource; otherwise use spec.workspace."},
+    "use_default_workspace":{"type":"boolean","description":"Explicitly reuse the item's verified default resource only to continue its actual work state; independent work uses spec.workspace new even within the same item."},
     "title": {"type": "string"},
     "relations": ` + relationsSchema + `,
     "spec": ` + specSchema + `,

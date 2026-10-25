@@ -1,8 +1,15 @@
 import { describe, expect, test, vi } from "vitest";
 import { ApiError } from "../api/client.ts";
-import type { ConversationItem, LedgerEvent } from "../api/generated/api.ts";
+import type {
+  ConversationItem,
+  LedgerEvent,
+  TaskDetail,
+  TaskSummary,
+} from "../api/generated/api.ts";
 import { processing } from "../conversation/model.ts";
-import { LiveData, type Reader } from "./data.ts";
+import { taskLook } from "../tasks/status.ts";
+import { queueReasonText } from "../tasks/execution.ts";
+import { LiveData, summary, type Reader } from "./data.ts";
 
 /** A fake owner API whose answers the test releases one by one. */
 class FakeApi implements Reader {
@@ -422,4 +429,128 @@ test("a shorter final reply stays terminal after late streaming or legacy items"
     final,
   ]);
   await live.stop();
+});
+
+const referenceTask: TaskDetail = {
+  task_id: "task_reference",
+  title: "Outside the snapshot",
+  project: "sample",
+  lifecycle: "running",
+  control_mode: "managed",
+  control_revision: 2,
+  spec_version: 1,
+  rating: "p2",
+  block_reason: "none",
+  workspace: "sample",
+  next_implement_generation: 2,
+  primary_work_item_id: "wi_primary",
+  execution: {
+    state: "queued",
+    queue_reason: { code: "workspace_busy", message: "occupied", task_id: "task_owner" },
+  },
+  actions: [],
+  runs: [],
+  artifacts: [],
+  acceptances: [],
+  decisions: [],
+  spec: { goal: "Inspect" },
+};
+function referenceEvent(object_type: string, object_id = "other"): LedgerEvent {
+  return {
+    event_seq: 2,
+    object_type,
+    object_id,
+    kind: `${object_type}.changed`,
+    created_at: "2026-10-25T00:00:00Z",
+  };
+}
+
+test("detail summaries retain every summary fact used by cached task references", () => {
+  const expected: TaskSummary = {
+    task_id: referenceTask.task_id,
+    title: referenceTask.title,
+    project: referenceTask.project,
+    lifecycle: referenceTask.lifecycle,
+    control_mode: referenceTask.control_mode,
+    control_revision: referenceTask.control_revision,
+    spec_version: referenceTask.spec_version,
+    rating: referenceTask.rating,
+    block_reason: referenceTask.block_reason,
+    workspace: referenceTask.workspace,
+    next_implement_generation: referenceTask.next_implement_generation,
+    primary_work_item_id: "wi_primary",
+    execution: referenceTask.execution!,
+  };
+  expect(summary(referenceTask)).toEqual(expected);
+  expect(taskLook(summary(referenceTask)).label).toBe("排队中");
+  expect(queueReasonText(summary(referenceTask))).toBe("等待工作区释放");
+  expect(summary(referenceTask)).not.toHaveProperty("spec");
+  expect(summary(referenceTask)).not.toHaveProperty("runs");
+});
+
+test("TaskRef's lookup and subsequent detail reads keep authoritative execution facts", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  try {
+    const looked = live.lookUp(referenceTask.task_id);
+    await api.answer("/api/v1/tasks/task_reference", referenceTask);
+    await looked;
+    expect(live.lookups.get().get(referenceTask.task_id)?.primary_work_item_id).toBe("wi_primary");
+    expect(taskLook(live.lookups.get().get(referenceTask.task_id)!).label).toBe("排队中");
+    const opened = live.open(referenceTask.task_id);
+    await api.answer("/api/v1/tasks/task_reference", {
+      ...referenceTask,
+      execution: { state: "accepting", role: "accept" },
+    });
+    await opened;
+    expect(taskLook(live.lookups.get().get(referenceTask.task_id)!).label).toBe("验收中");
+    expect(live.lookups.get().get(referenceTask.task_id)?.execution).toEqual({
+      state: "accepting",
+      role: "accept",
+    });
+  } finally {
+    await live.stop();
+  }
+});
+
+test("outside-snapshot references refresh on other workspace, host and run facts", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  try {
+    const first = live.lookUp(referenceTask.task_id);
+    // A host event while the original response is pending must schedule a newer read.
+    live.apply(referenceEvent("host"));
+    live.apply(referenceEvent("workspace"));
+    expect(api.calls.filter((p) => p.includes("task_reference"))).toHaveLength(1);
+    await api.answer("/api/v1/tasks/task_reference", referenceTask);
+    await first;
+    expect(api.calls.filter((p) => p.includes("task_reference"))).toHaveLength(2);
+    await api.answer("/api/v1/tasks/task_reference", {
+      ...referenceTask,
+      execution: { state: "running", role: "implement" },
+    });
+    expect(taskLook(live.lookups.get().get(referenceTask.task_id)!).label).toBe("执行中");
+    live.apply(referenceEvent("run"));
+    await api.answer("/api/v1/tasks/task_reference", {
+      ...referenceTask,
+      execution: {
+        state: "queued",
+        queue_reason: { code: "host_capacity", message: "capacity exhausted" },
+      },
+    });
+    expect(queueReasonText(live.lookups.get().get(referenceTask.task_id)!)).toBe(
+      "等待主机空闲槽位",
+    );
+    live.apply(referenceEvent("task", referenceTask.task_id));
+    await api.answer("/api/v1/tasks/task_reference", {
+      ...referenceTask,
+      lifecycle: "completed",
+      execution: { state: "completed" },
+    });
+    const completedCalls = api.calls.filter((p) => p.includes("task_reference")).length;
+    live.apply(referenceEvent("host"));
+    expect(api.calls.filter((p) => p.includes("task_reference"))).toHaveLength(completedCalls);
+  } finally {
+    await live.stop();
+  }
 });

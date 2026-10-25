@@ -10,16 +10,18 @@ import (
 
 // TaskSummary is a task as listed.
 type TaskSummary struct {
-	TaskID          string        `json:"task_id"`
-	Title           string        `json:"title"`
-	Project         string        `json:"project"`
-	Lifecycle       TaskLifecycle `json:"lifecycle"`
-	ControlMode     ControlMode   `json:"control_mode"`
-	ControlRevision int64         `json:"control_revision"`
-	SpecVersion     int64         `json:"spec_version"`
-	Rating          Rating        `json:"rating"`
-	BlockReason     BlockReason   `json:"block_reason"`
-	Workspace       string        `json:"workspace"`
+	Execution         *TaskExecutionView `json:"execution,omitempty"`
+	PrimaryWorkItemID string             `json:"primary_work_item_id,omitempty"`
+	TaskID            string             `json:"task_id"`
+	Title             string             `json:"title"`
+	Project           string             `json:"project"`
+	Lifecycle         TaskLifecycle      `json:"lifecycle"`
+	ControlMode       ControlMode        `json:"control_mode"`
+	ControlRevision   int64              `json:"control_revision"`
+	SpecVersion       int64              `json:"spec_version"`
+	Rating            Rating             `json:"rating"`
+	BlockReason       BlockReason        `json:"block_reason"`
+	Workspace         string             `json:"workspace"`
 	// NextImplementGeneration is the generation a retry of the
 	// implementation must name.
 	NextImplementGeneration int64 `json:"next_implement_generation"`
@@ -44,17 +46,18 @@ type TaskDetail struct {
 
 // WorkspaceView is a task's workspace on a host.
 type WorkspaceView struct {
-	Mode         string      `json:"mode,omitempty"`
-	SourceTaskID string      `json:"source_task_id,omitempty"`
-	ResourceID   string      `json:"resource_id,omitempty"`
-	Kind         string      `json:"kind,omitempty"`
-	Name         string      `json:"name,omitempty"`
-	Path         string      `json:"path,omitempty"`
-	ProviderID   string      `json:"provider_id,omitempty"`
-	OccupiedBy   string      `json:"occupied_by,omitempty"`
-	Host         string      `json:"host"`
-	Status       string      `json:"status"`
-	Mounts       []MountView `json:"mounts"`
+	OwnerWorkItemID string      `json:"owner_work_item_id,omitempty"`
+	Mode            string      `json:"mode,omitempty"`
+	SourceTaskID    string      `json:"source_task_id,omitempty"`
+	ResourceID      string      `json:"resource_id,omitempty"`
+	Kind            string      `json:"kind,omitempty"`
+	Name            string      `json:"name,omitempty"`
+	Path            string      `json:"path,omitempty"`
+	ProviderID      string      `json:"provider_id,omitempty"`
+	OccupiedBy      string      `json:"occupied_by,omitempty"`
+	Host            string      `json:"host"`
+	Status          string      `json:"status"`
+	Mounts          []MountView `json:"mounts"`
 }
 
 // MountView records a logical mount and its resolved Git facts. Path is the

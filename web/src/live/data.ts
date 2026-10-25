@@ -83,6 +83,7 @@ export class LiveData {
   private readonly detailStore = new Store<DetailState | null>(null);
   private readonly lookupStore = new Store<TaskLookup>(new Map());
   private readonly lookingUp = new Set<string>();
+  private readonly dirtyLookups = new Set<string>();
   private historyGeneration = 0;
   private logCache: { runId: string; entries: RunLogView[]; next: number; more: boolean } | null =
     null;
@@ -180,11 +181,20 @@ export class LiveData {
       case "outbox":
         // Deliveries; what they deliver has events of its own.
         return;
-      case "task":
-        if (this.lookupStore.get().has(event.object_id)) {
-          void this.lookUp(event.object_id, true);
-        }
-        break;
+    }
+    // A host, workspace or another task can change a reference's queue reason.
+    // Refresh cached active references from the server, including an initial read
+    // still in flight; never derive a scheduling result from the event itself.
+    const references = new Set([...this.lookupStore.get().keys(), ...this.lookingUp]);
+    for (const id of references) {
+      const task = this.lookupStore.get().get(id);
+      if (
+        (event.object_type === "task" && event.object_id === id) ||
+        task === undefined ||
+        (task !== null && task.lifecycle !== "completed" && task.lifecycle !== "cancelled")
+      ) {
+        void this.lookUp(id, true);
+      }
     }
     this.tasks.changed();
     this.workItems.changed();
@@ -257,13 +267,16 @@ export class LiveData {
    * a finished one. Each is read once unless again is set.
    */
   async lookUp(taskId: string, again = false): Promise<void> {
-    if (this.lookingUp.has(taskId) || (!again && this.lookupStore.get().has(taskId))) {
+    if (this.stopped) return;
+    if (this.lookingUp.has(taskId)) {
+      if (again) this.dirtyLookups.add(taskId);
       return;
     }
+    if (!again && this.lookupStore.get().has(taskId)) return;
     this.lookingUp.add(taskId);
     try {
       const t = await this.api.get<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
-      this.remember(taskId, summary(t));
+      if (!this.stopped) this.remember(taskId, summary(t));
     } catch (err) {
       if (err instanceof ApiError && err.code === "not_found") {
         this.remember(taskId, null);
@@ -271,6 +284,7 @@ export class LiveData {
       // Otherwise it stays unknown and is tried again when shown again.
     } finally {
       this.lookingUp.delete(taskId);
+      if (this.dirtyLookups.delete(taskId) && !this.stopped) void this.lookUp(taskId, true);
     }
   }
 
@@ -426,6 +440,7 @@ export class LiveData {
   /** Stops all owned timers and the pending log request. */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.dirtyLookups.clear();
     this.repos.stop();
     this.workItems.stop();
     this.detailController?.abort();
@@ -613,6 +628,10 @@ export function summary(t: TaskDetail): TaskSummary {
     block_reason: t.block_reason,
     workspace: t.workspace,
     next_implement_generation: t.next_implement_generation,
+    ...(t.execution === undefined ? {} : { execution: t.execution }),
+    ...(t.primary_work_item_id === undefined
+      ? {}
+      : { primary_work_item_id: t.primary_work_item_id }),
   };
 }
 

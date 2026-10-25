@@ -8,6 +8,7 @@ import type {
   TaskLifecycle,
   TaskSummary,
 } from "../api/generated/api.ts";
+import { executionLook } from "./execution.ts";
 import type { Tone } from "../shell/StatusDot.tsx";
 
 export interface TaskLook {
@@ -49,9 +50,10 @@ export const ratingLabels: Record<Rating, string> = {
   p3: "p3",
 };
 
-type State = Pick<TaskSummary, "lifecycle" | "control_mode" | "block_reason">;
+type State = Pick<TaskSummary, "lifecycle" | "control_mode" | "block_reason" | "execution">;
 
 export function taskLook(t: State): TaskLook {
+  if (t.execution) return executionLook(t.execution);
   switch (t.lifecycle) {
     case "completed":
       return { tone: "ok", label: lifecycleLabels.completed };
