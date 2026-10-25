@@ -118,3 +118,60 @@ func TestRequiredHostLegacySpecAndRunnerRequirements(t *testing.T) {
 		}
 	}
 }
+
+func TestRequiredHostLossRejectsLegacyStartOverWithoutAbandoningWorkspace(t *testing.T) {
+	h := newDeliverableHarness(t)
+	spec := temporaryReportSpec()
+	spec.Requirements.HostID = "linux-1"
+	task := h.createReportTask("host-bound", spec)
+	as, ok, _ := h.claimDeliverableRun()
+	if !ok {
+		t.Fatal("missing assignment")
+	}
+	h.reportDirectory(as, t.TempDir())
+	if op := h.runAs(as, protocol.OpRunsSubmitArtifact, protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Preserve local investigation"}}, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	h.withHosts("linux-2")
+	h.checkWorkspaces()
+	questions := h.openDecisions(task.TaskID)
+	if len(questions) != 1 || strings.Contains(questions[0].OptionsJSON, domain.StartOverOption) || !strings.Contains(questions[0].Question, "requirements.host_id") {
+		t.Fatal(questions)
+	}
+	original := h.resourceForTask(task.TaskID)
+	question := questions[0]
+	// Older servers persisted an unsafe option; keep its answer without applying it.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE decisions SET options_json=?,effects_json=? WHERE decision_id=?`, `["wait for the host","start over on another host","cancel the task"]`, `{"start over on another host":"start_over","cancel the task":"cancel"}`, question.DecisionID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	answer := h.answer(question, domain.StartOverOption)
+	if answer.Effect == nil || answer.Effect.Applied || !strings.Contains(answer.Effect.Reason, "requirements.host_id") {
+		t.Fatal(answer)
+	}
+	got := h.resourceForTask(task.TaskID)
+	if got.WorkspaceID != original.WorkspaceID || got.Status != original.Status || got.Path != original.Path || got.HostID != original.HostID {
+		t.Fatal("workspace changed", got)
+	}
+	if h.task(task.TaskID).BlockReason != protocol.BlockWorkspaceUnavailable {
+		t.Fatal("unsafe option cleared block")
+	}
+	replacement := h.openDecisions(task.TaskID)
+	if len(replacement) != 1 || replacement[0].DecisionID == question.DecisionID || strings.Contains(replacement[0].OptionsJSON, domain.StartOverOption) {
+		t.Fatal(replacement)
+	}
+	h.withHosts("linux-1", "linux-2")
+	h.checkWorkspaces()
+	if h.task(task.TaskID).BlockReason != protocol.BlockNone || len(h.openDecisions(task.TaskID)) != 0 {
+		t.Fatal("host return did not resolve wait")
+	}
+	if h.resourceForTask(task.TaskID).WorkspaceID != original.WorkspaceID {
+		t.Fatal("host return changed resource")
+	}
+	resumed, ok, _ := h.claimDeliverableRun()
+	if !ok || resumed.TaskID != task.TaskID || resumed.Role != protocol.RoleAccept || resumed.Workspace.ID != original.WorkspaceID {
+		t.Fatalf("host return failed to resume original resource: %+v %v", resumed, ok)
+	}
+}

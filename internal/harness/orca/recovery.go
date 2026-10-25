@@ -263,10 +263,13 @@ func (w *worker) recheckFailedTurn(ctx context.Context, wait Wait) error {
 }
 
 func (w *worker) finishHandback(ctx context.Context) error {
-	if w.st.Recovery == nil {
+	if w.st.Recovery == nil && w.st.FailedTurn == 0 {
 		return nil
 	}
-	w.st.Recovery.Phase = "handed_back"
+	if w.st.Recovery != nil {
+		w.st.Recovery.Phase = "handed_back"
+	}
+	w.st.HandbackEventID = fmt.Sprintf("%s@%d/recovery-handed-back", w.st.Terminal, w.st.Turn)
 	if err := w.save(); err != nil {
 		return err
 	}
@@ -275,7 +278,15 @@ func (w *worker) finishHandback(ctx context.Context) error {
 }
 
 func (w *worker) emitHandback(ctx context.Context) {
-	w.emitID(ctx, fmt.Sprintf("%s@%d/recovery-handed-back", w.st.Terminal, w.st.Turn), "worker.recovery_handed_back", map[string]int{"attempts": w.st.Recovery.Attempts})
+	id := w.st.HandbackEventID
+	if id == "" {
+		id = fmt.Sprintf("%s@%d/recovery-handed-back", w.st.Terminal, w.st.Turn)
+	}
+	attempts := 0
+	if w.st.Recovery != nil {
+		attempts = w.st.Recovery.Attempts
+	}
+	w.emitID(ctx, id, "worker.recovery_handed_back", map[string]int{"attempts": attempts})
 }
 
 // Phase checkpoints replay facts, not provider mutations. Identity and payload
@@ -283,6 +294,9 @@ func (w *worker) emitHandback(ctx context.Context) {
 func (w *worker) emitRecoveryPhase(ctx context.Context) {
 	r := w.st.Recovery
 	if r == nil {
+		if w.st.HandbackEventID != "" {
+			w.emitHandback(ctx)
+		}
 		return
 	}
 	kind, phase := "", ""
