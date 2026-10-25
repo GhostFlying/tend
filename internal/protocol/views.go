@@ -10,18 +10,20 @@ import (
 
 // TaskSummary is a task as listed.
 type TaskSummary struct {
-	Execution         *TaskExecutionView `json:"execution,omitempty"`
-	PrimaryWorkItemID string             `json:"primary_work_item_id,omitempty"`
-	TaskID            string             `json:"task_id"`
-	Title             string             `json:"title"`
-	Project           string             `json:"project"`
-	Lifecycle         TaskLifecycle      `json:"lifecycle"`
-	ControlMode       ControlMode        `json:"control_mode"`
-	ControlRevision   int64              `json:"control_revision"`
-	SpecVersion       int64              `json:"spec_version"`
-	Rating            Rating             `json:"rating"`
-	BlockReason       BlockReason        `json:"block_reason"`
-	Workspace         string             `json:"workspace"`
+	Execution            *TaskExecutionView `json:"execution,omitempty"`
+	PrimaryWorkItemTitle string             `json:"primary_work_item_title,omitempty"`
+	CompletedAt          int64              `json:"completed_at,omitempty"`
+	PrimaryWorkItemID    string             `json:"primary_work_item_id,omitempty"`
+	TaskID               string             `json:"task_id"`
+	Title                string             `json:"title"`
+	Project              string             `json:"project"`
+	Lifecycle            TaskLifecycle      `json:"lifecycle"`
+	ControlMode          ControlMode        `json:"control_mode"`
+	ControlRevision      int64              `json:"control_revision"`
+	SpecVersion          int64              `json:"spec_version"`
+	Rating               Rating             `json:"rating"`
+	BlockReason          BlockReason        `json:"block_reason"`
+	Workspace            string             `json:"workspace"`
 	// NextImplementGeneration is the generation a retry of the
 	// implementation must name.
 	NextImplementGeneration int64 `json:"next_implement_generation"`

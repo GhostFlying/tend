@@ -1,15 +1,15 @@
 import { RepositoryEntry } from "../repos/Repositories.tsx";
-// The work overview: what needs the owner, tasks by project and the hosts.
+// Work items are the primary navigation; execution records have a separate view.
 import type { Connection } from "../api/client.ts";
+import { useServices } from "../app/services.tsx";
 import { Attention } from "../decisions/Attention.tsx";
 import { useStore } from "../state/store.ts";
 import { theme, themeLabels, toggleTheme } from "../theme/theme.ts";
 import { Note } from "./Chat.tsx";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
-import { WorkItemOverview } from "../workitems/Board.tsx";
 import { RecentTasks } from "../tasks/Board.tsx";
+import { WorkItemOverview } from "../workitems/Board.tsx";
 import controls from "./controls.module.css";
-import { TaskOverview } from "../tasks/Overview.tsx";
 import { Hosts } from "../hosts/Hosts.tsx";
 import styles from "./Sidebar.module.css";
 import type { View } from "./TabBar.tsx";
@@ -29,6 +29,7 @@ export function Sidebar({
   onSettings(): void;
   onRepos(): void;
 }) {
+  const { live } = useServices();
   const choice = useStore(theme);
   return (
     <div className={styles.root} data-view={view}>
@@ -49,7 +50,7 @@ export function Sidebar({
         <div className={styles.decisions}>
           <Attention />
         </div>
-        <section className={styles.tasks} aria-label="任务">
+        <section className={styles.tasks} aria-label="工作项与资源">
           <button
             type="button"
             className={`${controls.chipBtn} ${styles.allTasks}`}
@@ -57,15 +58,20 @@ export function Sidebar({
           >
             工作项 · 白板 ›
           </button>
-          <WorkItemOverview />
-          <details>
-            <summary>执行任务与记录</summary>
-            <button type="button" className={controls.chipBtn} onClick={onRecords}>
-              执行记录
-            </button>
-            <TaskOverview />
-            <RecentTasks />
-          </details>
+          <WorkItemOverview onAll={onBoard} />
+          <div className={styles.recent}>
+            <RecentTasks limit={3} detailed />
+          </div>
+          <button
+            type="button"
+            className={styles.recordsLink}
+            onClick={() => {
+              live.tasks.setProject("");
+              onRecords();
+            }}
+          >
+            全部执行记录 ›
+          </button>
           <RepositoryEntry onOpen={onRepos} />
           <Hosts connection={connection} />
         </section>

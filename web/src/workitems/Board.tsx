@@ -14,7 +14,7 @@ import controls from "../shell/controls.module.css";
 import list from "../shell/list.module.css";
 import styles from "./WorkItems.module.css";
 
-export function WorkItemOverview() {
+export function WorkItemOverview({ onAll }: { onAll(): void }) {
   const { live, openWorkItem } = useServices();
   const source = live.workItems.overview;
   const state = useStore(source.state);
@@ -41,7 +41,7 @@ export function WorkItemOverview() {
         ...concerns.filter((item) => item.column === "unplanned"),
         ...items.filter((item) => !concerns.includes(item)),
       ]
-        .slice(0, 6)
+        .slice(0, 3)
         .map((item) => (
           <button
             type="button"
@@ -57,6 +57,18 @@ export function WorkItemOverview() {
             <ExecutionSummary counts={item.execution} />
           </button>
         ))}
+      {items.length > 3 && (
+        <button
+          type="button"
+          className={styles.overviewMore}
+          onClick={() => {
+            live.workItems.setProject("");
+            onAll();
+          }}
+        >
+          查看全部 {items.length} 个工作项 ›
+        </button>
+      )}
       {!items.length && !state.error && (
         <p className={controls.empty}>
           {state.loading ? "正在读取工作项…" : "暂无持续跟进的工作项。"}

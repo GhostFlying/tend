@@ -180,3 +180,71 @@ func TestCrossProjectBacklinkRemovalReachesAgentDelta(t *testing.T) {
 		t.Fatalf("backlink removal missing from delta: %s", next)
 	}
 }
+
+// Completion order must not drift when an old task's metadata is changed.
+func TestRecentTasksUseCompletionEvidenceAndPrimaryWorkItem(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	ids := []string{e.task("old result"), e.task("new result"), e.task("legacy result"), e.task("another legacy result"), e.task("cancelled result")}
+	err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		for i, id := range ids {
+			state := "completed"
+			if i == 4 {
+				state = "cancelled"
+			}
+			if _, err := tx.Exec(t.Context(), "UPDATE tasks SET lifecycle=?, updated_at=? WHERE task_id=?", state, 9000-i, id); err != nil {
+				return err
+			}
+			if i < 2 || i == 4 {
+				if _, err := tx.InsertEvent(t.Context(), store.EventRow{EventID: fmt.Sprintf("event_completion_%d", i), Source: "app", ObjectType: "task", ObjectID: id, Kind: "task.completed", BodyJSON: "{}", CreatedAt: int64(1000 + i*1000)}); err != nil {
+					return err
+				}
+			}
+		}
+		owner, err := store.GetTaskWorkItemOwner(t.Context(), tx.Q(), ids[1])
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), "UPDATE work_items SET body_json=json_set(body_json,'$.title','Current parent title') WHERE work_item_id=?", owner)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []protocol.TaskSummary
+	cursor := ""
+	for range 5 {
+		var page protocol.TaskPage
+		path := "/api/v1/tasks?all=1&lifecycle=completed&sort=completed_at&limit=1"
+		if cursor != "" {
+			path += "&before=" + url.QueryEscape(cursor)
+		}
+		if status := e.do("GET", path, token, nil, &page); status != http.StatusOK {
+			t.Fatalf("page status %d", status)
+		}
+		got = append(got, page.Tasks...)
+		if page.Next == "" {
+			break
+		}
+		cursor = page.Next
+	}
+	if len(got) != 4 || got[0].TaskID != ids[1] || got[1].TaskID != ids[0] || got[0].CompletedAt != 2000 || got[1].CompletedAt != 1000 {
+		t.Fatalf("completion order: %+v", got)
+	}
+	if got[0].PrimaryWorkItemID == "" || got[0].PrimaryWorkItemTitle != "Current parent title" {
+		t.Fatalf("primary item: %+v", got[0])
+	}
+	if got[2].CompletedAt != 0 || got[3].CompletedAt != 0 || got[2].TaskID == got[3].TaskID {
+		t.Fatalf("missing historical evidence: %+v", got[2:])
+	}
+	var detail protocol.TaskDetail
+	if status := e.do("GET", "/api/v1/tasks/"+ids[1], token, nil, &detail); status != http.StatusOK || detail.CompletedAt != got[0].CompletedAt {
+		t.Fatalf("detail mismatch: %d %+v", status, detail)
+	}
+	for _, path := range []string{"/api/v1/tasks?all=1&sort=completed_at", "/api/v1/tasks?all=1&lifecycle=running&sort=completed_at", "/api/v1/tasks?all=1&sort=invalid"} {
+		if status := e.do("GET", path, token, nil, nil); status != http.StatusBadRequest {
+			t.Fatalf("invalid sort %s: %d", path, status)
+		}
+	}
+}
