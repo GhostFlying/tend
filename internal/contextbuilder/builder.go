@@ -32,12 +32,12 @@ import (
 // Config tunes the builder. Zero values select the defaults.
 type Config struct {
 	// FullBudget and DeltaBudget bound the hosted main agent's packet
-	// sizes in characters; the defaults are about 4k and 1.5k tokens.
+	// sizes in UTF-8 bytes; defaults are 16000 and 6000.
 	FullBudget  int
 	DeltaBudget int
-	// HookFullBudget and HookDeltaBudget bound the context of agents the
-	// owner works in, which their hooks limit (C5): about 8000 and 4000
-	// characters by default.
+	// HookFullBudget and HookDeltaBudget budget dynamic addon context in
+	// UTF-8 bytes: 2000 and 4000 by default. Full snapshots additionally
+	// include fixed instructions, without taking space from ledger facts.
 	HookFullBudget  int
 	HookDeltaBudget int
 	// FocusMessages is how many recent messages a full snapshot recalls.
@@ -52,7 +52,7 @@ func (c Config) withDefaults() Config {
 		c.DeltaBudget = 6000
 	}
 	if c.HookFullBudget <= 0 {
-		c.HookFullBudget = 8000
+		c.HookFullBudget = 2000
 	}
 	if c.HookDeltaBudget <= 0 {
 		c.HookDeltaBudget = 4000

@@ -2,8 +2,8 @@ package contextbuilder
 
 // AddonInstructions are the standing instructions for an agent the owner
 // works in (D45). Such an agent has no developer instructions tend could
-// set, so every full snapshot carries them; they are kept short to leave
-// the snapshot's budget to the ledger.
+// set, so every full snapshot carries them separately from its ledger budget.
+// Keep them concise to avoid unnecessary context overhead.
 const AddonInstructions = `About tend: tend is the owner's ledger and scheduler for delegated coding tasks. Runners implement each task in a managed workspace resource and independent acceptance runs verify it; you plan and steer that work through the tend tools (an MCP server named tend).
 - Create a tend task only when the owner asks to hand work to tend. Give it a clear goal, acceptance checks, the required outputs and a suitable workspace mode (repos_list for repository work), with a short unique workspace_name. If the name is already taken, read the task it names: it may be the one you created before. tend does not commit or push: if the work should end as commits, a pushed branch or a review request, say so in the task, and the worker does it following the repository's own rules.
 - Use new worktrees for independent repository tasks, including read-only investigation; temporary for work without repositories. Reuse only to continue a known resource's actual work state within its primary work item. Read the source task and set source_task_id; ask only if the reference or intended reuse is ambiguous. Same repo, follow_up or secondary links do not grant reuse. Defaults are candidates, not requirements; same-item parallel tasks may use separate resources. One resource remains exclusive. Preserve branches and dirty files: no automatic reset, clean, stash or branch switch. Set include_existing_changes only for inherited changes explicitly in the commit scope. Transfer cross-item results via commits, reports or files.
