@@ -123,6 +123,13 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 			filter.Lifecycles = append(filter.Lifecycles, state)
 		}
 	}
+	if order := query.Get("sort"); order != "" {
+		if order != "completed_at" || !all || len(filter.Lifecycles) != 1 || filter.Lifecycles[0] != protocol.TaskCompleted {
+			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "sort=completed_at requires all=1 and lifecycle=completed"))
+			return
+		}
+		filter.CompletedOrder = true
+	}
 	if !all && query.Get("finished") != "1" {
 		s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
 			list, err := views.Tasks(r.Context(), q, false, "")
@@ -138,7 +145,7 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 	if before := query.Get("before"); before != "" {
 		ms, rest, ok := strings.Cut(before, ":")
 		n, err := strconv.ParseInt(ms, 10, 64)
-		if !ok || err != nil || n <= 0 || rest == "" {
+		if !ok || err != nil || (n < 0 || n == 0 && !filter.CompletedOrder) || rest == "" {
 			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "before must be a cursor from a previous page"))
 			return
 		}
@@ -167,7 +174,11 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 		page := protocol.TaskPage{Tasks: summaries}
 		if more {
 			last := rows[len(rows)-1]
-			page.Next = fmt.Sprintf("%d:%s", last.UpdatedAt, last.TaskID)
+			cursorTime := last.UpdatedAt
+			if filter.CompletedOrder {
+				cursorTime = last.CompletedAt
+			}
+			page.Next = fmt.Sprintf("%d:%s", cursorTime, last.TaskID)
 		}
 		return page, nil
 	})

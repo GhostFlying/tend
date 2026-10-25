@@ -272,12 +272,14 @@ export interface APIResponse {
  */
 export interface TaskSummary {
   block_reason: BlockReason;
+  completed_at?: number;
   control_mode: ControlMode;
   control_revision: number;
   execution?: TaskExecutionView;
   lifecycle: TaskLifecycle;
   next_implement_generation: number;
   primary_work_item_id?: string;
+  primary_work_item_title?: string;
   project: string;
   rating: Rating;
   spec_version: number;
@@ -1126,6 +1128,7 @@ export interface TaskDetail {
   actions: ActionView[] | null;
   artifacts: ArtifactView[] | null;
   block_reason: BlockReason;
+  completed_at?: number;
   control_mode: ControlMode;
   control_revision: number;
   current_artifact_id?: string;
@@ -1134,6 +1137,7 @@ export interface TaskDetail {
   lifecycle: TaskLifecycle;
   next_implement_generation: number;
   primary_work_item_id?: string;
+  primary_work_item_title?: string;
   project: string;
   rating: Rating;
   relations?: TaskRelationView[];

@@ -21,6 +21,7 @@ func Summary(r store.TaskRow) protocol.TaskSummary {
 		TaskID: r.TaskID, Title: r.Title, Project: r.Project, Lifecycle: r.Lifecycle, ControlMode: r.ControlMode, ControlRevision: r.ControlRevision,
 		SpecVersion: r.SpecVersion, Rating: r.Rating, BlockReason: r.BlockReason, Workspace: r.WorkspaceName,
 		NextImplementGeneration: r.ImplementGeneration + 1,
+		CompletedAt:             r.CompletedAt,
 	}
 }
 

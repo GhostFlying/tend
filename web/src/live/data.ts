@@ -632,6 +632,10 @@ export function summary(t: TaskDetail): TaskSummary {
     ...(t.primary_work_item_id === undefined
       ? {}
       : { primary_work_item_id: t.primary_work_item_id }),
+    ...(t.primary_work_item_title === undefined
+      ? {}
+      : { primary_work_item_title: t.primary_work_item_title }),
+    ...(t.completed_at === undefined ? {} : { completed_at: t.completed_at }),
   };
 }
 

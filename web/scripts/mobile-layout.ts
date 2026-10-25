@@ -40,7 +40,12 @@ let snapshot: Snapshot = {
 };
 const tasks = Array.from({ length: 5 }, (_, i) => ({
   task_id: `task_example${i}`,
-  title: `Example completed task ${i + 1}`,
+  title:
+    ["启动设计稿 Web 预览", "调整附件入口图标", "调整仓库归档文案与排序"][i] ??
+    `Example completed task ${i + 1}`,
+  primary_work_item_id: "wi_01M5M3ME31875GDA8F7P5XTD74",
+  primary_work_item_title: "移动端工作项页重新设计",
+  completed_at: Date.now() - (i + 1) * 5 * 60_000,
   project: "sample",
   lifecycle: "completed",
   control_mode: "managed",
@@ -67,14 +72,49 @@ const server = createServer(async (req, res) => {
   if (path === "/api/v1/session")
     return json({ token: "fixture-token", login: "Example owner", scope: "owner" });
   if (path === "/api/v1/repos") return json({ repos: [] });
-  if (path === "/api/v1/work-items")
-    return json(workItemPage(url.searchParams.get("project") || "sample"));
+  if (path === "/api/v1/work-items") {
+    const fixture = workItemPage(url.searchParams.get("project") || "sample");
+    const original = fixture.items![0]!;
+    return json({
+      items: Array.from({ length: 6 }, (_, i) => ({
+        ...original,
+        work_item_id: original.work_item_id.slice(0, -1) + i,
+        title:
+          ["移动端工作项页重新设计", "后续任务自动关联已有交付文件", "附件入口图标调整"][i] ??
+          `示例工作项 ${i + 1}`,
+        execution: {
+          queued: 0,
+          running: i === 0 ? 1 : 0,
+          accepting: 0,
+          waiting_owner: 0,
+          paused: 0,
+          unknown: 0,
+          completed: 2,
+          cancelled: 0,
+          idle: 0,
+        },
+      })),
+    });
+  }
   if (path === "/api/v1/snapshot") return json(snapshot);
   if (path === "/api/v1/conversation/settings") return json({ enabled: false });
   if (path === "/api/v1/conversation/handoff") return json(handoff);
   if (path === "/api/v1/conversation") return json({ items: [], more: false });
   if (path === "/api/v1/tasks")
     return json({ tasks: url.searchParams.get("lifecycle") === "completed" ? tasks : [] });
+  if (path.startsWith("/api/v1/tasks/")) {
+    const task = tasks.find((task) => path.endsWith(task.task_id));
+    if (task)
+      return json({
+        ...task,
+        spec: { goal: task.title, acceptance: [] },
+        actions: [],
+        runs: [],
+        artifacts: [],
+        acceptances: [],
+        decisions: [],
+      });
+  }
   if (path === "/api/v1/events") {
     res.setHeader("Content-Type", "text/event-stream");
     res.write(`event: start\ndata: ${JSON.stringify({ event_seq: snapshot.event_seq })}\n\n`);
@@ -147,6 +187,7 @@ try {
     { width: 390, height: 760 },
     { width: 430, height: 832 },
     { width: 1440, height: 900 },
+    { width: 820, height: 900 },
     { width: 390, height: 568 },
   ]) {
     snapshot = { ...snapshot, hosts: initialHosts() };
@@ -163,6 +204,38 @@ try {
       await page.locator("header").getByRole("button", { name: "设置", exact: true }).count(),
       0,
     );
+    if (!mobile) {
+      const sidebar = page.locator("aside").first();
+      const overview = sidebar.getByRole("region", { name: "工作项概览" });
+      await overview.getByRole("button", { name: "查看全部 6 个工作项 ›" }).waitFor();
+      assert.equal(await overview.getByRole("button").count(), 4);
+      assert.equal(await sidebar.getByText("执行任务与记录", { exact: true }).count(), 0);
+      const results = sidebar.getByRole("region", { name: "最近完成的任务" });
+      await results.getByRole("button").nth(2).waitFor();
+      assert.equal(await results.getByRole("button").count(), 3);
+      assert.equal(
+        await results.getByText("所属工作项：移动端工作项页重新设计", { exact: true }).count(),
+        3,
+      );
+      assert.equal(await results.locator("time").count(), 3);
+      assert(reads.some((path) => path.includes("sort=completed_at")));
+      await page.screenshot({ path: join(output, `sidebar-${viewport.width}.png`) });
+      await results.getByRole("button").first().click();
+      const details = page.getByRole("region", { name: "任务详情", exact: true });
+      await details.getByText("启动设计稿 Web 预览", { exact: true }).first().waitFor();
+      await details.getByRole("button", { name: "关闭", exact: true }).click();
+      const records = sidebar.getByRole("button", { name: "全部执行记录 ›", exact: true });
+      await records.scrollIntoViewIfNeeded();
+      await unobscured(records);
+      await records.focus();
+      await page.keyboard.press("Enter");
+      await page.getByRole("heading", { name: "执行记录", exact: true }).waitFor();
+      await page.getByLabel("按项目筛选", { exact: true }).fill("filtered-project");
+      await records.click();
+      assert.equal(await page.getByLabel("按项目筛选", { exact: true }).inputValue(), "");
+      await overview.getByRole("button", { name: "查看全部 6 个工作项 ›" }).click();
+      await page.getByRole("heading", { name: "工作项", exact: true }).waitFor();
+    }
     if (mobile) await tabs.getByRole("button", { name: "工作项", exact: true }).click();
     else await page.getByRole("button", { name: "工作项 · 白板 ›" }).click();
     await page.getByRole("heading", { name: "工作项" }).waitFor();
@@ -191,6 +264,7 @@ try {
     const rows = list.getByRole("button", { name: /^主机详情：/ });
     await rows.nth(1).waitFor();
     assert.equal(await rows.count(), 2);
+    if (!mobile) await rows.nth(1).scrollIntoViewIfNeeded();
     if (viewport.height >= 760) {
       await unobscured(rows.nth(0));
       await unobscured(rows.nth(1));

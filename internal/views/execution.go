@@ -47,7 +47,7 @@ func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows
 	var err error
 	for _, row := range rows {
 		summary := Summary(row)
-		summary.PrimaryWorkItemID, err = store.GetTaskWorkItemOwner(ctx, q, row.TaskID)
+		summary.PrimaryWorkItemID, summary.PrimaryWorkItemTitle, err = store.TaskWorkItemLabel(ctx, q, row.TaskID)
 		if err != nil {
 			return nil, err
 		}

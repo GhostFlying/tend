@@ -2205,6 +2205,9 @@
         "block_reason": {
           "$ref": "#/definitions/BlockReason"
         },
+        "completed_at": {
+          "type": "integer"
+        },
         "control_mode": {
           "$ref": "#/definitions/ControlMode"
         },
@@ -2237,6 +2240,9 @@
           "type": "integer"
         },
         "primary_work_item_id": {
+          "type": "string"
+        },
+        "primary_work_item_title": {
           "type": "string"
         },
         "project": {
@@ -2405,6 +2411,9 @@
         "block_reason": {
           "$ref": "#/definitions/BlockReason"
         },
+        "completed_at": {
+          "type": "integer"
+        },
         "control_mode": {
           "$ref": "#/definitions/ControlMode"
         },
@@ -2421,6 +2430,9 @@
           "type": "integer"
         },
         "primary_work_item_id": {
+          "type": "string"
+        },
+        "primary_work_item_title": {
           "type": "string"
         },
         "project": {

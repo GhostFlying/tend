@@ -35,6 +35,7 @@ export class TaskFeed {
     private readonly api: Reader,
     private readonly lifecycle: readonly TaskLifecycle[],
     private readonly limit = 50,
+    private readonly completedOrder = false,
   ) {}
   start(): void {
     if (!this.enabled) {
@@ -64,6 +65,7 @@ export class TaskFeed {
       lifecycle: this.lifecycle.join(","),
       limit: String(this.limit),
     });
+    if (this.completedOrder) query.set("sort", "completed_at");
     if (this.project) query.set("project", this.project);
     if (before) query.set("before", before);
     return `/api/v1/tasks?${query}`;
@@ -162,7 +164,7 @@ export class TaskLists {
   private timer: ReturnType<typeof setTimeout> | undefined;
   constructor(api: Reader) {
     this.columns = stages.map((stage) => new TaskFeed(api, stage.lifecycle));
-    this.recent = new TaskFeed(api, ["completed"], 5);
+    this.recent = new TaskFeed(api, ["completed"], 5, true);
   }
   setProject(project: string): void {
     this.project.set(project);

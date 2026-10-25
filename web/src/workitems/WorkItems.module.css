@@ -467,3 +467,14 @@
   width: 100%;
   min-width: 0;
 }
+
+.overviewMore {
+  min-height: 44px;
+  padding: 8px;
+  color: var(--label-2);
+  font-size: var(--text-s);
+  text-align: left;
+}
+.overviewMore:hover {
+  text-decoration: underline;
+}
