@@ -74,7 +74,7 @@ func TestPhysicalMountDirectoryDoesNotInventLogicalSubdirectory(t *testing.T) {
 			}
 			reuse := spec
 			reuse.Workspace = domain.Workspace{Mode: domain.WorkspaceReuse, SourceTaskID: task.TaskID}
-			op, follow := h.createTask(owner, createTaskPayload{Title: "follow-up", Spec: reuse})
+			op, follow := h.createTask(owner, h.sameItemReusePayload("follow-up", reuse))
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}

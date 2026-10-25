@@ -14,6 +14,7 @@ func APITypes() []any {
 // APIEnums lists the values of every string enum in the owner API.
 func APIEnums() []any {
 	return []any{
+		ExecutionStateValues(), QueueWaitCodeValues(),
 		SharedFactKindValues(), WorkItemStatusValues(), WorkItemUpdateStatusValues(),
 		WorkItemStageStatusValues(), WorkItemFollowOnKindValues(), WorkItemFollowOnStatusValues(),
 		WorkItemDeliveryProviderValues(), WorkItemEvidenceKindValues(), WorkItemClosureKindValues(), WorkItemTaskDispositionActionValues(),

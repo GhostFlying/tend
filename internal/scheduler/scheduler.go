@@ -80,66 +80,86 @@ const MultiMountUnsupported = "host's worker does not support workspaces with mo
 // Skip explains why a candidate is not eligible on a host. The empty string
 // means it is eligible.
 func Skip(h Host, c Candidate) string {
-	switch {
-	case !h.Active:
-		return "host is retired"
-	case h.Busy >= h.Slots:
-		return "host has no free slot"
-	}
-	if reason := Held(c); reason != "" {
-		return reason
-	}
-	switch {
-	case c.Requirements.OS != "" && c.Requirements.OS != h.OS:
-		return "host OS does not match"
-	case !containsAll(h.Labels, c.Requirements.Labels):
-		return "host lacks a required label"
-	case !containsAll(h.Repos, c.Repos):
-		return "host does not serve every repository"
-	case c.RequiresTaskInputs && !h.TaskInputs:
-		return "runner does not support task input attachments"
-	case c.RequiresWorkspaceProtocol && h.WorkspaceProtocol < 1:
-		return "runner does not support workspace resources and composable deliverables"
-	case c.Mounts > 1 && !h.Worker.MultiMount:
-		return MultiMountUnsupported
-	case c.WorkspaceHost != "" && c.WorkspaceHost != h.ID:
-		// The workspace, and the artifact commits in its repositories,
-		// exist only on that host.
-		return "task workspace is on another host"
-	case c.WorkspaceHost == "" && slices.Contains(c.AbandonedHosts, h.ID):
-		// The abandoned workspace and its branches are still there and
-		// would be taken up again.
-		return "task gave up its workspace on this host"
+	if reason := SkipReason(h, c); reason != nil {
+		return reason.Message
 	}
 	return ""
 }
 
-// Held returns why a candidate cannot run on any host, or "" when only
-// the hosts decide.
-func Held(c Candidate) string {
+// SkipReason is the structured explanation of the same eligibility rule.
+func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
+	switch {
+	case !h.Active:
+		return waitReason(protocol.QueueHostUnavailable, "host is retired")
+	case h.Busy >= h.Slots:
+		return waitReason(protocol.QueueHostCapacity, "host has no free slot")
+	}
+	if reason := HeldReason(c); reason != nil {
+		return reason
+	}
+	switch {
+	case c.Requirements.OS != "" && c.Requirements.OS != h.OS:
+		return waitReason(protocol.QueueHostRequirements, "host OS does not match")
+	case !containsAll(h.Labels, c.Requirements.Labels):
+		return waitReason(protocol.QueueHostRequirements, "host lacks a required label")
+	case !containsAll(h.Repos, c.Repos):
+		return waitReason(protocol.QueueHostRequirements, "host does not serve every repository")
+	case c.RequiresTaskInputs && !h.TaskInputs:
+		return waitReason(protocol.QueueHostRequirements, "runner does not support task input attachments")
+	case c.RequiresWorkspaceProtocol && h.WorkspaceProtocol < 1:
+		return waitReason(protocol.QueueHostRequirements, "runner does not support workspace resources and composable deliverables")
+	case c.Mounts > 1 && !h.Worker.MultiMount:
+		return waitReason(protocol.QueueHostRequirements, MultiMountUnsupported)
+	case c.WorkspaceHost != "" && c.WorkspaceHost != h.ID:
+		// The workspace, and the artifact commits in its repositories,
+		// exist only on that host.
+		return waitReason(protocol.QueueHostRequirements, "task workspace is on another host")
+	case c.WorkspaceHost == "" && slices.Contains(c.AbandonedHosts, h.ID):
+		// The abandoned workspace and its branches are still there and
+		// would be taken up again.
+		return waitReason(protocol.QueueHostRequirements, "task gave up its workspace on this host")
+	}
+	return nil
+}
+
+// HeldReason explains why a candidate cannot run on any host, or returns nil
+// when only the hosts decide.
+func HeldReason(c Candidate) *protocol.QueueWaitReason {
 	switch {
 	case c.Status != protocol.ActionPending:
-		return "action is not pending"
+		return waitReason(protocol.QueueTaskBlocked, "action is not pending")
 	case c.Kind != protocol.ActionImplement && c.Kind != protocol.ActionAccept:
-		return "action is not runnable"
+		return waitReason(protocol.QueueTaskBlocked, "action is not runnable")
 	case c.TargetSpecVersion != c.SpecVersion:
-		return "action targets an older spec version"
+		return waitReason(protocol.QueueTaskBlocked, "action targets an older spec version")
 	case c.Lifecycle.Terminal() || c.Lifecycle == protocol.TaskDraft:
-		return "task is not runnable in its lifecycle"
+		return waitReason(protocol.QueueTaskBlocked, "task is not runnable in its lifecycle")
 	case c.Control != protocol.ControlManaged:
-		return "task is not managed"
+		return waitReason(protocol.QueueTaskBlocked, "task is not managed")
 	case c.Block != protocol.BlockNone:
-		return "task is blocked"
+		return waitReason(protocol.QueueTaskBlocked, "task is blocked")
 	case !c.DependenciesDone:
-		return "dependencies are not completed"
+		return waitReason(protocol.QueueDependency, "dependencies are not completed")
 	case c.Kind == protocol.ActionImplement && c.Generation != c.ImplementGeneration:
-		return "implement action is not the current generation"
+		return waitReason(protocol.QueueTaskBlocked, "implement action is not the current generation")
 	case c.Kind == protocol.ActionAccept && (c.Lifecycle != protocol.TaskAwaitingAcceptance || c.TargetArtifactID != c.CurrentArtifactID):
-		return "acceptance targets an artifact that is no longer under acceptance"
+		return waitReason(protocol.QueueTaskBlocked, "acceptance targets an artifact that is no longer under acceptance")
 	case c.WorkspaceOccupied:
 		// Includes unknown runs: losing contact does not prove the old
 		// run stopped writing.
-		return "a run may still be using the workspace"
+		return waitReason(protocol.QueueWorkspaceBusy, "a run may still be using the workspace")
+	}
+	return nil
+}
+
+func waitReason(code protocol.QueueWaitCode, message string) *protocol.QueueWaitReason {
+	return &protocol.QueueWaitReason{Code: code, Message: message}
+}
+
+// Held preserves the textual scheduler explanation for existing callers.
+func Held(c Candidate) string {
+	if reason := HeldReason(c); reason != nil {
+		return reason.Message
 	}
 	return ""
 }

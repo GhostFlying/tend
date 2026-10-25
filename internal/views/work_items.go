@@ -13,12 +13,17 @@ func WorkItem(ctx context.Context, q store.Querier, id string) (protocol.WorkIte
 	if err != nil {
 		return protocol.WorkItemView{}, err
 	}
-	return workItemView(ctx, q, w)
+	facts, err := readExecutionFacts(ctx, q)
+	if err != nil {
+		return protocol.WorkItemView{}, err
+	}
+	return workItemView(ctx, q, w, facts)
 }
 
-func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem) (protocol.WorkItemView, error) {
+func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem, facts executionFacts) (protocol.WorkItemView, error) {
 	v := protocol.WorkItemView{WorkItem: w, Column: "unplanned"}
 	seen := map[string]bool{}
+	var tasks []store.TaskRow
 	for _, stage := range w.Stages {
 		for _, id := range stage.TaskIDs {
 			if seen[id] {
@@ -29,10 +34,15 @@ func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem) (pr
 			if err != nil {
 				return v, err
 			}
-			v.Tasks = append(v.Tasks, Summary(t))
+			tasks = append(tasks, t)
 		}
 	}
 	var err error
+	v.Tasks, err = facts.summaries(ctx, q, tasks)
+	if err != nil {
+		return v, err
+	}
+	projectWorkItemExecution(&v)
 	v.Observations, err = store.ListDeliveryObservations(ctx, q, w.WorkItemID)
 	if err != nil {
 		return v, err
@@ -89,11 +99,18 @@ func WorkItems(ctx context.Context, q store.Querier, project string, includeClos
 		return protocol.WorkItemPage{}, err
 	}
 	page := protocol.WorkItemPage{Items: []protocol.WorkItemView{}}
+	if len(items) == 0 {
+		return page, nil
+	}
+	facts, err := readExecutionFacts(ctx, q)
+	if err != nil {
+		return page, err
+	}
 	for _, item := range items {
 		if !includeClosed && item.Status == "closed" {
 			continue
 		}
-		v, err := workItemView(ctx, q, item)
+		v, err := workItemView(ctx, q, item, facts)
 		if err != nil {
 			return page, err
 		}
@@ -102,4 +119,44 @@ func WorkItems(ctx context.Context, q store.Querier, project string, includeClos
 		}
 	}
 	return page, nil
+}
+
+// projectWorkItemExecution aggregates distinct tasks; parent stages include their
+// children, but neither stage status nor completion is changed by this read.
+func projectWorkItemExecution(v *protocol.WorkItemView) {
+	v.Execution = &protocol.ExecutionCounts{}
+	tasks := map[string]*protocol.TaskExecutionView{}
+	for _, task := range v.Tasks {
+		if _, seen := tasks[task.TaskID]; seen {
+			continue
+		}
+		tasks[task.TaskID] = task.Execution
+		countExecution(v.Execution, task.Execution)
+	}
+	stages := map[string]protocol.WorkItemStage{}
+	for _, stage := range v.Stages {
+		stages[stage.StageID] = stage
+	}
+	for _, stage := range v.Stages {
+		counts := protocol.ExecutionCounts{}
+		seen := map[string]bool{}
+		for _, child := range v.Stages {
+			belongs := child.StageID == stage.StageID
+			for parent := child.ParentID; parent != "" && !belongs; parent = stages[parent].ParentID {
+				belongs = parent == stage.StageID
+			}
+			if !belongs {
+				continue
+			}
+			for _, id := range child.TaskIDs {
+				if !seen[id] {
+					seen[id] = true
+					if task, ok := tasks[id]; ok {
+						countExecution(&counts, task)
+					}
+				}
+			}
+		}
+		v.StageExecution = append(v.StageExecution, protocol.StageExecutionView{StageID: stage.StageID, Execution: counts})
+	}
 }

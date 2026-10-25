@@ -7,7 +7,7 @@ import type {
 
 export const columns = [
   { id: "unplanned", title: "待安排" },
-  { id: "active", title: "进行中" },
+  { id: "active", title: "推进中" },
   { id: "checking", title: "待检查" },
   { id: "attention", title: "待处理" },
   { id: "snoozed", title: "暂缓" },

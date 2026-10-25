@@ -1,0 +1,64 @@
+.counts,
+.task,
+.reason {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.counts {
+  margin-top: 7px;
+}
+.task {
+  margin: 7px 0;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: var(--radius-s);
+  font-size: var(--text-s);
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--label-2);
+  background: var(--bg-l1);
+}
+.badge[data-state="running"],
+.badge[data-state="starting"],
+.badge[data-state="accepting"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.badge[data-state="queued"],
+.badge[data-state="waiting_owner"],
+.badge[data-state="unknown"] {
+  color: var(--warn-text);
+  background: var(--warn-soft);
+}
+.reason,
+.empty {
+  color: var(--label-3);
+  font-size: var(--text-s);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.reason {
+  flex-basis: 100%;
+}
+.reference {
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.reference:hover {
+  text-decoration: underline;
+}
+.reference:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

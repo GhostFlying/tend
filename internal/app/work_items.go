@@ -251,7 +251,13 @@ func BindWorkItemTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string,
 		return w, nil, nil
 	}
 	if w.DefaultWorkspaceTaskID == "" && len(spec.Workspace.Mounts) > 0 {
-		w.DefaultWorkspaceTaskID = taskID
+		owner, err := store.GetTaskWorkItemOwner(ctx, tx.Q(), taskID)
+		if err != nil {
+			return w, nil, err
+		}
+		if owner == w.WorkItemID {
+			w.DefaultWorkspaceTaskID = taskID
+		}
 	}
 	w.Revision++
 	w.UpdatedAt = x.Now.UnixMilli()
@@ -318,6 +324,11 @@ func validateWorkItemReferences(ctx context.Context, x *Exec, q store.Querier, w
 		}
 	}
 	if w.DefaultWorkspaceTaskID != "" {
+		if previous == nil || w.DefaultWorkspaceTaskID != previous.DefaultWorkspaceTaskID {
+			if err := checkDefaultWorkspaceOwner(ctx, q, w.WorkItemID, w.DefaultWorkspaceTaskID); err != nil {
+				return err
+			}
+		}
 		_, spec, err := loadTask(ctx, q, w.DefaultWorkspaceTaskID)
 		if err != nil {
 			return errNotFound(err, "default workspace source must reference an existing task")

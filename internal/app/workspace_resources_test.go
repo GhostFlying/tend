@@ -18,12 +18,33 @@ func temporaryReportSpec() domain.Spec {
 
 func (h *harness) createReportTask(title string, spec domain.Spec) taskResult {
 	h.t.Helper()
-	op, task := h.createTask(owner, createTaskPayload{Title: title, Spec: spec})
+	payload := createTaskPayload{Title: title, Spec: spec}
+	if spec.Workspace.ModeValue() == domain.WorkspaceReuse {
+		payload = h.sameItemReusePayload(title, spec)
+	}
+	op, task := h.createTask(owner, payload)
 	if op.Status != protocol.OpSucceeded {
 		h.t.Fatalf("create %s: %+v", title, op)
 	}
 	return task
 }
+
+// sameItemReusePayload declares the state-continuation agreement explicitly in
+// fixtures. Independent work must use createTask without this helper.
+func (h *harness) sameItemReusePayload(title string, spec domain.Spec) createTaskPayload {
+	h.t.Helper()
+	var itemID string
+	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
+		var err error
+		itemID, err = store.GetTaskWorkItemOwner(context.Background(), tx.Q(), spec.Workspace.SourceTaskID)
+		return err
+	}); err != nil || itemID == "" {
+		h.t.Fatalf("source has no primary work item: %s %v", itemID, err)
+	}
+	item := h.work(itemID)
+	return createTaskPayload{Title: title, Spec: spec, WorkItemID: itemID, WorkItemRevision: item.Revision, StageIDs: []string{item.Stages[0].StageID}}
+}
+
 func (h *harness) resourceForTask(taskID string) store.WorkspaceRow {
 	h.t.Helper()
 	var w store.WorkspaceRow

@@ -10,6 +10,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func freezeWorkItemContext(item protocol.WorkItem) protocol.TaskWorkContext {
@@ -17,47 +18,7 @@ func freezeWorkItemContext(item protocol.WorkItem) protocol.TaskWorkContext {
 }
 
 func applyWorkItemDependencies(ctx context.Context, q store.Querier, candidates []scheduler.Candidate) error {
-	for i := range candidates {
-		c := &candidates[i]
-		items, err := store.ListTaskWorkItems(ctx, q, c.TaskID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if item.Status != "open" {
-				c.DependenciesDone = false
-				continue
-			}
-			stages := map[string]protocol.WorkItemStage{}
-			for _, stage := range item.Stages {
-				stages[stage.StageID] = stage
-			}
-			for _, stage := range item.Stages {
-				if !slices.Contains(stage.TaskIDs, c.TaskID) {
-					continue
-				}
-				if stage.Status == "retired" || stage.Status == "cancelled" {
-					c.DependenciesDone = false
-				}
-				// A child inherits the prerequisites of every containing group.
-				for ancestor := stage; ; ancestor = stages[ancestor.ParentID] {
-					if ancestor.Status == "retired" || ancestor.Status == "cancelled" {
-						c.DependenciesDone = false
-					}
-					for _, dependency := range ancestor.DependsOn {
-						dep := stages[dependency]
-						if dep.Status != "done" && !slices.Contains(dep.TaskIDs, c.TaskID) {
-							c.DependenciesDone = false
-						}
-					}
-					if ancestor.ParentID == "" {
-						break
-					}
-				}
-			}
-		}
-	}
-	return nil
+	return views.ApplyWorkItemDependencies(ctx, q, candidates)
 }
 
 // taskWorkItem resolves the explicit concern or creates one for a standalone
@@ -84,6 +45,9 @@ func taskWorkItem(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPaylo
 		if p.UseDefaultWorkspace {
 			if item.DefaultWorkspaceTaskID == "" {
 				return item, nil, protocol.Errorf(protocol.CodeInvalidRequest, "work item has no default workspace source task")
+			}
+			if err := checkDefaultWorkspaceOwner(ctx, tx.Q(), item.WorkItemID, item.DefaultWorkspaceTaskID); err != nil {
+				return item, nil, err
 			}
 			p.Spec.Workspace = domain.Workspace{Mode: domain.WorkspaceReuse, SourceTaskID: item.DefaultWorkspaceTaskID, IncludeExistingChanges: p.Spec.Workspace.IncludeExistingChanges}
 		}

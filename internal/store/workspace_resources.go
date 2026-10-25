@@ -11,6 +11,7 @@ type WorkspaceRow struct {
 	WorkspaceID        string
 	TaskID             string
 	CreatorTaskID      string
+	OwnerWorkItemID    string
 	Name               string
 	HostID             string
 	Status             string
@@ -35,12 +36,12 @@ const (
 
 const resourceColumns = `w.workspace_id,w.task_id,w.name,w.host_id,w.status,w.kind,
 	COALESCE(w.occupied_by,''),w.provider_id,w.provider_instance_id,w.path,
-	COALESCE(w.released_at,0),COALESCE(w.cleanup_id,'')`
+	COALESCE(w.released_at,0),COALESCE(w.cleanup_id,''),COALESCE(w.owner_work_item_id,'')`
 
 func scanWorkspace(s interface{ Scan(...any) error }) (WorkspaceRow, error) {
 	var w WorkspaceRow
 	err := s.Scan(&w.WorkspaceID, &w.CreatorTaskID, &w.Name, &w.HostID, &w.Status, &w.Kind,
-		&w.OccupiedBy, &w.ProviderID, &w.ProviderInstanceID, &w.Path, &w.ReleasedAt, &w.CleanupID)
+		&w.OccupiedBy, &w.ProviderID, &w.ProviderInstanceID, &w.Path, &w.ReleasedAt, &w.CleanupID, &w.OwnerWorkItemID)
 	return w, err
 }
 
@@ -81,7 +82,11 @@ func (t *Tx) InsertWorkspace(ctx context.Context, w WorkspaceRow, now int64) err
 	if w.Mode == "" {
 		w.Mode = "new"
 	}
-	_, err := t.Exec(ctx, `INSERT INTO workspaces(workspace_id,task_id,name,host_id,status,kind,occupied_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, w.WorkspaceID, w.TaskID, w.Name, w.HostID, w.Status, w.Kind, w.TaskID, now, now)
+	owner, err := GetTaskWorkItemOwner(ctx, t.Q(), w.TaskID)
+	if err != nil {
+		return err
+	}
+	_, err = t.Exec(ctx, `INSERT INTO workspaces(workspace_id,task_id,name,host_id,status,kind,occupied_by,created_at,updated_at,owner_work_item_id) VALUES(?,?,?,?,?,?,?,?,?,?)`, w.WorkspaceID, w.TaskID, w.Name, w.HostID, w.Status, w.Kind, w.TaskID, now, now, nullString(owner))
 	if err != nil {
 		return fmt.Errorf("store: insert workspace: %w", err)
 	}

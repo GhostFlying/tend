@@ -2,16 +2,14 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 
-	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // QueueOrder is the order claims rank queued work in as of now (D60).
@@ -97,22 +95,5 @@ func unplaceable(hosts []scheduler.Host, c scheduler.Candidate) string {
 // candidatesOf turns the claim candidates read from the store into the
 // facts the scheduler rules take.
 func candidatesOf(rows []store.CandidateRow) ([]scheduler.Candidate, error) {
-	out := make([]scheduler.Candidate, 0, len(rows))
-	for _, r := range rows {
-		var spec domain.Spec
-		if err := json.Unmarshal([]byte(r.SpecJSON), &spec); err != nil {
-			return nil, fmt.Errorf("app: decode spec of %s: %w", r.Action.TaskID, err)
-		}
-		out = append(out, scheduler.Candidate{
-			ActionID: r.Action.ActionID, TaskID: r.Action.TaskID, Kind: r.Action.Kind, Status: r.Action.Status,
-			Generation: r.Action.Generation, TargetSpecVersion: r.Action.TargetSpecVersion,
-			TargetArtifactID: r.Action.TargetArtifactID, CreatedAt: r.Action.CreatedAt,
-			Lifecycle: r.Lifecycle, Control: r.Control, Block: r.Block, SpecVersion: r.SpecVersion,
-			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Rating: r.Rating, Weight: r.Weight,
-			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(), Mounts: len(spec.Workspace.Mounts),
-			RequiresTaskInputs: len(spec.Inputs) > 0, WorkspaceMode: spec.Workspace.ModeValue(), RequiresWorkspaceProtocol: spec.Workspace.ModeValue() != domain.WorkspaceNew || len(spec.Deliverables) > 0,
-			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied, AbandonedHosts: r.AbandonedHosts,
-		})
-	}
-	return out, nil
+	return views.SchedulingCandidates(rows)
 }

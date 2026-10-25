@@ -79,7 +79,7 @@ describe("work-item presentation", () => {
     expect(concern(item)).toBe("本轮已结束，后续尚未安排");
     expect(columns.map((column) => column.title)).toEqual([
       "待安排",
-      "进行中",
+      "推进中",
       "待检查",
       "待处理",
       "暂缓",

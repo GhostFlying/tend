@@ -5,6 +5,7 @@ import { useServices } from "../app/services.tsx";
 import { DecisionCard } from "../decisions/DecisionCard.tsx";
 import { currentWork } from "../tasks/facts.ts";
 import { WorkItemRef } from "../workitems/WorkItemRef.tsx";
+import { TaskExecution } from "../tasks/Execution.tsx";
 import { WorkspaceFacts } from "../tasks/WorkspaceFacts.tsx";
 import { ArtifactDelivery } from "../tasks/ArtifactDelivery.tsx";
 import { Markdown } from "../conversation/Markdown.tsx";
@@ -74,7 +75,7 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
   return (
     <>
       <div className={styles.summary}>
-        <strong>{lifecycleLabels[t.lifecycle]}</strong>
+        <strong>任务阶段 · {lifecycleLabels[t.lifecycle]}</strong>
         <span>
           {t.project || "未分组"} · {ratingLabels[t.rating]} · spec {t.spec_version}
         </span>
@@ -82,6 +83,7 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
           <span className={styles.badge}>{controlLabels[t.control_mode]}</span>
         )}
       </div>
+      <TaskExecution task={t} />
       {!!t.work_item_ids?.length && (
         <Section title="所属工作项">
           {t.work_item_ids.map((id) => (

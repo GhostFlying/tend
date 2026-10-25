@@ -3,6 +3,7 @@ import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 import { useEffect, useId } from "react";
 import type { Connection } from "../api/client.ts";
 import type { TaskSummary } from "../api/generated/api.ts";
+import { TaskExecution } from "./Execution.tsx";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import controls from "../shell/controls.module.css";
@@ -193,20 +194,23 @@ function Column({ title, feed }: { title: string; feed: TaskFeed }) {
 function TaskCard({ task }: { task: TaskSummary }) {
   const { openTask } = useServices();
   return (
-    <button
-      type="button"
-      className={styles.card}
-      onClick={() => openTask(task.task_id)}
-      title={task.title}
-    >
-      <strong>{task.title}</strong>
-      <span className={styles.meta}>
-        {task.project || "未分组"} · {ratingLabels[task.rating]} · spec {task.spec_version}
-      </span>
-      <span className={styles.badges}>
-        {task.control_mode !== "managed" && <span>{controlLabels[task.control_mode]}</span>}
-        {task.block_reason !== "none" && <span>{blockLabels[task.block_reason]}</span>}
-      </span>
-    </button>
+    <article className={styles.card}>
+      <button
+        type="button"
+        className={styles.cardOpen}
+        onClick={() => openTask(task.task_id)}
+        title={task.title}
+      >
+        <strong>{task.title}</strong>
+        <span className={styles.meta}>
+          {task.project || "未分组"} · {ratingLabels[task.rating]} · spec {task.spec_version}
+        </span>
+        <span className={styles.badges}>
+          {task.control_mode !== "managed" && <span>{controlLabels[task.control_mode]}</span>}
+          {task.block_reason !== "none" && <span>{blockLabels[task.block_reason]}</span>}
+        </span>
+      </button>
+      <TaskExecution task={task} />
+    </article>
   );
 }
