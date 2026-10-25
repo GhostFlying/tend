@@ -32,7 +32,8 @@ export function TaskExecution({
   const execution = task.execution;
   if (!execution) return null;
   const reason = execution.queue_reason;
-  if (!showState && !reason) return null;
+  const reasonText = queueReasonText(task);
+  if (!showState && !reasonText) return null;
   const look = executionLook(execution);
   return (
     <div className={styles.task} aria-label="任务执行状态">
@@ -41,13 +42,13 @@ export function TaskExecution({
           {look.label}
         </span>
       )}
-      {reason && (
-        <span className={styles.reason} title={reason.message}>
-          <span>{queueReasonText(task)}</span>
-          {reason.task_id && (
+      {reasonText && (
+        <span className={styles.reason} title={reason?.message}>
+          <span>{reasonText}</span>
+          {reason?.task_id && (
             <WaitingTask id={reason.task_id} occupied={reason.code === "workspace_busy"} />
           )}
-          {reason.host_id && <span>主机 {reason.host_id}</span>}
+          {reason?.host_id && <span>主机 {reason.host_id}</span>}
         </span>
       )}
     </div>

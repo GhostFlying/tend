@@ -370,3 +370,111 @@ func TestExecutionViewPausedTaskWithoutRunDoesNotQueue(t *testing.T) {
 		t.Fatalf("paused task without a run: %+v", view.Execution)
 	}
 }
+
+func TestExecutionViewSupersededWorkerRemainsVisibleUntilStopped(t *testing.T) {
+	h := newHarness(t)
+	_, task := h.createTask(owner, createTaskPayload{Title: "update active work", Spec: testSpec})
+	as, ok, _ := h.claim("linux-1")
+	if !ok {
+		t.Fatal("no claim")
+	}
+	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	next := testSpec
+	next.Scope = "new scope while old worker is unresolved"
+	op := h.exec(owner, h.env("tasks.update_intent", taskTarget(task.TaskID), updateIntentPayload{Spec: &next}, rev(h.task(task.TaskID).ControlRevision)), UpdateIntent{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	updated := h.executionTask(task.TaskID)
+	if updated.SpecVersion != 2 || updated.Execution.State != protocol.ExecutionRunning || updated.Execution.RunID != as.RunID {
+		t.Fatalf("old spec still running: %+v", updated)
+	}
+	h.clock.Advance(DefaultLeaseTTL + time.Second)
+	if n, err := h.app.ExpireLeases(t.Context()); err != nil || n != 1 {
+		t.Fatalf("expire %d: %v", n, err)
+	}
+	if got := h.executionTask(task.TaskID).Execution; got.State != protocol.ExecutionUnknown || got.RunID != as.RunID {
+		t.Fatalf("old spec unknown hidden: %+v", got)
+	}
+}
+
+func TestExecutionViewExhaustedBudgetWaitsForOwner(t *testing.T) {
+	h := newHarness(t)
+	spec := testSpec
+	spec.MaxImplementAttempts = 1
+	_, task := h.createTask(owner, createTaskPayload{Title: "one attempt", Spec: spec})
+	as, _, _ := h.claim("linux-1")
+	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(task.TaskID).WorkspaceName), SubmitArtifact{})
+	acc, ok, _ := h.claim("linux-1")
+	if !ok {
+		t.Fatal("no acceptance")
+	}
+	h.runAs(acc, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	if op := h.runAs(acc, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictChangesRequired}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	got := h.executionTask(task.TaskID)
+	if got.BlockReason != protocol.BlockBudgetExhausted || got.Execution.State != protocol.ExecutionWaitingOwner {
+		t.Fatalf("budget exhaustion hidden: %+v", got)
+	}
+}
+
+func TestExecutionViewUnusableAcceptanceWaitsForOwner(t *testing.T) {
+	h := newHarness(t)
+	task, acc := h.toAcceptanceClaim()
+	h.runAs(acc, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	if op := h.runAs(acc, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictBlocked}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	got := h.executionTask(task)
+	if got.BlockReason != protocol.BlockAcceptanceEnvUnavailable || got.Execution.State != protocol.ExecutionWaitingOwner {
+		t.Fatalf("blocked acceptance looks queued: %+v", got)
+	}
+}
+
+func TestExecutionViewStageDependencyLinksOnlyUnfinishedTask(t *testing.T) {
+	for _, parentDependency := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "ancestor"}[parentDependency], func(t *testing.T) {
+			h := newHarness(t)
+			plan := workPlan()
+			plan.Stages = append(plan.Stages, protocol.WorkItemStage{StageID: "after", Title: "After", Status: "active", DependsOn: []string{"investigate"}})
+			dependentStage := "after"
+			if parentDependency {
+				plan.Stages = append(plan.Stages, protocol.WorkItemStage{StageID: "child", Title: "Child", ParentID: "after", Status: "active"})
+				dependentStage = "child"
+			}
+			item := h.createWork(plan)
+			_, before := h.createTask(owner, createTaskPayload{Title: "before", Spec: testSpec, WorkItemID: item.WorkItemID, WorkItemRevision: item.Revision, StageIDs: []string{"investigate"}})
+			item = h.work(item.WorkItemID)
+			_, after := h.createTask(owner, createTaskPayload{Title: "after", Spec: testSpec, WorkItemID: item.WorkItemID, WorkItemRevision: item.Revision, StageIDs: []string{dependentStage}})
+			reason := h.executionTask(after.TaskID).Execution.QueueReason
+			if reason.Code != protocol.QueueDependency || reason.TaskID != before.TaskID {
+				t.Fatalf("missing prerequisite link: %+v", reason)
+			}
+			// Completing the task does not complete the owner's stage. Keep the
+			// dependency wait, but stop blaming the now-completed task for it.
+			as, ok, _ := h.claim("linux-1")
+			if !ok || as.TaskID != before.TaskID {
+				t.Fatal(as)
+			}
+			h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+			h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(before.TaskID).WorkspaceName), SubmitArtifact{})
+			acc, ok, _ := h.claim("linux-1")
+			if !ok || acc.Role != protocol.RoleAccept {
+				t.Fatal(acc)
+			}
+			h.runAs(acc, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+			if op := h.runAs(acc, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			reason = h.executionTask(after.TaskID).Execution.QueueReason
+			if reason.Code != protocol.QueueDependency || reason.TaskID != "" {
+				t.Fatalf("completed task falsely blamed: %+v", reason)
+			}
+			if h.work(item.WorkItemID).Stages[0].Status != "planned" {
+				t.Fatal("view completed the plan")
+			}
+		})
+	}
+}

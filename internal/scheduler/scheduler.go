@@ -53,6 +53,9 @@ type Candidate struct {
 	// DependenciesDone reports that every task this one depends on is
 	// completed.
 	DependenciesDone bool
+	// DependencyTaskID optionally identifies an unfinished prerequisite for views.
+	// It does not change eligibility; DependenciesDone remains authoritative.
+	DependencyTaskID string
 
 	Requirements domain.Requirements
 	Repos        []string

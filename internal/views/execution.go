@@ -120,10 +120,21 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		v.State = protocol.ExecutionCancelled
 		return v, nil
 	}
-	ownerBlocked := t.BlockReason == protocol.BlockWaitingDecision || t.BlockReason == protocol.BlockWaitingApproval
+	ownerBlocked := t.BlockReason == protocol.BlockWaitingDecision || t.BlockReason == protocol.BlockWaitingApproval ||
+		t.BlockReason == protocol.BlockBudgetExhausted || t.BlockReason == protocol.BlockAcceptanceEnvUnavailable || t.BlockReason == protocol.BlockWorkspaceUnavailable
 	runs, err := store.ListRunsByTask(ctx, q, t.TaskID)
 	if err != nil {
 		return nil, err
+	}
+	// A superseded action revokes authorization, not the physical possibility
+	// that its old worker still holds the workspace. Preserve unresolved facts.
+	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].ObservedState == protocol.RunUnknown {
+			v.State = protocol.ExecutionUnknown
+			v.RunID = runs[i].RunID
+			v.Role = runs[i].Role
+			return v, nil
+		}
 	}
 	actions, err := store.ListActions(ctx, q, t.TaskID)
 	if err != nil {
@@ -135,7 +146,7 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 	}
 	for i := len(runs) - 1; i >= 0; i-- {
 		run := runs[i]
-		if !current[run.ActionID] || run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed {
+		if run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed {
 			continue
 		}
 		v.RunID = run.RunID
@@ -143,8 +154,8 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		// Uncertainty about a worker takes precedence over its last known wait.
 		// Questions from unrelated or historical runs are not execution blockers.
 		if run.ObservedState != protocol.RunUnknown && run.ObservedState != protocol.RunInterrupted {
-			waiting := ownerBlocked
-			if !waiting && run.DesiredState != protocol.DesiredStopped {
+			waiting := ownerBlocked && current[run.ActionID]
+			if !waiting && current[run.ActionID] && run.DesiredState != protocol.DesiredStopped {
 				questions, err := store.ListWorkerQuestions(ctx, q, run.RunID)
 				if err != nil {
 					return nil, err
@@ -187,17 +198,10 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		return v, nil
 	}
 	c, pending := f.candidates[t.TaskID]
-	if !pending && t.Lifecycle != protocol.TaskQueued && t.Lifecycle != protocol.TaskAwaitingAcceptance {
+	if !pending {
 		return v, nil
 	}
 	v.State = protocol.ExecutionQueued
-	if !pending {
-		v.QueueReason = &protocol.QueueWaitReason{Code: protocol.QueueTaskBlocked, Message: "no current runnable action"}
-		if t.Lifecycle == protocol.TaskAwaitingAcceptance {
-			v.Role = protocol.RoleAccept
-		}
-		return v, nil
-	}
 	v.Role = protocol.RoleImplement
 	if c.Kind == protocol.ActionAccept {
 		v.Role = protocol.RoleAccept
@@ -224,6 +228,9 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		v.QueueReason.TaskID, err = store.FirstIncompleteDependency(ctx, q, t.TaskID)
 		if err != nil {
 			return nil, err
+		}
+		if v.QueueReason.TaskID == "" {
+			v.QueueReason.TaskID = c.DependencyTaskID
 		}
 	}
 	return v, nil
