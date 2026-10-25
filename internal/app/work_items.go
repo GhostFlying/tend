@@ -97,7 +97,7 @@ func (UpdateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	old := w.Revision
-	changed := domain.WorkItemPlanChanged(w.WorkItemPlan, p.WorkItemPlan) || status != w.Status
+	changed := domain.WorkItemPlanChanged(w.WorkItemPlan, p.WorkItemPlan) || status != w.Status || len(p.CompletionReviews) > 0
 	if err := claimWorkItemSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
@@ -109,6 +109,9 @@ func (UpdateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	w.Revision++
 	w.UpdatedAt = x.Now.UnixMilli()
 	freezeWorkItemCurrentEvidence(&w, x.Env.RequestID)
+	if err := acknowledgeCompletionReviews(ctx, tx, w, p.CompletionReviews); err != nil {
+		return Outcome{}, err
+	}
 	return saveWorkItem(ctx, tx, w, old, "work_item.updated", p)
 }
 
@@ -285,6 +288,12 @@ func saveWorkItem(ctx context.Context, tx *store.Tx, w protocol.WorkItem, expect
 	if err := tx.SaveWorkItem(ctx, w, expected, reason); err != nil {
 		return Outcome{}, err
 	}
+	if err := tx.EnsureCompletionReviews(ctx, w.WorkItemID); err != nil {
+		return Outcome{}, err
+	}
+	if err := settleCompletionReviews(ctx, tx, w); err != nil {
+		return Outcome{}, err
+	}
 	return Outcome{Result: w, Events: []Event{{ObjectType: "work_item", ObjectID: w.WorkItemID, ObjectVersion: w.Revision, Kind: kind, Body: map[string]any{"revision": w.Revision, "status": w.Status}}}}, nil
 }
 func claimWorkItemSource(ctx context.Context, x *Exec, tx *store.Tx, id, source string, seq int64) error {
@@ -400,6 +409,9 @@ func validateWorkItemEvidenceReferences(ctx context.Context, x *Exec, q store.Qu
 
 		}
 		if !valid {
+			if e.Kind == "acceptance" {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "%s[%d].reference must be the acceptance_id of a passed acceptance for a linked task; read tasks_read.acceptances or artifacts_read.acceptances (artifact_id is not acceptance_id)", field, i)
+			}
 			return protocol.Errorf(protocol.CodeInvalidRequest, "evidence reference %s has no matching verified fact", e.Reference)
 		}
 	}

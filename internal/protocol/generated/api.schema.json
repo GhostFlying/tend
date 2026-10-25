@@ -24,6 +24,9 @@
     "AcceptanceView": {
       "additionalProperties": false,
       "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
         "artifact_id": {
           "type": "string"
         },
@@ -37,6 +40,7 @@
         }
       },
       "required": [
+        "acceptance_id",
         "artifact_id",
         "spec_version",
         "verdict",
@@ -357,6 +361,23 @@
       ],
       "title": "Code",
       "type": "string"
+    },
+    "CompletionReviewAcknowledgement": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "reason"
+      ],
+      "title": "CompletionReviewAcknowledgement",
+      "type": "object"
     },
     "ControlMode": {
       "enum": [
@@ -1122,6 +1143,9 @@
         "queued": {
           "type": "integer"
         },
+        "recovering": {
+          "type": "integer"
+        },
         "running": {
           "type": "integer"
         },
@@ -1146,12 +1170,32 @@
       "title": "ExecutionCounts",
       "type": "object"
     },
+    "ExecutionRecovery": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer"
+        },
+        "code": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "title": "ExecutionRecovery",
+      "type": "object"
+    },
     "ExecutionState": {
       "enum": [
         "idle",
         "queued",
         "starting",
         "running",
+        "recovering",
         "accepting",
         "waiting_owner",
         "paused",
@@ -2321,6 +2365,9 @@
         "queue_reason": {
           "$ref": "#/definitions/QueueWaitReason"
         },
+        "recovery": {
+          "$ref": "#/definitions/ExecutionRecovery"
+        },
         "role": {
           "$ref": "#/definitions/RunRole"
         },
@@ -2596,6 +2643,12 @@
         "commit_seq": {
           "type": "integer"
         },
+        "completion_reviews": {
+          "items": {
+            "$ref": "#/definitions/CompletionReviewAcknowledgement"
+          },
+          "type": "array"
+        },
         "default_workspace_task_id": {
           "type": "string"
         },
@@ -2804,6 +2857,31 @@
       ],
       "title": "WorkItemClosureKind",
       "type": "string"
+    },
+    "WorkItemCompletionReview": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "task_id",
+        "acceptance_id",
+        "created_at"
+      ],
+      "title": "WorkItemCompletionReview",
+      "type": "object"
     },
     "WorkItemDelivery": {
       "additionalProperties": false,
@@ -3106,6 +3184,12 @@
         "observations": {
           "items": {
             "$ref": "#/definitions/DeliveryObservation"
+          },
+          "type": "array"
+        },
+        "pending_reviews": {
+          "items": {
+            "$ref": "#/definitions/WorkItemCompletionReview"
           },
           "type": "array"
         },

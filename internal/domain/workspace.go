@@ -48,6 +48,7 @@ type Base struct {
 
 // Requirements constrain which hosts may run the task.
 type Requirements struct {
+	HostID string   `json:"host_id,omitempty"`
 	OS     string   `json:"os,omitempty"`
 	Labels []string `json:"labels,omitempty"`
 }
@@ -186,7 +187,7 @@ func (w Workspace) Equal(o Workspace) bool {
 
 // Equal reports whether two requirement sets are the same.
 func (r Requirements) Equal(o Requirements) bool {
-	return r.OS == o.OS && slices.Equal(r.Labels, o.Labels)
+	return r.HostID == o.HostID && r.OS == o.OS && slices.Equal(r.Labels, o.Labels)
 }
 
 // checkPinnedWorkspace allows only additions once the task's workspace

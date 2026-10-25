@@ -43,6 +43,9 @@ type WorkerOptions struct {
 	Poll time.Duration
 	// WaitChunk bounds each wait for the terminal to go idle. Default 1m.
 	WaitChunk time.Duration
+	// RecoveryAttempts bounds automatic model-error recovery per run. Nil defaults
+	// to one; zero disables it. The count is persisted in the worker journal.
+	RecoveryAttempts *int
 }
 
 // Workers implements harness.Workers with agent TUIs in orca terminals.
@@ -179,6 +182,10 @@ type workerState struct {
 	PromptOutcome string `json:"launch_prompt_outcome,omitempty"`
 	// PromptReceiptAt bounds startup state already observed when delivery settled.
 	PromptReceiptAt int64 `json:"launch_prompt_receipt_at,omitempty"`
+	// FailedTurn is a root failure already reported, persisted across runner restarts.
+	FailedTurn int64          `json:"failed_turn,omitempty"`
+	Recovery   *recoveryState `json:"recovery,omitempty"`
+	SessionID  string         `json:"session_id,omitempty"`
 }
 
 // Agent states as orca reports them.
@@ -208,8 +215,9 @@ type worker struct {
 	holding string
 	// askedVerdict is set once an acceptance agent that finished without
 	// a verdict this worker received was asked for it again.
-	askedVerdict bool
-	state        string // the agent state last reported
+	askedVerdict      bool
+	state             string // the agent state last reported
+	failedTurnEmitted int64  // per-process delivery; replay uses a stable native ID
 	// unseen is when the worker first found the agent's terminal with no
 	// state for the agent in orca.
 	unseen time.Time
@@ -342,6 +350,32 @@ func (w *worker) save() error {
 // begin leaves the agent with a turn of tend's under way: the one an
 // earlier attempt left running, a continuation, or a new agent's brief.
 func (w *worker) begin(ctx context.Context, agent string) error {
+	w.emitRecoveryPhase(ctx)
+	if w.spec.HandBack && w.st.Recovery != nil && (w.st.Recovery.Phase == recoveryClosing || w.st.Recovery.Phase == recoveryContinuing) {
+		// An explicit return to managed control supersedes the automatic path,
+		// but does not reset its allowance or discard a pending provider receipt.
+		if w.st.Recovery.Phase == recoveryContinuing && w.st.Recovery.ContinuationIssued && w.st.Send == "" {
+			a, alive, err := w.agent(ctx)
+			if err != nil {
+				return err
+			}
+			if !alive || a.Prompt == "" || !samePrompt(said(a.Prompt), said(w.recoveryBrief())) {
+				return errors.New("orca: recovery prompt submission is unknown; reconcile it before handback")
+			}
+		}
+		w.st.Recovery.Phase = "handing_back"
+		if err := w.save(); err != nil {
+			return err
+		}
+	}
+	if w.st.Recovery != nil && w.st.Recovery.Phase == recoveryContinuing {
+		return w.continueFailedSession(ctx)
+	}
+	if w.st.Recovery != nil && w.st.Recovery.Phase == recoveryClosing {
+		if err := w.closeFailedSession(ctx); err != nil {
+			return err
+		}
+	}
 	if err := launchPromptFailure(w.st.PromptOutcome); err != nil {
 		return err
 	}
@@ -355,15 +389,37 @@ func (w *worker) begin(ctx context.Context, agent string) error {
 			// was lost is settled first, so the hand-back is a turn of
 			// its own.
 			handBack := harness.HandBack(w.spec)
+			// Returning this exact terminal explicitly adopts the owner's
+			// current provider session, including a replacement session.
+			w.st.SessionID = ""
+			if a.ProviderSession != nil {
+				w.st.SessionID = a.ProviderSession.ID
+			}
 			if w.st.Send != "" {
 				pending := w.st.SendText
-				if err := w.send(ctx, ""); err != nil || pending == handBack {
-					return err // the hand-back itself was pending
+				if err := w.send(ctx, ""); err != nil {
+					return err
+				}
+				if pending == handBack {
+					w.spec.HandBack = false
+					return w.finishHandback(ctx)
 				}
 			}
-			return w.send(ctx, handBack)
+			if err := w.send(ctx, handBack); err != nil {
+				return err
+			}
+			w.spec.HandBack = false
+			return w.finishHandback(ctx)
 		}
 		if alive {
+			// Do not send a continuation into an explicitly failed root turn.
+			// step observes the failure and waits for existing child work to settle.
+			if rootFailed(a, w.st.Turn) || rootUnconfirmed(a, w.st.Turn) {
+				if w.st.Send != "" {
+					return w.send(ctx, "")
+				}
+				return nil
+			}
 			if reason := w.takenOver(a); reason != "" {
 				w.holding = reason // run reports it and waits
 				return nil
@@ -381,7 +437,7 @@ func (w *worker) begin(ctx context.Context, agent string) error {
 			return w.send(ctx, harness.Continuation(w.spec))
 		}
 		w.ws.opts.Log.InfoContext(ctx, "the worker's agent is gone; launching a new one with the brief", "run_id", w.spec.RunID, "terminal", w.st.Terminal)
-		w.st = workerState{}
+		w.resetNative()
 	}
 	if w.st.Marker != "" && w.st.Launch == "" {
 		// The runner stopped before the launch was answered (C4: its
@@ -391,7 +447,7 @@ func (w *worker) begin(ctx context.Context, agent string) error {
 		if err != nil || found {
 			return err
 		}
-		w.st = workerState{}
+		w.resetNative()
 	}
 	return w.launch(ctx, agent)
 }
@@ -400,7 +456,11 @@ func (w *worker) begin(ctx context.Context, agent string) error {
 // developer instructions, so they lead the brief, after the marker.
 func (w *worker) prompt() string {
 	instructions, input := harness.Brief(w.spec)
-	return "[tend run " + w.spec.RunID + ", launch " + w.st.Marker + "]\n\n" + instructions + "\n\n" + input
+	prompt := "[tend run " + w.spec.RunID + ", launch " + w.st.Marker + "]\n\n" + instructions + "\n\n" + input
+	if w.st.Recovery != nil {
+		prompt += "\n\n" + w.recoveryBrief()
+	}
+	return prompt
 }
 
 // launchAttempts bounds how often a launch whose answer was lost is
@@ -447,7 +507,7 @@ func (w *worker) launch(ctx context.Context, agent string) error {
 		}
 		if !Unconfirmed(err) {
 			// orca refused the launch: nothing started.
-			w.st = workerState{}
+			w.resetNative()
 			if serr := w.save(); serr != nil {
 				return serr
 			}
@@ -461,7 +521,7 @@ func (w *worker) launched(ctx context.Context, l Launch, prompt string) error {
 		if l.Outcome.Handle != "" {
 			_ = w.ws.opts.Client.CloseTerminal(context.WithoutCancel(ctx), l.Outcome.Handle)
 		}
-		w.st = workerState{}
+		w.resetNative()
 		_ = w.save()
 		return fmt.Errorf("orca started the %s worker as a chat (%s); turn off the Chat UI for %s in orca on this host", w.ws.opts.Agent, l.Receipt.Detail, w.ws.opts.Agent)
 	}
@@ -477,6 +537,13 @@ func (w *worker) launched(ctx context.Context, l Launch, prompt string) error {
 	}
 	if err := launchPromptFailure(w.st.PromptOutcome); err != nil {
 		return err
+	}
+	if w.st.Recovery != nil && w.st.Recovery.Phase == recoveryLaunching {
+		w.st.Recovery.Phase = recoveryRunning
+		if err := w.save(); err != nil {
+			return err
+		}
+		w.emitRecoveryPhase(ctx)
 	}
 	w.emit(ctx, "turn.started", map[string]string{"prompt": prompt})
 	return nil
@@ -583,6 +650,16 @@ func (w *worker) send(ctx context.Context, text string) error {
 			return err
 		}
 	}
+	if r := w.st.Recovery; r != nil && r.Phase == recoveryContinuing && !r.ContinuationIssued {
+		r.ContinuationIssued = true
+		if err := w.save(); err != nil {
+			// No provider call was made. Keep this distinguishable from a crash
+			// after submit, where only a receipt or observed prompt can settle it.
+			r.ContinuationIssued = false
+			_ = w.save()
+			return err
+		}
+	}
 	o := SendOptions{Terminal: w.st.Terminal, Text: text, Enter: true, WaitSubmit: 30 * time.Second, RetryRequest: w.st.Send}
 	for i := 0; ; i++ {
 		_, err := w.ws.opts.Client.SendInput(ctx, o)
@@ -659,10 +736,21 @@ func (w *worker) run(ctx context.Context) {
 			return
 		}
 		if err != nil {
+			if w.st.Recovery != nil {
+				w.emit(ctx, "worker.recovery_failed", map[string]any{"attempts": w.st.Recovery.Attempts, "code": w.st.Recovery.Code})
+			}
 			w.err = err
 			return
 		}
 		if done {
+			if w.st.Recovery != nil && w.st.Recovery.Phase == recoveryRunning {
+				w.st.Recovery.Phase = recoveryCompleted
+				if err := w.save(); err != nil {
+					w.err = err
+					return
+				}
+				w.emitRecoveryPhase(ctx)
+			}
 			w.emit(ctx, "turn.completed", map[string]string{"reply": a.LastAssistantMessage})
 			if w.spec.Role == protocol.RoleAccept && w.verdicts.Verdict() == nil && !w.askedVerdict {
 				// The verdict may have gone to an earlier worker, or never
@@ -731,14 +819,47 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 			w.state = a.State
 			w.emit(ctx, "agent.state", map[string]string{"state": a.State, "blocked_reason": wait.BlockedReason})
 		}
+		if w.st.SessionID == "" && a.ProviderSession != nil && a.ProviderSession.ID != "" {
+			w.st.SessionID = a.ProviderSession.ID
+			if err := w.save(); err != nil {
+				return a, false, err
+			}
+		}
 		if reason := w.takenOver(a); reason != "" {
 			w.holding = reason
 			return a, false, nil
 		}
+		if w.st.Recovery != nil && w.st.Recovery.Phase == recoveryLaunching && a.Prompt != "" && w.st.Said != "" && samePrompt(said(a.Prompt), w.st.Said) && a.StateStartedAt >= w.st.Turn {
+			w.st.Recovery.Phase = recoveryRunning
+			if err := w.save(); err != nil {
+				return a, false, err
+			}
+			w.emitRecoveryPhase(ctx)
+		}
+		if rootFailed(a, w.st.Turn) || rootUnconfirmed(a, w.st.Turn) {
+			if w.st.FailedTurn != a.MainAgent.StateStartedAt {
+				w.st.FailedTurn = a.MainAgent.StateStartedAt
+				if err := w.save(); err != nil {
+					return a, false, err
+				}
+			}
+			if w.failedTurnEmitted != a.MainAgent.StateStartedAt {
+				w.failedTurnEmitted = a.MainAgent.StateStartedAt
+				w.emitID(ctx, fmt.Sprintf("%s@%d/root-failure/%d", w.st.Terminal, w.st.Turn, a.MainAgent.StateStartedAt), "worker.turn_failed", map[string]any{"outcome": a.MainAgent.Outcome, "turn_at": a.MainAgent.StateStartedAt, "background_pending": !backgroundSettled(a, wait)})
+			}
+			// Root failure does not prove that background commands have stopped.
+			// Keep the slot and original terminal until Orca confirms aggregate idle.
+			if backgroundSettled(a, wait) {
+				if rootUnconfirmed(a, w.st.Turn) {
+					return a, false, errors.New("orca: root turn ended without confirmed completion; reconciliation is required")
+				}
+				return a, false, w.recoverFailure(ctx, a)
+			}
+		}
 		if wait.Satisfied && answered(a, w.st.Turn) {
 			return a, true, nil
 		}
-		if w.st.Interrupted && a.State == stateDone && a.Interrupted {
+		if w.st.Interrupted && a.State == stateDone && (a.Interrupted || rootInterrupted(a, w.st.Turn)) {
 			// tend's own interruption, reported only now.
 			return a, false, w.send(ctx, harness.Continuation(w.spec))
 		}
@@ -757,13 +878,19 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 // it is: someone gave it a prompt tend did not, or interrupted a turn tend
 // did not interrupt (D67).
 func (w *worker) takenOver(a Agent) string {
+	if rootInterrupted(a, w.st.Turn) && !w.st.Interrupted {
+		return "someone interrupted the root agent's turn"
+	}
+	if w.st.SessionID != "" && a.ProviderSession != nil && a.ProviderSession.ID != w.st.SessionID {
+		return "the terminal belongs to a different provider session"
+	}
 	if a.StateStartedAt < w.st.Turn || a.State == "" {
 		return ""
 	}
 	if a.Prompt != "" && w.st.Said != "" && !samePrompt(said(a.Prompt), w.st.Said) {
 		return "the agent works on a prompt tend did not give"
 	}
-	if a.State == stateDone && a.Interrupted && !w.st.Interrupted {
+	if a.State == stateDone && a.Interrupted && !w.st.Interrupted && (a.MainAgent == nil || a.MainAgent.Outcome == "") {
 		return "someone interrupted the agent's turn"
 	}
 	return ""
@@ -807,9 +934,41 @@ func samePrompt(a, b string) bool {
 const codeTimeout = "timeout"
 
 // answered reports whether the agent finished the turn tend began at turn.
-// A turn someone interrupted did not finish.
+// A turn someone interrupted or explicitly failed did not finish. Older hooks
+// omit outcomes even after a normal turn; their idle completion keeps the legacy
+// behavior, with actual deliverables/verdicts still required downstream.
 func answered(a Agent, turn int64) bool {
+	if a.MainAgent != nil {
+		return a.State == stateDone && a.MainAgent.State == stateDone &&
+			(a.MainAgent.Outcome == "" || a.MainAgent.Outcome == "success") &&
+			!a.Interrupted && a.MainAgent.StateStartedAt >= turn
+	}
 	return a.State == stateDone && !a.Interrupted && a.StateStartedAt >= turn
+}
+
+func rootInterrupted(a Agent, turn int64) bool {
+	return a.MainAgent != nil && a.MainAgent.State == stateDone && a.MainAgent.StateStartedAt >= turn &&
+		a.MainAgent.Outcome == "cancellation"
+}
+
+// rootUnconfirmed includes unexpected provider outcomes. They are neither a
+// successful result nor evidence that the owner took control.
+func rootUnconfirmed(a Agent, turn int64) bool {
+	if a.MainAgent == nil || a.MainAgent.State != stateDone || a.MainAgent.StateStartedAt < turn {
+		return false
+	}
+	switch a.MainAgent.Outcome {
+	case "", "success", "failure", "cancellation":
+		return false
+	default:
+		return true
+	}
+}
+
+// rootFailed only reads the root's own outcome, never a child's completion.
+func rootFailed(a Agent, turn int64) bool {
+	return a.MainAgent != nil && a.MainAgent.State == stateDone &&
+		a.MainAgent.Outcome == "failure" && a.MainAgent.StateStartedAt >= turn
 }
 
 // stop leaves the agent as the cause asks: closed when tend no longer
@@ -887,12 +1046,16 @@ func (w *worker) ownsUnconfirmedTurn(ctx context.Context) bool {
 // emit reports a fact unless the worker is stopping. Facts of starting
 // wait for run, as nobody reads them before Start returns.
 func (w *worker) emit(ctx context.Context, kind string, body any) {
+	w.seq++
+	w.emitID(ctx, fmt.Sprintf("%s@%d#%d", w.st.Terminal, w.st.Turn, w.seq), kind, body)
+}
+
+func (w *worker) emitID(ctx context.Context, nativeID, kind string, body any) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return
 	}
-	w.seq++
-	ev := harness.WorkerEvent{NativeID: fmt.Sprintf("%s@%d#%d", w.st.Terminal, w.st.Turn, w.seq), Kind: kind, Body: b}
+	ev := harness.WorkerEvent{NativeID: nativeID, Kind: kind, Body: b}
 	if !w.running {
 		w.pending = append(w.pending, ev)
 		return

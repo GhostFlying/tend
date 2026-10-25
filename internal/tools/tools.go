@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -67,6 +68,7 @@ type tool struct {
 }
 
 var tools = []tool{
+	{"tool_failures_list", "List failed hosted-agent tool calls across all projects in the owner conversation (not filtered by current session project), with source message, call identity and structured error, without original inputs. Use before_seq for earlier pages and tool to filter.", (*Service).toolFailuresList},
 	{"work_items_refresh_delivery", "Request a read-only refresh of a linked GitHub PR or Codebase MR on a capable runner. This never merges, closes or deploys it. Read work_items_read for the resulting observation and timestamp.", (*Service).workItemsRefresh},
 	{"work_items_list", "List continuing work items independently of execution tasks. Find undecided next steps, open commitments and unclosed deliveries even when all tasks finished. Columns: unplanned, active, checking, attention, snoozed, closed.", (*Service).workItemsList},
 	{"work_items_read", "Read a work item, dynamic plan, shared sourced background, commitments, deliveries and task facts before continuing or closing it.", (*Service).workItemsRead},
@@ -239,6 +241,9 @@ func (s *Service) summary(ctx context.Context, taskID string) any {
 func decode(raw json.RawMessage, v any) error {
 	if len(raw) == 0 {
 		raw = json.RawMessage(`{}`)
+	}
+	if err := unknownArgument(raw, reflect.TypeOf(v), ""); err != nil {
+		return err
 	}
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()

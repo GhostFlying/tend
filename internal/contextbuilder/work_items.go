@@ -18,6 +18,9 @@ func workItemLine(w protocol.WorkItemView) string {
 		}
 	}
 	line := fmt.Sprintf("%s %q, revision %d, %s; stages: %s", w.WorkItemID, w.Title, w.Revision, w.Column, strings.Join(parts, "; "))
+	if len(w.PendingReviews) > 0 {
+		line += fmt.Sprintf("; %d completed execution(s) need plan reconciliation (read pending_reviews and acceptance_id)", len(w.PendingReviews))
+	}
 	for _, next := range w.FollowOns {
 		if next.Status == "open" {
 			line += fmt.Sprintf("; %s: %s (source: %s)", next.Kind, next.Text, next.Source)

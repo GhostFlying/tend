@@ -401,9 +401,34 @@ func (c *Client) Terminals(ctx context.Context, worktree string) ([]Terminal, er
 	return res.Terminals, err
 }
 
+// MainAgent is the root turn's state, independently of background child work.
+// Older Orca hosts omit it; absence is not evidence of success or failure.
+type MainAgent struct {
+	State   string `json:"state"`
+	Outcome string `json:"outcome,omitempty"`
+
+	StateStartedAt int64 `json:"stateStartedAt"`
+}
+
+// ProviderSession identifies the root transcript used for a recovery handoff.
+type ProviderSession struct {
+	ID             string `json:"id"`
+	TranscriptPath string `json:"transcriptPath,omitempty"`
+}
+
+// ChildWork is Orca's explicit background-operation settlement evidence.
+type ChildWork struct {
+	State      string `json:"state"`
+	Membership string `json:"membership"`
+}
+
 // Agent is an agent orca tracks in a worktree.
 type Agent struct {
-	PaneKey string `json:"paneKey"`
+	PaneKey             string           `json:"paneKey"`
+	MainAgent           *MainAgent       `json:"mainAgent,omitempty"`
+	ProviderSession     *ProviderSession `json:"providerSession,omitempty"`
+	Children            []ChildWork      `json:"children,omitempty"`
+	SubagentObservation string           `json:"subagentObservation,omitempty"`
 	// State is working, done and so on, as orca reports it.
 	State     string `json:"state"`
 	AgentType string `json:"agentType"`

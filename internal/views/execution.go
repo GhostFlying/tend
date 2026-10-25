@@ -2,6 +2,8 @@ package views
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"slices"
 
@@ -185,6 +187,15 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 				v.State = protocol.ExecutionAccepting
 			}
 		}
+		if v.State == protocol.ExecutionRunning || v.State == protocol.ExecutionAccepting || v.State == protocol.ExecutionStarting {
+			v.Recovery, err = executionRecovery(ctx, q, run.RunID)
+			if err != nil {
+				return nil, err
+			}
+			if v.Recovery != nil {
+				v.State = protocol.ExecutionRecovering
+			}
+		}
 		return v, nil
 	}
 	// Control is an intent, not confirmation that an allocated worker stopped.
@@ -296,6 +307,8 @@ func countExecution(counts *protocol.ExecutionCounts, execution *protocol.TaskEx
 	switch execution.State {
 	case protocol.ExecutionQueued:
 		counts.Queued++
+	case protocol.ExecutionRecovering:
+		counts.Recovering++
 	case protocol.ExecutionRunning:
 		counts.Running++
 	case protocol.ExecutionAccepting:
@@ -319,4 +332,35 @@ func countExecution(counts *protocol.ExecutionCounts, execution *protocol.TaskEx
 	default:
 		counts.Idle++
 	}
+}
+
+// Latest durable root-turn fact wins only for the selected live run.
+func executionRecovery(ctx context.Context, q store.Querier, runID string) (*protocol.ExecutionRecovery, error) {
+	var kind, body string
+	err := q.QueryRowContext(ctx, `SELECT kind,body_json FROM run_logs WHERE run_id=? AND kind IN ('worker.turn_failed','worker.recovery_pending','worker.recovery_started','worker.recovery_completed','worker.recovery_failed','worker.recovery_handed_back') ORDER BY seq DESC LIMIT 1`, runID).Scan(&kind, &body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if kind == "worker.recovery_completed" || kind == "worker.recovery_handed_back" {
+		return nil, nil
+	}
+	var recovery protocol.ExecutionRecovery
+	if err := json.Unmarshal([]byte(body), &recovery); err != nil {
+		// Run logs are arbitrary JSON facts; malformed optional metadata must not break task reads.
+		recovery = protocol.ExecutionRecovery{}
+	}
+	switch kind {
+	case "worker.turn_failed":
+		recovery.Phase = "turn_failed"
+	case "worker.recovery_pending":
+		recovery.Phase = "pending"
+	case "worker.recovery_started":
+		recovery.Phase = "running"
+	case "worker.recovery_failed":
+		recovery.Phase = "failed"
+	}
+	return &recovery, nil
 }

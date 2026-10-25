@@ -65,12 +65,13 @@ type config struct {
 	// codex or traex, as a TUI in orca (D66); OrcaBin defaults to orca on
 	// PATH.
 	Worker struct {
-		Kind     protocol.WorkerKind `json:"kind"`
-		TraexBin string              `json:"traex_bin"`
-		Agent    protocol.AgentKind  `json:"agent"`
-		OrcaBin  string              `json:"orca_bin"`
-		Model    string              `json:"model"`
-		Effort   string              `json:"effort"`
+		Kind             protocol.WorkerKind `json:"kind"`
+		TraexBin         string              `json:"traex_bin"`
+		Agent            protocol.AgentKind  `json:"agent"`
+		OrcaBin          string              `json:"orca_bin"`
+		Model            string              `json:"model"`
+		Effort           string              `json:"effort"`
+		RecoveryAttempts *int                `json:"recovery_attempts,omitempty"`
 	} `json:"worker"`
 	Git struct {
 		Bin string   `json:"bin"`
@@ -137,6 +138,9 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	var cfg config
 	if err := cfgfile.Load(path, &cfg); err != nil {
 		return err
+	}
+	if cfg.Worker.RecoveryAttempts != nil && *cfg.Worker.RecoveryAttempts < 0 {
+		return errors.New("worker.recovery_attempts must be non-negative")
 	}
 	token := os.Getenv("TEND_HOST_TOKEN")
 	if token == "" {
@@ -223,7 +227,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 			return fmt.Errorf("upgrade worker.orca_bin to an Orca CLI supporting folder-workspace and project-group commands before enabling workspace protocol 1: %w", preflightErr)
 		}
 		workers = orca.NewWorkers(orca.WorkerOptions{
-			Client: oc, Agent: cfg.Worker.Agent, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort,
+			Client: oc, Agent: cfg.Worker.Agent, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort, RecoveryAttempts: cfg.Worker.RecoveryAttempts,
 			BridgeCommand: self, BridgeArgs: []string{workerMCP}, IDs: ids, Now: time.Now, Log: log,
 		})
 		workspaces = gitws.NewOrca(wsCfg, oc)

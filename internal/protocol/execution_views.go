@@ -8,6 +8,7 @@ const (
 	ExecutionQueued       ExecutionState = "queued"
 	ExecutionStarting     ExecutionState = "starting"
 	ExecutionRunning      ExecutionState = "running"
+	ExecutionRecovering   ExecutionState = "recovering"
 	ExecutionAccepting    ExecutionState = "accepting"
 	ExecutionWaitingOwner ExecutionState = "waiting_owner"
 	ExecutionPaused       ExecutionState = "paused"
@@ -17,7 +18,7 @@ const (
 )
 
 func ExecutionStateValues() []ExecutionState {
-	return []ExecutionState{ExecutionIdle, ExecutionQueued, ExecutionStarting, ExecutionRunning, ExecutionAccepting, ExecutionWaitingOwner, ExecutionPaused, ExecutionUnknown, ExecutionCompleted, ExecutionCancelled}
+	return []ExecutionState{ExecutionIdle, ExecutionQueued, ExecutionStarting, ExecutionRunning, ExecutionRecovering, ExecutionAccepting, ExecutionWaitingOwner, ExecutionPaused, ExecutionUnknown, ExecutionCompleted, ExecutionCancelled}
 }
 
 // QueueWaitCode identifies the scheduling constraint without changing BlockReason.
@@ -48,8 +49,16 @@ type QueueWaitReason struct {
 
 // TaskExecutionView separates an allocated worker from pending execution.
 type TaskExecutionView struct {
-	State       ExecutionState   `json:"state"`
-	Role        RunRole          `json:"role,omitempty"`
-	RunID       string           `json:"run_id,omitempty"`
-	QueueReason *QueueWaitReason `json:"queue_reason,omitempty"`
+	Recovery    *ExecutionRecovery `json:"recovery,omitempty"`
+	State       ExecutionState     `json:"state"`
+	Role        RunRole            `json:"role,omitempty"`
+	RunID       string             `json:"run_id,omitempty"`
+	QueueReason *QueueWaitReason   `json:"queue_reason,omitempty"`
+}
+
+// ExecutionRecovery exposes safe progress facts, never native transcript paths.
+type ExecutionRecovery struct {
+	Phase    string `json:"phase"`
+	Code     string `json:"code,omitempty"`
+	Attempts int    `json:"attempts,omitempty"`
 }
