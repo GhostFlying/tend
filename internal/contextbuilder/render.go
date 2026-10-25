@@ -78,9 +78,9 @@ type section struct {
 	omitted   string // note format with one %d for the count
 }
 
-// Render writes a packet's text within budget characters. A line is never
-// cut: a constraint is either there in full or its task is listed among
-// the omissions.
+// Render budgets dynamic packet content in UTF-8 bytes. Fixed addon
+// instructions are included separately and cannot displace ledger facts.
+// Lines are never cut; protected attention can exceed the dynamic budget.
 func Render(s Snapshot, budget int) string {
 	kind := "delta"
 	if s.Full {
@@ -92,8 +92,10 @@ func Render(s Snapshot, budget int) string {
 	} else {
 		header = fmt.Sprintf("[tend context packet %s epoch=%d watermark=%d kind=%s]\n", s.PacketID, s.Epoch, s.Watermark, kind)
 	}
+	fixedBytes := 0
 	switch {
 	case s.Full && s.Addon:
+		fixedBytes = len(AddonInstructions)
 		header += "This replaces all earlier tend context in this conversation, including any carried over in a summary. " +
 			"It is tend's ledger as of now and is authoritative over anything you remember.\n\n" + AddonInstructions + "\n"
 		if s.Project != "" {
@@ -137,7 +139,7 @@ func Render(s Snapshot, budget int) string {
 	focus := func(sec *section) bool { return sec.title == "Recent conversation" }
 	dropped := map[*section]int{}
 	size := func() int {
-		n := len(header)
+		n := len(header) - fixedBytes
 		for _, sec := range sections {
 			if len(sec.lines) == 0 && dropped[sec] == 0 {
 				continue
