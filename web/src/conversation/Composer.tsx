@@ -205,10 +205,16 @@ export function Composer({ connection }: { connection: Connection }) {
           onClick={() => fileInput.current?.click()}
           disabled={blocked || persisting}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-            <rect x="3" y="3" width="18" height="18" rx="4" />
-            <circle cx="8" cy="8" r="1.5" />
-            <path d="m3 17 5-5 4 4 4-6 5 7" />
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.5-8.5" />
           </svg>
         </button>
         <span className={styles.hint} role="status">
