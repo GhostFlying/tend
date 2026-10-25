@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,29 +56,34 @@ type server struct {
 	// path and ttl are what the server was opened with.
 	path string
 	ttl  time.Duration
+	now  func() time.Time
 	// stops stop what runs against the ledger, in the order started.
 	stops []func()
 	ended sync.Once
 }
 
-func newServer(t *testing.T, ttl time.Duration) *server {
+func newServer(t *testing.T, ttl time.Duration, clock ...func() time.Time) *server {
 	t.Helper()
-	return openServer(t, ttl, filepath.Join(t.TempDir(), "tend.db"))
+	return openServer(t, ttl, filepath.Join(t.TempDir(), "tend.db"), clock...)
 }
 
 // openServer starts a server on the ledger at path.
-func openServer(t *testing.T, ttl time.Duration, path string) *server {
+func openServer(t *testing.T, ttl time.Duration, path string, clock ...func() time.Time) *server {
 	t.Helper()
+	now := time.Now
+	if len(clock) > 0 {
+		now = clock[0]
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s, err := store.Open(ctx, path, time.Now)
+	s, err := store.Open(ctx, path, now)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
 	}
-	ids := protocol.NewULIDGen(time.Now, nil)
+	ids := protocol.NewULIDGen(now, nil)
 	sig := dispatch.NewSignal()
-	a := app.New(s, ids, time.Now, app.WithLeaseTTL(ttl), app.WithNotifier(sig))
-	srv := &server{t: t, store: s, app: a, ids: ids, signal: sig, path: path, ttl: ttl}
+	a := app.New(s, ids, now, app.WithLeaseTTL(ttl), app.WithNotifier(sig))
+	srv := &server{t: t, store: s, app: a, ids: ids, signal: sig, path: path, ttl: ttl, now: now}
 	t.Cleanup(srv.shutdown)
 	srv.onStop(func() { s.Close() })
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
@@ -116,7 +122,7 @@ func (s *server) shutdown() {
 func (s *server) restart() *server {
 	s.t.Helper()
 	s.shutdown()
-	return openServer(s.t, s.ttl, s.path)
+	return openServer(s.t, s.ttl, s.path, s.now)
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -244,12 +250,15 @@ func (w *workspaces) Finish(context.Context, protocol.Assignment) error { return
 // network can be cut between the runner and tend, or drop requests of
 // chosen operations.
 type network struct {
-	mu   sync.Mutex
-	down bool
+	mu       sync.Mutex
+	down     bool
+	inflight int
 	// drop counts how many more requests of an operation to fail, and
 	// lose how many more answers to lose after tend handled the request.
 	drop map[string]int
 	lose map[string]int
+	// before runs before delivery and is configured before starting the node.
+	before func(*http.Request) error
 }
 
 func (n *network) loseNext(op string, times int) {
@@ -284,6 +293,11 @@ func (n *network) set(down bool) {
 }
 
 func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
+	if n.before != nil {
+		if err := n.before(req); err != nil {
+			return nil, err
+		}
+	}
 	var body []byte
 	if req.Body != nil {
 		var err error
@@ -304,12 +318,16 @@ func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
 	if drop {
 		n.drop[env.Operation]--
 	}
+	if !down && !drop {
+		n.inflight++
+	}
 	n.mu.Unlock()
 	if down || drop {
 		return nil, errors.New("network is down")
 	}
 	res, err := http.DefaultTransport.RoundTrip(req)
 	n.mu.Lock()
+	n.inflight--
 	lose := n.lose[env.Operation] > 0
 	if lose {
 		n.lose[env.Operation]--
@@ -356,7 +374,7 @@ func newNode(t *testing.T, srv *server, script func(harness.WorkerSpec) testkit.
 
 func (n *node) journal() *journal.Journal {
 	n.t.Helper()
-	j, err := journal.Open(context.Background(), n.path, time.Now)
+	j, err := journal.Open(context.Background(), n.path, n.srv.now)
 	if err != nil {
 		n.t.Fatal(err)
 	}
@@ -371,7 +389,7 @@ func (n *node) start() {
 	r := runner.New(runner.Config{
 		ServerURL: n.srv.url, HostID: "linux-1", HostToken: hostToken, Version: "test",
 		HTTPClient: &http.Client{Transport: n.net}, Journal: j, Worker: protocol.WorkerOrca, Workers: n.workers, Workspaces: n.ws,
-		Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: quiet(),
+		Now: n.srv.now, IDs: protocol.NewULIDGen(n.srv.now, nil), Log: quiet(),
 		RetryDelay: 20 * time.Millisecond, EventFlush: n.flush,
 	})
 	go func() {
@@ -491,34 +509,79 @@ func TestFault_ClaimReceiptLost_Runner(t *testing.T) {
 }
 
 func TestFault_HeartbeatLostRunnerAlive_Runner(t *testing.T) {
-	srv := newServer(t, 400*time.Millisecond)
-	hold := make(chan struct{})
-	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
-		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
-			// The first worker would run forever; only fencing stops it.
-			return testkit.WorkerScript{Gate: hold}
-		}
-		return passing(spec)
-	})
-	n.start()
-	task := srv.createTask()
-	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
+	for _, fenceBeforeStart := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pre_start_fence=%t", fenceBeforeStart), func(t *testing.T) {
+			clock := testkit.NewClock()
+			srv := newServer(t, 400*time.Millisecond, clock.Now)
+			n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
+				if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
+					return testkit.WorkerScript{Gate: make(chan struct{})}
+				}
+				return passing(spec)
+			})
+			entered := make(chan struct{})
+			var questionReads atomic.Int32
+			if fenceBeforeStart {
+				n.net.before = func(req *http.Request) error {
+					if req.URL.Path == "/runner/v1/questions" && questionReads.Add(1) == 2 {
+						// NextAttempt is durable before owner-question recovery and worker Start.
+						close(entered)
+						<-req.Context().Done()
+						return req.Context().Err()
+					}
+					return nil
+				}
+			}
+			n.start()
+			task := srv.createTask()
+			n.diagnoseFailure(task)
+			eventually(t, "the worker starts with a durable thread", func() bool { return len(n.workers.Started()) == 1 })
+			first := n.workers.Started()[0]
+			j := n.journal()
+			defer j.Close()
+			original, err := j.Run(t.Context(), first.RunID)
+			if err != nil || original.Thread == "" {
+				t.Fatalf("initial thread: %+v, %v", original, err)
+			}
 
-	n.net.set(true)
-	eventually(t, "the runner fences its worker", func() bool { return len(n.workers.Stopped()) == 1 })
-	eventually(t, "tend marks the run unknown", func() bool { return srv.runState(protocol.RoleImplement) == protocol.RunUnknown })
-	if got := srv.count(`SELECT COUNT(*) FROM runs`); got != 1 {
-		t.Fatalf("runs while the runner is unreachable = %d, want 1", got)
-	}
-
-	n.net.set(false)
-	eventually(t, "the task completes after reconciliation", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
-	started := n.workers.Started()
-	if len(started) < 2 || started[1].Role != protocol.RoleImplement || started[1].Attempt != 2 {
-		t.Errorf("workers started: %+v, want the implementation resumed as attempt 2", started)
-	}
-	if got := srv.count(`SELECT COUNT(*) FROM runs WHERE role = 'implement'`); got != 1 {
-		t.Errorf("implement runs = %d, want the same run resumed", got)
+			n.net.disconnect(t)
+			// No accidental wall-clock lease expiry can occur before the fault barrier.
+			clock.Advance(time.Second)
+			eventually(t, "the runner fences its worker", func() bool { return len(n.workers.Stopped()) == 1 })
+			eventually(t, "tend marks the run unknown", func() bool { return srv.runState(protocol.RoleImplement) == protocol.RunUnknown })
+			if got := srv.count(`SELECT COUNT(*) FROM runs`); got != 1 {
+				t.Fatalf("runs while unreachable = %d, want 1", got)
+			}
+			n.net.set(false)
+			expectedAttempt := 2
+			if fenceBeforeStart {
+				select {
+				case <-entered:
+				case <-time.After(15 * time.Second):
+					t.Fatal("owner-question recovery was not reached")
+				}
+				n.net.disconnect(t)
+				clock.Advance(time.Second)
+				eventually(t, "the unstarted second attempt is durably fenced", func() bool {
+					run, err := j.Run(t.Context(), first.RunID)
+					return err == nil && run.Attempts == 2 && run.Fenced
+				})
+				if len(n.workers.Started()) != 1 {
+					t.Fatal("fenced preparation launched a worker")
+				}
+				eventually(t, "the second lease expires", func() bool { return srv.runState(protocol.RoleImplement) == protocol.RunUnknown })
+				expectedAttempt = 3
+				n.net.set(false)
+			}
+			eventually(t, "the task completes after reconciliation", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
+			started := n.workers.Started()
+			if len(started) != 3 || started[1].Role != protocol.RoleImplement || started[1].Attempt != expectedAttempt || started[1].RunID != first.RunID || started[1].Thread != original.Thread || started[2].Role != protocol.RoleAccept {
+				t.Errorf("expected exactly initial implementation, same-run/thread attempt %d and acceptance; got %d worker starts (details in failure diagnostics)", expectedAttempt, len(started))
+			}
+			if got := srv.count(`SELECT COUNT(*) FROM runs WHERE role = 'implement'`); got != 1 {
+				t.Errorf("implement runs = %d, want the same run resumed", got)
+			}
+		})
 	}
 }
 
@@ -826,7 +889,8 @@ func TestTakeoverHandedBackBeforeAHeartbeat(t *testing.T) {
 }
 
 func TestFault_TakeoverReplyLostThenHandedBack(t *testing.T) {
-	srv := newServer(t, 400*time.Millisecond)
+	clock := testkit.NewClock()
+	srv := newServer(t, 400*time.Millisecond, clock.Now)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
 			return testkit.WorkerScript{Takeover: "the owner typed", Gate: make(chan struct{})}
@@ -837,6 +901,7 @@ func TestFault_TakeoverReplyLostThenHandedBack(t *testing.T) {
 	n.net.loseNext(protocol.OpRunsReportTakeover, 1000)
 	n.start()
 	task := srv.createTask()
+	n.diagnoseFailure(task)
 	eventually(t, "the task passes to human control", func() bool { return srv.task(task).ControlMode == protocol.ControlHumanControl })
 	n.stop()
 	// The owner hands the run back while the runner is down.
@@ -982,4 +1047,65 @@ func TestRejectedReportReleasesRun(t *testing.T) {
 	if st := srv.runState(protocol.RoleAccept); st != protocol.RunFailed {
 		t.Errorf("acceptance run = %s, want failed after its report was rejected", st)
 	}
+}
+
+// diagnoseFailure reports identities and lifecycle facts, not credentials or specs.
+func (n *node) diagnoseFailure(task string) {
+	n.t.Cleanup(func() {
+		if !n.t.Failed() {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		err := n.srv.store.Read(ctx, func(tx *store.ReadTx) error {
+			row, err := store.GetTask(ctx, tx.Q(), task)
+			if err != nil {
+				return err
+			}
+			n.t.Logf("task=%s lifecycle=%s control=%s revision=%d", task, row.Lifecycle, row.ControlMode, row.ControlRevision)
+			rows, err := tx.Q().QueryContext(ctx, `SELECT run_id,role,observed_state FROM runs WHERE task_id=?`, task)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id, role, state string
+				if err := rows.Scan(&id, &role, &state); err != nil {
+					return err
+				}
+				n.t.Logf("server run=%s role=%s state=%s", id, role, state)
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			n.t.Logf("server diagnostics: %v", err)
+		}
+		j, err := journal.Open(ctx, n.path, n.srv.now)
+		if err != nil {
+			n.t.Logf("journal diagnostics: %v", err)
+			return
+		}
+		defer j.Close()
+		runs, err := j.Runs(ctx)
+		if err != nil {
+			n.t.Logf("journal runs: %v", err)
+		}
+		for _, run := range runs {
+			n.t.Logf("journal run=%s phase=%s attempts=%d fenced=%t held=%t thread=%s", run.Assignment.RunID, run.Phase, run.Attempts, run.Fenced, run.Held, run.Thread)
+		}
+		for _, spec := range n.workers.Started() {
+			n.t.Logf("worker run=%s role=%s attempt=%d thread=%s handback=%t", spec.RunID, spec.Role, spec.Attempt, spec.Thread, spec.HandBack)
+		}
+	})
+}
+
+// disconnect waits for requests sent before the cut to finish before advancing
+// the shared clock, so an old heartbeat cannot renew the deliberately lost lease.
+func (n *network) disconnect(t *testing.T) {
+	n.set(true)
+	eventually(t, "in-flight requests drain before clock advance", func() bool {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		return n.inflight == 0
+	})
 }
