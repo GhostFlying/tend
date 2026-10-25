@@ -42,6 +42,10 @@ func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem, fac
 	if err != nil {
 		return v, err
 	}
+	v.PendingReviews, err = store.ListPendingCompletionReviews(ctx, q, w.WorkItemID)
+	if err != nil {
+		return v, err
+	}
 	projectWorkItemExecution(&v)
 	v.Observations, err = store.ListDeliveryObservations(ctx, q, w.WorkItemID)
 	if err != nil {

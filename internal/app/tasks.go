@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/GhostFlying/tend/internal/domain"
@@ -93,6 +94,9 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	p.Spec.Workspace = ws
+	if err := checkRequiredHost(ctx, tx.Q(), p.Spec, resource); err != nil {
+		return Outcome{}, err
+	}
 	p.Spec = p.Spec.Normalize()
 	if err := freezeTaskInputs(ctx, tx.Q(), &p.Spec, nil); err != nil {
 		return Outcome{}, err
@@ -240,6 +244,17 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, err
 		}
 		p.Spec.Workspace = ws
+		if resource == nil && detachedResource == nil {
+			existing, lookupErr := store.GetWorkspaceByTask(ctx, tx.Q(), row.TaskID)
+			if lookupErr == nil {
+				resource = &existing
+			} else if !errors.Is(lookupErr, store.ErrNotFound) {
+				return Outcome{}, lookupErr
+			}
+		}
+		if err := checkRequiredHost(ctx, tx.Q(), *p.Spec, resource); err != nil {
+			return Outcome{}, err
+		}
 		*p.Spec = p.Spec.Normalize()
 		if err := freezeTaskInputs(ctx, tx.Q(), p.Spec, current.Inputs); err != nil {
 			return Outcome{}, err

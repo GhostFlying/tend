@@ -34,13 +34,14 @@ type workItemCreateArgs struct {
 	Reason    string                `json:"reason"`
 }
 type workItemUpdateArgs struct {
-	WorkItemID              string                             `json:"work_item_id"`
-	ExpectedControlRevision int64                              `json:"expected_control_revision"`
-	Plan                    protocol.WorkItemPlan              `json:"plan"`
-	Status                  protocol.WorkItemUpdateStatus      `json:"status,omitempty"`
-	TaskDispositions        []protocol.WorkItemTaskDisposition `json:"task_dispositions,omitempty"`
-	CommitSeq               int64                              `json:"commit_seq"`
-	Reason                  string                             `json:"reason"`
+	CompletionReviews       []protocol.CompletionReviewAcknowledgement `json:"completion_reviews,omitempty"`
+	WorkItemID              string                                     `json:"work_item_id"`
+	ExpectedControlRevision int64                                      `json:"expected_control_revision"`
+	Plan                    protocol.WorkItemPlan                      `json:"plan"`
+	Status                  protocol.WorkItemUpdateStatus              `json:"status,omitempty"`
+	TaskDispositions        []protocol.WorkItemTaskDisposition         `json:"task_dispositions,omitempty"`
+	CommitSeq               int64                                      `json:"commit_seq"`
+	Reason                  string                                     `json:"reason"`
 }
 type workItemCloseArgs struct {
 	CommitSeq               int64                    `json:"commit_seq"`
@@ -167,7 +168,7 @@ func (s *Service) workItemsUpdate(ctx context.Context, c Call) (any, error) {
 	if err := requireMessage(c); err != nil {
 		return nil, err
 	}
-	p := protocol.UpdateWorkItemPayload{WorkItemPlan: a.Plan, Status: a.Status, TaskDispositions: a.TaskDispositions, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}
+	p := protocol.UpdateWorkItemPayload{WorkItemPlan: a.Plan, Status: a.Status, CompletionReviews: a.CompletionReviews, TaskDispositions: a.TaskDispositions, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}
 	return s.execute(ctx, c, "work_items.update", protocol.Target{Type: "work_item", ID: a.WorkItemID}, &a.ExpectedControlRevision, a.Reason, p, app.UpdateWorkItem{})
 }
 func (s *Service) workItemsClose(ctx context.Context, c Call) (any, error) {

@@ -21,7 +21,8 @@ import {
   followOnLabels,
   parallelStages,
   refreshReconciled,
-  stageLabels,
+  stageProgressLabel,
+  stageNeedsReview,
   stageRows,
 } from "./model.ts";
 import controls from "../shell/controls.module.css";
@@ -258,47 +259,62 @@ export function StageList({ item, compact = false }: { item: WorkItemView; compa
   const parallel = parallelStages(stages);
   const titles = new Map(stages.map((stage) => [stage.stage_id, stage.title]));
   return (
-    <ol className={styles.stages}>
-      {stageRows(stages).map(({ stage, depth }) => (
-        <li
-          key={stage.stage_id}
-          className={styles.stage}
-          style={{ marginInlineStart: `${Math.min(depth, 4) * 12}px` }}
-        >
-          <div className={styles.stageHeading}>
-            <strong>{stage.title}</strong>
-            <span>计划 · {stageLabels[stage.status] ?? stage.status}</span>
-          </div>
-          <ExecutionSummary
-            counts={
-              item.stage_execution?.find((entry) => entry.stage_id === stage.stage_id)?.execution
-            }
-          />
-          {stage.parent_id && (
-            <p className={styles.meta}>属于 {titles.get(stage.parent_id) ?? stage.parent_id}</p>
-          )}
-          {!!stage.depends_on?.length && (
-            <p className={styles.meta}>
-              依赖：{stage.depends_on.map((id) => titles.get(id) ?? id).join("、")}
-            </p>
-          )}
-          {parallel.has(stage.stage_id) && (
-            <p className={styles.parallel} title="阶段依赖允许并行；执行仍由调度器分配资源">
-              计划可并行
-            </p>
-          )}
-          {stage.reason && <p>{stage.reason}</p>}
-          {!!stage.task_ids?.length && (
-            <div className={styles.taskLinks}>
-              {stage.task_ids.map((id) => (
-                <TaskButton key={id} id={id} item={item} />
-              ))}
+    <>
+      {!!item.pending_reviews?.length && (
+        <p className={styles.meta}>
+          有 {item.pending_reviews.length} 项已完成执行等待阶段核对。任务完成不代表工作项结束。
+        </p>
+      )}
+      <ol className={styles.stages}>
+        {stageRows(stages).map(({ stage, depth }) => (
+          <li
+            key={stage.stage_id}
+            className={styles.stage}
+            style={{ marginInlineStart: `${Math.min(depth, 4) * 12}px` }}
+          >
+            <div className={styles.stageHeading}>
+              <strong>{stage.title}</strong>
+              <span>
+                计划 ·{" "}
+                {stageProgressLabel(
+                  stage,
+                  item.stage_execution?.find((entry) => entry.stage_id === stage.stage_id)
+                    ?.execution,
+                  stageNeedsReview(item, stage.stage_id),
+                )}
+              </span>
             </div>
-          )}
-          {!compact && <Evidence items={stage.evidence} />}
-        </li>
-      ))}
-    </ol>
+            <ExecutionSummary
+              counts={
+                item.stage_execution?.find((entry) => entry.stage_id === stage.stage_id)?.execution
+              }
+            />
+            {stage.parent_id && (
+              <p className={styles.meta}>属于 {titles.get(stage.parent_id) ?? stage.parent_id}</p>
+            )}
+            {!!stage.depends_on?.length && (
+              <p className={styles.meta}>
+                依赖：{stage.depends_on.map((id) => titles.get(id) ?? id).join("、")}
+              </p>
+            )}
+            {parallel.has(stage.stage_id) && (
+              <p className={styles.parallel} title="阶段依赖允许并行；执行仍由调度器分配资源">
+                计划可并行
+              </p>
+            )}
+            {stage.reason && <p>{stage.reason}</p>}
+            {!!stage.task_ids?.length && (
+              <div className={styles.taskLinks}>
+                {stage.task_ids.map((id) => (
+                  <TaskButton key={id} id={id} item={item} />
+                ))}
+              </div>
+            )}
+            {!compact && <Evidence items={stage.evidence} />}
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 function TaskButton({ item, id }: { item: WorkItemView; id: string }) {

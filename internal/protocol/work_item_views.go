@@ -3,6 +3,7 @@ package protocol
 // WorkItemView combines the plan with current execution facts. Column is a
 // projection, not an editable business stage or proof of completion.
 type WorkItemView struct {
+	PendingReviews []WorkItemCompletionReview `json:"pending_reviews,omitempty"`
 	WorkItem
 	Execution      *ExecutionCounts      `json:"execution,omitempty"`
 	StageExecution []StageExecutionView  `json:"stage_execution,omitempty"`
@@ -23,6 +24,7 @@ type StageExecutionView struct {
 
 // ExecutionCounts counts distinct linked tasks, including mixed execution states.
 type ExecutionCounts struct {
+	Recovering   int `json:"recovering,omitempty"`
 	Queued       int `json:"queued"`
 	Running      int `json:"running"`
 	Accepting    int `json:"accepting"`

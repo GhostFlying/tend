@@ -27,7 +27,7 @@ func (ws *Workers) ReleaseFinalizing(ctx context.Context, runID, thread string, 
 		return fmt.Errorf("orca: decode finalizing worker: %w", err)
 	}
 	// A refused launch explicitly clears its saved state before returning.
-	if st == (workerState{}) {
+	if st == (workerState{}) || st.Recovery != nil && st.Terminal == "" && st.Marker == "" && st.Launch == "" && st.Worktree == "" {
 		return nil
 	}
 	if st.PromptOutcome == promptNotDelivered {

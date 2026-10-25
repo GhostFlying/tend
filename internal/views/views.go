@@ -141,7 +141,7 @@ func workspace(ctx context.Context, q store.Querier, taskID string) (*protocol.W
 func Acceptances(rows []store.AcceptanceRow, evidence bool) []protocol.AcceptanceView {
 	out := make([]protocol.AcceptanceView, 0, len(rows))
 	for _, a := range rows {
-		v := protocol.AcceptanceView{ArtifactID: a.ArtifactID, SpecVersion: a.SpecVersion, Verdict: a.Verdict, Issues: json.RawMessage(a.IssuesJSON)}
+		v := protocol.AcceptanceView{AcceptanceID: a.AcceptanceID, ArtifactID: a.ArtifactID, SpecVersion: a.SpecVersion, Verdict: a.Verdict, Issues: json.RawMessage(a.IssuesJSON)}
 		if evidence {
 			v.Evidence = json.RawMessage(a.EvidenceJSON)
 		}
@@ -250,43 +250,9 @@ func Snapshot(ctx context.Context, q store.Querier, queue []protocol.QueueEntry,
 			v.Decisions = append(v.Decisions, d)
 		}
 	}
-	hosts, err := store.ListActiveHosts(ctx, q)
+	v.Hosts, err = Hosts(ctx, q)
 	if err != nil {
 		return v, err
-	}
-	v.Hosts = make([]protocol.HostView, 0, len(hosts))
-	for _, h := range hosts {
-		n, err := store.CountOpenRuns(ctx, q, h.HostID)
-		if err != nil {
-			return v, err
-		}
-		hv := protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, Worker: h.Worker, WorkspaceProtocol: h.WorkspaceProtocol, OpenRuns: n}
-		rt, err := store.GetHostRuntime(ctx, q, h.HostID)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return v, err
-		}
-		if err == nil {
-			stamp := time.UnixMilli(rt.LastHeartbeatAt)
-			hv.Online = &rt.Online
-			hv.LastHeartbeatAt = &stamp
-			hv.BuildVersion = rt.Runtime.Build.Version
-			hv.ProtocolVersion = &rt.Runtime.Protocol
-		}
-		control, err := store.GetHostControl(ctx, q, h.HostID)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return v, err
-		}
-		if control.Mode == protocol.RunnerMaintenance || rt.Runtime.Mode == protocol.RunnerMaintenance || rt.Runtime.Mode == protocol.RunnerReady {
-			hv.Maintenance = &protocol.HostMaintenanceView{Mode: protocol.RunnerMaintenance, Phase: "draining", ReleaseID: control.ReleaseID, UpgradeID: control.UpgradeID, RemainingRuns: n}
-			if rt.Runtime.Mode == protocol.RunnerReady && n == 0 && rt.Runtime.AppliedControlRevision == control.Revision {
-				hv.Maintenance.Mode = protocol.RunnerReady
-				hv.Maintenance.Phase = "ready"
-			}
-			if len(rt.Runtime.Blockers) > 0 {
-				hv.Maintenance.Reason = strings.Join(rt.Runtime.Blockers, ", ")
-			}
-		}
-		v.Hosts = append(v.Hosts, hv)
 	}
 	if v.Tasks == nil {
 		v.Tasks = []protocol.TaskSummary{}
@@ -488,4 +454,47 @@ func TaskRelations(ctx context.Context, q store.Querier, taskID string) ([]proto
 		out[i].Task = summary
 	}
 	return out, nil
+}
+
+// Hosts returns registered execution hosts with capacity and runtime state.
+func Hosts(ctx context.Context, q store.Querier) ([]protocol.HostView, error) {
+	hosts, err := store.ListActiveHosts(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]protocol.HostView, 0, len(hosts))
+	for _, h := range hosts {
+		n, err := store.CountOpenRuns(ctx, q, h.HostID)
+		if err != nil {
+			return nil, err
+		}
+		hv := protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, Worker: h.Worker, WorkspaceProtocol: h.WorkspaceProtocol, OpenRuns: n}
+		rt, err := store.GetHostRuntime(ctx, q, h.HostID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		if err == nil {
+			stamp := time.UnixMilli(rt.LastHeartbeatAt)
+			hv.Online = &rt.Online
+			hv.LastHeartbeatAt = &stamp
+			hv.BuildVersion = rt.Runtime.Build.Version
+			hv.ProtocolVersion = &rt.Runtime.Protocol
+		}
+		control, err := store.GetHostControl(ctx, q, h.HostID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		if control.Mode == protocol.RunnerMaintenance || rt.Runtime.Mode == protocol.RunnerMaintenance || rt.Runtime.Mode == protocol.RunnerReady {
+			hv.Maintenance = &protocol.HostMaintenanceView{Mode: protocol.RunnerMaintenance, Phase: "draining", ReleaseID: control.ReleaseID, UpgradeID: control.UpgradeID, RemainingRuns: n}
+			if rt.Runtime.Mode == protocol.RunnerReady && n == 0 && rt.Runtime.AppliedControlRevision == control.Revision {
+				hv.Maintenance.Mode = protocol.RunnerReady
+				hv.Maintenance.Phase = "ready"
+			}
+			if len(rt.Runtime.Blockers) > 0 {
+				hv.Maintenance.Reason = strings.Join(rt.Runtime.Blockers, ", ")
+			}
+		}
+		result = append(result, hv)
+	}
+	return result, nil
 }

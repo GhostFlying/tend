@@ -837,6 +837,17 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 			if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
 				return err
 			}
+			switch e.Kind {
+			case "worker.turn_failed", "worker.recovery_pending", "worker.recovery_started", "worker.recovery_completed", "worker.recovery_failed", "worker.recovery_handed_back":
+				body, err := json.Marshal(map[string]any{"seq": e.Seq, "kind": e.Kind})
+				if err != nil {
+					return err
+				}
+				if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "runner", ObjectType: "run", ObjectID: runID, Kind: "run.recovery", BodyJSON: string(body), CreatedAt: now}); err != nil {
+					return err
+				}
+				changed = true
+			}
 			// Events only move a live run between running and waiting, or
 			// resume an interrupted one. Leaving starting goes through
 			// runs.report_started, which also applies the task rules.

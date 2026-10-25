@@ -11,6 +11,7 @@ import {
   refreshReconciled,
   splitWorkItemIds,
   stageRows,
+  stageProgressLabel,
 } from "./model.ts";
 
 const item: WorkItemView = {
@@ -186,4 +187,26 @@ describe("work-item presentation", () => {
     expect(draft.state.get().text).toContain("未处理承诺、运行任务和未确认操作");
     expect(draft.state.get().focus).toBe(2);
   });
+});
+
+test("completed execution remains distinct from stage and responsibility completion", () => {
+  const counts = {
+    queued: 0,
+    running: 0,
+    accepting: 0,
+    waiting_owner: 0,
+    paused: 0,
+    unknown: 0,
+    idle: 0,
+    completed: 1,
+    cancelled: 0,
+  };
+  const stage: WorkItemStage = { stage_id: "work", title: "Work", status: "active" };
+  expect(stageProgressLabel(stage, counts, true)).toBe("本轮执行已完成 · 阶段待核对");
+  expect(stageProgressLabel(stage, counts, false)).toBe("本轮执行已完成 · 后续责任未结束");
+  expect(stageProgressLabel(stage, { ...counts, running: 1 }, true)).toBe("推进中");
+  expect(stageProgressLabel(stage, { ...counts, completed: 0, cancelled: 1 }, true)).toBe(
+    "本轮已取消 · 后续待安排",
+  );
+  expect(stageProgressLabel({ ...stage, status: "done" }, counts, false)).toBe("已完成");
 });

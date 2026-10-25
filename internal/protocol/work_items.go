@@ -92,8 +92,9 @@ type CreateWorkItemPayload struct {
 
 // UpdateWorkItemPayload replaces the plan under expected_control_revision.
 type UpdateWorkItemPayload struct {
-	SourceMessageID string `json:"source_message_id,omitempty"`
-	CommitSeq       int64  `json:"commit_seq,omitempty"`
+	CompletionReviews []CompletionReviewAcknowledgement `json:"completion_reviews,omitempty"`
+	SourceMessageID   string                            `json:"source_message_id,omitempty"`
+	CommitSeq         int64                             `json:"commit_seq,omitempty"`
 	WorkItemPlan
 	Status           WorkItemUpdateStatus      `json:"status,omitempty"`
 	TaskDispositions []WorkItemTaskDisposition `json:"task_dispositions,omitempty"`
@@ -119,4 +120,19 @@ type LinkWorkItemTaskPayload struct {
 	CommitSeq       int64    `json:"commit_seq,omitempty"`
 	TaskID          string   `json:"task_id"`
 	StageIDs        []string `json:"stage_ids"`
+}
+
+// CompletionReviewAcknowledgement records a planner's assessment, without
+// deriving stage completion or a responsibility endpoint from task completion.
+type CompletionReviewAcknowledgement struct {
+	EventID string `json:"event_id"`
+	Reason  string `json:"reason"`
+}
+
+// WorkItemCompletionReview is durable work left by a task completion event.
+type WorkItemCompletionReview struct {
+	EventID      string `json:"event_id"`
+	TaskID       string `json:"task_id"`
+	AcceptanceID string `json:"acceptance_id"`
+	CreatedAt    int64  `json:"created_at"`
 }

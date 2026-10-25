@@ -10,6 +10,11 @@ export function executionLook(execution: NonNullable<TaskSummary["execution"]>):
       return { label: execution.role === "accept" ? "排队中 · 待验收" : "排队中", tone: "warn" };
     case "starting":
       return { label: execution.role === "accept" ? "正在启动验收" : "正在启动", tone: "run" };
+    case "recovering":
+      return {
+        label: execution.recovery?.phase === "running" ? "恢复中" : "异常处理中",
+        tone: "warn",
+      };
     case "running":
       return { label: "执行中", tone: "run" };
     case "accepting":
@@ -29,6 +34,7 @@ export function executionLook(execution: NonNullable<TaskSummary["execution"]>):
   }
 }
 const countLabels = [
+  ["recovering", "恢复或异常处理中"],
   ["running", "执行中"],
   ["accepting", "验收中"],
   ["queued", "排队中"],
@@ -43,7 +49,7 @@ const countLabels = [
 /** Counts are server facts, never inferred from active plan stages or task lifecycle. */
 export function executionCounts(counts: ExecutionCounts): { state: string; text: string }[] {
   return countLabels.flatMap(([state, label]) =>
-    counts[state] > 0 ? [{ state, text: `${counts[state]} ${label}` }] : [],
+    (counts[state] ?? 0) > 0 ? [{ state, text: `${counts[state]} ${label}` }] : [],
   );
 }
 
@@ -59,6 +65,18 @@ const waitLabels = {
 
 /** Translate the server's chosen constraint; do not repeat scheduler predicates here. */
 export function queueReasonText(task: Pick<TaskSummary, "execution" | "block_reason">): string {
+  const recovery = task.execution?.recovery;
+  if (task.execution?.state === "recovering" && recovery) {
+    const phase =
+      recovery.phase === "running"
+        ? "已启动恢复会话"
+        : recovery.phase === "pending"
+          ? "正在确认旧会话及后台操作已停止"
+          : recovery.phase === "failed"
+            ? "自动恢复失败，等待处理"
+            : "模型轮次异常，正在核对执行状态";
+    return `${phase}${recovery.attempts ? ` · 第 ${recovery.attempts} 次恢复` : ""}${recovery.code ? ` · ${recovery.code}` : ""}`;
+  }
   const reason = task.execution?.queue_reason;
   if (!reason) {
     return task.execution?.state === "waiting_owner" && task.block_reason !== "none"

@@ -101,6 +101,8 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 		return reason
 	}
 	switch {
+	case c.Requirements.HostID != "" && c.Requirements.HostID != h.ID:
+		return waitReason(protocol.QueueHostRequirements, "task requires another host")
 	case c.Requirements.OS != "" && c.Requirements.OS != h.OS:
 		return waitReason(protocol.QueueHostRequirements, "host OS does not match")
 	case !containsAll(h.Labels, c.Requirements.Labels):

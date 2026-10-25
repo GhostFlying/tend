@@ -125,16 +125,10 @@ func (s *Service) reposList(ctx context.Context, c Call) (any, error) {
 		protocol.RegisteredRepoView
 		BaseCandidates []string `json:"base_candidates,omitempty"`
 	}
-	type hostView struct {
-		HostID string              `json:"host_id"`
-		OS     string              `json:"os"`
-		Labels []string            `json:"labels,omitempty"`
-		Worker protocol.WorkerKind `json:"worker"`
-	}
 	var out struct {
 		Repos     []repoView                 `json:"repos"`
 		Templates map[string]json.RawMessage `json:"templates"`
-		Hosts     []hostView                 `json:"hosts"`
+		Hosts     []protocol.HostView        `json:"hosts"`
 		// SingleMount says no host's worker supports a workspace with
 		// more than one mount, so tasks_create refuses one (D64).
 		SingleMount bool `json:"single_mount,omitempty"`
@@ -145,7 +139,7 @@ func (s *Service) reposList(ctx context.Context, c Call) (any, error) {
 		if err != nil {
 			return err
 		}
-		hosts, err := store.ListActiveHosts(ctx, q)
+		hosts, err := views.Hosts(ctx, q)
 		if err != nil {
 			return err
 		}
@@ -161,9 +155,7 @@ func (s *Service) reposList(ctx context.Context, c Call) (any, error) {
 		for _, r := range registered {
 			out.Repos = append(out.Repos, repoView{RegisteredRepoView: r, BaseCandidates: candidates[r.Repo]})
 		}
-		for _, h := range hosts {
-			out.Hosts = append(out.Hosts, hostView{h.HostID, h.OS, h.Labels, h.Worker})
-		}
+		out.Hosts = hosts
 		out.SingleMount, err = app.SingleMountOnly(ctx, q)
 		if err != nil {
 			return err

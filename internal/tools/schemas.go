@@ -40,7 +40,7 @@ const specSchema = `{
       },
       "additionalProperties": false
     },
-    "requirements": {"type": "object", "properties": {"os": {"type": "string"}, "labels": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}
+    "requirements": {"type": "object", "properties": {"host_id": {"type": "string", "description": "Optional required execution host ID from repos_list. Other hosts cannot claim the task; an offline or busy host leaves it queued."}, "os": {"type": "string"}, "labels": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}
   },
   "required": ["goal", "acceptance", "workspace"],
   "anyOf": [{"required": ["delivery"]}, {"required": ["deliverables"]}],
@@ -62,6 +62,7 @@ var schemas = map[string]string{
 	"work_items_close":            argumentSchema(workItemCloseArgs{}),
 	"work_items_reopen":           argumentSchema(workItemReopenArgs{}),
 	"work_items_link_task":        argumentSchema(workItemLinkArgs{}),
+	"tool_failures_list":          argumentSchema(toolFailuresArgs{}),
 	"conversation_read": `{
   "type":"object",
   "properties":{

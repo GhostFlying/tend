@@ -2,6 +2,7 @@ import type {
   DeliveryObservation,
   WorkItemDelivery,
   WorkItemStage,
+  ExecutionCounts,
   WorkItemView,
 } from "../api/generated/api.ts";
 
@@ -194,4 +195,44 @@ export function refreshReconciled(
       current.generation > baseline.generation &&
       (current.checkedAt > baseline.checkedAt || current.attemptedAt > baseline.attemptedAt))
   );
+}
+
+/** Execution completion does not decide whether the plan stage is finished. */
+export function stageProgressLabel(
+  stage: WorkItemStage,
+  counts?: ExecutionCounts,
+  pending = false,
+): string {
+  if ((stage.status !== "active" && stage.status !== "planned") || !counts)
+    return stageLabels[stage.status] ?? stage.status;
+  const live =
+    (counts.recovering ?? 0) +
+    counts.queued +
+    counts.running +
+    counts.accepting +
+    counts.waiting_owner +
+    counts.paused +
+    counts.unknown +
+    counts.idle;
+  if (live > 0) return "推进中";
+  if (counts.completed > 0)
+    return pending ? "本轮执行已完成 · 阶段待核对" : "本轮执行已完成 · 后续责任未结束";
+  if (counts.cancelled > 0) return "本轮已取消 · 后续待安排";
+  return "待推进";
+}
+
+export function stageNeedsReview(item: WorkItemView, stageId: string): boolean {
+  const stages = new Map(item.stages?.map((stage) => [stage.stage_id, stage]));
+  const pendingTasks = new Set(item.pending_reviews?.map((review) => review.task_id));
+  for (const stage of stages.values()) {
+    if (!stage.task_ids?.some((id) => pendingTasks.has(id))) continue;
+    let current: WorkItemStage | undefined = stage;
+    const seen = new Set<string>();
+    while (current && !seen.has(current.stage_id)) {
+      if (current.stage_id === stageId) return true;
+      seen.add(current.stage_id);
+      current = current.parent_id ? stages.get(current.parent_id) : undefined;
+    }
+  }
+  return false;
 }

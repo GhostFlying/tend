@@ -107,11 +107,12 @@ type ArtifactView struct {
 
 // AcceptanceView is a verdict on an artifact.
 type AcceptanceView struct {
-	ArtifactID  string          `json:"artifact_id"`
-	SpecVersion int64           `json:"spec_version"`
-	Verdict     Verdict         `json:"verdict"`
-	Issues      json.RawMessage `json:"issues"`
-	Evidence    json.RawMessage `json:"evidence,omitempty"`
+	AcceptanceID string          `json:"acceptance_id"`
+	ArtifactID   string          `json:"artifact_id"`
+	SpecVersion  int64           `json:"spec_version"`
+	Verdict      Verdict         `json:"verdict"`
+	Issues       json.RawMessage `json:"issues"`
+	Evidence     json.RawMessage `json:"evidence,omitempty"`
 }
 
 // DecisionView is a question for the owner.

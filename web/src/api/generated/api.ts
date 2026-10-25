@@ -43,6 +43,7 @@ export type ExecutionState =
   | "queued"
   | "starting"
   | "running"
+  | "recovering"
   | "accepting"
   | "waiting_owner"
   | "paused"
@@ -293,6 +294,7 @@ export interface TaskSummary {
  */
 export interface TaskExecutionView {
   queue_reason?: QueueWaitReason;
+  recovery?: ExecutionRecovery;
   role?: RunRole;
   run_id?: string;
   state: ExecutionState;
@@ -310,6 +312,15 @@ export interface QueueWaitReason {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutionRecovery".
+ */
+export interface ExecutionRecovery {
+  attempts?: number;
+  code?: string;
+  phase: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkItemView".
  */
 export interface WorkItemView {
@@ -323,6 +334,7 @@ export interface WorkItemView {
   follow_ons?: WorkItemFollowOn[];
   intent: string;
   observations?: DeliveryObservation[];
+  pending_reviews?: WorkItemCompletionReview[];
   project: string;
   revision: number;
   stage_execution?: StageExecutionView[];
@@ -414,6 +426,7 @@ export interface ExecutionCounts {
   idle: number;
   paused: number;
   queued: number;
+  recovering?: number;
   running: number;
   unknown: number;
   waiting_owner: number;
@@ -430,6 +443,16 @@ export interface WorkItemFollowOn {
   status: WorkItemFollowOnStatus;
   text: string;
   transferred_to?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemCompletionReview".
+ */
+export interface WorkItemCompletionReview {
+  acceptance_id: string;
+  created_at: number;
+  event_id: string;
+  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -516,6 +539,7 @@ export interface ArtifactDetail {
  * via the `definition` "AcceptanceView".
  */
 export interface AcceptanceView {
+  acceptance_id: string;
   artifact_id: string;
   evidence?: unknown;
   issues: unknown;
@@ -1257,6 +1281,7 @@ export interface ToolSpec {
 export interface UpdateWorkItemPayload {
   background?: SharedFact[];
   commit_seq?: number;
+  completion_reviews?: CompletionReviewAcknowledgement[];
   default_workspace_task_id?: string;
   deliveries?: WorkItemDelivery[];
   follow_ons?: WorkItemFollowOn[];
@@ -1267,6 +1292,14 @@ export interface UpdateWorkItemPayload {
   status?: WorkItemUpdateStatus;
   task_dispositions?: WorkItemTaskDisposition[];
   title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CompletionReviewAcknowledgement".
+ */
+export interface CompletionReviewAcknowledgement {
+  event_id: string;
+  reason: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

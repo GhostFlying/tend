@@ -27,14 +27,33 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 	if err := json.Unmarshal([]byte(ref), &artifact); err != nil {
 		return fmt.Errorf("app: decode completed artifact: %w", err)
 	}
+	acceptances, err := store.ListAcceptances(ctx, tx.Q(), taskID, task.CurrentArtifactID)
+	if err != nil {
+		return err
+	}
+	acceptanceID := ""
+	for _, acceptance := range acceptances {
+		if acceptance.Verdict == protocol.VerdictPassed && acceptance.SpecVersion == task.SpecVersion {
+			acceptanceID = acceptance.AcceptanceID
+		}
+	}
+	if acceptanceID == "" {
+		return fmt.Errorf("app: completed task has no passed acceptance")
+	}
 	var body strings.Builder
 	fmt.Fprintf(&body, "任务已完成：%s\n\n独立验收通过 · spec %d。\n\n产物：`%s`。", taskID, task.SpecVersion, task.CurrentArtifactID)
+	fmt.Fprintf(&body, "\n\n验收证据：`%s`（acceptance_id）。", acceptanceID)
 	items, err := store.ListTaskWorkItems(ctx, tx.Q(), taskID)
 	if err != nil {
 		return err
 	}
 	for _, item := range items {
-		fmt.Fprintf(&body, "\n\n工作项：%s（%s）。本轮执行完成不代表后续跟进结束；请核对已有承诺、交付状态和下一步安排。", item.WorkItemID, item.Title)
+		if item.Status != "closed" {
+			if err := tx.PutCompletionReview(ctx, item.WorkItemID, protocol.WorkItemCompletionReview{EventID: sourceEventID, TaskID: taskID, AcceptanceID: acceptanceID, CreatedAt: x.Now.UnixMilli()}); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintf(&body, "\n\n工作项：%s（%s）。本轮执行完成不代表后续跟进结束；请核对已有承诺、交付状态和下一步安排；完成阶段后更新计划，仍有阶段责任时用 completion_reviews 明确记录核对结论。", item.WorkItemID, item.Title)
 	}
 	for _, mount := range artifact.Mounts {
 		// Commit hashes are facts captured in the accepted artifact, not

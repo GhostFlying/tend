@@ -45,12 +45,14 @@ function detail(): TaskDetail {
     acceptances: [
       {
         artifact_id: "old",
+        acceptance_id: "acc_fixture",
         spec_version: 1,
         verdict: "changes_required",
         issues: ["historical failure"],
       },
       {
         artifact_id: "current",
+        acceptance_id: "acc_fixture",
         spec_version: 2,
         verdict: "changes_required",
         issues: ["current issue"],
@@ -65,7 +67,13 @@ test("current issues and artifacts are tied to spec and implementation identity"
 });
 test("a passed reacceptance replaces the old failure and active implementation does not surface history", () => {
   const t = detail();
-  t.acceptances!.push({ artifact_id: "current", spec_version: 2, verdict: "passed", issues: [] });
+  t.acceptances!.push({
+    artifact_id: "current",
+    acceptance_id: "acc_fixture",
+    spec_version: 2,
+    verdict: "passed",
+    issues: [],
+  });
   expect(currentWork(t).issues).toEqual([]);
   t.lifecycle = "running";
   t.acceptances!.pop();
@@ -110,7 +118,15 @@ test("implementation generations reused across specs never associate an old arti
     },
   ];
   t.artifacts = [{ artifact_id: "old", run_id: "old", ref: {} }];
-  t.acceptances = [{ artifact_id: "old", spec_version: 1, verdict: "passed", issues: [] }];
+  t.acceptances = [
+    {
+      artifact_id: "old",
+      acceptance_id: "acc_fixture",
+      spec_version: 1,
+      verdict: "passed",
+      issues: [],
+    },
+  ];
   expect(currentWork(t).artifacts).toEqual([]);
   t.runs.push({
     run_id: "new",
@@ -138,6 +154,7 @@ test("the authoritative artifact beats unrelated implementation and acceptance g
   });
   t.acceptances!.push({
     artifact_id: "old",
+    acceptance_id: "acc_fixture",
     spec_version: 2,
     verdict: "changes_required",
     issues: ["explicit current target"],
@@ -146,7 +163,13 @@ test("the authoritative artifact beats unrelated implementation and acceptance g
   expect(currentWork(t).issues.map((v) => v.issues)).toEqual([["explicit current target"]]);
   t.lifecycle = "completed";
   t.current_artifact_id = "current";
-  t.acceptances!.push({ artifact_id: "current", spec_version: 2, verdict: "passed", issues: [] });
+  t.acceptances!.push({
+    artifact_id: "current",
+    acceptance_id: "acc_fixture",
+    spec_version: 2,
+    verdict: "passed",
+    issues: [],
+  });
   expect(currentWork(t).artifacts.map((a) => a.artifact_id)).toEqual(["current"]);
 });
 

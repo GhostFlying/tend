@@ -65,6 +65,7 @@ worker 是 orca 里的 agent TUI（D63、D66）：runner 在 orca 里建 worktre
 - **agent 的 orca hook 生效**：orca 从 agent 的 hook 得知它的状态（在做、等待、一轮结束），tend 据此判断一轮是否结束。agent 的配置关掉了 hook 时（例如 Codex 的 `[features]` 里 `hooks = false`），或 orca 的 hook 没有被信任时，orca 看不到 agent，worker 在启动后约两分钟以明确的错误失败。
 - **agent 信任这个仓库**：Codex 和 traecli 只对受信任的项目加载项目级配置，worktree 的信任跟随仓库根目录。tend 通过项目级配置给 worker 接上 `submit_verdict` 等工具，并设置无人值守（`approval_policy = "never"`、`sandbox_mode = "danger-full-access"`、tend 工具免批准），不受信任时验收拿不到结论。
 - **runner 配置**：`worker.kind: "orca"`，`worker.agent` 为 `codex` 或 `traex`；`model`、`effort` 可选（orca 只在给了 model 时接受 effort）。
+- **有界恢复（D96）**：`worker.recovery_attempts` 默认 `1`，设为 `0` 关闭自动恢复。次数按 run 持久记录，重启不会重置。仅在 Orca 提供可核验的根轮次失败和原会话身份、后台操作已收敛时恢复；加密历史错误使用新会话，临时连接错误或明确的 `rate_limit_exceeded` 续接原会话；不根据普通 HTTP 400 推断可恢复，不切换模型或 provider。无法确认的工具或部署结果进入待决，不自动重放。旧 Orca 缺失这些事实时不会猜测会话或依据静默时长重启终端。
 
 tend 在仓库里留下的东西：
 

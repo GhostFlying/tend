@@ -33,6 +33,8 @@ func TestSkipRules(t *testing.T) {
 		base   func() Candidate
 		reason string
 	}{
+		{"required other host", nil, func(c *Candidate) { c.Requirements.HostID = "other" }, implement, "task requires another host"},
+		{"required own host", nil, func(c *Candidate) { c.Requirements.HostID = "linux-1" }, implement, ""},
 		{"eligible implement", nil, nil, implement, ""},
 		{"eligible accept", nil, nil, accept, ""},
 		{"input implement unsupported", nil, func(c *Candidate) { c.RequiresTaskInputs = true }, implement, "runner does not support task input attachments"},

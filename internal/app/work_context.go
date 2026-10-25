@@ -31,6 +31,8 @@ func workerSpec(spec domain.Spec, role protocol.RunRole) (json.RawMessage, error
 	spec.Scope = b.String()
 	spec.ImplementationContext = ""
 	spec.SharedContext = nil
+	// Host selection is enforced by the server, not an extra runner wire field.
+	spec.Requirements.HostID = ""
 	// Provenance is a planning read model. Keep the original task-inputs-v1
 	// wire shape for existing runners without mutating the frozen spec.
 	spec.Inputs = slices.Clone(spec.Inputs)
