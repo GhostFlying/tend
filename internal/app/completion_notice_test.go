@@ -28,7 +28,7 @@ func TestCompletionNoticeIsAtomicAndNotRepeated(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if len(rows) != 1 || rows[0].Author != "system" || rows[0].Kind != "message" || rows[0].ReplyTo != "" {
+		if len(rows) != 2 || rows[0].Author != "system" || rows[0].Kind != "message" || rows[0].ReplyTo != "" {
 			t.Fatalf("completion items = %+v", rows)
 		}
 		metadata, err := store.GetMessageNotice(t.Context(), tx.Q(), rows[0].MessageID)
@@ -46,7 +46,7 @@ func TestCompletionNoticeIsAtomicAndNotRepeated(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if len(messages) != 1 || messages[0].Author != "system" || len(messages[0].Bindings) != 3 {
+		if len(messages) != 2 || messages[0].Author != "system" || len(messages[0].Bindings) != 4 {
 			t.Fatalf("notice is not available to context recall: %+v", messages)
 		}
 		var turns int
@@ -60,7 +60,7 @@ func TestCompletionNoticeIsAtomicAndNotRepeated(t *testing.T) {
 		if err := tx.Q().QueryRowContext(t.Context(), "SELECT COUNT(*) FROM events WHERE kind='conversation.message'").Scan(&notices); err != nil {
 			return err
 		}
-		if notices != 1 {
+		if notices != 2 {
 			t.Fatalf("notice events = %d", notices)
 		}
 		return nil

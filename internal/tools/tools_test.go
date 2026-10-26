@@ -271,6 +271,7 @@ func tags(v any) []string {
 
 func TestSchemasMatchArgs(t *testing.T) {
 	args := map[string]any{
+		"background_sources": backgroundSourceArgs{}, "background_checkin": backgroundCheckinArgs{},
 		"work_items_followups_list":    followupListArgs{},
 		"work_items_followups_history": followupHistoryArgs{},
 		"work_items_followups_create":  followupCreateArgs{},

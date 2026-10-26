@@ -32,6 +32,9 @@ func workItemLine(w protocol.WorkItemView) string {
 	for _, delivery := range w.Deliveries {
 		line += fmt.Sprintf("; delivery %s %s %s#%d (read work_items_read for last verified state)", delivery.DeliveryID, delivery.Provider, delivery.Repository, delivery.Number)
 	}
+	if w.Followups != nil && w.Followups.Active+w.Followups.Paused > 0 {
+		line += fmt.Sprintf("; followups: %d waiting, %d paused, next UTC-ms %d, %q (read work_items_followups_list; waiting is not running)", w.Followups.Active, w.Followups.Paused, w.Followups.NextAt, w.Followups.Purpose)
+	}
 	if w.Column == "unplanned" {
 		line += "; this round may be complete, next steps remain undecided"
 	}

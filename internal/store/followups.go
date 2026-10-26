@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -42,6 +44,25 @@ func ListFollowups(ctx context.Context, q Querier, item, after string) (protocol
 		out.Items = out.Items[:50]
 		out.More = true
 		out.Next = out.Items[49].RuleID
+	}
+	rows.Close()
+	out.Latest = map[string]protocol.FollowupOccurrence{}
+	for _, rule := range out.Items {
+		var o protocol.FollowupOccurrence
+		var checkin string
+		err := q.QueryRowContext(ctx, occurrenceSelect+`WHERE f.rule_id=? ORDER BY f.revision DESC LIMIT 1`, rule.RuleID).Scan(&o.OccurrenceID, &o.RuleID, &o.Revision, &o.WorkItemID, &o.MessageID, &o.Reason, &o.Status, &o.Evidence, &o.CreatedAt, &o.BackgroundMessageID, &checkin)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return out, err
+		}
+		if checkin != "" {
+			if err := json.Unmarshal([]byte(checkin), &o.Checkin); err != nil {
+				return out, err
+			}
+		}
+		out.Latest[rule.RuleID] = o
 	}
 	out.EventSeq, err = LatestEventSeq(ctx, q)
 	return out, err
@@ -97,10 +118,13 @@ func FollowupIDs(ctx context.Context, q Querier, query string, args ...any) ([]s
 
 const occurrenceSelect = `SELECT f.occurrence_id,f.rule_id,f.revision,f.work_item_id,f.message_id,f.reason,
  CASE WHEN f.status='cancelled' THEN 'cancelled' ELSE COALESCE(
-  (SELECT CASE WHEN o.status IN ('unknown','failed','cancelled') THEN o.status END FROM outbox o WHERE o.destination='main_thread' AND json_extract(o.payload_json,'$.message_id')=f.message_id ORDER BY o.seq DESC LIMIT 1),
-  (SELECT CASE t.status WHEN 'started' THEN 'processing' WHEN 'starting' THEN 'starting' WHEN 'rejected' THEN NULL ELSE t.status END FROM main_turns t WHERE t.message_id=f.message_id ORDER BY t.created_at DESC LIMIT 1),
-  (SELECT CASE o.status WHEN 'pending' THEN 'queued' WHEN 'sending' THEN 'starting' ELSE o.status END FROM outbox o WHERE o.destination='main_thread' AND json_extract(o.payload_json,'$.message_id')=f.message_id ORDER BY o.seq DESC LIMIT 1),'unknown') END,
- f.evidence,f.created_at FROM followup_occurrences f `
+  (SELECT CASE WHEN o.status IN ('unknown','failed','cancelled') THEN o.status END FROM outbox o WHERE o.destination='main_thread' AND json_extract(o.payload_json,'$.message_id')=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),f.message_id) ORDER BY o.seq DESC LIMIT 1),
+  (SELECT CASE t.status WHEN 'started' THEN 'processing' WHEN 'starting' THEN 'starting' WHEN 'rejected' THEN NULL ELSE t.status END FROM main_turns t WHERE t.message_id=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),f.message_id) ORDER BY t.created_at DESC LIMIT 1),
+  (SELECT CASE o.status WHEN 'pending' THEN 'queued' WHEN 'sending' THEN 'starting' ELSE o.status END FROM outbox o WHERE o.destination='main_thread' AND json_extract(o.payload_json,'$.message_id')=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),f.message_id) ORDER BY o.seq DESC LIMIT 1),'unknown') END,
+ f.evidence,f.created_at,
+ COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),''),
+ COALESCE((SELECT CASE WHEN b.status='completed' AND f.status<>'cancelled' AND s.cancelled_at=0 THEN b.checkin_json ELSE '' END FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),'')
+ FROM followup_occurrences f `
 
 func FollowupOccurrences(ctx context.Context, q Querier, id, after string) ([]protocol.FollowupOccurrence, bool, error) {
 	rows, err := q.QueryContext(ctx, occurrenceSelect+`WHERE f.rule_id=? AND f.occurrence_id>? ORDER BY f.occurrence_id LIMIT 51`, id, after)
@@ -111,8 +135,14 @@ func FollowupOccurrences(ctx context.Context, q Querier, id, after string) ([]pr
 	out := []protocol.FollowupOccurrence{}
 	for rows.Next() {
 		var o protocol.FollowupOccurrence
-		if err := rows.Scan(&o.OccurrenceID, &o.RuleID, &o.Revision, &o.WorkItemID, &o.MessageID, &o.Reason, &o.Status, &o.Evidence, &o.CreatedAt); err != nil {
+		var checkin string
+		if err := rows.Scan(&o.OccurrenceID, &o.RuleID, &o.Revision, &o.WorkItemID, &o.MessageID, &o.Reason, &o.Status, &o.Evidence, &o.CreatedAt, &o.BackgroundMessageID, &checkin); err != nil {
 			return nil, false, err
+		}
+		if checkin != "" {
+			if err := json.Unmarshal([]byte(checkin), &o.Checkin); err != nil {
+				return nil, false, err
+			}
 		}
 		out = append(out, o)
 	}

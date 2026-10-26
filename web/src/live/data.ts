@@ -236,6 +236,8 @@ export class LiveData {
     }
     switch (event.object_type) {
       case "message":
+        // Followup occurrences project the current main-turn state.
+        if (event.kind === "conversation.message_state") this.workItems.changed();
         this.handoff.invalidate(event.event_seq);
         if (this.held) {
           this.held.push(event);

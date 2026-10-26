@@ -314,11 +314,13 @@ var chosen = regexp.MustCompile(`choosing option "([^"]*)" of decision (\S+) ver
 func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 	srv := newServer(t, time.Minute)
 	agent := testkit.NewHarness()
+	sourceResults := make(chan harness.ToolResult, 4)
 	agent.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		ctx := context.Background()
 		if strings.HasPrefix(in.Text, "[Tend ledger event ") {
 			// A ledger notification is not another request to ship a release.
-			// The fake model acknowledges it without inventing a new question.
+			// The fake model reads the retained facts without inventing a new question.
+			sourceResults <- th.CallTool(ctx, turn, "sources_"+turn, "background_sources", map[string]any{})
 			th.Say(turn, "item_"+turn, "The decision state changed; no new owner instruction.")
 			return "completed"
 		}
@@ -401,9 +403,29 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 		t.Fatal("decision coordination duplicated a question or woke itself")
 	}
 	var sawAppliedAnswer bool
-	for _, start := range agent.Starts() {
-		if strings.Contains(start.Text, "decision.answered") && strings.Contains(start.Text, `"effect":"cancel"`) && strings.Contains(start.Text, `"applied":true`) {
-			sawAppliedAnswer = true
+	for range 2 {
+		read := <-sourceResults
+		if !read.Success {
+			t.Fatal(read.Text)
+		}
+		var result struct {
+			Result struct {
+				Outcome protocol.BackgroundSourcePage `json:"outcome"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(read.Text), &result); err != nil {
+			t.Fatal(err)
+		}
+		for _, source := range result.Result.Outcome.Sources {
+			var fact protocol.AnswerResult
+			if source.Kind == "decision.answered" {
+				if err := json.Unmarshal(source.Data, &fact); err != nil {
+					t.Fatal(err)
+				}
+				if fact.Effect != nil && fact.Effect.Applied && fact.Effect.Effect == protocol.EffectCancel {
+					sawAppliedAnswer = true
+				}
+			}
 		}
 	}
 	if !sawAppliedAnswer {

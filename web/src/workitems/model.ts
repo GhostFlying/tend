@@ -129,6 +129,8 @@ export function concern(item: WorkItemView): string {
   if (active) return active.title;
   const planned = item.stages?.find((stage) => stage.status === "planned");
   if (planned) return planned.title;
+  if (item.followups?.active) return `等待跟进：${item.followups.purpose}`;
+  if (item.followups?.paused) return "跟进安排已暂停";
   return "本轮已结束，后续尚未安排";
 }
 export type WorkItemIntention = "discuss" | "close" | "snooze" | "resume" | "reopen";

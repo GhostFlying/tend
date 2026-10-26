@@ -56,6 +56,8 @@ const relationsSchema = `{
 
 var schemas = map[string]string{
 	"work_items_refresh_delivery":  argumentSchema(workItemRefreshArgs{}),
+	"background_sources":           argumentSchema(backgroundSourceArgs{}),
+	"background_checkin":           argumentSchema(backgroundCheckinArgs{}),
 	"work_items_followups_list":    argumentSchema(followupListArgs{}),
 	"work_items_followups_history": argumentSchema(followupHistoryArgs{}),
 	"work_items_followups_create":  argumentSchema(followupCreateArgs{}),

@@ -247,6 +247,24 @@ func (RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if !utf8.ValidString(p.Body) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body must be UTF-8")
+	}
+	switch p.Status {
+	case "", protocol.AssistantStreaming, protocol.AssistantCompleted, protocol.AssistantInterrupted, protocol.AssistantFailed, protocol.AssistantUnknown:
+	default:
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown assistant status")
+	}
+	if handled, out, err := bufferBackgroundReply(ctx, x, tx, p); handled {
+		return out, err
+	}
+	return recordVisibleAgentMessage(ctx, x, tx)
+}
+func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p recordAgentMessagePayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
 	status := p.Status
 	if status == "" {
 		status = protocol.AssistantCompleted
@@ -429,6 +447,9 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 		if err := tx.PutMainTurn(ctx, m, now); err != nil {
 			return err
 		}
+		if err := a.settleBackground(ctx, tx, m.MessageID, m.Status, now); err != nil {
+			return err
+		}
 		if state, ok := turnStates[m.Status]; ok && prev.Status != m.Status {
 			return a.insertMessageState(ctx, tx, m.MessageID, state, now)
 		}
@@ -465,6 +486,9 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 			return err
 		}
 		for _, id := range ids {
+			if err := a.settleBackground(ctx, tx, id, store.TurnInterrupted, now); err != nil {
+				return err
+			}
 			if err := a.insertMessageState(ctx, tx, id, protocol.MessageInterrupted, now); err != nil {
 				return err
 			}
@@ -552,6 +576,14 @@ func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	case p.Status != protocol.ToolRunning && p.Status != protocol.ToolCompleted && p.Status != protocol.ToolFailed:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown tool status %q", p.Status)
 	}
+	p.Input, p.Output = clipText(p.Input), clipText(p.Output)
+	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p); handled || err != nil {
+		return out, err
+	}
+	return recordVisibleToolUse(ctx, x, tx, p)
+}
+
+func recordVisibleToolUse(ctx context.Context, x *Exec, tx *store.Tx, p recordToolUsePayload) (Outcome, error) {
 	now := x.Now.UnixMilli()
 	u, err := store.GetToolUse(ctx, tx.Q(), p.TurnID, p.ItemID)
 	var seq int64
@@ -573,7 +605,7 @@ func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 			return Outcome{}, err
 		}
 	}
-	u.Tool, u.Input, u.Output, u.Status, u.UpdatedAt = p.Tool, clipText(p.Input), clipText(p.Output), string(p.Status), now
+	u.Tool, u.Input, u.Output, u.Status, u.UpdatedAt = p.Tool, p.Input, p.Output, string(p.Status), now
 	if err := tx.PutToolUse(ctx, u); err != nil {
 		return Outcome{}, err
 	}

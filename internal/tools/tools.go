@@ -38,6 +38,7 @@ type Call struct {
 	Native    string
 	// SourceMessageID is the conversation message the turn handles.
 	SourceMessageID string
+	TurnID          string
 	// ParentRequestID is the request that delivered that message.
 	ParentRequestID string
 	Tool            string
@@ -68,6 +69,8 @@ type tool struct {
 }
 
 var tools = []tool{
+	{"background_sources", "Read one bounded page of this frozen background batch, preserving exact source facts and answers. Read all pages before acting.", (*Service).backgroundSources},
+	{"background_checkin", "Record a silent waiting result for the current background turn only. Requires all sources read and completion reviews resolved. Does not answer choices or end business responsibilities.", (*Service).backgroundCheckin},
 	{"work_items_followups_list", "Read bounded followup rules for an existing work item, including next time and status.", (*Service).followupsList},
 	{"work_items_followups_history", "Read rule revisions and durable occurrences; queued, running and completed checks are distinct from business completion.", (*Service).followupsHistory},
 	{"work_items_followups_create", "Register a bounded time or ledger condition for existing owner-authorized work. Hosted only; does not authorize new work or start a worker. Use UTC milliseconds and an explicit IANA presentation timezone. Source is the current turn.", (*Service).followupsCreate},
@@ -133,6 +136,9 @@ func Specs() []harness.ToolSpec {
 func AddonSpecs() []protocol.ToolSpec {
 	out := make([]protocol.ToolSpec, 0, len(tools))
 	for _, t := range tools {
+		if t.name == "background_sources" || t.name == "background_checkin" {
+			continue
+		}
 		if strings.HasPrefix(t.name, "work_items_followups_") && t.name != "work_items_followups_list" && t.name != "work_items_followups_history" {
 			continue
 		}

@@ -313,6 +313,146 @@
       "title": "AssistantState",
       "type": "string"
     },
+    "BackgroundBatch": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_id": {
+          "type": "string"
+        },
+        "checkin": {
+          "$ref": "#/definitions/BackgroundCheckin"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "frozen_at": {
+          "type": "integer"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "source_count": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "batch_id",
+        "message_id",
+        "status",
+        "source_count",
+        "created_at"
+      ],
+      "title": "BackgroundBatch",
+      "type": "object"
+    },
+    "BackgroundCheckin": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "type": "integer"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "note": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "note",
+        "created_at"
+      ],
+      "title": "BackgroundCheckin",
+      "type": "object"
+    },
+    "BackgroundSource": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "cancelled_at": {
+          "type": "integer"
+        },
+        "data": {},
+        "event_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "occurrence_id": {
+          "type": "string"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "message_id",
+        "event_id",
+        "kind",
+        "body"
+      ],
+      "title": "BackgroundSource",
+      "type": "object"
+    },
+    "BackgroundSourcePage": {
+      "additionalProperties": false,
+      "properties": {
+        "batch": {
+          "$ref": "#/definitions/BackgroundBatch"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/BackgroundSource"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "batch",
+        "sources",
+        "more"
+      ],
+      "title": "BackgroundSourcePage",
+      "type": "object"
+    },
     "BlockReason": {
       "enum": [
         "none",
@@ -584,6 +724,9 @@
         },
         "author": {
           "type": "string"
+        },
+        "background": {
+          "$ref": "#/definitions/BackgroundBatch"
         },
         "body": {
           "type": "string"
@@ -881,6 +1024,49 @@
         "current"
       ],
       "title": "ConversationSummaryView",
+      "type": "object"
+    },
+    "CoordinationMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "background_depth": {
+          "type": "integer"
+        },
+        "coalesced_sources": {
+          "type": "integer"
+        },
+        "max_dispatch_delay_ms": {
+          "type": "integer"
+        },
+        "oldest_background_at": {
+          "type": "integer"
+        },
+        "oldest_owner_at": {
+          "type": "integer"
+        },
+        "owner_depth": {
+          "type": "integer"
+        },
+        "silent_checks": {
+          "type": "integer"
+        },
+        "unknown_batches": {
+          "type": "integer"
+        },
+        "withdrawal_conflicts": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "owner_depth",
+        "background_depth",
+        "max_dispatch_delay_ms",
+        "withdrawal_conflicts",
+        "coalesced_sources",
+        "silent_checks",
+        "unknown_batches"
+      ],
+      "title": "CoordinationMetrics",
       "type": "object"
     },
     "CreateActionPayload": {
@@ -1445,6 +1631,12 @@
     "FollowupOccurrence": {
       "additionalProperties": false,
       "properties": {
+        "background_message_id": {
+          "type": "string"
+        },
+        "checkin": {
+          "$ref": "#/definitions/BackgroundCheckin"
+        },
         "created_at": {
           "type": "integer"
         },
@@ -1508,6 +1700,12 @@
               "type": "null"
             }
           ]
+        },
+        "latest": {
+          "additionalProperties": {
+            "$ref": "#/definitions/FollowupOccurrence"
+          },
+          "type": "object"
         },
         "more": {
           "type": "boolean"
@@ -4266,6 +4464,9 @@
     "ArtifactPayload": {
       "$ref": "#/definitions/ArtifactPayload"
     },
+    "BackgroundSourcePage": {
+      "$ref": "#/definitions/BackgroundSourcePage"
+    },
     "CloseWorkItemPayload": {
       "$ref": "#/definitions/CloseWorkItemPayload"
     },
@@ -4289,6 +4490,9 @@
     },
     "ConversationSettingsView": {
       "$ref": "#/definitions/ConversationSettingsView"
+    },
+    "CoordinationMetrics": {
+      "$ref": "#/definitions/CoordinationMetrics"
     },
     "CreateActionPayload": {
       "$ref": "#/definitions/CreateActionPayload"

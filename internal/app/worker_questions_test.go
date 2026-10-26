@@ -105,7 +105,7 @@ func TestWorkerQuestionsKeepRunAndExposeProvenance(t *testing.T) {
 			if h.task(as.TaskID) != before || h.run(as.RunID).ObservedState != protocol.RunRunning {
 				t.Fatal("answer ended or retried the original work")
 			}
-			if h.count("outbox WHERE operation='main_thread.handle_event'") != 2 || h.count("outbox WHERE operation='main_thread.handle_message'") != 0 {
+			if h.count("outbox WHERE operation='main_thread.handle_event'") != 1 || h.count("background_sources") != 2 || h.count("outbox WHERE operation='main_thread.handle_message'") != 0 {
 				t.Fatal("direct panel answer created an extra owner turn")
 			}
 			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -143,7 +143,7 @@ func TestWorkerQuestionIdentitySurvivesCreateReceiptLoss(t *testing.T) {
 		t.Fatal(first, same)
 	}
 	q := askQuestion(t, h, as, scopeQuestion)
-	if h.count("worker_questions") != 1 || h.count("conversation_messages") != 1 {
+	if h.count("worker_questions") != 1 || h.count("conversation_messages") != 2 {
 		t.Fatal("replayed question duplicated facts")
 	}
 	changed := scopeQuestion

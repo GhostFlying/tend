@@ -30,6 +30,9 @@ func TestEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T
 					Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}}},
 			})
 		}
+		if strings.HasPrefix(in.Text, "[Tend ledger event ") {
+			th.CallTool(context.Background(), turn, "read-sources", "background_sources", map[string]any{})
+		}
 		th.Say(turn, "reply", "The ledger is the source of truth.")
 		return "completed"
 	}
@@ -52,8 +55,13 @@ func TestEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T
 		return srv.count("SELECT COUNT(*) FROM main_turns WHERE status='completed'") == 2
 	})
 	starts := agent.Starts()
-	if len(starts) != 2 || starts[1].UserMessageID != notice.MessageID || !strings.Contains(starts[1].Text, "Tend ledger event") || !strings.Contains(starts[1].Text, "not an owner request") {
+	if len(starts) != 2 || starts[1].UserMessageID == notice.MessageID || !strings.Contains(starts[1].Text, "Tend ledger event") || !strings.Contains(starts[1].Text, "not an owner request") {
 		t.Fatalf("completion did not initiate exactly one system event turn: %+v", starts)
+	}
+	batchMessage := starts[1].UserMessageID
+	var sources protocol.BackgroundSourcePage
+	if st := web.do("GET", "/api/v1/background/"+batchMessage+"/sources", nil, &sources); st != http.StatusOK || len(sources.Sources) != 1 || sources.Sources[0].MessageID != notice.MessageID || sources.Sources[0].Body != notice.Body {
+		t.Fatalf("completion batch lost original notice: %d %+v", st, sources)
 	}
 	var completed protocol.TaskPage
 	if st := web.do("GET", "/api/v1/tasks?all=1&lifecycle=completed", nil, &completed); st != http.StatusOK || len(completed.Tasks) != 1 {
@@ -67,7 +75,7 @@ func TestEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T
 		t.Helper()
 		var found []protocol.ConversationItem
 		for _, item := range c.conversation("").Items {
-			if item.Author == "system" {
+			if item.Author == "system" && item.MessageID == notice.MessageID {
 				found = append(found, item)
 			}
 		}
@@ -84,7 +92,7 @@ func TestEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T
 	}
 	var replies int
 	for _, item := range web.conversation("").Items {
-		if item.Author == "main_agent" && item.ReplyTo == notice.MessageID {
+		if item.Author == "main_agent" && item.Kind == protocol.ItemMessage && item.ReplyTo == batchMessage {
 			replies++
 		}
 	}

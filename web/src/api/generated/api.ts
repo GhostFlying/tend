@@ -218,6 +218,7 @@ export interface TendAPI {
   AnswerResult?: AnswerResult;
   ArtifactDetail?: ArtifactDetail;
   ArtifactPayload?: ArtifactPayload;
+  BackgroundSourcePage?: BackgroundSourcePage;
   CloseWorkItemPayload?: CloseWorkItemPayload;
   ConversationAttachment?: ConversationAttachment;
   ConversationHandoffPayload?: ConversationHandoffPayload;
@@ -226,6 +227,7 @@ export interface TendAPI {
   ConversationPage?: ConversationPage;
   ConversationQueuePage?: ConversationQueuePage;
   ConversationSettingsView?: ConversationSettingsView;
+  CoordinationMetrics?: CoordinationMetrics;
   CreateActionPayload?: CreateActionPayload;
   CreateWorkItemChoicePayload?: CreateWorkItemChoicePayload;
   CreateWorkItemPayload?: CreateWorkItemPayload;
@@ -713,6 +715,56 @@ export interface ResultReport {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackgroundSourcePage".
+ */
+export interface BackgroundSourcePage {
+  batch: BackgroundBatch;
+  more: boolean;
+  next?: number;
+  sources: BackgroundSource[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackgroundBatch".
+ */
+export interface BackgroundBatch {
+  batch_id: string;
+  checkin?: BackgroundCheckin;
+  created_at: number;
+  frozen_at?: number;
+  message_id: string;
+  source_count: number;
+  status: string;
+  work_item_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackgroundCheckin".
+ */
+export interface BackgroundCheckin {
+  created_at: number;
+  evidence_ids?: string[];
+  note: string;
+  thread_id?: string;
+  turn_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackgroundSource".
+ */
+export interface BackgroundSource {
+  body: string;
+  cancelled_at?: number;
+  data?: unknown;
+  event_id: string;
+  kind: string;
+  message_id: string;
+  occurrence_id?: string;
+  rule_id?: string;
+  seq: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "CloseWorkItemPayload".
  */
 export interface CloseWorkItemPayload {
@@ -813,6 +865,7 @@ export interface ConversationItem {
   assistant_state?: AssistantState;
   attachments?: ConversationAttachment[];
   author: string;
+  background?: BackgroundBatch;
   body?: string;
   choices?: WorkItemChoice[];
   control?: MessageControl;
@@ -915,6 +968,21 @@ export interface ConversationModel {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CoordinationMetrics".
+ */
+export interface CoordinationMetrics {
+  background_depth: number;
+  coalesced_sources: number;
+  max_dispatch_delay_ms: number;
+  oldest_background_at?: number;
+  oldest_owner_at?: number;
+  owner_depth: number;
+  silent_checks: number;
+  unknown_batches: number;
+  withdrawal_conflicts: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "CreateActionPayload".
  */
 export interface CreateActionPayload {
@@ -997,6 +1065,8 @@ export interface FollowupHistoryPage {
  * via the `definition` "FollowupOccurrence".
  */
 export interface FollowupOccurrence {
+  background_message_id?: string;
+  checkin?: BackgroundCheckin;
   created_at: number;
   evidence: string;
   message_id: string;
@@ -1054,6 +1124,9 @@ export interface FollowupPage {
   enabled: boolean;
   event_seq: number;
   items: FollowupRule[] | null;
+  latest?: {
+    [k: string]: FollowupOccurrence | undefined;
+  };
   more: boolean;
   next?: string;
 }

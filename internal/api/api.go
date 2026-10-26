@@ -96,6 +96,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/work-item-choices/{id}", s.workItemChoice)
 	mux.HandleFunc("GET /api/v1/work-items/{id}/followups", s.followups)
 	mux.HandleFunc("GET /api/v1/followups/{id}/history", s.followupHistory)
+	mux.HandleFunc("GET /api/v1/background/{id}/sources", s.backgroundSources)
+	mux.HandleFunc("GET /api/v1/coordination/metrics", s.coordinationMetrics)
 	mux.HandleFunc("GET /api/v1/work-items", s.workItems)
 	mux.HandleFunc("GET /api/v1/work-items/{id}", s.workItem)
 	mux.HandleFunc("GET /api/v1/files/{id}", s.downloadFile)

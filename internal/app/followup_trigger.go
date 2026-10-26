@@ -91,6 +91,10 @@ func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.Fo
 		}
 		after = occurrences[len(occurrences)-1].OccurrenceID
 	}
+	if !manual && reason == "condition" && x.Principal.Kind == protocol.PrincipalMainAgent && !x.Principal.Addon() {
+		r.Status = "finished"
+		return save("condition observed in current main turn")
+	}
 	key := fmt.Sprintf("revision:%d", r.Revision)
 	if r.Kind == "every" {
 		key = fmt.Sprintf("at:%d", r.NextAt)
@@ -195,6 +199,7 @@ func followupEvents(ctx context.Context, x *Exec, tx *store.Tx, events []Event) 
 		if !x.FollowupsEnabled {
 			continue
 		}
+
 		yes, err := evaluateFollowup(ctx, x, tx, &r, w, false)
 		if err != nil {
 			return false, err

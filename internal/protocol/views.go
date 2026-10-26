@@ -271,6 +271,7 @@ const (
 // owner, main agent or system, or a tool the main agent used. Items share
 // one order, by seq.
 type ConversationItem struct {
+	Background  *BackgroundBatch         `json:"background,omitempty"`
 	Control     *MessageControl          `json:"control,omitempty"`
 	Choices     []WorkItemChoice         `json:"choices,omitempty"`
 	Images      []ConversationImage      `json:"images,omitempty"`

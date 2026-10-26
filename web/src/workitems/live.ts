@@ -1,5 +1,11 @@
 // Server projections stay authoritative; events invalidate reads, never replay plans.
-import type { WorkItemPage, WorkItemView } from "../api/generated/api.ts";
+import type {
+  BackgroundSourcePage,
+  FollowupPage,
+  FollowupHistoryPage,
+  WorkItemPage,
+  WorkItemView,
+} from "../api/generated/api.ts";
 import type { OpSender } from "../app/ops.ts";
 import { ChoiceResponse } from "./choice.ts";
 import { DeliveryRefresh } from "./refresh.ts";
@@ -95,6 +101,10 @@ export class WorkItemRead<T> {
 }
 
 export class WorkItems {
+  readonly backgroundSources: WorkItemRead<BackgroundSourcePage>;
+  readonly followups: WorkItemRead<FollowupPage>;
+  readonly followupHistory: WorkItemRead<FollowupHistoryPage>;
+
   private readonly choiceActions = new Map<string, ChoiceResponse>();
   choiceResponse(id: string, sender: OpSender, changed: () => void): ChoiceResponse {
     let response = this.choiceActions.get(id);
@@ -128,6 +138,9 @@ export class WorkItems {
   private stopped = false;
 
   constructor(api: Reader) {
+    this.backgroundSources = new WorkItemRead(api);
+    this.followups = new WorkItemRead(api);
+    this.followupHistory = new WorkItemRead(api);
     const remember = (item: WorkItemView) => {
       const cache = new Map(this.cache.get());
       if ((cache.get(item.work_item_id)?.revision ?? 0) > item.revision) return;
@@ -177,6 +190,9 @@ export class WorkItems {
     this.selected.set(null);
     this.detail.close();
     this.history.close();
+    this.backgroundSources.close();
+    this.followups.close();
+    this.followupHistory.close();
   }
   lookUp(id: string): void {
     if (this.stopped || this.cache.get().has(id) || this.lookups.has(id)) return;
@@ -196,6 +212,9 @@ export class WorkItems {
     void this.overview.refresh();
     void this.detail.refresh();
     void this.history.refresh();
+    void this.backgroundSources.refresh();
+    void this.followups.refresh();
+    void this.followupHistory.refresh();
     for (const read of this.lookups.values()) void read.refresh();
   }
   stop(): void {
@@ -205,6 +224,9 @@ export class WorkItems {
     this.overview.close();
     this.detail.close();
     this.history.close();
+    this.backgroundSources.close();
+    this.followups.close();
+    this.followupHistory.close();
     for (const read of this.lookups.values()) read.close();
   }
 }
