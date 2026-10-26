@@ -217,7 +217,7 @@ async function usable(locator: Locator, page: Page) {
 }
 async function closed(page: Page, entry: Locator) {
   await page
-    .getByRole("dialog", { name: "已注册仓库", exact: true })
+    .getByRole("dialog", { name: /^(已注册仓库|资源与记录)$/, exact: true })
     .waitFor({ state: "detached" });
   assert(
     await entry.evaluate((element) => globalThis.document.activeElement === element),
@@ -254,25 +254,29 @@ try {
         .getByRole("navigation", { name: "视图" })
         .getByRole("button", { name: "工作项", exact: true })
         .click();
-    const entry = page
-      .locator(mobile ? "main" : "aside")
-      .locator('button[aria-haspopup="dialog"]')
-      .filter({ hasText: "已注册仓库", visible: true });
-    await page.waitForFunction(() =>
-      [...globalThis.document.querySelectorAll("button")].some(
-        (b) =>
-          b.textContent?.includes("已注册仓库") &&
-          b.textContent.includes("30 个") &&
-          !b.textContent.includes("上次记录"),
-      ),
-    );
+    const entry = mobile
+      ? page.getByRole("button", { name: /^资源与记录/ })
+      : page
+          .locator("aside")
+          .locator('button[aria-haspopup="dialog"]')
+          .filter({ hasText: "已注册仓库", visible: true });
     await usable(entry, page);
     // Project filtering must not affect registration scope or count.
     if (mobile)
       await page.getByRole("combobox", { name: "按项目筛选工作项" }).fill("selected-project");
     const before = reads;
-    await entry.click();
-    const panel = page.getByRole("dialog", { name: "已注册仓库", exact: true });
+    const panel = page.getByRole("dialog", {
+      name: mobile ? "资源与记录" : "已注册仓库",
+      exact: true,
+    });
+    const openRegistry = async () => {
+      await entry.click();
+      if (mobile) await panel.getByRole("tab", { name: "已注册仓库" }).click();
+    };
+    const closeRegistry = panel.getByRole("button", {
+      name: mobile ? "关闭资源与记录" : "关闭已注册仓库",
+    });
+    await openRegistry();
     await panel.getByText("已读取登记。", { exact: true }).waitFor();
     assert(reads > before, "reopening reads the independent API");
     assert.equal(
@@ -364,50 +368,43 @@ try {
     await panel.getByRole("button", { name: "刷新仓库" }).click();
     await panel.getByText("已读取登记。", { exact: true }).waitFor();
     await ordered(panel, registrationOrder);
-    await usable(panel.getByRole("button", { name: "关闭已注册仓库" }), page);
-    await panel.getByRole("button", { name: "关闭已注册仓库" }).focus();
+    await usable(closeRegistry, page);
+    await closeRegistry.focus();
     await page.keyboard.press("Tab");
     assert(
       await panel.evaluate((element) => element.contains(globalThis.document.activeElement)),
       "modal traps focus",
     );
-    await panel.getByRole("button", { name: "关闭已注册仓库" }).click();
+    await closeRegistry.click();
     await closed(page, entry);
-    await entry.click();
+    await openRegistry();
     await panel.waitFor();
     await page.keyboard.press("Escape");
     await closed(page, entry);
-    await entry.click();
+    await openRegistry();
     await panel.waitFor();
     await page.mouse.click(1, 1);
     await closed(page, entry);
 
     if (mobile) {
-      const summary = page.locator("summary").filter({ hasText: "执行主机" });
-      await usable(summary, page);
-      await summary.click();
-      const recent = page.locator("summary").filter({ hasText: "最近完成" });
-      await recent.click();
-      // Both panels expanded with real task rows must leave usable board space.
-      await usable(page.getByRole("button", { name: "Completed sample 5 已完成" }).last(), page);
+      await entry.click();
+      await panel.getByRole("tab", { name: "最近完成" }).click();
+      await usable(panel.getByRole("button", { name: "Completed sample 5 已完成" }), page);
+      await panel.getByRole("tab", { name: "执行主机" }).click();
+      const lastHost = panel.getByRole("button", { name: "主机详情：host-l" });
+      await usable(lastHost, page);
+      await lastHost.click();
+      await page.getByRole("dialog", { name: "主机详情", exact: true }).waitFor();
+      await page.getByRole("button", { name: "关闭主机详情" }).click();
+      await closeRegistry.click();
       const queuedCard = page
         .getByRole("region", { name: "待安排", exact: true })
         .getByRole("button", { name: "Sample ongoing work item", exact: true });
       await usable(queuedCard, page);
       const cardBox = await queuedCard.locator("..").boundingBox();
-      assert(
-        cardBox && cardBox.height >= 60,
-        "expanded resources must not squeeze work-item cards",
-      );
-      const lastHost = page.getByRole("button", { name: "主机详情：host-l" }).last();
-      await usable(lastHost, page);
-      await lastHost.click();
-      await page.getByRole("dialog", { name: "主机详情", exact: true }).waitFor();
-      await page.getByRole("button", { name: "关闭主机详情" }).click();
+      assert(cardBox && cardBox.height >= 60, "resources must not squeeze work-item cards");
       await usable(entry, page);
       await usable(page.getByRole("region", { name: "工作项白板" }), page);
-      await summary.click();
-      await recent.click();
       await page
         .getByRole("navigation", { name: "视图" })
         .getByRole("button", { name: "待处理", exact: true })
@@ -430,10 +427,14 @@ try {
 
     if (!mobile) await page.getByRole("button", { name: "工作项 · 白板 ›", exact: true }).click();
     // Historical tasks that predate work items must remain reachable and paginated.
-    await page
-      .locator("main header")
-      .getByRole("button", { name: "执行记录", exact: true })
-      .click();
+    if (mobile) {
+      await entry.click();
+      await panel.getByRole("button", { name: "查看执行记录", exact: true }).click();
+    } else
+      await page
+        .locator("main header")
+        .getByRole("button", { name: "执行记录", exact: true })
+        .click();
     await page.getByRole("heading", { name: "执行记录", exact: true }).waitFor();
     const executions = page.getByRole("region", { name: "分阶段任务看板", exact: true });
     for (const [lifecycle, label] of [
@@ -459,7 +460,7 @@ try {
     if (viewport.width === 390 && viewport.height === 844) {
       // Visible loading retains the last successful list; failures cannot become zero.
       pause = true;
-      await entry.click();
+      await openRegistry();
       await panel.getByText(/正在读取登记/).waitFor();
       assert.equal(
         await panel.getByRole("heading", { name: "sample-app", exact: true }).count(),
@@ -471,7 +472,11 @@ try {
       fail = true;
       await panel.getByRole("button", { name: "刷新仓库" }).click();
       await panel.getByText(/读取失败，请重试/).waitFor();
-      assert((await entry.textContent())?.includes("30 个 · 上次记录"));
+      assert.match((await panel.textContent())!, /上次成功读取的记录/);
+      assert.equal(
+        await panel.getByRole("list", { name: "仓库登记列表" }).locator(":scope > li").count(),
+        30,
+      );
       fail = false;
       registry = { repos: [...registrations.repos!, { repo: "new-registration", hosts: [] }] };
       await panel.getByRole("button", { name: "重试读取仓库" }).click();
@@ -484,7 +489,11 @@ try {
       await context.setOffline(true);
       for (const response of streams) response.end();
       await panel.getByText(/连接已断开/).waitFor();
-      assert((await entry.textContent())?.includes("31 个 · 上次记录"));
+      assert.match((await panel.textContent())!, /上次成功读取的记录/);
+      assert.equal(
+        await panel.getByRole("list", { name: "仓库登记列表" }).locator(":scope > li").count(),
+        31,
+      );
       await context.setOffline(false);
       registry = { repos: [...registry.repos!, { repo: "reconnected-registration", hosts: [] }] };
       await panel
@@ -512,14 +521,14 @@ try {
       registry = { repos: [] };
       await panel.getByRole("button", { name: "刷新仓库" }).click();
       await panel.getByText("账本中暂无已注册仓库。", { exact: true }).waitFor();
-      await panel.getByRole("button", { name: "关闭已注册仓库" }).click();
+      await closeRegistry.click();
       registry = registrations;
       await page.reload();
       await page
         .getByRole("navigation", { name: "视图" })
         .getByRole("button", { name: "工作项", exact: true })
         .click();
-      await entry.click();
+      await openRegistry();
       await panel.getByText("全部 30 个 · 含已归档仓库", { exact: true }).waitFor();
       await ordered(panel, registrationOrder);
     }

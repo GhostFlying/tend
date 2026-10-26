@@ -372,6 +372,7 @@ func validateWorkItemEvidenceReferences(ctx context.Context, x *Exec, q store.Qu
 			continue
 		}
 		evidence[i].Observation = nil
+		evidence[i].Upgrade = nil
 		var valid bool
 		switch e.Kind {
 		case "owner_decision":
@@ -379,7 +380,7 @@ func validateWorkItemEvidenceReferences(ctx context.Context, x *Exec, q store.Qu
 				valid = true
 				break
 			}
-			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='owner') OR EXISTS(SELECT 1 FROM decisions WHERE decision_id=? AND status='answered') OR EXISTS(SELECT 1 FROM request_records WHERE request_id=? AND domain='owner' AND status='succeeded' AND operation LIKE 'work_items.%')`, e.Reference, e.Reference, e.Reference).Scan(&valid); err != nil {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='owner') OR EXISTS(SELECT 1 FROM decisions WHERE decision_id=? AND status='answered') OR EXISTS(SELECT 1 FROM request_records WHERE request_id=? AND domain='owner' AND status='succeeded' AND operation LIKE 'work_items.%') OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, e.Reference, e.Reference, e.Reference, w.WorkItemID).Scan(&valid); err != nil {
 				return err
 			}
 		case "acceptance":
@@ -394,6 +395,13 @@ func validateWorkItemEvidenceReferences(ctx context.Context, x *Exec, q store.Qu
 				}
 			}
 
+		case "upgrade":
+			snapshot, err := workItemUpgradeEvidence(ctx, x, q, e.Reference)
+			if err != nil {
+				return err
+			}
+			evidence[i].Upgrade = snapshot
+			valid = true
 		case "delivery":
 			// External references are verified by the observation subsystem. A plan
 			// reference alone is not proof that the provider was queried successfully.
@@ -496,13 +504,14 @@ func workItemCloseGuard(ctx context.Context, q store.Querier, id string) error {
  EXISTS(SELECT 1 FROM tasks WHERE task_id IN linked AND lifecycle NOT IN ('completed','cancelled')) OR
  EXISTS(SELECT 1 FROM runs WHERE task_id IN linked AND observed_state NOT IN ('finished','failed','interrupted')) OR
  EXISTS(SELECT 1 FROM decisions WHERE task_id IN linked AND status='open') OR
+ EXISTS(SELECT 1 FROM work_item_choices WHERE work_item_id=? AND status='open') OR
  EXISTS(SELECT 1 FROM plan_actions a JOIN request_records r ON r.request_id=a.created_request_id WHERE a.task_id IN linked AND r.status IN ('unknown','accepted')) OR
- EXISTS(SELECT 1 FROM events e JOIN request_records r ON r.request_id=e.request_id WHERE r.status IN ('unknown','accepted') AND ((e.object_type='task' AND e.object_id IN linked) OR (e.object_type='work_item' AND e.object_id=?)))`, id, id).Scan(&blocked)
+ EXISTS(SELECT 1 FROM events e JOIN request_records r ON r.request_id=e.request_id WHERE r.status IN ('unknown','accepted') AND ((e.object_type='task' AND e.object_id IN linked) OR (e.object_type='work_item' AND e.object_id=?)))`, id, id, id).Scan(&blocked)
 	if err != nil {
 		return err
 	}
 	if blocked {
-		return protocol.Errorf(protocol.CodeInvalidTransition, "active tasks, runs, open decisions or uncertain operations prevent closure")
+		return protocol.Errorf(protocol.CodeInvalidTransition, "active tasks, runs, open decisions, unanswered choices or uncertain operations prevent closure")
 	}
 	return nil
 }

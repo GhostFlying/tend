@@ -55,6 +55,11 @@ const relationsSchema = `{
 
 var schemas = map[string]string{
 	"work_items_refresh_delivery": argumentSchema(workItemRefreshArgs{}),
+	"work_item_choices_list":      argumentSchema(choiceListArgs{}),
+	"work_item_choices_create":    argumentSchema(choiceCreateArgs{}),
+	"work_item_choices_resolve":   argumentSchema(choiceUpdateArgs{}),
+	"work_item_choices_withdraw":  argumentSchema(choiceUpdateArgs{}),
+	"work_item_choices_replace":   argumentSchema(choiceUpdateArgs{}),
 	"work_items_list":             argumentSchema(workItemsListArgs{}),
 	"work_items_read":             argumentSchema(workItemReadArgs{}),
 	"work_items_create":           argumentSchema(workItemCreateArgs{}),

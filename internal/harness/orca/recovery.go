@@ -34,7 +34,7 @@ type recoveryState struct {
 }
 
 func (w *worker) resetNative() {
-	w.st = workerState{Recovery: w.st.Recovery}
+	w.st = workerState{Recovery: w.st.Recovery, Startup: w.st.Startup}
 }
 
 func (w *worker) recoveryBrief() string {

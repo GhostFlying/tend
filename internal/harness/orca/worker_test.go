@@ -35,6 +35,7 @@ type liveOrca struct {
 	loseLaunch          int
 	launchKind          string
 	launchPromptOutcome string
+	launchDiagnostic    *LaunchDiagnostic
 	omitLaunchPrompt    bool
 	failClose           bool
 	// loseSend loses the answer of this many sends; onLaunch runs as a
@@ -102,7 +103,7 @@ func (f *liveOrca) exec(_ context.Context, dir string, args []string) ([]byte, e
 		t := f.term(handle)
 		receipt := map[string]any{"outcome": map[string]any{"kind": kind, "handle": handle, "paneKey": t.PaneKey()}, "worktreeId": f.wt}
 		if !f.omitLaunchPrompt {
-			receipt["prompt"] = map[string]any{"outcome": cmpOr(f.launchPromptOutcome, promptHandedToTerminal)}
+			receipt["prompt"] = map[string]any{"outcome": cmpOr(f.launchPromptOutcome, promptHandedToTerminal), "diagnostic": f.launchDiagnostic}
 		}
 		return ok(receipt), nil
 	case "terminal list":
@@ -155,7 +156,7 @@ func (f *liveOrca) exec(_ context.Context, dir string, args []string) ([]byte, e
 		h := flag(args, "--terminal")
 		delete(f.agents, f.term(h).PaneKey())
 		f.terms = slices.DeleteFunc(f.terms, func(t Terminal) bool { return t.Handle == h })
-		return ok(map[string]any{}), nil
+		return ok(map[string]any{"close": map[string]any{"handle": h, "ptyKilled": true}}), nil
 	}
 	return nil, fmt.Errorf("unexpected orca command %q", args)
 }

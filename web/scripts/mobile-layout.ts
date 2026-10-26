@@ -243,22 +243,16 @@ try {
       await page.locator("header").getByRole("button", { name: "设置", exact: true }).count(),
       0,
     );
-    const summary = page.locator("summary").filter({ hasText: "执行主机" });
-    const recent = page.locator("summary").filter({ hasText: "最近完成" });
+    const resource = page.getByRole("dialog", { name: "资源与记录", exact: true });
     if (mobile) {
-      await recent.click();
-      await page
-        .getByRole("region", { name: "最近完成" })
-        .getByText("Example completed task 5")
-        .waitFor({ state: "attached" });
-      // The old layout fails here: five recent tasks hid the hosts entry below 180px.
-      await unobscured(summary);
-      assert.match((await summary.textContent())!, /2 台/);
-      await recent.click();
       await page.screenshot({
         path: join(output, `board-${viewport.width}x${viewport.height}.png`),
       });
-      await summary.click();
+      await page.getByRole("button", { name: /^资源与记录/ }).click();
+      await resource.getByRole("tab", { name: "最近完成" }).click();
+      await resource.getByText("Example completed task 5").waitFor();
+      await unobscured(resource.getByRole("tab", { name: "执行主机" }));
+      await resource.getByRole("tab", { name: "执行主机" }).click();
     }
     const list = page.getByRole("region", { name: "执行主机占用" }).filter({ visible: true });
     const rows = list.getByRole("button", { name: /^主机详情：/ });
@@ -284,7 +278,6 @@ try {
       await dialog.getByRole("button", { name: "关闭主机详情" }).click();
     }
     await page.screenshot({ path: join(output, `hosts-${viewport.width}x${viewport.height}.png`) });
-    if (mobile) await recent.click();
     publish(Array.from({ length: 24 }, (_, i) => host(`Example Host ${i + 1}`)));
     await rows.nth(23).waitFor({ state: "attached" });
     await rows.nth(23).scrollIntoViewIfNeeded();
@@ -298,8 +291,7 @@ try {
       "Example Host 24",
     );
     await page.getByRole("button", { name: "关闭主机详情" }).click();
-    const board = page.getByRole("region", { name: "工作项白板" });
-    assert((await board.boundingBox())!.height > 80);
+
     assert(await list.evaluate((el) => el.scrollWidth <= el.clientWidth));
     if (mobile)
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -316,12 +308,19 @@ try {
     assert.equal(await detail.getByRole("heading", { level: 3 }).textContent(), "Example Solo");
     assert.match((await detail.textContent())!, /维护/);
     await detail.getByRole("button", { name: "关闭主机详情" }).click();
+    if (mobile) await resource.getByRole("button", { name: "关闭资源与记录" }).click();
+    const board = page.getByRole("region", { name: "工作项白板" });
+    assert((await board.boundingBox())!.height > 80);
     const filtered = page.waitForResponse((response) =>
       response.url().includes("project=unrelated"),
     );
     await page.getByLabel("按项目筛选工作项").fill("unrelated");
     await filtered;
+    if (mobile) {
+      await page.getByRole("button", { name: /^资源与记录/ }).click();
+    }
     assert.equal(await rows.count(), 2);
+    if (mobile) await resource.getByRole("button", { name: "关闭资源与记录" }).click();
     assert(reads.some((path) => path.includes("project=unrelated")));
     assert(!reads.some((path) => path.startsWith("/api/v1/snapshot?")));
     if (mobile) await tabs.getByRole("button", { name: "待处理", exact: true }).click();

@@ -255,6 +255,17 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			run.Thread = thread
 			return r.cfg.Journal.SetThread(context.WithoutCancel(ctx), as.RunID, thread)
 		},
+		OnStartupEvent: func(eventCtx context.Context, ev harness.WorkerEvent) error {
+			if err := r.cfg.Journal.AppendEvent(eventCtx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: boundedBody(ev.Body)}); err != nil {
+				return err
+			}
+			flushCtx, cancel := context.WithTimeout(eventCtx, stopFlush)
+			defer cancel()
+			// The durable outbox survives transport failure. Startup must not be replayed
+			// merely because a diagnostic upload failed.
+			_ = r.flushEvents(flushCtx, as)
+			return nil
+		},
 		OnTakeover: func(reason string) error { return r.reportTakeover(runCtx, as, a, reason) },
 		HandBack:   run.Held,
 	})

@@ -387,6 +387,11 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 	if err != nil {
 		return protocol.ConversationItem{}, err
 	}
+	choices, err := store.ListWorkItemChoices(ctx, q, "", r.MessageID)
+	if err != nil {
+		return it, err
+	}
+	it.Choices = choices
 	notice, err := store.GetMessageNotice(ctx, q, r.MessageID)
 	if err == nil {
 		it.NoticeType = notice.NoticeType

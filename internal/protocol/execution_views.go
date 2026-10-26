@@ -49,6 +49,7 @@ type QueueWaitReason struct {
 
 // TaskExecutionView separates an allocated worker from pending execution.
 type TaskExecutionView struct {
+	Startup     *ExecutionStartup  `json:"startup,omitempty"`
 	Recovery    *ExecutionRecovery `json:"recovery,omitempty"`
 	State       ExecutionState     `json:"state"`
 	Role        RunRole            `json:"role,omitempty"`
@@ -61,4 +62,13 @@ type ExecutionRecovery struct {
 	Phase    string `json:"phase"`
 	Code     string `json:"code,omitempty"`
 	Attempts int    `json:"attempts,omitempty"`
+}
+
+// ExecutionStartup exposes bounded startup diagnosis without native terminal data.
+type ExecutionStartup struct {
+	Phase            string `json:"phase"`
+	Code             string `json:"code,omitempty"`
+	PromptWriteState string `json:"prompt_write_state,omitempty"`
+	ElapsedMS        int64  `json:"elapsed_ms,omitempty"`
+	Attempts         int    `json:"attempts"`
 }

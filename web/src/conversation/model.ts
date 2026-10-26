@@ -229,3 +229,9 @@ export function duration(ms: number): string {
   }
   return `${Math.floor(m / 60)} 小时 ${m % 60} 分`;
 }
+
+/** The attached card already renders its question, including terminal history. */
+export function systemMessageBody(item: Pick<ConversationItem, "body" | "choices">): string {
+  const body = item.body ?? "";
+  return item.choices?.some((choice) => choice.question === body) ? "" : body;
+}

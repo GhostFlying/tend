@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { ApiError } from "../api/client.ts";
 import type {
+  WorkItemChoice,
   ConversationItem,
   LedgerEvent,
   TaskDetail,
@@ -108,6 +109,218 @@ describe("LiveData", () => {
       more: true,
       loaded: true,
     });
+  });
+
+  test("choice invalidation retries transient failure without another SSE event", async () => {
+    vi.useFakeTimers();
+    const choice: WorkItemChoice = {
+      choice_id: "choice-retry",
+      work_item_id: "wi-retry",
+      version: 1,
+      status: "open",
+      question: "Deploy?",
+      options: ["yes"],
+      source_id: "event-retry",
+      message_id: "message-retry",
+      created_at: 1,
+      updated_at: 1,
+    };
+    let calls = 0;
+    const api: Reader = {
+      async get<T>(): Promise<T> {
+        calls++;
+        if (calls === 1) throw new ApiError(500, { code: "internal", message: "temporary" });
+        return { ...choice, version: 2, status: "answered", answer: "Later" } as T;
+      },
+    };
+    const live = new LiveData(api);
+    try {
+      live.apply(messageEvent(1, { ...owner(1, "replied"), choices: [choice] }));
+      await live.choiceChanged(choice.choice_id);
+      expect(live.choiceRead(choice.choice_id).state.get().error).toBe("temporary");
+      expect(live.conversation.get().items[0]?.choices?.[0]?.status).toBe("open");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toBe(2);
+      expect(live.choiceRead(choice.choice_id).state.get().error).toBeUndefined();
+      expect(live.conversation.get().items[0]?.choices?.[0]?.status).toBe("answered");
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(calls).toBe(2);
+    } finally {
+      await live.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test("repeated in-flight choice invalidations and consecutive failures leave one cancellable timer", async () => {
+    vi.useFakeTimers();
+    const failures: ((error: Error) => void)[] = [];
+    let calls = 0;
+    const api: Reader = {
+      get<T>(): Promise<T> {
+        calls++;
+        return new Promise((_resolve, reject) => failures.push(reject));
+      },
+    };
+    const live = new LiveData(api);
+    try {
+      const first = live.choiceChanged("choice-double-failure");
+      void live.choiceChanged("choice-double-failure");
+      void live.choiceChanged("choice-double-failure");
+      expect(calls).toBe(1);
+      failures.shift()!(new Error("first failure"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toBe(2);
+      // The initial backoff cannot fire while the coalesced second read is pending.
+      await vi.advanceTimersByTimeAsync(1000);
+      failures.shift()!(new Error("second failure"));
+      await first;
+      expect(calls).toBe(2);
+      expect(live.choiceRead("choice-double-failure").state.get().error).toBe("second failure");
+      expect(vi.getTimerCount()).toBe(1);
+      await live.stop();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(calls).toBe(2);
+    } finally {
+      await live.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test("choice reads share one retry timer and stop cancels pending retry and fetch", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    let signal: AbortSignal | undefined;
+    const api: Reader = {
+      get<T>(_path: string, current?: AbortSignal): Promise<T> {
+        calls++;
+        if (calls === 1) return Promise.reject(new Error("temporary"));
+        signal = current;
+        return new Promise((_resolve, reject) =>
+          current?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          ),
+        );
+      },
+    };
+    const live = new LiveData(api);
+    try {
+      await live.choiceChanged("choice-stop");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls).toBe(2);
+      void live.choiceChanged("choice-stop");
+      void live.choiceChanged("choice-stop");
+      expect(calls).toBe(2);
+      await live.stop();
+      expect(signal?.aborted).toBe(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(calls).toBe(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await live.stop();
+      vi.useRealTimers();
+    }
+    // Stopping before the retry deadline must cancel that timer as well.
+    vi.useFakeTimers();
+    const failed = new LiveData({
+      async get<T>(): Promise<T> {
+        throw new Error("offline");
+      },
+    });
+    try {
+      await failed.choiceChanged("choice-scheduled");
+      await failed.stop();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await failed.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test.each([true, false])(
+    "newer card revision survives an older in-flight latest page (already loaded: %s)",
+    async (loaded) => {
+      const api = new FakeApi();
+      const live = new LiveData(api);
+      const choice: WorkItemChoice = {
+        choice_id: "choice-race",
+        work_item_id: "wi-race",
+        version: 1,
+        status: "open",
+        question: "Deploy?",
+        options: ["yes"],
+        source_id: "event-race",
+        message_id: "message-race",
+        created_at: 1,
+        updated_at: 1,
+      };
+      const oldMessage = { ...owner(1, "replied"), choices: [choice] };
+      if (loaded) live.apply(messageEvent(1, oldMessage));
+      const reload = live.reload();
+      live.apply({
+        event_seq: 2,
+        object_type: "work_item_choice",
+        object_id: choice.choice_id,
+        kind: "work_item_choice.answered",
+        created_at: "2026-10-26T00:00:00Z",
+      });
+      await api.answer("/api/v1/work-item-choices/", {
+        ...choice,
+        version: 2,
+        status: "answered",
+        answer: "Later",
+      });
+      if (loaded) expect(live.conversation.get().items[0]?.choices?.[0]?.status).toBe("answered");
+      // This response was issued before the answer, and still contains version 1.
+      await api.answer("/api/v1/conversation", { items: [oldMessage], more: false });
+      await api.answer("/api/v1/snapshot", snapshot);
+      await reload;
+      expect(live.conversation.get().items[0]?.choices?.[0]).toMatchObject({
+        version: 2,
+        status: "answered",
+        answer: "Later",
+      });
+      expect(live.conversation.get().items).toHaveLength(1);
+      live.stop();
+    },
+  );
+
+  test("choice events refresh an older loaded card without replacing chat history", async () => {
+    const api = new FakeApi();
+    const live = new LiveData(api);
+    const choice: WorkItemChoice = {
+      choice_id: "choice-one",
+      work_item_id: "wi-one",
+      version: 1,
+      status: "open",
+      question: "Continue?",
+      options: ["yes"],
+      source_id: "event-one",
+      message_id: "message-one",
+      created_at: 1,
+      updated_at: 1,
+    };
+    const message = { ...owner(1, "replied"), choices: [choice] };
+    live.apply(messageEvent(1, message));
+    live.apply(messageEvent(2, owner(2, "replied")));
+    const changed = live.choiceChanged(choice.choice_id);
+    await api.answer("/api/v1/work-item-choices/", {
+      ...choice,
+      version: 2,
+      status: "withdrawn",
+      reason: "Already deployed",
+    });
+    await changed;
+    expect(live.conversation.get().items).toHaveLength(2);
+    expect(live.conversation.get().items[0]?.choices?.[0]?.status).toBe("withdrawn");
+    expect(api.calls.some((path) => path.startsWith("/api/v1/conversation"))).toBe(false);
+    live.apply(messageEvent(3, message));
+    expect(live.conversation.get().items[0]?.choices?.[0]?.version).toBe(2);
+    live.stop();
   });
 
   test("conversation events update their item in place", async () => {

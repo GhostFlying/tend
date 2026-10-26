@@ -266,9 +266,20 @@ type Launch struct {
 	} `json:"receipt"`
 	Prompt struct {
 		// Outcome says whether the brief reached the agent.
-		Outcome string `json:"outcome"`
+		Outcome    string            `json:"outcome"`
+		Diagnostic *LaunchDiagnostic `json:"diagnostic,omitempty"`
 	} `json:"prompt"`
 	OperationID string `json:"operationId"`
+}
+
+// LaunchDiagnostic is the provider's bounded, structured delivery evidence.
+// It deliberately excludes terminal text, prompts and raw provider errors.
+type LaunchDiagnostic struct {
+	Code             string `json:"code"`
+	Phase            string `json:"phase"`
+	PromptWriteState string `json:"promptWriteState"`
+	ElapsedMS        int64  `json:"elapsedMs"`
+	TerminalHandle   string `json:"terminalHandle"`
 }
 
 // OutcomeTerminal is the outcome kind of an agent launched in a terminal;

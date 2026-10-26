@@ -72,6 +72,7 @@ type config struct {
 		Model            string              `json:"model"`
 		Effort           string              `json:"effort"`
 		RecoveryAttempts *int                `json:"recovery_attempts,omitempty"`
+		StartupAttempts  *int                `json:"startup_attempts,omitempty"`
 	} `json:"worker"`
 	Git struct {
 		Bin string   `json:"bin"`
@@ -138,6 +139,9 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	var cfg config
 	if err := cfgfile.Load(path, &cfg); err != nil {
 		return err
+	}
+	if cfg.Worker.StartupAttempts != nil && *cfg.Worker.StartupAttempts < 0 {
+		return errors.New("worker.startup_attempts must be non-negative")
 	}
 	if cfg.Worker.RecoveryAttempts != nil && *cfg.Worker.RecoveryAttempts < 0 {
 		return errors.New("worker.recovery_attempts must be non-negative")
@@ -227,7 +231,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 			return fmt.Errorf("upgrade worker.orca_bin to an Orca CLI supporting folder-workspace and project-group commands before enabling workspace protocol 1: %w", preflightErr)
 		}
 		workers = orca.NewWorkers(orca.WorkerOptions{
-			Client: oc, Agent: cfg.Worker.Agent, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort, RecoveryAttempts: cfg.Worker.RecoveryAttempts,
+			Client: oc, Agent: cfg.Worker.Agent, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort, RecoveryAttempts: cfg.Worker.RecoveryAttempts, StartupAttempts: cfg.Worker.StartupAttempts,
 			BridgeCommand: self, BridgeArgs: []string{workerMCP}, IDs: ids, Now: time.Now, Log: log,
 		})
 		workspaces = gitws.NewOrca(wsCfg, oc)

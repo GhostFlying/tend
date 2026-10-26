@@ -1,6 +1,7 @@
 // Server projections stay authoritative; events invalidate reads, never replay plans.
 import type { WorkItemPage, WorkItemView } from "../api/generated/api.ts";
 import type { OpSender } from "../app/ops.ts";
+import { ChoiceResponse } from "./choice.ts";
 import { DeliveryRefresh } from "./refresh.ts";
 import type { Reader } from "../live/data.ts";
 import { Store } from "../state/store.ts";
@@ -46,6 +47,9 @@ export class WorkItemRead<T> {
     const generation = this.generation;
     const run = (async () => {
       do {
+        // A dirty read retries immediately; it supersedes the previous backoff.
+        clearTimeout(this.timer);
+        this.timer = undefined;
         this.dirty = false;
         const controller = new AbortController();
         this.controller = controller;
@@ -65,6 +69,7 @@ export class WorkItemRead<T> {
             loading: false,
             error: error instanceof Error ? error.message : String(error),
           });
+          clearTimeout(this.timer);
           this.timer = setTimeout(() => void this.refresh(), this.delay);
           this.delay = Math.min(30_000, this.delay * 2);
         }
@@ -90,6 +95,15 @@ export class WorkItemRead<T> {
 }
 
 export class WorkItems {
+  private readonly choiceActions = new Map<string, ChoiceResponse>();
+  choiceResponse(id: string, sender: OpSender, changed: () => void): ChoiceResponse {
+    let response = this.choiceActions.get(id);
+    if (!response) {
+      response = new ChoiceResponse(sender, changed);
+      this.choiceActions.set(id, response);
+    }
+    return response;
+  }
   private readonly refreshActions = new Map<string, DeliveryRefresh>();
   deliveryRefresh(workItemId: string, deliveryId: string, sender: OpSender): DeliveryRefresh {
     const key = `${workItemId}/${deliveryId}`;

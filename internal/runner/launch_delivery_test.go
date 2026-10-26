@@ -149,3 +149,57 @@ func TestFault_UndeliveredLaunchFinalizesAfterRestart(t *testing.T) {
 		})
 	}
 }
+
+func TestStartupUnknownCloseRetainsRunAndResourceAfterRestart(t *testing.T) {
+	ctx := t.Context()
+	clock := testkit.NewClock()
+	path := filepath.Join(t.TempDir(), "journal.db")
+	j, err := journal.Open(ctx, path, clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { j.Close() }()
+	as := protocol.Assignment{RunID: "run_startup_unknown", TaskID: "task_startup_unknown", Role: protocol.RoleImplement, Desired: protocol.DesiredRun}
+	if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerOrca); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
+		t.Fatal(err)
+	}
+	thread := `{"worktree":"folder:owned","terminal":"owned-terminal","pane":"tab:leaf","launch_prompt_outcome":"not-delivered","startup":{"attempts":1,"phase":"closing","terminal":"owned-terminal","close_issued":true,"stopped":false}}`
+	if err := j.SetThread(ctx, as.RunID, thread); err != nil {
+		t.Fatal(err)
+	}
+	nativeCalls := 0
+	cfg := Config{Journal: j, Now: clock.Now, IDs: testkit.NewIDGen(clock, 1), Worker: protocol.WorkerOrca, Workers: orca.NewWorkers(orca.WorkerOptions{Client: &orca.Client{Exec: func(context.Context, string, []string) ([]byte, error) {
+		nativeCalls++
+		return nil, errors.New("must reconcile original close")
+	}}, Now: clock.Now}), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	r := New(cfg)
+	if err := r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "worker_start_failed"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j, err = journal.Open(ctx, path, clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Journal = j
+	r = New(cfg)
+	if err := r.stopCompletedAgent(ctx, as, false); err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("stop=%v", err)
+	}
+	saved, err := j.Run(ctx, as.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.StoppedConfirmed || saved.Phase != journal.PhaseReleasing || nativeCalls != 0 {
+		t.Fatalf("run prematurely released: %+v nativeCalls=%d", saved, nativeCalls)
+	}
+	request, found, err := j.RequestForRun(ctx, as.RunID)
+	if err != nil || !found || request.Envelope.Operation != protocol.OpRunsRelease {
+		t.Fatalf("original final intent lost: %+v %v", request, err)
+	}
+}

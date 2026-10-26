@@ -52,6 +52,7 @@ export const deliveryLabels: Record<string, string> = {
   unknown: "尚未确认",
 };
 const evidenceLabels: Record<string, string> = {
+  upgrade: "升级批次核验",
   acceptance: "独立验收",
   delivery: "交付核验",
   owner_decision: "用户决定",
@@ -206,6 +207,7 @@ export function stageProgressLabel(
   if ((stage.status !== "active" && stage.status !== "planned") || !counts)
     return stageLabels[stage.status] ?? stage.status;
   const live =
+    (counts.starting ?? 0) +
     (counts.recovering ?? 0) +
     counts.queued +
     counts.running +

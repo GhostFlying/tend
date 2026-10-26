@@ -19,7 +19,13 @@ const phaseLabels: Record<string, string> = {
   normal: "正常",
 };
 
-export function Hosts({ connection }: { connection: Connection }) {
+export function Hosts({
+  connection,
+  expanded = false,
+}: {
+  connection: Connection;
+  expanded?: boolean;
+}) {
   const { live } = useServices();
   const snapshot = useStore(live.snapshot);
   const [selected, setSelected] = useState<string | null>(null);
@@ -31,7 +37,7 @@ export function Hosts({ connection }: { connection: Connection }) {
     queueMicrotask(() => returnFocus.current?.isConnected && returnFocus.current.focus());
   };
   return (
-    <section aria-label="执行主机占用">
+    <section aria-label="执行主机占用" className={expanded ? styles.expanded : undefined}>
       <div className={styles.title}>
         执行主机{snapshot && ` · ${snapshot.hosts?.length ?? 0} 台`}
       </div>
@@ -44,6 +50,7 @@ export function Hosts({ connection }: { connection: Connection }) {
         <button
           type="button"
           className={styles.row}
+          data-expanded={expanded || undefined}
           key={h.host_id}
           aria-label={`主机详情：${h.host_id}`}
           title={`槽位占用：${h.open_runs} / ${h.slots} · ${h.os} / ${h.arch} · ${h.worker}`}

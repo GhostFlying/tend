@@ -838,7 +838,7 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 				return err
 			}
 			switch e.Kind {
-			case "worker.turn_failed", "worker.recovery_pending", "worker.recovery_started", "worker.recovery_completed", "worker.recovery_failed", "worker.recovery_handed_back":
+			case "worker.turn_failed", "worker.recovery_pending", "worker.recovery_started", "worker.recovery_completed", "worker.recovery_failed", "worker.recovery_handed_back", "worker.startup_failed", "worker.startup_retry_pending", "worker.startup_started":
 				body, err := json.Marshal(map[string]any{"seq": e.Seq, "kind": e.Kind})
 				if err != nil {
 					return err

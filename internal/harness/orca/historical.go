@@ -26,8 +26,11 @@ func (ws *Workers) ReleaseFinalizing(ctx context.Context, runID, thread string, 
 	if err := json.Unmarshal([]byte(thread), &st); err != nil {
 		return fmt.Errorf("orca: decode finalizing worker: %w", err)
 	}
+	if st.Startup != nil && st.Startup.CloseIssued && !st.Startup.Stopped {
+		return errors.New("orca: startup terminal close outcome unknown; reconciliation required")
+	}
 	// A refused launch explicitly clears its saved state before returning.
-	if st == (workerState{}) || st.Recovery != nil && st.Terminal == "" && st.Marker == "" && st.Launch == "" && st.Worktree == "" {
+	if st == (workerState{}) || (st.Recovery != nil || st.Startup != nil) && st.Terminal == "" && st.Marker == "" && st.Launch == "" && st.Worktree == "" {
 		return nil
 	}
 	if st.PromptOutcome == promptNotDelivered {
@@ -119,6 +122,10 @@ func (ws *Workers) releaseOwned(ctx context.Context, runID, thread string, held 
 // reached its new terminal. Its own startup state can precede that receipt;
 // subsequent activity or evidence of a real turn belongs to someone else.
 func (ws *Workers) releaseUndelivered(ctx context.Context, runID string, st workerState, held, handBack bool) error {
+	return ws.releaseUndeliveredUsing(ctx, runID, st, held, handBack, func() error { return ws.Release(ctx, runID, mustState(st)) })
+}
+
+func (ws *Workers) releaseUndeliveredUsing(ctx context.Context, runID string, st workerState, held, handBack bool, closeTerminal func() error) error {
 	if st.Terminal == "" || st.Pane == "" || st.Worktree == "" || st.Launch != "" || st.Send != "" {
 		return errors.New("orca: undelivered launch identity is incomplete or unresolved")
 	}
@@ -156,9 +163,5 @@ func (ws *Workers) releaseUndelivered(ctx context.Context, runID string, st work
 			}
 		}
 	}
-	body, err := json.Marshal(st)
-	if err != nil {
-		return err
-	}
-	return ws.Release(ctx, runID, string(body))
+	return closeTerminal()
 }

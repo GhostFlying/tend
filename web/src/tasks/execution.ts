@@ -34,6 +34,7 @@ export function executionLook(execution: NonNullable<TaskSummary["execution"]>):
   }
 }
 const countLabels = [
+  ["starting", "正在启动"],
   ["recovering", "恢复或异常处理中"],
   ["running", "执行中"],
   ["accepting", "验收中"],
@@ -65,6 +66,19 @@ const waitLabels = {
 
 /** Translate the server's chosen constraint; do not repeat scheduler predicates here. */
 export function queueReasonText(task: Pick<TaskSummary, "execution" | "block_reason">): string {
+  const startup = task.execution?.startup;
+  if (startup && startup.phase !== "started") {
+    const labels: Record<string, string> = {
+      readiness_timeout: "等待 CLI 就绪超时",
+      interactive_prompt: "CLI 等待交互处理",
+      process_exited: "CLI 在启动时退出",
+      write_failed: "提示写入失败",
+      prompt_write_failed: "提示写入失败",
+      delivery_unknown: "提示投递结果待核对",
+    };
+    const reason = labels[startup.code ?? ""] ?? "Worker 启动未完成";
+    return `${reason}${startup.phase === "retry_pending" ? " · 正在确认旧终端停止后重试" : ""}${startup.attempts ? ` · 已自动重试 ${startup.attempts} 次` : ""}`;
+  }
   const recovery = task.execution?.recovery;
   if (task.execution?.state === "recovering" && recovery) {
     const phase =

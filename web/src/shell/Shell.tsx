@@ -191,7 +191,6 @@ export function Shell({
                 active={boardOpen && !recordsOpen}
                 connection={connection}
                 onChat={showChat}
-                onRepos={showRepos}
                 onRecords={showRecords}
               />
             </div>

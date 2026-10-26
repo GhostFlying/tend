@@ -12,7 +12,7 @@
   font-weight: 600;
   margin: 0 auto 0 0;
 }
-.head > button {
+.head > button:not(.resourceEntry) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -37,7 +37,7 @@
 }
 .description {
   margin: 0;
-  padding: 12px 18px 0;
+  padding: 10px 0 0;
   color: var(--label-3);
   font-size: var(--text-m);
   flex: none;
@@ -367,63 +367,359 @@
 .history input {
   width: 70px;
 }
+/* Desktop retains its board columns and sidebar resource navigation. */
+.reading {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.intro {
+  padding: 12px 18px 0;
+  flex: none;
+}
+.projectRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clearFilter,
+.refreshButton,
+.roundButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+}
+.resourceEntry,
+.mobileOnly,
+.cardState {
+  display: none;
+}
+.cardExecution:empty {
+  display: none;
+}
+.emptyIcon {
+  display: none;
+}
+.emptyAction {
+  color: var(--accent);
+  min-height: 44px;
+}
+.resourceDialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.resourceBody {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 20px;
+}
+.resourceTabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--bg-l1);
+  margin-bottom: 20px;
+}
+.resourceTabs button {
+  min-height: 44px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+.resourceTabs button[aria-selected="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.resourceDialog section button {
+  min-width: 44px;
+  min-height: 44px;
+}
+.recordsButton {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  margin-top: 20px;
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.cardStages summary svg {
+  display: none;
+}
+.cardMore svg {
+  display: none;
+}
 @media (max-width: 760px) {
   .head {
-    padding: calc(12px + env(safe-area-inset-top)) 12px 10px;
-    gap: 8px;
+    padding: calc(10px + env(safe-area-inset-top)) 20px 10px;
+    min-height: 64px;
+    gap: 10px;
   }
   .head h1 {
-    font-size: var(--text-l);
+    font-size: 24px;
+    line-height: 1.3;
+    letter-spacing: -0.7px;
+  }
+  .desktopOnly {
+    display: none !important;
+  }
+  .resourceEntry {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    text-align: left;
+    padding-left: 10px;
+    min-height: 44px;
+    font-size: 13px;
+  }
+  .resourceEntry small {
+    display: block;
+    color: var(--warn-text);
+    font-size: 11px;
+  }
+  .reading {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .intro {
+    padding: 20px 20px 0;
   }
   .filter {
-    order: 2;
+    flex: 1;
+    min-width: 0;
+    min-height: 48px;
+    padding: 0 12px;
+    gap: 9px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-l1);
+    font-size: 13px;
+    color: var(--label-2);
   }
   .filter input {
-    width: 120px;
+    flex: 1;
+    width: 0;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .clearFilter {
+    min-width: 44px;
+    margin-right: -10px;
+  }
+  .refreshButton {
+    width: 44px;
   }
   .description {
-    padding: 12px;
-    font-size: var(--text-s);
+    padding: 12px 0 0;
+    font-size: 12px;
   }
   .mobileTabs {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 4px;
-    padding: 0 12px 10px;
+    gap: 5px;
+    margin: 18px 20px 0;
+    padding: 0;
+    background: var(--bg-l1);
+    border-radius: 12px;
     flex: none;
   }
   .mobileTabs button {
+    min-height: 44px;
     padding: 8px 2px;
-    border: 1px solid var(--border-soft);
-    border-radius: var(--radius-s);
-    font-size: var(--text-s);
-    color: var(--label-3);
+    border: 1px solid transparent;
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--label-2);
   }
   .mobileTabs button span {
     margin-left: 6px;
+    font-size: 11px;
     font-variant-numeric: tabular-nums;
   }
   .mobileTabs button[aria-selected="true"] {
     color: var(--accent);
     border-color: var(--accent-ring);
     background: var(--accent-soft);
+    font-weight: 650;
   }
   .board {
     display: block;
-    padding: 0 12px 12px;
-    overflow: auto;
+    flex: none;
+    padding: 0 20px 24px;
+    overflow: visible;
   }
   .column {
-    min-height: 100%;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
   }
   .column:not([data-mobile-active="true"]) {
     display: none;
   }
+  .columnHead {
+    justify-content: space-between;
+    padding: 20px 0 10px;
+  }
+  .columnHead h2 {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .columnHead > span {
+    font-size: 12px;
+  }
+  .mobileOnly {
+    display: inline;
+  }
   .cards {
     overflow: visible;
+    padding: 0;
   }
   .card {
-    padding: 14px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+    margin-bottom: 12px;
+    border-radius: 14px;
+  }
+  .cardMeta {
+    grid-row: 1;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    justify-content: space-between;
+  }
+  .cardMeta .meta {
+    margin: 0;
+    font-size: 11px;
+    min-width: 0;
+  }
+  .cardState {
+    display: inline;
+    flex: none;
+    color: var(--accent);
+    font-size: 11px;
+  }
+  .cardState::before {
+    content: "";
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .cardState[data-column="attention"] {
+    color: var(--warn-text);
+  }
+  .cardState[data-column="closed"] {
+    color: var(--ok);
+  }
+  .cardState[data-column="snoozed"] {
+    color: var(--label-3);
+  }
+  .cardTitle {
+    grid-row: 2;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.6;
+    min-height: 44px;
+    margin-top: 10px;
+    padding: 0;
+  }
+  .concern {
+    grid-row: 3;
+    font-size: 13px;
+    margin: 10px 0 13px;
+    line-height: 1.8;
+  }
+  .cardExecution {
+    grid-row: 4;
+  }
+  .facts {
+    font-size: 11px;
+  }
+  .cardStages {
+    margin-top: 13px;
+    padding-top: 0;
+  }
+  .cardStages summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 44px;
+    list-style: none;
+  }
+  .cardStages summary::-webkit-details-marker {
+    display: none;
+  }
+  .cardStages summary svg,
+  .cardMore svg {
+    display: block;
+  }
+  .cardStages[open] > summary svg {
+    transform: rotate(90deg);
+  }
+  .cardMore {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    margin-top: 0;
+    border-top: 1px solid var(--border-soft);
+    font-size: 12px;
+    padding: 0 6px;
+  }
+  .waitingTaskTitle,
+  .taskLink {
+    min-height: 44px;
+  }
+  .empty {
+    text-align: center;
+    padding: 64px 12px;
+    color: var(--label);
+  }
+  .emptyIcon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    border-radius: 18px;
+    background: var(--bg-l1);
+    color: var(--label-3);
+    margin-bottom: 8px;
+  }
+  .emptyTitle {
+    font-size: 16px;
+  }
+  .emptyAction {
+    margin-top: 12px;
+  }
+  .empty .meta {
+    font-size: 12px;
+  }
+  .notice {
+    margin: 12px 20px 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+  }
+  .notice button,
+  .detailBody button,
+  .detailHead button,
+  .detailBody summary {
+    min-height: 44px;
+  }
+  .detailHead button {
+    min-width: 44px;
   }
   .dialog {
     max-height: 100dvh;
@@ -477,4 +773,214 @@
 }
 .overviewMore:hover {
   text-decoration: underline;
+}
+@media (max-width: 360px) {
+  .head {
+    padding-inline: 16px;
+  }
+  .intro {
+    padding-inline: 16px;
+  }
+  .mobileTabs {
+    margin-inline: 16px;
+  }
+  .board {
+    padding-inline: 16px;
+  }
+}
+@media (max-width: 760px) {
+  .resourceDialog {
+    position: fixed;
+    inset: auto 0 0;
+    width: 100%;
+    height: 88dvh;
+    max-height: 88dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 22px 22px 0 0;
+  }
+  .resourceDialog::before {
+    content: "";
+    flex: none;
+    width: 32px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 4px;
+    align-self: center;
+    margin-top: 10px;
+  }
+  .resourceTabs {
+    background: transparent;
+    border-radius: 0;
+    padding: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .resourceTabs button {
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+  }
+  .resourceTabs button[aria-selected="true"] {
+    background: transparent;
+    border-bottom-color: var(--accent);
+  }
+  .recordsButton {
+    color: white;
+    background: var(--accent);
+  }
+  .resourceDialog .detailHead {
+    padding: 10px 20px 14px;
+    flex: none;
+  }
+  .resourceDialog .detailHead h2 {
+    font-size: 18px;
+    margin: 0;
+  }
+  .resourceDialog .detailHead .meta {
+    font-size: 11px;
+  }
+}
+
+.progress {
+  margin-bottom: 20px;
+}
+.progressCounts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.progressCount {
+  min-height: 44px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 8px 12px;
+  color: var(--label-2);
+  font: inherit;
+  font-size: var(--text-s);
+}
+.progressCount[data-state="running"],
+.progressCount[data-state="accepting"],
+.progressCount[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.currentSteps {
+  margin: 16px 0;
+}
+.currentSteps h3 {
+  font-size: var(--text-s);
+  color: var(--label-2);
+  margin: 0 0 6px;
+}
+.currentSteps p,
+.currentSteps ul {
+  margin: 6px 0;
+}
+.currentSteps ul {
+  padding-left: 20px;
+}
+.taskTabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.taskTabs button {
+  min-height: 44px;
+  padding: 8px 4px;
+  border-bottom: 2px solid transparent;
+  color: var(--label-2);
+  font: inherit;
+  font-size: var(--text-s);
+}
+.taskTabs button[aria-selected="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.filterNotice {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--text-s);
+  padding-top: 12px;
+}
+.progressTasks {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+.progressTask {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 14px;
+  font: inherit;
+  color: var(--label);
+  overflow-wrap: anywhere;
+}
+.progressTask:hover {
+  background: var(--hover);
+}
+.progressTaskHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.progressTaskHead strong {
+  min-width: 0;
+}
+.progressTaskHead > span {
+  flex: none;
+  font-size: var(--text-s);
+  color: var(--label-2);
+}
+.taskReason {
+  color: var(--label-2);
+  font-size: var(--text-s);
+}
+.choice {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 0 0 16px;
+}
+.choice h3 {
+  margin: 0 0 12px;
+  font-size: var(--text-m);
+}
+.choice form {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 12px;
+}
+.choice label {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  font-size: var(--text-s);
+  color: var(--label-2);
+}
+.choice textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+  color: var(--label);
+  background: var(--input);
+}
+.choiceOther {
+  margin-top: 12px;
+  color: var(--label-2);
+  font-size: var(--text-s);
+}
+.choiceOther summary {
+  cursor: pointer;
+  min-height: 32px;
+  padding-top: 6px;
 }

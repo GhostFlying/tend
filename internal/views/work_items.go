@@ -46,6 +46,10 @@ func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem, fac
 	if err != nil {
 		return v, err
 	}
+	v.Choices, err = store.ListWorkItemChoices(ctx, q, w.WorkItemID, "")
+	if err != nil {
+		return v, err
+	}
 	projectWorkItemExecution(&v)
 	v.Observations, err = store.ListDeliveryObservations(ctx, q, w.WorkItemID)
 	if err != nil {
@@ -62,6 +66,11 @@ func WorkItemColumn(v protocol.WorkItemView) string {
 	}
 	if v.Status == "snoozed" {
 		return "snoozed"
+	}
+	for _, choice := range v.Choices {
+		if choice.Status == "open" {
+			return "attention"
+		}
 	}
 	for _, observation := range v.Observations {
 		if observation.ErrorKind != "" {

@@ -73,6 +73,11 @@
   padding: 16px;
   overscroll-behavior: contain;
 }
+.body[data-embedded="true"] {
+  padding: 0;
+  overflow: visible;
+}
+
 .note {
   margin: 0 0 10px;
   color: var(--label-3);

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -49,6 +50,11 @@ func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows
 	var err error
 	for _, row := range rows {
 		summary := Summary(row)
+		if row.Lifecycle.Terminal() {
+			if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at),0) FROM events WHERE object_type='task' AND object_id=? AND kind=?`, row.TaskID, "task."+string(row.Lifecycle)).Scan(&summary.EndedAt); err != nil {
+				return nil, fmt.Errorf("views: read task terminal time: %w", err)
+			}
+		}
 		summary.PrimaryWorkItemID, summary.PrimaryWorkItemTitle, err = store.TaskWorkItemLabel(ctx, q, row.TaskID)
 		if err != nil {
 			return nil, err
@@ -135,6 +141,10 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 			v.State = protocol.ExecutionUnknown
 			v.RunID = runs[i].RunID
 			v.Role = runs[i].Role
+			v.Startup, err = executionStartup(ctx, q, runs[i].RunID)
+			if err != nil {
+				return nil, err
+			}
 			return v, nil
 		}
 	}
@@ -143,8 +153,12 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		return nil, err
 	}
 	current := map[string]bool{}
+	latestExecutionAction := ""
 	for _, action := range actions {
 		current[action.ActionID] = action.TargetSpecVersion == t.SpecVersion && action.Status != protocol.ActionCancelled && action.Status != protocol.ActionSuperseded
+		if current[action.ActionID] && (action.Kind == protocol.ActionImplement || action.Kind == protocol.ActionAccept) {
+			latestExecutionAction = action.ActionID
+		}
 	}
 	for i := len(runs) - 1; i >= 0; i-- {
 		run := runs[i]
@@ -153,6 +167,10 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		}
 		v.RunID = run.RunID
 		v.Role = run.Role
+		v.Startup, err = executionStartup(ctx, q, run.RunID)
+		if err != nil {
+			return nil, err
+		}
 		// Uncertainty about a worker takes precedence over its last known wait.
 		// Questions from unrelated or historical runs are not execution blockers.
 		if run.ObservedState != protocol.RunUnknown && run.ObservedState != protocol.RunInterrupted {
@@ -206,6 +224,14 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 	}
 	if ownerBlocked {
 		v.State = protocol.ExecutionWaitingOwner
+		// The failed run explains its unresolved owner decision, but must not
+		// override a later action's scheduling state after retry or spec revision.
+		if len(runs) > 0 && runs[len(runs)-1].ActionID == latestExecutionAction {
+			v.Startup, err = executionStartup(ctx, q, runs[len(runs)-1].RunID)
+			if err != nil {
+				return nil, err
+			}
+		}
 		return v, nil
 	}
 	c, pending := f.candidates[t.TaskID]
@@ -314,11 +340,7 @@ func countExecution(counts *protocol.ExecutionCounts, execution *protocol.TaskEx
 	case protocol.ExecutionAccepting:
 		counts.Accepting++
 	case protocol.ExecutionStarting:
-		if execution.Role == protocol.RoleAccept {
-			counts.Accepting++
-		} else {
-			counts.Running++
-		}
+		counts.Starting++
 	case protocol.ExecutionWaitingOwner:
 		counts.WaitingOwner++
 	case protocol.ExecutionPaused:
@@ -337,14 +359,14 @@ func countExecution(counts *protocol.ExecutionCounts, execution *protocol.TaskEx
 // Latest durable root-turn fact wins only for the selected live run.
 func executionRecovery(ctx context.Context, q store.Querier, runID string) (*protocol.ExecutionRecovery, error) {
 	var kind, body string
-	err := q.QueryRowContext(ctx, `SELECT kind,body_json FROM run_logs WHERE run_id=? AND kind IN ('worker.turn_failed','worker.recovery_pending','worker.recovery_started','worker.recovery_completed','worker.recovery_failed','worker.recovery_handed_back') ORDER BY seq DESC LIMIT 1`, runID).Scan(&kind, &body)
+	err := q.QueryRowContext(ctx, `SELECT kind,body_json FROM run_logs WHERE run_id=? AND kind IN ('worker.turn_failed','worker.recovery_pending','worker.recovery_started','worker.recovery_completed','worker.recovery_failed','worker.recovery_handed_back','worker.startup_failed','worker.startup_retry_pending','worker.startup_started') ORDER BY seq DESC LIMIT 1`, runID).Scan(&kind, &body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if kind == "worker.recovery_completed" || kind == "worker.recovery_handed_back" {
+	if kind == "worker.recovery_completed" || kind == "worker.recovery_handed_back" || kind == "worker.startup_started" {
 		return nil, nil
 	}
 	var recovery protocol.ExecutionRecovery
@@ -353,6 +375,10 @@ func executionRecovery(ctx context.Context, q store.Querier, runID string) (*pro
 		recovery = protocol.ExecutionRecovery{}
 	}
 	switch kind {
+	case "worker.startup_failed":
+		recovery.Phase = "startup_failed"
+	case "worker.startup_retry_pending":
+		recovery.Phase = "startup_retry_pending"
 	case "worker.turn_failed":
 		recovery.Phase = "turn_failed"
 	case "worker.recovery_pending":
@@ -363,4 +389,27 @@ func executionRecovery(ctx context.Context, q store.Querier, runID string) (*pro
 		recovery.Phase = "failed"
 	}
 	return &recovery, nil
+}
+
+func executionStartup(ctx context.Context, q store.Querier, runID string) (*protocol.ExecutionStartup, error) {
+	var kind, body string
+	err := q.QueryRowContext(ctx, `SELECT kind,body_json FROM run_logs WHERE run_id=? AND kind IN ('worker.startup_failed','worker.startup_retry_pending','worker.startup_started') ORDER BY seq DESC LIMIT 1`, runID).Scan(&kind, &body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var fact struct {
+		Attempts   int `json:"attempts"`
+		Diagnostic struct {
+			Code             string `json:"code"`
+			PromptWriteState string `json:"promptWriteState"`
+			ElapsedMS        int64  `json:"elapsedMs"`
+		} `json:"diagnostic"`
+	}
+	if json.Unmarshal([]byte(body), &fact) != nil {
+		return nil, nil
+	}
+	return &protocol.ExecutionStartup{Phase: kind[len("worker.startup_"):], Code: fact.Diagnostic.Code, PromptWriteState: fact.Diagnostic.PromptWriteState, ElapsedMS: fact.Diagnostic.ElapsedMS, Attempts: fact.Attempts}, nil
 }

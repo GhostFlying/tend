@@ -15,7 +15,7 @@ import (
 // writes answer it, retry after a decision and steer tasks.
 var ownerCommands = commandMap(
 	app.UpdateWorkItem{}, app.CloseWorkItem{}, app.ReopenWorkItem{},
-	app.RefreshDelivery{},
+	app.RefreshDelivery{}, app.UpdateWorkItemChoice{Action: "respond"},
 	app.HostMaintenance{},
 	app.ControlUpgrade{},
 	app.AnswerDecision{},

@@ -47,6 +47,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.row[data-expanded="true"] {
+  height: auto;
+  min-height: 44px;
+  padding-block: 12px;
+  align-items: flex-start;
+}
+.row[data-expanded="true"] .label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 
 .meta {
   flex: none;
