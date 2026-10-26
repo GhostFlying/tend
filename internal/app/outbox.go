@@ -104,12 +104,20 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 		}); err != nil {
 			return err
 		}
+		if destination == MainThreadDestination {
+			if err := a.queueChanged(ctx, tx, m.RequestID, now.UnixMilli()); err != nil {
+				return err
+			}
+		}
 		m.Attempts++
 		d, ok = deliveryOf(m), true
 		return nil
 	})
 	if err != nil {
 		return Delivery{}, time.Time{}, false, err
+	}
+	if ok {
+		a.notifyChange()
 	}
 	return d, wake, ok, nil
 }
@@ -151,6 +159,11 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
 		if err := tx.TransitionOutbox(ctx, tr); err != nil {
 			return err
+		}
+		if d.Destination == MainThreadDestination {
+			if err := a.queueChanged(ctx, tx, d.RequestID, now.UnixMilli()); err != nil {
+				return err
+			}
 		}
 		if kind == "" {
 			return nil

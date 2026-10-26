@@ -372,6 +372,15 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 		// Other system notices remain facts without a queued/processing state.
 		it.State = protocol.MessageState(r.State)
 	}
+	if r.Author == "owner" {
+		c, err := store.MessageControl(ctx, q, r.MessageID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return it, err
+		}
+		if err == nil {
+			it.Control = &c
+		}
+	}
 	if r.DecisionJSON != "" {
 		var c protocol.DecisionChoice
 		if json.Unmarshal([]byte(r.DecisionJSON), &c) == nil {

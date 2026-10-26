@@ -52,6 +52,8 @@ type Exec struct {
 
 // Outcome is what a successful Apply produced besides its direct writes.
 type Outcome struct {
+	// Notify wakes dispatch when a write removes a queue blocker.
+	Notify bool
 	Result any
 	Events []Event
 	Outbox []OutboxMessage
@@ -221,7 +223,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			if err := tx.Release(ctx, applySavepoint); err != nil {
 				return err
 			}
-			queued = len(out.Outbox) > 0
+			queued = out.Notify || len(out.Outbox) > 0
 			for _, event := range out.Events {
 				queued = queued || wakesMain(x.Principal, event.Kind)
 			}

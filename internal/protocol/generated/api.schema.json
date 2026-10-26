@@ -594,6 +594,9 @@
           },
           "type": "array"
         },
+        "control": {
+          "$ref": "#/definitions/MessageControl"
+        },
         "created_at": {
           "format": "date-time",
           "type": "string"
@@ -729,6 +732,73 @@
         "more"
       ],
       "title": "ConversationPage",
+      "type": "object"
+    },
+    "ConversationQueueEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "can_withdraw": {
+          "type": "boolean"
+        },
+        "item": {
+          "$ref": "#/definitions/ConversationItem"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "item",
+        "position",
+        "revision",
+        "status",
+        "can_withdraw"
+      ],
+      "title": "ConversationQueueEntry",
+      "type": "object"
+    },
+    "ConversationQueuePage": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConversationQueueEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled",
+        "event_seq",
+        "items",
+        "total"
+      ],
+      "title": "ConversationQueuePage",
       "type": "object"
     },
     "ConversationSettingsView": {
@@ -1513,6 +1583,22 @@
         "stage_ids"
       ],
       "title": "LinkWorkItemTaskPayload",
+      "type": "object"
+    },
+    "MessageControl": {
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer"
+        },
+        "withdrawn_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision"
+      ],
+      "title": "MessageControl",
       "type": "object"
     },
     "MessageState": {
@@ -2721,6 +2807,81 @@
       "title": "ToolUseView",
       "type": "object"
     },
+    "TranscriptBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConversationItem"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_seq": {
+          "type": "integer"
+        },
+        "notice_only": {
+          "type": "boolean"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "trigger": {
+          "$ref": "#/definitions/ConversationItem"
+        }
+      },
+      "required": [
+        "position",
+        "trigger",
+        "items",
+        "more"
+      ],
+      "title": "TranscriptBlock",
+      "type": "object"
+    },
+    "TranscriptPage": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TranscriptBlock"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_before": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "blocks",
+        "more",
+        "event_seq"
+      ],
+      "title": "TranscriptPage",
+      "type": "object"
+    },
     "UpdateWorkItemChoicePayload": {
       "additionalProperties": false,
       "properties": {
@@ -3067,6 +3228,29 @@
       ],
       "title": "Verdict",
       "type": "string"
+    },
+    "WithdrawMessagePayload": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "WithdrawMessagePayload",
+      "type": "object"
+    },
+    "WithdrawMessageResult": {
+      "additionalProperties": false,
+      "properties": {
+        "control": {
+          "$ref": "#/definitions/MessageControl"
+        },
+        "message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "control"
+      ],
+      "title": "WithdrawMessageResult",
+      "type": "object"
     },
     "WorkItemChoice": {
       "additionalProperties": false,
@@ -3761,6 +3945,9 @@
     "ConversationPage": {
       "$ref": "#/definitions/ConversationPage"
     },
+    "ConversationQueuePage": {
+      "$ref": "#/definitions/ConversationQueuePage"
+    },
     "ConversationSettingsView": {
       "$ref": "#/definitions/ConversationSettingsView"
     },
@@ -3851,11 +4038,23 @@
     "ToolSpec": {
       "$ref": "#/definitions/ToolSpec"
     },
+    "TranscriptBlock": {
+      "$ref": "#/definitions/TranscriptBlock"
+    },
+    "TranscriptPage": {
+      "$ref": "#/definitions/TranscriptPage"
+    },
     "UpdateWorkItemChoicePayload": {
       "$ref": "#/definitions/UpdateWorkItemChoicePayload"
     },
     "UpdateWorkItemPayload": {
       "$ref": "#/definitions/UpdateWorkItemPayload"
+    },
+    "WithdrawMessagePayload": {
+      "$ref": "#/definitions/WithdrawMessagePayload"
+    },
+    "WithdrawMessageResult": {
+      "$ref": "#/definitions/WithdrawMessageResult"
     },
     "WorkItemChoice": {
       "$ref": "#/definitions/WorkItemChoice"

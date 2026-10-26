@@ -44,6 +44,16 @@ func (a *App) HandoffSummaryInput(ctx context.Context, instance string, maxBytes
 			out.PreviousSummary = &previous
 			since = &previous.Snapshot.Version
 		}
+		if since != nil {
+			var withdrawn bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_message_controls c JOIN conversation_changes d ON d.message_id=c.message_id WHERE c.withdrawn_at<>0 AND d.last_version>?)`, *since).Scan(&withdrawn); err != nil {
+				return err
+			}
+			if withdrawn {
+				since = nil
+				out.PreviousSummary = nil
+			}
+		}
 		used := 0
 		if out.PreviousSummary != nil {
 			encoded, err := json.Marshal(out.PreviousSummary)
@@ -95,6 +105,9 @@ func (a *App) HandoffSummaryInput(ctx context.Context, instance string, maxBytes
 				}
 				it.Attachments, err = store.ConversationAttachments(ctx, tx.Q(), id)
 				if err != nil {
+					return err
+				}
+				if err := store.HideUndeliveredOwner(ctx, tx.Q(), &it); err != nil {
 					return err
 				}
 				item = it

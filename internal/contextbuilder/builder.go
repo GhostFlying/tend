@@ -383,6 +383,11 @@ func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, 
 		return err
 	}
 	for _, m := range msgs {
+		item := protocol.ConversationItem{MessageID: m.MessageID, Author: m.Author, Body: m.Body}
+		if err := store.HideUndeliveredOwner(ctx, q, &item); err != nil {
+			return err
+		}
+		m.Body = item.Body
 		s.Focus = append(s.Focus, messageLine(m))
 	}
 	return nil

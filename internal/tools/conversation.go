@@ -38,7 +38,15 @@ func (s *Service) conversationRead(ctx context.Context, c Call) (any, error) {
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
 		result.ConversationPage, err = views.Conversation(ctx, tx.Q(), args.BeforeSeq, args.AfterSeq, limit)
-		return err
+		if err != nil {
+			return err
+		}
+		for i := range result.Items {
+			if err := store.HideUndeliveredOwner(ctx, tx.Q(), &result.Items[i]); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

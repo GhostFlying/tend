@@ -411,6 +411,13 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 			return err
 		}
 		if m.Status == store.TurnStarting && (errors.Is(err, store.ErrNotFound) || prev.Status == store.TurnRejected) {
+			c, ce := store.MessageControl(ctx, tx.Q(), m.MessageID)
+			if ce != nil && !errors.Is(ce, store.ErrNotFound) {
+				return ce
+			}
+			if c.WithdrawnAt != 0 {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "message was withdrawn")
+			}
 			paused, err := upgradePausesMain(ctx, tx.Q())
 			if err != nil {
 				return err

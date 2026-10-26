@@ -90,7 +90,20 @@ func (a *App) HandoffSnapshot(ctx context.Context, instance string) (v store.Han
 	return
 }
 func (a *App) HandoffSummary(ctx context.Context, instance string) (v store.HandoffSummary, ok bool, err error) {
-	err = a.store.Read(ctx, func(tx *store.ReadTx) error { v, err = store.GetHandoffSummary(ctx, tx.Q(), instance); return err })
+	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+		v, err = store.GetHandoffSummary(ctx, tx.Q(), instance)
+		if err != nil {
+			return err
+		}
+		var withdrawn bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_message_controls c JOIN conversation_changes d ON d.message_id=c.message_id WHERE c.withdrawn_at<>0 AND d.last_version>?)`, v.Snapshot.Version).Scan(&withdrawn); err != nil {
+			return err
+		}
+		if withdrawn {
+			return sql.ErrNoRows
+		}
+		return nil
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 		return

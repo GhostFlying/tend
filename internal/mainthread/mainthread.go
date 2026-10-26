@@ -432,6 +432,11 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	if err != nil {
 		return app.DeliveryResult{Outcome: app.Failed, Reason: "the message does not exist"}
 	}
+	if withdrawn, err := m.app.MessageWithdrawn(ctx, msg.MessageID); err != nil {
+		return retry(err)
+	} else if withdrawn {
+		return app.DeliveryResult{Outcome: app.Delivered}
+	}
 	imageURLs, err := m.app.MessageImageURLs(ctx, msg.MessageID)
 	if err != nil {
 		return retry(err)

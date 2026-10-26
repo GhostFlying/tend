@@ -224,6 +224,7 @@ export interface TendAPI {
   ConversationHandoffView?: ConversationHandoffView;
   ConversationImageResponse?: ConversationImageResponse;
   ConversationPage?: ConversationPage;
+  ConversationQueuePage?: ConversationQueuePage;
   ConversationSettingsView?: ConversationSettingsView;
   CreateActionPayload?: CreateActionPayload;
   CreateWorkItemChoicePayload?: CreateWorkItemChoicePayload;
@@ -254,8 +255,12 @@ export interface TendAPI {
   ToolRequest?: ToolRequest;
   ToolResponse?: ToolResponse;
   ToolSpec?: ToolSpec;
+  TranscriptBlock?: TranscriptBlock;
+  TranscriptPage?: TranscriptPage;
   UpdateWorkItemChoicePayload?: UpdateWorkItemChoicePayload;
   UpdateWorkItemPayload?: UpdateWorkItemPayload;
+  WithdrawMessagePayload?: WithdrawMessagePayload;
+  WithdrawMessageResult?: WithdrawMessageResult;
   WorkItemChoice?: WorkItemChoice;
   WorkItemChoicePage?: WorkItemChoicePage;
   WorkItemPage?: WorkItemPage;
@@ -794,6 +799,7 @@ export interface ConversationItem {
   author: string;
   body?: string;
   choices?: WorkItemChoice[];
+  control?: MessageControl;
   created_at: string;
   decision?: DecisionChoice;
   host_id?: string;
@@ -806,6 +812,14 @@ export interface ConversationItem {
   state?: MessageState;
   tool?: ToolUseView;
   upgrade_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessageControl".
+ */
+export interface MessageControl {
+  revision: number;
+  withdrawn_at?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -837,6 +851,28 @@ export interface ToolUseView {
   status: ToolStatus;
   turn_id: string;
   updated_at: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationQueuePage".
+ */
+export interface ConversationQueuePage {
+  enabled: boolean;
+  event_seq: number;
+  items: ConversationQueueEntry[] | null;
+  next?: number;
+  total: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationQueueEntry".
+ */
+export interface ConversationQueueEntry {
+  can_withdraw: boolean;
+  item: ConversationItem;
+  position: number;
+  revision: number;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1384,6 +1420,28 @@ export interface ToolSpec {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TranscriptBlock".
+ */
+export interface TranscriptBlock {
+  items: ConversationItem[] | null;
+  more: boolean;
+  next_seq?: number;
+  notice_only?: boolean;
+  position: number;
+  trigger: ConversationItem;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TranscriptPage".
+ */
+export interface TranscriptPage {
+  blocks: TranscriptBlock[] | null;
+  event_seq: number;
+  more: boolean;
+  next_before?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "UpdateWorkItemChoicePayload".
  */
 export interface UpdateWorkItemChoicePayload {
@@ -1427,6 +1485,19 @@ export interface WorkItemTaskDisposition {
   reason: string;
   spec_version: number;
   task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WithdrawMessagePayload".
+ */
+export interface WithdrawMessagePayload {}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WithdrawMessageResult".
+ */
+export interface WithdrawMessageResult {
+  control: MessageControl;
+  message_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
