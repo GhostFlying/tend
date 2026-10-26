@@ -5,17 +5,21 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/bridge"
 	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
@@ -71,6 +75,7 @@ func (w *smokeWorkspaces) Prepare(ctx context.Context, as protocol.Assignment) (
 // Embedding preserves Orca's historical/finalizing release interfaces.
 type smokeOrcaWorkers struct {
 	*orca.Workers
+	t         *testing.T
 	mu        sync.Mutex
 	nonce     string
 	downloads int
@@ -128,7 +133,11 @@ func (w *smokeOrcaWorkers) Start(ctx context.Context, spec harness.WorkerSpec) (
 		}
 		return path, nil
 	}
-	return w.Workers.Start(ctx, spec)
+	worker, err := w.Workers.Start(ctx, spec)
+	if err != nil {
+		w.t.Logf("isolated worker start failed for run %s: %v", spec.RunID, smokeStartError(err))
+	}
+	return worker, err
 }
 
 func temporaryRunnerSmoke(t *testing.T, real bool) {
@@ -152,6 +161,18 @@ func temporaryRunnerSmoke(t *testing.T, real bool) {
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Slots: 1, TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}, Worker: protocol.WorkerOrca}}}, app.SyncConfig{})
 	home := filepath.Join(root, "runner")
 	sockets := filepath.Join(root, "s")
+	if err := os.MkdirAll(sockets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Probe the actual bridge even in the fake-worker fixture, so socket setup
+	// errors cannot be hidden by a worker that does not use the Unix transport.
+	probe, err := bridge.Listen(filepath.Join(sockets, "probe.sock"), "smoke-probe", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
 	cfg := gitws.Config{Home: home, ServerURL: srv.url}
 	var workers harness.Workers
 	var observed *smokeOrcaWorkers
@@ -170,7 +191,7 @@ func temporaryRunnerSmoke(t *testing.T, real bool) {
 		if model == "" {
 			model = traexModel()
 		}
-		observed = &smokeOrcaWorkers{nonce: nonce, runs: map[string]smokeRunEvidence{}, Workers: orca.NewWorkers(orca.WorkerOptions{Client: oc, Agent: protocol.AgentTraex, Model: model, Effort: os.Getenv("TEND_ORCA_EFFORT"), BridgeCommand: bin, BridgeArgs: []string{"worker-mcp"}, SocketDir: sockets, IDs: protocol.NewULIDGen(time.Now, nil), Now: time.Now})}
+		observed = &smokeOrcaWorkers{t: t, nonce: nonce, runs: map[string]smokeRunEvidence{}, Workers: orca.NewWorkers(orca.WorkerOptions{Client: oc, Agent: protocol.AgentTraex, Model: model, Effort: os.Getenv("TEND_ORCA_EFFORT"), BridgeCommand: bin, BridgeArgs: []string{"worker-mcp"}, SocketDir: sockets, IDs: protocol.NewULIDGen(time.Now, nil), Now: time.Now})}
 		workers = observed
 		spaces = gitws.NewOrca(cfg, oc)
 	} else {
@@ -366,4 +387,24 @@ func TestIntegrationFixture_SmokeDeliveryShape(t *testing.T) {
 	if id, err := smokeDeliveredFile(json.RawMessage(`{"files":[{"file_id":"f1","name":"nonce.txt"}]}`)); err != nil || id != "f1" {
 		t.Fatalf("valid delivery = %q, %v", id, err)
 	}
+}
+
+// Native errors can carry provider payloads. Keep only typed startup details.
+func smokeStartError(err error) string {
+	if provider, ok := errors.AsType[*orca.Error](err); ok {
+		return "orca_code=" + provider.Code
+	}
+	if socket, ok := errors.AsType[*net.OpError](err); ok {
+		if errno, ok := errors.AsType[syscall.Errno](socket); ok {
+			return fmt.Sprintf("socket_operation=%s network=%s errno=%d", socket.Op, socket.Net, errno)
+		}
+		return fmt.Sprintf("socket_operation=%s network=%s", socket.Op, socket.Net)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline_exceeded"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "context_cancelled"
+	}
+	return fmt.Sprintf("type=%T worker_not_started=%t", err, errors.Is(err, harness.ErrWorkerNotStarted))
 }
