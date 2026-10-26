@@ -109,7 +109,9 @@ export function queueReasonText(task: Pick<TaskSummary, "execution" | "block_rea
     case "host_unavailable":
       return "等待执行主机恢复可用";
     case "host_requirements":
-      return "等待满足要求的执行主机";
+      return reason.message === "runner does not support scoped worker observation"
+        ? "等待支持现场核验的执行主机"
+        : "等待满足要求的执行主机";
     case "task_blocked":
       return waitLabels[task.block_reason] ?? reason.message;
     default:

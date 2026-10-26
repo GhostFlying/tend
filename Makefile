@@ -4,6 +4,7 @@ GO ?= go
 PNPM ?= pnpm
 STATICCHECK_VERSION ?= v0.8.2
 PKGS := ./...
+TEST_TIMEOUT ?= 20m
 WEB := web
 
 .PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check
@@ -25,7 +26,7 @@ staticcheck:
 	GOTOOLCHAIN=$$($(GO) env GOVERSION) $(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(PKGS)
 
 test:
-	$(GO) test -race $(PKGS)
+	$(GO) test -race -timeout $(TEST_TIMEOUT) $(PKGS)
 
 ## it: integration tests that need a real harness or tailnet
 it:

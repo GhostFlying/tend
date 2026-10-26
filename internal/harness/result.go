@@ -35,6 +35,9 @@ type Results struct {
 }
 
 func (r *Results) Handle(ctx context.Context, c ToolCall) ToolResult {
+	if c.Tool == ReadObservationTool {
+		return r.readObservation(ctx, c)
+	}
 	if c.Tool == AskOwnerTool {
 		return r.askOwner(ctx, c)
 	}

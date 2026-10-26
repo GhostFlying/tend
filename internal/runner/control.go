@@ -126,7 +126,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	if r.bootstrapMaintenance {
 		upgradeID = r.cfg.UpgradeID
 	}
-	capabilities := []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions}
+	capabilities := []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilityWorkerObservation}
 	for _, provider := range r.cfg.DeliveryProviders {
 		if r.cfg.DeliveryObserver != nil {
 			switch provider {

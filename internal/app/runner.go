@@ -277,7 +277,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	pick, ok := scheduler.Pick(scheduler.Host{
 		ID: host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
-		TaskInputs: runtimeSupportsTaskInputs(p.Runtime),
+		TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
 	}, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
@@ -355,7 +355,7 @@ func (Hello) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
 	if err := checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, true); err != nil {
 		return err
 	}
-	if err := checkInputRunRecovery(ctx, q, x.Principal.Subject, p.Runtime); err != nil {
+	if err := checkRunCapabilitiesRecovery(ctx, q, x.Principal.Subject, p.Runtime); err != nil {
 		return err
 	}
 	return checkQuestionRunRecovery(ctx, q, x.Principal.Subject, p.Runtime)

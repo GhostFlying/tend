@@ -83,7 +83,7 @@ func HandBack(spec WorkerSpec) string {
 	if spec.Role == protocol.RoleAccept {
 		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before."
 	}
-	return s + questionRecovery(spec)
+	return s + "\n" + observationBrief(spec) + questionRecovery(spec)
 }
 
 // Continuation is the turn input that continues a worker's thread after
@@ -96,7 +96,7 @@ func Continuation(spec WorkerSpec) string {
 	if spec.Role == protocol.RoleAccept {
 		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before the interruption: that call was lost."
 	}
-	return s + questionRecovery(spec)
+	return s + "\n" + observationBrief(spec) + questionRecovery(spec)
 }
 
 // Brief returns a worker's developer instructions and its turn input. The
@@ -109,6 +109,7 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 	if spec.AskOwner != nil {
 		b.WriteString("When owner judgment is required, use ask_owner with investigation evidence and a stable question_key. Wait for its answer in this same task; asking does not complete your work. Do not use an implementation result or acceptance verdict just to ask a question.\n\n")
 	}
+	b.WriteString(observationBrief(spec))
 	b.WriteString(questionRecovery(spec))
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "Goal:\n%s\n", s.Goal)

@@ -246,3 +246,44 @@ func TestBothWorkerRolesExposeNegotiatedOwnerQuestion(t *testing.T) {
 		})
 	}
 }
+
+func TestBothWorkerRolesExposeScopedObservation(t *testing.T) {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		t.Run(string(role), func(t *testing.T) {
+			ws, servers := fakeWorkers(t)
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(context.Canceled)
+			called := false
+			w, err := ws.Start(ctx, harness.WorkerSpec{Role: role, Dir: "/w", Spec: json.RawMessage(`{"observation":{"deployment":true}}`), ReadObservation: func(_ context.Context) (protocol.RunObservation, error) {
+				called = true
+				return protocol.RunObservation{Version: 1}, nil
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := <-servers
+			var start ThreadStartParams
+			_ = json.Unmarshal(f.params(methodThreadStart), &start)
+			found := false
+			for _, tool := range start.DynamicTools {
+				if tool.Name == "read_observation" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s worker has no read_observation: %s", role, f.params(methodThreadStart))
+			}
+			f.send(map[string]any{"id": 7, "method": methodToolCall, "params": map[string]any{"threadId": "th_w", "turnId": "tu_w", "callId": "download", "tool": "read_observation", "arguments": map[string]any{}}})
+			<-f.answers
+			if !called {
+				t.Error("download tool callback was not dispatched")
+			}
+			cancel(context.Canceled)
+			for range w.Events() {
+			}
+			if _, err := w.Wait(); !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+		})
+	}
+}

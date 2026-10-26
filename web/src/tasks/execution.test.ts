@@ -190,3 +190,18 @@ test("startup diagnostics distinguish readiness timeout and count startup separa
     }),
   ).toBe("");
 });
+
+test("observation capability wait explains which host support is missing", () => {
+  expect(
+    queueReasonText({
+      block_reason: "none",
+      execution: {
+        state: "queued",
+        queue_reason: {
+          code: "host_requirements",
+          message: "runner does not support scoped worker observation",
+        },
+      },
+    }),
+  ).toBe("等待支持现场核验的执行主机");
+});
