@@ -766,6 +766,9 @@
     "ConversationQueuePage": {
       "additionalProperties": false,
       "properties": {
+        "active": {
+          "$ref": "#/definitions/ConversationQueueEntry"
+        },
         "enabled": {
           "type": "boolean"
         },

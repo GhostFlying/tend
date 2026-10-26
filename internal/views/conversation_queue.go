@@ -22,29 +22,24 @@ func ConversationQueue(ctx context.Context, q store.Querier, category string, af
 		out.Next = rows[limit-1].Position
 		rows = rows[:limit]
 	}
+
 	for _, r := range rows {
-		row, err := store.GetConversationItem(ctx, q, r.ID)
+		entry, err := conversationQueueEntry(ctx, q, r, category)
 		if err != nil {
 			return out, err
 		}
-		item, err := conversationItem(ctx, q, row)
+		out.Items = append(out.Items, entry)
+	}
+	active, err := store.ConversationActive(ctx, q)
+	if err != nil {
+		return out, err
+	}
+	if active != nil {
+		entry, err := conversationQueueEntry(ctx, q, *active, "owner")
 		if err != nil {
 			return out, err
 		}
-		status := r.Status
-		if status == "pending" {
-			status = "queued"
-		}
-		if status == "sending" {
-			status = "starting"
-		}
-		if r.Turn == "started" {
-			status = "processing"
-		}
-		if r.WithdrawnAt != 0 {
-			status = "withdrawn"
-		}
-		out.Items = append(out.Items, protocol.ConversationQueueEntry{Item: item, Position: r.Position, Revision: r.Revision, Status: status, CanWithdraw: category == "owner" && r.Status == "pending" && (r.Turn == "" || r.Turn == "rejected") && r.WithdrawnAt == 0})
+		out.Active = &entry
 	}
 	out.EventSeq, err = store.LatestEventSeq(ctx, q)
 	return out, err
@@ -119,4 +114,29 @@ func Transcript(ctx context.Context, q store.Querier, before int64, limit int) (
 	}
 	out.EventSeq, err = store.LatestEventSeq(ctx, q)
 	return out, err
+}
+
+func conversationQueueEntry(ctx context.Context, q store.Querier, r store.ConversationQueueRow, category string) (protocol.ConversationQueueEntry, error) {
+	row, err := store.GetConversationItem(ctx, q, r.ID)
+	if err != nil {
+		return protocol.ConversationQueueEntry{}, err
+	}
+	item, err := conversationItem(ctx, q, row)
+	if err != nil {
+		return protocol.ConversationQueueEntry{}, err
+	}
+	status := r.Status
+	if status == "pending" {
+		status = "queued"
+	}
+	if status == "sending" {
+		status = "starting"
+	}
+	if r.Turn == "started" {
+		status = "processing"
+	}
+	if r.WithdrawnAt != 0 {
+		status = "withdrawn"
+	}
+	return protocol.ConversationQueueEntry{Item: item, Position: r.Position, Revision: r.Revision, Status: status, CanWithdraw: category == "owner" && r.Status == "pending" && (r.Turn == "" || r.Turn == "rejected") && r.WithdrawnAt == 0}, nil
 }

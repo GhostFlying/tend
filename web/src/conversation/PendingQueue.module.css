@@ -1,0 +1,62 @@
+.queue {
+  max-height: min(32vh, 22rem);
+  overflow: auto;
+  overflow-anchor: none;
+  font-size: 0.82rem;
+  margin-bottom: 0.6rem;
+  border-radius: 0.65rem;
+}
+.queue:empty {
+  display: none;
+}
+.queue details {
+  margin-block: 0.4rem;
+}
+.queue button {
+  font: inherit;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  margin: 0.2rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 0.4rem;
+  color: inherit;
+  background: var(--bg);
+}
+.queue button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.item {
+  padding: 0.4rem 0.6rem;
+  margin-block: 0.25rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 0.5rem;
+}
+.summary,
+.note {
+  color: var(--label-3);
+}
+.heading {
+  font-weight: 600;
+}
+.preview {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .queue {
+    max-height: 24vh;
+  }
+}

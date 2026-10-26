@@ -1,15 +1,17 @@
+import type { TranscriptBlock } from "../api/generated/api.ts";
+import { notify } from "../app/notice.ts";
 // The scrolling conversation. It opens at the latest page and follows new
 // content only while the reader is near the bottom; otherwise it offers a
 // jump to the latest. Scrolling near the top reads the page before, and
 // the reading position stays where it was.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useServices } from "../app/services.tsx";
 import { noOutbox } from "../queue/sendQueue.ts";
 import { ArrowDown } from "../shell/icons.tsx";
 import { StatusDot } from "../shell/StatusDot.tsx";
 import { useStore } from "../state/store.ts";
 import { AgentTurn, Divider, OutgoingRow, OwnerMessage, SystemMessage } from "./Messages.tsx";
-import { buildEntries, duration, processing } from "./model.ts";
+import { buildEntries, duration, processing, type Entry } from "./model.ts";
 import styles from "./Transcript.module.css";
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "./scrollAnchor.ts";
 
@@ -26,13 +28,54 @@ const emptyNote =
 export function Transcript({ jump, visible }: { jump: number; visible: boolean }) {
   const { live, queue } = useServices();
   const scroller = useRef<HTMLDivElement>(null);
-  const conversation = useStore(live.conversation);
+  const raw = useStore(live.conversation);
+  const blocks = useStore(live.queueView.state);
+  const conversation = blocks.supported
+    ? {
+        ...raw,
+        loaded: blocks.loaded,
+        more: blocks.more,
+        loadingEarlier: blocks.loadingEarlier,
+        error: blocks.error,
+      }
+    : raw;
   const outbox = useStore(queue?.list ?? noOutbox);
-  const entries = useMemo(
-    () => buildEntries(conversation.items, outbox),
-    [conversation.items, outbox],
+  const entries = useMemo<(Entry & { block?: TranscriptBlock })[]>(
+    () =>
+      blocks.supported === undefined
+        ? []
+        : blocks.supported
+          ? blocks.blocks.flatMap((b) =>
+              buildEntries(
+                [
+                  ...(b.notice_only || b.trigger.author !== "system"
+                    ? [b.trigger]
+                    : [
+                        {
+                          ...b.trigger,
+                          body: "继续处理后台事项",
+                          choices: [],
+                          images: [],
+                          attachments: [],
+                        },
+                      ]),
+                  ...(b.items ?? []),
+                ],
+                [],
+              ).map((e) => ({ ...e, key: `${b.position}:${e.key}`, block: b })),
+            )
+          : buildEntries(conversation.items, outbox),
+    [blocks.supported, blocks.blocks, conversation.items, outbox],
   );
-  const busy = processing(conversation.items);
+  const active = blocks.pages.owner?.active;
+  const busy =
+    active?.status === "processing"
+      ? active.item
+      : blocks.supported
+        ? Object.values(blocks.pages)
+            .flatMap((p) => p.items ?? [])
+            .find((e) => e.status === "processing")?.item
+        : processing(conversation.items);
 
   const lastJump = useRef(jump);
   const [atBottom, setAtBottom] = useState(true);
@@ -48,7 +91,7 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
       return;
     }
     anchor.current = captureAnchor(el);
-    void live.loadEarlier();
+    void (blocks.supported ? live.queueView.earlier() : live.loadEarlier());
   };
 
   const onScroll = () => {
@@ -136,13 +179,28 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
               case "divider":
                 return <Divider key={e.key} at={e.at} />;
               case "system":
-                return <SystemMessage key={e.key} item={e.item} />;
+                return <SystemMessage key={e.key} item={e.item} scrollID={e.key} />;
               case "owner":
                 return <OwnerMessage key={e.key} item={e.item} />;
               case "outgoing":
                 return <OutgoingRow key={e.key} message={e.message} queue={queue} />;
               case "agent":
-                return <AgentTurn key={e.key} entry={e} />;
+                return (
+                  <Fragment key={e.key}>
+                    <AgentTurn entry={e} />
+                    {e.block?.more && (
+                      <button
+                        onClick={() =>
+                          void live.queueView
+                            .moreBlock(e.block!)
+                            .catch((error) => notify(String(error), "warn"))
+                        }
+                      >
+                        继续读取本轮消息
+                      </button>
+                    )}
+                  </Fragment>
+                );
             }
           })}
           {busy && (

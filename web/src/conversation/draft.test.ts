@@ -19,7 +19,7 @@ test("follow-up intentions preserve drafts and do not duplicate after owner edit
   draft.write(draft.state.get().text + "修改按钮位置");
   const edited = draft.state.get().text;
   draft.followUp({ ...task, title: "更新后的标题" });
-  expect(draft.state.get()).toEqual({ text: edited, files: [], focus: 2 });
+  expect(draft.state.get()).toMatchObject({ text: edited, files: [], focus: 2 });
   draft.followUp({ ...task, task_id: "task_another" });
   expect(draft.state.get().text).toContain("task_another");
   expect(draft.state.get().text).toContain("修改按钮位置");

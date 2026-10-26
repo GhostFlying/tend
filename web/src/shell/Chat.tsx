@@ -1,3 +1,4 @@
+import { PendingQueue } from "../conversation/PendingQueue.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 // The one conversation with the main agent (D27): the transcript, and the
 // seat docked at the bottom with notes and the composer.
@@ -52,6 +53,7 @@ export function Chat({ connection, visible }: { connection: Connection; visible:
         <div className={styles.seatInner}>
           <Note />
           <DecisionDock />
+          <PendingQueue connection={connection} />
           <Composer connection={connection} />
         </div>
       </div>

@@ -104,7 +104,7 @@ describe("SendQueue", () => {
     sender.answers = [new NetworkError(new TypeError("lost receipt"))];
     const reloaded = await open();
     await reloaded.resume();
-    expect(sender.submitted).toHaveLength(3);
+    expect(sender.submitted).toHaveLength(2);
     for (const envelope of sender.submitted) expect(envelope).toEqual(queued.envelope);
     expect((await stored())[0]?.state).toBe("sent");
   });
@@ -116,7 +116,7 @@ describe("SendQueue", () => {
 
     const m = await q.enqueue({ body: "hello", replyTo: "msg_9", lastSeenSeq: 7 });
 
-    expect(await stored()).toEqual([m]);
+    expect(await stored()).toMatchObject([{ ...m, submitAttempted: true }]);
     expect(m.state).toBe("sending");
     expect(m.envelope).toEqual({
       request_id: m.requestId,
@@ -177,7 +177,7 @@ describe("SendQueue", () => {
     await q.enqueue({ body: "hi" });
     await q.idle();
 
-    expect(sender.submitted).toHaveLength(1);
+    expect(sender.submitted).toHaveLength(0);
     expect(pauses).toEqual([]);
     expect(q.list.get()[0]?.state).toBe("sending");
 
@@ -367,12 +367,13 @@ describe("SendQueue", () => {
       expect(q.list.get().map((m) => m.state)).toEqual(["sent", "sent"]);
     });
 
-    test("until the owner deletes it", async () => {
+    test("an uncertain submission cannot be deleted locally", async () => {
       const { q, a, b } = await heldBack();
-      await q.discard(a.requestId);
-      await q.idle();
-      expect(sender.submitted.slice(3).map((e) => e.request_id)).toEqual([b.requestId]);
-      expect(q.list.get()).toMatchObject([{ requestId: b.requestId, state: "sent" }]);
+      await expect(q.discard(a.requestId)).rejects.toThrow("先核对");
+      expect(q.list.get()).toMatchObject([
+        { requestId: a.requestId, state: "unknown" },
+        { requestId: b.requestId, state: "sending" },
+      ]);
     });
   });
 
@@ -612,4 +613,75 @@ test("message retries keep frozen attachment references and do not upload origin
   expect(uploads).toBe(1);
   expect(sender.submitted).toEqual([frozen, frozen]);
   expect(sender.looked).toEqual([m.requestId]);
+});
+
+test("a second tab cancelling an unsubmitted message fences a stale sender", async () => {
+  online = false;
+  const first = await open();
+  const m = await first.enqueue({ body: "cancel before transport" });
+  await first.idle();
+  const second = await open();
+  await second.discard(m.requestId);
+  online = true;
+  await first.resume();
+  expect(sender.submitted).toEqual([]);
+  expect(await stored()).toEqual([]);
+});
+
+test("a second tab cannot cancel after the submit marker is committed", async () => {
+  const answer = deferred<APIResponse>();
+  sender.answers = [answer.promise];
+  const started = deferred<void>();
+  const submit = sender.submit.bind(sender);
+  sender.submit = async (envelope) => {
+    expect((await stored())[0]?.submitAttempted).toBe(true);
+    started.resolve();
+    return submit(envelope);
+  };
+  const first = await open();
+  const m = await first.enqueue({ body: "in flight" });
+  await started.promise;
+  const second = await open();
+  await expect(second.discard(m.requestId)).rejects.toThrow("先核对");
+  answer.resolve(accepted(m.requestId, "msg_result", 1));
+  await first.idle();
+  expect((await stored())[0]?.state).toBe("sent");
+});
+
+test("upgrading a legacy unfinished upload retains the file and its receipt", async () => {
+  online = false;
+  const first = await open();
+  const queued = await first.enqueue({
+    body: "with file",
+    files: [new File(["bytes"], "proof.txt")],
+  });
+  await first.idle();
+  const outbox = await openOutbox(factory);
+  await outbox.edit(queued.requestId, (m) => {
+    delete m.submitAttempted;
+    return m;
+  });
+  const uploadSender: Sender = {
+    submit: (env) => sender.submit(env),
+    lookup: (id) => sender.lookup(id),
+    upload: async (id) => ({
+      operation: {
+        request_id: id,
+        status: "succeeded",
+        result: {
+          file_id: "original",
+          name: "proof.txt",
+          media_type: "text/plain",
+          sha256: "hash",
+          size: 5,
+        },
+      },
+    }),
+  };
+  online = true;
+  const next = await open({ sender: uploadSender });
+  await next.resume();
+  expect(sender.submitted[0]?.payload).toEqual({ body: "with file", attachments: ["original"] });
+  expect((await stored())[0]?.uploads?.[0]?.receipt?.file_id).toBe("original");
+  expect((await stored())[0]?.submitAttempted).toBe(true);
 });

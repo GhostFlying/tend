@@ -16,6 +16,7 @@ type ConversationQueueEntry struct {
 }
 
 type ConversationQueuePage struct {
+	Active   *ConversationQueueEntry  `json:"active,omitempty"`
 	Enabled  bool                     `json:"enabled"`
 	EventSeq int64                    `json:"event_seq"`
 	Items    []ConversationQueueEntry `json:"items"`

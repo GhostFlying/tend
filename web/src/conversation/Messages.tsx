@@ -1,3 +1,4 @@
+import { notify } from "../app/notice.ts";
 import { ChoiceCard } from "../workitems/Choice.tsx";
 import { useServices } from "../app/services.tsx";
 import { noticeTitle } from "../upgrades/status.ts";
@@ -39,7 +40,8 @@ export function OwnerMessage({ item }: { item: ConversationItem }) {
       )}
       {item.body && <div className={styles.bubble}>{item.body}</div>}
       <div className={styles.state} data-state={state}>
-        {messageStateLabels[state]} · {clock(Date.parse(item.created_at))}
+        {item.control?.withdrawn_at ? "已撤回" : messageStateLabels[state]} ·{" "}
+        {clock(Date.parse(item.created_at))}
       </div>
     </div>
   );
@@ -63,20 +65,22 @@ export function OutgoingRow({
       <div className={styles.state} data-state={message.state}>
         {message.state === "sending" &&
           (message.uploads?.length && !message.attachmentsFrozen ? "正在上传附件…" : "发送中…")}
-        {message.state === "sending" && !!message.uploads?.length && !message.attachmentsFrozen && (
+        {message.state === "sending" && message.submitAttempted === false && (
           <>
             {" "}
             ·{" "}
             <button
               type="button"
               className={controls.link}
-              onClick={() => void queue?.discard(requestId)}
+              onClick={() =>
+                void queue?.discard(requestId).catch((error) => notify(String(error), "warn"))
+              }
             >
               取消发送
             </button>
           </>
         )}
-        {message.state === "sent" && `已收下 · ${clock(message.createdAt)}`}
+        {message.state === "sent" && `已送达 · ${clock(message.createdAt)}`}
         {message.state === "unknown" && (
           <>
             {message.uploads?.length && !message.attachmentsFrozen
@@ -99,13 +103,6 @@ export function OutgoingRow({
               重发
             </button>{" "}
             ·{" "}
-            <button
-              type="button"
-              className={controls.link}
-              onClick={() => void queue?.discard(requestId)}
-            >
-              删除
-            </button>
           </>
         )}
         {message.state === "failed" && (
@@ -114,7 +111,9 @@ export function OutgoingRow({
             <button
               type="button"
               className={controls.link}
-              onClick={() => void queue?.discard(requestId)}
+              onClick={() =>
+                void queue?.discard(requestId).catch((error) => notify(String(error), "warn"))
+              }
             >
               删除
             </button>
@@ -171,11 +170,15 @@ const AgentItem = memo(function AgentItem({ item }: { item: ConversationItem }) 
   );
 });
 
-export function SystemMessage({ item }: { item: ConversationItem }) {
+export function SystemMessage({ item, scrollID }: { item: ConversationItem; scrollID?: string }) {
   const { openUpgrade } = useServices();
   const title = noticeTitle(item.notice_type);
   return (
-    <section className={styles.system} data-scroll-id={item.message_id} aria-label={`${title}通知`}>
+    <section
+      className={styles.system}
+      data-scroll-id={scrollID ?? item.message_id}
+      aria-label={`${title}通知`}
+    >
       <div className={styles.systemHead}>
         {title} <time dateTime={item.created_at}>{clock(Date.parse(item.created_at))}</time>
       </div>
