@@ -47,12 +47,16 @@ func TestIntegrationFixture_TemporaryRunner(t *testing.T) { temporaryRunnerSmoke
 
 type smokeWorkspaces struct {
 	*gitws.Workspaces
+	t         *testing.T
 	mu        sync.Mutex
 	resources map[string]protocol.WorkspaceCleanup
 }
 
 func (w *smokeWorkspaces) Prepare(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {
 	p, err := w.Workspaces.Prepare(ctx, as)
+	if err != nil {
+		w.t.Logf("isolated workspace preparation failed for run %s: %v", as.RunID, err)
+	}
 	if err == nil {
 		w.mu.Lock()
 		// Acceptance reopens the same resource and may omit its provider report.
@@ -176,7 +180,7 @@ func temporaryRunnerSmoke(t *testing.T, real bool) {
 			return testkit.WorkerScript{Result: result, Err: err}
 		}}
 	}
-	ws := &smokeWorkspaces{Workspaces: spaces, resources: map[string]protocol.WorkspaceCleanup{}}
+	ws := &smokeWorkspaces{Workspaces: spaces, t: t, resources: map[string]protocol.WorkspaceCleanup{}}
 	j, err := journal.Open(t.Context(), filepath.Join(root, "journal.db"), time.Now)
 	if err != nil {
 		t.Fatal(err)
@@ -266,6 +270,11 @@ func temporaryRunnerSmoke(t *testing.T, real bool) {
 	smokeWait(t, deadline, "independently accepted task", func() bool {
 		task := srv.task(created.TaskID)
 		if task.Lifecycle == protocol.TaskCancelled || task.Lifecycle == protocol.TaskChangesRequired || (task.BlockReason != protocol.BlockNone && task.BlockReason != protocol.BlockWaitingResource) {
+			var question string
+			_ = srv.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				return tx.Q().QueryRowContext(t.Context(), "SELECT question FROM decisions WHERE task_id=? AND status='open' LIMIT 1", created.TaskID).Scan(&question)
+			})
+			t.Logf("isolated task decision: %s", question)
 			t.Fatalf("isolated task %s stopped progressing: lifecycle=%s block_reason=%s", task.TaskID, task.Lifecycle, task.BlockReason)
 		}
 		return task.Lifecycle == protocol.TaskCompleted
