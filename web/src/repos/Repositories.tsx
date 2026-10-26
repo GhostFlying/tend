@@ -31,7 +31,11 @@ export function Repositories({ connection, onClose }: { connection: Connection; 
     void registry.refresh();
   }, [registry]);
   const online = connection.status === "online";
-  const repos = state.view ? (state.view.repos ?? []) : null;
+  const repos = state.view
+    ? [...(state.view.repos ?? [])].sort(
+        (a, b) => Number(Boolean(a.retired)) - Number(Boolean(b.retired)),
+      )
+    : null;
   return (
     <dialog
       ref={panel}
@@ -45,7 +49,7 @@ export function Repositories({ connection, onClose }: { connection: Connection; 
       <header className={styles.header}>
         <div>
           <h2>已注册仓库</h2>
-          <span>{repos ? `全部 ${repos.length} 个 · 含已退役仓库` : "全部登记"}</span>
+          <span>{repos ? `全部 ${repos.length} 个 · 含已归档仓库` : "全部登记"}</span>
         </div>
         <button
           type="button"
@@ -83,7 +87,7 @@ export function Repositories({ connection, onClose }: { connection: Connection; 
               <li key={repo.repo} className={styles.repo} data-retired={repo.retired || undefined}>
                 <div className={styles.repoHead}>
                   <h3>{repo.repo}</h3>
-                  <span className={styles.badge}>{repo.retired ? "已退役" : "启用"}</span>
+                  <span className={styles.badge}>{repo.retired ? "已归档" : "启用"}</span>
                 </div>
                 {repo.retired && (
                   <p className={styles.note}>停止新任务挂载，已有任务仍可由配置主机服务。</p>

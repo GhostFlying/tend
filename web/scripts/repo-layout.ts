@@ -15,19 +15,28 @@ const output = process.env.TEND_LAYOUT_OUTPUT;
 if (output) await mkdir(output, { recursive: true });
 const registrations: RepoRegistry = {
   repos: [
+    { repo: "legacy-zeta-library", retired: true, hosts: ["host-a"] },
     { repo: "sample-app", hosts: ["host-a", "host-b"] },
-    { repo: "legacy-library", retired: true, hosts: ["host-a"] },
+    { repo: "legacy-alpha-library", retired: true, hosts: [] },
     { repo: "unserved-library", hosts: [] },
     {
       repo: "shared-library-with-a-very-long-logical-name-that-must-wrap-completely-on-mobile-without-truncation",
       hosts: ["host-b"],
     },
-    ...Array.from({ length: 26 }, (_, i) => ({
+    ...Array.from({ length: 25 }, (_, i) => ({
       repo: `sample-library-${String(i + 1).padStart(2, "0")}`,
       hosts: ["host-a"],
     })),
   ],
 };
+const registrationOrder = [
+  "sample-app",
+  "unserved-library",
+  "shared-library-with-a-very-long-logical-name-that-must-wrap-completely-on-mobile-without-truncation",
+  ...Array.from({ length: 25 }, (_, i) => `sample-library-${String(i + 1).padStart(2, "0")}`),
+  "legacy-zeta-library",
+  "legacy-alpha-library",
+];
 const hosts: HostView[] = Array.from({ length: 12 }, (_, i) => ({
   host_id: `host-${String.fromCharCode(97 + i)}`,
   os: "linux",
@@ -215,6 +224,13 @@ async function closed(page: Page, entry: Locator) {
     "return focus to entry",
   );
 }
+async function ordered(panel: Locator, expected: string[]) {
+  assert.deepEqual(
+    await panel.getByRole("list", { name: "仓库登记列表" }).getByRole("heading").allTextContents(),
+    expected,
+    "active registrations precede archived registrations, preserving both input orders",
+  );
+}
 
 try {
   for (const viewport of [
@@ -264,9 +280,16 @@ try {
       30,
     );
     await panel.getByText("启用", { exact: true }).first().waitFor();
-    await panel.getByText("已退役", { exact: true }).waitFor();
+    assert.equal(await panel.getByText("已归档", { exact: true }).count(), 2);
+    assert.equal(await panel.getByText(/已退役/).count(), 0);
+    await panel.getByText("全部 30 个 · 含已归档仓库", { exact: true }).waitFor();
+    await ordered(panel, registrationOrder);
+    await panel.getByRole("button", { name: "刷新仓库" }).click();
+    await panel.getByText("已读取登记。", { exact: true }).waitFor();
+    await ordered(panel, registrationOrder);
     await panel
       .getByText("没有已登记且未退役的执行主机配置为服务此仓库。", { exact: true })
+      .first()
       .waitFor();
     assert.equal(
       await panel
@@ -292,8 +315,57 @@ try {
       await long.evaluate((element) => element.scrollWidth <= element.clientWidth),
       "long logical name wraps",
     );
-    await usable(panel.getByRole("heading", { name: "sample-library-26", exact: true }), page);
+    await usable(panel.getByRole("heading", { name: "legacy-alpha-library", exact: true }), page);
+    await panel
+      .getByText("停止新任务挂载，已有任务仍可由配置主机服务。", { exact: true })
+      .last()
+      .waitFor();
+    if (output && viewport.height !== 640)
+      await page.screenshot({ path: join(output, `repos-archived-${viewport.width}.png`) });
+    // Refresh data changes must apply the same partition without alphabetizing either group.
+    for (const scenario of [
+      {
+        repos: [
+          { repo: "archive-zeta", retired: true, hosts: [] },
+          { repo: "active-zeta", retired: false, hosts: [] },
+          { repo: "archive-alpha", retired: true, hosts: ["host-a"] },
+          { repo: "active-alpha", hosts: ["host-b"] },
+        ],
+        expected: ["active-zeta", "active-alpha", "archive-zeta", "archive-alpha"],
+      },
+      {
+        repos: [
+          { repo: "archive-zeta", retired: true, hosts: [] },
+          { repo: "archive-alpha", retired: true, hosts: ["host-a"] },
+        ],
+        expected: ["archive-zeta", "archive-alpha"],
+      },
+      {
+        repos: [
+          { repo: "active-zeta", retired: false, hosts: [] },
+          { repo: "active-alpha", hosts: ["host-b"] },
+        ],
+        expected: ["active-zeta", "active-alpha"],
+      },
+      { repos: [], expected: [] },
+    ]) {
+      registry = { repos: scenario.repos };
+      for (let refresh = 0; refresh < 2; refresh++) {
+        await panel.getByRole("button", { name: "刷新仓库" }).click();
+        await panel.getByText("已读取登记。", { exact: true }).waitFor();
+        if (scenario.expected.length) await ordered(panel, scenario.expected);
+        else {
+          await panel.getByText("账本中暂无已注册仓库。", { exact: true }).waitFor();
+          assert.equal(await panel.getByRole("list", { name: "仓库登记列表" }).count(), 0);
+        }
+      }
+    }
+    registry = registrations;
+    await panel.getByRole("button", { name: "刷新仓库" }).click();
+    await panel.getByText("已读取登记。", { exact: true }).waitFor();
+    await ordered(panel, registrationOrder);
     await usable(panel.getByRole("button", { name: "关闭已注册仓库" }), page);
+    await panel.getByRole("button", { name: "关闭已注册仓库" }).focus();
     await page.keyboard.press("Tab");
     assert(
       await panel.evaluate((element) => element.contains(globalThis.document.activeElement)),
@@ -403,7 +475,12 @@ try {
       fail = false;
       registry = { repos: [...registrations.repos!, { repo: "new-registration", hosts: [] }] };
       await panel.getByRole("button", { name: "重试读取仓库" }).click();
-      await panel.getByText("全部 31 个 · 含已退役仓库", { exact: true }).waitFor();
+      await panel.getByText("全部 31 个 · 含已归档仓库", { exact: true }).waitFor();
+      await ordered(panel, [
+        ...registrationOrder.slice(0, -2),
+        "new-registration",
+        ...registrationOrder.slice(-2),
+      ]);
       await context.setOffline(true);
       for (const response of streams) response.end();
       await panel.getByText(/连接已断开/).waitFor();
@@ -411,9 +488,15 @@ try {
       await context.setOffline(false);
       registry = { repos: [...registry.repos!, { repo: "reconnected-registration", hosts: [] }] };
       await panel
-        .getByText("全部 32 个 · 含已退役仓库", { exact: true })
+        .getByText("全部 32 个 · 含已归档仓库", { exact: true })
         .waitFor({ timeout: 15000 });
       await panel.getByText("已读取登记。", { exact: true }).waitFor();
+      await ordered(panel, [
+        ...registrationOrder.slice(0, -2),
+        "new-registration",
+        "reconnected-registration",
+        ...registrationOrder.slice(-2),
+      ]);
       // Superseding after headers must not make the healthy connection offline.
       partial = true;
       const partialResponse = page.waitForResponse(
@@ -437,11 +520,12 @@ try {
         .getByRole("button", { name: "工作项", exact: true })
         .click();
       await entry.click();
-      await panel.getByText("全部 30 个 · 含已退役仓库", { exact: true }).waitFor();
+      await panel.getByText("全部 30 个 · 含已归档仓库", { exact: true }).waitFor();
+      await ordered(panel, registrationOrder);
     }
     assert.deepEqual(errors, [], "no browser runtime errors");
     console.log(
-      `PASS ${viewport.width}x${viewport.height}: registry, scrolling, focus, resources, navigation`,
+      `PASS ${viewport.width}x${viewport.height}: archive labels, stable mixed/archived/active/empty order, refresh, registry, scrolling, focus, resources, navigation`,
     );
     await context.close();
   }
