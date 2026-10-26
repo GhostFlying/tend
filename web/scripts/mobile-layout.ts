@@ -224,12 +224,12 @@ try {
       const details = page.getByRole("region", { name: "任务详情", exact: true });
       await details.getByText("启动设计稿 Web 预览", { exact: true }).first().waitFor();
       await details.getByRole("button", { name: "关闭", exact: true }).click();
-      const records = sidebar.getByRole("button", { name: "全部执行记录 ›", exact: true });
+      const records = sidebar.getByRole("button", { name: "全部任务执行 ›", exact: true });
       await records.scrollIntoViewIfNeeded();
       await unobscured(records);
       await records.focus();
       await page.keyboard.press("Enter");
-      await page.getByRole("heading", { name: "执行记录", exact: true }).waitFor();
+      await page.getByRole("heading", { name: "任务执行", exact: true }).waitFor();
       await page.getByLabel("按项目筛选", { exact: true }).fill("filtered-project");
       await records.click();
       assert.equal(await page.getByLabel("按项目筛选", { exact: true }).inputValue(), "");

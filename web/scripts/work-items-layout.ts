@@ -449,7 +449,10 @@ try {
     upgradeVisible = false;
     publish();
     await banner.waitFor({ state: "detached" });
-    const stageTask = firstCard.getByRole("button", { name: "设计稿与说明 已完成", exact: true });
+    const stageTask = firstCard.getByRole("button", {
+      name: "设计稿与说明 已完成",
+      exact: true,
+    });
     await reachable(stageTask, mobile ? 44 : 0);
     await page.screenshot({ path: join(output, `stages-${width}.png`) });
     await stageTask.click();
@@ -569,7 +572,7 @@ try {
       );
       await panel.getByRole("tab", { name: "最近完成" }).click();
       const longRecent = panel.getByRole("button", {
-        name: `${longTask.title} 已完成`,
+        name: `${longTask.title} 已完成 未关联工作项`,
         exact: true,
       });
       await reachable(longRecent, 44);
@@ -580,7 +583,10 @@ try {
         "recent long titles fit their rows",
       );
       await page.screenshot({ path: join(output, `resources-recent-${width}.png`) });
-      const recent = panel.getByRole("button", { name: "设计稿与说明 已完成", exact: true });
+      const recent = panel.getByRole("button", {
+        name: "设计稿与说明 已完成 未关联工作项",
+        exact: true,
+      });
       await reachable(recent, 44);
       await recent.click();
       await panel.waitFor({ state: "detached" });
@@ -589,8 +595,8 @@ try {
       await detail.getByRole("button", { name: "关闭", exact: true }).click();
       assert(await entry.evaluate((el) => el === document.activeElement));
       await entry.click();
-      await panel.getByRole("button", { name: "查看执行记录" }).click();
-      await page.getByRole("heading", { name: "执行记录", exact: true }).waitFor();
+      await panel.getByRole("button", { name: "查看任务执行" }).click();
+      await page.getByRole("heading", { name: "任务执行", exact: true }).waitFor();
       await page.getByRole("button", { name: "返回工作项" }).click();
       await title.waitFor();
       await reading.evaluate((el) => {

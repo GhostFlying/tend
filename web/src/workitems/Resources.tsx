@@ -189,7 +189,7 @@ function BoardResourcePanel({
           </section>
         </ServicesContext>
         <button className={styles.recordsButton} onClick={onRecords}>
-          查看执行记录
+          查看任务执行
         </button>
       </div>
     </dialog>

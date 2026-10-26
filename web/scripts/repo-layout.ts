@@ -139,6 +139,8 @@ const server = await createServer({
                 task("completed", "Completed sample 1", "sample-project"),
               ]),
             );
+          if (path === "/api/v1/work-items/wi_01M5M3ME31875GDA8F7P5XTD74")
+            return json(res, workItemPage().items![0]);
           if (path.startsWith("/api/v1/tasks/")) {
             const id = decodeURIComponent(path.split("/").at(-1)!);
             const lifecycle = id.includes("cancelled") ? "cancelled" : "completed";
@@ -152,24 +154,51 @@ const server = await createServer({
             });
           }
           if (path === "/api/v1/tasks") {
-            const lifecycle =
-              (url.searchParams.get("lifecycle")?.split(",").at(-1) as TaskSummary["lifecycle"]) ??
-              "queued";
+            const lifecycles = (url.searchParams.get("lifecycle")?.split(",") || [
+              "queued",
+            ]) as TaskSummary["lifecycle"][];
             const project = url.searchParams.get("project") || "sample-project";
+            const pageTwo = url.searchParams.has("before");
             return json(res, {
-              tasks: url.searchParams.has("before")
-                ? [task(lifecycle, `Unlinked historical ${lifecycle} page 2`, project)]
-                : lifecycle === "completed"
+              tasks: pageTwo
+                ? lifecycles
+                    .filter((l) => ["completed", "cancelled"].includes(l))
+                    .map((l) => task(l, `Unlinked historical ${l} page 2`, project))
+                : lifecycles.length === 1 && lifecycles[0] === "completed"
                   ? Array.from({ length: 5 }, (_, i) =>
                       task("completed", `Completed sample ${i + 1}`, project),
                     )
-                  : [task(lifecycle, `Sample ${lifecycle} task`, project)],
-              next:
-                !url.searchParams.has("before") && ["completed", "cancelled"].includes(lifecycle)
-                  ? `page-2-${lifecycle}`
-                  : "",
+                  : lifecycles.map((l) => ({
+                      ...task(l, `Task ${l}`, project),
+                      primary_work_item_id: "wi_01M5M3ME31875GDA8F7P5XTD74",
+                      primary_work_item_title: "Mobile work item",
+                      execution: {
+                        state:
+                          l === "running"
+                            ? "starting"
+                            : l === "awaiting_acceptance"
+                              ? "queued"
+                              : l === "changes_required"
+                                ? "waiting_owner"
+                                : l === "draft"
+                                  ? "idle"
+                                  : l,
+                        ...(l === "awaiting_acceptance"
+                          ? {
+                              role: "accept",
+                              queue_reason: {
+                                code: "host_capacity",
+                                message: "waiting for slot",
+                                host_id: "host-a",
+                              },
+                            }
+                          : {}),
+                      },
+                    })),
+              next: !pageTwo && lifecycles.includes("cancelled") ? "history-page-2" : "",
             });
           }
+
           const views: Record<string, unknown> = {
             "/api/v1/session": {
               login: "owner@example.com",
@@ -389,7 +418,10 @@ try {
     if (mobile) {
       await entry.click();
       await panel.getByRole("tab", { name: "最近完成" }).click();
-      await usable(panel.getByRole("button", { name: "Completed sample 5 已完成" }), page);
+      await usable(
+        panel.getByRole("button", { name: "Completed sample 5 已完成 未关联工作项" }),
+        page,
+      );
       await panel.getByRole("tab", { name: "执行主机" }).click();
       const lastHost = panel.getByRole("button", { name: "主机详情：host-l" });
       await usable(lastHost, page);
@@ -429,31 +461,83 @@ try {
     // Historical tasks that predate work items must remain reachable and paginated.
     if (mobile) {
       await entry.click();
-      await panel.getByRole("button", { name: "查看执行记录", exact: true }).click();
+      await panel.getByRole("button", { name: "查看任务执行", exact: true }).click();
     } else
       await page
         .locator("main header")
-        .getByRole("button", { name: "执行记录", exact: true })
+        .getByRole("button", { name: "任务执行", exact: true })
         .click();
-    await page.getByRole("heading", { name: "执行记录", exact: true }).waitFor();
-    const executions = page.getByRole("region", { name: "分阶段任务看板", exact: true });
-    for (const [lifecycle, label] of [
-      ["completed", "已完成"],
-      ["cancelled", "已取消"],
-    ] as const) {
-      const column = executions.getByRole("region", { name: label, exact: true });
-      const more = column.getByRole("button", { name: `加载更多${label}`, exact: true });
-      await more.scrollIntoViewIfNeeded();
-      await more.click();
-      const oldTask = column.getByRole("button", {
+    await page.getByRole("heading", { name: "任务执行", exact: true }).waitFor();
+    const executions = page.getByRole("region", { name: "任务执行列表", exact: true });
+    await executions.getByText("正在启动", { exact: true }).waitFor();
+    await executions.getByText("排队中 · 待验收", { exact: true }).waitFor();
+    await executions.getByText("主机 host-a", { exact: true }).waitFor();
+    assert.equal(await executions.locator("article").count(), 5);
+    const firstRow = await executions.locator("article").first().boundingBox();
+    assert(firstRow && firstRow.height <= (mobile ? 160 : 110), "execution entries stay compact");
+    const taskTabs = executions.getByRole("tablist", { name: "任务范围" });
+    assert(
+      await taskTabs.evaluate((el) => el.getBoundingClientRect().bottom < innerHeight / 2),
+      "execution tabs appear in the first half of the viewport",
+    );
+    if (mobile) {
+      const resources = page
+        .locator("main details")
+        .filter({ has: page.locator("summary", { hasText: /^资源与记录$/ }) });
+      assert.equal(await resources.getAttribute("open"), null, "resources start collapsed");
+      await resources.locator(":scope > summary").click();
+      await resources.getByText("最近完成的任务", { exact: true }).waitFor();
+      await resources.locator(":scope > summary").click();
+    }
+
+    if (output)
+      await page.screenshot({
+        path: join(output, `tasks-current-${viewport.width}x${viewport.height}.png`),
+      });
+    await executions
+      .getByRole("button", { name: "所属工作项：Mobile work item ›", exact: true })
+      .first()
+      .click();
+    const parentDetail = page.getByRole("dialog", { name: "工作项详情", exact: true });
+    await parentDetail
+      .getByRole("heading", { name: "Sample ongoing work item", exact: true })
+      .waitFor();
+    await parentDetail.getByRole("button", { name: "关闭工作项详情", exact: true }).click();
+    const ended = executions.getByRole("tab", { name: "已结束", exact: true });
+    await ended.focus();
+    await page.keyboard.press("Enter");
+    await executions.getByRole("button", { name: "查看结果与验收 ›", exact: true }).waitFor();
+    await executions.getByRole("button", { name: "查看取消记录 ›", exact: true }).waitFor();
+    assert.equal(await executions.locator("article").count(), 2);
+    if (output)
+      await page.screenshot({
+        path: join(output, `tasks-ended-${viewport.width}x${viewport.height}.png`),
+      });
+    await executions.getByRole("button", { name: "加载更多任务", exact: true }).click();
+    for (const lifecycle of ["completed", "cancelled"]) {
+      const oldTask = executions.getByRole("button", {
         name: new RegExp(`Unlinked historical ${lifecycle} page 2`),
       });
-      await oldTask.scrollIntoViewIfNeeded();
       await oldTask.click();
       const details = page.getByRole("region", { name: "任务详情", exact: true });
       await details.getByText(`Unlinked historical ${lifecycle} page 2`, { exact: true }).waitFor();
       await details.getByRole("button", { name: "关闭", exact: true }).click();
     }
+    await executions.getByRole("tab", { name: "全部", exact: true }).click();
+    await executions.getByText("正在启动", { exact: true }).waitFor();
+    assert.equal(await executions.locator("article").count(), 7);
+    await executions.getByRole("tab", { name: "全部", exact: true }).focus();
+    await page.keyboard.press("Home");
+    assert.equal(
+      await executions
+        .getByRole("tab", { name: "当前", exact: true })
+        .getAttribute("aria-selected"),
+      "true",
+    );
+    assert(
+      await executions.evaluate((el) => el.scrollWidth <= el.clientWidth),
+      "task list does not overflow horizontally",
+    );
     await page.getByRole("button", { name: "返回工作项", exact: true }).click();
     await page.getByRole("region", { name: "工作项白板", exact: true }).waitFor();
 

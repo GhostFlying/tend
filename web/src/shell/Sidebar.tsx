@@ -70,7 +70,7 @@ export function Sidebar({
               onRecords();
             }}
           >
-            全部执行记录 ›
+            全部任务执行 ›
           </button>
           <RepositoryEntry onOpen={onRepos} />
           <Hosts connection={connection} />
