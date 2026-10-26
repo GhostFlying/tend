@@ -60,6 +60,9 @@ func ConversationQueue(ctx context.Context, q Querier, category string, after in
 	case "withdrawn":
 		filter = `o.destination='main_thread' AND o.operation='main_thread.handle_message' AND o.status='cancelled'`
 	}
+	if category != "withdrawn" {
+		filter += ` AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status IN ('completed','interrupted','failed','unknown'))`
+	}
 	var count int64
 	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox o WHERE `+filter).Scan(&count); err != nil {
 		return nil, 0, fmt.Errorf("store: queue count: %w", err)
@@ -138,4 +141,17 @@ func HideUndeliveredOwner(ctx context.Context, q Querier, it *protocol.Conversat
 		it.Decision = nil
 	}
 	return nil
+}
+
+// ConversationActive is independent of queue category and pagination.
+func ConversationActive(ctx context.Context, q Querier) (*ConversationQueueRow, error) {
+	var r ConversationQueueRow
+	err := q.QueryRowContext(ctx, `SELECT json_extract(o.payload_json,'$.message_id'),o.seq,o.status,COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),COALESCE(t.status,'') FROM outbox o LEFT JOIN conversation_message_controls c ON c.message_id=json_extract(o.payload_json,'$.message_id') LEFT JOIN main_turns t ON t.request_id=o.request_id WHERE o.destination='main_thread' AND o.operation IN ('main_thread.handle_message','main_thread.handle_event') AND o.status='sending' AND COALESCE(t.status,'') NOT IN ('completed','interrupted','failed','unknown') ORDER BY o.seq LIMIT 1`).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: active conversation: %w", err)
+	}
+	return &r, nil
 }

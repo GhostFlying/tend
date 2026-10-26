@@ -8,7 +8,7 @@ import type { ConversationAttachment, Envelope } from "../api/generated/api.ts";
  * unknown: no answer after several tries; tend may or may not have it.
  * failed: tend refused it.
  */
-export type SendState = "sending" | "sent" | "unknown" | "failed";
+export type SendState = "sending" | "sent" | "unknown" | "failed" | "cancelled";
 
 export interface OutgoingAttachment {
   requestId: string;
@@ -20,6 +20,8 @@ export interface OutgoingAttachment {
 }
 
 export interface OutgoingMessage {
+  submitAttempted?: boolean;
+  references?: ConversationAttachment[];
   uploads?: OutgoingAttachment[];
   attachmentsFrozen?: boolean;
   /** The envelope's request ID; every resend uses it again (D11). */
@@ -45,6 +47,11 @@ export interface OutgoingMessage {
 
 export interface Outbox {
   all(): Promise<OutgoingMessage[]>;
+  cancelled(id: string): Promise<boolean>;
+  edit(
+    id: string,
+    change: (current: OutgoingMessage) => OutgoingMessage | null,
+  ): Promise<OutgoingMessage | undefined>;
   put(message: OutgoingMessage): Promise<void>;
   delete(requestId: string): Promise<void>;
 }
@@ -84,9 +91,30 @@ export async function openOutbox(factory: IDBFactory = indexedDB, name = "tend")
   };
 
   return {
+    async edit(id, change) {
+      const tx = db.transaction(storeName, "readwrite", { durability: "strict" });
+      const completion = committed(tx);
+      const store = tx.objectStore(storeName);
+      const current = await done(store.get(id) as IDBRequest<OutgoingMessage | undefined>);
+      const next = current ? change(current) : undefined;
+      if (next) store.put(next);
+      else if (current) store.delete(id);
+      await completion;
+      return next ?? undefined;
+    },
+    async cancelled(id) {
+      const value = await done(
+        db.transaction(storeName).objectStore(storeName).get(id) as IDBRequest<
+          OutgoingMessage | undefined
+        >,
+      );
+      return value?.state === "cancelled";
+    },
     async all() {
       const tx = db.transaction(storeName, "readonly");
-      return done(tx.objectStore(storeName).getAll() as IDBRequest<OutgoingMessage[]>);
+      return (
+        await done(tx.objectStore(storeName).getAll() as IDBRequest<OutgoingMessage[]>)
+      ).filter((m) => m.state !== "cancelled");
     },
     put: (message) => write((store) => store.put(message)),
     delete: (requestId) => write((store) => store.delete(requestId)),

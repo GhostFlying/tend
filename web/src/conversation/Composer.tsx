@@ -3,6 +3,8 @@
 // §6.2). While a reply is in progress and nothing is written, the send
 // button stops the reply instead (D69).
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import type { Snapshot } from "../api/generated/api.ts";
+import { MessageAttachments } from "./Attachments.tsx";
 import type { Connection } from "../api/client.ts";
 import { notify } from "../app/notice.ts";
 import { Settings } from "./Settings.tsx";
@@ -21,12 +23,23 @@ const touch = window.matchMedia("(pointer: coarse)").matches;
 export function Composer({ connection }: { connection: Connection }) {
   const { client, live, queue, draft: composerDraft } = useServices();
   const conversation = useStore(live.conversation);
-  const { text: draft, files, focus } = useStore(composerDraft.state);
+  const queueState = useStore(live.queueView.state);
+  const {
+    text: draft,
+    files,
+    focus,
+    attachments,
+    replyTo,
+    source,
+    loaded,
+    error: draftError,
+  } = useStore(composerDraft.state);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const saving = useRef(false);
   const [persisting, setPersisting] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [confirmChoice, setConfirmChoice] = useState(false);
   useEffect(() => {
     if (!focus) return;
     const frame = requestAnimationFrame(() => {
@@ -38,10 +51,20 @@ export function Composer({ connection }: { connection: Connection }) {
   }, [focus]);
   const interrupt = useMemo(() => new Interrupt(client), [client]);
   const pending = useStore(interrupt.state);
-  const blocked = queue === null || connection.status === "not-owner";
+  const blocked = queue === null || connection.status === "not-owner" || !loaded;
   const body = draft.trim();
   const reply = latestReply(conversation.items);
-  const busy = processing(conversation.items);
+  const active = queueState.pages.owner?.active;
+  const busy =
+    active?.status === "processing"
+      ? active.item
+      : queueState.supported
+        ? Object.values(queueState.pages)
+            .flatMap((p) => p.items ?? [])
+            .find((e) => e.status === "processing")?.item
+        : processing(conversation.items);
+
+  const queued = !!queueState.pages.owner?.total || !!queueState.pages.background?.total;
 
   useEffect(() => {
     interrupt.observe(conversation.items);
@@ -71,23 +94,48 @@ export function Composer({ connection }: { connection: Connection }) {
   }, [interrupt, connection.status, pending?.envelope.request_id]);
 
   const send = async () => {
-    if (queue === null || blocked || saving.current || (!body && !files.length)) {
+    if (
+      queue === null ||
+      blocked ||
+      saving.current ||
+      (!body && !files.length && !attachments.length)
+    ) {
       return;
     }
     saving.current = true;
     setPersisting(true);
-    composerDraft.clear();
+
     const lastSeq = conversation.items.at(-1)?.seq;
     try {
+      let decision = source?.decision;
+      if (decision) {
+        if (!confirmChoice) {
+          notify("请确认取回消息中的原选择，或清除它再发送", "warn");
+          return;
+        }
+        const snapshot = await client.get<Snapshot>("/api/v1/snapshot");
+        const candidate = decision;
+        const current = snapshot.decisions?.find((d) => d.decision_id === candidate.decision_id);
+        if (!current || current.status !== "open" || current.version !== decision.version) {
+          decision = undefined;
+          notify("原选择已失效，本次仅发送文字与附件", "warn");
+        }
+      }
+      await composerDraft.flush();
       await queue.enqueue({
         body,
         files,
-        ...(reply ? { replyTo: reply.message_id } : {}),
+        attachments,
+        ...(decision ? { decision } : {}),
+        ...(replyTo || reply ? { replyTo: replyTo || reply!.message_id } : {}),
         ...(lastSeq ? { lastSeenSeq: lastSeq } : {}),
       });
+      composerDraft.clear();
+      await composerDraft.flush();
+      setConfirmChoice(false);
     } catch {
       // Not written down, so not sent either; give the entire draft back.
-      composerDraft.restore(draft, files);
+
       notify("消息未能保存到发送队列，文字和附件已恢复，请重试", "warn");
     } finally {
       saving.current = false;
@@ -126,11 +174,15 @@ export function Composer({ connection }: { connection: Connection }) {
         : (pending?.error ?? "正在停止…");
   } else if (connection.status === "offline") {
     hint = "离线：消息先存在这台设备上，连上后自动发送";
+  } else if (queued && !busy) {
+    hint = "加入队列，按接收顺序依次处理";
   } else if (reply) {
-    hint = `回复 ${clock(Date.parse(reply.created_at))} 的消息`;
+    hint = busy
+      ? "加入队列，当前回复结束后处理"
+      : `回复 ${clock(Date.parse(reply.created_at))} 的消息`;
   }
 
-  const showStop = busy !== undefined && body === "" && !files.length;
+  const showStop = busy !== undefined && body === "" && !files.length && !attachments.length;
   return (
     <div
       className={styles.composer}
@@ -151,6 +203,28 @@ export function Composer({ connection }: { connection: Connection }) {
         addFiles(Array.from(event.dataTransfer.files));
       }}
     >
+      {draftError && <p role="alert">{draftError}</p>}
+      {!!attachments.length && (
+        <div>
+          <MessageAttachments attachments={attachments} />
+          {attachments.map((file, index) => (
+            <button key={file.file_id} onClick={() => composerDraft.removeAttachment(index)}>
+              移除 {file.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {source?.decision && (
+        <label>
+          <input
+            type="checkbox"
+            checked={confirmChoice}
+            onChange={(e) => setConfirmChoice(e.target.checked)}
+          />
+          确认原选择：{source.decision.option}（发送前核对当前版本）
+          <button onClick={() => composerDraft.clearChoice()}>清除原选择</button>
+        </label>
+      )}
       {!!files.length && (
         <ul className={styles.files} aria-label="待发送附件">
           {files.map((file, index) => (
@@ -182,7 +256,7 @@ export function Composer({ connection }: { connection: Connection }) {
         }}
         placeholder={touch ? "和主 Agent 说…" : "和主 Agent 说…（Enter 发送，Shift+Enter 换行）"}
         aria-label="消息"
-        disabled={queue === null}
+        disabled={blocked || persisting}
       />
       <div className={styles.bar}>
         <input
@@ -221,6 +295,17 @@ export function Composer({ connection }: { connection: Connection }) {
           {dragging ? "松开以添加附件" : hint}
         </span>
         <Settings connection={connection} />
+        {busy && !showStop && (
+          <button
+            type="button"
+            className={styles.attach}
+            disabled={stopping}
+            onClick={() => void stop()}
+            aria-label="停止当前回复"
+          >
+            <Stop />
+          </button>
+        )}
         {showStop ? (
           <button
             type="button"
@@ -237,9 +322,9 @@ export function Composer({ connection }: { connection: Connection }) {
             type="button"
             className={styles.send}
             onClick={() => void send()}
-            disabled={blocked || persisting || (!body && !files.length)}
-            title="发送"
-            aria-label="发送"
+            disabled={blocked || persisting || (!body && !files.length && !attachments.length)}
+            title={busy || queued ? "加入队列" : "发送"}
+            aria-label={busy || queued ? "加入队列" : "发送"}
           >
             <Send />
           </button>

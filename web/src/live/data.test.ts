@@ -767,3 +767,44 @@ test("outside-snapshot references refresh on other workspace, host and run facts
     await live.stop();
   }
 });
+
+test("choice updates refresh retained transcript cards and resist older pages", async () => {
+  const choice = {
+    choice_id: "choice",
+    work_item_id: "work",
+    version: 1,
+    status: "open",
+    question: "Continue?",
+    source_id: "source",
+    message_id: "notice",
+    created_at: 1,
+    updated_at: 1,
+  } as WorkItemChoice;
+  const trigger: ConversationItem = {
+    ...owner(1),
+    message_id: "notice",
+    author: "system",
+    choices: [choice],
+  };
+  const api: Reader = {
+    async get<T>(path: string): Promise<T> {
+      if (path.includes("work-item-choices"))
+        return { ...choice, version: 2, status: "withdrawn" } as T;
+      if (path.includes("transcript"))
+        return {
+          blocks: [{ position: 1, notice_only: true, trigger, items: [], more: false }],
+          more: false,
+          event_seq: 2,
+        } as T;
+      return { enabled: true, items: [], total: 0, event_seq: 2 } as T;
+    },
+  };
+  const live = new LiveData(api);
+  live.queueView.start();
+  await live.queueView.refresh();
+  await live.choiceChanged("choice");
+  expect(live.queueView.state.get().blocks[0]?.trigger.choices?.[0]?.status).toBe("withdrawn");
+  await live.queueView.refresh();
+  expect(live.queueView.state.get().blocks[0]?.trigger.choices?.[0]?.status).toBe("withdrawn");
+  await live.stop();
+});

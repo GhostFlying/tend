@@ -1,3 +1,4 @@
+import { ConversationQueue } from "../conversation/queueView.ts";
 // The views the Web shows, kept current from the event stream (D69): the
 // snapshot, the conversation and the open task's details. Conversation
 // events carry their item, which replaces the one shown; any other event
@@ -67,6 +68,7 @@ const maxLogPages = 20;
 const noProcessing: ReadonlyMap<string, number> = new Map();
 
 export class LiveData {
+  readonly queueView: ConversationQueue;
   readonly settings: ConversationSettings;
   readonly handoff: ConversationHandoff;
   readonly tasks: TaskLists;
@@ -109,6 +111,7 @@ export class LiveData {
 
   constructor(api: Reader) {
     this.api = api;
+    this.queueView = new ConversationQueue(api, (item) => this.currentChoices(item));
     this.settings = new ConversationSettings(api);
     this.handoff = new ConversationHandoff(api);
     this.tasks = new TaskLists(api);
@@ -137,6 +140,7 @@ export class LiveData {
 
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
+    void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
     void this.repos.refresh();
     void this.settings.refresh();
     void this.handoff.refresh();
@@ -154,12 +158,26 @@ export class LiveData {
     ]);
   }
 
+  private refreshTranscriptChoices(): void {
+    const ids = new Set(
+      this.queueView.state
+        .get()
+        .blocks.flatMap((block) =>
+          [block.trigger, ...(block.items ?? [])].flatMap(
+            (item) => item.choices?.map((choice) => choice.choice_id) ?? [],
+          ),
+        ),
+    );
+    for (const id of ids) void this.choiceChanged(id);
+  }
+
   /** One coalesced, cancellable read/backoff per choice, shared by both surfaces. */
   choiceRead(id: string): WorkItemRead<WorkItemChoice> {
     let read = this.choiceReads.get(id);
     if (!read) {
       read = new WorkItemRead(this.api, (choice) => {
         this.rememberChoice(choice);
+        this.queueView.refreshChoices();
         const state = this.conversationStore.get();
         this.conversationStore.set({
           ...state,
@@ -194,6 +212,7 @@ export class LiveData {
 
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
+    this.queueView.changed(event);
     if (event.object_type === "work_item_choice") {
       void this.choiceChanged(event.object_id);
       return;
@@ -487,6 +506,7 @@ export class LiveData {
   /** Stops all owned timers and the pending log request. */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.queueView.stop();
     this.dirtyLookups.clear();
     this.repos.stop();
     this.workItems.stop();

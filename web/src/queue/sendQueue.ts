@@ -48,6 +48,7 @@ export interface Draft {
   body: string;
   images?: ConversationImageInput[];
   files?: File[];
+  attachments?: ConversationAttachment[];
   replyTo?: string;
   lastSeenSeq?: number;
   /** The option of an open decision the message chooses (D71). */
@@ -132,6 +133,7 @@ export class SendQueue {
     const now = this.now();
     const requestId = this.newId(now);
     const payload: SubmitMessagePayload = { body: draft.body };
+    if (draft.attachments?.length) payload.attachments = draft.attachments.map((a) => a.file_id);
     if (draft.images?.length) {
       payload.images = draft.images.map((image) => ({ ...image }));
     }
@@ -147,6 +149,8 @@ export class SendQueue {
     const message: OutgoingMessage = {
       requestId,
       order,
+      submitAttempted: false,
+      references: draft.attachments ?? [],
       envelope: {
         request_id: requestId,
         operation: "conversation.submit_message",
@@ -167,6 +171,7 @@ export class SendQueue {
           }
         : {}),
     };
+    await this.outbox.put(message);
     await this.save(message);
     void this.kick();
     return message;
@@ -177,6 +182,7 @@ export class SendQueue {
    * reconnect or the network coming back.
    */
   async resume(): Promise<void> {
+    this.messages.set(sorted(await this.outbox.all()));
     for (const m of this.messages.get()) {
       if (m.state === "unknown") {
         await this.reconcile(m.requestId);
@@ -242,17 +248,24 @@ export class SendQueue {
   }
 
   /**
-   * Drops a message from the outbox. Dropping an unknown message lets the
-   * messages after it go.
+   * Cancels only before message transport, retaining a durable tombstone
+   * for edit recovery and fencing stale senders in other tabs.
    */
   async discard(requestId: string): Promise<void> {
+    const current = await this.outbox.edit(requestId, (m) => {
+      if (m.submitAttempted !== false && m.state !== "failed") return m;
+      return { ...m, state: "cancelled" };
+    });
+    if (current && current.state !== "cancelled")
+      throw new Error("消息可能已提交，请先核对服务端状态后撤回");
     this.discarded.add(requestId);
-    // Remove the in-memory intent before aborting: the transfer may settle
-    // while the IndexedDB deletion is still committing.
     this.messages.set(this.messages.get().filter((m) => m.requestId !== requestId));
     if (this.transfer?.requestId === requestId) this.transfer.controller.abort();
-    await this.outbox.delete(requestId);
     void this.kick();
+  }
+
+  cancelled(id: string): Promise<boolean> {
+    return this.outbox.cancelled(id);
   }
 
   /** Starts sending if it is not already; resolves when it stops. */
@@ -302,7 +315,32 @@ export class SendQueue {
       if (!current.attachmentsFrozen) return false;
       m = current;
     }
+    if (!this.online()) return false;
+    // The same IndexedDB transaction arbitrates cancellation across tabs.
+    const claimed = await this.outbox.edit(m.requestId, (current) =>
+      current.state === "cancelled"
+        ? current
+        : {
+            ...current,
+            submitAttempted: true,
+          },
+    );
+    if (!claimed) {
+      this.messages.set(this.messages.get().filter((it) => it.requestId !== m.requestId));
+      return true;
+    }
+    if (claimed.state === "cancelled") {
+      this.messages.set(this.messages.get().filter((it) => it.requestId !== m.requestId));
+      return true;
+    }
+    m = claimed;
+    if (m.state === "sent" || m.state === "failed") {
+      await this.save(m);
+      return true;
+    }
+    await this.save(m);
     for (let attempt = 0; ; attempt++) {
+      if (!this.online()) return false;
       const outcome = await this.attempt(m.envelope);
       if (outcome.kind === "stop") {
         return false;
@@ -342,7 +380,10 @@ export class SendQueue {
             ...m.envelope,
             payload: {
               ...(m.envelope.payload as SubmitMessagePayload),
-              attachments: m.uploads!.map((entry) => entry.receipt!.file_id),
+              attachments: [
+                ...((m.envelope.payload as SubmitMessagePayload).attachments ?? []),
+                ...m.uploads!.map((entry) => entry.receipt!.file_id),
+              ],
             },
           },
         });
@@ -477,8 +518,37 @@ export class SendQueue {
 
   private async save(m: OutgoingMessage): Promise<void> {
     if (this.discarded.has(m.requestId)) return;
-    await this.outbox.put(m);
+    const saved = await this.outbox.edit(m.requestId, (current) =>
+      current.state === "cancelled"
+        ? current
+        : {
+            ...m,
+            ...(current.submitAttempted === true ||
+            current.attachmentsFrozen === true ||
+            (current.submitAttempted === undefined && !current.uploads?.length)
+              ? {
+                  envelope: current.envelope,
+                  uploads: current.uploads ?? [],
+                  attachmentsFrozen: current.attachmentsFrozen ?? true,
+                }
+              : {}),
+            ...(current.state === "sent"
+              ? { state: current.state, messageId: current.messageId ?? "", seq: current.seq ?? 0 }
+              : {}),
+            ...(current.submitAttempted === undefined && m.submitAttempted === undefined
+              ? {}
+              : {
+                  submitAttempted: current.submitAttempted === true || m.submitAttempted === true,
+                }),
+          },
+    );
+    if (!saved || saved.state === "cancelled") {
+      this.discarded.add(m.requestId);
+      this.messages.set(this.messages.get().filter((it) => it.requestId !== m.requestId));
+      return;
+    }
     if (this.discarded.has(m.requestId)) return;
+    m = saved;
     const others = this.messages.get().filter((o) => o.requestId !== m.requestId);
     this.messages.set(sorted([...others, m]));
   }

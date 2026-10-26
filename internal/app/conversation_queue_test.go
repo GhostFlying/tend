@@ -330,3 +330,37 @@ func TestWithdrawalNotifiesDispatcher(t *testing.T) {
 		t.Error("withdrawing a blocked head does not wake the dispatcher")
 	}
 }
+
+func TestQueueActiveIndependentOfCategoryAndCursor(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	id := queueMessage(t, h, "active")
+	delivery, _, ok, err := h.app.NextDelivery(ctx, MainThreadDestination)
+	if err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	for _, status := range []string{store.TurnStarting, store.TurnStarted} {
+		if err := h.app.PutMainTurn(ctx, store.MainTurn{RequestID: delivery.RequestID, MessageID: id, ThreadID: "thread", TurnID: "turn", Status: status}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+		page, err := views.ConversationQueue(ctx, tx.Q(), "withdrawn", 99999, 50)
+		if err != nil {
+			return err
+		}
+		if page.Total != 0 || page.Active == nil || page.Active.Item.MessageID != id || page.Active.Status != "processing" {
+			t.Fatalf("active page: %+v", page)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.PutMainTurn(ctx, store.MainTurn{RequestID: delivery.RequestID, MessageID: id, ThreadID: "thread", TurnID: "turn", Status: store.TurnCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	page := readMessageQueue(t, h, "owner")
+	if page.Total != 0 || page.Active != nil {
+		t.Fatalf("completed turn still queued: %+v", page)
+	}
+}

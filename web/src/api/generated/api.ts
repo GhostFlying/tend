@@ -857,6 +857,7 @@ export interface ToolUseView {
  * via the `definition` "ConversationQueuePage".
  */
 export interface ConversationQueuePage {
+  active?: ConversationQueueEntry;
   enabled: boolean;
   event_seq: number;
   items: ConversationQueueEntry[] | null;
