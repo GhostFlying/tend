@@ -39,7 +39,9 @@ export function Composer({ connection }: { connection: Connection }) {
   const saving = useRef(false);
   const [persisting, setPersisting] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [confirmChoice, setConfirmChoice] = useState(false);
+  const [confirmedChoice, setConfirmedChoice] = useState<string | null>(null);
+  const choiceKey = source?.decision ? JSON.stringify([source.message_id, source.decision]) : null;
+  const confirmChoice = choiceKey !== null && confirmedChoice === choiceKey;
   useEffect(() => {
     if (!focus) return;
     const frame = requestAnimationFrame(() => {
@@ -132,7 +134,7 @@ export function Composer({ connection }: { connection: Connection }) {
       });
       composerDraft.clear();
       await composerDraft.flush();
-      setConfirmChoice(false);
+      setConfirmedChoice(null);
     } catch {
       // Not written down, so not sent either; give the entire draft back.
 
@@ -219,7 +221,7 @@ export function Composer({ connection }: { connection: Connection }) {
           <input
             type="checkbox"
             checked={confirmChoice}
-            onChange={(e) => setConfirmChoice(e.target.checked)}
+            onChange={(e) => setConfirmedChoice(e.target.checked ? choiceKey : null)}
           />
           确认原选择：{source.decision.option}（发送前核对当前版本）
           <button onClick={() => composerDraft.clearChoice()}>清除原选择</button>
@@ -256,7 +258,8 @@ export function Composer({ connection }: { connection: Connection }) {
         }}
         placeholder={touch ? "和主 Agent 说…" : "和主 Agent 说…（Enter 发送，Shift+Enter 换行）"}
         aria-label="消息"
-        disabled={blocked || persisting}
+        disabled={blocked}
+        readOnly={persisting}
       />
       <div className={styles.bar}>
         <input

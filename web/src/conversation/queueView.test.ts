@@ -167,3 +167,43 @@ test("reconnect bridges missing pages before retaining older loaded history", as
   expect(q.state.get().more).toBe(false);
   q.stop();
 });
+
+test("a delayed continuation cannot replace a refreshed completed block", async () => {
+  const trigger = { ...item("a", 1), state: "processing" as const };
+  let done = false;
+  let release!: (block: TranscriptBlock) => void;
+  const q = new ConversationQueue({
+    async get<T>(path: string): Promise<T> {
+      if (path.includes("/blocks/"))
+        return new Promise<T>((resolve) => {
+          release = (b) => resolve(b as T);
+        });
+      if (path.includes("transcript"))
+        return {
+          blocks: [
+            {
+              position: 1,
+              trigger: { ...trigger, state: done ? "replied" : "processing" },
+              items: [],
+              more: !done,
+              next_seq: done ? 0 : 50,
+            },
+          ],
+          more: false,
+          event_seq: done ? 2 : 1,
+        } as T;
+      return { items: [], total: 0, enabled: true, event_seq: done ? 2 : 1 } as T;
+    },
+  });
+  q.start();
+  await q.refresh();
+  const old = q.state.get().blocks[0]!;
+  const pending = q.moreBlock(old);
+  done = true;
+  await q.refresh();
+  release(old);
+  await pending;
+  expect(q.state.get().blocks[0]?.trigger.state).toBe("replied");
+  expect(q.state.get().blocks[0]?.more).toBe(false);
+  q.stop();
+});

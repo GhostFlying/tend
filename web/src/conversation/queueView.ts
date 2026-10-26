@@ -297,6 +297,7 @@ export class ConversationQueue {
     }
   }
   async moreBlock(block: TranscriptBlock): Promise<void> {
+    if (this.state.get().blocks.find((b) => b.position === block.position) !== block) return;
     const page = await this.api.get<TranscriptBlock>(
       `/api/v1/conversation/blocks/${encodeURIComponent(block.trigger.message_id)}?after=${block.next_seq || 0}`,
     );
@@ -304,7 +305,7 @@ export class ConversationQueue {
     this.publish({
       ...now,
       blocks: now.blocks.map((b) =>
-        b.position === block.position
+        b === block
           ? {
               ...page,
               items: mergeOutput(b.items ?? [], page.items ?? []),

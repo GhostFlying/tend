@@ -685,3 +685,21 @@ test("upgrading a legacy unfinished upload retains the file and its receipt", as
   expect((await stored())[0]?.uploads?.[0]?.receipt?.file_id).toBe("original");
   expect((await stored())[0]?.submitAttempted).toBe(true);
 });
+
+test("cancelled upload tombstones release original bytes while fencing stale senders", async () => {
+  online = false;
+  const q = await open();
+  const m = await q.enqueue({
+    body: "discard",
+    files: [new File(["large original"], "data.bin")],
+    images: [{ name: "image", media_type: "image/png", data_base64: "AQID" }],
+  });
+  await q.idle();
+  await q.discard(m.requestId);
+  const outbox = await openOutbox(factory);
+  const tombstone = await outbox.edit(m.requestId, (current) => current);
+  expect(tombstone?.state).toBe("cancelled");
+  expect(tombstone?.uploads).toBeUndefined();
+  expect(tombstone?.envelope.payload).toEqual({});
+  expect(tombstone?.body).toBe("");
+});

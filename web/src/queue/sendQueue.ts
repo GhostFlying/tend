@@ -254,7 +254,15 @@ export class SendQueue {
   async discard(requestId: string): Promise<void> {
     const current = await this.outbox.edit(requestId, (m) => {
       if (m.submitAttempted !== false && m.state !== "failed") return m;
-      return { ...m, state: "cancelled" };
+      const tombstone: OutgoingMessage = {
+        ...m,
+        state: "cancelled",
+        body: "",
+        envelope: { ...m.envelope, payload: {} },
+      };
+      delete tombstone.uploads;
+      delete tombstone.references;
+      return tombstone;
     });
     if (current && current.state !== "cancelled")
       throw new Error("消息可能已提交，请先核对服务端状态后撤回");
