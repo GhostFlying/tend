@@ -36,6 +36,7 @@ import (
 // changing that configuration. Set TEND_ORCA_TEMPORARY_RUNNER=1 explicitly;
 // TEND_ORCA_BIN and TEND_ORCA_EFFORT select the provider/effort. The model
 // defaults to TEND_TRAEX_MODEL (GPT-5.6-Sol); TEND_ORCA_MODEL overrides it.
+// An explicitly empty TEND_ORCA_MODEL uses the host launcher configuration.
 // The test covers only the host running it, not every configured Orca host.
 // No production ledger, repository, or runner configuration is used.
 func TestIntegration_OrcaTemporaryRunner(t *testing.T) {
@@ -187,8 +188,8 @@ func temporaryRunnerSmoke(t *testing.T, real bool) {
 		if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, "github.com/GhostFlying/tend/cmd/tend-runner").CombinedOutput(); err != nil {
 			t.Fatalf("build bridge: %v\n%s", err, out)
 		}
-		model := os.Getenv("TEND_ORCA_MODEL")
-		if model == "" {
+		model, explicitModel := os.LookupEnv("TEND_ORCA_MODEL")
+		if !explicitModel {
 			model = traexModel()
 		}
 		observed = &smokeOrcaWorkers{t: t, nonce: nonce, runs: map[string]smokeRunEvidence{}, Workers: orca.NewWorkers(orca.WorkerOptions{Client: oc, Agent: protocol.AgentTraex, Model: model, Effort: os.Getenv("TEND_ORCA_EFFORT"), BridgeCommand: bin, BridgeArgs: []string{"worker-mcp"}, SocketDir: sockets, IDs: protocol.NewULIDGen(time.Now, nil), Now: time.Now})}
