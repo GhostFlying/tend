@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,7 +22,7 @@ type Options struct {
 	// Bin is the traex binary; empty means "traex" on PATH.
 	Bin string
 	// Env is added to the inherited environment, for example TRAE_HOME
-	// for a dedicated home.
+	// for a dedicated home. Orca context is removed after merging.
 	Env []string
 	// Dir is the process's working directory.
 	Dir string
@@ -66,7 +67,7 @@ func Start(ctx context.Context, opts Options) (*Session, error) {
 	procCtx, kill := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(procCtx, bin, "app-server")
 	cmd.Dir = opts.Dir
-	cmd.Env = append(os.Environ(), opts.Env...)
+	cmd.Env = appServerEnv(os.Environ(), opts.Env)
 	cmd.Stderr = opts.Stderr
 	procx.Contain(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -106,6 +107,20 @@ func Start(ctx context.Context, opts Options) (*Session, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func appServerEnv(inherited, overrides []string) []string {
+	env := make([]string, 0, len(inherited)+len(overrides))
+	for _, source := range [][]string{inherited, overrides} {
+		for _, entry := range source {
+			key, _, _ := strings.Cut(entry, "=")
+			// Independent sessions must not report hooks as their parent Orca pane.
+			if !strings.HasPrefix(strings.ToUpper(key), "ORCA_") {
+				env = append(env, entry)
+			}
+		}
+	}
+	return env
 }
 
 func newSession(r io.Reader, w io.WriteCloser, log *slog.Logger) *Session {
