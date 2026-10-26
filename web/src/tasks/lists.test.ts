@@ -144,9 +144,9 @@ test.each([25, 150])("continuous %ims events cannot starve slow task reads", asy
       lists.changed();
       await vi.advanceTimersByTimeAsync(interval);
     }
-    expect(lists.columns[1]!.state.get().items.length).toBe(1);
-    expect(completed).toBeGreaterThanOrEqual(12);
-    expect(calls.length).toBeLessThanOrEqual(24);
+    expect(lists.feeds[0]!.state.get().items.length).toBe(1);
+    expect(completed).toBeGreaterThanOrEqual(2);
+    expect(calls.length).toBeLessThanOrEqual(4);
     expect(calls.every((s) => !s.aborted)).toBe(true);
     const stopped = lists.stop();
     await vi.advanceTimersByTimeAsync(500);
@@ -154,4 +154,38 @@ test.each([25, 150])("continuous %ims events cannot starve slow task reads", asy
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("execution tabs include all nonterminal and terminal tasks without mixing their pages", async () => {
+  const api = new Api();
+  const lists = new TaskLists(api);
+  lists.open();
+  expect(api.calls).toHaveLength(1);
+  expect(new URL(api.calls[0]!.path, "http://test").searchParams.get("lifecycle")).toBe(
+    "draft,queued,running,awaiting_acceptance,changes_required",
+  );
+  lists.open(1);
+  expect(api.calls[0]!.signal?.aborted).toBe(true);
+  expect(new URL(api.calls[1]!.path, "http://test").searchParams.get("lifecycle")).toBe(
+    "completed,cancelled",
+  );
+  api.calls[1]!.resolve({ tasks: [{ ...task("ended"), lifecycle: "cancelled" }] });
+  api.calls[0]!.resolve({ tasks: [task("stale")] });
+  await flush();
+  expect(lists.feeds[0]!.state.get().items).toEqual([]);
+  expect(lists.feeds[1]!.state.get().items.map((t) => t.task_id)).toEqual(["ended"]);
+  lists.setProject("other");
+  expect(api.calls[2]!.path).toContain("project=other");
+  api.calls[2]!.resolve({ tasks: [] });
+  await flush();
+  lists.open(2);
+  expect(
+    new URL(api.calls[3]!.path, "http://test").searchParams.get("lifecycle")?.split(","),
+  ).toHaveLength(7);
+  api.calls[3]!.resolve({
+    tasks: [task("live", "other"), { ...task("done", "other"), lifecycle: "completed" }],
+  });
+  await flush();
+  expect(lists.feeds[2]!.state.get().items).toHaveLength(2);
+  await lists.stop();
 });

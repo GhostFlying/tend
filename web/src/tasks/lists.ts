@@ -4,14 +4,27 @@ import type { TaskLifecycle, TaskPage, TaskSummary } from "../api/generated/api.
 import type { Reader } from "../live/data.ts";
 import { Store } from "../state/store.ts";
 
-export const stages: { id: string; title: string; lifecycle: TaskLifecycle[] }[] = [
-  { id: "pending", title: "待开始", lifecycle: ["draft", "queued"] },
-  { id: "running", title: "实现中", lifecycle: ["running"] },
-  { id: "accepting", title: "验收中", lifecycle: ["awaiting_acceptance"] },
-  { id: "changes", title: "待返工", lifecycle: ["changes_required"] },
-  { id: "completed", title: "已完成", lifecycle: ["completed"] },
-  { id: "cancelled", title: "已取消", lifecycle: ["cancelled"] },
-];
+export const taskTabs = [
+  {
+    id: "current",
+    title: "当前",
+    lifecycle: ["draft", "queued", "running", "awaiting_acceptance", "changes_required"],
+  },
+  { id: "ended", title: "已结束", lifecycle: ["completed", "cancelled"] },
+  {
+    id: "all",
+    title: "全部",
+    lifecycle: [
+      "draft",
+      "queued",
+      "running",
+      "awaiting_acceptance",
+      "changes_required",
+      "completed",
+      "cancelled",
+    ],
+  },
+] satisfies { id: string; title: string; lifecycle: TaskLifecycle[] }[];
 export interface FeedState {
   items: readonly TaskSummary[];
   pages: number;
@@ -158,28 +171,31 @@ export class TaskFeed {
 }
 
 export class TaskLists {
-  readonly columns: readonly TaskFeed[];
+  readonly feeds: readonly TaskFeed[];
   readonly recent: TaskFeed;
   readonly project = new Store("");
   private timer: ReturnType<typeof setTimeout> | undefined;
   constructor(api: Reader) {
-    this.columns = stages.map((stage) => new TaskFeed(api, stage.lifecycle));
+    this.feeds = taskTabs.map((tab) => new TaskFeed(api, tab.lifecycle));
     this.recent = new TaskFeed(api, ["completed"], 5, true);
   }
   setProject(project: string): void {
     this.project.set(project);
-    for (const column of this.columns) column.setProject(project);
+    for (const column of this.feeds) column.setProject(project);
   }
-  open(): void {
-    for (const column of this.columns) column.start();
+  open(index = 0): void {
+    for (const [i, feed] of this.feeds.entries()) {
+      if (i === index) feed.start();
+      else void feed.stop();
+    }
   }
   close(): void {
-    for (const column of this.columns) void column.stop();
+    for (const column of this.feeds) void column.stop();
   }
   refresh(): void {
     clearTimeout(this.timer);
     this.timer = undefined;
-    for (const column of this.columns) void column.refresh();
+    for (const column of this.feeds) void column.refresh();
     void this.recent.refresh();
   }
   changed(): void {
@@ -188,6 +204,6 @@ export class TaskLists {
   async stop(): Promise<void> {
     clearTimeout(this.timer);
     this.timer = undefined;
-    await Promise.all([...this.columns.map((column) => column.stop()), this.recent.stop()]);
+    await Promise.all([...this.feeds.map((column) => column.stop()), this.recent.stop()]);
   }
 }

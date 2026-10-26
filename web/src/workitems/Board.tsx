@@ -120,7 +120,7 @@ export function WorkItemBoard({
           className={`${controls.chipBtn} ${styles.desktopOnly}`}
           onClick={onRecords}
         >
-          执行记录
+          任务执行
         </button>
         <BoardResourceEntry connection={connection} onRecords={onRecords} />
       </header>
