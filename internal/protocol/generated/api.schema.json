@@ -588,6 +588,12 @@
         "body": {
           "type": "string"
         },
+        "choices": {
+          "items": {
+            "$ref": "#/definitions/WorkItemChoice"
+          },
+          "type": "array"
+        },
         "created_at": {
           "format": "date-time",
           "type": "string"
@@ -825,6 +831,52 @@
         "generation"
       ],
       "title": "CreateActionPayload",
+      "type": "object"
+    },
+    "CreateWorkItemChoicePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "recommendation": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "task_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "question",
+        "options",
+        "source_id"
+      ],
+      "title": "CreateWorkItemChoicePayload",
       "type": "object"
     },
     "CreateWorkItemPayload": {
@@ -1149,6 +1201,9 @@
         "running": {
           "type": "integer"
         },
+        "starting": {
+          "type": "integer"
+        },
         "unknown": {
           "type": "integer"
         },
@@ -1187,6 +1242,32 @@
         "phase"
       ],
       "title": "ExecutionRecovery",
+      "type": "object"
+    },
+    "ExecutionStartup": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer"
+        },
+        "code": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "type": "integer"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "prompt_write_state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "attempts"
+      ],
+      "title": "ExecutionStartup",
       "type": "object"
     },
     "ExecutionState": {
@@ -2274,6 +2355,9 @@
             }
           ]
         },
+        "ended_at": {
+          "type": "integer"
+        },
         "execution": {
           "$ref": "#/definitions/TaskExecutionView"
         },
@@ -2374,6 +2458,9 @@
         "run_id": {
           "type": "string"
         },
+        "startup": {
+          "$ref": "#/definitions/ExecutionStartup"
+        },
         "state": {
           "$ref": "#/definitions/ExecutionState"
         }
@@ -2465,6 +2552,9 @@
           "$ref": "#/definitions/ControlMode"
         },
         "control_revision": {
+          "type": "integer"
+        },
+        "ended_at": {
           "type": "integer"
         },
         "execution": {
@@ -2631,6 +2721,22 @@
       "title": "ToolUseView",
       "type": "object"
     },
+    "UpdateWorkItemChoicePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "type": "string"
+        },
+        "owner_message_id": {
+          "type": "string"
+        },
+        "replacement": {
+          "$ref": "#/definitions/CreateWorkItemChoicePayload"
+        }
+      },
+      "title": "UpdateWorkItemChoicePayload",
+      "type": "object"
+    },
     "UpdateWorkItemPayload": {
       "additionalProperties": false,
       "properties": {
@@ -2706,6 +2812,151 @@
         "stages"
       ],
       "title": "UpdateWorkItemPayload",
+      "type": "object"
+    },
+    "UpdaterReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/definitions/UpgradeBinding"
+        },
+        "committed_confirmed": {
+          "type": "boolean"
+        },
+        "current_process_instance_id": {
+          "type": "string"
+        },
+        "current_sha256": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "rollback_confirmed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "binding",
+        "phase",
+        "current_process_instance_id",
+        "current_sha256",
+        "rollback_confirmed",
+        "committed_confirmed"
+      ],
+      "title": "UpdaterReceipt",
+      "type": "object"
+    },
+    "UpgradeBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_sha256": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "manifest_sha256": {
+          "type": "string"
+        },
+        "process_instance_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "upgrade_id",
+        "instance_id",
+        "process_instance_id",
+        "release_id",
+        "manifest_sha256",
+        "artifact_sha256"
+      ],
+      "title": "UpgradeBinding",
+      "type": "object"
+    },
+    "UpgradeEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_at": {
+          "type": "integer"
+        },
+        "completed_at": {
+          "type": "integer"
+        },
+        "hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UpgradeEvidenceHost"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "manifest_sha256": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "server_sha256": {
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "upgrade_id",
+        "revision",
+        "release_id",
+        "manifest_sha256",
+        "server_sha256",
+        "checked_at",
+        "completed_at",
+        "hosts"
+      ],
+      "title": "UpgradeEvidence",
+      "type": "object"
+    },
+    "UpgradeEvidenceHost": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_sha256": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "previous_sha256": {
+          "type": "string"
+        },
+        "receipt": {
+          "$ref": "#/definitions/UpdaterReceipt"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host_id",
+        "status",
+        "artifact_sha256",
+        "previous_sha256"
+      ],
+      "title": "UpgradeEvidenceHost",
       "type": "object"
     },
     "UpgradeHostView": {
@@ -2816,6 +3067,121 @@
       ],
       "title": "Verdict",
       "type": "string"
+    },
+    "WorkItemChoice": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "type": "string"
+        },
+        "answer_source_id": {
+          "type": "string"
+        },
+        "answer_source_kind": {
+          "type": "string"
+        },
+        "choice_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "delivery_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "recommendation": {
+          "type": "string"
+        },
+        "replaced_by": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "supersedes": {
+          "type": "string"
+        },
+        "task_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "updated_at": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "choice_id",
+        "work_item_id",
+        "version",
+        "status",
+        "question",
+        "options",
+        "source_id",
+        "message_id",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "WorkItemChoice",
+      "type": "object"
+    },
+    "WorkItemChoicePage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/WorkItemChoice"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "WorkItemChoicePage",
+      "type": "object"
     },
     "WorkItemClosure": {
       "additionalProperties": false,
@@ -2936,6 +3302,9 @@
         },
         "summary": {
           "type": "string"
+        },
+        "upgrade": {
+          "$ref": "#/definitions/UpgradeEvidence"
         }
       },
       "required": [
@@ -2950,7 +3319,8 @@
       "enum": [
         "acceptance",
         "delivery",
-        "owner_decision"
+        "owner_decision",
+        "upgrade"
       ],
       "title": "WorkItemEvidenceKind",
       "type": "string"
@@ -3148,6 +3518,12 @@
         "background": {
           "items": {
             "$ref": "#/definitions/SharedFact"
+          },
+          "type": "array"
+        },
+        "choices": {
+          "items": {
+            "$ref": "#/definitions/WorkItemChoice"
           },
           "type": "array"
         },
@@ -3391,6 +3767,9 @@
     "CreateActionPayload": {
       "$ref": "#/definitions/CreateActionPayload"
     },
+    "CreateWorkItemChoicePayload": {
+      "$ref": "#/definitions/CreateWorkItemChoicePayload"
+    },
     "CreateWorkItemPayload": {
       "$ref": "#/definitions/CreateWorkItemPayload"
     },
@@ -3472,8 +3851,17 @@
     "ToolSpec": {
       "$ref": "#/definitions/ToolSpec"
     },
+    "UpdateWorkItemChoicePayload": {
+      "$ref": "#/definitions/UpdateWorkItemChoicePayload"
+    },
     "UpdateWorkItemPayload": {
       "$ref": "#/definitions/UpdateWorkItemPayload"
+    },
+    "WorkItemChoice": {
+      "$ref": "#/definitions/WorkItemChoice"
+    },
+    "WorkItemChoicePage": {
+      "$ref": "#/definitions/WorkItemChoicePage"
     },
     "WorkItemPage": {
       "$ref": "#/definitions/WorkItemPage"

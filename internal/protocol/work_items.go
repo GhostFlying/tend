@@ -31,6 +31,7 @@ type WorkItemEvidence struct {
 	Summary   string               `json:"summary"`
 	// Observation is a server-frozen provider fact, never caller supplied proof.
 	Observation *DeliveryObservation `json:"observation,omitempty"`
+	Upgrade     *UpgradeEvidence     `json:"upgrade,omitempty"`
 }
 
 // WorkItemStage has caller-chosen stable identity within its work item.

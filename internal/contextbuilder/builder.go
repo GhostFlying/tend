@@ -81,6 +81,8 @@ const (
 )
 
 var classes = map[string]class{
+	"work_item_choice.opened": attention, "work_item_choice.answered": attention,
+	"work_item_choice.withdrawn": intent, "work_item_choice.superseded": intent,
 	"work_item.created": intent, "work_item.updated": intent, "work_item.task_linked": intent,
 	"work_item.closed": result, "work_item.reopened": intent, "work_item.delivery_changed": result,
 	"task.relations_backlinks_updated": intent, "task.relations_updated": intent, "task.created": intent, "task.spec_updated": intent, "task.rating_changed": intent, "task.project_changed": intent, "task.control_changed": intent,
@@ -409,6 +411,28 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			return err
 		}
 		if mine {
+			continue
+		}
+		if e.ObjectType == "work_item_choice" {
+			choice, err := store.GetWorkItemChoice(ctx, q, e.ObjectID)
+			if err != nil {
+				return err
+			}
+			item, err := store.GetWorkItem(ctx, q, choice.WorkItemID)
+			if err != nil {
+				return err
+			}
+			line := sc.label(item.Project, fmt.Sprintf("#%d %s: %s of %s %q (by %s)", e.Seq, e.Kind, workItemChoiceLine(choice), item.WorkItemID, clipRunes(item.Title, 80), actor(e.ActorJSON)))
+			c := classify(e.Kind, body)
+			if sc.covers(item.Project) {
+				if c == attention {
+					s.Attention = append(s.Attention, line)
+				} else {
+					s.Changes = append(s.Changes, line)
+				}
+			} else if c == attention {
+				s.OtherAttention = append(s.OtherAttention, line)
+			}
 			continue
 		}
 		if e.ObjectType == "work_item" {

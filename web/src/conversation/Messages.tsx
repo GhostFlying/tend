@@ -1,3 +1,4 @@
+import { ChoiceCard } from "../workitems/Choice.tsx";
 import { useServices } from "../app/services.tsx";
 import { noticeTitle } from "../upgrades/status.ts";
 // The transcript's rows: the owner's messages as right-hand bubbles with
@@ -10,7 +11,14 @@ import type { SendQueue } from "../queue/sendQueue.ts";
 import controls from "../shell/controls.module.css";
 import { Markdown } from "./Markdown.tsx";
 import styles from "./Messages.module.css";
-import { clock, dayLabel, duration, messageStateLabels, type Entry } from "./model.ts";
+import {
+  clock,
+  dayLabel,
+  duration,
+  messageStateLabels,
+  systemMessageBody,
+  type Entry,
+} from "./model.ts";
 import { ToolRow } from "./ToolRow.tsx";
 import { MessageImages, OutgoingImages } from "./Images.tsx";
 import { MessageAttachments, OutgoingAttachments } from "./Attachments.tsx";
@@ -144,6 +152,9 @@ const AgentItem = memo(function AgentItem({ item }: { item: ConversationItem }) 
   const status = item.assistant_state;
   return (
     <div data-scroll-id={item.message_id}>
+      {item.choices?.map((choice) => (
+        <ChoiceCard key={choice.choice_id} choice={choice} />
+      ))}
       {item.tool ? (
         <ToolRow tool={item.tool} />
       ) : (
@@ -168,12 +179,15 @@ export function SystemMessage({ item }: { item: ConversationItem }) {
       <div className={styles.systemHead}>
         {title} <time dateTime={item.created_at}>{clock(Date.parse(item.created_at))}</time>
       </div>
-      <Markdown text={item.body ?? ""} />
+      <Markdown text={systemMessageBody(item)} />
       {item.state && (
         <div className={styles.state} data-state={item.state} role="status">
           {messageStateLabels[item.state]}
         </div>
       )}
+      {item.choices?.map((choice) => (
+        <ChoiceCard key={choice.choice_id} choice={choice} />
+      ))}
       {item.upgrade_id && (
         <button type="button" onClick={() => openUpgrade(item.upgrade_id!)}>
           查看发布详情

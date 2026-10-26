@@ -279,7 +279,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 			}
 		}
 		if e.Kind != "task.completed" && wakesMain(x.Principal, e.Kind) {
-			if err := recordDecisionWake(ctx, x, tx, e, eventID); err != nil {
+			if e.Kind == "work_item_choice.answered" {
+				if err := recordWorkItemChoiceWake(ctx, x, tx, e, eventID); err != nil {
+					return err
+				}
+			} else if err := recordDecisionWake(ctx, x, tx, e, eventID); err != nil {
 				return err
 			}
 		}

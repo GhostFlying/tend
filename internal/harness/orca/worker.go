@@ -43,6 +43,9 @@ type WorkerOptions struct {
 	Poll time.Duration
 	// WaitChunk bounds each wait for the terminal to go idle. Default 1m.
 	WaitChunk time.Duration
+	// StartupAttempts bounds explicit no-write readiness-timeout retries per run.
+	// Nil defaults to one; zero disables retries.
+	StartupAttempts *int
 	// RecoveryAttempts bounds automatic model-error recovery per run. Nil defaults
 	// to one; zero disables it. The count is persisted in the worker journal.
 	RecoveryAttempts *int
@@ -185,9 +188,11 @@ type workerState struct {
 	// HandbackEventID replays a successful handback until the next root failure.
 	HandbackEventID string `json:"handback_event_id,omitempty"`
 	// FailedTurn checkpoints the latest root failure for replay after restart.
-	FailedTurn int64          `json:"failed_turn,omitempty"`
-	Recovery   *recoveryState `json:"recovery,omitempty"`
-	SessionID  string         `json:"session_id,omitempty"`
+	FailedTurn       int64             `json:"failed_turn,omitempty"`
+	Startup          *startupState     `json:"startup,omitempty"`
+	LaunchDiagnostic *LaunchDiagnostic `json:"launch_diagnostic,omitempty"`
+	Recovery         *recoveryState    `json:"recovery,omitempty"`
+	SessionID        string            `json:"session_id,omitempty"`
 }
 
 // Agent states as orca reports them.
@@ -267,7 +272,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	}
 	// From begin onward, launch/send/recovery outcomes can be unknown. Never
 	// attach the prelaunch proof to those errors, even if the thread is empty.
-	if err := w.begin(ctx, agent); err != nil {
+	if err := w.beginStartup(ctx, agent); err != nil {
 		if errors.Is(err, harness.ErrHeld) {
 			w.holding = err.Error()
 			go w.run(ctx)
@@ -535,6 +540,7 @@ func (w *worker) launched(ctx context.Context, l Launch, prompt string) error {
 	w.st.Launch = ""
 	w.st.Terminal, w.st.Pane = l.Outcome.Handle, l.Outcome.PaneKey
 	w.st.PromptOutcome = l.Prompt.Outcome
+	w.st.LaunchDiagnostic = l.Prompt.Diagnostic
 	w.st.PromptReceiptAt = w.ws.opts.Now().UnixMilli()
 	if w.st.PromptOutcome != promptHandedToTerminal && w.st.PromptOutcome != promptNotDelivered {
 		w.st.PromptOutcome = promptUnconfirmed

@@ -25,6 +25,8 @@ import {
   stageNeedsReview,
   stageRows,
 } from "./model.ts";
+import { ChoiceCard } from "./Choice.tsx";
+import { WorkItemProgress } from "./Progress.tsx";
 import controls from "../shell/controls.module.css";
 import styles from "./WorkItems.module.css";
 
@@ -105,32 +107,66 @@ export function WorkItemDetails({
         {!item && !state.error && <p className={styles.empty}>正在读取工作项…</p>}
         {item && (
           <>
-            <p className={styles.meta}>
-              {item.project || "未分组"} · 修订 {item.revision} · <code>{item.work_item_id}</code>
-            </p>
+            {!historical && (
+              <WorkItemProgress key={item.work_item_id} item={item}>
+                {item.choices
+                  ?.filter((choice) => choice.status === "open")
+                  .map((choice) => (
+                    <ChoiceCard key={choice.choice_id} choice={choice} />
+                  ))}
+              </WorkItemProgress>
+            )}
+            {!historical &&
+              !!item.follow_ons?.some(
+                (next) => next.kind === "problem" && next.status === "open",
+              ) && (
+                <Section title="当前阻碍">
+                  {item.follow_ons
+                    .filter((next) => next.kind === "problem" && next.status === "open")
+                    .map((next) => (
+                      <div key={next.follow_on_id} className={styles.notice}>
+                        <Markdown text={next.text} />
+                      </div>
+                    ))}
+                </Section>
+              )}
             {!historical && <DraftActions item={item} />}
-            {!historical && <ExecutionSummary counts={item.execution} />}
-            <Section title="目标">
-              <Markdown text={item.intent} />
-            </Section>
-            {!!item.background?.length && (
-              <Section title="共享背景">
-                {item.background.map((fact, index) => (
-                  <div key={index} className={styles.fact}>
-                    <span className={styles.meta}>{factLabels[fact.kind] ?? fact.kind}</span>
-                    <Markdown text={fact.text} />
-                    <p className={styles.source}>来源：{fact.source}</p>
-                  </div>
-                ))}
+            <details className={styles.history} open={historical || undefined}>
+              <summary>目标与共享背景</summary>
+              <Section title="目标">
+                <Markdown text={item.intent} />
+              </Section>
+              {!!item.background?.length && (
+                <Section title="共享背景">
+                  {item.background.map((fact, index) => (
+                    <div key={index} className={styles.fact}>
+                      <span className={styles.meta}>{factLabels[fact.kind] ?? fact.kind}</span>
+                      <Markdown text={fact.text} />
+                      <p className={styles.source}>来源：{fact.source}</p>
+                    </div>
+                  ))}
+                </Section>
+              )}
+            </details>
+            <details className={styles.history} open={historical || undefined}>
+              <summary>完整阶段计划与执行关联</summary>
+              <Section title="阶段与执行">
+                {item.stages?.length ? (
+                  <StageList item={item} />
+                ) : (
+                  <p className={styles.empty}>阶段尚未安排，仍保持跟进。</p>
+                )}
+              </Section>
+            </details>
+            {!!item.choices?.some((choice) => choice.status !== "open") && (
+              <Section title="历史安排">
+                {item.choices
+                  .filter((choice) => choice.status !== "open")
+                  .map((choice) => (
+                    <ChoiceCard key={choice.choice_id} choice={choice} readOnly />
+                  ))}
               </Section>
             )}
-            <Section title="阶段与执行">
-              {item.stages?.length ? (
-                <StageList item={item} />
-              ) : (
-                <p className={styles.empty}>阶段尚未安排，仍保持跟进。</p>
-              )}
-            </Section>
             <Section title="后续事项">
               {item.follow_ons?.length ? (
                 item.follow_ons.map((next) => (
@@ -172,6 +208,12 @@ export function WorkItemDetails({
                 <Evidence items={item.closure.evidence} />
               </Section>
             )}
+            <details className={styles.history}>
+              <summary>工作项标识与修订</summary>
+              <p className={styles.meta}>
+                {item.project || "未分组"} · 修订 {item.revision} · <code>{item.work_item_id}</code>
+              </p>
+            </details>
             {!historical && (
               <details className={styles.history}>
                 <summary>查看计划历史</summary>
@@ -338,6 +380,37 @@ function Evidence({ items }: { items: readonly WorkItemEvidence[] | null | undef
       {items.map((item, index) => (
         <div key={index}>
           <Markdown text={item.summary} />
+          {item.upgrade && (
+            <div className={styles.source}>
+              <p>
+                升级批次 {item.upgrade.upgrade_id} · 修订 {item.upgrade.revision}
+              </p>
+              <p>
+                发布 {item.upgrade.release_id} · 核验于{" "}
+                {new Date(item.upgrade.checked_at).toLocaleString()}
+              </p>
+              <p>
+                Manifest <code>{item.upgrade.manifest_sha256}</code>
+              </p>
+              <p>
+                Server <code>{item.upgrade.server_sha256}</code>
+              </p>
+              <ul>
+                {item.upgrade.hosts?.map((host) => (
+                  <li key={host.host_id}>
+                    {host.host_id} ·{" "}
+                    {host.status === "completed"
+                      ? "已更新"
+                      : host.status === "skipped"
+                        ? "已符合目标版本"
+                        : host.status}{" "}
+                    · <code>{host.artifact_sha256}</code>
+                  </li>
+                ))}
+              </ul>
+              <p>此依据仅证明上述发布范围完成，不代表产品功能已通过验收。</p>
+            </div>
+          )}
           {item.observation && (
             <p className={styles.source}>
               留存观察：{deliveryLabels[item.observation.state] ?? item.observation.state}

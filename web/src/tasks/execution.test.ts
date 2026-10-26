@@ -157,3 +157,36 @@ test("recovery is visible separately from running and preserves its diagnostic",
     { state: "recovering", text: "1 恢复或异常处理中" },
   ]);
 });
+
+test("startup diagnostics distinguish readiness timeout and count startup separately", () => {
+  expect(executionCounts({ ...counts, starting: 1 })).toEqual([
+    { state: "starting", text: "1 正在启动" },
+  ]);
+  expect(
+    queueReasonText({
+      block_reason: "waiting_decision",
+      execution: {
+        state: "waiting_owner",
+        startup: { phase: "failed", code: "readiness_timeout", attempts: 1 },
+      },
+    }),
+  ).toBe("等待 CLI 就绪超时 · 已自动重试 1 次");
+  expect(
+    queueReasonText({
+      block_reason: "none",
+      execution: {
+        state: "recovering",
+        startup: { phase: "retry_pending", code: "readiness_timeout", attempts: 0 },
+      },
+    }),
+  ).toContain("正在确认旧终端停止后重试");
+  expect(
+    queueReasonText({
+      block_reason: "none",
+      execution: {
+        state: "running",
+        startup: { phase: "started", code: "readiness_timeout", attempts: 0 },
+      },
+    }),
+  ).toBe("");
+});

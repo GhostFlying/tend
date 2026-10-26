@@ -4,12 +4,13 @@
 // only says something changed, and the affected views are read again. The
 // client never rebuilds ledger state from events itself.
 import { RepositoryRegistry } from "../repos/registry.ts";
-import { WorkItems } from "../workitems/live.ts";
+import { WorkItemRead, WorkItems } from "../workitems/live.ts";
 import { TaskLists } from "../tasks/lists.ts";
 import { ConversationHandoff } from "../conversation/handoff.ts";
 import { ConversationSettings } from "../conversation/settings.ts";
 import { ApiError } from "../api/client.ts";
 import type {
+  WorkItemChoice,
   ConversationItem,
   ConversationPage,
   LedgerEvent,
@@ -85,6 +86,8 @@ export class LiveData {
   private readonly lookingUp = new Set<string>();
   private readonly dirtyLookups = new Set<string>();
   private historyGeneration = 0;
+  private readonly choiceVersions = new Map<string, WorkItemChoice>();
+  private readonly choiceReads = new Map<string, WorkItemRead<WorkItemChoice>>();
   private logCache: { runId: string; entries: RunLogView[]; next: number; more: boolean } | null =
     null;
   /** Conversation events that arrived while the latest page was being read. */
@@ -139,6 +142,7 @@ export class LiveData {
     void this.handoff.refresh();
     this.tasks.refresh();
     this.workItems.refresh();
+    for (const read of this.choiceReads.values()) void read.refresh();
     this.detailController?.abort();
     void this.stopLogs();
     this.logCache = null;
@@ -150,8 +154,50 @@ export class LiveData {
     ]);
   }
 
+  /** One coalesced, cancellable read/backoff per choice, shared by both surfaces. */
+  choiceRead(id: string): WorkItemRead<WorkItemChoice> {
+    let read = this.choiceReads.get(id);
+    if (!read) {
+      read = new WorkItemRead(this.api, (choice) => {
+        this.rememberChoice(choice);
+        const state = this.conversationStore.get();
+        this.conversationStore.set({
+          ...state,
+          items: state.items.map((item) => this.currentChoices(item)),
+        });
+        this.workItems.changed();
+      });
+      this.choiceReads.set(id, read);
+    }
+    return read;
+  }
+
+  /** Refresh a card in place, including older loaded chat history. */
+  async choiceChanged(id: string): Promise<void> {
+    if (this.stopped) return;
+    this.workItems.changed();
+    await this.choiceRead(id).open(`/api/v1/work-item-choices/${encodeURIComponent(id)}`);
+  }
+
+  private rememberChoice(choice: WorkItemChoice): WorkItemChoice {
+    const current = this.choiceVersions.get(choice.choice_id);
+    if (current && current.version > choice.version) return current;
+    this.choiceVersions.set(choice.choice_id, choice);
+    return choice;
+  }
+
+  /** Every read path shares card versions, even when its HTTP page is older. */
+  private currentChoices(item: ConversationItem): ConversationItem {
+    if (!item.choices?.length) return item;
+    return { ...item, choices: item.choices.map((choice) => this.rememberChoice(choice)) };
+  }
+
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
+    if (event.object_type === "work_item_choice") {
+      void this.choiceChanged(event.object_id);
+      return;
+    }
     if (
       [
         "conversation.handoff_settings",
@@ -229,7 +275,7 @@ export class LiveData {
       const now = this.conversationStore.get();
       this.conversationStore.set({
         ...now,
-        items: merge(page.items ?? [], now.items),
+        items: merge(page.items ?? [], now.items).map((item) => this.currentChoices(item)),
         more: page.more,
         before: page.items?.[0]?.seq ?? now.before,
         loadingEarlier: false,
@@ -331,6 +377,7 @@ export class LiveData {
         items = merge(previous, items);
         more = earlier.more;
       }
+      items = items.map((item) => this.currentChoices(item));
       this.recovered("conversation");
       // Items before the page's first one are dropped: the page may have
       // moved past them while the stream was down, so they could be stale.
@@ -357,7 +404,7 @@ export class LiveData {
   }
 
   private applyItem(event: LedgerEvent): void {
-    const item = event.item;
+    const item = event.item ? this.currentChoices(event.item) : undefined;
     if (!item) {
       return;
     }
@@ -443,6 +490,7 @@ export class LiveData {
     this.dirtyLookups.clear();
     this.repos.stop();
     this.workItems.stop();
+    for (const read of this.choiceReads.values()) read.close();
     this.detailController?.abort();
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
@@ -596,7 +644,18 @@ export function merge(
     // Reads and delayed stream events may arrive in either order. A final
     // body can be shorter than a draft, so only its revision orders them.
     if ((current?.assistant_revision ?? 0) > (it.assistant_revision ?? 0)) continue;
-    byId.set(it.message_id, it);
+    byId.set(
+      it.message_id,
+      current?.choices?.length
+        ? {
+            ...it,
+            choices: (it.choices ?? current.choices).map((choice) => {
+              const old = current.choices?.find((entry) => entry.choice_id === choice.choice_id);
+              return old && old.version > choice.version ? old : choice;
+            }),
+          }
+        : it,
+    );
   }
   return [...byId.values()].sort((a, b) => a.seq - b.seq);
 }
@@ -635,6 +694,7 @@ export function summary(t: TaskDetail): TaskSummary {
     ...(t.primary_work_item_title === undefined
       ? {}
       : { primary_work_item_title: t.primary_work_item_title }),
+    ...(t.ended_at === undefined ? {} : { ended_at: t.ended_at }),
     ...(t.completed_at === undefined ? {} : { completed_at: t.completed_at }),
   };
 }

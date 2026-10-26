@@ -29,6 +29,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.row[data-expanded="true"] .name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.expanded .title {
+  padding: 0 0 12px;
+}
+.row[data-expanded="true"] {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+}
 .online {
   flex: none;
   color: var(--label-3);

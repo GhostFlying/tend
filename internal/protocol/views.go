@@ -10,6 +10,7 @@ import (
 
 // TaskSummary is a task as listed.
 type TaskSummary struct {
+	EndedAt              int64              `json:"ended_at,omitempty"`
 	Execution            *TaskExecutionView `json:"execution,omitempty"`
 	PrimaryWorkItemTitle string             `json:"primary_work_item_title,omitempty"`
 	CompletedAt          int64              `json:"completed_at,omitempty"`
@@ -270,6 +271,7 @@ const (
 // owner, main agent or system, or a tool the main agent used. Items share
 // one order, by seq.
 type ConversationItem struct {
+	Choices     []WorkItemChoice         `json:"choices,omitempty"`
 	Images      []ConversationImage      `json:"images,omitempty"`
 	Attachments []ConversationAttachment `json:"attachments,omitempty"`
 	NoticeType  string                   `json:"notice_type,omitempty"`

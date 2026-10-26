@@ -45,7 +45,7 @@ func TestWorkItemEnumSchemaPreservesExistingVocabulary(t *testing.T) {
 		{"WorkItemFollowOn", "kind", "WorkItemFollowOnKind", []string{"commitment", "problem", "suggestion"}},
 		{"WorkItemFollowOn", "status", "WorkItemFollowOnStatus", []string{"open", "resolved", "transferred"}},
 		{"WorkItemDelivery", "provider", "WorkItemDeliveryProvider", []string{"github", "codebase"}},
-		{"WorkItemEvidence", "kind", "WorkItemEvidenceKind", []string{"acceptance", "delivery", "owner_decision"}},
+		{"WorkItemEvidence", "kind", "WorkItemEvidenceKind", []string{"acceptance", "delivery", "owner_decision", "upgrade"}},
 		{"WorkItemClosure", "kind", "WorkItemClosureKind", []string{"completed", "declined", "handed_off", "superseded"}},
 		{"WorkItemTaskDisposition", "action", "WorkItemTaskDispositionAction", []string{"continue_existing", "updated", "stopped"}},
 	} {

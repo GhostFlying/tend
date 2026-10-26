@@ -58,6 +58,8 @@ type WorkerSpec struct {
 	// recorded before any work happens in it, and again whenever the
 	// harness changes it. An error stops the worker from starting.
 	OnThread func(threadID string) error
+	// OnStartupEvent persists startup facts before Start returns.
+	OnStartupEvent func(context.Context, WorkerEvent) error
 	// OnTakeover, when set, is called when the worker notices that the
 	// owner works in its agent (D67). The worker then neither judges nor
 	// touches the agent until it is stopped, normally with ErrHeld.

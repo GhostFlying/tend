@@ -53,7 +53,7 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 				return err
 			}
 		}
-		fmt.Fprintf(&body, "\n\n工作项：%s（%s）。本轮执行完成不代表后续跟进结束；请核对已有承诺、交付状态和下一步安排；完成阶段后更新计划，仍有阶段责任时用 completion_reviews 明确记录核对结论。", item.WorkItemID, item.Title)
+		fmt.Fprintf(&body, "\n\n工作项：%s（%s）。本轮执行完成不代表后续跟进结束；请核对已有承诺、交付状态和下一步安排；完成阶段后更新计划，仍有阶段责任时用 completion_reviews 明确记录核对结论。若已授权上线则继续；否则在核对现有选择后通过工作项选择卡询问下一步，明确尚需提交、PR、合入或部署的哪些步骤，已决定稍后处理的不要重复问。", item.WorkItemID, item.Title)
 	}
 	for _, mount := range artifact.Mounts {
 		// Commit hashes are facts captured in the accepted artifact, not

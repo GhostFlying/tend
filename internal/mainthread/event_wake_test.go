@@ -220,3 +220,68 @@ func TestEventWakeWaitsForActiveOwnerAndPendingOwner(t *testing.T) {
 		t.Fatalf("pending owner did not precede event: %+v", starts)
 	}
 }
+
+func TestWorkItemChoiceAnswerWakesWithSystemNoticeAndNoQueuedOwnerReply(t *testing.T) {
+	h := testkit.NewHarness()
+	e := newEnv(t, h)
+	e.stop()
+	// A previously received owner request is the question's provenance, not a
+	// fresh owner turn that could accidentally mask a failed answer wake.
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.InsertMessage(t.Context(), store.MessageRow{MessageID: "choice-source", Author: "owner", Body: "Implement the change; ask before deployment", CreatedAt: 1})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var item protocol.WorkItem
+	if err := json.Unmarshal(e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Delivery", Intent: "Implement and discuss deployment"}}, app.CreateWorkItem{}), &item); err != nil {
+		t.Fatal(err)
+	}
+	execute := func(cmd app.Command, target protocol.Target, version int64, payload any) protocol.Operation {
+		t.Helper()
+		raw, _ := json.Marshal(payload)
+		op, err := e.app.Execute(t.Context(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: cmd.Operation(), Target: target, ExpectedControlRevision: &version, Payload: raw, Reason: "Owner selects next step"}, cmd)
+		if err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatalf("op=%+v err=%v", op, err)
+		}
+		return op
+	}
+	opened := execute(app.CreateWorkItemChoice{}, protocol.Target{Type: "work_item", ID: item.WorkItemID}, item.Revision, protocol.CreateWorkItemChoicePayload{Question: "Continue to deployment?", Options: []string{"Deploy", "Later"}, SourceID: "choice-source"})
+	var choice protocol.WorkItemChoice
+	if err := json.Unmarshal(opened.Result, &choice); err != nil {
+		t.Fatal(err)
+	}
+	answered := execute(app.UpdateWorkItemChoice{Action: "respond"}, protocol.Target{Type: "work_item_choice", ID: choice.ChoiceID}, choice.Version, protocol.UpdateWorkItemChoicePayload{Answer: "Deploy after CI"})
+	if err := json.Unmarshal(answered.Result, &choice); err != nil {
+		t.Fatal(err)
+	}
+	e.start()
+	eventually(t, "choice answer event completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed'`) == 1 })
+	starts := h.Starts()
+	if len(starts) != 1 {
+		t.Fatalf("starts=%+v", starts)
+	}
+	for _, text := range []string{"work_item_choice.answered", choice.ChoiceID, "Deploy after CI", choice.AnswerSourceID} {
+		if !strings.Contains(starts[0].Text, text) {
+			t.Errorf("wake missing %q: %s", text, starts[0].Text)
+		}
+	}
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		msg, err := store.GetMessage(t.Context(), tx.Q(), starts[0].UserMessageID)
+		if err != nil {
+			return err
+		}
+		if msg.Author != "system" || msg.ReplyTo != choice.AnswerSourceID {
+			t.Fatalf("notice=%+v", msg)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if e.count(`SELECT COUNT(*) FROM events WHERE object_id=? AND kind='conversation.message_state' AND json_extract(body_json,'$.state')='replied'`, choice.AnswerSourceID) != 1 {
+		t.Fatal("recorded owner choice remained queued")
+	}
+	if e.count(`SELECT COUNT(*) FROM outbox WHERE operation=? AND status='failed'`, app.OpHandleEvent) != 0 {
+		t.Fatal("choice wake was rejected")
+	}
+}

@@ -169,3 +169,61 @@ func TestInterruptRejectsSystemNoticeWithoutEventTurn(t *testing.T) {
 		t.Fatalf("unrelated notice admitted as stoppable event turn: %+v", op)
 	}
 }
+
+func TestStartupFailureNoticeUsesCurrentRunSafeDiagnosis(t *testing.T) {
+	for _, diagnostic := range []bool{true, false} {
+		t.Run(map[bool]string{true: "structured", false: "legacy"}[diagnostic], func(t *testing.T) {
+			h := newHarness(t)
+			_, task := h.createTask(owner, createTaskPayload{Title: "startup notice", Spec: testSpec})
+			as, _, _ := h.claim("linux-1")
+			h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+			if diagnostic {
+				_, err := h.app.RecordRunEvents(t.Context(), runPrincipal(as.RunID, as.Role), as.RunID, []protocol.RunEvent{{Seq: 1, Kind: "worker.startup_failed", Body: json.RawMessage(`{"attempts":1,"diagnostic":{"code":"readiness_timeout","phase":"readiness","terminalSnapshot":{"tail":["PRIVATE_PROMPT_SECRET"]},"terminalHandle":"PRIVATE_TERMINAL"}}`)}})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "worker_start_failed"}, Release{})
+			lastBody := func() string {
+				t.Helper()
+				var body string
+				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+					items, err := store.ListConversation(t.Context(), tx.Q(), 0, 0, 100)
+					if err == nil {
+						body = items[len(items)-1].Body
+					}
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				return body
+			}
+			body := lastBody()
+			if diagnostic {
+				for _, part := range []string{"等待 CLI 就绪超时", "阶段：等待 CLI 就绪", "已自动重试 1 次"} {
+					if !strings.Contains(body, part) {
+						t.Fatalf("missing %q: %s", part, body)
+					}
+				}
+			} else if strings.Contains(body, "启动失败：") {
+				t.Fatalf("legacy failure fabricated diagnosis: %s", body)
+			}
+			if strings.Contains(body, "PRIVATE_") {
+				t.Fatalf("private native data leaked: %s", body)
+			}
+			// A new legacy run must not inherit the earlier run's structured failure.
+			if op := h.requestAction(task.TaskID, protocol.ActionImplement, 2); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			next, ok, _ := h.claim("linux-1")
+			if !ok {
+				t.Fatal("retry missing")
+			}
+			h.runAs(next, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+			h.runAs(next, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "worker_start_failed"}, Release{})
+			if body := lastBody(); strings.Contains(body, "启动失败：") {
+				t.Fatalf("new failure borrowed old run diagnosis: %s", body)
+			}
+		})
+	}
+}

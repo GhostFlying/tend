@@ -1,12 +1,12 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type { WorkItemView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
-import { Back } from "../shell/icons.tsx";
+import { Back, Chevron, Close } from "../shell/icons.tsx";
 import { queueReasonText } from "../tasks/execution.ts";
 import { ExecutionSummary, TaskExecution } from "../tasks/Execution.tsx";
-import { BoardResources } from "../tasks/Board.tsx";
+import { BoardResourceEntry } from "./Resources.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 import { columns, columnLabel, concern } from "./model.ts";
 import { StageList } from "./Details.tsx";
@@ -82,13 +82,11 @@ export function WorkItemBoard({
   active,
   connection,
   onChat,
-  onRepos,
   onRecords,
 }: {
   active: boolean;
   connection: Connection;
   onChat(): void;
-  onRepos(): void;
   onRecords(): void;
 }) {
   const { live } = useServices();
@@ -98,6 +96,7 @@ export function WorkItemBoard({
   const snapshot = useStore(live.snapshot);
   const [mobileColumn, setMobileColumn] = useState<string>("unplanned");
   const filterId = useId();
+  const filter = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (active) items.openBoard();
     else items.closeBoard();
@@ -107,98 +106,222 @@ export function WorkItemBoard({
   return (
     <>
       <header className={styles.head}>
-        <button type="button" className={controls.chipBtn} onClick={onChat}>
+        <button
+          type="button"
+          className={`${controls.chipBtn} ${styles.desktopOnly}`}
+          onClick={onChat}
+        >
           <Back width={14} height={14} />
           返回聊天
         </button>
         <h1>工作项</h1>
-        <label className={styles.filter}>
-          项目
-          <input
-            aria-label="按项目筛选工作项"
-            list={filterId}
-            value={project}
-            placeholder="全部项目"
-            onChange={(event) => items.setProject(event.target.value)}
-          />
-        </label>
-        <datalist id={filterId}>
-          {snapshot?.projects?.map((p) => (
-            <option key={p.project} value={p.project}>
-              {p.title}
-            </option>
-          ))}
-        </datalist>
-        {project && (
-          <button type="button" className={controls.link} onClick={() => items.setProject("")}>
-            全部项目
-          </button>
-        )}
-        <button type="button" className={controls.chipBtn} onClick={() => items.refresh()}>
-          刷新工作项
-        </button>
-        <button type="button" className={controls.chipBtn} onClick={onRecords}>
+        <button
+          type="button"
+          className={`${controls.chipBtn} ${styles.desktopOnly}`}
+          onClick={onRecords}
+        >
           执行记录
         </button>
+        <BoardResourceEntry connection={connection} onRecords={onRecords} />
       </header>
-      <UpgradeBanner connection={connection} />
-      <BoardResources connection={connection} onRepos={onRepos} compact />
-      {connection.status !== "online" && (
-        <p className={styles.notice} role="status">
-          等待连接恢复 · 当前显示最后读取的工作项
-        </p>
-      )}
-      {state.error && (
-        <p className={styles.notice} role="alert">
-          读取工作项失败：{state.error}{" "}
-          <button className={controls.link} onClick={() => void items.board.refresh()}>
-            重试工作项
-          </button>
-        </p>
-      )}
-      <p className={styles.description}>工作项持续跟进目标。任务完成后，未定的后续仍会留在这里。</p>
-      <div className={styles.mobileTabs} role="tablist" aria-label="工作项状态">
-        {columns.map((column) => (
-          <button
-            type="button"
-            role="tab"
-            id={`${filterId}-${column.id}`}
-            aria-controls={`${filterId}-panel-${column.id}`}
-            aria-selected={mobileColumn === column.id}
-            key={column.id}
-            onClick={() => setMobileColumn(column.id)}
-          >
-            {column.title}
-            <span>{rows.filter((item) => item.column === column.id).length}</span>
-          </button>
-        ))}
-      </div>
-      <div className={styles.board} role="region" aria-label="工作项白板" aria-busy={state.loading}>
-        {columns.map((column) => {
-          const cards = rows.filter((item) => item.column === column.id);
-          return (
-            <section
-              key={column.id}
-              className={styles.column}
-              data-mobile-active={mobileColumn === column.id}
-              id={`${filterId}-panel-${column.id}`}
-              aria-label={column.title}
+      <div className={styles.reading}>
+        <UpgradeBanner connection={connection} />
+        <div className={styles.intro}>
+          <div className={styles.projectRow}>
+            <label className={styles.filter}>
+              项目
+              <input
+                ref={filter}
+                aria-label="按项目筛选工作项"
+                list={filterId}
+                value={project}
+                placeholder="全部项目"
+                onChange={(event) => items.setProject(event.target.value)}
+              />
+              {project && (
+                <button
+                  type="button"
+                  className={styles.clearFilter}
+                  aria-label="清除项目筛选"
+                  onClick={() => {
+                    items.setProject("");
+                    filter.current?.focus();
+                  }}
+                >
+                  <Close width={18} height={18} />
+                </button>
+              )}
+            </label>
+            <datalist id={filterId}>
+              {snapshot?.projects?.map((p) => (
+                <option key={p.project} value={p.project}>
+                  {p.title}
+                </option>
+              ))}
+            </datalist>
+
+            <button
+              type="button"
+              className={styles.refreshButton}
+              aria-label="刷新工作项"
+              onClick={() => items.refresh()}
             >
-              <div className={styles.columnHead}>
-                <h2>{column.title}</h2>
-                <span>{cards.length}</span>
-              </div>
-              <div className={styles.cards}>
-                {cards.map((item) => (
-                  <WorkItemCard key={item.work_item_id} item={item} />
-                ))}
-                {!cards.length && (
-                  <p className={styles.empty}>{state.loading ? "正在读取…" : "暂无工作项"}</p>
-                )}
-              </div>
-            </section>
-          );
-        })}
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+              >
+                <path d="M20 7v5h-5M20 12a8 8 0 1 0-2 6" />
+              </svg>
+            </button>
+          </div>
+          <p className={styles.description}>持续跟进目标，本轮完成后仍保留未定的后续。</p>
+        </div>
+        {connection.status !== "online" && (
+          <p className={styles.notice} role="status">
+            等待连接恢复 · 当前显示最后读取的工作项
+          </p>
+        )}
+        {state.error && (
+          <p className={styles.notice} role="alert">
+            读取工作项失败：{state.error}{" "}
+            <button className={controls.link} onClick={() => void items.board.refresh()}>
+              重试工作项
+            </button>
+          </p>
+        )}
+        <div className={styles.mobileTabs} role="tablist" aria-label="工作项状态">
+          {columns.map((column) => (
+            <button
+              type="button"
+              role="tab"
+              id={`${filterId}-${column.id}`}
+              aria-controls={`${filterId}-panel-${column.id}`}
+              aria-selected={mobileColumn === column.id}
+              tabIndex={mobileColumn === column.id ? 0 : -1}
+              onKeyDown={(event) => {
+                const index = columns.findIndex((entry) => entry.id === column.id);
+                const offset =
+                  event.key === "ArrowLeft"
+                    ? -1
+                    : event.key === "ArrowRight"
+                      ? 1
+                      : event.key === "ArrowUp"
+                        ? -3
+                        : event.key === "ArrowDown"
+                          ? 3
+                          : undefined;
+                const next =
+                  event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? columns.length - 1
+                      : offset === undefined
+                        ? undefined
+                        : (index + offset + columns.length) % columns.length;
+                if (next === undefined) return;
+                event.preventDefault();
+                const selected = columns[next]!;
+                setMobileColumn(selected.id);
+                document.getElementById(`${filterId}-${selected.id}`)?.focus();
+              }}
+              key={column.id}
+              onClick={() => setMobileColumn(column.id)}
+            >
+              {column.title}
+              <span>{rows.filter((item) => item.column === column.id).length}</span>
+            </button>
+          ))}
+        </div>
+        <div
+          className={styles.board}
+          role="region"
+          aria-label="工作项白板"
+          aria-busy={state.loading}
+        >
+          {columns.map((column) => {
+            const cards = rows.filter((item) => item.column === column.id);
+            return (
+              <section
+                key={column.id}
+                className={styles.column}
+                data-mobile-active={mobileColumn === column.id}
+                id={`${filterId}-panel-${column.id}`}
+                aria-label={column.title}
+              >
+                <div className={styles.columnHead}>
+                  <h2>{column.title}</h2>
+                  <span>
+                    {cards.length}
+                    <span className={styles.mobileOnly}> 个工作项</span>
+                  </span>
+                </div>
+                <div className={styles.cards}>
+                  {cards.map((item) => (
+                    <WorkItemCard key={item.work_item_id} item={item} />
+                  ))}
+                  {!cards.length && (
+                    <div className={styles.empty}>
+                      {!state.loading && !state.error && (
+                        <span className={styles.emptyIcon}>
+                          <svg
+                            width="24"
+                            height="24"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            aria-hidden="true"
+                          >
+                            <rect x="4" y="4" width="16" height="16" rx="3" />
+                            <path d="M8 9h8M8 13h5" />
+                          </svg>
+                        </span>
+                      )}
+                      <p className={styles.emptyTitle}>
+                        {state.loading
+                          ? "正在读取工作项…"
+                          : state.error
+                            ? "工作项尚未读取成功"
+                            : !project && !rows.length
+                              ? "暂无持续跟进的工作项"
+                              : `暂无${column.title}的工作项`}
+                      </p>
+                      {!state.loading && !state.error && (
+                        <>
+                          <p className={styles.meta}>
+                            {!project && !rows.length
+                              ? "可以回到对话，讨论要推进的目标。"
+                              : "其他项目和状态的工作项仍保留在账本中。"}
+                          </p>
+                          <button
+                            className={styles.emptyAction}
+                            onClick={() => {
+                              if (project) {
+                                items.setProject("");
+                                filter.current?.focus();
+                              } else if (!rows.length) onChat();
+                              else {
+                                setMobileColumn("unplanned");
+                                document.getElementById(`${filterId}-unplanned`)?.focus();
+                              }
+                            }}
+                          >
+                            {project ? "查看全部项目" : !rows.length ? "回到对话" : "查看待安排"}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </section>
+            );
+          })}
+        </div>
       </div>
     </>
   );
@@ -217,10 +340,17 @@ function WorkItemCard({ item }: { item: WorkItemView }) {
       >
         {item.title}
       </button>
-      <span className={styles.meta}>
-        {item.project || "未分组"} · 修订 {item.revision}
-      </span>
-      <ExecutionSummary counts={item.execution} />
+      <div className={styles.cardMeta}>
+        <span className={styles.meta}>
+          {item.project || "未分组"} · 修订 {item.revision}
+        </span>
+        <span className={styles.cardState} data-column={item.column}>
+          {columnLabel(item.column)}
+        </span>
+      </div>
+      <div className={styles.cardExecution}>
+        <ExecutionSummary counts={item.execution} />
+      </div>
       <p className={styles.concern} data-attention={item.column === "attention"}>
         {concern(item)}
       </p>
@@ -255,7 +385,10 @@ function WorkItemCard({ item }: { item: WorkItemView }) {
       )}
       {!!stages.length && (
         <details className={styles.cardStages}>
-          <summary>{stages.length} 个阶段</summary>
+          <summary>
+            {stages.length} 个阶段
+            <Chevron width={16} height={16} />
+          </summary>
           <StageList item={item} compact />
         </details>
       )}
@@ -264,7 +397,7 @@ function WorkItemCard({ item }: { item: WorkItemView }) {
         className={styles.cardMore}
         onClick={() => openWorkItem(item.work_item_id)}
       >
-        背景、后续与交付 ›
+        背景、后续与交付 <Chevron width={16} height={16} />
       </button>
     </article>
   );

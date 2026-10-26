@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { ConversationItem } from "../api/generated/api.ts";
 import type { OutgoingMessage } from "../queue/outbox.ts";
 import {
+  systemMessageBody,
   buildEntries,
   processing,
   latestReply,
@@ -230,3 +231,26 @@ test("background event replies retain their provenance and can be stopped", () =
     at: Date.parse(reply.created_at),
   });
 });
+
+test.each(["open", "answered", "withdrawn", "superseded"])(
+  "system notice omits only a repeated card question (%s)",
+  (status) => {
+    const choice = {
+      choice_id: "choice-one",
+      work_item_id: "wi-one",
+      message_id: "msg-one",
+      source_id: "event-one",
+      version: 1,
+      status,
+      question: "是否继续上线？",
+      options: [],
+      created_at: 1,
+      updated_at: 1,
+    };
+    expect(systemMessageBody({ body: choice.question, choices: [choice] })).toBe("");
+    expect(systemMessageBody({ body: "已通过验收，是否继续上线？", choices: [choice] })).toBe(
+      "已通过验收，是否继续上线？",
+    );
+    expect(systemMessageBody({ body: choice.question })).toBe(choice.question);
+  },
+);

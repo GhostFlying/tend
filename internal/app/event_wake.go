@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -16,7 +18,7 @@ func wakesMain(p protocol.Principal, kind string) bool {
 	switch kind {
 	case "task.completed":
 		return true
-	case "decision.opened", "decision.answered":
+	case "decision.opened", "decision.answered", "work_item_choice.answered":
 		return p.Kind != protocol.PrincipalMainAgent || p.Addon()
 	default:
 		return false
@@ -58,6 +60,15 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 			body += "\n\n调查证据与背景：\n" + d.Worker.Evidence
 		}
 		body += "\n\n回答后原任务继续；等待期间仍占用执行 slot。"
+	}
+	if d.Worker == nil && e.Kind == "decision.opened" {
+		summary, err := startupFailureNotice(ctx, x, tx.Q(), d.TaskID)
+		if err != nil {
+			return err
+		}
+		if summary != "" {
+			body += "\n\n" + summary
+		}
 	}
 	var recordedAnswer json.RawMessage
 	if e.Kind == "decision.answered" {
@@ -125,4 +136,84 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 		return err
 	}
 	return queueEventTurn(ctx, x, tx, id, eventID, e.Kind, recordedAnswer)
+}
+
+// recordWorkItemChoiceWake delivers durable answer facts without presenting the
+// notification as a new owner message or replaying the owner's original turn.
+func recordWorkItemChoiceWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eventID string) error {
+	c, err := store.GetWorkItemChoice(ctx, tx.Q(), e.ObjectID)
+	if err != nil {
+		return err
+	}
+	answer, err := json.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("app: encode choice answer: %w", err)
+	}
+	id := x.IDs.New(protocol.PrefixMessage)
+	now := x.Now.UnixMilli()
+	body := fmt.Sprintf("工作项下一步选择已有回答：%s\n\n%s\n\n回答：%s", c.ChoiceID, c.Question, c.Answer)
+	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "system", Body: body, ReplyTo: c.AnswerSourceID, CreatedAt: now})
+	if err != nil {
+		return err
+	}
+	for _, binding := range []struct{ kind, id string }{{"work_item_choice", c.ChoiceID}, {"work_item", c.WorkItemID}, {"event", eventID}} {
+		if err := tx.BindMessage(ctx, id, binding.kind, binding.id, "notice"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"system"}`, RequestID: x.Env.RequestID, TraceID: x.TraceID, ActorJSON: `{"kind":"system"}`, CreatedAt: now}); err != nil {
+		return err
+	}
+	return queueEventTurn(ctx, x, tx, id, eventID, e.Kind, answer)
+}
+
+// startupFailureNotice uses only the run reporting this failure. Earlier runs
+// and previously recovered failures cannot explain a new decision.
+func startupFailureNotice(ctx context.Context, x *Exec, q store.Querier, taskID string) (string, error) {
+	if x.Env.Operation != protocol.OpRunsRelease || x.Env.Target.Type != "run" || taskID == "" {
+		return "", nil
+	}
+	var release protocol.ReleasePayload
+	if json.Unmarshal(x.Env.Payload, &release) != nil || release.Reason != "worker_start_failed" {
+		return "", nil
+	}
+	run, err := store.GetRun(ctx, q, x.Env.Target.ID)
+	if err != nil {
+		return "", err
+	}
+	if run.TaskID != taskID || run.ObservedState != protocol.RunFailed {
+		return "", nil
+	}
+	var kind, raw string
+	err = q.QueryRowContext(ctx, `SELECT kind,body_json FROM run_logs WHERE run_id=? AND kind IN ('worker.startup_failed','worker.startup_retry_pending','worker.startup_started') ORDER BY seq DESC LIMIT 1`, run.RunID).Scan(&kind, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if kind != "worker.startup_failed" {
+		return "", nil
+	}
+	var fact struct {
+		Attempts   int `json:"attempts"`
+		Diagnostic struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"diagnostic"`
+	}
+	if json.Unmarshal([]byte(raw), &fact) != nil {
+		return "", nil
+	}
+	// Run logs may contain arbitrary strings. Render only fixed descriptions;
+	// raw errors, terminal snapshots, prompts and provider identities stay out.
+	reason := map[string]string{"readiness_timeout": "等待 CLI 就绪超时", "interactive_prompt": "CLI 等待交互处理", "process_exited": "CLI 进程已退出", "readiness_failed": "CLI 就绪检查失败", "write_failed": "提示写入失败", "delivery_unknown": "提示投递结果未确认"}[fact.Diagnostic.Code]
+	phase := map[string]string{"readiness": "等待 CLI 就绪", "write": "写入任务提示", "submit": "提交任务提示"}[fact.Diagnostic.Phase]
+	if reason == "" || phase == "" {
+		return "", nil
+	}
+	if fact.Attempts < 0 {
+		fact.Attempts = 0
+	}
+	return fmt.Sprintf("启动失败：%s。阶段：%s；已自动重试 %d 次。", reason, phase, fact.Attempts), nil
 }

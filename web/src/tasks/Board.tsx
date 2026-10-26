@@ -18,9 +18,11 @@ import styles from "./Board.module.css";
 export function RecentTasks({
   limit = 5,
   detailed = false,
+  expanded = false,
 }: {
   limit?: number;
   detailed?: boolean;
+  expanded?: boolean;
 }) {
   const { live, openTask } = useServices();
   const feed = live.tasks.recent;
@@ -53,6 +55,7 @@ export function RecentTasks({
           type="button"
           key={task.task_id}
           className={detailed ? styles.recentTask : list.row}
+          data-expanded={expanded || undefined}
           title={task.title}
           onClick={() => openTask(task.task_id)}
         >
