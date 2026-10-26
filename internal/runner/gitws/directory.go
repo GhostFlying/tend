@@ -31,7 +31,7 @@ func workspaceTitle(as protocol.Assignment) string {
 }
 
 func (w *Workspaces) workspaceComment(as protocol.Assignment) string {
-	comment := fmt.Sprintf("tend task %s\nworkspace %s\nkind %s\nrole %s", as.TaskID, as.Workspace.ID, as.Workspace.Kind, as.Role)
+	comment := fmt.Sprintf("%s\ntend task %s\nworkspace %s\nkind %s\nrole %s", resourceMarker(as), as.TaskID, as.Workspace.ID, as.Workspace.Kind, as.Role)
 	if u, err := url.Parse(w.cfg.ServerURL); err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
 		u.User = nil
 		u.Fragment = ""
@@ -158,11 +158,13 @@ func (w *Workspaces) ensureFolder(ctx context.Context, as protocol.Assignment, h
 	if as.Workspace.ProviderID != "" && as.Workspace.ProviderID != st.ProviderID {
 		return errors.New("gitws: folder provider identity changed")
 	}
-	if st.DisplayTask != as.TaskID {
-		if err := c.RenameWorkspace(ctx, st.ProviderID, workspaceTitle(as), w.workspaceComment(as)); err != nil {
+	comment := w.workspaceComment(as)
+	if st.DisplayTask != as.TaskID || st.DisplayComment != comment {
+		if err := c.RenameWorkspace(ctx, st.ProviderID, workspaceTitle(as), comment); err != nil {
 			return err
 		}
 		st.DisplayTask = as.TaskID
+		st.DisplayComment = comment
 	}
 	return nil
 }
