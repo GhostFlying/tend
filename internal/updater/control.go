@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"io"
 	"net"
 	"net/http"
@@ -14,10 +15,13 @@ import (
 )
 
 type ControlRequest struct {
-	ExpectedPhase string `json:"expected_phase,omitempty"`
-	ID            string `json:"id,omitempty"`
-	Release       string `json:"release,omitempty"`
-	PID           int    `json:"pid,omitempty"`
+	Configuration  *protocol.RunnerConfiguration `json:"configuration,omitempty"`
+	Candidate      string                        `json:"candidate,omitempty"`
+	ManifestSHA256 string                        `json:"manifest_sha256,omitempty"`
+	ExpectedPhase  string                        `json:"expected_phase,omitempty"`
+	ID             string                        `json:"id,omitempty"`
+	Release        string                        `json:"release,omitempty"`
+	PID            int                           `json:"pid,omitempty"`
 }
 type ControlResponse struct {
 	State State  `json:"state"`
@@ -78,7 +82,9 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 		case "/bootstrap":
 			err = s.Bootstrap(r.Context(), req.PID)
 		case "/upgrade":
-			err = s.Upgrade(r.Context(), req.ID, req.Release)
+			err = s.UpgradeConfigured(r.Context(), req.ID, req.Release, req.Configuration)
+		case "/stage-config":
+			err = s.StageConfiguration(r.Context(), req.ID, req.ManifestSHA256, req.Candidate, req.Configuration)
 		case "/restart":
 			err = s.Restart(req.ID)
 		case "/retry":

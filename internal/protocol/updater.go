@@ -39,9 +39,10 @@ type UpgradeHealth struct {
 
 // UpgradeStartRequest is accepted only over the service user's local control socket.
 type UpgradeStartRequest struct {
-	RequestID string `json:"request_id"`
-	UpgradeID string `json:"upgrade_id"`
-	Release   string `json:"release"`
+	RunnerConfigurations map[string]RunnerConfiguration `json:"runner_configurations,omitempty"`
+	RequestID            string                         `json:"request_id"`
+	UpgradeID            string                         `json:"upgrade_id"`
+	Release              string                         `json:"release"`
 }
 type UpgradeChangeRequest struct {
 	RequestID               string `json:"request_id"`

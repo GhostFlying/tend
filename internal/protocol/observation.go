@@ -54,6 +54,7 @@ type ObservedTask struct {
 
 // ObservedDeployment separates actual process facts from historical release state.
 type ObservedDeployment struct {
+	Runner         *ObservedRunner  `json:"runner,omitempty"`
 	ObservedAt     int64            `json:"observed_at"`
 	SchemaVersion  int64            `json:"schema_version"`
 	ActualServer   *ObservedServer  `json:"actual_server,omitempty"`
@@ -100,4 +101,19 @@ type ObservedRun struct {
 	Role          RunRole     `json:"role"`
 	DesiredState  RunDesired  `json:"desired_state"`
 	ObservedState RunObserved `json:"observed_state"`
+}
+
+// ObservedRunner is the authenticated heartbeat of this run's own host only.
+// It is a server-side observation, not a direct process inspection.
+type ObservedRunner struct {
+	HostID                 string      `json:"host_id"`
+	InstanceID             string      `json:"instance_id"`
+	Online                 bool        `json:"online"`
+	LastHeartbeatAt        int64       `json:"last_heartbeat_at"`
+	Mode                   string      `json:"mode"`
+	ControlMode            string      `json:"control_mode"`
+	ControlRevision        int64       `json:"control_revision"`
+	AppliedControlRevision int64       `json:"applied_control_revision"`
+	Build                  RunnerBuild `json:"build"`
+	Capabilities           []string    `json:"capabilities"`
 }

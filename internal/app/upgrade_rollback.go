@@ -102,6 +102,9 @@ func reconcileUpgradeRollbacks(ctx context.Context, x *Exec, tx *store.Tx, r *st
 			rt.Runtime.PendingClaims != 0 || rt.Runtime.PendingOperations != 0 || len(rt.Runtime.Blockers) != 0 {
 			continue
 		}
+		if h.Configuration != nil && rt.Runtime.ConfigurationSHA256 != h.Configuration.PreviousSHA256 {
+			continue
+		}
 		h.Rollback = rt.Runtime.UpdaterReceipt
 		r.View.Hosts[i].Status = "attention"
 		r.View.Hosts[i].Phase = "rolled_back"

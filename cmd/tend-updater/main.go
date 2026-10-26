@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -57,6 +58,11 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	config := flags.String("config", os.Getenv("TEND_UPDATER_CONFIG"), "fixed supervisor configuration")
 	bundle := flags.String("release", "", "release bundle directory")
 	id := flags.String("upgrade-id", "", "stable coordinator upgrade identity")
+	candidateConfig := flags.String("candidate", "", "private candidate service configuration")
+	previousConfig := flags.String("previous-sha256", "", "expected current configuration digest")
+	targetConfig := flags.String("sha256", "", "candidate configuration digest")
+	manifest := flags.String("manifest-sha256", "", "pinned maintenance manifest digest")
+	providers := flags.String("providers", "", "comma-separated required providers")
 	pid := flags.Int("pid", 0, "existing idle service PID")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
@@ -94,7 +100,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return s.Serve(ctx)
 	}
 	switch command {
-	case "bootstrap", "upgrade", "restart", "status", "retry", "cancel":
+	case "bootstrap", "upgrade", "restart", "status", "retry", "cancel", "stage-config":
 	default:
 		return errors.New("updater: unknown command")
 	}
@@ -128,7 +134,17 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	state, err := updater.Call(callCtx, cfg, command, updater.ControlRequest{ID: *id, Release: *bundle, PID: *pid})
+	request := updater.ControlRequest{ID: *id, Release: *bundle, PID: *pid}
+	if command == "stage-config" {
+		required := []string{}
+		if *providers != "" {
+			required = strings.Split(*providers, ",")
+		}
+		request.Configuration = &protocol.RunnerConfiguration{PreviousSHA256: *previousConfig, SHA256: *targetConfig, Providers: required}
+		request.Candidate = *candidateConfig
+		request.ManifestSHA256 = *manifest
+	}
+	state, err := updater.Call(callCtx, cfg, command, request)
 	if err != nil {
 		return err
 	}

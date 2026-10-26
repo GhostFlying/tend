@@ -64,7 +64,7 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 		if !r.updateUpgradeAttempt(control, func() {}) {
 			return errors.New("upgrade attempt changed")
 		}
-		if err := r.submitUpdater(ctx, control.UpgradeID, dir, target.ManifestSHA256); err != nil {
+		if err := r.submitConfiguredUpdater(ctx, control.UpgradeID, dir, target.ManifestSHA256, target.Configuration); err != nil {
 			return err
 		}
 		r.updateUpgradeAttempt(control, func() { r.upgradePhase = "submitted" })
@@ -193,6 +193,9 @@ func (r *Runner) downloadReleaseFile(ctx context.Context, path, dest string, siz
 }
 
 func (r *Runner) submitUpdater(ctx context.Context, id, dir, digest string) error {
+	return r.submitConfiguredUpdater(ctx, id, dir, digest, nil)
+}
+func (r *Runner) submitConfiguredUpdater(ctx context.Context, id, dir, digest string, configuration *protocol.RunnerConfiguration) error {
 	client := &http.Client{Transport: &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", r.cfg.UpdaterControlSocket)
 	}}, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("updater redirects forbidden") }}
@@ -239,9 +242,10 @@ func (r *Runner) submitUpdater(ctx context.Context, id, dir, digest string) erro
 		return nil
 	}
 	body, _ := json.Marshal(struct {
-		ID      string `json:"id"`
-		Release string `json:"release"`
-	}{id, dir})
+		Configuration *protocol.RunnerConfiguration `json:"configuration,omitempty"`
+		ID            string                        `json:"id"`
+		Release       string                        `json:"release"`
+	}{configuration, id, dir})
 	req, err = http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost/upgrade", bytes.NewReader(body))
 	if err != nil {
 		return err

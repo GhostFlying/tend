@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 
@@ -47,7 +48,7 @@ func TestServerReleaseEntryGoesThroughCoordinator(t *testing.T) {
 	if err := startCoordinatedUpgrade(context.Background(), socket, request, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := <-received; got != request {
+	if got := <-received; !reflect.DeepEqual(got, request) {
 		t.Fatal("coordinator request identity changed")
 	}
 	var v protocol.UpgradeView

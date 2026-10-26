@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -262,5 +263,29 @@ func TestRunnerAdvertisesOriginalTaskInputSupport(t *testing.T) {
 	}
 	if !slices.Contains(view.Capabilities, protocol.CapabilityTaskInputs) {
 		t.Fatalf("task inputs capability missing: %+v", view.Capabilities)
+	}
+}
+
+func TestConfigurationDigestRequiresExplicitServerTarget(t *testing.T) {
+	r := controlRunner(t)
+	r.cfg.ConfigurationSHA256 = "loaded-configuration"
+	r.resourceReconciled = true
+	view, err := r.runtimeObservation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(view)
+	if strings.Contains(string(raw), "configuration_sha256") {
+		t.Fatal("legacy server received an unnegotiated field")
+	}
+	r.control.Upgrade = &protocol.RunnerUpgradeTarget{Configuration: &protocol.RunnerConfiguration{SHA256: "requested"}}
+	view, err = r.runtimeObservation(t.Context())
+	if err != nil || view.ConfigurationSHA256 != "loaded-configuration" {
+		t.Fatal("reported requested hash instead of actual loaded configuration", view, err)
+	}
+	r.control.Upgrade = nil
+	view, err = r.runtimeObservation(t.Context())
+	if err != nil || view.ConfigurationSHA256 != "" {
+		t.Fatal("configuration extension leaked after maintenance", view, err)
 	}
 }

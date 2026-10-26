@@ -53,6 +53,9 @@ func (AuthorizeRunnerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return Outcome{}, err
 		}
+		if h.Configuration != nil && rt.Runtime.ConfigurationSHA256 != h.Configuration.PreviousSHA256 {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "loaded configuration no longer matches maintenance baseline")
+		}
 		if ctl.UpgradeID != b.UpgradeID || ctl.Mode != protocol.RunnerMaintenance || ctl.Upgrade == nil || rt.Runtime.Mode != protocol.RunnerReady || rt.Runtime.AppliedControlRevision != ctl.Revision || rt.Runtime.PendingClaims != 0 || rt.Runtime.PendingOperations != 0 || len(rt.Runtime.Blockers) != 0 || n != 0 || !rt.Online || x.Now.UnixMilli()-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 			return Outcome{Result: protocol.UpgradeGrant{Binding: b}, NoEffect: true}, nil
 		}
@@ -128,7 +131,7 @@ func (a *App) RunnerUpgradeHealth(ctx context.Context, p protocol.Principal, b p
 			health.ServerConfirmed = runnerCandidateMatches(r, h, rt.Runtime) && rt.Runtime.Build.BinarySHA256 == b.ArtifactSHA256 && rt.Online && a.now().UnixMilli()-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds()
 			health.AdmissionFenced = health.ServerConfirmed && h.Committed == nil && !committedMatches(r, h, rt.Runtime.UpdaterReceipt, rt.Runtime) && rt.Runtime.InstanceID == h.CandidateInstance && ctl.UpgradeID == r.View.UpgradeID && rt.Runtime.UpgradeID == r.View.UpgradeID && ctl.Mode == protocol.RunnerMaintenance && rt.Runtime.AppliedControlRevision == ctl.Revision
 			admitted := h.Committed != nil && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal
-			health.Healthy = health.ServerConfirmed && h.HealthInstance == rt.Runtime.InstanceID && h.Healthy >= 2 && installedRunnerMatches(rt.Runtime, r.Manifest) && rt.Runtime.AppliedControlRevision == ctl.Revision && (admitted || runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && rt.Runtime.Mode == protocol.RunnerReady)
+			health.Healthy = runnerConfigurationMatches(h, rt.Runtime) && health.ServerConfirmed && h.HealthInstance == rt.Runtime.InstanceID && h.Healthy >= 2 && installedRunnerMatches(rt.Runtime, r.Manifest) && rt.Runtime.AppliedControlRevision == ctl.Revision && (admitted || runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && rt.Runtime.Mode == protocol.RunnerReady)
 			health.HeartbeatSequence = uint64(max(0, rt.Runtime.Sequence))
 			// Once claims are enabled, an old journal is never restored, even if no
 			// claim was observed yet: a request may already be in flight.

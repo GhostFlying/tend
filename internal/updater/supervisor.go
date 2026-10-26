@@ -9,15 +9,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 )
 
 type Options struct {
-	Process   Process
-	Authority Authority
-	Now       func() time.Time
-	NewID     func() (string, error)
-	BootClock func() (string, int64, error)
+	ValidateConfiguration func(context.Context, string, string, string) error
+	Process               Process
+	Authority             Authority
+	Now                   func() time.Time
+	NewID                 func() (string, error)
+	BootClock             func() (string, int64, error)
 }
 type Supervisor struct {
 	durable        State
@@ -36,6 +38,25 @@ func Open(cfg Config, opts Options) (*Supervisor, error) {
 	}
 	if cfg.InstanceID == "" || len(cfg.InstanceID) > 256 || cfg.Role != "server" && cfg.Role != "runner" || !filepath.IsAbs(cfg.StateDir) || !filepath.IsAbs(cfg.InitialBinary) || !filepath.IsAbs(cfg.LogPath) {
 		return nil, errors.New("updater: invalid service configuration")
+	}
+	if cfg.ServiceConfig != "" {
+		if cfg.Role != "runner" || !filepath.IsAbs(cfg.ServiceConfig) || filepath.Clean(cfg.ServiceConfig) != cfg.ServiceConfig {
+			return nil, errors.New("updater: invalid fixed service configuration path")
+		}
+		found := false
+		for i, arg := range cfg.Args {
+			if (arg == "-config" || arg == "--config") && i+1 < len(cfg.Args) && cfg.Args[i+1] == cfg.ServiceConfig {
+				found = true
+			}
+		}
+		if !found {
+			return nil, errors.New("updater: service configuration must match managed arguments")
+		}
+		for _, p := range append(append([]string{}, cfg.EnvFiles...), cfg.DataFiles...) {
+			if p == cfg.ServiceConfig {
+				return nil, errors.New("updater: configuration overlaps data or credentials")
+			}
+		}
 	}
 	seen := map[string]bool{}
 	for _, p := range cfg.DataFiles {
@@ -139,6 +160,14 @@ func (s *Supervisor) save() error {
 	return nil
 }
 func cloneState(v State) State { // no aliases to internal mutable operation state
+	if v.Configurations != nil {
+		cloned := make(map[string]StagedConfiguration, len(v.Configurations))
+		for id, c := range v.Configurations {
+			c.Target.Providers = append([]string(nil), c.Target.Providers...)
+			cloned[id] = c
+		}
+		v.Configurations = cloned
+	}
 	if v.CommittedProof != nil {
 		proof := *v.CommittedProof
 		v.CommittedProof = &proof
@@ -156,6 +185,11 @@ func cloneState(v State) State { // no aliases to internal mutable operation sta
 	}
 	if v.Operation != nil {
 		o := *v.Operation
+		if o.Configuration != nil {
+			c := *o.Configuration
+			c.Target.Providers = append([]string(nil), c.Target.Providers...)
+			o.Configuration = &c
+		}
 		if o.RollbackAuthorization != nil {
 			auth := *o.RollbackAuthorization
 			o.RollbackAuthorization = &auth
@@ -241,6 +275,10 @@ func done(op *Operation) bool {
 // Upgrade validates and installs the bundle without disturbing the running
 // process. The operation ID is stable across retries and payload conflicts fail.
 func (s *Supervisor) Upgrade(ctx context.Context, id, dir string) error {
+	return s.UpgradeConfigured(ctx, id, dir, nil)
+}
+
+func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, configuration *protocol.RunnerConfiguration) error {
 	if !release.ValidID(id) {
 		return errors.New("updater: invalid upgrade identity")
 	}
@@ -252,7 +290,19 @@ func (s *Supervisor) Upgrade(ctx context.Context, id, dir string) error {
 	if s.state.Current.Binary == "" {
 		return errors.New("updater: bootstrap required")
 	}
+	var staged *StagedConfiguration
+	if saved, ok := s.state.Configurations[id]; ok {
+		if configuration == nil || !sameConfigurationTarget(saved.Target, *configuration) {
+			return errors.New("updater: configuration identity conflicts with staged request")
+		}
+		staged = &saved
+	} else if configuration != nil {
+		return errors.New("updater: configuration must be staged locally first")
+	}
 	if receipt, ok := s.state.Terminals[id]; ok {
+		if staged != nil && receipt.Binding.ManifestSHA256 != staged.ManifestSHA256 {
+			return errors.New("updater: configuration manifest conflict")
+		}
 		if receipt.Phase == "cancelled" {
 			return errors.New("updater: operation was cancelled")
 		}
@@ -268,6 +318,9 @@ func (s *Supervisor) Upgrade(ctx context.Context, id, dir string) error {
 	candidate, err := s.stage(dir)
 	if err != nil {
 		return err
+	}
+	if staged != nil && (candidate.ManifestSHA256 != staged.ManifestSHA256 || candidate.Artifact.SHA256 != s.state.Current.Artifact.SHA256) {
+		return errors.New("updater: configuration maintenance requires its pinned manifest and current binary")
 	}
 	if op := s.state.Operation; op != nil && op.ID == id {
 		if op.Candidate.ManifestSHA256 != candidate.ManifestSHA256 || op.Candidate.Artifact.SHA256 != candidate.Artifact.SHA256 {
@@ -286,7 +339,7 @@ func (s *Supervisor) Upgrade(ctx context.Context, id, dir string) error {
 		return err
 	}
 	b := Binding{UpgradeID: id, InstanceID: s.cfg.InstanceID, ProcessInstanceID: processID, ReleaseID: candidate.ReleaseID, ManifestSHA256: candidate.ManifestSHA256, ArtifactSHA256: candidate.Artifact.SHA256}
-	s.state.Operation = &Operation{ID: id, Kind: "upgrade", Binding: b, Previous: s.state.Current, Candidate: candidate, PreviousProcess: s.state.Process, LaunchID: processID, Phase: "staged", StartedAt: s.opts.Now()}
+	s.state.Operation = &Operation{Configuration: staged, ID: id, Kind: "upgrade", Binding: b, Previous: s.state.Current, Candidate: candidate, PreviousProcess: s.state.Process, LaunchID: processID, Phase: "staged", StartedAt: s.opts.Now()}
 	return s.save()
 }
 
@@ -423,12 +476,17 @@ func (s *Supervisor) Step(ctx context.Context) error {
 func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 	switch op.Phase {
 	case "staged":
+		if op.Configuration != nil {
+			if err := s.verifyStagedConfiguration(op.Configuration); err != nil {
+				return err
+			}
+		}
 		if err := s.authorize(ctx, op); err != nil {
 			return err
 		}
 		// Equal bytes skip process replacement; authorization is still checked and
 		// the manifest identity is preserved as the selected release.
-		if op.Candidate.Artifact.SHA256 == s.state.Current.Artifact.SHA256 {
+		if op.Configuration == nil && op.Candidate.Artifact.SHA256 == s.state.Current.Artifact.SHA256 {
 			s.state.Current = op.Candidate
 			op.Irreversible = true
 			op.Phase = "committed"
@@ -439,6 +497,11 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 	case "stopping":
 		if err := s.grantValid(op); err != nil {
 			return s.recoverStopping(ctx, op)
+		}
+		if op.Configuration != nil {
+			if err := s.verifyStagedConfiguration(op.Configuration); err != nil {
+				return err
+			}
 		}
 		if err := s.opts.Process.Stop(ctx, op.PreviousProcess, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second); err != nil {
 			return err
@@ -460,6 +523,22 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 	case "backed_up":
 		if err := s.grantValid(op); err != nil {
 			return s.recoverUnlaunched(ctx, op)
+		}
+		if op.Configuration != nil {
+			op.Phase = "config_applying"
+			return s.save()
+		}
+		op.Phase = "starting"
+		if err := s.save(); err != nil {
+			return err
+		}
+		return s.start(ctx, op, false)
+	case "config_applying":
+		if err := s.grantValid(op); err != nil {
+			return s.recoverUnlaunched(ctx, op)
+		}
+		if err := s.applyConfiguration(op.Configuration); err != nil {
+			return err
 		}
 		op.Phase = "starting"
 		if err := s.save(); err != nil {
@@ -485,6 +564,9 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 			if err := restoreData(s.cfg, op); err != nil {
 				return err
 			}
+		}
+		if err := s.restoreConfiguration(op.Configuration); err != nil {
+			return err
 		}
 		op.Phase = "rollback_starting"
 		launch, err := s.opts.NewID()
@@ -600,6 +682,12 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) error {
 	if processErr != nil && !errors.Is(processErr, ErrNotRunning) {
 		return processErr
 	}
+	if running && h.Healthy && op.Configuration != nil {
+		sum, err := configurationDigest(s.cfg.ServiceConfig)
+		if err != nil || sum != op.Configuration.Target.SHA256 {
+			return errors.New("updater: candidate configuration changed before commitment")
+		}
+	}
 	if running && h.Healthy && h.HeartbeatSequence > op.LastHealthSequence {
 		op.HealthCount++
 		op.LastHealthSequence = h.HeartbeatSequence
@@ -655,8 +743,11 @@ func (s *Supervisor) monitor(ctx context.Context) error {
 // recoverUnlaunched restores availability without copying database snapshots:
 // these durable phases prove only Stop/backup occurred, never candidate Start.
 func (s *Supervisor) recoverUnlaunched(ctx context.Context, op *Operation) error {
-	if op.Kind != "upgrade" || op.Irreversible || op.CandidateProcess.PID != 0 || (op.Phase != "stopped" && op.Phase != "backed_up") {
+	if op.Kind != "upgrade" || op.Irreversible || op.CandidateProcess.PID != 0 || (op.Phase != "stopped" && op.Phase != "backed_up" && op.Phase != "config_applying") {
 		return ErrUnknown
+	}
+	if err := s.restoreConfiguration(op.Configuration); err != nil {
+		return err
 	}
 	launch, err := s.opts.NewID()
 	if err != nil {

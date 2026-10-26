@@ -24,6 +24,8 @@ type Authority interface {
 // Config contains paths and non-secret process arguments. Credentials remain in
 // existing environment files and are never copied into updater state or logs.
 type Config struct {
+	// ServiceConfig is the single fixed file eligible for configuration maintenance.
+	ServiceConfig string   `json:"service_config,omitempty"`
 	InstanceID    string   `json:"instance_id"`
 	Role          string   `json:"role"`
 	StateDir      string   `json:"state_dir"`
@@ -70,29 +72,30 @@ type BackupFile struct {
 	Mode    uint32 `json:"mode"`
 }
 type Operation struct {
-	RollbackAuthorization *Health      `json:"rollback_authorization,omitempty"`
-	CandidateNotStarted   bool         `json:"candidate_not_started,omitempty"`
-	ID                    string       `json:"id"`
-	Kind                  string       `json:"kind"`
-	Binding               Binding      `json:"binding"`
-	Previous              Version      `json:"previous"`
-	Candidate             Version      `json:"candidate"`
-	PreviousProcess       Identity     `json:"previous_process"`
-	CandidateProcess      Identity     `json:"candidate_process"`
-	LaunchID              string       `json:"launch_id"`
-	Phase                 string       `json:"phase"`
-	Grant                 *Grant       `json:"grant,omitempty"`
-	GrantBootID           string       `json:"grant_boot_id,omitempty"`
-	GrantDeadlineMillis   int64        `json:"grant_deadline_millis,omitempty"`
-	Backups               []BackupFile `json:"backups,omitempty"`
-	BackupDir             string       `json:"backup_dir,omitempty"`
-	HealthCount           int          `json:"health_count"`
-	LastHealthSequence    uint64       `json:"last_health_sequence"`
-	Irreversible          bool         `json:"irreversible"`
-	CancelRequested       bool         `json:"cancel_requested"`
-	StartedAt             time.Time    `json:"started_at"`
-	HealthStartedAt       time.Time    `json:"health_started_at"`
-	LastError             string       `json:"last_error,omitempty"`
+	Configuration         *StagedConfiguration `json:"configuration,omitempty"`
+	RollbackAuthorization *Health              `json:"rollback_authorization,omitempty"`
+	CandidateNotStarted   bool                 `json:"candidate_not_started,omitempty"`
+	ID                    string               `json:"id"`
+	Kind                  string               `json:"kind"`
+	Binding               Binding              `json:"binding"`
+	Previous              Version              `json:"previous"`
+	Candidate             Version              `json:"candidate"`
+	PreviousProcess       Identity             `json:"previous_process"`
+	CandidateProcess      Identity             `json:"candidate_process"`
+	LaunchID              string               `json:"launch_id"`
+	Phase                 string               `json:"phase"`
+	Grant                 *Grant               `json:"grant,omitempty"`
+	GrantBootID           string               `json:"grant_boot_id,omitempty"`
+	GrantDeadlineMillis   int64                `json:"grant_deadline_millis,omitempty"`
+	Backups               []BackupFile         `json:"backups,omitempty"`
+	BackupDir             string               `json:"backup_dir,omitempty"`
+	HealthCount           int                  `json:"health_count"`
+	LastHealthSequence    uint64               `json:"last_health_sequence"`
+	Irreversible          bool                 `json:"irreversible"`
+	CancelRequested       bool                 `json:"cancel_requested"`
+	StartedAt             time.Time            `json:"started_at"`
+	HealthStartedAt       time.Time            `json:"health_started_at"`
+	LastError             string               `json:"last_error,omitempty"`
 }
 
 // TerminalReceipt fences delayed requests after the single active operation moves on.
@@ -115,15 +118,16 @@ type CommittedProof struct {
 	Process Identity `json:"process"`
 }
 type State struct {
-	CommittedProof *CommittedProof            `json:"committed_proof,omitempty"`
-	RollbackProof  *RollbackProof             `json:"rollback_proof,omitempty"`
-	Terminals      map[string]TerminalReceipt `json:"terminals,omitempty"`
-	Format         int                        `json:"format"`
-	InstanceID     string                     `json:"instance_id"`
-	Current        Version                    `json:"current"`
-	Process        Identity                   `json:"process"`
-	Operation      *Operation                 `json:"operation,omitempty"`
-	LastError      string                     `json:"last_error,omitempty"`
+	Configurations map[string]StagedConfiguration `json:"configurations,omitempty"`
+	CommittedProof *CommittedProof                `json:"committed_proof,omitempty"`
+	RollbackProof  *RollbackProof                 `json:"rollback_proof,omitempty"`
+	Terminals      map[string]TerminalReceipt     `json:"terminals,omitempty"`
+	Format         int                            `json:"format"`
+	InstanceID     string                         `json:"instance_id"`
+	Current        Version                        `json:"current"`
+	Process        Identity                       `json:"process"`
+	Operation      *Operation                     `json:"operation,omitempty"`
+	LastError      string                         `json:"last_error,omitempty"`
 }
 
 type Process interface {

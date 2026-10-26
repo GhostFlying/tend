@@ -136,6 +136,19 @@ func (a *App) ReadRunObservation(ctx context.Context, p protocol.Principal) (pro
 		}
 		if allowed.Deployment {
 			result.Deployment = deployment
+			runtime, err := store.GetHostRuntime(ctx, q, rc.run.HostID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+			if err == nil {
+				control, err := runnerControl(ctx, q, rc.run.HostID, now)
+				if err != nil {
+					return err
+				}
+				rt := runtime.Runtime
+				deployment.Runner = &protocol.ObservedRunner{HostID: rc.run.HostID, InstanceID: rt.InstanceID, Online: runtime.Online && now-runtime.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && now >= runtime.LastHeartbeatAt, LastHeartbeatAt: runtime.LastHeartbeatAt, Mode: rt.Mode, ControlMode: control.Mode, ControlRevision: control.Revision, AppliedControlRevision: rt.AppliedControlRevision, Build: rt.Build, Capabilities: append([]string{}, rt.Capabilities...)}
+			}
+
 			if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&deployment.SchemaVersion); err != nil {
 				return err
 			}

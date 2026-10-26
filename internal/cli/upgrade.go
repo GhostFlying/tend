@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 		return usagef("upgrade expects start, status, retry or cancel")
 	}
 	fs := newFlags(e, "upgrade "+action)
+	configPlan := fs.String("runner-configurations", "", "private JSON metadata for a single runner configuration maintenance")
 	bundle := fs.String("release", "", "verified local release directory")
 	upgradeID := fs.String("upgrade-id", "", "stable upgrade batch ID")
 	requestID := fs.String("request-id", "", "reuse this ID only when retrying the identical request")
@@ -35,6 +37,9 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
+	}
+	if *configPlan != "" && action != "start" {
+		return usagef("runner-configurations is only valid for start")
 	}
 	if len(positional) > 0 {
 		return usagef("upgrade takes no positional arguments")
@@ -63,7 +68,22 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 		if *upgradeID == "" {
 			*upgradeID = *requestID
 		}
-		input = protocol.UpgradeStartRequest{RequestID: *requestID, UpgradeID: *upgradeID, Release: absolute}
+		var configurations map[string]protocol.RunnerConfiguration
+		if *configPlan != "" {
+			raw, err := os.ReadFile(*configPlan)
+			if err != nil {
+				return err
+			}
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&configurations); err != nil {
+				return usagef("invalid runner configuration metadata")
+			}
+			if decoder.Decode(new(any)) != io.EOF || len(configurations) != 1 {
+				return usagef("configuration metadata must select exactly one host")
+			}
+		}
+		input = protocol.UpgradeStartRequest{RequestID: *requestID, UpgradeID: *upgradeID, Release: absolute, RunnerConfigurations: configurations}
 	case "status":
 		if *bundle != "" || *upgradeID != "" || *requestID != "" || *revision != 0 {
 			return usagef("upgrade status takes no release, ID or revision")

@@ -31,9 +31,19 @@ type UpgradeView struct {
 
 // RunnerUpgradeTarget names an authenticated immutable release download.
 // URLs are relative to the configured server; runners never follow a new origin.
+// RunnerConfiguration is metadata only; file contents stay on the target host.
+type RunnerConfiguration struct {
+	PreviousSHA256 string   `json:"previous_sha256"`
+	SHA256         string   `json:"sha256"`
+	Providers      []string `json:"providers"`
+}
+
+const CapabilityRunnerConfiguration = "runner-config-maintenance-v1"
+
 type RunnerUpgradeTarget struct {
-	ManifestPath     string `json:"manifest_path"`
-	ManifestSHA256   string `json:"manifest_sha256"`
-	ManifestSize     int64  `json:"manifest_size"`
-	ArtifactBasePath string `json:"artifact_base_path"`
+	Configuration    *RunnerConfiguration `json:"configuration,omitempty"`
+	ManifestPath     string               `json:"manifest_path"`
+	ManifestSHA256   string               `json:"manifest_sha256"`
+	ManifestSize     int64                `json:"manifest_size"`
+	ArtifactBasePath string               `json:"artifact_base_path"`
 }

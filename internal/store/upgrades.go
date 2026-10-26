@@ -31,17 +31,18 @@ type UpgradeRow struct {
 	Hosts               []UpgradeHost            `json:"hosts"`
 }
 type UpgradeHost struct {
-	Committed         *protocol.UpdaterReceipt `json:"committed,omitempty"`
-	HealthInstance    string                   `json:"health_instance,omitempty"`
-	Rollback          *protocol.UpdaterReceipt `json:"rollback,omitempty"`
-	HostID            string                   `json:"host_id"`
-	PreviousHash      string                   `json:"previous_hash"`
-	TargetHash        string                   `json:"target_hash"`
-	CandidateInstance string                   `json:"candidate_instance"`
-	Healthy           int64                    `json:"healthy"`
-	LastSequence      int64                    `json:"last_sequence"`
-	LastHealthyAt     int64                    `json:"last_healthy_at"`
-	GrantDeadline     int64                    `json:"grant_deadline"`
+	Configuration     *protocol.RunnerConfiguration `json:"configuration,omitempty"`
+	Committed         *protocol.UpdaterReceipt      `json:"committed,omitempty"`
+	HealthInstance    string                        `json:"health_instance,omitempty"`
+	Rollback          *protocol.UpdaterReceipt      `json:"rollback,omitempty"`
+	HostID            string                        `json:"host_id"`
+	PreviousHash      string                        `json:"previous_hash"`
+	TargetHash        string                        `json:"target_hash"`
+	CandidateInstance string                        `json:"candidate_instance"`
+	Healthy           int64                         `json:"healthy"`
+	LastSequence      int64                         `json:"last_sequence"`
+	LastHealthyAt     int64                         `json:"last_healthy_at"`
+	GrantDeadline     int64                         `json:"grant_deadline"`
 }
 
 func GetUpgrade(ctx context.Context, q Querier, id string) (UpgradeRow, error) {

@@ -28,6 +28,7 @@ type RunnerBuild struct {
 // Sequence is monotonic within InstanceID. Replayed claims retain their original
 // runtime observation and must still return their original assignment.
 type RunnerRuntime struct {
+	ConfigurationSHA256         string          `json:"configuration_sha256,omitempty"`
 	ConfirmedCancelledUpgradeID string          `json:"confirmed_cancelled_upgrade_id,omitempty"`
 	AuthorizationDeadlineMillis int64           `json:"authorization_deadline_ms,omitempty"`
 	UpdaterReceipt              *UpdaterReceipt `json:"updater_receipt,omitempty"`

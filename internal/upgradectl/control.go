@@ -93,13 +93,17 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
-	payload, err := json.Marshal(map[string]string{"release_id": bundle.Manifest.ReleaseID, "manifest_sha256": bundle.ManifestSHA256})
+	payload, err := json.Marshal(struct {
+		ReleaseID      string                                  `json:"release_id"`
+		ManifestSHA256 string                                  `json:"manifest_sha256"`
+		Configurations map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
+	}{bundle.Manifest.ReleaseID, bundle.ManifestSHA256, r.RunnerConfigurations})
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
 	zero := int64(0)
 	env := &protocol.Envelope{RequestID: r.RequestID, Operation: "upgrades.start", Target: protocol.Target{Type: "upgrade", ID: r.UpgradeID}, ExpectedControlRevision: &zero, Payload: payload, Reason: "Start the verified immutable local release through the service updater."}
-	op, err := c.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, app.StartUpgrade{Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis})
+	op, err := c.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, app.StartUpgrade{RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis})
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
