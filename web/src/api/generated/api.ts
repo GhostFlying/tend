@@ -231,6 +231,9 @@ export interface TendAPI {
   CreateWorkItemPayload?: CreateWorkItemPayload;
   DownloadURLResponse?: DownloadURLResponse;
   Envelope?: Envelope;
+  FollowupHistoryPage?: FollowupHistoryPage;
+  FollowupPage?: FollowupPage;
+  FollowupSpec?: FollowupSpec;
   HookRequest?: HookRequest;
   HookResponse?: HookResponse;
   InterruptReplyPayload?: InterruptReplyPayload;
@@ -257,6 +260,7 @@ export interface TendAPI {
   ToolSpec?: ToolSpec;
   TranscriptBlock?: TranscriptBlock;
   TranscriptPage?: TranscriptPage;
+  UpdateFollowupPayload?: UpdateFollowupPayload;
   UpdateWorkItemChoicePayload?: UpdateWorkItemChoicePayload;
   UpdateWorkItemPayload?: UpdateWorkItemPayload;
   WithdrawMessagePayload?: WithdrawMessagePayload;
@@ -355,6 +359,7 @@ export interface WorkItemView {
   deliveries?: WorkItemDelivery[];
   execution?: ExecutionCounts;
   follow_ons?: WorkItemFollowOn[];
+  followups?: FollowupSummary;
   intent: string;
   observations?: DeliveryObservation[];
   pending_reviews?: WorkItemCompletionReview[];
@@ -542,6 +547,17 @@ export interface WorkItemFollowOn {
   status: WorkItemFollowOnStatus;
   text: string;
   transferred_to?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FollowupSummary".
+ */
+export interface FollowupSummary {
+  active: number;
+  next_at?: number;
+  paused: number;
+  purpose?: string;
+  rule_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -963,6 +979,101 @@ export interface Envelope {
 export interface Target {
   id?: string;
   type: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FollowupHistoryPage".
+ */
+export interface FollowupHistoryPage {
+  more: boolean;
+  next_occurrence?: string;
+  next_revision?: number;
+  occurrences: FollowupOccurrence[] | null;
+  revisions: FollowupRule[] | null;
+  rule: FollowupRule;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FollowupOccurrence".
+ */
+export interface FollowupOccurrence {
+  created_at: number;
+  evidence: string;
+  message_id: string;
+  occurrence_id: string;
+  reason: string;
+  revision: number;
+  rule_id: string;
+  status: string;
+  work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FollowupRule".
+ */
+export interface FollowupRule {
+  at?: number;
+  condition?: FollowupCondition;
+  created_at: number;
+  every_seconds?: number;
+  expires_at?: number;
+  expiry_silent?: boolean;
+  follow_on_id?: string;
+  instruction: string;
+  kind: string;
+  max_triggers?: number;
+  next_at?: number;
+  purpose: string;
+  reason?: string;
+  revision: number;
+  rule_id: string;
+  source_id?: string;
+  status: string;
+  timezone: string;
+  trigger_count: number;
+  updated_at: number;
+  work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FollowupCondition".
+ */
+export interface FollowupCondition {
+  choice_id?: string;
+  decision_id?: string;
+  delivery_id?: string;
+  delivery_state?: string;
+  kind: string;
+  task_ids?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FollowupPage".
+ */
+export interface FollowupPage {
+  enabled: boolean;
+  event_seq: number;
+  items: FollowupRule[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FollowupSpec".
+ */
+export interface FollowupSpec {
+  at?: number;
+  condition?: FollowupCondition;
+  every_seconds?: number;
+  expires_at?: number;
+  expiry_silent?: boolean;
+  follow_on_id?: string;
+  instruction: string;
+  kind: string;
+  max_triggers?: number;
+  purpose: string;
+  source_id?: string;
+  timezone: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1440,6 +1551,13 @@ export interface TranscriptPage {
   event_seq: number;
   more: boolean;
   next_before?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdateFollowupPayload".
+ */
+export interface UpdateFollowupPayload {
+  spec?: FollowupSpec;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

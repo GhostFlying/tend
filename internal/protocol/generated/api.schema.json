@@ -1360,6 +1360,329 @@
       "title": "ExecutionState",
       "type": "string"
     },
+    "FollowupCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "choice_id": {
+          "type": "string"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "delivery_state": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "task_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "FollowupCondition",
+      "type": "object"
+    },
+    "FollowupHistoryPage": {
+      "additionalProperties": false,
+      "properties": {
+        "more": {
+          "type": "boolean"
+        },
+        "next_occurrence": {
+          "type": "string"
+        },
+        "next_revision": {
+          "type": "integer"
+        },
+        "occurrences": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/FollowupOccurrence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revisions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/FollowupRule"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rule": {
+          "$ref": "#/definitions/FollowupRule"
+        }
+      },
+      "required": [
+        "rule",
+        "revisions",
+        "occurrences",
+        "more"
+      ],
+      "title": "FollowupHistoryPage",
+      "type": "object"
+    },
+    "FollowupOccurrence": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "type": "integer"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "occurrence_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "occurrence_id",
+        "rule_id",
+        "revision",
+        "work_item_id",
+        "message_id",
+        "reason",
+        "status",
+        "evidence",
+        "created_at"
+      ],
+      "title": "FollowupOccurrence",
+      "type": "object"
+    },
+    "FollowupPage": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/FollowupRule"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "items",
+        "more",
+        "event_seq"
+      ],
+      "title": "FollowupPage",
+      "type": "object"
+    },
+    "FollowupRule": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "type": "integer"
+        },
+        "condition": {
+          "$ref": "#/definitions/FollowupCondition"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "every_seconds": {
+          "type": "integer"
+        },
+        "expires_at": {
+          "type": "integer"
+        },
+        "expiry_silent": {
+          "type": "boolean"
+        },
+        "follow_on_id": {
+          "type": "string"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "max_triggers": {
+          "type": "integer"
+        },
+        "next_at": {
+          "type": "integer"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "trigger_count": {
+          "type": "integer"
+        },
+        "updated_at": {
+          "type": "integer"
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "purpose",
+        "instruction",
+        "kind",
+        "timezone",
+        "rule_id",
+        "work_item_id",
+        "revision",
+        "status",
+        "trigger_count",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "FollowupRule",
+      "type": "object"
+    },
+    "FollowupSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "type": "integer"
+        },
+        "condition": {
+          "$ref": "#/definitions/FollowupCondition"
+        },
+        "every_seconds": {
+          "type": "integer"
+        },
+        "expires_at": {
+          "type": "integer"
+        },
+        "expiry_silent": {
+          "type": "boolean"
+        },
+        "follow_on_id": {
+          "type": "string"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "max_triggers": {
+          "type": "integer"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "purpose",
+        "instruction",
+        "kind",
+        "timezone"
+      ],
+      "title": "FollowupSpec",
+      "type": "object"
+    },
+    "FollowupSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "active": {
+          "type": "integer"
+        },
+        "next_at": {
+          "type": "integer"
+        },
+        "paused": {
+          "type": "integer"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "rule_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "active",
+        "paused"
+      ],
+      "title": "FollowupSummary",
+      "type": "object"
+    },
     "HookEvent": {
       "enum": [
         "session_start",
@@ -2885,6 +3208,16 @@
       "title": "TranscriptPage",
       "type": "object"
     },
+    "UpdateFollowupPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "spec": {
+          "$ref": "#/definitions/FollowupSpec"
+        }
+      },
+      "title": "UpdateFollowupPayload",
+      "type": "object"
+    },
     "UpdateWorkItemChoicePayload": {
       "additionalProperties": false,
       "properties": {
@@ -3741,6 +4074,9 @@
           },
           "type": "array"
         },
+        "followups": {
+          "$ref": "#/definitions/FollowupSummary"
+        },
         "intent": {
           "type": "string"
         },
@@ -3969,6 +4305,15 @@
     "Envelope": {
       "$ref": "#/definitions/Envelope"
     },
+    "FollowupHistoryPage": {
+      "$ref": "#/definitions/FollowupHistoryPage"
+    },
+    "FollowupPage": {
+      "$ref": "#/definitions/FollowupPage"
+    },
+    "FollowupSpec": {
+      "$ref": "#/definitions/FollowupSpec"
+    },
     "HookRequest": {
       "$ref": "#/definitions/HookRequest"
     },
@@ -4046,6 +4391,9 @@
     },
     "TranscriptPage": {
       "$ref": "#/definitions/TranscriptPage"
+    },
+    "UpdateFollowupPayload": {
+      "$ref": "#/definitions/UpdateFollowupPayload"
     },
     "UpdateWorkItemChoicePayload": {
       "$ref": "#/definitions/UpdateWorkItemChoicePayload"

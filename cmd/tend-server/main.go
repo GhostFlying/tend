@@ -23,6 +23,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/GhostFlying/tend/internal/api"
 	"github.com/GhostFlying/tend/internal/app"
@@ -177,6 +178,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		return err
 	}
 	opts = append(opts, observationOption)
+	opts = append(opts, app.WithFollowups(cfg.MainAgent != nil))
 	a := app.New(s, ids, time.Now, opts...)
 	if err := syncConfig(ctx, a, ids, cfg); err != nil {
 		return err
@@ -281,6 +283,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	}
 	if front != nil {
 		wg.Go(func() { _ = front.Run(runCtx) })
+		wg.Go(func() { a.RunFollowups(runCtx, log) })
 	}
 	wg.Go(func() { _ = d.Run(runCtx) })
 	wg.Go(func() { runners.SweepLeases(runCtx, a.LeaseTTL()/4) })

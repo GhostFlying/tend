@@ -124,9 +124,21 @@ func TranscriptReplies(ctx context.Context, q Querier, id string, after int64, l
 	return out, rows.Err()
 }
 
-// HideUndeliveredOwner keeps future or withdrawn instructions out of model reads.
+// HideUndeliveredOwner keeps unadmitted owner input and cancelled followups out of model reads.
 func HideUndeliveredOwner(ctx context.Context, q Querier, it *protocol.ConversationItem) error {
 	if it.Author != "owner" {
+		if it.Author == "system" {
+			var cancelled bool
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM followup_occurrences WHERE message_id=? AND status='cancelled')`, it.MessageID).Scan(&cancelled); err != nil {
+				return err
+			}
+			if cancelled {
+				it.Body = "[Cancelled followup input; historical record only, not an instruction.]"
+				it.Attachments = nil
+				it.Images = nil
+				it.Decision = nil
+			}
+		}
 		return nil
 	}
 	var hidden bool

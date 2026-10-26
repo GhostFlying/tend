@@ -68,6 +68,14 @@ type tool struct {
 }
 
 var tools = []tool{
+	{"work_items_followups_list", "Read bounded followup rules for an existing work item, including next time and status.", (*Service).followupsList},
+	{"work_items_followups_history", "Read rule revisions and durable occurrences; queued, running and completed checks are distinct from business completion.", (*Service).followupsHistory},
+	{"work_items_followups_create", "Register a bounded time or ledger condition for existing owner-authorized work. Hosted only; does not authorize new work or start a worker. Use UTC milliseconds and an explicit IANA presentation timezone. Source is the current turn.", (*Service).followupsCreate},
+	{"work_items_followups_update", "Replace a followup spec under its revision, revoking unclaimed old input. Preserve authority and cumulative trigger count.", (*Service).followupsUpdate},
+	{"work_items_followups_pause", "Pause a followup and cancel its unclaimed checks. Started turns remain actual history.", (*Service).followupsPause},
+	{"work_items_followups_resume", "Resume a paused followup after rereading its facts. Expired one-time rules need an explicit new time or manual trigger.", (*Service).followupsResume},
+	{"work_items_followups_cancel", "Cancel a followup and its unclaimed checks, preserving history.", (*Service).followupsCancel},
+	{"work_items_followups_trigger", "Request one explicit check of this rule without resetting its schedule or budget. Does not authorize additional work.", (*Service).followupsTrigger},
 	{"tool_failures_list", "List failed hosted-agent tool calls across all projects in the owner conversation (not filtered by current session project), with source message, call identity and structured error, without original inputs. Use before_seq for earlier pages and tool to filter.", (*Service).toolFailuresList},
 	{"work_items_refresh_delivery", "Request a read-only refresh of a linked GitHub PR or Codebase MR on a capable runner. This never merges, closes or deploys it. Read work_items_read for the resulting observation and timestamp.", (*Service).workItemsRefresh},
 	{"work_item_choices_list", "Read persistent next-step questions for a work item, including answered and withdrawn history.", (*Service).workItemChoicesList},
@@ -125,6 +133,9 @@ func Specs() []harness.ToolSpec {
 func AddonSpecs() []protocol.ToolSpec {
 	out := make([]protocol.ToolSpec, 0, len(tools))
 	for _, t := range tools {
+		if strings.HasPrefix(t.name, "work_items_followups_") && t.name != "work_items_followups_list" && t.name != "work_items_followups_history" {
+			continue
+		}
 		var schema map[string]any
 		if err := json.Unmarshal([]byte(schemas[t.name]), &schema); err != nil {
 			panic(fmt.Sprintf("tools: schema of %s: %v", t.name, err)) // the schemas are constants
