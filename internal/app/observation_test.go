@@ -72,6 +72,9 @@ func TestRunObservationScopeAndFreshness(t *testing.T) {
 			if first.Deployment.SchemaVersion == 0 || first.Deployment.ActualServer.PID != 123 || first.Deployment.CommittedProof != nil || first.Deployment.ProofStatus != "unavailable" {
 				t.Fatal(first.Deployment)
 			}
+			if first.Deployment.Runner == nil || first.Deployment.Runner.HostID != "linux-1" || !first.Deployment.Runner.Online || first.Deployment.Runner.InstanceID != "observation-host" {
+				t.Fatal("own host deployment projection missing", first.Deployment.Runner)
+			}
 			raw, _ := json.Marshal(first)
 			if strings.Contains(string(raw), "PRIVATE") || strings.Contains(string(raw), "background") || strings.Contains(string(raw), "report") {
 				t.Fatalf("sensitive projection: %s", raw)

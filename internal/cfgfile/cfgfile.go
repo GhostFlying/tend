@@ -5,6 +5,8 @@ package cfgfile
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,21 +18,25 @@ import (
 )
 
 // Load reads the file at path into v.
-func Load(path string, v any) error {
+func Load(path string, v any) error { _, err := LoadDigest(path, v); return err }
+
+// LoadDigest returns the SHA-256 of the exact configuration bytes decoded.
+func LoadDigest(path string, v any) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("cfgfile: %w", err)
+		return "", fmt.Errorf("cfgfile: %w", err)
 	}
 	std, err := hujson.Standardize(raw)
 	if err != nil {
-		return fmt.Errorf("cfgfile: %s: %w", path, err)
+		return "", fmt.Errorf("cfgfile: %s: %w", path, err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(std))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		return fmt.Errorf("cfgfile: %s: %w", path, err)
+		return "", fmt.Errorf("cfgfile: %s: %w", path, err)
 	}
-	return nil
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // Path expands a leading ~ to the user's home directory and makes the

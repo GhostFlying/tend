@@ -19,14 +19,16 @@ const capabilityUpdater = "runner-updater-v1"
 // StartUpgrade receives an already verified immutable local bundle from the
 // local control service. The remotely supplied payload cannot choose binaries.
 type StartUpgrade struct {
-	Manifest       release.Manifest
-	ManifestSHA256 string
-	ManifestSize   int64
-	ServerHash     string
-	ServerInstance string
-	DrainMillis    int64
-	RestartMillis  int64
-	GrantMillis    int64
+	RunnerConfigurations map[string]protocol.RunnerConfiguration
+	CurrentServerHash    string
+	Manifest             release.Manifest
+	ManifestSHA256       string
+	ManifestSize         int64
+	ServerHash           string
+	ServerInstance       string
+	DrainMillis          int64
+	RestartMillis        int64
+	GrantMillis          int64
 }
 
 func (StartUpgrade) Operation() string { return "upgrades.start" }
@@ -101,6 +103,15 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "rolling upgrades require another online execution host")
 	}
 	r := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, Hosts: []protocol.UpgradeHostView{}}, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
+	if len(c.RunnerConfigurations) > 0 {
+		if len(c.RunnerConfigurations) != 1 || c.ServerHash != c.CurrentServerHash {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration maintenance requires one host and the current server binary")
+		}
+		if c.Manifest.Storage.ServerSchema.Max != schema || c.Manifest.Protocol.Max != protocol.CurrentRunnerProtocol {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration maintenance must retain installed versions")
+		}
+		r.View.Phase = "runners"
+	}
 	totalBytes := c.ManifestSize
 	for _, artifact := range c.Manifest.Artifacts {
 		totalBytes += artifact.Size
@@ -133,13 +144,58 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "unfinished run %s requires a retired protocol", run.RunID)
 			}
 		}
-		r.Hosts = append(r.Hosts, store.UpgradeHost{HostID: h.HostID, PreviousHash: rt.Runtime.Build.BinarySHA256, TargetHash: artifact.SHA256})
+		var configuration *protocol.RunnerConfiguration
+		if len(c.RunnerConfigurations) > 0 {
+			if artifact.SHA256 != rt.Runtime.Build.BinarySHA256 || !installedRunnerMatches(rt.Runtime, c.Manifest) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration maintenance cannot replace binaries")
+			}
+			if target, ok := c.RunnerConfigurations[h.HostID]; ok {
+				if !validRunnerConfiguration(target) || !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityRunnerConfiguration) {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "host does not support this configuration target")
+				}
+				configuration = &target
+			}
+		}
+		r.Hosts = append(r.Hosts, store.UpgradeHost{Configuration: configuration, HostID: h.HostID, PreviousHash: rt.Runtime.Build.BinarySHA256, TargetHash: artifact.SHA256})
 		r.View.Hosts = append(r.View.Hosts, protocol.UpgradeHostView{HostID: h.HostID, Status: "queued", Phase: "queued", CurrentVersion: rt.Runtime.Build.Version, TargetVersion: c.Manifest.ReleaseID, ProtocolVersion: rt.Runtime.Protocol, TotalBytes: totalBytes})
+	}
+	if len(c.RunnerConfigurations) > 0 {
+		found := false
+		for i, h := range r.Hosts {
+			if h.Configuration == nil {
+				r.View.Hosts[i].Status = "skipped"
+				r.View.Hosts[i].Phase = "skipped"
+				continue
+			}
+			found = true
+			ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
+			if err != nil {
+				return Outcome{}, err
+			}
+			ctl.Revision++
+			ctl.Mode = protocol.RunnerMaintenance
+			ctl.UpgradeID = r.View.UpgradeID
+			ctl.ReleaseID = r.View.ReleaseID
+			ctl.Authorization = nil
+			ctl.CancelledUpgradeID = ""
+			if err := tx.PutHostControl(ctx, h.HostID, ctl, x.Now.UnixMilli()); err != nil {
+				return Outcome{}, err
+			}
+			r.View.Hosts[i].Status = "running"
+			r.View.Hosts[i].Phase = "draining"
+		}
+		if !found {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration host is not active")
+		}
 	}
 	if err := tx.PutUpgrade(ctx, r); err != nil {
 		return Outcome{}, err
 	}
-	if err := upgradeNotice(ctx, x, tx, r, "upgrade_started", "", fmt.Sprintf("开始升级至 `%s`。先等待主会话完成当前回复，再逐台更新执行主机。", r.View.ReleaseID)); err != nil {
+	notice := fmt.Sprintf("开始升级至 `%s`。先等待主会话完成当前回复，再逐台更新执行主机。", r.View.ReleaseID)
+	if len(c.RunnerConfigurations) > 0 {
+		notice = "已暂停目标主机的新任务领取；等待当前运行与待确认操作结束后应用配置。"
+	}
+	if err := upgradeNotice(ctx, x, tx, r, "upgrade_started", "", notice); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Result: r.View, Events: []Event{upgradeEvent(r)}}, nil
@@ -386,7 +442,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 				return attention("等待升级的主机离线")
 			}
-			if h.PreviousHash == h.TargetHash {
+			if h.PreviousHash == h.TargetHash && h.Configuration == nil {
 				if !installedRunnerMatches(rt.Runtime, r.Manifest) {
 					return attention("当前 runner 的协议或 journal 版本与发布清单不一致")
 				}
@@ -432,7 +488,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 		}
 		if v.Phase == "draining" && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && runs == 0 {
 			ctl.Revision++
-			ctl.Upgrade = &protocol.RunnerUpgradeTarget{ManifestPath: "/runner/v1/releases/" + r.View.UpgradeID + "/manifest", ManifestSHA256: r.ManifestSHA256, ManifestSize: r.ManifestSize, ArtifactBasePath: "/runner/v1/releases/" + r.View.UpgradeID + "/artifacts/"}
+			ctl.Upgrade = &protocol.RunnerUpgradeTarget{Configuration: h.Configuration, ManifestPath: "/runner/v1/releases/" + r.View.UpgradeID + "/manifest", ManifestSHA256: r.ManifestSHA256, ManifestSize: r.ManifestSize, ArtifactBasePath: "/runner/v1/releases/" + r.View.UpgradeID + "/artifacts/"}
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
 				return err
 			}

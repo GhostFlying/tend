@@ -89,8 +89,9 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
-	DeliveryObserver  DeliveryObserver
-	DeliveryProviders []string
+	DeliveryObserver    DeliveryObserver
+	ConfigurationSHA256 string
+	DeliveryProviders   []string
 
 	ServerURL            string
 	HostID               string

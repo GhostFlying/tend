@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -72,7 +73,16 @@ func New(cfg Config) *Client {
 		cfg.Timeout = 30 * time.Second
 	}
 	if cfg.Exec == nil {
-		cfg.Exec = execute
+		cfg.Exec = func(ctx context.Context, bin string, args []string) ([]byte, error) {
+			if bin != cfg.CodebaseBin {
+				return execute(ctx, bin, args)
+			}
+			cmd := exec.CommandContext(ctx, bin, args...)
+			cmd.Env = append(os.Environ(), "BYTEDCLI_NO_AUTO_UPGRADE=1")
+			procx.Contain(cmd)
+			defer procx.KillGroup(cmd)
+			return cmd.Output()
+		}
 	}
 	return &Client{cfg: cfg}
 }

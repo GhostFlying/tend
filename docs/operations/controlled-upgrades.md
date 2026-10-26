@@ -119,3 +119,58 @@ journal requests 表为空而豁免。
 或为失败对账创建释放意图。journal 读写错误仍是维护故障，不因资源隔离而忽略。
 升级 runner 不会恢复已 done 的历史 run，也不能作为关闭原生终端的授权。
 具体边界及回归见[实施计划](../plans/terminal-resource-maintenance.md)。
+
+## 单主机 provider 配置维护（D106）
+
+首次使用前以普通发布安装支持 `runner-config-maintenance-v1` 的 runner 和 server，
+并显式升级固定 updater。停止 updater 不应停止受管 runner；先核对服务管理器的
+进程边界、持久状态和实际进程身份，保留旧 updater，再换更新器。不得用停止 runner
+来安装这项能力。目标 updater 增加 `service_config`，必须与已有 `args` 的 `-config`
+路径完全相同；不改变 runner 配置本身。
+
+worker 只准备私有候选和证据，外部 operator 负责启动批次及等待完成。执行任务若
+运行在目标 runner 上，应先安排它结束，或按 owner 的维护授权暂停并正式收敛 run。
+worker 等待提问仍是活动 run，不满足排空条件。配置维护冻结整个目标主机的新 claim，
+不只冻结该任务；验收只能在维护完成恢复领取后启动。
+
+本期只允许 `delivery_observer` 的差异，provider 可执行文件必须为显式绝对路径。
+固定 runner 的 `check-config OLD CANDIDATE` 只解析配置并解析可执行文件路径，不登录
+或访问平台，也不证明真实账号认证。updater 暂存前强制调用这个模式。Codebase 观察
+调用设置 `BYTEDCLI_NO_AUTO_UPGRADE=1`，避免只读查询触发 CLI 自更新。
+
+准备包含**当前实际 server 和所有 runner 原字节**的新 manifest，存储和协议版本不变；
+唯一的新 `release_id` 与配置批次关联，不通过修改 build ID 制造一次程序升级。配置
+内容不放进 bundle。元数据文件仅包含目标主机及原/新文件哈希和要求的 provider，例如：
+
+```json
+{"runner-a":{"previous_sha256":"<old-sha256>","sha256":"<candidate-sha256>","providers":["github","codebase"]}}
+```
+
+在目标主机使用新 updater CLI 暂存，沿用同一批次 ID 重试：
+
+```sh
+tend-updater stage-config --config "$UPDATER_CONFIG" \
+  --upgrade-id "$BATCH_ID" --manifest-sha256 "$MANIFEST_SHA256" \
+  --candidate "$PRIVATE_CANDIDATE" --previous-sha256 "$OLD_SHA256" \
+  --sha256 "$CANDIDATE_SHA256" --providers github,codebase
+```
+
+原配置和候选必须是权限不超过 0600、至多 1 MiB 的普通文件。updater 固定目标路径，
+保存不可变候选和备份；这里只做准备，不修改运行配置。随后在 server 本机执行：
+
+```sh
+tend upgrade start --release "$RELEASE_DIR" --upgrade-id "$BATCH_ID" \
+  --runner-configurations "$METADATA_FILE" --json
+```
+
+配置批次跳过 server 重启，在创建批次的事务内冻结指定主机 claim。其余主机保持正常，
+目标等待所有 run、未确认领取及资源/交付操作完成。旧进程报告实际加载的原配置哈希；
+server 授权后，updater 停旧进程、备份数据、原子应用配置并启动相同程序。新进程报告
+实际解析字节的哈希，server 确认 required provider、两次不同健康心跳，updater 再
+持久提交。服务端恢复 normal 并收到确认后批次完成。验收须独立读回配置、PID/实例、
+server 侧 online/normal/provider，真实对象访问需另有明确目标与授权。
+
+已知未启动或有 server admission fence 的失败恢复原配置及允许恢复的数据，并核对
+旧配置加载哈希后才解除维护。停止/启动结果未知、配置被外部改动、备份损坏或健康
+渠道不可用时保持维护并报告，不以“应已回滚”代替证据。提交后不恢复旧 journal；
+后续撤销配置须以当前哈希为基线启动新的维护批次。原始配置和备份不上传为任务附件。

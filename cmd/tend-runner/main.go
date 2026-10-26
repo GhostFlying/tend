@@ -89,6 +89,14 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "check-config" {
+		if err := checkConfiguration(os.Args[2], os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, "runner configuration maintenance validation failed")
+			os.Exit(1)
+		}
+		fmt.Println("configuration parsed and provider executables resolved")
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == workerMCP {
 		os.Exit(runWorkerMCP(os.Args[2:]))
 	}
@@ -137,7 +145,8 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		return errors.New("-config is required")
 	}
 	var cfg config
-	if err := cfgfile.Load(path, &cfg); err != nil {
+	configurationSHA, err := cfgfile.LoadDigest(path, &cfg)
+	if err != nil {
 		return err
 	}
 	if cfg.Worker.StartupAttempts != nil && *cfg.Worker.StartupAttempts < 0 {
@@ -270,7 +279,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		return err
 	}
 	r := runner.New(runner.Config{
-		DeliveryObserver: observer, DeliveryProviders: providers,
+		ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
 		InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: cfg.UpdaterSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,

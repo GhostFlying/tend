@@ -65,6 +65,7 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		ctl.Revision++
 		ctl.Mode = protocol.RunnerNormal
 		ctl.Authorization = nil
+		ctl.Upgrade = nil
 		ctl.UpgradeID = ""
 		ctl.ReleaseID = ""
 		if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
@@ -113,7 +114,7 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		}
 		v.Phase = "checking"
 		admitted := h.Committed != nil && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal
-		healthy := fresh && (admitted || ctl.Mode == protocol.RunnerMaintenance && rt.Runtime.Mode == protocol.RunnerReady && runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0)
+		healthy := runnerConfigurationMatches(*h, rt.Runtime) && fresh && (admitted || ctl.Mode == protocol.RunnerMaintenance && rt.Runtime.Mode == protocol.RunnerReady && runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0)
 		if healthy && rt.Runtime.Sequence > h.LastSequence && rt.LastHeartbeatAt-h.LastHealthyAt >= 7500 {
 			h.Healthy++
 			h.LastSequence = rt.Runtime.Sequence
@@ -129,7 +130,9 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 				ctl.Revision++
 			}
 			ctl.Mode = protocol.RunnerNormal
-			ctl.Upgrade = nil
+			if h.Configuration == nil {
+				ctl.Upgrade = nil
+			}
 			ctl.Authorization = nil
 			// Retain the batch identity until normal mode is acknowledged.
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
@@ -147,6 +150,7 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 			r.Deadline = now + r.DrainMillis
 		}
 		ctl.Revision++
+		ctl.Upgrade = nil
 		ctl.UpgradeID = ""
 		ctl.ReleaseID = ""
 		if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
