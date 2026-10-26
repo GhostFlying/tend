@@ -14,6 +14,7 @@ import (
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
 var ownerCommands = commandMap(
+	app.WithdrawMessage{},
 	app.UpdateWorkItem{}, app.CloseWorkItem{}, app.ReopenWorkItem{},
 	app.RefreshDelivery{}, app.UpdateWorkItemChoice{Action: "respond"},
 	app.HostMaintenance{},
