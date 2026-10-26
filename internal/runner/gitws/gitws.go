@@ -195,6 +195,7 @@ type state struct {
 	ProviderInstanceID string                `json:"provider_instance_id,omitempty"`
 	FolderAsked        bool                  `json:"folder_asked,omitempty"`
 	DisplayTask        string                `json:"display_task,omitempty"`
+	DisplayComment     string                `json:"display_comment,omitempty"`
 	Mounts             map[string]mountState `json:"mounts"`
 	// Prepared maps a profile's key to the hash of its inputs when it last
 	// ran successfully.
@@ -453,11 +454,13 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 	if as.Workspace.ProviderInstanceID != "" && as.Workspace.ProviderInstanceID != st.ProviderInstanceID {
 		return runner.Prepared{}, fmt.Errorf("gitws: assigned provider instance changed")
 	}
-	if l, ok := w.layout.(orcaLayout); ok && as.Workspace.ID != "" && p.ProviderID != "" && st.DisplayTask != as.TaskID {
-		if err := l.orca.RenameWorkspace(ctx, p.ProviderID, workspaceTitle(as), w.workspaceComment(as)); err != nil {
+	comment := w.workspaceComment(as)
+	if l, ok := w.layout.(orcaLayout); ok && as.Workspace.ID != "" && p.ProviderID != "" && (st.DisplayTask != as.TaskID || st.DisplayComment != comment) {
+		if err := l.orca.RenameWorkspace(ctx, p.ProviderID, workspaceTitle(as), comment); err != nil {
 			return runner.Prepared{}, err
 		}
 		st.DisplayTask = as.TaskID
+		st.DisplayComment = comment
 	}
 	p.Report.ProviderID, p.Report.ProviderInstanceID, p.Report.Path = st.ProviderID, st.ProviderInstanceID, root
 	if len(fullBaseline) > 0 {
