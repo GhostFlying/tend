@@ -808,3 +808,30 @@ test("choice updates refresh retained transcript cards and resist older pages", 
   expect(live.queueView.state.get().blocks[0]?.trigger.choices?.[0]?.status).toBe("withdrawn");
   await live.stop();
 });
+
+test("turn state events refresh an open followup projection", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  const path = "/api/v1/work-items/work-example/followups";
+  try {
+    const first = live.workItems.followups.open(path);
+    await api.answer(path, { enabled: true, items: [], latest: { rule: { status: "starting" } } });
+    await first;
+    live.apply(
+      messageEvent(
+        10,
+        { ...owner(2, "processing"), author: "system" },
+        "conversation.message_state",
+      ),
+    );
+    await vi.waitFor(() => expect(api.pending()).toContain(path));
+    await api.answer(path, {
+      enabled: true,
+      items: [],
+      latest: { rule: { status: "processing" } },
+    });
+    expect(live.workItems.followups.state.get().value?.latest?.rule?.status).toBe("processing");
+  } finally {
+    live.stop();
+  }
+});

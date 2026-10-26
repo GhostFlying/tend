@@ -354,6 +354,12 @@ function WorkItemCard({ item }: { item: WorkItemView }) {
       <p className={styles.concern} data-attention={item.column === "attention"}>
         {concern(item)}
       </p>
+      {item.followups && item.followups.active + item.followups.paused > 0 && (
+        <p className={styles.meta}>
+          等待：{item.followups.purpose} · {item.followups.active} 项有效 / {item.followups.paused}{" "}
+          项暂停
+        </p>
+      )}
       <div className={styles.facts}>
         <span>
           {tasks.filter((task) => task.lifecycle === "completed").length}/{tasks.length} 任务完成

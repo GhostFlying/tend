@@ -74,7 +74,11 @@ export function WorkItemProgress({ item, children }: { item: WorkItemView; child
               ? "任务已安排，阶段尚未关联"
               : item.status === "closed"
                 ? "工作项已结束"
-                : "本轮暂无执行任务，后续待安排"}
+                : item.followups?.active
+                  ? `等待跟进：${item.followups.purpose}`
+                  : item.followups?.paused
+                    ? "跟进安排已暂停，保留等待事项"
+                    : "本轮暂无执行任务，后续待安排"}
           </p>
         )}
         {!!ongoing.length && (

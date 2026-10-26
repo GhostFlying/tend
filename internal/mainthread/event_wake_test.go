@@ -84,7 +84,7 @@ func TestTasklessAnsweredDecisionWakeCarriesAnswerIntoFreshThread(t *testing.T) 
 		t.Fatalf("unexpected original owner input: %+v", starts)
 	}
 	for _, text := range []string{"decision.answered", opened.DecisionID, `"option":"narrow"`, `"text":"Limit it to the renderer; preserve the loader."`} {
-		if !strings.Contains(starts[0].Text, text) {
+		if !strings.Contains(starts[0].Text+backgroundFacts(e, starts[0].UserMessageID), text) {
 			t.Errorf("fresh event turn lost canonical answer %q: %s", text, starts[0].Text)
 		}
 	}
@@ -149,7 +149,7 @@ func TestEventWakeSurvivesRestartAndKeepsOwnerPriority(t *testing.T) {
 		t.Fatalf("owner priority lost after restart: %+v", starts)
 	}
 	for _, text := range []string{"Tend ledger event", "decision.opened", "not an owner request", "already be superseded", "grants no new authority"} {
-		if !strings.Contains(starts[1].Text, text) {
+		if !strings.Contains(starts[1].Text+backgroundFacts(e, starts[1].UserMessageID), text) {
 			t.Errorf("event input missing %q: %s", text, starts[1].Text)
 		}
 	}
@@ -262,12 +262,19 @@ func TestWorkItemChoiceAnswerWakesWithSystemNoticeAndNoQueuedOwnerReply(t *testi
 		t.Fatalf("starts=%+v", starts)
 	}
 	for _, text := range []string{"work_item_choice.answered", choice.ChoiceID, "Deploy after CI", choice.AnswerSourceID} {
-		if !strings.Contains(starts[0].Text, text) {
+		if !strings.Contains(starts[0].Text+backgroundFacts(e, starts[0].UserMessageID), text) {
 			t.Errorf("wake missing %q: %s", text, starts[0].Text)
 		}
 	}
 	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		msg, err := store.GetMessage(t.Context(), tx.Q(), starts[0].UserMessageID)
+		page, err := store.BackgroundSources(t.Context(), tx.Q(), starts[0].UserMessageID, 0)
+		if err != nil {
+			return err
+		}
+		if len(page.Sources) != 1 {
+			t.Fatal(page)
+		}
+		msg, err := store.GetMessage(t.Context(), tx.Q(), page.Sources[0].MessageID)
 		if err != nil {
 			return err
 		}
@@ -284,4 +291,30 @@ func TestWorkItemChoiceAnswerWakesWithSystemNoticeAndNoQueuedOwnerReply(t *testi
 	if e.count(`SELECT COUNT(*) FROM outbox WHERE operation=? AND status='failed'`, app.OpHandleEvent) != 0 {
 		t.Fatal("choice wake was rejected")
 	}
+}
+
+func backgroundFacts(e *env, message string) string {
+	e.t.Helper()
+	var out string
+	if err := e.store.Read(e.t.Context(), func(tx *store.ReadTx) error {
+		for after := int64(0); ; {
+			page, err := store.BackgroundSources(e.t.Context(), tx.Q(), message, after)
+			if err != nil {
+				return err
+			}
+			raw, err := json.Marshal(page)
+			if err != nil {
+				return err
+			}
+			out += string(raw)
+			if !page.More {
+				break
+			}
+			after = page.Next
+		}
+		return nil
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return out
 }

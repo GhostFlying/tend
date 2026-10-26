@@ -23,15 +23,11 @@ func TestAnsweredDecisionWakeCarriesCanonicalEffectResult(t *testing.T) {
 			t.Fatalf("chat notice omitted readable answer or exposed protocol JSON: %s", last.Body)
 		}
 		var raw string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT payload_json FROM outbox WHERE operation=? AND json_extract(payload_json,'$.message_id')=?`, OpHandleEvent, last.MessageID).Scan(&raw); err != nil {
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT data_json FROM background_sources WHERE message_id=?`, last.MessageID).Scan(&raw); err != nil {
 			return err
 		}
-		var wake HandleMessage
-		if err := json.Unmarshal([]byte(raw), &wake); err != nil {
-			return err
-		}
-		if string(wake.DecisionAnswer) != string(answer.Answer) || !strings.Contains(string(wake.DecisionAnswer), `"applied":true`) {
-			t.Fatalf("durable event wake lost canonical answer: %s", wake.DecisionAnswer)
+		if raw != string(answer.Answer) || !strings.Contains(raw, `"applied":true`) {
+			t.Fatalf("durable source lost effect: %s", raw)
 		}
 		return nil
 	}); err != nil {
@@ -47,7 +43,7 @@ func TestEventWakeFailureDecisionAndOwnerAnswerAreDurable(t *testing.T) {
 		t.Fatalf("failure decision wake: %+v, %v, %v", d, ok, err)
 	}
 	var wake HandleMessage
-	if err := json.Unmarshal(d.Payload, &wake); err != nil || wake.EventKind != "decision.opened" || wake.EventID == "" {
+	if err := json.Unmarshal(d.Payload, &wake); err != nil || wake.EventKind != "background.batch" || wake.EventID == "" {
 		t.Fatalf("wake = %+v, %v", wake, err)
 	}
 	msg, err := h.app.Message(t.Context(), wake.MessageID)
@@ -55,7 +51,14 @@ func TestEventWakeFailureDecisionAndOwnerAnswerAreDurable(t *testing.T) {
 		t.Fatalf("event provenance = %+v, %v", msg, err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		metadata, err := store.GetMessageNotice(t.Context(), tx.Q(), wake.MessageID)
+		page, err := store.BackgroundSources(t.Context(), tx.Q(), wake.MessageID, 0)
+		if err != nil {
+			return err
+		}
+		if len(page.Sources) != 1 {
+			t.Fatal(page)
+		}
+		metadata, err := store.GetMessageNotice(t.Context(), tx.Q(), page.Sources[0].MessageID)
 		if err == nil && metadata.NoticeType != "decision_opened" {
 			t.Fatalf("decision notice type = %q", metadata.NoticeType)
 		}
@@ -75,11 +78,18 @@ func TestEventWakeFailureDecisionAndOwnerAnswerAreDurable(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("answer wake after restart = %+v, %v, %v", d, ok, err)
 	}
-	if err := json.Unmarshal(d.Payload, &wake); err != nil || wake.EventKind != "decision.answered" {
+	if err := json.Unmarshal(d.Payload, &wake); err != nil || wake.EventKind != "background.batch" {
 		t.Fatalf("answer wake = %+v, %v", wake, err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		metadata, err := store.GetMessageNotice(t.Context(), tx.Q(), wake.MessageID)
+		page, err := store.BackgroundSources(t.Context(), tx.Q(), wake.MessageID, 0)
+		if err != nil {
+			return err
+		}
+		if len(page.Sources) != 1 {
+			t.Fatal(page)
+		}
+		metadata, err := store.GetMessageNotice(t.Context(), tx.Q(), page.Sources[0].MessageID)
 		if err == nil && metadata.NoticeType != "decision_answered" {
 			t.Fatalf("answer notice type = %q", metadata.NoticeType)
 		}
@@ -190,7 +200,13 @@ func TestStartupFailureNoticeUsesCurrentRunSafeDiagnosis(t *testing.T) {
 				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 					items, err := store.ListConversation(t.Context(), tx.Q(), 0, 0, 100)
 					if err == nil {
-						body = items[len(items)-1].Body
+						for i := len(items) - 1; i >= 0; i-- {
+							m, e := store.GetMessageNotice(t.Context(), tx.Q(), items[i].MessageID)
+							if e == nil && m.NoticeType == "decision_opened" {
+								body = items[i].Body
+								break
+							}
+						}
 					}
 					return err
 				}); err != nil {

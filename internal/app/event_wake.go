@@ -29,6 +29,9 @@ func wakesMain(p protocol.Principal, kind string) bool {
 // request ID and the existing main_turns record make dispatch/restart replay
 // follow the same no-blind-retry rules as an owner message.
 func queueEventTurn(ctx context.Context, x *Exec, tx *store.Tx, messageID, eventID, kind string, answer json.RawMessage) error {
+	return queueBackgroundSource(ctx, x, tx, messageID, eventID, kind, answer)
+}
+func queueSingleEventTurn(ctx context.Context, x *Exec, tx *store.Tx, messageID, eventID, kind string, answer json.RawMessage) error {
 	payload, err := json.Marshal(HandleMessage{MessageID: messageID, EventID: eventID, EventKind: kind, DecisionAnswer: answer})
 	if err != nil {
 		return fmt.Errorf("app: encode event wake: %w", err)

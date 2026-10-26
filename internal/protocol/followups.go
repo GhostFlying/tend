@@ -40,23 +40,26 @@ type FollowupRule struct {
 }
 
 type FollowupOccurrence struct {
-	OccurrenceID string `json:"occurrence_id"`
-	RuleID       string `json:"rule_id"`
-	Revision     int64  `json:"revision"`
-	WorkItemID   string `json:"work_item_id"`
-	MessageID    string `json:"message_id"`
-	Reason       string `json:"reason"`
-	Status       string `json:"status"`
-	Evidence     string `json:"evidence"`
-	CreatedAt    int64  `json:"created_at"`
+	BackgroundMessageID string             `json:"background_message_id,omitempty"`
+	Checkin             *BackgroundCheckin `json:"checkin,omitempty"`
+	OccurrenceID        string             `json:"occurrence_id"`
+	RuleID              string             `json:"rule_id"`
+	Revision            int64              `json:"revision"`
+	WorkItemID          string             `json:"work_item_id"`
+	MessageID           string             `json:"message_id"`
+	Reason              string             `json:"reason"`
+	Status              string             `json:"status"`
+	Evidence            string             `json:"evidence"`
+	CreatedAt           int64              `json:"created_at"`
 }
 
 type FollowupPage struct {
-	Enabled  bool           `json:"enabled"`
-	Items    []FollowupRule `json:"items"`
-	More     bool           `json:"more"`
-	Next     string         `json:"next,omitempty"`
-	EventSeq int64          `json:"event_seq"`
+	Latest   map[string]FollowupOccurrence `json:"latest,omitempty"`
+	Enabled  bool                          `json:"enabled"`
+	Items    []FollowupRule                `json:"items"`
+	More     bool                          `json:"more"`
+	Next     string                        `json:"next,omitempty"`
+	EventSeq int64                         `json:"event_seq"`
 }
 
 type FollowupHistoryPage struct {

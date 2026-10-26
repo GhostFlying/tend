@@ -138,7 +138,7 @@ func TestFollowupPeriodicMissesCoalesceAndUnknownPauses(t *testing.T) {
 	}
 	o := h.occurrences(r.RuleID)[0]
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, e := tx.Exec(t.Context(), `UPDATE outbox SET status='unknown' WHERE json_extract(payload_json,'$.message_id')=?`, o.MessageID)
+		_, e := tx.Exec(t.Context(), `UPDATE outbox SET status='unknown' WHERE json_extract(payload_json,'$.message_id')=(SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.message_id=? LIMIT 1)`, o.MessageID)
 		return e
 	}); err != nil {
 		t.Fatal(err)

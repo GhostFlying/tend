@@ -1,12 +1,13 @@
 package app
 
 import (
-	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
-	"github.com/GhostFlying/tend/internal/views"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func TestCompletionReviewsSurviveFailedUpdateAndAcknowledgeSharedWork(t *testing.T) {
@@ -70,7 +71,11 @@ func TestCompletionReviewsSurviveFailedUpdateAndAcknowledgeSharedWork(t *testing
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(messages[len(messages)-1].Body, pending.AcceptanceID) {
+		var retained strings.Builder
+		for _, m := range messages {
+			retained.WriteString(m.Body)
+		}
+		if !strings.Contains(retained.String(), pending.AcceptanceID) {
 			t.Fatal("notice omitted acceptance ID")
 		}
 		return nil

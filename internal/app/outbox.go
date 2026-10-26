@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -105,6 +106,11 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 			return err
 		}
 		if destination == MainThreadDestination {
+			if m.Operation == OpHandleEvent {
+				if err := freezeBackgroundBatch(ctx, tx, m.PayloadJSON, now.UnixMilli()); err != nil {
+					return err
+				}
+			}
 			if err := a.queueChanged(ctx, tx, m.RequestID, now.UnixMilli()); err != nil {
 				return err
 			}
@@ -117,6 +123,9 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 		return Delivery{}, time.Time{}, false, err
 	}
 	if ok {
+		if d.Operation == OpHandleEvent {
+			slog.InfoContext(ctx, "background delivery claimed", "trace_id", a.ids.New(protocol.PrefixTrace), "request_id", d.RequestID, "outbox_id", d.OutboxID, "attempt", d.Attempt)
+		}
 		a.notifyChange()
 	}
 	return d, wake, ok, nil
@@ -176,6 +185,9 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 			state := protocol.MessageFailed
 			if r.Outcome == Unknown {
 				state = protocol.MessageUnknown
+			}
+			if err := a.settleBackground(ctx, tx, m.MessageID, string(state), now.UnixMilli()); err != nil {
+				return err
 			}
 			if err := a.insertMessageState(ctx, tx, m.MessageID, state, now.UnixMilli()); err != nil {
 				return err

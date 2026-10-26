@@ -92,7 +92,7 @@ type TranscriptBlockRow struct {
 }
 
 func TranscriptBlocks(ctx context.Context, q Querier, before int64, limit int) ([]TranscriptBlockRow, error) {
-	rows, err := q.QueryContext(ctx, `SELECT b.position,b.message_id,b.notice_only FROM conversation_blocks b WHERE (?=0 OR b.position<?) AND NOT EXISTS(SELECT 1 FROM conversation_message_controls c WHERE c.message_id=b.message_id AND c.withdrawn_at<>0) ORDER BY b.position DESC LIMIT ?`, before, before, limit)
+	rows, err := q.QueryContext(ctx, `SELECT b.position,b.message_id,b.notice_only FROM conversation_blocks b WHERE (?=0 OR b.position<?) AND NOT EXISTS(SELECT 1 FROM conversation_message_controls c WHERE c.message_id=b.message_id AND c.withdrawn_at<>0) AND NOT EXISTS(SELECT 1 FROM followup_occurrences f JOIN background_sources bs ON bs.occurrence_id=f.occurrence_id WHERE f.message_id=b.message_id) AND NOT EXISTS(SELECT 1 FROM background_batches bg WHERE bg.message_id=b.message_id AND (b.notice_only=1 OR (bg.status='cancelled' AND bg.frozen_at=0))) ORDER BY b.position DESC LIMIT ?`, before, before, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: transcript blocks: %w", err)
 	}

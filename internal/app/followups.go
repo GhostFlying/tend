@@ -315,6 +315,9 @@ func followupFacts(ctx context.Context, q store.Querier, r protocol.FollowupRule
 	return
 }
 func cancelPendingFollowups(ctx context.Context, x *Exec, tx *store.Tx, id string) error {
+	if err := cancelBackgroundFollowups(ctx, x, tx, id); err != nil {
+		return err
+	}
 	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT f.message_id FROM followup_occurrences f WHERE f.rule_id=? AND f.status='queued' AND EXISTS(SELECT 1 FROM outbox o WHERE o.destination='main_thread' AND json_extract(o.payload_json,'$.message_id')=f.message_id AND o.status='pending') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=f.message_id AND t.status<>'rejected')`, id)
 	if err != nil {
 		return err

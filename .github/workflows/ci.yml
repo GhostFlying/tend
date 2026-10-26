@@ -37,6 +37,8 @@ jobs:
         run: pnpm --dir web test:work-items-layout
       - name: delivery refresh reconciliation
         run: pnpm --dir web test:delivery-refresh
+      - name: followup lifecycle and recovery
+        run: pnpm --dir web test:followups
       - name: cross-compile
         run: |
           GOOS=windows GOARCH=amd64 go build ./...

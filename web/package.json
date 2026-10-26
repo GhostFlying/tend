@@ -21,7 +21,8 @@
     "test:work-items-layout": "pnpm build && node scripts/work-items-layout.ts",
     "test:layout": "pnpm build && node scripts/mobile-layout.ts",
     "test:repos-layout": "node scripts/repo-layout.ts",
-    "test:delivery-refresh": "node scripts/delivery-refresh-layout.ts"
+    "test:delivery-refresh": "node scripts/delivery-refresh-layout.ts",
+    "test:followups": "pnpm build && node scripts/followups-layout.ts"
   },
   "dependencies": {
     "markdown-it": "^15.0.3",

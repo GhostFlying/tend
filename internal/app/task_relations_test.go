@@ -81,7 +81,7 @@ func TestFollowUpPreservesCompletedTaskAndReadsBothDirections(t *testing.T) {
 	if len(parent.Relations) != 1 || parent.Relations[0].Direction != protocol.RelationIncoming {
 		t.Fatalf("clearing removed backlinks: %+v", parent.Relations)
 	}
-	if h.count("plan_actions") != nActions || h.count("conversation_messages WHERE author='system'") != 1 {
+	if h.count("plan_actions") != nActions || h.count("conversation_messages WHERE author='system'") != 2 {
 		t.Fatal("relations scheduled work or repeated the completion notice")
 	}
 	as, ok, _ := h.claim("linux-1")

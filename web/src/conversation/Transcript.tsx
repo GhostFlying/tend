@@ -1,3 +1,4 @@
+import { showTranscriptBlock } from "./background.ts";
 import type { TranscriptBlock } from "../api/generated/api.ts";
 import { notify } from "../app/notice.ts";
 // The scrolling conversation. It opens at the latest page and follows new
@@ -45,7 +46,7 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
       blocks.supported === undefined
         ? []
         : blocks.supported
-          ? blocks.blocks.flatMap((b) =>
+          ? blocks.blocks.filter(showTranscriptBlock).flatMap((b) =>
               buildEntries(
                 [
                   ...(b.notice_only || b.trigger.author !== "system"

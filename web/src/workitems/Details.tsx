@@ -26,6 +26,7 @@ import {
   stageRows,
 } from "./model.ts";
 import { ChoiceCard } from "./Choice.tsx";
+import { Followups } from "./Followups.tsx";
 import { WorkItemProgress } from "./Progress.tsx";
 import controls from "../shell/controls.module.css";
 import styles from "./WorkItems.module.css";
@@ -131,6 +132,9 @@ export function WorkItemDetails({
                 </Section>
               )}
             {!historical && <DraftActions item={item} />}
+            {!historical && (
+              <Followups key={item.work_item_id} item={item} connection={connection} />
+            )}
             <details className={styles.history} open={historical || undefined}>
               <summary>目标与共享背景</summary>
               <Section title="目标">
