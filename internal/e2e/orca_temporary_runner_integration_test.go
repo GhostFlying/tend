@@ -276,7 +276,7 @@ func temporaryRunnerSmoke(t *testing.T, real bool) {
 		})
 		return err == nil
 	})
-	goal := fmt.Sprintf("Create exactly one deliverable file named nonce.txt with exact bytes %q. Upload it with upload_file and submit_result with the returned file metadata. Do not make a Git commit or change anything outside this task workspace.", nonce)
+	goal := fmt.Sprintf("Create exactly one deliverable file named nonce.txt with exact bytes %q. Call submit_result with a single files entry whose path is the local nonce.txt file and whose name is nonce.txt; that tool uploads the file and records its durable metadata. Do not make a Git commit or change anything outside this task workspace.", nonce)
 	spec := domain.Spec{Goal: goal, Acceptance: []string{"Exactly one delivered file named nonce.txt", fmt.Sprintf("The acceptance worker must call download_file with the supplied file_id and independently compare its downloaded bytes to %q, including the final newline. Do not substitute reading the implementation directory. Include the file_id and byte comparison result in verdict evidence.", nonce)}, Deliverables: []string{domain.DeliveryFiles}, Workspace: domain.Workspace{Mode: "temporary"}}
 	op := srv.exec(owner, "tasks.create", protocol.Target{Type: "task"}, map[string]any{"title": "isolated temporary runner smoke", "spec": spec}, app.CreateTask{})
 	var created struct {
