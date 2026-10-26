@@ -240,6 +240,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	w, err := r.cfg.Workers.Start(runCtx, harness.WorkerSpec{
 		RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
 		AskOwner: askOwner, Questions: questions,
+		ReadObservation: r.observationReader(runCtx, as),
 		UploadFile: func(ctx context.Context, path, name string) (protocol.ArtifactFile, error) {
 			return r.uploadFile(ctx, as, p, path, name)
 		},

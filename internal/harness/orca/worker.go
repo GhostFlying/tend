@@ -319,6 +319,9 @@ func (w *worker) openBridge(ctx context.Context) error {
 			return w.results.Handle(ctx, c)
 		}
 	}
+	if harness.HasObservation(w.spec) {
+		tools = append(tools, harness.ReadObservationToolSpec)
+	}
 	if w.spec.DownloadFile != nil {
 		tools = append(tools, harness.DownloadFileToolSpec)
 	}

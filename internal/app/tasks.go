@@ -98,6 +98,9 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	p.Spec = p.Spec.Normalize()
+	if err := checkObservationScope(ctx, tx.Q(), p.Spec.Observation); err != nil {
+		return Outcome{}, err
+	}
 	if err := freezeTaskInputs(ctx, tx.Q(), &p.Spec, nil); err != nil {
 		return Outcome{}, err
 	}
@@ -256,6 +259,9 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, err
 		}
 		*p.Spec = p.Spec.Normalize()
+		if err := checkObservationScope(ctx, tx.Q(), p.Spec.Observation); err != nil {
+			return Outcome{}, err
+		}
 		if err := freezeTaskInputs(ctx, tx.Q(), p.Spec, current.Inputs); err != nil {
 			return Outcome{}, err
 		}

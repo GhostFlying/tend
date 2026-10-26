@@ -257,6 +257,9 @@ func TestRunnerAdvertisesOriginalTaskInputSupport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !slices.Contains(view.Capabilities, protocol.CapabilityWorkerObservation) {
+		t.Fatalf("worker observation capability missing: %+v", view.Capabilities)
+	}
 	if !slices.Contains(view.Capabilities, protocol.CapabilityTaskInputs) {
 		t.Fatalf("task inputs capability missing: %+v", view.Capabilities)
 	}

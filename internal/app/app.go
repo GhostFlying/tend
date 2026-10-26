@@ -86,15 +86,16 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
-	store    *store.Store
-	ids      protocol.IDGen
-	now      func() time.Time
-	notifier Notifier
-	changes  *Broadcast
-	logs     *Broadcast
-	leaseTTL time.Duration
-	waitPer  float64
-	hostLost time.Duration
+	observeDeployment func(context.Context) (protocol.ObservedDeployment, error)
+	store             *store.Store
+	ids               protocol.IDGen
+	now               func() time.Time
+	notifier          Notifier
+	changes           *Broadcast
+	logs              *Broadcast
+	leaseTTL          time.Duration
+	waitPer           float64
+	hostLost          time.Duration
 }
 
 // Option configures an App.

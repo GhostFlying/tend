@@ -18,10 +18,11 @@ const DefaultMaxImplementAttempts = 3
 
 // Spec is the content of one immutable task spec version.
 type Spec struct {
-	Goal        string   `json:"goal"`
-	Scope       string   `json:"scope,omitempty"`
-	Constraints []string `json:"constraints,omitempty"`
-	Acceptance  []string `json:"acceptance"`
+	Observation *protocol.ObservationScope `json:"observation,omitempty"`
+	Goal        string                     `json:"goal"`
+	Scope       string                     `json:"scope,omitempty"`
+	Constraints []string                   `json:"constraints,omitempty"`
+	Acceptance  []string                   `json:"acceptance"`
 	// Delivery preserves the legacy commit-only wire representation.
 	Delivery string `json:"delivery"`
 	// Deliverables lists required outputs; absent means legacy Delivery.
@@ -46,6 +47,16 @@ type Spec struct {
 func (s Spec) Normalize() Spec {
 	s.Workspace = s.Workspace.Normalize()
 	return s
+}
+
+func observationEqual(a, b *protocol.ObservationScope) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	x, y := slices.Clone(a.WorkItemIDs), slices.Clone(b.WorkItemIDs)
+	slices.Sort(x)
+	slices.Sort(y)
+	return a.Deployment == b.Deployment && slices.Equal(x, y)
 }
 
 // Supported independently composable delivery kinds.
@@ -77,6 +88,19 @@ func (s Spec) Executable() bool {
 
 // Validate checks the spec for values the ledger cannot act on.
 func (s Spec) Validate() error {
+	if s.Observation != nil {
+		if !s.Observation.Deployment && len(s.Observation.WorkItemIDs) == 0 {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "observation requires work_item_ids or deployment")
+		}
+		seen := map[string]bool{}
+		for _, id := range s.Observation.WorkItemIDs {
+			if !protocol.ValidID(protocol.PrefixWorkItem, id) || seen[id] {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "observation.work_item_ids requires distinct valid work item IDs")
+			}
+			seen[id] = true
+		}
+	}
+
 	switch {
 	case s.Delivery != "" && s.Delivery != DeliveryCommit:
 		return protocol.Errorf(protocol.CodeInvalidRequest, "delivery %q is not supported", s.Delivery)
@@ -119,7 +143,7 @@ func (s Spec) Budget() int64 {
 
 // Equal reports whether two specs ask for the same thing.
 func (s Spec) Equal(o Spec) bool {
-	return s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
+	return observationEqual(s.Observation, o.Observation) && s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
 		s.Budget() == o.Budget() && slices.Equal(s.Constraints, o.Constraints) && slices.Equal(s.Acceptance, o.Acceptance) &&
 		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements) && slices.Equal(s.Inputs, o.Inputs) &&
 		s.ImplementationContext == o.ImplementationContext && equalSharedContext(s.SharedContext, o.SharedContext)

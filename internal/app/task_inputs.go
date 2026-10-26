@@ -97,10 +97,14 @@ func (a *App) OpenRunFile(ctx context.Context, p protocol.Principal, id string) 
 	return file.ArtifactFile, body, err
 }
 
-// Recovery must retain the same input support as the original claim. Otherwise
+func runtimeSupportsObservation(runtime *protocol.RunnerRuntime) bool {
+	return runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityWorkerObservation)
+}
+
+// Recovery must retain the same capabilities as the original claim. Otherwise
 // restarting an older runner could bypass the scheduler through reassignment.
-func checkInputRunRecovery(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) error {
-	if runtimeSupportsTaskInputs(runtime) {
+func checkRunCapabilitiesRecovery(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) error {
+	if runtimeSupportsTaskInputs(runtime) && runtimeSupportsObservation(runtime) {
 		return nil
 	}
 	open, err := store.ListOpenRunsOnHost(ctx, q, host)
@@ -123,7 +127,10 @@ func checkInputRunRecovery(ctx context.Context, q store.Querier, host string, ru
 		if err := json.Unmarshal([]byte(body), &spec); err != nil {
 			return err
 		}
-		if len(spec.Inputs) > 0 {
+		if spec.Observation != nil && !runtimeSupportsObservation(runtime) {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "runner requires worker-observation-v1 to recover an assigned observation task")
+		}
+		if len(spec.Inputs) > 0 && !runtimeSupportsTaskInputs(runtime) {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "runner requires task-inputs-v1 to recover an assigned input task")
 		}
 	}

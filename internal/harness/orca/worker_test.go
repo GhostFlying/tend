@@ -1000,3 +1000,37 @@ func TestOrcaBothWorkerRolesAskOwnerThroughBridge(t *testing.T) {
 		})
 	}
 }
+
+func TestOrcaBothWorkerRolesReadScopedObservationThroughBridge(t *testing.T) {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		t.Run(string(role), func(t *testing.T) {
+			f := newWorkerFixture(t)
+			spec := f.spec(role)
+			called := false
+			spec.Spec = json.RawMessage(`{"observation":{"deployment":true}}`)
+			spec.ReadObservation = func(context.Context) (protocol.RunObservation, error) {
+				called = true
+				return protocol.RunObservation{Version: 1, RunID: "observed_run"}, nil
+			}
+			w, _, drained := f.start(t.Context(), spec)
+			state, err := bridge.StatePath(t.Context(), f.dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			in := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n" +
+				`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_observation","arguments":{}}}` + "\n"
+			if err := bridge.ServeMCP(t.Context(), state, spec.RunID, strings.NewReader(in), &out); err != nil || strings.Contains(out.String(), "isError") || !strings.Contains(out.String(), `"name":"read_observation"`) || !strings.Contains(out.String(), "observed_run") || !called {
+				t.Errorf("download bridge = %s, %v", out.String(), err)
+			}
+			if role == protocol.RoleAccept {
+				f.submit(protocol.VerdictPassed)
+			}
+			f.orca.finish("term_1", "downloaded input")
+			if _, err := w.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			<-drained
+		})
+	}
+}

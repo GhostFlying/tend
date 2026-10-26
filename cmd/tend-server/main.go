@@ -172,6 +172,11 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		}
 		opts = append(opts, app.WithWaitPerHour(*w))
 	}
+	observationOption, err := deploymentObservation(cfg.Upgrades, ids)
+	if err != nil {
+		return err
+	}
+	opts = append(opts, observationOption)
 	a := app.New(s, ids, time.Now, opts...)
 	if err := syncConfig(ctx, a, ids, cfg); err != nil {
 		return err

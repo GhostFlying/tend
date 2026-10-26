@@ -112,7 +112,8 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 		facts.hosts = append(facts.hosts, executionHost{Host: scheduler.Host{
 			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots, Busy: busy,
 			Worker: h.Worker.Capabilities(), WorkspaceProtocol: h.WorkspaceProtocol,
-			TaskInputs: slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityTaskInputs),
+			TaskInputs:        slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityTaskInputs),
+			WorkerObservation: slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityWorkerObservation),
 		}, available: available})
 	}
 	return facts, nil
