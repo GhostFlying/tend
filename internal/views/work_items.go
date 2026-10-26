@@ -46,6 +46,11 @@ func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem, fac
 	if err != nil {
 		return v, err
 	}
+	summary, err := store.FollowupOverview(ctx, q, w.WorkItemID)
+	if err != nil {
+		return v, err
+	}
+	v.Followups = &summary
 	v.Choices, err = store.ListWorkItemChoices(ctx, q, w.WorkItemID, "")
 	if err != nil {
 		return v, err

@@ -35,11 +35,13 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
-	Env       *protocol.Envelope
-	Principal protocol.Principal
-	TraceID   string
-	Now       time.Time
-	IDs       protocol.IDGen
+	FollowupsEnabled bool
+	FollowupQueued   bool
+	Env              *protocol.Envelope
+	Principal        protocol.Principal
+	TraceID          string
+	Now              time.Time
+	IDs              protocol.IDGen
 	// LeaseTTL is the lease duration of runs allocated by this request.
 	LeaseTTL time.Duration
 	// WaitPerHour is what an hour in the queue adds to an action's score
@@ -88,6 +90,7 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
+	followupsEnabled  bool
 	observeDeployment func(context.Context) (protocol.ObservedDeployment, error)
 	store             *store.Store
 	ids               protocol.IDGen
@@ -155,7 +158,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	if x.TraceID == "" {
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}
@@ -223,7 +226,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			if err := tx.Release(ctx, applySavepoint); err != nil {
 				return err
 			}
-			queued = out.Notify || len(out.Outbox) > 0
+			queued = out.Notify || x.FollowupQueued || len(out.Outbox) > 0
 			for _, event := range out.Events {
 				queued = queued || wakesMain(x.Principal, event.Kind)
 			}
@@ -291,6 +294,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 			}
 		}
 	}
+	matched, err := followupEvents(ctx, x, tx, out.Events)
+	if err != nil {
+		return err
+	}
+	x.FollowupQueued = matched
 	for _, m := range out.Outbox {
 		payload, err := json.Marshal(m.Payload)
 		if err != nil {

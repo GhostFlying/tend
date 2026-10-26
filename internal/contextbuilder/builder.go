@@ -81,6 +81,7 @@ const (
 )
 
 var classes = map[string]class{
+	"followup.changed":        intent,
 	"work_item_choice.opened": attention, "work_item_choice.answered": attention,
 	"work_item_choice.withdrawn": intent, "work_item_choice.superseded": intent,
 	"work_item.created": intent, "work_item.updated": intent, "work_item.task_linked": intent,
@@ -416,6 +417,21 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			return err
 		}
 		if mine {
+			continue
+		}
+		if e.ObjectType == "followup" {
+			rule, err := store.GetFollowup(ctx, q, e.ObjectID)
+			if err != nil {
+				return err
+			}
+			item, err := store.GetWorkItem(ctx, q, rule.WorkItemID)
+			if err != nil {
+				return err
+			}
+			line := sc.label(item.Project, fmt.Sprintf("#%d %s: %s revision %d %s of %s; %s (read work_items_followups_list for current authority)", e.Seq, e.Kind, rule.RuleID, rule.Revision, rule.Status, item.WorkItemID, clipRunes(rule.Reason, 200)))
+			if sc.covers(item.Project) {
+				s.Changes = append(s.Changes, line)
+			}
 			continue
 		}
 		if e.ObjectType == "work_item_choice" {

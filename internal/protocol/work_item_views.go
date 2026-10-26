@@ -3,6 +3,7 @@ package protocol
 // WorkItemView combines the plan with current execution facts. Column is a
 // projection, not an editable business stage or proof of completion.
 type WorkItemView struct {
+	Followups      *FollowupSummary           `json:"followups,omitempty"`
 	Choices        []WorkItemChoice           `json:"choices,omitempty"`
 	PendingReviews []WorkItemCompletionReview `json:"pending_reviews,omitempty"`
 	WorkItem

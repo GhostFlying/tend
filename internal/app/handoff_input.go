@@ -46,7 +46,7 @@ func (a *App) HandoffSummaryInput(ctx context.Context, instance string, maxBytes
 		}
 		if since != nil {
 			var withdrawn bool
-			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_message_controls c JOIN conversation_changes d ON d.message_id=c.message_id WHERE c.withdrawn_at<>0 AND d.last_version>?)`, *since).Scan(&withdrawn); err != nil {
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_changes d LEFT JOIN conversation_message_controls c ON c.message_id=d.message_id LEFT JOIN followup_occurrences f ON f.message_id=d.message_id WHERE (c.withdrawn_at<>0 OR f.status='cancelled') AND d.last_version>?)`, *since).Scan(&withdrawn); err != nil {
 				return err
 			}
 			if withdrawn {
