@@ -33,6 +33,8 @@ jobs:
           pnpm --dir web test:layout
       - name: repository layout regression
         run: pnpm --dir web test:repos-layout
+      - name: work item progress regression
+        run: pnpm --dir web test:work-items-layout
       - name: delivery refresh reconciliation
         run: pnpm --dir web test:delivery-refresh
       - name: cross-compile
