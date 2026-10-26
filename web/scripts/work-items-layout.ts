@@ -541,7 +541,7 @@ try {
       await hostPanel.waitFor({ state: "detached" });
       assert(await host.evaluate((el) => el === document.activeElement));
       await panel.getByRole("tab", { name: "已注册仓库" }).click();
-      await panel.getByText("全部 12 个 · 含已退役仓库").waitFor();
+      await panel.getByText("全部 12 个 · 含已归档仓库").waitFor();
       await reachable(panel.getByRole("heading", { name: /^a-long-logical/ }));
       assert(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth));
       await page.screenshot({ path: join(output, `resources-repos-${width}.png`) });
