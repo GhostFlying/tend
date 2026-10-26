@@ -171,6 +171,7 @@ try {
   assert.equal(requests.size, 1);
 
   // A fresh read and unrelated facts must leave the original uncertainty intact.
+  await panel.getByText("目标与共享背景", { exact: true }).click();
   item.intent = "Unrelated plan update";
   publish();
   await panel.getByText(item.intent, { exact: true }).waitFor();
