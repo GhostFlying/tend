@@ -78,7 +78,7 @@ func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
 		limit = conversationPageSize
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.Conversation(r.Context(), q, before, after, int(limit))
+		return views.Conversation(r.Context(), q, before, after, int(limit), r.URL.Query().Get("conversation_id"))
 	})
 }
 

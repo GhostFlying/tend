@@ -179,6 +179,9 @@ func (a *App) settleBackground(ctx context.Context, tx *store.Tx, message, statu
 	if status == store.TurnStarting || status == store.TurnStarted || status == store.TurnRejected {
 		return nil
 	}
+	if err := a.settleAgentAssessment(ctx, tx, message, status, now); err != nil {
+		return err
+	}
 	b, err := store.BackgroundByMessage(ctx, tx.Q(), message)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil

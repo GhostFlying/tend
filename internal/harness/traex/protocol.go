@@ -80,6 +80,11 @@ type ThreadStartResponse struct {
 	ModelProvider      string   `json:"modelProvider"`
 	ReasoningEffort    *string  `json:"reasoningEffort"`
 	InstructionSources []string `json:"instructionSources"`
+	ApprovalPolicy     string   `json:"approvalPolicy"`
+	ApprovalsReviewer  string   `json:"approvalsReviewer"`
+	Sandbox            struct {
+		Type string `json:"type"`
+	} `json:"sandbox"`
 }
 
 // Thread is the harness's thread record.

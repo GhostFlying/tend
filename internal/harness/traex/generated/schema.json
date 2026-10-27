@@ -1,5 +1,5 @@
 {
-  "traex_version": "0.210.1",
+  "traex_version": "0.211.1",
   "generator": "traex app-server generate-json-schema --experimental",
   "messages": {
     "AgentMessageDeltaNotification": {
@@ -37,6 +37,7 @@
         "model",
         "modelFamily",
         "modelProviderId",
+        "modelSpecialty",
         "multiAgentVersion",
         "serviceTiers",
         "supportedReasoningEfforts",
@@ -118,6 +119,47 @@
         "type"
       ]
     },
+    "ContextUsageSnapshot": {
+      "properties": [
+        "activeContextTokens",
+        "autoCompactLimitReached",
+        "autoCompactScopeTokens",
+        "autoCompactTokenLimit",
+        "categories",
+        "effectiveContextWindow",
+        "estimatedTokens",
+        "historyRevision",
+        "measurement",
+        "model",
+        "modelBackendVariant",
+        "modelProviderId",
+        "observedTokens",
+        "rawContextWindow",
+        "remainingPercentage",
+        "requestHistoryRevision",
+        "responseId",
+        "revision",
+        "sampledAt",
+        "threadId",
+        "usedPercentage",
+        "windowId",
+        "windowNumber"
+      ],
+      "required": [
+        "autoCompactLimitReached",
+        "categories",
+        "estimatedTokens",
+        "historyRevision",
+        "measurement",
+        "model",
+        "modelProviderId",
+        "revision",
+        "sampledAt",
+        "threadId",
+        "windowId",
+        "windowNumber"
+      ]
+    },
     "DynamicToolCallItem": {
       "properties": [
         "arguments",
@@ -183,6 +225,7 @@
     },
     "ImageUserInput": {
       "properties": [
+        "detail",
         "type",
         "url"
       ],
@@ -353,6 +396,30 @@
         "turns",
         "updatedAt"
       ]
+    },
+    "ThreadCompactStartParams": {
+      "properties": [
+        "threadId",
+        "userGuidance"
+      ],
+      "required": [
+        "threadId"
+      ]
+    },
+    "ThreadContextUsageParams": {
+      "properties": [
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ]
+    },
+    "ThreadContextUsageResponse": {
+      "properties": [
+        "contextWindowUsage",
+        "snapshot"
+      ],
+      "required": null
     },
     "ThreadForkParams": {
       "properties": [
@@ -566,6 +633,7 @@
         "capabilities",
         "collaborationMode",
         "cwd",
+        "cyberAccessProgram",
         "displayText",
         "effort",
         "environments",
@@ -582,9 +650,11 @@
         "runtimeWorkspaceRoots",
         "sandboxPolicy",
         "serviceTier",
+        "serviceTierForTurn",
         "summary",
         "threadId",
         "toolOutput",
+        "turnTrigger",
         "userMessageId"
       ],
       "required": [

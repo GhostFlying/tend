@@ -31,6 +31,7 @@ export interface Sender {
 }
 
 export interface QueueOptions {
+  conversationID?: string;
   outbox: Outbox;
   sender: Sender;
   now?: () => number;
@@ -75,6 +76,7 @@ export const noOutbox: Readable<readonly OutgoingMessage[]> = new Store([]);
 
 export class SendQueue {
   private readonly outbox: Outbox;
+  private readonly conversationID: string;
   private readonly sender: Sender;
   private readonly now: () => number;
   private readonly newId: (now: number) => string;
@@ -92,6 +94,7 @@ export class SendQueue {
 
   private constructor(options: QueueOptions) {
     this.outbox = options.outbox;
+    this.conversationID = options.conversationID ?? "main";
     this.sender = options.sender;
     this.now = options.now ?? Date.now;
     this.newId = options.newId ?? ((now) => newRequestId(now));
@@ -107,6 +110,11 @@ export class SendQueue {
     const cutoff = q.now() - q.keepSentMs;
     const kept: OutgoingMessage[] = [];
     for (const m of await q.outbox.all()) {
+      if (
+        ((m.envelope.payload as SubmitMessagePayload).conversation_id ?? "main") !==
+        q.conversationID
+      )
+        continue;
       q.nextOrder = Math.max(q.nextOrder, m.order + 1);
       if (m.state === "sent" && m.updatedAt < cutoff) {
         await q.outbox.delete(m.requestId);
@@ -132,7 +140,10 @@ export class SendQueue {
     const order = this.nextOrder++;
     const now = this.now();
     const requestId = this.newId(now);
-    const payload: SubmitMessagePayload = { body: draft.body };
+    const payload: SubmitMessagePayload = {
+      body: draft.body,
+      ...(this.conversationID !== "main" ? { conversation_id: this.conversationID } : {}),
+    };
     if (draft.attachments?.length) payload.attachments = draft.attachments.map((a) => a.file_id);
     if (draft.images?.length) {
       payload.images = draft.images.map((image) => ({ ...image }));
@@ -182,7 +193,15 @@ export class SendQueue {
    * reconnect or the network coming back.
    */
   async resume(): Promise<void> {
-    this.messages.set(sorted(await this.outbox.all()));
+    this.messages.set(
+      sorted(
+        (await this.outbox.all()).filter(
+          (m) =>
+            ((m.envelope.payload as SubmitMessagePayload).conversation_id ?? "main") ===
+            this.conversationID,
+        ),
+      ),
+    );
     for (const m of this.messages.get()) {
       if (m.state === "unknown") {
         await this.reconcile(m.requestId);

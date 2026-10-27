@@ -1,5 +1,7 @@
 package tools
 
+import "github.com/GhostFlying/tend/internal/protocol"
+
 // JSON Schemas of the tools' arguments, written by hand next to the
 // argument types; TestSchemasMatchArgs keeps the two in step.
 
@@ -55,6 +57,15 @@ const relationsSchema = `{
 }`
 
 var schemas = map[string]string{
+	"background_evidence_read":     argumentSchema(evidenceArgs{}),
+	"conversation_associate":       argumentSchema(associateArgs{}),
+	"work_item_context_read":       argumentSchema(contextReadArgs{}),
+	"work_item_context_prepare":    argumentSchema(contextPrepareArgs{}),
+	"work_item_context_fact":       argumentSchema(contextFactArgs{}),
+	"agent_conversations_list":     argumentSchema(agentListArgs{}),
+	"agent_rollout_read":           argumentSchema(rolloutArgs{}),
+	"background_item_read":         argumentSchema(contextReadArgs{}),
+	"background_submit":            argumentSchema(protocol.BackgroundAssessmentPayload{}),
 	"work_items_refresh_delivery":  argumentSchema(workItemRefreshArgs{}),
 	"background_sources":           argumentSchema(backgroundSourceArgs{}),
 	"background_checkin":           argumentSchema(backgroundCheckinArgs{}),
@@ -79,15 +90,7 @@ var schemas = map[string]string{
 	"work_items_reopen":            argumentSchema(workItemReopenArgs{}),
 	"work_items_link_task":         argumentSchema(workItemLinkArgs{}),
 	"tool_failures_list":           argumentSchema(toolFailuresArgs{}),
-	"conversation_read": `{
-  "type":"object",
-  "properties":{
-   "before_seq":{"type":"integer","minimum":0,"description":"Read earlier than this sequence; omit to read the latest page. Mutually exclusive with after_seq."},
-   "after_seq":{"type":"integer","minimum":0,"description":"Read later than this sequence. Mutually exclusive with before_seq."},
-   "limit":{"type":"integer","minimum":1,"maximum":50,"description":"Maximum conversation items; default 20."}
-  },
-  "additionalProperties":false
- }`,
+	"conversation_read":            argumentSchema(conversationArgs{}),
 	"tasks_list": `{
   "type": "object",
   "properties": {

@@ -26,5 +26,14 @@ func (s *Server) conversationSettings(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.settings(r.Context()))
+	view := s.settings(r.Context())
+	if id := r.URL.Query().Get("conversation_id"); id != "" && id != "main" {
+		c, err := s.app.AgentConversation(r.Context(), id)
+		if err != nil {
+			s.writeError(w, r, notFound(err))
+			return
+		}
+		view.Model, view.Effort, view.Revision = c.Model, c.Effort, c.Revision
+	}
+	writeJSON(w, http.StatusOK, view)
 }

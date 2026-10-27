@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -80,7 +81,7 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 	)
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
 		backgroundOperation := ""
-		if destination == MainThreadDestination {
+		if destination == MainThreadDestination || strings.HasPrefix(destination, "background_thread:") {
 			backgroundOperation = OpHandleEvent
 		}
 		m, err := store.HeadOutboxPrioritized(ctx, tx.Q(), destination, backgroundOperation)
@@ -94,6 +95,15 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 			// Left over by a previous process; reconciliation decides.
 			return nil
 		}
+		if strings.HasPrefix(destination, "background_thread:") && m.Operation == OpHandleEvent {
+			var closed bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_conversations c JOIN work_items w ON w.work_item_id=c.work_item_id WHERE c.conversation_id=? AND w.status='closed')`, strings.TrimPrefix(destination, "background_thread:")).Scan(&closed); err != nil {
+				return err
+			}
+			if closed {
+				return nil
+			}
+		}
 		now := a.now()
 		if due := time.UnixMilli(m.NextAttemptAt); due.After(now) {
 			wake = due
@@ -105,7 +115,7 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 		}); err != nil {
 			return err
 		}
-		if destination == MainThreadDestination {
+		if destination == MainThreadDestination || strings.HasPrefix(destination, "background_thread:") {
 			if m.Operation == OpHandleEvent {
 				if err := freezeBackgroundBatch(ctx, tx, m.PayloadJSON, now.UnixMilli()); err != nil {
 					return err
@@ -177,7 +187,7 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		if kind == "" {
 			return nil
 		}
-		if d.Destination == MainThreadDestination && (d.Operation == OpHandleMessage || d.Operation == OpHandleEvent) {
+		if (d.Destination == MainThreadDestination || strings.HasPrefix(d.Destination, "background_thread:")) && (d.Operation == OpHandleMessage || d.Operation == OpHandleEvent) {
 			var m HandleMessage
 			if err := json.Unmarshal(d.Payload, &m); err != nil {
 				return fmt.Errorf("app: decode message delivery: %w", err)
@@ -185,6 +195,18 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 			state := protocol.MessageFailed
 			if r.Outcome == Unknown {
 				state = protocol.MessageUnknown
+			}
+			if strings.HasPrefix(d.Destination, "background_thread:") {
+				var known bool
+				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_turn_contexts WHERE request_id=?)`, d.RequestID).Scan(&known); err != nil {
+					return err
+				}
+				if !known {
+					x := &Exec{Env: &protocol.Envelope{RequestID: d.RequestID}, IDs: a.ids, Now: now}
+					if err := queueCoordinationNotice(ctx, x, tx, "后台处理启动失败或结果未知。核对持久记录；不得自动重放未知动作。", m.MessageID, strings.TrimPrefix(d.Destination, "background_thread:")); err != nil {
+						return err
+					}
+				}
 			}
 			if err := a.settleBackground(ctx, tx, m.MessageID, string(state), now.UnixMilli()); err != nil {
 				return err

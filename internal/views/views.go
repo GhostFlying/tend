@@ -4,6 +4,7 @@ package views
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -330,8 +331,8 @@ func RunLogs(ctx context.Context, q store.Querier, runID string, after int64, li
 // Conversation reads up to limit conversation items: after seq after when
 // after is positive, else before seq before when before is positive, else
 // the latest (D69).
-func Conversation(ctx context.Context, q store.Querier, before, after int64, limit int) (protocol.ConversationPage, error) {
-	rows, err := store.ListConversation(ctx, q, before, after, limit+1)
+func Conversation(ctx context.Context, q store.Querier, before, after int64, limit int, session ...string) (protocol.ConversationPage, error) {
+	rows, err := store.ListConversation(ctx, q, before, after, limit+1, session...)
 	if err != nil {
 		return protocol.ConversationPage{}, err
 	}
@@ -356,9 +357,20 @@ func Conversation(ctx context.Context, q store.Querier, before, after int64, lim
 
 // conversationItem shows a conversation row to the owner.
 func conversationItem(ctx context.Context, q store.Querier, r store.ConversationRow) (protocol.ConversationItem, error) {
-	it := protocol.ConversationItem{Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
+	it := protocol.ConversationItem{ConversationID: r.ConversationID, Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
 		ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC(),
 		AssistantState: protocol.AssistantState(r.AssistantState), AssistantRevision: r.AssistantRevision}
+	associations, err := store.MessageAssociations(ctx, q, r.MessageID)
+	if err != nil {
+		return it, err
+	}
+	it.Associations = &associations
+	var link protocol.ConversationReturnLink
+	if err := q.QueryRowContext(ctx, `SELECT conversation_id,source_message_id FROM conversation_return_links WHERE message_id=? OR message_id=? ORDER BY CASE WHEN message_id=? THEN 0 ELSE 1 END LIMIT 1`, r.MessageID, r.ReplyTo, r.MessageID).Scan(&link.ConversationID, &link.MessageID); err == nil {
+		it.ReturnLink = &link
+	} else if err != sql.ErrNoRows {
+		return it, err
+	}
 	switch {
 	case r.Tool != nil:
 		it.Tool = &protocol.ToolUseView{Name: r.Tool.Tool, Input: r.Tool.Input, Output: r.Tool.Output,

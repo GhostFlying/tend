@@ -153,7 +153,11 @@ func TestRetargetPreparedHandoffOnlyBeforeExternalCreation(t *testing.T) {
 			if _, err := h.app.BindMainThread(ctx, "main", "source", "schema", ""); err != nil {
 				t.Fatal(err)
 			}
-			job, err := h.app.PrepareHandoff(ctx, store.ThreadHandoff{Instance: "main", SourceThreadID: "source", SourceGeneration: 1, ToolsetHash: "previous-upgrade", Prompt: "old prompt"})
+			snapshot, err := h.app.HandoffSnapshot(ctx, "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			job, err := h.app.PrepareHandoff(ctx, store.ThreadHandoff{Instance: "main", SourceThreadID: "source", SourceGeneration: 1, SourceVersion: snapshot.Version, ToolsetHash: "previous-upgrade", Prompt: "old prompt"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -182,7 +186,7 @@ func TestRetargetPreparedHandoffOnlyBeforeExternalCreation(t *testing.T) {
 					}
 				}
 			}
-			err = h.app.RetargetPreparedHandoff(ctx, job.ID, "current-toolset", 0, "new prompt")
+			err = h.app.RetargetPreparedHandoff(ctx, job.ID, "current-toolset", snapshot.Version, "new prompt")
 			got, _, readErr := h.app.GetHandoff(ctx, job.ID)
 			if readErr != nil {
 				t.Fatal(readErr)
@@ -197,7 +201,7 @@ func TestRetargetPreparedHandoffOnlyBeforeExternalCreation(t *testing.T) {
 				t.Fatalf("retarget failed %+v %v", got, err)
 			}
 			h.clock.Advance(time.Minute)
-			if err := h.app.RetargetPreparedHandoff(ctx, job.ID, "current-toolset", 0, "new prompt"); err != nil {
+			if err := h.app.RetargetPreparedHandoff(ctx, job.ID, "current-toolset", snapshot.Version, "new prompt"); err != nil {
 				t.Fatal(err)
 			}
 			replay, _, _ := h.app.GetHandoff(ctx, job.ID)
@@ -210,7 +214,7 @@ func TestRetargetPreparedHandoffOnlyBeforeExternalCreation(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := h.app.RetargetPreparedHandoff(ctx, job.ID, "latest", 0, "stale"); protocol.CodeOf(err) != protocol.CodeStaleRevision {
+			if err := h.app.RetargetPreparedHandoff(ctx, job.ID, "latest", snapshot.Version, "stale"); protocol.CodeOf(err) != protocol.CodeStaleRevision {
 				t.Fatalf("stale snapshot accepted %v", err)
 			}
 			snap, err := h.app.HandoffSnapshot(ctx, "main")

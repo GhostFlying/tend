@@ -7,6 +7,7 @@ import type { Snapshot } from "../api/generated/api.ts";
 import { MessageAttachments } from "./Attachments.tsx";
 import type { Connection } from "../api/client.ts";
 import { notify } from "../app/notice.ts";
+import { ContextUsage } from "./ContextUsage.tsx";
 import { Settings } from "./Settings.tsx";
 import { Interrupt } from "./interrupt.ts";
 import { useServices } from "../app/services.tsx";
@@ -21,7 +22,7 @@ import { Close } from "../shell/icons.tsx";
 const touch = window.matchMedia("(pointer: coarse)").matches;
 
 export function Composer({ connection }: { connection: Connection }) {
-  const { client, live, queue, draft: composerDraft } = useServices();
+  const { client, live, queue, conversation: recipient, draft: composerDraft } = useServices();
   const conversation = useStore(live.conversation);
   const queueState = useStore(live.queueView.state);
   const {
@@ -256,7 +257,7 @@ export function Composer({ connection }: { connection: Connection }) {
           event.preventDefault();
           addFiles(files);
         }}
-        placeholder={touch ? "和主 Agent 说…" : "和主 Agent 说…（Enter 发送，Shift+Enter 换行）"}
+        placeholder={`发给 ${recipient?.title ?? "主 Agent"}…${touch ? "" : "（Enter 发送，Shift+Enter 换行）"}`}
         aria-label="消息"
         disabled={blocked}
         readOnly={persisting}
@@ -298,6 +299,7 @@ export function Composer({ connection }: { connection: Connection }) {
           {dragging ? "松开以添加附件" : hint}
         </span>
         <Settings connection={connection} />
+        <ContextUsage connection={connection} />
         {busy && !showStop && (
           <button
             type="button"

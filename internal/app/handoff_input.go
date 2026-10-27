@@ -99,6 +99,13 @@ func (a *App) HandoffSummaryInput(ctx context.Context, instance string, maxBytes
 					}
 					it.Decision = &choice
 				}
+				associations, err := store.MessageAssociations(ctx, tx.Q(), id)
+				if err != nil {
+					return err
+				}
+				if associations.Revision > 0 || len(associations.Items) > 0 {
+					it.Associations = &associations
+				}
 				it.Images, err = store.ConversationImages(ctx, tx.Q(), id)
 				if err != nil {
 					return err

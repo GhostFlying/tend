@@ -39,6 +39,8 @@ jobs:
         run: pnpm --dir web test:delivery-refresh
       - name: followup lifecycle and recovery
         run: pnpm --dir web test:followups
+      - name: agent conversation routing and layout
+        run: pnpm --dir web test:agents
       - name: cross-compile
         run: |
           GOOS=windows GOARCH=amd64 go build ./...

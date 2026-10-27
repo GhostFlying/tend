@@ -64,6 +64,17 @@ type ConfiguredThread interface {
 	ModelDefaults() ModelSelection
 }
 
+// PermissionSettings is the effective policy reported by a native thread.
+// Empty fields mean the runtime did not report that part of the policy.
+type PermissionSettings struct {
+	Sandbox, ApprovalPolicy, ApprovalsReviewer string
+}
+
+// PermissionedThread reports native policy, rather than requested defaults.
+type PermissionedThread interface {
+	PermissionDefaults() PermissionSettings
+}
+
 // ThreadConfig configures a thread.
 type ThreadConfig struct {
 	Cwd                   string
@@ -148,6 +159,7 @@ type EventKind string
 const (
 	EventTurnStarted       EventKind = "turn_started"
 	EventTurnCompleted     EventKind = "turn_completed"
+	EventContextUsage      EventKind = "context_usage"
 	EventItemStarted       EventKind = "item_started"
 	EventItemCompleted     EventKind = "item_completed"
 	EventAgentMessageDelta EventKind = "agent_message_delta"
@@ -162,8 +174,9 @@ const (
 
 // Event is something that happened in a thread.
 type Event struct {
-	Kind   EventKind
-	TurnID string
+	ContextUsage *protocol.AgentContextUsage
+	Kind         EventKind
+	TurnID       string
 	// ItemID and ItemType describe the item of item events.
 	ItemID   string
 	ItemType string
@@ -189,4 +202,11 @@ type ToolUse struct {
 	Input  string
 	Output string
 	Status protocol.ToolStatus
+}
+
+// ContextManager exposes native current-window usage and explicit compaction.
+// Acceptance of Compact is not completion; the contextCompaction item confirms it.
+type ContextManager interface {
+	ContextUsage(context.Context) (protocol.AgentContextUsage, error)
+	Compact(context.Context) error
 }

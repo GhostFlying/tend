@@ -11,9 +11,9 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func ConversationQueue(ctx context.Context, q store.Querier, category string, after int64, limit int) (protocol.ConversationQueuePage, error) {
+func ConversationQueue(ctx context.Context, q store.Querier, category string, after int64, limit int, session ...string) (protocol.ConversationQueuePage, error) {
 	out := protocol.ConversationQueuePage{Items: []protocol.ConversationQueueEntry{}}
-	rows, total, err := store.ConversationQueue(ctx, q, category, after, limit+1)
+	rows, total, err := store.ConversationQueue(ctx, q, category, after, limit+1, session...)
 	if err != nil {
 		return out, err
 	}
@@ -30,7 +30,7 @@ func ConversationQueue(ctx context.Context, q store.Querier, category string, af
 		}
 		out.Items = append(out.Items, entry)
 	}
-	active, err := store.ConversationActive(ctx, q)
+	active, err := store.ConversationActive(ctx, q, session...)
 	if err != nil {
 		return out, err
 	}
@@ -84,9 +84,9 @@ func TranscriptBlock(ctx context.Context, q store.Querier, id string, after int6
 	}
 	return out, nil
 }
-func Transcript(ctx context.Context, q store.Querier, before int64, limit int) (protocol.TranscriptPage, error) {
+func Transcript(ctx context.Context, q store.Querier, before int64, limit int, session ...string) (protocol.TranscriptPage, error) {
 	out := protocol.TranscriptPage{Blocks: []protocol.TranscriptBlock{}}
-	rows, err := store.TranscriptBlocks(ctx, q, before, limit+1)
+	rows, err := store.TranscriptBlocks(ctx, q, before, limit+1, session...)
 	if err != nil {
 		return out, err
 	}

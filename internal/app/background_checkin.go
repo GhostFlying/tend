@@ -15,7 +15,7 @@ type BackgroundCommand struct{ Action, MessageID, TurnID, DeliveryID string }
 
 func (c BackgroundCommand) Operation() string { return "background." + c.Action }
 func (c BackgroundCommand) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
-	if x.Principal.Kind != protocol.PrincipalMainAgent || x.Principal.Addon() || c.TurnID == "" || c.MessageID == "" || c.DeliveryID == "" {
+	if (x.Principal.Kind != protocol.PrincipalMainAgent && x.Principal.Kind != protocol.PrincipalBackgroundAgent) || x.Principal.Addon() || c.TurnID == "" || c.MessageID == "" || c.DeliveryID == "" {
 		return protocol.Errorf(protocol.CodeForbidden, "current hosted background turn required")
 	}
 	return nil
@@ -34,6 +34,15 @@ func (c BackgroundCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	}
 	if batch.Status != "frozen" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "background batch is not frozen")
+	}
+	if x.Principal.Kind == protocol.PrincipalBackgroundAgent {
+		conv, err := store.AgentConversation(ctx, tx.Q(), x.Principal.ConversationID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if conv.WorkItemID != batch.WorkItemID || c.Action != "sources" {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "background scope mismatch")
+		}
 	}
 	if c.Action == "sources" {
 		var p struct {
@@ -137,7 +146,7 @@ func cancelBackgroundFollowups(ctx context.Context, x *Exec, tx *store.Tx, rule 
 			if _, err := tx.Exec(ctx, `UPDATE background_batches SET status='cancelled' WHERE batch_id=?`, batch); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE outbox SET status='cancelled' WHERE destination='main_thread' AND status='pending' AND json_extract(payload_json,'$.message_id')=?`, message); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE outbox SET status='cancelled' WHERE (destination='main_thread' OR destination LIKE 'background_thread:%') AND status='pending' AND json_extract(payload_json,'$.message_id')=?`, message); err != nil {
 				return err
 			}
 			if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: message, Kind: "conversation.message_state", BodyJSON: `{"state":"interrupted"}`, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {

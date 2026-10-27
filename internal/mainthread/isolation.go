@@ -1,6 +1,10 @@
 package mainthread
 
-import "github.com/GhostFlying/tend/internal/harness"
+import (
+	"maps"
+
+	"github.com/GhostFlying/tend/internal/harness"
+)
 
 // ThreadConfig gives the hosted dispatcher only tend coordination tools and
 // read-only presentation. Investigation and execution belong to workers (D88).
@@ -45,4 +49,26 @@ var Isolation = map[string]any{
 	"tools.experimental_request_user_input.enabled": false,
 	"features.code_mode":                            false,
 	"features.code_mode_only":                       false,
+}
+
+// backgroundThreadConfig implements D111's temporary native auto-mode policy.
+// Tend's background tool scope is enforced separately by the tool service.
+func backgroundThreadConfig(cfg harness.ThreadConfig) harness.ThreadConfig {
+	cfg.Sandbox = "workspace-write"
+	cfg.ApprovalPolicy = "on-request"
+	cfg.ApprovalsReviewer = "auto_review"
+	cfg.Config = maps.Clone(cfg.Config)
+	if cfg.Config == nil {
+		cfg.Config = make(map[string]any)
+	}
+	// The main dispatcher's tool feature switches are not inherited by a
+	// background session. Native tools remain available under auto review.
+	for key := range Isolation {
+		delete(cfg.Config, key)
+	}
+	// The runtime rejects simultaneous permission_mode and sandbox overrides.
+	// Explicit protocol fields above select the auto-mode permission tuple.
+	delete(cfg.Config, "permission_mode")
+	cfg.Config["sandbox_workspace_write.writable_roots"] = []string{}
+	return cfg
 }

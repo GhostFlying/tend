@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -92,6 +93,9 @@ type config struct {
 // mainAgentConfig configures the hosted main agent (D68). Every field is
 // optional.
 type mainAgentConfig struct {
+	ConversationID        string `json:"-"`
+	BackgroundAgents      bool   `json:"background_agents"`
+	BackgroundConcurrency int    `json:"background_concurrency"`
 	// Instance names the main agent; default "main".
 	Instance string `json:"instance"`
 	TraexBin string `json:"traex_bin"`
@@ -178,7 +182,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		return err
 	}
 	opts = append(opts, observationOption)
-	opts = append(opts, app.WithFollowups(cfg.MainAgent != nil))
+	opts = append(opts, app.WithFollowups(cfg.MainAgent != nil), app.WithBackgroundAgents(cfg.MainAgent != nil && cfg.MainAgent.BackgroundAgents))
 	a := app.New(s, ids, time.Now, opts...)
 	if err := syncConfig(ctx, a, ids, cfg); err != nil {
 		return err
@@ -238,6 +242,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	ts := tools.New(a, s, cb, log)
 	handlers := map[string]dispatch.Handler{}
 	var front *mainthread.Manager
+	var background *mainthread.BackgroundPool
 	if cfg.MainAgent != nil {
 		if cfg.MainAgent.Instance == "" {
 			cfg.MainAgent.Instance = "main"
@@ -249,17 +254,26 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		handlers[app.MainThreadControlDestination] = front.Control()
 		log.Info("running the hosted main agent", "instance", cfg.MainAgent.Instance)
 	}
+	if cfg.MainAgent != nil && cfg.MainAgent.BackgroundAgents {
+		background = &mainthread.BackgroundPool{App: a, Front: front, Limit: cfg.MainAgent.BackgroundConcurrency, New: func(id string) (*mainthread.Manager, error) {
+			c := *cfg.MainAgent
+			c.Instance = cfg.MainAgent.Instance + "/" + id
+			c.ConversationID = id
+			return hostedMainThread(a, cb, ts, c, dataDir, log)
+		}}
+		handlers[app.MainThreadControlDestination] = background
+	}
 	d := dispatch.New(a, handlers, wake, time.Now, dispatch.Config{}, log)
 	releaseDir := ""
 	if cfg.Upgrades != nil {
 		releaseDir = cfg.Upgrades.ReleaseDir
 	}
 	runners := runnerapi.New(a, whois, secret, runnerapi.Config{ReleaseDir: releaseDir}, log)
-	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, ids, log)
+	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, background, ids, log)
 	if err != nil {
 		return err
 	}
-	ownerConfig := api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}
+	ownerConfig := api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil, BackgroundAgents: background != nil}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
 		ownerConfig.ConversationHandoff = front.HandoffStatus
@@ -284,6 +298,9 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	if front != nil {
 		wg.Go(func() { _ = front.Run(runCtx) })
 		wg.Go(func() { a.RunFollowups(runCtx, log) })
+	}
+	if background != nil {
+		wg.Go(func() { background.Run(runCtx) })
 	}
 	wg.Go(func() { _ = d.Run(runCtx) })
 	wg.Go(func() { runners.SweepLeases(runCtx, a.LeaseTTL()/4) })
@@ -327,12 +344,9 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 	if err != nil {
 		return nil, err
 	}
-	cwd := filepath.Join(dataDir, "main-agent")
-	if cfg.Cwd != "" {
-		var err error
-		if cwd, err = cfgfile.Path(cfg.Cwd); err != nil {
-			return nil, err
-		}
+	cwd, err := mainAgentWorkingDirectory(cfg, dataDir)
+	if err != nil {
+		return nil, err
 	}
 	// The owner's traex setup may connect tend's add-on (D46); the hosted
 	// agent is no add-on session.
@@ -349,7 +363,8 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 	}
 	return mainthread.New(a, cb, ts, mainthread.Config{
 		Instance:           cfg.Instance,
-		MaintenanceEnabled: true,
+		ConversationID:     cfg.ConversationID,
+		MaintenanceEnabled: cfg.ConversationID == "",
 		SummaryIdleMinutes: idle,
 		Now:                time.Now,
 		Thread:             mainthread.ThreadConfig(cwd, cfg.Model),
@@ -358,6 +373,19 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 		},
 		Log: log,
 	}), nil
+}
+
+// mainAgentWorkingDirectory keeps auto-mode writable directories independent
+// across logical conversations, including when the main agent has a custom cwd.
+func mainAgentWorkingDirectory(cfg mainAgentConfig, dataDir string) (string, error) {
+	if cfg.ConversationID != "" && cfg.ConversationID != "main" {
+		key := sha256.Sum256([]byte(cfg.ConversationID))
+		return filepath.Join(dataDir, "background-agents", fmt.Sprintf("%x", key)), nil
+	}
+	if cfg.Cwd != "" {
+		return cfgfile.Path(cfg.Cwd)
+	}
+	return filepath.Join(dataDir, "main-agent"), nil
 }
 
 // syncConfig brings hosts, repositories and templates into the ledger.

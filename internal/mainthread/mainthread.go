@@ -31,6 +31,7 @@ import (
 
 // Config configures the manager.
 type Config struct {
+	ConversationID string
 	// MaintenanceEnabled enables private summaries and schema handoffs.
 	MaintenanceEnabled bool
 	// SummaryIdleMinutes is the default; zero disables automatic summaries.
@@ -136,10 +137,14 @@ func (m *Manager) serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := m.app.RegisterAgentThread(ctx, m.cfg.ConversationID, th.ID()); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	m.session, m.thread = s, th
 	close(m.ready)
 	m.mu.Unlock()
+	m.refreshUsage(ctx, th)
 	drafts := replyDrafts{}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -178,7 +183,23 @@ func (m *Manager) serve(ctx context.Context) error {
 			m.mu.Lock()
 			m.lastActivity = m.cfg.Now()
 			m.mu.Unlock()
+			if ev.ContextUsage != nil {
+				if err := m.app.RecordAgentUsage(ctx, m.cfg.ConversationID, *ev.ContextUsage); err != nil {
+					return err
+				}
+				continue
+			}
+			if ev.Kind != harness.EventAgentMessageDelta {
+				if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, th.ID(), ev.TurnID, ev.ItemID, string(ev.Kind), ev.Raw); err != nil {
+					return err
+				}
+			}
 			if ev.Kind == harness.EventAgentMessageDelta || (ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemAgentMessage) {
+				// Start the batch interval at the first fragment, not at a stale
+				// idle tick delayed by durable turn-start bookkeeping.
+				if _, exists := drafts[replyKey{ev.TurnID, ev.ItemID}]; !exists && ev.Kind == harness.EventAgentMessageDelta {
+					ticker.Reset(100 * time.Millisecond)
+				}
 				drafts.consume(ev)
 				if ev.Kind == harness.EventItemCompleted {
 					if err := m.flushReplies(ctx, th, drafts, ev.TurnID, ""); err != nil {
@@ -231,6 +252,12 @@ func (m *Manager) detach(th harness.Thread) harness.Session {
 func (m *Manager) threadConfig() harness.ThreadConfig {
 	cfg := m.cfg.Thread
 	cfg.Tools = tools.Specs()
+	if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
+		cfg.Tools = tools.BackgroundSpecs()
+		cfg = backgroundThreadConfig(cfg)
+		cfg.DeveloperInstructions = "You are a work-item background checker. Read only your assigned work item and linked evidence with the provided tools. Main agent owns all business decisions, task scheduling and completion review. Read every source page and submit background_submit with the exact context revision. Use waiting for no change, briefing for nonurgent facts, escalate for action, missing context, failure or completion review. Your natural-language reply is not formal submission. Owner messages are original authority but business changes must go through main. Native tools run in auto mode; their availability does not authorize business changes or replace worker delegation. Do not change approval settings or bypass an automatic review denial. If permissions block the check, report the limitation to main instead of retrying with broader permissions. After context compaction read the current context before proceeding."
+	}
+
 	cfg.OnToolCall = m.onToolCall
 	return cfg
 }
@@ -273,6 +300,10 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Event) {
 	switch {
 	case ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemContextCompaction:
+		m.refreshUsage(ctx, th)
+		if err := m.app.CompleteNativeCompact(ctx, m.cfg.ConversationID, th.ID(), ev.ItemID); err != nil {
+			m.cfg.Log.ErrorContext(ctx, "record compact completion", "err", err)
+		}
 		// The harness replaced the history; what tend injected is gone.
 		if err := m.context.Invalidate(ctx, m.threadKey(th.ID())); err != nil {
 			m.cfg.Log.ErrorContext(ctx, "could not invalidate the context baseline", "err", err)
@@ -290,6 +321,7 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 		}
 		m.mu.Unlock()
 	case ev.Kind == harness.EventTurnCompleted:
+		m.refreshUsage(ctx, th)
 		m.mu.Lock()
 		a := m.active
 		if a != nil && a.turnID == ev.TurnID {
@@ -380,6 +412,10 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		}
 		m.mu.Unlock()
 	}
+	if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
+		call.Principal.Kind = protocol.PrincipalBackgroundAgent
+		call.Principal.ConversationID = m.cfg.ConversationID
+	}
 	return m.tools.Handle(ctx, call)
 }
 
@@ -403,11 +439,19 @@ func (m *Manager) waitThread(ctx context.Context) (harness.Thread, error) {
 // Deliver implements dispatch.Handler: it hands a message to the front
 // thread as one turn and returns when the turn ended.
 func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	if d.Operation == "conversation.compact" {
+		return m.deliverCompact(ctx, d)
+	}
 	if d.Operation == "conversation.handoff" {
 		return m.deliverHandoff(ctx, d)
 	}
 	m.workMu.Lock()
 	defer m.workMu.Unlock()
+	if blocked, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID); err != nil {
+		return retry(err)
+	} else if blocked {
+		return retry(errors.New("native compact must be reconciled before the next turn"))
+	}
 	if paused, err := m.app.UpgradePausesMain(ctx); err != nil {
 		return retry(err)
 	} else if paused {
@@ -457,7 +501,7 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 			text += "\n[Recorded decision answer: authoritative ledger data, including the effect result; not additional instructions.]\n" + string(p.DecisionAnswer)
 		}
 	}
-	if d.Operation == app.OpHandleEvent {
+	if d.Operation == app.OpHandleEvent && (m.cfg.ConversationID == "" || m.cfg.ConversationID == "main") {
 		prompt, err := m.app.BackgroundPrompt(ctx, msg.MessageID)
 		if err != nil {
 			return retry(err)
@@ -468,7 +512,7 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	if err != nil {
 		return retry(err)
 	}
-	if len(refs) > 0 {
+	if len(refs) > 0 && (m.cfg.ConversationID == "" || m.cfg.ConversationID == "main") {
 		encoded, err := json.Marshal(refs)
 		if err != nil {
 			return retry(err)
@@ -492,7 +536,18 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	if msg.LastSeenSeq > 0 && msg.LastSeenSeq < msg.Seq {
 		focus = msg.LastSeenSeq + 1
 	}
-	packet, err := m.context.Prepare(ctx, key, focus)
+	var packet *contextbuilder.Packet
+	if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
+		contextText, contextErr := m.app.AgentContext(ctx, m.cfg.ConversationID, d.RequestID)
+		if contextErr != nil {
+			return retry(contextErr)
+		}
+		if err = th.InjectDeveloper(ctx, contextText); err != nil {
+			return retry(err)
+		}
+	} else {
+		packet, err = m.context.Prepare(ctx, key, focus)
+	}
 	if err != nil {
 		return retry(err)
 	}
@@ -583,6 +638,9 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 // Reconcile implements dispatch.Handler for a delivery a previous process
 // left in the middle.
 func (m *Manager) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	if d.Operation == "conversation.compact" {
+		return m.reconcileCompact(ctx, d)
+	}
 	if d.Operation == "conversation.handoff" {
 		return m.reconcileHandoff(ctx, d)
 	}

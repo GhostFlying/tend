@@ -9,9 +9,10 @@ import (
 )
 
 type conversationArgs struct {
-	BeforeSeq int64 `json:"before_seq,omitempty"`
-	AfterSeq  int64 `json:"after_seq,omitempty"`
-	Limit     *int  `json:"limit,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	BeforeSeq      int64  `json:"before_seq,omitempty"`
+	AfterSeq       int64  `json:"after_seq,omitempty"`
+	Limit          *int   `json:"limit,omitempty"`
 }
 
 type conversationPage struct {
@@ -37,12 +38,12 @@ func (s *Service) conversationRead(ctx context.Context, c Call) (any, error) {
 	var result conversationPage
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		result.ConversationPage, err = views.Conversation(ctx, tx.Q(), args.BeforeSeq, args.AfterSeq, limit)
+		result.ConversationPage, err = views.Conversation(ctx, tx.Q(), args.BeforeSeq, args.AfterSeq, limit, args.ConversationID)
 		if err != nil {
 			return err
 		}
 		for i := range result.Items {
-			if err := store.HideUndeliveredOwner(ctx, tx.Q(), &result.Items[i]); err != nil {
+			if err := store.HideUnadmittedForCoordinator(ctx, tx.Q(), &result.Items[i]); err != nil {
 				return err
 			}
 		}

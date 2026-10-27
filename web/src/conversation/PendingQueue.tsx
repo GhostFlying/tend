@@ -13,7 +13,7 @@ import type { Category } from "./queueView.ts";
 import styles from "./PendingQueue.module.css";
 
 export function PendingQueue({ connection }: { connection: Connection }) {
-  const { live, client, queue, draft } = useServices();
+  const { live, client, queue, draft, agentsEnabled, conversation } = useServices();
   const state = useStore(live.queueView.state);
   const settings = useStore(live.settings.state).view;
   const handoff = useStore(live.handoff.state).view;
@@ -113,7 +113,7 @@ export function PendingQueue({ connection }: { connection: Connection }) {
   );
   return (
     <section className={styles.queue} aria-label="待处理队列">
-      {active?.status === "processing" && (
+      {!agentsEnabled && active?.status === "processing" && (
         <div className={styles.preview}>正在处理：{active.item.body || "附件消息"}</div>
       )}
       {(connection.status !== "online" || state.error) && (
@@ -167,7 +167,7 @@ export function PendingQueue({ connection }: { connection: Connection }) {
           {owner?.next && <button onClick={() => more("owner")}>加载更多待处理消息</button>}
         </>
       )}
-      {!!background?.total && (
+      {(!agentsEnabled || conversation?.id !== "main") && !!background?.total && (
         <details>
           <summary>
             后台事项 · {background.total}

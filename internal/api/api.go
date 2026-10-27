@@ -27,6 +27,7 @@ const maxBody = 1 << 20
 
 // Config configures the API. Zero values select the defaults.
 type Config struct {
+	BackgroundAgents bool
 	// Owners are the tailnet logins allowed to use the API.
 	Owners []string
 	// OwnerNodes maps nodes, by machine name or "tag:", to the owner whose
@@ -106,6 +107,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs", s.runLogs)
 	mux.HandleFunc("GET /api/v1/requests/{id}", s.request)
 	mux.HandleFunc("GET /api/v1/conversation", s.conversation)
+	mux.HandleFunc("GET /api/v1/agent-conversations", s.agentConversations)
+	mux.HandleFunc("GET /api/v1/agent-conversations/{id}", s.agentConversation)
+	mux.HandleFunc("GET /api/v1/messages/{id}/associations", s.messageAssociations)
+	mux.HandleFunc("GET /api/v1/work-items/{id}/context", s.workItemContext)
+	mux.HandleFunc("GET /api/v1/agent-conversations/{id}/rollout", s.agentRollout)
+	mux.HandleFunc("GET /api/v1/agent-conversations/{id}/rollout/{seq}", s.agentRolloutWindow)
+	mux.HandleFunc("GET /api/v1/agent-conversations/{id}/usage", s.agentUsage)
+	mux.HandleFunc("GET /api/v1/agent-conversations/{id}/compactions", s.agentCompactions)
 	mux.HandleFunc("GET /api/v1/conversation/queue", s.conversationQueue)
 	mux.HandleFunc("GET /api/v1/conversation/transcript", s.conversationTranscript)
 	mux.HandleFunc("GET /api/v1/conversation/blocks/{id}", s.conversationBlock)

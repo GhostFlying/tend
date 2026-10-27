@@ -47,23 +47,11 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
         ? []
         : blocks.supported
           ? blocks.blocks.filter(showTranscriptBlock).flatMap((b) =>
-              buildEntries(
-                [
-                  ...(b.notice_only || b.trigger.author !== "system"
-                    ? [b.trigger]
-                    : [
-                        {
-                          ...b.trigger,
-                          body: "继续处理后台事项",
-                          choices: [],
-                          images: [],
-                          attachments: [],
-                        },
-                      ]),
-                  ...(b.items ?? []),
-                ],
-                [],
-              ).map((e) => ({ ...e, key: `${b.position}:${e.key}`, block: b })),
+              buildEntries([b.trigger, ...(b.items ?? [])], []).map((e) => ({
+                ...e,
+                key: `${b.position}:${e.key}`,
+                block: b,
+              })),
             )
           : buildEntries(conversation.items, outbox),
     [blocks.supported, blocks.blocks, conversation.items, outbox],

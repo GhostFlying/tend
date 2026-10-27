@@ -79,7 +79,7 @@ func executableSHA256() (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
-func prepareUpgradeController(cfg *upgradeConfig, a *app.App, front *mainthread.Manager, ids protocol.IDGen, log *slog.Logger) (*upgradectl.Controller, error) {
+func prepareUpgradeController(cfg *upgradeConfig, a *app.App, front *mainthread.Manager, background *mainthread.BackgroundPool, ids protocol.IDGen, log *slog.Logger) (*upgradectl.Controller, error) {
 	if cfg == nil {
 		return nil, nil
 	}
@@ -92,14 +92,32 @@ func prepareUpgradeController(cfg *upgradeConfig, a *app.App, front *mainthread.
 		process = ids.New(protocol.PrefixLaunch)
 	}
 	return upgradectl.New(upgradectl.Config{Instance: cfg.Instance, ProcessInstance: process, BinarySHA256: sum, ControlSocket: cfg.ControlSocket, UpdaterSocket: cfg.UpdaterSocket, ReleaseDir: cfg.ReleaseDir, DrainMillis: time.Duration(cfg.DrainTimeout).Milliseconds(), RestartMillis: time.Duration(cfg.RestartBudget).Milliseconds(), GrantMillis: time.Duration(cfg.GrantDuration).Milliseconds()}, a, ids, func(ctx context.Context) (app.ServerObservation, error) {
-		drained := true
+		var agents []upgradeDrainer
 		if front != nil {
-			var err error
-			drained, err = front.UpgradeDrainStatus(ctx)
-			if err != nil {
-				return app.ServerObservation{}, err
-			}
+			agents = append(agents, front)
+		}
+		if background != nil {
+			agents = append(agents, background)
+		}
+		drained, err := allAgentsDrained(ctx, a, agents...)
+		if err != nil {
+			return app.ServerObservation{}, err
 		}
 		return app.ServerObservation{Healthy: true, MainDrained: drained}, nil
 	}, log)
+}
+
+type upgradeDrainer interface {
+	UpgradeDrainStatus(context.Context) (bool, error)
+}
+
+func allAgentsDrained(ctx context.Context, a *app.App, agents ...upgradeDrainer) (bool, error) {
+	for _, agent := range agents {
+		drained, err := agent.UpgradeDrainStatus(ctx)
+		if err != nil || !drained {
+			return false, err
+		}
+	}
+	uncertain, err := a.AgentCompactionsUncertain(ctx)
+	return !uncertain && err == nil, err
 }

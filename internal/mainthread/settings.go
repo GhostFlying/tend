@@ -44,7 +44,7 @@ func (m *Manager) defaults(th harness.Thread) harness.ModelSelection {
 // Settings returns the shared next-turn settings and the live harness catalog.
 // A disconnected harness leaves persisted selections readable but unavailable.
 func (m *Manager) Settings(ctx context.Context) (protocol.ConversationSettingsView, error) {
-	settings, err := m.app.ConversationSettings(ctx)
+	settings, err := m.app.ConversationSettings(ctx, m.cfg.ConversationID)
 	if err != nil {
 		return protocol.ConversationSettingsView{}, err
 	}
@@ -95,11 +95,11 @@ func (m *Manager) Settings(ctx context.Context) (protocol.ConversationSettingsVi
 // turnModel snapshots settings once a queued message starts processing. Later
 // owner writes affect subsequent turns, including queued offline messages.
 func (m *Manager) turnModel(ctx context.Context, th harness.Thread) (harness.ModelSelection, int64, error) {
-	settings, err := m.app.ConversationSettings(ctx)
+	settings, err := m.app.ConversationSettings(ctx, m.cfg.ConversationID)
 	if err != nil {
 		return harness.ModelSelection{}, 0, err
 	}
-	if settings.Revision == 0 {
+	if settings.Revision == 0 && settings.Model == "" {
 		return m.defaults(th), 0, nil
 	}
 	models, err := m.modelCatalog(ctx)

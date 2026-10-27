@@ -13,7 +13,7 @@ import (
 
 // queueBackgroundSource retains every notice and merges only unclaimed input.
 func queueBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, message, event, kind string, data json.RawMessage) error {
-	groups, err := store.FollowupIDs(ctx, tx.Q(), `SELECT object_id FROM conversation_bindings WHERE message_id=? AND object_type='work_item' UNION SELECT l.work_item_id FROM work_item_task_links l JOIN conversation_bindings b ON b.object_id=l.task_id AND b.object_type='task' WHERE b.message_id=? ORDER BY 1`, message, message)
+	groups, err := store.FollowupIDs(ctx, tx.Q(), `SELECT work_item_id FROM message_work_items WHERE message_id=? AND active=1 UNION SELECT l.work_item_id FROM work_item_task_links l JOIN conversation_bindings b ON b.object_id=l.task_id AND b.object_type='task' WHERE b.message_id=? AND NOT EXISTS(SELECT 1 FROM message_work_items a WHERE a.message_id=b.message_id AND a.work_item_id=l.work_item_id AND a.active=0 AND a.owner_locked=1) ORDER BY 1`, message, message)
 	if err != nil {
 		return err
 	}
@@ -36,6 +36,21 @@ func queueBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, message, 
 }
 func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, item, message, event, kind string, data json.RawMessage) error {
 	now := x.Now.UnixMilli()
+	conversation := "main"
+	if x.BackgroundAgentsEnabled && item != "" {
+		var baseline int64
+		if err := tx.Q().QueryRowContext(ctx, `SELECT baseline_revision FROM work_item_contexts WHERE work_item_id=?`, item).Scan(&baseline); err != nil {
+			return err
+		}
+		if baseline > 0 {
+			var err error
+			conversation, err = ensureAgentConversation(ctx, x, tx, item)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	var batch, canonical string
 	err := tx.Q().QueryRowContext(ctx, `SELECT batch_id,message_id FROM background_batches WHERE group_key=? AND status='pending'`, group).Scan(&batch, &canonical)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -45,7 +60,7 @@ func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, i
 		if item != "" {
 			body += "：" + item
 		}
-		seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: canonical, Author: "system", Body: body, CreatedAt: now})
+		seq, err := tx.InsertMessage(ctx, store.MessageRow{ConversationID: conversation, MessageID: canonical, Author: "system", Body: body, CreatedAt: now})
 		if err != nil {
 			return err
 		}

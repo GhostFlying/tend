@@ -9,11 +9,11 @@ import (
 )
 
 // ConversationSettings reads the owner's shared next-turn selection.
-func (a *App) ConversationSettings(ctx context.Context) (store.ConversationSettings, error) {
+func (a *App) ConversationSettings(ctx context.Context, session ...string) (store.ConversationSettings, error) {
 	var settings store.ConversationSettings
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		settings, err = store.GetConversationSettings(ctx, tx.Q())
+		settings, err = store.GetConversationSettings(ctx, tx.Q(), session...)
 		return err
 	})
 	return settings, err
@@ -47,7 +47,7 @@ func (c SetConversationSettings) Apply(ctx context.Context, x *Exec, tx *store.T
 	if err != nil {
 		return Outcome{}, err
 	}
-	current, err := store.GetConversationSettings(ctx, tx.Q())
+	current, err := store.GetConversationSettings(ctx, tx.Q(), p.ConversationID)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -70,10 +70,14 @@ func (c SetConversationSettings) Apply(ctx context.Context, x *Exec, tx *store.T
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "effort is not supported by this model")
 	}
 	next := store.ConversationSettings{Model: p.Model, Effort: p.Effort, Revision: current.Revision + 1}
-	if err := tx.PutConversationSettings(ctx, next, x.Now.UnixMilli()); err != nil {
+	if store.ConversationID(p.ConversationID) != "main" {
+		if _, err := tx.Exec(ctx, `UPDATE agent_conversations SET model=?,effort=?,revision=? WHERE conversation_id=?`, next.Model, next.Effort, next.Revision, p.ConversationID); err != nil {
+			return Outcome{}, err
+		}
+	} else if err := tx.PutConversationSettings(ctx, next, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
 	result := map[string]any{"model": next.Model, "effort": next.Effort, "revision": next.Revision}
-	return Outcome{Result: result, Events: []Event{{ObjectType: "conversation", ObjectID: "main", ObjectVersion: next.Revision,
+	return Outcome{Result: result, Events: []Event{{ObjectType: "conversation", ObjectID: store.ConversationID(p.ConversationID), ObjectVersion: next.Revision,
 		Kind: "conversation.settings", Body: result}}}, nil
 }

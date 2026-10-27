@@ -19,7 +19,7 @@ func (s *Server) conversationQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		out, err := views.ConversationQueue(r.Context(), q, category, after, 50)
+		out, err := views.ConversationQueue(r.Context(), q, category, after, 50, r.URL.Query().Get("conversation_id"))
 		out.Enabled = s.cfg.HostedMainAgent
 		return out, err
 	})
@@ -31,7 +31,7 @@ func (s *Server) conversationTranscript(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.Transcript(r.Context(), q, before, 20)
+		return views.Transcript(r.Context(), q, before, 20, r.URL.Query().Get("conversation_id"))
 	})
 }
 func (s *Server) conversationBlock(w http.ResponseWriter, r *http.Request) {
