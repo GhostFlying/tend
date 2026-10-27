@@ -574,3 +574,24 @@ func TestFault_NativeFailureWithNonzeroTurnDurationCanRecover(t *testing.T) {
 		t.Fatalf("native recovery did not continue once: %+v", w.st.Recovery)
 	}
 }
+
+func TestFault_NativeFailureDeduplicatesAcrossObservedCompletionClocks(t *testing.T) {
+	_, w, a := nativeFixture(t)
+	a.RootTurn.Operations = "unknown"
+	if _, _, err := w.step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	a.RootTurn.CompletedAt++
+	if _, _, err := w.step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	failures := 0
+	for _, e := range w.pending {
+		if e.Kind == "worker.turn_failed" {
+			failures++
+		}
+	}
+	if failures != 1 {
+		t.Fatalf("failure events=%d", failures)
+	}
+}
