@@ -1,10 +1,12 @@
 // The composer's compact model seat: a two-level menu shared across devices.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { Back, Chevron } from "../shell/icons.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Settings.module.css";
+import { useAnchoredPanel } from "./useAnchoredPanel.ts";
 
 type Pane = "root" | "model" | "effort";
 const effortLabel = (effort: string) => effort || "默认";
@@ -20,6 +22,7 @@ export function Settings({ connection }: { connection: Connection }) {
   const menu = useRef<HTMLDivElement>(null);
   const rootFocus = useRef("模型");
   const id = useId();
+  const position = useAnchoredPanel(open, trigger, 240);
 
   useEffect(() => {
     settings.start();
@@ -33,13 +36,18 @@ export function Settings({ connection }: { connection: Connection }) {
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
+      if (
+        event.target instanceof Node &&
+        !root.current?.contains(event.target) &&
+        !menu.current?.contains(event.target)
+      )
+        setOpen(false);
     };
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [open]);
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open || position.visibility === "hidden") return;
     const current = menu.current;
     const preferred =
       pane === "root"
@@ -53,7 +61,7 @@ export function Settings({ connection }: { connection: Connection }) {
       current?.querySelector<HTMLButtonElement>("button:not(:disabled)") ??
       current
     )?.focus();
-  }, [open, pane]);
+  }, [open, pane, position.visibility]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -168,7 +176,11 @@ export function Settings({ connection }: { connection: Connection }) {
       className={styles.root}
       onKeyDown={keyDown}
       onBlur={(event) => {
-        if (!(event.relatedTarget instanceof Node) || !root.current?.contains(event.relatedTarget))
+        if (
+          !(event.relatedTarget instanceof Node) ||
+          (!root.current?.contains(event.relatedTarget) &&
+            !menu.current?.contains(event.relatedTarget))
+        )
           close();
       }}
     >
@@ -200,143 +212,146 @@ export function Settings({ connection }: { connection: Connection }) {
         </span>
         <Chevron className={styles.chevron} data-open={open || undefined} />
       </button>
-      {open && (
-        <div
-          ref={menu}
-          id={`${id}-menu`}
-          className={styles.menu}
-          role="menu"
-          tabIndex={-1}
-          aria-label={
-            pane === "root" ? "主会话设置菜单" : pane === "model" ? "选择模型" : "选择思考强度"
-          }
-          aria-busy={state.saving}
-        >
-          {pane !== "root" && (
-            <button
-              type="button"
-              role="menuitem"
-              tabIndex={-1}
-              aria-label="返回主菜单"
-              className={styles.back}
-              onClick={back}
-            >
-              <Back />
-              {pane === "model" ? "模型" : "思考强度"}
-            </button>
-          )}
-          <div className={styles.options}>
-            {pane === "root" ? (
-              <>
-                <button
-                  type="button"
-                  role="menuitem"
-                  tabIndex={-1}
-                  aria-label="模型"
-                  aria-describedby={`${id}-model`}
-                  data-pane="model"
-                  className={styles.cell}
-                  disabled={disabled || !view?.models?.length}
-                  onClick={() => setPane("model")}
-                >
-                  <span>模型</span>
-                  <span id={`${id}-model`} className={styles.cellValue}>
-                    {modelLabel}
-                  </span>
-                  <Chevron />
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  tabIndex={-1}
-                  aria-label="思考强度"
-                  aria-describedby={`${id}-effort`}
-                  data-pane="effort"
-                  className={styles.cell}
-                  disabled={disabled || efforts.length === 0}
-                  onClick={() => setPane("effort")}
-                >
-                  <span>思考强度</span>
-                  <span id={`${id}-effort`} className={styles.cellValue}>
-                    {effortLabel(view?.effort ?? "")}
-                  </span>
-                  <Chevron />
-                </button>
-              </>
-            ) : pane === "model" ? (
-              view?.models?.map((choice) => (
-                <button
-                  key={choice.id}
-                  type="button"
-                  role="menuitemradio"
-                  tabIndex={-1}
-                  aria-label={choice.label || choice.id}
-                  aria-checked={choice.id === view.model}
-                  title={choice.label || choice.id}
-                  className={styles.option}
-                  disabled={disabled}
-                  onClick={() =>
-                    choose(
-                      choice.id,
-                      choice.id === view.model ? view.effort : choice.default_effort,
-                    )
-                  }
-                >
-                  <span className={styles.optionLabel}>{choice.label || choice.id}</span>
-                  <span className={styles.check} aria-hidden>
-                    {choice.id === view.model ? "✓" : ""}
-                  </span>
-                </button>
-              ))
-            ) : (
-              efforts.map((effort) => (
-                <button
-                  key={effort}
-                  type="button"
-                  role="menuitemradio"
-                  tabIndex={-1}
-                  aria-label={effortLabel(effort)}
-                  aria-checked={effort === view?.effort}
-                  className={styles.option}
-                  disabled={disabled}
-                  onClick={() => {
-                    if (view) choose(view.model, effort);
-                  }}
-                >
-                  <span className={styles.optionLabel}>{effortLabel(effort)}</span>
-                  <span className={styles.check} aria-hidden>
-                    {effort === view?.effort ? "✓" : ""}
-                  </span>
-                </button>
-              ))
+      {open &&
+        createPortal(
+          <div
+            ref={menu}
+            id={`${id}-menu`}
+            className={styles.menu}
+            style={position}
+            role="menu"
+            tabIndex={-1}
+            aria-label={
+              pane === "root" ? "主会话设置菜单" : pane === "model" ? "选择模型" : "选择思考强度"
+            }
+            aria-busy={state.saving}
+          >
+            {pane !== "root" && (
+              <button
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                aria-label="返回主菜单"
+                className={styles.back}
+                onClick={back}
+              >
+                <Back />
+                {pane === "model" ? "模型" : "思考强度"}
+              </button>
             )}
-          </div>
-          {(message || state.error) && (
-            <div className={styles.status} data-warning={warning || undefined} role="status">
-              {message}
-              {state.error && <span>{state.error}</span>}
+            <div className={styles.options}>
+              {pane === "root" ? (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    tabIndex={-1}
+                    aria-label="模型"
+                    aria-describedby={`${id}-model`}
+                    data-pane="model"
+                    className={styles.cell}
+                    disabled={disabled || !view?.models?.length}
+                    onClick={() => setPane("model")}
+                  >
+                    <span>模型</span>
+                    <span id={`${id}-model`} className={styles.cellValue}>
+                      {modelLabel}
+                    </span>
+                    <Chevron />
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    tabIndex={-1}
+                    aria-label="思考强度"
+                    aria-describedby={`${id}-effort`}
+                    data-pane="effort"
+                    className={styles.cell}
+                    disabled={disabled || efforts.length === 0}
+                    onClick={() => setPane("effort")}
+                  >
+                    <span>思考强度</span>
+                    <span id={`${id}-effort`} className={styles.cellValue}>
+                      {effortLabel(view?.effort ?? "")}
+                    </span>
+                    <Chevron />
+                  </button>
+                </>
+              ) : pane === "model" ? (
+                view?.models?.map((choice) => (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    role="menuitemradio"
+                    tabIndex={-1}
+                    aria-label={choice.label || choice.id}
+                    aria-checked={choice.id === view.model}
+                    title={choice.label || choice.id}
+                    className={styles.option}
+                    disabled={disabled}
+                    onClick={() =>
+                      choose(
+                        choice.id,
+                        choice.id === view.model ? view.effort : choice.default_effort,
+                      )
+                    }
+                  >
+                    <span className={styles.optionLabel}>{choice.label || choice.id}</span>
+                    <span className={styles.check} aria-hidden>
+                      {choice.id === view.model ? "✓" : ""}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                efforts.map((effort) => (
+                  <button
+                    key={effort}
+                    type="button"
+                    role="menuitemradio"
+                    tabIndex={-1}
+                    aria-label={effortLabel(effort)}
+                    aria-checked={effort === view?.effort}
+                    className={styles.option}
+                    disabled={disabled}
+                    onClick={() => {
+                      if (view) choose(view.model, effort);
+                    }}
+                  >
+                    <span className={styles.optionLabel}>{effortLabel(effort)}</span>
+                    <span className={styles.check} aria-hidden>
+                      {effort === view?.effort ? "✓" : ""}
+                    </span>
+                  </button>
+                ))
+              )}
             </div>
-          )}
-          {(state.pendingId || state.readError || (view && !view.available)) && (
-            <button
-              type="button"
-              role="menuitem"
-              tabIndex={-1}
-              className={styles.recover}
-              disabled={state.saving || !online}
-              onClick={() =>
-                void (state.pendingId ? settings.reconcile(client) : settings.refresh())
-              }
-            >
-              {state.pendingId ? "核对设置" : "重新读取"}
-            </button>
-          )}
-          <div className={styles.note}>
-            用于下一次开始的回复，含排队消息。
-            {model && efforts.length === 0 && "该模型使用默认思考强度。"}
-          </div>
-        </div>
-      )}
+            {(message || state.error) && (
+              <div className={styles.status} data-warning={warning || undefined} role="status">
+                {message}
+                {state.error && <span>{state.error}</span>}
+              </div>
+            )}
+            {(state.pendingId || state.readError || (view && !view.available)) && (
+              <button
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                className={styles.recover}
+                disabled={state.saving || !online}
+                onClick={() =>
+                  void (state.pendingId ? settings.reconcile(client) : settings.refresh())
+                }
+              >
+                {state.pendingId ? "核对设置" : "重新读取"}
+              </button>
+            )}
+            <div className={styles.note}>
+              用于下一次开始的回复，含排队消息。
+              {model && efforts.length === 0 && "该模型使用默认思考强度。"}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
