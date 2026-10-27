@@ -101,6 +101,9 @@ func (s *Service) agentList(ctx context.Context, c Call) (any, error) {
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
 		v, err = store.AgentConversations(ctx, tx.Q(), p.Search, p.Status, p.After, 30)
+		// Hosted main-agent startup always enables the background pool (D114).
+		// This is capability availability, not the state of an individual turn.
+		v.RuntimeAvailable = c.Principal.Kind == protocol.PrincipalMainAgent && c.Principal.Validate() == nil
 		return err
 	})
 	return v, err
