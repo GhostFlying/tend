@@ -51,6 +51,8 @@ type WindowState = ReturnType<typeof useRunWindow>;
 interface ReadingPosition {
   key: string;
   top: number;
+  disclosures: Record<string, string[]>;
+  scrolls: Record<string, { top: number; left: number }[]>;
 }
 function RunWindow({ run }: { run: RunView }) {
   const window = useRunWindow(run.run_id);
@@ -62,6 +64,7 @@ function RunWindow({ run }: { run: RunView }) {
   const [usage, setUsage] = useState(false);
   const regionID = useId();
   const readingPosition = useRef<ReadingPosition | null>(null);
+  const [savedPosition, setSavedPosition] = useState<ReadingPosition | null>(null);
   const observed = run.observed;
   const active = observed === "running" || observed === "starting";
   const current =
@@ -69,6 +72,7 @@ function RunWindow({ run }: { run: RunView }) {
   const close = useCallback(() => setFull(false), []);
   const open = (step?: Step) => {
     if (step) window.setLive(false);
+    setSavedPosition(readingPosition.current);
     setTarget(step?.key ?? "");
     setFull(true);
   };
@@ -137,6 +141,7 @@ function RunWindow({ run }: { run: RunView }) {
           steps={steps}
           target={target}
           position={readingPosition}
+          restored={savedPosition}
           onClose={close}
         />
       )}
@@ -168,12 +173,14 @@ function StepView({
   step,
   compact = false,
   reveal = false,
+  rawOpen = false,
   active,
   inspect,
 }: {
   step: Step;
   compact?: boolean;
   reveal?: boolean;
+  rawOpen?: boolean;
   active: boolean;
   inspect?: () => void;
 }) {
@@ -198,7 +205,7 @@ function StepView({
           {warning}
         </div>
       ) : (
-        <details className={styles.disclosure} open={reveal || undefined}>
+        <details className={styles.disclosure} data-disclosure="content" open={reveal || undefined}>
           <summary>
             <StateMark active={active && step.pending} failed={step.failed} />
             <span className={styles.toolTitle}>{step.title}</span>
@@ -217,13 +224,13 @@ function StepView({
             {step.input && (
               <div className={styles.io}>
                 <span>{step.title === "执行命令" ? "命令" : "输入"}</span>
-                <pre>{step.input}</pre>
+                <pre data-scroll="input">{step.input}</pre>
               </div>
             )}
             {step.output && (
               <div className={styles.io}>
                 <span>输出</span>
-                <pre>{step.output}</pre>
+                <pre data-scroll="output">{step.output}</pre>
               </div>
             )}
             {!step.text && !step.input && !step.output && (
@@ -232,7 +239,7 @@ function StepView({
               </p>
             )}
             {warning}
-            <StepDiagnostics step={step} />
+            <StepDiagnostics step={step} open={rawOpen} />
           </div>
         </details>
       )}
@@ -245,13 +252,21 @@ function StepView({
           ↗
         </button>
       )}
-      {!compact && step.kind === "text" && <StepDiagnostics step={step} quiet />}
+      {!compact && step.kind === "text" && <StepDiagnostics step={step} quiet open={rawOpen} />}
     </article>
   );
 }
-function StepDiagnostics({ step, quiet = false }: { step: Step; quiet?: boolean }) {
+function StepDiagnostics({
+  step,
+  quiet = false,
+  open = false,
+}: {
+  step: Step;
+  quiet?: boolean;
+  open?: boolean;
+}) {
   return (
-    <details className={styles.diagnostics}>
+    <details className={styles.diagnostics} data-disclosure="raw" open={open || undefined}>
       <summary aria-label={quiet ? "查看原始记录" : undefined}>{quiet ? "⋯" : "原始记录"}</summary>
       <small>
         记录 {step.seq}–{step.lastSeq}
@@ -270,6 +285,7 @@ function Reader({
   steps,
   target,
   position,
+  restored,
   onClose,
 }: {
   run: RunView;
@@ -277,6 +293,7 @@ function Reader({
   steps: Step[];
   target: string;
   position: RefObject<ReadingPosition | null>;
+  restored: ReadingPosition | null;
   onClose(): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -313,6 +330,18 @@ function Reader({
       }
       const el = readingElement;
       if (el) {
+        const disclosures: ReadingPosition["disclosures"] = {};
+        const scrolls: ReadingPosition["scrolls"] = {};
+        for (const item of el.querySelectorAll<HTMLElement>("[data-step-key]")) {
+          const key = item.dataset.stepKey!;
+          disclosures[key] = [
+            ...item.querySelectorAll<HTMLElement>("details[open][data-disclosure]"),
+          ].map((node) => node.dataset.disclosure!);
+          scrolls[key] = [...item.querySelectorAll("pre")].map((node) => ({
+            top: node.scrollTop,
+            left: node.scrollLeft,
+          }));
+        }
         const top = el.getBoundingClientRect().top;
         const row = [...el.querySelectorAll<HTMLElement>("[data-step-key]")].find(
           (item) => item.getBoundingClientRect().bottom > top,
@@ -321,6 +350,8 @@ function Reader({
           position.current = {
             key: row.dataset.stepKey!,
             top: row.getBoundingClientRect().top - top,
+            disclosures,
+            scrolls,
           };
       }
       panel?.close();
@@ -332,7 +363,20 @@ function Reader({
     const el = scroller.current;
     if (!el) return;
     if (initial.current) {
-      const saved = !target && !state.live ? position.current : null;
+      const saved = !target && !state.live ? restored : null;
+      if (saved) {
+        for (const item of el.querySelectorAll<HTMLElement>("[data-step-key]")) {
+          const offsets = saved.scrolls[item.dataset.stepKey!];
+          if (!offsets) continue;
+          [...item.querySelectorAll("pre")].forEach((node, index) => {
+            const offset = offsets[index];
+            if (offset) {
+              node.scrollTop = offset.top;
+              node.scrollLeft = offset.left;
+            }
+          });
+        }
+      }
       const key = target || saved?.key;
       const row = [...el.querySelectorAll<HTMLElement>("[data-step-key]")].find(
         (item) => item.dataset.stepKey === key,
@@ -352,7 +396,7 @@ function Reader({
           row.getBoundingClientRect().top - el.getBoundingClientRect().top - saved.top;
       anchor.current = null;
     } else if (state.live) el.scrollTop = el.scrollHeight;
-  }, [steps, target, state.live, state.page, position]);
+  }, [steps, target, state.live, state.page, position, restored]);
   useEffect(() => {
     const observer = new ResizeObserver(() => {
       if (state.live && scroller.current)
@@ -479,7 +523,15 @@ function Reader({
           <ol ref={flow} className={styles.steps}>
             {steps.map((step) => (
               <li key={step.key} data-step-key={step.key} data-target={step.key === target}>
-                <StepView step={step} active={active} reveal={step.key === target} />
+                <StepView
+                  step={step}
+                  active={active}
+                  reveal={
+                    step.key === target ||
+                    restored?.disclosures[step.key]?.includes("content") === true
+                  }
+                  rawOpen={restored?.disclosures[step.key]?.includes("raw") === true}
+                />
               </li>
             ))}
           </ol>

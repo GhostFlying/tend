@@ -91,7 +91,9 @@ logs[145] = {
     command: "go test ./internal/domain",
     status: "completed",
     durationMs: 18,
-    aggregatedOutput: "ok   example/internal/domain  0.018s",
+    aggregatedOutput:
+      "ok   example/internal/domain  0.018s\n" +
+      Array.from({ length: 80 }, (_, index) => `演示输出 ${index + 1}`).join("\n"),
     exitCode: 0,
   },
 };
@@ -419,7 +421,10 @@ try {
       .click();
     await rollout.waitFor();
     await rollout.getByText("历史阅读", { exact: true }).waitFor();
-    await rollout.getByText("ok   example/internal/domain  0.018s", { exact: true }).waitFor();
+    await rollout
+      .locator('pre[data-scroll="output"]')
+      .filter({ hasText: "ok   example/internal/domain" })
+      .waitFor();
     const targetBounds = await rollout.locator('[data-target="true"]').boundingBox();
     const readerBounds = await reader.boundingBox();
     assert(
@@ -427,6 +432,37 @@ try {
         readerBounds &&
         targetBounds.y >= readerBounds.y - 2 &&
         targetBounds.y < readerBounds.y + readerBounds.height,
+    );
+    const expandedTool = rollout
+      .locator("article")
+      .filter({ hasText: "go test ./internal/domain" });
+    const toolOutput = expandedTool.locator('pre[data-scroll="output"]');
+    await toolOutput.evaluate((el) => {
+      el.scrollTop = 80;
+    });
+    await reader.evaluate((el) => {
+      el.scrollTop += 150;
+    });
+    const expandedTop = (await expandedTool.boundingBox())!.y;
+    const outputTop = await toolOutput.evaluate((el) => el.scrollTop);
+    assert(outputTop > 0, "fixture did not exercise an output scroller");
+    await rollout.getByRole("button", { name: "← 返回", exact: true }).click();
+    await rollout.waitFor({ state: "detached" });
+    await card
+      .getByRole("button", { name: /查看完整过程/ })
+      .evaluate((el) => (el as HTMLButtonElement).click());
+    await rollout.waitFor();
+    assert(
+      (await expandedTool.locator("details").first().getAttribute("open")) !== null,
+      "reopening collapsed the reading step",
+    );
+    assert(
+      Math.abs((await expandedTool.boundingBox())!.y - expandedTop) < 3,
+      "reopening moved the expanded reading anchor",
+    );
+    assert(
+      Math.abs((await toolOutput.evaluate((el) => el.scrollTop)) - outputTop) < 3,
+      "reopening lost the tool output scroll position",
     );
     await page.keyboard.press("Escape");
     await rollout.waitFor({ state: "detached" });
@@ -496,8 +532,13 @@ try {
     if (await rollout.locator("nav details[open]").count())
       await rollout.getByText("更多", { exact: true }).click();
     const commandRow = rollout.locator("article").filter({ hasText: "go test ./internal/domain" });
-    await commandRow.locator("summary").first().click();
-    await commandRow.getByText("ok   example/internal/domain  0.018s", { exact: true }).waitFor();
+    if ((await commandRow.locator("details").first().getAttribute("open")) === null) {
+      await commandRow.locator("summary").first().click();
+    }
+    await commandRow
+      .locator('pre[data-scroll="output"]')
+      .filter({ hasText: "ok   example/internal/domain" })
+      .waitFor();
     await page.screenshot({ path: join(output, `rollout-${viewport.width}.png`), fullPage: true });
     await rollout.getByRole("button", { name: "关闭完整过程" }).click();
     await rollout.waitFor({ state: "detached" });
