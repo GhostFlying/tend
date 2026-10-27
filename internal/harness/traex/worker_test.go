@@ -52,13 +52,13 @@ func TestAcceptanceWorkerReportsVerdict(t *testing.T) {
 	<-f.answers
 	f.send(map[string]any{"method": notifyItemCompleted, "params": map[string]any{"threadId": "th_w", "turnId": "tu_w", "item": map[string]any{"id": "i1", "type": "agentMessage", "text": "All good."}}})
 	f.send(map[string]any{"method": notifyTurnCompleted, "params": map[string]any{"threadId": "th_w", "turn": map[string]any{"id": "tu_w", "status": "completed"}}})
-	var events int
-	for range w.Events() {
-		events++
+	var events []harness.WorkerEvent
+	for event := range w.Events() {
+		events = append(events, event)
 	}
 	res, err := w.Wait()
-	if err != nil || res.Verdict == nil || res.Verdict.Verdict != protocol.VerdictPassed || res.Summary != "All good." || events != 1 {
-		t.Errorf("result = %+v, %v (events %d)", res, err, events)
+	if err != nil || res.Verdict == nil || res.Verdict.Verdict != protocol.VerdictPassed || res.Summary != "All good." || len(events) != 2 || events[1].Kind != "native.turn_completed" {
+		t.Errorf("result = %+v, %v (events %+v)", res, err, events)
 	}
 }
 

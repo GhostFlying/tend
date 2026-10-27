@@ -2,6 +2,7 @@ package traex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -173,10 +174,38 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					w.err = errors.New("traex: the worker's app-server exited")
 					return
 				}
+				if ev.RequestUsage != nil {
+					body, err := json.Marshal(ev.RequestUsage)
+					if err != nil {
+						w.err = err
+						return
+					}
+					select {
+					case w.events <- harness.WorkerEvent{NativeID: ev.RequestUsage.RequestID, Kind: "usage.request", Body: body}:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				if ev.Kind == harness.EventChildRollout {
+					select {
+					case w.events <- harness.WorkerEvent{Kind: "native.child", Body: ev.Raw}:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+
 				if ev.TurnID != turnID {
 					continue
 				}
 				switch ev.Kind {
+				case harness.EventTurnStarted, harness.EventItemStarted:
+					select {
+					case w.events <- nativeRolloutEvent(th.ID(), ev):
+					case <-ctx.Done():
+						return
+					}
 				case harness.EventItemCompleted:
 					if ev.ItemType == harness.ItemAgentMessage && ev.Text != "" {
 						summary = ev.Text
@@ -186,6 +215,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					case <-ctx.Done():
 					}
 				case harness.EventTurnCompleted:
+					select {
+					case w.events <- nativeRolloutEvent(th.ID(), ev):
+					case <-ctx.Done():
+						return
+					}
 					w.res = harness.WorkerResult{Verdict: verdicts.Verdict(), Result: results.Result(), Summary: summary}
 					if ev.TurnStatus != "completed" {
 						w.err = fmt.Errorf("traex: the worker's turn ended %s", ev.TurnStatus)
@@ -226,4 +260,17 @@ func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSp
 		}
 	}
 	return s.StartThread(ctx, cfg)
+}
+
+func nativeRolloutEvent(threadID string, ev harness.Event) harness.WorkerEvent {
+	if ev.ItemType == harness.ItemUserMessage {
+		ev.Raw = json.RawMessage(`{"type":"userMessage"}`)
+	}
+	body, _ := json.Marshal(struct {
+		ThreadID string          `json:"thread_id"`
+		TurnID   string          `json:"turn_id"`
+		ItemID   string          `json:"item_id"`
+		Data     json.RawMessage `json:"data,omitempty"`
+	}{threadID, ev.TurnID, ev.ItemID, ev.Raw})
+	return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "native." + string(ev.Kind), Body: body}
 }

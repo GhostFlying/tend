@@ -168,6 +168,8 @@ const (
 	EventTurnStarted       EventKind = "turn_started"
 	EventTurnCompleted     EventKind = "turn_completed"
 	EventContextUsage      EventKind = "context_usage"
+	EventRequestUsage      EventKind = "request_usage"
+	EventChildRollout      EventKind = "child_rollout"
 	EventItemStarted       EventKind = "item_started"
 	EventItemCompleted     EventKind = "item_completed"
 	EventAgentMessageDelta EventKind = "agent_message_delta"
@@ -182,6 +184,7 @@ const (
 
 // Event is something that happened in a thread.
 type Event struct {
+	RequestUsage *protocol.TokenUsageSample
 	ContextUsage *protocol.AgentContextUsage
 	Kind         EventKind
 	TurnID       string

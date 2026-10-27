@@ -52,6 +52,7 @@ type InitializeCapabilities struct {
 
 // ThreadStartParams creates a thread.
 type ThreadStartParams struct {
+	ExperimentalRawEvents bool              `json:"experimentalRawEvents"`
 	Model                 string            `json:"model,omitempty"`
 	Cwd                   string            `json:"cwd,omitempty"`
 	ApprovalPolicy        string            `json:"approvalPolicy,omitempty"`
@@ -307,4 +308,26 @@ type CollabAgentItem struct {
 	Tool   string  `json:"tool"`
 	Prompt *string `json:"prompt"`
 	Status string  `json:"status"`
+}
+
+// RawResponseCompletedNotification is opt-in request-level usage. Metadata is
+// retained only for supported counter presence checks; arbitrary metadata is
+// never exposed as diagnostics or stored by this adapter.
+type RawResponseCompletedNotification struct {
+	ThreadID      string             `json:"threadId"`
+	TurnID        string             `json:"turnId"`
+	ResponseID    string             `json:"responseId"`
+	Usage         *RequestTokenUsage `json:"usage"`
+	UsageMetadata *struct {
+		Metadata json.RawMessage `json:"metadata"`
+	} `json:"usageMetadata"`
+}
+
+// RequestTokenUsage is a native request snapshot, not a thread total.
+type RequestTokenUsage struct {
+	Input      *int64 `json:"inputTokens"`
+	CacheRead  *int64 `json:"cachedInputTokens"`
+	CacheWrite *int64 `json:"cacheCreationInputTokens"`
+	Output     *int64 `json:"outputTokens"`
+	Total      *int64 `json:"totalTokens"`
 }

@@ -341,6 +341,20 @@
         "data"
       ]
     },
+    "RawResponseCompletedNotification": {
+      "properties": [
+        "responseId",
+        "threadId",
+        "turnId",
+        "usage",
+        "usageMetadata"
+      ],
+      "required": [
+        "responseId",
+        "threadId",
+        "turnId"
+      ]
+    },
     "ReasoningEffortOption": {
       "properties": [
         "description",
@@ -349,6 +363,23 @@
       "required": [
         "description",
         "reasoningEffort"
+      ]
+    },
+    "RequestTokenUsage": {
+      "properties": [
+        "cacheCreationInputTokens",
+        "cachedInputTokens",
+        "inputTokens",
+        "outputTokens",
+        "reasoningOutputTokens",
+        "totalTokens"
+      ],
+      "required": [
+        "cachedInputTokens",
+        "inputTokens",
+        "outputTokens",
+        "reasoningOutputTokens",
+        "totalTokens"
       ]
     },
     "Thread": {

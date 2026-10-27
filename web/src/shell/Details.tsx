@@ -1,3 +1,4 @@
+import { RunRollout } from "../rollout/RunRollout.tsx";
 // A task's ledger facts and revision-checked owner controls (D70).
 import { useState, type ReactNode } from "react";
 import type { TaskDetail, ArtifactView, AcceptanceView } from "../api/generated/api.ts";
@@ -378,36 +379,13 @@ function TaskControls({ task: t }: { task: TaskDetail }) {
 }
 
 function LogSection({ task }: { task: TaskDetail }) {
-  const { live } = useServices();
-  const state = useStore(live.detail);
   return (
-    <Fold title="最近日志">
-      {!state?.logs ? (
-        <p className={controls.empty}>
-          {task.runs?.length ? "正在读取日志，暂时无法读取时会随更新重试。" : "尚未开始执行。"}
-        </p>
-      ) : (
-        <>
-          <small>
-            {state.logs.runId} · 最近 {state.logs.entries.length} 条
-          </small>
-          {state.logs.more && (
-            <button className={controls.link} onClick={() => void live.refreshDetail()}>
-              继续读取较新日志
-            </button>
-          )}
-          <pre className={styles.logs}>
-            {state.logs.entries.length
-              ? state.logs.entries
-                  .map((l) => `${l.created_at} ${l.kind}\n${text(l.body)}`)
-                  .join("\n\n")
-              : "暂无日志。"}
-          </pre>
-        </>
-      )}
+    <Fold title="执行过程与用量">
+      <RunRollout runs={task.runs ?? []} />
     </Fold>
   );
 }
+
 function Artifacts({
   artifacts,
   verdicts,

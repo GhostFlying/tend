@@ -15,6 +15,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/procx"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // Options start an app-server.
@@ -45,6 +46,7 @@ type Session struct {
 	threadLifecycle chan struct{}
 	// orphans holds events of threads not registered yet, such as a new
 	// thread whose start response is still on its way to the caller.
+	parents map[string]string
 	orphans map[string][]harness.Event
 	ended   bool
 	// stopped is closed by Close, releasing event pumps whose consumer
@@ -127,7 +129,7 @@ func newSession(r io.Reader, w io.WriteCloser, log *slog.Logger) *Session {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	s := &Session{log: log, threads: map[string]*thread{}, orphans: map[string][]harness.Event{}, stopped: make(chan struct{}), threadLifecycle: make(chan struct{}, 1)}
+	s := &Session{log: log, threads: map[string]*thread{}, orphans: map[string][]harness.Event{}, parents: map[string]string{}, stopped: make(chan struct{}), threadLifecycle: make(chan struct{}, 1)}
 	s.conn = newConn(r, w, handlers{request: s.serverRequest, notify: s.notification, prepare: s.prepareServerRequest}, log)
 	s.stop = w.Close
 	go func() {
@@ -180,7 +182,7 @@ func dynamicTools(specs []harness.ToolSpec) []DynamicToolSpec {
 // StartThread implements harness.Session.
 func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (harness.Thread, error) {
 	var res ThreadStartResponse
-	err := s.conn.call(ctx, methodThreadStart, ThreadStartParams{
+	err := s.conn.call(ctx, methodThreadStart, ThreadStartParams{ExperimentalRawEvents: true,
 		Model: cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
 		DeveloperInstructions: cfg.DeveloperInstructions, Config: cfg.Config, DynamicTools: dynamicTools(cfg.Tools),
 	}, &res)
@@ -307,6 +309,62 @@ func (s *Session) notification(method string, params json.RawMessage) {
 	var ev harness.Event
 	var threadID string
 	switch method {
+	case "thread/started":
+		var n struct {
+			Thread struct {
+				ID     string `json:"id"`
+				Source struct {
+					SubAgent struct {
+						Spawn struct {
+							Parent string `json:"parent_thread_id"`
+						} `json:"thread_spawn"`
+					} `json:"subAgent"`
+				} `json:"source"`
+			} `json:"thread"`
+		}
+		if json.Unmarshal(params, &n) != nil || n.Thread.ID == "" || n.Thread.Source.SubAgent.Spawn.Parent == "" || n.Thread.ID == n.Thread.Source.SubAgent.Spawn.Parent {
+			return
+		}
+		s.mu.Lock()
+		s.parents[n.Thread.ID] = n.Thread.Source.SubAgent.Spawn.Parent
+		pending := s.orphans[n.Thread.ID]
+		delete(s.orphans, n.Thread.ID)
+		s.mu.Unlock()
+		for _, event := range pending {
+			s.enqueueNative(n.Thread.ID, event)
+		}
+		return
+	case "rawResponse/completed":
+		var n RawResponseCompletedNotification
+		if json.Unmarshal(params, &n) != nil || n.ResponseID == "" || n.ThreadID == "" {
+			return
+		}
+		sample := protocol.TokenUsageSample{Source: "traex/response/" + n.ThreadID, RequestID: n.ResponseID, ThreadID: n.ThreadID, TurnID: n.TurnID, Revision: 1, Settlement: "final", Profile: "traex-responses-0.211.1"}
+		if n.Usage != nil {
+			sample.Input = n.Usage.Input
+			// Native normalization may default absent cache details to zero.
+			// Require the original upstream Responses detail to establish presence.
+			sample.CacheRead = nil
+			sample.CacheWrite = nil
+			sample.Output = n.Usage.Output
+			sample.Total = n.Usage.Total
+		}
+		if n.UsageMetadata != nil && n.Usage != nil {
+			var original struct {
+				InputDetails *struct {
+					Cached *int64 `json:"cached_tokens"`
+					Write  *int64 `json:"cache_write_tokens"`
+				} `json:"input_tokens_details"`
+			}
+			if json.Unmarshal(n.UsageMetadata.Metadata, &original) == nil && original.InputDetails != nil {
+				sample.CacheRead = original.InputDetails.Cached
+				sample.CacheWrite = original.InputDetails.Write
+			}
+		}
+		// This notification does not provide a native occurrence instant or a
+		// guaranteed actual model. Neither is inferred from arrival/config.
+		threadID = n.ThreadID
+		ev = harness.Event{Kind: harness.EventRequestUsage, TurnID: n.TurnID, RequestUsage: &sample}
 	case "thread/tokenUsage/updated":
 		var n struct {
 			ThreadID string `json:"threadId"`
@@ -371,8 +429,35 @@ func (s *Session) notification(method string, params json.RawMessage) {
 	default:
 		return
 	}
+	s.enqueueNative(threadID, ev)
+}
+
+func (s *Session) enqueueNative(threadID string, ev harness.Event) {
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if parent := s.parents[threadID]; parent != "" {
+		original := threadID
+		seen := map[string]bool{threadID: true}
+		for parent != "" && !seen[parent] {
+			seen[parent] = true
+			threadID = parent
+			parent = s.parents[parent]
+		}
+		if ev.RequestUsage != nil {
+			ev.RequestUsage.ParentThreadID = s.parents[original]
+		} else if ev.ContextUsage == nil && ev.Kind != harness.EventAgentMessageDelta {
+			raw, _ := json.Marshal(struct {
+				Thread string            `json:"thread_id"`
+				Turn   string            `json:"turn_id"`
+				Kind   harness.EventKind `json:"kind"`
+				Data   json.RawMessage   `json:"data,omitempty"`
+			}{original, ev.TurnID, ev.Kind, ev.Raw})
+			ev = harness.Event{Kind: harness.EventChildRollout, TurnID: ev.TurnID, Raw: raw}
+		} else {
+			return
+		}
+	}
 	if t := s.threads[threadID]; t != nil {
 		t.push(ev)
 		return

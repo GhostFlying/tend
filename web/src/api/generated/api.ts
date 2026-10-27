@@ -255,6 +255,7 @@ export interface TendAPI {
   RepositoryRegistration?: RepositoryRegistration;
   RequestView?: RequestView;
   RunLogPage?: RunLogPage;
+  RunRolloutPage?: RunRolloutPage;
   RunnerRepository?: RunnerRepository;
   SessionRequest?: SessionRequest;
   SessionView?: SessionView;
@@ -267,6 +268,8 @@ export interface TendAPI {
   SubmitMessagePayload?: SubmitMessagePayload;
   TaskDetail?: TaskDetail;
   TaskPage?: TaskPage;
+  TokenUsageSample?: TokenUsageSample;
+  TokenUsageView?: TokenUsageView;
   ToolSpec?: ToolSpec;
   TranscriptBlock?: TranscriptBlock;
   TranscriptPage?: TranscriptPage;
@@ -1513,6 +1516,20 @@ export interface RunLogView {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunRolloutPage".
+ */
+export interface RunRolloutPage {
+  after: number;
+  before: number;
+  logs: RunLogView[] | null;
+  more_after: boolean;
+  more_before: boolean;
+  observed: RunObserved;
+  run_id: string;
+  watermark: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RunnerRepository".
  */
 export interface RunnerRepository {
@@ -1851,6 +1868,132 @@ export interface MountView {
 export interface TaskPage {
   next?: string;
   tasks: TaskSummary[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TokenUsageSample".
+ */
+export interface TokenUsageSample {
+  cache_read: number | null;
+  cache_write: number | null;
+  input: number | null;
+  model: string;
+  occurred_at: number | null;
+  output: number | null;
+  parent_thread_id?: string;
+  profile: string;
+  request_id: string;
+  revision: number;
+  settlement: string;
+  source: string;
+  thread_id: string;
+  total: number | null;
+  turn_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TokenUsageView".
+ */
+export interface TokenUsageView {
+  as_of: number;
+  conflicts: number;
+  coverage: string;
+  end: number;
+  models: TokenUsageGroup[] | null;
+  more: boolean;
+  next: number;
+  records: TokenUsageRecord[] | null;
+  revision: number;
+  roles: TokenUsageGroup[] | null;
+  start: number | null;
+  timezone: string;
+  totals: TokenUsageTotals;
+  trend: TokenUsageBucket[] | null;
+  unattributed: TokenUsageTotals;
+  window: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TokenUsageGroup".
+ */
+export interface TokenUsageGroup {
+  cache_read: number;
+  cache_read_known: number;
+  cache_write: number;
+  cache_write_known: number;
+  final: number;
+  input: number;
+  input_known: number;
+  name: string;
+  output: number;
+  output_known: number;
+  requests: number;
+  total: number;
+  total_known: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TokenUsageRecord".
+ */
+export interface TokenUsageRecord {
+  cache_read: number | null;
+  cache_write: number | null;
+  conflict: boolean;
+  input: number | null;
+  model: string;
+  occurred_at: number | null;
+  output: number | null;
+  parent_thread_id?: string;
+  profile: string;
+  received_at: number;
+  request_id: string;
+  revision: number;
+  role: string;
+  seq: number;
+  settlement: string;
+  source: string;
+  subject: string;
+  thread_id: string;
+  total: number | null;
+  turn_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TokenUsageTotals".
+ */
+export interface TokenUsageTotals {
+  cache_read: number;
+  cache_read_known: number;
+  cache_write: number;
+  cache_write_known: number;
+  final: number;
+  input: number;
+  input_known: number;
+  output: number;
+  output_known: number;
+  requests: number;
+  total: number;
+  total_known: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TokenUsageBucket".
+ */
+export interface TokenUsageBucket {
+  cache_read: number;
+  cache_read_known: number;
+  cache_write: number;
+  cache_write_known: number;
+  end: number;
+  final: number;
+  input: number;
+  input_known: number;
+  output: number;
+  output_known: number;
+  requests: number;
+  start: number;
+  total: number;
+  total_known: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

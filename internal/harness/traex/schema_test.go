@@ -36,6 +36,8 @@ var checked = []struct {
 	{"ClientInfo", "v1/InitializeParams.json", "ClientInfo", "", ClientInfo{}, true},
 	{"InitializeCapabilities", "v1/InitializeParams.json", "InitializeCapabilities", "", InitializeCapabilities{}, true},
 	{"ThreadStartParams", "v2/ThreadStartParams.json", "", "", ThreadStartParams{}, true},
+	{"RawResponseCompletedNotification", "v2/RawResponseCompletedNotification.json", "", "", RawResponseCompletedNotification{}, false},
+	{"RequestTokenUsage", "v2/RawResponseCompletedNotification.json", "TokenUsageBreakdown", "", RequestTokenUsage{}, false},
 	{"DynamicToolSpec", "v2/ThreadStartParams.json", "DynamicToolSpec", "has=inputSchema", DynamicToolSpec{}, true},
 	{"ThreadForkParams", "v2/ThreadForkParams.json", "", "", ThreadForkParams{}, true},
 	{"ThreadUnsubscribeParams", "v2/ThreadUnsubscribeParams.json", "", "", ThreadUnsubscribeParams{}, true},

@@ -18,6 +18,7 @@ const (
 // ThreadForkParams creates a non-persisted fork. Paginated ephemeral forks
 // require excludeTurns; their inherited history is still model-visible.
 type ThreadForkParams struct {
+	ExperimentalRawEvents bool           `json:"experimentalRawEvents"`
 	ThreadID              string         `json:"threadId"`
 	Ephemeral             bool           `json:"ephemeral"`
 	ExcludeTurns          bool           `json:"excludeTurns"`
@@ -46,7 +47,7 @@ type ThreadUnsubscribeResponse struct {
 func (s *Session) ForkThread(ctx context.Context, sourceThreadID string, cfg harness.ThreadConfig) (harness.Thread, error) {
 	var res ThreadStartResponse
 	if err := s.conn.call(ctx, methodThreadFork, ThreadForkParams{
-		ThreadID: sourceThreadID, Ephemeral: true, ExcludeTurns: true,
+		ThreadID: sourceThreadID, Ephemeral: true, ExcludeTurns: true, ExperimentalRawEvents: true,
 		Model: cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy,
 		ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
 		DeveloperInstructions: cfg.DeveloperInstructions, Config: cfg.Config,
