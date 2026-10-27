@@ -148,8 +148,15 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	if r.control.Upgrade != nil && r.control.Upgrade.Configuration != nil {
 		configurationSHA = r.cfg.ConfigurationSHA256
 	}
+	var repositories []protocol.RunnerRepository
+	if r.cfg.RepositoryBindings != nil {
+		capabilities = append(capabilities, protocol.CapabilityRepositoryBindings)
+	}
+	if r.repositoryBindingsSupported && r.cfg.RepositoryBindings != nil {
+		repositories = r.cfg.RepositoryBindings()
+	}
 	r.sequence++
-	return &protocol.RunnerRuntime{ConfigurationSHA256: configurationSHA, JournalVersion: 9, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests) + len(releases)), Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
+	return &protocol.RunnerRuntime{Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: 9, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests) + len(releases)), Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
 }
 
 func sameGrant(a, b *protocol.MaintenanceAuthorization) bool {

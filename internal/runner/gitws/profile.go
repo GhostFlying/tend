@@ -31,7 +31,7 @@ func (w *Workspaces) runProfiles(ctx context.Context, as protocol.Assignment, ho
 		if m.Profile == "" {
 			continue
 		}
-		p, ok := w.cfg.Repos[m.Repo].Profiles[m.Profile]
+		p, ok := w.repo(m.Repo).Profiles[m.Profile]
 		if !ok {
 			return fmt.Errorf("workspace_prepare_failed: repo %s has no profile %q on this runner", m.Repo, m.Profile)
 		}

@@ -34,7 +34,7 @@ func checkUpgradeHostConfig(ctx context.Context, q store.Querier, next []HostCon
 			break
 		}
 		h := old[i]
-		if h.OS != n.OS || h.Arch != n.Arch || h.Slots != n.Slots || h.TokenHash != n.TokenHash || h.Worker != n.Worker || !slices.Equal(h.Labels, n.Labels) || !slices.Equal(h.Repos, n.Repos) || !slices.Equal(h.Nodes, n.Nodes) {
+		if h.OS != n.OS || h.Arch != n.Arch || h.Slots != n.Slots || h.TokenHash != n.TokenHash || h.Worker != n.Worker || !slices.Equal(h.Labels, n.Labels) || !slices.Equal(h.ConfiguredRepos, n.Repos) || !slices.Equal(h.Nodes, n.Nodes) {
 			changed = true
 			break
 		}

@@ -89,6 +89,7 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
+	RepositoryBindings  func() []protocol.RunnerRepository
 	DeliveryObserver    DeliveryObserver
 	ConfigurationSHA256 string
 	DeliveryProviders   []string
@@ -166,26 +167,27 @@ type Runner struct {
 	active  map[string]*active
 	wg      sync.WaitGroup
 
-	controlMu            sync.Mutex
-	control              protocol.RunnerControl
-	controlLoaded        bool
-	bootstrapMaintenance bool
-	updaterMu            sync.Mutex
-	cancelledUpdaterID   string
-	instanceID           string
-	generation           int64
-	sequence             int64
-	grantDeadlines       map[string]time.Time
-	helloConfirmed       bool
-	grantServerDeadline  int64
-	grantID              string
-	resourceReconciled   bool
-	resourceBusy         bool
-	resourceBlockers     []string
-	upgradePhase         string
-	upgradeError         string
-	downloadedBytes      int64
-	confirmedRuntime     protocol.RunnerRuntime
+	controlMu                   sync.Mutex
+	control                     protocol.RunnerControl
+	controlLoaded               bool
+	repositoryBindingsSupported bool
+	bootstrapMaintenance        bool
+	updaterMu                   sync.Mutex
+	cancelledUpdaterID          string
+	instanceID                  string
+	generation                  int64
+	sequence                    int64
+	grantDeadlines              map[string]time.Time
+	helloConfirmed              bool
+	grantServerDeadline         int64
+	grantID                     string
+	resourceReconciled          bool
+	resourceBusy                bool
+	resourceBlockers            []string
+	upgradePhase                string
+	upgradeError                string
+	downloadedBytes             int64
+	confirmedRuntime            protocol.RunnerRuntime
 }
 
 // New returns a Runner.
@@ -463,6 +465,9 @@ func (r *Runner) claimOnce(ctx context.Context, env *protocol.Envelope, sentAt t
 
 // hello reconciles every run the journal holds with tend.
 func (r *Runner) hello(ctx context.Context) error {
+	r.controlMu.Lock()
+	r.repositoryBindingsSupported = false
+	r.controlMu.Unlock()
 	runs, err := r.cfg.Journal.Runs(ctx)
 	if err != nil {
 		return err
@@ -490,6 +495,9 @@ func (r *Runner) hello(ctx context.Context) error {
 	if err := json.Unmarshal(op.Result, &res); err != nil {
 		return fmt.Errorf("runner: decode hello: %w", err)
 	}
+	r.controlMu.Lock()
+	r.repositoryBindingsSupported = res.RepositoryBindings
+	r.controlMu.Unlock()
 	r.setTTL(res.LeaseTTLMillis)
 	if err := r.applyControl(ctx, res.Control, sent, true); err != nil {
 		return err

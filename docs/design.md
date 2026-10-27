@@ -109,6 +109,7 @@
 | D107 | 独立 TraeX app-server 在合并继承环境和显式覆盖后清除全部 `ORCA_` 环境项，避免嵌套执行器继承外层窗格、会话、launch 或 hook 路由身份；包含别名且大小写不敏感。普通进程设置、模型 home 和认证配置保留。Orca TUI 的原有启动与身份不变，不放松接管或未知结果保护，不改变 runner 通信协议。见 docs/plans/appserver-process-identity.md。 | 已实现（2026-10-27） |
 | D108 | Orca worker 的首次 provider session 只有在新鲜、非空且匹配 Tend 指令的观测通过接管检查后才能持久绑定；失败观测不污染 journal。旧验收产物自行编译的启动代码不受服务升级覆盖，测试须外部隔离 ORCA_ 环境，后续实现吸收 D107。创建者不证明当前执行者，不据此丢弃可能的人工接管证据；诊断仅含身份和 prompt 摘要哈希。handback 不虚构 owner 曾操作终端，复用原 run 工具桥与已完成检查；历史 journal 的旧 handback 原文沿原请求重放，不因措辞变化重复发起。见 docs/plans/orca-root-observation.md。 | 已实现（2026-10-27） |
 | D109 | 工作项与任务统一使用宽浮层，支持全屏阅读、直接链接及浏览器前进后退；从工作项打开任务保留工作项页签、折叠、滚动和返回焦点。已完成调查优先展示评审材料，活动执行优先展示阶段；跟进、承诺、交付和历史仍独立可达。输入原件及交付截图通过 owner 元数据与单文件短期签名展示，报告图片仅解析当前不可变清单的唯一相对名称或文件身份；不加载任意远程图片或 worker 路径。交付 HTML 使用无脚本、无同源权限的 sandbox 和禁止主动资源加载的 CSP 静态预览，原件下载及原有验收身份保持不变。不改变 runner 协议。见 docs/plans/detail-review-experience.md。 | 已实现（2026-10-27） |
+| D110 | 仓库注册与 runner 本机绑定在线生效，细化 D30、D65：owner 经带请求去重及控制修订的 repos.register 接管仓库元数据，启动配置不覆盖或退役在线条目。runner 通过私有本机命令校验既有 Orca 仓库 origin、固定 provider ID，原子持久化后发布绑定，不重启或排空已有任务。hello 显式协商 runner-repositories-v1 后才发送可选仓库身份观测；server 只将与账本 remote 身份匹配的已加载绑定合入 host 的有效仓库集合。旧静态配置和协议 1/0 请求默认语义保留，新增绑定不改已有工作区或允许替换仓库身份；退役只阻止新挂载。详见 docs/plans/online-repositories.md。 | 已实现（2026-10-27） |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

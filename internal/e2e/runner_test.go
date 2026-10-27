@@ -350,9 +350,11 @@ type node struct {
 	ws      *workspaces
 	net     *network
 	// flush is how often the runner uploads run events.
-	flush  time.Duration
-	cancel context.CancelFunc
-	done   chan error
+	repositories func() []protocol.RunnerRepository
+	heartbeat    time.Duration
+	flush        time.Duration
+	cancel       context.CancelFunc
+	done         chan error
 }
 
 func newNode(t *testing.T, srv *server, script func(harness.WorkerSpec) testkit.WorkerScript) *node {
@@ -390,7 +392,7 @@ func (n *node) start() {
 		ServerURL: n.srv.url, HostID: "linux-1", HostToken: hostToken, Version: "test",
 		HTTPClient: &http.Client{Transport: n.net}, Journal: j, Worker: protocol.WorkerOrca, Workers: n.workers, Workspaces: n.ws,
 		Now: n.srv.now, IDs: protocol.NewULIDGen(n.srv.now, nil), Log: quiet(),
-		RetryDelay: 20 * time.Millisecond, EventFlush: n.flush,
+		RetryDelay: 20 * time.Millisecond, EventFlush: n.flush, RepositoryBindings: n.repositories, HeartbeatInterval: n.heartbeat,
 	})
 	go func() {
 		err := r.Run(ctx)

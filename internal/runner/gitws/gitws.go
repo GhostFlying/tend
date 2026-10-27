@@ -80,8 +80,12 @@ type Workspaces struct {
 	git    git
 	layout layout
 
-	mu    sync.Mutex
-	locks map[string]chan struct{}
+	bindMu          sync.Mutex
+	repoMu          sync.RWMutex
+	bindings        bindingRegistry
+	bindingsPending *bindingRegistry
+	mu              sync.Mutex
+	locks           map[string]chan struct{}
 }
 
 var _ runner.Workspaces = (*Workspaces)(nil)
@@ -335,7 +339,7 @@ func (w *Workspaces) clone(ctx context.Context, repo, remoteURL, path string) er
 	tmp := path + ".partial"
 	_ = os.RemoveAll(tmp)
 	args := []string{"clone", "--bare", "--quiet"}
-	if ref := w.cfg.Repos[repo].Reference; ref != "" {
+	if ref := w.repo(repo).Reference; ref != "" {
 		args = append(args, "--reference", ref, "--dissociate")
 	}
 	if _, err := w.git.run(ctx, filepath.Dir(path), append(args, remoteURL, tmp)...); err != nil {

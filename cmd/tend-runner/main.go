@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -89,6 +90,9 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "repo" {
+		os.Exit(runRepositoryCommand(os.Args[2:]))
+	}
 	if len(os.Args) == 4 && os.Args[1] == "check-config" {
 		if err := checkConfiguration(os.Args[2], os.Args[3]); err != nil {
 			fmt.Fprintln(os.Stderr, "runner configuration maintenance validation failed")
@@ -216,7 +220,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	wsCfg := gitws.Config{Home: home, ServerURL: cfg.ServerURL, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
 	var (
 		workers    harness.Workers
-		workspaces runner.Workspaces
+		workspaces *gitws.Workspaces
 	)
 	switch cfg.Worker.Kind {
 	case protocol.WorkerOrca:
@@ -247,6 +251,15 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	default:
 		workers = traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: cfg.Worker.TraexBin, Version: version, Log: log}, Model: cfg.Worker.Model})
 		workspaces = gitws.New(wsCfg)
+	}
+	var repositoryBindings func() []protocol.RunnerRepository
+	if runtime.GOOS != "windows" {
+		closeRepositoryControl, err := startRepositoryControl(ctx, home, workspaces)
+		if err != nil {
+			return err
+		}
+		defer closeRepositoryControl()
+		repositoryBindings = workspaces.RepositoryBindings
 	}
 	build, err := runnerBuild(version)
 	if err != nil {
@@ -279,7 +292,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		return err
 	}
 	r := runner.New(runner.Config{
-		ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
+		RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
 		InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: cfg.UpdaterSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,

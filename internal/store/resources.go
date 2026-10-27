@@ -7,20 +7,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // HostRow is a configured execution host.
 type HostRow struct {
-	HostID    string
-	OS        string
-	Arch      string
-	Labels    []string
-	Repos     []string
-	Slots     int64
-	TokenHash string
-	Nodes     []string
+	HostID          string
+	OS              string
+	Arch            string
+	Labels          []string
+	Repos           []string
+	ConfiguredRepos []string
+	Slots           int64
+	TokenHash       string
+	Nodes           []string
 	// Worker is the host's harness; empty means the app-server.
 	Worker            protocol.WorkerKind
 	WorkspaceProtocol int64
@@ -94,6 +96,10 @@ func GetHost(ctx context.Context, q Querier, hostID string) (HostRow, error) {
 	if h.Nodes, err = parseList(nodes); err != nil {
 		return HostRow{}, err
 	}
+	h.ConfiguredRepos = slices.Clone(h.Repos)
+	if err := addObservedRepositories(ctx, q, &h); err != nil {
+		return HostRow{}, err
+	}
 	return h, nil
 }
 
@@ -122,7 +128,7 @@ func (t *Tx) UpsertRepo(ctx context.Context, r RepoRow, now int64) error {
 // new ones.
 func (t *Tx) RetireReposExcept(ctx context.Context, keep []string, now int64) error {
 	_, err := t.Exec(ctx, `UPDATE repos SET retired = 1, updated_at = ?
-		WHERE retired = 0 AND repo NOT IN (SELECT value FROM json_each(?))`, now, jsonList(keep))
+		WHERE retired = 0 AND repo NOT IN (SELECT repo FROM online_repositories) AND repo NOT IN (SELECT value FROM json_each(?))`, now, jsonList(keep))
 	if err != nil {
 		return fmt.Errorf("store: retire repos: %w", err)
 	}

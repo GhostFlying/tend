@@ -394,6 +394,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			return Outcome{}, err
 		}
 		res.Control = &c
+		res.RepositoryBindings = slices.Contains(p.Runtime.Capabilities, protocol.CapabilityRepositoryBindings)
 	}
 	var events []Event
 	if changed {
