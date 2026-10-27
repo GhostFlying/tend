@@ -219,7 +219,8 @@ type worker struct {
 	results  harness.Results
 	// holding is why the worker leaves the agent to the owner, once it
 	// noticed a takeover.
-	holding string
+	holding         string
+	holdingEvidence map[string]any
 	// askedVerdict is set once an acceptance agent that finished without
 	// a verdict this worker received was asked for it again.
 	askedVerdict      bool
@@ -415,7 +416,7 @@ func (w *worker) begin(ctx context.Context, agent string) error {
 				if err := w.send(ctx, ""); err != nil {
 					return err
 				}
-				if pending == handBack {
+				if harness.IsHandBack(w.spec, pending) {
 					w.spec.HandBack = false
 					return w.finishHandback(ctx)
 				}
@@ -436,7 +437,7 @@ func (w *worker) begin(ctx context.Context, agent string) error {
 				return nil
 			}
 			if reason := w.takenOver(a); reason != "" {
-				w.holding = reason // run reports it and waits
+				w.recordTakeover(a, reason) // run reports it and waits
 				return nil
 			}
 			// A verdict from an earlier attempt is not journaled: an
@@ -811,6 +812,7 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 		alive := true
 		if err == nil {
 			a, alive, err = w.agent(ctx)
+
 		}
 		if ctx.Err() != nil {
 			return Agent{}, false, nil
@@ -842,15 +844,16 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 			w.state = a.State
 			w.emit(ctx, "agent.state", map[string]string{"state": a.State, "blocked_reason": wait.BlockedReason})
 		}
-		if w.st.SessionID == "" && a.ProviderSession != nil && a.ProviderSession.ID != "" {
+		if reason := w.takenOver(a); reason != "" {
+			w.recordTakeover(a, reason)
+			return a, false, nil
+		}
+		if w.st.SessionID == "" && a.ProviderSession != nil && a.ProviderSession.ID != "" &&
+			a.State != "" && a.StateStartedAt >= w.st.Turn && a.Prompt != "" && w.st.Said != "" && samePrompt(said(a.Prompt), w.st.Said) {
 			w.st.SessionID = a.ProviderSession.ID
 			if err := w.save(); err != nil {
 				return a, false, err
 			}
-		}
-		if reason := w.takenOver(a); reason != "" {
-			w.holding = reason
-			return a, false, nil
 		}
 		if w.st.Recovery != nil && w.st.Recovery.Phase == recoveryLaunching && a.Prompt != "" && w.st.Said != "" && samePrompt(said(a.Prompt), w.st.Said) && a.StateStartedAt >= w.st.Turn {
 			w.st.Recovery.Phase = recoveryRunning
@@ -931,7 +934,11 @@ func (w *worker) takenOver(a Agent) string {
 // worker is stopped. Whether the owner holds the run is the runner's to
 // keep: it learns so from tend, and tells the next worker to hand back.
 func (w *worker) hold(ctx context.Context) {
-	w.emit(ctx, "worker.taken_over", map[string]string{"reason": w.holding})
+	body := w.holdingEvidence
+	if body == nil {
+		body = map[string]any{"reason": w.holding}
+	}
+	w.emit(ctx, "worker.taken_over", body)
 	if w.spec.OnTakeover != nil {
 		if err := w.spec.OnTakeover(w.holding); err != nil && ctx.Err() == nil {
 			w.ws.opts.Log.WarnContext(ctx, "could not report the takeover", "run_id", w.spec.RunID, "err", err)
