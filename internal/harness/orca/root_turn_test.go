@@ -15,7 +15,7 @@ func nativeFixture(t *testing.T) (*workerFixture, *worker, *Agent) {
 	f, w, a := failedWorker(t)
 	a.AgentType = "traex"
 	a.ProviderSession.TranscriptPath = ""
-	a.RootTurn = &RootTurn{Version: 1, PaneKey: a.PaneKey, LaunchID: "launch", SessionID: a.ProviderSession.ID, TurnID: "turn-root", ObservedAt: 300, StartedAt: 200, CompletedAt: 200, Source: "native-api", State: "failed", Operations: "settled", ErrorCode: "response_stream_disconnected", Retryable: true}
+	a.RootTurn = &RootTurn{Version: 1, PaneKey: a.PaneKey, LaunchID: "launch", SessionID: a.ProviderSession.ID, TurnID: "turn-root", ObservedAt: 300, StartedAt: 150, CompletedAt: 200, Source: "native-api", State: "failed", Operations: "settled", ErrorCode: "response_stream_disconnected", Retryable: true}
 	previous := f.ws.opts.Client.Exec
 	f.ws.opts.Client.Exec = func(ctx context.Context, dir string, args []string) ([]byte, error) {
 		data, err := previous(ctx, dir, args)
@@ -497,5 +497,80 @@ func TestMissingRecoveryObservationIsNotOwnershipChange(t *testing.T) {
 	err := w.begin(t.Context(), "traex")
 	if !errors.Is(err, errRecoveryUncertain) || errors.Is(err, harness.ErrHeld) || f.orca.count("terminal send", nil) != 0 {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestFault_HandbackRecoveryCanReconcileObservedSubmission(t *testing.T) {
+	_, w, a := nativeFixture(t)
+	w.spec.HandBack = true
+	w.st.Recovery = &recoveryState{Attempts: 1, Phase: recoveryContinuing, SessionID: a.ProviderSession.ID, TurnID: a.RootTurn.TurnID, TurnAt: 200, OriginalPrompt: w.st.Said, ContinuationIssued: true}
+	if err := w.begin(t.Context(), "traex"); !errors.Is(err, errRecoveryUncertain) {
+		t.Fatalf("begin: %v", err)
+	}
+	// The original send is subsequently proven by the observed native prompt.
+	a.Prompt = w.recoveryBrief()
+	a.StateStartedAt = w.st.Turn + 1
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	if !w.awaitRecoveryReconciliation(ctx) {
+		t.Fatal("matching original recovery prompt never reconciles during handback")
+	}
+}
+
+func TestFault_UnknownNativeTurnIsNotTakeoverDuringRecovery(t *testing.T) {
+	_, w, a := nativeFixture(t)
+	w.st.Recovery = &recoveryState{Attempts: 1, Phase: recoveryContinuing, SessionID: a.ProviderSession.ID, TurnID: a.RootTurn.TurnID, TurnAt: 200, LaunchID: "launch", RuntimeID: "runtime", OriginalPrompt: w.st.Said}
+	// The same native launch/session exists, but the history read is temporarily unavailable.
+	a.RootTurn.State, a.RootTurn.Operations = "unknown", "unknown"
+	a.MainAgent = nil
+	a.State = stateWorking
+	err := w.begin(t.Context(), "traex")
+	if !errors.Is(err, errRecoveryUncertain) || errors.Is(err, harness.ErrHeld) {
+		t.Fatalf("unknown native evidence should reconcile, got %v", err)
+	}
+}
+
+func TestFault_SettledNativeCompletionOverridesOlderAggregate(t *testing.T) {
+	_, w, a := nativeFixture(t)
+	a.State = stateWorking
+	a.MainAgent = nil
+	a.UpdatedAt = 150
+	a.RootTurn.State = "completed"
+	if _, done, err := w.step(t.Context()); err != nil || !done {
+		t.Fatalf("native completed+settled is newer than aggregate, done=%v err=%v", done, err)
+	}
+}
+
+func TestFault_TransientCapabilityFailureDuringNativeRecoveryDoesNotHold(t *testing.T) {
+	f, w, a := nativeFixture(t)
+	a.MainAgent = nil
+	a.State = stateWorking
+	a.UpdatedAt = 150
+	observed, _, err := w.agent(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := f.ws.opts.Client.Exec
+	f.ws.opts.Client.Exec = func(ctx context.Context, dir string, args []string) ([]byte, error) {
+		if args[0] == "status" {
+			return nil, errors.New("temporary status failure")
+		}
+		return previous(ctx, dir, args)
+	}
+	err = w.recoverFailure(t.Context(), observed)
+	if !errors.Is(err, errRecoveryUncertain) || errors.Is(err, harness.ErrHeld) {
+		t.Fatalf("single transient capability read failed recovery as %v", err)
+	}
+}
+
+func TestFault_NativeFailureWithNonzeroTurnDurationCanRecover(t *testing.T) {
+	f, w, a := nativeFixture(t)
+	a.RootTurn.CompletedAt = 250 // StartedAt is 200; normal non-instantaneous failure.
+	_, done, err := w.step(t.Context())
+	if err != nil || done {
+		t.Fatalf("native recovery failed to start, done=%v err=%v; recovery=%+v", done, err, w.st.Recovery)
+	}
+	if w.st.Recovery == nil || w.st.Recovery.Phase != recoveryRunning || f.orca.count("terminal send", nil) != 1 {
+		t.Fatalf("native recovery did not continue once: %+v", w.st.Recovery)
 	}
 }

@@ -950,7 +950,7 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 				return a, false, w.recoverFailure(ctx, a)
 			}
 		}
-		if wait.Satisfied && answered(a, w.st.Turn) {
+		if (wait.Satisfied || a.RootTurn != nil && backgroundSettled(a, wait)) && answered(a, w.st.Turn) {
 			return a, true, nil
 		}
 		if w.st.Interrupted && a.State == stateDone && (a.Interrupted || rootInterrupted(a, w.st.Turn)) {
@@ -1041,6 +1041,9 @@ const codeTimeout = "timeout"
 func answered(a Agent, turn int64) bool {
 	if a.RootTurn != nil && (!validRootTurn(a, turn) || a.RootTurn.State != "completed" || a.RootTurn.Operations != "settled") {
 		return false
+	}
+	if a.RootTurn != nil && a.UpdatedAt > 0 && a.UpdatedAt <= a.RootTurn.ObservedAt && !a.Interrupted {
+		return true
 	}
 	if a.MainAgent != nil {
 		return a.State == stateDone && a.MainAgent.State == stateDone &&
