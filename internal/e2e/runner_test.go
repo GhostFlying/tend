@@ -250,9 +250,9 @@ func (w *workspaces) Finish(context.Context, protocol.Assignment) error { return
 // network can be cut between the runner and tend, or drop requests of
 // chosen operations.
 type network struct {
-	mu       sync.Mutex
-	down     bool
-	inflight int
+	mu          sync.Mutex
+	down        bool
+	inflightRPC int
 	// drop counts how many more requests of an operation to fail, and
 	// lose how many more answers to lose after tend handled the request.
 	drop map[string]int
@@ -318,8 +318,9 @@ func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
 	if drop {
 		n.drop[env.Operation]--
 	}
-	if !down && !drop {
-		n.inflight++
+	isRPC := env.Operation != ""
+	if !down && !drop && isRPC {
+		n.inflightRPC++
 	}
 	n.mu.Unlock()
 	if down || drop {
@@ -327,7 +328,9 @@ func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	res, err := http.DefaultTransport.RoundTrip(req)
 	n.mu.Lock()
-	n.inflight--
+	if isRPC {
+		n.inflightRPC--
+	}
 	lose := n.lose[env.Operation] > 0
 	if lose {
 		n.lose[env.Operation]--
@@ -353,6 +356,7 @@ type node struct {
 	repositories func() []protocol.RunnerRepository
 	heartbeat    time.Duration
 	flush        time.Duration
+	log          *slog.Logger
 	cancel       context.CancelFunc
 	done         chan error
 }
@@ -388,10 +392,14 @@ func (n *node) start() {
 	j := n.journal()
 	ctx, cancel := context.WithCancel(context.Background())
 	n.cancel, n.done = cancel, make(chan error, 1)
+	log := n.log
+	if log == nil {
+		log = quiet()
+	}
 	r := runner.New(runner.Config{
 		ServerURL: n.srv.url, HostID: "linux-1", HostToken: hostToken, Version: "test",
 		HTTPClient: &http.Client{Transport: n.net}, Journal: j, Worker: protocol.WorkerOrca, Workers: n.workers, Workspaces: n.ws,
-		Now: n.srv.now, IDs: protocol.NewULIDGen(n.srv.now, nil), Log: quiet(),
+		Now: n.srv.now, IDs: protocol.NewULIDGen(n.srv.now, nil), Log: log,
 		RetryDelay: 20 * time.Millisecond, EventFlush: n.flush, RepositoryBindings: n.repositories, HeartbeatInterval: n.heartbeat,
 	})
 	go func() {
@@ -399,6 +407,19 @@ func (n *node) start() {
 		j.Close()
 		n.done <- err
 	}()
+}
+
+type runnerLogWriter struct{ t *testing.T }
+
+func (w runnerLogWriter) Write(p []byte) (int, error) {
+	w.t.Log(strings.TrimSpace(string(p)))
+	return len(p), nil
+}
+
+// runnerTestLog retains runner control-flow logs in the failed test's output.
+func runnerTestLog(t *testing.T) *slog.Logger {
+	t.Helper()
+	return slog.New(slog.NewTextHandler(runnerLogWriter{t}, nil))
 }
 
 func (n *node) stop() {
@@ -1070,6 +1091,24 @@ func (n *node) diagnoseFailure(task string) {
 			if err != nil {
 				return err
 			}
+			n.t.Logf("server clock=%s", n.srv.now().Format(time.RFC3339Nano))
+			leases, err := tx.Q().QueryContext(ctx, `SELECT l.run_id,l.lease_id,l.status,l.expires_at,l.updated_at
+				FROM leases l JOIN runs r ON r.run_id=l.run_id WHERE r.task_id=?`, task)
+			if err != nil {
+				return err
+			}
+			defer leases.Close()
+			for leases.Next() {
+				var runID, leaseID, status string
+				var expires, renewed int64
+				if err := leases.Scan(&runID, &leaseID, &status, &expires, &renewed); err != nil {
+					return err
+				}
+				n.t.Logf("lease run=%s lease=%s status=%s expires_at=%d updated_at=%d", runID, leaseID, status, expires, renewed)
+			}
+			if err := leases.Err(); err != nil {
+				return err
+			}
 			n.t.Logf("task=%s lifecycle=%s control=%s revision=%d", task, row.Lifecycle, row.ControlMode, row.ControlRevision)
 			rows, err := tx.Q().QueryContext(ctx, `SELECT run_id,role,observed_state FROM runs WHERE task_id=?`, task)
 			if err != nil {
@@ -1107,13 +1146,14 @@ func (n *node) diagnoseFailure(task string) {
 	})
 }
 
-// disconnect waits for requests sent before the cut to finish before advancing
-// the shared clock, so an old heartbeat cannot renew the deliberately lost lease.
+// disconnect drains RPC writes before advancing the shared clock, so an old
+// heartbeat cannot renew the deliberately lost lease. Question long polls do
+// not renew leases and may stay open until their waiting worker is fenced.
 func (n *network) disconnect(t *testing.T) {
 	n.set(true)
 	eventually(t, "in-flight requests drain before clock advance", func() bool {
 		n.mu.Lock()
 		defer n.mu.Unlock()
-		return n.inflight == 0
+		return n.inflightRPC == 0
 	})
 }

@@ -10,12 +10,14 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 func TestEndToEnd_WorkerQuestionsKeepRunAndLease(t *testing.T) {
-	const leaseTTL = 5 * time.Second
-	srv := newServer(t, leaseTTL)
+	clock := testkit.NewClock()
+	const ttl = time.Minute
+	srv := newServer(t, ttl, clock.Now)
 	srv.startMainThread(testkit.NewHarness())
 	web := srv.webLogin(srv.startWeb().URL)
 	answers := make(chan protocol.WorkerQuestion, 2)
@@ -36,8 +38,13 @@ func TestEndToEnd_WorkerQuestionsKeepRunAndLease(t *testing.T) {
 		}
 		return script
 	})
+	n.heartbeat = 20 * time.Millisecond
+	n.log = runnerTestLog(t)
 	n.start()
 	task := srv.createTask()
+	n.diagnoseFailure(task)
+	j := n.journal()
+	defer j.Close()
 	for i, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
 		var decision protocol.DecisionView
 		eventually(t, "worker question becomes visible to owner", func() bool {
@@ -52,15 +59,31 @@ func TestEndToEnd_WorkerQuestionsKeepRunAndLease(t *testing.T) {
 		if decision.TaskID != task || decision.Worker.Evidence == "" || decision.Worker.QuestionMessageID == "" {
 			t.Fatalf("question lost provenance: %+v", decision)
 		}
-		// The tool is waiting over HTTP; the runner must keep its lease
-		// alive past its initial deadline without starting another worker.
-		initialExpiry := srv.count(`SELECT expires_at FROM leases WHERE run_id=?`, decision.Worker.RunID)
-		eventually(t, "waiting worker renews its lease", func() bool {
-			return srv.count(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='active' AND expires_at>?`,
-				decision.Worker.RunID, int64(initialExpiry)+leaseTTL.Milliseconds()) == 1
-		})
+		initial := workerQuestionLease(t, srv, decision.Worker.RunID)
+		original, err := j.Run(t.Context(), initial.RunID)
+		if err != nil || original.Thread == "" {
+			t.Fatalf("waiting worker thread: %q, %v", original.Thread, err)
+		}
+		// Advance only after observing the previous renewal. The minute TTL
+		// bounds real HTTP requests generously; fake time still crosses the
+		// original deadline while the question remains unanswered.
+		for clock.Now().UnixMilli() <= initial.ExpiresAt {
+			clock.Advance(ttl / 4)
+			expires := clock.Now().Add(ttl).UnixMilli()
+			eventually(t, "waiting worker renews the original lease", func() bool {
+				lease := workerQuestionLease(t, srv, initial.RunID)
+				return lease.LeaseID == initial.LeaseID && lease.Status == store.LeaseActive && lease.ExpiresAt >= expires
+			})
+		}
 		if got := len(n.workers.Started()); got != i+1 {
-			t.Fatalf("question caused extra worker starts: got %d, want %d; starts=%+v", got, i+1, n.workers.Started())
+			t.Fatalf("question caused extra worker starts: %d, want %d (role=%s run=%s)", got, i+1, role, initial.RunID)
+		}
+		current, err := j.Run(t.Context(), initial.RunID)
+		if err != nil || current.Thread != original.Thread || current.Attempts != 1 || current.Fenced {
+			t.Fatalf("waiting worker changed: thread=%s attempts=%d fenced=%t err=%v", current.Thread, current.Attempts, current.Fenced, err)
+		}
+		if got := srv.count(`SELECT COUNT(*) FROM worker_questions w JOIN decisions d ON d.decision_id=w.decision_id WHERE w.run_id=? AND d.status='open'`, initial.RunID); got != 1 {
+			t.Fatalf("waiting questions = %d, want 1", got)
 		}
 		payload := protocol.AnswerDecisionPayload{Version: decision.Version}
 		if role == protocol.RoleImplement {
@@ -85,6 +108,109 @@ func TestEndToEnd_WorkerQuestionsKeepRunAndLease(t *testing.T) {
 	eventually(t, "both workers finish the original task", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
 	if got := srv.count(`SELECT COUNT(*) FROM runs WHERE task_id=?`, task); got != 2 {
 		t.Fatalf("question introduced replacement runs: %d", got)
+	}
+}
+
+func workerQuestionLease(t *testing.T, srv *server, runID string) store.LeaseRow {
+	t.Helper()
+	var lease store.LeaseRow
+	if err := srv.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		lease, err = store.GetLeaseByRun(t.Context(), tx.Q(), runID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return lease
+}
+
+func TestFault_WorkerQuestionSurvivesHeartbeatLoss(t *testing.T) {
+	clock := testkit.NewClock()
+	const ttl = time.Minute
+	srv := newServer(t, ttl, clock.Now)
+	srv.startMainThread(testkit.NewHarness())
+	web := srv.webLogin(srv.startWeb().URL)
+	answers := make(chan protocol.WorkerQuestion, 1)
+	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
+		script := passing(spec)
+		if spec.Role == protocol.RoleImplement {
+			script.Act = func(ctx context.Context) error {
+				q, err := spec.AskOwner(ctx, protocol.AskOwnerPayload{
+					QuestionKey: "scope", Question: "Keep the existing constraint?", Evidence: "The constraint applies to both paths.",
+				})
+				if err == nil {
+					answers <- q
+				}
+				return err
+			}
+		}
+		return script
+	})
+	n.heartbeat = 20 * time.Millisecond
+	n.log = runnerTestLog(t)
+	n.start()
+	task := srv.createTask()
+	n.diagnoseFailure(task)
+	var decision protocol.DecisionView
+	eventually(t, "worker question is waiting", func() bool {
+		for _, d := range web.decisions() {
+			if d.TaskID == task && d.Worker != nil {
+				decision = d
+				return true
+			}
+		}
+		return false
+	})
+	first := n.workers.Started()[0]
+	j := n.journal()
+	defer j.Close()
+	original, err := j.Run(t.Context(), first.RunID)
+	if err != nil || original.Thread == "" {
+		t.Fatalf("original waiting thread: %q, %v", original.Thread, err)
+	}
+	n.net.disconnect(t)
+	clock.Advance(ttl + time.Millisecond)
+	eventually(t, "waiting worker stops after its lease is lost", func() bool {
+		return len(n.workers.Stopped()) == 1
+	})
+	eventually(t, "waiting run is durably fenced and unknown", func() bool {
+		run, err := j.Run(t.Context(), first.RunID)
+		return err == nil && run.Fenced && srv.runState(protocol.RoleImplement) == protocol.RunUnknown
+	})
+	if got := len(n.workers.Started()); got != 1 {
+		t.Fatalf("worker restarted before reconciliation: %d starts", got)
+	}
+	n.net.set(false)
+	eventually(t, "waiting worker resumes after reconciliation", func() bool { return len(n.workers.Started()) == 2 })
+	resumed := n.workers.Started()[1]
+	if resumed.RunID != first.RunID || resumed.Thread != original.Thread || resumed.Dir != first.Dir || resumed.Attempt != 2 {
+		t.Fatalf("resume changed identity: run=%s thread=%s attempt=%d same_workspace=%t", resumed.RunID, resumed.Thread, resumed.Attempt, resumed.Dir == first.Dir)
+	}
+	if len(resumed.Questions) != 1 || resumed.Questions[0].DecisionID != decision.DecisionID || resumed.Questions[0].QuestionMessageID != decision.Worker.QuestionMessageID {
+		t.Fatal("resume lost the original waiting question")
+	}
+	web.op(srv.ids.New(protocol.PrefixRequest), "decisions.respond", protocol.Target{Type: "decision", ID: decision.DecisionID},
+		protocol.AnswerDecisionPayload{Version: decision.Version, Text: "Keep the existing constraint."})
+	select {
+	case answer := <-answers:
+		if answer.DecisionID != decision.DecisionID || answer.RunID != first.RunID || answer.Status != "answered" {
+			t.Fatalf("resumed worker received another answer: run=%s decision=%s status=%s", answer.RunID, answer.DecisionID, answer.Status)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("resumed worker did not receive the answer")
+	}
+	eventually(t, "recovered task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
+	if got := srv.count(`SELECT COUNT(*) FROM runs WHERE task_id=?`, task); got != 2 {
+		t.Fatalf("recovery introduced replacement runs: %d", got)
+	}
+	if got := srv.count(`SELECT COUNT(*) FROM worker_questions WHERE run_id=?`, first.RunID); got != 1 {
+		t.Fatalf("recovery duplicated the question: %d", got)
+	}
+	if got := srv.count(`SELECT COUNT(*) FROM conversation_messages WHERE author='owner' AND reply_to=?`, decision.Worker.QuestionMessageID); got != 1 {
+		t.Fatalf("recovered answer reply association count = %d", got)
+	}
+	if got := len(n.workers.Started()); got != 3 {
+		t.Fatalf("recovered task worker starts = %d, want implement, resume, accept", got)
 	}
 }
 
