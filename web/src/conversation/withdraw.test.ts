@@ -5,6 +5,8 @@ import type { ConversationQueueEntry } from "../api/generated/api.ts";
 import { ComposerDraft } from "./draft.ts";
 import { DraftStorage } from "./draftStore.ts";
 import { Withdrawals } from "./withdraw.ts";
+import type { OutgoingMessage } from "../queue/outbox.ts";
+import type { SendQueue } from "../queue/sendQueue.ts";
 
 beforeEach(() => {
   vi.stubGlobal("indexedDB", new IDBFactory());
@@ -87,3 +89,62 @@ test("returning from a cached page reacquires the draft before it saves", async 
     "after return",
   );
 });
+
+test.each([undefined, "work-item:background"])(
+  "take-back reconciles a concurrent submit in the original conversation %s",
+  async (conversationId) => {
+    const draft = new ComposerDraft(conversationId);
+    await draft.open();
+    const message: OutgoingMessage = {
+      requestId: "original-submit",
+      order: 1,
+      body: "retrieve me",
+      createdAt: 1,
+      updatedAt: 1,
+      state: "sending",
+      submitAttempted: false,
+      envelope: {
+        request_id: "original-submit",
+        operation: "conversation.submit_message",
+        target: { type: "conversation" },
+        payload: { body: "retrieve me", conversation_id: conversationId },
+      },
+    };
+    const get = vi.fn(async (path: string) => {
+      const url = new URL(path, "https://fixture.invalid");
+      if (url.searchParams.get("conversation_id") !== (conversationId ?? "main"))
+        return { items: [] };
+      if (url.searchParams.get("after") === "0") return { items: [], next: 10 };
+      return { items: [entry] };
+    });
+    const submit = vi.fn(async () => ({ operation: { status: "succeeded" } }));
+    const client = {
+      lookup: async (id: string) =>
+        id === "original-submit"
+          ? { status: "succeeded", result: { message_id: entry.item.message_id } }
+          : undefined,
+      get,
+      submit,
+    } as unknown as ApiClient;
+    const queue = {
+      cancelled: async () => false,
+      discard: async () => {
+        throw new Error("another sender already submitted the message");
+      },
+    } as unknown as SendQueue;
+    const controller = new Withdrawals(client, draft, () => {}, queue);
+    await controller.takeBack(message);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "conversation.withdraw_message",
+        target: { type: "message", id: entry.item.message_id },
+        expected_control_revision: entry.revision,
+      }),
+    );
+    expect(draft.state.get().text).toBe("retrieve me");
+    expect(draft.state.get().attachments[0]?.file_id).toBe("document");
+    expect(controller.state.get()[0]?.state).toBe("done");
+    await (await draft.durableStorage()).release();
+  },
+);

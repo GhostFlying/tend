@@ -1,0 +1,257 @@
+.session {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.session[hidden] {
+  display: none;
+}
+.drawer {
+  position: fixed;
+  inset: 16px 16px 16px auto;
+  margin: 0;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  height: calc(100dvh - 32px);
+  max-height: none;
+  background: var(--bg);
+  color: var(--label);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-2);
+  z-index: 80;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.drawer header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+.drawer h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.drawer p {
+  color: var(--label-3);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.drawer input,
+.drawer select {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-l1);
+  color: var(--label);
+  font: inherit;
+  width: 100%;
+}
+.sessionList {
+  overflow: auto;
+  min-height: 0;
+}
+.sessionRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  text-align: left;
+  width: 100%;
+  gap: 8px;
+  padding: 16px 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.sessionRow:hover {
+  background: var(--hover);
+}
+.sessionRow strong,
+.sessionRow span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sessionRow span {
+  color: var(--label-3);
+  font-size: 13px;
+}
+.sessionRow time,
+.sessionRow small {
+  font-size: 12px;
+  color: var(--label-3);
+}
+.sessionRow small[data-status="running"] {
+  color: var(--accent);
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--label-2);
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  white-space: nowrap;
+  padding: 3px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+.tag span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tag svg,
+.returnLink svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.returnLink {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  gap: 4px;
+  padding: 3px 6px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.menu {
+  padding: 3px 7px;
+  color: var(--caption);
+}
+.tags .menu {
+  opacity: 0;
+}
+.tags:hover .menu,
+.tags:focus-within .menu {
+  opacity: 1;
+}
+.editor {
+  width: min(430px, calc(100vw - 24px));
+  max-height: 80dvh;
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--label);
+  box-shadow: var(--shadow-2);
+}
+.editor::backdrop {
+  background: rgba(0, 0, 0, 0.18);
+}
+.editor label {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+}
+.editor input[type="search"] {
+  width: 100%;
+  padding: 10px;
+  background: var(--bg-l1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--label);
+}
+.editor footer {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.editor footer button {
+  padding: 8px 14px;
+  border-radius: 7px;
+  background: var(--bg-l2);
+}
+.editor footer button:last-child {
+  background: var(--accent);
+  color: white;
+}
+.usage {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.ring {
+  height: 26px;
+  width: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+.ring span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg);
+  font-size: 8px;
+  color: var(--label-3);
+}
+.popover {
+  position: absolute;
+  bottom: 40px;
+  right: 0;
+  width: min(340px, calc(100vw - 30px));
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  z-index: 45;
+  font-size: 13px;
+}
+.popover h3 {
+  margin-top: 0;
+}
+.popover p,
+.popover li {
+  color: var(--label-3);
+  line-height: 1.7;
+}
+.popover button {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+@media (max-width: 760px) {
+  .drawer {
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    border-radius: 0;
+    padding-top: calc(20px + env(safe-area-inset-top));
+  }
+  .tags .menu {
+    opacity: 1;
+  }
+  .tag {
+    max-width: 140px;
+  }
+}
+
+@media (max-width: 760px) {
+  .popover {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: 140px;
+    width: auto;
+    max-height: calc(100dvh - 160px);
+    overflow: auto;
+  }
+}

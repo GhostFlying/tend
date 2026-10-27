@@ -23,7 +23,7 @@ func TestHandoffMigrationSeedsExistingConversationChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := old.Write(ctx, func(tx *Tx) error {
-		_, err := tx.InsertMessage(ctx, MessageRow{MessageID: "existing", Author: "system", Body: "historic completion"})
+		_, err := tx.Exec(ctx, `INSERT INTO conversation_messages(message_id,author,body,created_at) VALUES('existing','system','historic completion',0)`)
 		return err
 	}); err != nil {
 		write.Close()

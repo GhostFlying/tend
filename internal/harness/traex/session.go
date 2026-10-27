@@ -189,6 +189,7 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	}
 	t := s.register(res.Thread.ID, cfg.OnToolCall)
 	t.setModelDefaults(res)
+	t.setPermissionDefaults(res)
 	t.setRolloutPath(res.Thread.Path)
 	return t, nil
 }
@@ -224,6 +225,7 @@ func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness
 	}
 	t.setToolHandler(cfg.OnToolCall)
 	t.setModelDefaults(res)
+	t.setPermissionDefaults(res)
 	t.setRolloutPath(res.Thread.Path)
 	return t, nil
 }
@@ -262,8 +264,8 @@ func (s *Session) thread(id string) *thread {
 
 func (s *Session) serverRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	if method != methodToolCall {
-		// tend runs workers with approvals off; anything else asking for
-		// a decision is not something tend can answer.
+		// Background approval requests belong to the native auto-reviewer.
+		// Unexpected interactive requests are never approved by Tend.
 		return nil, fmt.Errorf("%w: %s", errUnknownMethod, method)
 	}
 	var p DynamicToolCallParams
@@ -293,6 +295,19 @@ func (s *Session) notification(method string, params json.RawMessage) {
 	var ev harness.Event
 	var threadID string
 	switch method {
+	case "thread/tokenUsage/updated":
+		var n struct {
+			ThreadID string `json:"threadId"`
+			Context  *struct {
+				Usage *ContextUsageSnapshot `json:"contextUsage"`
+			} `json:"context"`
+		}
+		if json.Unmarshal(params, &n) != nil || n.Context == nil || n.Context.Usage == nil {
+			return
+		}
+		usage := n.Context.Usage.usage(n.ThreadID)
+		threadID = n.ThreadID
+		ev = harness.Event{Kind: harness.EventContextUsage, ContextUsage: &usage}
 	case notifyAgentMessageDelta:
 		var n AgentMessageDeltaNotification
 		if err := json.Unmarshal(params, &n); err != nil {
@@ -355,6 +370,7 @@ type thread struct {
 	wake        chan struct{}
 	ended       bool
 	events      chan harness.Event
+	permissions harness.PermissionSettings
 	defaults    harness.ModelSelection
 	rolloutPath string
 	fork        bool

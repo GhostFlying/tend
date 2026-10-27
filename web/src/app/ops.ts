@@ -37,10 +37,10 @@ export async function runOp(
   try {
     res = await sender.submit(envelope);
   } catch (err) {
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError && err.status < 500) {
       return { kind: "refused", message: err.message, ...(err.code ? { code: err.code } : {}) };
     }
-    if (!(err instanceof NetworkError)) {
+    if (!(err instanceof NetworkError) && !(err instanceof ApiError)) {
       throw err;
     }
     try {

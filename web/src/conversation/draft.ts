@@ -33,11 +33,17 @@ export class ComposerDraft {
   private reporting = false;
   private storage: Promise<DraftStorage> | undefined;
   private saving: Promise<void> = Promise.resolve();
-  constructor() {
+  constructor(private readonly conversationID = "main") {
     let id: string;
     try {
-      id = sessionStorage.getItem("tend.draft-id") || crypto.randomUUID();
-      sessionStorage.setItem("tend.draft-id", id);
+      id =
+        sessionStorage.getItem(
+          `tend.draft-id${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
+        ) || crypto.randomUUID();
+      sessionStorage.setItem(
+        `tend.draft-id${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
+        id,
+      );
     } catch {
       id = crypto.randomUUID();
     }
@@ -49,18 +55,30 @@ export class ComposerDraft {
       const navigation = performance.getEntriesByType("navigation")[0] as
         PerformanceNavigationTiming | undefined;
       if (navigation?.type === "reload")
-        this.owner = sessionStorage.getItem("tend.draft-owner") || this.owner;
-      sessionStorage.setItem("tend.draft-owner", this.owner);
+        this.owner =
+          sessionStorage.getItem(
+            `tend.draft-owner${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
+          ) || this.owner;
+      sessionStorage.setItem(
+        `tend.draft-owner${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
+        this.owner,
+      );
     } catch {
       /* Storage denial leaves a page-scoped owner. */
     }
-    this.storage = DraftStorage.open();
+    this.storage = DraftStorage.open(
+      indexedDB,
+      this.conversationID === "main" ? "tend-drafts" : `tend-drafts:${this.conversationID}`,
+    );
     try {
       const storage = await this.storage;
       if (!(await storage.claim(this.id, this.owner))) {
         this.id = crypto.randomUUID();
         try {
-          sessionStorage.setItem("tend.draft-id", this.id);
+          sessionStorage.setItem(
+            `tend.draft-id${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
+            this.id,
+          );
         } catch {
           /* Isolated draft still works for this page. */
         }

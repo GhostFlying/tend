@@ -335,6 +335,13 @@ func (m *Manager) migrateThread(ctx context.Context, s harness.Session, source h
 }
 
 func (m *Manager) migrateOneThread(ctx context.Context, s harness.Session, source harness.Thread, hash, requestID string) (harness.Thread, error) {
+	// Startup schema recovery uses this same path without deliverHandoff. Keep
+	// the original binding until its native compaction has been reconciled.
+	if blocked, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID); err != nil {
+		return nil, err
+	} else if blocked {
+		return nil, errors.New("mainthread: native compact must be reconciled before handoff")
+	}
 	if requestID != "" {
 		old, ok, err := m.app.GetHandoff(ctx, requestID)
 		if err != nil {
@@ -487,8 +494,14 @@ func (m *Manager) deliverHandoff(ctx context.Context, d app.Delivery) app.Delive
 	if th == nil {
 		return app.DeliveryResult{Outcome: app.Retry, Reason: "hosted conversation is not ready; maintenance has not started"}
 	}
+
 	m.workMu.Lock()
 	defer m.workMu.Unlock()
+	if blocked, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID); err != nil {
+		return retry(err)
+	} else if blocked {
+		return retry(errors.New("native compact must be reconciled before handoff"))
+	}
 	if paused, err := m.app.UpgradePausesMain(ctx); err != nil {
 		return retry(err)
 	} else if paused {

@@ -75,7 +75,7 @@ func GetHandoffSnapshot(ctx context.Context, q Querier, instance string) (Handof
 		return v, err
 	}
 	v.ThreadID, v.BindingGeneration = binding.ThreadID, binding.Generation
-	err = q.QueryRowContext(ctx, `SELECT version,MAX(last_activity,COALESCE((SELECT updated_at FROM main_threads WHERE instance=?),0)),COALESCE((SELECT MAX(seq) FROM conversation_messages),0),EXISTS(SELECT 1 FROM outbox WHERE destination='main_thread' AND operation IN ('main_thread.handle_message','main_thread.handle_event') AND status IN ('pending','sending')) FROM conversation_coverage WHERE singleton=1`, instance).Scan(&v.Version, &v.LastActivityMillis, &v.MaxSeq, &v.Pending)
+	err = q.QueryRowContext(ctx, `SELECT version,MAX(last_activity,COALESCE((SELECT updated_at FROM main_threads WHERE instance=?),0)),COALESCE((SELECT MAX(seq) FROM conversation_messages WHERE conversation_id='main'),0),EXISTS(SELECT 1 FROM outbox WHERE destination='main_thread' AND operation IN ('main_thread.handle_message','main_thread.handle_event') AND status IN ('pending','sending')) FROM conversation_coverage WHERE singleton=1`, instance).Scan(&v.Version, &v.LastActivityMillis, &v.MaxSeq, &v.Pending)
 	if err != nil {
 		return v, err
 	}
@@ -134,10 +134,10 @@ func GetPendingHandoff(ctx context.Context, q Querier, instance string) (ThreadH
 // A nil version requests the entire conversation; deltas include changed IDs
 // even when their sequence did not change or the item was deleted.
 func SummaryObservationIDs(ctx context.Context, q Querier, since *int64, limit int) ([]string, error) {
-	query := `SELECT message_id FROM conversation_messages ORDER BY seq LIMIT ?`
+	query := `SELECT message_id FROM conversation_messages WHERE conversation_id='main' ORDER BY seq LIMIT ?`
 	args := []any{limit}
 	if since != nil {
-		query = `SELECT c.message_id FROM conversation_changes c LEFT JOIN conversation_messages m ON m.message_id=c.message_id WHERE c.last_version>? ORDER BY COALESCE(m.seq,0),c.message_id LIMIT ?`
+		query = `SELECT c.message_id FROM conversation_changes c LEFT JOIN conversation_messages m ON m.message_id=c.message_id WHERE c.last_version>? AND (m.conversation_id='main' OR m.message_id IS NULL) ORDER BY COALESCE(m.seq,0),c.message_id LIMIT ?`
 		args = []any{*since, limit}
 	}
 	rows, err := q.QueryContext(ctx, query, args...)

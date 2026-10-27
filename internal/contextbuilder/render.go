@@ -10,6 +10,8 @@ const unratedTitle = "Unrated, ask the owner to rate them (p0 urgent, p1 high, p
 
 // Snapshot is what a packet says, gathered from the ledger.
 type Snapshot struct {
+	// Facts are sourced constraints and responsibilities, preserved across compact.
+	Facts []string
 	// PacketID is empty for a snapshot that is shown but not recorded.
 	PacketID  string
 	Epoch     int64
@@ -64,7 +66,7 @@ type Snapshot struct {
 }
 
 func (s Snapshot) empty() bool {
-	return len(s.Attention) == 0 && len(s.Results) == 0 && len(s.Changes) == 0 && len(s.OtherAttention) == 0
+	return len(s.Facts) == 0 && len(s.Attention) == 0 && len(s.Results) == 0 && len(s.Changes) == 0 && len(s.OtherAttention) == 0
 }
 
 // section is a block of lines with a priority; under budget pressure the
@@ -117,6 +119,7 @@ func Render(s Snapshot, budget int) string {
 	var sections []*section
 	if s.Full {
 		sections = []*section{
+			{title: "Current sourced context facts (replace earlier versions; needs_review is not current authority)", lines: s.Facts, protected: true},
 			{title: "Open work items and follow-up", lines: s.WorkItems, priority: 5, omitted: "(%d more work items; see work_items_list)"},
 			{title: "Limits", lines: s.Limits, protected: true},
 			{title: "Decisions", lines: s.Decisions, priority: 6, omitted: "(%d more decisions; see tasks_read)"},
@@ -129,6 +132,7 @@ func Render(s Snapshot, budget int) string {
 		}
 	} else {
 		sections = []*section{
+			{title: "Current sourced context facts (replace earlier versions; needs_review is not current authority)", lines: s.Facts, protected: true},
 			{title: "Needs attention", lines: s.Attention, protected: true},
 			{title: "Other projects, needs attention", lines: s.OtherAttention, protected: true},
 			{title: "Results", lines: s.Results, priority: 3, omitted: "(%d more results; see tasks_list)"},

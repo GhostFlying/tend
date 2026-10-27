@@ -70,6 +70,26 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	if (p.Body == "" && len(p.Images) == 0 && len(p.Attachments) == 0) || len(p.Body) > maxMessageBytes || !utf8.ValidString(p.Body) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body must be non-empty UTF-8 of at most %d bytes", maxMessageBytes)
 	}
+	p.ConversationID = store.ConversationID(p.ConversationID)
+	conversation, err := store.AgentConversation(ctx, tx.Q(), p.ConversationID)
+	if err != nil {
+		return Outcome{}, errNotFound(err, "conversation does not exist")
+	}
+	if p.ConversationID != "main" && !x.BackgroundAgentsEnabled {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "background agents are disabled")
+	}
+	if p.ConversationID != "main" && p.Decision != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "answer business decisions in the main conversation")
+	}
+	if p.ReplyTo != "" {
+		target, err := store.MessageConversation(ctx, tx.Q(), p.ReplyTo)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if target != p.ConversationID {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "reply belongs to another conversation")
+		}
+	}
 	images, err := validateConversationImages(p.Images)
 	if err != nil {
 		return Outcome{}, err
@@ -101,7 +121,7 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	}
 	id := x.IDs.New(protocol.PrefixMessage)
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{
-		MessageID: id, Author: "owner", ClientID: x.Principal.Client, Body: p.Body, ReplyTo: p.ReplyTo,
+		ConversationID: p.ConversationID, MessageID: id, Author: "owner", ClientID: x.Principal.Client, Body: p.Body, ReplyTo: p.ReplyTo,
 		LastSeenSeq: p.LastSeenSeq, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(), DecisionJSON: string(choice),
 	})
 	if err != nil {
@@ -123,10 +143,18 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 			return Outcome{}, err
 		}
 	}
+	if conversation.WorkItemID != "" {
+		if err := tx.BindMessage(ctx, id, "work_item", conversation.WorkItemID, "conversation"); err != nil {
+			return Outcome{}, err
+		}
+		if err := queueCoordinationNotice(ctx, x, tx, "The owner sent an original message to the work-item background conversation. Read its exact text and attachments; reconcile any business or authority changes as main coordinator.", id, p.ConversationID); err != nil {
+			return Outcome{}, err
+		}
+	}
 	return Outcome{
 		Result:   map[string]any{"message_id": id, "seq": seq},
 		Events:   []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": "owner", "seq": seq}}},
-		Outbox:   []OutboxMessage{{Destination: MainThreadDestination, Operation: OpHandleMessage, Payload: HandleMessage{MessageID: id}}},
+		Outbox:   []OutboxMessage{{Destination: store.ConversationDestination(p.ConversationID), Operation: OpHandleMessage, Payload: HandleMessage{MessageID: id}}},
 		Accepted: true,
 	}, nil
 }

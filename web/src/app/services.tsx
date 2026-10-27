@@ -10,6 +10,10 @@ import type { LiveData } from "../live/data.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
 
 export interface Services {
+  conversation?: { id: string; title: string; workItemID?: string };
+  agentsEnabled?: boolean;
+  selectConversation?(id: string): void;
+  openAgentDrawer?(): void;
   client: ApiClient;
   live: LiveData;
   /** null while the outbox opens, or where the browser has none. */

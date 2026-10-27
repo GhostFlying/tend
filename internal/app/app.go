@@ -35,13 +35,14 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
-	FollowupsEnabled bool
-	FollowupQueued   bool
-	Env              *protocol.Envelope
-	Principal        protocol.Principal
-	TraceID          string
-	Now              time.Time
-	IDs              protocol.IDGen
+	BackgroundAgentsEnabled bool
+	FollowupsEnabled        bool
+	FollowupQueued          bool
+	Env                     *protocol.Envelope
+	Principal               protocol.Principal
+	TraceID                 string
+	Now                     time.Time
+	IDs                     protocol.IDGen
 	// LeaseTTL is the lease duration of runs allocated by this request.
 	LeaseTTL time.Duration
 	// WaitPerHour is what an hour in the queue adds to an action's score
@@ -90,21 +91,26 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
-	followupsEnabled  bool
-	observeDeployment func(context.Context) (protocol.ObservedDeployment, error)
-	store             *store.Store
-	ids               protocol.IDGen
-	now               func() time.Time
-	notifier          Notifier
-	changes           *Broadcast
-	logs              *Broadcast
-	leaseTTL          time.Duration
-	waitPer           float64
-	hostLost          time.Duration
+	backgroundAgentsEnabled bool
+	followupsEnabled        bool
+	observeDeployment       func(context.Context) (protocol.ObservedDeployment, error)
+	store                   *store.Store
+	ids                     protocol.IDGen
+	now                     func() time.Time
+	notifier                Notifier
+	changes                 *Broadcast
+	logs                    *Broadcast
+	leaseTTL                time.Duration
+	waitPer                 float64
+	hostLost                time.Duration
 }
 
 // Option configures an App.
 type Option func(*App)
+
+func WithBackgroundAgents(enabled bool) Option {
+	return func(a *App) { a.backgroundAgentsEnabled = enabled }
+}
 
 // WithNotifier makes the App notify n after committing outbox messages.
 func WithNotifier(n Notifier) Option {
@@ -158,7 +164,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{BackgroundAgentsEnabled: a.backgroundAgentsEnabled, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	if x.TraceID == "" {
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}

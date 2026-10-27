@@ -66,3 +66,16 @@ export const Gear = (p: IconProps) => (
     <circle cx="11" cy="12" r="3" />
   </svg>
 );
+
+export const Tag = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} strokeWidth={1.6} {...p}>
+    <path d="M3 4h8l10 10-7 7L3 10z" strokeLinejoin="round" />
+    <circle cx="7.5" cy="7.5" r="1" />
+  </svg>
+);
+
+export const ExternalLink = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} strokeWidth={1.6} {...p}>
+    <path d="M8 16L19 5M11 5h8v8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);

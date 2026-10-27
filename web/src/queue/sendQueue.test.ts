@@ -703,3 +703,27 @@ test("cancelled upload tombstones release original bytes while fencing stale sen
   expect(tombstone?.envelope.payload).toEqual({});
   expect(tombstone?.body).toBe("");
 });
+
+test("reloading and resuming isolates main and background queues and retry targets", async () => {
+  online = false;
+  const main = await open();
+  const background = await open({ conversationID: "work-item:one" });
+  const other = await open({ conversationID: "work-item:two" });
+  await main.enqueue({ body: "main only" });
+  await background.enqueue({ body: "background only" });
+  await other.enqueue({ body: "other only" });
+  const recovered = await open({ conversationID: "work-item:one" });
+  expect(recovered.list.get().map((m) => m.body)).toEqual(["background only"]);
+  online = true;
+  await recovered.resume();
+  expect(sender.submitted.map((e) => e.payload)).toEqual([
+    { body: "background only", conversation_id: "work-item:one" },
+  ]);
+  expect(recovered.list.get().map((m) => m.body)).toEqual(["background only"]);
+  const recoveredMain = await open();
+  await recoveredMain.resume();
+  expect(sender.submitted.map((e) => e.payload)).toEqual([
+    { body: "background only", conversation_id: "work-item:one" },
+    { body: "main only" },
+  ]);
+});

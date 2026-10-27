@@ -1,3 +1,4 @@
+import { MessageTags } from "./MessageTags.tsx";
 import { notify } from "../app/notice.ts";
 import { ChoiceCard } from "../workitems/Choice.tsx";
 import { useServices } from "../app/services.tsx";
@@ -39,6 +40,7 @@ export function OwnerMessage({ item }: { item: ConversationItem }) {
         !!item.images?.length && <MessageImages images={item.images} />
       )}
       {item.body && <div className={styles.bubble}>{item.body}</div>}
+      <MessageTags item={item} />
       <div className={styles.state} data-state={state}>
         {item.control?.withdrawn_at ? "已撤回" : messageStateLabels[state]} ·{" "}
         {clock(Date.parse(item.created_at))}
@@ -159,6 +161,7 @@ const AgentItem = memo(function AgentItem({ item }: { item: ConversationItem }) 
       ) : (
         <>
           <Markdown text={item.body ?? ""} />
+          <MessageTags item={item} />
           {status && status !== "completed" && (
             <div className={styles.assistantState} data-state={status} role="status">
               {assistantLabels[status]}
@@ -173,6 +176,13 @@ const AgentItem = memo(function AgentItem({ item }: { item: ConversationItem }) 
 export function SystemMessage({ item, scrollID }: { item: ConversationItem; scrollID?: string }) {
   const { openUpgrade } = useServices();
   const title = noticeTitle(item.notice_type);
+  if (item.notice_type === "background_batch" && item.conversation_id !== "main")
+    return (
+      <details data-scroll-id={scrollID ?? item.message_id}>
+        <summary>后台核对来源 · {clock(Date.parse(item.created_at))}</summary>
+        <Markdown text={systemMessageBody(item)} />
+      </details>
+    );
   return (
     <section
       className={styles.system}
@@ -183,6 +193,7 @@ export function SystemMessage({ item, scrollID }: { item: ConversationItem; scro
         {title} <time dateTime={item.created_at}>{clock(Date.parse(item.created_at))}</time>
       </div>
       <Markdown text={systemMessageBody(item)} />
+      {item.return_link && <MessageTags item={item} />}
       {item.state && (
         <div className={styles.state} data-state={item.state} role="status">
           {messageStateLabels[item.state]}

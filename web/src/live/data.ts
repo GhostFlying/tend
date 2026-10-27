@@ -110,10 +110,13 @@ export class LiveData {
     done: Promise<void>;
   } | null = null;
 
-  constructor(api: Reader) {
+  constructor(
+    api: Reader,
+    readonly conversationID = "main",
+  ) {
     this.api = api;
     this.queueView = new ConversationQueue(api, (item) => this.currentChoices(item));
-    this.settings = new ConversationSettings(api);
+    this.settings = new ConversationSettings(api, conversationID);
     this.handoff = new ConversationHandoff(api);
     this.tasks = new TaskLists(api);
     this.repos = new RepositoryRegistry(api);
@@ -224,6 +227,17 @@ export class LiveData {
 
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
+    if (event.item && (event.item.conversation_id ?? "main") !== this.conversationID) return;
+    if (event.kind === "conversation.associations_changed") {
+      void this.latestReads.run();
+      void this.queueView.refresh();
+      return;
+    }
+
+    if (event.object_type === "work_item") {
+      void this.latestReads.run();
+      void this.queueView.refresh();
+    }
     this.queueView.changed(event);
     if (event.object_type === "work_item_choice") {
       void this.choiceChanged(event.object_id);

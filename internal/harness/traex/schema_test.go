@@ -28,6 +28,10 @@ var checked = []struct {
 	v                         any
 	sent                      bool
 }{
+	{"ThreadContextUsageParams", "v2/ThreadContextUsageParams.json", "", "", ThreadContextUsageParams{}, true},
+	{"ThreadContextUsageResponse", "v2/ThreadContextUsageResponse.json", "", "", ThreadContextUsageResponse{}, false},
+	{"ContextUsageSnapshot", "v2/ThreadContextUsageResponse.json", "ContextUsageSnapshot", "", ContextUsageSnapshot{}, false},
+	{"ThreadCompactStartParams", "v2/ThreadCompactStartParams.json", "", "", ThreadCompactStartParams{}, true},
 	{"InitializeParams", "v1/InitializeParams.json", "", "", InitializeParams{}, true},
 	{"ClientInfo", "v1/InitializeParams.json", "ClientInfo", "", ClientInfo{}, true},
 	{"InitializeCapabilities", "v1/InitializeParams.json", "InitializeCapabilities", "", InitializeCapabilities{}, true},
@@ -46,8 +50,8 @@ var checked = []struct {
 	{"CatalogModel", "v2/ModelListResponse.json", "Model", "", CatalogModel{}, false},
 	{"ReasoningEffortOption", "v2/ModelListResponse.json", "ReasoningEffortOption", "", ReasoningEffortOption{}, false},
 	{"AgentMessageDeltaNotification", "v2/AgentMessageDeltaNotification.json", "", "", AgentMessageDeltaNotification{}, false},
-	{"UserInput", "v2/TurnStartParams.json", "UserInput", "type=text", UserInput{}, true},
-	{"ImageUserInput", "v2/TurnStartParams.json", "UserInput", "type=image", ImageUserInput{}, true},
+	{"UserInput", "v2/TurnStartParams.json", "UserInputParams", "type=text", UserInput{}, true},
+	{"ImageUserInput", "v2/TurnStartParams.json", "UserInputParams", "type=image", ImageUserInput{}, true},
 	{"TurnStartResponse", "v2/TurnStartResponse.json", "", "", TurnStartResponse{}, false},
 	{"Turn", "v2/TurnStartResponse.json", "Turn", "", Turn{}, false},
 	{"TurnInterruptParams", "v2/TurnInterruptParams.json", "", "", TurnInterruptParams{}, true},

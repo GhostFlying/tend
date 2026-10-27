@@ -36,9 +36,13 @@ func queueSingleEventTurn(ctx context.Context, x *Exec, tx *store.Tx, messageID,
 	if err != nil {
 		return fmt.Errorf("app: encode event wake: %w", err)
 	}
+	conversation, err := store.MessageConversation(ctx, tx.Q(), messageID)
+	if err != nil {
+		return err
+	}
 	return tx.InsertOutbox(ctx, store.OutboxRow{
 		OutboxID: x.IDs.New(protocol.PrefixOutbox), RequestID: x.IDs.New(protocol.PrefixRequest),
-		ParentRequestID: x.Env.RequestID, Destination: MainThreadDestination, Operation: OpHandleEvent,
+		ParentRequestID: x.Env.RequestID, Destination: store.ConversationDestination(conversation), Operation: OpHandleEvent,
 		PayloadJSON: string(payload), CreatedAt: x.Now.UnixMilli(),
 	})
 }

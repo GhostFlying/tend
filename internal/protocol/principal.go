@@ -10,7 +10,8 @@ const (
 	// PrincipalOwner is the human user, identified by tailnet login.
 	PrincipalOwner PrincipalKind = "owner"
 	// PrincipalMainAgent is a main-agent thread inside a harness instance.
-	PrincipalMainAgent PrincipalKind = "main_agent"
+	PrincipalMainAgent       PrincipalKind = "main_agent"
+	PrincipalBackgroundAgent PrincipalKind = "background_agent"
 	// PrincipalRunner is a runner process on a host.
 	PrincipalRunner PrincipalKind = "runner"
 	// PrincipalRun is a single run acting with a run-scoped credential.
@@ -22,7 +23,8 @@ const (
 // Principal is the caller identity established by the authentication layer.
 // It is never read from a request payload.
 type Principal struct {
-	Kind PrincipalKind `json:"kind"`
+	Kind           PrincipalKind `json:"kind"`
+	ConversationID string        `json:"conversation_id,omitempty"`
 	// Subject identifies the caller within its kind: the login for owners,
 	// the harness instance for the hosted main agent, the client ID of the
 	// token for agents the owner works in, the host for runners and the run
@@ -60,6 +62,10 @@ func (p Principal) Validate() error {
 		// works in may not know its session.
 		if p.Subject == "" || (p.Agent == "" && p.Thread == "") || (p.Agent != "" && !p.Agent.Valid()) {
 			return fmt.Errorf("protocol: main_agent principal needs a subject and a thread or a known agent kind")
+		}
+	case PrincipalBackgroundAgent:
+		if p.Subject == "" || p.Thread == "" || p.ConversationID == "" || p.Agent != "" {
+			return fmt.Errorf("protocol: background principal requires a registered conversation and thread")
 		}
 	case PrincipalRun:
 		if p.Subject == "" || !p.Role.Valid() {

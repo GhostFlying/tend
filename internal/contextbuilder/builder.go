@@ -301,6 +301,9 @@ func (b *Builder) Current(ctx context.Context, self protocol.Principal) (string,
 }
 
 func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, messageSeq int64, sc *scope) error {
+	if err := gatherContextFacts(ctx, q, s, sc); err != nil {
+		return err
+	}
 	if err := gatherWorkItems(ctx, q, s, sc); err != nil {
 		return err
 	}
@@ -401,6 +404,14 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 	events, err := store.ListEventsAfter(ctx, q, after, through, told)
 	if err != nil {
 		return err
+	}
+	for _, e := range events {
+		if e.Kind == "work_item.context_changed" || e.Kind == "conversation.associations_changed" {
+			if err := gatherContextFacts(ctx, q, s, sc); err != nil {
+				return err
+			}
+			break
+		}
 	}
 	own := ownRequests{self: self, seen: map[string]bool{}}
 	titles := map[string]string{}
@@ -995,4 +1006,23 @@ func (sc *scope) label(project, line string) string {
 		return line
 	}
 	return "[" + project + "] " + line
+}
+
+// gatherContextFacts retains source and attribution instead of promoting an
+// association or an agent suggestion into owner authority.
+func gatherContextFacts(ctx context.Context, q store.Querier, s *Snapshot, sc *scope) error {
+	rows, err := q.QueryContext(ctx, `SELECT f.fact_id,f.scope,COALESCE(f.work_item_id,''),f.kind,f.attribution,f.source_message_id,f.body,f.needs_review FROM work_item_context_facts f LEFT JOIN work_items w ON w.work_item_id=f.work_item_id WHERE f.superseded=0 AND (?='' OR f.scope='global' OR (f.scope='project' AND f.project=?) OR w.project=?) ORDER BY f.created_at,f.fact_id`, sc.project, sc.project, sc.project)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, scope, item, kind, attribution, source, body string
+		var review bool
+		if err = rows.Scan(&id, &scope, &item, &kind, &attribution, &source, &body, &review); err != nil {
+			return err
+		}
+		s.Facts = append(s.Facts, fmt.Sprintf("%s scope=%s work_item=%s kind=%s attribution=%s source=%s needs_review=%t: %s", id, scope, item, kind, attribution, source, review, body))
+	}
+	return rows.Err()
 }

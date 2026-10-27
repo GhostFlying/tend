@@ -664,3 +664,32 @@ func TestLaggingClientIsVisible(t *testing.T) {
 		t.Errorf("turn input = %q", in)
 	}
 }
+
+func TestBackgroundThreadConfigUsesAutoMode(t *testing.T) {
+	base := ThreadConfig("/background", "model")
+	base.Sandbox, base.ApprovalPolicy = "danger-full-access", "never"
+	m := &Manager{cfg: Config{ConversationID: "work-item:fixture", Thread: base}}
+	cfg := m.threadConfig()
+	if cfg.Sandbox != "workspace-write" || cfg.ApprovalPolicy != "on-request" || cfg.ApprovalsReviewer != "auto_review" {
+		t.Fatalf("background permissions: %+v", cfg)
+	}
+	if cfg.Cwd != base.Cwd || cfg.Model != base.Model {
+		t.Fatal("background permissions changed model or cwd")
+	}
+	for _, feature := range []string{"features.shell_tool", "features.apply_patch_freeform", "features.multi_agent"} {
+		if _, forced := cfg.Config[feature]; forced {
+			t.Errorf("background inherited dispatcher restriction %s", feature)
+		}
+		if base.Config[feature] != false {
+			t.Errorf("background config mutated main config %s", feature)
+		}
+	}
+	for _, tool := range cfg.Tools {
+		if tool.Name == "tasks_create" || tool.Name == "work_items_update" || tool.Name == "decisions_answer" {
+			t.Fatalf("business write exposed to background: %s", tool.Name)
+		}
+	}
+	if cfg.OnToolCall == nil || len(cfg.Tools) == 0 {
+		t.Fatal("background lost its scoped Tend tools")
+	}
+}

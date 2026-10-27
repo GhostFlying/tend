@@ -23,8 +23,9 @@ type ConversationSettingsView struct {
 // SetConversationSettingsPayload changes the next hosted turn's settings.
 // The envelope carries the expected settings revision.
 type SetConversationSettingsPayload struct {
-	Model  string `json:"model"`
-	Effort string `json:"effort"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	Model          string `json:"model"`
+	Effort         string `json:"effort"`
 }
 
 // AssistantState describes a persisted assistant message, including drafts.

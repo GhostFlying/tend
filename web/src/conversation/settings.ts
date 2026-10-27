@@ -26,7 +26,10 @@ export class ConversationSettings {
   private running: Promise<void> | null = null;
   private again = false;
 
-  constructor(private readonly api: Reader) {}
+  constructor(
+    private readonly api: Reader,
+    private readonly conversationID = "main",
+  ) {}
 
   start(): void {
     if (this.active) return;
@@ -103,7 +106,10 @@ export class ConversationSettings {
         operation: "conversation.set_settings",
         target: { type: "conversation" },
         expected_control_revision: before.view.revision,
-        payload,
+        payload: {
+          ...payload,
+          ...(this.conversationID !== "main" ? { conversation_id: this.conversationID } : {}),
+        },
       });
       this.settle(outcome, requestId);
       await this.refresh();

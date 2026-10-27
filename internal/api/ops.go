@@ -13,7 +13,7 @@ import (
 // ownerCommands are the writes the owner API accepts, by operation. Work
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
-var ownerCommands = commandMap(app.RegisterRepository{},
+var ownerCommands = commandMap(app.RegisterRepository{}, app.SetMessageAssociations{}, app.OpenAgentConversation{},
 	app.FollowupCommand{Action: "create"},
 	app.FollowupCommand{Action: "update"},
 	app.FollowupCommand{Action: "pause"},
@@ -34,7 +34,7 @@ var ownerCommands = commandMap(app.RegisterRepository{},
 
 // hostedCommands are the conversation writes, accepted only when the
 // server runs the hosted main thread (D45).
-var hostedCommands = commandMap(app.SubmitMessage{}, app.InterruptReply{}, app.SetConversationHandoffSettings{}, app.ConversationHandoff{})
+var hostedCommands = commandMap(app.CompactConversation{}, app.SubmitMessage{}, app.InterruptReply{}, app.SetConversationHandoffSettings{}, app.ConversationHandoff{})
 
 func commandMap(cmds ...app.Command) map[string]app.Command {
 	m := make(map[string]app.Command, len(cmds))

@@ -47,3 +47,27 @@ func TestExampleConfigLoads(t *testing.T) {
 		t.Errorf("example config = %+v", c)
 	}
 }
+
+func TestBackgroundAutoModeWorkingDirectories(t *testing.T) {
+	root := t.TempDir()
+	custom := t.TempDir()
+	main, err := mainAgentWorkingDirectory(mainAgentConfig{Cwd: custom}, root)
+	if err != nil || main != custom {
+		t.Fatalf("main cwd=%q err=%v", main, err)
+	}
+	a, err := mainAgentWorkingDirectory(mainAgentConfig{Cwd: custom, ConversationID: "work-item:a"}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := mainAgentWorkingDirectory(mainAgentConfig{ConversationID: "work-item:a"}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := mainAgentWorkingDirectory(mainAgentConfig{ConversationID: "work-item:b"}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != again || a == b || a == main {
+		t.Fatalf("background cwd identity not stable and independent: %q %q %q %q", a, again, b, main)
+	}
+}

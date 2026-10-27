@@ -79,13 +79,14 @@ func (t *Tx) SettleToolUses(ctx context.Context, threadID string, now int64) ([]
 
 // ConversationRow is one item of the conversation as the owner reads it.
 type ConversationRow struct {
-	Seq       int64
-	Kind      string
-	MessageID string
-	Author    string
-	Body      string
-	ReplyTo   string
-	CreatedAt int64
+	ConversationID string
+	Seq            int64
+	Kind           string
+	MessageID      string
+	Author         string
+	Body           string
+	ReplyTo        string
+	CreatedAt      int64
 	// State is the latest state recorded for an owner or event message, empty
 	// when none was.
 	State             string
@@ -101,22 +102,26 @@ type ConversationRow struct {
 const conversationCols = `m.seq, m.kind, m.message_id, m.author, m.body, COALESCE(m.reply_to, ''), m.created_at,
 	COALESCE((SELECT json_extract(e.body_json, '$.state') FROM events e WHERE e.object_type = 'message'
 		AND e.object_id = m.message_id AND e.kind = 'conversation.message_state' ORDER BY e.event_seq DESC LIMIT 1), ''),
-	u.turn_id, u.item_id, u.tool, u.input, u.output, u.status, u.updated_at, COALESCE(m.decision_json, ''), COALESCE(a.status, ''), COALESCE(a.revision, 0)
+	u.turn_id, u.item_id, u.tool, u.input, u.output, u.status, u.updated_at, COALESCE(m.decision_json, ''), COALESCE(a.status, ''), COALESCE(a.revision, 0), m.conversation_id
 	FROM conversation_messages m LEFT JOIN conversation_tool_uses u ON u.message_id = m.message_id LEFT JOIN conversation_agent_messages a ON a.message_id = m.message_id`
 
 // ListConversation returns up to limit conversation items in order:
 // those after seq after when after is positive, else those before seq
 // before when before is positive, else the latest.
-func ListConversation(ctx context.Context, q Querier, before, after int64, limit int) ([]ConversationRow, error) {
+func ListConversation(ctx context.Context, q Querier, before, after int64, limit int, session ...string) ([]ConversationRow, error) {
 	var query string
 	var args []any
+	id := "main"
+	if len(session) > 0 {
+		id = ConversationID(session[0])
+	}
 	switch {
 	case after > 0:
-		query, args = `SELECT `+conversationCols+` WHERE m.seq > ? ORDER BY m.seq LIMIT ?`, []any{after, limit}
+		query, args = `SELECT `+conversationCols+` WHERE m.conversation_id=? AND m.seq > ? ORDER BY m.seq LIMIT ?`, []any{id, after, limit}
 	case before > 0:
-		query, args = `SELECT * FROM (SELECT `+conversationCols+` WHERE m.seq < ? ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{before, limit}
+		query, args = `SELECT * FROM (SELECT `+conversationCols+` WHERE m.conversation_id=? AND m.seq < ? ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{id, before, limit}
 	default:
-		query, args = `SELECT * FROM (SELECT `+conversationCols+` ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{limit}
+		query, args = `SELECT * FROM (SELECT `+conversationCols+` WHERE m.conversation_id=? ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{id, limit}
 	}
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -148,7 +153,7 @@ func scanConversation(row interface{ Scan(...any) error }) (ConversationRow, err
 	var turn, item, tool, input, output, status sql.NullString
 	var updated sql.NullInt64
 	if err := row.Scan(&r.Seq, &r.Kind, &r.MessageID, &r.Author, &r.Body, &r.ReplyTo, &r.CreatedAt, &r.State,
-		&turn, &item, &tool, &input, &output, &status, &updated, &r.DecisionJSON, &r.AssistantState, &r.AssistantRevision); err != nil {
+		&turn, &item, &tool, &input, &output, &status, &updated, &r.DecisionJSON, &r.AssistantState, &r.AssistantRevision, &r.ConversationID); err != nil {
 		return ConversationRow{}, fmt.Errorf("store: scan conversation: %w", err)
 	}
 	if tool.Valid {

@@ -15,6 +15,7 @@ const (
 
 // MessageRow is a conversation item to store.
 type MessageRow struct {
+	ConversationID string
 	// Kind is KindMessage when empty.
 	Kind        string
 	MessageID   string
@@ -37,9 +38,9 @@ func (t *Tx) InsertMessage(ctx context.Context, m MessageRow) (int64, error) {
 		m.Kind = KindMessage
 	}
 	res, err := t.Exec(ctx, `INSERT INTO conversation_messages (kind, message_id, author, client_id, body, reply_to, last_seen_seq,
-		request_id, created_at, decision_json) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?)`,
+		request_id, created_at, decision_json,conversation_id) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?, ?)`,
 		m.Kind, m.MessageID, m.Author, nullString(m.ClientID), m.Body, nullString(m.ReplyTo), m.LastSeenSeq, nullString(m.RequestID), m.CreatedAt,
-		nullString(m.DecisionJSON))
+		nullString(m.DecisionJSON), ConversationID(m.ConversationID))
 	if err != nil {
 		return 0, fmt.Errorf("store: insert message: %w", err)
 	}

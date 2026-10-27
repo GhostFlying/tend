@@ -10,7 +10,7 @@ import type { SendQueue } from "../queue/sendQueue.ts";
 import { useStore } from "../state/store.ts";
 import { Handoff } from "../conversation/Handoff.tsx";
 import { UpgradeDetails } from "../upgrades/Upgrade.tsx";
-import { Chat } from "./Chat.tsx";
+import { AgentWorkspace as Chat } from "../conversation/AgentWorkspace.tsx";
 import { Details } from "./Details.tsx";
 import { DetailOverlay, DetailPane } from "./DetailOverlay.tsx";
 import styles from "./Shell.module.css";
@@ -133,6 +133,22 @@ export function Shell({
     [applyDetail, detailSession],
   );
 
+  useEffect(() => {
+    const open = () => {
+      live.workItems.close();
+      setBoardOpen(false);
+      live.close();
+      setTaskSelected(null);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("task");
+      url.searchParams.delete("work_item");
+      window.history.replaceState({ ...window.history.state, tendDetailDepth: 0 }, "", url);
+      setView("chat");
+    };
+    window.addEventListener("tend:open-agent", open);
+    return () => window.removeEventListener("tend:open-agent", open);
+  }, [live]);
+
   const services = useMemo<Services>(
     () => ({
       client,
@@ -140,6 +156,7 @@ export function Shell({
       queue,
       draft,
       followUp(task) {
+        window.dispatchEvent(new Event("tend:main-agent"));
         live.close();
         setTaskSelected(null);
         live.workItems.close();
@@ -160,6 +177,7 @@ export function Shell({
         navigateDetail(id, null);
       },
       discussWorkItem(item, intention) {
+        window.dispatchEvent(new Event("tend:main-agent"));
         live.workItems.close();
         live.close();
         setTaskSelected(null);

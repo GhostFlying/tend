@@ -1,0 +1,129 @@
+package protocol
+
+// AgentConversation is a logical conversation; native thread generations are separate.
+type AgentConversation struct {
+	ID             string `json:"conversation_id"`
+	WorkItemID     string `json:"work_item_id,omitempty"`
+	Title          string `json:"title"`
+	Status         string `json:"status"`
+	Revision       int64  `json:"revision"`
+	Model          string `json:"model"`
+	Effort         string `json:"effort"`
+	LastMessageSeq int64  `json:"last_message_seq"`
+	LastMessageAt  int64  `json:"last_message_at"`
+	Preview        string `json:"preview"`
+}
+type AgentConversationPage struct {
+	Enabled bool                `json:"enabled"`
+	Items   []AgentConversation `json:"items"`
+	Next    string              `json:"next,omitempty"`
+}
+type MessageWorkItem struct {
+	WorkItemID  string `json:"work_item_id"`
+	Title       string `json:"title"`
+	Source      string `json:"source"`
+	OwnerLocked bool   `json:"owner_locked"`
+}
+type MessageAssociations struct {
+	MessageID string            `json:"message_id"`
+	Revision  int64             `json:"revision"`
+	Items     []MessageWorkItem `json:"items"`
+}
+type SetMessageAssociationsPayload struct {
+	WorkItemIDs []string `json:"work_item_ids"`
+}
+type ContextFact struct {
+	ID              string `json:"fact_id"`
+	WorkItemID      string `json:"work_item_id,omitempty"`
+	Scope           string `json:"scope"`
+	Project         string `json:"project,omitempty"`
+	Kind            string `json:"kind"`
+	Body            string `json:"body"`
+	SourceMessageID string `json:"source_message_id"`
+	Attribution     string `json:"attribution"`
+	Supersedes      string `json:"supersedes,omitempty"`
+	NeedsReview     bool   `json:"needs_review"`
+}
+type WorkItemContext struct {
+	WorkItemID string             `json:"work_item_id"`
+	Revision   int64              `json:"revision"`
+	Prepared   bool               `json:"prepared"`
+	Coverage   string             `json:"coverage"`
+	Gaps       string             `json:"gaps"`
+	Facts      []ContextFact      `json:"facts"`
+	Sources    []ConversationItem `json:"sources"`
+	More       bool               `json:"more"`
+	Next       int64              `json:"next,omitempty"`
+}
+type PrepareWorkItemContextPayload struct {
+	Coverage string `json:"coverage"`
+	Gaps     string `json:"gaps"`
+}
+type BackgroundAssessmentPayload struct {
+	ContextRevision int64    `json:"context_revision"`
+	Disposition     string   `json:"disposition"`
+	Note            string   `json:"note"`
+	EvidenceIDs     []string `json:"evidence_ids"`
+}
+
+// AgentContextUsage keeps a coherent native snapshot, never cumulative billing usage.
+type AgentContextUsage struct {
+	Available        bool   `json:"available"`
+	CompactSupported bool   `json:"compact_supported"`
+	ThreadID         string `json:"thread_id,omitempty"`
+	Revision         int64  `json:"revision"`
+	UsedPercentage   *int64 `json:"used_percentage,omitempty"`
+	ActiveTokens     *int64 `json:"active_tokens,omitempty"`
+	EffectiveWindow  *int64 `json:"effective_window,omitempty"`
+	Measurement      string `json:"measurement"`
+	SampledAt        int64  `json:"sampled_at"`
+	UpdatedAt        int64  `json:"updated_at"`
+}
+type AgentCompaction struct {
+	ID             string             `json:"operation_id"`
+	ConversationID string             `json:"conversation_id"`
+	ThreadID       string             `json:"thread_id"`
+	Status         string             `json:"status"`
+	Source         string             `json:"source"`
+	CreatedAt      int64              `json:"created_at"`
+	UpdatedAt      int64              `json:"updated_at"`
+	Before         *AgentContextUsage `json:"before,omitempty"`
+	After          *AgentContextUsage `json:"after,omitempty"`
+}
+type AgentCompactionPage struct {
+	Items []AgentCompaction `json:"items"`
+	Next  int64             `json:"next,omitempty"`
+}
+type ConversationReturnLink struct {
+	ConversationID string `json:"conversation_id"`
+	MessageID      string `json:"message_id"`
+}
+
+// AgentRolloutPage exposes collected native records and the thread lineage.
+// Missing historical collection is explicit; projections do not pretend to be raw history.
+type AgentRolloutPage struct {
+	ConversationID string               `json:"conversation_id"`
+	Coverage       string               `json:"coverage"`
+	Threads        []string             `json:"threads"`
+	Records        []AgentRolloutRecord `json:"records"`
+	Next           int64                `json:"next"`
+	More           bool                 `json:"more"`
+}
+type AgentRolloutRecord struct {
+	Seq        int64  `json:"seq"`
+	ThreadID   string `json:"thread_id"`
+	TurnID     string `json:"turn_id"`
+	ItemID     string `json:"item_id"`
+	Kind       string `json:"kind"`
+	Data       string `json:"data"`
+	Characters int64  `json:"characters"`
+	Truncated  bool   `json:"truncated"`
+	CreatedAt  int64  `json:"created_at"`
+}
+
+// AgentRolloutWindow uses Unicode character offsets so JSON remains readable.
+type AgentRolloutWindow struct {
+	Text string `json:"text"`
+	Next int64  `json:"next"`
+	More bool   `json:"more"`
+}

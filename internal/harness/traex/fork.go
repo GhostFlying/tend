@@ -61,6 +61,7 @@ func (s *Session) ForkThread(ctx context.Context, sourceThreadID string, cfg har
 	t.fork = true
 	t.mu.Unlock()
 	t.setModelDefaults(res)
+	t.setPermissionDefaults(res)
 	t.setRolloutPath(res.Thread.Path)
 	return t, nil
 }

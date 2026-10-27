@@ -102,6 +102,198 @@
       "title": "ActionView",
       "type": "object"
     },
+    "AgentCompaction": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/definitions/AgentContextUsage"
+        },
+        "before": {
+          "$ref": "#/definitions/AgentContextUsage"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operation_id",
+        "conversation_id",
+        "thread_id",
+        "status",
+        "source",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "AgentCompaction",
+      "type": "object"
+    },
+    "AgentCompactionPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentCompaction"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "AgentCompactionPage",
+      "type": "object"
+    },
+    "AgentContextUsage": {
+      "additionalProperties": false,
+      "properties": {
+        "active_tokens": {
+          "type": "integer"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "compact_supported": {
+          "type": "boolean"
+        },
+        "effective_window": {
+          "type": "integer"
+        },
+        "measurement": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "sampled_at": {
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        },
+        "used_percentage": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "available",
+        "compact_supported",
+        "revision",
+        "measurement",
+        "sampled_at",
+        "updated_at"
+      ],
+      "title": "AgentContextUsage",
+      "type": "object"
+    },
+    "AgentConversation": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "last_message_at": {
+          "type": "integer"
+        },
+        "last_message_seq": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "preview": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "title",
+        "status",
+        "revision",
+        "model",
+        "effort",
+        "last_message_seq",
+        "last_message_at",
+        "preview"
+      ],
+      "title": "AgentConversation",
+      "type": "object"
+    },
+    "AgentConversationPage": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentConversation"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "items"
+      ],
+      "title": "AgentConversationPage",
+      "type": "object"
+    },
     "AgentKind": {
       "enum": [
         "claude",
@@ -110,6 +302,125 @@
       ],
       "title": "AgentKind",
       "type": "string"
+    },
+    "AgentRolloutPage": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "coverage": {
+          "type": "string"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "records": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentRolloutRecord"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threads": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "conversation_id",
+        "coverage",
+        "threads",
+        "records",
+        "next",
+        "more"
+      ],
+      "title": "AgentRolloutPage",
+      "type": "object"
+    },
+    "AgentRolloutRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "characters": {
+          "type": "integer"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "data": {
+          "type": "string"
+        },
+        "item_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "thread_id",
+        "turn_id",
+        "item_id",
+        "kind",
+        "data",
+        "characters",
+        "truncated",
+        "created_at"
+      ],
+      "title": "AgentRolloutRecord",
+      "type": "object"
+    },
+    "AgentRolloutWindow": {
+      "additionalProperties": false,
+      "properties": {
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "next",
+        "more"
+      ],
+      "title": "AgentRolloutWindow",
+      "type": "object"
     },
     "AnswerDecisionPayload": {
       "additionalProperties": false,
@@ -312,6 +623,41 @@
       ],
       "title": "AssistantState",
       "type": "string"
+    },
+    "BackgroundAssessmentPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "context_revision": {
+          "type": "integer"
+        },
+        "disposition": {
+          "type": "string"
+        },
+        "evidence_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "context_revision",
+        "disposition",
+        "note",
+        "evidence_ids"
+      ],
+      "title": "BackgroundAssessmentPayload",
+      "type": "object"
     },
     "BackgroundBatch": {
       "additionalProperties": false,
@@ -519,6 +865,52 @@
       "title": "CompletionReviewAcknowledgement",
       "type": "object"
     },
+    "ContextFact": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "fact_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "needs_review": {
+          "type": "boolean"
+        },
+        "project": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "supersedes": {
+          "type": "string"
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_id",
+        "scope",
+        "kind",
+        "body",
+        "source_message_id",
+        "attribution",
+        "needs_review"
+      ],
+      "title": "ContextFact",
+      "type": "object"
+    },
     "ControlMode": {
       "enum": [
         "managed",
@@ -716,6 +1108,9 @@
         "assistant_state": {
           "$ref": "#/definitions/AssistantState"
         },
+        "associations": {
+          "$ref": "#/definitions/MessageAssociations"
+        },
         "attachments": {
           "items": {
             "$ref": "#/definitions/ConversationAttachment"
@@ -739,6 +1134,9 @@
         },
         "control": {
           "$ref": "#/definitions/MessageControl"
+        },
+        "conversation_id": {
+          "type": "string"
         },
         "created_at": {
           "format": "date-time",
@@ -767,6 +1165,9 @@
         },
         "reply_to": {
           "type": "string"
+        },
+        "return_link": {
+          "$ref": "#/definitions/ConversationReturnLink"
         },
         "seq": {
           "type": "integer"
@@ -945,6 +1346,23 @@
         "total"
       ],
       "title": "ConversationQueuePage",
+      "type": "object"
+    },
+    "ConversationReturnLink": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "message_id"
+      ],
+      "title": "ConversationReturnLink",
       "type": "object"
     },
     "ConversationSettingsView": {
@@ -2109,6 +2527,37 @@
       "title": "LinkWorkItemTaskPayload",
       "type": "object"
     },
+    "MessageAssociations": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MessageWorkItem"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "message_id",
+        "revision",
+        "items"
+      ],
+      "title": "MessageAssociations",
+      "type": "object"
+    },
     "MessageControl": {
       "additionalProperties": false,
       "properties": {
@@ -2136,6 +2585,31 @@
       ],
       "title": "MessageState",
       "type": "string"
+    },
+    "MessageWorkItem": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_locked": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "work_item_id",
+        "title",
+        "source",
+        "owner_locked"
+      ],
+      "title": "MessageWorkItem",
+      "type": "object"
     },
     "MountView": {
       "additionalProperties": false,
@@ -2200,6 +2674,23 @@
         "status"
       ],
       "title": "Operation",
+      "type": "object"
+    },
+    "PrepareWorkItemContextPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "type": "string"
+        },
+        "gaps": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "coverage",
+        "gaps"
+      ],
+      "title": "PrepareWorkItemContextPayload",
       "type": "object"
     },
     "ProjectView": {
@@ -2751,6 +3242,9 @@
     "SetConversationSettingsPayload": {
       "additionalProperties": false,
       "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
         "effort": {
           "type": "string"
         },
@@ -2763,6 +3257,29 @@
         "effort"
       ],
       "title": "SetConversationSettingsPayload",
+      "type": "object"
+    },
+    "SetMessageAssociationsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "work_item_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "work_item_ids"
+      ],
+      "title": "SetMessageAssociationsPayload",
       "type": "object"
     },
     "SharedFact": {
@@ -2924,6 +3441,9 @@
           "type": "array"
         },
         "body": {
+          "type": "string"
+        },
+        "conversation_id": {
           "type": "string"
         },
         "decision": {
@@ -4036,6 +4556,70 @@
       "title": "WorkItemCompletionReview",
       "type": "object"
     },
+    "WorkItemContext": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "type": "string"
+        },
+        "facts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ContextFact"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gaps": {
+          "type": "string"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "prepared": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConversationItem"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "work_item_id",
+        "revision",
+        "prepared",
+        "coverage",
+        "gaps",
+        "facts",
+        "sources",
+        "more"
+      ],
+      "title": "WorkItemContext",
+      "type": "object"
+    },
     "WorkItemDelivery": {
       "additionalProperties": false,
       "properties": {
@@ -4521,6 +5105,24 @@
     "APIResponse": {
       "$ref": "#/definitions/APIResponse"
     },
+    "AgentCompactionPage": {
+      "$ref": "#/definitions/AgentCompactionPage"
+    },
+    "AgentContextUsage": {
+      "$ref": "#/definitions/AgentContextUsage"
+    },
+    "AgentConversation": {
+      "$ref": "#/definitions/AgentConversation"
+    },
+    "AgentConversationPage": {
+      "$ref": "#/definitions/AgentConversationPage"
+    },
+    "AgentRolloutPage": {
+      "$ref": "#/definitions/AgentRolloutPage"
+    },
+    "AgentRolloutWindow": {
+      "$ref": "#/definitions/AgentRolloutWindow"
+    },
     "AnswerDecisionPayload": {
       "$ref": "#/definitions/AnswerDecisionPayload"
     },
@@ -4533,11 +5135,17 @@
     "ArtifactPayload": {
       "$ref": "#/definitions/ArtifactPayload"
     },
+    "BackgroundAssessmentPayload": {
+      "$ref": "#/definitions/BackgroundAssessmentPayload"
+    },
     "BackgroundSourcePage": {
       "$ref": "#/definitions/BackgroundSourcePage"
     },
     "CloseWorkItemPayload": {
       "$ref": "#/definitions/CloseWorkItemPayload"
+    },
+    "ContextFact": {
+      "$ref": "#/definitions/ContextFact"
     },
     "ConversationAttachment": {
       "$ref": "#/definitions/ConversationAttachment"
@@ -4602,6 +5210,12 @@
     "LinkWorkItemTaskPayload": {
       "$ref": "#/definitions/LinkWorkItemTaskPayload"
     },
+    "MessageAssociations": {
+      "$ref": "#/definitions/MessageAssociations"
+    },
+    "PrepareWorkItemContextPayload": {
+      "$ref": "#/definitions/PrepareWorkItemContextPayload"
+    },
     "RateTaskPayload": {
       "$ref": "#/definitions/RateTaskPayload"
     },
@@ -4643,6 +5257,9 @@
     },
     "SetConversationSettingsPayload": {
       "$ref": "#/definitions/SetConversationSettingsPayload"
+    },
+    "SetMessageAssociationsPayload": {
+      "$ref": "#/definitions/SetMessageAssociationsPayload"
     },
     "Snapshot": {
       "$ref": "#/definitions/Snapshot"
@@ -4694,6 +5311,9 @@
     },
     "WorkItemChoicePage": {
       "$ref": "#/definitions/WorkItemChoicePage"
+    },
+    "WorkItemContext": {
+      "$ref": "#/definitions/WorkItemContext"
     },
     "WorkItemPage": {
       "$ref": "#/definitions/WorkItemPage"

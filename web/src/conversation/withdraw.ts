@@ -116,11 +116,13 @@ export class Withdrawals {
                 (submitted?.status !== "accepted" && submitted?.status !== "succeeded")
               )
                 throw new Error("发送结果尚未确认，保留原请求继续核对");
+              const conversation =
+                (w.envelope.payload as SubmitMessagePayload).conversation_id ?? "main";
               let after = 0,
                 entry: ConversationQueueEntry | undefined;
               do {
                 const page = await this.client.get<ConversationQueuePage>(
-                  `/api/v1/conversation/queue?category=owner&after=${after}`,
+                  `/api/v1/conversation/queue?category=owner&after=${after}&conversation_id=${encodeURIComponent(conversation)}`,
                 );
                 entry = page.items?.find((it) => it.item.message_id === result.message_id);
                 after = page.next ?? 0;

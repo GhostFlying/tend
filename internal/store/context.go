@@ -181,7 +181,7 @@ type MessageView struct {
 // and including the message with seq through when through is positive.
 func RecentMessages(ctx context.Context, q Querier, n int, through int64) ([]MessageView, error) {
 	rows, err := q.QueryContext(ctx, `SELECT seq, message_id, author, body, COALESCE(reply_to, ''), created_at FROM (
-		SELECT * FROM conversation_messages WHERE kind = 'message' AND (? <= 0 OR seq <= ?) ORDER BY seq DESC LIMIT ?) ORDER BY seq`, through, through, n)
+		SELECT * FROM conversation_messages WHERE conversation_id='main' AND kind = 'message' AND (? <= 0 OR seq <= ?) ORDER BY seq DESC LIMIT ?) ORDER BY seq`, through, through, n)
 	if err != nil {
 		return nil, fmt.Errorf("store: recent messages: %w", err)
 	}
@@ -202,7 +202,7 @@ func RecentMessages(ctx context.Context, q Querier, n int, through int64) ([]Mes
 		return nil, err
 	}
 	for i := range out {
-		b, err := q.QueryContext(ctx, `SELECT object_type || ':' || object_id FROM conversation_bindings WHERE message_id = ? ORDER BY object_type, object_id`, out[i].MessageID)
+		b, err := q.QueryContext(ctx, `SELECT object_type || ':' || object_id AS binding FROM conversation_bindings WHERE message_id = ? AND object_type<>'work_item' UNION SELECT 'work_item:' || work_item_id AS binding FROM message_work_items WHERE message_id=? AND active=1 ORDER BY binding`, out[i].MessageID, out[i].MessageID)
 		if err != nil {
 			return nil, fmt.Errorf("store: bindings: %w", err)
 		}

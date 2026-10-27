@@ -271,6 +271,8 @@ func tags(v any) []string {
 
 func TestSchemasMatchArgs(t *testing.T) {
 	args := map[string]any{
+		"background_evidence_read": evidenceArgs{},
+		"conversation_associate":   associateArgs{}, "work_item_context_read": contextReadArgs{}, "work_item_context_prepare": contextPrepareArgs{}, "work_item_context_fact": contextFactArgs{}, "agent_conversations_list": agentListArgs{}, "agent_rollout_read": rolloutArgs{}, "background_item_read": contextReadArgs{}, "background_submit": protocol.BackgroundAssessmentPayload{},
 		"background_sources": backgroundSourceArgs{}, "background_checkin": backgroundCheckinArgs{},
 		"work_items_followups_list":    followupListArgs{},
 		"work_items_followups_history": followupHistoryArgs{},
@@ -450,5 +452,23 @@ func TestLegacyCreateRequestReplayAfterRelationsUpgrade(t *testing.T) {
 	}
 	if string(outcome.Outcome) != string(prior["outcome"].(json.RawMessage)) {
 		t.Fatal("legacy replay changed its result")
+	}
+}
+
+func TestBackgroundNativeAutoModeDoesNotGrantTendWrites(t *testing.T) {
+	service := &Service{}
+	principal := protocol.Principal{Kind: protocol.PrincipalBackgroundAgent, ConversationID: "work-item:fixture"}
+	for _, spec := range Specs() {
+		if backgroundTools[spec.Name] {
+			continue
+		}
+		result := service.Handle(t.Context(), Call{Principal: principal, Tool: spec.Name, Arguments: json.RawMessage(`{}`)})
+		var body answer
+		if err := json.Unmarshal([]byte(result.Text), &body); err != nil {
+			t.Fatal(err)
+		}
+		if result.Success || body.Error == nil || body.Error.Code != protocol.CodeForbidden {
+			t.Errorf("background tool %s bypassed identity checks: %s", spec.Name, result.Text)
+		}
 	}
 }

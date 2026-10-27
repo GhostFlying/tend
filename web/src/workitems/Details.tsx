@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Connection } from "../api/client.ts";
 import type {
   DeliveryObservation,
@@ -6,6 +6,9 @@ import type {
   WorkItemEvidence,
   WorkItemView,
 } from "../api/generated/api.ts";
+import { runOp } from "../app/ops.ts";
+import { notify } from "../app/notice.ts";
+import type { AgentConversationPage } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
@@ -37,7 +40,21 @@ import controls from "../shell/controls.module.css";
 import styles from "./WorkItems.module.css";
 
 export function WorkItemDetails({ connection }: { connection: Connection }) {
-  const { live } = useServices();
+  const { live, client } = useServices();
+  const [agentsEnabled, setAgentsEnabled] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void client
+      .get<AgentConversationPage>("/api/v1/agent-conversations")
+      .then((p) => {
+        if (active) setAgentsEnabled(p.enabled);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [client]);
+
   const current = useStore(live.workItems.detail.state);
   const history = useStore(live.workItems.history.state);
   const [historical, setHistorical] = useState(false);
@@ -57,6 +74,31 @@ export function WorkItemDetails({ connection }: { connection: Connection }) {
             工作项 · {item ? columnLabel(item.column) : "正在读取"}
           </span>
           <h2>{item?.title ?? "工作项详情"}</h2>
+          {item && agentsEnabled && (
+            <button
+              className={controls.link}
+              onClick={() => {
+                void runOp(client, {
+                  operation: "conversation.open_background",
+                  target: { type: "work_item", id: item.work_item_id },
+                  payload: {},
+                })
+                  .then((r) => {
+                    if (r.kind !== "done") {
+                      notify(r.message, "warn");
+                      return;
+                    }
+                    const result = r.result as { conversation_id: string };
+                    window.dispatchEvent(
+                      new CustomEvent("tend:open-agent", { detail: result.conversation_id }),
+                    );
+                  })
+                  .catch((e) => notify(String(e), "warn"));
+              }}
+            >
+              打开后台 Agent ↗
+            </button>
+          )}
         </div>
       </div>
       <DetailTabs
