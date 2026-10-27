@@ -937,9 +937,20 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 					return a, false, err
 				}
 			}
-			if w.failedTurnEmitted != a.MainAgent.StateStartedAt {
-				w.failedTurnEmitted = a.MainAgent.StateStartedAt
-				w.emitID(ctx, fmt.Sprintf("%s@%d/root-failure/%d", w.st.Terminal, w.st.Turn, a.MainAgent.StateStartedAt), "worker.turn_failed", map[string]any{"outcome": a.MainAgent.Outcome, "turn_at": a.MainAgent.StateStartedAt, "managed_turn_at": w.st.Turn, "background_pending": !backgroundSettled(a, wait), "root_state": "failed", "root_turn": a.RootTurn})
+			failureStamp := a.MainAgent.StateStartedAt
+			if a.RootTurn != nil {
+				failureStamp = w.st.Turn
+			}
+			if w.failedTurnEmitted != failureStamp {
+				w.failedTurnEmitted = failureStamp
+				body := map[string]any{"outcome": a.MainAgent.Outcome, "turn_at": a.MainAgent.StateStartedAt, "managed_turn_at": w.st.Turn, "background_pending": !backgroundSettled(a, wait), "root_state": "failed", "root_turn": a.RootTurn}
+				if a.RootTurn != nil {
+					body["code"] = a.RootTurn.ErrorCode
+					if !validRootTurn(a, w.st.Turn) && w.ws.opts.Now().UnixMilli()-w.st.Turn < 10000 {
+						body["code"] = "observation_pending"
+					}
+				}
+				w.emitID(ctx, fmt.Sprintf("%s@%d/root-failure/%d", w.st.Terminal, w.st.Turn, failureStamp), "worker.turn_failed", body)
 			}
 			// Root failure does not prove that background commands have stopped.
 			// Keep the slot and original terminal until Orca confirms aggregate idle.
