@@ -221,9 +221,9 @@ try {
       assert(reads.some((path) => path.includes("sort=completed_at")));
       await page.screenshot({ path: join(output, `sidebar-${viewport.width}.png`) });
       await results.getByRole("button").first().click();
-      const details = page.getByRole("region", { name: "任务详情", exact: true });
+      const details = page.getByRole("dialog", { name: "任务详情", exact: true });
       await details.getByText("启动设计稿 Web 预览", { exact: true }).first().waitFor();
-      await details.getByRole("button", { name: "关闭", exact: true }).click();
+      await details.getByRole("button", { name: "关闭详情", exact: true }).click();
       const records = sidebar.getByRole("button", { name: "全部任务执行 ›", exact: true });
       await records.scrollIntoViewIfNeeded();
       await unobscured(records);

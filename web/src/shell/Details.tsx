@@ -21,30 +21,20 @@ import {
 } from "../tasks/status.ts";
 import controls from "./controls.module.css";
 import styles from "./Details.module.css";
-import { Back, Close } from "./icons.tsx";
+import { DetailTabs } from "./DetailOverlay.tsx";
+import { TaskInputs } from "../workitems/Materials.tsx";
 import { Note } from "./Chat.tsx";
 import { StatusDot } from "./StatusDot.tsx";
 
-export function Details({ onClose }: { onClose: () => void }) {
+export function Details() {
   const { live } = useServices();
   const state = useStore(live.detail);
   const task = state?.task;
   return (
     <>
       <div className={styles.head}>
-        <button
-          type="button"
-          className={`${controls.iconBtn} ${styles.back}`}
-          onClick={onClose}
-          aria-label="返回"
-        >
-          <Back />
-        </button>
         {task && <StatusDot tone={taskLook(task).tone} />}
         <span className={styles.title}>{task?.title ?? "任务详情"}</span>
-        <button type="button" className={controls.iconBtn} onClick={onClose} aria-label="关闭">
-          <Close />
-        </button>
       </div>
       <div className={styles.body}>
         <Note />
@@ -70,6 +60,7 @@ export function Details({ onClose }: { onClose: () => void }) {
 function TaskContent({ task: t }: { task: TaskDetail }) {
   const { followUp, openTask } = useServices();
   const current = currentWork(t);
+  const [tab, setTab] = useState(t.lifecycle === "completed" ? "delivery" : "execution");
   const spec = t.spec && typeof t.spec === "object" ? (t.spec as Record<string, unknown>) : null;
   const decisions = (t.decisions ?? []).filter((d) => d.status === "open");
   return (
@@ -83,7 +74,20 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
           <span className={styles.badge}>{controlLabels[t.control_mode]}</span>
         )}
       </div>
-      <TaskExecution task={t} />
+      <DetailTabs
+        tabs={[
+          { key: "delivery", label: "交付与验收" },
+          { key: "inputs", label: "目标与输入" },
+          { key: "execution", label: "执行与日志" },
+          { key: "workspace", label: "工作区" },
+          { key: "history", label: "历史" },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+      <div hidden={tab !== "execution"}>
+        <TaskExecution task={t} />
+      </div>
       {!!t.work_item_ids?.length && (
         <Section title="所属工作项">
           {t.work_item_ids.map((id) => (
@@ -123,142 +127,161 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
           <span>回到聊天补充意向，确认后手动发送</span>
         </div>
       )}
-      {t.lifecycle === "completed" && (
-        <Section title={`本版交付与验收 · spec ${t.spec_version}`}>
-          <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
-        </Section>
-      )}
-      {!!t.relations?.length && (
-        <Section title="任务关系">
-          <div className={styles.relations}>
-            {t.relations.map((relation) => (
-              <button
-                type="button"
-                className={styles.relation}
-                key={`${relation.kind}:${relation.direction}:${relation.task.task_id}`}
-                onClick={() => openTask(relation.task.task_id)}
-              >
-                <span>
-                  {relation.kind === "follow_up"
-                    ? relation.direction === "outgoing"
-                      ? "跟进自"
-                      : "后续跟进"
-                    : relation.direction === "outgoing"
-                      ? "关联 · 本任务声明"
-                      : "关联 · 对方声明"}
-                </span>
-                <strong>{relation.task.title}</strong>
-                <small>
-                  {lifecycleLabels[relation.task.lifecycle]} · {relation.task.task_id}
-                </small>
-              </button>
-            ))}
-          </div>
-        </Section>
-      )}
-      {typeof spec?.goal === "string" && (
-        <Section title="任务目标">
-          <Markdown text={spec.goal} />
-        </Section>
-      )}
-      {t.lifecycle !== "completed" && current.artifacts.length > 0 && (
-        <Section title={`本版产物 · spec ${t.spec_version}`}>
-          <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
-        </Section>
-      )}
-      <WorkspaceFacts task={t} />
-      <Section title="本版执行进展">
-        {!t.runs?.some((r) => r.spec_version === t.spec_version) && (
-          <p className={controls.empty}>暂无本版执行记录。</p>
+      <div hidden={tab !== "delivery"}>
+        {t.lifecycle === "completed" && (
+          <Section title={`本版交付与验收 · spec ${t.spec_version}`}>
+            <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
+          </Section>
         )}
-        {t.runs
-          ?.filter((r) => r.spec_version === t.spec_version)
-          .slice(-3)
-          .reverse()
-          .map((r) => (
-            <div className={styles.progress} key={r.run_id}>
-              <b>
-                {r.role === "implement" ? "实现" : "验收"} · 第 {r.generation} 代
-              </b>
-              <span>{statusLabels[r.observed] ?? r.observed}</span>
-              <small>{r.host}</small>
+      </div>
+      <div hidden={tab !== "execution"}>
+        {!!t.relations?.length && (
+          <Section title="任务关系">
+            <div className={styles.relations}>
+              {t.relations.map((relation) => (
+                <button
+                  type="button"
+                  className={styles.relation}
+                  key={`${relation.kind}:${relation.direction}:${relation.task.task_id}`}
+                  onClick={() => openTask(relation.task.task_id)}
+                >
+                  <span>
+                    {relation.kind === "follow_up"
+                      ? relation.direction === "outgoing"
+                        ? "跟进自"
+                        : "后续跟进"
+                      : relation.direction === "outgoing"
+                        ? "关联 · 本任务声明"
+                        : "关联 · 对方声明"}
+                  </span>
+                  <strong>{relation.task.title}</strong>
+                  <small>
+                    {lifecycleLabels[relation.task.lifecycle]} · {relation.task.task_id}
+                  </small>
+                </button>
+              ))}
+            </div>
+          </Section>
+        )}
+      </div>
+      <div hidden={tab !== "inputs"}>
+        <TaskInputs spec={t.spec} />
+        {typeof spec?.goal === "string" && (
+          <Section title="任务目标">
+            <Markdown text={spec.goal} />
+          </Section>
+        )}
+      </div>
+      <div hidden={tab !== "delivery"}>
+        {t.lifecycle !== "completed" && current.artifacts.length > 0 && (
+          <Section title={`本版产物 · spec ${t.spec_version}`}>
+            <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
+          </Section>
+        )}
+      </div>
+      <div hidden={tab !== "workspace"}>
+        <WorkspaceFacts task={t} />
+      </div>
+      <div hidden={tab !== "execution"}>
+        <Section title="本版执行进展">
+          {!t.runs?.some((r) => r.spec_version === t.spec_version) && (
+            <p className={controls.empty}>暂无本版执行记录。</p>
+          )}
+          {t.runs
+            ?.filter((r) => r.spec_version === t.spec_version)
+            .slice(-3)
+            .reverse()
+            .map((r) => (
+              <div className={styles.progress} key={r.run_id}>
+                <b>
+                  {r.role === "implement" ? "实现" : "验收"} · 第 {r.generation} 代
+                </b>
+                <span>{statusLabels[r.observed] ?? r.observed}</span>
+                <small>{r.host}</small>
+              </div>
+            ))}
+        </Section>
+        <LogSection task={t} />
+      </div>
+      <div hidden={tab !== "inputs"}>
+        <Fold title={`完整目标与验收条件 · spec ${t.spec_version}`}>
+          {spec ? (
+            Object.entries(spec).map(([key, value]) => (
+              <div key={key}>
+                <div className={styles.caption}>
+                  {key === "goal" ? "目标" : (specLabels[key] ?? key)}
+                </div>
+                <SpecValue value={value} field={key} />
+              </div>
+            ))
+          ) : (
+            <pre className={styles.fact}>{text(t.spec)}</pre>
+          )}
+        </Fold>
+      </div>
+      <div hidden={tab !== "workspace"}>
+        <Fold title="工作区与分支">
+          <p>
+            {t.workspace || "尚未分配"}
+            {t.workspace_state &&
+              ` · ${t.workspace_state.host} · ${workspaceLabels[t.workspace_state.status] ?? t.workspace_state.status}`}
+          </p>
+          {t.workspace_state?.mounts?.map((m) => (
+            <div className={styles.mount} key={`${m.repo}:${m.path}`}>
+              <dl className={styles.kv}>
+                {m.repo === m.path ? (
+                  <>
+                    <dt>仓库 / 路径</dt>
+                    <dd>
+                      <code>{m.repo}</code>
+                    </dd>
+                  </>
+                ) : (
+                  <>
+                    <dt>仓库</dt>
+                    <dd>{m.repo}</dd>
+                    <dt>相对路径</dt>
+                    <dd>
+                      <code>{m.path}</code>
+                    </dd>
+                  </>
+                )}
+                <dt>分支</dt>
+                <dd>
+                  <code>{m.branch}</code>
+                </dd>
+              </dl>
             </div>
           ))}
-      </Section>
-      <LogSection task={t} />
-      <Fold title={`完整目标与验收条件 · spec ${t.spec_version}`}>
-        {spec ? (
-          Object.entries(spec).map(([key, value]) => (
-            <div key={key}>
-              <div className={styles.caption}>
-                {key === "goal" ? "目标" : (specLabels[key] ?? key)}
-              </div>
-              <SpecValue value={value} field={key} />
-            </div>
-          ))
-        ) : (
-          <pre className={styles.fact}>{text(t.spec)}</pre>
-        )}
-      </Fold>
-      <Fold title="工作区与分支">
-        <p>
-          {t.workspace || "尚未分配"}
-          {t.workspace_state &&
-            ` · ${t.workspace_state.host} · ${workspaceLabels[t.workspace_state.status] ?? t.workspace_state.status}`}
-        </p>
-        {t.workspace_state?.mounts?.map((m) => (
-          <div className={styles.mount} key={`${m.repo}:${m.path}`}>
-            <dl className={styles.kv}>
-              {m.repo === m.path ? (
-                <>
-                  <dt>仓库 / 路径</dt>
-                  <dd>
-                    <code>{m.repo}</code>
-                  </dd>
-                </>
-              ) : (
-                <>
-                  <dt>仓库</dt>
-                  <dd>{m.repo}</dd>
-                  <dt>相对路径</dt>
-                  <dd>
-                    <code>{m.path}</code>
-                  </dd>
-                </>
-              )}
-              <dt>分支</dt>
-              <dd>
-                <code>{m.branch}</code>
-              </dd>
-            </dl>
-          </div>
-        ))}
-      </Fold>
-      <Fold title="标识与原始记录">
-        <dl className={styles.kv}>
-          <dt>任务 ID</dt>
-          <dd>
-            <code>{t.task_id}</code>
-          </dd>
-          <dt>控制版本</dt>
-          <dd>{t.control_revision}</dd>
-          <dt>实现代次</dt>
-          <dd>{t.next_implement_generation}</dd>
-        </dl>
-        <pre className={styles.fact}>
-          {text({
-            relations: t.relations,
-            actions: t.actions,
-            runs: t.runs,
-            artifacts: t.artifacts,
-            acceptances: t.acceptances,
-            decisions: t.decisions,
-          })}
-        </pre>
-      </Fold>
-      <Fold title="历史产物与验收">
-        <Artifacts artifacts={t.artifacts ?? []} verdicts={t.acceptances ?? []} historical />
-      </Fold>
+        </Fold>
+      </div>
+      <div hidden={tab !== "history"}>
+        <Fold title="标识与原始记录">
+          <dl className={styles.kv}>
+            <dt>任务 ID</dt>
+            <dd>
+              <code>{t.task_id}</code>
+            </dd>
+            <dt>控制版本</dt>
+            <dd>{t.control_revision}</dd>
+            <dt>实现代次</dt>
+            <dd>{t.next_implement_generation}</dd>
+          </dl>
+          <pre className={styles.fact}>
+            {text({
+              relations: t.relations,
+              actions: t.actions,
+              runs: t.runs,
+              artifacts: t.artifacts,
+              acceptances: t.acceptances,
+              decisions: t.decisions,
+            })}
+          </pre>
+        </Fold>
+        <Fold title="历史产物与验收">
+          <Artifacts artifacts={t.artifacts ?? []} verdicts={t.acceptances ?? []} historical />
+        </Fold>
+      </div>
     </>
   );
 }

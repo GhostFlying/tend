@@ -11,6 +11,7 @@ import { processing } from "../conversation/model.ts";
 import { taskLook } from "../tasks/status.ts";
 import { queueReasonText } from "../tasks/execution.ts";
 import { LiveData, summary, type Reader } from "./data.ts";
+import { WorkItemRead } from "../workitems/live.ts";
 
 /** A fake owner API whose answers the test releases one by one. */
 class FakeApi implements Reader {
@@ -96,6 +97,40 @@ function messageEvent(
 const snapshot = { event_seq: 1, tasks: [], decisions: [], hosts: [], projects: [], queue: [] };
 
 describe("LiveData", () => {
+  test("materials refresh on acceptance events without selecting a task", async () => {
+    const api = new FakeApi();
+    const live = new LiveData(api);
+    const read = new WorkItemRead<TaskDetail>(api);
+    const unwatch = live.watchMaterials("task-materials", read);
+    await api.answer("/api/v1/tasks/task-materials", {
+      task_id: "task-materials",
+      acceptances: [],
+    });
+    live.apply({
+      event_seq: 2,
+      object_type: "task",
+      object_id: "task-materials",
+      kind: "acceptance.submitted",
+      created_at: "2026-10-27T00:00:00Z",
+    });
+    await api.answer("/api/v1/tasks/task-materials", {
+      task_id: "task-materials",
+      acceptances: [{ verdict: "blocked" }],
+    });
+    expect(read.state.get().value?.acceptances).toEqual([{ verdict: "blocked" }]);
+    expect(live.detail.get()).toBeNull();
+    unwatch();
+    const count = api.calls.filter((path) => path === "/api/v1/tasks/task-materials").length;
+    live.apply({
+      event_seq: 3,
+      object_type: "task",
+      object_id: "task-materials",
+      kind: "acceptance.submitted",
+      created_at: "2026-10-27T00:00:01Z",
+    });
+    expect(api.calls.filter((path) => path === "/api/v1/tasks/task-materials")).toHaveLength(count);
+    await live.stop();
+  });
   test("a reload reads the snapshot and the latest page", async () => {
     const api = new FakeApi();
     const live = new LiveData(api);

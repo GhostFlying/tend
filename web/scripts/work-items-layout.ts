@@ -322,6 +322,16 @@ function publish() {
 }
 async function reachable(control: Locator, minHeight = 0) {
   await control.scrollIntoViewIfNeeded();
+  const diagnostics = await control.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      rect: r.toJSON(),
+      viewport: [innerWidth, innerHeight],
+      hit: document
+        .elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+        ?.outerHTML.slice(0, 200),
+    };
+  });
   assert(
     await control.evaluate((el, height) => {
       const rect = el.getBoundingClientRect();
@@ -329,15 +339,16 @@ async function reachable(control: Locator, minHeight = 0) {
       return (
         rect.height >= height &&
         rect.width >= height &&
-        rect.left >= 0 &&
+        // Scrolling rounds fractional CSS pixels; hit testing remains authoritative.
+        rect.left >= -1 &&
         rect.right <= innerWidth + 1 &&
-        rect.top >= 0 &&
-        rect.bottom <= innerHeight &&
+        rect.top >= -1 &&
+        rect.bottom <= innerHeight + 1 &&
         hit &&
         el.contains(hit)
       );
     }, minHeight),
-    `unreachable control: ${await control.textContent()}`,
+    `unreachable control: ${await control.textContent()} ${JSON.stringify(diagnostics)}`,
   );
 }
 await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
@@ -456,9 +467,9 @@ try {
     await reachable(stageTask, mobile ? 44 : 0);
     await page.screenshot({ path: join(output, `stages-${width}.png`) });
     await stageTask.click();
-    const taskDetail = page.getByRole("region", { name: "任务详情", exact: true });
+    const taskDetail = page.getByRole("dialog", { name: "任务详情", exact: true });
     await taskDetail.getByText(task.title, { exact: true }).waitFor();
-    await taskDetail.getByRole("button", { name: "关闭", exact: true }).click();
+    await taskDetail.getByRole("button", { name: "关闭详情", exact: true }).click();
     assert(await stageTask.evaluate((el) => el === document.activeElement));
     await stages.click();
     await filter.fill(longProject);
@@ -499,8 +510,8 @@ try {
       await more.click();
       const lastDetails = page.getByRole("dialog", { name: "工作项详情", exact: true });
       await lastDetails.getByRole("heading", { name: items[4]!.title, exact: true }).waitFor();
-      await reachable(lastDetails.getByRole("button", { name: "关闭工作项详情" }), 44);
-      await lastDetails.getByRole("button", { name: "关闭工作项详情" }).click();
+      await reachable(lastDetails.getByRole("button", { name: "关闭详情" }), 44);
+      await lastDetails.getByRole("button", { name: "关闭详情" }).click();
       assert(await more.evaluate((el) => el === document.activeElement));
       const top = await reading.evaluate((el) => el.scrollTop);
       const entry = page.getByRole("button", { name: /^资源与记录/ });
@@ -590,9 +601,9 @@ try {
       await reachable(recent, 44);
       await recent.click();
       await panel.waitFor({ state: "detached" });
-      const detail = page.getByRole("region", { name: "任务详情", exact: true });
+      const detail = page.getByRole("dialog", { name: "任务详情", exact: true });
       await detail.getByText(task.title, { exact: true }).waitFor();
-      await detail.getByRole("button", { name: "关闭", exact: true }).click();
+      await detail.getByRole("button", { name: "关闭详情", exact: true }).click();
       assert(await entry.evaluate((el) => el === document.activeElement));
       await entry.click();
       await panel.getByRole("button", { name: "查看任务执行" }).click();
@@ -654,6 +665,7 @@ try {
     assert(
       await detail
         .getByRole("button", { name: /实现已批准页面/ })
+        .first()
         .evaluate((el) => el.getBoundingClientRect().bottom < innerHeight),
     );
     await page.screenshot({ path: join(output, `detail-current-${width}.png`) });
@@ -680,6 +692,7 @@ try {
     planChoice.version = 1;
     items[0]!.choices = [planChoice];
     publish();
+    await detail.getByRole("button", { name: "评审材料", exact: true }).click();
     const choiceCard = detail.getByRole("region", { name: "下一步安排" });
     await choiceCard.getByRole("button", { name: "稍后决定", exact: true }).waitFor();
     await choiceCard.scrollIntoViewIfNeeded();
@@ -687,10 +700,12 @@ try {
     await choiceCard.getByText("其他安排", { exact: true }).click();
     await choiceCard.getByLabel("你的安排").fill("先让我看看效果，再安排上线");
     await choiceCard.getByRole("button", { name: "发送回答", exact: true }).click();
+    await detail.getByRole("button", { name: "历史", exact: true }).click();
     await detail.getByText("已回答 · 是否继续完成 PR、合入并上线？", { exact: true }).waitFor();
     assert.equal(planChoice.answer, "先让我看看效果，再安排上线");
     assert.equal(await detail.getByRole("button", { name: "继续上线", exact: true }).count(), 0);
     delete items[0]!.choices;
+    await detail.getByRole("button", { name: "跟进与交付", exact: true }).click();
     await reachable(detail.getByRole("button", { name: "继续讨论", exact: true }), mobile ? 44 : 0);
     await reachable(
       detail.getByRole("button", { name: "提出暂缓安排", exact: true }),
@@ -698,14 +713,15 @@ try {
     );
     await reachable(detail.getByRole("link", { name: "example/repo #1 ↗", exact: true }));
     assert.equal(await detail.getByRole("button", { name: "刷新交付状态" }).count(), 1);
+    await detail.getByRole("button", { name: "历史", exact: true }).click();
     await detail.getByText("查看计划历史", { exact: true }).click();
     await detail.getByRole("button", { name: "读取历史计划" }).click();
     await detail
       .getByText("历史计划与留存依据；不包含当前执行和观察状态。", { exact: false })
       .waitFor();
     await detail.getByRole("button", { name: "回到当前计划" }).click();
-    await reachable(detail.getByRole("button", { name: "关闭工作项详情" }), mobile ? 44 : 0);
-    await detail.getByRole("button", { name: "关闭工作项详情" }).click();
+    await reachable(detail.getByRole("button", { name: "关闭详情" }), mobile ? 44 : 0);
+    await detail.getByRole("button", { name: "关闭详情" }).click();
     assert(await title.evaluate((el) => el === document.activeElement));
     items[0]!.tasks = originalTasks;
     items[0]!.stages!.pop();
@@ -773,6 +789,7 @@ try {
       await current.getByText("等待主机空闲槽位", { exact: true }).waitFor();
     }
     await title.click();
+    await detail.getByRole("button", { name: "跟进与交付", exact: true }).click();
     await detail.getByText("后续仍需明确安排。", { exact: true }).waitFor();
     await detail.getByRole("button", { name: "继续讨论", exact: true }).click();
     const composer = page.getByRole("textbox", { name: "消息", exact: true });
