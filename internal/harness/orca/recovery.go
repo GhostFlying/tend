@@ -223,6 +223,9 @@ func (w *worker) continueFailedSession(ctx context.Context) error {
 	if r.OriginalPrompt == "" {
 		r.OriginalPrompt = w.st.Said
 	}
+	if a.RootTurn != nil && (!validRootTurn(a, w.st.Turn) || a.RootTurn.State == "unknown") {
+		return errRecoveryUncertain
+	}
 	prompt := w.recoveryBrief()
 	alreadySent := samePrompt(said(a.Prompt), said(prompt)) && a.Prompt != "" && a.StateStartedAt >= w.st.Turn
 	if !alreadySent {
@@ -301,6 +304,9 @@ func (w *worker) recheckFailedTurn(ctx context.Context, wait Wait) error {
 	expected := r.OriginalPrompt
 	if expected == "" {
 		expected = w.st.Said
+	}
+	if r.Phase == recoveryContinuing && a.RootTurn != nil && (!validRootTurn(a, w.st.Turn) || a.RootTurn.State == "unknown") {
+		return errRecoveryUncertain
 	}
 	if !alive || w.spec.HandBack || a.ProviderSession == nil || a.ProviderSession.ID != r.SessionID ||
 		a.Prompt == "" || expected == "" || !samePrompt(said(a.Prompt), expected) || a.Interrupted ||
@@ -388,7 +394,12 @@ func (w *worker) awaitRecoveryReconciliation(ctx context.Context) bool {
 	for ctx.Err() == nil {
 		// A saved receipt is queried under its original identity. Without one,
 		// continueFailedSession only accepts an observed matching prompt after issue.
-		err := w.continueFailedSession(ctx)
+		var err error
+		if w.spec.HandBack {
+			err = w.begin(ctx, orcaAgents[w.ws.opts.Agent])
+		} else {
+			err = w.continueFailedSession(ctx)
+		}
 		if err == nil {
 			w.emitID(ctx, identity+"/resolved", "worker.root_observation_resolved", map[string]any{"managed_turn_at": w.st.Turn})
 			return true
