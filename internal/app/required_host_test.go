@@ -148,6 +148,7 @@ func TestRequiredHostLossRejectsLegacyStartOverWithoutAbandoningWorkspace(t *tes
 		t.Fatal(err)
 	}
 	answer := h.answer(question, domain.StartOverOption)
+	reviewDecisionAnswer(t, h, question.DecisionID)
 	if answer.Effect == nil || answer.Effect.Applied || !strings.Contains(answer.Effect.Reason, "requirements.host_id") {
 		t.Fatal(answer)
 	}

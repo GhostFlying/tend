@@ -209,7 +209,7 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 			}
 		}
 		if d.Destination == MainThreadDestination && r.Outcome == Unknown {
-			if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='unknown',reason='Native execution receipt is unknown; reconcile before continuing.',updated_at=? WHERE status NOT IN ('completed','stopped') AND logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?)`, now.UnixMilli(), d.RequestID); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='unknown',reason='Native execution receipt is unknown; reconcile before continuing.',updated_at=? WHERE status NOT IN ('completed','stopped','awaiting_clarification') AND logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?)`, now.UnixMilli(), d.RequestID); err != nil {
 				return err
 			}
 		}

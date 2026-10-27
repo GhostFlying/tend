@@ -202,16 +202,15 @@ func cancelObsoleteQuestions(ctx context.Context, x *Exec, tx *store.Tx, out *Ou
 
 // recordWorkerAnswerSource preserves direct panel answers in chat without
 // queuing another owner turn; the decision event performs the coordination.
-func recordWorkerAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRow, p *protocol.AnswerDecisionPayload) ([]Event, error) {
-	if d.Worker == nil {
-		return nil, nil
-	}
-	rc, err := loadRun(ctx, tx.Q(), d.Worker.RunID)
-	if err != nil {
-		return nil, err
-	}
-	if desiredFor(rc.run, rc.action, rc.task) == protocol.DesiredStopped {
-		return nil, protocol.Errorf(protocol.CodeStaleRevision, "the question's run no longer applies")
+func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRow, p *protocol.AnswerDecisionPayload) ([]Event, error) {
+	if d.Worker != nil {
+		rc, err := loadRun(ctx, tx.Q(), d.Worker.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if desiredFor(rc.run, rc.action, rc.task) == protocol.DesiredStopped {
+			return nil, protocol.Errorf(protocol.CodeStaleRevision, "the question's run no longer applies")
+		}
 	}
 	if p.SourceMessageID != "" {
 		m, err := store.GetMessage(ctx, tx.Q(), p.SourceMessageID)
@@ -223,7 +222,7 @@ func recordWorkerAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d stor
 		}
 		return nil, nil
 	}
-	if x.Principal.Kind != protocol.PrincipalOwner && !x.Principal.Addon() {
+	if x.Principal.Kind != protocol.PrincipalOwner {
 		return nil, protocol.Errorf(protocol.CodeForbidden, "worker answers require an actual owner message")
 	}
 	author := "owner"
@@ -234,10 +233,6 @@ func recordWorkerAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d stor
 		}
 		body += p.Text
 	}
-	if x.Principal.Addon() {
-		author = "main_agent"
-		body = "转交 owner 的回答：\n\n" + body
-	}
 	id := x.IDs.New(protocol.PrefixMessage)
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: author, Body: body, ReplyTo: d.AskedMessageID, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
@@ -246,9 +241,7 @@ func recordWorkerAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d stor
 	if err := tx.BindMessage(ctx, id, "decision", d.DecisionID, "answers"); err != nil {
 		return nil, err
 	}
-	if err := tx.BindMessage(ctx, id, "task", d.TaskID, "answers"); err != nil {
-		return nil, err
-	}
+
 	p.SourceMessageID = id
 	events := []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": author, "reply_to": d.AskedMessageID}}}
 	if author == "owner" {

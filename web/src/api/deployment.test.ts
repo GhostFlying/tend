@@ -104,3 +104,22 @@ test("delayed cleanup preserves the new deployment's interrupt and followup jour
   expect(new Interrupt(sender, { storage: disk }).state.get()).toBeNull();
   expect(new FollowupActions(sender, "item", disk, vi.fn()).state.get().pending).toEqual([]);
 });
+
+test("instance reset preserves static shell and newer business caches", async () => {
+  const remove = vi.fn<(name: string) => Promise<boolean>>(async () => true);
+  vi.stubGlobal("caches", {
+    keys: async () => [
+      "tend-shell-build",
+      "tend-api:deployment:old",
+      "tend-api:deployment:new",
+      "tend-legacy",
+      "unrelated",
+    ],
+    delete: remove,
+  });
+  await clearOldDeploymentData("old");
+  expect(remove.mock.calls.map(([name]) => name)).toEqual([
+    "tend-api:deployment:old",
+    "tend-legacy",
+  ]);
+});

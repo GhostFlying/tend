@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )

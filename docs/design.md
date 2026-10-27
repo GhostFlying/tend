@@ -114,6 +114,7 @@
 | D112 | TraeX 根回合失败观察与有限恢复，细化 D67：能力协商启用 Orca 的可选 rootTurn 原生事实，固定 session、turn、pane、终端启动及 runtime 身份，区分根失败与后台操作收敛；可信暂时性错误在原 run/会话继续最多一次，预算和阶段沿用 journal 扩展，未知操作或发送先对账，恢复发送不明时保留原终端和占用等待处理。旧 Orca 保留 JSONL 证据路径；other 等错误不扩大重试。原生结束时钟缺失但本回合 hook 仍 working 时不提醒，历史不可读仍需核对；引导观察细化为后台待收敛的失败时也生成提醒；未收敛失败经已有 inbox、消息和后台来源事务形成一次持久提醒，已有待决不重复；不改数据库迁移和 runner 协议代次。详见 docs/plans/traex-root-turn-recovery.md。 | 已实现（2026-10-27） |
 
 | D113 | 正式消息显式 linked/unassigned 判定，内容版本与事实检查作为逻辑轮完成条件；保留流式，遗漏受限自动修正并持久恢复。托管主 Agent 始终启动后台会话，取代 D111 的默认关闭策略。新项当轮初始化，不实现历史回填。持久 deployment_id 拒绝跨空库实例回放；本次全新部署删除旧业务数据，仅独占转移网络身份。见 docs/plans/mandatory-message-context.md。 | 已实现（2026-10-27） |
+| D114 | 退役外挂主协调 Agent，主协调统一由 Tend 托管。删除外挂 MCP/hook/setup、会话项目绑定及专用检查工具，不签发或接受外挂 agent token；保留 owner CLI、worker MCP、runner 和 provider。历史迁移与来源仍可读取，旧入口拒绝执行。取代 D45/D47/D48/D54/D59/D68 中外挂并存的运行规则。见 docs/plans/mandatory-message-context.md。 | 已确认（2026-10-27） |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -279,3 +280,7 @@ owner 认证 GET `/api/v1/repos` 与 `repos_list` 共用 views 的全量登记�
 工作项详情提供规则创建、编辑、暂停、恢复、取消、手动检查及修订/发生历史，卡片和当前步骤显示等待摘要，等待不冒充 running。绝对时间使用显式 IANA 时区转换为 UTC 毫秒，拒绝不存在或歧义的夏令时时刻；固定间隔是时长，不是当地每日时间。未知控制请求按 request_id 独立持久保存，刷新与多标签页不会替换它，核对和重试沿用原身份。规则、历史及来源读取使用读取代次和取消保护，并接入 SSE、重连和前台恢复。连续相同静默结果可折叠，展开仍能查看每次来源。
 
 owner 认证的 `/api/v1/coordination/metrics` 从账本导出 pending owner/background 深度及最老创建时间、时点到 occurrence 入队的最大延迟、撤回竞争失败、累计合并来源数、成功静默检查数和 unknown 批次数。历史计数包括留存行，当前排队计数不含已运行轮次；不引入指标依赖。领取日志携带 request/outbox 身份，规则与来源身份保存在同事务事件及 occurrence。迁移 0041 只追加，不改变 runner 通信。旧 outbox 保持原投递方式；旧 Web 仍可使用原聊天 API，新界面按能力禁用未提供的跟进写入。工具定义变化沿 D81 交接，发布与回退预检沿实施计划执行；此实现不包含部署。
+
+D113 补充：程序可确定处理 owner 无自由文本、精确匹配持久执行选项且已成功应用的直接面板回答；只为新生成原文保存本次 decision/version、task/spec/control revision、effect/generation 的授权事实及精确内容检查，不完成其他来源或逻辑轮。此语义不依赖 hosted main 配置。其他回答原文必须进入主协调责任。部署身份变化清理业务缓存，静态构建 shell 缓存由 service worker 版本管理。
+
+D114 当前运行边界：D45、D47、D48、D54、D59、D68、D94 及旧部署章节中的外挂行为仅保留为历史设计，不再提供入口。owner 登录只签发 owner token，旧 agent token 和非托管主 Agent 身份拒绝执行。主 Agent 工具只有一套托管 schema；历史 `addon_relay` 及 actor 来源仍按真实身份读取。runner 的 `worker-mcp` 和 provider 类型独立保留，server/runner 通信协议不变。

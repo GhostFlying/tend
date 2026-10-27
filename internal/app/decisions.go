@@ -126,7 +126,7 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	}
 	// The hosted main agent records answers from the conversation it
 	// hosts. An agent the owner works in has no message to point to.
-	if c.FromMessage && p.SourceMessageID == "" && !x.Principal.Addon() {
+	if c.FromMessage && p.SourceMessageID == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "source_message_id is required")
 	}
 	d, err := store.GetDecision(ctx, tx.Q(), x.Env.Target.ID)
@@ -153,13 +153,30 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		return Outcome{}, pe
 	}
-	sourceEvents, err := recordWorkerAnswerSource(ctx, x, tx, d, &p)
+	newOwnerSource := x.Principal.Kind == protocol.PrincipalOwner && p.SourceMessageID == ""
+	sourceEvents, err := recordDecisionAnswerSource(ctx, x, tx, d, &p)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if p.SourceMessageID != "" {
+		if d.TaskID != "" {
+			if err := tx.BindMessage(ctx, p.SourceMessageID, "task", d.TaskID, "answers"); err != nil {
+				return Outcome{}, err
+			}
+		}
+		if err := attachReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
+			return Outcome{}, err
+		}
 	}
 	effect, effectEvents, err := answerEffect(ctx, x, tx, d, p.Option)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if newOwnerSource && p.Text == "" && p.Option != "" && effect != nil && effect.Applied {
+		if err := reviewAppliedOwnerChoice(ctx, x, tx, d, p, *effect); err != nil {
+			return Outcome{}, err
+		}
+		sourceEvents = append(sourceEvents, Event{ObjectType: "message", ObjectID: p.SourceMessageID, Kind: "conversation.turn_reviewed"})
 	}
 	answer, err := json.Marshal(decisionAnswer{Option: p.Option, Text: p.Text, Effect: effect})
 	if err != nil {

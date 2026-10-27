@@ -23,7 +23,7 @@ func TestAnsweredDecisionWakeCarriesCanonicalEffectResult(t *testing.T) {
 			t.Fatalf("chat notice omitted readable answer or exposed protocol JSON: %s", last.Body)
 		}
 		var raw string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT data_json FROM background_sources WHERE message_id=?`, last.MessageID).Scan(&raw); err != nil {
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT json_extract(payload_json,'$.decision_answer') FROM outbox WHERE json_extract(payload_json,'$.message_id')=?`, last.MessageID).Scan(&raw); err != nil {
 			return err
 		}
 		if raw != string(answer.Answer) || !strings.Contains(raw, `"applied":true`) {
@@ -80,18 +80,11 @@ func TestEventWakeFailureDecisionAndOwnerAnswerAreDurable(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("answer wake after restart = %+v, %v, %v", d, ok, err)
 	}
-	if err := json.Unmarshal(d.Payload, &wake); err != nil || wake.EventKind != "background.batch" {
+	if err := json.Unmarshal(d.Payload, &wake); err != nil || wake.EventKind != "decision.answered" {
 		t.Fatalf("answer wake = %+v, %v", wake, err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		page, err := store.BackgroundSources(t.Context(), tx.Q(), wake.MessageID, 0)
-		if err != nil {
-			return err
-		}
-		if len(page.Sources) != 1 {
-			t.Fatal(page)
-		}
-		metadata, err := store.GetMessageNotice(t.Context(), tx.Q(), page.Sources[0].MessageID)
+		metadata, err := store.GetMessageNotice(t.Context(), tx.Q(), wake.MessageID)
 		if err == nil && metadata.NoticeType != "decision_answered" {
 			t.Fatalf("answer notice type = %q", metadata.NoticeType)
 		}
@@ -109,11 +102,6 @@ func TestEventWakeFailureDecisionAndOwnerAnswerAreDurable(t *testing.T) {
 }
 
 func TestEventWakeDoesNotLoopOrPollProgress(t *testing.T) {
-	addon := mainAgent
-	addon.Agent = "codex"
-	if !wakesMain(addon, "decision.answered") {
-		t.Fatal("external agent decision answer did not wake hosted main")
-	}
 	for _, kind := range []string{"run.progress", "run.heartbeat", "run.failed", "conversation.message", "decision.opened", "decision.answered"} {
 		if wakesMain(mainAgent, kind) {
 			t.Errorf("main agent event %s woke itself", kind)

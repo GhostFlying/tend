@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -262,79 +261,4 @@ func TaskByWorkspaceName(ctx context.Context, q Querier, name string) (string, e
 		return "", notFound(err, "task with workspace "+name)
 	}
 	return id, nil
-}
-
-// BindAgentSession records that an agent session called a tend tool. The
-// first call binds it; later ones only mark it seen.
-func (t *Tx) BindAgentSession(ctx context.Context, agent, sessionID, clientID string, now int64) error {
-	_, err := t.Exec(ctx, `INSERT INTO agent_sessions (agent, session_id, client_id, first_seen_at, last_seen_at, bound_at)
-		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (agent, session_id) DO UPDATE SET client_id = excluded.client_id,
-		last_seen_at = excluded.last_seen_at, bound_at = COALESCE(agent_sessions.bound_at, excluded.bound_at)`,
-		agent, sessionID, clientID, now, now, now)
-	if err != nil {
-		return fmt.Errorf("store: bind agent session: %w", err)
-	}
-	return nil
-}
-
-// AgentSessionBound reports whether an agent session has called a tend
-// tool.
-func AgentSessionBound(ctx context.Context, q Querier, agent, sessionID string) (bool, error) {
-	var n int
-	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE agent = ? AND session_id = ? AND bound_at IS NOT NULL`,
-		agent, sessionID).Scan(&n)
-	if err != nil {
-		return false, fmt.Errorf("store: read agent session: %w", err)
-	}
-	return n > 0, nil
-}
-
-// How a session's project was set (D59).
-const (
-	ProjectAuto     = "auto"
-	ProjectExplicit = "explicit"
-)
-
-// SessionProject is the project an agent session works in. An empty
-// Source means tend has not bound the session yet; a binding with an
-// empty Project means every project.
-type SessionProject struct {
-	Project string
-	Source  string
-}
-
-// GetSessionProject returns an agent session's project. A session tend has
-// not recorded has none.
-func GetSessionProject(ctx context.Context, q Querier, agent, sessionID string) (SessionProject, error) {
-	var project, source sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT project, project_source FROM agent_sessions WHERE agent = ? AND session_id = ?`,
-		agent, sessionID).Scan(&project, &source)
-	if errors.Is(err, sql.ErrNoRows) {
-		return SessionProject{}, nil
-	}
-	if err != nil {
-		return SessionProject{}, fmt.Errorf("store: read session project: %w", err)
-	}
-	return SessionProject{Project: project.String, Source: source.String}, nil
-}
-
-// SetSessionProject records the project of a recorded agent session.
-func (t *Tx) SetSessionProject(ctx context.Context, agent, sessionID string, sp SessionProject) error {
-	_, err := t.Exec(ctx, `UPDATE agent_sessions SET project = ?, project_source = ? WHERE agent = ? AND session_id = ?`,
-		nullString(sp.Project), nullString(sp.Source), agent, sessionID)
-	if err != nil {
-		return fmt.Errorf("store: set session project: %w", err)
-	}
-	return nil
-}
-
-// UpsertAgentSession records that an agent session was seen.
-func (t *Tx) UpsertAgentSession(ctx context.Context, agent, sessionID, clientID string, now int64) error {
-	_, err := t.Exec(ctx, `INSERT INTO agent_sessions (agent, session_id, client_id, first_seen_at, last_seen_at)
-		VALUES (?, ?, ?, ?, ?) ON CONFLICT (agent, session_id) DO UPDATE SET client_id = excluded.client_id,
-		last_seen_at = excluded.last_seen_at`, agent, sessionID, clientID, now, now)
-	if err != nil {
-		return fmt.Errorf("store: upsert agent session: %w", err)
-	}
-	return nil
 }

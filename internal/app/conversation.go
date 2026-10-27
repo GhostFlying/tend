@@ -474,6 +474,22 @@ func (a *App) insertToolUseEvent(ctx context.Context, tx *store.Tx, messageID st
 	return err
 }
 
+// mainTurnBusinessStatus keeps metadata execution outcomes separate from the
+// ordinary request, including when native receipt reconciliation is pending.
+func mainTurnBusinessStatus(ctx context.Context, q store.Querier, m store.MainTurn) (string, bool, error) {
+	var repair bool
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT repair FROM logical_turn_executions WHERE request_id=?),0)`, m.RequestID).Scan(&repair); err != nil {
+		return "", false, err
+	}
+	status := m.Status
+	if repair {
+		if err := q.QueryRowContext(ctx, `SELECT t.status FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?) AND e.repair=0 ORDER BY e.rowid LIMIT 1`, m.RequestID).Scan(&status); err != nil {
+			return "", false, err
+		}
+	}
+	return status, repair, nil
+}
+
 // PutMainTurn records the progress of a delivery's turn, and the state its
 // message reached when that changes.
 func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
@@ -511,6 +527,10 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 		if err := a.registerLogicalTurn(ctx, tx, m, now); err != nil {
 			return err
 		}
+		businessStatus, repair, err := mainTurnBusinessStatus(ctx, tx.Q(), m)
+		if err != nil {
+			return err
+		}
 		if m.NativeReconciled {
 			if _, err := tx.Exec(ctx, `DELETE FROM native_turn_receipts_pending WHERE request_id=?`, m.RequestID); err != nil {
 				return err
@@ -524,7 +544,11 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 			return err
 		}
 		if pendingReceipt {
-			return a.insertMessageState(ctx, tx, m.MessageID, protocol.MessageUnknown, now)
+			state := protocol.MessageUnknown
+			if repair && (businessStatus == store.TurnFailed || businessStatus == store.TurnInterrupted) {
+				state = turnStates[businessStatus]
+			}
+			return a.insertMessageState(ctx, tx, m.MessageID, state, now)
 		}
 		if m.Status == store.TurnCompleted || m.Status == store.TurnInterrupted || m.Status == store.TurnFailed {
 			if _, err := tx.Exec(ctx, `UPDATE outbox SET status='delivered',updated_at=? WHERE request_id=? AND (status='unknown' OR (? AND status='sending'))`, now, m.RequestID, m.NativeReconciled); err != nil {
@@ -538,16 +562,28 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 			}
 			if incomplete {
 				state := protocol.MessageProcessing
-				if m.Status == store.TurnInterrupted {
-					state = protocol.MessageInterrupted
+				if businessStatus == store.TurnFailed || businessStatus == store.TurnInterrupted {
+					state = turnStates[businessStatus]
 				}
 				return a.insertMessageState(ctx, tx, m.MessageID, state, now)
 			}
 		}
-		if err := a.settleBackground(ctx, tx, m.MessageID, m.Status, now); err != nil {
-			return err
+		settleBusiness := !repair
+		if repair {
+			if err := tx.Q().QueryRowContext(ctx, `SELECT l.status='completed' FROM logical_turns l JOIN logical_turn_executions e ON e.logical_turn_id=l.logical_turn_id WHERE e.request_id=?`, m.RequestID).Scan(&settleBusiness); err != nil {
+				return err
+			}
 		}
-		if state, ok := turnStates[m.Status]; ok && prev.Status != m.Status {
+		if settleBusiness {
+			if err := a.settleBackground(ctx, tx, m.MessageID, businessStatus, now); err != nil {
+				return err
+			}
+		}
+		projectedStatus := businessStatus
+		if repair && businessStatus == store.TurnCompleted && (m.Status == store.TurnStarting || m.Status == store.TurnStarted) {
+			projectedStatus = m.Status
+		}
+		if state, ok := turnStates[projectedStatus]; ok && (prev.Status != m.Status || m.NativeReconciled) {
 			return a.insertMessageState(ctx, tx, m.MessageID, state, now)
 		}
 		return nil
@@ -585,11 +621,17 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		if err != nil {
 			return err
 		}
-		for _, id := range ids {
-			if err := a.settleBackground(ctx, tx, id, store.TurnInterrupted, now); err != nil {
+		for _, turn := range ids {
+			businessStatus, repair, err := mainTurnBusinessStatus(ctx, tx.Q(), turn)
+			if err != nil {
 				return err
 			}
-			if err := a.insertMessageState(ctx, tx, id, protocol.MessageInterrupted, now); err != nil {
+			if !repair {
+				if err := a.settleBackground(ctx, tx, turn.MessageID, store.TurnInterrupted, now); err != nil {
+					return err
+				}
+			}
+			if err := a.insertMessageState(ctx, tx, turn.MessageID, turnStates[businessStatus], now); err != nil {
 				return err
 			}
 		}

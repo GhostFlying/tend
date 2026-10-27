@@ -3,9 +3,10 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"testing"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
-	"testing"
 )
 
 func (h *harness) askChoice(w protocol.WorkItem, source string) protocol.WorkItemChoice {
@@ -103,63 +104,5 @@ func TestChoiceAnswerNotifiesDispatcherExactlyOnce(t *testing.T) {
 	}
 	if h.count("main_turns") != 0 {
 		t.Fatal("application must enqueue, not start a native turn")
-	}
-}
-
-func TestWorkItemChoiceAddonRelayPreservesProvenance(t *testing.T) {
-	h := newHarness(t)
-	w := h.createWork(workPlan())
-	c := h.askChoice(w, h.ownerEvidence().Reference)
-	cmd := UpdateWorkItemChoice{Action: "respond", FromMessage: true}
-	target := protocol.Target{Type: "work_item_choice", ID: c.ChoiceID}
-	payload := protocol.UpdateWorkItemChoicePayload{Answer: "Later, after I review the preview"}
-	// A hosted agent cannot claim an unrecorded owner answer.
-	failed := h.exec(mainAgent, h.env(cmd.Operation(), target, payload, rev(c.Version)), cmd)
-	if failed.Status == protocol.OpSucceeded {
-		t.Fatal("hosted caller relayed without an owner message")
-	}
-	addon := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "addon-client", Thread: "native-session", Agent: protocol.AgentCodex}
-	env := h.env(cmd.Operation(), target, payload, rev(c.Version))
-	op := h.exec(addon, env, cmd)
-	if op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	var answer protocol.WorkItemChoice
-	if err := json.Unmarshal(op.Result, &answer); err != nil {
-		t.Fatal(err)
-	}
-	if answer.AnswerSourceKind != "addon_relay" || answer.Status != "answered" {
-		t.Fatal(answer)
-	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		msg, err := store.GetMessage(t.Context(), tx.Q(), answer.AnswerSourceID)
-		if err != nil {
-			return err
-		}
-		var requestID string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT request_id FROM conversation_messages WHERE message_id=?`, answer.AnswerSourceID).Scan(&requestID); err != nil {
-			return err
-		}
-		if msg.Author != "main_agent" || requestID != env.RequestID || msg.ReplyTo != c.MessageID {
-			t.Fatalf("unattributed relay: %+v", msg)
-		}
-		var actor string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT actor_json FROM events WHERE request_id=? AND kind='work_item_choice.answered'`, env.RequestID).Scan(&actor); err != nil {
-			return err
-		}
-		var principal protocol.Principal
-		if err := json.Unmarshal([]byte(actor), &principal); err != nil {
-			return err
-		}
-		if principal != addon {
-			t.Fatalf("lost relay principal: %+v", principal)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	replay := h.exec(addon, env, cmd)
-	if replay.Status != protocol.OpSucceeded || string(op.Result) != string(replay.Result) {
-		t.Fatal(replay)
 	}
 }

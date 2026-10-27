@@ -1,8 +1,9 @@
 package api
 
 import (
-	"github.com/GhostFlying/tend/internal/protocol"
 	"net/http"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 const deploymentHeader = "X-Tend-Deployment-ID"

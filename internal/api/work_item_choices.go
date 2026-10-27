@@ -1,9 +1,10 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
-	"net/http"
 )
 
 func (s *Server) workItemChoice(w http.ResponseWriter, r *http.Request) {

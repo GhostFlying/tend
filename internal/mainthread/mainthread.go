@@ -637,6 +637,9 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 			if perr := m.app.PutMainTurn(ctx, rec); perr != nil {
 				return retry(perr)
 			}
+			if repair {
+				return app.DeliveryResult{Outcome: app.Failed, Reason: "repair turn/start was rejected"}
+			}
 			return retry(err)
 		}
 		// The turn may be running. Take the session down so it cannot

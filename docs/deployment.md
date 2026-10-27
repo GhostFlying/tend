@@ -1,6 +1,6 @@
 # 部署说明
 
-服务端和 runner 直接运行在各自的机器上（D39）；owner 在自己的设备上安装 `tend` CLI，把自己使用的 agent 接入 tend（D45、D46）。示例配置见 `docs/examples/`，格式是 HuJSON（D32）。
+服务端和 runner 直接运行在各自的机器上（D39）；owner 通过 Web 与托管主 Agent 对话，也可以使用 `tend` CLI 管理账本（D46、D114）。示例配置见 `docs/examples/`，格式是 HuJSON（D32）。
 
 ## tend-server
 
@@ -10,7 +10,7 @@ go build -o tend-server ./cmd/tend-server
 TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 ```
 
-- `TEND_SERVER_SECRET`：至少 32 字节，hex 编码，用来派生 run 凭据（D29）和 owner、agent 的 token（D49）。更换它会让正在执行的 run 失去凭据，所有 token 失效，需要重新 `tend login`。
+- `TEND_SERVER_SECRET`：至少 32 字节，hex 编码，用来派生 run 凭据（D29）和 owner token（D49）。更换它会让正在执行的 run 失去凭据，所有 token 失效，需要重新 `tend login`。
 - `TS_AUTHKEY`：只在第一次加入 tailnet 时需要；之后状态保存在 `data_dir/tsnet`。正式部署使用带 `tag:tend-server` 的 key。
 - 监听：加入 tailnet 后，同一组接口同时在 443（https，证书由 tailnet 签发）和 80（http）上提供。启动后会预取一次证书；tailnet 没有开启 HTTPS 证书时日志里有一条警告，这时客户端使用 `http://<hostname>`，WireGuard 仍然加密流量（design.md §6.4）。
 - `owners`：可以使用 owner API 的 tailnet 登录名，也就是可以运行 `tend login` 的人（D49）。不加入 tailnet、只用 `listen` 时，用 `local_owner` 指定本地开发的 owner。owner 在 tagged 机器上工作时（tagged 节点没有登录名），用 `owner_nodes` 把这台机器的名字映射到 `owners` 里的登录名（D56）。
@@ -22,9 +22,9 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 - 上传临时文件在正常失败/取消时清理；硬中断可能留下 `.upload-*`，未产生有效账本引用。清理硬中断遗留项应在确认没有在途上传的维护窗口执行，不按年龄删除可能仍在写入的文件。
 - `hosts[].worker`：可选，默认 `appserver`。这台 host 用哪种 harness 运行 worker（D63、D64）：`appserver` 是 traex app-server 加 runner 自建的工作区；`orca` 在 orca 的 worktree 里运行 agent TUI，只支持单仓库工作区。有活动 host 而它们都不支持多仓库时，tend 拒绝建多个 mount 的任务；已有的这类任务在 `tend status` 里显示没有 host 能领取的原因。runner 配置的 `worker.kind` 必须与它一致，否则 runner 的 hello 和领取被拒绝。
 - `queue.wait_per_hour`：可选，默认 0.1。排队的动作按分数领取（D60）：`p0` 最先；其余的分数是 project 权重 × 评级分（`p1` 3、`p2` 2、`p3` 1，未评级按 `p2`）加上排队小时数 × 这个系数。默认值下，权重为 1 时等 10 小时相当于升一级；设为 0 则不考虑等待时间。
-- `main_agent`：可选，默认不配置。主 Agent 是 owner 自己使用的 agent（见下文 `tend` CLI）；配置了 `main_agent`（可以是空对象 `{}`）时，服务端另外运行一个托管的主 Agent，Web 客户端和它对话，与外挂的主 Agent 并存（D68）。
+- `main_agent`：配置后由服务端运行唯一的主协调 Agent，Web 客户端与它对话；工作项后台 Agent 随之启用。未配置时仅提供 owner 管理接口和 runner 调度，不支持外挂 Agent 代替主协调（D114）。
   - 它是服务端启动的 traex app-server，默认使用运行服务端的用户自己的 traex home：用这台机器上 owner 的 traex 鉴权、配置和 MCP server，主会话也出现在 owner 的 traex 历史里。`main_agent.traex_home` 可以改用一个单独的 home，这时需要在那个 home 下完成一次 traex 鉴权。
-  - owner 的 traex 里接入了 tend（`tend setup`）时，托管会话不会把自己当作外挂会话：服务端为它设置 `TEND_ADDON=off`，不需要另外配置。
+  - 启动时保留 `TEND_ADDON=off`，仅用于仍指向旧版二进制的遗留配置；它不能让新 CLI 的已退役命令成功。替换 CLI 和启动 Agent 前必须清理已确认的 Tend 外挂 hook/MCP。
   - 权限：sandbox 是 `workspace-write`，可以读整台机器（例如仓库），只能写自己的工作目录（`main_agent.cwd`，默认 `data_dir/main-agent`，必须在任何仓库之外）；需要更多权限的操作由 traex 的 `auto_review` 自动审查，不等人确认。编辑文件、浏览器、插件、应用、skill 和 memory 是关掉的。
   - 模型默认用 traex 的默认模型，`main_agent.model` 可以指定。
   - `main_agent.summary_idle_minutes` 设置预备摘要的空闲分钟，省略默认 50，0 关闭自动准备，范围 0..10080。Web 的独立 owner 设置持久化覆盖该默认值，不依赖模型目录。交接维护仍启用；工具 schema 升级会使用 fresh native thread，Web 对话历史与原 native 历史保留（D81）。
@@ -74,7 +74,7 @@ TEND_HOST_TOKEN=... TS_AUTHKEY=... ./tend-runner -config tend-runner.hujson
 - `TEND_HOST_TOKEN`：任意足够长的随机串；服务端配置里该 host 的 `token_hash` 是它的 SHA-256。
 - `worker.kind`：可选，默认 `appserver`，必须与服务端为这台 host 配置的 `worker` 相同。
 - worker 使用这台机器上已有的 traex 和用户配置（D38），需要能直接运行 `traex`；git 提交使用这台机器的 git 身份。
-- 这台机器上即使也按下文接入了 tend，worker 也不会把自己当作主 Agent：runner 为 worker 设置 `TEND_ADDON=off`，tend 的 hook 和 MCP 看到它时什么都不做（D45）。
+- worker 仅通过 run 身份使用执行工具。升级前清理用户级 Tend 外挂配置；runner 仍向子进程提供 `TEND_ADDON=off`，只用于抑制遗留旧版外挂二进制。
 - runner 的 tailnet 节点必须匹配服务端为该 host 配置的 `nodes`（tag 或机器名）。
 
 ### orca worker（`worker.kind: orca`）
@@ -107,29 +107,22 @@ tend 在仓库里留下的东西：
 
 历史任务迁移时保留原占用，即使账本已完成。runner 根据 journal 和提供方记录核对所有历史运行，只在能确认属于对应 run 且已停止时释放；无法确认或已有人接手的终端继续保留。升级后应检查 host 的 `workspace_protocol` 为 1、原任务和资源数量、待决原因及运行状态；不能仅凭任务完成状态人工清空占用。切换 harness 不授予新 harness 删除旧 provider 资源的权限；找不到原适配器或目录已有其他注册时暂停清理，其他资源的释放继续进行。已完成 worker 的结果会先存入 journal，恢复时不重新启动该 worker。
 
-orca 里启动的 agent 继承 orca 的环境而不是 runner 的，runner 无法给它设置 `TEND_ADDON=off`；tend 的 hook 和 MCP 看到当前 worktree 的 git 目录里有 `tend-worker.json` 时同样什么都不做（D45）。
+Orca 启动的 agent 继承 Orca 的环境。升级前必须清理已确认的 Tend 用户级外挂 hook/MCP；工作区 marker 仅保留资源身份用途，不能代替清理。保留 runner 为当前 run 安装的 `tend_worker` 桥。
 
 owner 在 orca 里给 worker 的 agent 发一句话或按 Esc，就是接管（D67）：tend 察觉后任务转为 `human_control`，不再判断、打断或推进这个 agent；`tend takeover <task>` 可以显式接管。处理完后 `tend resume <task>` 交还，worker 先检查工作区再完成任务。
 
-## tend CLI 与 agent 接入
+## owner CLI
 
 在 owner 的设备上：
 
 ```sh
 go build -o tend ./cmd/tend        # 放到 PATH 上
 tend login --server https://<hostname>.<tailnet>.ts.net
-tend setup claude                  # 只显示要做的修改
-tend setup claude --write          # 写入；codex、traex 同理
 ```
 
 - 配置和凭据在 `~/.config/tend/`（可用 `TEND_CONFIG_DIR` 指定），凭据文件只有本人可读。token 有效期 30 天，过期后重新 `tend login`。
-- `tend setup` 每次都先显示 diff，重复执行不会重复添加：
-  - Claude Code：在 `settings.json` 里加上 SessionStart 和 UserPromptSubmit 两个 hook，放行 `mcp__tend__*` 工具；`--write` 时用 `claude mcp add --scope user` 注册 MCP server。
-  - Codex：在配置目录的 `hooks.json` 里加上两个 hook，在 `config.toml` 里追加 `[mcp_servers.tend]`。
-  - traex：在 `traecli.toml` 里追加两个 `[[hooks.<Event>]]` 表和 `[mcp_servers.tend]`（traex 不读 `hooks.json`）。如果已经用 `SessionStart = [...]` 这类写法定义了同名事件，`tend setup` 不改动，只打印需要手动合并的片段。**第一次启动 TUI 时要信任这两个 hook**，否则它们不会运行。
-- hook 命令按路径写入：`tend` 在 PATH 上时写 `tend`，否则写绝对路径。Codex 和 traex 按命令记录信任，换了路径要重新信任，所以升级时放回同一个位置。
-- 只有用过 tend 的会话才会收到 tend 的上下文（D54）：会话第一次调用 tend 的工具之后，hook 才开始注入快照和增量。在一个会话里让 agent 使用 tend 时，它会先调用 `tend_context`。agent 的后台会话和与 tend 无关的会话不受影响。
-- hook 等 tend 最多 3 秒（`TEND_HOOK_TIMEOUT` 可调），超时或 tend 不可达时只注入一行提示，不会挡住输入。
+- `login` 仅领取 owner token。旧 agent token 不再有效，旧 `setup`、`mcp`、`hook` 命令和 `/api/v1/agent/` 接口已移除；旧版客户端需升级后重新登录，不能自动转为 owner 身份重试。
+- 升级时清理已确认由 Tend 安装的用户级 `mcp_servers.tend`、对应 Tend hook 和工具放行项；保留其他 MCP、hook 与个人配置。runner 生成的 `tend_worker` MCP 不属于此清理范围。
 - owner 命令：`tend status [--project <p>]`、`tend task <id>`、`tend logs <run_id> [-f]`、`tend decide`、`tend retry`、`tend rate <id> <p0..p3>`、`tend pause|resume|cancel`，都支持 `--json`。`tend status` 按 project 分组，列出每个 project 的权重、运行中和排队的数量、未结束的任务，以及排队的动作在整个队列里的位置、评级、等待时间和分数（D60）。
 
 ## tailnet ACL

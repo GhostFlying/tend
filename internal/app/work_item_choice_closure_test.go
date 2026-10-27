@@ -32,7 +32,7 @@ func TestWorkItemChoiceMustBeResolvedBeforeClosure(t *testing.T) {
 
 func TestWorkItemChoiceAnswerCanSupplyClosureEvidence(t *testing.T) {
 	for _, relay := range []bool{false, true} {
-		t.Run(map[bool]string{false: "owner", true: "addon"}[relay], func(t *testing.T) {
+		t.Run(map[bool]string{false: "owner", true: "hosted"}[relay], func(t *testing.T) {
 			h := newHarness(t)
 			plan := workPlan()
 			plan.Stages = nil
@@ -45,10 +45,10 @@ func TestWorkItemChoiceAnswerCanSupplyClosureEvidence(t *testing.T) {
 			expectWorkCode(t, closeWith(w, c.ChoiceID), protocol.CodeInvalidTransition)
 			principal := owner
 			if relay {
-				principal = protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "addon-client", Thread: "native-session", Agent: protocol.AgentCodex}
+				principal = mainAgent
 			}
 			cmd := UpdateWorkItemChoice{Action: "respond", FromMessage: relay}
-			op := h.exec(principal, h.env(cmd.Operation(), protocol.Target{Type: "work_item_choice", ID: c.ChoiceID}, protocol.UpdateWorkItemChoicePayload{Answer: "No further work; close this item"}, rev(c.Version)), cmd)
+			op := h.exec(principal, h.env(cmd.Operation(), protocol.Target{Type: "work_item_choice", ID: c.ChoiceID}, protocol.UpdateWorkItemChoicePayload{Answer: "No further work; close this item", OwnerMessageID: h.ownerEvidence().Reference}, rev(c.Version)), cmd)
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}

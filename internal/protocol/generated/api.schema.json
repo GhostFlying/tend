@@ -294,15 +294,6 @@
       "title": "AgentConversationPage",
       "type": "object"
     },
-    "AgentKind": {
-      "enum": [
-        "claude",
-        "codex",
-        "traex"
-      ],
-      "title": "AgentKind",
-      "type": "string"
-    },
     "AgentRolloutPage": {
       "additionalProperties": false,
       "properties": {
@@ -2308,61 +2299,6 @@
       "title": "FollowupSummary",
       "type": "object"
     },
-    "HookEvent": {
-      "enum": [
-        "session_start",
-        "user_prompt_submit"
-      ],
-      "title": "HookEvent",
-      "type": "string"
-    },
-    "HookRequest": {
-      "additionalProperties": false,
-      "properties": {
-        "agent": {
-          "$ref": "#/definitions/AgentKind"
-        },
-        "event": {
-          "$ref": "#/definitions/HookEvent"
-        },
-        "prompt": {
-          "type": "string"
-        },
-        "remotes": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "request_id": {
-          "type": "string"
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "source": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "request_id",
-        "agent",
-        "event",
-        "session_id"
-      ],
-      "title": "HookRequest",
-      "type": "object"
-    },
-    "HookResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "context": {
-          "type": "string"
-        }
-      },
-      "title": "HookResponse",
-      "type": "object"
-    },
     "HostMaintenanceView": {
       "additionalProperties": false,
       "properties": {
@@ -3944,56 +3880,10 @@
     },
     "TokenScope": {
       "enum": [
-        "owner",
-        "agent"
+        "owner"
       ],
       "title": "TokenScope",
       "type": "string"
-    },
-    "ToolRequest": {
-      "additionalProperties": false,
-      "properties": {
-        "agent": {
-          "$ref": "#/definitions/AgentKind"
-        },
-        "arguments": {},
-        "remotes": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "request_id": {
-          "type": "string"
-        },
-        "session_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "request_id",
-        "agent",
-        "arguments"
-      ],
-      "title": "ToolRequest",
-      "type": "object"
-    },
-    "ToolResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "content": {
-          "type": "string"
-        },
-        "success": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "success",
-        "content"
-      ],
-      "title": "ToolResponse",
-      "type": "object"
     },
     "ToolSpec": {
       "additionalProperties": false,
@@ -5339,12 +5229,6 @@
     "FollowupSpec": {
       "$ref": "#/definitions/FollowupSpec"
     },
-    "HookRequest": {
-      "$ref": "#/definitions/HookRequest"
-    },
-    "HookResponse": {
-      "$ref": "#/definitions/HookResponse"
-    },
     "InterruptReplyPayload": {
       "$ref": "#/definitions/InterruptReplyPayload"
     },
@@ -5419,12 +5303,6 @@
     },
     "TaskPage": {
       "$ref": "#/definitions/TaskPage"
-    },
-    "ToolRequest": {
-      "$ref": "#/definitions/ToolRequest"
-    },
-    "ToolResponse": {
-      "$ref": "#/definitions/ToolResponse"
     },
     "ToolSpec": {
       "$ref": "#/definitions/ToolSpec"

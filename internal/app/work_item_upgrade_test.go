@@ -2,12 +2,13 @@ package app
 
 import (
 	"encoding/json"
-	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/release"
-	"github.com/GhostFlying/tend/internal/store"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 func TestWorkItemUpgradeEvidenceVerifiesAndFreezesBatch(t *testing.T) {

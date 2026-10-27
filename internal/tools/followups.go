@@ -41,7 +41,7 @@ func (s *Service) followupsList(ctx context.Context, c Call) (any, error) {
 		p, err = store.ListFollowups(ctx, tx.Q(), a.WorkItemID, a.After)
 		return err
 	})
-	p.Enabled = s.app.FollowupsEnabled() && !c.Principal.Addon()
+	p.Enabled = s.app.FollowupsEnabled()
 	return p, err
 }
 func (s *Service) followupsHistory(ctx context.Context, c Call) (any, error) {

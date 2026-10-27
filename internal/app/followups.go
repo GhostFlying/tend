@@ -22,9 +22,6 @@ func (c FollowupCommand) Authorize(_ context.Context, x *Exec, _ store.Querier) 
 	if err := allowKinds(x.Principal, planners...); err != nil {
 		return err
 	}
-	if x.Principal.Addon() {
-		return protocol.Errorf(protocol.CodeForbidden, "addon sessions can only read followups")
-	}
 	if !x.FollowupsEnabled && c.Action != "pause" && c.Action != "cancel" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "active followups require the hosted main agent")
 	}

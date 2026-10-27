@@ -2,9 +2,10 @@ package app
 
 import (
 	"encoding/json"
+	"testing"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
-	"testing"
 )
 
 func TestReviewStaleAssessmentWakesMainOnce(t *testing.T) {

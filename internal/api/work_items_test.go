@@ -22,8 +22,8 @@ func TestWorkItemOwnerReadsHistoryAndStaleUpdate(t *testing.T) {
 	if st := e.do("GET", path, "", nil, nil); st != http.StatusUnauthorized {
 		t.Fatal(st)
 	}
-	agent := e.loginAs("agent-client", protocol.ScopeAgent)
-	if st := e.do("GET", path, agent, nil, nil); st != http.StatusForbidden {
+	agent := e.retiredAgentToken("agent-client")
+	if st := e.do("GET", path, agent, nil, nil); st != http.StatusUnauthorized {
 		t.Fatal(st)
 	}
 	var page protocol.WorkItemPage

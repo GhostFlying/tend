@@ -9,7 +9,7 @@ func APITypes() []any {
 		WorkItemChoice{}, WorkItemChoicePage{}, CreateWorkItemChoicePayload{}, UpdateWorkItemChoicePayload{}, RefreshDeliveryPayload{}, WorkItemPage{}, WorkItemView{}, CreateWorkItemPayload{}, UpdateWorkItemPayload{}, CloseWorkItemPayload{}, ReopenWorkItemPayload{}, LinkWorkItemTaskPayload{},
 		SessionRequest{}, SessionView{}, InterruptReplyPayload{}, SubmitMessagePayload{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
 		ConversationAttachment{}, DownloadURLResponse{}, ConversationImageResponse{}, ConversationSettingsView{}, SetConversationSettingsPayload{}, ConversationHandoffView{}, SetConversationHandoffSettingsPayload{}, ConversationHandoffPayload{},
-		ArtifactPayload{}, HookRequest{}, HookResponse{}, ToolSpec{}, ToolRequest{}, ToolResponse{}}
+		ArtifactPayload{}, ToolSpec{}}
 }
 
 // APIEnums lists the values of every string enum in the owner API.
@@ -38,9 +38,8 @@ func APIEnums() []any {
 		[]Code{CodeInvalidRequest, CodeMissingRequestID, CodeConflictPayload, CodeStaleRevision, CodeUnauthenticated, CodeForbidden, CodeNotFound,
 			CodeInvalidTransition, CodeDuplicateEffect, CodeUnknownOutcome, CodeInternal},
 		[]OpStatus{OpSucceeded, OpFailed, OpAccepted, OpUnknown},
-		[]TokenScope{ScopeOwner, ScopeAgent},
+		[]TokenScope{ScopeOwner},
 		Agents,
-		[]HookEvent{HookSessionStart, HookUserPromptSubmit},
 		WorkerKinds,
 	}
 }

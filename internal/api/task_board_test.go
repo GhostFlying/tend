@@ -159,15 +159,15 @@ func TestTaskDetailReadsReferencesAndBacklinks(t *testing.T) {
 func TestCrossProjectBacklinkRemovalReachesAgentDelta(t *testing.T) {
 	e := newEnv(t)
 	e.configureProjects()
-	core := e.sessionIn("s-core", "https://example.com/me/tend")
-	web := e.sessionIn("s-web", "git@example.com:me/site.git")
+	core := e.hostedSession("s-core", "core")
+	web := e.hostedSession("s-web", "web")
 	coreTask := created(t, core.call("tasks_create", createArgs("ledger", "ledger"), ""))
 	webTask := created(t, web.call("tasks_create", createArgs("site", "site"), ""))
 	revision := e.taskRow(webTask).ControlRevision
 	e.exec("tasks.update_intent", protocol.Target{Type: "task", ID: webTask}, &revision, map[string]any{
 		"relations": []protocol.TaskRelation{{Kind: protocol.RelationRelated, TaskID: coreTask}},
 	}, app.UpdateIntent{})
-	initial := core.start("startup")
+	initial := core.read(true)
 	if !strings.Contains(initial, "related incoming: "+webTask) {
 		t.Fatalf("initial backlink missing: %s", initial)
 	}
@@ -175,7 +175,7 @@ func TestCrossProjectBacklinkRemovalReachesAgentDelta(t *testing.T) {
 	e.exec("tasks.update_intent", protocol.Target{Type: "task", ID: webTask}, &revision, map[string]any{
 		"relations": []protocol.TaskRelation{},
 	}, app.UpdateIntent{})
-	next := core.prompt()
+	next := core.read(false)
 	if !strings.Contains(next, "task.relations_backlinks_updated") || !strings.Contains(next, webTask) {
 		t.Fatalf("backlink removal missing from delta: %s", next)
 	}

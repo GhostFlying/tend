@@ -277,7 +277,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		ownerConfig.ConversationSettings = front.Settings
 		ownerConfig.ConversationHandoff = front.HandoffStatus
 	}
-	owner := api.New(a, s, ts, cb, whois, secret, ownerConfig, log)
+	owner := api.New(a, s, whois, secret, ownerConfig, log)
 	server := &http.Server{Handler: serverHandler(runners.Handler(), owner.Handler()), ReadHeaderTimeout: 10 * time.Second}
 	// Shutdown waits for requests to finish; event streams never do.
 	server.RegisterOnShutdown(owner.EndStreams)

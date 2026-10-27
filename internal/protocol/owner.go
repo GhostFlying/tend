@@ -16,13 +16,13 @@ type TokenScope string
 const (
 	// ScopeOwner is for the owner's own commands, such as the tend CLI.
 	ScopeOwner TokenScope = "owner"
-	// ScopeAgent is for an agent the owner works in: its hooks and the
-	// tools it calls through the MCP bridge.
+	// ScopeAgent identifies retired tokens in historical data and rejection tests.
+	// It is never valid for issuance or authentication (D114).
 	ScopeAgent TokenScope = "agent"
 )
 
-// Valid reports whether s is a known scope.
-func (s TokenScope) Valid() bool { return s == ScopeOwner || s == ScopeAgent }
+// Valid reports whether s may be issued and authenticated.
+func (s TokenScope) Valid() bool { return s == ScopeOwner }
 
 // SessionRequest asks for a token for a client the caller generated and
 // keeps, such as one tend CLI installation.

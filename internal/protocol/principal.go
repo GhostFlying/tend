@@ -33,8 +33,8 @@ type Principal struct {
 	// Thread is the harness thread for hosted main-agent callers, and the
 	// agent's session, when known, for agents the owner works in.
 	Thread string `json:"thread,omitempty"`
-	// Agent is the kind of agent for main-agent callers that are agents the
-	// owner works in (D45); it is empty for the hosted main agent.
+	// Agent preserves the provider of historical external coordinator records.
+	// Nonempty values are rejected for new main-agent requests.
 	Agent AgentKind `json:"agent,omitempty"`
 	// Role is the run role for run callers.
 	Role RunRole `json:"role,omitempty"`
@@ -58,10 +58,9 @@ func (p Principal) Validate() error {
 			return fmt.Errorf("protocol: %s principal needs a subject", p.Kind)
 		}
 	case PrincipalMainAgent:
-		// The hosted main agent always has its thread. An agent the owner
-		// works in may not know its session.
-		if p.Subject == "" || (p.Agent == "" && p.Thread == "") || (p.Agent != "" && !p.Agent.Valid()) {
-			return fmt.Errorf("protocol: main_agent principal needs a subject and a thread or a known agent kind")
+		// Only a hosted coordinator may execute new requests.
+		if p.Subject == "" || p.Thread == "" || p.Agent != "" {
+			return fmt.Errorf("protocol: main_agent principal requires a hosted subject and thread")
 		}
 	case PrincipalBackgroundAgent:
 		if p.Subject == "" || p.Thread == "" || p.ConversationID == "" || p.Agent != "" {
@@ -92,7 +91,3 @@ func (p Principal) DedupDomain() string {
 		return string(p.Kind) + ":" + p.Subject
 	}
 }
-
-// Addon reports whether p is an agent the owner works in, rather than the
-// hosted main agent.
-func (p Principal) Addon() bool { return p.Kind == PrincipalMainAgent && p.Agent != "" }

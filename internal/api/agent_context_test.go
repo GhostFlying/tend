@@ -1,9 +1,10 @@
 package api
 
 import (
-	"github.com/GhostFlying/tend/internal/protocol"
 	"net/http"
 	"testing"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func TestMissingWorkItemContextReturnsNotFound(t *testing.T) {

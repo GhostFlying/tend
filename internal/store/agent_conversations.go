@@ -90,7 +90,7 @@ func MessageAssociations(ctx context.Context, q Querier, id string) (protocol.Me
 		return out, err
 	}
 	if hasProcessing {
-		if err := q.QueryRowContext(ctx, `SELECT l.logical_turn_id,l.status,l.revision,l.reason FROM logical_turns l JOIN logical_turn_messages m ON m.logical_turn_id=l.logical_turn_id WHERE m.message_id=? ORDER BY l.updated_at DESC,l.rowid DESC LIMIT 1`, id).Scan(&processing.LogicalTurnID, &processing.Status, &processing.Revision, &processing.Reason); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT l.logical_turn_id,l.status,l.revision,l.reason FROM logical_turns l JOIN logical_turn_messages m ON m.logical_turn_id=l.logical_turn_id WHERE m.message_id=? ORDER BY CASE WHEN l.status='completed' THEN 2 WHEN l.resumed_by IS NOT NULL THEN 1 ELSE 0 END,l.updated_at DESC,l.rowid DESC LIMIT 1`, id).Scan(&processing.LogicalTurnID, &processing.Status, &processing.Revision, &processing.Reason); err != nil {
 			return out, err
 		}
 		out.Processing = &processing

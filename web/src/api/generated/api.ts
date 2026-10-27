@@ -162,16 +162,6 @@ export type ToolStatus = "running" | "completed" | "failed" | "interrupted";
 export type ActionKind = "implement" | "accept" | "deliver";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "AgentKind".
- */
-export type AgentKind = "claude" | "codex" | "traex";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "HookEvent".
- */
-export type HookEvent = "session_start" | "user_prompt_submit";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RunObserved".
  */
 export type RunObserved =
@@ -180,7 +170,7 @@ export type RunObserved =
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "TokenScope".
  */
-export type TokenScope = "owner" | "agent";
+export type TokenScope = "owner";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkerKind".
@@ -244,8 +234,6 @@ export interface TendAPI {
   FollowupHistoryPage?: FollowupHistoryPage;
   FollowupPage?: FollowupPage;
   FollowupSpec?: FollowupSpec;
-  HookRequest?: HookRequest;
-  HookResponse?: HookResponse;
   InterruptReplyPayload?: InterruptReplyPayload;
   LedgerEvent?: LedgerEvent;
   LinkWorkItemTaskPayload?: LinkWorkItemTaskPayload;
@@ -271,8 +259,6 @@ export interface TendAPI {
   SubmitMessagePayload?: SubmitMessagePayload;
   TaskDetail?: TaskDetail;
   TaskPage?: TaskPage;
-  ToolRequest?: ToolRequest;
-  ToolResponse?: ToolResponse;
   ToolSpec?: ToolSpec;
   TranscriptBlock?: TranscriptBlock;
   TranscriptPage?: TranscriptPage;
@@ -1350,26 +1336,6 @@ export interface FollowupSpec {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "HookRequest".
- */
-export interface HookRequest {
-  agent: AgentKind;
-  event: HookEvent;
-  prompt?: string;
-  remotes?: string[];
-  request_id: string;
-  session_id: string;
-  source?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "HookResponse".
- */
-export interface HookResponse {
-  context?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "InterruptReplyPayload".
  */
 export interface InterruptReplyPayload {
@@ -1824,25 +1790,6 @@ export interface MountView {
 export interface TaskPage {
   next?: string;
   tasks: TaskSummary[] | null;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "ToolRequest".
- */
-export interface ToolRequest {
-  agent: AgentKind;
-  arguments: unknown;
-  remotes?: string[];
-  request_id: string;
-  session_id?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "ToolResponse".
- */
-export interface ToolResponse {
-  content: string;
-  success: boolean;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

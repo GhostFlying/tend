@@ -11,7 +11,7 @@
   "tailnet": {"hostname": "tend"},
   // "listen": "127.0.0.1:8640",
 
-  // Tailnet logins allowed to use the owner API: the tend CLI and their agents.
+  // Tailnet logins allowed to use the owner API through the Web UI or CLI.
   "owners": ["you@example.com"],
   // Tagged machines have no login. If you work on one, name it here as
   // yours (D56); prefer the machine name over a tag.
@@ -33,9 +33,9 @@
   // worth one rating step at weight 1.
   "queue": {"wait_per_hour": 0.1},
 
-  // The main agent is the agent you work in, connected with `tend setup`.
-  // "main_agent" also runs a hosted one, which the Web client talks to
-  // (D68); with it, the owner API accepts conversation messages. Every
+  // "main_agent" runs the hosted coordinator and its background agents
+  // (D114). With it, the owner API accepts conversation messages. External
+  // coordinator MCP/hook integration is no longer supported. Every
   // field is optional: by default it uses traex on PATH with your own
   // traex home and the default model, and works in data_dir/main-agent.
   // "main_agent": {
@@ -81,10 +81,9 @@
   ],
 
   // Projects group tasks (D52). Leave this out to keep every task in one
-  // implicit "default" project. An agent session working in one of a
-  // project's repos sees that project; weight multiplies the rating of its
-  // tasks in the queue; template is the workspace of tasks created without
-  // one.
+  // implicit "default" project. The hosted coordinator selects the project
+  // explicitly; weight multiplies the rating of its tasks in the queue, and
+  // template is the workspace of tasks created without one.
   "projects": [
     // {"name": "app", "title": "The app", "weight": 2, "repos": ["app", "lib"], "template": "app-with-lib"},
   ],

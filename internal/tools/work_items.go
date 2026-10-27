@@ -109,13 +109,7 @@ func (s *Service) workItemsList(ctx context.Context, c Call) (any, error) {
 	var page protocol.WorkItemPage
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		project := ""
-		if a.Project == nil {
-			var err error
-			project, err = app.SessionScope(ctx, tx.Q(), c.Principal)
-			if err != nil {
-				return err
-			}
-		} else if *a.Project != "*" {
+		if a.Project != nil && *a.Project != "*" {
 			project = *a.Project
 		}
 		var err error

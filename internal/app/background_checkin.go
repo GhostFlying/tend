@@ -15,7 +15,7 @@ type BackgroundCommand struct{ Action, MessageID, TurnID, DeliveryID string }
 
 func (c BackgroundCommand) Operation() string { return "background." + c.Action }
 func (c BackgroundCommand) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
-	if (x.Principal.Kind != protocol.PrincipalMainAgent && x.Principal.Kind != protocol.PrincipalBackgroundAgent) || x.Principal.Addon() || c.TurnID == "" || c.MessageID == "" || c.DeliveryID == "" {
+	if (x.Principal.Kind != protocol.PrincipalMainAgent && x.Principal.Kind != protocol.PrincipalBackgroundAgent) || c.TurnID == "" || c.MessageID == "" || c.DeliveryID == "" {
 		return protocol.Errorf(protocol.CodeForbidden, "current hosted background turn required")
 	}
 	return nil

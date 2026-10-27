@@ -127,29 +127,12 @@ func (cmd UpdateWorkItemChoice) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	c.Version++
 	c.UpdatedAt = x.Now.UnixMilli()
 	c.Reason = x.Env.Reason
-	var sourceEvents []Event
 	switch cmd.Action {
 	case "respond":
 		if strings.TrimSpace(p.Answer) == "" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "answer is required")
 		}
-		if cmd.FromMessage && p.OwnerMessageID == "" && x.Principal.Addon() {
-			// Native addon conversations are not Tend owner messages. Preserve
-			// the relay as an agent-authored record with its audited request.
-			id := x.IDs.New(protocol.PrefixMessage)
-			seq, e := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "main_agent", Body: "转交 owner 的回答：\n\n" + p.Answer, ReplyTo: c.MessageID, RequestID: x.Env.RequestID, CreatedAt: c.UpdatedAt})
-			if e != nil {
-				return Outcome{}, e
-			}
-			for _, b := range []struct{ kind, id string }{{"work_item_choice", c.ChoiceID}, {"work_item", c.WorkItemID}} {
-				if e := tx.BindMessage(ctx, id, b.kind, b.id, "answers"); e != nil {
-					return Outcome{}, e
-				}
-			}
-			c.AnswerSourceID = id
-			c.AnswerSourceKind = "addon_relay"
-			sourceEvents = append(sourceEvents, Event{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": "main_agent", "reply_to": c.MessageID}})
-		} else if cmd.FromMessage {
+		if cmd.FromMessage {
 			m, e := store.GetMessage(ctx, tx.Q(), p.OwnerMessageID)
 			if e != nil {
 				return Outcome{}, errNotFound(e, "owner message does not exist")
@@ -170,6 +153,12 @@ func (cmd UpdateWorkItemChoice) Apply(ctx context.Context, x *Exec, tx *store.Tx
 			if _, e = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"owner"}`, RequestID: x.Env.RequestID, TraceID: x.TraceID, ActorJSON: `{"kind":"owner"}`, CreatedAt: c.UpdatedAt}); e != nil {
 				return Outcome{}, e
 			}
+		}
+		if err := tx.BindMessage(ctx, c.AnswerSourceID, "work_item", c.WorkItemID, "answers"); err != nil {
+			return Outcome{}, err
+		}
+		if err := attachReviewSource(ctx, x, tx, c.AnswerSourceID); err != nil {
+			return Outcome{}, err
 		}
 		c.Status = "answered"
 		c.Answer = p.Answer
@@ -206,7 +195,7 @@ func (cmd UpdateWorkItemChoice) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err := tx.SaveWorkItemChoice(ctx, c, "", old); err != nil {
 		return Outcome{}, err
 	}
-	events := append(sourceEvents, choiceEvent(c, c.Status))
+	events := []Event{choiceEvent(c, c.Status)}
 	if c.Status == "answered" && !cmd.FromMessage {
 		// A recorded choice answer is already handled as input; its follow-up
 		// coordination runs from a separate system notice, not this owner message.

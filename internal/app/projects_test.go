@@ -134,33 +134,6 @@ func TestProjectConfigChecks(t *testing.T) {
 	}
 }
 
-func TestNormalizeRemote(t *testing.T) {
-	same := []string{
-		"https://example.com/me/tend.git",
-		"https://user@example.com:8443/me/tend/",
-		"ssh://git@example.com:22/me/tend.git",
-		"git@example.com:me/tend.git",
-		"example.com:me/tend",
-		"HTTPS://Example.com/Me/Tend",
-	}
-	for _, r := range same {
-		if got := normalizeRemote(r); got != "example.com/me/tend" {
-			t.Errorf("normalizeRemote(%q) = %q", r, got)
-		}
-	}
-	for r, want := range map[string]string{
-		"ssh://git@[2001:db8::1]/me/tend.git": "2001:db8::1/me/tend",
-		"git@[2001:db8::1]:me/tend.git":       "2001:db8::1/me/tend",
-		"/srv/git/tend.git":                   "/srv/git/tend",
-		"file:///srv/git/tend":                "srv/git/tend",
-		"./relative/path:with:it":             "./relative/path:with:it",
-	} {
-		if got := normalizeRemote(r); got != want {
-			t.Errorf("normalizeRemote(%q) = %q, want %q", r, got, want)
-		}
-	}
-}
-
 func TestListTasksFiltersBeforeTheLimit(t *testing.T) {
 	h := newHarness(t)
 	h.syncConfig(withProjects())

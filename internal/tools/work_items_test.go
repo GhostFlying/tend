@@ -48,3 +48,43 @@ func TestWorkItemToolsKeepUndecidedConcernVisibleAndRejectStalePlans(t *testing.
 func initialFixtureContext() protocol.InitialWorkItemContext {
 	return protocol.InitialWorkItemContext{Coverage: "Reviewed fixture input", Gaps: "None in fixture", ReviewedKinds: []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}}
 }
+
+func TestInitialContextMissingKindsReturnsRepairableContract(t *testing.T) {
+	e := newEnv(t)
+	args := workItemCreateArgs{InitialContext: initialFixtureContext(), Plan: protocol.WorkItemPlan{Title: "Initialize source context", Intent: "Preserve the full owner concern"}, CommitSeq: 1}
+	args.InitialContext.ReviewedKinds = []string{"goal", "constraint"}
+	rejected := e.call("work_items_create", args, "incomplete-kinds")
+	if rejected.OK || rejected.Error == nil || rejected.Error.Code != protocol.CodeInvalidRequest {
+		t.Fatal(rejected)
+	}
+	var detail struct {
+		Field    string   `json:"field"`
+		Required []string `json:"required_kinds"`
+		Missing  []string `json:"missing_kinds"`
+	}
+	if err := json.Unmarshal(rejected.Error.Details, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Field != "initial_context.reviewed_kinds" || len(detail.Required) != 7 || len(detail.Missing) != 5 {
+		t.Fatalf("missing actionable contract: %+v", detail)
+	}
+	for _, kind := range detail.Missing {
+		if !strings.Contains(rejected.Error.Message, kind) {
+			t.Fatalf("error omits missing kind %q", kind)
+		}
+	}
+	// Correct only the field the server identified; the intended plan survives.
+	args.InitialContext.ReviewedKinds = detail.Required
+	args.CommitSeq++
+	accepted := e.call("work_items_create", args, "complete-kinds")
+	if !accepted.OK {
+		t.Fatal(accepted.Error)
+	}
+	var result struct{ Outcome protocol.WorkItem }
+	if err := json.Unmarshal(accepted.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome.Title != args.Plan.Title || result.Outcome.Intent != args.Plan.Intent {
+		t.Fatal(result)
+	}
+}

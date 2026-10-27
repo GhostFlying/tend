@@ -24,7 +24,7 @@ func TestOnlineRepositoryOwnerAPIAndReplay(t *testing.T) {
 	if status := e.do("GET", "/api/v1/repos/online", token, nil, &registered); status != http.StatusOK || registered.ControlRevision != 1 || registered.RemoteURL != "https://example.com/online.git" {
 		t.Fatal(status, registered)
 	}
-	for _, tok := range []string{"", e.login(protocol.ScopeAgent)} {
+	for _, tok := range []string{"", e.retiredAgentToken(clientID)} {
 		if status := e.do("GET", "/api/v1/repos/online", tok, nil, nil); status != http.StatusUnauthorized && status != http.StatusForbidden {
 			t.Fatal("non-owner catalog read", status)
 		}

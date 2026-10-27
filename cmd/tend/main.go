@@ -1,12 +1,10 @@
-// Command tend is the owner's command line and the agent add-on's bridge
-// (D46). All logic is in internal/cli.
+// Command tend is the owner command line. All logic is in internal/cli.
 package main
 
 import (
 	"context"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"time"
@@ -23,28 +21,11 @@ func main() {
 	if configDir == "" {
 		configDir = filepath.Join(home, ".config", "tend")
 	}
-	self, err := os.Executable()
-	if err != nil {
-		self = os.Args[0]
-	}
-	if p, err := filepath.EvalSymlinks(self); err == nil {
-		self = p
-	}
 	e := &cli.Env{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
 		Home: home, ConfigDir: configDir,
-		HTTP:       &http.Client{Timeout: 60 * time.Second, Transport: cli.Transport()},
-		IDs:        protocol.NewULIDGen(time.Now, nil),
-		Executable: self, LookPath: exec.LookPath,
-		Run: func(ctx context.Context, name string, args ...string) error {
-			c := exec.CommandContext(ctx, name, args...)
-			c.Stdout, c.Stderr = os.Stderr, os.Stderr
-			return c.Run()
-		},
-		Output: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			return exec.CommandContext(ctx, name, args...).Output()
-		},
-		Getwd: os.Getwd,
+		HTTP: &http.Client{Timeout: 60 * time.Second, Transport: cli.Transport()},
+		IDs:  protocol.NewULIDGen(time.Now, nil),
 	}
 	os.Exit(cli.Main(ctx, e, os.Args[1:]))
 }

@@ -14,7 +14,7 @@ func TestWorkItemChoiceOwnerAPIReadAnswerAndStaleVersion(t *testing.T) {
 	e.server.cfg.HostedMainAgent = true
 	e.configure()
 	token := e.login(protocol.ScopeOwner)
-	agent := e.loginAs("choice-agent", protocol.ScopeAgent)
+	agent := e.retiredAgentToken("choice-agent")
 	var item protocol.WorkItem
 	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Implement page", Intent: "Improve the page"}}, app.CreateWorkItem{}), &item); err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestWorkItemChoiceOwnerAPIReadAnswerAndStaleVersion(t *testing.T) {
 	if status := e.do("GET", path, "", nil, nil); status != http.StatusUnauthorized {
 		t.Fatalf("no auth: %d", status)
 	}
-	if status := e.do("GET", path, agent, nil, nil); status != http.StatusForbidden {
+	if status := e.do("GET", path, agent, nil, nil); status != http.StatusUnauthorized {
 		t.Fatalf("agent read: %d", status)
 	}
 	if status := e.do("GET", "/api/v1/work-item-choices/missing", token, nil, nil); status != http.StatusNotFound {
@@ -49,7 +49,7 @@ func TestWorkItemChoiceOwnerAPIReadAnswerAndStaleVersion(t *testing.T) {
 	target := protocol.Target{Type: "work_item_choice", ID: choice.ChoiceID}
 	version := int64(1)
 	answer := e.envelope("work_item_choices.respond", target, &version, protocol.UpdateWorkItemChoicePayload{Answer: "Later, after I inspect the result"})
-	if status, _ := e.op(agent, answer); status != http.StatusForbidden {
+	if status, _ := e.op(agent, answer); status != http.StatusUnauthorized {
 		t.Fatalf("agent answer: %d", status)
 	}
 	status, response := e.op(token, answer)

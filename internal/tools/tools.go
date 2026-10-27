@@ -96,12 +96,12 @@ var tools = []tool{
 	{"work_items_refresh_delivery", "Request a read-only refresh of a linked GitHub PR or Codebase MR on a capable runner. This never merges, closes or deploys it. Read work_items_read for the resulting observation and timestamp.", (*Service).workItemsRefresh},
 	{"work_item_choices_list", "Read persistent next-step questions for a work item, including answered and withdrawn history.", (*Service).workItemChoicesList},
 	{"work_item_choices_create", "Ask once about an undecided next step after checking existing authority and choices. Cite this item completion event or an owner message. Never use this to block a worker or execute deployment.", (*Service).workItemChoicesCreate},
-	{"work_item_choices_resolve", "Record an actual owner answer. Hosted callers must cite a persisted owner_message_id; addon callers may omit it to record an explicitly agent-authored relay from their native conversation. Never supply your own decision. Check changed delivery facts before arranging follow-up work.", (*Service).workItemChoicesResolve},
+	{"work_item_choices_resolve", "Record an actual owner answer. Cite a persisted owner_message_id. Never supply your own decision. Check changed delivery facts before arranging follow-up work.", (*Service).workItemChoicesResolve},
 	{"work_item_choices_withdraw", "Withdraw an obsolete planning question with a factual reason; does not answer for the owner or alter worker decisions.", (*Service).workItemChoicesWithdraw},
 	{"work_item_choices_replace", "Atomically replace an obsolete planning question, retaining history and linking its successor.", (*Service).workItemChoicesReplace},
 	{"work_items_list", "List continuing work items independently of execution tasks. Find undecided next steps, open commitments and unclosed deliveries even when all tasks finished. Columns: unplanned, active, checking, attention, snoozed, closed.", (*Service).workItemsList},
 	{"work_items_read", "Read a work item, dynamic plan, shared sourced background, commitments, deliveries and task facts before continuing or closing it.", (*Service).workItemsRead},
-	{"work_items_create", "Create a continuing owner concern with its own dynamic plan. Stages are optional initially and evolve through discussion. Shared background must exclude detailed designs and author self-assessment.", (*Service).workItemsCreate},
+	{"work_items_create", "Create a continuing owner concern with plan.title, plan.intent and optional stages. initial_context requires coverage, gaps, source_message_ids, facts and reviewed_kinds. After checking originals, reviewed_kinds must include all seven: goal, constraint, authorization, refusal, commitment, question, suggestion, even when a kind has no facts. Facts use kind, scope (work_item/project/global), body and source_message_id. Shared background excludes detailed designs and author self-assessment.", (*Service).workItemsCreate},
 	{"work_items_update", "Replace the complete work-item plan under its revision. Read the current plan first and retain unchanged background, stages, dependencies, commitments and deliveries. Fix rejected fields using the error details; never remove valid content merely to pass validation. Explicitly acknowledge active task agreements. Stages are per-item, not project configuration. Plan changes do not authorize new work.", (*Service).workItemsUpdate},
 	{"work_items_close", "End continuing responsibility with explicit reason and evidence. A completed task, report, PR or owner silence alone does not justify closure. Use existing owner intent/identity evidence when it establishes the endpoint; do not require a new owner answer. Unresolved commitments and active/unknown operations block closure.", (*Service).workItemsClose},
 	{"work_items_reopen", "Reopen a continuing concern for the owner's new follow-up; preserve historical task completion and closure evidence.", (*Service).workItemsReopen},
@@ -122,64 +122,14 @@ var tools = []tool{
 	{"requests_read", "Look up the outcome of one of your earlier requests instead of repeating it.", (*Service).requestsRead},
 	{"repos_list", "List registered repositories with base candidates and eligible hosts, workspace templates, and host worker capabilities. Use this registry to choose task workspaces; runners resolve filesystem locations. A retired repository is not a new-task target.", (*Service).reposList},
 	{"tend_context", "Show tend's whole ledger again as a full snapshot.", (*Service).tendContext},
-	{"session_project", "Choose the project this session works in, as the owner asked, in place of the one tend chose from the repository you are in. An empty project shows every project.", (*Service).sessionProject},
 }
-
-// addonOnly names the tools that have meaning only in a session the owner
-// works in; the hosted main agent does not get them.
-var addonOnly = map[string]bool{"session_project": true}
 
 // Specs returns the tools to register with the hosted main agent's
 // harness.
 func Specs() []harness.ToolSpec {
 	out := make([]harness.ToolSpec, 0, len(tools))
 	for _, t := range tools {
-		if addonOnly[t.name] {
-			continue
-		}
 		out = append(out, harness.ToolSpec{Name: t.name, Description: t.description, InputSchema: json.RawMessage(schemas[t.name])})
-	}
-	return out
-}
-
-// AddonSpecs returns the tools for agents the owner works in (D48). Their
-// planning writes have no conversation message, so no commit_seq, and a
-// new task must name its workspace: the unique name is what stops a model
-// that calls tasks_create again from creating the task twice.
-func AddonSpecs() []protocol.ToolSpec {
-	out := make([]protocol.ToolSpec, 0, len(tools))
-	for _, t := range tools {
-		if t.name == "background_sources" || t.name == "background_checkin" {
-			continue
-		}
-		if strings.HasPrefix(t.name, "work_items_followups_") && t.name != "work_items_followups_list" && t.name != "work_items_followups_history" {
-			continue
-		}
-		var schema map[string]any
-		if err := json.Unmarshal([]byte(schemas[t.name]), &schema); err != nil {
-			panic(fmt.Sprintf("tools: schema of %s: %v", t.name, err)) // the schemas are constants
-		}
-		props, _ := schema["properties"].(map[string]any)
-		delete(props, "commit_seq")
-		var required []string
-		if r, ok := schema["required"].([]any); ok {
-			for _, v := range r {
-				if v != "commit_seq" {
-					required = append(required, v.(string))
-				}
-			}
-		}
-		if t.name == "tasks_create" {
-			required = append(required, "workspace_name")
-		}
-		if required != nil {
-			schema["required"] = required
-		}
-		b, err := json.Marshal(schema)
-		if err != nil {
-			panic(fmt.Sprintf("tools: schema of %s: %v", t.name, err))
-		}
-		out = append(out, protocol.ToolSpec{Name: t.name, Description: t.description, InputSchema: b})
 	}
 	return out
 }
@@ -207,12 +157,14 @@ func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
 	}
 	var t *tool
 	for i := range tools {
-		if tools[i].name == c.Tool && (c.Principal.Addon() || !addonOnly[c.Tool]) {
+		if tools[i].name == c.Tool {
 			t = &tools[i]
 		}
 	}
 	var a answer
-	if c.Principal.Kind == protocol.PrincipalBackgroundAgent && !backgroundTools[c.Tool] {
+	if c.Principal.Kind == protocol.PrincipalMainAgent && c.Principal.Agent != "" {
+		a.Error = protocol.Errorf(protocol.CodeForbidden, "external coordinator access has been retired")
+	} else if c.Principal.Kind == protocol.PrincipalBackgroundAgent && !backgroundTools[c.Tool] {
 		a.Error = protocol.Errorf(protocol.CodeForbidden, "tool is unavailable to background agents")
 	} else if t == nil {
 		a.Error = protocol.Errorf(protocol.CodeInvalidRequest, "there is no tool %q", c.Tool)
@@ -346,7 +298,7 @@ func (s *Service) execute(ctx context.Context, c Call, op string, target protoco
 // requireMessage rejects a hosted planning write outside a conversation
 // turn. Agents the owner works in have no conversation in tend.
 func requireMessage(c Call) error {
-	if c.SourceMessageID == "" && !c.Principal.Addon() {
+	if c.SourceMessageID == "" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "this tool can only be used while handling a message")
 	}
 	return nil
@@ -374,9 +326,6 @@ func (s *Service) tasksCreate(ctx context.Context, c Call) (any, error) {
 	}
 	if err := requireMessage(c); err != nil {
 		return nil, err
-	}
-	if c.Principal.Addon() && a.WorkspaceName == "" {
-		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "workspace_name is required")
 	}
 	payload := map[string]any{
 		"title": a.Title, "spec": a.Spec, "rating": a.Rating, "project": a.Project, "workspace_name": a.WorkspaceName,

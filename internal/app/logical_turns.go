@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -29,6 +30,10 @@ func (c CommitLogicalTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
+	allowed := map[string]bool{}
+	for _, m := range v.Messages {
+		allowed[m.MessageID] = true
+	}
 	if len(p.Messages) == 0 || len(p.Messages) > 100 || len(p.Contexts) > 500 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "review between 1 and 100 exact message versions")
 	}
@@ -38,11 +43,7 @@ func (c CommitLogicalTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "duplicate reviewed message")
 		}
 		seen[r.MessageID] = true
-		var belongs bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_messages WHERE logical_turn_id=? AND message_id=?)`, v.ID, r.MessageID).Scan(&belongs); err != nil {
-			return Outcome{}, err
-		}
-		if !belongs {
+		if !allowed[r.MessageID] {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "message outside this logical turn")
 		}
 		m, err := store.MessageAssociations(ctx, tx.Q(), r.MessageID)
@@ -86,8 +87,10 @@ func (c CommitLogicalTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if baseline == 0 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "initialize or reconcile the work item context first")
 		}
-		if _, err := tx.Exec(ctx, `UPDATE message_context_obligations SET needs_review=0 WHERE work_item_id=? AND message_id IN (SELECT message_id FROM logical_turn_messages WHERE logical_turn_id=?)`, c.WorkItemID, v.ID); err != nil {
-			return Outcome{}, err
+		for _, message := range p.Messages {
+			if _, err := tx.Exec(ctx, `UPDATE message_context_obligations SET needs_review=0 WHERE work_item_id=? AND message_id=?`, c.WorkItemID, message.MessageID); err != nil {
+				return Outcome{}, err
+			}
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_context_reviews(logical_turn_id,work_item_id,revision) VALUES(?,?,?) ON CONFLICT(logical_turn_id,work_item_id) DO UPDATE SET revision=excluded.revision`, v.ID, c.WorkItemID, c.Revision); err != nil {
 			return Outcome{}, err
@@ -174,6 +177,53 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 	if !registered {
 		return false, nil
 	}
+	v, err := store.LogicalTurn(ctx, tx.Q(), m.RequestID)
+	if err != nil {
+		return false, err
+	}
+	// A reconciled adopted execution belongs to its final successor. Recheck
+	// that responsibility rather than creating a competing repair for the ancestor.
+	var successor string
+	if err := tx.Q().QueryRowContext(ctx, `WITH RECURSIVE chain(id) AS (
+ SELECT ? UNION SELECT l.resumed_by FROM logical_turns l JOIN chain c ON l.logical_turn_id=c.id WHERE l.resumed_by IS NOT NULL)
+ SELECT l.logical_turn_id FROM logical_turns l JOIN chain c ON l.logical_turn_id=c.id WHERE l.resumed_by IS NULL`, v.ID).Scan(&successor); err != nil {
+		return false, err
+	}
+	if successor != v.ID {
+		var queued bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN outbox o ON o.request_id=e.request_id WHERE e.logical_turn_id=? AND e.repair=1 AND o.status IN ('pending','sending','unknown'))`, successor).Scan(&queued); err != nil {
+			return false, err
+		}
+		if queued {
+			return true, nil
+		}
+		var request string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT e.request_id FROM logical_turn_executions e JOIN main_turns t ON t.request_id=e.request_id WHERE e.logical_turn_id=? ORDER BY e.rowid DESC LIMIT 1`, successor).Scan(&request); err != nil {
+			return false, err
+		}
+		rec, err := store.GetMainTurn(ctx, tx.Q(), request)
+		if err != nil {
+			return false, err
+		}
+		if rec.Status == store.TurnStarting || rec.Status == store.TurnStarted {
+			return true, nil
+		}
+		if _, err := tx.Exec(ctx, `UPDATE logical_turn_executions SET settled=0 WHERE request_id=?`, request); err != nil {
+			return false, err
+		}
+		return a.settleLogicalTurn(ctx, tx, rec, now)
+	}
+	uncertain, err := logicalNativeUncertain(ctx, tx.Q(), v.ID)
+	if err != nil {
+		return false, err
+	}
+	if uncertain {
+		if _, err := tx.Exec(ctx, `UPDATE logical_turn_executions SET settled=0 WHERE request_id=?`, m.RequestID); err != nil {
+			return false, err
+		}
+		_, err := tx.Exec(ctx, `UPDATE logical_turns SET status='unknown',reason='An adopted native execution must be reconciled before completion.',updated_at=? WHERE logical_turn_id=? AND status NOT IN ('stopped','awaiting_clarification')`, now, v.ID)
+		return true, err
+	}
 	if settled {
 		var incomplete bool
 		err := tx.Q().QueryRowContext(ctx, `SELECT status<>'completed' FROM logical_turns WHERE logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?)`, m.RequestID).Scan(&incomplete)
@@ -182,17 +232,16 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 	if _, err := tx.Exec(ctx, `UPDATE logical_turn_executions SET settled=1 WHERE request_id=?`, m.RequestID); err != nil {
 		return false, err
 	}
-	v, err := store.LogicalTurn(ctx, tx.Q(), m.RequestID)
-	if err != nil {
-		return false, err
-	}
 	var missing int
 	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM logical_turn_messages lm LEFT JOIN message_dispositions d ON d.message_id=lm.message_id WHERE lm.logical_turn_id=? AND (d.message_id IS NULL OR d.disposition='pending' OR d.classified_revision<>d.content_revision OR d.facts_revision<>d.content_revision)`, v.ID).Scan(&missing); err != nil {
 		return false, err
 	}
 	var unready int
-	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM work_item_contexts c WHERE (c.baseline_revision=0 OR NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews cr WHERE cr.logical_turn_id=? AND cr.work_item_id=c.work_item_id AND cr.revision=c.revision)) AND c.work_item_id IN (SELECT work_item_id FROM logical_turn_contexts WHERE logical_turn_id=?)`, v.ID, v.ID).Scan(&unready); err != nil {
+	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM work_item_contexts c WHERE (c.baseline_revision=0 OR NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews cr WHERE cr.logical_turn_id=? AND cr.work_item_id=c.work_item_id AND cr.revision=c.revision) OR EXISTS(SELECT 1 FROM message_context_obligations o JOIN logical_turn_messages lm ON lm.message_id=o.message_id WHERE lm.logical_turn_id=? AND o.work_item_id=c.work_item_id AND o.needs_review=1)) AND c.work_item_id IN (SELECT work_item_id FROM logical_turn_contexts WHERE logical_turn_id=?)`, v.ID, v.ID, v.ID).Scan(&unready); err != nil {
 		return false, err
+	}
+	if v.Status == "stopped" || v.Status == "awaiting_clarification" {
+		return true, nil
 	}
 	if missing == 0 && unready == 0 {
 		_, err = tx.Exec(ctx, `UPDATE logical_turns SET status='completed',reason='',updated_at=? WHERE logical_turn_id=?`, now, v.ID)
@@ -201,9 +250,6 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 		}
 		_, err = tx.Exec(ctx, `WITH RECURSIVE children(id) AS (SELECT logical_turn_id FROM logical_turns WHERE resumed_by=? UNION ALL SELECT l.logical_turn_id FROM logical_turns l JOIN children c ON l.resumed_by=c.id) UPDATE logical_turns SET status='completed',reason='',updated_at=? WHERE logical_turn_id IN (SELECT id FROM children)`, v.ID, now)
 		return false, err
-	}
-	if v.Status == "stopped" || v.Status == "awaiting_clarification" {
-		return true, nil
 	}
 	reason := fmt.Sprintf("%d messages require classification or fact review; %d contexts require initialization", missing, unready)
 	status := "recovering"
@@ -263,7 +309,7 @@ func (ResumeLogicalTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		return Outcome{NoEffect: true}, nil
 	}
 	var uncertain bool
-	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN outbox o ON o.request_id=e.request_id WHERE e.logical_turn_id=? AND o.status IN ('sending','unknown')) OR EXISTS(SELECT 1 FROM logical_turn_executions e JOIN main_turns t ON t.request_id=e.request_id WHERE e.logical_turn_id=? AND t.status IN ('starting','started'))`, x.Env.Target.ID, x.Env.Target.ID).Scan(&uncertain); err != nil {
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN outbox o ON o.request_id=e.request_id WHERE e.logical_turn_id=? AND o.status IN ('sending','unknown')) OR EXISTS(SELECT 1 FROM logical_turn_executions e JOIN main_turns t ON t.request_id=e.request_id WHERE e.logical_turn_id=? AND t.status IN ('starting','started')) OR EXISTS(SELECT 1 FROM logical_turn_executions e JOIN native_turn_receipts_pending p ON p.request_id=e.request_id WHERE e.logical_turn_id=?)`, x.Env.Target.ID, x.Env.Target.ID, x.Env.Target.ID).Scan(&uncertain); err != nil {
 		return Outcome{}, err
 	}
 	if uncertain || status == "unknown" || status == "processing" || status == "recovering" {
@@ -366,6 +412,13 @@ func (c AdoptClarification) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 	if status != "awaiting_clarification" || current.ID == x.Env.Target.ID {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only a separate pending clarification may be adopted")
 	}
+	uncertain, err := logicalNativeUncertain(ctx, tx.Q(), x.Env.Target.ID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if uncertain {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reconcile the clarification's native executions before adopting it")
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_messages(logical_turn_id,message_id) SELECT ?,message_id FROM logical_turn_messages WHERE logical_turn_id=? ON CONFLICT(logical_turn_id,message_id) DO NOTHING`, current.ID, x.Env.Target.ID); err != nil {
 		return Outcome{}, err
 	}
@@ -430,4 +483,15 @@ func (a *App) NativeReceiptPending(ctx context.Context, request string) (bool, e
 		return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM native_turn_receipts_pending WHERE request_id=?)`, request).Scan(&pending)
 	})
 	return pending, err
+}
+
+// logicalNativeUncertain checks the whole responsibility inherited by a turn.
+func logicalNativeUncertain(ctx context.Context, q store.Querier, id string) (bool, error) {
+	var uncertain bool
+	err := q.QueryRowContext(ctx, `WITH RECURSIVE responsibility(id) AS (
+ SELECT ? UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON l.resumed_by=r.id)
+ SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN responsibility r ON r.id=e.logical_turn_id
+ LEFT JOIN main_turns t ON t.request_id=e.request_id
+ WHERE t.status IN ('starting','started') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=e.request_id))`, id).Scan(&uncertain)
+	return uncertain, err
 }

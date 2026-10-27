@@ -10,7 +10,7 @@ import (
 func TestQueueReadsAndWithdrawalAreOwnerOnly(t *testing.T) {
 	e := newEnv(t)
 	owner := e.login(protocol.ScopeOwner)
-	agent := e.login(protocol.ScopeAgent)
+	agent := e.retiredAgentToken(clientID)
 	e.server.cfg.HostedMainAgent = true
 	env := e.envelope("conversation.submit_message", protocol.Target{Type: "conversation"}, nil, protocol.SubmitMessagePayload{Body: "queued"})
 	var response protocol.APIResponse
