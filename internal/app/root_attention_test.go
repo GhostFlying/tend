@@ -127,3 +127,41 @@ func TestRootFailureKeepsUnknownOperationFactsAndLaterConvergence(t *testing.T) 
 		t.Fatalf("lost operation convergence: %+v", got)
 	}
 }
+
+func TestFault_PendingNativeObservationRefinesBootstrapAttention(t *testing.T) {
+	for _, rootState := range []string{"failed", "completed"} {
+		t.Run(rootState, func(t *testing.T) {
+			h := newHarness(t)
+			h.createTask(owner, createTaskPayload{Title: "refined root observation", Spec: testSpec})
+			as, _, _ := h.claim("linux-1")
+			h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+			events := []protocol.RunEvent{{Seq: 1, Kind: "worker.turn_failed", Body: json.RawMessage(`{"turn_at":100,"managed_turn_at":100,"root_state":"failed","background_pending":true,"code":"observation_pending"}`)}}
+			for _, seq := range []int64{2, 3} {
+				body, _ := json.Marshal(map[string]any{"turn_at": 200, "managed_turn_at": 100, "root_state": rootState, "background_pending": true, "code": "other", "root_turn": map[string]string{"sessionId": "session", "turnId": "native-turn", "state": rootState}})
+				events = append(events, protocol.RunEvent{Seq: seq, Kind: "worker.root_background_pending", Body: body})
+			}
+			if _, err := h.app.RecordRunEvents(t.Context(), runPrincipal(as.RunID, as.Role), as.RunID, events); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var notices, sources int
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM message_notices WHERE notice_type='run_attention'`).Scan(&notices); err != nil {
+					return err
+				}
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM background_sources WHERE kind='run.attention_required'`).Scan(&sources); err != nil {
+					return err
+				}
+				want := 0
+				if rootState == "failed" {
+					want = 1
+				}
+				if notices != want || sources != want {
+					t.Fatalf("notices=%d sources=%d want=%d", notices, sources, want)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

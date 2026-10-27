@@ -838,7 +838,8 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 			if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
 				return err
 			}
-			if e.Kind == "worker.turn_failed" || e.Kind == "worker.root_observation_unknown" {
+			if e.Kind == "worker.turn_failed" || e.Kind == "worker.root_observation_unknown" ||
+				e.Kind == "worker.root_background_pending" {
 				queued, err := a.recordRootAttention(ctx, tx, run, e)
 				if err != nil {
 					return err
