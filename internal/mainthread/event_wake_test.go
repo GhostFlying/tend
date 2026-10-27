@@ -45,10 +45,10 @@ func TestFault_EventWakeUnknownStartIsNotReplayed(t *testing.T) {
 	}
 	e.say("Explain the current status")
 	eventually(t, "owner message continues after ambiguous event", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed'`) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
 	})
-	if len(h.Starts()) != 1 || strings.Contains(h.Starts()[0].Text, "Tend ledger event") {
-		t.Fatalf("unknown event turn blindly replayed: %+v", h.Starts())
+	if len(businessStarts(h)) != 1 || strings.Contains(businessStarts(h)[0].Text, "Tend ledger event") {
+		t.Fatalf("unknown event turn blindly replayed: %+v", businessStarts(h))
 	}
 }
 
@@ -77,9 +77,9 @@ func TestTasklessAnsweredDecisionWakeCarriesAnswerIntoFreshThread(t *testing.T) 
 		protocol.AnswerDecisionPayload{Version: 1, Option: "narrow", Text: "Limit it to the renderer; preserve the loader."}, app.AnswerDecision{})
 	e.start()
 	eventually(t, "taskless answer event completes", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed'`) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
 	})
-	starts := h.Starts()
+	starts := businessStarts(h)
 	if len(starts) != 1 || e.count(`SELECT COUNT(*) FROM conversation_messages WHERE author='owner'`) != 0 {
 		t.Fatalf("unexpected original owner input: %+v", starts)
 	}
@@ -101,17 +101,17 @@ func TestOwnerCanStopBackgroundEventTurn(t *testing.T) {
 	e := newEnv(t, h)
 	openWakeDecision(e)
 	eventually(t, "event starts", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='started'`) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='started'`) == 1
 	})
-	message := h.Starts()[0].UserMessageID
+	message := businessStarts(h)[0].UserMessageID
 	e.exec(owner, "conversation.interrupt_reply", protocol.Target{Type: "message", ID: message},
 		protocol.InterruptReplyPayload{MessageID: message}, app.InterruptReply{})
 	eventually(t, "event stops", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND status='interrupted'`, message) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND message_id=? AND status='interrupted'`, message) == 1
 	})
 	e.say("Now use the revised scope")
 	eventually(t, "owner resumes coordination", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed'`) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
 	})
 	// A delayed second stop returns the settled state, just as for owner turns.
 	var result struct{ State string }
@@ -142,9 +142,9 @@ func TestEventWakeSurvivesRestartAndKeepsOwnerPriority(t *testing.T) {
 	ownerMessage := e.say("Clarify my scope first")
 	e.start()
 	eventually(t, "owner and event turns finish", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 2
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 2
 	})
-	starts := h.Starts()
+	starts := businessStarts(h)
 	if len(starts) != 2 || starts[0].UserMessageID != ownerMessage {
 		t.Fatalf("owner priority lost after restart: %+v", starts)
 	}
@@ -180,10 +180,10 @@ func TestEventWakeSurvivesRestartAndKeepsOwnerPriority(t *testing.T) {
 	// dispatcher drained the queue without replaying the completed event.
 	e.say("What is the status?")
 	eventually(t, "post-restart message finishes", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 3
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 3
 	})
-	if len(h.Starts()) != 3 {
-		t.Fatalf("completed background turn replayed: %+v", h.Starts())
+	if len(businessStarts(h)) != 3 {
+		t.Fatalf("completed background turn replayed: %+v", businessStarts(h))
 	}
 }
 
@@ -205,17 +205,17 @@ func TestEventWakeWaitsForActiveOwnerAndPendingOwner(t *testing.T) {
 		}
 	}()
 	e.say("Hold the owner turn")
-	eventually(t, "owner turn starts", func() bool { return len(h.Starts()) == 1 })
+	eventually(t, "owner turn starts", func() bool { return len(businessStarts(h)) == 1 })
 	openWakeDecision(e)
 	second := e.say("A newer owner instruction")
-	if len(h.Starts()) != 1 {
+	if len(businessStarts(h)) != 1 {
 		t.Fatal("background wake interrupted or overlapped owner")
 	}
 	close(release)
 	eventually(t, "all serial turns finish", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 3
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 3
 	})
-	starts := h.Starts()
+	starts := businessStarts(h)
 	if starts[1].UserMessageID != second || !strings.Contains(starts[2].Text, "Tend ledger event") {
 		t.Fatalf("pending owner did not precede event: %+v", starts)
 	}
@@ -255,9 +255,24 @@ func TestWorkItemChoiceAnswerWakesWithSystemNoticeAndNoQueuedOwnerReply(t *testi
 	if err := json.Unmarshal(answered.Result, &choice); err != nil {
 		t.Fatal(err)
 	}
+	// Preserve the already-enqueued legacy main batch identity on upgrade.
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		if _, err := tx.Exec(t.Context(), `DELETE FROM message_dispositions WHERE message_id IN (SELECT message_id FROM background_batches)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE conversation_messages SET conversation_id='main' WHERE message_id IN (SELECT message_id FROM background_batches)`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE outbox SET destination='main_thread' WHERE operation='main_thread.handle_event'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	e.start()
-	eventually(t, "choice answer event completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed'`) == 1 })
-	starts := h.Starts()
+	eventually(t, "choice answer event completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
+	})
+	starts := businessStarts(h)
 	if len(starts) != 1 {
 		t.Fatalf("starts=%+v", starts)
 	}

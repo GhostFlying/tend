@@ -38,6 +38,7 @@ func TestAnsweredDecisionWakeCarriesCanonicalEffectResult(t *testing.T) {
 func TestEventWakeFailureDecisionAndOwnerAnswerAreDurable(t *testing.T) {
 	h := newHarness(t)
 	_, decision := h.failImplementation()
+	h.legacyMainBatches()
 	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
 	if err != nil || !ok || d.Operation != OpHandleEvent {
 		t.Fatalf("failure decision wake: %+v, %v, %v", d, ok, err)
@@ -74,6 +75,7 @@ func TestEventWakeFailureDecisionAndOwnerAnswerAreDurable(t *testing.T) {
 	h.exec(owner, env, AnswerDecision{})
 	// Reconstruct the app as on restart; pending outbox work survives it.
 	h.app = New(h.store, h.ids, h.clock.Now)
+	h.legacyMainBatches()
 	d, _, ok, err = h.app.NextDelivery(t.Context(), MainThreadDestination)
 	if err != nil || !ok {
 		t.Fatalf("answer wake after restart = %+v, %v, %v", d, ok, err)
@@ -100,6 +102,7 @@ func TestEventWakeFailureDecisionAndOwnerAnswerAreDurable(t *testing.T) {
 	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {
 		t.Fatal(err)
 	}
+	h.legacyMainBatches()
 	if _, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination); err != nil || ok {
 		t.Fatalf("replay duplicated event wake: %v, %v", ok, err)
 	}
@@ -118,6 +121,7 @@ func TestEventWakeDoesNotLoopOrPollProgress(t *testing.T) {
 	}
 	h := newHarness(t)
 	h.exec(mainAgent, h.env("decisions.open", protocol.Target{Type: "decision"}, openDecisionPayload{Question: "Need owner scope", Options: []string{"a", "b"}}, nil), OpenDecision{})
+	h.legacyMainBatches()
 	if _, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination); err != nil || ok {
 		t.Fatalf("main agent decision queued itself: %v, %v", ok, err)
 	}
@@ -127,21 +131,25 @@ func TestOwnerDeliveryPrecedesPendingEventButNotInflightWork(t *testing.T) {
 	h := newHarness(t)
 	h.failImplementation()
 	h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{Body: "Pause and clarify first"}, nil), SubmitMessage{})
+	h.legacyMainBatches()
 	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
 	if err != nil || !ok || d.Operation != OpHandleMessage {
 		t.Fatalf("owner not prioritized: %+v, %v", d, err)
 	}
+	h.legacyMainBatches()
 	if _, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination); err != nil || ok {
 		t.Fatalf("event overtook in-flight owner: %v, %v", ok, err)
 	}
 	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {
 		t.Fatal(err)
 	}
+	h.legacyMainBatches()
 	d, _, ok, err = h.app.NextDelivery(t.Context(), MainThreadDestination)
 	if err != nil || !ok || d.Operation != OpHandleEvent {
 		t.Fatalf("event lost after owner: %+v, %v", d, err)
 	}
 	h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{Body: "Another owner message"}, nil), SubmitMessage{})
+	h.legacyMainBatches()
 	if _, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination); err != nil || ok {
 		t.Fatalf("owner overlapped in-flight event: %v, %v", ok, err)
 	}

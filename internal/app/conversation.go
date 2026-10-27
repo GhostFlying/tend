@@ -75,9 +75,6 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	if err != nil {
 		return Outcome{}, errNotFound(err, "conversation does not exist")
 	}
-	if p.ConversationID != "main" && !x.BackgroundAgentsEnabled {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "background agents are disabled")
-	}
 	if p.ConversationID != "main" && p.Decision != nil {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "answer business decisions in the main conversation")
 	}
@@ -236,13 +233,31 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		state = protocol.MessageQueued
 	}
 	result := map[string]any{"message_id": p.MessageID, "state": state}
+	stopped, err := tx.Exec(ctx, `UPDATE logical_turns SET status='stopped',reason='Stopped by owner; resume explicitly.',updated_at=? WHERE message_id=? AND status NOT IN ('completed','stopped')`, x.Now.UnixMilli(), p.MessageID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	changed, err := stopped.RowsAffected()
+	if err != nil {
+		return Outcome{}, err
+	}
+	var events []Event
+	if changed > 0 {
+		events = []Event{{ObjectType: "message", ObjectID: p.MessageID, Kind: "conversation.processing_stopped"}}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE outbox SET status='failed',updated_at=? WHERE operation='conversation.repair_turn' AND status='pending' AND request_id IN (SELECT e.request_id FROM logical_turn_executions e JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE l.message_id=? AND l.status='stopped')`, x.Now.UnixMilli(), p.MessageID); err != nil {
+		return Outcome{}, err
+	}
+
 	if _, err := store.GetOpenTurn(ctx, tx.Q(), p.MessageID); errors.Is(err, store.ErrNotFound) {
-		return Outcome{Result: result}, nil
+		return Outcome{Result: result, Events: events, Notify: changed > 0}, nil
 	} else if err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{
 		Result:   result,
+		Events:   events,
+		Notify:   changed > 0,
 		Outbox:   []OutboxMessage{{Destination: MainThreadControlDestination, Operation: OpInterruptTurn, Payload: InterruptTurn{MessageID: p.MessageID}}},
 		Accepted: true,
 	}, nil
@@ -251,7 +266,7 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 // RecordAgentMessage handles conversation.record_agent_message: the main
 // agent said something in a turn. Its request ID is derived from the
 // harness item, so recording the same item again has no effect.
-type RecordAgentMessage struct{}
+type RecordAgentMessage struct{ Reconciled bool }
 
 type recordAgentMessagePayload struct {
 	Body    string                  `json:"body"`
@@ -270,7 +285,7 @@ func (RecordAgentMessage) Authorize(_ context.Context, x *Exec, _ store.Querier)
 }
 
 // Apply implements Command.
-func (RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func (c RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p recordAgentMessagePayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -286,9 +301,9 @@ func (RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	if handled, out, err := bufferBackgroundReply(ctx, x, tx, p); handled {
 		return out, err
 	}
-	return recordVisibleAgentMessage(ctx, x, tx)
+	return recordVisibleAgentMessage(ctx, x, tx, c.Reconciled)
 }
-func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx, reconciled ...bool) (Outcome, error) {
 	var p recordAgentMessagePayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -325,7 +340,8 @@ func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 			// Terminal text cannot be revived by a delayed delta. A streaming
 			// update is cumulative and must extend the committed prefix; the
 			// authoritative completed item may replace it with shorter text.
-			if row.Status != string(protocol.AssistantStreaming) || (status == protocol.AssistantStreaming && !strings.HasPrefix(p.Body, old.Body)) || (old.Body == p.Body && row.Status == string(status)) {
+			restore := len(reconciled) > 0 && reconciled[0] && (row.Status == string(protocol.AssistantInterrupted) || row.Status == string(protocol.AssistantUnknown))
+			if (row.Status != string(protocol.AssistantStreaming) && !restore) || (status == protocol.AssistantStreaming && !strings.HasPrefix(p.Body, old.Body)) || (old.Body == p.Body && row.Status == string(status)) {
 				return result, nil
 			}
 		}
@@ -367,6 +383,17 @@ func bindSource(ctx context.Context, tx *store.Tx, messageID, objectType, object
 			return nil
 		}
 		return err
+	}
+	if objectType == "task" {
+		items, err := store.ListTaskWorkItems(ctx, tx.Q(), objectID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := tx.BindMessage(ctx, messageID, "work_item", item.WorkItemID, "resolved_task"); err != nil {
+				return err
+			}
+		}
 	}
 	return tx.BindMessage(ctx, messageID, objectType, objectID, "resolved")
 }
@@ -457,6 +484,15 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 			return err
 		}
 		if m.Status == store.TurnStarting && (errors.Is(err, store.ErrNotFound) || prev.Status == store.TurnRejected) {
+			// Claiming a delivery does not authorize a later native start after
+			// the owner stopped its logical turn. Check again at admission.
+			var cancelledRepair bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE e.request_id=? AND e.repair=1 AND l.status IN ('stopped','awaiting_clarification','completed'))`, m.RequestID).Scan(&cancelledRepair); err != nil {
+				return err
+			}
+			if cancelledRepair {
+				return ErrRepairCancelled
+			}
 			c, ce := store.MessageControl(ctx, tx.Q(), m.MessageID)
 			if ce != nil && !errors.Is(ce, store.ErrNotFound) {
 				return ce
@@ -472,8 +508,41 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 				return protocol.Errorf(protocol.CodeInvalidTransition, "main thread is draining for server upgrade")
 			}
 		}
+		if err := a.registerLogicalTurn(ctx, tx, m, now); err != nil {
+			return err
+		}
+		if m.NativeReconciled {
+			if _, err := tx.Exec(ctx, `DELETE FROM native_turn_receipts_pending WHERE request_id=?`, m.RequestID); err != nil {
+				return err
+			}
+		}
 		if err := tx.PutMainTurn(ctx, m, now); err != nil {
 			return err
+		}
+		var pendingReceipt bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM native_turn_receipts_pending WHERE request_id=?)`, m.RequestID).Scan(&pendingReceipt); err != nil {
+			return err
+		}
+		if pendingReceipt {
+			return a.insertMessageState(ctx, tx, m.MessageID, protocol.MessageUnknown, now)
+		}
+		if m.Status == store.TurnCompleted || m.Status == store.TurnInterrupted || m.Status == store.TurnFailed {
+			if _, err := tx.Exec(ctx, `UPDATE outbox SET status='delivered',updated_at=? WHERE request_id=? AND (status='unknown' OR (? AND status='sending'))`, now, m.RequestID, m.NativeReconciled); err != nil {
+				return err
+			}
+		}
+		if prev.Status != m.Status || m.NativeReconciled {
+			incomplete, err := a.settleLogicalTurn(ctx, tx, m, now)
+			if err != nil {
+				return err
+			}
+			if incomplete {
+				state := protocol.MessageProcessing
+				if m.Status == store.TurnInterrupted {
+					state = protocol.MessageInterrupted
+				}
+				return a.insertMessageState(ctx, tx, m.MessageID, state, now)
+			}
 		}
 		if err := a.settleBackground(ctx, tx, m.MessageID, m.Status, now); err != nil {
 			return err
@@ -509,6 +578,9 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 	now := a.now().UnixMilli()
 	settled := 0
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
+		if err := markNativeReceiptsPending(ctx, tx, threadID, now); err != nil {
+			return err
+		}
 		ids, err := tx.SettleOpenTurns(ctx, threadID, now)
 		if err != nil {
 			return err
@@ -540,6 +612,20 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 				return err
 			}
 			if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{}`, CreatedAt: now}); err != nil {
+				return err
+			}
+		}
+		requests, err := store.FollowupIDs(ctx, tx.Q(), `SELECT e.request_id FROM logical_turn_executions e JOIN main_turns t ON t.request_id=e.request_id JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE t.thread_id=? AND t.status='interrupted' AND l.status IN ('processing','recovering') AND e.settled=0 AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)`, threadID)
+		if err != nil {
+			return err
+		}
+		for _, request := range requests {
+			rec, err := store.GetMainTurn(ctx, tx.Q(), request)
+			if err != nil {
+				return err
+			}
+			rec.Status = store.TurnFailed
+			if _, err := a.settleLogicalTurn(ctx, tx, rec, now); err != nil {
 				return err
 			}
 		}

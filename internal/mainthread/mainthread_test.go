@@ -63,6 +63,16 @@ func newEnv(t *testing.T, h *testkit.Harness, opts ...func(*Config)) *env {
 	for _, o := range opts {
 		o(&cfg)
 	}
+	originalTurn := h.Turn
+	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
+		if in.Repair {
+			return completeFixtureReview(t, th, turn)
+		}
+		if originalTurn != nil {
+			return originalTurn(th, turn, in)
+		}
+		return "completed"
+	}
 	e.m = New(a, cb, tools.New(a, s, cb, quiet()), cfg)
 	e.start()
 	t.Cleanup(func() {
@@ -120,7 +130,7 @@ func (e *env) count(query string, args ...any) int {
 func (e *env) outboxStatus() string {
 	var s string
 	_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(context.Background(), `SELECT status FROM outbox ORDER BY seq DESC LIMIT 1`).Scan(&s)
+		return tx.Q().QueryRowContext(context.Background(), `SELECT status FROM outbox WHERE operation<>'conversation.repair_turn' ORDER BY seq DESC LIMIT 1`).Scan(&s)
 	})
 	return s
 }
@@ -182,7 +192,9 @@ func TestMessageBecomesTask(t *testing.T) {
 	e := newEnv(t, h)
 	msg := e.say("Please fix the build.")
 
-	eventually(t, "the turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 	if n := e.count(`SELECT COUNT(*) FROM tasks`); n != 1 {
 		t.Errorf("tasks = %d, want 1", n)
 	}
@@ -192,7 +204,7 @@ func TestMessageBecomesTask(t *testing.T) {
 	if n := e.count(`SELECT COUNT(*) FROM conversation_messages WHERE author = 'main_agent' AND reply_to = ?`, msg); n != 1 {
 		t.Errorf("agent replies = %d, want 1", n)
 	}
-	starts := h.Starts()
+	starts := businessStarts(h)
 	if len(starts) != 1 || starts[0].UserMessageID != msg || !strings.HasPrefix(starts[0].Text, "[message "+msg+"]") {
 		t.Errorf("turn input = %+v", starts)
 	}
@@ -226,8 +238,11 @@ func TestToolUsesJoinTheConversation(t *testing.T) {
 	}
 	e := newEnv(t, h)
 	msg := e.say("Anything open?")
-	eventually(t, "the turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 
+	eventually(t, "logical review completes", func() bool { return e.count(`SELECT COUNT(*) FROM logical_turns WHERE status='completed'`) == 1 })
 	var page protocol.ConversationPage
 	_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
 		var err error
@@ -287,13 +302,15 @@ func TestTurnsAreSerial(t *testing.T) {
 	e := newEnv(t, h)
 	e.say("first")
 	e.say("second")
-	eventually(t, "the first turn starts", func() bool { return len(h.Starts()) == 1 })
+	eventually(t, "the first turn starts", func() bool { return len(businessStarts(h)) == 1 })
 	time.Sleep(200 * time.Millisecond)
-	if n := len(h.Starts()); n != 1 {
+	if n := len(businessStarts(h)); n != 1 {
 		t.Fatalf("turns started while the first one runs: %d", n)
 	}
 	close(gate)
-	eventually(t, "both turns complete", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 2 })
+	eventually(t, "both turns complete", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 2
+	})
 	if overlap {
 		t.Error("turns overlapped")
 	}
@@ -319,7 +336,9 @@ func TestFault_TurnStartUnknown(t *testing.T) {
 	// message gets a turn.
 	eventually(t, "a new session takes over", func() bool { return h.Sessions() == 2 })
 	e.say("are you there?")
-	eventually(t, "the next message gets its turn", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the next message gets its turn", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 	time.Sleep(200 * time.Millisecond)
 	if n := e.count(`SELECT COUNT(*) FROM outbox WHERE attempts > 1`); n != 0 {
 		t.Error("an uncertain turn start was retried")
@@ -344,7 +363,9 @@ func TestRejectedTurnStartIsRetried(t *testing.T) {
 	}
 	e := newEnv(t, h)
 	e.say("hello")
-	eventually(t, "the turn completes after the refusal", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the turn completes after the refusal", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 }
 
 func TestCompactionTriggersFullSnapshot(t *testing.T) {
@@ -357,11 +378,17 @@ func TestCompactionTriggersFullSnapshot(t *testing.T) {
 	}
 	e := newEnv(t, h)
 	e.say("hello")
-	eventually(t, "the first turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the first turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 	e.say("compact please")
-	eventually(t, "the second turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 2 })
+	eventually(t, "the second turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 2
+	})
 	e.say("and now?")
-	eventually(t, "the third turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 3 })
+	eventually(t, "the third turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 3
+	})
 	var thread string
 	_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
 		var err error
@@ -380,11 +407,15 @@ func TestRestartResumesThread(t *testing.T) {
 	h := testkit.NewHarness()
 	e := newEnv(t, h)
 	e.say("one")
-	eventually(t, "the first turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the first turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 	h.Crash()
 	eventually(t, "a new session resumes the thread", func() bool { return h.Sessions() == 2 && h.Resumed() == 1 })
 	e.say("two")
-	eventually(t, "the second turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 2 })
+	eventually(t, "the second turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 2
+	})
 	if n := e.count(`SELECT COUNT(DISTINCT thread_id) FROM main_turns`); n != 1 {
 		t.Errorf("turns ran on %d threads, want the resumed one", n)
 	}
@@ -407,7 +438,7 @@ func TestFault_TurnStartUnknownAfterRestart(t *testing.T) {
 	}
 	e.start()
 	eventually(t, "reconciliation marks the delivery unknown", func() bool { return e.outboxStatus() == store.OutboxUnknown })
-	if n := len(h.Starts()); n != 0 {
+	if n := len(businessStarts(h)); n != 0 {
 		t.Errorf("an uncertain delivery was started again: %d", n)
 	}
 }
@@ -416,7 +447,9 @@ func TestFault_TurnRunningAtCrash(t *testing.T) {
 	h := testkit.NewHarness()
 	e := newEnv(t, h)
 	e.say("one")
-	eventually(t, "the first turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the first turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 	e.stop()
 	// A previous process started the turn for "two" and died during it.
 	id := e.say("two")
@@ -435,9 +468,9 @@ func TestFault_TurnRunningAtCrash(t *testing.T) {
 	}
 	e.start()
 	eventually(t, "the turn is settled and its delivery kept", func() bool {
-		return e.outboxStatus() == store.OutboxDelivered && e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id = 'x' AND status = 'interrupted'`) == 1
+		return e.outboxStatus() == store.OutboxDelivered && e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND request_id = 'x' AND status = 'interrupted'`) == 1
 	})
-	if n := len(h.Starts()); n != 1 {
+	if n := len(businessStarts(h)); n != 1 {
 		t.Errorf("turn starts = %d, want the interrupted message not sent again", n)
 	}
 	if n := e.count(`SELECT COUNT(*) FROM events WHERE kind = 'conversation.message_state' AND object_id = ? AND body_json LIKE '%interrupted%'`, id); n != 1 {
@@ -511,12 +544,14 @@ func TestInterruptReply(t *testing.T) {
 	}
 
 	long := e.say("a long one")
-	eventually(t, "the turn runs", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'started'`) == 1 })
+	eventually(t, "the turn runs", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'started'`) == 1
+	})
 	retried := e.ids.New(protocol.PrefixRequest)
 	stop(long, retried)
 	stop(long, retried) // a retry of the same request
 	eventually(t, "the turn is interrupted", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id = ? AND status = 'interrupted'`, long) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND message_id = ? AND status = 'interrupted'`, long) == 1
 	})
 	if n := e.count(`SELECT COUNT(*) FROM outbox WHERE destination = ?`, app.MainThreadControlDestination); n != 1 {
 		t.Errorf("stops queued = %d, want 1", n)
@@ -530,7 +565,10 @@ func TestInterruptReply(t *testing.T) {
 	// reply changes nothing.
 	next := e.say("a short one")
 	eventually(t, "the next turn completes", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id = ? AND status = 'completed'`, next) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND message_id = ? AND status = 'completed'`, next) == 1
+	})
+	eventually(t, "the next logical turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM logical_turns WHERE message_id=? AND status='completed'`, next) == 1
 	})
 	var res struct {
 		State protocol.MessageState `json:"state"`
@@ -563,10 +601,12 @@ func TestInterruptRefusedWhileRunningIsRetried(t *testing.T) {
 	e := newEnv(t, h)
 	defer close(gate)
 	msg := e.say("long")
-	eventually(t, "the turn runs", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'started'`) == 1 })
+	eventually(t, "the turn runs", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'started'`) == 1
+	})
 	e.exec(owner, "conversation.interrupt_reply", protocol.Target{Type: "message", ID: msg}, protocol.InterruptReplyPayload{MessageID: msg}, app.InterruptReply{})
 	eventually(t, "the turn is interrupted after a refusal", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id = ? AND status = 'interrupted'`, msg) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND message_id = ? AND status = 'interrupted'`, msg) == 1
 	})
 }
 
@@ -584,7 +624,9 @@ func TestFault_InterruptUnanswered(t *testing.T) {
 	e := newEnv(t, h, func(c *Config) { c.InterruptTimeout = 50 * time.Millisecond })
 	defer close(gate)
 	msg := e.say("long")
-	eventually(t, "the turn runs", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'started'`) == 1 })
+	eventually(t, "the turn runs", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'started'`) == 1
+	})
 	e.exec(owner, "conversation.interrupt_reply", protocol.Target{Type: "message", ID: msg}, protocol.InterruptReplyPayload{MessageID: msg}, app.InterruptReply{})
 	eventually(t, "the stop is marked unknown, not resent", func() bool {
 		return e.count(`SELECT COUNT(*) FROM outbox WHERE destination = ? AND status = 'unknown'`, app.MainThreadControlDestination) == 1
@@ -595,7 +637,10 @@ func TestFault_InterruptReplyLost(t *testing.T) {
 	h := testkit.NewHarness()
 	e := newEnv(t, h)
 	msg := e.say("one")
-	eventually(t, "the turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
+	eventually(t, "logical review finishes", func() bool { return e.count(`SELECT COUNT(*) FROM logical_turns WHERE status='completed'`) == 1 })
 	payload, _ := json.Marshal(app.InterruptTurn{MessageID: msg})
 	d := app.Delivery{Destination: app.MainThreadControlDestination, Operation: app.OpInterruptTurn, Payload: payload}
 	if r := e.m.Control().Reconcile(context.Background(), d); r.Outcome != app.Delivered {
@@ -629,9 +674,13 @@ func TestReplayedToolCallKeepsItsMessage(t *testing.T) {
 	}
 	e := newEnv(t, h)
 	e.say("create it")
-	eventually(t, "the first turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the first turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 	e.say("something else")
-	eventually(t, "the second turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 2 })
+	eventually(t, "the second turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 2
+	})
 	if !replay.Success {
 		t.Errorf("replayed call = %s, want the original result", replay.Text)
 	}
@@ -645,7 +694,9 @@ func TestEarlyReplyKeepsItsMessage(t *testing.T) {
 	h.BeforeAnswer = func(th *testkit.FakeThread, turn string) { th.Say(turn, "item_1", "quick answer") }
 	e := newEnv(t, h)
 	msg := e.say("hi")
-	eventually(t, "the turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "the turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 	if n := e.count(`SELECT COUNT(*) FROM conversation_messages WHERE author = 'main_agent' AND reply_to = ?`, msg); n != 1 {
 		t.Errorf("early reply not tied to its message")
 	}
@@ -656,11 +707,13 @@ func TestLaggingClientIsVisible(t *testing.T) {
 	e := newEnv(t, h)
 	e.say("one")
 	e.say("two")
-	eventually(t, "two turns complete", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 2 })
+	eventually(t, "two turns complete", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 2
+	})
 	// A client that last showed the first message answers.
 	e.exec(owner, "conversation.submit_message", protocol.Target{Type: "message"}, map[string]any{"body": "yes", "last_seen_seq": 1}, app.SubmitMessage{})
-	eventually(t, "the third turn starts", func() bool { return len(h.Starts()) >= 3 })
-	if in := h.Starts()[2].Text; !strings.Contains(in, "having seen messages up to #1") {
+	eventually(t, "the third turn starts", func() bool { return len(businessStarts(h)) >= 3 })
+	if in := businessStarts(h)[2].Text; !strings.Contains(in, "having seen messages up to #1") {
 		t.Errorf("turn input = %q", in)
 	}
 }
@@ -692,4 +745,71 @@ func TestBackgroundThreadConfigUsesAutoMode(t *testing.T) {
 	if cfg.OnToolCall == nil || len(cfg.Tools) == 0 {
 		t.Fatal("background lost its scoped Tend tools")
 	}
+}
+
+// Existing transport tests count original business executions separately from
+// D112 review continuations; the latter exercise the actual restricted tools.
+func businessStarts(h *testkit.Harness) []harness.TurnInput {
+	var out []harness.TurnInput
+	for _, in := range h.Starts() {
+		if !in.Repair {
+			out = append(out, in)
+		}
+	}
+	return out
+}
+func completeFixtureReview(t *testing.T, th *testkit.FakeThread, turn string) string {
+	t.Helper()
+	call := 0
+	invoke := func(name string, args any, out any) bool {
+		call++
+		result := th.CallTool(context.Background(), turn, fmt.Sprintf("review-%d", call), name, args)
+		var answer struct {
+			OK     bool            `json:"ok"`
+			Result json.RawMessage `json:"result"`
+		}
+		if !result.Success || json.Unmarshal([]byte(result.Text), &answer) != nil || !answer.OK {
+			return false
+		}
+		return out == nil || json.Unmarshal(answer.Result, out) == nil
+	}
+	var state protocol.LogicalTurnState
+	if !invoke("conversation_turn_read", struct{}{}, &state) {
+		return "failed"
+	}
+	for _, m := range state.Messages {
+		if m.Disposition != "pending" {
+			continue
+		}
+		ids := []string{}
+		for _, i := range m.Items {
+			ids = append(ids, i.WorkItemID)
+		}
+		disposition := "unassigned"
+		if len(ids) > 0 {
+			disposition = "linked"
+		}
+		if !invoke("conversation_associate", map[string]any{"message_id": m.MessageID, "content_revision": m.ContentRevision, "expected_control_revision": m.Revision, "disposition": disposition, "work_item_ids": ids}, nil) {
+			return "failed"
+		}
+	}
+	if !invoke("conversation_turn_read", struct{}{}, &state) {
+		return "failed"
+	}
+	for _, c := range state.Contexts {
+		if !invoke("work_item_context_prepare", map[string]any{"work_item_id": c.WorkItemID, "expected_control_revision": c.Revision, "coverage": "Reviewed transport fixture messages; no additional semantic facts", "gaps": "None in this fixture"}, nil) {
+			return "failed"
+		}
+	}
+	if !invoke("conversation_turn_read", struct{}{}, &state) {
+		return "failed"
+	}
+	review := protocol.LogicalTurnCommit{Contexts: state.Contexts}
+	for _, m := range state.Messages {
+		review.Messages = append(review.Messages, protocol.LogicalTurnReview{MessageID: m.MessageID, ContentRevision: m.ContentRevision, AssociationRevision: m.Revision})
+	}
+	if !invoke("conversation_turn_commit", review, nil) {
+		return "failed"
+	}
+	return "completed"
 }

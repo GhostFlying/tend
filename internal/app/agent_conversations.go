@@ -18,9 +18,6 @@ func (OpenAgentConversation) Authorize(_ context.Context, x *Exec, _ store.Queri
 	return allowKinds(x.Principal, protocol.PrincipalOwner, protocol.PrincipalMainAgent)
 }
 func (OpenAgentConversation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	if !x.BackgroundAgentsEnabled {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "background agents are disabled")
-	}
 	id, err := ensureAgentConversation(ctx, x, tx, x.Env.Target.ID)
 	if err != nil {
 		return Outcome{}, err
@@ -67,7 +64,11 @@ func (a *App) AgentContext(ctx context.Context, id string, request string) (stri
 		if err != nil {
 			return err
 		}
-		if !v.Prepared {
+		ready, err := store.WorkItemContextReady(ctx, tx.Q(), c.WorkItemID)
+		if err != nil {
+			return err
+		}
+		if !ready {
 			return protocol.Errorf(protocol.CodeInvalidTransition, "main agent must prepare or reconcile the context baseline before background processing")
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO agent_turn_contexts(request_id,conversation_id,context_revision) VALUES(?,?,?) ON CONFLICT(request_id) DO UPDATE SET context_revision=excluded.context_revision`, request, id, v.Revision); err != nil {
@@ -84,8 +85,30 @@ func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 	var ids []string
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		ids, err = store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT c.conversation_id FROM agent_conversations c JOIN outbox o ON o.destination='background_thread:'||c.conversation_id WHERE (o.status='sending' OR (o.status='pending' AND o.next_attempt_at<=?)) AND EXISTS(SELECT 1 FROM work_item_contexts wc WHERE wc.work_item_id=c.work_item_id AND wc.baseline_revision>0) AND (o.operation<>'main_thread.handle_event' OR EXISTS(SELECT 1 FROM work_items w WHERE w.work_item_id=c.work_item_id AND w.status<>'closed')) ORDER BY c.conversation_id`, a.now().UnixMilli())
-		return err
+		ids, err = store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT c.conversation_id FROM agent_conversations c JOIN outbox o ON o.destination='background_thread:'||c.conversation_id WHERE (o.status='sending' OR (o.status='pending' AND o.next_attempt_at<=?)) AND (o.operation<>'main_thread.handle_event' OR EXISTS(SELECT 1 FROM work_items w WHERE w.work_item_id=c.work_item_id AND w.status<>'closed')) ORDER BY c.conversation_id`, a.now().UnixMilli())
+		if err != nil {
+			return err
+		}
+		var runnable []string
+		for _, id := range ids {
+			c, err := store.AgentConversation(ctx, tx.Q(), id)
+			if err != nil {
+				return err
+			}
+			var inflight bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox WHERE destination=? AND status='sending')`, "background_thread:"+id).Scan(&inflight); err != nil {
+				return err
+			}
+			ready, err := store.WorkItemContextReady(ctx, tx.Q(), c.WorkItemID)
+			if err != nil {
+				return err
+			}
+			if inflight || ready {
+				runnable = append(runnable, id)
+			}
+		}
+		ids = runnable
+		return nil
 	})
 	return ids, err
 }

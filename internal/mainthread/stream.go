@@ -72,6 +72,13 @@ func (m *Manager) flushReplies(ctx context.Context, th harness.Thread, drafts re
 }
 
 func (m *Manager) recordReplyState(ctx context.Context, th harness.Thread, ev harness.Event, state protocol.AssistantState) error {
+	repair, err := m.isRepairEvent(ctx, th, ev)
+	if err != nil {
+		return err
+	}
+	if repair {
+		return nil
+	}
 	replyTo := m.replyTo(ev.TurnID)
 	if replyTo == "" {
 		rec, ok, err := m.app.TurnDelivery(ctx, th.ID(), ev.TurnID)
@@ -92,4 +99,32 @@ func (m *Manager) recordReplyState(ctx context.Context, th harness.Thread, ev ha
 		native += fmt.Sprintf("/%s:%x", state, sha256.Sum256([]byte(ev.Text)))
 	}
 	return m.record(ctx, th, native, "conversation.record_agent_message", payload, app.RecordAgentMessage{})
+}
+
+func (m *Manager) isRepairEvent(ctx context.Context, th harness.Thread, ev harness.Event) (bool, error) {
+	request := ""
+	m.mu.Lock()
+	if a := m.active; a != nil && (a.turnID == "" || a.turnID == ev.TurnID) {
+		request = a.requestID
+	}
+	m.mu.Unlock()
+	if request == "" {
+		rec, ok, err := m.app.TurnDelivery(ctx, th.ID(), ev.TurnID)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			request = rec.RequestID
+		}
+	}
+	if request != "" {
+		repair, err := m.app.IsRepairExecution(ctx, request)
+		if err != nil {
+			return false, err
+		}
+		if repair {
+			return true, nil
+		}
+	}
+	return false, nil
 }

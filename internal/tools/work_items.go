@@ -29,9 +29,10 @@ type workItemRefreshArgs struct {
 	Reason                  string `json:"reason"`
 }
 type workItemCreateArgs struct {
-	Plan      protocol.WorkItemPlan `json:"plan"`
-	CommitSeq int64                 `json:"commit_seq"`
-	Reason    string                `json:"reason"`
+	InitialContext protocol.InitialWorkItemContext `json:"initial_context"`
+	Plan           protocol.WorkItemPlan           `json:"plan"`
+	CommitSeq      int64                           `json:"commit_seq"`
+	Reason         string                          `json:"reason"`
 }
 type workItemUpdateArgs struct {
 	CompletionReviews       []protocol.CompletionReviewAcknowledgement `json:"completion_reviews,omitempty"`
@@ -157,7 +158,7 @@ func (s *Service) workItemsCreate(ctx context.Context, c Call) (any, error) {
 	if err := requireMessage(c); err != nil {
 		return nil, err
 	}
-	p := protocol.CreateWorkItemPayload{WorkItemPlan: a.Plan, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}
+	p := protocol.CreateWorkItemPayload{InitialContext: &a.InitialContext, WorkItemPlan: a.Plan, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}
 	return s.execute(ctx, c, "work_items.create", protocol.Target{Type: "work_item"}, nil, a.Reason, p, app.CreateWorkItem{})
 }
 func (s *Service) workItemsUpdate(ctx context.Context, c Call) (any, error) {

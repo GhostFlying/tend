@@ -34,20 +34,23 @@ type Harness struct {
 	Models   []harness.Model
 	Defaults harness.ModelSelection
 
-	mu       sync.Mutex
-	persist  map[string]bool
-	sessions []*FakeSession
-	starts   []harness.TurnInput
-	injected map[string][]string
-	resumed  int
-	nextID   int
-	nextTurn int
+	mu             sync.Mutex
+	persist        map[string]bool
+	sessions       []*FakeSession
+	starts         []harness.TurnInput
+	injected       map[string][]string
+	resumed        int
+	nextID         int
+	nextTurn       int
+	receipts       map[string]harness.TurnReceipt
+	identities     map[string]string
+	receiptThreads map[string]string
 }
 
 // NewHarness returns a Harness whose turns complete without doing anything
 // unless Turn is set.
 func NewHarness() *Harness {
-	return &Harness{persist: map[string]bool{}, injected: map[string][]string{}}
+	return &Harness{persist: map[string]bool{}, injected: map[string][]string{}, receipts: map[string]harness.TurnReceipt{}, identities: map[string]string{}, receiptThreads: map[string]string{}}
 }
 
 // Open starts a new session, like starting the harness process.
@@ -229,6 +232,9 @@ func (t *FakeThread) StartTurn(_ context.Context, in harness.TurnInput) (string,
 	// Turn IDs stay unique across sessions, as a persisted thread's are.
 	h.nextTurn++
 	id := fmt.Sprintf("%s_tu_%d", t.id, h.nextTurn)
+	h.receipts[id] = harness.TurnReceipt{ID: id, Status: "inProgress"}
+	h.identities[id] = in.UserMessageID
+	h.receiptThreads[id] = t.id
 	h.mu.Unlock()
 	if h.BeforeAnswer != nil {
 		t.Emit(harness.Event{Kind: harness.EventTurnStarted, TurnID: id})
@@ -268,6 +274,19 @@ func (t *FakeThread) Emit(ev harness.Event) {
 		t.mu.Unlock()
 		return
 	}
+	h := t.s.h
+	h.mu.Lock()
+	receipt, exists := h.receipts[ev.TurnID]
+	if exists {
+		if ev.Kind == harness.EventTurnCompleted {
+			receipt.Status = ev.TurnStatus
+		}
+		if ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemAgentMessage {
+			receipt.Messages = append(receipt.Messages, ev)
+		}
+		h.receipts[ev.TurnID] = receipt
+	}
+	h.mu.Unlock()
 	t.queue = append(t.queue, ev)
 	t.mu.Unlock()
 	select {
@@ -305,6 +324,15 @@ func (t *FakeThread) CallTool(ctx context.Context, turnID, callID, tool string, 
 func (t *FakeThread) close() {
 	t.mu.Lock()
 	t.ended = true
+	h := t.s.h
+	h.mu.Lock()
+	for id, r := range h.receipts {
+		if h.receiptThreads[id] == t.id && r.Status == "inProgress" {
+			r.Status = "interrupted"
+			h.receipts[id] = r
+		}
+	}
+	h.mu.Unlock()
 	t.mu.Unlock()
 	select {
 	case t.wake <- struct{}{}:
@@ -334,4 +362,26 @@ func (t *FakeThread) pump() {
 			return
 		}
 	}
+}
+
+// FindTurn exposes the fake's durable native history across process restarts.
+func (t *FakeThread) FindTurn(_ context.Context, identity, knownTurn string) (harness.TurnReceipt, bool, error) {
+	h := t.s.h
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var found bool
+	var result harness.TurnReceipt
+	for id, r := range h.receipts {
+		if h.receiptThreads[id] != t.id || (knownTurn != "" && id != knownTurn) || (knownTurn == "" && h.identities[id] != identity) {
+			continue
+		}
+		if found {
+			return harness.TurnReceipt{}, false, errors.New("ambiguous native identity")
+		}
+		found = true
+		result = r
+		result.Messages = append([]harness.Event{}, r.Messages...)
+	}
+	result.Raw, _ = json.Marshal(result.Messages)
+	return result, found, nil
 }

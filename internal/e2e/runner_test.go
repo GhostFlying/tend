@@ -843,7 +843,8 @@ func TestCancelWhilePausedReleasesTheAgent(t *testing.T) {
 }
 
 func TestTakeoverHoldsTheRunUntilHandedBack(t *testing.T) {
-	srv := newServer(t, 400*time.Millisecond)
+	// This test covers ownership transfer, not lease expiry during race-instrumented IO.
+	srv := newServer(t, 5*time.Second)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
 			return testkit.WorkerScript{Takeover: "the owner typed", Gate: make(chan struct{}),

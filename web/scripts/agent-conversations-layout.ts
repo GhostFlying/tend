@@ -14,6 +14,10 @@ await mkdir(output, { recursive: true });
 const names = ["后台 Agent 与上下文管理", "消息关联标签与历史来源追溯", "跨会话输入与附件隔离验证"];
 const associations = {
   message_id: "owner-main",
+  content_revision: 1,
+  disposition: "linked",
+  facts_reviewed: true,
+  owner_locked: true,
   revision: 1,
   items: names.map((title, i) => ({
     work_item_id: `work-${i}`,
@@ -76,7 +80,12 @@ const server = createServer(async (req, res) => {
     p = decodeURIComponent(u.pathname),
     id = u.searchParams.get("conversation_id") ?? "main";
   if (p === "/api/v1/session")
-    return json(res, { token: "fixture", login: "Example owner", scope: "owner" });
+    return json(res, {
+      token: "fixture",
+      login: "Example owner",
+      scope: "owner",
+      deployment_id: "layout-fixture",
+    });
   if (p === "/api/v1/events") {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     res.write('event: start\ndata: {"event_seq":1}\n\n');
@@ -97,7 +106,7 @@ const server = createServer(async (req, res) => {
   if (p === "/api/v1/tasks") return json(res, { items: [], more: false });
   if (p === "/api/v1/agent-conversations")
     return json(res, {
-      enabled: true,
+      runtime_available: true,
       items: conversations.filter((c) => c.title.includes(u.searchParams.get("search") ?? "")),
     });
   if (p.endsWith("/usage"))
@@ -279,6 +288,7 @@ const server = createServer(async (req, res) => {
           },
         });
       associations.revision++;
+      associations.disposition = (e.payload as { disposition: string }).disposition;
       const selected = (e.payload as { work_item_ids: string[] }).work_item_ids;
       associations.items = names.flatMap((title, i) =>
         selected.includes(`work-${i}`)
@@ -316,6 +326,7 @@ const browser = await chromium.launch({
 });
 try {
   for (const width of [1505, 1280, 390]) {
+    associations.disposition = "linked";
     associations.items = names.map((title, i) => ({
       work_item_id: `work-${i}`,
       title,
@@ -463,6 +474,35 @@ try {
     }
     await page.emulateMedia({ colorScheme: "dark" });
     await page.screenshot({ path: join(output, `dark-${width}.png`), fullPage: true });
+    const originalOwner = owner.associations!;
+    const originalReply = reply.associations!;
+    owner.associations = {
+      ...associations,
+      disposition: "pending",
+      items: [],
+      facts_reviewed: false,
+      processing: {
+        logical_turn_id: "logical-example",
+        revision: 2,
+        status: "needs_review",
+        reason: "自动补齐未完成，可继续处理。",
+      },
+    };
+    reply.associations = { ...associations, disposition: "unassigned", items: [] };
+    await page.reload();
+    await page.getByText("关联处理中", { exact: true }).waitFor();
+    await page.getByText("无工作项", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "继续处理", exact: true }).waitFor();
+    await page.screenshot({
+      path: join(output, `classification-recovery-${width}.png`),
+      fullPage: true,
+    });
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      false,
+    );
+    owner.associations = originalOwner;
+    reply.associations = originalReply;
     assert.deepEqual(errors, []);
     await context.close();
   }

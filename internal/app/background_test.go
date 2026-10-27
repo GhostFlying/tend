@@ -25,6 +25,7 @@ func (h *harness) backgroundPage(message string, after int64) protocol.Backgroun
 }
 func (h *harness) startBackground() (Delivery, store.MainTurn) {
 	h.t.Helper()
+	h.legacyMainBatches()
 	d, _, ok, err := h.app.NextDelivery(h.t.Context(), MainThreadDestination)
 	if err != nil || !ok {
 		h.t.Fatal(err, ok)
@@ -380,4 +381,23 @@ func TestBackgroundTranscriptKeepsLegacyFollowupTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertVisible(true)
+}
+
+// legacyMainBatches models already-persisted pre-D112 main-owned batches. New
+// production events are always routed to work-item conversations; these tests
+// continue checking the old frozen batch identities and publication protocol.
+func (h *harness) legacyMainBatches() {
+	h.t.Helper()
+	if err := h.store.Write(h.t.Context(), func(tx *store.Tx) error {
+		if _, err := tx.Exec(h.t.Context(), `DELETE FROM message_dispositions WHERE message_id IN (SELECT message_id FROM background_batches WHERE status='pending')`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(h.t.Context(), `UPDATE conversation_messages SET conversation_id='main' WHERE message_id IN (SELECT message_id FROM background_batches WHERE status='pending')`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(h.t.Context(), `UPDATE outbox SET destination='main_thread' WHERE status='pending' AND operation='main_thread.handle_event'`)
+		return err
+	}); err != nil {
+		h.t.Fatal(err)
+	}
 }

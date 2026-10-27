@@ -85,7 +85,7 @@ func InstallPrivate(ctx context.Context, dir string, agent protocol.AgentKind, c
 		return fmt.Errorf("bridge: %w", err)
 	}
 	args = append(slices.Clone(args), "--state", state, "--run", st.Run)
-	if err := os.WriteFile(cfg, []byte(config(command, args)), 0o644); err != nil {
+	if err := os.WriteFile(cfg, []byte(config(agent, command, args)), 0o644); err != nil {
 		return fmt.Errorf("bridge: write %s: %w", rel, err)
 	}
 	return nil
@@ -152,9 +152,9 @@ func checkOwn(path string) error {
 }
 
 // config is the agent's TOML configuration. A JSON string is a valid TOML
-// basic string. The worker runs unattended (D38, D39): the agent asks
-// nobody before running a command or calling the run's tools.
-func config(command string, args []string) string {
+// basic string. Traex uses native auto review; Codex retains its unattended
+// worker policy (D38, D39).
+func config(agent protocol.AgentKind, command string, args []string) string {
 	q := func(s string) string {
 		b, _ := json.Marshal(s)
 		return string(b)
@@ -167,7 +167,11 @@ func config(command string, args []string) string {
 	// MCP waits may contain a human decision. A week-long transport budget
 	// avoids ordinary tool deadlines; cancellation still stops the call, and
 	// expiry never deletes or answers the durable question.
-	return configHeader + "\napproval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\ncheck_for_update_on_startup = false\n" +
+	permissions := "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n"
+	if agent == protocol.AgentTraex {
+		permissions = "permission_mode = \"auto\"\n"
+	}
+	return configHeader + "\n" + permissions + "check_for_update_on_startup = false\n" +
 		"\n[mcp_servers.tend_worker]\ncommand = " + q(command) + "\nargs = [" + strings.Join(quoted, ", ") + "]\n" +
 		"default_tools_approval_mode = \"approve\"\ntool_timeout_sec = 604800\n"
 }

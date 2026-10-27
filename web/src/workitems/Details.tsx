@@ -8,7 +8,7 @@ import type {
 } from "../api/generated/api.ts";
 import { runOp } from "../app/ops.ts";
 import { notify } from "../app/notice.ts";
-import type { AgentConversationPage } from "../api/generated/api.ts";
+import type { WorkItemContext } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
@@ -41,19 +41,6 @@ import styles from "./WorkItems.module.css";
 
 export function WorkItemDetails({ connection }: { connection: Connection }) {
   const { live, client } = useServices();
-  const [agentsEnabled, setAgentsEnabled] = useState(false);
-  useEffect(() => {
-    let active = true;
-    void client
-      .get<AgentConversationPage>("/api/v1/agent-conversations")
-      .then((p) => {
-        if (active) setAgentsEnabled(p.enabled);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [client]);
 
   const current = useStore(live.workItems.detail.state);
   const history = useStore(live.workItems.history.state);
@@ -61,6 +48,21 @@ export function WorkItemDetails({ connection }: { connection: Connection }) {
   const [revision, setRevision] = useState("1");
   const state = historical ? history : current;
   const item = state.value;
+  const [context, setContext] = useState<WorkItemContext | null>(null);
+  useEffect(() => {
+    if (!item) return;
+    const abort = new AbortController();
+    void client
+      .get<WorkItemContext>(
+        `/api/v1/work-items/${encodeURIComponent(item.work_item_id)}/context`,
+        abort.signal,
+      )
+      .then(setContext)
+      .catch(() => {
+        if (!abort.signal.aborted) setContext(null);
+      });
+    return () => abort.abort();
+  }, [client, item]);
   const [chosenTab, setTab] = useState<string | null>(null);
   const [reviewVisited, setReviewVisited] = useState(false);
   const tab =
@@ -74,7 +76,27 @@ export function WorkItemDetails({ connection }: { connection: Connection }) {
             工作项 · {item ? columnLabel(item.column) : "正在读取"}
           </span>
           <h2>{item?.title ?? "工作项详情"}</h2>
-          {item && agentsEnabled && (
+          {context && (
+            <details>
+              <summary>
+                上下文 ·{" "}
+                {(
+                  {
+                    initializing: "初始化中",
+                    synced: "已同步",
+                    needs_review: "待核对",
+                    recovering: "正在恢复",
+                  } as Record<string, string>
+                )[context.sync_status] ?? context.sync_status}
+              </summary>
+              <p>
+                版本 {context.revision} · 消息水位 {context.watermark}
+              </p>
+              <p>检查范围：{context.coverage || "尚未登记"}</p>
+              <p>已知缺口：{context.gaps || "尚未登记"}</p>
+            </details>
+          )}
+          {item && (
             <button
               className={controls.link}
               onClick={() => {

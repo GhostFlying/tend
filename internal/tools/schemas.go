@@ -57,6 +57,10 @@ const relationsSchema = `{
 }`
 
 var schemas = map[string]string{
+	"conversation_turn_adopt":      argumentSchema(protocol.AdoptClarificationPayload{}),
+	"conversation_turn_wait":       argumentSchema(protocol.TurnClarification{}),
+	"conversation_turn_read":       argumentSchema(turnReadArgs{}),
+	"conversation_turn_commit":     argumentSchema(protocol.LogicalTurnCommit{}),
 	"background_evidence_read":     argumentSchema(evidenceArgs{}),
 	"conversation_associate":       argumentSchema(associateArgs{}),
 	"work_item_context_read":       argumentSchema(contextReadArgs{}),

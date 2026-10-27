@@ -11,7 +11,6 @@ import type { SendQueue } from "../queue/sendQueue.ts";
 
 export interface Services {
   conversation?: { id: string; title: string; workItemID?: string };
-  agentsEnabled?: boolean;
   selectConversation?(id: string): void;
   openAgentDrawer?(): void;
   client: ApiClient;

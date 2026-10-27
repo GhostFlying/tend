@@ -43,6 +43,10 @@ func runLogin(ctx context.Context, e *Env, args []string) error {
 			return fmt.Errorf("get the %s token: %w", scope, err)
 		}
 	}
+	if views[0].DeploymentID == "" || views[0].DeploymentID != views[1].DeploymentID {
+		return fmt.Errorf("server deployment identity missing or changed during login")
+	}
+	cred.DeploymentID = views[0].DeploymentID
 	cred.Owner, cred.Agent = views[0].Token, views[1].Token
 	if err := e.saveConfig(cfg, cred); err != nil {
 		return err

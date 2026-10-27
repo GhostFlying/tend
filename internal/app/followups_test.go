@@ -172,6 +172,7 @@ func TestFollowupPauseUpdateCancelAndClaimFence(t *testing.T) {
 	}
 	h.clock.Advance(5 * time.Minute)
 	h.sweepFollowups()
+	h.legacyMainBatches()
 	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
 	if err != nil || !ok {
 		t.Fatalf("delivery %v %v", ok, err)

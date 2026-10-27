@@ -17,9 +17,12 @@ export function MessageTags({ item }: { item: ConversationItem }) {
   const [search, setSearch] = useState("");
   const [items, setItems] = useState<WorkItemPage | null>(null);
   const [selection, setSelection] = useState<string[]>([]);
+  const [unassigned, setUnassigned] = useState(false);
+  const [contentRevision, setContentRevision] = useState(0);
   const [editRevision, setEditRevision] = useState<number | null>(null);
   const [error, setError] = useState("");
   const operation = useDurableOp(client, `associations:${item.message_id}`);
+  const recovery = useDurableOp(client, `processing:${item.message_id}`);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -35,6 +38,8 @@ export function MessageTags({ item }: { item: ConversationItem }) {
       .then(([links, list]) => {
         setValue(links);
         setEditRevision(links.revision);
+        setContentRevision(links.content_revision);
+        setUnassigned(links.disposition === "unassigned");
         setSelection((links.items ?? []).map((x) => x.work_item_id));
         setItems(list);
       })
@@ -53,7 +58,11 @@ export function MessageTags({ item }: { item: ConversationItem }) {
               operation: "conversation.set_associations",
               target: { type: "message", id: item.message_id },
               expected_control_revision: editRevision,
-              payload: { work_item_ids: selection },
+              payload: {
+                work_item_ids: selection,
+                disposition: unassigned ? "unassigned" : "linked",
+                content_revision: contentRevision,
+              },
             },
       );
       if (result.kind !== "done") {
@@ -64,6 +73,8 @@ export function MessageTags({ item }: { item: ConversationItem }) {
           );
           setValue(current);
           setEditRevision(current.revision);
+          setContentRevision(current.content_revision);
+          setUnassigned(current.disposition === "unassigned");
           setSelection((current.items ?? []).map((x) => x.work_item_id));
         }
         return;
@@ -83,6 +94,54 @@ export function MessageTags({ item }: { item: ConversationItem }) {
   return (
     <>
       <div className={styles.tags}>
+        {value?.processing &&
+          value.processing.status !== "completed" &&
+          value.processing.status !== "processing" && (
+            <span className={styles.tag} title={value.processing.reason}>
+              {(
+                {
+                  recovering: "正在自动补齐",
+                  stopped: "处理已停止",
+                  needs_review: "需要继续处理",
+                  unknown: "正在核对执行结果",
+                  awaiting_clarification: "等待澄清",
+                } as Record<string, string>
+              )[value.processing.status] ?? "关联处理中"}
+              {["stopped", "needs_review", "awaiting_clarification"].includes(
+                value.processing.status,
+              ) && (
+                <button
+                  disabled={recovery.busy || !!recovery.storageError}
+                  onClick={() => {
+                    void recovery
+                      .execute(
+                        recovery.pending
+                          ? undefined
+                          : {
+                              operation: "conversation.resume_processing",
+                              target: {
+                                type: "logical_turn",
+                                id: value.processing!.logical_turn_id,
+                              },
+                              expected_control_revision: value.processing!.revision,
+                              payload: {},
+                            },
+                      )
+                      .then((r) => {
+                        if (r.kind !== "done") setError(r.message);
+                        void live.reload();
+                      });
+                  }}
+                >
+                  {recovery.pending ? "核对继续处理" : "继续处理"}
+                </button>
+              )}
+            </span>
+          )}
+        {value?.disposition === "unassigned" && <span className={styles.tag}>无工作项</span>}
+        {(!value || value.disposition === "pending") && (
+          <span className={styles.tag}>关联处理中</span>
+        )}
         {(expanded ? links : links.slice(0, 2)).map((link) => (
           <button
             key={link.work_item_id}
@@ -120,6 +179,8 @@ export function MessageTags({ item }: { item: ConversationItem }) {
           </button>
         )}
       </div>
+      {recovery.storageError && <p role="alert">{recovery.storageError}</p>}
+      {error && !open && <p role="alert">{error}</p>}
       {open && (
         <dialog
           ref={dialog}
@@ -138,6 +199,17 @@ export function MessageTags({ item }: { item: ConversationItem }) {
             placeholder="搜索工作项"
             aria-label="搜索工作项"
           />
+          <label>
+            <input
+              type="checkbox"
+              checked={unassigned}
+              onChange={(e) => {
+                setUnassigned(e.target.checked);
+                if (e.target.checked) setSelection([]);
+              }}
+            />
+            明确不属于任何工作项
+          </label>
           {items?.items
             ?.filter((x) => x.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
             .map((x) => (
@@ -145,13 +217,14 @@ export function MessageTags({ item }: { item: ConversationItem }) {
                 <input
                   type="checkbox"
                   checked={selection.includes(x.work_item_id)}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    setUnassigned(false);
                     setSelection((old) =>
                       e.target.checked
                         ? [...old, x.work_item_id]
                         : old.filter((id) => id !== x.work_item_id),
-                    )
-                  }
+                    );
+                  }}
                 />
                 <span>
                   {x.title}
@@ -168,7 +241,11 @@ export function MessageTags({ item }: { item: ConversationItem }) {
             <button onClick={() => setOpen(false)}>取消</button>
             <button
               disabled={
-                operation.busy || !items || editRevision === null || !!operation.storageError
+                operation.busy ||
+                !items ||
+                editRevision === null ||
+                !!operation.storageError ||
+                (!operation.pending && !unassigned && selection.length === 0)
               }
               onClick={() => void save(operation.pending)}
             >

@@ -21,9 +21,10 @@ type config struct {
 // credentials is credentials.json, readable by the owner only. ClientID
 // identifies this installation and stays the same across logins.
 type credentials struct {
-	ClientID string `json:"client_id"`
-	Owner    string `json:"owner_token,omitempty"`
-	Agent    string `json:"agent_token,omitempty"`
+	DeploymentID string `json:"deployment_id"`
+	ClientID     string `json:"client_id"`
+	Owner        string `json:"owner_token,omitempty"`
+	Agent        string `json:"agent_token,omitempty"`
 }
 
 var errNotLoggedIn = errors.New("not logged in; run: tend login --server <url>")
@@ -109,5 +110,5 @@ func (e *Env) client(scope protocol.TokenScope) (*client, error) {
 	if tok == "" {
 		return nil, errNotLoggedIn
 	}
-	return &client{http: e.HTTP, server: cfg.Server, token: tok}, nil
+	return &client{http: e.HTTP, server: cfg.Server, token: tok, deploymentID: cred.DeploymentID}, nil
 }

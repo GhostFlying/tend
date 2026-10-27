@@ -58,7 +58,12 @@ const server = createServer(async (req, res) => {
   const u = new URL(req.url!, "http://fixture.invalid"),
     path = u.pathname;
   if (path === "/api/v1/session")
-    return json(res, { token: "fixture", login: "Example owner", scope: "owner" });
+    return json(res, {
+      token: "fixture",
+      login: "Example owner",
+      scope: "owner",
+      deployment_id: "layout-fixture",
+    });
   if (path === "/api/v1/events") {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     res.write(`event: start\ndata: {"event_seq":${seq}}\n\n`);

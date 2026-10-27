@@ -89,6 +89,11 @@ func (e *env) do(method, path, token string, body any, out any) int {
 		r = bytes.NewReader(b)
 	}
 	req, _ := http.NewRequest(method, e.url+path, r)
+	id, err := e.app.DeploymentID(e.t.Context())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	req.Header.Set(deploymentHeader, id)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

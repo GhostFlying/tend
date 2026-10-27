@@ -44,7 +44,19 @@ func (CreateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	freezeWorkItemCurrentEvidence(&w, x.Env.RequestID)
-	return saveWorkItem(ctx, tx, w, 0, "work_item.created", p)
+	out, err := saveWorkItem(ctx, tx, w, 0, "work_item.created", p)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if _, err = ensureAgentConversation(ctx, x, tx, w.WorkItemID); err != nil {
+		return Outcome{}, err
+	}
+	if p.InitialContext != nil {
+		if err := initializeWorkItemContext(ctx, x, tx, w.WorkItemID, *p.InitialContext); err != nil {
+			return Outcome{}, err
+		}
+	}
+	return out, nil
 }
 
 // UpdateWorkItem revises a plan while preserving execution agreements and history.

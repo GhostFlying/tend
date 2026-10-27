@@ -127,7 +127,6 @@ export function AgentWorkspace({
   }, [services.client, connection.status]);
   const shared = {
     ...services,
-    agentsEnabled: page?.enabled ?? false,
     selectConversation: select,
     openAgentDrawer: () => setOpen(true),
   };
@@ -199,6 +198,9 @@ export function AgentWorkspace({
             ))}
           </select>
           {error && <p role="alert">{error}</p>}
+          {page && !page.runtime_available && (
+            <p role="alert">后台运行时不可用，消息和处理责任仍保留。</p>
+          )}
           <div className={styles.sessionList}>
             {page?.items?.map((c) => (
               <button
@@ -219,7 +221,7 @@ export function AgentWorkspace({
                 <small data-status={c.status}>{statusLabels[c.status] ?? c.status}</small>
               </button>
             ))}
-            {page && !page.items?.length && <p>暂无匹配会话。工作项启用后台处理后会出现在这里。</p>}
+            {page && !page.items?.length && <p>暂无匹配会话。新建工作项后会出现在这里。</p>}
             {page?.next && (
               <button disabled={loadingMore} onClick={() => void more()}>
                 加载更多
@@ -232,6 +234,7 @@ export function AgentWorkspace({
   );
 }
 const statusLabels: Record<string, string> = {
+  initializing: "等待上下文",
   queued: "排队中",
   running: "处理中",
   idle: "空闲",

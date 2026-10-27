@@ -113,6 +113,8 @@
 | D111 | 工作项独立后台会话，主 agent 保持调度权并登记消息关联和有来源上下文；owner 标签纠正优先，关联变更推进版本并使旧结果失效。后台串行会话、有限并发、结构化回传与持久 rollout；主聊天仅展示自身状态。原生 ctx/compact 与 thread 交接分开，unknown 不重放。topic/channel 仅记录后续方向。见 docs/plans/work-item-agent-conversations.md。按 owner 后续指示，暂时允许后台原生工具，创建和恢复显式使用 workspace-write + on-request + auto_review；Tend 工具继续按后台身份与工作项范围校验，业务调度归主 agent。原生 auto mode 不等于工作项数据强隔离；后台默认关闭，尚未达到完整发布验收。 | 实施中 |
 | D112 | TraeX 根回合失败观察与有限恢复，细化 D67：能力协商启用 Orca 的可选 rootTurn 原生事实，固定 session、turn、pane、终端启动及 runtime 身份，区分根失败与后台操作收敛；可信暂时性错误在原 run/会话继续最多一次，预算和阶段沿用 journal 扩展，未知操作或发送先对账，恢复发送不明时保留原终端和占用等待处理。旧 Orca 保留 JSONL 证据路径；other 等错误不扩大重试。原生结束时钟缺失但本回合 hook 仍 working 时不提醒，历史不可读仍需核对；引导观察细化为后台待收敛的失败时也生成提醒；未收敛失败经已有 inbox、消息和后台来源事务形成一次持久提醒，已有待决不重复；不改数据库迁移和 runner 协议代次。详见 docs/plans/traex-root-turn-recovery.md。 | 已实现（2026-10-27） |
 
+| D113 | 正式消息显式 linked/unassigned 判定，内容版本与事实检查作为逻辑轮完成条件；保留流式，遗漏受限自动修正并持久恢复。托管主 Agent 始终启动后台会话，取代 D111 的默认关闭策略。新项当轮初始化，不实现历史回填。持久 deployment_id 拒绝跨空库实例回放；本次全新部署删除旧业务数据，仅独占转移网络身份。见 docs/plans/mandatory-message-context.md。 | 已实现（2026-10-27） |
+
 ## 2. 上下文注入（修订 v0.1 §7）
 
 > D45：当前先做的外挂形态里，上下文由各 agent 的 hook 追加，水位、完整快照与增量的规则不变，具体机制见阶段 C 计划。本节描述的 `thread/inject_items` 方式属于托管形态，随托管一起延后；记录的 app-server 能力也适用于 worker。

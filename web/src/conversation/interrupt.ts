@@ -2,6 +2,7 @@
 // and never replay an interrupt tend already recorded (D11, D69).
 import { ApiError, FallbackStorage, type KeyValueStorage } from "../api/client.ts";
 import type { ConversationItem, Envelope, Operation } from "../api/generated/api.ts";
+import { deploymentStorageName } from "../api/deployment.ts";
 import { newRequestId } from "../api/ids.ts";
 import type { OpSender } from "../app/ops.ts";
 import { Store, type Readable } from "../state/store.ts";
@@ -12,9 +13,9 @@ export interface InterruptState {
   phase: "unconfirmed" | "recorded" | "unknown" | "failed";
   error?: string;
 }
-const key = "tend.interrupt-request.v1";
 
 export class Interrupt {
+  private readonly key = deploymentStorageName("tend.interrupt-request.v1");
   private readonly sender: OpSender;
   private readonly storage: KeyValueStorage;
   private readonly newId: () => string;
@@ -129,14 +130,15 @@ export class Interrupt {
   }
 
   private write(request: InterruptState | null): void {
-    if (request && request.phase !== "failed") this.storage.setItem(key, JSON.stringify(request));
-    else this.storage.removeItem(key);
+    if (request && request.phase !== "failed")
+      this.storage.setItem(this.key, JSON.stringify(request));
+    else this.storage.removeItem(this.key);
     this.store.set(request);
   }
 
   private read(): InterruptState | null {
     try {
-      const value = JSON.parse(this.storage.getItem(key) ?? "null") as InterruptState | null;
+      const value = JSON.parse(this.storage.getItem(this.key) ?? "null") as InterruptState | null;
       if (
         value &&
         typeof value.messageId === "string" &&

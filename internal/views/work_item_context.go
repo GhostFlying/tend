@@ -18,6 +18,29 @@ func WorkItemContext(ctx context.Context, q store.Querier, id string, after int6
 		return v, err
 	}
 	v.Prepared = baseline > 0
+	v.SyncStatus = "synced"
+	if baseline == 0 {
+		v.SyncStatus = "initializing"
+	}
+	ready, err := store.WorkItemContextReady(ctx, q, id)
+	if err != nil {
+		return v, err
+	}
+	if baseline > 0 && !ready {
+		v.SyncStatus = "needs_review"
+	}
+	var recovering bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_contexts lc JOIN logical_turns l ON l.logical_turn_id=lc.logical_turn_id WHERE lc.work_item_id=? AND l.status='recovering')`, id).Scan(&recovering); err != nil {
+		return v, err
+	}
+	if recovering {
+		v.SyncStatus = "recovering"
+	}
+	// A later reviewed message cannot hide an earlier unreviewed source.
+	if err := q.QueryRowContext(ctx, `WITH sources AS (SELECT DISTINCT m.seq,d.content_revision,d.facts_revision,d.disposition FROM conversation_messages m JOIN (SELECT message_id FROM message_work_items WHERE work_item_id=? AND active=1 UNION SELECT message_id FROM message_context_obligations WHERE work_item_id=? AND needs_review=1) a ON a.message_id=m.message_id LEFT JOIN message_dispositions d ON d.message_id=m.message_id) SELECT COALESCE(MAX(seq),0) FROM sources WHERE seq<COALESCE((SELECT MIN(seq) FROM sources WHERE disposition IS NULL OR disposition='pending' OR facts_revision<>content_revision),9223372036854775807)`, id, id).Scan(&v.Watermark); err != nil {
+		return v, err
+	}
+
 	rows, err := q.QueryContext(ctx, `SELECT fact_id,COALESCE(work_item_id,''),scope,project,kind,body,source_message_id,attribution,COALESCE(supersedes,''),needs_review FROM work_item_context_facts WHERE superseded=0 AND (work_item_id=? OR scope='global' OR (scope='project' AND project=?)) ORDER BY created_at,fact_id`, id, w.Project)
 	if err != nil {
 		return v, err

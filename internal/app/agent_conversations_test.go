@@ -37,7 +37,7 @@ func (h *harness) agentContext(item string) protocol.WorkItemContext {
 func (h *harness) associate(p protocol.Principal, message string, items ...string) protocol.Operation {
 	h.t.Helper()
 	a := h.associations(message)
-	return h.exec(p, h.env("conversation.set_associations", protocol.Target{Type: "message", ID: message}, protocol.SetMessageAssociationsPayload{WorkItemIDs: items}, rev(a.Revision)), SetMessageAssociations{})
+	return h.exec(p, h.env("conversation.set_associations", protocol.Target{Type: "message", ID: message}, protocol.SetMessageAssociationsPayload{WorkItemIDs: items, Disposition: dispositionForTest(items), ContentRevision: a.ContentRevision}, rev(a.Revision)), SetMessageAssociations{})
 }
 func (h *harness) prepareAgent(item string) {
 	h.t.Helper()
@@ -58,7 +58,7 @@ func TestAgentAssociationCorrectionsVersionSourcesAndDedup(t *testing.T) {
 	h.prepareAgent(w.WorkItemID)
 	before := h.agentContext(w.WorkItemID)
 	a := h.associations(source)
-	env := h.env("conversation.set_associations", protocol.Target{Type: "message", ID: source}, protocol.SetMessageAssociationsPayload{WorkItemIDs: []string{other.WorkItemID}}, rev(a.Revision))
+	env := h.env("conversation.set_associations", protocol.Target{Type: "message", ID: source}, protocol.SetMessageAssociationsPayload{WorkItemIDs: []string{other.WorkItemID}, Disposition: "linked", ContentRevision: a.ContentRevision}, rev(a.Revision))
 	first := h.exec(owner, env, SetMessageAssociations{})
 	second := h.exec(owner, env, SetMessageAssociations{})
 	if first.Status != protocol.OpSucceeded || string(first.Result) != string(second.Result) {
@@ -90,7 +90,6 @@ func TestAgentAutomaticBindingConflictsWithConcurrentOwnerEdit(t *testing.T) {
 }
 func TestAgentConversationScopeAndBaseline(t *testing.T) {
 	h := newHarness(t)
-	WithBackgroundAgents(true)(h.app)
 	w := h.createWork(workPlan())
 	op := h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
 	if op.Status != protocol.OpSucceeded {
@@ -135,13 +134,13 @@ func TestAgentConversationScopeAndBaseline(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	h.reviewBackgroundOwnerNotices()
 	if d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(v.ID)); err != nil || !ok || d.Destination == MainThreadDestination {
 		t.Fatal(d, ok, err)
 	}
 }
 func TestAgentMissingAssessmentEscalatesExactlyOnce(t *testing.T) {
 	h := newHarness(t)
-	WithBackgroundAgents(true)(h.app)
 	w := h.createWork(workPlan())
 	h.prepareAgent(w.WorkItemID)
 	h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
@@ -150,6 +149,7 @@ func TestAgentMissingAssessmentEscalatesExactlyOnce(t *testing.T) {
 	if op.Status != protocol.OpAccepted {
 		t.Fatal(op)
 	}
+	h.reviewBackgroundOwnerNotices()
 	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(id))
 	if err != nil || !ok {
 		t.Fatal(err)
@@ -263,7 +263,6 @@ func TestAgentRolloutWindowsRetainUnicodeAndScope(t *testing.T) {
 
 func TestAgentReplyDoesNotReorderMainConversation(t *testing.T) {
 	h := newHarness(t)
-	WithBackgroundAgents(true)(h.app)
 	w := h.createWork(workPlan())
 	h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
 	id := "work-item:" + w.WorkItemID
@@ -316,5 +315,63 @@ func TestAgentInitialWorkItemSourceIsAssociatedAfterCreation(t *testing.T) {
 	links := h.associations(source)
 	if len(links.Items) != 1 || links.Items[0].WorkItemID != item.WorkItemID {
 		t.Fatal("initial source was bound before work item existed and then lost", links)
+	}
+}
+
+func dispositionForTest(ids []string) string {
+	if len(ids) == 0 {
+		return "unassigned"
+	}
+	return "linked"
+}
+
+// reviewBackgroundOwnerNotices simulates the main coordinator reviewing the
+// original owner source before releasing a direct background message.
+func (h *harness) reviewBackgroundOwnerNotices() {
+	h.t.Helper()
+	for {
+		var pending bool
+		if err := h.store.Read(h.t.Context(), func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(h.t.Context(), `SELECT EXISTS(SELECT 1 FROM outbox o JOIN conversation_return_links r ON r.message_id=json_extract(o.payload_json,'$.message_id') WHERE o.destination='main_thread' AND o.status='pending')`).Scan(&pending)
+		}); err != nil {
+			h.t.Fatal(err)
+		}
+		if !pending {
+			return
+		}
+		d, _, ok, err := h.app.NextDelivery(h.t.Context(), MainThreadDestination)
+		if err != nil || !ok {
+			h.t.Fatal("main review delivery", ok, err)
+		}
+		var p HandleMessage
+		if err := json.Unmarshal(d.Payload, &p); err != nil {
+			h.t.Fatal(err)
+		}
+		turn := store.MainTurn{RequestID: d.RequestID, MessageID: p.MessageID, ThreadID: mainAgent.Thread, TurnID: "review-" + d.RequestID, Status: store.TurnStarted}
+		if err := h.app.PutMainTurn(h.t.Context(), turn); err != nil {
+			h.t.Fatal(err)
+		}
+		state, err := h.app.LogicalTurn(h.t.Context(), d.RequestID)
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		for _, m := range state.Messages {
+			if m.Disposition == "pending" {
+				if op := h.associate(mainAgent, m.MessageID); op.Status != protocol.OpSucceeded {
+					h.t.Fatal(op)
+				}
+			}
+		}
+		for _, c := range state.Contexts {
+			h.prepareAgent(c.WorkItemID)
+		}
+		commitFixtureTurn(h.t, h, d.RequestID)
+		turn.Status = store.TurnCompleted
+		if err := h.app.PutMainTurn(h.t.Context(), turn); err != nil {
+			h.t.Fatal(err)
+		}
+		if err := h.app.FinishDelivery(h.t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {
+			h.t.Fatal(err)
+		}
 	}
 }

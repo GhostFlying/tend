@@ -1,4 +1,5 @@
 import type { Envelope } from "../api/generated/api.ts";
+import { deploymentStorageName } from "../api/deployment.ts";
 import { newRequestId } from "../api/ids.ts";
 import { runOp, settleOp, type OpSender, type OpOutcome } from "../app/ops.ts";
 import { Store } from "../state/store.ts";
@@ -10,6 +11,7 @@ export class FollowupActions {
     pending: [],
   });
   private readonly key: string;
+  private readonly suffix = deploymentStorageName("");
   private readable = false;
   constructor(
     private sender: OpSender,
@@ -26,7 +28,10 @@ export class FollowupActions {
       const all: Envelope[] = [];
       for (let i = 0; i < this.storage.length; i++) {
         const key = this.storage.key(i);
-        if (key?.startsWith(this.key + ".")) {
+        if (
+          key?.startsWith(this.key + ".") &&
+          (this.suffix ? key.endsWith(this.suffix) : !key.includes(":deployment:"))
+        ) {
           const raw = this.storage.getItem(key);
           if (raw) all.push(JSON.parse(raw) as Envelope);
         }
@@ -47,7 +52,10 @@ export class FollowupActions {
       return false;
     const envelope = { ...op, request_id: newRequestId(Date.now()) };
     try {
-      this.storage.setItem(`${this.key}.${envelope.request_id}`, JSON.stringify(envelope));
+      this.storage.setItem(
+        `${this.key}.${envelope.request_id}${this.suffix}`,
+        JSON.stringify(envelope),
+      );
       this.reload();
     } catch {
       this.state.set({ ...this.state.get(), message: "无法持久保存操作，本次未发送" });
@@ -92,7 +100,7 @@ export class FollowupActions {
   private settle(result: OpOutcome, envelope: Envelope) {
     if (result.kind !== "unknown") {
       this.reload();
-      this.storage?.removeItem(`${this.key}.${envelope.request_id}`);
+      this.storage?.removeItem(`${this.key}.${envelope.request_id}${this.suffix}`);
       this.reload();
     }
     this.state.set({

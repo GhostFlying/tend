@@ -1,3 +1,4 @@
+import { deploymentStorageName } from "../api/deployment.ts";
 import { DraftStorage, type SavedDraft, type Withdrawal } from "./draftStore.ts";
 import type { ConversationAttachment, ConversationItem } from "../api/generated/api.ts";
 // Shell-scoped composer text survives navigation without sending an intention.
@@ -37,13 +38,9 @@ export class ComposerDraft {
     let id: string;
     try {
       id =
-        sessionStorage.getItem(
-          `tend.draft-id${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
-        ) || crypto.randomUUID();
-      sessionStorage.setItem(
-        `tend.draft-id${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
-        id,
-      );
+        sessionStorage.getItem(deploymentStorageName(`tend.draft-id:${this.conversationID}`)) ||
+        crypto.randomUUID();
+      sessionStorage.setItem(deploymentStorageName(`tend.draft-id:${this.conversationID}`), id);
     } catch {
       id = crypto.randomUUID();
     }
@@ -57,10 +54,10 @@ export class ComposerDraft {
       if (navigation?.type === "reload")
         this.owner =
           sessionStorage.getItem(
-            `tend.draft-owner${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
+            deploymentStorageName(`tend.draft-owner:${this.conversationID}`),
           ) || this.owner;
       sessionStorage.setItem(
-        `tend.draft-owner${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
+        deploymentStorageName(`tend.draft-owner:${this.conversationID}`),
         this.owner,
       );
     } catch {
@@ -68,7 +65,9 @@ export class ComposerDraft {
     }
     this.storage = DraftStorage.open(
       indexedDB,
-      this.conversationID === "main" ? "tend-drafts" : `tend-drafts:${this.conversationID}`,
+      deploymentStorageName(
+        this.conversationID === "main" ? "tend-drafts" : `tend-drafts:${this.conversationID}`,
+      ),
     );
     try {
       const storage = await this.storage;
@@ -76,7 +75,7 @@ export class ComposerDraft {
         this.id = crypto.randomUUID();
         try {
           sessionStorage.setItem(
-            `tend.draft-id${this.conversationID === "main" ? "" : ":" + this.conversationID}`,
+            deploymentStorageName(`tend.draft-id:${this.conversationID}`),
             this.id,
           );
         } catch {

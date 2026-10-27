@@ -1,3 +1,4 @@
+import { deploymentStorageName } from "../api/deployment.ts";
 // Drafts and withdrawal intentions share one durable transaction boundary.
 import type { ConversationAttachment, ConversationItem, Envelope } from "../api/generated/api.ts";
 export interface SavedDraft {
@@ -36,7 +37,10 @@ export class DraftStorage {
   private readonly instance = crypto.randomUUID();
   private lease: { id: string; owner: string } | undefined;
   constructor(private db: IDBDatabase) {}
-  static async open(factory: IDBFactory = indexedDB, name = "tend-drafts"): Promise<DraftStorage> {
+  static async open(
+    factory: IDBFactory = indexedDB,
+    name = deploymentStorageName("tend-drafts"),
+  ): Promise<DraftStorage> {
     const open = factory.open(name, 2);
     open.onupgradeneeded = () => {
       if (!open.result.objectStoreNames.contains("drafts"))

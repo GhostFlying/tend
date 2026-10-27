@@ -80,6 +80,11 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 		ok   bool
 	)
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
+		if destination == MainThreadDestination {
+			if err := a.recoverLateTurnMessages(ctx, tx); err != nil {
+				return err
+			}
+		}
 		backgroundOperation := ""
 		if destination == MainThreadDestination || strings.HasPrefix(destination, "background_thread:") {
 			backgroundOperation = OpHandleEvent
@@ -101,6 +106,19 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 				return err
 			}
 			if closed {
+				return nil
+			}
+		}
+		if strings.HasPrefix(destination, "background_thread:") {
+			c, err := store.AgentConversation(ctx, tx.Q(), strings.TrimPrefix(destination, "background_thread:"))
+			if err != nil {
+				return err
+			}
+			ready, err := store.WorkItemContextReady(ctx, tx.Q(), c.WorkItemID)
+			if err != nil {
+				return err
+			}
+			if !ready {
 				return nil
 			}
 		}
@@ -178,6 +196,22 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
 		if err := tx.TransitionOutbox(ctx, tr); err != nil {
 			return err
+		}
+		if d.Destination == MainThreadDestination && d.Operation == "conversation.repair_turn" && r.Outcome == Failed {
+			var m HandleMessage
+			if err := json.Unmarshal(d.Payload, &m); err != nil {
+				return fmt.Errorf("app: decode repair delivery: %w", err)
+			}
+			// A definite failure before native admission still owns metadata repair.
+			// Normal native settlement is idempotent; unknown admission never enters here.
+			if _, err := a.settleLogicalTurn(ctx, tx, store.MainTurn{RequestID: d.RequestID, MessageID: m.MessageID, Status: store.TurnFailed}, now.UnixMilli()); err != nil {
+				return err
+			}
+		}
+		if d.Destination == MainThreadDestination && r.Outcome == Unknown {
+			if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='unknown',reason='Native execution receipt is unknown; reconcile before continuing.',updated_at=? WHERE status NOT IN ('completed','stopped') AND logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?)`, now.UnixMilli(), d.RequestID); err != nil {
+				return err
+			}
 		}
 		if d.Destination == MainThreadDestination {
 			if err := a.queueChanged(ctx, tx, d.RequestID, now.UnixMilli()); err != nil {

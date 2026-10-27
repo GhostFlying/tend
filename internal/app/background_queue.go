@@ -37,17 +37,11 @@ func queueBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, message, 
 func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, item, message, event, kind string, data json.RawMessage) error {
 	now := x.Now.UnixMilli()
 	conversation := "main"
-	if x.BackgroundAgentsEnabled && item != "" {
-		var baseline int64
-		if err := tx.Q().QueryRowContext(ctx, `SELECT baseline_revision FROM work_item_contexts WHERE work_item_id=?`, item).Scan(&baseline); err != nil {
+	if item != "" {
+		var err error
+		conversation, err = ensureAgentConversation(ctx, x, tx, item)
+		if err != nil {
 			return err
-		}
-		if baseline > 0 {
-			var err error
-			conversation, err = ensureAgentConversation(ctx, x, tx, item)
-			if err != nil {
-				return err
-			}
 		}
 	}
 

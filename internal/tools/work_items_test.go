@@ -11,7 +11,7 @@ import (
 func TestWorkItemToolsKeepUndecidedConcernVisibleAndRejectStalePlans(t *testing.T) {
 	e := newEnv(t)
 	plan := protocol.WorkItemPlan{Title: "Investigate layout", Intent: "Explain the overlapping controls", Stages: []protocol.WorkItemStage{{StageID: "inspect", Title: "Investigate", Status: "planned"}}, Background: []protocol.SharedFact{{Kind: "observation", Text: "Controls overlap on a short screen", Source: "owner screenshot"}}}
-	created := e.call("work_items_create", workItemCreateArgs{Plan: plan, CommitSeq: 1, Reason: "Track the investigation and later discussion"}, "create-work")
+	created := e.call("work_items_create", workItemCreateArgs{InitialContext: initialFixtureContext(), Plan: plan, CommitSeq: 1, Reason: "Track the investigation and later discussion"}, "create-work")
 	if !created.OK {
 		t.Fatal(created.Error)
 	}
@@ -43,4 +43,8 @@ func TestWorkItemToolsKeepUndecidedConcernVisibleAndRejectStalePlans(t *testing.
 	if !historical.OK || strings.Contains(string(historical.Result), "Validate on two platforms") {
 		t.Fatalf("history overwritten: %s %+v", historical.Result, historical.Error)
 	}
+}
+
+func initialFixtureContext() protocol.InitialWorkItemContext {
+	return protocol.InitialWorkItemContext{Coverage: "Reviewed fixture input", Gaps: "None in fixture", ReviewedKinds: []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}}
 }

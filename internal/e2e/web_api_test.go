@@ -43,10 +43,11 @@ func (s *server) startWeb() *httptest.Server {
 
 // webClient calls the owner API the way the web client does.
 type webClient struct {
-	t     *testing.T
-	srv   *server
-	url   string
-	token string
+	t            *testing.T
+	srv          *server
+	url          string
+	token        string
+	deploymentID string
 }
 
 func (s *server) webLogin(url string) *webClient {
@@ -57,6 +58,7 @@ func (s *server) webLogin(url string) *webClient {
 		s.t.Fatalf("login = %d %+v", st, v)
 	}
 	c.token = v.Token
+	c.deploymentID = v.DeploymentID
 	return c
 }
 
@@ -72,6 +74,7 @@ func (c *webClient) do(method, path string, body, out any) int {
 	req, _ := http.NewRequest(method, c.url+path, r)
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("X-Tend-Deployment-ID", c.deploymentID)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -151,6 +154,7 @@ func (c *webClient) stream(query string) *eventStream {
 	c.t.Cleanup(cancel)
 	req, _ := http.NewRequestWithContext(ctx, "GET", c.url+"/api/v1/events"+query, nil)
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("X-Tend-Deployment-ID", c.deploymentID)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		c.t.Fatal(err)
@@ -334,7 +338,23 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 		th.Say(turn, "item_"+turn, "Which release branch should I use?")
 		return "completed"
 	}
-	srv.startMainThread(agent)
+	backgroundTurn := agent.Turn
+	srv.startMainThread(agent, func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
+		status := backgroundTurn(th, turn, in)
+		item := strings.TrimPrefix(th.Config.Cwd, "/background/work-item:")
+		res := th.CallTool(context.Background(), turn, "read-context", "work_item_context_read", map[string]any{"work_item_id": item})
+		var v struct {
+			Result protocol.WorkItemContext `json:"result"`
+		}
+		if !res.Success || json.Unmarshal([]byte(res.Text), &v) != nil {
+			return "failed"
+		}
+		res = th.CallTool(context.Background(), turn, "submit-background", "background_submit", protocol.BackgroundAssessmentPayload{ContextRevision: v.Result.Revision, Disposition: "waiting", Note: "Decision state read", EvidenceIDs: []string{}})
+		if !res.Success {
+			return "failed"
+		}
+		return status
+	})
 	hs := srv.startWeb()
 	web := srv.webLogin(hs.URL)
 	events := web.stream("")
@@ -394,16 +414,16 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 	if n := srv.count(`SELECT COUNT(*) FROM decisions WHERE decision_id = ? AND json_extract(answer_json, '$.option') = 'release/1.x'`, q.DecisionID); n != 1 {
 		t.Errorf("decisions answered with the chosen option = %d, want 1", n)
 	}
-	// Rule-opened and owner-answered decisions wake the model once each.
-	// The hosted model's own open/resolve calls do not wake it again.
-	eventually(t, "two owner and two background turns settle", func() bool {
-		return srv.count("SELECT COUNT(*) FROM main_turns WHERE status='completed'") == 4
+	// Unclaimed events may coalesce; both original sources must be read without
+	// creating another owner question or running business operations twice.
+	eventually(t, "owner replies and background decision sources settle", func() bool {
+		return srv.count(`SELECT COUNT(*) FROM logical_turns WHERE status<>'completed'`) == 0 && srv.count(`SELECT COUNT(*) FROM background_sources WHERE kind='decision.answered'`) > 0 && srv.count(`SELECT COUNT(*) FROM background_sources s WHERE kind='decision.answered' AND NOT EXISTS(SELECT 1 FROM background_reads r WHERE r.batch_id=s.batch_id AND r.source_seq=s.seq)`) == 0
 	})
-	if len(agent.Starts()) != 4 || srv.count("SELECT COUNT(*) FROM decisions") != 2 || srv.count("SELECT COUNT(*) FROM outbox WHERE operation='main_thread.handle_event'") != 2 {
-		t.Fatal("decision coordination duplicated a question or woke itself")
+	if srv.count("SELECT COUNT(*) FROM decisions") != 2 {
+		t.Fatal("decision coordination duplicated a question")
 	}
 	var sawAppliedAnswer bool
-	for range 2 {
+	for len(sourceResults) > 0 {
 		read := <-sourceResults
 		if !read.Success {
 			t.Fatal(read.Text)
@@ -455,12 +475,12 @@ func TestFault_SendReceiptLost(t *testing.T) {
 		t.Errorf("the resend = %+v, want the first operation %+v", again, first)
 	}
 	eventually(t, "the reply is done", func() bool {
-		return srv.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1
+		return srv.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed' AND request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1)`) == 1
 	})
 	for query, want := range map[string]int{
-		`SELECT COUNT(*) FROM conversation_messages WHERE author = 'owner'`:      1,
-		`SELECT COUNT(*) FROM conversation_messages WHERE author = 'main_agent'`: 1,
-		`SELECT COUNT(*) FROM main_turns`:                                        1,
+		`SELECT COUNT(*) FROM conversation_messages WHERE author = 'owner'`:                                                       1,
+		`SELECT COUNT(*) FROM conversation_messages WHERE author = 'main_agent'`:                                                  1,
+		`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1)`: 1,
 	} {
 		if got := srv.count(query); got != want {
 			t.Errorf("%s = %d, want %d", query, got, want)
@@ -562,7 +582,7 @@ func TestFault_EventStreamAcrossRestart(t *testing.T) {
 	// Work goes on before the client is back.
 	srv.say("written from another client")
 	eventually(t, "the reply is done", func() bool {
-		return srv.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 2
+		return srv.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed' AND request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1)`) == 2
 	})
 
 	resumed := web.stream("?after=" + strconv.FormatInt(events.last, 10))

@@ -29,8 +29,10 @@ func TestImageOnlyMessageReachesNativeTurn(t *testing.T) {
 	}
 	encoded := base64.StdEncoding.EncodeToString(b.Bytes())
 	e.exec(owner, "conversation.submit_message", protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{Images: []protocol.ConversationImageInput{{Name: "x.png", MediaType: "image/png", DataBase64: encoded}}}, app.SubmitMessage{})
-	eventually(t, "image turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed'`) == 1 })
-	starts := h.Starts()
+	eventually(t, "image turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
+	})
+	starts := businessStarts(h)
 	if len(starts) != 1 || len(starts[0].ImageURLs) != 1 || starts[0].ImageURLs[0] != "data:image/png;base64,"+encoded || strings.Contains(starts[0].Text, encoded) {
 		t.Fatalf("native image not separate from text: %+v", starts)
 	}
@@ -53,8 +55,10 @@ func TestOriginalFileReachesNativeTurnWithoutInliningContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.exec(owner, "conversation.submit_message", protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{Attachments: []string{file.FileID}}, app.SubmitMessage{})
-	eventually(t, "file turn completes", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed'`) == 1 })
-	starts := h.Starts()
+	eventually(t, "file turn completes", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
+	})
+	starts := businessStarts(h)
 	if len(starts) != 1 || len(starts[0].ImageURLs) != 0 || strings.Contains(starts[0].Text, content) || !strings.Contains(starts[0].Text, file.FileID) || !strings.Contains(starts[0].Text, `"local_path":`) {
 		t.Fatalf("native file reference: %+v", starts)
 	}

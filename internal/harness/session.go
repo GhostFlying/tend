@@ -125,6 +125,8 @@ type ToolHandler func(ctx context.Context, call ToolCall) ToolResult
 
 // TurnInput is a user turn.
 type TurnInput struct {
+	// Repair marks a coordinator continuation with no business-write authority.
+	Repair    bool
 	ImageURLs []string
 	Text      string
 	// Model, ModelProvider and Effort override the defaults for this turn.
@@ -209,4 +211,16 @@ type ToolUse struct {
 type ContextManager interface {
 	ContextUsage(context.Context) (protocol.AgentContextUsage, error)
 	Compact(context.Context) error
+}
+
+// TurnReader reconciles an uncertain start against the original caller identity.
+// Missing history is not proof that the turn did not execute.
+type TurnReader interface {
+	FindTurn(context.Context, string, string) (TurnReceipt, bool, error)
+}
+type TurnReceipt struct {
+	ID       string
+	Status   string
+	Messages []Event
+	Raw      json.RawMessage
 }

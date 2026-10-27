@@ -15,9 +15,10 @@ import (
 
 // client calls the tend server's owner API.
 type client struct {
-	http   *http.Client
-	server string
-	token  string
+	deploymentID string
+	http         *http.Client
+	server       string
+	token        string
 }
 
 // transportError is a failure to get an answer from the server at all, or
@@ -48,6 +49,9 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(c.server, "/")+path, r)
 	if err != nil {
 		return err
+	}
+	if c.deploymentID != "" {
+		req.Header.Set("X-Tend-Deployment-ID", c.deploymentID)
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)

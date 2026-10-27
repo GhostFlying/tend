@@ -32,6 +32,15 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != old.Revision {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "message associations changed")
 	}
+	if p.ContentRevision != old.ContentRevision {
+		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "message content changed")
+	}
+	if (p.Disposition != "linked" && p.Disposition != "unassigned") || (p.Disposition == "linked") != (len(p.WorkItemIDs) > 0) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "explicit linked with nonempty work items or unassigned with empty work items required")
+	}
+	if old.OwnerLocked && x.Principal.Kind != protocol.PrincipalOwner {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "owner message classification cannot be overridden")
+	}
 	desired := map[string]bool{}
 	for _, id := range p.WorkItemIDs {
 		if desired[id] {
@@ -77,6 +86,9 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if _, err := tx.Exec(ctx, `INSERT INTO message_association_revisions(message_id,revision) VALUES(?,1) ON CONFLICT(message_id) DO UPDATE SET revision=revision+1`, old.MessageID); err != nil {
 		return Outcome{}, err
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO message_dispositions(message_id,content_revision,disposition,classified_revision,owner_locked,source,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(message_id) DO UPDATE SET disposition=excluded.disposition,classified_revision=excluded.classified_revision,facts_revision=0,owner_locked=MAX(owner_locked,excluded.owner_locked),source=excluded.source,updated_at=excluded.updated_at`, old.MessageID, p.ContentRevision, p.Disposition, p.ContentRevision, owner, source, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
 	updated, err := store.MessageAssociations(ctx, tx.Q(), old.MessageID)
 	if err != nil {
 		return Outcome{}, err
@@ -85,6 +97,12 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	after, _ := json.Marshal(p.WorkItemIDs)
 	actor, _ := json.Marshal(x.Principal)
 	if _, err := tx.Exec(ctx, `INSERT INTO message_association_history(message_id,revision,actor,before_json,after_json,created_at) VALUES(?,?,?,?,?,?)`, old.MessageID, updated.Revision, string(actor), string(before), string(after), x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO message_disposition_history(message_id,content_revision,association_revision,disposition,actor,created_at) VALUES(?,?,?,?,?,?)`, old.MessageID, p.ContentRevision, updated.Revision, p.Disposition, string(actor), x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	if err := attachReviewSource(ctx, x, tx, old.MessageID); err != nil {
 		return Outcome{}, err
 	}
 	out := Outcome{Result: map[string]any{"revision": updated.Revision}, Events: []Event{{ObjectType: "message", ObjectID: old.MessageID, Kind: "conversation.associations_changed"}}}
@@ -127,6 +145,47 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != rev {
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "context changed")
+		}
+		if len(p.RetiredFactIDs)+len(p.ConfirmedFactIDs) > 100 {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "at most 100 fact reconciliations")
+		}
+		seen := map[string]bool{}
+		for _, group := range []struct {
+			ids    []string
+			retire bool
+		}{{p.RetiredFactIDs, true}, {p.ConfirmedFactIDs, false}} {
+			for _, fact := range group.ids {
+				if seen[fact] {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "duplicate fact reconciliation")
+				}
+				seen[fact] = true
+				var source, scope, item string
+				if err := tx.Q().QueryRowContext(ctx, `SELECT source_message_id,scope,COALESCE(work_item_id,'') FROM work_item_context_facts WHERE fact_id=? AND superseded=0 AND (work_item_id=? OR scope='global' OR (scope='project' AND project=(SELECT project FROM work_items WHERE work_item_id=?)))`, fact, id, id).Scan(&source, &scope, &item); err != nil {
+					return Outcome{}, errNotFound(err, "fact outside context")
+				}
+				if !group.retire && scope == "work_item" {
+					var active bool
+					if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM message_work_items WHERE message_id=? AND work_item_id=? AND active=1)`, source, item).Scan(&active); err != nil {
+						return Outcome{}, err
+					}
+					if !active {
+						return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "removed source cannot certify the old fact; retire or replace it")
+					}
+				}
+				if _, err := tx.Exec(ctx, `UPDATE work_item_context_facts SET superseded=?,needs_review=0 WHERE fact_id=?`, group.retire, fact); err != nil {
+					return Outcome{}, err
+				}
+				if _, err := tx.Exec(ctx, `UPDATE work_item_contexts SET revision=revision+1 WHERE ?='global' OR work_item_id=? OR (?='project' AND work_item_id IN (SELECT w.work_item_id FROM work_items w JOIN work_item_context_facts f ON f.project=w.project WHERE f.fact_id=?))`, scope, item, scope, fact); err != nil {
+					return Outcome{}, err
+				}
+			}
+		}
+		var unresolved bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_item_context_facts WHERE superseded=0 AND needs_review=1 AND (work_item_id=? OR scope='global' OR (scope='project' AND project=(SELECT project FROM work_items WHERE work_item_id=?))))`, id, id).Scan(&unresolved); err != nil {
+			return Outcome{}, err
+		}
+		if unresolved {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "explicitly reconcile facts invalidated by source corrections")
 		}
 		if _, err := tx.Exec(ctx, `UPDATE work_item_contexts SET baseline_revision=revision+1,revision=revision+1,coverage=?,gaps=?,prepared_by=? WHERE work_item_id=?`, p.Coverage, p.Gaps, x.Principal.Thread, id); err != nil {
 			return Outcome{}, err
@@ -190,6 +249,9 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "superseded fact must have the same scope")
 			}
 		}
+		if err := attachReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
+			return Outcome{}, err
+		}
 		p.ID = x.IDs.New(protocol.Prefix("fact"))
 		if _, err := tx.Exec(ctx, `INSERT INTO work_item_context_facts(fact_id,work_item_id,project,scope,kind,body,source_message_id,attribution,supersedes,created_at) VALUES(?,NULLIF(?,''),?,?,?,?,?,?,NULLIF(?,''),?)`, p.ID, p.WorkItemID, p.Project, p.Scope, p.Kind, p.Body, p.SourceMessageID, p.Attribution, p.Supersedes, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
@@ -218,4 +280,52 @@ func createCoordinationNotice(ctx context.Context, x *Exec, tx *store.Tx, body, 
 	}
 	payload, _ := json.Marshal(HandleMessage{MessageID: id})
 	return id, tx.InsertOutbox(ctx, store.OutboxRow{OutboxID: x.IDs.New(protocol.PrefixOutbox), RequestID: x.IDs.New(protocol.PrefixRequest), ParentRequestID: x.Env.RequestID, Destination: MainThreadDestination, Operation: OpHandleMessage, PayloadJSON: string(payload), CreatedAt: x.Now.UnixMilli()})
+}
+
+func initializeWorkItemContext(ctx context.Context, x *Exec, tx *store.Tx, id string, p protocol.InitialWorkItemContext) error {
+	if strings.TrimSpace(p.Coverage) == "" || len(p.Coverage) > 8000 || len(p.Gaps) > 8000 || len(p.SourceMessageIDs) > 100 || len(p.Facts) > 100 {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "bounded initial coverage, sources and facts required")
+	}
+	for _, kind := range []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"} {
+		if !slices.Contains(p.ReviewedKinds, kind) {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "explicitly review all fact kinds, including kinds with no facts")
+		}
+	}
+	for _, mid := range p.SourceMessageIDs {
+		if err := attachReviewSource(ctx, x, tx, mid); err != nil {
+			return err
+		}
+		m, err := store.MessageAssociations(ctx, tx.Q(), mid)
+		if err != nil {
+			return err
+		}
+		linked := slices.ContainsFunc(m.Items, func(v protocol.MessageWorkItem) bool { return v.WorkItemID == id })
+		if m.OwnerLocked && !linked {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "source classification is locked by owner")
+		}
+		if err := tx.BindMessage(ctx, mid, "work_item", id, "initial_context"); err != nil {
+			return err
+		}
+	}
+	for _, fact := range p.Facts {
+		var revision int64
+		if err := tx.Q().QueryRowContext(ctx, `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, id).Scan(&revision); err != nil {
+			return err
+		}
+		child := *x
+		env := *x.Env
+		child.Env = &env
+		child.Env.Target = protocol.Target{Type: "work_item", ID: id}
+		child.Env.ExpectedControlRevision = &revision
+		body, err := json.Marshal(fact)
+		if err != nil {
+			return err
+		}
+		child.Env.Payload = body
+		if _, err := (ContextCommand{Action: "fact"}).Apply(ctx, &child, tx); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(ctx, `UPDATE work_item_contexts SET coverage=?,gaps=?,baseline_revision=revision+1,revision=revision+1,prepared_by=? WHERE work_item_id=?`, p.Coverage, p.Gaps, x.Principal.Thread, id)
+	return err
 }

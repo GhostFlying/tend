@@ -35,11 +35,12 @@ type SessionRequest struct {
 // the answer to a SessionRequest; it goes in the Authorization header as a
 // bearer token.
 type SessionView struct {
-	Login     string     `json:"login"`
-	ClientID  string     `json:"client_id"`
-	Scope     TokenScope `json:"scope"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	Token     string     `json:"token,omitempty"`
+	DeploymentID string     `json:"deployment_id"`
+	Login        string     `json:"login"`
+	ClientID     string     `json:"client_id"`
+	Scope        TokenScope `json:"scope"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	Token        string     `json:"token,omitempty"`
 }
 
 // APIResponse is the body of an owner API write, and of any request that

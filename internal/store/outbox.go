@@ -51,7 +51,7 @@ func HeadOutboxPrioritized(ctx context.Context, q Querier, destination, backgrou
 	m, err := scanOutbox(q.QueryRowContext(ctx, `SELECT `+outboxColumns+` FROM outbox
 		WHERE destination = ? AND status IN ('pending', 'sending')
 		ORDER BY CASE WHEN status = 'sending' THEN 0 ELSE 1 END,
-		CASE WHEN operation='conversation.compact' THEN -1 WHEN operation = ? THEN 1 ELSE 0 END, seq LIMIT 1`, destination, backgroundOperation))
+		CASE WHEN operation='conversation.compact' THEN -1 WHEN operation='conversation.repair_turn' THEN 2 WHEN operation = ? THEN 1 ELSE 0 END, seq LIMIT 1`, destination, backgroundOperation))
 	if err != nil {
 		return OutboxMessage{}, notFound(err, "outbox head")
 	}

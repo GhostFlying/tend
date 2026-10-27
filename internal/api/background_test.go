@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 func TestBackgroundOwnerSourcesAndMetrics(t *testing.T) {
@@ -26,7 +27,13 @@ func TestBackgroundOwnerSourcesAndMetrics(t *testing.T) {
 			t.Fatal(r)
 		}
 	}
-	d, _, ok, err := e.app.NextDelivery(t.Context(), app.MainThreadDestination)
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE work_item_contexts SET baseline_revision=revision,coverage='fixture initialized' WHERE work_item_id=?`, w.WorkItemID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d, _, ok, err := e.app.NextDelivery(t.Context(), "background_thread:work-item:"+w.WorkItemID)
 	if err != nil || !ok {
 		t.Fatal(err, ok)
 	}

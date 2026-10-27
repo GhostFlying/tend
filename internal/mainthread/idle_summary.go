@@ -60,6 +60,19 @@ func (m *Manager) openManagedThread(ctx context.Context, s harness.Session) (har
 	if !needsHandoff {
 		return th, nil
 	}
+	readCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	err = m.reconcileNativeReceipts(readCtx, th)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	pending, err := m.app.UncertainNativeTurns(ctx, th.ID())
+	if err != nil {
+		return nil, err
+	}
+	if len(pending) != 0 {
+		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "native receipts must be reconciled before changing the thread")
+	}
 	return m.migrateThread(ctx, s, th, hash, "")
 }
 

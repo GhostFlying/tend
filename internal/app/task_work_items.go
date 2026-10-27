@@ -67,6 +67,15 @@ func taskWorkItem(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPaylo
 	if err != nil {
 		return item, nil, err
 	}
+	if _, err := ensureAgentConversation(ctx, x, tx, item.WorkItemID); err != nil {
+		return item, nil, err
+	}
+	// Standalone requests have an explicit task specification but no hosted
+	// conversational review. Record that bounded program baseline rather than
+	// leave their future events permanently inadmissible.
+	if _, err := tx.Exec(ctx, `UPDATE work_item_contexts SET baseline_revision=revision+1,revision=revision+1,coverage=?,gaps=?,prepared_by='program' WHERE work_item_id=?`, "Initial standalone task request: goal, constraints, stages and task specification.", "No additional conversation or owner authorization was supplied or inferred.", item.WorkItemID); err != nil {
+		return item, nil, err
+	}
 	p.WorkItemID, p.WorkItemRevision, p.StageIDs = item.WorkItemID, item.Revision, []string{"initial"}
 	p.Spec.SharedContext = []protocol.TaskWorkContext{freezeWorkItemContext(item)}
 	return item, out.Events, nil

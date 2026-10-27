@@ -19,7 +19,7 @@ func TestEndToEnd_WebStopsBackgroundEventTurn(t *testing.T) {
 		}
 		return "completed"
 	}
-	srv.startMainThread(agent)
+	srv.startMainThread(agent, agent.Turn)
 	web := srv.webLogin(srv.startWeb().URL)
 	stream := web.stream("")
 	n := newNode(t, srv, passing)
@@ -30,9 +30,17 @@ func TestEndToEnd_WebStopsBackgroundEventTurn(t *testing.T) {
 		return e.Item != nil && e.Item.Author == "system" && e.Item.State == protocol.MessageProcessing
 	})
 	message := events[len(events)-1].Item.MessageID
+	conversation, err := srv.app.MessageConversation(t.Context(), message)
+	if err != nil || conversation == "main" {
+		t.Fatal(conversation, err)
+	}
 	assertState := func(state protocol.MessageState) {
 		t.Helper()
-		for _, item := range web.conversation("").Items {
+		var page protocol.ConversationPage
+		if st := web.do("GET", "/api/v1/conversation?conversation_id="+conversation, nil, &page); st != 200 {
+			t.Fatal(st)
+		}
+		for _, item := range page.Items {
 			if item.MessageID == message && item.Author == "system" && item.State == state {
 				return
 			}

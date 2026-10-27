@@ -10,7 +10,6 @@ import (
 
 func TestReviewCancelledFollowupMustNotRemainDeliverable(t *testing.T) {
 	h := newHarness(t)
-	WithBackgroundAgents(true)(h.app)
 	w := h.createWork(workPlan())
 	h.prepareAgent(w.WorkItemID)
 	r := h.followup(w, protocol.FollowupSpec{Kind: "every", EverySeconds: 300, ExpiresAt: h.clock.Now().Add(24 * time.Hour).UnixMilli()})
@@ -21,6 +20,7 @@ func TestReviewCancelledFollowupMustNotRemainDeliverable(t *testing.T) {
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	h.reviewBackgroundOwnerNotices()
 	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination("work-item:"+w.WorkItemID))
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,6 @@ func TestReviewAssociationEditMustInvalidateCachedSummary(t *testing.T) {
 
 func TestReviewBackgroundUnknownDeliveryMustEscalate(t *testing.T) {
 	h := newHarness(t)
-	WithBackgroundAgents(true)(h.app)
 	w := h.createWork(workPlan())
 	h.prepareAgent(w.WorkItemID)
 	op := h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
@@ -80,6 +79,7 @@ func TestReviewBackgroundUnknownDeliveryMustEscalate(t *testing.T) {
 	if op.Status != protocol.OpAccepted {
 		t.Fatal(op)
 	}
+	h.reviewBackgroundOwnerNotices()
 	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(id))
 	if err != nil || !ok {
 		t.Fatal(err, ok)

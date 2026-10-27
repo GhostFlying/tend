@@ -263,8 +263,12 @@ func TestInstallConfiguresTheAgent(t *testing.T) {
 	if string(b) != want {
 		t.Errorf("config =\n%s\nwant\n%s", b, want)
 	}
-	if _, err := os.Stat(filepath.Join(wt, ".trae", "traecli.toml")); err != nil {
-		t.Error(err)
+	traexConfig, err := os.ReadFile(filepath.Join(wt, ".trae", "traecli.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(traexConfig), "permission_mode = \"auto\"") || strings.Contains(string(traexConfig), "sandbox_mode") || strings.Contains(string(traexConfig), "approval_policy") {
+		t.Fatalf("Traex must use native auto mode without conflicting legacy permission settings: %s", traexConfig)
 	}
 	// Neither the work nor the owner's checkout sees the files.
 	if s := runGit(t, wt, "status", "--porcelain", "--untracked-files=all"); s != "" {
