@@ -93,7 +93,7 @@ func TestExecutionViewDistinguishesPlanQueueAndMixedWorkers(t *testing.T) {
 	}
 }
 
-func TestExecutionViewAcceptanceIsQueuedUntilClaimedAndTerminalWins(t *testing.T) {
+func TestExecutionViewTerminalOutcomeRetainsWorkerUntilStopped(t *testing.T) {
 	h := newHarness(t)
 	_, task := h.createTask(owner, createTaskPayload{Title: "verify", Spec: testSpec})
 	as, _, _ := h.claim("linux-1")
@@ -111,14 +111,121 @@ func TestExecutionViewAcceptanceIsQueuedUntilClaimedAndTerminalWins(t *testing.T
 	if got := h.executionTask(task.TaskID).Execution; got.State != protocol.ExecutionAccepting || got.RunID != acceptance.RunID {
 		t.Fatal(got)
 	}
-	// Cancellation can precede confirmation that the old worker stopped. The
-	// task must still show its terminal business outcome, not active execution.
+	// Cancellation can precede confirmation that the old worker stopped. Keep
+	// both the terminal business outcome and the physical execution identity.
 	op := h.exec(owner, h.env("tasks.cancel", taskTarget(task.TaskID), nil, rev(h.task(task.TaskID).ControlRevision)), CancelTask{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	if got := h.executionTask(task.TaskID); got.Lifecycle != protocol.TaskCancelled || got.Execution.State != protocol.ExecutionAccepting || got.Execution.RunID != acceptance.RunID || got.Execution.Role != protocol.RoleAccept {
+		t.Fatal(got)
+	}
+	if released := h.runAs(acceptance, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "cancelled by owner"}, Release{}); released.Status != protocol.OpSucceeded {
+		t.Fatal(released)
+	}
 	if got := h.executionTask(task.TaskID).Execution; got.State != protocol.ExecutionCancelled || got.RunID != "" {
 		t.Fatal(got)
+	}
+}
+
+func TestExecutionViewCancelledUnknownWorkerRemainsVisible(t *testing.T) {
+	h := newHarness(t)
+	_, task := h.createTask(owner, createTaskPayload{Title: "cancel unknown worker", Spec: testSpec})
+	as, ok, _ := h.claim("linux-1")
+	if !ok {
+		t.Fatal("no claim")
+	}
+	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	h.clock.Advance(DefaultLeaseTTL + time.Second)
+	if n, err := h.app.ExpireLeases(t.Context()); err != nil || n != 1 {
+		t.Fatalf("expired %d runs: %v", n, err)
+	}
+	if op := h.exec(owner, h.env("tasks.cancel", taskTarget(task.TaskID), nil, rev(h.task(task.TaskID).ControlRevision)), CancelTask{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	view := h.executionTask(task.TaskID)
+	if view.Lifecycle != protocol.TaskCancelled || view.Execution.State != protocol.ExecutionUnknown || view.Execution.RunID != as.RunID || view.Execution.Role != protocol.RoleImplement {
+		t.Fatalf("cancelled task concealed unknown worker: %+v", view)
+	}
+	if released := h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "stop confirmed after reconnect"}, Release{}); released.Status != protocol.OpSucceeded {
+		t.Fatal(released)
+	}
+	if got := h.executionTask(task.TaskID).Execution; got.State != protocol.ExecutionCancelled || got.RunID != "" {
+		t.Fatalf("settled cancellation did not converge: %+v", got)
+	}
+}
+
+func TestWorkItemFactsAdvanceWithoutPlanRevision(t *testing.T) {
+	h := newHarness(t)
+	plan := workPlan()
+	plan.Stages[0].Status = "active"
+	item := h.createWork(plan)
+	op, task := h.createTask(owner, createTaskPayload{Title: "same plan, changing execution", Spec: testSpec, WorkItemID: item.WorkItemID, WorkItemRevision: item.Revision, StageIDs: []string{"investigate"}})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	read := func() protocol.WorkItemView {
+		t.Helper()
+		var view protocol.WorkItemView
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			var err error
+			view, err = views.WorkItem(t.Context(), tx.Q(), item.WorkItemID)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return view
+	}
+	queued := read()
+	as, ok, _ := h.claim("linux-1")
+	if !ok || as.TaskID != task.TaskID {
+		t.Fatal("no matching claim")
+	}
+	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	running := read()
+	if running.Revision != queued.Revision || running.FactsSeq <= queued.FactsSeq || running.Execution.Running != 1 || running.Column != "active" {
+		t.Fatalf("running facts did not advance independently: before=%+v after=%+v", queued, running)
+	}
+	if op := h.exec(owner, h.env("tasks.cancel", taskTarget(task.TaskID), nil, rev(h.task(task.TaskID).ControlRevision)), CancelTask{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	cancelledRunning := read()
+	if cancelledRunning.Revision != queued.Revision || cancelledRunning.FactsSeq <= running.FactsSeq || cancelledRunning.Execution.Running != 1 || cancelledRunning.Execution.Cancelled != 0 || cancelledRunning.Column != "active" || cancelledRunning.Tasks[0].Lifecycle != protocol.TaskCancelled || cancelledRunning.Tasks[0].Execution.RunID != as.RunID {
+		t.Fatalf("logical cancellation concealed run: %+v", cancelledRunning)
+	}
+	if op := h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "stop confirmed"}, Release{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	settled := read()
+	if settled.Revision != queued.Revision || settled.FactsSeq <= cancelledRunning.FactsSeq || settled.Execution.Cancelled != 1 || settled.Execution.Running != 0 || settled.Column != "unplanned" || settled.Tasks[0].Execution.RunID != "" {
+		t.Fatalf("settled facts did not converge: %+v", settled)
+	}
+}
+
+func TestWorkItemFactsAdvanceWhenDeliveryQueryBecomesVisible(t *testing.T) {
+	h := newHarness(t)
+	item := observerItem(t, h)
+	observerHello(t, h, "linux-1", "observer")
+	read := func() protocol.WorkItemView {
+		t.Helper()
+		var view protocol.WorkItemView
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			var err error
+			view, err = views.WorkItem(t.Context(), tx.Q(), item.WorkItemID)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return view
+	}
+	before := read()
+	assignments := pollDelivery(t, h, "linux-1", "observer")
+	if len(assignments) != 1 {
+		t.Fatalf("assignments: %+v", assignments)
+	}
+	after := read()
+	if after.Revision != before.Revision || after.FactsSeq <= before.FactsSeq || len(after.Observations) != 1 || !after.Observations[0].RefreshPending {
+		t.Fatalf("delivery reservation did not advance visible facts: before=%+v after=%+v", before, after)
 	}
 }
 

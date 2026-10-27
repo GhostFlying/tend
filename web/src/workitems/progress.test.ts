@@ -49,6 +49,31 @@ describe("work item current execution", () => {
     ]);
     expect(progressCounts(tasks)).toEqual([["idle", 1]]);
   });
+  test("terminal business outcomes stay current until their worker settles", () => {
+    const cancelledRunning = {
+      ...task("cancelled-running", "cancelled"),
+      execution: { state: "running" as const, run_id: "run-a", role: "implement" as const },
+    };
+    const completedUnknown = {
+      ...task("completed-unknown", "completed"),
+      execution: { state: "unknown" as const, run_id: "run-b", role: "accept" as const },
+    };
+    const settled = task("settled", "cancelled");
+    const tasks = [cancelledRunning, completedUnknown, settled];
+    expect(currentState(cancelledRunning)).toBe("running");
+    expect(currentState(completedUnknown)).toBe("unknown");
+    expect(selectTasks(tasks, "current", null).map((task) => task.task_id)).toEqual([
+      "completed-unknown",
+      "cancelled-running",
+    ]);
+    expect(selectTasks(tasks, "ended", null).map((task) => task.task_id)).toEqual(["settled"]);
+    expect(new Map(progressCounts(tasks))).toEqual(
+      new Map([
+        ["unknown", 1],
+        ["running", 1],
+      ]),
+    );
+  });
   test("owner attention first, stable task identity within group, terminal completion newest first", () => {
     const tasks = [
       task("b", "running"),

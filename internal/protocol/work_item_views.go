@@ -7,6 +7,9 @@ type WorkItemView struct {
 	Choices        []WorkItemChoice           `json:"choices,omitempty"`
 	PendingReviews []WorkItemCompletionReview `json:"pending_reviews,omitempty"`
 	WorkItem
+	// FactsSeq orders current dynamic projections without changing the plan revision.
+	// Historical plan views omit it because they do not contain current facts.
+	FactsSeq       int64                 `json:"facts_seq,omitempty"`
 	Execution      *ExecutionCounts      `json:"execution,omitempty"`
 	StageExecution []StageExecutionView  `json:"stage_execution,omitempty"`
 	Column         string                `json:"column"`

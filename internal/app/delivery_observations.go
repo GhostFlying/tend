@@ -39,6 +39,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	now := x.Now.UnixMilli()
 	var selected *store.DeliveryObservationRow
 	var selectedDelivery protocol.WorkItemDelivery
+	var selectedItem protocol.WorkItem
 	for _, item := range items {
 		for _, delivery := range item.Deliveries {
 			if delivery.HostID != "" && delivery.HostID != x.Principal.Subject || !slices.Contains(rt.Capabilities, deliveryCapability(delivery.Provider)) {
@@ -57,6 +58,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			if selected == nil || row.NextCheckAt < selected.NextCheckAt {
 				selected = &row
 				selectedDelivery = delivery
+				selectedItem = item
 			}
 		}
 	}
@@ -68,6 +70,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	selected.HostID = x.Principal.Subject
 	selected.InstanceID = p.InstanceID
 	selected.QueryUntil = now + (2 * time.Minute).Milliseconds()
+	selected.Observation.RefreshPending = true
 	// A timed-out query joins the queue at its last attempt, instead of always
 	// preceding untouched references. A completed report sets the next interval.
 	selected.NextCheckAt = now
@@ -75,7 +78,9 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	result.Assignments = append(result.Assignments, protocol.DeliveryAssignment{WorkItemID: selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce})
-	return Outcome{Result: result}, nil
+	event := deliveryChanged(selectedItem, selected.Observation)
+	event.Kind = "work_item.delivery_query_started"
+	return Outcome{Result: result, Events: []Event{event}}, nil
 }
 func deliveryCapability(provider protocol.WorkItemDeliveryProvider) string {
 	switch provider {

@@ -17,11 +17,15 @@ func WorkItem(ctx context.Context, q store.Querier, id string) (protocol.WorkIte
 	if err != nil {
 		return protocol.WorkItemView{}, err
 	}
-	return workItemView(ctx, q, w, facts)
+	factsSeq, err := store.LatestEventSeq(ctx, q)
+	if err != nil {
+		return protocol.WorkItemView{}, err
+	}
+	return workItemView(ctx, q, w, facts, factsSeq)
 }
 
-func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem, facts executionFacts) (protocol.WorkItemView, error) {
-	v := protocol.WorkItemView{WorkItem: w, Column: "unplanned"}
+func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem, facts executionFacts, factsSeq int64) (protocol.WorkItemView, error) {
+	v := protocol.WorkItemView{WorkItem: w, FactsSeq: factsSeq, Column: "unplanned"}
 	seen := map[string]bool{}
 	var tasks []store.TaskRow
 	for _, stage := range w.Stages {
@@ -89,7 +93,9 @@ func WorkItemColumn(v protocol.WorkItemView) string {
 	}
 	running, checking := false, false
 	for _, task := range v.Tasks {
-		if task.Lifecycle.Terminal() {
+		settled := task.Execution == nil || task.Execution.State == protocol.ExecutionCompleted ||
+			task.Execution.State == protocol.ExecutionCancelled || task.Execution.State == protocol.ExecutionIdle
+		if task.Lifecycle.Terminal() && settled {
 			continue
 		}
 		if task.BlockReason != protocol.BlockNone && task.BlockReason != protocol.BlockWaitingResource || task.ControlMode != protocol.ControlManaged {
@@ -124,11 +130,15 @@ func WorkItems(ctx context.Context, q store.Querier, project string, includeClos
 	if err != nil {
 		return page, err
 	}
+	factsSeq, err := store.LatestEventSeq(ctx, q)
+	if err != nil {
+		return page, err
+	}
 	for _, item := range items {
 		if !includeClosed && item.Status == "closed" {
 			continue
 		}
-		v, err := workItemView(ctx, q, item, facts)
+		v, err := workItemView(ctx, q, item, facts, factsSeq)
 		if err != nil {
 			return page, err
 		}

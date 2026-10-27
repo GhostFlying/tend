@@ -31,7 +31,7 @@ export class WorkItemRead<T> {
 
   constructor(
     private api: Reader,
-    private received: (value: T) => void = () => {},
+    private received: (value: T) => T | void = () => {},
   ) {}
 
   open(path: string): Promise<void> {
@@ -61,10 +61,11 @@ export class WorkItemRead<T> {
         this.controller = controller;
         this.state.set({ ...this.state.get(), loading: true });
         try {
-          const value = await this.api.get<T>(this.path!, controller.signal);
+          const received = await this.api.get<T>(this.path!, controller.signal);
           if (controller.signal.aborted || generation !== this.generation) return;
+          const transformed = this.received(received);
+          const value = transformed === undefined ? received : transformed;
           this.state.set({ value, loading: false });
-          this.received(value);
           clearTimeout(this.timer);
           this.timer = undefined;
           this.delay = 1_000;
@@ -141,15 +142,29 @@ export class WorkItems {
     this.backgroundSources = new WorkItemRead(api);
     this.followups = new WorkItemRead(api);
     this.followupHistory = new WorkItemRead(api);
-    const remember = (item: WorkItemView) => {
+    const remember = (item: WorkItemView): WorkItemView => {
+      const current = this.cache.get().get(item.work_item_id);
+      if (current) {
+        if (current.revision > item.revision) return current;
+        if (current.revision === item.revision) {
+          const currentFacts = current.facts_seq;
+          const incomingFacts = item.facts_seq;
+          // Older servers have no facts_seq; preserve their last-response-wins
+          // behavior until both sides carry a comparable transaction watermark.
+          if (currentFacts !== undefined || incomingFacts !== undefined) {
+            if ((currentFacts ?? 0) >= (incomingFacts ?? 0)) return current;
+          }
+        }
+      }
       const cache = new Map(this.cache.get());
-      if ((cache.get(item.work_item_id)?.revision ?? 0) > item.revision) return;
       cache.set(item.work_item_id, item);
       this.cache.set(cache);
+      return item;
     };
-    const page = (value: WorkItemPage) => {
-      for (const item of value.items ?? []) remember(item);
-    };
+    const page = (value: WorkItemPage): WorkItemPage => ({
+      ...value,
+      items: (value.items ?? []).map(remember),
+    });
     this.board = new WorkItemRead(api, page);
     this.overview = new WorkItemRead(api, page);
     this.detail = new WorkItemRead(api, remember);
@@ -158,7 +173,7 @@ export class WorkItems {
     this.remember = remember;
   }
   private api: Reader;
-  private remember: (item: WorkItemView) => void;
+  private remember: (item: WorkItemView) => WorkItemView;
 
   startOverview(): void {
     if (!this.stopped) void this.overview.open("/api/v1/work-items?include_closed=false");

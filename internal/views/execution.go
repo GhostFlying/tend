@@ -121,14 +121,6 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 
 func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskRow) (*protocol.TaskExecutionView, error) {
 	v := &protocol.TaskExecutionView{State: protocol.ExecutionIdle}
-	switch t.Lifecycle {
-	case protocol.TaskCompleted:
-		v.State = protocol.ExecutionCompleted
-		return v, nil
-	case protocol.TaskCancelled:
-		v.State = protocol.ExecutionCancelled
-		return v, nil
-	}
 	ownerBlocked := t.BlockReason == protocol.BlockWaitingDecision || t.BlockReason == protocol.BlockWaitingApproval ||
 		t.BlockReason == protocol.BlockBudgetExhausted || t.BlockReason == protocol.BlockAcceptanceEnvUnavailable || t.BlockReason == protocol.BlockWorkspaceUnavailable
 	runs, err := store.ListRunsByTask(ctx, q, t.TaskID)
@@ -206,7 +198,9 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 				v.State = protocol.ExecutionAccepting
 			}
 		}
-		if v.State == protocol.ExecutionRunning || v.State == protocol.ExecutionAccepting || v.State == protocol.ExecutionStarting {
+		// Recovery is no longer authorized after the task's logical outcome, but
+		// the underlying worker remains visible until its stop is confirmed.
+		if !t.Lifecycle.Terminal() && (v.State == protocol.ExecutionRunning || v.State == protocol.ExecutionAccepting || v.State == protocol.ExecutionStarting) {
 			v.Recovery, err = executionRecovery(ctx, q, run.RunID)
 			if err != nil {
 				return nil, err
@@ -215,6 +209,16 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 				v.State = protocol.ExecutionRecovering
 			}
 		}
+		return v, nil
+	}
+	// A terminal lifecycle is the logical outcome, not proof that an allocated
+	// worker stopped. Only use it after every run has physically settled.
+	switch t.Lifecycle {
+	case protocol.TaskCompleted:
+		v.State = protocol.ExecutionCompleted
+		return v, nil
+	case protocol.TaskCancelled:
+		v.State = protocol.ExecutionCancelled
 		return v, nil
 	}
 	// Control is an intent, not confirmation that an allocated worker stopped.

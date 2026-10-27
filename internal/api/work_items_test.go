@@ -30,6 +30,13 @@ func TestWorkItemOwnerReadsHistoryAndStaleUpdate(t *testing.T) {
 	if st := e.do("GET", "/api/v1/work-items", token, nil, &page); st != http.StatusOK || len(page.Items) != 1 {
 		t.Fatalf("list = %d %+v", st, page)
 	}
+	if page.Items[0].FactsSeq == 0 || page.Items[0].FactsSeq != int64(e.count(`SELECT MAX(event_seq) FROM events`)) {
+		t.Fatalf("list facts_seq = %d", page.Items[0].FactsSeq)
+	}
+	var current protocol.WorkItemView
+	if st := e.do("GET", path, token, nil, &current); st != http.StatusOK || current.FactsSeq != page.Items[0].FactsSeq {
+		t.Fatalf("detail = %d %+v, list facts_seq = %d", st, current, page.Items[0].FactsSeq)
+	}
 	plan = item.WorkItemPlan
 	plan.Title = "Investigate updated goal"
 	revision := item.Revision
@@ -43,7 +50,7 @@ func TestWorkItemOwnerReadsHistoryAndStaleUpdate(t *testing.T) {
 		t.Fatalf("stale = %+v", res)
 	}
 	var historical protocol.WorkItemView
-	if st := e.do("GET", path+"?revision=1", token, nil, &historical); st != http.StatusOK || historical.Title != "Investigate" || historical.Column != "historical" || len(historical.Tasks) != 0 || len(historical.Observations) != 0 {
+	if st := e.do("GET", path+"?revision=1", token, nil, &historical); st != http.StatusOK || historical.Title != "Investigate" || historical.Column != "historical" || historical.FactsSeq != 0 || len(historical.Tasks) != 0 || len(historical.Observations) != 0 {
 		t.Fatalf("history = %d %+v", st, historical)
 	}
 	for _, suffix := range []string{"?revision=0", "?revision=oops"} {

@@ -18,6 +18,14 @@ func TestWorkItemBoardDoesNotConfuseExecutionWithClosure(t *testing.T) {
 	if got := WorkItemColumn(v); got != "active" {
 		t.Fatal(got)
 	}
+	v.Tasks = []protocol.TaskSummary{{Lifecycle: protocol.TaskCancelled, ControlMode: protocol.ControlManaged, BlockReason: protocol.BlockNone, Execution: &protocol.TaskExecutionView{State: protocol.ExecutionUnknown, RunID: "run"}}}
+	if got := WorkItemColumn(v); got != "active" {
+		t.Fatalf("cancelled task with unresolved run = %s", got)
+	}
+	v.Tasks[0].Execution = &protocol.TaskExecutionView{State: protocol.ExecutionCancelled}
+	if got := WorkItemColumn(v); got != "unplanned" {
+		t.Fatalf("settled cancelled task = %s", got)
+	}
 	v.FollowOns = []protocol.WorkItemFollowOn{{Kind: "problem", Status: "open"}}
 	if got := WorkItemColumn(v); got != "attention" {
 		t.Fatal(got)
