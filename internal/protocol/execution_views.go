@@ -59,9 +59,11 @@ type TaskExecutionView struct {
 
 // ExecutionRecovery exposes safe progress facts, never native transcript paths.
 type ExecutionRecovery struct {
-	Phase    string `json:"phase"`
-	Code     string `json:"code,omitempty"`
-	Attempts int    `json:"attempts,omitempty"`
+	RootState         string `json:"root_state,omitempty"`
+	BackgroundPending bool   `json:"background_pending,omitempty"`
+	Phase             string `json:"phase"`
+	Code              string `json:"code,omitempty"`
+	Attempts          int    `json:"attempts,omitempty"`
 }
 
 // ExecutionStartup exposes bounded startup diagnosis without native terminal data.

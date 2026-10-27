@@ -819,7 +819,7 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 		}
 	}
 	now := a.now().UnixMilli()
-	changed := false
+	changed, wakeQueued := false, false
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
 		run, err := store.GetRun(ctx, tx.Q(), runID)
 		if err != nil {
@@ -838,8 +838,16 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 			if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
 				return err
 			}
+			if e.Kind == "worker.turn_failed" || e.Kind == "worker.root_observation_unknown" {
+				queued, err := a.recordRootAttention(ctx, tx, run, e)
+				if err != nil {
+					return err
+				}
+				changed = changed || queued
+				wakeQueued = wakeQueued || queued
+			}
 			switch e.Kind {
-			case "worker.turn_failed", "worker.recovery_pending", "worker.recovery_started", "worker.recovery_completed", "worker.recovery_failed", "worker.recovery_handed_back", "worker.startup_failed", "worker.startup_retry_pending", "worker.startup_started":
+			case "worker.root_background_pending", "worker.root_observation_resolved", "worker.root_observation_unknown", "worker.turn_failed", "worker.recovery_pending", "worker.recovery_started", "worker.recovery_completed", "worker.recovery_failed", "worker.recovery_handed_back", "worker.startup_failed", "worker.startup_retry_pending", "worker.startup_started":
 				body, err := json.Marshal(map[string]any{"seq": e.Seq, "kind": e.Kind})
 				if err != nil {
 					return err
@@ -880,6 +888,9 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 	}
 	if err == nil && changed {
 		a.notifyChange()
+	}
+	if err == nil && wakeQueued && a.notifier != nil {
+		a.notifier.Notify()
 	}
 	return res, err
 }

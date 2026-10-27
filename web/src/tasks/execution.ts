@@ -12,7 +12,22 @@ export function executionLook(execution: NonNullable<TaskSummary["execution"]>):
       return { label: execution.role === "accept" ? "正在启动验收" : "正在启动", tone: "run" };
     case "recovering":
       return {
-        label: execution.recovery?.phase === "running" ? "恢复中" : "异常处理中",
+        label:
+          execution.recovery?.phase === "background_pending"
+            ? execution.recovery.root_state === "failed"
+              ? "根回合失败 · 后台待收敛"
+              : "后台尚未收敛"
+            : execution.recovery?.phase === "observation_unknown"
+              ? execution.recovery.root_state === "failed"
+                ? "根回合失败 · 后台待核对"
+                : "回合事实待核对"
+              : execution.recovery?.phase === "running"
+                ? "正在有限恢复"
+                : execution.recovery?.background_pending
+                  ? "根回合失败 · 后台待收敛"
+                  : execution.recovery?.phase === "failed"
+                    ? "需要处理"
+                    : "根回合失败",
         tone: "warn",
       };
     case "running":
@@ -82,13 +97,21 @@ export function queueReasonText(task: Pick<TaskSummary, "execution" | "block_rea
   const recovery = task.execution?.recovery;
   if (task.execution?.state === "recovering" && recovery) {
     const phase =
-      recovery.phase === "running"
-        ? "已启动恢复会话"
-        : recovery.phase === "pending"
-          ? "正在确认旧会话及后台操作已停止"
-          : recovery.phase === "failed"
-            ? "自动恢复失败，等待处理"
-            : "模型轮次异常，正在核对执行状态";
+      recovery.phase === "background_pending"
+        ? recovery.root_state === "failed"
+          ? "根回合失败，后台操作仍在执行，保留占用"
+          : "根回合已结束，后台操作仍在执行，保留占用"
+        : recovery.phase === "observation_unknown"
+          ? "根回合或后台操作事实暂不可确认，保留占用并等待核对"
+          : recovery.phase === "running"
+            ? "正在沿原 run 有限恢复"
+            : recovery.phase === "pending"
+              ? "正在确认原回合及后台操作已收敛"
+              : recovery.phase === "failed"
+                ? "自动恢复失败，等待处理"
+                : recovery.background_pending
+                  ? "根回合失败，后台尚未收敛，保留执行占用"
+                  : "根回合失败，需要处理";
     return `${phase}${recovery.attempts ? ` · 第 ${recovery.attempts} 次恢复` : ""}${recovery.code ? ` · ${recovery.code}` : ""}`;
   }
   const reason = task.execution?.queue_reason;

@@ -83,6 +83,9 @@ func Unconfirmed(err error) bool {
 }
 
 type reply struct {
+	Meta struct {
+		RuntimeID string `json:"runtimeId"`
+	} `json:"_meta"`
 	OK     bool            `json:"ok"`
 	Result json.RawMessage `json:"result"`
 	Error  *Error          `json:"error"`
@@ -91,6 +94,11 @@ type reply struct {
 // call runs one command with --json in dir and decodes its result into
 // out, which may be nil.
 func (c *Client) call(ctx context.Context, dir string, out any, args ...string) error {
+	_, err := c.callWithRuntime(ctx, dir, out, args...)
+	return err
+}
+
+func (c *Client) callWithRuntime(ctx context.Context, dir string, out any, args ...string) (string, error) {
 	args = append(args, "--json")
 	run := c.Exec
 	if run == nil {
@@ -100,23 +108,23 @@ func (c *Client) call(ctx context.Context, dir string, out any, args ...string) 
 	var r reply
 	if err := json.Unmarshal(stdout, &r); err != nil {
 		if runErr != nil {
-			return fmt.Errorf("orca %s: %w", strings.Join(args[:2], " "), runErr)
+			return "", fmt.Errorf("orca %s: %w", strings.Join(args[:2], " "), runErr)
 		}
-		return fmt.Errorf("orca %s: decode reply: %w", strings.Join(args[:2], " "), err)
+		return "", fmt.Errorf("orca %s: decode reply: %w", strings.Join(args[:2], " "), err)
 	}
 	if !r.OK {
 		if r.Error == nil {
-			return fmt.Errorf("orca %s: failed without an error", strings.Join(args[:2], " "))
+			return "", fmt.Errorf("orca %s: failed without an error", strings.Join(args[:2], " "))
 		}
-		return r.Error
+		return "", r.Error
 	}
 	if out == nil {
-		return nil
+		return r.Meta.RuntimeID, nil
 	}
 	if err := json.Unmarshal(r.Result, out); err != nil {
-		return fmt.Errorf("orca %s: decode result: %w", strings.Join(args[:2], " "), err)
+		return "", fmt.Errorf("orca %s: decode result: %w", strings.Join(args[:2], " "), err)
 	}
-	return nil
+	return r.Meta.RuntimeID, nil
 }
 
 func (c *Client) runCLI(ctx context.Context, dir string, args []string) ([]byte, error) {
@@ -435,6 +443,10 @@ type ChildWork struct {
 
 // Agent is an agent orca tracks in a worktree.
 type Agent struct {
+	rootProvisional     bool
+	legacyRootSupport   bool
+	RootTurn            *RootTurn        `json:"rootTurn,omitempty"`
+	RuntimeID           string           `json:"-"`
 	PaneKey             string           `json:"paneKey"`
 	MainAgent           *MainAgent       `json:"mainAgent,omitempty"`
 	ProviderSession     *ProviderSession `json:"providerSession,omitempty"`
@@ -463,11 +475,79 @@ func (c *Client) Agents(ctx context.Context, worktreeID string) ([]Agent, error)
 		} `json:"worktrees"`
 		Truncated bool `json:"truncated"`
 	}
-	if err := c.call(ctx, "", &res, "worktree", "ps", "--limit", "10000"); err != nil {
+	observedRuntime, err := c.callWithRuntime(ctx, "", &res, "worktree", "ps", "--limit", "10000")
+	if err != nil {
 		return nil, err
 	}
 	for _, w := range res.Worktrees {
 		if w.WorktreeID == worktreeID {
+			for j := range w.Agents {
+				w.Agents[j].RuntimeID = observedRuntime
+			}
+			hasNative := false
+			for _, a := range w.Agents {
+				hasNative = hasNative || a.RootTurn != nil || (a.AgentType == "traex" && observedRuntime != "")
+			}
+			if hasNative {
+				runtimeID, supported, known := c.rootTurnRuntime(ctx)
+				verified := known && runtimeID != "" && runtimeID == observedRuntime
+				for j := range w.Agents {
+					a := &w.Agents[j]
+					if a.AgentType != "traex" && a.RootTurn == nil {
+						a.legacyRootSupport = true
+						continue
+					}
+					if verified && !supported && a.RootTurn == nil {
+						a.legacyRootSupport = true
+						continue
+					}
+					if !verified || !supported || a.RootTurn == nil {
+						if a.RootTurn == nil {
+							a.rootProvisional = !verified
+							code := "observation_unavailable"
+							if verified && supported {
+								code = "observation_pending"
+							}
+							sessionID := ""
+							if a.ProviderSession != nil {
+								sessionID = a.ProviderSession.ID
+							}
+							a.RootTurn = &RootTurn{Version: 1, Source: "native-api", PaneKey: a.PaneKey, SessionID: sessionID, TurnID: "unobserved", ErrorCode: code}
+						}
+						a.RootTurn.State, a.RootTurn.Operations, a.RootTurn.Retryable = "unknown", "unknown", false
+						if !verified || !supported {
+							a.RootTurn.ErrorCode = "observation_unavailable"
+						}
+						continue
+					}
+					switch a.RootTurn.State {
+					case "running", "completed", "failed", "cancelled", "unknown":
+					default:
+						a.RootTurn.State = "unknown"
+					}
+					switch a.RootTurn.Operations {
+					case "settled", "pending", "unknown":
+					default:
+						a.RootTurn.Operations = "unknown"
+					}
+					if a.RootTurn.State == "unknown" || a.RootTurn.State == "running" {
+						a.RootTurn.Operations = "unknown"
+						a.RootTurn.Retryable = false
+					}
+					if validRootTurn(*a, 0) {
+						outcome := map[string]string{"failed": "failure", "completed": "success", "cancelled": "cancellation"}[a.RootTurn.State]
+						if outcome != "" {
+							a.MainAgent = &MainAgent{State: stateDone, Outcome: outcome, StateStartedAt: max(a.RootTurn.CompletedAt, a.RootTurn.HostStartedAt, a.RootTurn.StartedAt)}
+						}
+					}
+				}
+			}
+
+			if !hasNative {
+				for j := range w.Agents {
+					w.Agents[j].legacyRootSupport = true
+				}
+			}
 			return w.Agents, nil
 		}
 	}

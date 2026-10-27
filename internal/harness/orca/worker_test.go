@@ -73,6 +73,8 @@ func (f *liveOrca) exec(_ context.Context, dir string, args []string) ([]byte, e
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, slices.Clone(args))
 	switch args[0] + " " + args[1] {
+	case "status --json":
+		return ok(map[string]any{"runtime": map[string]any{"runtimeId": "runtime", "capabilities": []string{rootTurnCapability}}}), nil
 	case "worktree show":
 		return ok(map[string]any{"worktree": map[string]any{"id": f.wt, "path": strings.TrimPrefix(flag(args, "--worktree"), "path:")}}), nil
 	case "agent launch":

@@ -348,8 +348,10 @@ export interface QueueWaitReason {
  */
 export interface ExecutionRecovery {
   attempts?: number;
+  background_pending?: boolean;
   code?: string;
   phase: string;
+  root_state?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

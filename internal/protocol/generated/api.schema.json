@@ -1908,10 +1908,16 @@
         "attempts": {
           "type": "integer"
         },
+        "background_pending": {
+          "type": "boolean"
+        },
         "code": {
           "type": "string"
         },
         "phase": {
+          "type": "string"
+        },
+        "root_state": {
           "type": "string"
         }
       },
