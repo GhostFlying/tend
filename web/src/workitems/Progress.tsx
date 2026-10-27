@@ -2,9 +2,9 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import type { ExecutionState, WorkItemView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { executionLook, queueReasonText } from "../tasks/execution.ts";
-import { isFinished } from "../tasks/status.ts";
 import {
   currentState,
+  isCurrentTask,
   progressCounts,
   selectTasks,
   uniqueTasks,
@@ -25,7 +25,7 @@ export function WorkItemProgress({ item, children }: { item: WorkItemView; child
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const id = useId();
   const tasks = uniqueTasks(item);
-  const current = tasks.filter((task) => !isFinished(task));
+  const current = tasks.filter(isCurrentTask);
   const ids = new Set(current.map((task) => task.task_id));
   const stages = (item.stages ?? []).filter((stage) => stage.task_ids?.some((id) => ids.has(id)));
   const ongoing = (item.stages ?? []).filter(

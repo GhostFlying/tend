@@ -4953,6 +4953,9 @@
         "execution": {
           "$ref": "#/definitions/ExecutionCounts"
         },
+        "facts_seq": {
+          "type": "integer"
+        },
         "follow_ons": {
           "items": {
             "$ref": "#/definitions/WorkItemFollowOn"

@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ExecutionCounts, TaskSummary, WorkItemView } from "../api/generated/api.ts";
-import { ExecutionSummary } from "./Execution.tsx";
+import { ExecutionSummary, TaskExecution } from "./Execution.tsx";
 import { executionCounts, executionLook, queueReasonText } from "./execution.ts";
 import { taskLook } from "./status.ts";
 
@@ -73,6 +73,30 @@ describe("server execution facts", () => {
     );
     expect(executionLook({ state: "waiting_owner" }).label).toBe("等待用户");
     expect(executionLook({ state: "unknown" }).label).toBe("执行待核对");
+  });
+  test("actual task components show unresolved runs even after logical cancellation", () => {
+    const task = {
+      task_id: "task_cancelled",
+      title: "Cancelled while stopping",
+      project: "sample",
+      lifecycle: "cancelled",
+      control_mode: "managed",
+      control_revision: 2,
+      spec_version: 1,
+      next_implement_generation: 1,
+      workspace: "workspace_cancelled",
+      rating: "",
+      block_reason: "none",
+      execution: { state: "unknown", run_id: "run_original", role: "implement" },
+    } satisfies TaskSummary;
+    const unresolved = renderToStaticMarkup(createElement(TaskExecution, { task }));
+    expect(unresolved).toContain('data-state="unknown"');
+    expect(unresolved).toContain("执行待核对");
+    expect(taskLook(task)).toEqual({ label: "执行待核对", tone: "warn" });
+    const settled = { ...task, execution: { state: "cancelled" as const } };
+    expect(renderToStaticMarkup(createElement(TaskExecution, { task: settled }))).toContain(
+      "已取消",
+    );
   });
   test("an active plan without execution facts never fabricates running workers", () => {
     const plan = {

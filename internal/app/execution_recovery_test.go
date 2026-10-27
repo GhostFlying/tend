@@ -47,12 +47,13 @@ func TestExecutionRecoveryUsesLatestRunFactAndDoesNotReplayEvents(t *testing.T) 
 	if got := h.count("events") - before; got != 7 {
 		t.Fatalf("recovery invalidation events=%d", got)
 	}
-	// Terminal task lifecycle wins even when old worker logs arrive late.
+	// Cancellation stops recovery responsibility, but late worker logs cannot
+	// conceal that the underlying run still lacks physical stop confirmation.
 	op := h.exec(owner, h.env("tasks.cancel", taskTarget(task.TaskID), struct{}{}, rev(h.task(task.TaskID).ControlRevision)), CancelTask{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if got := h.executionTask(task.TaskID); got.Execution.State != protocol.ExecutionCancelled || got.Execution.Recovery != nil {
+	if got := h.executionTask(task.TaskID); got.Lifecycle != protocol.TaskCancelled || got.Execution.State != protocol.ExecutionRunning || got.Execution.RunID != as.RunID || got.Execution.Recovery != nil {
 		t.Fatal(got.Execution)
 	}
 }

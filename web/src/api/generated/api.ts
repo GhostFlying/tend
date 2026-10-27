@@ -363,6 +363,7 @@ export interface WorkItemView {
   default_workspace_task_id?: string;
   deliveries?: WorkItemDelivery[];
   execution?: ExecutionCounts;
+  facts_seq?: number;
   follow_ons?: WorkItemFollowOn[];
   followups?: FollowupSummary;
   intent: string;
