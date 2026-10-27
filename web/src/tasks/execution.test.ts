@@ -139,10 +139,10 @@ describe("server execution facts", () => {
 
 test("recovery is visible separately from running and preserves its diagnostic", () => {
   expect(executionLook({ state: "recovering", recovery: { phase: "pending" } }).label).toBe(
-    "异常处理中",
+    "根回合失败",
   );
   expect(executionLook({ state: "recovering", recovery: { phase: "running" } }).label).toBe(
-    "恢复中",
+    "正在有限恢复",
   );
   expect(
     queueReasonText({
@@ -152,7 +152,7 @@ test("recovery is visible separately from running and preserves its diagnostic",
         recovery: { phase: "running", attempts: 1, code: "invalid_encrypted_content" },
       },
     }),
-  ).toBe("已启动恢复会话 · 第 1 次恢复 · invalid_encrypted_content");
+  ).toBe("正在沿原 run 有限恢复 · 第 1 次恢复 · invalid_encrypted_content");
   expect(executionCounts({ ...counts, recovering: 1 })).toEqual([
     { state: "recovering", text: "1 恢复或异常处理中" },
   ]);

@@ -360,7 +360,8 @@ func countExecution(counts *protocol.ExecutionCounts, execution *protocol.TaskEx
 // Latest durable root-turn fact wins only for the selected live run.
 func executionRecovery(ctx context.Context, q store.Querier, runID string) (*protocol.ExecutionRecovery, error) {
 	var kind, body string
-	err := q.QueryRowContext(ctx, `SELECT kind,body_json FROM run_logs WHERE run_id=? AND kind IN ('worker.turn_failed','worker.recovery_pending','worker.recovery_started','worker.recovery_completed','worker.recovery_failed','worker.recovery_handed_back','worker.startup_failed','worker.startup_retry_pending','worker.startup_started') ORDER BY seq DESC LIMIT 1`, runID).Scan(&kind, &body)
+	var seq int64
+	err := q.QueryRowContext(ctx, `SELECT seq,kind,body_json FROM run_logs WHERE run_id=? AND kind IN ('worker.root_background_pending','worker.root_observation_unknown','worker.turn_failed','worker.recovery_pending','worker.recovery_started','worker.recovery_completed','worker.recovery_failed','worker.recovery_handed_back','worker.startup_failed','worker.startup_retry_pending','worker.startup_started') AND (kind NOT IN ('worker.root_observation_unknown','worker.root_background_pending') OR seq > COALESCE((SELECT MAX(seq) FROM run_logs WHERE run_id=? AND kind='worker.root_observation_resolved'),0)) ORDER BY seq DESC LIMIT 1`, runID, runID).Scan(&seq, &kind, &body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -380,8 +381,45 @@ func executionRecovery(ctx context.Context, q store.Querier, runID string) (*pro
 		recovery.Phase = "startup_failed"
 	case "worker.startup_retry_pending":
 		recovery.Phase = "startup_retry_pending"
+	case "worker.root_background_pending":
+		recovery.Phase = "background_pending"
+	case "worker.root_observation_unknown":
+		recovery.Phase = "observation_unknown"
 	case "worker.turn_failed":
 		recovery.Phase = "turn_failed"
+		recovery.RootState = "failed"
+		var native struct {
+			RootTurn *struct {
+				Operations string `json:"operations"`
+				ErrorCode  string `json:"errorCode"`
+			} `json:"root_turn"`
+		}
+		if json.Unmarshal([]byte(body), &native) == nil && native.RootTurn != nil {
+			if recovery.Code == "" {
+				recovery.Code = native.RootTurn.ErrorCode
+			}
+			if native.RootTurn.Operations == "unknown" {
+				recovery.Phase = "observation_unknown"
+				recovery.BackgroundPending = true
+			} else if native.RootTurn.Operations == "pending" {
+				recovery.Phase = "background_pending"
+				recovery.BackgroundPending = true
+			}
+		}
+		var observedSeq int64
+		var observedBody string
+		err := q.QueryRowContext(ctx, `SELECT seq,body_json FROM run_logs WHERE run_id=? AND kind='worker.root_observation_resolved' ORDER BY seq DESC LIMIT 1`, runID).Scan(&observedSeq, &observedBody)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		var observed protocol.ExecutionRecovery
+		if err == nil && observedSeq > seq && json.Unmarshal([]byte(observedBody), &observed) == nil && observed.RootState == "failed" {
+			recovery.Phase = "turn_failed"
+			recovery.BackgroundPending = false
+			if observed.Code != "" {
+				recovery.Code = observed.Code
+			}
+		}
 	case "worker.recovery_pending":
 		recovery.Phase = "pending"
 	case "worker.recovery_started":
