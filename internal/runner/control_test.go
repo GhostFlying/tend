@@ -289,3 +289,31 @@ func TestConfigurationDigestRequiresExplicitServerTarget(t *testing.T) {
 		t.Fatal("configuration extension leaked after maintenance", view, err)
 	}
 }
+
+func TestRepositoryObservationsRequireServerNegotiation(t *testing.T) {
+	r := controlRunner(t)
+	r.cfg.RepositoryBindings = func() []protocol.RunnerRepository {
+		return []protocol.RunnerRepository{{Repo: "new", RemoteIdentity: "example.com/new"}}
+	}
+	before, err := r.runtimeObservation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"repositories"`) {
+		t.Fatal("new field leaked to an old server", string(raw))
+	}
+	if !slices.Contains(before.Capabilities, protocol.CapabilityRepositoryBindings) {
+		t.Fatal("capability was not offered")
+	}
+	r.controlMu.Lock()
+	r.repositoryBindingsSupported = true
+	r.controlMu.Unlock()
+	after, err := r.runtimeObservation(t.Context())
+	if err != nil || len(after.Repositories) != 1 {
+		t.Fatal("negotiated bindings missing", after, err)
+	}
+}

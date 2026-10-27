@@ -2362,6 +2362,28 @@
       "title": "RefreshDeliveryPayload",
       "type": "object"
     },
+    "RegisterRepositoryPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "base_candidates": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "remote_url": {
+          "type": "string"
+        },
+        "retired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "remote_url"
+      ],
+      "title": "RegisterRepositoryPayload",
+      "type": "object"
+    },
     "RegisteredRepoView": {
       "additionalProperties": false,
       "properties": {
@@ -2440,6 +2462,36 @@
         "repos"
       ],
       "title": "RepoRegistry",
+      "type": "object"
+    },
+    "RepositoryRegistration": {
+      "additionalProperties": false,
+      "properties": {
+        "base_candidates": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "remote_url": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "retired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "repo",
+        "remote_url",
+        "control_revision"
+      ],
+      "title": "RepositoryRegistration",
       "type": "object"
     },
     "RequestView": {
@@ -2605,6 +2657,23 @@
         "observed"
       ],
       "title": "RunView",
+      "type": "object"
+    },
+    "RunnerRepository": {
+      "additionalProperties": false,
+      "properties": {
+        "remote_identity": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo",
+        "remote_identity"
+      ],
+      "title": "RunnerRepository",
       "type": "object"
     },
     "SessionRequest": {
@@ -4539,17 +4608,26 @@
     "RefreshDeliveryPayload": {
       "$ref": "#/definitions/RefreshDeliveryPayload"
     },
+    "RegisterRepositoryPayload": {
+      "$ref": "#/definitions/RegisterRepositoryPayload"
+    },
     "ReopenWorkItemPayload": {
       "$ref": "#/definitions/ReopenWorkItemPayload"
     },
     "RepoRegistry": {
       "$ref": "#/definitions/RepoRegistry"
     },
+    "RepositoryRegistration": {
+      "$ref": "#/definitions/RepositoryRegistration"
+    },
     "RequestView": {
       "$ref": "#/definitions/RequestView"
     },
     "RunLogPage": {
       "$ref": "#/definitions/RunLogPage"
+    },
+    "RunnerRepository": {
+      "$ref": "#/definitions/RunnerRepository"
     },
     "SessionRequest": {
       "$ref": "#/definitions/SessionRequest"

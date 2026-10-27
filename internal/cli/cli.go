@@ -113,6 +113,7 @@ Owner commands:
   retry <task_id> --kind implement|accept
   rate <task_id> <p0|p1|p2|p3>     rate a task: urgent, high, normal or low
   pause|resume|cancel <task_id>
+  repo register|show <name>       manage repositories online
   upgrade [start|status|retry|cancel] [--release <directory>] [--json]
   conversation handoff [--prepare-only | --status] [--json]
   attachment download <file_id> --out <path>  save an original attachment
@@ -141,6 +142,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 		return report(e, runLogin(ctx, e, rest))
 	case "setup":
 		return report(e, runSetup(ctx, e, rest))
+	case "repo":
+		return report(e, runRepository(ctx, e, rest))
 	case "upgrade":
 		return report(e, runUpgrade(ctx, e, rest))
 	case "attachment":

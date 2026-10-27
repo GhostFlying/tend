@@ -46,7 +46,7 @@ func (l orcaLayout) add(ctx context.Context, as protocol.Assignment, m protocol.
 	if len(as.Workspace.Mounts) != 1 {
 		return mountState{}, fmt.Errorf("workspace_prepare_failed: orca lays out workspaces with one mount, not %d", len(as.Workspace.Mounts))
 	}
-	selector := w.cfg.Repos[m.Repo].Orca
+	selector := w.repo(m.Repo).Orca
 	if selector == "" {
 		return mountState{}, fmt.Errorf("workspace_prepare_failed: repo %s has no orca repository on this runner", m.Repo)
 	}

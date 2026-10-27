@@ -6,11 +6,12 @@ const CurrentRunnerProtocol int64 = 1
 const PreviousRunnerProtocol int64 = CurrentRunnerProtocol - 1
 
 const (
-	RunnerNormal                = "normal"
-	RunnerMaintenance           = "maintenance"
-	RunnerReady                 = "ready"
-	CapabilityRunnerHeartbeat   = "runner-heartbeat-v1"
-	CapabilityRunnerMaintenance = "runner-maintenance-v1"
+	RunnerNormal                 = "normal"
+	RunnerMaintenance            = "maintenance"
+	RunnerReady                  = "ready"
+	CapabilityRepositoryBindings = "runner-repositories-v1"
+	CapabilityRunnerHeartbeat    = "runner-heartbeat-v1"
+	CapabilityRunnerMaintenance  = "runner-maintenance-v1"
 )
 
 // RunnerBuild identifies the immutable executable and process for supervision.
@@ -28,12 +29,13 @@ type RunnerBuild struct {
 // Sequence is monotonic within InstanceID. Replayed claims retain their original
 // runtime observation and must still return their original assignment.
 type RunnerRuntime struct {
-	ConfigurationSHA256         string          `json:"configuration_sha256,omitempty"`
-	ConfirmedCancelledUpgradeID string          `json:"confirmed_cancelled_upgrade_id,omitempty"`
-	AuthorizationDeadlineMillis int64           `json:"authorization_deadline_ms,omitempty"`
-	UpdaterReceipt              *UpdaterReceipt `json:"updater_receipt,omitempty"`
-	JournalVersion              int64           `json:"journal_version,omitempty"`
-	InstanceID                  string          `json:"instance_id"`
+	Repositories                []RunnerRepository `json:"repositories,omitempty"`
+	ConfigurationSHA256         string             `json:"configuration_sha256,omitempty"`
+	ConfirmedCancelledUpgradeID string             `json:"confirmed_cancelled_upgrade_id,omitempty"`
+	AuthorizationDeadlineMillis int64              `json:"authorization_deadline_ms,omitempty"`
+	UpdaterReceipt              *UpdaterReceipt    `json:"updater_receipt,omitempty"`
+	JournalVersion              int64              `json:"journal_version,omitempty"`
+	InstanceID                  string             `json:"instance_id"`
 	// Generation orders process starts using non-rollback local durable state.
 	Generation             int64       `json:"generation"`
 	Sequence               int64       `json:"sequence"`

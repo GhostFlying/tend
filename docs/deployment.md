@@ -30,6 +30,29 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
   - `main_agent.summary_idle_minutes` 设置预备摘要的空闲分钟，省略默认 50，0 关闭自动准备，范围 0..10080。Web 的独立 owner 设置持久化覆盖该默认值，不依赖模型目录。交接维护仍启用；工具 schema 升级会使用 fresh native thread，Web 对话历史与原 native 历史保留（D81）。
   - `tend conversation handoff --prepare-only` 只准备摘要，`tend conversation handoff` 排队执行交接，`tend conversation handoff --status [--json]` 读取共享设置与摘要状态。网络重试沿用原请求 ID；结果未知时先核对原请求，不重复发起交接。
 
+## 在线添加仓库（D110）
+
+仓库可以通过 owner CLI 注册，无需重启 server。首次在线登记会接管同名启动配置条目；此后登记信息以账本为准，旧配置及配置中的遗漏不会覆盖或退役它。`repo show` 返回当前控制修订；`register --retired` 停止新挂载，但不打断已有任务。已有仓库不能在线替换为不同的 remote 身份，需要另一个逻辑名。
+
+```sh
+tend repo register lynx --remote "$REPO_REMOTE" --base main
+tend repo show lynx
+```
+
+在要承载任务的 runner 主机上，将同一逻辑名绑定到已有 Orca 仓库：
+
+```sh
+tend-runner repo bind --config "$RUNNER_CONFIG" \
+  --repo lynx --remote "$REPO_REMOTE" --orca "id:$ORCA_REPO_ID"
+tend-runner repo status --config "$RUNNER_CONFIG"
+```
+
+本机命令经 runner 的私有 Unix socket 执行，支持 Linux/macOS；绑定记录位于 runner home；较长 home 路径通过私有定位文件使用短路径 socket。命令校验实际 origin 并将选择器固定为 provider ID，持久保存成功后在线发布。appserver 模式省略 `--orca`，需要时才创建 runner 自有 bare clone。绑定只允许新增或相同身份登记，不更换已有绑定、工作区或脏文件；已有配置的 prepare profile 保留。
+
+绑定的 remote 地址必须与 server 登记及本地 origin 一致；不推断不同传输地址、`.git` 后缀或 SSH 相对/绝对路径等价。runner 与 server 在 hello 中协商能力，随后在心跳中只报告仓库名与精确 remote 地址的 SHA-256 指纹，不暴露地址、凭据或本机路径。server 确认身份匹配后，`repos_list` 和调度视图才显示这台 host 可以执行该仓库。注册成功、本机绑定成功和 server 已确认可调度是三个可区分的状态；通常在下一次心跳后收敛。旧 runner 继续使用原静态配置；连接旧 server 时新 runner 不发送未协商字段。
+
+每次写入都会输出 request ID 和原修订。网络结果不确定时保留两者；owner CLI 优先查询已有请求结果，不以后来变化的默认值重建已记录操作。尚无记录时以相同参数及 `--request-id`、`--revision` 对账，不能换新身份盲目重做。绑定持久记录包含请求回执，重启后仍可恢复原结果。程序升级仍使用受控发布；在线增加仓库不属于程序升级或 D106 的配置替换维护。
+
 ## Web 客户端
 
 owner 在浏览器里打开 tend-server 的地址（`https://<hostname>.<tailnet>.ts.net`）就是 Web 客户端（D70），手机上可以装成 PWA。

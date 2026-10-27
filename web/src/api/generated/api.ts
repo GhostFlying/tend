@@ -243,10 +243,13 @@ export interface TendAPI {
   LinkWorkItemTaskPayload?: LinkWorkItemTaskPayload;
   RateTaskPayload?: RateTaskPayload;
   RefreshDeliveryPayload?: RefreshDeliveryPayload;
+  RegisterRepositoryPayload?: RegisterRepositoryPayload;
   ReopenWorkItemPayload?: ReopenWorkItemPayload;
   RepoRegistry?: RepoRegistry;
+  RepositoryRegistration?: RepositoryRegistration;
   RequestView?: RequestView;
   RunLogPage?: RunLogPage;
+  RunnerRepository?: RunnerRepository;
   SessionRequest?: SessionRequest;
   SessionView?: SessionView;
   SetControlModePayload?: SetControlModePayload;
@@ -1213,6 +1216,15 @@ export interface RefreshDeliveryPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RegisterRepositoryPayload".
+ */
+export interface RegisterRepositoryPayload {
+  base_candidates?: string[];
+  remote_url: string;
+  retired?: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ReopenWorkItemPayload".
  */
 export interface ReopenWorkItemPayload {
@@ -1233,6 +1245,17 @@ export interface RepoRegistry {
  */
 export interface RegisteredRepoView {
   hosts: string[] | null;
+  repo: string;
+  retired?: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RepositoryRegistration".
+ */
+export interface RepositoryRegistration {
+  base_candidates?: string[];
+  control_revision: number;
+  remote_url: string;
   repo: string;
   retired?: boolean;
 }
@@ -1267,6 +1290,14 @@ export interface RunLogView {
   kind: string;
   native_id?: string;
   seq: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerRepository".
+ */
+export interface RunnerRepository {
+  remote_identity: string;
+  repo: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

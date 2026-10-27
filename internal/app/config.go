@@ -220,6 +220,9 @@ func (SyncConfig) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if err := mergeOnlineRepositories(ctx, tx.Q(), &p); err != nil {
+		return Outcome{}, err
+	}
 	if err := p.validate(); err != nil {
 		return Outcome{}, err
 	}
@@ -229,6 +232,13 @@ func (SyncConfig) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	now := x.Now.UnixMilli()
 	var repoNames, hostIDs []string
 	for _, r := range p.Repos {
+		revision, err := store.RepositoryRevision(ctx, tx.Q(), r.Repo)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if revision > 0 {
+			continue
+		}
 		if err := tx.UpsertRepo(ctx, store.RepoRow{
 			Repo: r.Repo, RemoteURL: r.RemoteURL, BaseCandidates: r.BaseCandidates, Retired: r.Retired,
 		}, now); err != nil {
@@ -306,4 +316,36 @@ func (SyncConfig) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 
 func invalid(format string, args ...any) error {
 	return protocol.Errorf(protocol.CodeInvalidRequest, format, args...)
+}
+
+// Online catalog entries override bootstrap configuration, including omissions.
+func mergeOnlineRepositories(ctx context.Context, q store.Querier, p *ConfigPayload) error {
+	repos, err := store.ListRepos(ctx, q)
+	if err != nil {
+		return err
+	}
+	for _, r := range repos {
+		revision, err := store.RepositoryRevision(ctx, q, r.Repo)
+		if err != nil {
+			return err
+		}
+		if revision == 0 {
+			continue
+		}
+		// Bootstrap templates can keep referring to a repository retired online.
+		// Their new task mounts are rejected against the actual ledger entry.
+		// SyncConfig skips writing managed entries, so this does not revive it.
+		entry := RepoConfig{Repo: r.Repo, RemoteURL: r.RemoteURL, BaseCandidates: r.BaseCandidates}
+		found := false
+		for i := range p.Repos {
+			if p.Repos[i].Repo == r.Repo {
+				p.Repos[i] = entry
+				found = true
+			}
+		}
+		if !found {
+			p.Repos = append(p.Repos, entry)
+		}
+	}
+	return nil
 }
