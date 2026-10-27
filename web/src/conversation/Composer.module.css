@@ -130,3 +130,9 @@
     font-size: 16px;
   }
 }
+
+@media (max-height: 500px) {
+  .composer textarea {
+    max-height: 48px;
+  }
+}

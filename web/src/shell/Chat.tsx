@@ -67,13 +67,17 @@ export function Chat({ connection, visible }: { connection: Connection; visible:
         </button>
       </header>
       <UpgradeBanner connection={connection} />
-      <Transcript jump={jump} visible={visible} />
-      <div className={styles.seat}>
-        <div className={styles.seatInner}>
-          <Note />
-          {!conversation?.workItemID && <DecisionDock />}
-          <PendingQueue connection={connection} />
-          <Composer connection={connection} />
+      <div className={styles.body}>
+        <Transcript jump={jump} visible={visible} />
+        <div className={styles.seat}>
+          <div className={styles.seatInner}>
+            <Note />
+            <div className={styles.seatScroll}>
+              {!conversation?.workItemID && <DecisionDock />}
+              <PendingQueue connection={connection} />
+            </div>
+            <Composer connection={connection} />
+          </div>
         </div>
       </div>
     </>

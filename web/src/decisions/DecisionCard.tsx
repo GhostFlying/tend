@@ -1,7 +1,7 @@
 // A question for the owner, with its options as buttons (D71, D89). Options
 // tend carries out itself are marked "tend 执行". Worker questions return
 // directly to their run; other questions go through the main-agent chat.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DecisionView, TaskSummary } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { noOutbox } from "../queue/sendQueue.ts";
@@ -27,6 +27,7 @@ export function DecisionCard({
   const outbox = useStore(s.queue?.list ?? noOutbox);
   const [busy, setBusy] = useState(false);
   const [reply, setReply] = useState("");
+  const retryFocus = useRef<HTMLButtonElement | null>(null);
   const byMessage = messageAnswer(d, conversation.items, outbox);
   const failed = byMessage?.state === "failed";
 
@@ -39,14 +40,32 @@ export function DecisionCard({
 
   const options = optionsOf(d);
   const primary = options.find((o) => effectOf(d, o));
-  const choose = async (option: string) => {
+  const choose = async (option: string, trigger?: HTMLButtonElement | null) => {
+    const retryTarget =
+      trigger ??
+      (document.activeElement instanceof HTMLButtonElement ? document.activeElement : null);
+    retryFocus.current = retryTarget;
     setBusy(true);
+    let accepted = false;
     try {
-      if (await answer(s, d, option, task?.title, d.worker ? reply : undefined)) {
+      accepted = await answer(s, d, option, task?.title, d.worker ? reply : undefined);
+      if (accepted) {
         setReply("");
       }
     } finally {
       setBusy(false);
+      if (!accepted) {
+        requestAnimationFrame(() => {
+          const target = retryFocus.current;
+          if (
+            target === retryTarget &&
+            target?.isConnected &&
+            (document.activeElement === document.body || document.activeElement === target)
+          ) {
+            target.focus();
+          }
+        });
+      }
     }
   };
   const pending = byMessage?.state === "pending";
@@ -98,10 +117,10 @@ export function DecisionCard({
             <button
               key={o}
               type="button"
-              className={styles.opt}
+              className={`${styles.opt} ${styles.choice}`}
               data-primary={o === primary || undefined}
               disabled={busy}
-              onClick={() => void choose(o)}
+              onClick={(event) => void choose(o, event.currentTarget)}
             >
               {optionLabel(d, o)}
               {effectOf(d, o) && <span className={styles.eff}>tend 执行</span>}
@@ -114,7 +133,10 @@ export function DecisionCard({
           className={styles.reply}
           onSubmit={(event) => {
             event.preventDefault();
-            void choose("");
+            void choose(
+              "",
+              (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null,
+            );
           }}
         >
           <label>
