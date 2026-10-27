@@ -120,6 +120,7 @@
 | D115 | Owner 的补充消息由当前主会话投递循环领取，经原生 `turn/steer` 的 thread/expected-turn 前置条件送入同一回合；只有 owner 原文可 steer，系统事件仍排队，handoff 保持屏障。发送意图、接受回执和原生 user-item 消费证据独立保存；unknown 不重发、不作为后续 context 指令。工具首次 source/request 持久固定；规划 effect 使用原 turn 初始消息与 commit_seq 去重，实际 owner 审计来源独立保留，换 native call ID 或消费状态询问不创建新序号空间；回复固定开始时来源并关联该时点已消费的 owner 消息。已消费补充消息加入原逻辑轮，正式消息归类与事实检查不因原生回合完成而跳过；修正轮不接收 steer。接受不承诺即时消费，不支持路径继续等待。见 docs/plans/owner-main-turn-steer.md 与 docs/owner-message-steer.md。 | 已实现，未上线（2026-10-27） |
 | D116 | 运行中 run 的补充消息独立于正式 task spec、owner decision 和控制通路。主代理工具显式冻结 task/run/action/spec/代次/控制修订和认证来源，服务端持久队列与投递历史按 run 有序领取；runner 在原生调用或工具响应前记录意图，未知不重发、不迁移到后续 run。TraeX app-server 以原 thread/expectedTurnId 调用 turn/steer；Orca TUI 经原 run 专属 MCP receive_messages/ack_message 在同一执行中的安全点协作接收，禁止 PTY 输入、interrupt、重开 turn 或重建模拟。工具响应产生不证明接收，TUI 显式 ack 与原生接受回执才记录 accepted，均不声明模型已读取或执行要求。暂停/取消/结束使未领取消息失败，已领取结果保留 unknown 待真实回执。新增 run-messages-v1 能力协商、可选 assignment 字段及迁移 0051/journal 0010，旧通信含义不变。专用回执在最终阶段与 done 后独立恢复，沿原请求身份上传；released 租约只允许匹配原领取身份的历史 report_message，不能恢复控制或领取权限。待回执阻止维护就绪。见 docs/plans/run-messages.md 与 docs/run-messages.md。 回执修复计划见 docs/plans/run-message-receipts.md。 | 已实现（2026-10-27） |
 
+| D117 | 消费用量独立于 context 占用：按原生请求身份追加事实、请求 revision 替换贡献，重传、模型校正、父累计不得重复相加；同身份冲突单列并排除。全局/单 run 共享读模型，固定 Asia/Shanghai 自然周期，未知发生时点单列而非冒充接收时间。输入包含缓存明细，输出单列，缺失不填零。worker 历史/live 使用同一持久分页窗口与正式运行身份，缺口/截断可见。见 docs/plans/rollout-token-panel.md。 | 实施中 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

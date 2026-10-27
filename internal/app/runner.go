@@ -856,6 +856,19 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 				changed = changed || queued
 				wakeQueued = wakeQueued || queued
 			}
+			if e.Kind == "usage.request" {
+				var usage protocol.TokenUsageSample
+				if err := json.Unmarshal(e.Body, &usage); err != nil {
+					return protocol.Errorf(protocol.CodeInvalidRequest, "invalid usage event")
+				}
+				role := string(run.Role)
+				if usage.ParentThreadID != "" {
+					role = "subagent"
+				}
+				if err := recordTokenUsage(ctx, tx, usage, "run:"+runID, role, now); err != nil {
+					return err
+				}
+			}
 			switch e.Kind {
 			case "worker.root_background_pending", "worker.root_observation_resolved", "worker.root_observation_unknown", "worker.turn_failed", "worker.recovery_pending", "worker.recovery_started", "worker.recovery_completed", "worker.recovery_failed", "worker.recovery_handed_back", "worker.startup_failed", "worker.startup_retry_pending", "worker.startup_started":
 				body, err := json.Marshal(map[string]any{"seq": e.Seq, "kind": e.Kind})

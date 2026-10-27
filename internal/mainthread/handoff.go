@@ -181,6 +181,21 @@ func (m *Manager) collectSummary(ctx context.Context, s harness.Session, fork ha
 			if !ok {
 				return store.HandoffSummary{}, errors.New("mainthread: summary branch ended")
 			}
+			if ev.RequestUsage != nil {
+				sample := *ev.RequestUsage
+				if sample.ParentThreadID == "" {
+					sample.ParentThreadID = snap.ThreadID
+				}
+				if err := m.app.RecordTokenUsage(ctx, m.cfg.ConversationID, sample); err != nil {
+					return store.HandoffSummary{}, err
+				}
+				continue
+			}
+			if ev.Kind != harness.EventAgentMessageDelta && ev.ContextUsage == nil {
+				if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, fork.ID(), ev.TurnID, ev.ItemID, string(ev.Kind), ev.Raw); err != nil {
+					return store.HandoffSummary{}, err
+				}
+			}
 			if ev.TurnID != "" && ev.TurnID != turnID {
 				continue
 			}

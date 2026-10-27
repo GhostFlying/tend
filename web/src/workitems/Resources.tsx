@@ -1,3 +1,4 @@
+import { UsageEntry } from "../usage/Usage.tsx";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import { ServicesContext, useServices } from "../app/services.tsx";
@@ -133,6 +134,7 @@ function BoardResourcePanel({
         </button>
       </header>
       <div className={styles.resourceBody}>
+        <UsageEntry />
         <div className={styles.resourceTabs} role="tablist" aria-label="资源分类">
           {categories.map((entry) => (
             <button

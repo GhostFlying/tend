@@ -1,0 +1,126 @@
+.panel {
+  padding: 20px;
+  max-width: 1040px;
+  margin: auto;
+  overflow-wrap: anywhere;
+}
+.panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.panel h2,
+.panel h3 {
+  margin: 0 0 8px;
+}
+.panel h3 {
+  margin-top: 20px;
+  font-size: 15px;
+}
+.panel button,
+.panel select {
+  font: inherit;
+  color: var(--label);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.panel button[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+.hero {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.hero strong {
+  font-size: 36px;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  font-size: 14px;
+}
+.line b {
+  font-variant-numeric: tabular-nums;
+}
+.line small {
+  font-size: 12px;
+  color: var(--label-3);
+}
+.caption,
+.panel small {
+  color: var(--label-3);
+}
+.groups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.row {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 10px 0;
+  min-width: 0;
+}
+.row button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  margin-bottom: 5px;
+}
+.notice {
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+.panel summary {
+  cursor: pointer;
+}
+.panel p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+@media (max-width: 760px) {
+  .panel {
+    padding: 16px;
+  }
+  .panel button,
+  .panel select {
+    min-height: 44px;
+  }
+  .groups {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .hero strong {
+    font-size: 30px;
+  }
+}
+
+.timeFilters button {
+  font-size: 13px;
+  padding-inline: 8px;
+}
+.timeFilters > button:last-child {
+  margin-inline-start: auto;
+}

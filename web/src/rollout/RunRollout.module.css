@@ -1,0 +1,72 @@
+.root {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.root select {
+  max-width: 100%;
+  display: block;
+  font: inherit;
+  padding: 8px;
+  color: var(--label);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+.toolbar button {
+  font: inherit;
+  color: var(--label);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.events {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.events article {
+  padding: 12px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.events header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.events small,
+.root > small {
+  color: var(--label-3);
+  font-size: 11px;
+}
+.events summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+.events pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+.notice {
+  font-size: 12px;
+  color: var(--label-3);
+  line-height: 1.6;
+}
+@media (max-width: 760px) {
+  .toolbar button,
+  .root select {
+    min-height: 44px;
+  }
+}

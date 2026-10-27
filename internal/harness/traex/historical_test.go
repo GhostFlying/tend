@@ -28,6 +28,10 @@ func TestAppserverWorkerClosesSessionBeforeWaitCompletes(t *testing.T) {
 	}
 	f.send(map[string]any{"method": notifyTurnCompleted, "params": map[string]any{"threadId": "th_native", "turn": map[string]any{"id": "turn", "status": "completed"}}})
 	waited := make(chan error, 1)
+	go func() {
+		for range w.Events() {
+		}
+	}()
 	go func() { _, err := w.Wait(); waited <- err }()
 	select {
 	case <-entered:

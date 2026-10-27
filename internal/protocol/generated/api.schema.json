@@ -3342,6 +3342,57 @@
       "title": "RunRole",
       "type": "string"
     },
+    "RunRolloutPage": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "integer"
+        },
+        "before": {
+          "type": "integer"
+        },
+        "logs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RunLogView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more_after": {
+          "type": "boolean"
+        },
+        "more_before": {
+          "type": "boolean"
+        },
+        "observed": {
+          "$ref": "#/definitions/RunObserved"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "watermark": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "observed",
+        "logs",
+        "before",
+        "after",
+        "watermark",
+        "more_before",
+        "more_after"
+      ],
+      "title": "RunRolloutPage",
+      "type": "object"
+    },
     "RunView": {
       "additionalProperties": false,
       "properties": {
@@ -4048,6 +4099,549 @@
       ],
       "title": "TokenScope",
       "type": "string"
+    },
+    "TokenUsageBucket": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_read": {
+          "type": "integer"
+        },
+        "cache_read_known": {
+          "type": "integer"
+        },
+        "cache_write": {
+          "type": "integer"
+        },
+        "cache_write_known": {
+          "type": "integer"
+        },
+        "end": {
+          "type": "integer"
+        },
+        "final": {
+          "type": "integer"
+        },
+        "input": {
+          "type": "integer"
+        },
+        "input_known": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "output_known": {
+          "type": "integer"
+        },
+        "requests": {
+          "type": "integer"
+        },
+        "start": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "total_known": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "requests",
+        "input",
+        "input_known",
+        "cache_read",
+        "cache_read_known",
+        "cache_write",
+        "cache_write_known",
+        "output",
+        "output_known",
+        "total",
+        "total_known",
+        "final"
+      ],
+      "title": "TokenUsageBucket",
+      "type": "object"
+    },
+    "TokenUsageGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_read": {
+          "type": "integer"
+        },
+        "cache_read_known": {
+          "type": "integer"
+        },
+        "cache_write": {
+          "type": "integer"
+        },
+        "cache_write_known": {
+          "type": "integer"
+        },
+        "final": {
+          "type": "integer"
+        },
+        "input": {
+          "type": "integer"
+        },
+        "input_known": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "output_known": {
+          "type": "integer"
+        },
+        "requests": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "total_known": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "requests",
+        "input",
+        "input_known",
+        "cache_read",
+        "cache_read_known",
+        "cache_write",
+        "cache_write_known",
+        "output",
+        "output_known",
+        "total",
+        "total_known",
+        "final"
+      ],
+      "title": "TokenUsageGroup",
+      "type": "object"
+    },
+    "TokenUsageRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_read": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cache_write": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conflict": {
+          "type": "boolean"
+        },
+        "input": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parent_thread_id": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "received_at": {
+          "type": "integer"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "role": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "settlement": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "subject",
+        "role",
+        "received_at",
+        "conflict",
+        "source",
+        "request_id",
+        "thread_id",
+        "turn_id",
+        "revision",
+        "settlement",
+        "profile",
+        "model",
+        "occurred_at",
+        "input",
+        "cache_read",
+        "cache_write",
+        "output",
+        "total"
+      ],
+      "title": "TokenUsageRecord",
+      "type": "object"
+    },
+    "TokenUsageSample": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_read": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cache_write": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parent_thread_id": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "settlement": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "request_id",
+        "thread_id",
+        "turn_id",
+        "revision",
+        "settlement",
+        "profile",
+        "model",
+        "occurred_at",
+        "input",
+        "cache_read",
+        "cache_write",
+        "output",
+        "total"
+      ],
+      "title": "TokenUsageSample",
+      "type": "object"
+    },
+    "TokenUsageTotals": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_read": {
+          "type": "integer"
+        },
+        "cache_read_known": {
+          "type": "integer"
+        },
+        "cache_write": {
+          "type": "integer"
+        },
+        "cache_write_known": {
+          "type": "integer"
+        },
+        "final": {
+          "type": "integer"
+        },
+        "input": {
+          "type": "integer"
+        },
+        "input_known": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "output_known": {
+          "type": "integer"
+        },
+        "requests": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "total_known": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "requests",
+        "input",
+        "input_known",
+        "cache_read",
+        "cache_read_known",
+        "cache_write",
+        "cache_write_known",
+        "output",
+        "output_known",
+        "total",
+        "total_known",
+        "final"
+      ],
+      "title": "TokenUsageTotals",
+      "type": "object"
+    },
+    "TokenUsageView": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "integer"
+        },
+        "conflicts": {
+          "type": "integer"
+        },
+        "coverage": {
+          "type": "string"
+        },
+        "end": {
+          "type": "integer"
+        },
+        "models": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TokenUsageGroup"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "records": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TokenUsageRecord"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "roles": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TokenUsageGroup"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "totals": {
+          "$ref": "#/definitions/TokenUsageTotals"
+        },
+        "trend": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TokenUsageBucket"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unattributed": {
+          "$ref": "#/definitions/TokenUsageTotals"
+        },
+        "window": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "trend",
+        "revision",
+        "as_of",
+        "timezone",
+        "window",
+        "start",
+        "end",
+        "totals",
+        "unattributed",
+        "models",
+        "roles",
+        "records",
+        "next",
+        "more",
+        "conflicts",
+        "coverage"
+      ],
+      "title": "TokenUsageView",
+      "type": "object"
     },
     "ToolSpec": {
       "additionalProperties": false,
@@ -5444,6 +6038,9 @@
     "RunLogPage": {
       "$ref": "#/definitions/RunLogPage"
     },
+    "RunRolloutPage": {
+      "$ref": "#/definitions/RunRolloutPage"
+    },
     "RunnerRepository": {
       "$ref": "#/definitions/RunnerRepository"
     },
@@ -5479,6 +6076,12 @@
     },
     "TaskPage": {
       "$ref": "#/definitions/TaskPage"
+    },
+    "TokenUsageSample": {
+      "$ref": "#/definitions/TokenUsageSample"
+    },
+    "TokenUsageView": {
+      "$ref": "#/definitions/TokenUsageView"
     },
     "ToolSpec": {
       "$ref": "#/definitions/ToolSpec"

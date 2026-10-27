@@ -1,3 +1,4 @@
+import { UsageEntry } from "../usage/Usage.tsx";
 import { RepositoryEntry } from "../repos/Repositories.tsx";
 // Work items are the primary navigation; execution records have a separate view.
 import type { Connection } from "../api/client.ts";
@@ -73,6 +74,7 @@ export function Sidebar({
             全部任务执行 ›
           </button>
           <RepositoryEntry onOpen={onRepos} />
+          <UsageEntry />
           <Hosts connection={connection} />
         </section>
       </div>

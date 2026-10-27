@@ -224,6 +224,12 @@ func (m *Manager) serve(ctx context.Context) error {
 			m.mu.Lock()
 			m.lastActivity = m.cfg.Now()
 			m.mu.Unlock()
+			if ev.RequestUsage != nil {
+				if err := m.app.RecordTokenUsage(ctx, m.cfg.ConversationID, *ev.RequestUsage); err != nil {
+					return err
+				}
+				continue
+			}
 			if ev.ContextUsage != nil {
 				if err := m.app.RecordAgentUsage(ctx, m.cfg.ConversationID, *ev.ContextUsage); err != nil {
 					return err

@@ -1,3 +1,4 @@
+import { UsageEntry } from "../usage/Usage.tsx";
 import { RepositoryEntry } from "../repos/Repositories.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 import { useEffect, useId, useState } from "react";
@@ -136,6 +137,7 @@ export function BoardResources({
           </div>
         </details>
         <RepositoryEntry onOpen={onRepos} />
+        <UsageEntry />
         <details>
           <summary>最近完成的任务</summary>
           <div className={styles.mobileList}>
