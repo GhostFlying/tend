@@ -15,8 +15,6 @@ import type {
   ConversationItem,
   ConversationPage,
   LedgerEvent,
-  RunLogPage,
-  RunLogView,
   Snapshot,
   TaskDetail,
   TaskSummary,
@@ -52,19 +50,12 @@ export interface DetailState {
   /** null while the first read is under way or failed. */
   task: TaskDetail | null;
   error?: string;
-  /** The latest run's most recent logs, oldest first. */
-  logs: { runId: string; entries: readonly RunLogView[]; more: boolean } | null;
 }
 
 /** A task looked up for a reference outside the snapshot; null if tend has none. */
 export type TaskLookup = ReadonlyMap<string, TaskSummary | null>;
 
 const pageSize = 50;
-/** How many log entries of the latest run the details keep. */
-const logTail = 40;
-/** How many pages of logs a details read goes through, at most. */
-const maxLogPages = 20;
-
 const noProcessing: ReadonlyMap<string, number> = new Map();
 
 export class LiveData {
@@ -91,8 +82,6 @@ export class LiveData {
   private historyGeneration = 0;
   private readonly choiceVersions = new Map<string, WorkItemChoice>();
   private readonly choiceReads = new Map<string, WorkItemRead<WorkItemChoice>>();
-  private logCache: { runId: string; entries: RunLogView[]; next: number; more: boolean } | null =
-    null;
   /** Conversation events that arrived while the latest page was being read. */
   private held: LedgerEvent[] | null = null;
   private readonly snapshotReads: Coalesced;
@@ -103,12 +92,6 @@ export class LiveData {
   private retryDelay = 1_000;
   private stopped = false;
   private detailController: AbortController | null = null;
-  private logWatch: {
-    taskId: string;
-    runId: string;
-    controller: AbortController;
-    done: Promise<void>;
-  } | null = null;
 
   constructor(
     api: Reader,
@@ -163,8 +146,6 @@ export class LiveData {
     this.workItems.refresh();
     for (const read of this.choiceReads.values()) void read.refresh();
     this.detailController?.abort();
-    void this.stopLogs();
-    this.logCache = null;
     this.lookupStore.set(new Map());
     await Promise.all([
       this.refreshSnapshot(),
@@ -343,15 +324,13 @@ export class LiveData {
     const current = this.detailStore.get();
     if (current?.taskId !== taskId) {
       this.detailController?.abort();
-      void this.stopLogs();
-      this.detailStore.set({ taskId, task: null, logs: null });
+      this.detailStore.set({ taskId, task: null });
     }
     return this.refreshDetail();
   }
 
   close(): void {
     this.detailController?.abort();
-    void this.stopLogs();
     this.failed.delete("detail");
     this.detailStore.set(null);
   }
@@ -502,37 +481,10 @@ export class LiveData {
     if (now?.taskId !== taskId) {
       return;
     }
-    const run = task.runs?.at(-1);
-    if (this.logWatch && this.logWatch.runId !== run?.run_id) void this.stopLogs();
-    const withTask: DetailState = {
-      taskId,
-      task,
-      logs: now.logs?.runId === run?.run_id ? now.logs : null,
-    };
-    this.detailStore.set(withTask);
-    if (!run) {
-      this.detailStore.set({ ...withTask, logs: null });
-      return;
-    }
-    if (this.logWatch?.runId === run.run_id) return;
-    const logs = await this.readLogTail(run.run_id, controller.signal);
-    if (controller.signal.aborted) return;
-    if (!logs) this.retry("detail");
-    const latest = this.detailStore.get();
-    if (latest?.taskId === taskId && logs) {
-      this.detailStore.set({ ...latest, logs: { runId: run.run_id, ...logs } });
-    }
-    if (
-      this.detailStore.get()?.taskId === taskId &&
-      run.observed &&
-      run.observed !== "finished" &&
-      run.observed !== "failed"
-    ) {
-      this.watchLogs(taskId, run.run_id);
-    }
+    this.detailStore.set({ taskId, task });
   }
 
-  /** Stops all owned timers and the pending log request. */
+  /** Stops owned timers and pending view reads. */
   async stop(): Promise<void> {
     this.stopped = true;
     this.queueView.stop();
@@ -545,12 +497,7 @@ export class LiveData {
     this.detailController?.abort();
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
-    await Promise.all([
-      this.stopLogs(),
-      this.settings.stop(),
-      this.handoff.stop(),
-      this.tasks.stop(),
-    ]);
+    await Promise.all([this.settings.stop(), this.handoff.stop(), this.tasks.stop()]);
   }
 
   private recovered(view: "snapshot" | "conversation" | "detail"): void {
@@ -572,83 +519,6 @@ export class LiveData {
       if (this.failed.has("detail")) void this.refreshDetail();
     }, this.retryDelay);
     this.retryDelay = Math.min(this.retryDelay * 2, 30_000);
-  }
-
-  private stopLogs(): Promise<void> {
-    const watch = this.logWatch;
-    this.logWatch = null;
-    watch?.controller.abort();
-    return watch?.done ?? Promise.resolve();
-  }
-
-  private watchLogs(taskId: string, runId: string): void {
-    if (this.stopped) return;
-    const controller = new AbortController();
-    const watch = { taskId, runId, controller, done: Promise.resolve() };
-    this.logWatch = watch;
-    watch.done = (async () => {
-      let delay = 1_000;
-      while (!controller.signal.aborted) {
-        const after = this.logCache?.runId === runId ? this.logCache.next : 0;
-        try {
-          const page = await this.api.get<RunLogPage>(
-            `/api/v1/runs/${encodeURIComponent(runId)}/logs?after=${after}&wait=${this.logCache?.more ? 0 : 15}`,
-            controller.signal,
-          );
-          if (controller.signal.aborted || this.logWatch !== watch) return;
-          const entries = [
-            ...(this.logCache?.runId === runId ? this.logCache.entries : []),
-            ...(page.logs ?? []),
-          ].slice(-logTail);
-          const more = (page.logs?.length ?? 0) > 0;
-          this.logCache = { runId, entries, next: page.next, more };
-          const current = this.detailStore.get();
-          if (current?.taskId === taskId)
-            this.detailStore.set({ ...current, logs: { runId, entries, more } });
-          if (!more && (page.observed === "finished" || page.observed === "failed")) return;
-          delay = 1_000;
-          // A server may answer an empty poll immediately when run state changes.
-          if (!page.logs?.length) await abortablePause(250, controller.signal);
-        } catch {
-          if (controller.signal.aborted) return;
-          await abortablePause(delay, controller.signal);
-          delay = Math.min(delay * 2, 30_000);
-        }
-      }
-    })().finally(() => {
-      if (this.logWatch === watch) this.logWatch = null;
-    });
-  }
-
-  /** Reads a run's logs to the end, keeping the tail; null if it failed. */
-  private async readLogTail(
-    runId: string,
-    signal?: AbortSignal,
-  ): Promise<{ entries: RunLogView[]; more: boolean } | null> {
-    const previous = this.logCache?.runId === runId ? this.logCache : null;
-    const tail: RunLogView[] = [...(previous?.entries ?? [])];
-    let after = previous?.next ?? 0;
-    let more = true;
-    try {
-      for (let i = 0; i < maxLogPages; i++) {
-        const page = await this.api.get<RunLogPage>(
-          `/api/v1/runs/${encodeURIComponent(runId)}/logs?after=${after}`,
-          signal,
-        );
-        const logs = page.logs ?? [];
-        tail.push(...logs);
-        tail.splice(0, Math.max(0, tail.length - logTail));
-        if (logs.length === 0 || page.next <= after) {
-          more = false;
-          break;
-        }
-        after = page.next;
-      }
-    } catch {
-      return null;
-    }
-    this.logCache = { runId, entries: tail, next: after, more };
-    return { entries: tail, more };
   }
 }
 
@@ -752,20 +622,4 @@ export function summary(t: TaskDetail): TaskSummary {
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function abortablePause(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    const finish = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, ms);
-    signal.addEventListener("abort", finish, { once: true });
-  });
 }

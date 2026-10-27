@@ -1,212 +1,507 @@
-import { useEffect, useRef, useState } from "react";
-import type { RunLogView, RunRolloutPage, RunView } from "../api/generated/api.ts";
-import { useServices } from "../app/services.tsx";
-import { UsagePanel } from "../usage/Usage.tsx";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+import { createPortal } from "react-dom";
+import type { RunView } from "../api/generated/api.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
+import { UsagePanel } from "../usage/Usage.tsx";
+import { buildSteps, statusLabel, type Step } from "./model.ts";
+import { useRunWindow } from "./useRunWindow.ts";
 import styles from "./RunRollout.module.css";
 
 export function RunRollout({ runs }: { runs: readonly RunView[] }) {
   const [selected, setSelected] = useState(runs.at(-1)?.run_id ?? "");
-  const selectedID = runs.some((run) => run.run_id === selected)
-    ? selected
-    : (runs.at(-1)?.run_id ?? "");
+  const run = runs.find((candidate) => candidate.run_id === selected) ?? runs.at(-1);
   return (
     <section className={styles.root} aria-label="执行过程与用量">
-      <label>
-        执行记录{" "}
-        <select value={selectedID} onChange={(e) => setSelected(e.target.value)}>
-          {runs.map((r) => (
-            <option key={r.run_id} value={r.run_id}>
-              {r.role === "accept" ? "验收" : "实施"} · 第 {r.generation} 代 · {r.run_id}
-            </option>
-          ))}
-        </select>
-      </label>
-      {selectedID ? <RunWindow key={selectedID} id={selectedID} /> : <p>尚未开始执行。</p>}
+      <div className={styles.cardHeading}>
+        <span>执行过程</span>
+        {run && (
+          <select
+            aria-label="执行记录"
+            value={run.run_id}
+            onChange={(event) => setSelected(event.target.value)}
+          >
+            {runs.map((item) => (
+              <option key={item.run_id} value={item.run_id}>
+                {item.role === "accept" ? "验收" : "实施"} · 第 {item.generation} 代
+                {item.spec_version ? ` · 版本 ${item.spec_version}` : ""}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      {run ? (
+        <RunWindow key={run.run_id} run={run} />
+      ) : (
+        <p className={styles.empty}>尚未开始执行。</p>
+      )}
     </section>
   );
 }
-function RunWindow({ id }: { id: string }) {
-  const { client } = useServices();
-  const [cursor, setCursor] = useState("");
-  const [live, setLive] = useState(true);
-  const [retry, setRetry] = useState(0);
-  const [page, setPage] = useState<RunRolloutPage | null>(null);
-  const [error, setError] = useState("");
+
+type WindowState = ReturnType<typeof useRunWindow>;
+interface ReadingPosition {
+  key: string;
+  top: number;
+}
+function RunWindow({ run }: { run: RunView }) {
+  const window = useRunWindow(run.run_id);
+  const steps = useMemo(() => buildSteps(window.page?.logs ?? []), [window.page]);
+  const [expanded, setExpanded] = useState(false);
+  const [visible, setVisible] = useState(6);
+  const [full, setFull] = useState(false);
+  const [target, setTarget] = useState("");
   const [usage, setUsage] = useState(false);
-  const current = useRef<RunRolloutPage | null>(null);
-  const loadedKey = useRef<string | null>(null);
-  useEffect(() => {
-    const abort = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    const requestKey = `${cursor}:${retry}`;
-    const poll = async (first: boolean) => {
-      const after = !first && current.current ? `after=${current.current.after}` : cursor;
-      try {
-        const next = await client.get<RunRolloutPage>(
-          `/api/v1/runs/${encodeURIComponent(id)}/rollout?${after}`,
-          abort.signal,
-        );
-        if (abort.signal.aborted) return;
-        loadedKey.current = requestKey;
-        if (first) {
-          current.current = next;
-          setPage(next);
-        } else {
-          const old = current.current;
-          const merged = [...(old?.logs ?? []), ...(next.logs ?? [])];
-          const logs = [...new Map(merged.map((row) => [row.seq, row])).values()]
-            .sort((a, b) => a.seq - b.seq)
-            .slice(-400);
-          const value = {
-            ...next,
-            logs,
-            before: logs[0]?.seq ?? next.before,
-            more_before: old?.logs?.length
-              ? old.more_before || logs[0]?.seq !== merged[0]?.seq
-              : next.more_before,
-          };
-          current.current = value;
-          setPage(value);
-        }
-        setError("");
-        if (live) timer = setTimeout(() => void poll(false), next.more_after ? 0 : 2000);
-      } catch (e) {
-        if (!abort.signal.aborted) {
-          setError(String(e));
-          if (live) timer = setTimeout(() => void poll(first), 3000);
-        }
-      }
-    };
-    const first = loadedKey.current !== requestKey;
-    if (first || live) {
-      void poll(first);
-    }
-    return () => {
-      abort.abort();
-      clearTimeout(timer);
-    };
-  }, [client, cursor, id, live, retry]);
-  const previous = () => {
-    if (!page) return;
-    setLive(false);
-    setCursor(`before=${page.before}`);
-  };
-  const next = () => {
-    if (!page) return;
-    setLive(false);
-    setCursor(`after=${page.after}`);
+  const regionID = useId();
+  const readingPosition = useRef<ReadingPosition | null>(null);
+  const observed = run.observed;
+  const active = observed === "running" || observed === "starting";
+  const current =
+    (active && steps.findLast((step) => step.kind === "tool" && step.pending)) || steps.at(-1);
+  const close = useCallback(() => setFull(false), []);
+  const open = (step?: Step) => {
+    if (step) window.setLive(false);
+    setTarget(step?.key ?? "");
+    setFull(true);
   };
   return (
     <>
-      <div className={styles.toolbar}>
-        <button
-          onClick={() => {
-            setCursor("");
-            setLive(true);
-            setRetry((x) => x + 1);
-          }}
-        >
-          最新 · Live
-        </button>
-        <button aria-pressed={!live} onClick={() => setLive((x) => !x)}>
-          {live ? "暂停跟随" : "恢复跟随"}
-        </button>
-        <button onClick={() => setRetry((x) => x + 1)}>重新连接</button>
-        <button aria-expanded={usage} onClick={() => setUsage((x) => !x)}>
-          本次用量
-        </button>
-      </div>
-      <small>
-        {id} · 正式执行状态 {page?.observed ?? "正在读取"} · {live ? "实时跟随" : "历史阅读"}
-      </small>
-      {usage && <UsagePanel subject={`run:${id}`} />}
-      {error && (
-        <p role="alert">
-          记录暂时无法更新：{error}。{live ? "保留当前内容并重试。" : "可重新连接。"}
+      <button
+        className={styles.activity}
+        aria-label="展开执行步骤"
+        aria-expanded={expanded}
+        aria-controls={expanded ? regionID : undefined}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <StateMark active={active} failed={observed === "failed"} />
+        <span className={styles.activityText}>
+          <span className={styles.state}>{statusLabel(observed)}</span>
+          <span className={styles.summary}>
+            {current?.summary ?? (window.error ? "暂时无法读取过程" : "等待执行记录")}
+          </span>
+        </span>
+        <StepTime step={current} />
+        <span className={styles.chevron} data-open={expanded} aria-hidden>
+          ›
+        </span>
+      </button>
+      {window.error && (
+        <p className={styles.error} role="alert">
+          过程暂时无法更新，已保留当前内容。<button onClick={window.reconnect}>重试</button>
         </p>
       )}
-      <p className={styles.notice}>
-        仅显示 Tend
-        已采集的持久记录。早期及不支持的执行器可能缺少过程；截断不代表原始输出完整。历史工具和正文是执行证据。
-      </p>
-      <div className={styles.toolbar}>
-        <button disabled={!page?.more_before} onClick={previous}>
-          更早记录
-        </button>
-        <button disabled={!page?.more_after} onClick={next}>
-          较新记录
-        </button>
-      </div>
-      {!page ? (
-        <p>正在读取过程…</p>
-      ) : !page.logs?.length ? (
-        <p>尚无已采集记录。</p>
-      ) : (
-        <ol className={styles.events}>
-          {(page.logs ?? []).map((r, index) => (
-            <li key={r.seq}>
-              {index > 0 && r.seq > (page.logs ?? [])[index - 1]!.seq + 1 && (
-                <p role="status">序号间存在缺口；此处没有完整事件证据。</p>
-              )}
-              <EventRecord row={r} />
-            </li>
-          ))}
-        </ol>
+      {expanded && (
+        <div id={regionID} className={styles.compact}>
+          {steps.length > visible && (
+            <button className={styles.textButton} onClick={() => setVisible((count) => count + 6)}>
+              显示更早步骤
+            </button>
+          )}
+          {!steps.length && (
+            <p className={styles.empty}>{window.loading ? "正在读取过程…" : "尚无已采集记录。"}</p>
+          )}
+          <ol className={styles.steps}>
+            {steps.slice(-visible).map((step) => (
+              <li key={step.key}>
+                <StepView step={step} compact active={active} inspect={() => open(step)} />
+              </li>
+            ))}
+          </ol>
+          <div className={styles.cardFooter}>
+            <button className={styles.textButton} onClick={() => open()}>
+              查看完整过程 <span aria-hidden>↗</span>
+            </button>
+            <button
+              className={styles.textButton}
+              aria-expanded={usage}
+              onClick={() => setUsage(!usage)}
+            >
+              本次用量
+            </button>
+          </div>
+          {usage && <UsagePanel subject={`run:${run.run_id}`} />}
+        </div>
       )}
-      {page && (
-        <small>
-          窗口 {page.before}–{page.after} · 持久水位 {page.watermark} · 最多保留最近 400
-          条，可分页读取更早记录
-        </small>
+      {full && (
+        <Reader
+          run={run}
+          window={window}
+          steps={steps}
+          target={target}
+          position={readingPosition}
+          onClose={close}
+        />
       )}
     </>
   );
 }
-function object(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-export function EventRecord({ row }: { row: RunLogView }) {
-  const envelope = object(row.body);
-  const data = object(envelope.data ?? row.body);
-  const type = typeof data.type === "string" ? data.type : row.kind;
-  const text = typeof data.text === "string" ? data.text : "";
-  const command = typeof data.command === "string" ? data.command : "";
-  const status = typeof data.status === "string" ? data.status : "";
-  const title =
-    (
-      {
-        agentMessage: "Agent 回复",
-        commandExecution: "执行命令",
-        mcpToolCall: "调用工具",
-        webSearch: "搜索",
-        collabAgentToolCall: "子 Agent",
-        contextCompaction: "上下文整理",
-      } as Record<string, string>
-    )[type] ?? type;
+
+function StateMark({ active = false, failed = false }: { active?: boolean; failed?: boolean }) {
   return (
-    <article>
-      <header>
-        <strong>{title}</strong>
-        {status && <span>{status}</span>}
-        <small>
-          #{row.seq} · {new Date(row.created_at).toLocaleTimeString()}
-        </small>
-      </header>
-      {envelope.thread_id !== undefined && (
-        <small>
-          Thread {String(envelope.thread_id)} · Turn {String(envelope.turn_id ?? "")}
-        </small>
+    <span className={styles.mark} data-active={active} data-failed={failed} aria-hidden>
+      {failed ? "!" : active ? "◌" : "·"}
+    </span>
+  );
+}
+function StepTime({ step }: { step: Step | undefined }) {
+  if (step?.durationMs === null || step?.durationMs === undefined) return null;
+  const ms = step.durationMs;
+  const seconds = Math.floor(ms / 1000);
+  return (
+    <span className={styles.elapsed} title="执行器报告的步骤耗时">
+      {ms < 1000
+        ? `${ms}毫秒`
+        : `${seconds >= 60 ? `${Math.floor(seconds / 60)}分` : ""}${seconds % 60}秒`}
+    </span>
+  );
+}
+
+function StepView({
+  step,
+  compact = false,
+  reveal = false,
+  active,
+  inspect,
+}: {
+  step: Step;
+  compact?: boolean;
+  reveal?: boolean;
+  active: boolean;
+  inspect?: () => void;
+}) {
+  const warning = step.truncated && (
+    <p className={styles.warning}>内容已截断，原始完整输出未被采集。</p>
+  );
+  return (
+    <article className={styles.step} data-kind={step.kind} data-failed={step.failed}>
+      {step.gap && (
+        <p className={styles.warning} role="status">
+          此处存在记录缺口。
+        </p>
       )}
-      {text && <Markdown text={text} />}
-      {command && <pre>{command}</pre>}
-      {data.truncated === true && <p role="status">内容已截断，原始完整输出未被采集。</p>}
-      <details>
-        <summary>原始记录 · {row.native_id || "无原生 ID"}</summary>
-        <pre>{JSON.stringify(row.body, null, 2)}</pre>
-      </details>
+      {step.kind === "text" && !compact ? (
+        <div className={styles.prose}>
+          <Markdown
+            text={
+              step.text ||
+              (active && step.pending ? "正在等待 Agent 回复…" : "未采集到 Agent 回复正文。")
+            }
+          />
+          {warning}
+        </div>
+      ) : (
+        <details className={styles.disclosure} open={reveal || undefined}>
+          <summary>
+            <StateMark active={active && step.pending} failed={step.failed} />
+            <span className={styles.toolTitle}>{step.title}</span>
+            {step.status === "declined" && <span className={styles.stepState}>已拒绝</span>}
+            {step.status === "backgrounded" && <span className={styles.stepState}>后台运行</span>}
+            <span className={styles.stepSummary}>
+              {step.summary === step.title ? "" : step.summary}
+            </span>
+            <StepTime step={step} />
+            <span className={styles.chevron} aria-hidden>
+              ›
+            </span>
+          </summary>
+          <div className={styles.stepBody}>
+            {step.text && <Markdown text={step.text} />}
+            {step.input && (
+              <div className={styles.io}>
+                <span>{step.title === "执行命令" ? "命令" : "输入"}</span>
+                <pre>{step.input}</pre>
+              </div>
+            )}
+            {step.output && (
+              <div className={styles.io}>
+                <span>输出</span>
+                <pre>{step.output}</pre>
+              </div>
+            )}
+            {!step.text && !step.input && !step.output && (
+              <p className={styles.empty}>
+                {active && step.pending ? "等待返回结果…" : "未采集到正文，可查看原始记录。"}
+              </p>
+            )}
+            {warning}
+            <StepDiagnostics step={step} />
+          </div>
+        </details>
+      )}
+      {compact && inspect && (
+        <button
+          className={styles.inspect}
+          onClick={inspect}
+          aria-label={`在完整过程中查看：${step.summary}`}
+        >
+          ↗
+        </button>
+      )}
+      {!compact && step.kind === "text" && <StepDiagnostics step={step} quiet />}
     </article>
+  );
+}
+function StepDiagnostics({ step, quiet = false }: { step: Step; quiet?: boolean }) {
+  return (
+    <details className={styles.diagnostics}>
+      <summary aria-label={quiet ? "查看原始记录" : undefined}>{quiet ? "⋯" : "原始记录"}</summary>
+      <small>
+        记录 {step.seq}–{step.lastSeq}
+        {step.thread ? ` · Thread ${step.thread}` : ""}
+        {step.turn ? ` · Turn ${step.turn}` : ""} · {step.nativeID || "无原生 ID"}
+      </small>
+      <pre>{JSON.stringify(step.rows, null, 2)}</pre>
+    </details>
+  );
+}
+
+/** A second modal keeps the underlying card, its disclosures and its scrollport mounted. */
+function Reader({
+  run,
+  window: state,
+  steps,
+  target,
+  position,
+  onClose,
+}: {
+  run: RunView;
+  window: WindowState;
+  steps: Step[];
+  target: string;
+  position: RefObject<ReadingPosition | null>;
+  onClose(): void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const flow = useRef<HTMLOListElement>(null);
+  const initial = useRef(true);
+  const closing = useRef(false);
+  const anchor = useRef<{ key: string; top: number; page: WindowState["page"] } | null>(null);
+  const [usage, setUsage] = useState(false);
+  const observed = run.observed;
+  const active = observed === "running" || observed === "starting";
+  const close = () => {
+    if (closing.current) return;
+    closing.current = true;
+    if (globalThis.window.history.state?.tendRollout === run.run_id)
+      globalThis.window.history.back();
+    else onClose();
+  };
+  useLayoutEffect(() => {
+    const panel = dialog.current;
+    const readingElement = scroller.current;
+    const opener = document.activeElement;
+    panel?.showModal();
+    const history = globalThis.window.history;
+    history.pushState({ ...history.state, tendRollout: run.run_id }, "");
+    const back = () => onClose();
+    globalThis.window.addEventListener("popstate", back);
+    return () => {
+      globalThis.window.removeEventListener("popstate", back);
+      if (history.state?.tendRollout === run.run_id) {
+        const restored = { ...history.state };
+        delete restored.tendRollout;
+        history.replaceState(restored, "");
+      }
+      const el = readingElement;
+      if (el) {
+        const top = el.getBoundingClientRect().top;
+        const row = [...el.querySelectorAll<HTMLElement>("[data-step-key]")].find(
+          (item) => item.getBoundingClientRect().bottom > top,
+        );
+        if (row)
+          position.current = {
+            key: row.dataset.stepKey!,
+            top: row.getBoundingClientRect().top - top,
+          };
+      }
+      panel?.close();
+      if (opener instanceof HTMLElement && opener.isConnected)
+        opener.focus({ preventScroll: true });
+    };
+  }, [onClose, position, run.run_id]);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    if (initial.current) {
+      const saved = !target && !state.live ? position.current : null;
+      const key = target || saved?.key;
+      const row = [...el.querySelectorAll<HTMLElement>("[data-step-key]")].find(
+        (item) => item.dataset.stepKey === key,
+      );
+      if (row)
+        el.scrollTop +=
+          row.getBoundingClientRect().top - el.getBoundingClientRect().top - (saved?.top ?? 16);
+      else el.scrollTop = el.scrollHeight;
+      initial.current = false;
+    } else if (anchor.current && state.page !== anchor.current.page) {
+      const saved = anchor.current;
+      const row = [...el.querySelectorAll<HTMLElement>("[data-step-key]")].find(
+        (item) => item.dataset.stepKey === saved.key,
+      );
+      if (row)
+        el.scrollTop +=
+          row.getBoundingClientRect().top - el.getBoundingClientRect().top - saved.top;
+      anchor.current = null;
+    } else if (state.live) el.scrollTop = el.scrollHeight;
+  }, [steps, target, state.live, state.page, position]);
+  useEffect(() => {
+    const observer = new ResizeObserver(() => {
+      if (state.live && scroller.current)
+        scroller.current.scrollTop = scroller.current.scrollHeight;
+    });
+    if (flow.current) observer.observe(flow.current);
+    return () => observer.disconnect();
+  }, [state.live]);
+  const earlier = () => {
+    const el = scroller.current;
+    if (el) {
+      const top = el.getBoundingClientRect().top;
+      const row = [...el.querySelectorAll<HTMLElement>("[data-step-key]")].find(
+        (item) => item.getBoundingClientRect().bottom > top,
+      );
+      if (row)
+        anchor.current = {
+          key: row.dataset.stepKey!,
+          top: row.getBoundingClientRect().top - top,
+          page: state.page,
+        };
+    }
+    state.earlier();
+  };
+  return createPortal(
+    <dialog
+      ref={dialog}
+      className={styles.reader}
+      aria-label="完整执行过程"
+      onCancel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) close();
+      }}
+    >
+      <header className={styles.readerHeader}>
+        <button className={styles.back} onClick={close}>
+          ← 返回
+        </button>
+        <div className={styles.readerTitle}>
+          <strong>执行过程</strong>
+          <span>
+            {run.role === "accept" ? "验收" : "实施"} · 第 {run.generation} 代
+          </span>
+        </div>
+        <span className={styles.readerState}>
+          <StateMark active={active} failed={observed === "failed"} />
+          {statusLabel(observed)}
+        </span>
+        <button className={styles.close} aria-label="关闭完整过程" onClick={close}>
+          ×
+        </button>
+      </header>
+      <nav className={styles.readerTools} aria-label="执行过程操作">
+        <span className={styles.followState}>
+          <i data-live={state.live} />
+          {state.live ? "实时跟随" : "历史阅读"}
+        </span>
+        <button aria-pressed={!state.live} onClick={() => state.setLive(!state.live)}>
+          {state.live ? "暂停跟随" : "恢复跟随"}
+        </button>
+        <button aria-expanded={usage} onClick={() => setUsage(!usage)}>
+          本次用量
+        </button>
+        <details className={styles.more}>
+          <summary>更多</summary>
+          <div>
+            <button
+              onClick={(event) => {
+                event.currentTarget.closest("details")?.removeAttribute("open");
+                state.reconnect();
+              }}
+            >
+              重新连接
+            </button>
+            <small>
+              {run.run_id} · 窗口 {state.page?.before ?? 0}–{state.page?.after ?? 0} · 水位{" "}
+              {state.page?.watermark ?? 0}
+            </small>
+            <p>
+              仅显示 Tend
+              已采集的持久记录。早期及不支持的执行器可能缺少过程；截断不代表原始输出完整。历史工具和正文是执行证据。
+            </p>
+            <p>最多保留 400 条可见记录，可分页读取更早或较新记录。</p>
+          </div>
+        </details>
+      </nav>
+      {state.error && (
+        <p className={styles.readerError} role="alert">
+          记录暂时无法更新，已保留当前内容。<button onClick={state.reconnect}>重新连接</button>
+        </p>
+      )}
+      <div
+        ref={scroller}
+        className={styles.reading}
+        tabIndex={0}
+        aria-label="执行过程正文"
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          if (state.live && el.scrollHeight - el.scrollTop - el.clientHeight > 48)
+            state.setLive(false);
+        }}
+        onWheel={(event) => {
+          if (event.deltaY < 0) state.setLive(false);
+        }}
+        onTouchMove={() => state.setLive(false)}
+        onKeyDown={(event) => {
+          if (["ArrowUp", "PageUp", "Home"].includes(event.key)) state.setLive(false);
+        }}
+      >
+        <div className={styles.readingColumn}>
+          {usage && <UsagePanel subject={`run:${run.run_id}`} />}
+          {state.page?.more_before && (
+            <button className={styles.pageButton} disabled={state.loading} onClick={earlier}>
+              {state.loading ? "正在读取…" : "加载更早记录"}
+            </button>
+          )}
+          {!steps.length && (
+            <p className={styles.empty}>{state.loading ? "正在读取过程…" : "尚无已采集记录。"}</p>
+          )}
+          <ol ref={flow} className={styles.steps}>
+            {steps.map((step) => (
+              <li key={step.key} data-step-key={step.key} data-target={step.key === target}>
+                <StepView step={step} active={active} reveal={step.key === target} />
+              </li>
+            ))}
+          </ol>
+          {active && (
+            <p className={styles.working}>
+              <StateMark active />
+              正在执行…
+            </p>
+          )}
+          {state.page?.more_after && (
+            <button className={styles.pageButton} disabled={state.loading} onClick={state.later}>
+              加载较新记录
+            </button>
+          )}
+        </div>
+      </div>
+      {!state.live && (
+        <button className={styles.toLatest} onClick={state.latest}>
+          ↓ 回到最新
+        </button>
+      )}
+    </dialog>,
+    document.body,
   );
 }

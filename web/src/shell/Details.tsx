@@ -379,11 +379,7 @@ function TaskControls({ task: t }: { task: TaskDetail }) {
 }
 
 function LogSection({ task }: { task: TaskDetail }) {
-  return (
-    <Fold title="执行过程与用量">
-      <RunRollout runs={task.runs ?? []} />
-    </Fold>
-  );
+  return <RunRollout runs={task.runs ?? []} />;
 }
 
 function Artifacts({

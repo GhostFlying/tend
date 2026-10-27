@@ -705,15 +705,40 @@ const (
 	maxBatchBody = 1 << 20
 )
 
-// boundedBody replaces an event body that is oversized once encoded, which
-// may escape characters, with a note of its size.
+// boundedBody replaces oversized content while retaining small lifecycle
+// identities and statuses. A clipped result must still settle its start.
 func boundedBody(body json.RawMessage) json.RawMessage {
 	encoded, err := json.Marshal(body)
 	if err == nil && len(encoded) <= maxEventBody {
 		return body
 	}
 	note, _ := json.Marshal(map[string]any{"truncated": true, "bytes": len(body)})
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(body, &envelope) == nil && envelope != nil {
+		kept := boundedEventMetadata(envelope)
+		kept["truncated"] = json.RawMessage(`true`)
+		kept["bytes"], _ = json.Marshal(len(body))
+		var data map[string]json.RawMessage
+		if json.Unmarshal(envelope["data"], &data) == nil && data != nil {
+			inner := boundedEventMetadata(data)
+			inner["truncated"] = json.RawMessage(`true`)
+			kept["data"], _ = json.Marshal(inner)
+		}
+		if raw, err := json.Marshal(kept); err == nil && len(raw) <= maxEventBody {
+			return raw
+		}
+	}
 	return note
+}
+
+func boundedEventMetadata(body map[string]json.RawMessage) map[string]json.RawMessage {
+	kept := make(map[string]json.RawMessage)
+	for _, key := range []string{"thread_id", "turn_id", "item_id", "id", "kind", "type", "status", "exitCode", "success"} {
+		if raw, ok := body[key]; ok {
+			kept[key] = raw
+		}
+	}
+	return kept
 }
 
 // flushEvents uploads every pending event of a run in batches bounded by
