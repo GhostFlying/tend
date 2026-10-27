@@ -76,14 +76,32 @@ const VerdictReminder = "tend did not receive a verdict from you. Call " + Verdi
 	"even if you called it before: that call may have been lost. Do not repeat the review unless you have to."
 
 // HandBack is the turn input that returns a worker's agent to tend after
-// the owner worked in it (D67).
+// managed control was interrupted (D67). Handback does not prove the owner
+// actually changed the terminal: automatic detection may have been mistaken.
 func HandBack(spec WorkerSpec) string {
+	s := "The owner has handed the task back to tend in this terminal. " +
+		"Reconcile the working trees and any instructions already received, then finish the same task. " +
+		"Preserve completed work and checks; do not repeat them merely to resubmit a result."
+	if spec.Role == protocol.RoleAccept {
+		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before."
+	}
+	return s + "\n" + observationBrief(spec) + questionRecovery(spec)
+}
+
+// IsHandBack recognizes the exact saved turn input for a handback. Journals can
+// retain the previous wording across upgrades after a lost send receipt; replay
+// that original request without issuing another handback under a new identity.
+// This reads a historical local journal format, not an old wire protocol.
+func IsHandBack(spec WorkerSpec, input string) bool {
+	if input == HandBack(spec) {
+		return true
+	}
 	s := "The owner worked with you in this terminal and has handed the task back to tend. " +
 		"Check the state of the working trees and anything the owner changed or asked for, then finish the same task."
 	if spec.Role == protocol.RoleAccept {
 		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before."
 	}
-	return s + "\n" + observationBrief(spec) + questionRecovery(spec)
+	return input == s+"\n"+observationBrief(spec)+questionRecovery(spec)
 }
 
 // Continuation is the turn input that continues a worker's thread after
