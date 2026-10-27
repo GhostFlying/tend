@@ -502,7 +502,7 @@ try {
     await parentDetail
       .getByRole("heading", { name: "Sample ongoing work item", exact: true })
       .waitFor();
-    await parentDetail.getByRole("button", { name: "关闭工作项详情", exact: true }).click();
+    await parentDetail.getByRole("button", { name: "关闭详情", exact: true }).click();
     const ended = executions.getByRole("tab", { name: "已结束", exact: true });
     await ended.focus();
     await page.keyboard.press("Enter");
@@ -519,9 +519,9 @@ try {
         name: new RegExp(`Unlinked historical ${lifecycle} page 2`),
       });
       await oldTask.click();
-      const details = page.getByRole("region", { name: "任务详情", exact: true });
+      const details = page.getByRole("dialog", { name: "任务详情", exact: true });
       await details.getByText(`Unlinked historical ${lifecycle} page 2`, { exact: true }).waitFor();
-      await details.getByRole("button", { name: "关闭", exact: true }).click();
+      await details.getByRole("button", { name: "关闭详情", exact: true }).click();
     }
     await executions.getByRole("tab", { name: "全部", exact: true }).click();
     await executions.getByText("正在启动", { exact: true }).waitFor();

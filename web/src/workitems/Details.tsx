@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Connection } from "../api/client.ts";
 import type {
   DeliveryObservation,
@@ -25,19 +25,18 @@ import {
   stageNeedsReview,
   stageRows,
 } from "./model.ts";
+import { DetailTabs } from "../shell/DetailOverlay.tsx";
+import { Materials, OriginalInputs } from "./Materials.tsx";
+import { uniqueTasks } from "./progress.ts";
+import { isFinished } from "../tasks/status.ts";
+import materialStyles from "./Materials.module.css";
 import { ChoiceCard } from "./Choice.tsx";
 import { Followups } from "./Followups.tsx";
 import { WorkItemProgress } from "./Progress.tsx";
 import controls from "../shell/controls.module.css";
 import styles from "./WorkItems.module.css";
 
-export function WorkItemDetails({
-  connection,
-  onClose,
-}: {
-  connection: Connection;
-  onClose(): void;
-}) {
+export function WorkItemDetails({ connection }: { connection: Connection }) {
   const { live } = useServices();
   const current = useStore(live.workItems.detail.state);
   const history = useStore(live.workItems.history.state);
@@ -45,32 +44,35 @@ export function WorkItemDetails({
   const [revision, setRevision] = useState("1");
   const state = historical ? history : current;
   const item = state.value;
-  const panel = useRef<HTMLDialogElement>(null);
-  useLayoutEffect(() => panel.current?.showModal(), []);
+  const [chosenTab, setTab] = useState<string | null>(null);
+  const [reviewVisited, setReviewVisited] = useState(false);
+  const tab =
+    chosenTab ??
+    (item && uniqueTasks(item).some((task) => !isFinished(task)) ? "stages" : "review");
   return (
-    <dialog
-      ref={panel}
-      className={styles.dialog}
-      aria-label="工作项详情"
-      onCancel={onClose}
-      onClick={(event) => event.currentTarget === event.target && onClose()}
-    >
-      <div className={styles.detailHead}>
+    <>
+      <div className={`${styles.detailHead} ${styles.ledgerHead}`}>
         <div>
           <span className={styles.meta}>
             工作项 · {item ? columnLabel(item.column) : "正在读取"}
           </span>
           <h2>{item?.title ?? "工作项详情"}</h2>
         </div>
-        <button
-          type="button"
-          className={controls.iconBtn}
-          aria-label="关闭工作项详情"
-          onClick={onClose}
-        >
-          ×
-        </button>
       </div>
+      <DetailTabs
+        tabs={[
+          { key: "review", label: "评审材料" },
+          { key: "stages", label: "阶段与任务" },
+          { key: "background", label: "背景与输入" },
+          { key: "followups", label: "跟进与交付" },
+          { key: "history", label: "历史" },
+        ]}
+        value={tab}
+        onChange={(next) => {
+          if (tab === "review" || next === "review") setReviewVisited(true);
+          setTab(next);
+        }}
+      />
       <div className={styles.detailBody}>
         {connection.status !== "online" && (
           <p className={styles.notice} role="status">
@@ -108,153 +110,169 @@ export function WorkItemDetails({
         {!item && !state.error && <p className={styles.empty}>正在读取工作项…</p>}
         {item && (
           <>
-            {!historical && (
-              <WorkItemProgress key={item.work_item_id} item={item}>
-                {item.choices
-                  ?.filter((choice) => choice.status === "open")
-                  .map((choice) => (
-                    <ChoiceCard key={choice.choice_id} choice={choice} />
-                  ))}
-              </WorkItemProgress>
-            )}
-            {!historical &&
-              !!item.follow_ons?.some(
-                (next) => next.kind === "problem" && next.status === "open",
-              ) && (
-                <Section title="当前阻碍">
-                  {item.follow_ons
-                    .filter((next) => next.kind === "problem" && next.status === "open")
-                    .map((next) => (
-                      <div key={next.follow_on_id} className={styles.notice}>
-                        <Markdown text={next.text} />
+            <div hidden={tab !== "review"}>
+              <div className={materialStyles.review}>
+                {(tab === "review" || reviewVisited) &&
+                  (historical ? <OriginalInputs item={item} /> : <Materials item={item} />)}
+                <aside className={materialStyles.decisions} aria-label="下一步安排">
+                  {!historical &&
+                    item.choices
+                      ?.filter((choice) => choice.status === "open")
+                      .map((choice) => <ChoiceCard key={choice.choice_id} choice={choice} />)}
+                  {!historical && <DraftActions item={item} />}
+                </aside>
+              </div>
+            </div>
+            <div hidden={tab !== "stages"}>
+              {!historical && (
+                <WorkItemProgress key={item.work_item_id} item={item}></WorkItemProgress>
+              )}
+              {!historical &&
+                !!item.follow_ons?.some(
+                  (next) => next.kind === "problem" && next.status === "open",
+                ) && (
+                  <Section title="当前阻碍">
+                    {item.follow_ons
+                      .filter((next) => next.kind === "problem" && next.status === "open")
+                      .map((next) => (
+                        <div key={next.follow_on_id} className={styles.notice}>
+                          <Markdown text={next.text} />
+                        </div>
+                      ))}
+                  </Section>
+                )}
+              <div>
+                <Section title="阶段与执行">
+                  {item.stages?.length ? (
+                    <StageList item={item} />
+                  ) : (
+                    <p className={styles.empty}>阶段尚未安排，仍保持跟进。</p>
+                  )}
+                </Section>
+              </div>
+            </div>
+            <div hidden={tab !== "background"}>
+              <div>
+                {tab === "background" && <OriginalInputs item={item} />}
+                <Section title="目标">
+                  <Markdown text={item.intent} />
+                </Section>
+                {!!item.background?.length && (
+                  <Section title="共享背景">
+                    {item.background.map((fact, index) => (
+                      <div key={index} className={styles.fact}>
+                        <span className={styles.meta}>{factLabels[fact.kind] ?? fact.kind}</span>
+                        <Markdown text={fact.text} />
+                        <p className={styles.source}>来源：{fact.source}</p>
                       </div>
+                    ))}
+                  </Section>
+                )}
+              </div>
+            </div>
+            <div hidden={tab !== "followups"}>
+              {!historical && <DraftActions item={item} />}
+              {!historical && (
+                <Followups key={item.work_item_id} item={item} connection={connection} />
+              )}
+              <Section title="后续事项">
+                {item.follow_ons?.length ? (
+                  item.follow_ons.map((next) => (
+                    <div className={styles.fact} key={next.follow_on_id}>
+                      <p className={styles.meta}>
+                        {followOnLabels[next.kind] ?? next.kind} ·{" "}
+                        {followOnLabels[next.status] ?? next.status}
+                      </p>
+                      <Markdown text={next.text} />
+                      <p className={styles.source}>来源：{next.source}</p>
+                      {next.transferred_to && (
+                        <p className={styles.source}>
+                          承接：
+                          <Markdown text={next.transferred_to} />
+                        </p>
+                      )}
+                      <Evidence items={next.evidence} />
+                    </div>
+                  ))
+                ) : (
+                  <p className={styles.empty}>暂无已记录的后续事项；本轮完成不会自动结束跟进。</p>
+                )}
+              </Section>
+              <Section title="外部交付">
+                {item.deliveries?.length ? (
+                  <Deliveries item={item} readOnly={historical || connection.status !== "online"} />
+                ) : (
+                  <p className={styles.empty}>尚未关联交付对象。</p>
+                )}
+              </Section>
+              {item.default_workspace_task_id && (
+                <Section title="默认工作区来源">
+                  <TaskButton item={item} id={item.default_workspace_task_id} />
+                </Section>
+              )}
+              {item.closure && (
+                <Section title={`收尾 · ${closureLabels[item.closure.kind] ?? item.closure.kind}`}>
+                  <Markdown text={item.closure.reason} />
+                  <Evidence items={item.closure.evidence} />
+                </Section>
+              )}
+            </div>
+            <div hidden={tab !== "history"}>
+              {!!item.choices?.some((choice) => choice.status !== "open") && (
+                <Section title="历史安排">
+                  {item.choices
+                    .filter((choice) => choice.status !== "open")
+                    .map((choice) => (
+                      <ChoiceCard key={choice.choice_id} choice={choice} readOnly />
                     ))}
                 </Section>
               )}
-            {!historical && <DraftActions item={item} />}
-            {!historical && (
-              <Followups key={item.work_item_id} item={item} connection={connection} />
-            )}
-            <details className={styles.history} open={historical || undefined}>
-              <summary>目标与共享背景</summary>
-              <Section title="目标">
-                <Markdown text={item.intent} />
-              </Section>
-              {!!item.background?.length && (
-                <Section title="共享背景">
-                  {item.background.map((fact, index) => (
-                    <div key={index} className={styles.fact}>
-                      <span className={styles.meta}>{factLabels[fact.kind] ?? fact.kind}</span>
-                      <Markdown text={fact.text} />
-                      <p className={styles.source}>来源：{fact.source}</p>
-                    </div>
-                  ))}
-                </Section>
-              )}
-            </details>
-            <details className={styles.history} open={historical || undefined}>
-              <summary>完整阶段计划与执行关联</summary>
-              <Section title="阶段与执行">
-                {item.stages?.length ? (
-                  <StageList item={item} />
-                ) : (
-                  <p className={styles.empty}>阶段尚未安排，仍保持跟进。</p>
-                )}
-              </Section>
-            </details>
-            {!!item.choices?.some((choice) => choice.status !== "open") && (
-              <Section title="历史安排">
-                {item.choices
-                  .filter((choice) => choice.status !== "open")
-                  .map((choice) => (
-                    <ChoiceCard key={choice.choice_id} choice={choice} readOnly />
-                  ))}
-              </Section>
-            )}
-            <Section title="后续事项">
-              {item.follow_ons?.length ? (
-                item.follow_ons.map((next) => (
-                  <div className={styles.fact} key={next.follow_on_id}>
-                    <p className={styles.meta}>
-                      {followOnLabels[next.kind] ?? next.kind} ·{" "}
-                      {followOnLabels[next.status] ?? next.status}
-                    </p>
-                    <Markdown text={next.text} />
-                    <p className={styles.source}>来源：{next.source}</p>
-                    {next.transferred_to && (
-                      <p className={styles.source}>
-                        承接：
-                        <Markdown text={next.transferred_to} />
-                      </p>
-                    )}
-                    <Evidence items={next.evidence} />
-                  </div>
-                ))
-              ) : (
-                <p className={styles.empty}>暂无已记录的后续事项；本轮完成不会自动结束跟进。</p>
-              )}
-            </Section>
-            <Section title="外部交付">
-              {item.deliveries?.length ? (
-                <Deliveries item={item} readOnly={historical || connection.status !== "online"} />
-              ) : (
-                <p className={styles.empty}>尚未关联交付对象。</p>
-              )}
-            </Section>
-            {item.default_workspace_task_id && (
-              <Section title="默认工作区来源">
-                <TaskButton item={item} id={item.default_workspace_task_id} />
-              </Section>
-            )}
-            {item.closure && (
-              <Section title={`收尾 · ${closureLabels[item.closure.kind] ?? item.closure.kind}`}>
-                <Markdown text={item.closure.reason} />
-                <Evidence items={item.closure.evidence} />
-              </Section>
-            )}
-            <details className={styles.history}>
-              <summary>工作项标识与修订</summary>
-              <p className={styles.meta}>
-                {item.project || "未分组"} · 修订 {item.revision} · <code>{item.work_item_id}</code>
-              </p>
-            </details>
-            {!historical && (
               <details className={styles.history}>
-                <summary>查看计划历史</summary>
-                <label>
-                  修订{" "}
-                  <input
-                    aria-label="工作项历史修订"
-                    type="number"
-                    min={1}
-                    max={current.value?.revision ?? 1}
-                    value={revision}
-                    onChange={(event) => setRevision(event.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className={controls.chipBtn}
-                  disabled={
-                    !Number.isInteger(Number(revision)) ||
-                    Number(revision) < 1 ||
-                    Number(revision) > (current.value?.revision ?? 1)
-                  }
-                  onClick={() => {
-                    setHistorical(true);
-                    void live.workItems.history.open(
-                      `/api/v1/work-items/${encodeURIComponent(item.work_item_id)}?revision=${Number(revision)}`,
-                    );
-                  }}
-                >
-                  读取历史计划
-                </button>
+                <summary>工作项标识与修订</summary>
+                <p className={styles.meta}>
+                  {item.project || "未分组"} · 修订 {item.revision} ·{" "}
+                  <code>{item.work_item_id}</code>
+                </p>
               </details>
-            )}
+              {!historical && (
+                <details className={styles.history}>
+                  <summary>查看计划历史</summary>
+                  <label>
+                    修订{" "}
+                    <input
+                      aria-label="工作项历史修订"
+                      type="number"
+                      min={1}
+                      max={current.value?.revision ?? 1}
+                      value={revision}
+                      onChange={(event) => setRevision(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={controls.chipBtn}
+                    disabled={
+                      !Number.isInteger(Number(revision)) ||
+                      Number(revision) < 1 ||
+                      Number(revision) > (current.value?.revision ?? 1)
+                    }
+                    onClick={() => {
+                      setHistorical(true);
+                      setTab("background");
+                      void live.workItems.history.open(
+                        `/api/v1/work-items/${encodeURIComponent(item.work_item_id)}?revision=${Number(revision)}`,
+                      );
+                    }}
+                  >
+                    读取历史计划
+                  </button>
+                </details>
+              )}
+            </div>
           </>
         )}
       </div>
-    </dialog>
+    </>
   );
 }
 function DraftActions({ item }: { item: WorkItemView }) {

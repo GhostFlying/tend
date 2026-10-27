@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   ConversationImage,
@@ -166,14 +167,25 @@ function ImagePreview({
   }, [client, previewPath, attempt]);
   const dialog = useRef<HTMLDialogElement>(null);
   useLayoutEffect(() => {
-    dialog.current?.showModal();
+    const panel = dialog.current;
+    const opener = document.activeElement;
+    panel?.showModal();
+    return () => {
+      panel?.close();
+      if (opener instanceof HTMLElement && opener.isConnected)
+        opener.focus({ preventScroll: true });
+    };
   }, []);
-  return (
+  return createPortal(
     <dialog
       ref={dialog}
       className={styles.preview}
       aria-label={`图片预览 ${name}`}
-      onCancel={onClose}
+      onCancel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
       onClick={(event) => event.currentTarget === event.target && onClose()}
     >
       <div className={styles.header}>
@@ -201,6 +213,7 @@ function ImagePreview({
       ) : (
         <p role="status">正在读取图片…</p>
       )}
-    </dialog>
+    </dialog>,
+    document.body,
   );
 }

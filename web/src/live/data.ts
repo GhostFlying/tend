@@ -84,6 +84,7 @@ export class LiveData {
     processingSince: noProcessing,
   });
   private readonly detailStore = new Store<DetailState | null>(null);
+  private readonly materialReads = new Set<WorkItemRead<TaskDetail>>();
   private readonly lookupStore = new Store<TaskLookup>(new Map());
   private readonly lookingUp = new Set<string>();
   private readonly dirtyLookups = new Set<string>();
@@ -134,12 +135,23 @@ export class LiveData {
     return this.detailStore;
   }
 
+  /** Review materials follow ledger invalidation without taking over task navigation. */
+  watchMaterials(id: string, read: WorkItemRead<TaskDetail>): () => void {
+    this.materialReads.add(read);
+    void read.open(`/api/v1/tasks/${encodeURIComponent(id)}`);
+    return () => {
+      this.materialReads.delete(read);
+      read.close();
+    };
+  }
+
   get lookups(): Readable<TaskLookup> {
     return this.lookupStore;
   }
 
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
+    for (const read of this.materialReads) void read.refresh();
     void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
     void this.repos.refresh();
     void this.settings.refresh();
@@ -265,6 +277,7 @@ export class LiveData {
     }
     this.tasks.changed();
     this.workItems.changed();
+    for (const read of this.materialReads) void read.refresh();
     void this.refreshSnapshot();
     if (this.detailStore.get()) {
       void this.refreshDetail();
@@ -512,6 +525,8 @@ export class LiveData {
     this.dirtyLookups.clear();
     this.repos.stop();
     this.workItems.stop();
+    for (const read of this.materialReads) read.close();
+    this.materialReads.clear();
     for (const read of this.choiceReads.values()) read.close();
     this.detailController?.abort();
     clearTimeout(this.retryTimer);

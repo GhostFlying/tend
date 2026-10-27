@@ -161,6 +161,7 @@ try {
   page.setDefaultTimeout(10000);
   await page.goto(`http://127.0.0.1:${address.port}/?work_item=${id}`);
   const panel = page.getByRole("dialog", { name: "工作项详情" });
+  await panel.getByRole("button", { name: "跟进与交付", exact: true }).click();
   const button = panel.getByRole("button", { name: "刷新交付状态", exact: true });
   await button.click();
   const unknown = panel.getByText("刷新请求尚未确认，等待账本事件或连接恢复；不会自动重发。", {
@@ -171,10 +172,12 @@ try {
   assert.equal(requests.size, 1);
 
   // A fresh read and unrelated facts must leave the original uncertainty intact.
-  await panel.getByText("目标与共享背景", { exact: true }).click();
+  await panel.getByRole("button", { name: "背景与输入", exact: true }).click();
   item.intent = "Unrelated plan update";
   publish();
+  await panel.getByRole("button", { name: "背景与输入", exact: true }).click();
   await panel.getByText(item.intent, { exact: true }).waitFor();
+  await panel.getByRole("button", { name: "跟进与交付", exact: true }).click();
   assert(await button.isDisabled());
   await unknown.waitFor();
   item.observations!.push({
@@ -186,7 +189,9 @@ try {
   });
   item.intent = "Another delivery changed";
   publish();
+  await panel.getByRole("button", { name: "背景与输入", exact: true }).click();
   await panel.getByText(item.intent, { exact: true }).waitFor();
+  await panel.getByRole("button", { name: "跟进与交付", exact: true }).click();
   assert(await button.isDisabled());
 
   // Reserving a query is not a completed observation.
@@ -236,6 +241,7 @@ try {
     terminalPage.setDefaultTimeout(10000);
     await terminalPage.goto(`http://127.0.0.1:${address.port}/?work_item=${id}`);
     const details: Locator = terminalPage.getByRole("dialog", { name: "工作项详情" });
+    await details.getByRole("button", { name: "跟进与交付", exact: true }).click();
     const refresh: Locator = details.getByRole("button", { name: "刷新交付状态", exact: true });
     const before: number = requests.size;
     await refresh.click();
@@ -254,11 +260,12 @@ try {
     assert(await refresh.isDisabled());
     assert.equal(requests.size, before + 1);
     // Closing the dialog must not discard the original operation.
-    await details.getByRole("button", { name: "关闭工作项详情" }).click();
+    await details.getByRole("button", { name: "关闭详情" }).click();
     await terminalPage
       .locator("aside")
       .getByRole("button", { name: /Refresh reconciliation/ })
       .click();
+    await details.getByRole("button", { name: "跟进与交付", exact: true }).click();
     await details.getByRole("button", { name: "核对刷新请求", exact: true }).click();
     await details.getByText("未查到原刷新请求，可显式重试同一请求。", { exact: true }).waitFor();
     assert(await refresh.isDisabled());
@@ -290,9 +297,9 @@ try {
     const mobilePage = await mobileContext.newPage();
     mobilePage.setDefaultTimeout(10000);
     await mobilePage.goto(`http://127.0.0.1:${address.port}/?task=${taskId}`);
-    const taskDrawer = mobilePage.getByRole("region", { name: "任务详情", exact: true });
+    const taskDrawer = mobilePage.getByRole("dialog", { name: "任务详情", exact: true });
     await taskDrawer.getByText("Linked task", { exact: true }).waitFor();
-    await taskDrawer.getByRole("button", { name: "关闭", exact: true }).click();
+    await taskDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
     const composer = mobilePage.getByRole("textbox", { name: "消息", exact: true });
     await composer.fill("Existing unsent constraint");
     await mobilePage.locator('input[type="file"]').setInputFiles({

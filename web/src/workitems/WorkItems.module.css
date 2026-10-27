@@ -237,6 +237,9 @@
   margin: 5px 0 0;
   overflow-wrap: anywhere;
 }
+.ledgerHead {
+  position: static;
+}
 .detailBody {
   padding: 18px 22px 28px;
   overflow-wrap: anywhere;

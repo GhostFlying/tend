@@ -132,7 +132,7 @@ func (s *Server) downloadURL(w http.ResponseWriter, r *http.Request, kind string
 		s.writeError(w, r, err)
 		return
 	}
-	inline := kind == "attachment" && r.URL.Query().Get("inline") == "1"
+	inline := r.URL.Query().Get("inline") == "1"
 	g := fileGrant{Login: p.Subject, ID: id, Kind: kind, Inline: inline, Issued: s.cfg.Now().UnixMilli()}
 	query := url.Values{"download": {s.signFileGrant(g)}}
 	if inline {

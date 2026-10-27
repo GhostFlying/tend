@@ -1,7 +1,5 @@
-// The app's frame, after the design mock: sidebar, conversation and task
-// details side by side on a desktop; the details float over the
-// conversation at medium widths; one column with a tab bar on a phone.
-import { useEffect, useMemo, useRef, useState } from "react";
+// Keep the board and conversation mounted behind a shared ledger detail modal.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitTaskIds } from "../conversation/model.ts";
 import { ComposerDraft } from "../conversation/draft.ts";
 import type { ApiClient, Connection } from "../api/client.ts";
@@ -14,6 +12,7 @@ import { Handoff } from "../conversation/Handoff.tsx";
 import { UpgradeDetails } from "../upgrades/Upgrade.tsx";
 import { Chat } from "./Chat.tsx";
 import { Details } from "./Details.tsx";
+import { DetailOverlay, DetailPane } from "./DetailOverlay.tsx";
 import styles from "./Shell.module.css";
 import { TaskBoard } from "../tasks/Board.tsx";
 import { Repositories } from "../repos/Repositories.tsx";
@@ -35,7 +34,9 @@ export function Shell({
   queue: SendQueue | null;
 }) {
   const workItemSelected = useStore(live.workItems.selected);
-  const workItemFocus = useRef<HTMLElement | null>(null);
+  const [taskSelected, setTaskSelected] = useState<string | null>(null);
+  const [detailSession] = useState(() => `${performance.timeOrigin}:${performance.now()}`);
+  const closingDetails = useRef(false);
   const [upgradeId, setUpgradeId] = useState<string | null>(null);
   const upgradeFocus = useRef<HTMLElement | null>(null);
   const [reposOpen, setReposOpen] = useState(false);
@@ -71,10 +72,10 @@ export function Shell({
     queueMicrotask(() => settingsFocus.current?.focus());
   };
   const [draft] = useState(() => new ComposerDraft());
-  const returnFocus = useRef<HTMLElement | null>(null);
+
   const [view, setView] = useState<View>("chat");
   const snapshot = useStore(live.snapshot);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+
   const [boardOpen, setBoardOpen] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
   const [recordsVisited, setRecordsVisited] = useState(false);
@@ -96,6 +97,42 @@ export function Shell({
     setView("chat");
   };
 
+  const applyDetail = useCallback(
+    (item: string | null, task: string | null) => {
+      if (item) void live.workItems.open(item);
+      else live.workItems.close();
+      setTaskSelected(task);
+      if (task) void live.open(task);
+      else live.close();
+    },
+    [live],
+  );
+  const navigateDetail = useCallback(
+    (item: string | null, task: string | null) => {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("work_item") === item && url.searchParams.get("task") === task)
+        return;
+      if (item) url.searchParams.set("work_item", item);
+      else url.searchParams.delete("work_item");
+      if (task) url.searchParams.set("task", task);
+      else url.searchParams.delete("task");
+      window.history.pushState(
+        {
+          ...window.history.state,
+          tendDetailSession: detailSession,
+          tendDetailDepth:
+            (window.history.state?.tendDetailSession === detailSession
+              ? window.history.state.tendDetailDepth
+              : 0) + 1,
+        },
+        "",
+        url,
+      );
+      applyDetail(item, task);
+    },
+    [applyDetail, detailSession],
+  );
+
   const services = useMemo<Services>(
     () => ({
       client,
@@ -104,7 +141,12 @@ export function Shell({
       draft,
       followUp(task) {
         live.close();
-        setDetailsOpen(false);
+        setTaskSelected(null);
+        live.workItems.close();
+        const url = new URL(window.location.href);
+        url.searchParams.delete("task");
+        url.searchParams.delete("work_item");
+        window.history.replaceState({ ...window.history.state, tendDetailDepth: 0 }, "", url);
         setBoardOpen(false);
         setView("chat");
         draft.followUp(task);
@@ -115,52 +157,78 @@ export function Shell({
         setUpgradeId(id);
       },
       openWorkItem(id) {
-        workItemFocus.current =
-          document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        void live.workItems.open(id);
+        navigateDetail(id, null);
       },
       discussWorkItem(item, intention) {
         live.workItems.close();
         live.close();
-        setDetailsOpen(false);
+        setTaskSelected(null);
+        const url = new URL(window.location.href);
+        url.searchParams.delete("task");
+        url.searchParams.delete("work_item");
+        window.history.replaceState({ ...window.history.state, tendDetailDepth: 0 }, "", url);
         setBoardOpen(false);
         setView("chat");
         draft.workItem(item, intention);
       },
       openTask(taskId) {
-        live.workItems.close();
-        const active = document.activeElement;
-        if (active instanceof HTMLElement && !active.closest('[aria-label="任务详情"]'))
-          returnFocus.current = active;
-        void live.open(taskId);
-        setDetailsOpen(true);
+        navigateDetail(live.workItems.selected.get(), taskId);
       },
     }),
-    [client, live, queue, draft],
+    [client, live, queue, draft, navigateDetail],
   );
 
-  const openedInitialTask = useRef(false);
   useEffect(() => {
-    if (openedInitialTask.current) return;
-    openedInitialTask.current = true;
-    const taskId = new URLSearchParams(window.location.search).get("task");
-    const workItemId = new URLSearchParams(window.location.search).get("work_item");
-    if (workItemId) {
-      const parts = splitWorkItemIds(workItemId);
-      if (parts.length === 1 && typeof parts[0] !== "string")
-        services.openWorkItem(parts[0]!.workItemId);
-    }
-    if (!taskId) return;
-    const parts = splitTaskIds(taskId);
-    if (parts.length === 1 && typeof parts[0] !== "string") services.openTask(parts[0]!.taskId);
-  }, [services]);
-
+    const read = () => {
+      if (closingDetails.current) {
+        closingDetails.current = false;
+        const url = new URL(window.location.href);
+        url.searchParams.delete("work_item");
+        url.searchParams.delete("task");
+        window.history.replaceState(
+          { ...window.history.state, tendDetailSession: detailSession, tendDetailDepth: 0 },
+          "",
+          url,
+        );
+      }
+      const params = new URLSearchParams(window.location.search);
+      const item = params.get("work_item");
+      const task = params.get("task");
+      const validItem =
+        item && splitWorkItemIds(item).length === 1 && typeof splitWorkItemIds(item)[0] !== "string"
+          ? item
+          : null;
+      const validTask =
+        task && splitTaskIds(task).length === 1 && typeof splitTaskIds(task)[0] !== "string"
+          ? task
+          : null;
+      applyDetail(validItem, validTask);
+    };
+    // A reload starts a new UI session; do not traverse another document's stack.
+    window.history.replaceState(
+      { ...window.history.state, tendDetailSession: detailSession, tendDetailDepth: 0 },
+      "",
+    );
+    read();
+    window.addEventListener("popstate", read);
+    return () => window.removeEventListener("popstate", read);
+  }, [applyDetail, detailSession]);
   const closeDetails = () => {
-    setDetailsOpen(false);
-    live.close();
-    queueMicrotask(() => {
-      if (returnFocus.current?.isConnected) returnFocus.current.focus();
-    });
+    if (closingDetails.current) return;
+    const depth =
+      window.history.state?.tendDetailSession === detailSession
+        ? window.history.state.tendDetailDepth
+        : 0;
+    if (depth > 0) {
+      closingDetails.current = true;
+      window.history.go(-depth);
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("work_item");
+    url.searchParams.delete("task");
+    window.history.replaceState(window.history.state, "", url);
+    applyDetail(null, null);
   };
 
   return (
@@ -169,7 +237,7 @@ export function Shell({
         className={styles.app}
         data-view={view}
         data-board={boardOpen ? "open" : "closed"}
-        data-details={detailsOpen ? "open" : "closed"}
+        data-details={taskSelected ? "open" : "closed"}
       >
         <aside className={styles.sidebar}>
           <Sidebar
@@ -207,9 +275,6 @@ export function Shell({
             </div>
           )}
         </main>
-        <section className={styles.details} inert={!detailsOpen} aria-label="任务详情">
-          <Details onClose={closeDetails} />
-        </section>
         <TabBar
           view={view}
           onChange={(next) => {
@@ -222,17 +287,27 @@ export function Shell({
           pending={attentionCount(snapshot)}
         />
       </div>
-      {workItemSelected && (
-        <WorkItemDetails
-          key={workItemSelected}
-          connection={connection}
-          onClose={() => {
-            live.workItems.close();
-            queueMicrotask(
-              () => workItemFocus.current?.isConnected && workItemFocus.current.focus(),
-            );
-          }}
-        />
+      {(workItemSelected || taskSelected) && (
+        <DetailOverlay
+          task={!!taskSelected}
+          onClose={closeDetails}
+          onBack={
+            taskSelected && workItemSelected
+              ? () => navigateDetail(workItemSelected, null)
+              : undefined
+          }
+        >
+          {workItemSelected && (
+            <DetailPane active={!taskSelected}>
+              <WorkItemDetails key={workItemSelected} connection={connection} />
+            </DetailPane>
+          )}
+          {taskSelected && (
+            <DetailPane key={taskSelected} active>
+              <Details />
+            </DetailPane>
+          )}
+        </DetailOverlay>
       )}
       {upgradeId && (
         <UpgradeDetails

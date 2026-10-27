@@ -242,8 +242,10 @@ try {
         .getByRole("dialog", { name: "工作项详情", exact: true })
         .getByRole("heading", { name: item.title, exact: true })
         .waitFor();
+      await p.getByRole("button", { name: "跟进与交付", exact: true }).click();
     };
     await open(page);
+    await page.getByRole("button", { name: "跟进与交付", exact: true }).click();
     const section = page.getByRole("region", { name: "跟进安排" });
     await section.getByRole("button", { name: "新增安排" }).click();
     const form = page.getByRole("form", { name: "新增跟进安排" });
@@ -282,6 +284,7 @@ try {
     await section.getByRole("button", { name: "核对结果" }).waitFor();
     const unknown = writes.at(-1)!;
     await open(page);
+    await page.getByRole("button", { name: "跟进与交付", exact: true }).click();
     await page.getByRole("button", { name: "核对结果" }).waitFor();
     assert.equal(writes.at(-1)!.request_id, unknown.request_id);
     drop = false;
