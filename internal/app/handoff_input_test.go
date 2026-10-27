@@ -17,6 +17,7 @@ func TestSummaryInputPreservesUnknownBackgroundDeliveryState(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.failImplementation()
+	h.legacyMainBatches()
 	delivery, _, ok, err := h.app.NextDelivery(ctx, MainThreadDestination)
 	if err != nil || !ok {
 		t.Fatalf("claim background turn: %v, %v", ok, err)

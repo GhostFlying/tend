@@ -689,9 +689,9 @@ export interface AgentConversation {
  * via the `definition` "AgentConversationPage".
  */
 export interface AgentConversationPage {
-  enabled: boolean;
   items: AgentConversation[] | null;
   next?: string;
+  runtime_available: boolean;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1033,8 +1033,13 @@ export interface ConversationItem {
  * via the `definition` "MessageAssociations".
  */
 export interface MessageAssociations {
+  content_revision: number;
+  disposition: string;
+  facts_reviewed: boolean;
   items: MessageWorkItem[] | null;
   message_id: string;
+  owner_locked: boolean;
+  processing?: MessageProcessingState;
   revision: number;
 }
 /**
@@ -1046,6 +1051,16 @@ export interface MessageWorkItem {
   source: string;
   title: string;
   work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessageProcessingState".
+ */
+export interface MessageProcessingState {
+  logical_turn_id: string;
+  reason: string;
+  revision: number;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1186,11 +1201,23 @@ export interface CreateWorkItemPayload {
   default_workspace_task_id?: string;
   deliveries?: WorkItemDelivery[];
   follow_ons?: WorkItemFollowOn[];
+  initial_context?: InitialWorkItemContext;
   intent: string;
   project: string;
   source_message_id?: string;
   stages: WorkItemStage[] | null;
   title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "InitialWorkItemContext".
+ */
+export interface InitialWorkItemContext {
+  coverage: string;
+  facts: ContextFact[] | null;
+  gaps: string;
+  reviewed_kinds: string[] | null;
+  source_message_ids: string[] | null;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1375,8 +1402,10 @@ export interface LinkWorkItemTaskPayload {
  * via the `definition` "PrepareWorkItemContextPayload".
  */
 export interface PrepareWorkItemContextPayload {
+  confirmed_fact_ids?: string[];
   coverage: string;
   gaps: string;
+  retired_fact_ids?: string[];
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1491,6 +1520,7 @@ export interface SessionRequest {
  */
 export interface SessionView {
   client_id: string;
+  deployment_id: string;
   expires_at: string;
   login: string;
   scope: TokenScope;
@@ -1524,6 +1554,8 @@ export interface SetConversationSettingsPayload {
  * via the `definition` "SetMessageAssociationsPayload".
  */
 export interface SetMessageAssociationsPayload {
+  content_revision: number;
+  disposition: string;
   work_item_ids: string[] | null;
 }
 /**
@@ -1929,6 +1961,8 @@ export interface WorkItemContext {
   prepared: boolean;
   revision: number;
   sources: ConversationItem[] | null;
+  sync_status: string;
+  watermark: number;
   work_item_id: string;
 }
 /**

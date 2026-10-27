@@ -254,7 +254,7 @@ func TestHandoffUsesCurrentSummaryAndFreshToolset(t *testing.T) {
 	if binding.ThreadID != target.ID() || binding.ToolsetHash != hash || len(binding.Ancestors) != 1 || binding.Ancestors[0].ThreadID != f.source.ID() {
 		t.Fatalf("binding %+v", binding)
 	}
-	if len(f.e.h.Injected(f.source.ID())) != 0 || len(f.e.h.Starts()) != 0 {
+	if len(f.e.h.Injected(f.source.ID())) != 0 || len(businessStarts(f.e.h)) != 0 {
 		t.Fatal("summary/handoff polluted source conversation")
 	}
 }
@@ -353,7 +353,7 @@ func TestSummaryRejectsToolsAndNeverAppendsSourceOrWebMessages(t *testing.T) {
 	if f.e.count(`SELECT COUNT(*) FROM tasks`) != 0 || f.e.count(`SELECT COUNT(*) FROM conversation_messages`) != 0 {
 		t.Fatal("private summary caused public side effects")
 	}
-	if len(f.e.h.Injected(f.source.ID())) != 0 || len(f.e.h.Starts()) != 0 {
+	if len(f.e.h.Injected(f.source.ID())) != 0 || len(businessStarts(f.e.h)) != 0 {
 		t.Fatal("maintenance prompt or answer entered source history")
 	}
 	_, forks, releases := f.session.counts()
@@ -421,7 +421,7 @@ func TestSummaryReceivesSystemNoticeAndSubsequentInPlaceUpdate(t *testing.T) {
 	if text := <-inputs; !strings.Contains(text, "TASK_COMPLETION_NOTICE_MARKER: independent acceptance passed") {
 		t.Fatal("summary claimed coverage without receiving server-only completion notice body")
 	}
-	if len(f.e.h.Starts()) != 0 || len(f.e.h.Injected(f.source.ID())) != 0 {
+	if len(businessStarts(f.e.h)) != 0 || len(f.e.h.Injected(f.source.ID())) != 0 {
 		t.Fatal("server notice was unexpectedly delivered to source native history")
 	}
 	f.clock.Advance(time.Second)
@@ -593,7 +593,10 @@ func TestHandoffRetryRefreshesSourceBeyondRecentMessageFocus(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.saveSummary(t)
-	f.e.h.Turn = func(th *testkit.FakeThread, id string, _ harness.TurnInput) string {
+	f.e.h.Turn = func(th *testkit.FakeThread, id string, in harness.TurnInput) string {
+		if in.Repair {
+			return completeFixtureReview(t, th, id)
+		}
 		th.Say(id, "owner-reply", "Acknowledged the owner's instruction.")
 		return "completed"
 	}
@@ -628,13 +631,15 @@ func TestHandoffRetryRefreshesSourceBeyondRecentMessageFocus(t *testing.T) {
 		}
 		f.e.say(body)
 		want := i + 1
-		eventually(t, "source completes owner exchange", func() bool { return f.e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed'`) == want })
+		eventually(t, "source completes owner exchange", func() bool {
+			return f.e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == want
+		})
 	}
 	eventually(t, "owner delivery outbox settles", func() bool {
 		snap, err := f.e.app.HandoffSnapshot(ctx, "main")
-		return err == nil && !snap.Pending && !snap.Active
+		return err == nil && !snap.Pending && !snap.Active && f.e.count(`SELECT COUNT(*) FROM logical_turns WHERE status<>'completed'`) == 0
 	})
-	if len(f.e.h.Starts()) != 12 {
+	if len(businessStarts(f.e.h)) != 12 {
 		t.Fatal("fixture did not process all source native turns")
 	}
 	summaryInput := make(chan string, 1)

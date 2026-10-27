@@ -113,12 +113,15 @@ export class ApiClient {
   private signingIn: Promise<string> | null = null;
   /** The owner's login, from the last session answer. */
   private login = "";
+  private deploymentID: string | null;
+  private deploymentChanged = false;
 
   constructor(options: ClientOptions = {}) {
     this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.storage = options.storage ?? new FallbackStorage(() => globalThis.localStorage);
     this.random = options.random ?? cryptoRandom;
     this.timeoutMs = options.timeoutMs ?? 20_000;
+    this.deploymentID = this.storage.getItem("tend.deployment_id");
   }
 
   get connection(): Readable<Connection> {
@@ -138,9 +141,26 @@ export class ApiClient {
   /** Checks the session, signing in when there is no valid token. */
   async connect(): Promise<SessionView> {
     const view = await this.request<SessionView>("GET", "/api/v1/session");
+    this.acceptDeployment(view.deployment_id);
     this.login = view.login;
     this.markOnline();
     return view;
+  }
+
+  get deploymentId(): string {
+    return this.deploymentID ?? "";
+  }
+
+  private acceptDeployment(id: string): void {
+    if (!id) throw new Error("服务器没有部署身份，请升级客户端和服务端");
+    if (this.deploymentID && this.deploymentID !== id) {
+      this.deploymentChanged = true;
+      this.markOffline("Tend 已重建，旧请求已停止。请刷新进入新实例。");
+      globalThis.dispatchEvent?.(new CustomEvent("tend:deployment-changed", { detail: id }));
+      throw new Error("Tend 实例已变更，禁止重放旧请求");
+    }
+    this.deploymentID = id;
+    this.storage.setItem("tend.deployment_id", id);
   }
 
   /** Executes one owner write (POST /api/v1/ops). */
@@ -257,6 +277,7 @@ export class ApiClient {
     signal?: AbortSignal,
     accept?: string,
   ): Promise<Response> {
+    if (this.deploymentChanged) throw new Error("Tend 实例已变更，请刷新");
     let token = this.storage.getItem(tokenKey) ?? (await this.signIn());
     let res = await this.send(method, path, body, token, signal, accept);
     if (res.status === 401) {
@@ -278,6 +299,7 @@ export class ApiClient {
           throw new ApiError(res.status, { code: "internal", message: "no token in the session" });
         }
         this.storage.setItem(tokenKey, view.token);
+        this.acceptDeployment(view.deployment_id);
         this.login = view.login;
         this.markOnline();
         return view.token;
@@ -297,6 +319,8 @@ export class ApiClient {
     accept = "application/json",
   ): Promise<Response> {
     const headers: Record<string, string> = { Accept: accept };
+    if (this.deploymentChanged) throw new Error("Tend 实例已变更，请刷新");
+    if (this.deploymentID) headers["X-Tend-Deployment-ID"] = this.deploymentID;
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
@@ -305,13 +329,16 @@ export class ApiClient {
         body instanceof Blob ? body.type || "application/octet-stream" : "application/json";
     }
     try {
-      return await this.fetch(path, {
+      const response = await this.fetch(path, {
         method,
         headers,
         ...(body === undefined ? {} : { body: body instanceof Blob ? body : JSON.stringify(body) }),
         cache: "no-store",
         signal: signal ?? AbortSignal.timeout(this.timeoutMs),
       });
+      const identity = response.headers.get("X-Tend-Deployment-ID");
+      if (identity) this.acceptDeployment(identity);
+      return response;
     } catch (err) {
       if (!signal?.aborted) {
         // A caller that gave up learns nothing about the link.

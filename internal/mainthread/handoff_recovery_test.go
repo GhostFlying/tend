@@ -34,12 +34,12 @@ func assertCurrentRecoveredThread(t *testing.T, f *handoffFixture, target harnes
 	if !found || created.Config.OnToolCall == nil {
 		t.Fatal("recovered native thread lacks current tool definitions/handler")
 	}
-	if len(f.e.h.Starts()) != 0 {
+	if len(businessStarts(f.e.h)) != 0 {
 		t.Fatal("startup replayed an owner turn during recovery")
 	}
 }
 
-func TestSchemaStartupPreservesUnknownOldTurnWithoutReplay(t *testing.T) {
+func TestSchemaStartupWaitsForUnknownNativeReceiptWithoutReplay(t *testing.T) {
 	f := newHandoffFixture(t)
 	ctx := context.Background()
 	message := f.e.say("Owner request whose turn/start result was lost")
@@ -58,10 +58,9 @@ func TestSchemaStartupPreservesUnknownOldTurnWithoutReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	target, err := f.e.m.openManagedThread(ctx, f.session)
-	if err != nil {
-		t.Fatal(err)
+	if protocol.CodeOf(err) != protocol.CodeUnknownOutcome || target != nil {
+		t.Fatalf("unreconciled source migrated: %v %v", target, err)
 	}
-	assertCurrentRecoveredThread(t, f, target)
 	recorded, exists, err := f.e.app.MainTurn(ctx, requestID)
 	if err != nil || !exists || recorded.Status != store.TurnStarting || recorded.ThreadID != f.source.ID() || recorded.TurnID != "" {
 		t.Fatalf("uncertain old turn rewritten: %+v %v", recorded, err)
@@ -69,8 +68,9 @@ func TestSchemaStartupPreservesUnknownOldTurnWithoutReplay(t *testing.T) {
 	if f.e.count(`SELECT COUNT(*) FROM outbox WHERE request_id=? AND status='unknown' AND attempts=1`, requestID) != 1 {
 		t.Fatal("unknown delivery reset or replayed")
 	}
-	if target.ID() == f.source.ID() {
-		t.Fatal("unknown old turn prevented fresh-schema startup")
+	binding, _, err := f.e.app.MainThreadBinding(ctx, "main")
+	if err != nil || binding.ThreadID != f.source.ID() || len(businessStarts(f.e.h)) != 0 {
+		t.Fatalf("source replaced or execution replayed: %+v %v", binding, err)
 	}
 }
 

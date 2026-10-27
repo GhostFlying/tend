@@ -110,6 +110,10 @@ func TestMessageStatesFollowTheTurn(t *testing.T) {
 	id, d := h.say("hello")
 	turn := store.MainTurn{RequestID: d.RequestID, MessageID: id, ThreadID: "th-1"}
 	for _, status := range []string{store.TurnStarting, store.TurnStarted, store.TurnStarted, store.TurnCompleted} {
+		if status == store.TurnCompleted {
+			h.associate(mainAgent, id)
+			commitFixtureTurn(t, h, d.RequestID)
+		}
 		turn.Status = status
 		turn.TurnID = "turn-1"
 		if err := h.app.PutMainTurn(ctx, turn); err != nil {

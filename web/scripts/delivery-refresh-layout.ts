@@ -73,7 +73,12 @@ const server = await createServer({
           const path = new URL(req.url!, "http://fixture.invalid").pathname;
           if (!path.startsWith("/api/")) return next();
           if (path === "/api/v1/session")
-            return json(res, { token: "fixture", login: "owner", scope: "owner" });
+            return json(res, {
+              token: "fixture",
+              login: "owner",
+              scope: "owner",
+              deployment_id: "layout-fixture",
+            });
           if (path === "/api/v1/events") {
             res.writeHead(200, { "Content-Type": "text/event-stream" });
             res.write('event: start\ndata: {"event_seq":0}\n\n');

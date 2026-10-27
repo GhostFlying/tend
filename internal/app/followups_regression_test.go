@@ -69,6 +69,7 @@ func TestFollowupRegressionPeriodicClockRollbackResume(t *testing.T) {
 	r := h.followup(w, protocol.FollowupSpec{Kind: "every", EverySeconds: 300, ExpiresAt: h.clock.Now().Add(24 * time.Hour).UnixMilli()})
 	h.clock.Advance(5 * time.Minute)
 	h.sweepFollowups()
+	h.legacyMainBatches()
 	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -152,6 +153,7 @@ func TestFollowupManualOneTimeDoesNotScheduleAgain(t *testing.T) {
 	if op := h.controlFollowup(r, "trigger", nil); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	h.legacyMainBatches()
 	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
 	if err != nil || !ok {
 		t.Fatal(err, ok)

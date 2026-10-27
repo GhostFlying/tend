@@ -27,7 +27,6 @@ const maxBody = 1 << 20
 
 // Config configures the API. Zero values select the defaults.
 type Config struct {
-	BackgroundAgents bool
 	// Owners are the tailnet logins allowed to use the API.
 	Owners []string
 	// OwnerNodes maps nodes, by machine name or "tag:", to the owner whose
@@ -86,6 +85,7 @@ func New(a *app.App, s *store.Store, ts *tools.Service, cb *contextbuilder.Build
 // Handler returns the API's routes, all under /api/v1/.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/deployment", s.deployment)
 	mux.HandleFunc("POST /api/v1/session", s.createSession)
 	mux.HandleFunc("GET /api/v1/session", s.readSession)
 	mux.HandleFunc("POST /api/v1/ops", s.ops)
@@ -132,7 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/agent/hook", s.hook)
 	mux.HandleFunc("GET /api/v1/agent/tools", s.listTools)
 	mux.HandleFunc("POST /api/v1/agent/tools/{name}", s.callTool)
-	return mux
+	return s.deploymentGuard(mux)
 }
 
 var statusOf = map[protocol.Code]int{

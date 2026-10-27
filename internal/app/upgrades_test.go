@@ -31,7 +31,7 @@ func upgradeHarness(t *testing.T) (*harness, StartUpgrade) {
 			t.Fatal(op)
 		}
 	}
-	return h, StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: 44}, RunnerJournal: release.Range{Min: 9, Max: 9}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
+	return h, StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: 47}, RunnerJournal: release.Range{Min: 9, Max: 9}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
 }
 func startTestUpgrade(h *harness, id string, c StartUpgrade) protocol.Operation {
 	h.t.Helper()

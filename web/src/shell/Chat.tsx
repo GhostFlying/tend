@@ -19,8 +19,7 @@ import { ArrowDown } from "./icons.tsx";
 
 export function Chat({ connection, visible }: { connection: Connection; visible: boolean }) {
   const choice = useStore(theme);
-  const { conversation, agentsEnabled, openAgentDrawer, selectConversation, openWorkItem } =
-    useServices();
+  const { conversation, openAgentDrawer, selectConversation, openWorkItem } = useServices();
   const [jump, setJump] = useState(0);
   const toLatest = () => setJump((n) => n + 1);
 
@@ -32,7 +31,7 @@ export function Chat({ connection, visible }: { connection: Connection; visible:
           {conversation?.workItemID ? "工作项后台会话" : "一个会话，所有设备共享"}
         </span>
         <span className={styles.spacer} />
-        {agentsEnabled && (
+        {
           <nav aria-label="Agent 切换" className={styles.agentNav}>
             {conversation?.workItemID && (
               <button onClick={() => selectConversation?.("main")}>主 Agent</button>
@@ -44,7 +43,7 @@ export function Chat({ connection, visible }: { connection: Connection; visible:
               <button onClick={() => openWorkItem(conversation.workItemID!)}>工作项 ↗</button>
             )}
           </nav>
-        )}
+        }
         <Rollout />
         <button
           type="button"

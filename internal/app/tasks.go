@@ -17,6 +17,9 @@ func claimPlanCommit(ctx context.Context, x *Exec, tx *store.Tx, sourceMessageID
 	if sourceMessageID == "" {
 		return nil
 	}
+	if err := attachReviewSource(ctx, x, tx, sourceMessageID); err != nil {
+		return err
+	}
 	err := tx.InsertPlanCommit(ctx, sourceMessageID, seq, x.Env.RequestID, x.Now.UnixMilli())
 	if err == nil || !store.IsUniqueViolation(err) {
 		return err

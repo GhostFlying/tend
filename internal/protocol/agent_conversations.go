@@ -14,9 +14,9 @@ type AgentConversation struct {
 	Preview        string `json:"preview"`
 }
 type AgentConversationPage struct {
-	Enabled bool                `json:"enabled"`
-	Items   []AgentConversation `json:"items"`
-	Next    string              `json:"next,omitempty"`
+	RuntimeAvailable bool                `json:"runtime_available"`
+	Items            []AgentConversation `json:"items"`
+	Next             string              `json:"next,omitempty"`
 }
 type MessageWorkItem struct {
 	WorkItemID  string `json:"work_item_id"`
@@ -24,13 +24,27 @@ type MessageWorkItem struct {
 	Source      string `json:"source"`
 	OwnerLocked bool   `json:"owner_locked"`
 }
+type MessageProcessingState struct {
+	LogicalTurnID string `json:"logical_turn_id"`
+	Status        string `json:"status"`
+	Revision      int64  `json:"revision"`
+	Reason        string `json:"reason"`
+}
+
 type MessageAssociations struct {
-	MessageID string            `json:"message_id"`
-	Revision  int64             `json:"revision"`
-	Items     []MessageWorkItem `json:"items"`
+	Processing      *MessageProcessingState `json:"processing,omitempty"`
+	Disposition     string                  `json:"disposition"`
+	ContentRevision int64                   `json:"content_revision"`
+	FactsReviewed   bool                    `json:"facts_reviewed"`
+	OwnerLocked     bool                    `json:"owner_locked"`
+	MessageID       string                  `json:"message_id"`
+	Revision        int64                   `json:"revision"`
+	Items           []MessageWorkItem       `json:"items"`
 }
 type SetMessageAssociationsPayload struct {
-	WorkItemIDs []string `json:"work_item_ids"`
+	Disposition     string   `json:"disposition"`
+	ContentRevision int64    `json:"content_revision"`
+	WorkItemIDs     []string `json:"work_item_ids"`
 }
 type ContextFact struct {
 	ID              string `json:"fact_id"`
@@ -45,6 +59,8 @@ type ContextFact struct {
 	NeedsReview     bool   `json:"needs_review"`
 }
 type WorkItemContext struct {
+	SyncStatus string             `json:"sync_status"`
+	Watermark  int64              `json:"watermark"`
 	WorkItemID string             `json:"work_item_id"`
 	Revision   int64              `json:"revision"`
 	Prepared   bool               `json:"prepared"`
@@ -56,8 +72,10 @@ type WorkItemContext struct {
 	Next       int64              `json:"next,omitempty"`
 }
 type PrepareWorkItemContextPayload struct {
-	Coverage string `json:"coverage"`
-	Gaps     string `json:"gaps"`
+	RetiredFactIDs   []string `json:"retired_fact_ids,omitempty"`
+	ConfirmedFactIDs []string `json:"confirmed_fact_ids,omitempty"`
+	Coverage         string   `json:"coverage"`
+	Gaps             string   `json:"gaps"`
 }
 type BackgroundAssessmentPayload struct {
 	ContextRevision int64    `json:"context_revision"`
@@ -126,4 +144,44 @@ type AgentRolloutWindow struct {
 	Text string `json:"text"`
 	Next int64  `json:"next"`
 	More bool   `json:"more"`
+}
+
+// LogicalTurnReview identifies the exact persisted versions reviewed by the agent.
+type LogicalTurnReview struct {
+	MessageID           string `json:"message_id"`
+	ContentRevision     int64  `json:"content_revision"`
+	AssociationRevision int64  `json:"association_revision"`
+}
+type LogicalTurnCommit struct {
+	Messages []LogicalTurnReview    `json:"messages"`
+	Contexts []LogicalContextReview `json:"contexts"`
+}
+type LogicalContextReview struct {
+	WorkItemID string `json:"work_item_id"`
+	Revision   int64  `json:"revision"`
+}
+type LogicalTurnState struct {
+	Awaiting       []PendingClarification `json:"awaiting"`
+	ID             string                 `json:"logical_turn_id"`
+	Status         string                 `json:"status"`
+	Reason         string                 `json:"reason"`
+	RepairAttempts int                    `json:"repair_attempts"`
+	Messages       []MessageAssociations  `json:"messages"`
+	Contexts       []LogicalContextReview `json:"contexts"`
+}
+
+type TurnClarification struct {
+	Question string `json:"question"`
+}
+
+// PendingClarification identifies an unfinished responsibility without copying history.
+type PendingClarification struct {
+	LogicalTurnID string `json:"logical_turn_id"`
+	MessageID     string `json:"message_id"`
+	Revision      int64  `json:"revision"`
+	Question      string `json:"question"`
+}
+type AdoptClarificationPayload struct {
+	LogicalTurnID string `json:"logical_turn_id"`
+	Revision      int64  `json:"expected_control_revision"`
 }

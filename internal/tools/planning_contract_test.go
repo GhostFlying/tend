@@ -139,7 +139,7 @@ func TestPlanningTaskCorrectionPreservesPlanAndCreatesOnlyOnce(t *testing.T) {
 		{StageID: "design", Title: "Design", Status: "planned"},
 		{StageID: "review", Title: "Independent review", Status: "planned", DependsOn: []string{"design"}},
 	}}
-	created := e.call("work_items_create", workItemCreateArgs{Plan: plan, CommitSeq: 1, Reason: "Preserve the full concern"}, "")
+	created := e.call("work_items_create", workItemCreateArgs{InitialContext: initialFixtureContext(), Plan: plan, CommitSeq: 1, Reason: "Preserve the full concern"}, "")
 	if !created.OK {
 		t.Fatal(created.Error)
 	}

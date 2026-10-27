@@ -29,12 +29,13 @@ func TestBackgroundRecoveryWaitsForStartupSettlement(t *testing.T) {
 		if err := tx.PutMainTurn(t.Context(), store.MainTurn{RequestID: "bg-request", MessageID: "bg-message", ThreadID: "old-thread", TurnID: "old-turn", Status: store.TurnStarted}, 0); err != nil {
 			return err
 		}
-		return tx.InsertOutbox(t.Context(), store.OutboxRow{OutboxID: "bg-outbox", RequestID: "bg-request", Destination: store.ConversationDestination(id), Operation: app.OpHandleMessage, PayloadJSON: `{"message_id":"bg-message"}`})
+		if err := tx.InsertOutbox(t.Context(), store.OutboxRow{OutboxID: "bg-outbox", RequestID: "bg-request", Destination: store.ConversationDestination(id), Operation: app.OpHandleMessage, PayloadJSON: `{"message_id":"bg-message"}`}); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE outbox SET status='sending',attempts=1 WHERE outbox_id='bg-outbox'`)
+		return err
 	}); err != nil {
 		t.Fatal(err)
-	}
-	if _, _, ok, err := e.app.NextDelivery(t.Context(), store.ConversationDestination(id)); err != nil || !ok {
-		t.Fatal(ok, err)
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
 	m := New(e.app, e.m.context, e.m.tools, Config{Instance: "background-recovery", ConversationID: id, Log: quiet(), Open: func(ctx context.Context) (harness.Session, error) {

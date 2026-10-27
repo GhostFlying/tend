@@ -56,29 +56,29 @@ func TestSettingsUseResolvedDefaultsAndApplyOnlyToNextTurn(t *testing.T) {
 		t.Fatalf("set while processing = %+v, %v", op, err)
 	}
 	e.say("queued while first is running")
-	starts := h.Starts()
+	starts := businessStarts(h)
 	if len(starts) != 1 || starts[0].Model != "raw-a" || starts[0].Effort != "medium" || starts[0].ModelProvider != "provider-a" {
 		t.Fatalf("running turn changed: %+v", starts)
 	}
 	once.Do(func() { close(release) })
 	eventually(t, "both turns complete", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 2
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 2
 	})
-	starts = h.Starts()
+	starts = businessStarts(h)
 	if len(starts) != 2 || starts[1].Model != "raw-b" || starts[1].ModelProvider != "provider-b" || starts[1].Effort != "high" {
 		t.Fatalf("next turn settings = %+v", starts)
 	}
-	if e.count(`SELECT COUNT(*) FROM main_turns WHERE model = 'raw-a' AND effort = 'medium' AND settings_revision = 0`) != 1 ||
-		e.count(`SELECT COUNT(*) FROM main_turns WHERE model = 'raw-b' AND model_provider = 'provider-b' AND effort = 'high' AND settings_revision = 1`) != 1 {
+	if e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND model = 'raw-a' AND effort = 'medium' AND settings_revision = 0`) != 1 ||
+		e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND model = 'raw-b' AND model_provider = 'provider-b' AND effort = 'high' AND settings_revision = 1`) != 1 {
 		t.Fatal("turns did not preserve their actual model settings")
 	}
 	e.stop()
 	e.start()
 	e.say("after restart")
 	eventually(t, "resumed thread uses persisted settings", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed' AND model = 'raw-b' AND settings_revision = 1`) == 2
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed' AND model = 'raw-b' AND settings_revision = 1`) == 2
 	})
-	if starts = h.Starts(); len(starts) != 3 || starts[2].Model != "raw-b" || starts[2].Effort != "high" {
+	if starts = businessStarts(h); len(starts) != 3 || starts[2].Model != "raw-b" || starts[2].Effort != "high" {
 		t.Fatalf("restarted model settings = %+v", starts)
 	}
 }

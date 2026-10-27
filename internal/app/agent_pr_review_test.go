@@ -9,7 +9,6 @@ import (
 
 func TestReviewStaleAssessmentWakesMainOnce(t *testing.T) {
 	h := newHarness(t)
-	WithBackgroundAgents(true)(h.app)
 	w := h.createWork(workPlan())
 	h.prepareAgent(w.WorkItemID)
 	h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
@@ -18,6 +17,7 @@ func TestReviewStaleAssessmentWakesMainOnce(t *testing.T) {
 	if op.Status != protocol.OpAccepted {
 		t.Fatal(op)
 	}
+	h.reviewBackgroundOwnerNotices()
 	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(id))
 	if err != nil || !ok {
 		t.Fatal(ok, err)

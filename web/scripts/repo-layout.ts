@@ -201,6 +201,7 @@ const server = await createServer({
 
           const views: Record<string, unknown> = {
             "/api/v1/session": {
+              deployment_id: "layout-fixture",
               login: "owner@example.com",
               scope: "owner",
               client_id: "sample-browser",

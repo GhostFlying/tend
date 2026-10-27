@@ -93,7 +93,7 @@ func TestDistinctManualHandoffRefusesUnknownIntentAndUnblocksOwnerChat(t *testin
 		return f.e.count(`SELECT COUNT(*) FROM outbox WHERE request_id=? AND status='failed'`, second) == 1
 	})
 	eventually(t, "following owner chat completes", func() bool {
-		return f.e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND status='completed'`, message) == 1
+		return f.e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND message_id=? AND status='completed'`, message) == 1
 	})
 	after, _, _ := f.session.counts()
 	if before != after {
@@ -106,7 +106,7 @@ func TestDistinctManualHandoffRefusesUnknownIntentAndUnblocksOwnerChat(t *testin
 	if f.e.count(`SELECT COUNT(*) FROM main_thread_handoffs`) != 1 || f.e.count(`SELECT COUNT(*) FROM outbox WHERE request_id=? AND status='unknown'`, first) != 1 {
 		t.Fatal("distinct manual request replaced/retried the unknown intent")
 	}
-	if len(f.e.h.Starts()) != 1 {
+	if len(businessStarts(f.e.h)) != 1 {
 		t.Fatal("maintenance request started an owner turn or replayed chat")
 	}
 }
@@ -120,7 +120,7 @@ func TestHistoricalUnknownDoesNotBlockFreshSourceManualOrIdleSummary(t *testing.
 	if err != nil || !ok {
 		t.Fatalf("claim owner delivery: %v %v", ok, err)
 	}
-	if err := f.e.app.PutMainTurn(ctx, store.MainTurn{RequestID: delivery.RequestID, MessageID: message, ThreadID: f.source.ID(), Status: store.TurnStarting}); err != nil {
+	if err := f.e.app.PutMainTurn(ctx, store.MainTurn{RequestID: delivery.RequestID, MessageID: message, ThreadID: "legacy-ancestor", Status: store.TurnStarting}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.e.app.FinishDelivery(ctx, delivery, app.DeliveryResult{Outcome: app.Unknown, Reason: "start response lost; old native session closed"}); err != nil {
@@ -191,10 +191,10 @@ func TestHistoricalUnknownDoesNotBlockFreshSourceManualOrIdleSummary(t *testing.
 		t.Fatalf("summary coverage not current %+v %v", summary, err)
 	}
 	recorded, exists, err := f.e.app.MainTurn(ctx, delivery.RequestID)
-	if err != nil || !exists || recorded.Status != store.TurnStarting || recorded.ThreadID != f.source.ID() {
+	if err != nil || !exists || recorded.Status != store.TurnStarting || recorded.ThreadID != "legacy-ancestor" {
 		t.Fatalf("historical unknown turn changed %+v %v", recorded, err)
 	}
-	if f.e.count(`SELECT COUNT(*) FROM outbox WHERE request_id=? AND status='unknown' AND attempts=1`, delivery.RequestID) != 1 || len(f.e.h.Starts()) != 0 {
+	if f.e.count(`SELECT COUNT(*) FROM outbox WHERE request_id=? AND status='unknown' AND attempts=1`, delivery.RequestID) != 1 || len(businessStarts(f.e.h)) != 0 {
 		t.Fatal("historical unknown delivery was reset or replayed")
 	}
 	full, err := f.e.app.HandoffSummaryInput(ctx, "main", 256<<10)

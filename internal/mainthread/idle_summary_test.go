@@ -201,7 +201,9 @@ func TestIdleSummaryAllowsOwnerDeliveryAndRetainsStaleResult(t *testing.T) {
 		t.Fatal("overlapping maintenance created another summary fork")
 	}
 	f.e.say("New owner message during private summary")
-	eventually(t, "owner turn completes before summary", func() bool { return f.e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed'`) == 1 })
+	eventually(t, "owner turn completes before summary", func() bool {
+		return f.e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
+	})
 	select {
 	case err := <-finished:
 		t.Fatalf("summary ended before release: %v", err)
@@ -227,7 +229,7 @@ func TestIdleSummaryAllowsOwnerDeliveryAndRetainsStaleResult(t *testing.T) {
 	if summary.Snapshot.Covers(current) {
 		t.Fatal("summary from before owner activity marked current")
 	}
-	if len(f.e.h.Starts()) != 1 {
+	if len(businessStarts(f.e.h)) != 1 {
 		t.Fatal("private summary turn appeared in source harness")
 	}
 	if f.e.count(`SELECT COUNT(*) FROM conversation_messages WHERE body LIKE '%Snapshot taken before%'`) > 0 {

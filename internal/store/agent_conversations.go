@@ -31,7 +31,7 @@ func MessageConversation(ctx context.Context, q Querier, id string) (string, err
 	return v, nil
 }
 
-const agentConversationQuery = `SELECT c.conversation_id AS conversation_id,COALESCE(c.work_item_id,''),COALESCE(json_extract(w.body_json,'$.title'),'主 Agent') AS title,c.revision,c.model,c.effort,c.last_message_seq,COALESCE(m.created_at,0),COALESCE(substr(m.body,1,160),''),CASE WHEN w.status='closed' THEN 'archived' WHEN EXISTS(SELECT 1 FROM main_turns t JOIN conversation_messages x ON x.message_id=t.message_id WHERE x.conversation_id=c.conversation_id AND t.status='started') THEN 'running' WHEN EXISTS(SELECT 1 FROM outbox o WHERE o.destination=CASE WHEN c.conversation_id='main' THEN 'main_thread' ELSE 'background_thread:'||c.conversation_id END AND o.status IN ('unknown','sending')) THEN 'attention' WHEN EXISTS(SELECT 1 FROM outbox o WHERE o.destination=CASE WHEN c.conversation_id='main' THEN 'main_thread' ELSE 'background_thread:'||c.conversation_id END AND o.status='pending') THEN 'queued' ELSE 'idle' END AS status FROM agent_conversations c LEFT JOIN work_items w ON w.work_item_id=c.work_item_id LEFT JOIN conversation_messages m ON m.seq=c.last_message_seq`
+const agentConversationQuery = `SELECT c.conversation_id AS conversation_id,COALESCE(c.work_item_id,''),COALESCE(json_extract(w.body_json,'$.title'),'主 Agent') AS title,c.revision,c.model,c.effort,c.last_message_seq,COALESCE(m.created_at,0),COALESCE(substr(m.body,1,160),''),CASE WHEN w.status='closed' THEN 'archived' WHEN c.work_item_id IS NOT NULL AND EXISTS(SELECT 1 FROM work_item_contexts wc WHERE wc.work_item_id=c.work_item_id AND wc.baseline_revision=0) THEN 'initializing' WHEN EXISTS(SELECT 1 FROM main_turns t JOIN conversation_messages x ON x.message_id=t.message_id WHERE x.conversation_id=c.conversation_id AND t.status='started') THEN 'running' WHEN EXISTS(SELECT 1 FROM outbox o WHERE o.destination=CASE WHEN c.conversation_id='main' THEN 'main_thread' ELSE 'background_thread:'||c.conversation_id END AND o.status IN ('unknown','sending')) THEN 'attention' WHEN EXISTS(SELECT 1 FROM outbox o WHERE o.destination=CASE WHEN c.conversation_id='main' THEN 'main_thread' ELSE 'background_thread:'||c.conversation_id END AND o.status='pending') THEN 'queued' ELSE 'idle' END AS status FROM agent_conversations c LEFT JOIN work_items w ON w.work_item_id=c.work_item_id LEFT JOIN conversation_messages m ON m.seq=c.last_message_seq`
 
 func scanAgentConversation(row interface{ Scan(...any) error }) (protocol.AgentConversation, error) {
 	var v protocol.AgentConversation
@@ -80,9 +80,20 @@ func AgentConversations(ctx context.Context, q Querier, search, status, cursor s
 }
 func MessageAssociations(ctx context.Context, q Querier, id string) (protocol.MessageAssociations, error) {
 	out := protocol.MessageAssociations{MessageID: id, Items: []protocol.MessageWorkItem{}}
-	err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT revision FROM message_association_revisions WHERE message_id=m.message_id),0) FROM conversation_messages m WHERE message_id=?`, id).Scan(&out.Revision)
+	err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT revision FROM message_association_revisions WHERE message_id=m.message_id),0),COALESCE(d.disposition,'pending'),COALESCE(d.content_revision,1),COALESCE(d.facts_revision=d.content_revision,0),COALESCE(d.owner_locked,0) FROM conversation_messages m LEFT JOIN message_dispositions d ON d.message_id=m.message_id WHERE m.message_id=?`, id).Scan(&out.Revision, &out.Disposition, &out.ContentRevision, &out.FactsReviewed, &out.OwnerLocked)
 	if err != nil {
 		return out, notFound(err, "message")
+	}
+	var processing protocol.MessageProcessingState
+	var hasProcessing bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_messages WHERE message_id=?)`, id).Scan(&hasProcessing); err != nil {
+		return out, err
+	}
+	if hasProcessing {
+		if err := q.QueryRowContext(ctx, `SELECT l.logical_turn_id,l.status,l.revision,l.reason FROM logical_turns l JOIN logical_turn_messages m ON m.logical_turn_id=l.logical_turn_id WHERE m.message_id=? ORDER BY l.updated_at DESC,l.rowid DESC LIMIT 1`, id).Scan(&processing.LogicalTurnID, &processing.Status, &processing.Revision, &processing.Reason); err != nil {
+			return out, err
+		}
+		out.Processing = &processing
 	}
 	rows, err := q.QueryContext(ctx, `SELECT a.work_item_id,json_extract(w.body_json,'$.title'),a.source,a.owner_locked FROM message_work_items a JOIN work_items w ON w.work_item_id=a.work_item_id WHERE a.message_id=? AND a.active=1 ORDER BY a.work_item_id`, id)
 	if err != nil {

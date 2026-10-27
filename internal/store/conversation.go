@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // Conversation item kinds: a message, or a tool use of the main agent
@@ -74,6 +75,16 @@ func HasMessageTurnOperation(ctx context.Context, q Querier, messageID, operatio
 // BindMessage ties a message to an object it concerns. Binding twice is a
 // no-op.
 func (t *Tx) BindMessage(ctx context.Context, messageID, objectType, objectID, kind string) error {
+	if objectType == "work_item" {
+		var blocked bool
+		if err := t.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM message_dispositions d WHERE d.message_id=? AND d.owner_locked=1 AND NOT EXISTS(SELECT 1 FROM message_work_items a WHERE a.message_id=d.message_id AND a.work_item_id=? AND a.active=1))`, messageID, objectID).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "owner message classification cannot be overridden by a business binding")
+		}
+	}
+
 	_, err := t.Exec(ctx, `INSERT INTO conversation_bindings (message_id, object_type, object_id, kind) VALUES (?, ?, ?, ?)
 		ON CONFLICT DO NOTHING`, messageID, objectType, objectID, kind)
 	if err != nil {
@@ -116,6 +127,7 @@ const (
 
 // MainTurn is a delivery of a message to the front thread.
 type MainTurn struct {
+	NativeReconciled             bool // Set only after reading the exact native execution history.
 	RequestID                    string
 	MessageID                    string
 	ThreadID                     string

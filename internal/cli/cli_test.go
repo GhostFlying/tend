@@ -120,7 +120,7 @@ func TestLoginKeepsTheClientID(t *testing.T) {
 	f.on("POST /api/v1/session", func(w http.ResponseWriter, _ *http.Request, body []byte) {
 		var req protocol.SessionRequest
 		_ = json.Unmarshal(body, &req)
-		_ = json.NewEncoder(w).Encode(protocol.SessionView{Login: "me@example.com", ClientID: req.ClientID, Scope: req.Scope, Token: string(req.Scope) + "-token", ExpiresAt: time.Now()})
+		_ = json.NewEncoder(w).Encode(protocol.SessionView{DeploymentID: "deployment-test", Login: "me@example.com", ClientID: req.ClientID, Scope: req.Scope, Token: string(req.Scope) + "-token", ExpiresAt: time.Now()})
 	})
 	te := newTestEnv(t, "")
 	if code := te.main("login"); code != exitUsage {

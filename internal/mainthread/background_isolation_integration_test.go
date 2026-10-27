@@ -157,6 +157,10 @@ func probeBackgroundToolIsolation(t *testing.T, diagnostic bool) {
 	mu.Lock()
 	defer mu.Unlock()
 	if !diagnostic && (len(requests) != 4 || calls != 2) {
+		for i, r := range requests {
+			raw, _ := json.Marshal(r["input"])
+			t.Logf("request %d input: %s", i, raw)
+		}
 		t.Fatalf("requests=%d dynamic calls=%d; start and resume must both complete tool calls", len(requests), calls)
 	}
 	if diagnostic && len(requests) != 2 {

@@ -54,6 +54,7 @@ type Candidate struct {
 	// DependenciesDone reports that every task this one depends on is
 	// completed.
 	DependenciesDone bool
+	ContextPending   bool
 	// DependencyTaskID optionally identifies an unfinished prerequisite for views.
 	// It does not change eligibility; DependenciesDone remains authoritative.
 	DependencyTaskID string
@@ -147,6 +148,8 @@ func HeldReason(c Candidate) *protocol.QueueWaitReason {
 		return waitReason(protocol.QueueTaskBlocked, "task is not managed")
 	case c.Block != protocol.BlockNone:
 		return waitReason(protocol.QueueTaskBlocked, "task is blocked")
+	case c.ContextPending:
+		return waitReason(protocol.QueueTaskBlocked, "work item context review is incomplete")
 	case !c.DependenciesDone:
 		return waitReason(protocol.QueueDependency, "dependencies are not completed")
 	case c.Kind == protocol.ActionImplement && c.Generation != c.ImplementGeneration:

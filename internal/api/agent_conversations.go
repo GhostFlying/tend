@@ -11,7 +11,7 @@ import (
 func (s *Server) agentConversations(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
 		v, err := store.AgentConversations(r.Context(), q, r.URL.Query().Get("search"), r.URL.Query().Get("status"), r.URL.Query().Get("after"), 30)
-		v.Enabled = s.cfg.BackgroundAgents
+		v.RuntimeAvailable = s.cfg.HostedMainAgent
 		return v, err
 	})
 }

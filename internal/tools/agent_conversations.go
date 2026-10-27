@@ -9,20 +9,26 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
+type turnReadArgs struct{}
+
 type associateArgs struct {
-	MessageID   string   `json:"message_id"`
-	Revision    int64    `json:"expected_control_revision"`
-	WorkItemIDs []string `json:"work_item_ids"`
+	Disposition     string   `json:"disposition"`
+	ContentRevision int64    `json:"content_revision"`
+	MessageID       string   `json:"message_id"`
+	Revision        int64    `json:"expected_control_revision"`
+	WorkItemIDs     []string `json:"work_item_ids"`
 }
 type contextReadArgs struct {
 	WorkItemID string `json:"work_item_id"`
 	After      int64  `json:"after,omitempty"`
 }
 type contextPrepareArgs struct {
-	WorkItemID string `json:"work_item_id"`
-	Revision   int64  `json:"expected_control_revision"`
-	Coverage   string `json:"coverage"`
-	Gaps       string `json:"gaps"`
+	RetiredFactIDs   []string `json:"retired_fact_ids,omitempty"`
+	ConfirmedFactIDs []string `json:"confirmed_fact_ids,omitempty"`
+	WorkItemID       string   `json:"work_item_id"`
+	Revision         int64    `json:"expected_control_revision"`
+	Coverage         string   `json:"coverage"`
+	Gaps             string   `json:"gaps"`
 }
 type contextFactArgs struct {
 	WorkItemID string               `json:"work_item_id"`
@@ -48,7 +54,7 @@ func (s *Service) associate(ctx context.Context, c Call) (any, error) {
 		return nil, err
 	}
 	cmd := app.SetMessageAssociations{}
-	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "message", ID: p.MessageID}, &p.Revision, "", protocol.SetMessageAssociationsPayload{WorkItemIDs: p.WorkItemIDs}, cmd)
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "message", ID: p.MessageID}, &p.Revision, "", protocol.SetMessageAssociationsPayload{WorkItemIDs: p.WorkItemIDs, Disposition: p.Disposition, ContentRevision: p.ContentRevision}, cmd)
 }
 func (s *Service) contextRead(ctx context.Context, c Call) (any, error) {
 	var p contextReadArgs
@@ -75,7 +81,7 @@ func (s *Service) contextPrepare(ctx context.Context, c Call) (any, error) {
 		return nil, err
 	}
 	cmd := app.ContextCommand{Action: "prepare"}
-	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "work_item", ID: p.WorkItemID}, &p.Revision, "", protocol.PrepareWorkItemContextPayload{Coverage: p.Coverage, Gaps: p.Gaps}, cmd)
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "work_item", ID: p.WorkItemID}, &p.Revision, "", protocol.PrepareWorkItemContextPayload{Coverage: p.Coverage, Gaps: p.Gaps, RetiredFactIDs: p.RetiredFactIDs, ConfirmedFactIDs: p.ConfirmedFactIDs}, cmd)
 }
 func (s *Service) contextFact(ctx context.Context, c Call) (any, error) {
 	var p contextFactArgs
@@ -251,4 +257,34 @@ func (s *Service) backgroundEvidence(ctx context.Context, c Call) (any, error) {
 		return window, nil
 	}
 	return out, nil
+}
+
+func (s *Service) turnRead(ctx context.Context, c Call) (any, error) {
+	return s.app.LogicalTurn(ctx, c.ParentRequestID)
+}
+func (s *Service) turnCommit(ctx context.Context, c Call) (any, error) {
+	var p protocol.LogicalTurnCommit
+	if err := decode(c.Arguments, &p); err != nil {
+		return nil, err
+	}
+	cmd := app.CommitLogicalTurn{RequestID: c.ParentRequestID}
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: c.ParentRequestID}, nil, "", p, cmd)
+}
+
+func (s *Service) turnWait(ctx context.Context, c Call) (any, error) {
+	var p protocol.TurnClarification
+	if err := decode(c.Arguments, &p); err != nil {
+		return nil, err
+	}
+	cmd := app.AwaitTurnClarification{RequestID: c.ParentRequestID}
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: c.ParentRequestID}, nil, "", p, cmd)
+}
+
+func (s *Service) turnAdopt(ctx context.Context, c Call) (any, error) {
+	var p protocol.AdoptClarificationPayload
+	if err := decode(c.Arguments, &p); err != nil {
+		return nil, err
+	}
+	cmd := app.AdoptClarification{RequestID: c.ParentRequestID}
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: p.LogicalTurnID}, &p.Revision, "", p, cmd)
 }

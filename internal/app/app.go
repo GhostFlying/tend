@@ -35,14 +35,13 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
-	BackgroundAgentsEnabled bool
-	FollowupsEnabled        bool
-	FollowupQueued          bool
-	Env                     *protocol.Envelope
-	Principal               protocol.Principal
-	TraceID                 string
-	Now                     time.Time
-	IDs                     protocol.IDGen
+	FollowupsEnabled bool
+	FollowupQueued   bool
+	Env              *protocol.Envelope
+	Principal        protocol.Principal
+	TraceID          string
+	Now              time.Time
+	IDs              protocol.IDGen
 	// LeaseTTL is the lease duration of runs allocated by this request.
 	LeaseTTL time.Duration
 	// WaitPerHour is what an hour in the queue adds to an action's score
@@ -91,26 +90,21 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
-	backgroundAgentsEnabled bool
-	followupsEnabled        bool
-	observeDeployment       func(context.Context) (protocol.ObservedDeployment, error)
-	store                   *store.Store
-	ids                     protocol.IDGen
-	now                     func() time.Time
-	notifier                Notifier
-	changes                 *Broadcast
-	logs                    *Broadcast
-	leaseTTL                time.Duration
-	waitPer                 float64
-	hostLost                time.Duration
+	followupsEnabled  bool
+	observeDeployment func(context.Context) (protocol.ObservedDeployment, error)
+	store             *store.Store
+	ids               protocol.IDGen
+	now               func() time.Time
+	notifier          Notifier
+	changes           *Broadcast
+	logs              *Broadcast
+	leaseTTL          time.Duration
+	waitPer           float64
+	hostLost          time.Duration
 }
 
 // Option configures an App.
 type Option func(*App)
-
-func WithBackgroundAgents(enabled bool) Option {
-	return func(a *App) { a.backgroundAgentsEnabled = enabled }
-}
 
 // WithNotifier makes the App notify n after committing outbox messages.
 func WithNotifier(n Notifier) Option {
@@ -164,7 +158,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{BackgroundAgentsEnabled: a.backgroundAgentsEnabled, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	if x.TraceID == "" {
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}
@@ -268,6 +262,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		return fmt.Errorf("app: encode principal: %w", err)
 	}
 	for _, e := range out.Events {
+		if x.Env.ParentRequestID != "" {
+			if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_contexts(logical_turn_id,work_item_id) SELECT le.logical_turn_id,w.work_item_id FROM logical_turn_executions le JOIN work_items w ON ((?='work_item' AND w.work_item_id=?) OR (?='task' AND EXISTS(SELECT 1 FROM work_item_task_links wl WHERE wl.work_item_id=w.work_item_id AND wl.task_id=?))) WHERE le.request_id=? ON CONFLICT(logical_turn_id,work_item_id) DO NOTHING`, e.ObjectType, e.ObjectID, e.ObjectType, e.ObjectID, x.Env.ParentRequestID); err != nil {
+				return err
+			}
+		}
 		body, err := json.Marshal(e.Body)
 		if err != nil {
 			return fmt.Errorf("app: encode event: %w", err)

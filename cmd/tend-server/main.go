@@ -94,7 +94,6 @@ type config struct {
 // optional.
 type mainAgentConfig struct {
 	ConversationID        string `json:"-"`
-	BackgroundAgents      bool   `json:"background_agents"`
 	BackgroundConcurrency int    `json:"background_concurrency"`
 	// Instance names the main agent; default "main".
 	Instance string `json:"instance"`
@@ -182,7 +181,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		return err
 	}
 	opts = append(opts, observationOption)
-	opts = append(opts, app.WithFollowups(cfg.MainAgent != nil), app.WithBackgroundAgents(cfg.MainAgent != nil && cfg.MainAgent.BackgroundAgents))
+	opts = append(opts, app.WithFollowups(cfg.MainAgent != nil))
 	a := app.New(s, ids, time.Now, opts...)
 	if err := syncConfig(ctx, a, ids, cfg); err != nil {
 		return err
@@ -254,7 +253,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		handlers[app.MainThreadControlDestination] = front.Control()
 		log.Info("running the hosted main agent", "instance", cfg.MainAgent.Instance)
 	}
-	if cfg.MainAgent != nil && cfg.MainAgent.BackgroundAgents {
+	if cfg.MainAgent != nil {
 		background = &mainthread.BackgroundPool{App: a, Front: front, Limit: cfg.MainAgent.BackgroundConcurrency, New: func(id string) (*mainthread.Manager, error) {
 			c := *cfg.MainAgent
 			c.Instance = cfg.MainAgent.Instance + "/" + id
@@ -273,7 +272,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	ownerConfig := api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil, BackgroundAgents: background != nil}
+	ownerConfig := api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
 		ownerConfig.ConversationHandoff = front.HandoffStatus

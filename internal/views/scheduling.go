@@ -43,6 +43,19 @@ func ApplyWorkItemDependencies(ctx context.Context, q store.Querier, candidates 
 			return err
 		}
 		for _, item := range items {
+			// Only registered new-message responsibility gates dispatch; historical
+			// tasks without a D112 classification are not backfilled.
+			var tracked bool
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM message_context_obligations WHERE work_item_id=?) OR EXISTS(SELECT 1 FROM logical_turn_contexts WHERE work_item_id=?)`, item.WorkItemID, item.WorkItemID).Scan(&tracked); err != nil {
+				return err
+			}
+			if tracked {
+				ready, err := store.WorkItemContextReady(ctx, q, item.WorkItemID)
+				if err != nil {
+					return err
+				}
+				c.ContextPending = c.ContextPending || !ready
+			}
 			if item.Status != "open" {
 				c.DependenciesDone = false
 				continue

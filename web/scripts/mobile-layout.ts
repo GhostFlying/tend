@@ -70,7 +70,12 @@ const server = createServer(async (req, res) => {
   };
   if (path.startsWith("/api/")) reads.push(url.pathname + url.search);
   if (path === "/api/v1/session")
-    return json({ token: "fixture-token", login: "Example owner", scope: "owner" });
+    return json({
+      token: "fixture-token",
+      login: "Example owner",
+      scope: "owner",
+      deployment_id: "layout-fixture",
+    });
   if (path === "/api/v1/repos") return json({ repos: [] });
   if (path === "/api/v1/work-items") {
     const fixture = workItemPage(url.searchParams.get("project") || "sample");

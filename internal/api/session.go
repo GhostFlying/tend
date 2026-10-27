@@ -159,7 +159,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := token{Login: login, ClientID: req.ClientID, Scope: req.Scope, Issued: s.cfg.Now().UnixMilli()}
-	writeJSON(w, http.StatusOK, protocol.SessionView{
+	writeJSON(w, http.StatusOK, protocol.SessionView{DeploymentID: w.Header().Get(deploymentHeader),
 		Login: login, ClientID: v.ClientID, Scope: v.Scope, ExpiresAt: s.expires(v), Token: s.sign(v),
 	})
 }
@@ -172,7 +172,7 @@ func (s *Server) readSession(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, protocol.SessionView{Login: v.Login, ClientID: v.ClientID, Scope: v.Scope, ExpiresAt: s.expires(v)})
+	writeJSON(w, http.StatusOK, protocol.SessionView{DeploymentID: w.Header().Get(deploymentHeader), Login: v.Login, ClientID: v.ClientID, Scope: v.Scope, ExpiresAt: s.expires(v)})
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) error {

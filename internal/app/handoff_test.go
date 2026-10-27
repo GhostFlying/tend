@@ -92,6 +92,8 @@ func TestHandoffCoverageIncludesInPlaceMessagesToolsAndTurns(t *testing.T) {
 	if !active.Active {
 		t.Fatal("active turn omitted")
 	}
+	h.associate(mainAgent, msg.MessageID)
+	commitFixtureTurn(t, h, "request-turn")
 	if err := h.app.PutMainTurn(ctx, store.MainTurn{RequestID: "request-turn", MessageID: msg.MessageID, ThreadID: "source", TurnID: "turn-1", Status: store.TurnCompleted}); err != nil {
 		t.Fatal(err)
 	}

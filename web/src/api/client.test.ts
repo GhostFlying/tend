@@ -23,7 +23,7 @@ class FakeTend {
   tokens = 0;
   valid = new Set<string>();
   owner = true;
-  handle: Handler = () => json(200, {});
+  handle: Handler = () => json(200, { deployment_id: "deployment-test" });
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const headers = new Headers(init?.headers);
@@ -46,6 +46,7 @@ class FakeTend {
         login: "owner@example",
         client_id: "c",
         scope: "owner",
+        deployment_id: "deployment-test",
         expires_at: "",
         token,
       });
@@ -133,7 +134,13 @@ describe("ApiClient", () => {
   test("connect reports the owner", async () => {
     tend.handle = (c) =>
       c.path === "/api/v1/session"
-        ? json(200, { login: "owner@example", client_id: "c", scope: "owner", expires_at: "" })
+        ? json(200, {
+            login: "owner@example",
+            client_id: "c",
+            scope: "owner",
+            deployment_id: "deployment-test",
+            expires_at: "",
+          })
         : json(404, {});
     expect(client.connection.get()).toEqual({ status: "connecting" });
     await client.connect();
@@ -331,7 +338,8 @@ test("superseding a read after headers does not mark the healthy shared connecti
   const api = new ApiClient({
     storage,
     fetch: async (path, init) => {
-      if (String(path) === "/api/v1/session") return json(200, { login: "owner" });
+      if (String(path) === "/api/v1/session")
+        return json(200, { login: "owner", deployment_id: "deployment-test" });
       if (!first) return json(200, { repos: [{ repo: "replacement" }] });
       first = false;
       const stream = new ReadableStream<Uint8Array>({
@@ -367,4 +375,30 @@ test("superseding a read after headers does not mark the healthy shared connecti
   expect(states).not.toContain("offline");
   expect(api.connection.get().status).toBe("online");
   unsubscribe();
+});
+
+test("a new deployment never receives a retried old write after token refresh", async () => {
+  storage.setItem("tend.token", "old-token");
+  storage.setItem("tend.deployment_id", "deployment-old");
+  const sent: string[] = [];
+  const c = new ApiClient({
+    storage,
+    fetch: async (path, init) => {
+      sent.push(`${init?.method} ${String(path)}`);
+      expect(new Headers(init?.headers).get("X-Tend-Deployment-ID")).toBe("deployment-old");
+      return new Response(
+        JSON.stringify({ error: { code: "invalid_request", message: "deployment changed" } }),
+        {
+          status: 409,
+          headers: { "X-Tend-Deployment-ID": "deployment-new", "Content-Type": "application/json" },
+        },
+      );
+    },
+  });
+  await expect(c.request("POST", "/api/v1/ops", { request_id: "old-request" })).rejects.toThrow();
+  await expect(
+    c.request("POST", "/api/v1/ops", { request_id: "another-old-request" }),
+  ).rejects.toThrow();
+  expect(sent).toEqual(["POST /api/v1/ops"]);
+  expect(storage.getItem("tend.deployment_id")).toBe("deployment-old");
 });

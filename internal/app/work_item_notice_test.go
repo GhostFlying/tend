@@ -14,7 +14,7 @@ func TestDeliveryNoticesWakeOnceWithoutSettlingPlan(t *testing.T) {
 	if !accepted(t, reportDelivery(t, h, "linux-1", "observer", first, "closed", "")) {
 		t.Fatal("initial terminal observation rejected")
 	}
-	if h.count("message_notices WHERE notice_type='work_item_updated'") != 1 || h.count("outbox WHERE destination='main_thread'") != 1 {
+	if h.count("message_notices WHERE notice_type='work_item_updated'") != 1 || h.count("outbox WHERE destination LIKE 'background_thread:%'") != 1 {
 		t.Fatal("initial terminal observation did not wake the agent once")
 	}
 	// A repeated report cannot produce a second notification or settle intent.

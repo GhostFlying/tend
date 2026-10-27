@@ -1,3 +1,4 @@
+import { deploymentStorageName } from "../api/deployment.ts";
 // Owner control requests persist before transport. Recovery retains the original
 // target, revision and payload; a different tab cannot replace a pending request.
 import type { Envelope } from "../api/generated/api.ts";
@@ -12,7 +13,7 @@ export class DurableOp {
   private async change(
     update: (current: Envelope | undefined) => Envelope | undefined,
   ): Promise<Envelope | undefined> {
-    const open = this.factory.open("tend-control-requests", 1);
+    const open = this.factory.open(deploymentStorageName("tend-control-requests"), 1);
     open.onupgradeneeded = () => open.result.createObjectStore("requests");
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       open.onsuccess = () => resolve(open.result);

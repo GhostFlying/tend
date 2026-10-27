@@ -28,6 +28,11 @@ func TestStreamingAttachmentsExceedOldRequestLimitAndScopedDownload(t *testing.T
 	query := url.Values{"name": {"large.bin"}, "media_type": {"application/octet-stream"}, "request_id": {reqID}}
 	const size = int64(33 << 20)
 	req, _ := http.NewRequest("POST", e.url+"/api/v1/conversation/attachments?"+query.Encode(), io.LimitReader(zeroFileReader{}, size))
+	deployment, err := e.app.DeploymentID(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set(deploymentHeader, deployment)
 	req.Header.Set("Authorization", "Bearer "+token)
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {

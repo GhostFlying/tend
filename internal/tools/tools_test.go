@@ -272,7 +272,9 @@ func tags(v any) []string {
 func TestSchemasMatchArgs(t *testing.T) {
 	args := map[string]any{
 		"background_evidence_read": evidenceArgs{},
-		"conversation_associate":   associateArgs{}, "work_item_context_read": contextReadArgs{}, "work_item_context_prepare": contextPrepareArgs{}, "work_item_context_fact": contextFactArgs{}, "agent_conversations_list": agentListArgs{}, "agent_rollout_read": rolloutArgs{}, "background_item_read": contextReadArgs{}, "background_submit": protocol.BackgroundAssessmentPayload{},
+		"conversation_turn_adopt":  protocol.AdoptClarificationPayload{},
+		"conversation_turn_wait":   protocol.TurnClarification{}, "conversation_turn_read": turnReadArgs{}, "conversation_turn_commit": protocol.LogicalTurnCommit{},
+		"conversation_associate": associateArgs{}, "work_item_context_read": contextReadArgs{}, "work_item_context_prepare": contextPrepareArgs{}, "work_item_context_fact": contextFactArgs{}, "agent_conversations_list": agentListArgs{}, "agent_rollout_read": rolloutArgs{}, "background_item_read": contextReadArgs{}, "background_submit": protocol.BackgroundAssessmentPayload{},
 		"background_sources": backgroundSourceArgs{}, "background_checkin": backgroundCheckinArgs{},
 		"work_items_followups_list":    followupListArgs{},
 		"work_items_followups_history": followupHistoryArgs{},

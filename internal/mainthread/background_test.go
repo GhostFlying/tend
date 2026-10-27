@@ -30,7 +30,7 @@ func TestBackgroundCheckinUsesHarnessIdentityAndNeverPublishesReply(t *testing.T
 	e := newEnv(t, h)
 	openWakeDecision(e)
 	eventually(t, "background turn ends", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE status IN ('completed','failed')`) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status IN ('completed','failed')`) == 1
 	})
 	for range 2 {
 		if result := <-results; !result.Success {

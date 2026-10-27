@@ -51,10 +51,12 @@ type mcpTool struct {
 }
 
 type bridge struct {
-	e     *Env
-	agent protocol.AgentKind
-	off   bool
-	retry time.Duration
+	deploymentOnce sync.Once
+	deploymentID   string
+	e              *Env
+	agent          protocol.AgentKind
+	off            bool
+	retry          time.Duration
 
 	mu  sync.Mutex // guards out
 	out *json.Encoder
@@ -84,6 +86,13 @@ func runMCP(ctx context.Context, e *Env, args []string) int {
 // serve answers requests until stdin closes or ctx ends, then waits for
 // the calls in flight, which end with ctx.
 func (b *bridge) serve(ctx context.Context, in io.Reader) error {
+	// Pin before accepting any RPC, including an idle initialize-only session.
+	b.deploymentOnce.Do(func() {
+		if c, err := b.e.client(protocol.ScopeAgent); err == nil {
+			b.deploymentID = c.deploymentID
+		}
+	})
+
 	// The reader runs on its own so that cancellation does not wait for
 	// stdin; when ctx ends first it blocks only until the process exits.
 	lines := make(chan []byte)
@@ -184,7 +193,7 @@ func (b *bridge) list(ctx context.Context) any {
 	if b.off {
 		return map[string]any{"tools": tools}
 	}
-	c, err := b.e.client(protocol.ScopeAgent)
+	c, err := b.client()
 	if err != nil {
 		return &rpcError{Code: -32603, Message: err.Error()}
 	}
@@ -239,7 +248,7 @@ func (b *bridge) call(ctx context.Context, params json.RawMessage) any {
 	if b.off {
 		return toolResult("tend is turned off in this environment", true)
 	}
-	c, err := b.e.client(protocol.ScopeAgent)
+	c, err := b.client()
 	if err != nil {
 		return toolResult(err.Error(), true)
 	}
@@ -300,3 +309,17 @@ type toolsCache struct {
 const listTimeout = 5 * time.Second
 
 func (b *bridge) cachePath() string { return filepath.Join(b.e.ConfigDir, "tools.json") }
+
+// A live native session keeps its original deployment even if another process
+// logs this installation into a newly rebuilt server.
+func (b *bridge) client() (*client, error) {
+	c, err := b.e.client(protocol.ScopeAgent)
+	if err != nil {
+		return nil, err
+	}
+	b.deploymentOnce.Do(func() { b.deploymentID = c.deploymentID })
+	if c.deploymentID != b.deploymentID {
+		return nil, fmt.Errorf("tend deployment changed; restart the agent bridge without replaying old calls")
+	}
+	return c, nil
+}

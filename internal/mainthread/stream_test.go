@@ -156,7 +156,9 @@ func TestStreamingBeforeStartResponseKeepsOrder(t *testing.T) {
 	}
 	e := newEnv(t, h)
 	msg := e.say("hello")
-	eventually(t, "turn completed", func() bool { return e.count(`SELECT COUNT(*) FROM main_turns WHERE status = 'completed'`) == 1 })
+	eventually(t, "turn completed", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
+	})
 	rows := assistantItems(t, e)
 	if len(rows) != 2 || rows[0].Body != "first final" || rows[1].Body != "" || rows[0].AssistantState != protocol.AssistantCompleted || rows[1].AssistantState != protocol.AssistantCompleted {
 		t.Fatalf("rows: %+v", rows)

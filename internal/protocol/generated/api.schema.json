@@ -267,9 +267,6 @@
     "AgentConversationPage": {
       "additionalProperties": false,
       "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
         "items": {
           "anyOf": [
             {
@@ -285,10 +282,13 @@
         },
         "next": {
           "type": "string"
+        },
+        "runtime_available": {
+          "type": "boolean"
         }
       },
       "required": [
-        "enabled",
+        "runtime_available",
         "items"
       ],
       "title": "AgentConversationPage",
@@ -1583,6 +1583,9 @@
           },
           "type": "array"
         },
+        "initial_context": {
+          "$ref": "#/definitions/InitialWorkItemContext"
+        },
         "intent": {
           "type": "string"
         },
@@ -2454,6 +2457,65 @@
       "title": "HostView",
       "type": "object"
     },
+    "InitialWorkItemContext": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "type": "string"
+        },
+        "facts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ContextFact"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gaps": {
+          "type": "string"
+        },
+        "reviewed_kinds": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_message_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "coverage",
+        "gaps",
+        "source_message_ids",
+        "facts",
+        "reviewed_kinds"
+      ],
+      "title": "InitialWorkItemContext",
+      "type": "object"
+    },
     "InterruptReplyPayload": {
       "additionalProperties": false,
       "properties": {
@@ -2536,6 +2598,15 @@
     "MessageAssociations": {
       "additionalProperties": false,
       "properties": {
+        "content_revision": {
+          "type": "integer"
+        },
+        "disposition": {
+          "type": "string"
+        },
+        "facts_reviewed": {
+          "type": "boolean"
+        },
         "items": {
           "anyOf": [
             {
@@ -2552,11 +2623,21 @@
         "message_id": {
           "type": "string"
         },
+        "owner_locked": {
+          "type": "boolean"
+        },
+        "processing": {
+          "$ref": "#/definitions/MessageProcessingState"
+        },
         "revision": {
           "type": "integer"
         }
       },
       "required": [
+        "disposition",
+        "content_revision",
+        "facts_reviewed",
+        "owner_locked",
         "message_id",
         "revision",
         "items"
@@ -2578,6 +2659,31 @@
         "revision"
       ],
       "title": "MessageControl",
+      "type": "object"
+    },
+    "MessageProcessingState": {
+      "additionalProperties": false,
+      "properties": {
+        "logical_turn_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "logical_turn_id",
+        "status",
+        "revision",
+        "reason"
+      ],
+      "title": "MessageProcessingState",
       "type": "object"
     },
     "MessageState": {
@@ -2685,11 +2791,23 @@
     "PrepareWorkItemContextPayload": {
       "additionalProperties": false,
       "properties": {
+        "confirmed_fact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "coverage": {
           "type": "string"
         },
         "gaps": {
           "type": "string"
+        },
+        "retired_fact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -3196,6 +3314,9 @@
         "client_id": {
           "type": "string"
         },
+        "deployment_id": {
+          "type": "string"
+        },
         "expires_at": {
           "format": "date-time",
           "type": "string"
@@ -3211,6 +3332,7 @@
         }
       },
       "required": [
+        "deployment_id",
         "login",
         "client_id",
         "scope",
@@ -3268,6 +3390,12 @@
     "SetMessageAssociationsPayload": {
       "additionalProperties": false,
       "properties": {
+        "content_revision": {
+          "type": "integer"
+        },
+        "disposition": {
+          "type": "string"
+        },
         "work_item_ids": {
           "anyOf": [
             {
@@ -3283,6 +3411,8 @@
         }
       },
       "required": [
+        "disposition",
+        "content_revision",
         "work_item_ids"
       ],
       "title": "SetMessageAssociationsPayload",
@@ -4609,11 +4739,19 @@
             }
           ]
         },
+        "sync_status": {
+          "type": "string"
+        },
+        "watermark": {
+          "type": "integer"
+        },
         "work_item_id": {
           "type": "string"
         }
       },
       "required": [
+        "sync_status",
+        "watermark",
         "work_item_id",
         "revision",
         "prepared",

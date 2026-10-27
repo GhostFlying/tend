@@ -1,3 +1,4 @@
+import { deploymentStorageName } from "../api/deployment.ts";
 // The outbox: messages the owner wrote, kept in IndexedDB until tend has
 // them, so a closed page or a dropped network loses nothing (v0.1 §14.2).
 import type { ConversationAttachment, Envelope } from "../api/generated/api.ts";
@@ -73,7 +74,10 @@ function committed(tx: IDBTransaction): Promise<void> {
 }
 
 /** Opens the outbox in the browser's IndexedDB, or in the given factory. */
-export async function openOutbox(factory: IDBFactory = indexedDB, name = "tend"): Promise<Outbox> {
+export async function openOutbox(
+  factory: IDBFactory = indexedDB,
+  name = deploymentStorageName("tend"),
+): Promise<Outbox> {
   const open = factory.open(name, 1);
   open.onupgradeneeded = () => {
     open.result.createObjectStore(storeName, { keyPath: "requestId" });
