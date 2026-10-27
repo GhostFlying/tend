@@ -128,15 +128,12 @@ func TestConversationReadBoundariesAndToolPayloads(t *testing.T) {
 	}
 }
 
-func TestConversationReadAvailableToHostedAndAddon(t *testing.T) {
+func TestConversationReadAvailableToHosted(t *testing.T) {
 	if !slices.ContainsFunc(Specs(), func(s harness.ToolSpec) bool { return s.Name == "conversation_read" }) {
 		t.Fatal("hosted dispatcher cannot recover ledger history")
 	}
-	if !slices.ContainsFunc(AddonSpecs(), func(s protocol.ToolSpec) bool { return s.Name == "conversation_read" }) {
-		t.Fatal("addon cannot read history")
-	}
 	e := newEnv(t)
-	for _, p := range []protocol.Principal{hosted, {Kind: protocol.PrincipalMainAgent, Subject: "addon", Agent: protocol.AgentCodex}} {
+	for _, p := range []protocol.Principal{hosted} {
 		result := e.svc.Handle(context.Background(), Call{Principal: p, Tool: "conversation_read", Arguments: json.RawMessage(`{}`)})
 		if !result.Success {
 			t.Fatalf("principal %+v: %s", p, result.Text)

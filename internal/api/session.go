@@ -155,7 +155,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !req.Scope.Valid() {
-		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "scope must be %q or %q", protocol.ScopeOwner, protocol.ScopeAgent))
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "scope must be %q; external agent access has been retired", protocol.ScopeOwner))
 		return
 	}
 	v := token{Login: login, ClientID: req.ClientID, Scope: req.Scope, Issued: s.cfg.Now().UnixMilli()}

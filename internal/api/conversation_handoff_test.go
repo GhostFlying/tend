@@ -24,8 +24,8 @@ func TestConversationHandoffOwnerPolicyIndependentOfModelCatalog(t *testing.T) {
 	if status := e.do("GET", "/api/v1/conversation/handoff", "", nil, &view); status != http.StatusUnauthorized {
 		t.Fatalf("anonymous policy: %d", status)
 	}
-	agent := e.login(protocol.ScopeAgent)
-	if status := e.do("GET", "/api/v1/conversation/handoff", agent, nil, &view); status != http.StatusForbidden {
+	agent := e.retiredAgentToken(clientID)
+	if status := e.do("GET", "/api/v1/conversation/handoff", agent, nil, &view); status != http.StatusUnauthorized {
 		t.Fatalf("agent policy: %d", status)
 	}
 	owner := e.login(protocol.ScopeOwner)

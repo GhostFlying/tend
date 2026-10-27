@@ -286,10 +286,16 @@ func initializeWorkItemContext(ctx context.Context, x *Exec, tx *store.Tx, id st
 	if strings.TrimSpace(p.Coverage) == "" || len(p.Coverage) > 8000 || len(p.Gaps) > 8000 || len(p.SourceMessageIDs) > 100 || len(p.Facts) > 100 {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "bounded initial coverage, sources and facts required")
 	}
-	for _, kind := range []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"} {
+	required := []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}
+	var missing []string
+	for _, kind := range required {
 		if !slices.Contains(p.ReviewedKinds, kind) {
-			return protocol.Errorf(protocol.CodeInvalidRequest, "explicitly review all fact kinds, including kinds with no facts")
+			missing = append(missing, kind)
 		}
+	}
+	if len(missing) > 0 {
+		details, _ := json.Marshal(map[string]any{"field": "initial_context.reviewed_kinds", "required_kinds": required, "missing_kinds": missing})
+		return &protocol.Error{Code: protocol.CodeInvalidRequest, Message: "initial_context.reviewed_kinds must explicitly review all fact kinds, including kinds with no facts; missing: " + strings.Join(missing, ", "), Details: details}
 	}
 	for _, mid := range p.SourceMessageIDs {
 		if err := attachReviewSource(ctx, x, tx, mid); err != nil {

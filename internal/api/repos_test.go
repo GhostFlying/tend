@@ -14,7 +14,7 @@ import (
 
 func TestRepoRegistryAuthentication(t *testing.T) {
 	e := newEnv(t)
-	for _, tok := range []string{"", "invalid", e.login(protocol.ScopeAgent)} {
+	for _, tok := range []string{"", "invalid", e.retiredAgentToken(clientID)} {
 		if st := e.do("GET", "/api/v1/repos", tok, nil, nil); st != http.StatusUnauthorized && st != http.StatusForbidden {
 			t.Fatalf("non-owner read = %d", st)
 		}
@@ -48,7 +48,7 @@ func TestRepoRegistryCompleteSafeReadAndToolParity(t *testing.T) {
 	config.Repos = config.Repos[:4]
 	e.exec("config.sync", protocol.Target{Type: "config"}, nil, config, app.SyncConfig{})
 	// No runner has connected or checked out anything, and no task exists.
-	session := e.sessionIn("registry-parity", "https://example.com/alpha")
+	session := e.hostedSession("registry-parity", "")
 	tool := session.call("repos_list", map[string]any{}, "")
 	var toolView protocol.RepoRegistry
 	if !tool.OK || json.Unmarshal(tool.Result, &toolView) != nil {

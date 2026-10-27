@@ -91,7 +91,7 @@ func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.Fo
 		}
 		after = occurrences[len(occurrences)-1].OccurrenceID
 	}
-	if !manual && reason == "condition" && x.Principal.Kind == protocol.PrincipalMainAgent && !x.Principal.Addon() {
+	if !manual && reason == "condition" && x.Principal.Kind == protocol.PrincipalMainAgent {
 		r.Status = "finished"
 		return save("condition observed in current main turn")
 	}

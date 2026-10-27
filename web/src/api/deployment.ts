@@ -46,7 +46,12 @@ export async function clearOldDeploymentData(previous: string): Promise<void> {
   }
   try {
     if ("caches" in globalThis) {
-      for (const key of await caches.keys()) if (key.startsWith("tend")) await caches.delete(key);
+      // Build-versioned shell files contain no business data. A same-build
+      // instance reset does not reinstall its service worker to refill them.
+      for (const key of await caches.keys()) {
+        if (key.startsWith("tend") && !key.startsWith("tend-shell-") && belongsToPrevious(key))
+          await caches.delete(key);
+      }
     }
   } catch {
     /* Cache storage may be disabled independently of localStorage. */

@@ -24,7 +24,6 @@ type credentials struct {
 	DeploymentID string `json:"deployment_id"`
 	ClientID     string `json:"client_id"`
 	Owner        string `json:"owner_token,omitempty"`
-	Agent        string `json:"agent_token,omitempty"`
 }
 
 var errNotLoggedIn = errors.New("not logged in; run: tend login --server <url>")
@@ -104,8 +103,8 @@ func (e *Env) client(scope protocol.TokenScope) (*client, error) {
 		return nil, err
 	}
 	tok := cred.Owner
-	if scope == protocol.ScopeAgent {
-		tok = cred.Agent
+	if scope != protocol.ScopeOwner {
+		return nil, fmt.Errorf("only owner access is supported")
 	}
 	if tok == "" {
 		return nil, errNotLoggedIn

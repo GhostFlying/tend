@@ -19,7 +19,7 @@ func wakesMain(p protocol.Principal, kind string) bool {
 	case "task.completed":
 		return true
 	case "decision.opened", "decision.answered", "work_item_choice.answered":
-		return p.Kind != protocol.PrincipalMainAgent || p.Addon()
+		return p.Kind != protocol.PrincipalMainAgent
 	default:
 		return false
 	}
@@ -142,6 +142,16 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 	}); err != nil {
 		return err
 	}
+	if e.Kind == "decision.answered" && d.AnsweredMessageID != "" {
+		conversation, err := store.MessageConversation(ctx, tx.Q(), d.AnsweredMessageID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO conversation_return_links(message_id,conversation_id,source_message_id) VALUES(?,?,?)`, id, conversation, d.AnsweredMessageID); err != nil {
+			return err
+		}
+		return queueSingleEventTurn(ctx, x, tx, id, eventID, e.Kind, recordedAnswer)
+	}
 	return queueEventTurn(ctx, x, tx, id, eventID, e.Kind, recordedAnswer)
 }
 
@@ -171,7 +181,17 @@ func recordWorkItemChoiceWake(ctx context.Context, x *Exec, tx *store.Tx, e Even
 	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"system"}`, RequestID: x.Env.RequestID, TraceID: x.TraceID, ActorJSON: `{"kind":"system"}`, CreatedAt: now}); err != nil {
 		return err
 	}
-	return queueEventTurn(ctx, x, tx, id, eventID, e.Kind, answer)
+	// This notice coordinates a new owner answer.
+	// Review the original in the main logical turn before releasing background
+	// work against its changed context; never treat the notice as new authority.
+	conversation, err := store.MessageConversation(ctx, tx.Q(), c.AnswerSourceID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO conversation_return_links(message_id,conversation_id,source_message_id) VALUES(?,?,?)`, id, conversation, c.AnswerSourceID); err != nil {
+		return err
+	}
+	return queueSingleEventTurn(ctx, x, tx, id, eventID, e.Kind, answer)
 }
 
 // startupFailureNotice uses only the run reporting this failure. Earlier runs

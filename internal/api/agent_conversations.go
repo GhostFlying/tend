@@ -2,10 +2,11 @@ package api
 
 import (
 	"errors"
+	"net/http"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
-	"net/http"
 )
 
 func (s *Server) agentConversations(w http.ResponseWriter, r *http.Request) {

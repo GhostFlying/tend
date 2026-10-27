@@ -161,14 +161,14 @@ func TestFault_AgentScopeOwnerOp(t *testing.T) {
 	e := newEnv(t)
 	e.configure()
 	taskID := e.task("fix it")
-	tok := e.login(protocol.ScopeAgent)
+	tok := e.retiredAgentToken(clientID)
 	rev := int64(1)
 	st, res := e.op(tok, e.envelope("tasks.cancel", protocol.Target{Type: "task", ID: taskID}, &rev, map[string]any{}))
-	if st != http.StatusForbidden || res.Error == nil || res.Error.Code != protocol.CodeForbidden {
+	if st != http.StatusUnauthorized || res.Error == nil || res.Error.Code != protocol.CodeUnauthenticated {
 		t.Errorf("cancel with an agent token = %d %+v, want forbidden", st, res)
 	}
 	for _, path := range []string{"/api/v1/snapshot", "/api/v1/tasks/" + taskID, "/api/v1/tasks?finished=1"} {
-		if st := e.do("GET", path, tok, nil, nil); st != http.StatusForbidden {
+		if st := e.do("GET", path, tok, nil, nil); st != http.StatusUnauthorized {
 			t.Errorf("GET %s with an agent token = %d, want 403", path, st)
 		}
 	}

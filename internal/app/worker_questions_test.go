@@ -105,7 +105,7 @@ func TestWorkerQuestionsKeepRunAndExposeProvenance(t *testing.T) {
 			if h.task(as.TaskID) != before || h.run(as.RunID).ObservedState != protocol.RunRunning {
 				t.Fatal("answer ended or retried the original work")
 			}
-			if h.count("outbox WHERE operation='main_thread.handle_event'") != 1 || h.count("background_sources") != 2 || h.count("outbox WHERE operation='main_thread.handle_message'") != 0 {
+			if h.count("outbox WHERE operation='main_thread.handle_event'") != 2 || h.count("background_sources") != 1 || h.count("outbox WHERE operation='main_thread.handle_message'") != 0 {
 				t.Fatal("direct panel answer created an extra owner turn")
 			}
 			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -241,8 +241,8 @@ func TestWorkerQuestionsPauseRetainsAndSupersedeCancels(t *testing.T) {
 	}
 }
 
-func TestWorkerAnswersRequireOwnerSourceButAllowAddon(t *testing.T) {
-	for _, mode := range []string{"background", "owner chat", "addon"} {
+func TestWorkerAnswersRequireOwnerSource(t *testing.T) {
+	for _, mode := range []string{"background", "owner chat"} {
 		t.Run(mode, func(t *testing.T) {
 			h, as, _ := questionRun(t, protocol.RoleImplement)
 			q := askQuestion(t, h, as, scopeQuestion)
@@ -257,10 +257,6 @@ func TestWorkerAnswersRequireOwnerSourceButAllowAddon(t *testing.T) {
 					t.Fatal(err)
 				}
 				source = m.MessageID
-			}
-			if mode == "addon" {
-				p.Agent = "codex"
-				source = ""
 			}
 			op := questionOperation(h, p, h.env("decisions.resolve_from_message", protocol.Target{Type: "decision", ID: q.DecisionID}, protocol.AnswerDecisionPayload{Version: q.Version, Option: "renderer only", SourceMessageID: source}, nil), AnswerDecision{FromMessage: true})
 			if mode == "background" {

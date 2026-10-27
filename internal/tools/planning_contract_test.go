@@ -74,13 +74,10 @@ func planningSchemaAt(t *testing.T, root map[string]any, path ...string) map[str
 	return node
 }
 
-func TestPlanningSchemasExposeEnumsOnBothToolSurfaces(t *testing.T) {
-	surfaces := map[string]map[string]json.RawMessage{"hosted": {}, "addon": {}}
+func TestPlanningSchemasExposeEnumsOnHostedToolSurface(t *testing.T) {
+	surfaces := map[string]map[string]json.RawMessage{"hosted": {}}
 	for _, spec := range Specs() {
 		surfaces["hosted"][spec.Name] = spec.InputSchema
-	}
-	for _, spec := range AddonSpecs() {
-		surfaces["addon"][spec.Name] = spec.InputSchema
 	}
 	cases := []struct {
 		tool string

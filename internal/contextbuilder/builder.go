@@ -8,9 +8,7 @@
 // follows both succeeded. Any failure, or a packet a crash left
 // unconfirmed, invalidates the baseline, so the next turn gets a new full
 // snapshot rather than a replay: the harness does not deduplicate
-// injections (spike A2). An agent the owner works in gets its context from
-// its hooks, through the agent.hook command, which advances the watermark
-// as it answers.
+// injections (spike A2).
 package contextbuilder
 
 import (
@@ -35,11 +33,6 @@ type Config struct {
 	// sizes in UTF-8 bytes; defaults are 16000 and 6000.
 	FullBudget  int
 	DeltaBudget int
-	// HookFullBudget and HookDeltaBudget budget dynamic addon context in
-	// UTF-8 bytes: 2000 and 4000 by default. Full snapshots additionally
-	// include fixed instructions, without taking space from ledger facts.
-	HookFullBudget  int
-	HookDeltaBudget int
 	// FocusMessages is how many recent messages a full snapshot recalls.
 	FocusMessages int
 }
@@ -50,12 +43,6 @@ func (c Config) withDefaults() Config {
 	}
 	if c.DeltaBudget <= 0 {
 		c.DeltaBudget = 6000
-	}
-	if c.HookFullBudget <= 0 {
-		c.HookFullBudget = 2000
-	}
-	if c.HookDeltaBudget <= 0 {
-		c.HookDeltaBudget = 4000
 	}
 	if c.FocusMessages <= 0 {
 		c.FocusMessages = 8
@@ -248,15 +235,14 @@ func (b *Builder) Invalidate(ctx context.Context, threadKey string) error {
 	return b.app.InvalidateBaseline(ctx, threadKey)
 }
 
-// Compose implements app.ComposeFunc: the context of an agent session the
-// owner works in, read inside the hook's transaction.
-func (b *Builder) Compose(ctx context.Context, q store.Querier, r app.ComposeRequest) (app.Composed, error) {
+// Compose reads a hosted ledger snapshot or delta without advancing a watermark.
+func (b *Builder) Compose(ctx context.Context, q store.Querier, r ComposeRequest) (Composed, error) {
 	latest, err := store.LatestEventSeq(ctx, q)
 	if err != nil {
-		return app.Composed{}, err
+		return Composed{}, err
 	}
-	snap := Snapshot{PacketID: r.PacketID, Epoch: r.Epoch, Watermark: latest, Full: r.Full, Addon: true}
-	budget := b.cfg.HookFullBudget
+	snap := Snapshot{PacketID: r.PacketID, Epoch: r.Epoch, Watermark: latest, Full: r.Full}
+	budget := b.cfg.FullBudget
 	if r.Full {
 		var sc *scope
 		sc, snap.Project, err = scopeOf(ctx, q, r.Self)
@@ -272,28 +258,26 @@ func (b *Builder) Compose(ctx context.Context, q store.Querier, r app.ComposeReq
 			snap.Unseen, snap.UnseenAttention = since.Unseen, append(since.Attention, since.OtherAttention...)
 		}
 	} else {
-		budget = b.cfg.HookDeltaBudget
+		budget = b.cfg.DeltaBudget
 		var sc *scope
 		if sc, _, err = scopeOf(ctx, q, r.Self); err == nil {
 			err = b.gatherDelta(ctx, q, &snap, r.Watermark, latest, r.Self, sc)
 		}
 	}
 	if err != nil {
-		return app.Composed{}, err
+		return Composed{}, err
 	}
 	if !r.Full && snap.empty() {
-		return app.Composed{ToSeq: latest}, nil
+		return Composed{ToSeq: latest}, nil
 	}
-	return app.Composed{Text: Render(snap, budget), ToSeq: latest}, nil
+	return Composed{Text: Render(snap, budget), ToSeq: latest}, nil
 }
 
-// Current returns a full snapshot for an agent session the owner works in
-// without recording it or moving any watermark, for an agent that wants to
-// refresh its view.
+// Current refreshes the hosted coordinator's view without moving a watermark.
 func (b *Builder) Current(ctx context.Context, self protocol.Principal) (string, error) {
 	var out string
 	err := b.store.Read(ctx, func(tx *store.ReadTx) error {
-		c, err := b.Compose(ctx, tx.Q(), app.ComposeRequest{Self: self, Full: true})
+		c, err := b.Compose(ctx, tx.Q(), ComposeRequest{Self: self, Full: true})
 		out = c.Text
 		return err
 	})
@@ -413,7 +397,6 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			break
 		}
 	}
-	own := ownRequests{self: self, seen: map[string]bool{}}
 	titles := map[string]string{}
 	touched := map[string]bool{}
 	var order []string
@@ -422,13 +405,6 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 		_ = json.Unmarshal([]byte(e.BodyJSON), &body)
 		if body["stale"] == true {
 			continue // recorded as a fact, changes nothing
-		}
-		mine, err := own.made(ctx, q, e.RequestID)
-		if err != nil {
-			return err
-		}
-		if mine {
-			continue
 		}
 		if e.ObjectType == "followup" {
 			rule, err := store.GetFollowup(ctx, q, e.ObjectID)
@@ -625,38 +601,6 @@ func actor(principalJSON string) string {
 		return string(p.Agent) + " session " + session
 	}
 	return "tend"
-}
-
-// ownRequests tells whether a request was made by an agent session itself.
-type ownRequests struct {
-	self protocol.Principal
-	seen map[string]bool
-}
-
-func (o ownRequests) made(ctx context.Context, q store.Querier, requestID string) (bool, error) {
-	// Without its session, a call cannot be told apart from another
-	// session's, so its events go to every session.
-	if !o.self.Addon() || o.self.Thread == "" || requestID == "" {
-		return false, nil
-	}
-	if mine, ok := o.seen[requestID]; ok {
-		return mine, nil
-	}
-	rec, err := store.GetRequest(ctx, q, o.self.DedupDomain(), requestID)
-	if errors.Is(err, store.ErrNotFound) {
-		o.seen[requestID] = false
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	var p protocol.Principal
-	if err := json.Unmarshal([]byte(rec.PrincipalJSON), &p); err != nil {
-		return false, fmt.Errorf("contextbuilder: decode principal of %s: %w", requestID, err)
-	}
-	mine := p.Kind == o.self.Kind && p.Agent == o.self.Agent && p.Thread == o.self.Thread
-	o.seen[requestID] = mine
-	return mine, nil
 }
 
 // taskOf finds the task an event concerns, through its run for run
@@ -926,57 +870,6 @@ type scope struct {
 	projects map[string]string
 }
 
-// scopeOf returns the scope of a session's context, and the line that
-// tells the session about it when tend has several projects.
-func scopeOf(ctx context.Context, q store.Querier, self protocol.Principal) (*scope, string, error) {
-	sc := &scope{projects: map[string]string{}}
-	all, err := store.ListProjects(ctx, q)
-	if err != nil {
-		return nil, "", err
-	}
-	var names []string
-	for _, p := range all {
-		if !p.Retired {
-			names = append(names, p.Project)
-		}
-	}
-	var sp store.SessionProject
-	if self.Addon() && self.Thread != "" {
-		if sp, err = store.GetSessionProject(ctx, q, string(self.Agent), self.Thread); err != nil {
-			return nil, "", err
-		}
-	}
-	if slices.Contains(names, sp.Project) {
-		// The scope holds even with one active project: retired projects
-		// may still have open tasks.
-		sc.project = sp.Project
-	}
-	// Lines name their project whenever the context may hold more than
-	// one, retired projects with open tasks included.
-	open, err := store.CountOpenTasks(ctx, q)
-	if err != nil {
-		return nil, "", err
-	}
-	sc.labels = len(names) > 1 || sc.project != "" || len(open) > 1
-	if len(names) <= 1 {
-		return sc, "", nil
-	}
-	if sc.project == "" {
-		// Every project, as chosen, by default, or because the session's
-		// project was retired since.
-		return sc, fmt.Sprintf("Projects: %s. This session sees all of them; when the owner works on one, "+
-			"choose it with session_project.", strings.Join(names, ", ")), nil
-	}
-	how := "the project of the repository this session works in"
-	if sp.Source == store.ProjectExplicit {
-		how = "as chosen for this session"
-	}
-	others := slices.DeleteFunc(names, func(n string) bool { return n == sp.Project })
-	return sc, fmt.Sprintf("Project: %s, %s. Only its tasks are shown, and from the other projects (%s) only what needs attention. "+
-		"Switch with session_project when the owner asks; tasks_list with project \"*\" lists every project.",
-		sp.Project, how, strings.Join(others, ", ")), nil
-}
-
 // projectOf returns the project of a task, or "" for none.
 func (sc *scope) projectOf(ctx context.Context, q store.Querier, taskID string) (string, error) {
 	if taskID == "" {
@@ -1025,4 +918,24 @@ func gatherContextFacts(ctx context.Context, q store.Querier, s *Snapshot, sc *s
 		s.Facts = append(s.Facts, fmt.Sprintf("%s scope=%s work_item=%s kind=%s attribution=%s source=%s needs_review=%t: %s", id, scope, item, kind, attribution, source, review, body))
 	}
 	return rows.Err()
+}
+
+// scopeOf returns the hosted coordinator's view across every project.
+func scopeOf(ctx context.Context, q store.Querier, _ protocol.Principal) (*scope, string, error) {
+	all, err := store.ListProjects(ctx, q)
+	if err != nil {
+		return nil, "", err
+	}
+	var names []string
+	for _, p := range all {
+		if !p.Retired {
+			names = append(names, p.Project)
+		}
+	}
+	open, err := store.CountOpenTasks(ctx, q)
+	sc := &scope{labels: len(names) > 1 || len(open) > 1, projects: map[string]string{}}
+	if len(names) > 1 {
+		return sc, "Projects: " + strings.Join(names, ", ") + ". This coordinator sees every project.", err
+	}
+	return sc, "", err
 }

@@ -14,7 +14,9 @@ import (
 )
 
 func TestEndToEnd_WorkerQuestionsKeepRunAndLease(t *testing.T) {
-	srv := newServer(t, time.Second)
+	const leaseTTL = 5 * time.Second
+	srv := newServer(t, leaseTTL)
+	srv.startMainThread(testkit.NewHarness())
 	web := srv.webLogin(srv.startWeb().URL)
 	answers := make(chan protocol.WorkerQuestion, 2)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
@@ -55,10 +57,10 @@ func TestEndToEnd_WorkerQuestionsKeepRunAndLease(t *testing.T) {
 		initialExpiry := srv.count(`SELECT expires_at FROM leases WHERE run_id=?`, decision.Worker.RunID)
 		eventually(t, "waiting worker renews its lease", func() bool {
 			return srv.count(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='active' AND expires_at>?`,
-				decision.Worker.RunID, initialExpiry+1000) == 1
+				decision.Worker.RunID, int64(initialExpiry)+leaseTTL.Milliseconds()) == 1
 		})
 		if got := len(n.workers.Started()); got != i+1 {
-			t.Fatalf("question caused extra worker starts: %d", got)
+			t.Fatalf("question caused extra worker starts: got %d, want %d; starts=%+v", got, i+1, n.workers.Started())
 		}
 		payload := protocol.AnswerDecisionPayload{Version: decision.Version}
 		if role == protocol.RoleImplement {
@@ -148,6 +150,7 @@ func TestEndToEnd_MainRelaysOwnerAnswerToWaitingWorker(t *testing.T) {
 
 func TestFault_WorkerQuestionSurvivesRunnerRestartAndLostReceipt(t *testing.T) {
 	srv := newServer(t, time.Minute)
+	srv.startMainThread(testkit.NewHarness())
 	web := srv.webLogin(srv.startWeb().URL)
 	answers := make(chan protocol.WorkerQuestion, 1)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {

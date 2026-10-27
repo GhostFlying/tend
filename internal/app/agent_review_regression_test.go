@@ -2,10 +2,11 @@ package app
 
 import (
 	"encoding/json"
-	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
 	"testing"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 func TestReviewCancelledFollowupMustNotRemainDeliverable(t *testing.T) {

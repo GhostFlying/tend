@@ -40,18 +40,9 @@ func TestAttachmentsReadOriginalAndBoundedTextAfterThreadChange(t *testing.T) {
 	if !result.Success {
 		t.Fatal(result.Text)
 	}
-	// An owner's addon may run on another device and needs a usable download command.
+	// A retired external coordinator cannot read through hosted tools.
 	result = e.svc.Handle(context.Background(), Call{Principal: protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "remote-client", Agent: protocol.AgentCodex, Thread: "remote-thread"}, Tool: "attachments_read", Arguments: raw})
-	if !result.Success {
+	if result.Success || !strings.Contains(result.Text, "forbidden") {
 		t.Fatal(result.Text)
-	}
-	var addon struct {
-		Result attachmentWindow `json:"result"`
-	}
-	if err := json.Unmarshal([]byte(result.Text), &addon); err != nil {
-		t.Fatal(err)
-	}
-	if addon.Result.LocalPath != "" || addon.Result.DownloadCommand != "tend attachment download "+file.FileID+" --out <local-path>" || addon.Result.Text != text[64:128] {
-		t.Fatalf("addon window: %+v", addon.Result)
 	}
 }

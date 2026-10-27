@@ -268,45 +268,6 @@ func TestBackgroundRepliesRespectProcessingOrder(t *testing.T) {
 	}
 }
 
-func TestAddonRelayInTranscript(t *testing.T) {
-	h := newHarness(t)
-	c := h.askChoice(h.createWork(workPlan()), h.ownerEvidence().Reference)
-	cmd := UpdateWorkItemChoice{Action: "respond", FromMessage: true}
-	addon := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "addon", Thread: "native", Agent: protocol.AgentCodex}
-	op := h.exec(addon, h.env(cmd.Operation(), protocol.Target{Type: "work_item_choice", ID: c.ChoiceID}, protocol.UpdateWorkItemChoicePayload{Answer: "OWNER_RELAY_MARKER"}, rev(c.Version)), cmd)
-	if op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	var answered protocol.WorkItemChoice
-	if err := json.Unmarshal(op.Result, &answered); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		page, err := views.Transcript(t.Context(), tx.Q(), 0, 20)
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, b := range page.Blocks {
-			if b.Trigger.MessageID == answered.AnswerSourceID {
-				found = true
-			}
-			for _, it := range b.Items {
-				if it.MessageID == answered.AnswerSourceID {
-					found = true
-				}
-			}
-		}
-		t.Logf("source=%s choice=%s transcript=%+v", answered.AnswerSourceID, c.MessageID, page.Blocks)
-		if !found {
-			t.Error("recorded addon relay answer is completely absent from transcript")
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestWithdrawalNotifiesDispatcher(t *testing.T) {
 	h := newHarness(t)
 	id := queueMessage(t, h, "pending head")

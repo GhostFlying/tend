@@ -105,6 +105,7 @@ func TestFault_WorkspaceHostRetired(t *testing.T) {
 	if res.Effect == nil || !res.Effect.Applied {
 		t.Fatalf("start over = %+v", res.Effect)
 	}
+	reviewDecisionAnswer(t, h, decs[0].DecisionID)
 	got := h.task(task)
 	if got.Lifecycle != protocol.TaskQueued || got.ImplementGeneration != 2 || got.CurrentArtifactID != "" || got.BlockReason != protocol.BlockNone || got.WorkspaceAssigned {
 		t.Errorf("task after starting over = %+v", got)
@@ -195,6 +196,7 @@ func TestFault_WorkspaceHostRetiredMidRun(t *testing.T) {
 	if r := h.answer(decs[0], domain.StartOverOption); r.Effect == nil || !r.Effect.Applied {
 		t.Fatalf("start over = %+v", r.Effect)
 	}
+	reviewDecisionAnswer(t, h, decs[0].DecisionID)
 	as, ok, _ := h.claim("linux-2")
 	if !ok || as.TaskID != res.TaskID || as.Role != protocol.RoleImplement || as.Generation != 2 {
 		t.Errorf("claim on linux-2 = %+v (ok %v), want implementation 2", as, ok)

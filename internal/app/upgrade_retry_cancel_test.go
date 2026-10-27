@@ -1,10 +1,11 @@
 package app
 
 import (
-	"github.com/GhostFlying/tend/internal/protocol"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func TestUpgradeRetryWaitsForPendingCandidateCancellation(t *testing.T) {

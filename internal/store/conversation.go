@@ -75,6 +75,31 @@ func HasMessageTurnOperation(ctx context.Context, q Querier, messageID, operatio
 // BindMessage ties a message to an object it concerns. Binding twice is a
 // no-op.
 func (t *Tx) BindMessage(ctx context.Context, messageID, objectType, objectID, kind string) error {
+	if objectType == "task" && objectID != "" {
+		rows, err := t.Q().QueryContext(ctx, `SELECT DISTINCT work_item_id FROM work_item_task_links WHERE task_id=?`, objectID)
+		if err != nil {
+			return err
+		}
+		var items []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			items = append(items, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		for _, id := range items {
+			if err := t.BindMessage(ctx, messageID, "work_item", id, kind); err != nil {
+				return err
+			}
+		}
+	}
 	if objectType == "work_item" {
 		var blocked bool
 		if err := t.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM message_dispositions d WHERE d.message_id=? AND d.owner_locked=1 AND NOT EXISTS(SELECT 1 FROM message_work_items a WHERE a.message_id=d.message_id AND a.work_item_id=? AND a.active=1))`, messageID, objectID).Scan(&blocked); err != nil {
@@ -190,24 +215,24 @@ func (t *Tx) PutMainTurn(ctx context.Context, m MainTurn, now int64) error {
 
 // SettleOpenTurns marks the turns of a thread that were still running as
 // interrupted, for example after the harness restarted, and returns the
-// messages they handled.
-func (t *Tx) SettleOpenTurns(ctx context.Context, threadID string, now int64) ([]string, error) {
+// execution identities and the messages they handled.
+func (t *Tx) SettleOpenTurns(ctx context.Context, threadID string, now int64) ([]MainTurn, error) {
 	rows, err := t.Q().QueryContext(ctx, `UPDATE main_turns SET status = 'interrupted', updated_at = ? WHERE thread_id = ? AND status = 'started'
-		RETURNING message_id`, now, threadID)
+		RETURNING request_id,message_id,turn_id`, now, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("store: settle turns: %w", err)
 	}
 	defer rows.Close()
-	var ids []string
+	var turns []MainTurn
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		turn := MainTurn{ThreadID: threadID, Status: TurnInterrupted}
+		if err := rows.Scan(&turn.RequestID, &turn.MessageID, &turn.TurnID); err != nil {
 			return nil, fmt.Errorf("store: settle turns: %w", err)
 		}
-		ids = append(ids, id)
+		turns = append(turns, turn)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: settle turns: %w", err)
 	}
-	return ids, nil
+	return turns, nil
 }

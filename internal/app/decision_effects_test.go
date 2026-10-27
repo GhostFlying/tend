@@ -56,6 +56,7 @@ func TestDecisionEffects(t *testing.T) {
 		if got := h.task(taskID); got.BlockReason != protocol.BlockNone || got.ImplementGeneration != 2 {
 			t.Errorf("task = %+v, want generation 2 unblocked", got)
 		}
+		reviewDecisionAnswer(t, h, d.DecisionID)
 		next, ok, _ := h.claim("linux-1")
 		if !ok || next.Role != protocol.RoleImplement || next.Generation != 2 {
 			t.Errorf("claim after the answer = %+v, %v", next, ok)
@@ -82,9 +83,11 @@ func TestDecisionEffects(t *testing.T) {
 		h := newHarness(t)
 		taskID, acc := h.toAcceptanceClaim()
 		h.runAs(acc, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "sandbox crashed"}, Release{})
-		if res := h.answer(h.openDecision(taskID), "retry acceptance"); res.Effect == nil || !res.Effect.Applied {
+		d := h.openDecision(taskID)
+		if res := h.answer(d, "retry acceptance"); res.Effect == nil || !res.Effect.Applied {
 			t.Fatalf("effect = %+v", res.Effect)
 		}
+		reviewDecisionAnswer(t, h, d.DecisionID)
 		retry, ok, _ := h.claim("linux-1")
 		if !ok || retry.Role != protocol.RoleAccept || retry.Generation != 2 {
 			t.Errorf("claim after the answer = %+v, %v", retry, ok)

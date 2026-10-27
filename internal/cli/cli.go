@@ -1,28 +1,15 @@
-// Package cli is the tend command (D46): the owner's commands, the MCP
-// bridge and hook command for the agents the owner works in, and their
-// setup. It only forwards: tool definitions, context and every rule live
-// on the server, and the command keeps no copy of the ledger. It depends
-// on protocol and the standard library only, never on the server's
-// packages.
+// Package cli implements the owner command line. Business rules live on the server.
 package cli
 
 import (
-	"bytes"
 	"context"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
-
-// AddonEnv turns the agent add-on off for workers (D45).
-const AddonEnv = protocol.AddonEnv
 
 // ConfigDirEnv overrides where the configuration and credentials live.
 const ConfigDirEnv = "TEND_CONFIG_DIR"
@@ -39,63 +26,9 @@ type Env struct {
 	ConfigDir string
 	HTTP      *http.Client
 	IDs       protocol.IDGen
-	// Executable is the path of the running tend binary and LookPath finds
-	// commands on PATH; setup uses them to name tend in agent
-	// configuration.
-	Executable string
-	LookPath   func(string) (string, error)
-	// Run runs an external command, for setup.
-	Run func(ctx context.Context, name string, args ...string) error
-	// Output runs an external command and returns its standard output,
-	// and Getwd returns the working directory; the hook and the MCP bridge
-	// use them to find the repository the agent works in. Either may be
-	// nil.
-	Output func(ctx context.Context, name string, args ...string) ([]byte, error)
-	Getwd  func() (string, error)
 }
 
-// addonOff reports whether the add-on must do nothing: in a worker, told
-// so by AddonEnv or by the marker in its worktree's git directory.
-func (e *Env) addonOff(ctx context.Context) bool {
-	return e.Getenv(AddonEnv) == "off" || e.inWorker(ctx)
-}
-
-// inWorker reports whether the working directory is a worktree a TUI
-// worker runs in (D66).
-func (e *Env) inWorker(ctx context.Context) bool {
-	if e.Getwd == nil {
-		return false
-	}
-	dir, err := e.Getwd()
-	if err != nil {
-		return false
-	}
-	for parent := dir; ; parent = filepath.Dir(parent) {
-		for _, rel := range []string{".codex/config.toml", ".trae/traecli.toml"} {
-			b, err := os.ReadFile(filepath.Join(parent, rel))
-			if err == nil && bytes.HasPrefix(b, []byte("# Written by tend-runner for the run in this worktree; removed when the run ends.\n")) {
-				return true
-			}
-		}
-		if filepath.Dir(parent) == parent {
-			break
-		}
-	}
-	if e.Output == nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	out, err := e.Output(ctx, "git", "-C", dir, "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(filepath.Join(strings.TrimSpace(string(out)), protocol.WorkerMarker))
-	return err == nil
-}
-
-// Exit codes. The hook command always exits 0 (C5): any other code may
-// block the user's input.
+// Command exit codes.
 const (
 	exitOK    = 0
 	exitError = 1
@@ -105,7 +38,7 @@ const (
 const usage = `usage: tend <command> [arguments]
 
 Owner commands:
-  login --server <url>             get tokens for this machine
+  login --server <url>             get an owner token for this machine
   status [--project <p>] [--json]  projects with their tasks and queue, open decisions and hosts
   task <task_id> [--json]          one task in full
   logs [-f] <run_id|task_id>       a run's logs, or all runs of a task; -f follows the last
@@ -119,10 +52,6 @@ Owner commands:
   attachment download <file_id> --out <path>  save an original attachment
   takeover <task_id>               work in the task's agent yourself; resume hands it back
 
-Agent add-on:
-  setup <claude|codex|traex> [--write]   show or write the agent's configuration
-  mcp --agent <agent>              MCP server on stdio (started by the agent)
-  hook <agent> <event>             hook command (started by the agent)
 `
 
 // Main runs the tend command with args, without the program name, and
@@ -134,14 +63,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "hook":
-		return runHook(ctx, e, rest)
-	case "mcp":
-		return runMCP(ctx, e, rest)
 	case "login":
 		return report(e, runLogin(ctx, e, rest))
-	case "setup":
-		return report(e, runSetup(ctx, e, rest))
 	case "repo":
 		return report(e, runRepository(ctx, e, rest))
 	case "upgrade":

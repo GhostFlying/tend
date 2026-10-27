@@ -296,6 +296,7 @@ func TestWorkspaceReuseBindingSurvivesSourceStartOver(t *testing.T) {
 	if answer := h.answer(decisions[0], domain.StartOverOption); answer.Effect == nil || !answer.Effect.Applied {
 		t.Fatalf("start over: %+v", answer)
 	}
+	reviewDecisionAnswer(t, h, decisions[0].DecisionID)
 	h.exec(runner("linux-2"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-2"}, protocol.HelloPayload{WorkspaceProtocol: 1}, nil), Hello{})
 	// The source is now free to choose a different repository layout. A
 	// metadata edit of the pinned follow-up must retain its original directory.

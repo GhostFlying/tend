@@ -45,7 +45,7 @@ func (s *Service) attachmentsRead(ctx context.Context, c Call) (any, error) {
 	}
 	text, skipped, consumed, binary := fileText(data, offset, meta.Size)
 	result := attachmentWindow{ConversationAttachment: meta, Offset: offset + int64(skipped), NextOffset: offset + int64(consumed), EOF: offset+int64(consumed) >= meta.Size, Binary: binary, Text: text}
-	if c.Principal.Kind == protocol.PrincipalMainAgent && !c.Principal.Addon() {
+	if c.Principal.Kind == protocol.PrincipalMainAgent {
 		result.LocalPath, err = s.store.FileStore().Path(meta.SHA256)
 		if err != nil {
 			return nil, err

@@ -48,14 +48,16 @@ func (p *peer) set(id netx.Identity) {
 }
 
 type env struct {
-	t      *testing.T
-	clock  *testkit.Clock
-	app    *app.App
-	store  *store.Store
-	ids    protocol.IDGen
-	peer   *peer
-	server *Server
-	url    string
+	t       *testing.T
+	clock   *testkit.Clock
+	app     *app.App
+	store   *store.Store
+	ids     protocol.IDGen
+	peer    *peer
+	tools   *tools.Service
+	context *contextbuilder.Builder
+	server  *Server
+	url     string
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -72,7 +74,9 @@ func newEnv(t *testing.T) *env {
 	a := app.New(s, ids, clock.Now)
 	e := &env{t: t, clock: clock, app: a, store: s, ids: ids, peer: &peer{id: netx.Identity{Node: "laptop", User: ownerLogin}}}
 	cb := contextbuilder.New(a, s, ids, contextbuilder.Config{})
-	e.server = New(a, s, tools.New(a, s, cb, quiet()), cb, e.peer, secret, Config{Owners: []string{ownerLogin, "other-owner@example.com"}, Now: clock.Now}, quiet())
+	e.context = cb
+	e.tools = tools.New(a, s, cb, quiet())
+	e.server = New(a, s, e.peer, secret, Config{Owners: []string{ownerLogin, "other-owner@example.com"}, Now: clock.Now}, quiet())
 	hs := httptest.NewServer(e.server.Handler())
 	t.Cleanup(hs.Close)
 	e.url = hs.URL
@@ -130,7 +134,7 @@ func TestSessionLifecycle(t *testing.T) {
 	if st := e.do("GET", "/api/v1/session", "", nil, nil); st != http.StatusUnauthorized {
 		t.Errorf("without a token = %d, want 401", st)
 	}
-	for _, scope := range []protocol.TokenScope{protocol.ScopeOwner, protocol.ScopeAgent} {
+	for _, scope := range []protocol.TokenScope{protocol.ScopeOwner} {
 		tok := e.login(scope)
 		var v protocol.SessionView
 		if st := e.do("GET", "/api/v1/session", tok, nil, &v); st != http.StatusOK || v.ClientID != clientID || v.Scope != scope || v.Token != "" {
@@ -203,7 +207,7 @@ func TestTamperedToken(t *testing.T) {
 	valid := e.server.sign(token{Login: ownerLogin, ClientID: clientID, Scope: protocol.ScopeAgent, Issued: e.clock.Now().UnixMilli()})
 	forged := valid[:len(valid)-2] + "AA"
 	// An agent token re-signed as an owner token with another key.
-	other := New(e.app, e.store, e.server.tools, e.server.context, e.peer, bytes.Repeat([]byte{8}, 32), Config{Owners: []string{ownerLogin}, Now: e.clock.Now}, quiet())
+	other := New(e.app, e.store, e.peer, bytes.Repeat([]byte{8}, 32), Config{Owners: []string{ownerLogin}, Now: e.clock.Now}, quiet())
 	foreign := other.sign(token{Login: ownerLogin, ClientID: clientID, Scope: protocol.ScopeOwner, Issued: e.clock.Now().UnixMilli()})
 	for _, tok := range []string{forged, foreign, "not-a-token"} {
 		if st := e.do("GET", "/api/v1/session", tok, nil, nil); st != http.StatusUnauthorized {
@@ -219,7 +223,7 @@ func TestOwnerScope(t *testing.T) {
 		r.Header.Set("Authorization", "Bearer "+tok)
 		return r
 	}
-	if _, err := e.server.owner(request(e.login(protocol.ScopeAgent))); protocol.CodeOf(err) != protocol.CodeForbidden {
+	if _, err := e.server.owner(request(e.retiredAgentToken(clientID))); protocol.CodeOf(err) != protocol.CodeUnauthenticated {
 		t.Errorf("owner request with an agent token = %v, want forbidden", err)
 	}
 	p, err := e.server.owner(request(e.login(protocol.ScopeOwner)))

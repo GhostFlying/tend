@@ -10,7 +10,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestWorkItemChoiceEventsReachConfirmedAddonDelta(t *testing.T) {
+func TestWorkItemChoiceEventsReachConfirmedHostedDelta(t *testing.T) {
 	for _, action := range []string{"respond", "withdraw", "replace"} {
 		t.Run(action, func(t *testing.T) {
 			e := newEnv(t)
@@ -25,18 +25,18 @@ func TestWorkItemChoiceEventsReachConfirmedAddonDelta(t *testing.T) {
 			}
 			check := func(want ...string) {
 				t.Helper()
-				var composed app.Composed
+				var composed Composed
 				watermark := e.baseline().Watermark
 				if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
 					var err error
-					composed, err = e.b.Compose(t.Context(), tx.Q(), app.ComposeRequest{Self: protocol.Principal{Kind: protocol.PrincipalMainAgent, Agent: "codex"}, Watermark: watermark})
+					composed, err = e.b.Compose(t.Context(), tx.Q(), ComposeRequest{Self: protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "main", Thread: "thread-main"}, Watermark: watermark})
 					return err
 				}); err != nil {
 					t.Fatal(err)
 				}
 				for _, text := range want {
 					if !strings.Contains(composed.Text, text) {
-						t.Fatalf("addon delta lacks %q: %s", text, composed.Text)
+						t.Fatalf("hosted delta lacks %q: %s", text, composed.Text)
 					}
 				}
 				p := e.prepare(0)

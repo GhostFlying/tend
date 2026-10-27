@@ -99,7 +99,7 @@ var schemas = map[string]string{
   "type": "object",
   "properties": {
     "include_finished": {"type": "boolean", "description": "Also list completed and cancelled tasks."},
-    "project": {"type": "string", "description": "List this project's tasks; \"*\" lists every project. Defaults to the project this session works in."}
+    "project": {"type": "string", "description": "List this project's tasks; \"*\" lists every project. Defaults to every project."}
   },
   "additionalProperties": false
 }`,
@@ -244,15 +244,6 @@ var schemas = map[string]string{
 	"tend_context": `{
   "type": "object",
   "properties": {},
-  "additionalProperties": false
-}`,
-	"session_project": `{
-  "type": "object",
-  "properties": {
-    "project": {"type": "string", "description": "The project to work in, or an empty string for every project."},
-    "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
-  },
-  "required": ["project"],
   "additionalProperties": false
 }`,
 }

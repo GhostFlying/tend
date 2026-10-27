@@ -46,7 +46,7 @@ func TestCompletionNoticeIsAtomicAndNotRepeated(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if len(messages) != 1 || messages[0].Author != "system" || len(messages[0].Bindings) != 4 {
+		if len(messages) != 1 || messages[0].Author != "system" || len(messages[0].Bindings) != 5 {
 			t.Fatalf("notice is not available to context recall: %+v", messages)
 		}
 		var turns int

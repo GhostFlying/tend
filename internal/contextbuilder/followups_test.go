@@ -2,10 +2,11 @@ package contextbuilder
 
 import (
 	"encoding/json"
-	"github.com/GhostFlying/tend/internal/store"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/store"
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"

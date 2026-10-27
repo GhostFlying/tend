@@ -224,6 +224,12 @@ func TestReadTools(t *testing.T) {
 
 func TestDecisionTools(t *testing.T) {
 	e := newEnv(t)
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.InsertMessage(t.Context(), store.MessageRow{MessageID: "msg_1", Author: "owner", Body: "Use the second option"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	a := e.call("decisions_open", openArgs{Question: "which?", Options: []string{"first", "second"}}, "")
 	var r struct {
 		Outcome struct {
@@ -291,7 +297,7 @@ func TestSchemasMatchArgs(t *testing.T) {
 		"conversation_read":  conversationArgs{},
 		"tasks_list":         listArgs{}, "tasks_read": taskArgs{}, "tasks_create": createArgs{}, "tasks_update_intent": updateArgs{},
 		"tasks_set_control": controlArgs{}, "tasks_cancel": cancelArgs{}, "actions_create": actionArgs{}, "decisions_open": openArgs{}, "decisions_resolve": resolveArgs{},
-		"artifacts_read": artifactArgs{}, "attachments_read": fileArgs{}, "files_read": fileArgs{}, "requests_read": requestArgs{}, "repos_list": noArgs{}, "tend_context": noArgs{}, "session_project": sessionProjectArgs{},
+		"artifacts_read": artifactArgs{}, "attachments_read": fileArgs{}, "files_read": fileArgs{}, "requests_read": requestArgs{}, "repos_list": noArgs{}, "tend_context": noArgs{},
 	}
 	if len(args) != len(tools) {
 		t.Fatalf("%d tools but %d argument types", len(tools), len(args))
@@ -326,21 +332,6 @@ func TestSchemasMatchArgs(t *testing.T) {
 	}
 	if rProps, _, _ := schemaFields(t, string(nested["requirements"])); !slices.Equal(rProps, tags(domain.Requirements{})) {
 		t.Errorf("requirements schema %v, domain.Requirements %v", rProps, tags(domain.Requirements{}))
-	}
-}
-
-func TestHostedMainAgentLacksAddonTools(t *testing.T) {
-	for _, spec := range Specs() {
-		if spec.Name == "session_project" {
-			t.Error("the hosted main agent is given session_project")
-		}
-	}
-	if !slices.ContainsFunc(AddonSpecs(), func(s protocol.ToolSpec) bool { return s.Name == "session_project" }) {
-		t.Error("add-on sessions are not given session_project")
-	}
-	e := newEnv(t)
-	if a := e.call("session_project", sessionProjectArgs{Project: "default"}, "c1"); a.OK || a.Error == nil || a.Error.Code != protocol.CodeInvalidRequest {
-		t.Errorf("hosted session_project = %+v", a)
 	}
 }
 

@@ -62,7 +62,7 @@ func recordWorkItemNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, e
 	if err != nil {
 		return err
 	}
-	if x.Principal.Kind == protocol.PrincipalMainAgent && !x.Principal.Addon() {
+	if x.Principal.Kind == protocol.PrincipalMainAgent {
 		return nil
 	}
 	return queueEventTurn(ctx, x, tx, id, eventID, e.Kind, nil)

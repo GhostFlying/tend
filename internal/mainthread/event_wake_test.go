@@ -65,8 +65,8 @@ func TestTasklessAnsweredDecisionWakeCarriesAnswerIntoFreshThread(t *testing.T) 
 	var opened struct {
 		DecisionID string `json:"decision_id"`
 	}
-	// No owner message or prior native turn carries this taskless choice.
-	// Only the durable answered event can supply it to the fresh thread.
+	// No prior native turn carries this taskless choice. The panel answer
+	// records owner provenance and a durable coordination event for review.
 	if err := json.Unmarshal(e.exec(protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "main", Thread: "previous-thread"},
 		"decisions.open", protocol.Target{Type: "decision"}, map[string]any{
 			"question": "Which scope should the investigation use?", "options": []string{"narrow", "broad"},
@@ -80,11 +80,11 @@ func TestTasklessAnsweredDecisionWakeCarriesAnswerIntoFreshThread(t *testing.T) 
 		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
 	})
 	starts := businessStarts(h)
-	if len(starts) != 1 || e.count(`SELECT COUNT(*) FROM conversation_messages WHERE author='owner'`) != 0 {
+	if len(starts) != 1 || e.count(`SELECT COUNT(*) FROM conversation_messages WHERE author='owner'`) != 1 {
 		t.Fatalf("unexpected original owner input: %+v", starts)
 	}
 	for _, text := range []string{"decision.answered", opened.DecisionID, `"option":"narrow"`, `"text":"Limit it to the renderer; preserve the loader."`} {
-		if !strings.Contains(starts[0].Text+backgroundFacts(e, starts[0].UserMessageID), text) {
+		if !strings.Contains(starts[0].Text, text) {
 			t.Errorf("fresh event turn lost canonical answer %q: %s", text, starts[0].Text)
 		}
 	}
@@ -255,19 +255,6 @@ func TestWorkItemChoiceAnswerWakesWithSystemNoticeAndNoQueuedOwnerReply(t *testi
 	if err := json.Unmarshal(answered.Result, &choice); err != nil {
 		t.Fatal(err)
 	}
-	// Preserve the already-enqueued legacy main batch identity on upgrade.
-	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
-		if _, err := tx.Exec(t.Context(), `DELETE FROM message_dispositions WHERE message_id IN (SELECT message_id FROM background_batches)`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(t.Context(), `UPDATE conversation_messages SET conversation_id='main' WHERE message_id IN (SELECT message_id FROM background_batches)`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `UPDATE outbox SET destination='main_thread' WHERE operation='main_thread.handle_event'`)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
 	e.start()
 	eventually(t, "choice answer event completes", func() bool {
 		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
@@ -277,19 +264,12 @@ func TestWorkItemChoiceAnswerWakesWithSystemNoticeAndNoQueuedOwnerReply(t *testi
 		t.Fatalf("starts=%+v", starts)
 	}
 	for _, text := range []string{"work_item_choice.answered", choice.ChoiceID, "Deploy after CI", choice.AnswerSourceID} {
-		if !strings.Contains(starts[0].Text+backgroundFacts(e, starts[0].UserMessageID), text) {
+		if !strings.Contains(starts[0].Text, text) {
 			t.Errorf("wake missing %q: %s", text, starts[0].Text)
 		}
 	}
 	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		page, err := store.BackgroundSources(t.Context(), tx.Q(), starts[0].UserMessageID, 0)
-		if err != nil {
-			return err
-		}
-		if len(page.Sources) != 1 {
-			t.Fatal(page)
-		}
-		msg, err := store.GetMessage(t.Context(), tx.Q(), page.Sources[0].MessageID)
+		msg, err := store.GetMessage(t.Context(), tx.Q(), starts[0].UserMessageID)
 		if err != nil {
 			return err
 		}

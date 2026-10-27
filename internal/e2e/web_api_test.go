@@ -17,21 +17,18 @@ import (
 
 	"github.com/GhostFlying/tend/internal/api"
 	"github.com/GhostFlying/tend/internal/app"
-	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
-	"github.com/GhostFlying/tend/internal/tools"
 )
 
 // startWeb serves the owner API of a server that runs the hosted main
 // agent, as the web client uses it. Shutting it down ends its event
 // streams first, as tend-server does.
 func (s *server) startWeb() *httptest.Server {
-	cb := contextbuilder.New(s.app, s.store, s.ids, contextbuilder.Config{})
 	phone := netx.Static{Identity: &netx.Identity{Node: "phone", User: ownerLogin}}
-	a := api.New(s.app, s.store, tools.New(s.app, s.store, cb, quiet()), cb, phone, secret,
+	a := api.New(s.app, s.store, phone, secret,
 		api.Config{Owners: []string{ownerLogin}, HostedMainAgent: true}, quiet())
 	hs := httptest.NewServer(a.Handler())
 	s.onStop(func() {
@@ -321,10 +318,17 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 	sourceResults := make(chan harness.ToolResult, 4)
 	agent.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		ctx := context.Background()
-		if strings.HasPrefix(in.Text, "[Tend ledger event ") {
-			// A ledger notification is not another request to ship a release.
-			// The fake model reads the retained facts without inventing a new question.
-			sourceResults <- th.CallTool(ctx, turn, "sources_"+turn, "background_sources", map[string]any{})
+		message, err := srv.app.Message(ctx, in.UserMessageID)
+		if err != nil {
+			t.Errorf("read fake model input: %v", err)
+			return "failed"
+		}
+		if message.Author == "system" {
+			// Ledger events and stale-background coordination notices can use
+			// different prompt headers. Neither is a new owner release request.
+			if strings.HasPrefix(th.Config.Cwd, "/background/") {
+				sourceResults <- th.CallTool(ctx, turn, "sources_"+turn, "background_sources", map[string]any{})
+			}
 			th.Say(turn, "item_"+turn, "The decision state changed; no new owner instruction.")
 			return "completed"
 		}
@@ -333,6 +337,10 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 			res := th.CallTool(ctx, turn, "call_"+turn, "decisions_resolve", map[string]any{"decision_id": m[2], "version": version, "option": m[1]})
 			th.Say(turn, "item_"+turn, "Going with "+m[1]+": "+res.Text)
 			return "completed"
+		}
+		if message.Author != "owner" || message.Body != "ship it" {
+			t.Errorf("unexpected release request from %s: %s", message.Author, message.Body)
+			return "failed"
 		}
 		th.CallTool(ctx, turn, "call_"+turn, "decisions_open", map[string]any{"question": "Which release branch?", "options": []string{"main", "release/1.x"}})
 		th.Say(turn, "item_"+turn, "Which release branch should I use?")
@@ -389,6 +397,9 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 	events.until("the agent asks", itemIs(asked, protocol.MessageReplied))
 	open := web.decisions()
 	if len(open) != 1 || open[0].Effects != nil {
+		for _, input := range businessStarts(agent) {
+			t.Logf("business input: %s", input.Text)
+		}
 		t.Fatalf("open decisions = %+v, want the agent's question", open)
 	}
 	q := open[0]
@@ -417,39 +428,24 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 	// Unclaimed events may coalesce; both original sources must be read without
 	// creating another owner question or running business operations twice.
 	eventually(t, "owner replies and background decision sources settle", func() bool {
-		return srv.count(`SELECT COUNT(*) FROM logical_turns WHERE status<>'completed'`) == 0 && srv.count(`SELECT COUNT(*) FROM background_sources WHERE kind='decision.answered'`) > 0 && srv.count(`SELECT COUNT(*) FROM background_sources s WHERE kind='decision.answered' AND NOT EXISTS(SELECT 1 FROM background_reads r WHERE r.batch_id=s.batch_id AND r.source_seq=s.seq)`) == 0
+		return srv.count(`SELECT COUNT(*) FROM logical_turns WHERE status<>'completed'`) == 0 && srv.count(`SELECT COUNT(*) FROM background_sources s WHERE kind='decision.answered' AND NOT EXISTS(SELECT 1 FROM background_reads r WHERE r.batch_id=s.batch_id AND r.source_seq=s.seq)`) == 0
 	})
 	if srv.count("SELECT COUNT(*) FROM decisions") != 2 {
 		t.Fatal("decision coordination duplicated a question")
 	}
-	var sawAppliedAnswer bool
 	for len(sourceResults) > 0 {
-		read := <-sourceResults
-		if !read.Success {
+		if read := <-sourceResults; !read.Success {
 			t.Fatal(read.Text)
 		}
-		var result struct {
-			Result struct {
-				Outcome protocol.BackgroundSourcePage `json:"outcome"`
-			} `json:"result"`
-		}
-		if err := json.Unmarshal([]byte(read.Text), &result); err != nil {
-			t.Fatal(err)
-		}
-		for _, source := range result.Result.Outcome.Sources {
-			var fact protocol.AnswerResult
-			if source.Kind == "decision.answered" {
-				if err := json.Unmarshal(source.Data, &fact); err != nil {
-					t.Fatal(err)
-				}
-				if fact.Effect != nil && fact.Effect.Applied && fact.Effect.Effect == protocol.EffectCancel {
-					sawAppliedAnswer = true
-				}
-			}
+	}
+	sawAppliedAnswer := false
+	for _, input := range businessStarts(agent) {
+		if strings.Contains(input.Text, `"applied":true`) && strings.Contains(input.Text, `"effect":"cancel"`) {
+			sawAppliedAnswer = true
 		}
 	}
 	if !sawAppliedAnswer {
-		t.Fatal("background answer turn omitted the canonical applied cancellation result")
+		t.Fatal("main answer coordination omitted the canonical applied cancellation result")
 	}
 }
 

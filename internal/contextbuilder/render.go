@@ -18,10 +18,6 @@ type Snapshot struct {
 	Watermark int64
 	// Full marks a full snapshot; otherwise the packet is a delta.
 	Full bool
-	// Addon marks context for an agent the owner works in rather than the
-	// hosted main agent: a full snapshot then carries the standing
-	// instructions, which such an agent has no other place for.
-	Addon bool
 	// Project says, in a full snapshot, which project the session works
 	// in, when tend has more than one, and Others sums up what the other
 	// projects hold.
@@ -80,8 +76,7 @@ type section struct {
 	omitted   string // note format with one %d for the count
 }
 
-// Render budgets dynamic packet content in UTF-8 bytes. Fixed addon
-// instructions are included separately and cannot displace ledger facts.
+// Render budgets packet content in UTF-8 bytes.
 // Lines are never cut; protected attention can exceed the dynamic budget.
 func Render(s Snapshot, budget int) string {
 	kind := "delta"
@@ -94,25 +89,9 @@ func Render(s Snapshot, budget int) string {
 	} else {
 		header = fmt.Sprintf("[tend context packet %s epoch=%d watermark=%d kind=%s]\n", s.PacketID, s.Epoch, s.Watermark, kind)
 	}
-	fixedBytes := 0
 	switch {
-	case s.Full && s.Addon:
-		fixedBytes = len(AddonInstructions)
-		header += "This replaces all earlier tend context in this conversation, including any carried over in a summary. " +
-			"It is tend's ledger as of now and is authoritative over anything you remember.\n\n" + AddonInstructions + "\n"
-		if s.Project != "" {
-			header += "\n" + s.Project + "\n"
-		}
-		if len(s.Others) > 0 {
-			header += "Other projects: " + strings.Join(s.Others, "; ") + ".\n"
-		}
-		if len(s.Tasks) == 0 && len(s.Attention) == 0 {
-			header += "\nThere are no unfinished execution tasks. This does not mean work items or deliveries are settled.\n"
-		}
 	case s.Full:
 		header += "This is tend's ledger as of now. It is authoritative over anything you remember; read details with the tend tools.\n"
-	case s.Addon:
-		header += "Changes in tend's ledger since your last tend context, made by others or by tend itself. Read details with the tend tools.\n"
 	default:
 		header += "Changes in tend's ledger since your last context. Background changes do not change what the owner is talking about.\n"
 	}
@@ -143,7 +122,7 @@ func Render(s Snapshot, budget int) string {
 	focus := func(sec *section) bool { return sec.title == "Recent conversation" }
 	dropped := map[*section]int{}
 	size := func() int {
-		n := len(header) - fixedBytes
+		n := len(header)
 		for _, sec := range sections {
 			if len(sec.lines) == 0 && dropped[sec] == 0 {
 				continue

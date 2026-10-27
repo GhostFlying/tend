@@ -47,7 +47,7 @@ func TestToolFailuresPaginationAndRedaction(t *testing.T) {
 
 func TestToolFailuresOwnerConversationScopeAndRunIsolation(t *testing.T) {
 	e := newEnv(t)
-	for _, principal := range []protocol.Principal{hosted, {Kind: protocol.PrincipalMainAgent, Subject: "addon", Agent: protocol.AgentCodex, Thread: "other-project-session"}} {
+	for _, principal := range []protocol.Principal{hosted} {
 		result := e.svc.Handle(context.Background(), Call{Principal: principal, Tool: "tool_failures_list", Arguments: json.RawMessage(`{}`)})
 		if !result.Success || !strings.Contains(result.Text, `"scope":"hosted_conversation"`) {
 			t.Fatalf("missing conversation scope: %s", result.Text)
