@@ -210,8 +210,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					if ev.ItemType == harness.ItemAgentMessage && ev.Text != "" {
 						summary = ev.Text
 					}
+					completed := completedRolloutEvent(th.ID(), ev)
 					select {
-					case w.events <- workerItemEvent(ev):
+					case w.events <- completed:
 					case <-ctx.Done():
 					}
 				case harness.EventTurnCompleted:
@@ -273,4 +274,20 @@ func nativeRolloutEvent(threadID string, ev harness.Event) harness.WorkerEvent {
 		Data     json.RawMessage `json:"data,omitempty"`
 	}{threadID, ev.TurnID, ev.ItemID, ev.Raw})
 	return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "native." + string(ev.Kind), Body: body}
+}
+
+// Completion fields stay at the root for existing CLI and server readers.
+// Optional attribution lets newer readers pair lifecycle facts without
+// changing the opaque event contract or requiring a newer runner protocol.
+func completedRolloutEvent(threadID string, ev harness.Event) harness.WorkerEvent {
+	base := workerItemEvent(ev)
+	var body map[string]json.RawMessage
+	if json.Unmarshal(base.Body, &body) != nil || body == nil {
+		return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "item.completed", Body: base.Body}
+	}
+	for key, value := range map[string]string{"thread_id": threadID, "turn_id": ev.TurnID, "item_id": ev.ItemID} {
+		body[key], _ = json.Marshal(value)
+	}
+	raw, _ := json.Marshal(body)
+	return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "item.completed", Body: raw}
 }

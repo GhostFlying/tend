@@ -1,72 +1,584 @@
 .root {
   min-width: 0;
+  margin: 16px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--bg);
   overflow-wrap: anywhere;
 }
+.root button,
+.reader button,
 .root select {
-  max-width: 100%;
-  display: block;
   font: inherit;
-  padding: 8px;
-  color: var(--label);
-  background: var(--input);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  color: inherit;
 }
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 12px 0;
-}
-.toolbar button {
-  font: inherit;
-  color: var(--label);
-  background: var(--input);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
+.root button,
+.reader button {
   cursor: pointer;
 }
-.events {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.root button:focus-visible,
+.reader button:focus-visible,
+.root summary:focus-visible,
+.reader summary:focus-visible,
+.root select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
-.events article {
-  padding: 12px 0;
-  border-top: 1px solid var(--border-soft);
+.root button:disabled,
+.reader button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
-.events header {
+.cardHeading {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.events small,
-.root > small {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 0;
   color: var(--label-3);
-  font-size: 11px;
-}
-.events summary {
-  cursor: pointer;
   font-size: 12px;
 }
-.events pre {
+.cardHeading select {
+  min-width: 0;
+  max-width: 70%;
+  border: 0;
+  background: transparent;
+  color: var(--label-2);
+  font-size: 12px;
+  padding: 4px;
+}
+.activity {
+  display: flex;
+  width: 100%;
+  gap: 10px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 12px 14px;
+  text-align: left;
+}
+.activityText {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 9px;
+}
+.state {
+  flex: none;
+  font-size: 12px;
+  color: var(--label-3);
+}
+.summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.mark {
+  flex: none;
+  display: inline-flex;
+  width: 16px;
+  align-items: center;
+  justify-content: center;
+  color: var(--label-3);
+}
+.mark[data-active="true"] {
+  color: var(--accent);
+  animation: spin 2s linear infinite;
+}
+.mark[data-failed="true"] {
+  color: var(--danger, #b93b3b);
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.elapsed {
+  font-size: 11px;
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: none;
+}
+.chevron {
+  display: inline-block;
+  color: var(--label-3);
+  transition: transform 0.15s;
+  font-size: 18px;
+  flex: none;
+}
+.chevron[data-open="true"],
+.disclosure[open] > summary .chevron {
+  transform: rotate(90deg);
+}
+.compact {
+  padding: 0 14px 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.step {
+  min-width: 0;
+  position: relative;
+}
+.step[data-failed="true"] .toolTitle {
+  color: var(--danger, #b93b3b);
+}
+.disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.toolTitle {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+}
+.stepSummary {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--label-3);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.stepBody {
+  margin: 3px 0 12px 24px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.stepBody > :not(.io) {
+  margin: 10px 12px;
+}
+.io {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-subtle, var(--input));
+  font-size: 12px;
+}
+.io + .io {
+  border-top: 1px solid var(--border-soft);
+}
+.io > span {
+  color: var(--label-3);
+  font-size: 11px;
+  padding-top: 2px;
+}
+.io pre,
+.diagnostics pre {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 12px;
-  max-height: 320px;
-  overflow: auto;
+  line-height: 1.65;
 }
-.notice {
+.diagnostics {
+  font-size: 11px;
+  color: var(--label-3);
+}
+.diagnostics > summary {
+  cursor: pointer;
+}
+.diagnostics small {
+  display: block;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.diagnostics pre {
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--input);
+}
+.compact .step {
+  padding-right: 20px;
+}
+.inspect {
+  position: absolute;
+  top: 4px;
+  right: -4px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 14px !important;
+  color: var(--label-3) !important;
+}
+.inspect:hover {
+  background: var(--input);
+  color: var(--accent) !important;
+}
+.cardFooter {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+}
+.textButton {
+  border: 0;
+  background: transparent;
+  color: var(--accent) !important;
+  padding: 5px 0;
+  font-size: 12px !important;
+}
+.empty {
+  color: var(--label-3);
+  font-size: 12px;
+  padding: 8px 14px;
+}
+.error,
+.readerError {
+  font-size: 12px;
+  padding: 8px 14px;
+  color: var(--danger, #b93b3b);
+}
+.error button,
+.readerError button {
+  margin-left: 8px;
+  background: none;
+  border: 0;
+  text-decoration: underline;
+}
+.warning {
   font-size: 12px;
   color: var(--label-3);
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+}
+.reader {
+  width: min(1040px, calc(100vw - 48px));
+  height: calc(100dvh - 48px);
+  max-height: none;
+  max-width: none;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--label);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+.reader[open] {
+  display: flex;
+  flex-direction: column;
+}
+.reader::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+.readerHeader {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-soft);
+  flex: none;
+}
+.back,
+.close {
+  border: 0;
+  background: transparent;
+  color: var(--label-2) !important;
+  padding: 6px 0;
+  font-size: 12px !important;
+}
+.close {
+  font-size: 22px !important;
+  min-width: 28px;
+}
+.readerTitle {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+  flex: 1;
+  font-size: 14px;
+}
+.readerTitle > span {
+  color: var(--label-3);
+  font-size: 12px;
+}
+.readerState {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+  color: var(--label-3);
+  font-size: 12px;
+}
+.readerTools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border-soft);
+  flex: none;
+  font-size: 12px;
+}
+.readerTools > button {
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  color: var(--label-3);
+}
+.followState {
+  margin-right: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--label-3);
+  white-space: nowrap;
+}
+.followState i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--label-3);
+}
+.followState i[data-live="true"] {
+  background: var(--accent);
+}
+.more {
+  position: relative;
+  color: var(--label-3);
+}
+.more > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.more > div {
+  position: absolute;
+  right: 0;
+  top: 25px;
+  z-index: 2;
+  width: min(340px, calc(100vw - 40px));
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  overflow-wrap: anywhere;
+}
+.more button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 0 0 10px;
+}
+.more small {
+  display: block;
+}
+.more p {
   line-height: 1.6;
 }
+.reading {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
+.readingColumn {
+  max-width: 780px;
+  padding: 24px 32px 80px;
+  margin: 0 auto;
+}
+.reading .steps > li {
+  margin: 12px 0;
+  scroll-margin-top: 16px;
+}
+.reading .steps > li[data-target="true"] {
+  border-radius: 6px;
+}
+.reading .prose {
+  margin: 22px 0 8px;
+  line-height: 1.75;
+}
+.reading .disclosure > summary {
+  gap: 8px;
+}
+.reading .toolTitle {
+  font-size: 13px;
+}
+.reading .stepSummary {
+  font-size: 13px;
+}
+.reading .diagnostics {
+  opacity: 0.65;
+}
+.reading .diagnostics:hover,
+.reading .diagnostics[open] {
+  opacity: 1;
+}
+.pageButton {
+  display: block;
+  margin: 12px auto;
+  background: var(--input);
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 12px !important;
+  color: var(--label-3) !important;
+}
+.working {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 13px;
+}
+.toLatest {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 9px 16px;
+  background: var(--bg);
+  color: var(--label-2);
+  font-size: 12px !important;
+  box-shadow: var(--shadow-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark[data-active="true"] {
+    animation: none;
+  }
+  .chevron {
+    transition: none;
+  }
+}
 @media (max-width: 760px) {
-  .toolbar button,
-  .root select {
+  .reader {
+    width: 100%;
+    height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  .readerHeader {
+    padding: calc(4px + env(safe-area-inset-top)) 14px 4px;
+    gap: 10px;
+  }
+  .readerTitle {
+    display: block;
+    font-size: 13px;
+  }
+  .readerTitle > span {
+    display: block;
+    font-size: 11px;
+  }
+  .readerState {
+    font-size: 11px;
+  }
+  .readerTools {
+    padding: 0 14px;
+    gap: 12px;
+  }
+  .readerTools > button,
+  .more > summary,
+  .readerHeader button {
     min-height: 44px;
   }
+  .more > summary {
+    display: flex;
+    align-items: center;
+  }
+  .more > div {
+    top: 44px;
+  }
+  .readingColumn {
+    padding: 16px 18px 80px;
+  }
+  .activityText {
+    gap: 6px;
+  }
+  .activity {
+    min-height: 48px;
+    padding: 10px;
+    gap: 6px;
+  }
+  .activity .state {
+    font-size: 11px;
+  }
+  .compact {
+    padding: 0 10px 8px;
+  }
+  .root select {
+    min-height: 36px;
+  }
+  .root summary,
+  .root .textButton,
+  .inspect,
+  .pageButton,
+  .toLatest {
+    min-height: 36px;
+  }
+  .reader .disclosure > summary {
+    min-height: 44px;
+  }
+  .io {
+    grid-template-columns: 24px minmax(0, 1fr);
+    padding: 10px;
+    gap: 6px;
+  }
+  .stepBody {
+    margin-left: 20px;
+  }
+  .toLatest {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+}
+
+.reading .prose + .diagnostics:not([open]) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  opacity: 0;
+}
+.reading .prose + .diagnostics > summary {
+  min-height: 20px;
+  min-width: 20px;
+  text-align: center;
+  font-size: 18px;
+  list-style: none;
+}
+.reading .step:hover > .diagnostics,
+.reading .step:focus-within > .diagnostics {
+  opacity: 0.8;
+}
+@media (hover: none) {
+  .reading .prose + .diagnostics:not([open]) {
+    opacity: 0.5;
+  }
+}
+
+.stepState {
+  font-size: 11px;
+  color: var(--label-3);
+  white-space: nowrap;
+}
+.step[data-failed="true"] .stepState {
+  color: var(--danger, #b93b3b);
 }

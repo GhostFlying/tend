@@ -427,26 +427,23 @@ describe("LiveData", () => {
     expect(api.pending()).toEqual(["/api/v1/snapshot", "/api/v1/tasks/task_1"]);
   });
 
-  test("run logs resume from their cursor and expose an unfinished read", async () => {
+  test("detail refresh keeps formal run status without fetching legacy logs", async () => {
     const api = new FakeApi();
     const live = new LiveData(api);
-    const task = { task_id: "task_1", title: "t", runs: [{ run_id: "run_1" }] };
     void live.open("task_1");
-    await api.answer("/api/v1/tasks/task_1", task);
-    for (let seq = 1; seq <= 20; seq++) {
-      expect(api.pending()).toContain(`/api/v1/runs/run_1/logs?after=${seq - 1}`);
-      await api.answer("/api/v1/runs/run_1/logs", {
-        logs: [{ seq, kind: "output", created_at: "2026-10-22T10:00:00Z", body: `line ${seq}` }],
-        next: seq,
-      });
-    }
-    expect(live.detail.get()?.logs).toMatchObject({ more: true });
+    await api.answer("/api/v1/tasks/task_1", {
+      task_id: "task_1",
+      runs: [{ run_id: "run_1", observed: "running" }],
+    });
+    expect(api.pending()).toEqual([]);
     void live.refreshDetail();
-    await api.answer("/api/v1/tasks/task_1", task);
-    expect(api.pending()).toContain("/api/v1/runs/run_1/logs?after=20");
-    await api.answer("/api/v1/runs/run_1/logs", { logs: [], next: 20 });
-    expect(live.detail.get()?.logs?.more).toBe(false);
-    expect(live.detail.get()?.logs?.entries).toHaveLength(20);
+    await api.answer("/api/v1/tasks/task_1", {
+      task_id: "task_1",
+      runs: [{ run_id: "run_1", observed: "failed" }],
+    });
+    expect(live.detail.get()?.task?.runs?.[0]?.observed).toBe("failed");
+    expect(api.pending()).toEqual([]);
+    await live.stop();
   });
 
   test("failed view reads retry without a stream event and stop owns retries", async () => {
@@ -516,38 +513,21 @@ describe("LiveData", () => {
     await live.stop();
   });
 
-  test("active logs update without ledger events and cancel on run, task, close and stop", async () => {
+  test("switching, closing and stopping details abort their pending read", async () => {
     const api = new FakeApi();
     const live = new LiveData(api);
-    const detail = (runId: string) => ({
-      task_id: "task_1",
-      runs: [{ run_id: runId, observed: "running" }],
-    });
     void live.open("task_1");
-    await api.answer("/api/v1/tasks/task_1", detail("run_1"));
-    await api.answer("/api/v1/runs/run_1/logs", { logs: [], next: 0 });
-    expect(api.pending()).toContain("/api/v1/runs/run_1/logs?after=0&wait=15");
-    await api.answer("/api/v1/runs/run_1/logs", {
-      logs: [{ seq: 1, body: "new log" }],
-      next: 1,
-      observed: "running",
-    });
-    expect(live.detail.get()?.logs?.entries).toMatchObject([{ seq: 1, body: "new log" }]);
-    expect(api.pending()).toContain("/api/v1/runs/run_1/logs?after=1&wait=0");
-    void live.refreshDetail();
-    await api.answer("/api/v1/tasks/task_1", detail("run_2"));
-    expect(api.pending().some((p) => p.includes("run_1"))).toBe(false);
-    await api.answer("/api/v1/runs/run_2/logs", { logs: [], next: 0 });
-    expect(api.pending()).toContain("/api/v1/runs/run_2/logs?after=0&wait=15");
     void live.open("task_2");
-    expect(api.pending().some((p) => p.includes("run_2"))).toBe(false);
-    await api.answer("/api/v1/tasks/task_2", { ...detail("run_3"), task_id: "task_2" });
-    await api.answer("/api/v1/runs/run_3/logs", { logs: [], next: 0 });
+    await vi.waitFor(() => expect(api.pending()).toEqual(["/api/v1/tasks/task_2"]));
+    await api.answer("/api/v1/tasks/task_2", {
+      task_id: "task_2",
+      runs: [{ run_id: "run_2", observed: "running" }],
+    });
+    expect(api.pending()).toEqual([]);
+    void live.refreshDetail();
     live.close();
     expect(api.pending()).toEqual([]);
-    void live.open("task_1");
-    await api.answer("/api/v1/tasks/task_1", detail("run_4"));
-    await api.answer("/api/v1/runs/run_4/logs", { logs: [], next: 0 });
+    void live.open("task_3");
     await live.stop();
     expect(api.pending()).toEqual([]);
   });

@@ -56,6 +56,18 @@ func TestAcceptanceWorkerReportsVerdict(t *testing.T) {
 	for event := range w.Events() {
 		events = append(events, event)
 	}
+	var completed struct {
+		Thread string `json:"thread_id"`
+		Turn   string `json:"turn_id"`
+		Item   string `json:"item_id"`
+	}
+	if len(events) == 0 || json.Unmarshal(events[0].Body, &completed) != nil || completed.Thread != "th_w" || completed.Turn != "tu_w" || completed.Item != "i1" {
+		t.Fatalf("completed item lost native attribution: %+v", events)
+	}
+	var item ThreadItem
+	if err := json.Unmarshal(events[0].Body, &item); err != nil || item.Text != "All good." || item.ID != completed.Item {
+		t.Fatalf("completed item lost legacy root fields = %s, %v", events[0].Body, err)
+	}
 	res, err := w.Wait()
 	if err != nil || res.Verdict == nil || res.Verdict.Verdict != protocol.VerdictPassed || res.Summary != "All good." || len(events) != 2 || events[1].Kind != "native.turn_completed" {
 		t.Errorf("result = %+v, %v (events %+v)", res, err, events)
