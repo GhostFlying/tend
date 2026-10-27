@@ -11,8 +11,9 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// claimPlanCommit records that a planning commit of a source message was
-// applied. A replay under a new request ID is a duplicate effect.
+// claimPlanCommit records a planning effect separately from owner attribution.
+// Hosted native turns keep their initial delivery as the effect identity even
+// after steer changes the payload's source. New call IDs cannot repeat a commit.
 func claimPlanCommit(ctx context.Context, x *Exec, tx *store.Tx, sourceMessageID string, seq int64) error {
 	if sourceMessageID == "" {
 		return nil
@@ -20,16 +21,23 @@ func claimPlanCommit(ctx context.Context, x *Exec, tx *store.Tx, sourceMessageID
 	if err := attachReviewSource(ctx, x, tx, sourceMessageID); err != nil {
 		return err
 	}
-	err := tx.InsertPlanCommit(ctx, sourceMessageID, seq, x.Env.RequestID, x.Now.UnixMilli())
+	effectSource := sourceMessageID
+	if x.planningSource != "" {
+		if x.Principal.Kind != protocol.PrincipalMainAgent {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "planning source requires a hosted main agent")
+		}
+		effectSource = x.planningSource
+	}
+	err := tx.InsertPlanCommit(ctx, effectSource, seq, x.Env.RequestID, x.Now.UnixMilli())
 	if err == nil || !store.IsUniqueViolation(err) {
 		return err
 	}
-	original, getErr := store.GetPlanCommitRequest(ctx, tx.Q(), sourceMessageID, seq)
+	original, getErr := store.GetPlanCommitRequest(ctx, tx.Q(), effectSource, seq)
 	if getErr != nil {
 		return fmt.Errorf("app: plan commit replay: %w", getErr)
 	}
 	return duplicateEffect("this planning commit was already applied", map[string]any{
-		"source_message_id": sourceMessageID, "commit_seq": seq, "original_request_id": original,
+		"source_message_id": sourceMessageID, "planning_source_message_id": effectSource, "commit_seq": seq, "original_request_id": original,
 	})
 }
 

@@ -5,8 +5,8 @@
 //
 // Messages arrive through the outbox, so the manager is the dispatcher's
 // handler for the main thread destination. A delivery returns once its
-// turn ended, which keeps the front thread to one turn at a time (v0.1
-// §6.2). Every delivery writes its turn record before turn/start: after a
+// turn ended; that same serial delivery can append queued owner input to
+// the active native turn (D107). Every initial delivery writes its record before turn/start: after a
 // restart, a delivery without a record certainly never started, one whose
 // turn started is done, and one stuck before confirmation is unknown and
 // left to the owner rather than resent.
@@ -52,7 +52,10 @@ type Config struct {
 	// hold the control destination and the stops queued after it.
 	// Default 10s.
 	InterruptTimeout time.Duration
-	Log              *slog.Logger
+	// SteerTimeout bounds native acceptance, not tool completion or consumption.
+	// Default 10s. A timeout is unknown and never automatically resent.
+	SteerTimeout time.Duration
+	Log          *slog.Logger
 }
 
 // Manager runs the front thread.
@@ -72,14 +75,19 @@ type Manager struct {
 	lastActivity       time.Time
 	workMu             sync.Mutex        // serializes deliveries with fork snapshot acquisition
 	settled            map[string]string // turn ID -> final status, for turns that ended before Deliver saw them start
+	ownerSourcesReady  bool              // persisted toolset proves hosted source selection is installed
 }
 
 // turn is the delivery the front thread is working on.
 type turn struct {
-	requestID string
-	messageID string
-	turnID    string
-	done      chan string
+	requestID                        string
+	messageID                        string
+	turnID                           string
+	done                             chan string
+	sourceMessageID, sourceRequestID string
+	sourceSeq                        int64
+	sources                          []string
+	finished, steerBlocked           bool
 }
 
 // New returns a Manager.
@@ -98,6 +106,9 @@ func New(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg Config) 
 	}
 	if cfg.InterruptTimeout <= 0 {
 		cfg.InterruptTimeout = 10 * time.Second
+	}
+	if cfg.SteerTimeout <= 0 {
+		cfg.SteerTimeout = 10 * time.Second
 	}
 	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, ready: make(chan struct{}), settled: map[string]string{}}
 }
@@ -146,8 +157,21 @@ func (m *Manager) serve(ctx context.Context) error {
 	if receiptErr != nil {
 		m.cfg.Log.WarnContext(ctx, "could not reconcile uncertain native receipts", "err", receiptErr)
 	}
+	hash, err := currentToolsetHash()
+	if err != nil {
+		return err
+	}
+	binding, bound, err := m.app.MainThreadBinding(ctx, m.cfg.Instance)
+	if err != nil {
+		return err
+	}
+	installed, err := m.app.MainThreadToolset(ctx, m.cfg.Instance, th.ID())
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	m.session, m.thread = s, th
+	m.ownerSourcesReady = installed == hash || (bound && binding.ThreadID == th.ID() && binding.ToolsetHash == hash)
 	close(m.ready)
 	m.mu.Unlock()
 	m.refreshUsage(ctx, th)
@@ -210,12 +234,21 @@ func (m *Manager) serve(ctx context.Context) error {
 					return err
 				}
 			}
+			if ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemUserMessage {
+				if err := m.consumeSteer(ctx, th.ID(), ev.TurnID, ev.Text, ev.ItemID); err != nil {
+					return err
+				}
+			}
+			if ev.Kind == harness.EventItemStarted && ev.ItemType == harness.ItemAgentMessage {
+				drafts.begin(ev, m)
+			}
 			if ev.Kind == harness.EventAgentMessageDelta || (ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemAgentMessage) {
 				// Start the batch interval at the first fragment, not at a stale
 				// idle tick delayed by durable turn-start bookkeeping.
 				if _, exists := drafts[replyKey{ev.TurnID, ev.ItemID}]; !exists && ev.Kind == harness.EventAgentMessageDelta {
 					ticker.Reset(100 * time.Millisecond)
 				}
+				drafts.begin(ev, m)
 				drafts.consume(ev)
 				if ev.Kind == harness.EventItemCompleted {
 					if err := m.flushReplies(ctx, th, drafts, ev.TurnID, ""); err != nil {
@@ -267,7 +300,7 @@ func (m *Manager) detach(th harness.Thread) harness.Session {
 
 func (m *Manager) threadConfig() harness.ThreadConfig {
 	cfg := m.cfg.Thread
-	cfg.Tools = tools.Specs()
+	cfg.Tools = hostedSpecs()
 	if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
 		cfg.Tools = tools.BackgroundSpecs()
 		cfg = backgroundThreadConfig(cfg)
@@ -316,7 +349,11 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 	if err != nil {
 		return nil, err
 	}
-	return th, m.app.SetMainThread(ctx, m.cfg.Instance, th.ID())
+	hash, err := currentToolsetHash()
+	if err != nil {
+		return nil, err
+	}
+	return th, m.app.SetMainThreadWithToolset(ctx, m.cfg.Instance, th.ID(), hash)
 }
 
 // handle acts on one thread event.
@@ -348,6 +385,7 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 		m.mu.Lock()
 		a := m.active
 		if a != nil && a.turnID == ev.TurnID {
+			a.finished = true
 			select {
 			case a.done <- ev.TurnStatus:
 			default:
@@ -375,19 +413,30 @@ func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harne
 	if ev.Kind == harness.EventItemCompleted {
 		phase = "completed:" + string(ev.Tool.Status)
 	}
-	payload := map[string]any{"turn_id": ev.TurnID, "item_id": ev.ItemID, "reply_to": m.replyTo(ev.TurnID),
+	replyTo, _ := m.replyContext(ev.TurnID)
+	if backgroundTool(ev.Tool.Name) {
+		original, ok, err := m.app.TurnDelivery(ctx, th.ID(), ev.TurnID)
+		if err != nil {
+			return err
+		}
+		if ok {
+			replyTo = original.MessageID
+		} else {
+			m.mu.Lock()
+			if a := m.active; a != nil && (a.turnID == "" || a.turnID == ev.TurnID) {
+				replyTo = a.messageID
+			}
+			m.mu.Unlock()
+		}
+	}
+	if prior, _, found, err := m.app.NativeItemSources(ctx, th.ID(), ev.TurnID, ev.ItemID); err != nil {
+		return err
+	} else if found {
+		replyTo = prior
+	}
+	payload := map[string]any{"turn_id": ev.TurnID, "item_id": ev.ItemID, "reply_to": replyTo,
 		"tool": ev.Tool.Name, "input": ev.Tool.Input, "output": ev.Tool.Output, "status": ev.Tool.Status}
 	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID+"/"+phase, "conversation.record_tool_use", payload, app.RecordToolUse{})
-}
-
-// replyTo is the message the turn handles, when it is the active one.
-func (m *Manager) replyTo(turnID string) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.active != nil && m.active.turnID == turnID {
-		return m.active.messageID
-	}
-	return ""
 }
 
 // record executes a conversation write of the main agent under a request
@@ -432,6 +481,7 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 	rec, ok, err := m.app.TurnDelivery(ctx, c.ThreadID, c.TurnID)
 	if err != nil {
 		m.cfg.Log.ErrorContext(ctx, "could not look up the call's turn", "turn", c.TurnID, "err", err)
+		return harness.ToolResult{Text: "Could not reconcile the tool's original turn; no tool was executed. Read the ledger before retrying."}
 	}
 	if ok {
 		call.SourceMessageID, call.ParentRequestID = rec.MessageID, rec.RequestID
@@ -445,6 +495,37 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 	if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
 		call.Principal.Kind = protocol.PrincipalBackgroundAgent
 		call.Principal.ConversationID = m.cfg.ConversationID
+		return m.tools.Handle(ctx, call)
+	}
+	if call.SourceMessageID == "" {
+		return harness.ToolResult{Text: "The tool's original turn delivery is unknown; no tool was executed. Read the ledger before retrying."}
+	}
+	// Freeze the turn's planning identity before either native input or an
+	// explicit owner source changes attribution. The ledger supplies this on
+	// recovery; the active delivery covers callbacks during turn/start.
+	call.ExecutionRequestID = call.ParentRequestID
+	call.PlanningSourceMessageID = call.SourceMessageID
+	if c.UserText != "" && !backgroundTool(c.Tool) {
+		// The adapter captured the user item in native wire order. Its event
+		// pump may still be waiting on serve; admit this exact receipt first.
+		if _, _, err := m.app.ConsumeMainSteer(ctx, c.ThreadID, c.TurnID, c.UserText, c.UserItemID); err != nil {
+			return harness.ToolResult{Text: "Could not reconcile the tool's owner input; read the ledger before retrying."}
+		}
+		if source, found, err := m.app.MainSteerByInput(ctx, c.ThreadID, c.TurnID, c.UserText); err != nil {
+			return harness.ToolResult{Text: "Could not read the tool's owner source."}
+		} else if found && source.NativeItemID != "" {
+			call.SourceMessageID, call.ParentRequestID = source.MessageID, source.RequestID
+		}
+	}
+	if err := m.selectOwnerSource(ctx, &call); err != nil {
+		code := protocol.CodeOf(err)
+		body, _ := json.Marshal(map[string]any{"ok": false, "error": protocol.Errorf(code, "owner source selection failed; select current or admitted owner input; no tool was executed")})
+		return harness.ToolResult{Text: string(body)}
+	}
+	var bindErr error
+	call.SourceMessageID, call.ParentRequestID, bindErr = m.app.BindMainToolSource(ctx, call.Native, call.SourceMessageID, call.ParentRequestID)
+	if bindErr != nil {
+		return harness.ToolResult{Text: "Could not persist the tool's source; no tool was executed."}
 	}
 	return m.tools.Handle(ctx, call)
 }
@@ -598,7 +679,7 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		}
 	}
 
-	a := &turn{requestID: d.RequestID, messageID: msg.MessageID, done: make(chan string, 1)}
+	a := &turn{requestID: d.RequestID, messageID: msg.MessageID, sourceMessageID: msg.MessageID, sourceRequestID: d.RequestID, sourceSeq: msg.Seq, sources: []string{msg.MessageID}, done: make(chan string, 1)}
 	m.mu.Lock()
 	m.active = a
 	m.mu.Unlock()
@@ -670,12 +751,26 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		}
 	}
 
-	// One turn at a time: the next message waits for this turn to end.
-	select {
-	case status := <-a.done:
-		rec.Status = finalStatus(status)
-	case <-ctx.Done():
-		return app.DeliveryResult{Outcome: app.Delivered}
+	// One coordinator remains active; owner input can enter its native turn.
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+wait:
+	for {
+		select {
+		case status := <-a.done:
+			rec.Status = finalStatus(status)
+			break wait
+		case <-ctx.Done():
+			return app.DeliveryResult{Outcome: app.Delivered}
+		case <-ticker.C:
+			if err := m.steerOne(ctx, th, a); err != nil {
+				m.cfg.Log.ErrorContext(ctx, "main steer delivery failed", "err", err)
+				m.blockSteer(a)
+			}
+		}
+	}
+	if err := m.app.SettleMainSteers(context.WithoutCancel(ctx), th.ID(), turnID, rec.Status); err != nil {
+		m.cfg.Log.ErrorContext(ctx, "could not settle main steers", "err", err)
 	}
 	if err := m.app.PutMainTurn(context.WithoutCancel(ctx), rec); err != nil {
 		m.cfg.Log.ErrorContext(ctx, "could not record the finished turn", "turn", turnID, "err", err)
@@ -697,6 +792,13 @@ func (m *Manager) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryRes
 		return app.DeliveryResult{Outcome: app.Unknown, Reason: "Native execution history requires reconciliation"}
 	}
 	rec, ok, err := m.app.MainTurn(ctx, d.RequestID)
+	if err == nil && (!ok || rec.Status == store.TurnRejected) {
+		if steer, found, err := m.app.MainSteer(ctx, d.RequestID); err != nil {
+			return app.DeliveryResult{Outcome: app.Unknown, Reason: "steer record could not be read"}
+		} else if found {
+			return steerReconcile(steer)
+		}
+	}
 	switch {
 	case err != nil:
 		return app.DeliveryResult{Outcome: app.Unknown, Reason: "the turn record could not be read"}

@@ -117,7 +117,7 @@ func TranscriptBlocks(ctx context.Context, q Querier, before int64, limit int, s
 	return out, rows.Err()
 }
 func TranscriptReplies(ctx context.Context, q Querier, id string, after int64, limit int) ([]ConversationRow, error) {
-	rows, err := q.QueryContext(ctx, `SELECT `+conversationCols+` WHERE m.reply_to=? AND m.author='main_agent' AND m.seq>? ORDER BY m.seq LIMIT ?`, id, after, limit)
+	rows, err := q.QueryContext(ctx, `SELECT `+conversationCols+` WHERE (m.reply_to=? OR EXISTS(SELECT 1 FROM conversation_reply_sources s WHERE s.reply_id=m.message_id AND s.source_id=?)) AND m.author='main_agent' AND m.seq>? ORDER BY m.seq LIMIT ?`, id, id, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: transcript replies: %w", err)
 	}
@@ -151,7 +151,7 @@ func HideUndeliveredOwner(ctx context.Context, q Querier, it *protocol.Conversat
 		return nil
 	}
 	var hidden bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_message_controls WHERE message_id=? AND withdrawn_at<>0) OR EXISTS(SELECT 1 FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation='main_thread.handle_message' AND json_extract(o.payload_json,'$.message_id')=? AND o.status IN ('pending','sending') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status IN ('started','completed','interrupted','failed')))`, it.MessageID, it.MessageID).Scan(&hidden)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_message_controls WHERE message_id=? AND withdrawn_at<>0) OR EXISTS(SELECT 1 FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation='main_thread.handle_message' AND json_extract(o.payload_json,'$.message_id')=? AND o.status IN ('pending','sending') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status IN ('started','completed','interrupted','failed')) AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=o.request_id AND s.native_item_id<>'')) OR EXISTS(SELECT 1 FROM main_steers s WHERE s.message_id=? AND s.status IN ('sending','accepted','unknown','waiting') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=s.request_id AND t.status IN ('started','completed','interrupted','failed')))`, it.MessageID, it.MessageID, it.MessageID).Scan(&hidden)
 	if err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("store: message visibility: %w", err)
 	}

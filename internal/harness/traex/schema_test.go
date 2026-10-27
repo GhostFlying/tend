@@ -45,6 +45,8 @@ var checked = []struct {
 	{"Thread", "v2/ThreadStartResponse.json", "Thread", "", Thread{}, false},
 	{"ThreadInjectItemsParams", "v2/ThreadInjectItemsParams.json", "", "", ThreadInjectItemsParams{}, true},
 	{"TurnStartParams", "v2/TurnStartParams.json", "", "", TurnStartParams{}, true},
+	{"TurnSteerParams", "v2/TurnSteerParams.json", "", "", TurnSteerParams{}, true},
+	{"TurnSteerResponse", "v2/TurnSteerResponse.json", "", "", TurnSteerResponse{}, false},
 	{"ModelListParams", "v2/ModelListParams.json", "", "", ModelListParams{}, true},
 	{"ModelListResponse", "v2/ModelListResponse.json", "", "", ModelListResponse{}, false},
 	{"CatalogModel", "v2/ModelListResponse.json", "Model", "", CatalogModel{}, false},

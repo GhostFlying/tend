@@ -670,6 +670,28 @@
         "turn"
       ]
     },
+    "TurnSteerParams": {
+      "properties": [
+        "additionalContext",
+        "expectedTurnId",
+        "input",
+        "responsesapiClientMetadata",
+        "threadId"
+      ],
+      "required": [
+        "expectedTurnId",
+        "input",
+        "threadId"
+      ]
+    },
+    "TurnSteerResponse": {
+      "properties": [
+        "turnId"
+      ],
+      "required": [
+        "turnId"
+      ]
+    },
     "UserInput": {
       "properties": [
         "text",

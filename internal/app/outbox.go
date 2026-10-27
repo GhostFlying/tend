@@ -194,6 +194,17 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		return fmt.Errorf("app: invalid delivery outcome %d", r.Outcome)
 	}
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
+		// Check under the same transaction as the transition: native item
+		// consumption can race a lost RPC answer on the delivery goroutine.
+		if d.Destination == MainThreadDestination && r.Outcome != Delivered {
+			steer, err := store.GetMainSteer(ctx, tx.Q(), d.RequestID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+			if err == nil && steer.NativeItemID != "" {
+				tr.To, kind = store.OutboxDelivered, ""
+			}
+		}
 		if err := tx.TransitionOutbox(ctx, tr); err != nil {
 			return err
 		}

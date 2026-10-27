@@ -25,6 +25,7 @@ import { ToolRow } from "./ToolRow.tsx";
 import { MessageImages, OutgoingImages } from "./Images.tsx";
 import { MessageAttachments, OutgoingAttachments } from "./Attachments.tsx";
 import { outgoingImages } from "./images.ts";
+import { steerNotice } from "./steer.ts";
 
 export function Divider({ at }: { at: number }) {
   return <div className={styles.divider}>{dayLabel(at)}</div>;
@@ -32,6 +33,7 @@ export function Divider({ at }: { at: number }) {
 
 export function OwnerMessage({ item }: { item: ConversationItem }) {
   const state = item.state ?? "queued";
+  const notice = steerNotice(item.steer);
   return (
     <div className={styles.user} data-scroll-id={item.message_id}>
       {item.attachments?.length ? (
@@ -44,6 +46,7 @@ export function OwnerMessage({ item }: { item: ConversationItem }) {
       <div className={styles.state} data-state={state}>
         {item.control?.withdrawn_at ? "已撤回" : messageStateLabels[state]} ·{" "}
         {clock(Date.parse(item.created_at))}
+        {notice && <span> · {notice}</span>}
       </div>
     </div>
   );

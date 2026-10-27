@@ -394,12 +394,39 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 		}
 	}
 	if r.Author == "owner" {
+		var steer protocol.MainSteerView
+		err := q.QueryRowContext(ctx, `SELECT status,thread_id,turn_id,native_item_id,reason FROM main_steers s WHERE message_id=? AND NOT (status='waiting' AND EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=s.request_id AND t.status<>'rejected'))`, r.MessageID).Scan(&steer.Status, &steer.ThreadID, &steer.TurnID, &steer.NativeItemID, &steer.Reason)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return it, err
+		}
+		if err == nil {
+			it.Steer = &steer
+		}
 		c, err := store.MessageControl(ctx, q, r.MessageID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return it, err
 		}
 		if err == nil {
 			it.Control = &c
+		}
+	}
+	if r.Author == "main_agent" {
+		rows, err := q.QueryContext(ctx, `SELECT s.source_id FROM conversation_reply_sources s JOIN conversation_messages m ON m.message_id=s.source_id WHERE s.reply_id=? ORDER BY m.seq`, r.MessageID)
+		if err != nil {
+			return it, err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return it, err
+			}
+			it.ReplySources = append(it.ReplySources, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return it, err
 		}
 	}
 	if r.DecisionJSON != "" {

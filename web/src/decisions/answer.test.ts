@@ -45,6 +45,7 @@ test("an answer on its way or with the main agent is pending", () => {
     state: "pending",
   });
   expect(messageAnswer(d, [owner("processing")], [])?.state).toBe("pending");
+  expect(messageAnswer(d, [owner("accepted")], [])?.state).toBe("pending");
   expect(
     messageAnswer(d, [owner("queued")], [out("sent", { messageId: "msg_5", seq: 5 })])?.state,
   ).toBe("pending");

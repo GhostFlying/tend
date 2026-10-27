@@ -96,7 +96,10 @@ export function messageAnswer(
   const mine = (c: { decision_id: string; version: number } | undefined) =>
     c?.decision_id === d.decision_id && c.version === d.version;
   for (const it of items) {
-    if (mine(it.decision) && (it.state === "queued" || it.state === "processing")) {
+    if (
+      mine(it.decision) &&
+      (it.state === "queued" || it.state === "accepted" || it.state === "processing")
+    ) {
       return { option: it.decision!.option, state: "pending" };
     }
   }

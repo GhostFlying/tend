@@ -192,6 +192,9 @@ func GetOpenTurn(ctx context.Context, q Querier, messageID string) (MainTurn, er
 	var requestID string
 	err := q.QueryRowContext(ctx, `SELECT request_id FROM main_turns WHERE message_id = ? AND status IN ('starting', 'started')
 		ORDER BY created_at DESC LIMIT 1`, messageID).Scan(&requestID)
+	if err == sql.ErrNoRows {
+		err = q.QueryRowContext(ctx, `SELECT t.request_id FROM main_turns t JOIN main_steers s ON s.thread_id=t.thread_id AND s.turn_id=t.turn_id WHERE s.message_id=? AND s.status IN ('accepted','consumed') AND t.status='started' LIMIT 1`, messageID).Scan(&requestID)
+	}
 	if err != nil {
 		return MainTurn{}, notFound(err, "open turn of "+messageID)
 	}

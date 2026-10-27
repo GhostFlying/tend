@@ -149,7 +149,14 @@ export type AssistantState = "streaming" | "completed" | "interrupted" | "failed
  * via the `definition` "MessageState".
  */
 export type MessageState =
-  "queued" | "processing" | "replied" | "interrupted" | "failed" | "unknown";
+  | "queued"
+  | "accepted"
+  | "processed"
+  | "processing"
+  | "replied"
+  | "interrupted"
+  | "failed"
+  | "unknown";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ToolStatus".
@@ -1009,10 +1016,12 @@ export interface ConversationItem {
   kind: string;
   message_id: string;
   notice_type?: string;
+  reply_sources?: string[];
   reply_to?: string;
   return_link?: ConversationReturnLink;
   seq: number;
   state?: MessageState;
+  steer?: MainSteerView;
   tool?: ToolUseView;
   upgrade_id?: string;
 }
@@ -1084,6 +1093,17 @@ export interface ConversationImage {
 export interface ConversationReturnLink {
   conversation_id: string;
   message_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MainSteerView".
+ */
+export interface MainSteerView {
+  native_item_id?: string;
+  reason?: string;
+  status: string;
+  thread_id: string;
+  turn_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

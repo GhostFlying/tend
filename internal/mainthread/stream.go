@@ -21,10 +21,21 @@ type replyDraft struct {
 	dirty     bool
 	order     int
 	persisted bool
+	replyTo   string
+	sources   []string
 }
 
 type replyKey struct{ turn, item string }
 type replyDrafts map[replyKey]*replyDraft
+
+func (d replyDrafts) begin(ev harness.Event, m *Manager) {
+	k := replyKey{ev.TurnID, ev.ItemID}
+	if d[k] != nil {
+		return
+	}
+	replyTo, sources := m.replyContext(ev.TurnID)
+	d[k] = &replyDraft{event: ev, state: protocol.AssistantStreaming, order: len(d), replyTo: replyTo, sources: sources}
+}
 
 func (d replyDrafts) consume(ev harness.Event) {
 	k := replyKey{ev.TurnID, ev.ItemID}
@@ -63,7 +74,7 @@ func (m *Manager) flushReplies(ctx context.Context, th harness.Thread, drafts re
 		if !r.dirty || (r.event.Text == "" && !r.persisted) {
 			continue
 		}
-		if err := m.recordReplyState(ctx, th, r.event, r.state); err != nil {
+		if err := m.recordReplySources(ctx, th, r.event, r.state, r.replyTo, r.sources); err != nil {
 			return err
 		}
 		r.dirty, r.persisted = false, true
@@ -72,6 +83,11 @@ func (m *Manager) flushReplies(ctx context.Context, th harness.Thread, drafts re
 }
 
 func (m *Manager) recordReplyState(ctx context.Context, th harness.Thread, ev harness.Event, state protocol.AssistantState) error {
+	replyTo, sources := m.replyContext(ev.TurnID)
+	return m.recordReplySources(ctx, th, ev, state, replyTo, sources)
+}
+
+func (m *Manager) recordReplySources(ctx context.Context, th harness.Thread, ev harness.Event, state protocol.AssistantState, replyTo string, sources []string) error {
 	repair, err := m.isRepairEvent(ctx, th, ev)
 	if err != nil {
 		return err
@@ -79,7 +95,11 @@ func (m *Manager) recordReplyState(ctx context.Context, th harness.Thread, ev ha
 	if repair {
 		return nil
 	}
-	replyTo := m.replyTo(ev.TurnID)
+	if prior, refs, found, err := m.app.NativeItemSources(ctx, th.ID(), ev.TurnID, ev.ItemID); err != nil {
+		return err
+	} else if found {
+		replyTo, sources = prior, refs
+	}
 	if replyTo == "" {
 		rec, ok, err := m.app.TurnDelivery(ctx, th.ID(), ev.TurnID)
 		if err != nil {
@@ -89,7 +109,10 @@ func (m *Manager) recordReplyState(ctx context.Context, th harness.Thread, ev ha
 			replyTo = rec.MessageID
 		}
 	}
-	payload := map[string]string{"body": ev.Text, "reply_to": replyTo, "turn_id": ev.TurnID, "item_id": ev.ItemID}
+	payload := map[string]any{"body": ev.Text, "reply_to": replyTo, "turn_id": ev.TurnID, "item_id": ev.ItemID}
+	if len(sources) > 1 {
+		payload["reply_sources"] = sources
+	}
 	native := th.ID() + "/" + ev.TurnID + "/item:" + ev.ItemID
 	// Keep the completed item's existing identity and payload for receipts
 	// created before streaming was enabled. Other writes include the body

@@ -233,7 +233,7 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		state = protocol.MessageQueued
 	}
 	result := map[string]any{"message_id": p.MessageID, "state": state}
-	stopped, err := tx.Exec(ctx, `UPDATE logical_turns SET status='stopped',reason='Stopped by owner; resume explicitly.',updated_at=? WHERE message_id=? AND status NOT IN ('completed','stopped')`, x.Now.UnixMilli(), p.MessageID)
+	stopped, err := tx.Exec(ctx, `UPDATE logical_turns SET status='stopped',reason='Stopped by owner; resume explicitly.',updated_at=? WHERE logical_turn_id IN (SELECT logical_turn_id FROM logical_turn_messages WHERE message_id=?) AND status NOT IN ('completed','stopped')`, x.Now.UnixMilli(), p.MessageID)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -249,7 +249,8 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 
-	if _, err := store.GetOpenTurn(ctx, tx.Q(), p.MessageID); errors.Is(err, store.ErrNotFound) {
+	turn, err := store.GetOpenTurn(ctx, tx.Q(), p.MessageID)
+	if errors.Is(err, store.ErrNotFound) {
 		return Outcome{Result: result, Events: events, Notify: changed > 0}, nil
 	} else if err != nil {
 		return Outcome{}, err
@@ -258,7 +259,7 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		Result:   result,
 		Events:   events,
 		Notify:   changed > 0,
-		Outbox:   []OutboxMessage{{Destination: MainThreadControlDestination, Operation: OpInterruptTurn, Payload: InterruptTurn{MessageID: p.MessageID}}},
+		Outbox:   []OutboxMessage{{Destination: MainThreadControlDestination, Operation: OpInterruptTurn, Payload: InterruptTurn{MessageID: turn.MessageID}}},
 		Accepted: true,
 	}, nil
 }
@@ -269,11 +270,12 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 type RecordAgentMessage struct{ Reconciled bool }
 
 type recordAgentMessagePayload struct {
-	Body    string                  `json:"body"`
-	ReplyTo string                  `json:"reply_to"`
-	TurnID  string                  `json:"turn_id"`
-	ItemID  string                  `json:"item_id"`
-	Status  protocol.AssistantState `json:"status,omitempty"`
+	Body         string                  `json:"body"`
+	ReplyTo      string                  `json:"reply_to"`
+	TurnID       string                  `json:"turn_id"`
+	ItemID       string                  `json:"item_id"`
+	Status       protocol.AssistantState `json:"status,omitempty"`
+	ReplySources []string                `json:"reply_sources,omitempty"`
 }
 
 // Operation implements Command.
@@ -357,6 +359,18 @@ func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx, recon
 			return Outcome{}, err
 		}
 		row = store.AgentMessageRow{MessageID: id, ThreadID: x.Principal.Thread, TurnID: p.TurnID, ItemID: p.ItemID}
+		for _, source := range p.ReplySources {
+			var allowed bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_turns WHERE thread_id=? AND turn_id=? AND message_id=?) OR EXISTS(SELECT 1 FROM main_steers WHERE thread_id=? AND turn_id=? AND message_id=? AND native_item_id<>'')`, x.Principal.Thread, p.TurnID, source, x.Principal.Thread, p.TurnID, source).Scan(&allowed); err != nil {
+				return Outcome{}, err
+			}
+			if !allowed {
+				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "reply source was not consumed by this turn")
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO conversation_reply_sources(reply_id,source_id) VALUES(?,?) ON CONFLICT DO NOTHING`, id, source); err != nil {
+				return Outcome{}, err
+			}
+		}
 	}
 	if identified {
 		row.Status, row.Revision = string(status), row.Revision+1
@@ -575,6 +589,9 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 			}
 		}
 		if settleBusiness {
+			if err := a.settleReviewedMainSteers(ctx, tx, m.RequestID, businessStatus, now); err != nil {
+				return err
+			}
 			if err := a.settleBackground(ctx, tx, m.MessageID, businessStatus, now); err != nil {
 				return err
 			}
@@ -619,6 +636,9 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		}
 		ids, err := tx.SettleOpenTurns(ctx, threadID, now)
 		if err != nil {
+			return err
+		}
+		if err := a.settleMainSteers(ctx, tx, threadID, "", store.TurnInterrupted, now); err != nil {
 			return err
 		}
 		for _, turn := range ids {
