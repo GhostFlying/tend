@@ -1,9 +1,11 @@
 .wrap {
   flex: 1;
-  min-height: 0;
+  min-height: 46px;
   position: relative;
   display: flex;
   flex-direction: column;
+  isolation: isolate;
+  overflow: hidden;
 }
 
 .transcript {

@@ -31,6 +31,8 @@ jobs:
         run: |
           pnpm --dir web exec playwright install --with-deps chromium
           pnpm --dir web test:layout
+      - name: mobile decision layout regression
+        run: pnpm --dir web test:decision-layout
       - name: repository layout regression
         run: pnpm --dir web test:repos-layout
       - name: work item progress regression

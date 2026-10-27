@@ -5,7 +5,15 @@ import { notify } from "../app/notice.ts";
 // content only while the reader is near the bottom; otherwise it offers a
 // jump to the latest. Scrolling near the top reads the page before, and
 // the reading position stays where it was.
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useServices } from "../app/services.tsx";
 import { noOutbox } from "../queue/sendQueue.ts";
 import { ArrowDown } from "../shell/icons.tsx";
@@ -71,6 +79,8 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
   const following = useRef(true);
   const wasVisible = useRef(visible);
   const readingAnchor = useRef<ScrollAnchor | null>(null);
+  const preserveContentResize = useRef(false);
+  const preserveContentResizeTimer = useRef<number | undefined>(undefined);
   /** Where the reader was when the page before was asked for. */
   const anchor = useRef<ScrollAnchor | null>(null);
 
@@ -131,28 +141,84 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
     }
   });
 
-  const toLatest = () => {
+  useEffect(() => {
+    const el = scroller.current;
+    if (!visible || !el) return;
+    const update = (entries: ResizeObserverEntry[] = []) => {
+      if (el.clientHeight === 0) {
+        setAtBottom(true);
+        return;
+      }
+      const contentResized = entries.some((entry) => entry.target !== el);
+      // Focus can remain inside the transcript while the viewport changes.
+      // Only a captured control activation proves that existing content grew
+      // at the reader's request; focus alone must not stop following output.
+      const userExpandedContent = contentResized && preserveContentResize.current;
+      if (contentResized && preserveContentResize.current) {
+        preserveContentResize.current = false;
+        window.clearTimeout(preserveContentResizeTimer.current);
+        preserveContentResizeTimer.current = undefined;
+      }
+      if (following.current && !userExpandedContent) {
+        el.scrollTop = el.scrollHeight;
+        setAtBottom(true);
+      } else {
+        const near = el.scrollHeight - el.scrollTop - el.clientHeight < nearBottomPx;
+        if (near) anchor.current = null;
+        following.current = near;
+        setAtBottom(near);
+      }
+      readingAnchor.current = captureAnchor(el);
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    update();
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(preserveContentResizeTimer.current);
+      preserveContentResize.current = false;
+      preserveContentResizeTimer.current = undefined;
+    };
+  }, [visible]);
+
+  const toLatest = useCallback(() => {
     const el = scroller.current;
     if (el) {
       anchor.current = null;
       following.current = true;
+      setAtBottom(true);
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
-  };
+  }, []);
 
   useEffect(() => {
     const el = scroller.current;
     if (visible && jump !== lastJump.current && el) {
       lastJump.current = jump;
-      anchor.current = null;
-      following.current = true;
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      toLatest();
     }
-  }, [jump, visible]);
+  }, [jump, visible, toLatest]);
 
   return (
     <div className={styles.wrap}>
-      <div className={styles.transcript} ref={scroller} onScroll={onScroll}>
+      <div
+        className={styles.transcript}
+        ref={scroller}
+        onScroll={onScroll}
+        onClickCapture={() => {
+          // A control inside an existing message can grow that message. Keep
+          // the control in view instead of treating the resize as new output.
+          preserveContentResize.current = true;
+          window.clearTimeout(preserveContentResizeTimer.current);
+          preserveContentResizeTimer.current = window.setTimeout(() => {
+            preserveContentResize.current = false;
+            preserveContentResizeTimer.current = undefined;
+          }, 500);
+        }}
+        role="region"
+        aria-label="对话记录"
+      >
         <div className={styles.lane}>
           {conversation.loadingEarlier && <div className={styles.note}>正在读取更早的消息…</div>}
           {conversation.loaded && !conversation.more && entries.length > 0 && (
@@ -202,7 +268,7 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
         </div>
       </div>
       {!atBottom && (
-        <button type="button" className={styles.jump} onClick={toLatest}>
+        <button type="button" className={styles.jump} onClick={toLatest} aria-label="跳到最新">
           <ArrowDown />
           跳到最新
         </button>

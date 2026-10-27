@@ -28,18 +28,48 @@
 }
 
 /* the dock above the conversation's bottom edge */
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .seat {
   padding: 0 24px 18px;
   background: linear-gradient(to bottom, transparent, var(--bg) 22px);
-  flex: none;
+  flex: 0 1 auto;
+  min-height: 0;
 }
 
 .seatInner {
+  height: 100%;
+  min-height: 0;
   max-width: var(--lane-width);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.seatScroll {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 8px;
+}
+
+.seatScroll > * {
+  flex-shrink: 0;
+}
+
+.seatScroll:not(:has(> :not(:empty))) {
+  display: none;
 }
 
 .note {
@@ -75,6 +105,26 @@
 
   .seat {
     padding: 0 10px 10px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .seatInner > :not(.seatScroll) {
+    flex-shrink: 0;
+  }
+
+  .seatScroll:has(> :not(:empty)) {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 760px) and (max-height: 500px) {
+  .body:has(.seatScroll > :not(:empty)) > :first-child {
+    flex: 0 0 46px;
+  }
+
+  .body:has(.seatScroll > :not(:empty)) .seat {
+    flex: 1 1 auto;
   }
 }
 
