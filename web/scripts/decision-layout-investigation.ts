@@ -203,7 +203,12 @@ const server = createServer(async (req, res) => {
   const path = url.pathname;
   res.setHeader("Cache-Control", "no-store");
   if (path === "/api/v1/session")
-    return sendJSON(res, { token: "fixture-token", login: "Fixture owner", scope: "owner" });
+    return sendJSON(res, {
+      token: "fixture-token",
+      login: "Fixture owner",
+      scope: "owner",
+      deployment_id: "layout-fixture",
+    });
   if (path === "/api/v1/ops" && req.method === "POST") {
     let raw = "";
     for await (const chunk of req) raw += String(chunk);
@@ -474,9 +479,13 @@ async function openPage(width: number, height: number) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
   const errors: string[] = [];
+  const consoleErrors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
   await page.goto(`http://127.0.0.1:${fixturePort}/`);
-  return { context, page, errors };
+  return { context, page, errors, consoleErrors };
 }
 
 function cardFor(page: Page) {
@@ -763,11 +772,55 @@ async function checkFocusedTranscriptResizeFollowing() {
   }
 }
 
+async function checkInitialSettingsKeyboard() {
+  for (const width of [390, 1440]) {
+    for (const key of ["ArrowDown", "ArrowUp"]) {
+      reset();
+      decisionVisible = false;
+      const { context, page, errors } = await openPage(width, width === 390 ? 844 : 900);
+      try {
+        const settings = page.getByRole("button", { name: "主会话设置", exact: true });
+        await settings.focus();
+        await page.keyboard.press(key);
+        const menu = page.getByRole("menu", { name: "主会话设置菜单", exact: true });
+        await menu.waitFor();
+        const item = menu.getByRole("menuitem", {
+          name: key === "ArrowDown" ? "模型" : "思考强度",
+          exact: true,
+        });
+        assert(
+          await item.evaluate((element) => element === document.activeElement),
+          "first settings opening lost keyboard focus",
+        );
+        await page.keyboard.press("Enter");
+        await page
+          .getByRole("menu", {
+            name: key === "ArrowDown" ? "选择模型" : "选择思考强度",
+            exact: true,
+          })
+          .waitFor();
+        await page.keyboard.press("Escape");
+        await page.keyboard.press("Escape");
+        await menu.waitFor({ state: "hidden" });
+        assert(await settings.evaluate((element) => element === document.activeElement));
+        assert.equal(errors.length, 0, errors.join("\n"));
+        console.log(`PASS initial settings keyboard ${browserName}-${width}-${key}`);
+      } finally {
+        await context.close();
+      }
+    }
+  }
+}
+
 async function checkComposerOverlays() {
   reset();
   decisionVisible = false;
-  for (const width of [390, 1440]) {
-    const { context, page, errors } = await openPage(width, width === 390 ? 844 : 900);
+  for (const { width, height } of [
+    { width: 390, height: 844 },
+    { width: 1440, height: 900 },
+    { width: 1440, height: 400 },
+  ]) {
+    const { context, page, errors } = await openPage(width, height);
     try {
       const settings = page.getByRole("button", { name: "主会话设置", exact: true });
       await settings.waitFor();
@@ -791,12 +844,31 @@ async function checkComposerOverlays() {
       await usage.click();
       const popover = page.getByRole("dialog", { name: "上下文用量", exact: true });
       await popover.waitFor();
+      await reachable(popover.getByRole("heading", { level: 3 }));
+      await reachable(popover.getByText("42% 已使用", { exact: true }));
+      await reachable(popover.getByText(/tokens/));
       await reachable(popover.getByRole("button", { name: "关闭", exact: true }));
       assert.equal(errors.length, 0, errors.join("\n"));
       if (width === 390)
         await page.screenshot({
           path: join(output, `${browserName}-composer-overlays-390x844.png`),
         });
+      if (width === 390) {
+        await page
+          .getByRole("navigation", { name: "视图", exact: true })
+          .getByRole("button", { name: "工作项", exact: true })
+          .click();
+      } else {
+        await page.getByRole("button", { name: /工作项.*白板/ }).click();
+      }
+      await popover.waitFor({ state: "hidden" });
+      if (width === 390) {
+        const navigation = page.getByRole("navigation", { name: "视图", exact: true });
+        await navigation.getByRole("button", { name: "对话", exact: true }).click();
+        await popover.waitFor();
+        await navigation.getByRole("button", { name: "待处理", exact: true }).click();
+        await popover.waitFor({ state: "hidden" });
+      }
       console.log(`PASS composer overlays ${browserName}-${width}`);
     } finally {
       await context.close();
@@ -888,9 +960,20 @@ async function checkConstrainedDockScroll() {
     await transcript.waitFor();
     const seatScroll = empty.page.locator('[class*="seatScroll_"]');
     assert.equal(await seatScroll.isVisible(), false, "empty dock remained in the flex layout");
-    assert((await rect(transcript)).height >= 180, "empty low-height dock took transcript space");
+    const emptyBudget = async () => {
+      const header = await rect(empty.page.locator("main header"));
+      const composer = await rect(empty.page.getByLabel("消息", { exact: true }).locator(".."));
+      const bounds = await rect(transcript);
+      assert(
+        bounds.height >= composer.top - header.bottom - 24,
+        "empty dock left unused space between header and composer",
+      );
+      return bounds.height;
+    };
+    const shortHeight = await emptyBudget();
     await empty.page.setViewportSize({ width: 390, height: 568 });
-    assert((await rect(transcript)).height >= 350, "empty dock reduced the mobile transcript");
+    const tallHeight = await emptyBudget();
+    assert(tallHeight >= shortHeight + 140, "empty transcript did not use the taller viewport");
     await empty.page.screenshot({
       path: join(output, `${browserName}-empty-dock-390x568.png`),
     });
@@ -898,6 +981,99 @@ async function checkConstrainedDockScroll() {
     console.log(`PASS empty low-height transcript budget ${browserName}`);
   } finally {
     await empty.context.close();
+  }
+}
+
+async function checkAttachmentDraftDock() {
+  for (const viewport of [
+    { width: 1440, height: 800 },
+    { width: 1440, height: 600 },
+    { width: 390, height: 568 },
+  ]) {
+    reset(layoutOptions);
+    includeQueue = true;
+    const { context, page, errors, consoleErrors } = await openPage(
+      viewport.width,
+      viewport.height,
+    );
+    try {
+      const card = cardFor(page);
+      await card.waitFor();
+      await page.getByLabel("选择附件", { exact: true }).setInputFiles(
+        Array.from({ length: 16 }, (_, index) => ({
+          name: `draft-${index + 1}.txt`,
+          mimeType: "text/plain",
+          buffer: Buffer.from("Local attachment fixture."),
+        })),
+      );
+      const draft = page.getByLabel("消息", { exact: true });
+      await draft.fill(
+        Array.from({ length: 30 }, () => "附件和长草稿不应挤掉决定控件。").join("\n"),
+      );
+      const files = page.getByRole("list", { name: "待发送附件" });
+      await page
+        .locator("main header")
+        .getByRole("button", { name: "跳到最新", exact: true })
+        .click();
+      const transcript = page.getByRole("region", { name: "对话记录" });
+      assert(
+        await transcript.evaluate((element) => {
+          const r = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return (
+            r.top >= 0 &&
+            r.bottom <= innerHeight &&
+            r.height >= 40 &&
+            hit !== null &&
+            element.contains(hit) &&
+            element.scrollHeight - element.scrollTop - element.clientHeight < 2
+          );
+        }),
+        "header jump did not reveal the latest transcript after focusing a tall draft",
+      );
+      assert.equal(await files.getByRole("listitem").count(), 16);
+      const dock = page.locator('[class*="seatScroll_"]');
+      assert((await rect(dock)).height >= 44, "attachments and draft collapsed the decision dock");
+      for (const control of [
+        card.getByRole("button", { name: layoutOptions[0]!, exact: true }),
+        card.getByLabel("补充说明或其他回答"),
+        card.getByRole("button", { name: "发送给 worker", exact: true }),
+        page
+          .getByRole("region", { name: "待处理队列", exact: true })
+          .getByRole("button", { name: "撤回", exact: true })
+          .first(),
+        files.getByRole("button").last(),
+        draft,
+      ])
+        await reachable(control);
+      const settings = page.getByRole("button", { name: "主会话设置", exact: true });
+      await reachable(settings);
+      await settings.click();
+      const menu = page.getByRole("menu", { name: "主会话设置菜单", exact: true });
+      const modelPane = menu.getByRole("menuitem", { name: "模型", exact: true });
+      await reachable(modelPane);
+      await modelPane.click();
+      await reachable(page.getByRole("menuitemradio", { name: "Model 12", exact: true }));
+      await page.keyboard.press("Escape");
+      assert.equal(
+        await draft.inputValue(),
+        Array.from({ length: 30 }, () => "附件和长草稿不应挤掉决定控件。").join("\n"),
+      );
+      assert.equal(errors.length, 0, errors.join("\n"));
+      assert.equal(consoleErrors.length, 0, consoleErrors.join("\n"));
+      assert.equal(writes.length, 0, "layout interactions submitted a message or decision");
+      await page.screenshot({
+        path: join(
+          output,
+          `${browserName}-attachment-draft-${viewport.width}x${viewport.height}.png`,
+        ),
+      });
+      console.log(
+        `PASS attachment and draft dock ${browserName}-${viewport.width}x${viewport.height}`,
+      );
+    } finally {
+      await context.close();
+    }
   }
 }
 
@@ -1061,7 +1237,9 @@ try {
   await checkTranscriptExpansionWithoutFocus();
   await checkFocusedTranscriptResizeFollowing();
   await checkComposerOverlays();
+  await checkInitialSettingsKeyboard();
   await checkConstrainedDockScroll();
+  await checkAttachmentDraftDock();
   await checkDecisionStates();
   await writeFile(
     join(output, `${browserName}-geometry.json`),

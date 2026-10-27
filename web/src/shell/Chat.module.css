@@ -72,6 +72,21 @@
   display: none;
 }
 
+@media (min-width: 761px) {
+  .seat {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .seatInner > :not(.seatScroll) {
+    flex-shrink: 0;
+  }
+
+  .seatScroll:has(> :not(:empty)) {
+    min-height: 44px;
+  }
+}
+
 .note {
   display: flex;
   align-items: center;
