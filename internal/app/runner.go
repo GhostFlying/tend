@@ -296,6 +296,11 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err := tx.InsertRun(ctx, run); err != nil {
 		return Outcome{}, err
 	}
+	if p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityRunMessages) {
+		if err := tx.EnableRunMessages(ctx, run.RunID); err != nil {
+			return Outcome{}, err
+		}
+	}
 	lease := store.LeaseRow{LeaseID: x.IDs.New(protocol.PrefixLease), RunID: run.RunID, HostID: host.HostID, ExpiresAt: x.Now.Add(x.LeaseTTL).UnixMilli()}
 	if err := tx.InsertLease(ctx, lease, now); err != nil {
 		return Outcome{}, err
@@ -357,6 +362,9 @@ func (Hello) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
 		return err
 	}
 	if err := checkRunCapabilitiesRecovery(ctx, q, x.Principal.Subject, p.Runtime); err != nil {
+		return err
+	}
+	if err := checkRunMessageRecovery(ctx, q, x.Principal.Subject, p.Runtime); err != nil {
 		return err
 	}
 	return checkQuestionRunRecovery(ctx, q, x.Principal.Subject, p.Runtime)
@@ -950,6 +958,17 @@ func (a *App) ExpireLeases(ctx context.Context) (int, error) {
 // active or lapsed lease authenticates the run: a lapsed run may still
 // report its result.
 func (a *App) RunCredential(ctx context.Context, runID string) (leaseID, hostID string, role protocol.RunRole, err error) {
+	return a.runCredential(ctx, runID, nil)
+}
+
+// RunMessageReceiptCredential permits only a fact about an already claimed
+// delivery to authenticate with its original lease after the run ends. The HTTP
+// caller must confine this credential to ReportRunMessage, never other run APIs.
+func (a *App) RunMessageReceiptCredential(ctx context.Context, runID string, delivery protocol.RunMessageDelivery) (leaseID, hostID string, role protocol.RunRole, err error) {
+	return a.runCredential(ctx, runID, &delivery)
+}
+
+func (a *App) runCredential(ctx context.Context, runID string, delivery *protocol.RunMessageDelivery) (leaseID, hostID string, role protocol.RunRole, err error) {
 	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
 		run, err := store.GetRun(ctx, tx.Q(), runID)
 		if err != nil {
@@ -959,7 +978,15 @@ func (a *App) RunCredential(ctx context.Context, runID string) (leaseID, hostID 
 		if err != nil {
 			return err
 		}
-		if lease.Status == store.LeaseReleased {
+		if delivery != nil {
+			m, err := store.GetRunMessage(ctx, tx.Q(), delivery.MessageID)
+			if err != nil {
+				return err
+			}
+			if m.RunID != runID || m.Receiver == "" || m.RunMessageDelivery != *delivery {
+				return store.ErrNotFound
+			}
+		} else if lease.Status == store.LeaseReleased {
 			return store.ErrNotFound
 		}
 		leaseID, hostID, role = lease.LeaseID, run.HostID, run.Role

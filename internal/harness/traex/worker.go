@@ -47,10 +47,41 @@ func NewWorkers(opts WorkerOptions) *Workers {
 
 // worker is a running traex worker.
 type worker struct {
+	thread *thread
+	turnID string
 	events chan harness.WorkerEvent
 	done   chan struct{}
 	res    harness.WorkerResult
 	err    error
+}
+
+var _ harness.LiveMessenger = (*worker)(nil)
+
+func (w *worker) MessageTarget() (string, string) { return w.thread.ID(), w.turnID }
+
+func (w *worker) SendMessage(ctx context.Context, text string) (protocol.RunMessageStatus, string) {
+	select {
+	case <-w.done:
+		return protocol.RunMessageFailed, "worker_ended"
+	default:
+	}
+	if ctx.Err() != nil {
+		return protocol.RunMessageFailed, "run_control_changed"
+	}
+	err := w.thread.Steer(ctx, w.turnID, text)
+	switch {
+	case err == nil:
+		return protocol.RunMessageAccepted, ""
+	case errors.Is(err, errSteerIdentity):
+		return protocol.RunMessageUnknown, "receipt_identity_mismatch"
+	case errors.Is(err, harness.ErrRejected):
+		if rpc, ok := errors.AsType[*RPCError](err); ok && rpc.Code == -32601 {
+			return protocol.RunMessageUnsupported, "native_method_unsupported"
+		}
+		return protocol.RunMessageFailed, "native_rejected"
+	default:
+		return protocol.RunMessageUnknown, "native_outcome_unknown"
+	}
 }
 
 func (w *worker) Events() <-chan harness.WorkerEvent { return w.events }
@@ -121,7 +152,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		_ = s.Close()
 		return nil, err
 	}
-	w := &worker{events: make(chan harness.WorkerEvent), done: make(chan struct{})}
+	w := &worker{thread: th.(*thread), turnID: turnID, events: make(chan harness.WorkerEvent), done: make(chan struct{})}
 	go func() {
 		defer close(w.done)
 		defer close(w.events)
@@ -151,7 +182,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 						summary = ev.Text
 					}
 					select {
-					case w.events <- harness.WorkerEvent{NativeID: ev.ItemID, Kind: "item.completed", Body: ev.Raw}:
+					case w.events <- workerItemEvent(ev):
 					case <-ctx.Done():
 					}
 				case harness.EventTurnCompleted:
@@ -165,6 +196,16 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		}
 	}()
 	return w, nil
+}
+
+func workerItemEvent(ev harness.Event) harness.WorkerEvent {
+	body := ev.Raw
+	if ev.ItemType == harness.ItemUserMessage {
+		// Incoming supplements are already in the private queue record. Do not
+		// duplicate their text into run logs or provider diagnostic events.
+		body = []byte(`{"type":"userMessage"}`)
+	}
+	return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "item.completed", Body: body}
 }
 
 // thread continues the thread of an earlier attempt of the run, or starts

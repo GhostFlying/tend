@@ -38,7 +38,7 @@ func TestUpgradeHealthNeedsCoordinatorAndDurableCommitBeforeAdmission(t *testing
 		t.Fatal(op)
 	}
 	rt := *testRuntime(b.ProcessInstanceID)
-	rt.JournalVersion = 9
+	rt.JournalVersion = c.Manifest.Storage.RunnerJournal.Max
 	rt.Build.BinarySHA256 = b.ArtifactSHA256
 	rt.Mode = protocol.RunnerReady
 	rt.UpgradeID = b.UpgradeID

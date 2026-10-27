@@ -44,7 +44,7 @@ func (t *thread) SteerTurn(ctx context.Context, expectedTurnID string, in harnes
 		return err
 	}
 	if res.TurnID != expectedTurnID {
-		return fmt.Errorf("traex: steer acceptance did not name the expected turn")
+		return errSteerIdentity
 	}
 	return nil
 }

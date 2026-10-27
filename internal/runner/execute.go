@@ -223,6 +223,26 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}
 	var askOwner func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
 	var questions []protocol.WorkerQuestion
+	var receiveMessages func(context.Context) (*protocol.RunMessage, error)
+	var ackMessage func(context.Context, string) error
+	if as.RunMessages && r.cfg.Worker == protocol.WorkerOrca {
+		messages := &workerMessages{r: r, as: as, receiver: r.cfg.IDs.New(protocol.PrefixRequest)}
+		withRun := func(call context.Context) (context.Context, func()) {
+			callCtx, cancel := context.WithCancel(call)
+			stop := context.AfterFunc(runCtx, cancel)
+			return callCtx, func() { stop(); cancel() }
+		}
+		receiveMessages = func(ctx context.Context) (*protocol.RunMessage, error) {
+			callCtx, done := withRun(ctx)
+			defer done()
+			return messages.receive(callCtx)
+		}
+		ackMessage = func(ctx context.Context, id string) error {
+			callCtx, done := withRun(ctx)
+			defer done()
+			return messages.ack(callCtx, id)
+		}
+	}
 	if as.WorkerQuestions {
 		owner := &ownerQuestions{r: r, as: as, prepared: p}
 		questions, err = owner.recover(runCtx)
@@ -240,6 +260,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	w, err := r.cfg.Workers.Start(runCtx, harness.WorkerSpec{
 		Execution: as.AcceptanceExecution, QuestionContext: as.QuestionContext, RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
 		AskOwner: askOwner, Questions: questions,
+		ReceiveMessages: receiveMessages, AckMessage: ackMessage,
 		ReadObservation: r.observationReader(runCtx, as),
 		UploadFile: func(ctx context.Context, path, name string) (protocol.ArtifactFile, error) {
 			return r.uploadFile(ctx, as, p, path, name)
@@ -298,12 +319,24 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		r.uploadEvents(uploaderCtx, as)
 	}()
 	var appendErr error
+	messageCtx, stopMessages := context.WithCancel(runCtx)
+	messagesDone := make(chan struct{})
+	go func() {
+		defer close(messagesDone)
+		if as.RunMessages {
+			if receiveMessages == nil {
+				r.runMessageLoop(messageCtx, as, w)
+			}
+		}
+	}()
 	for ev := range w.Events() {
 		if appendErr == nil {
 			appendErr = r.cfg.Journal.AppendEvent(ctx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: boundedBody(ev.Body)})
 		}
 	}
 	res, werr := w.Wait()
+	stopMessages()
+	<-messagesDone
 	stopUploader()
 	<-uploaded
 	if err := r.recordClosedSession(context.WithoutCancel(ctx), as); err != nil {
@@ -515,6 +548,11 @@ func outcome(env protocol.Envelope) []any {
 }
 
 func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
+	// Dedicated receipts are not in RequestForRun and must be drained before
+	// final reporting. Failure leaves both the receipt and final request intact.
+	if err := r.recoverRunMessages(ctx, as); err != nil {
+		return err
+	}
 	req, ok, err := r.cfg.Journal.RequestForRun(ctx, as.RunID)
 	if err != nil {
 		return err

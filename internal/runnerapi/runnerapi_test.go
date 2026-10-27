@@ -52,6 +52,7 @@ var runnerNode = &netx.Identity{Node: "build-box", Tags: []string{"tag:tend-runn
 type env struct {
 	t      *testing.T
 	app    *app.App
+	store  *store.Store
 	ids    protocol.IDGen
 	server *httptest.Server
 	peers  *peers
@@ -86,7 +87,7 @@ func newEnv(t *testing.T, claimWait time.Duration) *env {
 	t.Cleanup(func() { s.Close() })
 	ids := testkit.NewIDGen(clock, 3)
 	a := app.New(s, ids, clock.Now)
-	e := &env{t: t, app: a, ids: ids, peers: &peers{id: runnerNode}, logs: &syncBuffer{}}
+	e := &env{t: t, app: a, store: s, ids: ids, peers: &peers{id: runnerNode}, logs: &syncBuffer{}}
 	e.system("config.sync", app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 1,

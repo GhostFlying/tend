@@ -349,6 +349,9 @@ func (w *worker) openBridge(ctx context.Context) error {
 	if w.spec.AskOwner != nil {
 		tools = append(tools, harness.OwnerQuestionTool(w.spec.QuestionContext))
 	}
+	if w.spec.ReceiveMessages != nil && w.spec.AckMessage != nil {
+		tools = append(tools, harness.ReceiveMessagesToolSpec, harness.AckMessageToolSpec)
+	}
 	sock := filepath.Join(w.ws.opts.SocketDir, "tend-"+w.spec.RunID+".sock")
 	token := w.ws.opts.IDs.New(protocol.PrefixToken)
 	srv, err := bridge.Listen(sock, token, tools, handle)

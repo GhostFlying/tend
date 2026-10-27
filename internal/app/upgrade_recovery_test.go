@@ -97,7 +97,7 @@ func TestUpgradeRunnerRollbackReceiptReconcilesAfterTimeout(t *testing.T) {
 			if invalid == "healthy-before-rollback" {
 				candidate := testRuntime(b.ProcessInstanceID)
 				candidate.Build.BinarySHA256 = b.ArtifactSHA256
-				candidate.JournalVersion = 9
+				candidate.JournalVersion = c.Manifest.Storage.RunnerJournal.Max
 				candidate.Mode = protocol.RunnerReady
 				candidate.UpgradeID = b.UpgradeID
 				candidate.AppliedControlRevision = ctl.Revision
@@ -310,7 +310,7 @@ func TestUpgradeCompletedHostGrantDoesNotBlockLaterRetry(t *testing.T) {
 	}
 	candidate := testRuntime(b.ProcessInstanceID)
 	candidate.Build.BinarySHA256 = b.ArtifactSHA256
-	candidate.JournalVersion = 9
+	candidate.JournalVersion = c.Manifest.Storage.RunnerJournal.Max
 	candidate.Mode = protocol.RunnerReady
 	candidate.AppliedControlRevision = ctl.Revision
 	candidate.UpgradeID = b.UpgradeID
