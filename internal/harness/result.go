@@ -35,6 +35,9 @@ type Results struct {
 }
 
 func (r *Results) Handle(ctx context.Context, c ToolCall) ToolResult {
+	if c.Tool == ReceiveMessagesTool || c.Tool == AckMessageTool {
+		return r.messageTool(ctx, c)
+	}
 	if c.Tool == ReadObservationTool {
 		return r.readObservation(ctx, c)
 	}

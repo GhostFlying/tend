@@ -17,6 +17,9 @@ func configurationUpgradeHarness(t *testing.T) (*harness, StartUpgrade) {
 	c.Manifest.Artifacts[1].SHA256 = strings.Repeat("a", 64)
 	c.RunnerConfigurations = map[string]protocol.RunnerConfiguration{"linux-1": {PreviousSHA256: strings.Repeat("e", 64), SHA256: strings.Repeat("f", 64), Providers: []string{"github", "codebase"}}}
 	rt := upgradeAck(h, "linux-1", protocol.RunnerNormal)
+	// Configuration-only maintenance keeps the installed binary and journal.
+	c.Manifest.Storage.RunnerJournal.Min = rt.JournalVersion
+	c.Manifest.Storage.RunnerJournal.Max = rt.JournalVersion
 	rt.Sequence++
 	rt.Capabilities = append(rt.Capabilities, protocol.CapabilityRunnerConfiguration)
 	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &rt}); err != nil {

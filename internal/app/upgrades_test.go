@@ -31,7 +31,7 @@ func upgradeHarness(t *testing.T) (*harness, StartUpgrade) {
 			t.Fatal(op)
 		}
 	}
-	return h, StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: 50}, RunnerJournal: release.Range{Min: 9, Max: 9}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
+	return h, StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: 51}, RunnerJournal: release.Range{Min: 9, Max: 10}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
 }
 func startTestUpgrade(h *harness, id string, c StartUpgrade) protocol.Operation {
 	h.t.Helper()
@@ -259,7 +259,7 @@ func TestUpgradeServerFirstRestorationAndNoDatabaseRollback(t *testing.T) {
 		t.Fatalf("runner grant extended: %+v %+v", grant, replay)
 	}
 	candidate := testRuntime(rb.ProcessInstanceID)
-	candidate.JournalVersion = 9
+	candidate.JournalVersion = c.Manifest.Storage.RunnerJournal.Max
 	candidate.Build.BinarySHA256 = rb.ArtifactSHA256
 	candidate.Build.Version = "new"
 	candidate.Mode = protocol.RunnerReady
@@ -319,7 +319,7 @@ func TestUpgradeServerFirstRestorationAndNoDatabaseRollback(t *testing.T) {
 		t.Fatal(op)
 	}
 	next := testRuntime(rb2.ProcessInstanceID)
-	next.JournalVersion = 9
+	next.JournalVersion = c.Manifest.Storage.RunnerJournal.Max
 	next.Capabilities = append(next.Capabilities, capabilityUpdater)
 	next.Build.BinarySHA256 = rb2.ArtifactSHA256
 	next.Mode = protocol.RunnerReady

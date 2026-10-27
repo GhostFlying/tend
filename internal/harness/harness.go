@@ -22,6 +22,8 @@ type MountBaseline struct {
 type WorkerSpec struct {
 	Execution       *protocol.ExecutionProfile
 	QuestionContext bool
+	ReceiveMessages func(context.Context) (*protocol.RunMessage, error)
+	AckMessage      func(context.Context, string) error
 	AskOwner        func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
 	Questions       []protocol.WorkerQuestion
 	Baseline        []MountBaseline

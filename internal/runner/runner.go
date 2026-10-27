@@ -254,6 +254,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.wg.Go(func() { r.heartbeats(ctx) })
 	r.wg.Go(func() { r.watchdog(ctx) })
 	r.wg.Go(func() { r.reconciler(ctx) })
+	r.wg.Go(func() { r.finalMessageReceipts(ctx) })
 	if err := r.resendClaims(ctx); err != nil {
 		return err
 	}

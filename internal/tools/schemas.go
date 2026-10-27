@@ -72,6 +72,8 @@ var schemas = map[string]string{
 	"agent_rollout_read":           argumentSchema(rolloutArgs{}),
 	"background_item_read":         argumentSchema(contextReadArgs{}),
 	"background_submit":            argumentSchema(protocol.BackgroundAssessmentPayload{}),
+	"runs_send_message":            `{"type":"object","properties":{"run_id":{"type":"string"},"task_id":{"type":"string"},"spec_version":{"type":"integer","minimum":1},"generation":{"type":"integer","minimum":1},"expected_control_revision":{"type":"integer","minimum":1},"text":{"type":"string","minLength":1,"maxLength":16384},"commit_seq":{"type":"integer","minimum":1},"reason":{"type":"string"}},"required":["run_id","task_id","spec_version","generation","expected_control_revision","text","commit_seq"],"additionalProperties":false}`,
+	"runs_read_messages":           `{"type":"object","properties":{"run_id":{"type":"string"},"after":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["run_id"],"additionalProperties":false}`,
 	"work_items_refresh_delivery":  argumentSchema(workItemRefreshArgs{}),
 	"background_sources":           argumentSchema(backgroundSourceArgs{}),
 	"background_checkin":           argumentSchema(backgroundCheckinArgs{}),

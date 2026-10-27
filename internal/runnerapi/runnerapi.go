@@ -95,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /runner/v1/observation", s.observation)
 	mux.HandleFunc("GET /runner/v1/questions", s.questions)
 	mux.HandleFunc("GET /runner/v1/questions/{id}", s.questions)
+	mux.HandleFunc("GET /runner/v1/messages", s.runMessages)
 	return mux
 }
 
@@ -143,6 +144,10 @@ var errUnauthenticated = protocol.Errorf(protocol.CodeForbidden, "authentication
 
 // authenticate establishes the principal of a request.
 func (s *Server) authenticate(r *http.Request) (protocol.Principal, error) {
+	return s.authenticateCredential(r, nil)
+}
+
+func (s *Server) authenticateCredential(r *http.Request, delivery *protocol.RunMessageDelivery) (protocol.Principal, error) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || token == "" {
 		return protocol.Principal{}, errUnauthenticated
@@ -160,6 +165,9 @@ func (s *Server) authenticate(r *http.Request) (protocol.Principal, error) {
 	switch runID, hostHeader := r.Header.Get(HeaderRun), r.Header.Get(HeaderHost); {
 	case runID != "" && hostHeader == "":
 		leaseID, host, role, err := s.app.RunCredential(ctx, runID)
+		if delivery != nil {
+			leaseID, host, role, err = s.app.RunMessageReceiptCredential(ctx, runID, *delivery)
+		}
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return protocol.Principal{}, errUnauthenticated
@@ -171,6 +179,9 @@ func (s *Server) authenticate(r *http.Request) (protocol.Principal, error) {
 		}
 		p, hostID = protocol.Principal{Kind: protocol.PrincipalRun, Subject: runID, Role: role}, host
 	case hostHeader != "" && runID == "":
+		if delivery != nil {
+			return protocol.Principal{}, errUnauthenticated
+		}
 		p, hostID = protocol.Principal{Kind: protocol.PrincipalRunner, Subject: hostHeader}, hostHeader
 	default:
 		return protocol.Principal{}, errUnauthenticated
@@ -193,20 +204,40 @@ func (s *Server) authenticate(r *http.Request) (protocol.Principal, error) {
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
-	p, err := s.authenticate(r)
-	if err != nil {
-		s.writeError(w, r, nil, err)
+	p, authErr := s.authenticate(r)
+	if authErr != nil && protocol.CodeOf(authErr) != protocol.CodeForbidden {
+		s.writeError(w, r, nil, authErr)
 		return
 	}
 	var env protocol.Envelope
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
 	if err := dec.Decode(&env); err != nil {
+		if authErr != nil {
+			s.writeError(w, r, nil, authErr)
+			return
+		}
 		s.writeError(w, r, nil, protocol.Errorf(protocol.CodeInvalidRequest, "body is not an envelope"))
 		return
 	}
 	if err := env.Validate(); err != nil {
+		if authErr != nil {
+			s.writeError(w, r, nil, authErr)
+			return
+		}
 		s.writeError(w, r, &env, err)
 		return
+	}
+	if authErr != nil {
+		// Historical run tokens only authenticate this exact RPC and delivery.
+		// GETs and every other operation retain ordinary lease authentication.
+		var receipt protocol.RunMessageReceipt
+		if env.Operation == protocol.OpRunsReportMessage && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) && json.Unmarshal(env.Payload, &receipt) == nil {
+			p, authErr = s.authenticateCredential(r, &receipt.RunMessageDelivery)
+		}
+		if authErr != nil {
+			s.writeError(w, r, &env, authErr)
+			return
+		}
 	}
 	op, err := s.dispatch(r.Context(), p, &env)
 	if err != nil {
@@ -221,6 +252,8 @@ var runCommands = map[string]app.Command{
 	protocol.OpDeliveriesPoll:       app.PollDeliveries{},
 	protocol.OpDeliveriesReport:     app.ReportDelivery{},
 	protocol.OpRunsAskOwner:         app.AskOwner{},
+	protocol.OpRunsClaimMessage:     app.ClaimRunMessage{},
+	protocol.OpRunsReportMessage:    app.ReportRunMessage{},
 	protocol.OpWorkspaceReconcile:   app.ReconcileWorkspaces{},
 	protocol.OpWorkspaceRelease:     app.ReleaseWorkspace{},
 	protocol.OpWorkspaceCleanup:     app.ReserveWorkspaceCleanup{},

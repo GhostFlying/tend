@@ -521,3 +521,11 @@ func (t *thread) StartTurn(ctx context.Context, in harness.TurnInput) (string, e
 func (t *thread) Interrupt(ctx context.Context, turnID string) error {
 	return t.s.conn.call(ctx, methodTurnInterrupt, TurnInterruptParams{ThreadID: t.id, TurnID: turnID}, nil)
 }
+
+// Steer never starts, interrupts or resumes a turn. A mismatched receipt leaves
+// the result unknown even when the transport successfully returned a response.
+func (t *thread) Steer(ctx context.Context, turnID, text string) error {
+	return t.SteerTurn(ctx, turnID, harness.TurnInput{Text: text})
+}
+
+var errSteerIdentity = errors.New("traex: steer receipt turn does not match")

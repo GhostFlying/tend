@@ -267,6 +267,11 @@ func assignmentQuestions(ctx context.Context, q store.Querier, as *protocol.Assi
 	}
 	as.WorkerQuestions = err == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityWorkerQuestions)
 	as.QuestionContext = err == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityWorkerQuestionContext)
+	enabled, e := store.RunMessagesEnabled(ctx, q, as.RunID)
+	if e != nil {
+		return e
+	}
+	as.RunMessages = enabled && err == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityRunMessages)
 	if as.WorkerQuestions {
 		as.Questions, err = store.ListWorkerQuestions(ctx, q, as.RunID)
 		if err != nil {

@@ -81,6 +81,8 @@ type HelloResult struct {
 type Assignment struct {
 	AcceptanceExecution *ExecutionProfile `json:"acceptance_execution,omitempty"`
 	QuestionContext     bool              `json:"question_context,omitempty"`
+	// RunMessages enables the additive, run-scoped supplement delivery protocol.
+	RunMessages bool `json:"run_messages,omitempty"`
 	// WorkerQuestions is negotiated before exposing ask_owner to the worker.
 	WorkerQuestions bool             `json:"worker_questions,omitempty"`
 	Questions       []WorkerQuestion `json:"questions,omitempty"`

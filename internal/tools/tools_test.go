@@ -298,6 +298,7 @@ func TestSchemasMatchArgs(t *testing.T) {
 		"conversation_read":  conversationArgs{},
 		"tasks_list":         listArgs{}, "tasks_read": taskArgs{}, "tasks_create": createArgs{}, "tasks_update_intent": updateArgs{},
 		"tasks_set_control": controlArgs{}, "tasks_cancel": cancelArgs{}, "actions_create": actionArgs{}, "decisions_open": openArgs{}, "decisions_resolve": resolveArgs{},
+		"runs_send_message": sendRunMessageArgs{}, "runs_read_messages": readRunMessagesArgs{},
 		"artifacts_read": artifactArgs{}, "attachments_read": fileArgs{}, "files_read": fileArgs{}, "requests_read": requestArgs{}, "repos_list": noArgs{}, "tend_context": noArgs{},
 	}
 	if len(args) != len(tools) {

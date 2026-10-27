@@ -25,7 +25,7 @@ func TestUpgradeCompletedHostRestartCanCancel(t *testing.T) {
 			}
 			candidate := testRuntime(b.ProcessInstanceID)
 			candidate.Build.BinarySHA256 = b.ArtifactSHA256
-			candidate.JournalVersion = 9
+			candidate.JournalVersion = c.Manifest.Storage.RunnerJournal.Max
 			candidate.Mode = protocol.RunnerReady
 			candidate.AppliedControlRevision = ctl.Revision
 			candidate.UpgradeID = b.UpgradeID

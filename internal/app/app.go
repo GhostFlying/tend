@@ -265,6 +265,9 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 	if err := cancelObsoleteQuestions(ctx, x, tx, &out); err != nil {
 		return err
 	}
+	if err := settleObsoleteRunMessages(ctx, x, tx, &out); err != nil {
+		return err
+	}
 	now := x.Now.UnixMilli()
 	actor, err := json.Marshal(x.Principal)
 	if err != nil {

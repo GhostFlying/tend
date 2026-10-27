@@ -17,6 +17,7 @@ const (
 	methodThreadInject      = "thread/inject_items"
 	methodTurnStart         = "turn/start"
 	methodTurnInterrupt     = "turn/interrupt"
+	methodTurnSteer         = "turn/steer"
 	methodModelList         = "model/list"
 	methodToolCall          = "item/tool/call"
 	notifyTurnStarted       = "turn/started"
