@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
@@ -174,5 +175,43 @@ func TestRequestUsageIdenticalPayloadWithDifferentOwnershipIsAConflict(t *testin
 	}
 	if v.Conflicts != 1 || v.Totals.Requests != 0 || h.count("token_usage_facts") != 2 {
 		t.Fatal("conflicting provenance was lost", v)
+	}
+}
+
+func TestRequestUsageStaleRevisionConflictIsOrderIndependent(t *testing.T) {
+	for _, order := range [][]int{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}} {
+		t.Run(fmt.Sprint(order), func(t *testing.T) {
+			h := newHarness(t)
+			base := protocol.TokenUsageSample{Source: "native/thread", RequestID: "request", ThreadID: "thread", Revision: 1, Settlement: "provisional", Total: usageNumber(10)}
+			conflicting := base
+			conflicting.Total = usageNumber(11)
+			newer := base
+			newer.Revision, newer.Settlement, newer.Total = 2, "final", usageNumber(20)
+			facts := []protocol.TokenUsageSample{base, conflicting, newer}
+			for _, index := range order {
+				if err := h.app.RecordTokenUsage(t.Context(), "main", facts[index]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Neither a duplicate nor a higher revision may erase a known conflict.
+			if err := h.app.RecordTokenUsage(t.Context(), "main", base); err != nil {
+				t.Fatal(err)
+			}
+			newer.Revision = 3
+			if err := h.app.RecordTokenUsage(t.Context(), "main", newer); err != nil {
+				t.Fatal(err)
+			}
+			var v protocol.TokenUsageView
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var err error
+				v, err = views.TokenUsage(t.Context(), tx.Q(), "total", 0, "", "", 0, h.clock.Now())
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if v.Conflicts != 1 || v.Totals.Requests != 0 || h.count("token_usage_facts") != 4 {
+				t.Fatalf("order %v changed conflict accounting: %+v", order, v)
+			}
+		})
 	}
 }

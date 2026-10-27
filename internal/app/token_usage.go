@@ -51,6 +51,16 @@ func recordTokenUsage(ctx context.Context, tx *store.Tx, sample protocol.TokenUs
 	if err != nil {
 		return err
 	}
+	// A stale revision can contradict its earlier fact even after a newer
+	// contribution became current. Quarantine the request independent of order.
+	var conflict bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE source=? AND request_id=? AND revision=? AND payload_hash<>?)`, sample.Source, sample.RequestID, sample.Revision, digest).Scan(&conflict); err != nil {
+		return err
+	}
+	if conflict {
+		_, err = tx.Exec(ctx, `UPDATE token_usage_current SET conflict=1 WHERE source=? AND request_id=?`, sample.Source, sample.RequestID)
+		return err
+	}
 	var oldRaw, oldSubject, oldRole string
 	err = tx.Q().QueryRowContext(ctx, `SELECT f.payload_json,f.subject,f.role FROM token_usage_current c JOIN token_usage_facts f ON f.seq=c.fact_seq WHERE c.source=? AND c.request_id=?`, sample.Source, sample.RequestID).Scan(&oldRaw, &oldSubject, &oldRole)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
