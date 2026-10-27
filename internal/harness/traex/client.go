@@ -45,6 +45,8 @@ type handlers struct {
 	request func(ctx context.Context, method string, params json.RawMessage) (any, error)
 	// notify receives a notification.
 	notify func(method string, params json.RawMessage)
+	// prepare snapshots request identity synchronously in wire order.
+	prepare func(method string, params json.RawMessage) func(context.Context) (any, error)
 }
 
 // conn is one JSON-RPC connection to an app-server. A single goroutine
@@ -112,7 +114,11 @@ func (c *conn) read(r io.Reader) {
 func (c *conn) dispatch(m message) {
 	switch {
 	case m.ID != nil && m.Method != "":
-		go c.answer(m)
+		var prepared func(context.Context) (any, error)
+		if c.h.prepare != nil {
+			prepared = c.h.prepare(m.Method, m.Params)
+		}
+		go c.answerPrepared(m, prepared)
 	case m.ID != nil:
 		var id int64
 		if err := json.Unmarshal(m.ID, &id); err != nil {
@@ -131,8 +137,11 @@ func (c *conn) dispatch(m message) {
 	}
 }
 
-func (c *conn) answer(m message) {
-	result, err := c.h.request(c.ctx, m.Method, m.Params)
+func (c *conn) answerPrepared(m message, prepared func(context.Context) (any, error)) {
+	if prepared == nil {
+		prepared = func(ctx context.Context) (any, error) { return c.h.request(ctx, m.Method, m.Params) }
+	}
+	result, err := prepared(c.ctx)
 	reply := map[string]any{"id": m.ID}
 	if err != nil {
 		code := -32603

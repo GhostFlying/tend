@@ -114,6 +114,10 @@ type ToolCall struct {
 	Namespace string
 	Tool      string
 	Arguments json.RawMessage
+	// UserText and UserItemID snapshot the latest native user item at request
+	// arrival, before asynchronous tool execution can race later input.
+	UserText   string
+	UserItemID string
 }
 
 // ToolResult is tend's answer to a tool call.

@@ -11,6 +11,7 @@ import { OutgoingRow } from "./Messages.tsx";
 import { Withdrawals } from "./withdraw.ts";
 import type { Category } from "./queueView.ts";
 import styles from "./PendingQueue.module.css";
+import { steerNotice } from "./steer.ts";
 
 export function PendingQueue({ connection }: { connection: Connection }) {
   const { live, client, queue, draft, conversation } = useServices();
@@ -81,6 +82,9 @@ export function PendingQueue({ connection }: { connection: Connection }) {
               : "正在处理"}{" "}
         · {new Date(entry.item.created_at).toLocaleTimeString()}
       </div>
+      {steerNotice(entry.item.steer) && (
+        <p className={styles.note}>{steerNotice(entry.item.steer)}</p>
+      )}
       <details>
         <summary className={styles.preview}>{entry.item.body || "附件消息"}</summary>
         <p className={styles.body}>{entry.item.body}</p>

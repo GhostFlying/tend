@@ -128,7 +128,7 @@ func newSession(r io.Reader, w io.WriteCloser, log *slog.Logger) *Session {
 		log = slog.New(slog.DiscardHandler)
 	}
 	s := &Session{log: log, threads: map[string]*thread{}, orphans: map[string][]harness.Event{}, stopped: make(chan struct{}), threadLifecycle: make(chan struct{}, 1)}
-	s.conn = newConn(r, w, handlers{request: s.serverRequest, notify: s.notification}, log)
+	s.conn = newConn(r, w, handlers{request: s.serverRequest, notify: s.notification, prepare: s.prepareServerRequest}, log)
 	s.stop = w.Close
 	go func() {
 		<-s.conn.done
@@ -265,14 +265,17 @@ func (s *Session) thread(id string) *thread {
 }
 
 func (s *Session) serverRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	return s.prepareServerRequest(method, params)(ctx)
+}
+
+func (s *Session) prepareServerRequest(method string, params json.RawMessage) func(context.Context) (any, error) {
 	if method != methodToolCall {
-		// Background approval requests belong to the native auto-reviewer.
 		// Unexpected interactive requests are never approved by Tend.
-		return nil, fmt.Errorf("%w: %s", errUnknownMethod, method)
+		return func(context.Context) (any, error) { return nil, fmt.Errorf("%w: %s", errUnknownMethod, method) }
 	}
 	var p DynamicToolCallParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, fmt.Errorf("traex: decode tool call: %w", err)
+		return func(context.Context) (any, error) { return nil, fmt.Errorf("traex: decode tool call: %w", err) }
 	}
 	t := s.thread(p.ThreadID)
 	var handler harness.ToolHandler
@@ -280,13 +283,20 @@ func (s *Session) serverRequest(ctx context.Context, method string, params json.
 		handler = t.toolHandler()
 	}
 	if handler == nil {
-		return toolResponse(harness.ToolResult{Text: "this thread has no tools"}), nil
+		return func(context.Context) (any, error) {
+			return toolResponse(harness.ToolResult{Text: "this thread has no tools"}), nil
+		}
 	}
 	call := harness.ToolCall{ThreadID: p.ThreadID, TurnID: p.TurnID, CallID: p.CallID, Tool: p.Tool, Arguments: p.Arguments}
+	t.mu.Lock()
+	if t.userTurnID == p.TurnID {
+		call.UserText, call.UserItemID = t.userText, t.userItemID
+	}
+	t.mu.Unlock()
 	if p.Namespace != nil {
 		call.Namespace = *p.Namespace
 	}
-	return toolResponse(handler(ctx, call)), nil
+	return func(ctx context.Context) (any, error) { return toolResponse(handler(ctx, call)), nil }
 }
 
 func toolResponse(r harness.ToolResult) DynamicToolCallResponse {
@@ -345,6 +355,18 @@ func (s *Session) notification(method string, params json.RawMessage) {
 		if item.Type == harness.ItemAgentMessage {
 			ev.Text = item.Text
 		}
+		if item.Type == harness.ItemUserMessage {
+			var user struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			}
+			if json.Unmarshal(n.Item, &user) == nil {
+				for _, part := range user.Content {
+					ev.Text += part.Text
+				}
+			}
+		}
 		ev.Tool = toolUse(item.Type, n.Item, method == notifyItemCompleted)
 	default:
 		return
@@ -367,18 +389,19 @@ type thread struct {
 	id     string
 	onTool harness.ToolHandler
 
-	mu            sync.Mutex
-	queue         []harness.Event
-	wake          chan struct{}
-	ended         bool
-	events        chan harness.Event
-	permissions   harness.PermissionSettings
-	networkPolicy map[string]any
-	defaults      harness.ModelSelection
-	rolloutPath   string
-	fork          bool
-	released      bool
-	releaseDone   chan struct{}
+	mu                               sync.Mutex
+	queue                            []harness.Event
+	wake                             chan struct{}
+	ended                            bool
+	events                           chan harness.Event
+	permissions                      harness.PermissionSettings
+	networkPolicy                    map[string]any
+	defaults                         harness.ModelSelection
+	rolloutPath                      string
+	fork                             bool
+	released                         bool
+	releaseDone                      chan struct{}
+	userText, userItemID, userTurnID string
 }
 
 func newThread(s *Session, id string, onTool harness.ToolHandler) *thread {
@@ -394,6 +417,9 @@ func (t *thread) push(ev harness.Event) {
 		return
 	}
 	t.queue = append(t.queue, ev)
+	if ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemUserMessage {
+		t.userText, t.userItemID, t.userTurnID = ev.Text, ev.ItemID, ev.TurnID
+	}
 	t.mu.Unlock()
 	t.signal()
 }

@@ -1154,6 +1154,12 @@
         "notice_type": {
           "type": "string"
         },
+        "reply_sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "reply_to": {
           "type": "string"
         },
@@ -1165,6 +1171,9 @@
         },
         "state": {
           "$ref": "#/definitions/MessageState"
+        },
+        "steer": {
+          "$ref": "#/definitions/MainSteerView"
         },
         "tool": {
           "$ref": "#/definitions/ToolUseView"
@@ -2657,6 +2666,33 @@
       "title": "LinkWorkItemTaskPayload",
       "type": "object"
     },
+    "MainSteerView": {
+      "additionalProperties": false,
+      "properties": {
+        "native_item_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "thread_id",
+        "turn_id"
+      ],
+      "title": "MainSteerView",
+      "type": "object"
+    },
     "MessageAssociations": {
       "additionalProperties": false,
       "properties": {
@@ -2751,6 +2787,8 @@
     "MessageState": {
       "enum": [
         "queued",
+        "accepted",
+        "processed",
         "processing",
         "replied",
         "interrupted",

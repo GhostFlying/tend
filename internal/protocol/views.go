@@ -297,6 +297,10 @@ type ConversationItem struct {
 	CreatedAt time.Time `json:"created_at"`
 	// State is how far the main agent got with an owner message.
 	State MessageState `json:"state,omitempty"`
+	// Steer retains the native delivery and consumption evidence for owner input.
+	Steer *MainSteerView `json:"steer,omitempty"`
+	// ReplySources are owner messages consumed before this assistant item began.
+	ReplySources []string `json:"reply_sources,omitempty"`
 	// AssistantState is set on a streamed main-agent message (D74).
 	AssistantState AssistantState `json:"assistant_state,omitempty"`
 	// AssistantRevision increases with each cumulative body or state update.
@@ -305,6 +309,15 @@ type ConversationItem struct {
 	Decision *DecisionChoice `json:"decision,omitempty"`
 	// Tool is set for a tool use.
 	Tool *ToolUseView `json:"tool,omitempty"`
+}
+
+// MainSteerView distinguishes acceptance from a witnessed native user item.
+type MainSteerView struct {
+	Status       string `json:"status"`
+	ThreadID     string `json:"thread_id"`
+	TurnID       string `json:"turn_id"`
+	NativeItemID string `json:"native_item_id,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 // ToolUseView is a tool the main agent used. Input and output are cut off

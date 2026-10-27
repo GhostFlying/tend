@@ -457,10 +457,14 @@ func attachReviewSource(ctx context.Context, x *Exec, tx *store.Tx, message stri
 	if message == "" {
 		return nil
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO logical_turn_messages(logical_turn_id,message_id)
+	request, err := store.MainExecutionRequest(ctx, tx.Q(), x.Env.ParentRequestID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO logical_turn_messages(logical_turn_id,message_id)
  SELECT e.logical_turn_id,? FROM logical_turn_executions e JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id
  WHERE e.request_id=? AND l.status<>'completed'
- ON CONFLICT(logical_turn_id,message_id) DO NOTHING`, message, x.Env.ParentRequestID)
+ ON CONFLICT(logical_turn_id,message_id) DO NOTHING`, message, request)
 	return err
 }
 

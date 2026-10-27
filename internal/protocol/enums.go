@@ -133,6 +133,10 @@ type MessageState string
 const (
 	// MessageQueued: received, waiting for the main agent.
 	MessageQueued MessageState = "queued"
+	// MessageAccepted: native accepted steer input, consumption is not yet witnessed.
+	MessageAccepted MessageState = "accepted"
+	// MessageProcessed: consumption and turn completion are witnessed, without a reply.
+	MessageProcessed MessageState = "processed"
 	// MessageProcessing: the main agent's turn for it is running.
 	MessageProcessing MessageState = "processing"
 	// MessageReplied: the turn completed.

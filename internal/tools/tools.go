@@ -36,10 +36,16 @@ type Call struct {
 	// call within the instance named by the principal.
 	RequestID string
 	Native    string
-	// SourceMessageID is the conversation message the turn handles.
+	// SourceMessageID is the actual owner source of this action. Planning
+	// effect identity uses the recorded initial delivery of TurnID separately.
 	SourceMessageID string
-	TurnID          string
-	// ParentRequestID is the request that delivered that message.
+	// PlanningSourceMessageID is the turn's initial delivery, fixed by the host
+	// independently of a later consumed or explicitly selected owner source.
+	PlanningSourceMessageID string
+	TurnID                  string
+	// ExecutionRequestID identifies the native execution independently of owner attribution.
+	ExecutionRequestID string
+	// ParentRequestID is the request that delivered the actual owner source.
 	ParentRequestID string
 	Tool            string
 	Arguments       json.RawMessage
@@ -48,6 +54,13 @@ type Call struct {
 // Snapshots shows the ledger as a full snapshot, for tend_context.
 type Snapshots interface {
 	Current(ctx context.Context, self protocol.Principal) (string, error)
+}
+
+func (c Call) executionRequest() string {
+	if c.ExecutionRequestID != "" {
+		return c.ExecutionRequestID
+	}
+	return c.ParentRequestID
 }
 
 // Service answers the main agent's tool calls.
@@ -148,7 +161,7 @@ type answer struct {
 // Handle answers one tool call.
 func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
 	if c.ParentRequestID != "" {
-		repair, err := s.app.IsRepairExecution(ctx, c.ParentRequestID)
+		repair, err := s.app.IsRepairExecution(ctx, c.executionRequest())
 		if err != nil {
 			return harness.ToolResult{Text: "Cannot determine logical turn execution mode."}
 		}
@@ -285,6 +298,9 @@ func (s *Service) execute(ctx context.Context, c Call, op string, target protoco
 	env := &protocol.Envelope{
 		RequestID: requestID, ParentRequestID: c.ParentRequestID, Operation: op, Target: target,
 		ExpectedControlRevision: revision, Payload: body, Reason: reason,
+	}
+	if c.PlanningSourceMessageID != "" {
+		cmd = app.WithPlanningSource(cmd, c.PlanningSourceMessageID)
 	}
 	res, err := s.app.Execute(ctx, c.Principal, env, cmd)
 	if err != nil {

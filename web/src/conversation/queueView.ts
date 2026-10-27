@@ -182,7 +182,7 @@ export class ConversationQueue {
           for (const old of previous.blocks)
             if (
               !old.notice_only &&
-              old.trigger.state === "processing" &&
+              (old.trigger.state === "processing" || old.trigger.state === "accepted") &&
               !fetched.some((b) => b.position === old.position)
             ) {
               fetched.push(

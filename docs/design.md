@@ -117,6 +117,8 @@
 | D114 | 退役外挂主协调 Agent，主协调统一由 Tend 托管。删除外挂 MCP/hook/setup、会话项目绑定及专用检查工具，不签发或接受外挂 agent token；保留 owner CLI、worker MCP、runner 和 provider。历史迁移与来源仍可读取，旧入口拒绝执行。取代 D45/D47/D48/D54/D59/D68 中外挂并存的运行规则。见 docs/plans/mandatory-message-context.md。 | 已确认（2026-10-27） |
 | D118 | Worker 统一 YOLO，主/后台显式开放网络且保留文件及 Tend 工具边界；scratch 规范路径与独立验收目录、无每次探针；验收模型/强度支持 runner 默认与任务冻结选择。worker 可选结构化问题与主协调说明独立留痕，环境故障、证据缺口、授权及 owner 选择直接展示。新增通信字段通过能力协商，旧请求形状与默认选择保持，存储只追加迁移。见 docs/plans/worker-scratch-decision-context.md。 | 已实现（2026-10-28） |
 
+| D115 | Owner 的补充消息由当前主会话投递循环领取，经原生 `turn/steer` 的 thread/expected-turn 前置条件送入同一回合；只有 owner 原文可 steer，系统事件仍排队，handoff 保持屏障。发送意图、接受回执和原生 user-item 消费证据独立保存；unknown 不重发、不作为后续 context 指令。工具首次 source/request 持久固定；规划 effect 使用原 turn 初始消息与 commit_seq 去重，实际 owner 审计来源独立保留，换 native call ID 或消费状态询问不创建新序号空间；回复固定开始时来源并关联该时点已消费的 owner 消息。已消费补充消息加入原逻辑轮，正式消息归类与事实检查不因原生回合完成而跳过；修正轮不接收 steer。接受不承诺即时消费，不支持路径继续等待。见 docs/plans/owner-main-turn-steer.md 与 docs/owner-message-steer.md。 | 已实现，未上线（2026-10-27） |
+
 ## 2. 上下文注入（修订 v0.1 §7）
 
 > D45：当前先做的外挂形态里，上下文由各 agent 的 hook 追加，水位、完整快照与增量的规则不变，具体机制见阶段 C 计划。本节描述的 `thread/inject_items` 方式属于托管形态，随托管一起延后；记录的 app-server 能力也适用于 worker。
@@ -157,7 +159,7 @@ ContextPacket 仍按 v0.1 §7.3 的内容组织。注入的 developer 消息以 
 - 工具以动态工具的形式在 `thread/start` 的 `dynamicTools` 中注册（initialize 时声明 `experimentalApi`）。模型调用时，app-server 通过主会话的 stdio 连接向 tend 发出 `item/tool/call`，参数为 `{threadId, turnId, callId, namespace, tool, arguments}`；tend 返回 `{success, contentItems}`。
 - 调用方身份由连接决定：只有 tend 自己启动的 app-server 进程能发起调用，tend 根据连接和 threadId 确定是哪个 harness 实例、哪个 thread，不信任 arguments 里自报的身份。
 - 应用 request_id 由原生身份映射得到（D28）：来源 `harness:<harness_instance>`，键 `<threadId>/<turnId>/<callId>`。callId 当作不透明字符串使用（code mode 下是复合字符串）。
-- 第二层业务去重：规划写入以 `(source_message_id, plan_commit_seq)` 唯一；run 创建以 `(action_id, generation)` 唯一（v0.1 §8.6）。
+- 第二层业务去重：规划写入以 `(source_message_id, plan_commit_seq)` 唯一；D115 hosted 当前原生 turn 的去重 source 固定为其初始投递消息，payload 与对象绑定保留实际 owner 审计来源；run 创建以 `(action_id, generation)` 唯一（v0.1 §8.6）。
 - 第一批工具（namespace `tend`，名称用下划线）：`tasks_list`、`tasks_read`、`tasks_create`、`tasks_update_intent`、`actions_create`、`decisions_open`、`decisions_resolve`、`artifacts_read`、`requests_read`、`repos_list`。主 Agent 拿不到 `acceptance.submit`，也没有 completed 的写入路径。
 - 之后补上的工具：`tend_context`（C7）；`tasks_set_control`（暂停，或交还给 tend）和 `tasks_cancel`（阶段 C 预验收发现：v0.1 §14.3 的控制权操作和取消一直允许主 Agent 调用，只是没有对应的工具，owner 在 agent 里说“暂停”或者用待决事项选择“取消”时，主 Agent 无法执行）。接管（`human_control`）仍然只有 owner 能做。
 - 工具执行期间 tend 崩溃或连接中断时，调用的结果如何处理还没验证，B12 做专门的故障测试。在得到结论之前，工具的副作用按“结果未知”对待，靠 request_id 和业务去重保证重放安全。

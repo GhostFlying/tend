@@ -35,6 +35,8 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	// planningSource is the turn's initial delivery, supplied by the host.
+	planningSource   string
 	FollowupsEnabled bool
 	FollowupQueued   bool
 	Env              *protocol.Envelope
@@ -263,7 +265,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 	}
 	for _, e := range out.Events {
 		if x.Env.ParentRequestID != "" {
-			if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_contexts(logical_turn_id,work_item_id) SELECT le.logical_turn_id,w.work_item_id FROM logical_turn_executions le JOIN work_items w ON ((?='work_item' AND w.work_item_id=?) OR (?='task' AND EXISTS(SELECT 1 FROM work_item_task_links wl WHERE wl.work_item_id=w.work_item_id AND wl.task_id=?))) WHERE le.request_id=? ON CONFLICT(logical_turn_id,work_item_id) DO NOTHING`, e.ObjectType, e.ObjectID, e.ObjectType, e.ObjectID, x.Env.ParentRequestID); err != nil {
+			request, err := store.MainExecutionRequest(ctx, tx.Q(), x.Env.ParentRequestID)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_contexts(logical_turn_id,work_item_id) SELECT le.logical_turn_id,w.work_item_id FROM logical_turn_executions le JOIN work_items w ON ((?='work_item' AND w.work_item_id=?) OR (?='task' AND EXISTS(SELECT 1 FROM work_item_task_links wl WHERE wl.work_item_id=w.work_item_id AND wl.task_id=?))) WHERE le.request_id=? ON CONFLICT(logical_turn_id,work_item_id) DO NOTHING`, e.ObjectType, e.ObjectID, e.ObjectType, e.ObjectID, request); err != nil {
 				return err
 			}
 		}

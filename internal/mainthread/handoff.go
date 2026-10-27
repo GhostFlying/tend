@@ -15,7 +15,6 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
-	"github.com/GhostFlying/tend/internal/tools"
 )
 
 // historyReference retains identity when native resume definitively rejects it.
@@ -40,7 +39,7 @@ const summaryFormatVersion int64 = 2
 const summaryInstructions = `You are preparing a private handoff summary of the preceding conversation. This is maintenance, not a user request. Do not call tools, run commands, change files, perform tasks, or ask questions. Return only a concise, self-contained summary in the user's language. Preserve the user's goal, explicit constraints and authorization boundaries, decisions and their reasons, completed work and evidence, unresolved issues, rejected approaches, and concrete next steps. Preserve relevant task IDs and artifact references exactly. Distinguish confirmed facts from hypotheses. Preserve unknown delivery and action outcomes as unknown; a summary does not resolve them or authorize replay. Do not invent approvals or claim unfinished work is complete. The original conversation remains available for checking details.`
 
 func currentToolsetHash() (string, error) {
-	specs := tools.Specs()
+	specs := hostedSpecs()
 	sort.Slice(specs, func(i, j int) bool { return specs[i].Name < specs[j].Name })
 	// Canonicalize object keys and insignificant JSON whitespace in schemas.
 	type entry struct {

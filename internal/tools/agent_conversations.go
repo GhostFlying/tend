@@ -264,15 +264,15 @@ func (s *Service) backgroundEvidence(ctx context.Context, c Call) (any, error) {
 }
 
 func (s *Service) turnRead(ctx context.Context, c Call) (any, error) {
-	return s.app.LogicalTurn(ctx, c.ParentRequestID)
+	return s.app.LogicalTurn(ctx, c.executionRequest())
 }
 func (s *Service) turnCommit(ctx context.Context, c Call) (any, error) {
 	var p protocol.LogicalTurnCommit
 	if err := decode(c.Arguments, &p); err != nil {
 		return nil, err
 	}
-	cmd := app.CommitLogicalTurn{RequestID: c.ParentRequestID}
-	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: c.ParentRequestID}, nil, "", p, cmd)
+	cmd := app.CommitLogicalTurn{RequestID: c.executionRequest()}
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: c.executionRequest()}, nil, "", p, cmd)
 }
 
 func (s *Service) turnWait(ctx context.Context, c Call) (any, error) {
@@ -280,8 +280,8 @@ func (s *Service) turnWait(ctx context.Context, c Call) (any, error) {
 	if err := decode(c.Arguments, &p); err != nil {
 		return nil, err
 	}
-	cmd := app.AwaitTurnClarification{RequestID: c.ParentRequestID}
-	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: c.ParentRequestID}, nil, "", p, cmd)
+	cmd := app.AwaitTurnClarification{RequestID: c.executionRequest()}
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: c.executionRequest()}, nil, "", p, cmd)
 }
 
 func (s *Service) turnAdopt(ctx context.Context, c Call) (any, error) {
@@ -289,6 +289,6 @@ func (s *Service) turnAdopt(ctx context.Context, c Call) (any, error) {
 	if err := decode(c.Arguments, &p); err != nil {
 		return nil, err
 	}
-	cmd := app.AdoptClarification{RequestID: c.ParentRequestID}
+	cmd := app.AdoptClarification{RequestID: c.executionRequest()}
 	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: p.LogicalTurnID}, &p.Revision, "", p, cmd)
 }
