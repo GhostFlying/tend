@@ -595,3 +595,62 @@ func TestFault_NativeFailureDeduplicatesAcrossObservedCompletionClocks(t *testin
 		t.Fatalf("failure events=%d", failures)
 	}
 }
+
+func TestNativeUnconfirmedEndingWhileWorkingDoesNotRequestAttention(t *testing.T) {
+	for _, tc := range []struct {
+		state, code, want string
+		stale             bool
+	}{{stateWorking, "ending_unconfirmed", "worker.root_observation_resolved", false}, {stateDone, "ending_unconfirmed", "worker.root_observation_unknown", false}, {stateWorking, "history_unreadable", "worker.root_observation_unknown", false}, {stateWorking, "ending_unconfirmed", "worker.root_observation_unknown", true}} {
+		t.Run(tc.state+tc.code, func(t *testing.T) {
+			_, w, a := nativeFixture(t)
+			a.MainAgent.State, a.MainAgent.Outcome, a.MainAgent.StateStartedAt = tc.state, "", w.st.Turn
+			if tc.stale {
+				a.MainAgent.StateStartedAt = w.st.Turn - 1
+			}
+			a.RootTurn.State, a.RootTurn.ErrorCode, a.RootTurn.Operations = "unknown", tc.code, "unknown"
+			if err := w.recordRootObservation(t.Context(), *a); err != nil {
+				t.Fatal(err)
+			}
+			if last := w.pending[len(w.pending)-1]; last.Kind != tc.want {
+				t.Fatalf("got %s want %s", last.Kind, tc.want)
+			}
+			if _, err := nativeFailedTurn(*a, w.st.Turn); err == nil {
+				t.Fatal("unconfirmed ending allowed recovery")
+			}
+		})
+	}
+}
+
+func TestNativeEndHookAllowsTwoPollsForReadableEndingClock(t *testing.T) {
+	_, w, a := nativeFixture(t)
+	now := time.UnixMilli(100000)
+	w.ws.opts.Now = func() time.Time { return now }
+	a.MainAgent.State, a.MainAgent.Outcome = stateDone, "success"
+	a.MainAgent.StateStartedAt = now.UnixMilli() - 5000
+	a.RootTurn.State, a.RootTurn.ErrorCode, a.RootTurn.Operations = "unknown", "ending_unconfirmed", "unknown"
+	if err := w.recordRootObservation(t.Context(), *a); err != nil {
+		t.Fatal(err)
+	}
+	var first struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.pending[len(w.pending)-1].Body, &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Code != "observation_pending" {
+		t.Fatalf("early code=%s", first.Code)
+	}
+	now = now.Add(6 * time.Second)
+	if err := w.recordRootObservation(t.Context(), *a); err != nil {
+		t.Fatal(err)
+	}
+	var last struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.pending[len(w.pending)-1].Body, &last); err != nil {
+		t.Fatal(err)
+	}
+	if last.Code != "ending_unconfirmed" {
+		t.Fatalf("unresolved ending not escalated: %s", last.Code)
+	}
+}

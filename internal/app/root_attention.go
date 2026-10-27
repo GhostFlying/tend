@@ -30,6 +30,7 @@ func (a *App) recordRootAttention(ctx context.Context, tx *store.Tx, run store.R
 	var fact struct {
 		ManagedTurnAt int64  `json:"managed_turn_at"`
 		Code          string `json:"code"`
+		RootState     string `json:"root_state"`
 		RootTurn      *struct {
 			SessionID string `json:"sessionId"`
 			TurnID    string `json:"turnId"`
@@ -38,6 +39,9 @@ func (a *App) recordRootAttention(ctx context.Context, tx *store.Tx, run store.R
 		BackgroundPending bool  `json:"background_pending"`
 	}
 	if json.Unmarshal(e.Body, &fact) != nil || fact.TurnAt <= 0 || !fact.BackgroundPending || fact.Code == "observation_pending" {
+		return false, nil
+	}
+	if e.Kind == "worker.root_background_pending" && fact.RootState != "failed" {
 		return false, nil
 	}
 	decisions, err := store.ListDecisions(ctx, tx.Q(), run.TaskID)

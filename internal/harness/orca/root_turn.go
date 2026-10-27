@@ -111,6 +111,11 @@ func (w *worker) recordRootObservation(ctx context.Context, a Agent) error {
 		if w.ws.opts.Now().UnixMilli()-w.st.Turn < 10000 {
 			code = "observation_pending"
 		}
+	} else if r.State == "unknown" && r.ErrorCode == "ending_unconfirmed" && a.MainAgent != nil && a.MainAgent.State == stateWorking && a.MainAgent.StateStartedAt >= w.st.Turn && !rootFailed(a, w.st.Turn) {
+		// A readable turn without an end clock is expected while its TUI is working.
+		phase = "known"
+	} else if r.State == "unknown" && r.ErrorCode == "ending_unconfirmed" && a.MainAgent != nil && a.MainAgent.State == stateDone && !rootFailed(a, w.st.Turn) && a.MainAgent.StateStartedAt >= w.st.Turn && w.ws.opts.Now().UnixMilli()-a.MainAgent.StateStartedAt < 10000 {
+		phase, code = "unknown", "observation_pending"
 	} else if r.State == "unknown" || ended && r.Operations == "unknown" || rootFailed(a, w.st.Turn) && !ended && r.Operations != "settled" {
 		phase = "unknown"
 	} else if ended && r.Operations == "pending" {
