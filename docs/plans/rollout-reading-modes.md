@@ -36,3 +36,5 @@
 集成原 run 补充消息时，完成事件的关联字段必须建立在既有脱敏事件上，保留 owner 补充原文不复制到 run 日志的约束；同时保留普通 assistant 事件的正文与原生身份。
 
 运行更新：默认跟随最新 run，只有用户主动选择历史 run 时才固定，重新选最新恢复跟随。回合生命周期日志仅投影原生身份与状态，不转存包含 user items 的整份通知；隔离浏览器覆盖新 run、历史固定与恢复跟随。
+
+子线程诊断边界：child envelope 在 worker 转存前复用根事件的 user-item 脱敏及 turn 生命周期投影；保留 child thread/turn/kind、正常回复与工具正文。原始 session 历史保留给受权恢复，不把私有输入透传到 run_logs。假原生 worker 回归覆盖嵌套晚到父链、user 项目、完整 turn.items 和普通 child 输出。
