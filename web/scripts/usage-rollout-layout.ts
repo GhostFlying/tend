@@ -206,14 +206,15 @@ const server = createServer(async (req, res) => {
   }
   if (path === `/api/v1/runs/${runID}/logs`)
     return json({ run_id: runID, observed: "running", logs: logs.slice(0, 100), next: 100 });
-  if (path === `/api/v1/runs/${runID}/rollout`) {
+  if (/^\/api\/v1\/runs\/[^/]+\/rollout$/.test(path)) {
+    const requestedRun = path.split("/")[4]!;
     if (rolloutFailure) {
       res.statusCode = 503;
       return json({ error: { code: "unavailable", message: "Fixture failure" } });
     }
     if (rolloutEmpty)
       return json({
-        run_id: runID,
+        run_id: requestedRun,
         observed: "running",
         logs: [],
         before: 0,
@@ -232,7 +233,7 @@ const server = createServer(async (req, res) => {
     const first = selected[0]?.seq ?? before;
     const last = selected.at(-1)?.seq ?? after;
     return json({
-      run_id: runID,
+      run_id: requestedRun,
       observed: "running",
       logs: selected,
       before: first,
@@ -587,6 +588,68 @@ try {
   } finally {
     rolloutEmpty = false;
     await backlogContext.close();
+  }
+
+  // Follow newer executions by default, retaining history only after selection.
+  const selectionContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    serviceWorkers: "block",
+  });
+  try {
+    const page = await selectionContext.newPage();
+    await page.goto(`http://127.0.0.1:${address.port}/?task=${taskID}`);
+    const select = page
+      .getByRole("region", { name: "执行过程与用量" })
+      .getByRole("combobox", { name: "执行记录" });
+    await select.waitFor();
+    assert.equal(await select.inputValue(), runID);
+    const appendRun = (id: string, role: string, generation: number) => {
+      task.runs.push({ ...task.runs[0]!, run_id: id, role, generation });
+      eventSeq++;
+      for (const stream of streams)
+        stream.write(
+          `event: ledger\ndata: ${JSON.stringify({ event_seq: eventSeq, object_type: "task", object_id: taskID, kind: "task.changed", created_at: "2026-10-27T03:01:00Z" })}\n\n`,
+        );
+    };
+    const acceptance = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/v1/runs/run_accept/rollout",
+    );
+    appendRun("run_accept", "accept", 1);
+    await select.locator('option[value="run_accept"]').waitFor({ state: "attached" });
+    await acceptance;
+    assert.equal(
+      await select.inputValue(),
+      "run_accept",
+      "default reader failed to follow acceptance",
+    );
+    await select.selectOption(runID);
+    appendRun("run_retry", "implement", 2);
+    await select.locator('option[value="run_retry"]').waitFor({ state: "attached" });
+    assert.equal(
+      await select.inputValue(),
+      runID,
+      "explicit history selection changed on a newer run",
+    );
+    assert(
+      !reads.some((p) => p.startsWith("/api/v1/runs/run_retry/rollout")),
+      "historical reader fetched the unselected new run",
+    );
+    await select.selectOption("run_retry");
+    const next = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/v1/runs/run_accept_next/rollout",
+    );
+    appendRun("run_accept_next", "accept", 2);
+    await select.locator('option[value="run_accept_next"]').waitFor({ state: "attached" });
+    await next;
+    assert.equal(
+      await select.inputValue(),
+      "run_accept_next",
+      "selecting latest did not restore following",
+    );
+    console.log("PASS reader follows new runs, pins selected history, and resumes following");
+  } finally {
+    task.runs.splice(1);
+    await selectionContext.close();
   }
 
   // A complete short history must not acquire a false "older" boundary when
