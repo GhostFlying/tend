@@ -135,12 +135,22 @@ func TestIntegrationHostedSteerPlanningRetry(t *testing.T) {
 		t.Fatal("status steer repeated committed planning effect: ", retry.result.Text)
 	}
 	eventually(t, "same original turn completes", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND status='completed'`, first) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND thread_id=? AND turn_id=? AND status='completed'`, first, original.call.ThreadID, original.call.TurnID) == 1
 	})
-	if opens.Load() != 1 || tools.Load() != 2 || e.count(`SELECT COUNT(*) FROM tasks`) != 1 || e.count(`SELECT COUNT(*) FROM plan_commits WHERE source_message_id=?`, first) != 1 || e.count(`SELECT COUNT(*) FROM main_turns`) != 1 ||
-		e.count(`SELECT COUNT(*) FROM main_steers WHERE message_id=? AND status='completed' AND native_item_id<>''`, message.ID) != 1 ||
+	if opens.Load() != 1 || tools.Load() != 2 || e.count(`SELECT COUNT(*) FROM tasks`) != 1 || e.count(`SELECT COUNT(*) FROM plan_commits WHERE source_message_id=?`, first) != 1 || e.count(`SELECT COUNT(*) FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.repair=0`) != 1 ||
+		e.count(`SELECT COUNT(*) FROM main_steers WHERE message_id=? AND status='consumed' AND native_item_id<>''`, message.ID) != 1 ||
 		e.count(`SELECT COUNT(*) FROM conversation_messages WHERE author='main_agent' AND reply_to=? AND body LIKE '%STATUS_ONLY_KEEP_GOAL%'`, message.ID) != 1 {
 		t.Fatal("duplicate write/session/turn or missing native consumption and reply proof")
+	}
+	// This endpoint exercises planning retries, not the mandatory metadata
+	// review. Its final reply must leave an unreviewed logical responsibility.
+	rec, found, err := e.app.TurnDelivery(t.Context(), original.call.ThreadID, original.call.TurnID)
+	if err != nil || !found {
+		t.Fatal(rec, found, err)
+	}
+	state, err := e.app.LogicalTurn(t.Context(), rec.RequestID)
+	if err != nil || state.Status == "completed" {
+		t.Fatal("native completion bypassed formal review", state, err)
 	}
 	t.Logf("thread=%s turn=%s original=%s status=%s native_calls=%s,%s tools=2 tasks=1 sessions=1; retry=%s", original.call.ThreadID, original.call.TurnID, first, message.ID, original.call.CallID, retry.call.CallID, retry.result.Text)
 }

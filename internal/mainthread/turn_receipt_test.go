@@ -95,6 +95,109 @@ func TestReconnectRecoversFinalNativeMessagesBeforeMetadataRepair(t *testing.T) 
 	}
 }
 
+func TestReconnectRestoresSteerReplyAttributionFromOrderedHistory(t *testing.T) {
+	for _, consumedBeforeDisconnect := range []bool{true, false} {
+		name := "late consumption"
+		if consumedBeforeDisconnect {
+			name = "durable consumption"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, testkit.NewHarness())
+			e.stop()
+			original := e.say("original owner input")
+			d, _, ok, err := e.app.NextDelivery(t.Context(), app.MainThreadDestination)
+			if err != nil || !ok {
+				t.Fatal(d, ok, err)
+			}
+			session, err := e.h.Open(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			base, err := session.StartThread(t.Context(), harness.ThreadConfig{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			th := &receiptThread{Thread: base, found: true}
+			if err := e.app.RegisterAgentThread(t.Context(), "main", th.ID()); err != nil {
+				t.Fatal(err)
+			}
+			rec := store.MainTurn{RequestID: d.RequestID, MessageID: original, ThreadID: th.ID(), TurnID: "native-steered", Status: store.TurnStarted}
+			if err := e.app.PutMainTurn(t.Context(), rec); err != nil {
+				t.Fatal(err)
+			}
+			supplement := e.say("supplement owner input")
+			sd, ok, err := e.app.ClaimMainSteer(t.Context(), d.RequestID, th.ID(), rec.TurnID)
+			if err != nil || !ok {
+				t.Fatal(sd, ok, err)
+			}
+			steer, _, err := e.app.MainSteer(t.Context(), sd.RequestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			steer.InputText, steer.Status = "exact native steer input", "accepted"
+			if err := e.app.UpdateMainSteer(t.Context(), steer); err != nil {
+				t.Fatal(err)
+			}
+			if consumedBeforeDisconnect {
+				if _, ok, err := e.app.ConsumeMainSteer(t.Context(), th.ID(), rec.TurnID, steer.InputText, "supplement-user"); err != nil || !ok {
+					t.Fatal(ok, err)
+				}
+			}
+			if err := e.app.FinishDelivery(t.Context(), sd, app.DeliveryResult{Outcome: app.Delivered}); err != nil {
+				t.Fatal(err)
+			}
+			// A persisted item's original binding must survive history replay.
+			if err := e.m.record(t.Context(), th, "original-stream", "conversation.record_agent_message", map[string]any{"body": "original partial", "reply_to": original, "turn_id": rec.TurnID, "item_id": "persisted", "status": "streaming"}, app.RecordAgentMessage{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.app.SettleOpenTurns(t.Context(), th.ID()); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.app.FinishDelivery(t.Context(), d, app.DeliveryResult{Outcome: app.Unknown}); err != nil {
+				t.Fatal(err)
+			}
+			before := harness.Event{ItemType: harness.ItemAgentMessage, ItemID: "before", Text: "reply before supplement"}
+			user := harness.Event{ItemType: harness.ItemUserMessage, ItemID: "supplement-user", Text: steer.InputText}
+			after := harness.Event{ItemType: harness.ItemAgentMessage, ItemID: "after", Text: "reply after supplement"}
+			persisted := harness.Event{ItemType: harness.ItemAgentMessage, ItemID: "persisted", Text: "original completed"}
+			th.receipt = harness.TurnReceipt{ID: rec.TurnID, Status: "completed", Raw: json.RawMessage(`{"status":"completed"}`), Items: []harness.Event{before, after}}
+			if consumedBeforeDisconnect {
+				if err := e.m.reconcileNativeReceipts(t.Context(), th); err != nil {
+					t.Fatal(err)
+				}
+				state, err := e.app.LogicalTurn(t.Context(), d.RequestID)
+				if err != nil || state.Status != "unknown" || e.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE item_id='after'`) != 0 {
+					t.Fatal("incomplete history invented attribution", state, err)
+				}
+			}
+			th.receipt.Items = []harness.Event{before, user, persisted, after}
+			if err := e.m.reconcileNativeReceipts(t.Context(), th); err != nil {
+				t.Fatal(err)
+			}
+			if e.count(`SELECT COUNT(*) FROM conversation_messages m JOIN conversation_agent_messages a ON a.message_id=m.message_id WHERE a.item_id='after' AND m.reply_to=?`, supplement) != 1 {
+				t.Fatal("recovered final reply lost supplemental owner")
+			}
+			if e.count(`SELECT COUNT(*) FROM conversation_reply_sources s JOIN conversation_agent_messages a ON a.message_id=s.reply_id WHERE a.item_id='after' AND s.source_id IN (?,?)`, original, supplement) != 2 {
+				t.Fatal("recovered final reply lost shared sources")
+			}
+			if e.count(`SELECT COUNT(*) FROM conversation_reply_sources s JOIN conversation_agent_messages a ON a.message_id=s.reply_id WHERE a.item_id IN ('before','persisted') AND s.source_id=?`, supplement) != 0 {
+				t.Fatal("history rebound a reply across its original consumption boundary")
+			}
+			state, err := e.app.LogicalTurn(t.Context(), d.RequestID)
+			if err != nil || state.Status != "recovering" || state.RepairAttempts != 1 {
+				t.Fatal(state, err)
+			}
+			if err := e.m.reconcileNativeReceipts(t.Context(), th); err != nil {
+				t.Fatal(err)
+			}
+			if e.count(`SELECT COUNT(*) FROM logical_turn_executions WHERE repair=1`) != 1 || len(e.h.Starts()) != 0 {
+				t.Fatal("receipt replay created a competing execution")
+			}
+		})
+	}
+}
+
 type transientReceiptThread struct {
 	harness.Thread
 	calls atomic.Int32

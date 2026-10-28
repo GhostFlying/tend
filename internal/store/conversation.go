@@ -193,12 +193,31 @@ func GetOpenTurn(ctx context.Context, q Querier, messageID string) (MainTurn, er
 	err := q.QueryRowContext(ctx, `SELECT request_id FROM main_turns WHERE message_id = ? AND status IN ('starting', 'started')
 		ORDER BY created_at DESC LIMIT 1`, messageID).Scan(&requestID)
 	if err == sql.ErrNoRows {
-		err = q.QueryRowContext(ctx, `SELECT t.request_id FROM main_turns t JOIN main_steers s ON s.thread_id=t.thread_id AND s.turn_id=t.turn_id WHERE s.message_id=? AND s.status IN ('accepted','consumed') AND t.status='started' LIMIT 1`, messageID).Scan(&requestID)
+		ids, lookupErr := LogicalResponsibilities(ctx, q, messageID)
+		if lookupErr != nil {
+			return MainTurn{}, lookupErr
+		}
+		for _, id := range ids {
+			err = q.QueryRowContext(ctx, `SELECT t.request_id FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.logical_turn_id=? AND t.status IN ('starting','started') ORDER BY t.created_at DESC,e.rowid DESC LIMIT 1`, id).Scan(&requestID)
+			if err != sql.ErrNoRows {
+				break
+			}
+		}
 	}
 	if err != nil {
 		return MainTurn{}, notFound(err, "open turn of "+messageID)
 	}
 	return GetMainTurn(ctx, q, requestID)
+}
+
+// LogicalResponsibilities follows adopted input through its current successor.
+// Accepted supplements retain this link before a consumption receipt arrives.
+func LogicalResponsibilities(ctx context.Context, q Querier, messageID string) ([]string, error) {
+	return FollowupIDs(ctx, q, `WITH RECURSIVE responsibility(id) AS (
+ SELECT logical_turn_id FROM logical_turn_messages WHERE message_id=?
+ UNION SELECT e.logical_turn_id FROM main_steers s JOIN main_turns t ON t.thread_id=s.thread_id AND t.turn_id=s.turn_id JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE s.message_id=? AND (s.status IN ('accepted','consumed') OR s.native_item_id<>'')
+ UNION SELECT l.resumed_by FROM logical_turns l JOIN responsibility r ON r.id=l.logical_turn_id WHERE l.resumed_by IS NOT NULL)
+ SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON r.id=l.logical_turn_id ORDER BY l.rowid DESC`, messageID, messageID)
 }
 
 // PutMainTurn records or updates a delivery's turn.

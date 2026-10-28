@@ -228,5 +228,8 @@ type TurnReceipt struct {
 	ID       string
 	Status   string
 	Messages []Event
-	Raw      json.RawMessage
+	// Items retains native user/assistant order for source attribution. Nil
+	// means the reader did not provide that evidence, rather than empty history.
+	Items []Event
+	Raw   json.RawMessage
 }

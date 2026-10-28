@@ -237,24 +237,28 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if turnErr != nil && !errors.Is(turnErr, store.ErrNotFound) {
 		return Outcome{}, turnErr
 	}
-	logicalSource := p.MessageID
-	if turnErr == nil {
-		logicalSource = turn.MessageID
-	}
-	stopped, err := tx.Exec(ctx, `UPDATE logical_turns SET status='stopped',reason='Stopped by owner; resume explicitly.',updated_at=? WHERE logical_turn_id IN (SELECT logical_turn_id FROM logical_turn_messages WHERE message_id=? UNION SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?) AND status NOT IN ('completed','stopped')`, x.Now.UnixMilli(), p.MessageID, turn.RequestID)
+	responsibilities, err := store.LogicalResponsibilities(ctx, tx.Q(), p.MessageID)
 	if err != nil {
 		return Outcome{}, err
 	}
-	changed, err := stopped.RowsAffected()
-	if err != nil {
-		return Outcome{}, err
+	var changed int64
+	for _, id := range responsibilities {
+		stopped, err := tx.Exec(ctx, `UPDATE logical_turns SET status='stopped',reason='Stopped by owner; resume explicitly.',updated_at=? WHERE logical_turn_id=? AND status NOT IN ('completed','stopped')`, x.Now.UnixMilli(), id)
+		if err != nil {
+			return Outcome{}, err
+		}
+		n, err := stopped.RowsAffected()
+		if err != nil {
+			return Outcome{}, err
+		}
+		changed += n
+		if _, err := tx.Exec(ctx, `UPDATE outbox SET status='failed',updated_at=? WHERE operation='conversation.repair_turn' AND status='pending' AND request_id IN (SELECT e.request_id FROM logical_turn_executions e JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE l.logical_turn_id=? AND l.status='stopped')`, x.Now.UnixMilli(), id); err != nil {
+			return Outcome{}, err
+		}
 	}
 	var events []Event
 	if changed > 0 {
 		events = []Event{{ObjectType: "message", ObjectID: p.MessageID, Kind: "conversation.processing_stopped"}}
-	}
-	if _, err := tx.Exec(ctx, `UPDATE outbox SET status='failed',updated_at=? WHERE operation='conversation.repair_turn' AND status='pending' AND request_id IN (SELECT e.request_id FROM logical_turn_executions e JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE l.message_id=? AND l.status='stopped')`, x.Now.UnixMilli(), logicalSource); err != nil {
-		return Outcome{}, err
 	}
 
 	if errors.Is(turnErr, store.ErrNotFound) {
@@ -574,6 +578,11 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 				return err
 			}
 		}
+		if m.NativeReconciled && (m.Status == store.TurnCompleted || m.Status == store.TurnInterrupted || m.Status == store.TurnFailed) {
+			if err := a.settleMainSteers(ctx, tx, m.ThreadID, m.TurnID, m.Status, now); err != nil {
+				return err
+			}
+		}
 		if prev.Status != m.Status || m.NativeReconciled {
 			incomplete, err := a.settleLogicalTurn(ctx, tx, m, now)
 			if err != nil {
@@ -643,10 +652,12 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		if err != nil {
 			return err
 		}
-		if err := a.settleMainSteers(ctx, tx, threadID, "", store.TurnInterrupted, now); err != nil {
-			return err
-		}
 		for _, turn := range ids {
+			if turn.TurnID != "" {
+				if err := a.markMainSteersUncertain(ctx, tx, threadID, turn.TurnID, now); err != nil {
+					return err
+				}
+			}
 			businessStatus, repair, err := mainTurnBusinessStatus(ctx, tx.Q(), turn)
 			if err != nil {
 				return err

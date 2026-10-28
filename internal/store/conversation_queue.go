@@ -116,8 +116,14 @@ func TranscriptBlocks(ctx context.Context, q Querier, before int64, limit int, s
 	}
 	return out, rows.Err()
 }
+
+const transcriptRepliesQuery = `SELECT ` + conversationCols + ` WHERE m.message_id IN (
+ SELECT message_id FROM conversation_messages WHERE reply_to=? AND seq>?
+ UNION SELECT reply_id FROM conversation_reply_sources WHERE source_id=?)
+ AND m.author='main_agent' AND m.seq>? ORDER BY m.seq LIMIT ?`
+
 func TranscriptReplies(ctx context.Context, q Querier, id string, after int64, limit int) ([]ConversationRow, error) {
-	rows, err := q.QueryContext(ctx, `SELECT `+conversationCols+` WHERE (m.reply_to=? OR EXISTS(SELECT 1 FROM conversation_reply_sources s WHERE s.reply_id=m.message_id AND s.source_id=?)) AND m.author='main_agent' AND m.seq>? ORDER BY m.seq LIMIT ?`, id, id, after, limit)
+	rows, err := q.QueryContext(ctx, transcriptRepliesQuery, id, after, id, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: transcript replies: %w", err)
 	}

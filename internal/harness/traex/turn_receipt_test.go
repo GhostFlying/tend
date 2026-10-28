@@ -29,3 +29,28 @@ func TestNativeReceiptMatchesOnlyOriginalUserIdentity(t *testing.T) {
 		t.Fatal("absence invented a receipt", found, err)
 	}
 }
+
+func TestNativeReceiptPreservesSupplementAndReplyOrder(t *testing.T) {
+	f, s := newFake(t)
+	f.on(methodThreadStart, func(json.RawMessage) any { return map[string]any{"thread": map[string]string{"id": "thread"}} })
+	f.on("thread/read", func(json.RawMessage) any {
+		return map[string]any{"thread": map[string]any{"turns": []any{
+			map[string]any{"id": "turn", "status": "completed", "items": []any{
+				map[string]string{"id": "before", "type": "agentMessage", "text": "before supplement"},
+				map[string]any{"id": "supplement", "type": "userMessage", "content": []any{map[string]string{"type": "text", "text": "one "}, map[string]string{"type": "text", "text": "two"}}},
+				map[string]string{"id": "after", "type": "agentMessage", "text": "after supplement"},
+			}},
+		}}}
+	})
+	th, err := s.StartThread(t.Context(), harness.ThreadConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok, err := th.(harness.TurnReader).FindTurn(t.Context(), "", "turn")
+	if err != nil || !ok || len(r.Items) != 3 || len(r.Messages) != 2 {
+		t.Fatal(r, ok, err)
+	}
+	if r.Items[0].ItemID != "before" || r.Items[1].ItemID != "supplement" || r.Items[1].Text != "one two" || r.Items[2].ItemID != "after" {
+		t.Fatal(r.Items)
+	}
+}
