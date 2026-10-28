@@ -292,6 +292,20 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		}); err != nil {
 			return err
 		}
+		if e.Kind == "conversation.processing_stopped" {
+			if err := a.settleStoppedMainSources(ctx, tx, e.ObjectID, now); err != nil {
+				return err
+			}
+			if result, ok := out.Result.(map[string]any); ok {
+				item, err := store.GetConversationItem(ctx, tx.Q(), e.ObjectID)
+				if err != nil {
+					return err
+				}
+				if item.State != "" {
+					result["state"] = protocol.MessageState(item.State)
+				}
+			}
+		}
 		if e.Kind == "task.completed" {
 			if err := recordCompletionNotice(ctx, x, tx, e.ObjectID, eventID); err != nil {
 				return err
