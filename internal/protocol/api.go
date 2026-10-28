@@ -9,7 +9,7 @@ func APITypes() []any {
 		WorkItemChoice{}, WorkItemChoicePage{}, CreateWorkItemChoicePayload{}, UpdateWorkItemChoicePayload{}, RefreshDeliveryPayload{}, WorkItemPage{}, WorkItemView{}, CreateWorkItemPayload{}, UpdateWorkItemPayload{}, CloseWorkItemPayload{}, ReopenWorkItemPayload{}, LinkWorkItemTaskPayload{},
 		SessionRequest{}, SessionView{}, InterruptReplyPayload{}, SubmitMessagePayload{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
 		ConversationAttachment{}, DownloadURLResponse{}, ConversationImageResponse{}, ConversationSettingsView{}, SetConversationSettingsPayload{}, ConversationHandoffView{}, SetConversationHandoffSettingsPayload{}, ConversationHandoffPayload{},
-		ArtifactPayload{}, ToolSpec{}}
+		ExplainDecisionPayload{}, ArtifactPayload{}, ToolSpec{}}
 }
 
 // APIEnums lists the values of every string enum in the owner API.

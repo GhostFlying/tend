@@ -27,7 +27,7 @@ func SchedulingCandidates(rows []store.CandidateRow) ([]scheduler.Candidate, err
 			Lifecycle: r.Lifecycle, Control: r.Control, Block: r.Block, SpecVersion: r.SpecVersion,
 			ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Rating: r.Rating, Weight: r.Weight,
 			DependenciesDone: r.DependenciesDone, Requirements: spec.Requirements, Repos: spec.Workspace.Repos(), Mounts: len(spec.Workspace.Mounts),
-			RequiresObservation: spec.Observation != nil, RequiresTaskInputs: len(spec.Inputs) > 0, WorkspaceMode: spec.Workspace.ModeValue(), RequiresWorkspaceProtocol: spec.Workspace.ModeValue() != domain.WorkspaceNew || len(spec.Deliverables) > 0,
+			RequiresAcceptanceExecution: spec.AcceptanceExecution != nil, RequiresObservation: spec.Observation != nil, RequiresTaskInputs: len(spec.Inputs) > 0, WorkspaceMode: spec.Workspace.ModeValue(), RequiresWorkspaceProtocol: spec.Workspace.ModeValue() != domain.WorkspaceNew || len(spec.Deliverables) > 0,
 			WorkspaceHost: r.WorkspaceHost, WorkspaceOccupied: r.WorkspaceOccupied, AbandonedHosts: r.AbandonedHosts,
 		})
 	}

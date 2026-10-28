@@ -10,12 +10,17 @@ import (
 
 // WorkerQuestionRow captures immutable question provenance and dedup identity.
 type WorkerQuestionRow struct {
+	Issues                                                          []protocol.DecisionIssue
 	DecisionID, RunID, ActionID, QuestionKey, PayloadHash, Evidence string
 	SpecVersion                                                     int64
 }
 
 func (t *Tx) InsertWorkerQuestion(ctx context.Context, w WorkerQuestionRow) error {
-	_, err := t.Exec(ctx, `INSERT INTO worker_questions(decision_id,run_id,action_id,spec_version,question_key,payload_hash,evidence) VALUES(?,?,?,?,?,?,?)`, w.DecisionID, w.RunID, w.ActionID, w.SpecVersion, w.QuestionKey, w.PayloadHash, w.Evidence)
+	raw, err := json.Marshal(w.Issues)
+	if err != nil {
+		return fmt.Errorf("store: encode question issues: %w", err)
+	}
+	_, err = t.Exec(ctx, `INSERT INTO worker_questions(decision_id,run_id,action_id,spec_version,question_key,payload_hash,evidence,issues_json) VALUES(?,?,?,?,?,?,?,?)`, w.DecisionID, w.RunID, w.ActionID, w.SpecVersion, w.QuestionKey, w.PayloadHash, w.Evidence, string(raw))
 	if err != nil {
 		return fmt.Errorf("store: insert worker question: %w", err)
 	}
@@ -24,9 +29,13 @@ func (t *Tx) InsertWorkerQuestion(ctx context.Context, w WorkerQuestionRow) erro
 
 func GetWorkerQuestionRow(ctx context.Context, q Querier, decisionID string) (WorkerQuestionRow, error) {
 	var w WorkerQuestionRow
-	err := q.QueryRowContext(ctx, `SELECT decision_id,run_id,action_id,spec_version,question_key,payload_hash,evidence FROM worker_questions WHERE decision_id=?`, decisionID).Scan(&w.DecisionID, &w.RunID, &w.ActionID, &w.SpecVersion, &w.QuestionKey, &w.PayloadHash, &w.Evidence)
+	var issues string
+	err := q.QueryRowContext(ctx, `SELECT decision_id,run_id,action_id,spec_version,question_key,payload_hash,evidence,issues_json FROM worker_questions WHERE decision_id=?`, decisionID).Scan(&w.DecisionID, &w.RunID, &w.ActionID, &w.SpecVersion, &w.QuestionKey, &w.PayloadHash, &w.Evidence, &issues)
 	if err != nil {
 		return w, notFound(err, "worker question")
+	}
+	if err := json.Unmarshal([]byte(issues), &w.Issues); err != nil {
+		return w, fmt.Errorf("store: decode question issues: %w", err)
 	}
 	return w, nil
 }
@@ -48,7 +57,7 @@ func WorkerQuestion(ctx context.Context, q Querier, id string) (protocol.WorkerQ
 	if err != nil {
 		return protocol.WorkerQuestion{}, err
 	}
-	out := protocol.WorkerQuestion{DecisionID: id, RunID: w.RunID, ActionID: w.ActionID, SpecVersion: w.SpecVersion, QuestionKey: w.QuestionKey, Question: d.Question, Evidence: w.Evidence, Version: d.Version, Status: d.Status, QuestionMessageID: d.AskedMessageID}
+	out := protocol.WorkerQuestion{DecisionID: id, RunID: w.RunID, ActionID: w.ActionID, SpecVersion: w.SpecVersion, QuestionKey: w.QuestionKey, Question: d.Question, Evidence: w.Evidence, Issues: w.Issues, Version: d.Version, Status: d.Status, QuestionMessageID: d.AskedMessageID}
 	if d.Worker != nil {
 		out.Role = d.Worker.Role
 	}

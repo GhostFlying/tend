@@ -154,3 +154,24 @@ func TestFirstSessionRequiresFreshMatchingPrompt(t *testing.T) {
 		})
 	}
 }
+
+func TestSavedHandbackWithLegacyOwnerQuestionReplaysOnce(t *testing.T) {
+	f, w, a := failedWorker(t)
+	w.spec.HandBack = true
+	w.spec.Questions = []protocol.WorkerQuestion{{QuestionKey: "scope", Question: "Continue?", Evidence: "original investigation", Status: "answered"}}
+	body, err := json.Marshal(w.spec.Questions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := "The owner has handed the task back to tend in this terminal. Reconcile the working trees and any instructions already received, then finish the same task. Preserve completed work and checks; do not repeat them merely to resubmit a result.\n" +
+		"\n\nOwner questions recorded for this run (original content and answers):\n" + string(body) +
+		"\nFor an open question, call ask_owner again using exactly its question_key, question, evidence and options. Do not invent another key for the same question. Answered questions retain the owner's answer; use that answer and do not ask it again. Cancelled questions do not authorize work."
+	w.st.Send, w.st.SendText = "req_original_handback", old
+	a.State, a.MainAgent = stateWorking, nil
+	if err := w.begin(t.Context(), "trae"); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.orca.count("terminal send", nil); n != 1 || a.Prompt != old {
+		t.Fatalf("saved handback generated %d sends, want only its original replay", n)
+	}
+}

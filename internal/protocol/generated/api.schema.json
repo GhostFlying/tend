@@ -1612,6 +1612,49 @@
       "title": "CreateWorkItemPayload",
       "type": "object"
     },
+    "DecisionBriefing": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "type": "integer"
+        },
+        "issues": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/DecisionIssue"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner_choice": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "revision",
+        "summary",
+        "owner_choice",
+        "issues",
+        "source_message_id",
+        "created_at"
+      ],
+      "title": "DecisionBriefing",
+      "type": "object"
+    },
     "DecisionChoice": {
       "additionalProperties": false,
       "properties": {
@@ -1643,10 +1686,54 @@
       "title": "DecisionEffect",
       "type": "string"
     },
+    "DecisionIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "impact": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "next_action": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "category",
+        "summary",
+        "impact",
+        "next_action",
+        "actor",
+        "status",
+        "source"
+      ],
+      "title": "DecisionIssue",
+      "type": "object"
+    },
     "DecisionView": {
       "additionalProperties": false,
       "properties": {
         "answer": {},
+        "briefing": {
+          "$ref": "#/definitions/DecisionBriefing"
+        },
         "decision_id": {
           "type": "string"
         },
@@ -1963,6 +2050,45 @@
       ],
       "title": "ExecutionState",
       "type": "string"
+    },
+    "ExplainDecisionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_version": {
+          "type": "integer"
+        },
+        "issues": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/DecisionIssue"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner_choice": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_version",
+        "summary",
+        "owner_choice",
+        "issues",
+        "source_message_id"
+      ],
+      "title": "ExplainDecisionPayload",
+      "type": "object"
     },
     "FollowupCondition": {
       "additionalProperties": false,
@@ -5053,6 +5179,12 @@
         "evidence": {
           "type": "string"
         },
+        "issues": {
+          "items": {
+            "$ref": "#/definitions/DecisionIssue"
+          },
+          "type": "array"
+        },
         "question_key": {
           "type": "string"
         },
@@ -5222,6 +5354,9 @@
     },
     "Envelope": {
       "$ref": "#/definitions/Envelope"
+    },
+    "ExplainDecisionPayload": {
+      "$ref": "#/definitions/ExplainDecisionPayload"
     },
     "FollowupHistoryPage": {
       "$ref": "#/definitions/FollowupHistoryPage"

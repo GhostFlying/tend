@@ -115,6 +115,7 @@
 
 | D113 | 正式消息显式 linked/unassigned 判定，内容版本与事实检查作为逻辑轮完成条件；保留流式，遗漏受限自动修正并持久恢复。托管主 Agent 始终启动后台会话，取代 D111 的默认关闭策略。新项当轮初始化，不实现历史回填。持久 deployment_id 拒绝跨空库实例回放；本次全新部署删除旧业务数据，仅独占转移网络身份。见 docs/plans/mandatory-message-context.md。 | 已实现（2026-10-27） |
 | D114 | 退役外挂主协调 Agent，主协调统一由 Tend 托管。删除外挂 MCP/hook/setup、会话项目绑定及专用检查工具，不签发或接受外挂 agent token；保留 owner CLI、worker MCP、runner 和 provider。历史迁移与来源仍可读取，旧入口拒绝执行。取代 D45/D47/D48/D54/D59/D68 中外挂并存的运行规则。见 docs/plans/mandatory-message-context.md。 | 已确认（2026-10-27） |
+| D118 | Worker 统一 YOLO，主/后台显式开放网络且保留文件及 Tend 工具边界；scratch 规范路径与独立验收目录、无每次探针；验收模型/强度支持 runner 默认与任务冻结选择。worker 可选结构化问题与主协调说明独立留痕，环境故障、证据缺口、授权及 owner 选择直接展示。新增通信字段通过能力协商，旧请求形状与默认选择保持，存储只追加迁移。见 docs/plans/worker-scratch-decision-context.md。 | 已实现（2026-10-28） |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

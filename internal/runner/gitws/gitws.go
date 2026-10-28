@@ -440,7 +440,8 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 	if as.Role == protocol.RoleAccept {
 		scratch = filepath.Join(w.cfg.Home, "scratch", ".accept", as.RunID)
 	}
-	if err := os.MkdirAll(scratch, 0o755); err != nil {
+	scratch, err = prepareScratch(scratch)
+	if err != nil {
 		return runner.Prepared{}, fmt.Errorf("gitws: scratch dir: %w", err)
 	}
 	p := runner.Prepared{Dir: root, ScratchDir: scratch, Guide: guide, StateDir: filepath.Join(w.cfg.Home, "runs", as.RunID)}

@@ -69,6 +69,7 @@ type tool struct {
 }
 
 var tools = []tool{
+	{"decisions_explain", "Explain an existing decision without answering or replacing its original question. Read task/context first; account for every original issue with impact, actor, next action and status. expected_control_revision is briefing.revision or 0; decision_version is the original question version. Owner choices stay explicit and separate from environment faults.", (*Service).decisionsExplain},
 	{"conversation_turn_adopt", "After reading an owner answer, adopt its pending clarification into this logical turn. This only transfers review responsibility, never repeats business operations.", (*Service).turnAdopt},
 	{"conversation_turn_wait", "Persist an unresolved classification question and keep responsibility pending. Use only when original evidence cannot resolve ambiguity; ask the owner in chat.", (*Service).turnWait},
 	{"conversation_turn_read", "Read exact current logical-turn message versions and context obligations. Missing classification and fact review prevent completion.", (*Service).turnRead},

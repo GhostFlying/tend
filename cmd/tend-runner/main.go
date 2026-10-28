@@ -66,14 +66,15 @@ type config struct {
 	// codex or traex, as a TUI in orca (D66); OrcaBin defaults to orca on
 	// PATH.
 	Worker struct {
-		Kind             protocol.WorkerKind `json:"kind"`
-		TraexBin         string              `json:"traex_bin"`
-		Agent            protocol.AgentKind  `json:"agent"`
-		OrcaBin          string              `json:"orca_bin"`
-		Model            string              `json:"model"`
-		Effort           string              `json:"effort"`
-		RecoveryAttempts *int                `json:"recovery_attempts,omitempty"`
-		StartupAttempts  *int                `json:"startup_attempts,omitempty"`
+		Acceptance       *protocol.ExecutionProfile `json:"acceptance,omitempty"`
+		Kind             protocol.WorkerKind        `json:"kind"`
+		TraexBin         string                     `json:"traex_bin"`
+		Agent            protocol.AgentKind         `json:"agent"`
+		OrcaBin          string                     `json:"orca_bin"`
+		Model            string                     `json:"model"`
+		Effort           string                     `json:"effort"`
+		RecoveryAttempts *int                       `json:"recovery_attempts,omitempty"`
+		StartupAttempts  *int                       `json:"startup_attempts,omitempty"`
 	} `json:"worker"`
 	Git struct {
 		Bin string   `json:"bin"`
@@ -152,6 +153,11 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	configurationSHA, err := cfgfile.LoadDigest(path, &cfg)
 	if err != nil {
 		return err
+	}
+	if profile := cfg.Worker.Acceptance; profile != nil {
+		if err := profile.Validate(); err != nil {
+			return fmt.Errorf("worker.acceptance: %w", err)
+		}
 	}
 	if cfg.Worker.StartupAttempts != nil && *cfg.Worker.StartupAttempts < 0 {
 		return errors.New("worker.startup_attempts must be non-negative")
@@ -244,12 +250,12 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 			return fmt.Errorf("upgrade worker.orca_bin to an Orca CLI supporting folder-workspace and project-group commands before enabling workspace protocol 1: %w", preflightErr)
 		}
 		workers = orca.NewWorkers(orca.WorkerOptions{
-			Client: oc, Agent: cfg.Worker.Agent, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort, RecoveryAttempts: cfg.Worker.RecoveryAttempts, StartupAttempts: cfg.Worker.StartupAttempts,
+			Client: oc, Agent: cfg.Worker.Agent, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort, Acceptance: cfg.Worker.Acceptance, RecoveryAttempts: cfg.Worker.RecoveryAttempts, StartupAttempts: cfg.Worker.StartupAttempts,
 			BridgeCommand: self, BridgeArgs: []string{workerMCP}, IDs: ids, Now: time.Now, Log: log,
 		})
 		workspaces = gitws.NewOrca(wsCfg, oc)
 	default:
-		workers = traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: cfg.Worker.TraexBin, Version: version, Log: log}, Model: cfg.Worker.Model})
+		workers = traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: cfg.Worker.TraexBin, Version: version, Log: log}, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort, Acceptance: cfg.Worker.Acceptance})
 		workspaces = gitws.New(wsCfg)
 	}
 	var repositoryBindings func() []protocol.RunnerRepository

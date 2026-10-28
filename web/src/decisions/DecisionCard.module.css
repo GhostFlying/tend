@@ -200,3 +200,24 @@
   outline: 2px solid var(--accent-ring);
   outline-offset: 2px;
 }
+
+.context {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  color: var(--label-2);
+  font-size: var(--text-s);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.context p {
+  margin: 4px 0;
+}
+.issue {
+  margin: 10px 0;
+}
+.source {
+  color: var(--label-3);
+}

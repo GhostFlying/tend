@@ -93,7 +93,8 @@ func (w *Workspaces) prepareDirectory(ctx context.Context, as protocol.Assignmen
 	if as.Role == protocol.RoleAccept {
 		scratch = filepath.Join(w.cfg.Home, "scratch", ".accept", as.RunID)
 	}
-	if err := os.MkdirAll(scratch, 0o700); err != nil {
+	scratch, err = prepareScratch(scratch)
+	if err != nil {
 		return runner.Prepared{}, err
 	}
 	return runner.Prepared{Dir: home, StateDir: stateDir, ScratchDir: scratch, ProviderID: st.ProviderID, Guide: "This is a retained ordinary directory. It need not contain a Git repository. Preserve inherited files and perform only the task's authorized work.", Report: protocol.WorkspaceReport{Path: home, ProviderID: st.ProviderID, ProviderInstanceID: st.ProviderInstanceID, Baseline: baselineReport(baseline, "directory", as.TaskID)}}, nil

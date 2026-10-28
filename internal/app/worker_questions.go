@@ -55,6 +55,9 @@ func (AskOwner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, erro
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "options must be UTF-8")
 		}
 	}
+	if err := validateDecisionIssues(p.Issues); err != nil {
+		return Outcome{}, err
+	}
 	raw, err := json.Marshal(p)
 	if err != nil {
 		return Outcome{}, err
@@ -96,7 +99,7 @@ func (AskOwner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, erro
 	if err := tx.InsertDecision(ctx, id, rc.task.TaskID, p.Question, string(options), "{}", nil, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
-	if err := tx.InsertWorkerQuestion(ctx, store.WorkerQuestionRow{DecisionID: id, RunID: rc.run.RunID, ActionID: rc.action.ActionID, SpecVersion: rc.action.TargetSpecVersion, QuestionKey: p.QuestionKey, PayloadHash: hash, Evidence: p.Evidence}); err != nil {
+	if err := tx.InsertWorkerQuestion(ctx, store.WorkerQuestionRow{DecisionID: id, RunID: rc.run.RunID, ActionID: rc.action.ActionID, SpecVersion: rc.action.TargetSpecVersion, QuestionKey: p.QuestionKey, PayloadHash: hash, Evidence: p.Evidence, Issues: p.Issues}); err != nil {
 		return Outcome{}, err
 	}
 	// The notification is materialized by persistOutcome in this same transaction.
@@ -154,7 +157,9 @@ func (a *App) WorkerQuestion(ctx context.Context, p protocol.Principal, id strin
 }
 
 func checkQuestionRunRecovery(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) error {
-	if runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityWorkerQuestions) {
+	supportsQuestions := runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityWorkerQuestions)
+	supportsContext := runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityWorkerQuestionContext)
+	if supportsQuestions && supportsContext {
 		return nil
 	}
 	runs, err := store.ListOpenRunsOnHost(ctx, q, host)
@@ -173,8 +178,13 @@ func checkQuestionRunRecovery(ctx context.Context, q store.Querier, host string,
 		if err != nil {
 			return err
 		}
-		if len(questions) > 0 {
+		if len(questions) > 0 && !supportsQuestions {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "runner requires worker-questions-v1 to recover a run with owner questions")
+		}
+		for _, question := range questions {
+			if len(question.Issues) > 0 && !supportsContext {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "runner requires worker-question-context-v1 to recover structured questions")
+			}
 		}
 	}
 	return nil
@@ -256,6 +266,7 @@ func assignmentQuestions(ctx context.Context, q store.Querier, as *protocol.Assi
 		return err
 	}
 	as.WorkerQuestions = err == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityWorkerQuestions)
+	as.QuestionContext = err == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityWorkerQuestionContext)
 	if as.WorkerQuestions {
 		as.Questions, err = store.ListWorkerQuestions(ctx, q, as.RunID)
 		if err != nil {

@@ -9,24 +9,27 @@ const (
 
 // AskOwnerPayload identifies a question durably within its current run.
 type AskOwnerPayload struct {
-	QuestionKey string   `json:"question_key"`
-	Question    string   `json:"question"`
-	Evidence    string   `json:"evidence,omitempty"`
-	Options     []string `json:"options,omitempty"`
+	Issues      []DecisionIssue `json:"issues,omitempty"`
+	QuestionKey string          `json:"question_key"`
+	Question    string          `json:"question"`
+	Evidence    string          `json:"evidence,omitempty"`
+	Options     []string        `json:"options,omitempty"`
 }
 
 // WorkerQuestionSource identifies the worker behind an owner decision.
 type WorkerQuestionSource struct {
-	RunID             string  `json:"run_id"`
-	Role              RunRole `json:"role"`
-	SpecVersion       int64   `json:"spec_version"`
-	QuestionKey       string  `json:"question_key"`
-	Evidence          string  `json:"evidence,omitempty"`
-	QuestionMessageID string  `json:"question_message_id"`
+	Issues            []DecisionIssue `json:"issues,omitempty"`
+	RunID             string          `json:"run_id"`
+	Role              RunRole         `json:"role"`
+	SpecVersion       int64           `json:"spec_version"`
+	QuestionKey       string          `json:"question_key"`
+	Evidence          string          `json:"evidence,omitempty"`
+	QuestionMessageID string          `json:"question_message_id"`
 }
 
 // WorkerQuestion is replayable: reading an answer never consumes it.
 type WorkerQuestion struct {
+	Issues            []DecisionIssue `json:"issues,omitempty"`
 	DecisionID        string          `json:"decision_id"`
 	RunID             string          `json:"run_id"`
 	ActionID          string          `json:"action_id"`

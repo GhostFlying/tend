@@ -3,7 +3,8 @@ package traex
 import "github.com/GhostFlying/tend/internal/harness"
 
 func (t *thread) setPermissionDefaults(res ThreadStartResponse) {
-	policy := harness.PermissionSettings{Sandbox: res.Sandbox.Type, ApprovalPolicy: res.ApprovalPolicy, ApprovalsReviewer: res.ApprovalsReviewer}
+	sandbox, _ := res.Sandbox["type"].(string)
+	policy := harness.PermissionSettings{Sandbox: sandbox, ApprovalPolicy: res.ApprovalPolicy, ApprovalsReviewer: res.ApprovalsReviewer}
 	switch policy.Sandbox {
 	case "workspaceWrite":
 		policy.Sandbox = "workspace-write"

@@ -11,7 +11,7 @@ import (
 // An empty model leaves the harness default.
 func ThreadConfig(cwd, model string) harness.ThreadConfig {
 	return harness.ThreadConfig{
-		Cwd: cwd, Model: model, DeveloperInstructions: Instructions,
+		Cwd: cwd, Model: model, DeveloperInstructions: Instructions, NetworkAccess: true,
 		Sandbox: "read-only", ApprovalPolicy: "never",
 		Config: Isolation,
 	}
@@ -54,6 +54,7 @@ var Isolation = map[string]any{
 // backgroundThreadConfig implements D111's temporary native auto-mode policy.
 // Tend's background tool scope is enforced separately by the tool service.
 func backgroundThreadConfig(cfg harness.ThreadConfig) harness.ThreadConfig {
+	cfg.NetworkAccess = true
 	cfg.Sandbox = "workspace-write"
 	cfg.ApprovalPolicy = "on-request"
 	cfg.ApprovalsReviewer = "auto_review"

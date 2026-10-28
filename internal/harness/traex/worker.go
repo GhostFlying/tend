@@ -16,7 +16,9 @@ type WorkerOptions struct {
 	// installation and configuration (D38); leave Env without TRAE_HOME.
 	Session Options
 	// Model overrides the configured default model when set.
-	Model string
+	Model      string
+	Effort     string
+	Acceptance *protocol.ExecutionProfile
 	// Sandbox defaults to danger-full-access and ApprovalPolicy to never
 	// (D39): workers run unattended.
 	Sandbox        string
@@ -60,6 +62,7 @@ func (w *worker) Wait() (harness.WorkerResult, error) {
 
 // Start implements harness.Workers.
 func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.Worker, error) {
+	profile := harness.WorkerProfile(spec, ws.opts.Model, ws.opts.Effort, ws.opts.Acceptance)
 	opts := ws.opts.Session
 	opts.Dir = spec.Dir
 	// The worker may inherit the owner's tend hooks and MCP server from
@@ -77,7 +80,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		return nil, err
 	}
 	cfg := harness.ThreadConfig{
-		Cwd: spec.Dir, Model: ws.opts.Model, Sandbox: ws.opts.Sandbox, ApprovalPolicy: ws.opts.ApprovalPolicy,
+		Cwd: spec.Dir, Model: profile.Model, Sandbox: ws.opts.Sandbox, ApprovalPolicy: ws.opts.ApprovalPolicy,
 		DeveloperInstructions: instructions,
 		Tools:                 []harness.ToolSpec{harness.ResultToolSpec}, OnToolCall: results.Handle,
 	}
@@ -97,7 +100,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
 	}
 	if spec.AskOwner != nil {
-		cfg.Tools = append(cfg.Tools, harness.AskOwnerToolSpec)
+		cfg.Tools = append(cfg.Tools, harness.OwnerQuestionTool(spec.QuestionContext))
 	}
 	th, err := ws.thread(ctx, s, spec, cfg)
 	if err != nil {
@@ -113,7 +116,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	if th.ID() == spec.Thread {
 		input = harness.Continuation(spec)
 	}
-	turnID, err := th.StartTurn(ctx, harness.TurnInput{Text: input})
+	turnID, err := th.StartTurn(ctx, harness.TurnInput{Text: input, Model: profile.Model, Effort: profile.Effort})
 	if err != nil {
 		_ = s.Close()
 		return nil, err

@@ -75,16 +75,14 @@ type ThreadResumeParams struct {
 
 // ThreadStartResponse answers thread/start and thread/resume.
 type ThreadStartResponse struct {
-	Thread             Thread   `json:"thread"`
-	Model              string   `json:"model"`
-	ModelProvider      string   `json:"modelProvider"`
-	ReasoningEffort    *string  `json:"reasoningEffort"`
-	InstructionSources []string `json:"instructionSources"`
-	ApprovalPolicy     string   `json:"approvalPolicy"`
-	ApprovalsReviewer  string   `json:"approvalsReviewer"`
-	Sandbox            struct {
-		Type string `json:"type"`
-	} `json:"sandbox"`
+	Thread             Thread         `json:"thread"`
+	Model              string         `json:"model"`
+	ModelProvider      string         `json:"modelProvider"`
+	ReasoningEffort    *string        `json:"reasoningEffort"`
+	InstructionSources []string       `json:"instructionSources"`
+	ApprovalPolicy     string         `json:"approvalPolicy"`
+	ApprovalsReviewer  string         `json:"approvalsReviewer"`
+	Sandbox            map[string]any `json:"sandbox"`
 }
 
 // Thread is the harness's thread record.
@@ -109,12 +107,13 @@ type ThreadInjectItemsParams struct {
 
 // TurnStartParams starts a turn.
 type TurnStartParams struct {
-	ThreadID      string      `json:"threadId"`
-	Input         []UserInput `json:"input"`
-	UserMessageID string      `json:"userMessageId,omitempty"`
-	Model         string      `json:"model,omitempty"`
-	ModelProvider string      `json:"modelProvider,omitempty"`
-	Effort        string      `json:"effort,omitempty"`
+	SandboxPolicy map[string]any `json:"sandboxPolicy,omitempty"`
+	ThreadID      string         `json:"threadId"`
+	Input         []UserInput    `json:"input"`
+	UserMessageID string         `json:"userMessageId,omitempty"`
+	Model         string         `json:"model,omitempty"`
+	ModelProvider string         `json:"modelProvider,omitempty"`
+	Effort        string         `json:"effort,omitempty"`
 }
 
 // ModelListParams pages the visible model catalog without changing settings.

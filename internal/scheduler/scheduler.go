@@ -24,9 +24,10 @@ type Host struct {
 	WorkspaceProtocol int64
 	Busy              int64
 	// Worker is what the host's worker can do (D64).
-	Worker            protocol.WorkerCapabilities
-	TaskInputs        bool
-	WorkerObservation bool
+	Worker              protocol.WorkerCapabilities
+	TaskInputs          bool
+	WorkerObservation   bool
+	AcceptanceExecution bool
 }
 
 // Candidate is a pending action together with the facts the rules need.
@@ -62,11 +63,12 @@ type Candidate struct {
 	Requirements domain.Requirements
 	Repos        []string
 	// Mounts counts the mounts of the task's workspace.
-	WorkspaceMode             string
-	RequiresWorkspaceProtocol bool
-	RequiresTaskInputs        bool
-	RequiresObservation       bool
-	Mounts                    int
+	WorkspaceMode               string
+	RequiresWorkspaceProtocol   bool
+	RequiresTaskInputs          bool
+	RequiresObservation         bool
+	RequiresAcceptanceExecution bool
+	Mounts                      int
 	// WorkspaceHost is the host holding the task's workspace, or empty
 	// before the workspace exists.
 	WorkspaceHost string
@@ -112,6 +114,8 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 		return waitReason(protocol.QueueHostRequirements, "host lacks a required label")
 	case !containsAll(h.Repos, c.Repos):
 		return waitReason(protocol.QueueHostRequirements, "host does not serve every repository")
+	case c.RequiresAcceptanceExecution && !h.AcceptanceExecution:
+		return waitReason(protocol.QueueHostRequirements, "runner does not support acceptance model selection")
 	case c.RequiresObservation && !h.WorkerObservation:
 		return waitReason(protocol.QueueHostRequirements, "runner does not support scoped worker observation")
 	case c.RequiresTaskInputs && !h.TaskInputs:

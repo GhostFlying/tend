@@ -231,6 +231,7 @@ export interface TendAPI {
   CreateWorkItemPayload?: CreateWorkItemPayload;
   DownloadURLResponse?: DownloadURLResponse;
   Envelope?: Envelope;
+  ExplainDecisionPayload?: ExplainDecisionPayload;
   FollowupHistoryPage?: FollowupHistoryPage;
   FollowupPage?: FollowupPage;
   FollowupSpec?: FollowupSpec;
@@ -1237,6 +1238,31 @@ export interface Target {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExplainDecisionPayload".
+ */
+export interface ExplainDecisionPayload {
+  decision_version: number;
+  issues: DecisionIssue[] | null;
+  owner_choice: string;
+  source_message_id: string;
+  summary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DecisionIssue".
+ */
+export interface DecisionIssue {
+  actor: string;
+  category: string;
+  impact: string;
+  issue_id: string;
+  next_action: string;
+  source: string;
+  status: string;
+  summary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "FollowupHistoryPage".
  */
 export interface FollowupHistoryPage {
@@ -1544,6 +1570,7 @@ export interface Snapshot {
  */
 export interface DecisionView {
   answer?: unknown;
+  briefing?: DecisionBriefing;
   decision_id: string;
   effects?: {
     [k: string]: DecisionEffect | undefined;
@@ -1558,10 +1585,23 @@ export interface DecisionView {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DecisionBriefing".
+ */
+export interface DecisionBriefing {
+  created_at: number;
+  issues: DecisionIssue[] | null;
+  owner_choice: string;
+  revision: number;
+  source_message_id: string;
+  summary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkerQuestionSource".
  */
 export interface WorkerQuestionSource {
   evidence?: string;
+  issues?: DecisionIssue[];
   question_key: string;
   question_message_id: string;
   role: RunRole;

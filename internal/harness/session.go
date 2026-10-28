@@ -77,6 +77,8 @@ type PermissionedThread interface {
 
 // ThreadConfig configures a thread.
 type ThreadConfig struct {
+	// NetworkAccess explicitly enables networking without widening filesystem access.
+	NetworkAccess         bool
 	Cwd                   string
 	Model                 string
 	DeveloperInstructions string

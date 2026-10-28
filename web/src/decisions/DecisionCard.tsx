@@ -1,3 +1,4 @@
+import { DecisionContext } from "./DecisionContext.tsx";
 // A question for the owner, with its options as buttons (D71, D89). Options
 // tend carries out itself are marked "tend 执行". Worker questions return
 // directly to their run; other questions go through the main-agent chat.
@@ -88,6 +89,7 @@ export function DecisionCard({
         </span>
       </div>
       <q className={styles.question}>{question(d).text}</q>
+      <DecisionContext decision={d} />
       {d.worker && (
         <>
           <div className={styles.ctx}>

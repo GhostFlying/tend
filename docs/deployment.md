@@ -25,7 +25,7 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 - `main_agent`：配置后由服务端运行唯一的主协调 Agent，Web 客户端与它对话；工作项后台 Agent 随之启用。未配置时仅提供 owner 管理接口和 runner 调度，不支持外挂 Agent 代替主协调（D114）。
   - 它是服务端启动的 traex app-server，默认使用运行服务端的用户自己的 traex home：用这台机器上 owner 的 traex 鉴权、配置和 MCP server，主会话也出现在 owner 的 traex 历史里。`main_agent.traex_home` 可以改用一个单独的 home，这时需要在那个 home 下完成一次 traex 鉴权。
   - 启动时保留 `TEND_ADDON=off`，仅用于仍指向旧版二进制的遗留配置；它不能让新 CLI 的已退役命令成功。替换 CLI 和启动 Agent 前必须清理已确认的 Tend 外挂 hook/MCP。
-  - 权限：sandbox 是 `workspace-write`，可以读整台机器（例如仓库），只能写自己的工作目录（`main_agent.cwd`，默认 `data_dir/main-agent`，必须在任何仓库之外）；需要更多权限的操作由 traex 的 `auto_review` 自动审查，不等人确认。编辑文件、浏览器、插件、应用、skill 和 memory 是关掉的。
+  - 权限（D118）：主 Agent 文件只读、approval 为 never，显式允许网络，但 shell、编辑文件、浏览器、插件、应用、skill 和 memory 等原生路径仍关闭；业务写入通过 Tend 工具。后台 Agent 使用自己的工作目录、workspace-write + on-request + auto_review，显式允许网络；Tend 工具只允许所属工作项读取与正式评估，不赋予业务调度权。网络独立通过原生 turn sandboxPolicy 设置，恢复会话也重新应用。
   - 模型默认用 traex 的默认模型，`main_agent.model` 可以指定。
   - `main_agent.summary_idle_minutes` 设置预备摘要的空闲分钟，省略默认 50，0 关闭自动准备，范围 0..10080。Web 的独立 owner 设置持久化覆盖该默认值，不依赖模型目录。交接维护仍启用；工具 schema 升级会使用 fresh native thread，Web 对话历史与原 native 历史保留（D81）。
   - `tend conversation handoff --prepare-only` 只准备摘要，`tend conversation handoff` 排队执行交接，`tend conversation handoff --status [--json]` 读取共享设置与摘要状态。网络重试沿用原请求 ID；结果未知时先核对原请求，不重复发起交接。
@@ -128,3 +128,13 @@ tend login --server https://<hostname>.<tailnet>.ts.net
 ## tailnet ACL
 
 只允许 owner 的设备访问 `tag:tend-server` 的 443 和 80 端口，只允许 `tag:tend-runner` 访问 `tag:tend-server` 的 80 端口；runner 之间不互通（design.md §6.2）。使用 https 需要在 tailnet 中开启 MagicDNS 和 HTTPS 证书。ACL 由管理员在 tailnet 中配置，程序不修改。
+
+## Worker 权限、验收模型与决策说明（D118）
+
+所有 worker 原生使用 YOLO：Traex 项目配置为 `permission_mode="bypass_permissions"`，Codex 为 danger-full-access/never；直接 app-server worker 使用同样的完整访问策略。专用启动器不得再用 auto 参数覆盖项目配置。YOLO 是执行能力，不能扩大 task spec 的业务授权；验收仍按独立角色判断，不修改被验收产物。
+
+runner 创建 scratch 并解析路径别名，启动指令使用同一规范路径。普通目录实现 scratch 按 workspace ID，Git 工作区实现按 workspace name，验收按 run ID 隔离。准备错误走 workspace_prepare_failed；不在每次运行增加沙箱写入探针，实际权限回读与可写检查属于测试。
+
+`worker.acceptance` 可配置 `{ "model": "GPT-6.1-Sol", "effort": "xhigh" }` 作为验收角色默认值。任务 spec 可用 `acceptance_execution` 指定同样的结构，优先于 runner 的验收默认；两者都省略时继承现有 worker 默认。选择另一模型但省略 effort 时使用该模型原生默认，不继承实现模型的 effort。任务选择冻结在 spec；runner 必须声明 acceptance-execution-v1，缺少能力时排队，恢复也校验能力。模型标识和强度是否实际受 provider 支持，以原生启动与实际会话回读为准，不将请求值视为生效证明。
+
+worker-question-context-v1 协商后，ask_owner 可提交可选 issues，明确环境故障、证据缺口、缺少授权、影响、处理归属、下一步、状态和依据。旧请求不新增必填字段；空扩展省略以保持重放 hash。主 Agent 使用 decisions_explain 为原 decision/version 添加说明；说明修订有独立控制版本，保留全部历史，不修改原问题/选项、不回答 owner。每次说明必须处理 worker 及上一版说明中的全部问题，可标记解决、替代或延期而不能静默丢弃。卡片直接显示当前说明、问题影响与 owner 选择，长证据仍可折叠。

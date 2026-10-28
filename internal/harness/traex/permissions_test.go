@@ -28,7 +28,7 @@ func TestThreadPermissionsUseNativeReadback(t *testing.T) {
 				res := ThreadStartResponse{Thread: Thread{ID: "permission-test"}}
 				if reported {
 					// Deliberately differ from the request: never invent confirmation.
-					res.Sandbox.Type = "readOnly"
+					res.Sandbox = map[string]any{"type": "readOnly"}
 					res.ApprovalPolicy = "never"
 					res.ApprovalsReviewer = "guardian_subagent"
 				}

@@ -104,7 +104,7 @@ func runtimeSupportsObservation(runtime *protocol.RunnerRuntime) bool {
 // Recovery must retain the same capabilities as the original claim. Otherwise
 // restarting an older runner could bypass the scheduler through reassignment.
 func checkRunCapabilitiesRecovery(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) error {
-	if runtimeSupportsTaskInputs(runtime) && runtimeSupportsObservation(runtime) {
+	if runtimeSupportsTaskInputs(runtime) && runtimeSupportsObservation(runtime) && runtimeSupportsAcceptanceExecution(runtime) {
 		return nil
 	}
 	open, err := store.ListOpenRunsOnHost(ctx, q, host)
@@ -127,6 +127,9 @@ func checkRunCapabilitiesRecovery(ctx context.Context, q store.Querier, host str
 		if err := json.Unmarshal([]byte(body), &spec); err != nil {
 			return err
 		}
+		if spec.AcceptanceExecution != nil && !runtimeSupportsAcceptanceExecution(runtime) {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "runner requires acceptance-execution-v1 to recover an assigned acceptance model selection")
+		}
 		if spec.Observation != nil && !runtimeSupportsObservation(runtime) {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "runner requires worker-observation-v1 to recover an assigned observation task")
 		}
@@ -135,4 +138,8 @@ func checkRunCapabilitiesRecovery(ctx context.Context, q store.Querier, host str
 		}
 	}
 	return nil
+}
+
+func runtimeSupportsAcceptanceExecution(runtime *protocol.RunnerRuntime) bool {
+	return runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityAcceptanceExecution)
 }
