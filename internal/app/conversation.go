@@ -593,6 +593,16 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 				if businessStatus == store.TurnFailed || businessStatus == store.TurnInterrupted {
 					state = turnStates[businessStatus]
 				}
+				var stopped bool
+				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turns l JOIN logical_turn_executions e ON e.logical_turn_id=l.logical_turn_id WHERE e.request_id=? AND l.status='stopped')`, m.RequestID).Scan(&stopped); err != nil {
+					return err
+				}
+				if stopped {
+					state = protocol.MessageInterrupted
+					if err := a.settleReviewedMainSteers(ctx, tx, m.RequestID, businessStatus, now); err != nil {
+						return err
+					}
+				}
 				return a.insertMessageState(ctx, tx, m.MessageID, state, now)
 			}
 		}

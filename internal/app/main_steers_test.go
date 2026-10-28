@@ -421,6 +421,162 @@ func TestMainSteerSettlesAcrossRepeatedClarificationAdoption(t *testing.T) {
 	steerStatusFixture(t, h, supplement, "completed")
 }
 
+func TestSharedSteerSettlesWhenIndependentLogicalReviewsComplete(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		order     []int
+		stopOther bool
+	}{
+		{"original first", []int{0, 1}, false}, {"historical-source user first", []int{1, 0}, false},
+		{"historical-source user stops last", []int{0, 1}, true}, {"historical-source user stops first", []int{1, 0}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, active := activeSteerEnv(t)
+			supplement := consumedSteerFixture(t, h, active)
+			original, _, err := h.app.MainTurn(t.Context(), active.RequestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherMessage := queueMessage(t, h, "reuse the admitted answer in another responsibility")
+			other := store.MainTurn{RequestID: h.ids.New(protocol.PrefixRequest), MessageID: otherMessage, ThreadID: "native", TurnID: "independent", Status: store.TurnStarted}
+			if err := h.app.PutMainTurn(t.Context(), other); err != nil {
+				t.Fatal(err)
+			}
+			association := h.associations(supplement)
+			env := h.env("conversation.set_associations", protocol.Target{Type: "message", ID: supplement}, protocol.SetMessageAssociationsPayload{ContentRevision: association.ContentRevision, Disposition: "unassigned", WorkItemIDs: []string{}}, rev(association.Revision))
+			if op := h.exec(mainAgent, env, WithExecutionRequest(SetMessageAssociations{}, other.RequestID)); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			turns := []store.MainTurn{original, other}
+			for i := range turns {
+				turns[i].Status = store.TurnCompleted
+				if err := h.app.PutMainTurn(t.Context(), turns[i]); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			for step, index := range tc.order {
+				root := turns[index]
+				if tc.stopOther && index == 1 {
+					op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "conversation"}, protocol.InterruptReplyPayload{MessageID: root.MessageID}, nil), InterruptReply{})
+					if op.Status != protocol.OpSucceeded {
+						t.Fatal(op)
+					}
+					want := "consumed"
+					if step == 1 {
+						want = "interrupted"
+					}
+					steerStatusFixture(t, h, supplement, want)
+					continue
+				}
+				var repairRequest string
+				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+					return tx.Q().QueryRowContext(t.Context(), `SELECT request_id FROM logical_turn_executions WHERE logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?) AND repair=1 ORDER BY rowid DESC LIMIT 1`, root.RequestID).Scan(&repairRequest)
+				}); err != nil {
+					t.Fatal(err)
+				}
+				repair := store.MainTurn{RequestID: repairRequest, MessageID: root.MessageID, ThreadID: root.ThreadID, TurnID: "repair-" + repairRequest, Status: store.TurnStarted}
+				if err := h.app.PutMainTurn(t.Context(), repair); err != nil {
+					t.Fatal(err)
+				}
+				state, err := h.app.LogicalTurn(t.Context(), repairRequest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, message := range state.Messages {
+					if message.Disposition == "pending" {
+						if op := h.associate(mainAgent, message.MessageID); op.Status != protocol.OpSucceeded {
+							t.Fatal(op)
+						}
+					}
+				}
+				commitFixtureTurn(t, h, repairRequest)
+				repair.Status = store.TurnCompleted
+				if err := h.app.PutMainTurn(t.Context(), repair); err != nil {
+					t.Fatal(err)
+				}
+				want := "consumed"
+				if step == 1 {
+					want = "completed"
+					if tc.stopOther {
+						want = "interrupted"
+					}
+				}
+				steerStatusFixture(t, h, supplement, want)
+			}
+			for _, root := range turns {
+				state, err := h.app.LogicalTurn(t.Context(), root.RequestID)
+				want := "completed"
+				if tc.stopOther && root.RequestID == other.RequestID {
+					want = "stopped"
+				}
+				if err != nil || state.Status != want {
+					t.Fatal(state, err)
+				}
+			}
+		})
+	}
+}
+
+func TestOwnerStopRemainsTerminalWhenNativeCompletionWins(t *testing.T) {
+	for _, reconcile := range []bool{false, true} {
+		name := "live completion"
+		if reconcile {
+			name = "reconciled completion"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, active := activeSteerEnv(t)
+			supplement := consumedSteerFixture(t, h, active)
+			original, _, err := h.app.MainTurn(t.Context(), active.RequestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reconcile {
+				if err := h.app.SettleOpenTurns(t.Context(), original.ThreadID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "conversation"}, protocol.InterruptReplyPayload{MessageID: supplement}, nil), InterruptReply{})
+			if op.Status != protocol.OpAccepted && op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			original.Status = store.TurnCompleted
+			original.NativeReconciled = reconcile
+			if !reconcile {
+				if err := h.app.SettleMainSteers(t.Context(), original.ThreadID, original.TurnID, original.Status); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := h.app.PutMainTurn(t.Context(), original); err != nil {
+				t.Fatal(err)
+			}
+			steerStatusFixture(t, h, supplement, "interrupted")
+			state, err := h.app.LogicalTurn(t.Context(), active.RequestID)
+			if err != nil || state.Status != "stopped" || state.RepairAttempts != 0 {
+				t.Fatal(state, err)
+			}
+			actual, _, err := h.app.MainTurn(t.Context(), active.RequestID)
+			if err != nil || actual.Status != store.TurnCompleted {
+				t.Fatal("logical stop overwrote the native fact", actual, err)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				for _, id := range []string{original.MessageID, supplement} {
+					item, err := store.GetConversationItem(t.Context(), tx.Q(), id)
+					if err != nil {
+						return err
+					}
+					if item.State != string(protocol.MessageInterrupted) {
+						t.Fatal(item)
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestLateMainSteerConsumptionReopensOnlyCompletedReview(t *testing.T) {
 	for _, prior := range []string{"completed", "stopped", "awaiting_clarification"} {
 		t.Run(prior, func(t *testing.T) {
@@ -503,6 +659,78 @@ func TestLateMainSteerConsumptionReopensOnlyCompletedReview(t *testing.T) {
 			}
 			if _, ok, err := h.app.ConsumeMainSteer(t.Context(), "native", "turn", steer.InputText, "late-user"); err != nil || ok {
 				t.Fatal("receipt replay admitted twice", ok, err)
+			}
+		})
+	}
+}
+
+func TestStoppedSteerResumesOnlyCompletedNativeReview(t *testing.T) {
+	for _, native := range []string{store.TurnCompleted, store.TurnInterrupted} {
+		t.Run(native, func(t *testing.T) {
+			h, active := activeSteerEnv(t)
+			supplement := consumedSteerFixture(t, h, active)
+			original, _, err := h.app.MainTurn(t.Context(), active.RequestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original.Status = native
+			if err := h.app.PutMainTurn(t.Context(), original); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.app.FinishDelivery(t.Context(), active, DeliveryResult{Outcome: Delivered}); err != nil {
+				t.Fatal(err)
+			}
+			if op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "conversation"}, protocol.InterruptReplyPayload{MessageID: supplement}, nil), InterruptReply{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			steerStatusFixture(t, h, supplement, "interrupted")
+			state, err := h.app.LogicalTurn(t.Context(), active.RequestID)
+			if err != nil || state.Status != "stopped" {
+				t.Fatal(state, err)
+			}
+			if op := h.exec(owner, h.env("conversation.resume_processing", protocol.Target{Type: "logical_turn", ID: state.ID}, struct{}{}, rev(h.associations(original.MessageID).Processing.Revision)), ResumeLogicalTurn{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			want := "interrupted"
+			if native == store.TurnCompleted {
+				want = "consumed"
+			}
+			steerStatusFixture(t, h, supplement, want)
+			repair, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
+			if err != nil || !ok || repair.Operation != "conversation.repair_turn" {
+				t.Fatal(repair, ok, err)
+			}
+			record := store.MainTurn{RequestID: repair.RequestID, MessageID: original.MessageID, ThreadID: original.ThreadID, TurnID: "resumed-review", Status: store.TurnStarted}
+			if err := h.app.PutMainTurn(t.Context(), record); err != nil {
+				t.Fatal(err)
+			}
+			state, err = h.app.LogicalTurn(t.Context(), repair.RequestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, message := range state.Messages {
+				if message.Disposition == "pending" {
+					if op := h.associate(mainAgent, message.MessageID); op.Status != protocol.OpSucceeded {
+						t.Fatal(op)
+					}
+				}
+			}
+			commitFixtureTurn(t, h, repair.RequestID)
+			record.Status = store.TurnCompleted
+			if err := h.app.PutMainTurn(t.Context(), record); err != nil {
+				t.Fatal(err)
+			}
+			if native == store.TurnCompleted {
+				want = "completed"
+			}
+			steerStatusFixture(t, h, supplement, want)
+			state, err = h.app.LogicalTurn(t.Context(), repair.RequestID)
+			if err != nil || state.Status != "completed" {
+				t.Fatal(state, err)
+			}
+			actual, _, err := h.app.MainTurn(t.Context(), original.RequestID)
+			if err != nil || actual.Status != native || actual.TurnID != original.TurnID {
+				t.Fatal("metadata resume changed native fact", actual, err)
 			}
 		})
 	}

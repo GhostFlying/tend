@@ -326,7 +326,13 @@ func (ResumeLogicalTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	}
 	// Use the same transaction and injected dependencies as normal settlement.
 	a := App{ids: x.IDs}
+	if err := a.resumeMainSteers(ctx, tx, x.Env.Target.ID, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
 	if _, err := a.settleLogicalTurn(ctx, tx, store.MainTurn{RequestID: request, MessageID: message, Status: store.TurnFailed}, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	if err := a.settleReviewedMainSteers(ctx, tx, request, store.TurnFailed, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Result: map[string]any{"logical_turn_id": x.Env.Target.ID}, Notify: true, Events: []Event{{ObjectType: "message", ObjectID: message, Kind: "conversation.processing_resumed"}}}, nil

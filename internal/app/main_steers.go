@@ -325,10 +325,14 @@ func (a *App) settleMainSteers(ctx context.Context, tx *store.Tx, threadID, turn
 		if err != nil {
 			return err
 		}
+		settledStatus := status
 		if m.Status == "consumed" && status == store.TurnCompleted {
-			var incomplete bool
-			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_messages lm JOIN logical_turns l ON l.logical_turn_id=lm.logical_turn_id WHERE lm.message_id=? AND l.status<>'completed')`, m.MessageID).Scan(&incomplete); err != nil {
+			var incomplete, stopped bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_messages lm JOIN logical_turns l ON l.logical_turn_id=lm.logical_turn_id WHERE lm.message_id=? AND l.status NOT IN ('completed','stopped')),EXISTS(SELECT 1 FROM logical_turn_messages lm JOIN logical_turns l ON l.logical_turn_id=lm.logical_turn_id WHERE lm.message_id=? AND l.status='stopped')`, m.MessageID, m.MessageID).Scan(&incomplete, &stopped); err != nil {
 				return err
+			}
+			if stopped {
+				settledStatus = store.TurnInterrupted
 			}
 			if incomplete {
 				if m.Reason != "awaiting classification and fact review" {
@@ -344,7 +348,7 @@ func (a *App) settleMainSteers(ctx context.Context, tx *store.Tx, threadID, turn
 			}
 		}
 		if m.Status == "consumed" {
-			m.Status = status
+			m.Status = settledStatus
 			m.Reason = ""
 		} else {
 			m.Status = "unknown"
@@ -469,12 +473,30 @@ func (a *App) settleReviewedMainSteers(ctx context.Context, tx *store.Tx, reques
 	if status != store.TurnCompleted && status != store.TurnInterrupted && status != store.TurnFailed {
 		return nil
 	}
+	var logical string
+	err := tx.Q().QueryRowContext(ctx, `SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?`, request).Scan(&logical)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return a.settleMainSteerSources(ctx, tx, logical, now)
+}
+
+func (a *App) settleMainSteerSources(ctx context.Context, tx *store.Tx, logical string, now int64) error {
 	rows, err := tx.Q().QueryContext(ctx, `WITH RECURSIVE responsibility(id) AS (
- SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?
- UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON l.resumed_by=r.id)
- SELECT DISTINCT t.thread_id,t.turn_id,t.status FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id
- JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id
- WHERE e.repair=0 AND l.status='completed' AND t.status IN ('completed','interrupted','failed') AND t.turn_id IS NOT NULL AND t.turn_id<>'' AND l.logical_turn_id IN (SELECT id FROM responsibility)`, request)
+ SELECT ?
+ UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON l.resumed_by=r.id),
+ reviewed(message_id) AS (
+ SELECT DISTINCT m.message_id FROM logical_turn_messages m JOIN logical_turns l ON l.logical_turn_id=m.logical_turn_id
+ WHERE l.status IN ('completed','stopped') AND l.logical_turn_id IN (SELECT id FROM responsibility)),
+ native(thread_id,turn_id) AS (
+ SELECT t.thread_id,t.turn_id FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.repair=0 AND e.logical_turn_id IN (SELECT id FROM responsibility)
+ UNION SELECT s.thread_id,s.turn_id FROM main_steers s JOIN reviewed r ON r.message_id=s.message_id WHERE s.status='consumed')
+ SELECT DISTINCT t.thread_id,t.turn_id,t.status FROM native n JOIN main_turns t ON t.thread_id=n.thread_id AND t.turn_id=n.turn_id
+ JOIN logical_turn_executions e ON e.request_id=t.request_id JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id
+ WHERE e.repair=0 AND l.status IN ('completed','stopped') AND t.status IN ('completed','interrupted','failed') AND t.turn_id IS NOT NULL AND t.turn_id<>''`, logical)
 	if err != nil {
 		return err
 	}
@@ -523,6 +545,61 @@ func (a *App) markMainSteersUncertain(ctx context.Context, tx *store.Tx, thread,
 			return err
 		}
 		if err := a.insertMessageState(ctx, tx, m.MessageID, protocol.MessageUnknown, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Explicit stop closes metadata responsibility without certifying its facts.
+// Known native outcomes can settle shared inputs; pending receipts stay unknown.
+func (a *App) settleStoppedMainSources(ctx context.Context, tx *store.Tx, message string, now int64) error {
+	ids, err := store.LogicalResponsibilities(ctx, tx.Q(), message)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		var root, status string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT message_id,status FROM logical_turns WHERE logical_turn_id=?`, id).Scan(&root, &status); err != nil {
+			return err
+		}
+		if status != "stopped" {
+			continue
+		}
+		uncertain, err := logicalNativeUncertain(ctx, tx.Q(), id)
+		if err != nil {
+			return err
+		}
+		if !uncertain {
+			if err := a.insertMessageState(ctx, tx, root, protocol.MessageInterrupted, now); err != nil {
+				return err
+			}
+		}
+		if err := a.settleMainSteerSources(ctx, tx, id, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resumeMainSteers reopens metadata-only stops, never interrupted native work.
+func (a *App) resumeMainSteers(ctx context.Context, tx *store.Tx, logical string, now int64) error {
+	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT s.request_id FROM main_steers s JOIN logical_turn_messages m ON m.message_id=s.message_id
+ WHERE m.logical_turn_id=? AND s.status='interrupted' AND s.native_item_id<>''
+ AND EXISTS(SELECT 1 FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE t.thread_id=s.thread_id AND t.turn_id=s.turn_id AND t.status='completed' AND e.repair=0 AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id))`, logical)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		steer, err := store.GetMainSteer(ctx, tx.Q(), id)
+		if err != nil {
+			return err
+		}
+		steer.Status, steer.Reason = "consumed", "awaiting classification and fact review"
+		if err := tx.PutMainSteer(ctx, steer, now); err != nil {
+			return err
+		}
+		if err := a.insertMessageState(ctx, tx, steer.MessageID, protocol.MessageProcessing, now); err != nil {
 			return err
 		}
 	}
