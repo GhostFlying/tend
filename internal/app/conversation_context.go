@@ -51,12 +51,24 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{}, errNotFound(err, "work item does not exist")
 		}
 	}
+	if x.Principal.Kind != protocol.PrincipalOwner {
+		for id := range desired {
+			if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), id); err != nil {
+				return Outcome{}, err
+			}
+		}
+		for _, item := range old.Items {
+			if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), item.WorkItemID); err != nil {
+				return Outcome{}, err
+			}
+		}
+	}
 	same := old.Disposition == p.Disposition && len(old.Items) == len(desired)
 	for _, item := range old.Items {
 		same = same && desired[item.WorkItemID]
 	}
 	if same && (x.Principal.Kind != protocol.PrincipalOwner || old.OwnerLocked) {
-		if err := attachReviewSource(ctx, x, tx, old.MessageID); err != nil {
+		if err := attachLegacyReviewSource(ctx, x, tx, old.MessageID); err != nil {
 			return Outcome{}, err
 		}
 		return Outcome{Result: map[string]any{"revision": old.Revision}}, nil
@@ -115,7 +127,7 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if _, err := tx.Exec(ctx, `INSERT INTO message_disposition_history(message_id,content_revision,association_revision,disposition,actor,created_at) VALUES(?,?,?,?,?,?)`, old.MessageID, p.ContentRevision, updated.Revision, p.Disposition, string(actor), x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
-	if err := attachReviewSource(ctx, x, tx, old.MessageID); err != nil {
+	if err := attachLegacyReviewSource(ctx, x, tx, old.MessageID); err != nil {
 		return Outcome{}, err
 	}
 	out := Outcome{Result: map[string]any{"revision": updated.Revision}, Events: []Event{{ObjectType: "message", ObjectID: old.MessageID, Kind: "conversation.associations_changed"}}}
@@ -137,6 +149,9 @@ func (c ContextCommand) Authorize(_ context.Context, x *Exec, _ store.Querier) e
 }
 func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	id := x.Env.Target.ID
+	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), id); err != nil {
+		return Outcome{}, err
+	}
 	var revision int64
 	if err := tx.Q().QueryRowContext(ctx, `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, id).Scan(&revision); err != nil {
 		return Outcome{}, errNotFound(err, "context does not exist")
@@ -181,9 +196,9 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 					return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "duplicate fact reconciliation")
 				}
 				seen[fact] = true
-				var source, scope, item string
+				var source, scope, item, project string
 				var needsReview bool
-				if err := tx.Q().QueryRowContext(ctx, `SELECT source_message_id,scope,COALESCE(work_item_id,''),needs_review FROM work_item_context_facts WHERE fact_id=? AND superseded=0 AND (work_item_id=? OR scope='global' OR (scope='project' AND project=(SELECT project FROM work_items WHERE work_item_id=?)))`, fact, id, id).Scan(&source, &scope, &item, &needsReview); err != nil {
+				if err := tx.Q().QueryRowContext(ctx, `SELECT source_message_id,scope,COALESCE(work_item_id,''),project,needs_review FROM work_item_context_facts WHERE fact_id=? AND superseded=0 AND (work_item_id=? OR scope='global' OR (scope='project' AND project=(SELECT project FROM work_items WHERE work_item_id=?)))`, fact, id, id).Scan(&source, &scope, &item, &project, &needsReview); err != nil {
 					return Outcome{}, errNotFound(err, "fact outside context")
 				}
 				if !group.retire && scope == "work_item" {
@@ -197,6 +212,9 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 				}
 				if !group.retire && !needsReview {
 					continue
+				}
+				if err := rejectCanonicalLegacyFactScope(ctx, tx.Q(), scope, item, project); err != nil {
+					return Outcome{}, err
 				}
 				changed = true
 				if _, err := tx.Exec(ctx, `UPDATE work_item_context_facts SET superseded=?,needs_review=0 WHERE fact_id=?`, group.retire, fact); err != nil {
@@ -278,7 +296,7 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		var existing string
 		err = tx.Q().QueryRowContext(ctx, `SELECT fact_id FROM work_item_context_facts WHERE scope=? AND COALESCE(work_item_id,'')=? AND project=? AND kind=? AND body=? AND source_message_id=? AND COALESCE(supersedes,'')=? AND superseded=0 AND needs_review=0 LIMIT 1`, p.Scope, p.WorkItemID, p.Project, p.Kind, p.Body, p.SourceMessageID, p.Supersedes).Scan(&existing)
 		if err == nil {
-			if err := attachReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
+			if err := attachLegacyReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
 				return Outcome{}, err
 			}
 			return Outcome{Result: map[string]any{"work_item_id": id, "fact_id": existing}}, nil
@@ -286,7 +304,17 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		if !errors.Is(err, sql.ErrNoRows) {
 			return Outcome{}, err
 		}
+		if err := rejectCanonicalLegacyFactScope(ctx, tx.Q(), p.Scope, p.WorkItemID, p.Project); err != nil {
+			return Outcome{}, err
+		}
 		if p.Supersedes != "" {
+			var oldScope, oldItem, oldProject string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT scope,COALESCE(work_item_id,''),project FROM work_item_context_facts WHERE fact_id=? AND superseded=0`, p.Supersedes).Scan(&oldScope, &oldItem, &oldProject); err != nil {
+				return Outcome{}, errNotFound(err, "superseded fact does not exist")
+			}
+			if err := rejectCanonicalLegacyFactScope(ctx, tx.Q(), oldScope, oldItem, oldProject); err != nil {
+				return Outcome{}, err
+			}
 			res, err := tx.Exec(ctx, `UPDATE work_item_context_facts SET superseded=1 WHERE fact_id=? AND scope=? AND COALESCE(work_item_id,'')=? AND project=? AND superseded=0`, p.Supersedes, p.Scope, p.WorkItemID, p.Project)
 			if err != nil {
 				return Outcome{}, err
@@ -296,7 +324,7 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "superseded fact must have the same scope")
 			}
 		}
-		if err := attachReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
+		if err := attachLegacyReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
 			return Outcome{}, err
 		}
 		p.ID = x.IDs.New(protocol.Prefix("fact"))
@@ -345,7 +373,7 @@ func initializeWorkItemContext(ctx context.Context, x *Exec, tx *store.Tx, id st
 		return &protocol.Error{Code: protocol.CodeInvalidRequest, Message: "initial_context.reviewed_kinds must explicitly review all fact kinds, including kinds with no facts; missing: " + strings.Join(missing, ", "), Details: details}
 	}
 	for _, mid := range p.SourceMessageIDs {
-		if err := attachReviewSource(ctx, x, tx, mid); err != nil {
+		if err := attachLegacyReviewSource(ctx, x, tx, mid); err != nil {
 			return err
 		}
 		m, err := store.MessageAssociations(ctx, tx.Q(), mid)

@@ -217,6 +217,9 @@ func (LinkIssueTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), x.Env.Target.ID); err != nil {
+		return Outcome{}, err
+	}
 	revision, err := requireRevision(x.Env)
 	if err != nil {
 		return Outcome{}, err
@@ -233,6 +236,9 @@ func BindIssueTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string, re
 	w, err := store.GetIssue(ctx, tx.Q(), itemID)
 	if err != nil {
 		return w, nil, errNotFound(err, "work item does not exist")
+	}
+	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), w.WorkItemID); err != nil {
+		return w, nil, err
 	}
 	if w.Revision != revision {
 		return w, nil, protocol.Errorf(protocol.CodeStaleRevision, "work item revision changed")
@@ -292,6 +298,9 @@ func issueForWrite(ctx context.Context, x *Exec, q store.Querier) (protocol.Work
 	w, err := store.GetIssue(ctx, q, x.Env.Target.ID)
 	if err != nil {
 		return w, errNotFound(err, "work item does not exist")
+	}
+	if err := store.RejectCanonicalLegacyIssueWrite(ctx, q, w.WorkItemID); err != nil {
+		return w, err
 	}
 	if revision != w.Revision {
 		return w, protocol.Errorf(protocol.CodeStaleRevision, "work item revision changed")
