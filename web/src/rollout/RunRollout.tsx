@@ -17,7 +17,7 @@ import { useRunWindow } from "./useRunWindow.ts";
 import styles from "./RunRollout.module.css";
 
 export function RunRollout({ runs }: { runs: readonly RunView[] }) {
-  const [selected, setSelected] = useState(runs.at(-1)?.run_id ?? "");
+  const [selected, setSelected] = useState<string | null>(null);
   const run = runs.find((candidate) => candidate.run_id === selected) ?? runs.at(-1);
   return (
     <section className={styles.root} aria-label="执行过程与用量">
@@ -27,7 +27,9 @@ export function RunRollout({ runs }: { runs: readonly RunView[] }) {
           <select
             aria-label="执行记录"
             value={run.run_id}
-            onChange={(event) => setSelected(event.target.value)}
+            onChange={(event) =>
+              setSelected(event.target.value === runs.at(-1)?.run_id ? null : event.target.value)
+            }
           >
             {runs.map((item) => (
               <option key={item.run_id} value={item.run_id}>
