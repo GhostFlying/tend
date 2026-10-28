@@ -1,6 +1,6 @@
 # Issue 与 Agent 重构实施计划
 
-状态：P0 文档、独立评审和本地 make check 已通过，PR #155 等待 CI/合并；P1a 内部改名代码、本地检查及独立评审已完成，CI/合并/部署未完成；P1b1 存储/纯规则代码、本地完整检查及独立评审已完成，未启用入口，PR CI/合并未完成；P1b2–P9 尚未实施。本文是实施合同，不是发布声明。设计见 [Issue、Agent 与个人规划架构](../issue-agent-design.md)，Refs: D121–D126。
+状态：P0 文档、独立评审和本地 make check 已通过，PR #155 CI 因基线测试超时仍未通过，合并未完成；P1a 内部改名代码、本地检查及独立评审已完成，CI/合并/部署未完成；P1b1 存储/纯规则代码、本地完整检查及独立评审已完成，未启用入口，PR CI/合并未完成；P2a 纯配置基础、本地检查及独立 review 已通过，PR CI/合并未完成；P1b2–P1c 与其余 P2–P9 尚未实施。本文是实施合同，不是发布声明。设计见 [Issue、Agent 与个人规划架构](../issue-agent-design.md)，Refs: D121–D126。
 
 ## 进度账本与角色
 
@@ -8,9 +8,9 @@
 
 | 批次 | 依赖 | 设计 | 代码 | 独立评审 | 合并 | 部署 | Live 验收 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P0 | 无 | 文档完成 | 无运行代码；本地 make check 通过 | 已通过，澄清增量确认 | PR #155 待 CI/合并 | 本批不部署 | 无 |
-| P1 | P0 评审通过 | P1a 子计划已写，P1b 控制分片合同已评审可实施；P1c 待核定 | P1a、P1b1 代码及本地检查通过；P1b1 入口未启用；其余未开始 | P1a/P1b1 独立 review 通过；本次台账增量待核对 | CI/合并未完成 | 本批不部署 | 未执行 |
-| P2 | P1 身份基础 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
+| P0 | 无 | 文档完成 | 无运行代码；本地 make check 通过 | 已通过，澄清增量确认 | PR #155 CI 基线测试超时，未通过/未合并 | 本批不部署 | 无 |
+| P1 | P0 评审通过 | P1a 子计划已写，P1b 控制分片合同已评审可实施；P1c 待核定 | P1a、P1b1 代码及本地检查通过；P1b1 入口未启用；其余未开始 | P1a/P1b1 独立 review 通过 | CI/合并未完成 | 本批不部署 | 未执行 |
+| P2 | P1 身份基础 | P2a 子计划已写，其余接口待核定 | P2a 纯配置基础及本地检查完成，未接生产入口；其余未开始 | P2a 独立人工及规定 CLI review 通过，无 findings | 未合并 | 本批不部署 | 未执行 |
 | P3 | P1、P2 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P4 | P1–P3 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P5 | P4 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
@@ -23,10 +23,11 @@
 
 | 批次 | 固定 base SHA | 实施 head SHA | PR / CI | reviewer / 结论 | 部署 build / manifest | Live 对象 / 结论 |
 | --- | --- | --- | --- | --- | --- | --- |
-| P0 | `7761e61c0e9acdb0209fddff7f5d0e55830b4c65` | `5b20a8ad4536cb70341607066452a07e487a702e` | [PR #155](https://github.com/GhostFlying/tend/pull/155)；本地 make check 通过，CI 待回读 | GPT-6.1-Sol xhigh 通过，澄清增量已确认 | 不适用 | 不适用 |
+| P0 | `7761e61c0e9acdb0209fddff7f5d0e55830b4c65` | `5b20a8ad4536cb70341607066452a07e487a702e` | [PR #155](https://github.com/GhostFlying/tend/pull/155)；本地 make check 通过；CI 基线测试超时，仍未通过 | GPT-6.1-Sol xhigh 通过，澄清增量已确认 | 不适用 | 不适用 |
 | P1a | `5b20a8ad4536cb70341607066452a07e487a702e` | `d52d093741da41e78dc60effb0493a67058eded5`；冻结实现快照 SHA-256 `b94229bf4efe0dc91932358af1091004951c7b101be73442fb3dc288863b218f` | 本地 make check 通过；PR/CI 未完成 | GPT-6.1-Sol xhigh 无 findings；后续仅状态记录增量 | 未部署 | 未执行 |
-| P1b1 | `242ff5200c7bda28c70de3c313ffef7a55d64717`（含独立基线测试修复） | 待提交；r2 实施快照 SHA-256 `8f99a5d2fbb478ce8a28fec78312a9cdff8a4549d4255e5fa99b867d4d2c06c6`；入口未启用 | 首轮完整检查因 schema fixture 上限失败；修复后定向升级/维护 race、第二轮 make check 均通过；PR CI 未完成 | GPT-6.1-Sol xhigh 首轮及 r2 增量均通过，无 findings；随后仅本次台账增量 | 未部署 | 未执行 |
-| P1b2–P9（逐批追加） | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 |
+| P1b1 | `242ff5200c7bda28c70de3c313ffef7a55d64717`（含独立基线测试修复） | `9b7b85530b65dc2516425c8e7a131d762ead08a1`；r2 实施快照 SHA-256 `8f99a5d2fbb478ce8a28fec78312a9cdff8a4549d4255e5fa99b867d4d2c06c6`；入口未启用 | 首轮完整检查因 schema fixture 上限失败；修复后定向升级/维护 race、第二轮 make check 均通过；PR CI 未完成 | GPT-6.1-Sol xhigh 首轮及 r2 增量均通过，无 findings；随后仅本次台账增量 | 未部署 | 未执行 |
+| P2a | `9b7b85530b65dc2516425c8e7a131d762ead08a1` | 待提交；纯配置包无生产调用点 | 定向 race/vet 与本地 make check 通过；PR CI 未完成 | GPT-6.1-Sol xhigh 人工及规定 CLI review 通过，无 findings；随后仅本次状态增量 | 未部署 | 未执行 |
+| P1b2–P9（其余逐批追加） | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 |
 
 Base 在开始批次与评审前分别固定，若 rebase 改变 head 则更新并判断是否重审。公开账本只记录公开 PR、commit 和无私密信息的证据引用；机器运行路径、凭据及原始发布证据保存在忽略的本地记录中。
 
@@ -56,6 +57,8 @@ P1c 增加 owner API/CLI、views 与生成 schema/type 胶水，提供准确 rev
 必须验证：父子/依赖无环、单责任人、唯一 primary issue、可选 stage、revision 冲突、pause 阻新派发且活动合同继续、取消的正式协调、关闭/重开、reparent 拒绝活动 turn/执行及授权冲突、unknown 阻止伪关闭、旧 epoch 无控制权限。Assignment 按围栏旧写、核对旧 turn/unknown、启用新责任的顺序生效，不接管 worker 或改 spec。完成条件为 API/CLI 可创建/修订/委派/读回，领域和事务测试、旧执行回归、make check 通过，自动推进未启用。
 
 ## P2：本机 Agent 库存与冻结配置
+
+P2a 的纯配置校验、身份与公共投影见[独立子计划](agent-definition-config.md)，纯配置基础及本地检查已完成，尚无生产加载、登记或执行入口。定义全部 staged/unavailable；后续仍需真实角色指令注入、原 runtime/snapshot 可验证恢复、同 host 全局 workspace/backend 协调及通信协商，不以纯包测试替代启用门槛。
 
 依赖 P1 身份基础。新增全局 category、runner/runtime 本机 Agent definition 的非密钥投影；hosted main、issue、consultation 同样登记。提供来源类型、版本、规范化 hash、能力、加载/健康时点、退役状态及 owner 可读原因。
 
