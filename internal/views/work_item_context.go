@@ -2,6 +2,7 @@ package views
 
 import (
 	"context"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -22,19 +23,37 @@ func WorkItemContext(ctx context.Context, q store.Querier, id string, after int6
 	if baseline == 0 {
 		v.SyncStatus = "initializing"
 	}
-	ready, err := store.WorkItemContextReady(ctx, q, id)
+	ready, err := store.WorkItemContextReviewed(ctx, q, id)
 	if err != nil {
 		return v, err
 	}
 	if baseline > 0 && !ready {
 		v.SyncStatus = "needs_review"
 	}
+	v.DispatchReady, err = store.WorkItemContextReady(ctx, q, id)
+	if err != nil {
+		return v, err
+	}
+	v.DispatchBlockers, err = store.ContextBlockers(ctx, q, id)
+	if err != nil {
+		return v, err
+	}
+	bindings, err := store.TaskContextBlockers(ctx, q, id)
+	if err != nil {
+		return v, err
+	}
+	v.DispatchBlockers = append(v.DispatchBlockers, bindings...)
+	v.DispatchReady = v.DispatchReady && len(bindings) == 0
+	v.CoordinationState = "idle"
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT l.status FROM logical_turns l JOIN logical_turn_contexts lc USING(logical_turn_id) WHERE lc.work_item_id=? AND l.status<>'completed' ORDER BY l.updated_at DESC LIMIT 1),'idle')`, id).Scan(&v.CoordinationState); err != nil {
+		return v, err
+	}
 	var recovering bool
 	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_contexts lc JOIN logical_turns l ON l.logical_turn_id=lc.logical_turn_id WHERE lc.work_item_id=? AND l.status='recovering')`, id).Scan(&recovering); err != nil {
 		return v, err
 	}
 	if recovering {
-		v.SyncStatus = "recovering"
+		v.CoordinationState = "recovering"
 	}
 	// A later reviewed message cannot hide an earlier unreviewed source.
 	if err := q.QueryRowContext(ctx, `WITH sources AS (SELECT DISTINCT m.seq,d.content_revision,d.facts_revision,d.disposition FROM conversation_messages m JOIN (SELECT message_id FROM message_work_items WHERE work_item_id=? AND active=1 UNION SELECT message_id FROM message_context_obligations WHERE work_item_id=? AND needs_review=1) a ON a.message_id=m.message_id LEFT JOIN message_dispositions d ON d.message_id=m.message_id WHERE m.kind='message') SELECT COALESCE(MAX(seq),0) FROM sources WHERE seq<COALESCE((SELECT MIN(seq) FROM sources WHERE disposition IS NULL OR disposition='pending' OR facts_revision<>content_revision),9223372036854775807)`, id, id).Scan(&v.Watermark); err != nil {

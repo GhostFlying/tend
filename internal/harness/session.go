@@ -78,7 +78,9 @@ type PermissionedThread interface {
 // ThreadConfig configures a thread.
 type ThreadConfig struct {
 	// NetworkAccess explicitly enables networking without widening filesystem access.
-	NetworkAccess         bool
+	NetworkAccess bool
+	Ephemeral     bool
+
 	Cwd                   string
 	Model                 string
 	DeveloperInstructions string
@@ -235,4 +237,9 @@ type TurnReceipt struct {
 	// means the reader did not provide that evidence, rather than empty history.
 	Items []Event
 	Raw   json.RawMessage
+}
+
+// TokenCounter optionally supplies the runtime's tokenizer for summary routing.
+type TokenCounter interface {
+	CountTokens(context.Context, string, string) (int64, error)
 }

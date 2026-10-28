@@ -20,7 +20,7 @@ func reviewAppliedOwnerChoice(ctx context.Context, x *Exec, tx *store.Tx, d stor
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(map[string]any{"decision_id": d.DecisionID, "decision_version": d.Version, "task_id": d.TaskID, "spec_version": task.SpecVersion, "asked_control_revision": d.AskedRevision.Int64, "applied_control_revision": task.ControlRevision, "option": p.Option, "effect": effect.Effect, "implement_generation": task.ImplementGeneration, "accept_generation": acceptGeneration, "request_id": x.Env.RequestID, "scope": "Only the transition applied by this request; no authority for subsequent actions."})
+	body, err := json.Marshal(map[string]any{"decision_id": d.DecisionID, "decision_version": d.Version, "task_id": d.TaskID, "spec_version": task.SpecVersion, "asked_control_revision": d.AskedRevision.Int64, "applied_control_revision": task.ControlRevision, "option": p.Option, "effect": effect.Effect, "implement_generation": task.ImplementGeneration, "accept_generation": acceptGeneration, "request_id": x.Env.RequestID, "scope": protocol.AppliedTransitionAuthorizationScope})
 	if err != nil {
 		return err
 	}

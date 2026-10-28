@@ -86,11 +86,12 @@ type WorkItemTaskDisposition struct {
 
 // CreateWorkItemPayload supplies the initial plan; it always starts open.
 type InitialWorkItemContext struct {
-	Coverage         string        `json:"coverage"`
-	Gaps             string        `json:"gaps"`
-	SourceMessageIDs []string      `json:"source_message_ids"`
-	Facts            []ContextFact `json:"facts"`
-	ReviewedKinds    []string      `json:"reviewed_kinds"`
+	SourceReviews    []LogicalTurnReview `json:"source_reviews,omitempty"`
+	Coverage         string              `json:"coverage"`
+	Gaps             string              `json:"gaps"`
+	SourceMessageIDs []string            `json:"source_message_ids"`
+	Facts            []ContextFact       `json:"facts"`
+	ReviewedKinds    []string            `json:"reviewed_kinds"`
 }
 
 type CreateWorkItemPayload struct {

@@ -193,15 +193,20 @@ func TestRemovedAssociationRemainsFencedUntilFinalContextVersion(t *testing.T) {
 	commitFixtureTurn(t, h, turn.RequestID)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		ready, err := store.WorkItemContextReady(t.Context(), tx.Q(), w.WorkItemID)
-		if ready {
-			t.Error("removed-side context released before native completion")
+		if !ready {
+			t.Error("reviewed removed-side context must be ready before native completion")
 		}
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// A concurrent plan/context edit after commit must invalidate the final fence.
-	h.prepareAgent(w.WorkItemID)
+	// A real concurrent plan edit after commit must invalidate the final fence.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE work_item_contexts SET revision=revision+1 WHERE work_item_id=?`, w.WorkItemID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	turn.Status = store.TurnCompleted
 	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
 		t.Fatal(err)

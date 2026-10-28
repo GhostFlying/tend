@@ -53,6 +53,7 @@ type InitializeCapabilities struct {
 // ThreadStartParams creates a thread.
 type ThreadStartParams struct {
 	ExperimentalRawEvents bool              `json:"experimentalRawEvents"`
+	Ephemeral             bool              `json:"ephemeral,omitempty"`
 	Model                 string            `json:"model,omitempty"`
 	Cwd                   string            `json:"cwd,omitempty"`
 	ApprovalPolicy        string            `json:"approvalPolicy,omitempty"`

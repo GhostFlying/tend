@@ -17,6 +17,12 @@ type ConversationHandoffView struct {
 
 // ConversationSummaryView describes summary coverage without exposing its body.
 type ConversationSummaryView struct {
+	FormatVersion       int64  `json:"format_version"`
+	Method              string `json:"method,omitempty"`
+	LedgerBytes         int    `json:"ledger_bytes"`
+	CorrectionBytes     int    `json:"correction_bytes"`
+	Batches             int    `json:"batches"`
+	Complete            bool   `json:"complete"`
 	ID                  string `json:"id"`
 	SourceThreadID      string `json:"source_thread_id"`
 	Version             int64  `json:"version"`

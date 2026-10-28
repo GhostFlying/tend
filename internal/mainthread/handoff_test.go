@@ -69,6 +69,9 @@ func (t *handoffTestThread) InjectDeveloper(ctx context.Context, texts ...string
 	return t.Thread.InjectDeveloper(ctx, texts...)
 }
 func (s *handoffTestSession) StartThread(ctx context.Context, cfg harness.ThreadConfig) (harness.Thread, error) {
+	if cfg.Ephemeral {
+		return s.ForkThread(ctx, "", cfg)
+	}
 	s.mu.Lock()
 	s.starts++
 	err := s.startErr
@@ -205,6 +208,7 @@ func (f *handoffFixture) saveSummary(t *testing.T) store.HandoffSummary {
 	if err != nil {
 		t.Fatal(err)
 	}
+	snap.Summary = &store.SummaryCoverage{Complete: true, Method: "single", Batches: 1}
 	summary, err := f.e.app.SaveHandoffSummary(context.Background(), store.HandoffSummary{Instance: "main", Snapshot: snap, Body: "CACHED_SUMMARY_MARKER", FormatVersion: summaryFormatVersion})
 	if err != nil {
 		t.Fatal(err)
@@ -450,40 +454,32 @@ func TestSummaryReceivesSystemNoticeAndSubsequentInPlaceUpdate(t *testing.T) {
 	}
 }
 
-func TestSummaryOverBudgetObservationCannotBecomeCurrent(t *testing.T) {
+func TestSummaryLargeCorrectionUsesCleanBatches(t *testing.T) {
 	f := newHandoffFixture(t)
-	ctx := context.Background()
-	old := f.saveSummary(t)
+	ctx := t.Context()
+	f.saveSummary(t)
 	if err := f.e.store.Write(ctx, func(tx *store.Tx) error {
-		_, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: "large-server-observation", Author: "system", Body: strings.Repeat("B", (256<<10)+1), CreatedAt: f.clock.Now().UnixMilli()})
+		_, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: "large-server-observation", Author: "system", Body: strings.Repeat("B", (256<<10)+1)})
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	called := make(chan struct{}, 1)
-	f.session.summaryTurn = func(th *testkit.FakeThread, id string, _ harness.TurnInput) string {
-		called <- struct{}{}
-		th.Say(id, "summary", "Would falsely claim full coverage")
+	calls := 0
+	f.session.summaryTurn = func(th *testkit.FakeThread, id string, in harness.TurnInput) string {
+		calls++
+		th.Say(id, "summary", "Known obligations retained; batch merged")
 		return "completed"
 	}
-	if _, ok, err := f.e.m.prepareSummary(ctx, f.session, f.source); err == nil && ok {
-		t.Fatal("over-budget observation silently produced a complete summary")
+	result, ok, err := f.e.m.prepareSummary(ctx, f.session, f.source)
+	if err != nil || !ok {
+		t.Fatal(result, ok, err)
+	}
+	if calls < 3 || result.Snapshot.Summary == nil || !result.Snapshot.Summary.Complete || result.Snapshot.Summary.Method != "two_stage" || result.Snapshot.Summary.Batches < 2 {
+		t.Fatal("large input lost batch coverage", calls, result.Snapshot)
 	}
 	current, err := f.e.app.HandoffSnapshot(ctx, "main")
-	if err != nil {
-		t.Fatal(err)
-	}
-	retained, exists, err := f.e.app.HandoffSummary(ctx, "main")
-	if err != nil || !exists || retained.ID != old.ID {
-		t.Fatalf("prior summary not retained: exists=%v err=%v", exists, err)
-	}
-	if retained.Snapshot.Covers(current) {
-		t.Fatal("over-budget observation was marked covered")
-	}
-	select {
-	case <-called:
-		t.Fatal("summary model ran without a complete bounded observation input")
-	default:
+	if err != nil || !result.Snapshot.Covers(current) {
+		t.Fatal("complete batches did not cover frozen source", err)
 	}
 }
 
@@ -659,8 +655,8 @@ func TestHandoffRetryRefreshesSourceBeyondRecentMessageFocus(t *testing.T) {
 	if starts != 2 || forks != 1 {
 		t.Fatalf("native creates=%d summary forks=%d", starts, forks)
 	}
-	if input := <-summaryInput; !strings.Contains(input, constraint) {
-		t.Fatal("refreshed summary omitted source constraint outside recent-message focus")
+	if input := <-summaryInput; strings.Contains(input, constraint) {
+		t.Fatal("confirmed native history was replayed in the correction supplement")
 	}
 	injected := strings.Join(f.e.h.Injected(target.ID()), "\n")
 	if !strings.Contains(injected, "UPDATED_SUMMARY_CONSTRAINT_MARKER") || !strings.Contains(injected, `"summary_covers_snapshot":true`) {
@@ -671,3 +667,9 @@ func TestHandoffRetryRefreshesSourceBeyondRecentMessageFocus(t *testing.T) {
 		t.Fatalf("refreshed job %+v %v", committed, err)
 	}
 }
+
+func (t *handoffTestThread) ContextUsage(context.Context) (protocol.AgentContextUsage, error) {
+	used, window := int64(1000), int64(451250)
+	return protocol.AgentContextUsage{Available: true, ActiveTokens: &used, EffectiveWindow: &window}, nil
+}
+func (t *handoffTestThread) Compact(context.Context) error { return nil }

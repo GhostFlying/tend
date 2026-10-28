@@ -182,14 +182,21 @@ func dynamicTools(specs []harness.ToolSpec) []DynamicToolSpec {
 // StartThread implements harness.Session.
 func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (harness.Thread, error) {
 	var res ThreadStartResponse
-	err := s.conn.call(ctx, methodThreadStart, ThreadStartParams{ExperimentalRawEvents: true,
-		Model: cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
+	err := s.conn.call(ctx, methodThreadStart, ThreadStartParams{
+		ExperimentalRawEvents: true,
+		Ephemeral:             cfg.Ephemeral,
+		Model:                 cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
 		DeveloperInstructions: cfg.DeveloperInstructions, Config: cfg.Config, DynamicTools: dynamicTools(cfg.Tools),
 	}, &res)
 	if err != nil {
 		return nil, err
 	}
 	t := s.register(res.Thread.ID, cfg.OnToolCall)
+	if cfg.Ephemeral {
+		t.mu.Lock()
+		t.fork = true
+		t.mu.Unlock()
+	}
 	t.setModelDefaults(res)
 	t.setPermissionDefaults(res)
 	t.setNetworkPolicy(cfg, res)

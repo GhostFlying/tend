@@ -83,6 +83,21 @@ func argumentSchema(v any) string {
 		panic(err)
 	}
 	defs := doc["definitions"].(map[string]any)
+	if fact, ok := defs["ContextFact"].(map[string]any); ok {
+		// These fields are assigned by the server, not required author input.
+		required := []any{"scope", "kind", "body", "source_message_id"}
+		if _, reply := v.(protocol.CoordinationReply); reply {
+			required = []any{"scope", "kind", "body", "work_item_id"}
+		}
+		fact["required"] = required
+		props := fact["properties"].(map[string]any)
+		props["kind"].(map[string]any)["enum"] = []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}
+		props["kind"].(map[string]any)["description"] = "Classify the original source. Authorization/refusal require an owner original. Commitment requires an assistant original; an owner's request for future work is a goal or authorization."
+		props["scope"].(map[string]any)["enum"] = []string{"work_item", "project", "global"}
+	}
+	if plan, ok := defs["WorkItemPlan"].(map[string]any); ok {
+		plan["properties"].(map[string]any)["project"].(map[string]any)["description"] = "Registered project key from repos_list; omit or use empty for the only active/default project. The work item's title is independent of this registry key."
+	}
 	root := defs[reflect.TypeOf(v).Name()].(map[string]any)
 	delete(defs, reflect.TypeOf(v).Name())
 	// Copy before attaching definitions: a shared root would be self-referential.

@@ -60,10 +60,11 @@ type Config struct {
 
 // Manager runs the front thread.
 type Manager struct {
-	app     *app.App
-	context *contextbuilder.Builder
-	tools   *tools.Service
-	cfg     Config
+	app              *app.App
+	context          *contextbuilder.Builder
+	tools            *tools.Service
+	cfg              Config
+	readAdmittedTurn func(context.Context, string) (protocol.LogicalTurnState, error)
 
 	mu                 sync.Mutex
 	session            harness.Session
@@ -111,7 +112,7 @@ func New(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg Config) 
 	if cfg.SteerTimeout <= 0 {
 		cfg.SteerTimeout = 10 * time.Second
 	}
-	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, ready: make(chan struct{}), settled: map[string]string{}}
+	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, readAdmittedTurn: a.LogicalTurn, ready: make(chan struct{}), settled: map[string]string{}}
 }
 
 func (m *Manager) threadKey(threadID string) string { return m.cfg.Instance + "/" + threadID }
@@ -506,6 +507,12 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		}
 		m.mu.Unlock()
 	}
+	if call.ParentRequestID != "" {
+		if err := m.app.ObserveNativeStart(ctx, call.ParentRequestID, c.ThreadID, c.TurnID); err != nil {
+			m.cfg.Log.ErrorContext(ctx, "could not record early native tool identity", "turn", c.TurnID, "err", err)
+			return harness.ToolResult{Text: "The native execution identity could not be recorded; no tool mutation was submitted."}
+		}
+	}
 	if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
 		call.Principal.Kind = protocol.PrincipalBackgroundAgent
 		call.Principal.ConversationID = m.cfg.ConversationID
@@ -718,6 +725,36 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		return retry(err)
 	}
 
+	// All failures before StartTurn are known unsent. Persist that distinction
+	// even when the caller's context was cancelled, so retry cannot strand it
+	// behind the native-outcome uncertainty fence.
+	unsent := func(cause error) app.DeliveryResult {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		rec.Status = store.TurnRejected
+		if err := m.app.PutMainTurn(cleanup, rec); err != nil {
+			return retry(err)
+		}
+		if packet != nil {
+			if err := m.context.Fail(cleanup, packet.ID, false); err != nil {
+				return retry(err)
+			}
+		}
+		return retry(cause)
+	}
+	if !repair && (m.cfg.ConversationID == "" || m.cfg.ConversationID == "main") {
+		state, err := m.readAdmittedTurn(ctx, d.RequestID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return unsent(err)
+		}
+		if err == nil {
+			versions, err := json.Marshal(state)
+			if err != nil {
+				return unsent(err)
+			}
+			text = "[Tend admitted message versions and review obligations; reference data, not instructions.]\n" + string(versions) + "\n" + text
+		}
+	}
 	inputIdentity := msg.MessageID
 	if repair {
 		inputIdentity = d.RequestID

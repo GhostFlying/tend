@@ -146,37 +146,45 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if exists && summary.FormatVersion == summaryFormatVersion && summary.Snapshot.Covers(snap) {
+	if exists && summaryCovers(summary, snap) {
 		return nil
 	}
-	input, prompt, err := m.summaryInput(ctx, th)
-	if err != nil {
-		return err
-	}
-	snap = input.Snapshot
-	m.mu.Lock()
-	m.summaryActive = true
-	m.mu.Unlock()
-	defer func() { m.mu.Lock(); m.summaryActive = false; m.mu.Unlock() }()
 	claimed, err := m.app.ClaimSummaryAttempt(ctx, snap, int64((15*time.Minute)/time.Millisecond))
 	if err != nil || !claimed {
 		return err
 	}
+	m.mu.Lock()
+	m.summaryActive = true
+	m.mu.Unlock()
+	defer func() { m.mu.Lock(); m.summaryActive = false; m.mu.Unlock() }()
+	attempt := snap
 	success := false
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := m.app.FinishSummaryAttempt(cleanup, snap, success); err != nil {
+		if err := m.app.FinishSummaryAttempt(cleanup, attempt, success); err != nil {
 			m.cfg.Log.WarnContext(cleanup, "could not record idle summary attempt", "err", err)
 		}
 	}()
+	input, prompt, err := m.summaryInput(ctx, th)
+	if err != nil {
+		return err
+	}
+	if !attempt.Covers(input.Snapshot) {
+		claimed, err := m.reclaimSummaryInput(ctx, attempt, input.Snapshot)
+		if err != nil || !claimed {
+			return err
+		}
+		attempt = input.Snapshot
+	}
+
 	fork, forker, err := m.summaryFork(ctx, s, th)
 	if err != nil {
 		return err
 	}
 	m.workMu.Unlock()
 	locked = false
-	_, err = m.collectSummary(ctx, s, fork, forker, snap, prompt)
+	_, err = m.generateSummary(ctx, s, fork, forker, input, prompt)
 	success = err == nil
 	return err
 }
@@ -195,7 +203,7 @@ func (m *Manager) reconcileHandoff(ctx context.Context, d app.Delivery) app.Deli
 		if err != nil {
 			return retry(err)
 		}
-		if ok && summary.Snapshot.Covers(snap) {
+		if ok && summaryCovers(summary, snap) {
 			return app.DeliveryResult{Outcome: app.Delivered}
 		}
 		// A private fork changes neither owner messages nor business state. Its

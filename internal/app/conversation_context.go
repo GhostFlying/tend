@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
@@ -38,9 +40,7 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if (p.Disposition != "linked" && p.Disposition != "unassigned") || (p.Disposition == "linked") != (len(p.WorkItemIDs) > 0) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "explicit linked with nonempty work items or unassigned with empty work items required")
 	}
-	if old.OwnerLocked && x.Principal.Kind != protocol.PrincipalOwner {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "owner message classification cannot be overridden")
-	}
+
 	desired := map[string]bool{}
 	for _, id := range p.WorkItemIDs {
 		if desired[id] {
@@ -50,6 +50,19 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if _, err := store.GetWorkItem(ctx, tx.Q(), id); err != nil {
 			return Outcome{}, errNotFound(err, "work item does not exist")
 		}
+	}
+	same := old.Disposition == p.Disposition && len(old.Items) == len(desired)
+	for _, item := range old.Items {
+		same = same && desired[item.WorkItemID]
+	}
+	if same && (x.Principal.Kind != protocol.PrincipalOwner || old.OwnerLocked) {
+		if err := attachReviewSource(ctx, x, tx, old.MessageID); err != nil {
+			return Outcome{}, err
+		}
+		return Outcome{Result: map[string]any{"revision": old.Revision}}, nil
+	}
+	if old.OwnerLocked && x.Principal.Kind != protocol.PrincipalOwner {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "owner message classification cannot be overridden")
 	}
 	source := "agent"
 	owner := x.Principal.Kind == protocol.PrincipalOwner
@@ -131,6 +144,13 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != revision {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "context changed")
 	}
+	execution, err := x.reviewExecution(ctx, tx.Q())
+	if err != nil {
+		return Outcome{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_contexts(logical_turn_id,work_item_id) SELECT e.logical_turn_id,? FROM logical_turn_executions e JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE e.request_id=? AND l.status<>'completed' ON CONFLICT(logical_turn_id,work_item_id) DO NOTHING`, id, execution); err != nil {
+		return Outcome{}, err
+	}
 	if c.Action == "prepare" {
 		var p protocol.PrepareWorkItemContextPayload
 		if err := decodePayload(x.Env, &p); err != nil {
@@ -149,6 +169,8 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		if len(p.RetiredFactIDs)+len(p.ConfirmedFactIDs) > 100 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "at most 100 fact reconciliations")
 		}
+
+		changed := false
 		seen := map[string]bool{}
 		for _, group := range []struct {
 			ids    []string
@@ -160,7 +182,8 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 				}
 				seen[fact] = true
 				var source, scope, item string
-				if err := tx.Q().QueryRowContext(ctx, `SELECT source_message_id,scope,COALESCE(work_item_id,'') FROM work_item_context_facts WHERE fact_id=? AND superseded=0 AND (work_item_id=? OR scope='global' OR (scope='project' AND project=(SELECT project FROM work_items WHERE work_item_id=?)))`, fact, id, id).Scan(&source, &scope, &item); err != nil {
+				var needsReview bool
+				if err := tx.Q().QueryRowContext(ctx, `SELECT source_message_id,scope,COALESCE(work_item_id,''),needs_review FROM work_item_context_facts WHERE fact_id=? AND superseded=0 AND (work_item_id=? OR scope='global' OR (scope='project' AND project=(SELECT project FROM work_items WHERE work_item_id=?)))`, fact, id, id).Scan(&source, &scope, &item, &needsReview); err != nil {
 					return Outcome{}, errNotFound(err, "fact outside context")
 				}
 				if !group.retire && scope == "work_item" {
@@ -172,6 +195,10 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 						return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "removed source cannot certify the old fact; retire or replace it")
 					}
 				}
+				if !group.retire && !needsReview {
+					continue
+				}
+				changed = true
 				if _, err := tx.Exec(ctx, `UPDATE work_item_context_facts SET superseded=?,needs_review=0 WHERE fact_id=?`, group.retire, fact); err != nil {
 					return Outcome{}, err
 				}
@@ -186,6 +213,15 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		if unresolved {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "explicitly reconcile facts invalidated by source corrections")
+		}
+		if !changed {
+			var unchanged bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT baseline_revision>0 AND coverage=? AND gaps=? FROM work_item_contexts WHERE work_item_id=?`, p.Coverage, p.Gaps, id).Scan(&unchanged); err != nil {
+				return Outcome{}, err
+			}
+			if unchanged {
+				return Outcome{Result: map[string]any{"work_item_id": id}}, nil
+			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE work_item_contexts SET baseline_revision=revision+1,revision=revision+1,coverage=?,gaps=?,prepared_by=? WHERE work_item_id=?`, p.Coverage, p.Gaps, x.Principal.Thread, id); err != nil {
 			return Outcome{}, err
@@ -238,6 +274,17 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		if p.Scope == "project" && p.Project == "" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "project is required")
+		}
+		var existing string
+		err = tx.Q().QueryRowContext(ctx, `SELECT fact_id FROM work_item_context_facts WHERE scope=? AND COALESCE(work_item_id,'')=? AND project=? AND kind=? AND body=? AND source_message_id=? AND COALESCE(supersedes,'')=? AND superseded=0 AND needs_review=0 LIMIT 1`, p.Scope, p.WorkItemID, p.Project, p.Kind, p.Body, p.SourceMessageID, p.Supersedes).Scan(&existing)
+		if err == nil {
+			if err := attachReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
+				return Outcome{}, err
+			}
+			return Outcome{Result: map[string]any{"work_item_id": id, "fact_id": existing}}, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Outcome{}, err
 		}
 		if p.Supersedes != "" {
 			res, err := tx.Exec(ctx, `UPDATE work_item_context_facts SET superseded=1 WHERE fact_id=? AND scope=? AND COALESCE(work_item_id,'')=? AND project=? AND superseded=0`, p.Supersedes, p.Scope, p.WorkItemID, p.Project)
@@ -333,5 +380,65 @@ func initializeWorkItemContext(ctx context.Context, x *Exec, tx *store.Tx, id st
 		}
 	}
 	_, err := tx.Exec(ctx, `UPDATE work_item_contexts SET coverage=?,gaps=?,baseline_revision=revision+1,revision=revision+1,prepared_by=? WHERE work_item_id=?`, p.Coverage, p.Gaps, x.Principal.Thread, id)
-	return err
+	if err != nil {
+		return err
+	}
+	if len(p.SourceReviews) > 0 {
+		execution, err := x.reviewExecution(ctx, tx.Q())
+		if err != nil {
+			return err
+		}
+		state, err := store.LogicalTurn(ctx, tx.Q(), execution)
+		if err != nil {
+			return err
+		}
+		commit := protocol.LogicalTurnCommit{}
+		for _, r := range p.SourceReviews {
+			m, err := store.MessageAssociations(ctx, tx.Q(), r.MessageID)
+			if err != nil {
+				return err
+			}
+			commit.Messages = append(commit.Messages, protocol.LogicalTurnReview{MessageID: r.MessageID, ContentRevision: m.ContentRevision, AssociationRevision: m.Revision})
+		}
+		var revision int64
+		if err := tx.Q().QueryRowContext(ctx, `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, id).Scan(&revision); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_contexts(logical_turn_id,work_item_id) VALUES(?,?) ON CONFLICT DO NOTHING`, state.ID, id); err != nil {
+			return err
+		}
+		commit.Contexts = []protocol.LogicalContextReview{{WorkItemID: id, Revision: revision}}
+		child := *x
+		env := *x.Env
+		child.Env = &env
+		env.Payload, _ = json.Marshal(commit)
+		_, err = (CommitLogicalTurn{RequestID: execution}).Apply(ctx, &child, tx)
+		return err
+	}
+	return nil
+}
+
+func validateInitialReviews(ctx context.Context, x *Exec, tx *store.Tx, p protocol.InitialWorkItemContext) error {
+	if len(p.SourceReviews) > 0 {
+		if len(p.SourceReviews) != len(p.SourceMessageIDs) {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "review every distinct initial source version")
+		}
+		seen := map[string]bool{}
+		for _, r := range p.SourceReviews {
+			if seen[r.MessageID] || !slices.Contains(p.SourceMessageIDs, r.MessageID) {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "review distinct declared sources")
+			}
+			seen[r.MessageID] = true
+			m, err := store.MessageAssociations(ctx, tx.Q(), r.MessageID)
+			if err != nil {
+				return err
+			}
+			if m.ContentRevision != r.ContentRevision || m.Revision != r.AssociationRevision {
+				details, _ := json.Marshal(map[string]any{"pending": []any{map[string]any{"kind": "message_review", "message_id": r.MessageID, "content_revision": m.ContentRevision, "association_revision": m.Revision, "reason": "initial source changed"}}})
+				return &protocol.Error{Code: protocol.CodeStaleRevision, Message: "initial source changed", Details: details}
+			}
+		}
+	}
+
+	return nil
 }

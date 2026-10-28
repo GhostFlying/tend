@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -34,9 +35,9 @@ func (r *historyReference) StartTurn(context.Context, harness.TurnInput) (string
 }
 func (r *historyReference) Interrupt(context.Context, string) error { return harness.ErrRejected }
 
-const summaryFormatVersion int64 = 2
+const summaryFormatVersion int64 = 3
 
-const summaryInstructions = `You are preparing a private handoff summary of the preceding conversation. This is maintenance, not a user request. Do not call tools, run commands, change files, perform tasks, or ask questions. Return only a concise, self-contained summary in the user's language. Preserve the user's goal, explicit constraints and authorization boundaries, decisions and their reasons, completed work and evidence, unresolved issues, rejected approaches, and concrete next steps. Preserve relevant task IDs and artifact references exactly. Distinguish confirmed facts from hypotheses. Preserve unknown delivery and action outcomes as unknown; a summary does not resolve them or authorize replay. Do not invent approvals or claim unfinished work is complete. The original conversation remains available for checking details.`
+const summaryInstructions = `You are preparing a private handoff summary of the preceding conversation. This is maintenance, not a user request. Do not call tools, run commands, change files, perform tasks, or ask questions. Return only a concise, self-contained summary in the user's language. Preserve the user's goal, explicit constraints and authorization boundaries, decisions and their reasons, completed work and evidence, unresolved issues, rejected approaches, and concrete next steps. Preserve relevant task IDs and artifact references exactly. Distinguish confirmed facts from hypotheses. Facts marked needs_review are unresolved, never current authority. Apply withdrawals and corrections over older history and summaries. native_body_unchanged means only unchanged native text was omitted; apply its current metadata without erasing the original text. body_reference=previous_summary means the exact unchanged version was already covered by the complete prior summary; its corrected text overrides older raw history. Preserve unknown delivery and action outcomes as unknown; a summary does not resolve them or authorize replay. Do not invent approvals or claim unfinished work is complete. The original conversation remains available for checking details.`
 
 func currentToolsetHash() (string, error) {
 	specs := hostedSpecs()
@@ -112,9 +113,18 @@ func (m *Manager) HandoffStatus(ctx context.Context) (protocol.ConversationHando
 		return view, err
 	}
 	if ok {
-		view.Summary = &protocol.ConversationSummaryView{ID: summary.ID, SourceThreadID: summary.Snapshot.ThreadID, Version: summary.Snapshot.Version, MaxSeq: summary.Snapshot.MaxSeq, LastCompletedTurnID: summary.Snapshot.LastCompletedTurnID, CreatedAtMillis: summary.CreatedAtMillis, Current: summary.Snapshot.Covers(snap)}
+		view.Summary = &protocol.ConversationSummaryView{ID: summary.ID, FormatVersion: summary.FormatVersion, SourceThreadID: summary.Snapshot.ThreadID, Version: summary.Snapshot.Version, MaxSeq: summary.Snapshot.MaxSeq, LastCompletedTurnID: summary.Snapshot.LastCompletedTurnID, CreatedAtMillis: summary.CreatedAtMillis, Current: summaryCovers(summary, snap)}
+		if c := summary.Snapshot.Summary; c != nil {
+			view.Summary.Method, view.Summary.LedgerBytes, view.Summary.CorrectionBytes = c.Method, c.LedgerBytes, c.CorrectionBytes
+			view.Summary.Batches, view.Summary.Complete = c.Batches, c.Complete
+		}
 	}
 	return view, nil
+}
+
+// summaryCovers distinguishes v3 coverage from retained legacy reference text.
+func summaryCovers(summary store.HandoffSummary, snap store.HandoffSnapshot) bool {
+	return summary.FormatVersion == summaryFormatVersion && summary.Snapshot.Summary != nil && summary.Snapshot.Summary.Complete && summary.Snapshot.Covers(snap)
 }
 
 // summaryFork acquires its source snapshot while deliveries are excluded, but
@@ -124,7 +134,22 @@ func (m *Manager) summaryFork(ctx context.Context, s harness.Session, th harness
 	if !ok {
 		return nil, nil, errors.New("mainthread: harness does not support isolated summaries")
 	}
+	selection, err := m.summaryModel(ctx, s, th)
+	if err != nil {
+		return nil, nil, err
+	}
 	cfg := m.cfg.Thread
+	cfg.Model = selection.Model
+	cfg.Config = maps.Clone(cfg.Config)
+	if cfg.Config == nil {
+		cfg.Config = map[string]any{}
+	}
+	if selection.Provider != "" {
+		cfg.Config["model_provider"] = selection.Provider
+	}
+	if selection.Effort != "" {
+		cfg.Config["model_reasoning_effort"] = selection.Effort
+	}
 	cfg.DeveloperInstructions = summaryInstructions
 	cfg.Tools = nil
 	cfg.Sandbox = "read-only"
@@ -143,9 +168,10 @@ func (m *Manager) summaryFork(ctx context.Context, s harness.Session, th harness
 	return fork, forker, nil
 }
 
-func (m *Manager) collectSummary(ctx context.Context, s harness.Session, fork harness.Thread, forker harness.ThreadForker, snap store.HandoffSnapshot, prompt string) (store.HandoffSummary, error) {
+func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forker harness.ThreadForker, snap store.HandoffSnapshot, prompt string, selection harness.ModelSelection) (result store.HandoffSummary, err error) {
 	ctx, cancel := context.WithTimeout(ctx, m.cfg.SummaryTimeout)
 	defer cancel()
+	identity := "tend-summary:" + fork.ID()
 	turnID := ""
 	completed := false
 	defer func() {
@@ -153,21 +179,49 @@ func (m *Manager) collectSummary(ctx context.Context, s harness.Session, fork ha
 		defer stop()
 		// Stop first, including when turn/start lost its response; ReleaseThread
 		// deliberately cannot delete or archive the source conversation.
+		if !completed && turnID == "" {
+			if reader, ok := fork.(harness.TurnReader); ok {
+				if receipt, found, err := reader.FindTurn(cleanup, identity, ""); err == nil && found {
+					turnID = receipt.ID
+					completed = receipt.Status == "completed" || receipt.Status == "failed" || receipt.Status == "interrupted"
+				}
+			}
+		}
 		if !completed {
 			_ = fork.Interrupt(cleanup, turnID)
 		}
-		if err := forker.ReleaseThread(cleanup, fork.ID()); err != nil {
-			m.cfg.Log.WarnContext(cleanup, "could not release private summary branch", "err", err)
+		if releaseErr := forker.ReleaseThread(cleanup, fork.ID()); releaseErr != nil {
+			m.cfg.Log.WarnContext(cleanup, "could not release private summary branch", "err", releaseErr)
+			err = errors.Join(err, fmt.Errorf("mainthread: release private summary branch: %w", releaseErr))
 		}
 	}()
 	input := prompt
-	// Preserve the same selected model and effort as normal owner turns.
-	selection, err := m.summaryModel(ctx, s, fork)
+	// All stages use the model selected when the history fork was frozen.
+	turnID, err = fork.StartTurn(ctx, harness.TurnInput{Text: input, UserMessageID: identity, Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort})
 	if err != nil {
-		return store.HandoffSummary{}, err
-	}
-	turnID, err = fork.StartTurn(ctx, harness.TurnInput{Text: input, Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort})
-	if err != nil {
+		if !errors.Is(err, harness.ErrRejected) {
+			if reader, ok := fork.(harness.TurnReader); ok {
+				readCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				receipt, found, readErr := reader.FindTurn(readCtx, identity, "")
+				stop()
+				if readErr == nil && found {
+					turnID = receipt.ID
+					if receipt.Status == "completed" {
+						completed = true
+						var parts []string
+						for _, item := range receipt.Messages {
+							if item.ItemType == harness.ItemAgentMessage && item.Kind == harness.EventItemCompleted {
+								parts = append(parts, item.Text)
+							}
+						}
+						body := strings.TrimSpace(strings.Join(parts, "\n\n"))
+						if body != "" && len(body) <= 64<<10 {
+							return store.HandoffSummary{Instance: m.cfg.Instance, Snapshot: snap, Body: body, FormatVersion: summaryFormatVersion}, nil
+						}
+					}
+				}
+			}
+		}
 		return store.HandoffSummary{}, fmt.Errorf("mainthread: start summary: %w", err)
 	}
 	texts := map[string]string{}
@@ -222,7 +276,7 @@ func (m *Manager) collectSummary(ctx context.Context, s harness.Session, fork ha
 				if body == "" {
 					return store.HandoffSummary{}, errors.New("mainthread: summary is empty")
 				}
-				return m.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: m.cfg.Instance, Snapshot: snap, Body: body, FormatVersion: summaryFormatVersion})
+				return store.HandoffSummary{Instance: m.cfg.Instance, Snapshot: snap, Body: body, FormatVersion: summaryFormatVersion}, nil
 			}
 		}
 	}
@@ -237,7 +291,7 @@ func (m *Manager) prepareSummary(ctx context.Context, s harness.Session, th harn
 	if err != nil {
 		return summary, false, err
 	}
-	if exists && summary.FormatVersion == summaryFormatVersion && summary.Snapshot.Covers(snap) {
+	if exists && summaryCovers(summary, snap) {
 		return summary, true, nil
 	}
 	// The old native thread has not seen queued messages. Do not assign their
@@ -254,32 +308,51 @@ func (m *Manager) prepareSummary(ctx context.Context, s harness.Session, th harn
 	m.summaryActive = true
 	m.mu.Unlock()
 	defer func() { m.mu.Lock(); m.summaryActive = false; m.mu.Unlock() }()
-	input, prompt, err := m.summaryInput(ctx, th)
+	// Claim the frozen snapshot before input construction so preparation failures back off.
+	claimed, err := m.app.ClaimSummaryAttempt(ctx, snap, int64((15*time.Minute)/time.Millisecond))
 	if err != nil {
 		return summary, false, err
 	}
-	snap = input.Snapshot
-	// Explicit owner preparation may retry after an earlier failed attempt.
-	// Automatic preparation still observes the durable failure backoff.
-	_, err = m.app.ClaimSummaryAttempt(ctx, snap, int64((15*time.Minute)/time.Millisecond))
-	if err != nil {
-		return summary, false, err
+	if !claimed {
+		return summary, false, nil
 	}
+	attempt := snap
 	success := false
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := m.app.FinishSummaryAttempt(cleanup, snap, success); err != nil {
+		if err := m.app.FinishSummaryAttempt(cleanup, attempt, success); err != nil {
 			m.cfg.Log.WarnContext(cleanup, "could not record summary attempt", "err", err)
 		}
 	}()
+	input, prompt, err := m.summaryInput(ctx, th)
+	if err != nil {
+		return summary, false, err
+	}
+	if !attempt.Covers(input.Snapshot) {
+		claimed, err := m.reclaimSummaryInput(ctx, attempt, input.Snapshot)
+		if err != nil || !claimed {
+			return summary, false, err
+		}
+		attempt = input.Snapshot
+	}
+
 	fork, forker, err := m.summaryFork(ctx, s, th)
 	if err != nil {
 		return summary, false, err
 	}
-	summary, err = m.collectSummary(ctx, s, fork, forker, snap, prompt)
+	summary, err = m.generateSummary(ctx, s, fork, forker, input, prompt)
 	success = err == nil
 	return summary, err == nil, err
+}
+
+// reclaimSummaryInput closes the preparation attempt and claims a newer
+// quiescent input snapshot before any model call uses that different key.
+func (m *Manager) reclaimSummaryInput(ctx context.Context, prior, input store.HandoffSnapshot) (bool, error) {
+	if err := m.app.FinishSummaryAttempt(ctx, prior, false); err != nil {
+		return false, err
+	}
+	return m.app.ClaimSummaryAttempt(ctx, input, (15 * time.Minute).Milliseconds())
 }
 
 func (m *Manager) handoffPrompt(ctx context.Context, source harness.Thread) (string, error) {
@@ -303,7 +376,7 @@ func (m *Manager) handoffPrompt(ctx context.Context, source harness.Thread) (str
 	if sourcePath == "" && known {
 		sourcePath = binding.RolloutPath
 	}
-	data := map[string]any{"source_thread_id": source.ID(), "source_rollout_path": sourcePath, "conversation_version": snap.Version, "message_sequence": snap.MaxSeq, "last_completed_turn_id": snap.LastCompletedTurnID, "pending_messages": snap.Pending, "ledger_facts": facts, "summary_available": hasSummary}
+	data := map[string]any{"source_thread_id": source.ID(), "source_rollout_path": sourcePath, "conversation_version": snap.ConversationVersion, "snapshot_version": snap.Version, "ledger_version": snap.LedgerVersion, "message_sequence": snap.MaxSeq, "last_completed_turn_id": snap.LastCompletedTurnID, "pending_messages": snap.Pending, "ledger_facts": facts, "summary_available": hasSummary}
 	_, unavailable := source.(*historyReference)
 	data["source_native_available"] = !unavailable
 	if known {
@@ -312,7 +385,7 @@ func (m *Manager) handoffPrompt(ctx context.Context, source harness.Thread) (str
 	if hasSummary {
 		data["summary"] = summary.Body
 		data["summary_source_thread_id"] = summary.Snapshot.ThreadID
-		data["summary_covers_snapshot"] = summary.Snapshot.Covers(snap)
+		data["summary_covers_snapshot"] = summaryCovers(summary, snap)
 		data["summary_covered_sequence"] = summary.Snapshot.MaxSeq
 	}
 	body, err := json.Marshal(data)
@@ -610,11 +683,7 @@ func (m *Manager) summaryInput(ctx context.Context, source harness.Thread) (app.
 	if input.Snapshot.ThreadID != source.ID() {
 		return input, "", errors.New("mainthread: summary source changed")
 	}
-	facts, err := m.context.Current(ctx, protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.cfg.Instance, Thread: source.ID()})
-	if err != nil {
-		return input, "", err
-	}
-	data := map[string]any{"snapshot": input.Snapshot, "source_rollout_path": rolloutPath(source), "previous_summary": input.PreviousSummary, "conversation_observations": input.Observations, "current_ledger_facts": facts}
+	data := map[string]any{"snapshot": input.Snapshot, "previous_summary": input.PreviousSummary, "corrections": input.Observations, "current_ledger_facts": input.Ledger}
 	body, err := json.Marshal(data)
 	if err != nil {
 		return input, "", err

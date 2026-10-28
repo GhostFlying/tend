@@ -95,8 +95,12 @@ func (a *App) HandoffSummary(ctx context.Context, instance string) (v store.Hand
 		if err != nil {
 			return err
 		}
+		watermark := v.Snapshot.Version
+		if v.FormatVersion >= 3 || v.Snapshot.ConversationVersion != 0 || v.Snapshot.LedgerVersion != 0 {
+			watermark = v.Snapshot.ConversationVersion
+		}
 		var withdrawn bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_changes d LEFT JOIN conversation_message_controls c ON c.message_id=d.message_id LEFT JOIN followup_occurrences f ON f.message_id=d.message_id WHERE (c.withdrawn_at<>0 OR f.status='cancelled') AND d.last_version>?)`, v.Snapshot.Version).Scan(&withdrawn); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_changes d LEFT JOIN conversation_message_controls c ON c.message_id=d.message_id LEFT JOIN followup_occurrences f ON f.message_id=d.message_id WHERE (c.withdrawn_at<>0 OR f.status='cancelled') AND d.last_version>?)`, watermark).Scan(&withdrawn); err != nil {
 			return err
 		}
 		if withdrawn {
@@ -357,13 +361,13 @@ func (a *App) ClaimSummaryAttempt(ctx context.Context, snap store.HandoffSnapsho
 			return protocol.Errorf(protocol.CodeInvalidRequest, "summary backoff is too large")
 		}
 		var done bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_summaries WHERE instance=? AND source_thread_id=? AND source_version=?)`, snap.Instance, snap.ThreadID, snap.Version).Scan(&done); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_summaries WHERE instance=? AND source_thread_id=? AND source_version=? AND format_version>=3 AND json_extract(snapshot_json,'$.summary.complete')=1)`, snap.Instance, snap.ThreadID, snap.Version).Scan(&done); err != nil {
 			return err
 		}
 		if done {
 			return nil
 		}
-		result, err := tx.Exec(ctx, `INSERT INTO conversation_summary_attempts(instance,source_thread_id,source_version,binding_generation,status,retry_at,updated_at) VALUES(?,?,?,?,'started',?,?) ON CONFLICT(instance,source_thread_id,source_version,binding_generation) DO UPDATE SET status='started',retry_at=excluded.retry_at,updated_at=excluded.updated_at WHERE conversation_summary_attempts.status<>'succeeded' AND conversation_summary_attempts.retry_at<=?`, snap.Instance, snap.ThreadID, snap.Version, snap.BindingGeneration, now+retryAfterMillis, now, now)
+		result, err := tx.Exec(ctx, `INSERT INTO conversation_summary_attempts(instance,source_thread_id,source_version,binding_generation,status,retry_at,updated_at) VALUES(?,?,?,?,'started',?,?) ON CONFLICT(instance,source_thread_id,source_version,binding_generation) DO UPDATE SET status='started',retry_at=excluded.retry_at,updated_at=excluded.updated_at WHERE conversation_summary_attempts.status='succeeded' OR conversation_summary_attempts.retry_at<=?`, snap.Instance, snap.ThreadID, snap.Version, snap.BindingGeneration, now+retryAfterMillis, now, now)
 		if err != nil {
 			return err
 		}

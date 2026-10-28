@@ -52,7 +52,8 @@ type Exec struct {
 	WaitPerHour float64
 	// HostLostAfter is how long a host may go unheard before the
 	// workspaces on it count as unavailable; 0 never (D62).
-	HostLostAfter time.Duration
+	HostLostAfter    time.Duration
+	reviewedContexts map[string][]string
 }
 
 // Outcome is what a successful Apply produced besides its direct writes.
@@ -204,10 +205,52 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		if err := tx.Savepoint(ctx, applySavepoint); err != nil {
 			return err
 		}
+		// Context revisions include queue and lifecycle counters. Carry only
+		// reviews that were exact before the write, independent of its actor or
+		// command alias; persistOutcome also requires valid reviewed sources.
+		x.reviewedContexts = map[string][]string{}
+		rows, err := tx.Q().QueryContext(ctx, `SELECT c.work_item_id,r.logical_turn_id FROM work_item_contexts c JOIN logical_turn_context_reviews r ON r.work_item_id=c.work_item_id AND r.revision=c.revision JOIN logical_turns l ON l.logical_turn_id=r.logical_turn_id WHERE l.status='processing'`)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id, logical string
+			if err := rows.Scan(&id, &logical); err != nil {
+				rows.Close()
+				return err
+			}
+			x.reviewedContexts[id] = append(x.reviewedContexts[id], logical)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+
 		out, applyErr := cmd.Apply(ctx, x, tx)
 		if applyErr == nil && out.NoEffect {
 			if len(out.Events) > 0 || len(out.Outbox) > 0 {
 				return fmt.Errorf("app: %s returned a no-effect outcome with events or outbox messages", env.Operation)
+			}
+			if p.Kind == protocol.PrincipalMainAgent && coordinationWrite(env.Operation) {
+				// Preserve no-effect business semantics, but durably retain the
+				// exact receipt so retries cannot observe a later revision.
+				if err := tx.RollbackTo(ctx, applySavepoint); err != nil {
+					return err
+				}
+				if err := coordinationReceipt(ctx, x, tx, &out); err != nil {
+					return err
+				}
+				result, err := json.Marshal(out.Result)
+				if err != nil {
+					return err
+				}
+				rec.Status, rec.ResultJSON = protocol.OpSucceeded, string(result)
+				if err := tx.InsertRequest(ctx, rec); err != nil {
+					return err
+				}
+				op = operationOf(rec)
+				return nil
 			}
 			result, err := json.Marshal(out.Result)
 			if err != nil {
@@ -320,7 +363,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 			}
 		}
 		if e.Kind != "task.completed" && wakesMain(x.Principal, e.Kind) {
-			if e.Kind == "work_item_choice.answered" {
+			if e.Kind == "task.context_changed" {
+				if err := recordTaskContextWake(ctx, x, tx, e, eventID); err != nil {
+					return err
+				}
+			} else if e.Kind == "work_item_choice.answered" {
 				if err := recordWorkItemChoiceWake(ctx, x, tx, e, eventID); err != nil {
 					return err
 				}
@@ -346,6 +393,38 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		}); err != nil {
 			return err
 		}
+	}
+	for id, logicals := range x.reviewedContexts {
+		affected := false
+		for _, e := range out.Events {
+			if e.ObjectType == "work_item" && e.ObjectID == id {
+				affected = true
+			}
+			if e.ObjectType == "task" {
+				var linked bool
+				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_item_task_links WHERE task_id=? AND work_item_id=?)`, e.ObjectID, id).Scan(&linked); err != nil {
+					return err
+				}
+				affected = affected || linked
+			}
+		}
+		if !affected {
+			continue
+		}
+		checked, err := store.WorkItemContextReviewed(ctx, tx.Q(), id)
+		if err != nil {
+			return err
+		}
+		if checked {
+			for _, logical := range logicals {
+				if _, err := tx.Exec(ctx, `UPDATE logical_turn_context_reviews SET revision=(SELECT revision FROM work_item_contexts WHERE work_item_id=?) WHERE work_item_id=? AND logical_turn_id=?`, id, id, logical); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if err := coordinationReceipt(ctx, x, tx, &out); err != nil {
+		return err
 	}
 	result, err := json.Marshal(out.Result)
 	if err != nil {

@@ -59,17 +59,20 @@ type ContextFact struct {
 	NeedsReview     bool   `json:"needs_review"`
 }
 type WorkItemContext struct {
-	SyncStatus string             `json:"sync_status"`
-	Watermark  int64              `json:"watermark"`
-	WorkItemID string             `json:"work_item_id"`
-	Revision   int64              `json:"revision"`
-	Prepared   bool               `json:"prepared"`
-	Coverage   string             `json:"coverage"`
-	Gaps       string             `json:"gaps"`
-	Facts      []ContextFact      `json:"facts"`
-	Sources    []ConversationItem `json:"sources"`
-	More       bool               `json:"more"`
-	Next       int64              `json:"next,omitempty"`
+	DispatchReady     bool               `json:"dispatch_ready"`
+	CoordinationState string             `json:"coordination_state"`
+	DispatchBlockers  []ContextBlocker   `json:"dispatch_blockers"`
+	SyncStatus        string             `json:"sync_status"`
+	Watermark         int64              `json:"watermark"`
+	WorkItemID        string             `json:"work_item_id"`
+	Revision          int64              `json:"revision"`
+	Prepared          bool               `json:"prepared"`
+	Coverage          string             `json:"coverage"`
+	Gaps              string             `json:"gaps"`
+	Facts             []ContextFact      `json:"facts"`
+	Sources           []ConversationItem `json:"sources"`
+	More              bool               `json:"more"`
+	Next              int64              `json:"next,omitempty"`
 }
 type PrepareWorkItemContextPayload struct {
 	RetiredFactIDs   []string `json:"retired_fact_ids,omitempty"`
@@ -184,4 +187,14 @@ type PendingClarification struct {
 type AdoptClarificationPayload struct {
 	LogicalTurnID string `json:"logical_turn_id"`
 	Revision      int64  `json:"expected_control_revision"`
+}
+
+// ContextBlocker identifies a semantic or lifecycle fence at an exact object.
+type ContextBlocker struct {
+	ControlRevision int64  `json:"control_revision,omitempty"`
+	SpecVersion     int64  `json:"spec_version,omitempty"`
+	Code            string `json:"code"`
+	ObjectID        string `json:"object_id"`
+	Revision        int64  `json:"revision"`
+	Message         string `json:"message"`
 }

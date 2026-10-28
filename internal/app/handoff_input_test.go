@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -75,10 +76,10 @@ func TestSummaryInputIncludesServerOnlyNoticesAndCompleteDeltas(t *testing.T) {
 	if err := json.Unmarshal(first.Observations, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if first.PreviousSummary != nil || len(rows) != 4 || !strings.Contains(string(first.Observations), "task finished; artifact report") {
+	if first.PreviousSummary != nil || len(rows) != 3 || !strings.Contains(string(first.Observations), "task finished; artifact report") {
 		t.Fatalf("server-only observations missing: %+v %s", first, first.Observations)
 	}
-	if _, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: first.Snapshot, Body: "prior complete summary", FormatVersion: 2}); err != nil {
+	if _, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: first.Snapshot, Body: "prior complete summary", FormatVersion: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.store.Write(ctx, func(tx *store.Tx) error {
@@ -106,10 +107,10 @@ func TestSummaryInputIncludesServerOnlyNoticesAndCompleteDeltas(t *testing.T) {
 	if err := json.Unmarshal(delta.Observations, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 4 || strings.Contains(string(delta.Observations), "unchanged notice") || !strings.Contains(string(delta.Observations), `"deleted":true`) || !strings.Contains(string(delta.Observations), "complete report") || !strings.Contains(string(delta.Observations), "notice edited in place") {
+	if len(rows) != 3 || strings.Contains(string(delta.Observations), "unchanged notice") || !strings.Contains(string(delta.Observations), `"deleted":true`) || strings.Contains(string(delta.Observations), "complete report") || !strings.Contains(string(delta.Observations), "notice edited in place") {
 		t.Fatalf("incomplete delta: %s", delta.Observations)
 	}
-	saved, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: delta.Snapshot, Body: "new complete summary", FormatVersion: 2})
+	saved, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: delta.Snapshot, Body: "new complete summary", FormatVersion: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,45 +129,35 @@ func TestSummaryInputIncludesServerOnlyNoticesAndCompleteDeltas(t *testing.T) {
 	}
 }
 
-func TestSummaryInputBudgetNeverTruncatesOrClaimsCoverage(t *testing.T) {
+func TestSummaryInputPageHintNeverTruncatesCoverage(t *testing.T) {
 	h := newHarness(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := h.app.BindMainThread(ctx, "main", "source", "schema", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.store.Write(ctx, func(tx *store.Tx) error {
-		_, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: "large", Author: "system", Body: strings.Repeat("x", 1024)})
-		return err
+		for i := 0; i < 9; i++ {
+			if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: fmt.Sprint("notice-", i), Author: "system", Body: strings.Repeat("x", 40000)}); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	out, err := h.app.HandoffSummaryInput(ctx, "main", 128)
-	if protocol.CodeOf(err) != protocol.CodeInvalidRequest || len(out.Observations) != 0 || out.Snapshot.ThreadID != "" {
-		t.Fatalf("truncated success: %+v %v", out, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []any
+	if err := json.Unmarshal(out.Observations, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 9 || len(out.Observations) <= 256<<10 || !out.Snapshot.Summary.Complete {
+		t.Fatal("paging lost coverage", len(rows), len(out.Observations))
 	}
 	if h.count("conversation_summaries") != 0 {
-		t.Fatal("failed input saved summary")
-	}
-	full, err := h.app.HandoffSummaryInput(ctx, "main", 4096)
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: full.Snapshot, Body: strings.Repeat("\"<", 512), FormatVersion: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	encoded, err := json.Marshal(saved)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.app.HandoffSummaryInput(ctx, "main", len(encoded)+2); err != nil {
-		t.Fatalf("exact serialized budget rejected: %v", err)
-	}
-	if _, err := h.app.HandoffSummaryInput(ctx, "main", len(encoded)+1); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
-		t.Fatalf("previous metadata/escaping not budgeted: %v", err)
-	}
-	if _, err := h.app.HandoffSummaryInput(ctx, "main", 128); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
-		t.Fatalf("previous summary excluded from budget: %v", err)
+		t.Fatal("input preparation saved a summary")
 	}
 }
 
@@ -240,7 +231,7 @@ func TestSummaryInputDeltaIncludesAssistantStateOwnerStateAndDecision(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: input.Snapshot, Body: "prefix", FormatVersion: 2}); err != nil {
+	if _, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: input.Snapshot, Body: "prefix", FormatVersion: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.store.Write(ctx, func(tx *store.Tx) error {
@@ -260,5 +251,90 @@ func TestSummaryInputDeltaIncludesAssistantStateOwnerStateAndDecision(t *testing
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %s in %s", want, text)
 		}
+	}
+}
+
+func TestSummaryLedgerAndCorrectionsIgnoreRepeatedToolSnapshots(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	h.createWork(workPlan())
+	if _, err := h.app.BindMainThread(ctx, "main", "source", "schema", ""); err != nil {
+		t.Fatal(err)
+	}
+	before, err := h.app.HandoffSummaryInput(ctx, "main", 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		for i := 0; i < 50; i++ {
+			id := fmt.Sprint("tool-", i)
+			if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Kind: store.KindToolUse, Author: "main_agent"}); err != nil {
+				return err
+			}
+			if err := tx.PutToolUse(ctx, store.ToolUseRow{MessageID: id, ThreadID: "source", TurnID: "turn", ItemID: id, Tool: "tasks_read", Output: strings.Repeat("historical snapshot", 1024), Status: "completed"}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := h.app.HandoffSummaryInput(ctx, "main", 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	left, _ := json.Marshal(before.Ledger)
+	right, _ := json.Marshal(after.Ledger)
+	if string(left) != string(right) || string(before.Observations) != string(after.Observations) {
+		t.Fatal("tool history grew L or D")
+	}
+	if after.Snapshot.Version <= before.Snapshot.Version {
+		t.Fatal("fixture did not change native coverage version")
+	}
+}
+
+func TestSummaryDeltaCorrectsPriorUnknownNativeDeliveryState(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	if _, err := h.app.BindMainThread(ctx, "main", "source", "schema", ""); err != nil {
+		t.Fatal(err)
+	}
+	rec := store.MainTurn{RequestID: "system-delivery", MessageID: "system-notice", ThreadID: "source", TurnID: "native-system", Status: store.TurnInterrupted}
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: rec.MessageID, Author: "system", Body: "A result notification whose delivery was unknown"}); err != nil {
+			return err
+		}
+		if err := tx.PutMainTurn(ctx, rec, h.clock.Now().UnixMilli()); err != nil {
+			return err
+		}
+		return h.app.insertMessageState(ctx, tx, rec.MessageID, protocol.MessageUnknown, h.clock.Now().UnixMilli())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := h.app.HandoffSummaryInput(ctx, "main", 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(first.Observations), `"state":"unknown"`) {
+		t.Fatal("invalid fixture", string(first.Observations))
+	}
+	if _, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: first.Snapshot, Body: "Delivery of the notification is unknown.", FormatVersion: 3}); err != nil {
+		t.Fatal(err)
+	}
+	rec.Status = store.TurnCompleted
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		if err := tx.PutMainTurn(ctx, rec, h.clock.Now().UnixMilli()); err != nil {
+			return err
+		}
+		return h.app.insertMessageState(ctx, tx, rec.MessageID, protocol.MessageReplied, h.clock.Now().UnixMilli())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delta, err := h.app.HandoffSummaryInput(ctx, "main", 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(delta.Observations), `"state":"replied"`) {
+		t.Fatalf("state-only correction disappeared; prior=%s current=%s", first.Observations, delta.Observations)
 	}
 }
