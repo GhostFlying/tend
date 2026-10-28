@@ -138,7 +138,12 @@ func TestIdleSummaryDoesNotForkWithActiveOrPendingOwnerWork(t *testing.T) {
 }
 
 func TestIdleSummaryAllowsOwnerDeliveryAndRetainsStaleResult(t *testing.T) {
+	const phaseWait = 5 * time.Second
 	f := newHandoffFixture(t)
+	// This summary stays blocked through startup, status checks, the existing
+	// ten-second owner wait, and release. The shared one-second model budget
+	// would expire before the scenario's bounded stages can complete.
+	f.e.m.cfg.SummaryTimeout = 3*phaseWait + 10*time.Second
 	seedIdleConversation(t, f)
 	hash, err := currentToolsetHash()
 	if err != nil {
@@ -173,33 +178,56 @@ func TestIdleSummaryAllowsOwnerDeliveryAndRetainsStaleResult(t *testing.T) {
 	f.e.signal = dispatch.NewSignal()
 	f.e.start()
 	defer f.e.stop()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), phaseWait)
 	defer cancel()
 	if _, err := f.e.m.waitThread(ctx); err != nil {
 		t.Fatal(err)
 	}
+	cancel()
 	f.clock.Advance(time.Hour)
+	// The summary deliberately waits across owner delivery, whose bounded wait
+	// is independent of startup. Cancel and join it on every exit path.
+	summaryCtx, cancelSummary := context.WithCancel(t.Context())
 	finished := make(chan error, 1)
-	go func() { finished <- f.e.m.idleSummary(ctx) }()
+	summaryDone := make(chan struct{})
+	go func() {
+		defer close(summaryDone)
+		finished <- f.e.m.idleSummary(summaryCtx)
+	}()
+	defer func() {
+		cancelSummary()
+		unblock()
+		select {
+		case <-summaryDone:
+		case <-time.After(phaseWait):
+			t.Error("summary did not stop during cleanup")
+		}
+	}()
+	startCtx, cancelStart := context.WithTimeout(t.Context(), phaseWait)
+	defer cancelStart()
 	select {
 	case <-started:
-	case <-ctx.Done():
+	case <-startCtx.Done():
 		t.Fatal("summary did not start")
 	}
-	status, err := f.e.m.HandoffStatus(ctx)
+	cancelStart()
+	checkCtx, cancelCheck := context.WithTimeout(t.Context(), phaseWait)
+	defer cancelCheck()
+	status, err := f.e.m.HandoffStatus(checkCtx)
 	if err != nil || !status.Preparing || !status.Pending {
 		t.Fatalf("running summary status=%+v err=%v", status, err)
 	}
-	if _, ok, err := f.e.m.prepareSummary(ctx, f.session, f.source); err != nil || ok {
+	if _, ok, err := f.e.m.prepareSummary(checkCtx, f.session, f.source); err != nil || ok {
 		t.Fatalf("parallel manual preparation should defer to running summary: ok=%v err=%v", ok, err)
 	}
-	if err := f.e.m.idleSummary(ctx); err != nil {
+	if err := f.e.m.idleSummary(checkCtx); err != nil {
 		t.Fatal(err)
 	}
 	_, forks, _ := f.session.counts()
 	if forks != 1 {
 		t.Fatal("overlapping maintenance created another summary fork")
 	}
+	cancelCheck()
 	f.e.say("New owner message during private summary")
 	eventually(t, "owner turn completes before summary", func() bool {
 		return f.e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == 1
@@ -210,12 +238,14 @@ func TestIdleSummaryAllowsOwnerDeliveryAndRetainsStaleResult(t *testing.T) {
 	default:
 	}
 	unblock()
+	finishCtx, cancelFinish := context.WithTimeout(t.Context(), phaseWait)
+	defer cancelFinish()
 	select {
 	case err := <-finished:
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-ctx.Done():
+	case <-finishCtx.Done():
 		t.Fatal("summary did not finish")
 	}
 	summary, exists, err := f.e.app.HandoffSummary(context.Background(), "main")
