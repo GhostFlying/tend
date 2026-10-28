@@ -843,7 +843,8 @@ func TestPauseStopsWorkerAndResumes(t *testing.T) {
 }
 
 func TestCancelWhilePausedReleasesTheAgent(t *testing.T) {
-	srv := newServer(t, 400*time.Millisecond)
+	clock := testkit.NewClock()
+	srv := newServer(t, 400*time.Millisecond, clock.Now)
 	n := newNode(t, srv, func(harness.WorkerSpec) testkit.WorkerScript { return testkit.WorkerScript{Gate: make(chan struct{})} })
 	n.start()
 	task := srv.createTask()
@@ -859,6 +860,10 @@ func TestCancelWhilePausedReleasesTheAgent(t *testing.T) {
 		t.Fatalf("cancel: %+v, %v", op, err)
 	}
 	eventually(t, "the run is released", func() bool { return srv.runState(protocol.RoleImplement) == protocol.RunFailed })
+	eventually(t, "the original agent is released", func() bool { return len(n.workers.Released()) == 1 })
+	if started := n.workers.Started(); len(started) != 1 {
+		t.Fatalf("paused cancellation started another attempt: %+v", started)
+	}
 	run := n.workers.Started()[0].RunID
 	if got := n.workers.Released(); !slices.Equal(got, []string{fmt.Sprintf("th_%s_1", run)}) {
 		t.Errorf("released %q, want the run's thread", got)
