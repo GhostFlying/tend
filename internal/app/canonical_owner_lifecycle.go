@@ -30,15 +30,16 @@ type canonicalOwnerSourceDisposition struct {
 }
 type canonicalOwnerEndpoint struct {
 	canonicalOwnerControl
-	Closure                 *protocol.WorkItemClosure           `json:"closure,omitempty"`
-	FollowOnDispositions    []canonicalOwnerFollowOnDisposition `json:"follow_on_dispositions,omitempty"`
-	SourceDispositions      []canonicalOwnerSourceDisposition   `json:"source_dispositions,omitempty"`
-	ExpectedContextRevision *int64                              `json:"expected_context_revision,omitempty"`
+	Closure                 *protocol.WorkItemClosure                  `json:"closure,omitempty"`
+	FollowOnDispositions    []canonicalOwnerFollowOnDisposition        `json:"follow_on_dispositions,omitempty"`
+	SourceDispositions      []canonicalOwnerSourceDisposition          `json:"source_dispositions,omitempty"`
+	ExpectedContextRevision *int64                                     `json:"expected_context_revision,omitempty"`
+	CompletionReviews       []protocol.CompletionReviewAcknowledgement `json:"completion_reviews,omitempty"`
 }
 
 // applyCanonicalOwnerLifecycle runs after the existing command has authenticated
-// owner, checked target/revision and loaded the aggregate. Task and manager
-// execution remain unavailable through this internal owner command.
+// owner, checked target/revision and loaded the aggregate. Task execution uses
+// the separate owner task command; manager execution remains unavailable.
 func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, action string, current protocol.Issue) (Outcome, error) {
 	var common canonicalOwnerControl
 	var reason any
@@ -46,6 +47,8 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 	var endpoint *canonicalOwnerEndpoint
 	var expectedParent *int64
 	activation := false
+	var completionReviews []protocol.CompletionReviewAcknowledgement
+	var taskEvents []Event
 	switch action {
 	case "pause", "resume", "cancel", "reopen":
 		if err := decodePayload(x.Env, &common); err != nil {
@@ -60,6 +63,20 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		common = p.canonicalOwnerControl
 		endpoint = &p
 		reason = p
+	case "review_completions":
+		var p struct {
+			canonicalOwnerControl
+			Reviews []protocol.CompletionReviewAcknowledgement `json:"reviews"`
+		}
+		if err := decodePayload(x.Env, &p); err != nil {
+			return Outcome{}, err
+		}
+		common = p.canonicalOwnerControl
+		completionReviews = p.Reviews
+		reason = p
+		if len(completionReviews) == 0 {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "explicit pending completion reviews are required")
+		}
 	case "review_sources":
 		var p struct {
 			canonicalOwnerControl
@@ -126,11 +143,7 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 	if err := validateCanonicalSourceReference(ctx, tx.Q(), common.canonicalOwnerIssueSource); err != nil {
 		return Outcome{}, err
 	}
-	// Tasks are not part of the current canonical entry set. Do not pretend their
-	// actual run/control/lease state was checked; P1b4 must replace this gate.
-	if err := rejectCanonicalTaskScope(ctx, tx.Q(), current.IssueID); err != nil {
-		return Outcome{}, err
-	}
+
 	var err error
 	switch action {
 	case "pause":
@@ -139,6 +152,9 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		next.IssueControl, err = domain.ResumeIssue(current.IssueControl)
 	case "cancel":
 		next.IssueControl, err = domain.BeginIssueCancellation(current.IssueControl)
+		if err == nil {
+			taskEvents, err = cancelCanonicalPrimaryTasks(ctx, x, tx, current.IssueID)
+		}
 	case "reopen":
 		next.IssueControl, err = domain.ReopenIssueControl(current.IssueControl)
 		next.Closure = nil
@@ -154,6 +170,8 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 			}
 			err = domain.ValidateIssueReparentFacts(f)
 		}
+	case "review_completions":
+		err = acknowledgeCanonicalCompletions(ctx, tx, current.IssueID, current.Revision+1, completionReviews)
 	case "review_sources":
 		if current.State != protocol.IssueClosed && current.State != protocol.IssueCancelled {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "source-only settlement requires a terminal issue")
@@ -177,10 +195,13 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		if err = applyCanonicalFollowOnDispositions(&next.Plan, endpoint.FollowOnDispositions); err != nil {
 			return Outcome{}, err
 		}
-		if err = validateCanonicalUnboundPlan(x, next.Plan, &current.Plan); err != nil {
+		if err = validateCanonicalBoundPlan(ctx, x, tx.Q(), current.IssueID, next.Plan, &current.Plan); err != nil {
 			return Outcome{}, err
 		}
 		if err = applyCanonicalSourceDispositions(ctx, tx, current.IssueID, *endpoint); err != nil {
+			return Outcome{}, err
+		}
+		if err = acknowledgeCanonicalCompletions(ctx, tx, current.IssueID, current.Revision+1, endpoint.CompletionReviews); err != nil {
 			return Outcome{}, err
 		}
 		f, e := canonicalOwnerEndpointFacts(ctx, tx.Q(), next)
@@ -218,7 +239,7 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 	if err = validateCanonicalOwnerGraph(ctx, tx.Q(), next, expectedParent, activation); err != nil {
 		return Outcome{}, err
 	}
-	if action != "review_sources" && reflect.DeepEqual(current, next) && common.SourceMessageID == "" {
+	if action != "review_sources" && action != "review_completions" && reflect.DeepEqual(current, next) && common.SourceMessageID == "" {
 		return Outcome{Result: current}, nil
 	}
 	next.Revision++
@@ -230,6 +251,7 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 	if err != nil {
 		return Outcome{}, err
 	}
+	out.Events = append(out.Events, taskEvents...)
 	// Canonical save increments context revision through 0043. Review the ended C
 	// share at that final revision; do not mark a shared logical/native turn done.
 	if endpoint != nil {
@@ -241,6 +263,10 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 }
 
 func canonicalLifecycleEvent(action string) string {
+	if action == "review_completions" {
+		return "issue.completions_reviewed"
+	}
+
 	return map[string]string{"pause": "issue.paused", "resume": "issue.resumed", "cancel": "issue.cancelling", "finish_cancel": "issue.cancelled", "close": "issue.closed", "reopen": "issue.reopened", "reparent": "issue.reparented", "dependencies": "issue.dependencies_changed", "assign": "issue.assignment_confirmed", "review_sources": "issue.sources_reviewed"}[action]
 }
 

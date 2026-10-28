@@ -77,26 +77,12 @@ func HasMessageTurnOperation(ctx context.Context, q Querier, messageID, operatio
 // no-op.
 func (t *Tx) BindMessage(ctx context.Context, messageID, objectType, objectID, kind string) error {
 	if objectType == "task" && objectID != "" {
-		rows, err := t.Q().QueryContext(ctx, `SELECT DISTINCT work_item_id FROM work_item_task_links WHERE task_id=?`, objectID)
+		items, err := TaskIssueResponsibilities(ctx, t.Q(), objectID)
 		if err != nil {
 			return err
 		}
-		var items []string
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			items = append(items, id)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		for _, id := range items {
-			if err := t.BindMessage(ctx, messageID, "work_item", id, kind); err != nil {
+		for _, item := range items {
+			if err := t.BindMessage(ctx, messageID, "work_item", item.WorkItemID, kind); err != nil {
 				return err
 			}
 		}

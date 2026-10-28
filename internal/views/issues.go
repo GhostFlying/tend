@@ -26,22 +26,18 @@ func Issue(ctx context.Context, q store.Querier, id string) (protocol.WorkItemVi
 
 func issueView(ctx context.Context, q store.Querier, w protocol.WorkItem, facts executionFacts, factsSeq int64) (protocol.WorkItemView, error) {
 	v := protocol.WorkItemView{WorkItem: w, FactsSeq: factsSeq, Column: "unplanned"}
-	seen := map[string]bool{}
-	var tasks []store.TaskRow
-	for _, stage := range w.Stages {
-		for _, id := range stage.TaskIDs {
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			t, err := store.GetTask(ctx, q, id)
-			if err != nil {
-				return v, err
-			}
-			tasks = append(tasks, t)
-		}
+	ids, err := store.IssueTaskIDs(ctx, q, w.WorkItemID)
+	if err != nil {
+		return v, err
 	}
-	var err error
+	var tasks []store.TaskRow
+	for _, id := range ids {
+		task, err := store.GetTask(ctx, q, id)
+		if err != nil {
+			return v, err
+		}
+		tasks = append(tasks, task)
+	}
 	v.Tasks, err = facts.summaries(ctx, q, tasks)
 	if err != nil {
 		return v, err

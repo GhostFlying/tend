@@ -13,7 +13,14 @@ import (
 // ownerCommands are the writes the owner API accepts, by operation. Work
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
-var ownerCommands = commandMap(app.PutAgentCategory{}, app.RegisterRepository{}, app.SetMessageAssociations{}, app.OpenAgentConversation{},
+var ownerCommands = commandMap(
+	app.CanonicalOwnerIssueCommand{Action: "create"}, app.CanonicalOwnerIssueCommand{Action: "update"},
+	app.CanonicalOwnerIssueCommand{Action: "pause"}, app.CanonicalOwnerIssueCommand{Action: "resume"},
+	app.CanonicalOwnerIssueCommand{Action: "cancel"}, app.CanonicalOwnerIssueCommand{Action: "finish_cancel"},
+	app.CanonicalOwnerIssueCommand{Action: "close"}, app.CanonicalOwnerIssueCommand{Action: "reopen"},
+	app.CanonicalOwnerIssueCommand{Action: "reparent"}, app.CanonicalOwnerIssueCommand{Action: "dependencies"},
+	app.CanonicalOwnerIssueCommand{Action: "review_sources"}, app.CanonicalOwnerIssueCommand{Action: "review_completions"},
+	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetMessageAssociations{}, app.OpenAgentConversation{},
 	app.FollowupCommand{Action: "create"},
 	app.FollowupCommand{Action: "update"},
 	app.FollowupCommand{Action: "pause"},
@@ -92,6 +99,15 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 			v, err := views.Issue(r.Context(), tx.Q(), env.Target.ID)
 			if err == nil {
 				res.CurrentWorkItem = &v
+			}
+			return err
+		})
+	}
+	if op.Status == protocol.OpFailed && op.Error != nil && op.Error.Code == protocol.CodeStaleRevision && env.Target.Type == "issue" {
+		_ = s.store.Read(r.Context(), func(tx *store.ReadTx) error {
+			v, err := views.CanonicalIssue(r.Context(), tx.Q(), env.Target.ID, 0)
+			if err == nil {
+				res.CurrentIssue = &v
 			}
 			return err
 		})

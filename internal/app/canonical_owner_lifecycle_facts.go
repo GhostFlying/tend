@@ -10,21 +10,6 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func rejectCanonicalTaskScope(ctx context.Context, q store.Querier, root string) error {
-	var primary bool
-	err := q.QueryRowContext(ctx, `WITH RECURSIVE scope(id) AS (
- SELECT issue_id FROM issue_controls WHERE issue_id=?
- UNION ALL SELECT c.issue_id FROM issue_controls c JOIN scope s ON c.parent_issue_id=s.id)
- SELECT EXISTS(SELECT 1 FROM task_work_item_owners o JOIN scope s ON s.id=o.work_item_id)`, root).Scan(&primary)
-	if err != nil {
-		return err
-	}
-	if primary {
-		return protocol.Errorf(protocol.CodeInvalidTransition, "canonical task lifecycle support is not enabled")
-	}
-	return nil
-}
-
 func canonicalOwnerEndpointFacts(ctx context.Context, q store.Querier, current protocol.Issue) (domain.IssueLifecycleFacts, error) {
 	var facts domain.IssueLifecycleFacts
 	rows, err := q.QueryContext(ctx, `SELECT c.issue_id,w.revision FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id WHERE c.parent_issue_id=? AND c.state NOT IN ('closed','cancelled') ORDER BY c.issue_id`, current.IssueID)
@@ -94,12 +79,15 @@ func canonicalOwnerEndpointFacts(ctx context.Context, q store.Querier, current p
 			facts.OpenCommitments = append(facts.OpenCommitments, protocol.IssueBlocker{Code: "follow_on", ObjectID: f.FollowOnID, Revision: current.Revision})
 		}
 	}
+	if err := appendCanonicalTaskFacts(ctx, q, current.IssueID, &facts); err != nil {
+		return facts, err
+	}
 	// logical_turn_contexts records a C context-review share (0046), not ownership
 	// of the entire shared main native turn. Source duties above must be explicitly
 	// disposed before the owner endpoint records that share reviewed. They stay
 	// attached to C across owner reparent and are not execution LogicalDuties;
-	// OpenAttention here names this existing source obligation, not a P5 table. Actual C
-	// worker/manager execution cannot be admitted by the current internal commands.
+	// OpenAttention here names this existing source obligation, not a P5 table. Actual worker activity is read separately from primary tasks; manager
+	// execution remains unavailable.
 	return facts, nil
 }
 

@@ -21,6 +21,15 @@ func fenceChangedTaskContext(ctx context.Context, q store.Querier, rc runContext
 	if rc.action.Kind == protocol.ActionAccept && (rc.task.Lifecycle != protocol.TaskAwaitingAcceptance || rc.action.TargetArtifactID != rc.task.CurrentArtifactID) {
 		return domain.Decision{}, false, nil
 	}
+	scope, err := store.ResolveTaskIssueScope(ctx, q, rc.task.TaskID)
+	if err != nil {
+		return domain.Decision{}, false, err
+	}
+	if scope.Canonical {
+		// The owner's frozen spec authorizes this run. Source changes gate a
+		// subsequent claim, not a result produced under the existing agreement.
+		return domain.Decision{}, false, nil
+	}
 	for _, binding := range rc.spec.SharedContext {
 		if binding.ContextDigest == "" {
 			continue

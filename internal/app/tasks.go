@@ -81,11 +81,18 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	return createTask(ctx, x, tx, p, nil)
+}
+
+// createTask shares persistence without expanding the legacy entry's authority.
+func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload, canonical *canonicalTaskCreateContext) (Outcome, error) {
 	if p.Title == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "title is required")
 	}
-	if err := claimPlanCommit(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
-		return Outcome{}, err
+	if canonical == nil {
+		if err := claimPlanCommit(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
+			return Outcome{}, err
+		}
 	}
 	taskID := x.IDs.New(protocol.PrefixTask)
 	refs, err := validateRelations(ctx, tx.Q(), taskID, p.Relations)
@@ -96,7 +103,14 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err != nil {
 		return Outcome{}, err
 	}
-	item, itemEvents, err := taskIssue(ctx, x, tx, &p, project.Project)
+	var item protocol.WorkItem
+	var itemEvents []Event
+	if canonical == nil {
+		item, itemEvents, err = taskIssue(ctx, x, tx, &p, project.Project)
+	} else {
+		item = protocol.WorkItem{WorkItemID: canonical.Issue.IssueID, Revision: canonical.Issue.Revision, WorkItemPlan: canonical.Issue.Plan}
+		p.Spec.SharedContext, err = freezeCanonicalTaskContext(ctx, tx.Q(), canonical.Issue)
+	}
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -164,7 +178,12 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := tx.InsertTaskIssueOwner(ctx, taskID, item.WorkItemID); err != nil {
 		return Outcome{}, err
 	}
-	_, linkedEvents, err := BindIssueTask(ctx, x, tx, item.WorkItemID, item.Revision, taskID, p.StageIDs)
+	var linkedEvents []Event
+	if canonical == nil {
+		_, linkedEvents, err = BindIssueTask(ctx, x, tx, item.WorkItemID, item.Revision, taskID, p.StageIDs)
+	} else {
+		linkedEvents, err = bindCanonicalPrimaryTask(ctx, x, tx, *canonical, taskID, p.StageIDs)
+	}
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -212,8 +231,11 @@ type updateIntentPayload struct {
 func (UpdateIntent) Operation() string { return "tasks.update_intent" }
 
 // Authorize implements Command.
-func (UpdateIntent) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
-	return allowKinds(x.Principal, planners...)
+func (UpdateIntent) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
+	if err := allowKinds(x.Principal, planners...); err != nil {
+		return err
+	}
+	return canonicalTaskPlannerAccess(ctx, q, x)
 }
 
 // Apply implements Command.
@@ -229,7 +251,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := claimPlanCommit(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
+	if err := claimTaskPlanningSource(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
 	row, current, err := loadTask(ctx, tx.Q(), x.Env.Target.ID)
@@ -322,6 +344,13 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "name the project to move the task to")
 		}
 		if *p.Project != row.Project {
+			scope, err := store.ResolveTaskIssueScope(ctx, tx.Q(), row.TaskID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if scope.Canonical {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "canonical task must retain its primary issue project")
+			}
 			if _, err := resolveProject(ctx, tx.Q(), *p.Project, x.Principal); err != nil {
 				return Outcome{}, err
 			}
@@ -390,6 +419,9 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			Body: map[string]any{"workspace_id": detachedResource.WorkspaceID, "source_task_id": detachedResource.SourceTaskID, "previous_spec_version": row.SpecVersion, "spec_version": merged.Task.SpecVersion}})
 	}
 	events = append(events, backlinks...)
+	if err := validateCanonicalTaskDependencies(ctx, tx.Q()); err != nil {
+		return Outcome{}, err
+	}
 	return Outcome{Result: newTaskResult(merged.Task, actions), Events: events}, nil
 }
 
@@ -401,8 +433,11 @@ type RateTask struct{}
 func (RateTask) Operation() string { return "tasks.rate" }
 
 // Authorize implements Command.
-func (RateTask) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
-	return allowKinds(x.Principal, planners...)
+func (RateTask) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
+	if err := allowKinds(x.Principal, planners...); err != nil {
+		return err
+	}
+	return canonicalTaskPlannerAccess(ctx, q, x)
 }
 
 // Apply implements Command.
@@ -439,6 +474,9 @@ func (SetControlMode) Operation() string { return "control.set_mode" }
 // Authorize implements Command. Human control is a human decision: only the
 // owner (or tend acting for the owner) may take or hand back control.
 func (SetControlMode) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
+	if err := canonicalTaskPlannerAccess(ctx, q, x); err != nil {
+		return err
+	}
 	if err := allowKinds(x.Principal, planners...); err != nil {
 		return err
 	}
@@ -490,8 +528,11 @@ type CancelTask struct{}
 func (CancelTask) Operation() string { return "tasks.cancel" }
 
 // Authorize implements Command.
-func (CancelTask) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
-	return allowKinds(x.Principal, planners...)
+func (CancelTask) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
+	if err := allowKinds(x.Principal, planners...); err != nil {
+		return err
+	}
+	return canonicalTaskPlannerAccess(ctx, q, x)
 }
 
 // Apply implements Command.
@@ -525,8 +566,11 @@ type CreateAction struct{}
 func (CreateAction) Operation() string { return "actions.create" }
 
 // Authorize implements Command.
-func (CreateAction) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
-	return allowKinds(x.Principal, planners...)
+func (CreateAction) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
+	if err := allowKinds(x.Principal, planners...); err != nil {
+		return err
+	}
+	return canonicalTaskPlannerAccess(ctx, q, x)
 }
 
 // Apply implements Command.
@@ -560,7 +604,7 @@ func (CreateAction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := claimPlanCommit(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
+	if err := claimTaskPlanningSource(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
 	actions, events, err := applyDecision(ctx, x, tx, row, d, map[string]any{"on": "requested"})

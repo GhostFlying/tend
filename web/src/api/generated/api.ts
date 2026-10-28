@@ -69,10 +69,9 @@ export type TaskLifecycle =
 export type Rating = "" | "p0" | "p1" | "p2" | "p3";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "SharedFactKind".
+ * via the `definition` "IssueAssigneeKind".
  */
-export type SharedFactKind =
-  "goal" | "observation" | "user_constraint" | "decision" | "input" | "fact";
+export type IssueAssigneeKind = "owner" | "agent";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkItemEvidenceKind".
@@ -83,6 +82,12 @@ export type WorkItemEvidenceKind = "acceptance" | "delivery" | "owner_decision" 
  * via the `definition` "WorkItemClosureKind".
  */
 export type WorkItemClosureKind = "completed" | "declined" | "handed_off" | "superseded";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedFactKind".
+ */
+export type SharedFactKind =
+  "goal" | "observation" | "user_constraint" | "decision" | "input" | "fact";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkItemDeliveryProvider".
@@ -103,6 +108,11 @@ export type WorkItemFollowOnStatus = "open" | "resolved" | "transferred";
  * via the `definition` "WorkItemStageStatus".
  */
 export type WorkItemStageStatus = "planned" | "active" | "done" | "cancelled" | "retired";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueState".
+ */
+export type IssueState = "active" | "paused" | "cancelling" | "cancelled" | "closed";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkItemStatus".
@@ -169,6 +179,11 @@ export type ToolStatus = "running" | "completed" | "failed" | "interrupted";
 export type ActionKind = "implement" | "accept" | "deliver";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskRelationKind".
+ */
+export type TaskRelationKind = "follow_up" | "related";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RunObserved".
  */
 export type RunObserved =
@@ -195,19 +210,14 @@ export type ActionStatus = "pending" | "ready" | "dispatched" | "done" | "cancel
 export type RelationDirection = "outgoing" | "incoming";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "TaskRelationKind".
+ * via the `definition` "WorkItemTaskDispositionAction".
  */
-export type TaskRelationKind = "follow_up" | "related";
+export type WorkItemTaskDispositionAction = "continue_existing" | "updated" | "stopped";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkItemUpdateStatus".
  */
 export type WorkItemUpdateStatus = "" | "open" | "snoozed";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemTaskDispositionAction".
- */
-export type WorkItemTaskDispositionAction = "continue_existing" | "updated" | "stopped";
 
 export interface TendAPI {
   APIResponse?: APIResponse;
@@ -235,6 +245,8 @@ export interface TendAPI {
   ConversationSettingsView?: ConversationSettingsView;
   CoordinationMetrics?: CoordinationMetrics;
   CreateActionPayload?: CreateActionPayload;
+  CreateIssuePayload?: CreateIssuePayload;
+  CreateIssueTaskPayload?: CreateIssueTaskPayload;
   CreateWorkItemChoicePayload?: CreateWorkItemChoicePayload;
   CreateWorkItemPayload?: CreateWorkItemPayload;
   DownloadURLResponse?: DownloadURLResponse;
@@ -244,6 +256,10 @@ export interface TendAPI {
   FollowupPage?: FollowupPage;
   FollowupSpec?: FollowupSpec;
   InterruptReplyPayload?: InterruptReplyPayload;
+  IssueControlPayload?: IssueControlPayload;
+  IssueEndpointPayload?: IssueEndpointPayload;
+  IssuePage?: IssuePage;
+  IssueView?: IssueView;
   LedgerEvent?: LedgerEvent;
   LinkWorkItemTaskPayload?: LinkWorkItemTaskPayload;
   MessageAssociations?: MessageAssociations;
@@ -253,9 +269,12 @@ export interface TendAPI {
   RefreshDeliveryPayload?: RefreshDeliveryPayload;
   RegisterRepositoryPayload?: RegisterRepositoryPayload;
   ReopenWorkItemPayload?: ReopenWorkItemPayload;
+  ReparentIssuePayload?: ReparentIssuePayload;
   RepoRegistry?: RepoRegistry;
   RepositoryRegistration?: RepositoryRegistration;
   RequestView?: RequestView;
+  ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
+  ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
   RunLogPage?: RunLogPage;
   RunRolloutPage?: RunRolloutPage;
   RunnerRepository?: RunnerRepository;
@@ -264,6 +283,7 @@ export interface TendAPI {
   SetControlModePayload?: SetControlModePayload;
   SetConversationHandoffSettingsPayload?: SetConversationHandoffSettingsPayload;
   SetConversationSettingsPayload?: SetConversationSettingsPayload;
+  SetIssueDependenciesPayload?: SetIssueDependenciesPayload;
   SetMessageAssociationsPayload?: SetMessageAssociationsPayload;
   Snapshot?: Snapshot;
   StreamStart?: StreamStart;
@@ -276,6 +296,8 @@ export interface TendAPI {
   TranscriptBlock?: TranscriptBlock;
   TranscriptPage?: TranscriptPage;
   UpdateFollowupPayload?: UpdateFollowupPayload;
+  UpdateIssuePayload?: UpdateIssuePayload;
+  UpdateIssueTaskPayload?: UpdateIssueTaskPayload;
   UpdateWorkItemChoicePayload?: UpdateWorkItemChoicePayload;
   UpdateWorkItemPayload?: UpdateWorkItemPayload;
   WithdrawMessagePayload?: WithdrawMessagePayload;
@@ -292,6 +314,7 @@ export interface TendAPI {
  */
 export interface APIResponse {
   current?: TaskSummary;
+  current_issue?: IssueView;
   current_work_item?: WorkItemView;
   error?: Error;
   operation?: Operation;
@@ -365,66 +388,36 @@ export interface ExecutionStartup {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemView".
+ * via the `definition` "IssueView".
  */
-export interface WorkItemView {
-  background?: SharedFact[];
-  choices?: WorkItemChoice[];
+export interface IssueView {
+  assignee: IssueAssignee;
+  assignment_epoch: number;
+  assignment_state: string;
   closure?: WorkItemClosure;
-  column: string;
+  context_revision?: number;
   created_at: number;
-  default_workspace_task_id?: string;
-  deliveries?: WorkItemDelivery[];
-  execution?: ExecutionCounts;
-  facts_seq?: number;
-  follow_ons?: WorkItemFollowOn[];
-  followups?: FollowupSummary;
-  intent: string;
-  observations?: DeliveryObservation[];
+  depends_on: string[] | null;
+  historical?: boolean;
+  issue_id: string;
+  parent_issue_id?: string;
+  pending_assignee?: IssueAssignee;
+  pending_handoff_id?: string;
   pending_reviews?: WorkItemCompletionReview[];
-  project: string;
+  plan: WorkItemPlan;
   revision: number;
-  stage_execution?: StageExecutionView[];
-  stages: WorkItemStage[] | null;
-  status: WorkItemStatus;
-  tasks?: TaskSummary[];
-  title: string;
+  source_reviews?: IssueSourceReview[];
+  state: IssueState;
+  tasks?: IssueTaskSummary[];
   updated_at: number;
-  work_item_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "SharedFact".
+ * via the `definition` "IssueAssignee".
  */
-export interface SharedFact {
-  kind: SharedFactKind;
-  source: string;
-  text: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemChoice".
- */
-export interface WorkItemChoice {
-  answer?: string;
-  answer_source_id?: string;
-  answer_source_kind?: string;
-  choice_id: string;
-  created_at: number;
-  delivery_ids?: string[];
-  message_id: string;
-  options: string[] | null;
-  question: string;
-  reason?: string;
-  recommendation?: string;
-  replaced_by?: string;
-  source_id: string;
-  status: string;
-  supersedes?: string;
-  task_ids?: string[];
-  updated_at: number;
-  version: number;
-  work_item_id: string;
+export interface IssueAssignee {
+  kind: IssueAssigneeKind;
+  ref: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -527,6 +520,39 @@ export interface UpgradeBinding {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemCompletionReview".
+ */
+export interface WorkItemCompletionReview {
+  acceptance_id: string;
+  created_at: number;
+  event_id: string;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemPlan".
+ */
+export interface WorkItemPlan {
+  background?: SharedFact[];
+  default_workspace_task_id?: string;
+  deliveries?: WorkItemDelivery[];
+  follow_ons?: WorkItemFollowOn[];
+  intent: string;
+  project: string;
+  stages: WorkItemStage[] | null;
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedFact".
+ */
+export interface SharedFact {
+  kind: SharedFactKind;
+  source: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkItemDelivery".
  */
 export interface WorkItemDelivery {
@@ -536,6 +562,114 @@ export interface WorkItemDelivery {
   provider: WorkItemDeliveryProvider;
   repository: string;
   url?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemFollowOn".
+ */
+export interface WorkItemFollowOn {
+  evidence?: WorkItemEvidence[];
+  follow_on_id: string;
+  kind: WorkItemFollowOnKind;
+  source: string;
+  status: WorkItemFollowOnStatus;
+  text: string;
+  transferred_to?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemStage".
+ */
+export interface WorkItemStage {
+  depends_on?: string[];
+  evidence?: WorkItemEvidence[];
+  parent_id?: string;
+  reason?: string;
+  stage_id: string;
+  status: WorkItemStageStatus;
+  task_ids?: string[];
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueSourceReview".
+ */
+export interface IssueSourceReview {
+  association_revision: number;
+  author: string;
+  body: string;
+  content_revision: number;
+  message_id: string;
+  withdrawn: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueTaskSummary".
+ */
+export interface IssueTaskSummary {
+  block_reason: BlockReason;
+  control_mode: ControlMode;
+  control_revision: number;
+  execution?: TaskExecutionView;
+  lifecycle: TaskLifecycle;
+  rating: Rating;
+  spec_version: number;
+  task_id: string;
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemView".
+ */
+export interface WorkItemView {
+  background?: SharedFact[];
+  choices?: WorkItemChoice[];
+  closure?: WorkItemClosure;
+  column: string;
+  created_at: number;
+  default_workspace_task_id?: string;
+  deliveries?: WorkItemDelivery[];
+  execution?: ExecutionCounts;
+  facts_seq?: number;
+  follow_ons?: WorkItemFollowOn[];
+  followups?: FollowupSummary;
+  intent: string;
+  observations?: DeliveryObservation[];
+  pending_reviews?: WorkItemCompletionReview[];
+  project: string;
+  revision: number;
+  stage_execution?: StageExecutionView[];
+  stages: WorkItemStage[] | null;
+  status: WorkItemStatus;
+  tasks?: TaskSummary[];
+  title: string;
+  updated_at: number;
+  work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemChoice".
+ */
+export interface WorkItemChoice {
+  answer?: string;
+  answer_source_id?: string;
+  answer_source_kind?: string;
+  choice_id: string;
+  created_at: number;
+  delivery_ids?: string[];
+  message_id: string;
+  options: string[] | null;
+  question: string;
+  reason?: string;
+  recommendation?: string;
+  replaced_by?: string;
+  source_id: string;
+  status: string;
+  supersedes?: string;
+  task_ids?: string[];
+  updated_at: number;
+  version: number;
+  work_item_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -556,19 +690,6 @@ export interface ExecutionCounts {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemFollowOn".
- */
-export interface WorkItemFollowOn {
-  evidence?: WorkItemEvidence[];
-  follow_on_id: string;
-  kind: WorkItemFollowOnKind;
-  source: string;
-  status: WorkItemFollowOnStatus;
-  text: string;
-  transferred_to?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "FollowupSummary".
  */
 export interface FollowupSummary {
@@ -580,35 +701,11 @@ export interface FollowupSummary {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemCompletionReview".
- */
-export interface WorkItemCompletionReview {
-  acceptance_id: string;
-  created_at: number;
-  event_id: string;
-  task_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "StageExecutionView".
  */
 export interface StageExecutionView {
   execution: ExecutionCounts;
   stage_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemStage".
- */
-export interface WorkItemStage {
-  depends_on?: string[];
-  evidence?: WorkItemEvidence[];
-  parent_id?: string;
-  reason?: string;
-  stage_id: string;
-  status: WorkItemStageStatus;
-  task_ids?: string[];
-  title: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1223,6 +1320,124 @@ export interface CreateActionPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CreateIssuePayload".
+ */
+export interface CreateIssuePayload {
+  assignee?: IssueAssignee;
+  depends_on?: string[];
+  expected_parent_revision?: number;
+  expected_source_revision?: number;
+  parent_issue_id?: string;
+  plan: WorkItemPlan;
+  source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CreateIssueTaskPayload".
+ */
+export interface CreateIssueTaskPayload {
+  expected_assignment_epoch: number;
+  expected_source_revision?: number;
+  rating?: Rating;
+  relations?: TaskRelation[];
+  source_message_id?: string;
+  spec: OwnerTaskSpec;
+  stage_ids?: string[];
+  title: string;
+  use_default_workspace?: boolean;
+  workspace_name?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskRelation".
+ */
+export interface TaskRelation {
+  kind: TaskRelationKind;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OwnerTaskSpec".
+ */
+export interface OwnerTaskSpec {
+  acceptance: string[] | null;
+  acceptance_execution?: ExecutionProfile;
+  constraints?: string[];
+  deliverables?: string[];
+  delivery?: string;
+  goal: string;
+  implementation_context?: string;
+  inputs?: OwnerTaskInput[];
+  max_implement_attempts?: number;
+  observation?: ObservationScope;
+  requirements?: OwnerTaskRequirements;
+  scope?: string;
+  workspace: OwnerTaskWorkspace;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutionProfile".
+ */
+export interface ExecutionProfile {
+  effort?: string;
+  model: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OwnerTaskInput".
+ */
+export interface OwnerTaskInput {
+  file_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservationScope".
+ */
+export interface ObservationScope {
+  deployment?: boolean;
+  work_item_ids?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OwnerTaskRequirements".
+ */
+export interface OwnerTaskRequirements {
+  host_id?: string;
+  labels?: string[];
+  os?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OwnerTaskWorkspace".
+ */
+export interface OwnerTaskWorkspace {
+  include_existing_changes?: boolean;
+  mode?: string;
+  mounts: OwnerTaskMount[] | null;
+  profile?: string;
+  source_task_id?: string;
+  template?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OwnerTaskMount".
+ */
+export interface OwnerTaskMount {
+  base?: OwnerTaskBase;
+  path?: string;
+  profile?: string;
+  repo: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OwnerTaskBase".
+ */
+export interface OwnerTaskBase {
+  branch?: string;
+  commit?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "CreateWorkItemChoicePayload".
  */
 export interface CreateWorkItemChoicePayload {
@@ -1434,6 +1649,84 @@ export interface InterruptReplyPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueControlPayload".
+ */
+export interface IssueControlPayload {
+  expected_assignment_epoch: number;
+  expected_source_revision?: number;
+  reason?: string;
+  source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueEndpointPayload".
+ */
+export interface IssueEndpointPayload {
+  closure?: WorkItemClosure;
+  completion_reviews?: CompletionReviewAcknowledgement[];
+  expected_assignment_epoch: number;
+  expected_context_revision?: number;
+  expected_source_revision?: number;
+  follow_on_dispositions?: IssueFollowOnDisposition[];
+  reason?: string;
+  source_dispositions?: IssueSourceDisposition[];
+  source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CompletionReviewAcknowledgement".
+ */
+export interface CompletionReviewAcknowledgement {
+  event_id: string;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueFollowOnDisposition".
+ */
+export interface IssueFollowOnDisposition {
+  evidence: WorkItemEvidence[] | null;
+  follow_on_id: string;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueSourceDisposition".
+ */
+export interface IssueSourceDisposition {
+  association_revision: number;
+  content_revision: number;
+  message_id: string;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssuePage".
+ */
+export interface IssuePage {
+  items: IssueSummary[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueSummary".
+ */
+export interface IssueSummary {
+  assignee: IssueAssignee;
+  assignment_epoch: number;
+  assignment_state: string;
+  issue_id: string;
+  parent_issue_id?: string;
+  pending_assignee?: IssueAssignee;
+  pending_handoff_id?: string;
+  project: string;
+  revision: number;
+  state: IssueState;
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "LedgerEvent".
  */
 export interface LedgerEvent {
@@ -1507,6 +1800,18 @@ export interface ReopenWorkItemPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ReparentIssuePayload".
+ */
+export interface ReparentIssuePayload {
+  expected_assignment_epoch: number;
+  expected_parent_revision?: number;
+  expected_source_revision?: number;
+  parent_issue_id: string;
+  reason?: string;
+  source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RepoRegistry".
  */
 export interface RepoRegistry {
@@ -1542,6 +1847,29 @@ export interface RequestView {
   request_id: string;
   result?: unknown;
   status: OpStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ReviewIssueCompletionsPayload".
+ */
+export interface ReviewIssueCompletionsPayload {
+  expected_assignment_epoch: number;
+  expected_source_revision?: number;
+  reason?: string;
+  reviews: CompletionReviewAcknowledgement[] | null;
+  source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ReviewIssueSourcesPayload".
+ */
+export interface ReviewIssueSourcesPayload {
+  expected_assignment_epoch: number;
+  expected_context_revision: number | null;
+  expected_source_revision?: number;
+  reason?: string;
+  source_dispositions: IssueSourceDisposition[] | null;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1628,6 +1956,17 @@ export interface SetConversationSettingsPayload {
   conversation_id?: string;
   effort: string;
   model: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SetIssueDependenciesPayload".
+ */
+export interface SetIssueDependenciesPayload {
+  depends_on: string[] | null;
+  expected_assignment_epoch: number;
+  expected_source_revision?: number;
+  reason?: string;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2085,6 +2424,37 @@ export interface UpdateFollowupPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdateIssuePayload".
+ */
+export interface UpdateIssuePayload {
+  expected_assignment_epoch: number;
+  expected_source_revision?: number;
+  plan: WorkItemPlan;
+  source_message_id?: string;
+  task_dispositions?: WorkItemTaskDisposition[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkItemTaskDisposition".
+ */
+export interface WorkItemTaskDisposition {
+  action: WorkItemTaskDispositionAction;
+  reason: string;
+  spec_version: number;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdateIssueTaskPayload".
+ */
+export interface UpdateIssueTaskPayload {
+  expected_assignment_epoch: number;
+  rating?: Rating;
+  relations?: TaskRelation[];
+  spec?: OwnerTaskSpec;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "UpdateWorkItemChoicePayload".
  */
 export interface UpdateWorkItemChoicePayload {
@@ -2110,24 +2480,6 @@ export interface UpdateWorkItemPayload {
   status?: WorkItemUpdateStatus;
   task_dispositions?: WorkItemTaskDisposition[];
   title: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "CompletionReviewAcknowledgement".
- */
-export interface CompletionReviewAcknowledgement {
-  event_id: string;
-  reason: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemTaskDisposition".
- */
-export interface WorkItemTaskDisposition {
-  action: WorkItemTaskDispositionAction;
-  reason: string;
-  spec_version: number;
-  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

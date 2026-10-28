@@ -1,20 +1,24 @@
 # P1b：递归 Issue 控制与 primary task 接入
 
-状态：P1b1 聚合存储与纯规则代码、本地完整检查及独立评审已完成，未注册产品入口；PR CI/合并未完成，P1b2a 内部定义命令与 legacy guard 已纳入，r3 最终定向 race、既有 integration 编译、完整 make check 和独立复审通过，本次状态记录已独立核对；公开入口未启用，CI/合并/部署未完成，P1b2b 正式纳入 owner 内部生命周期与逐批来源收尾，候选 r2 已独立复审通过，正式 r1 定向 race/vet 已通过；正式 CLI 一项迟到 share 缺陷已采纳修正，r2 正式定向 race/vet 已通过，独立复核及完整 make check 已通过；task、manager 及公开入口仍未启用，其余分片尚未正式纳入，本批无发布。Refs: D121、D124、D126；依赖 [P0 总合同](issue-agent-refactor.md)及 [P1a 内部改名](issue-internal-names.md)。本批起点为 `d52d093741da41e78dc60effb0493a67058eded5`；子批开始和评审时各自固定实际 base/head。准备草稿不属于已实现代码。
+状态：P1b1–P1b2 已完成代码、本地完整检查及独立复审；P1b3 primary/no-stage 读取与上下文、P1b4 owner task 执行/独立验收/完成核对和 P1c owner API/CLI 已在同片正式纳入，各候选独立预审通过，正式组合定向 race/vet、schema/types 与真实 CLI 路径检查已通过，r1 规定 CLI review 两项 P2 已采纳修复，r1 完整检查主动停止未完成；r2 已正式应用，定向 race/vet、独立增量复审及完整 make check 均通过，CI/合并/部署未完成。manager、Agent assignment 和命名调度未启用。Refs: D121、D124、D126；当前基准及范围见 [owner 完整交付](issue-owner-delivery.md)，早期各分片的历史证据保留如下。
+
+## 当前正式组合
+
+本轮在固定 base `7b0edfb4ce7d340a4f2e26546d4e5d0608de92e5` 纳入 b3+b4 r2+P1c：primary 真实读/上下文、task 冻结/实现/独立验收/owner 核对/取消收尾，以及 owner API/CLI 全链。未提交 primary context 迁移重定为 0056，保留已提交 P2 0055。公开入口只包含已落实的 owner 行为，旧 facade 及历史兼容保留；assign/manager 工具不注册。以下 P1b1–P1b2 的“task/公开入口未启用”描述是各历史子批当时边界，已由本组合的实际调用接入取代，不能用于宣称 manager 已实现。
 
 ## 交付分片与启用门槛
 
-P1b 保留 task/run 的独立状态机、冻结 spec、正式验收及 workspace 合同。内部基础先合并，公共 owner API/CLI 留 P1c；不注册新工具、不修改 Web，不把数据库存在新表称为功能可用。各分片分别写真实进度、独立 review、make check、PR CI 与线性合并记录；中间批不部署。
+P1b 保留 task/run 的独立状态机、冻结 spec、正式验收及 workspace 合同。内部基础先合并，公共 owner API/CLI 由本轮 P1c 接通；不注册新 agent 工具、不修改可见 Web，不把数据库存在新表称为功能可用。各分片分别写真实进度、独立 review、make check、PR CI 与线性合并记录；中间批不部署。
 
 | 分片 | 完整且可核查的行为 | 依赖与门槛 | 明确未启用 |
 | --- | --- | --- | --- |
 | P1b1 聚合存储与纯规则 | 追加控制/边/不可变快照；单 revision 原子存取；树、组合义务环、生命周期谓词；旧 saver 的中央拒绝边界 | P1a；migration 与事务故障测试、legacy 回归通过 | 无 canonical app/HTTP/tool 创建入口，无 task 接入、manager 自动推进或 Agent assignment |
 | P1b2 owner 内部命令 | 经 App.Execute 的 canonical create/update、父子/依赖修改和 owner 生命周期；逐入口 legacy guard；精确执行/unknown blocker；支持无执行义务时的取消闭环 | P1b1；来源/身份/版本/原子回滚、并发父项关闭测试；不允许创建 canonical task | 不接入公共 API；canonical task 未启用，未来 cancel 记录意图而 finish_cancel 不越过在途责任；无 Agent 转交/manager 控制 |
-| P1b3 primary 读模型与上下文 | 显式 primary/reference 解析，stage-free detail/观察/上下文/证据范围、来源与 digest trigger；完成评估成员枚举改为 primary | P1b2；按下表逐消费者审计；验收 narrative 隔离、legacy 行为不变 | 无生产 canonical task 创建/领取入口；内部命令不越过此前生命周期 blocker；不启用未来 P5 attention/期限 |
-| P1b4 task 与控制闭环 | canonical task 内部创建/绑定、primary/ancestor 领取门槛、正式取消协调、close/reopen、completion review 和已有 durable 通知目标接入 | P1b2、P1b3；所有 primary 消费者及 guard/unknown/cancel 故障测试通过，才开放内部 canonical task 分支 | 无公共创建注册；P2/P3 Agent 选择及 P4 manager 自主行为、P5 完整唤醒合同未启用 |
+| P1b3 primary 读模型与上下文 | 显式 primary/reference 解析，stage-free detail/观察/上下文/证据范围、来源与 digest trigger；完成评估成员枚举改为 primary | P1b2；按下表逐消费者审计；验收 narrative 隔离、legacy 行为不变 | 已由同批 P1b4/P1c 消费，仍不启用未来 P5 attention/期限 |
+| P1b4 task 与控制闭环 | canonical task 内部创建/绑定、primary/ancestor 领取门槛、正式取消协调、close/reopen、completion review 和已有 durable 通知目标接入 | P1b2、P1b3；所有 primary 消费者及 guard/unknown/cancel 故障测试通过，才开放内部 canonical task 分支 | 已由同批 P1c 注册 owner 入口；P3 Agent 选择、P4 manager 自主行为及 P5 完整唤醒合同未启用 |
 | P1c owner 接口 | 独立计划确定公开 DTO/ops/CLI；完整 P1b 闭环后注册新入口和生成 schema/type | P1b1–P1b4；重新评估实际 API/通信兼容边界 | 无未经用户确认的可见 UI；仍不部署 |
 
-分片按实际 patch 大小可进一步拆出纯读取与通知接入，但不能把安全前提留给后续补丁后先启用路径。P1b1 的存储原子性和纯规则本身是交付行为；P1b2 命令仅由 app 测试验证，HTTP/tools 分发器没有引用。P1b4 之前不允许 canonical task 创建；测试若需要持久活动事实，通过正式 app fixture 或明确标注的底层故障 fixture 构造，不把临时测试写入当作产品入口。禁止用环境开关或全局 bypass 绕过 guard。任何执行路径缺少取消/unknown/primary 安全闭环则保持不可达。
+分片按实际 patch 大小可进一步拆出纯读取与通知接入，但不能把安全前提留给后续补丁后先启用路径。P1b1 的存储原子性和纯规则本身是交付行为；P1b2 命令仅由 app 测试验证，HTTP/tools 分发器没有引用。此前 P1b4 之前不允许 canonical task 创建，本组合现已落实该消费路径；测试若需要持久活动事实，通过正式 app fixture 或明确标注的底层故障 fixture 构造，不把临时测试写入当作产品入口。禁止用环境开关或全局 bypass 绕过 guard。任何执行路径缺少取消/unknown/primary 安全闭环则保持不可达。
 
 ## P1b2 实际应用合同与分批
 
@@ -231,3 +235,5 @@ r2 只在现有 CommitLogicalTurn 显式精确当前版本接点补写 terminal 
 真实 queued SubmitMessage/association→owner terminal source settlement→later PutMainTurn 回归，在正式 r1 的 closed/cancelled 两变体均因 baseline0 失败（预期退出 1，0.295 秒）；修复后正例通过（退出 0，0.268 秒），包含 reopen、真实 assistant streaming 迟到内容及 native 仍 started 不伪完成的最终 plain 通过（退出 0，0.481 秒）。首次副本命令未正确路由新文件而产生编译失败，随后逐 hash 校准正式 r1 源码后才取得上述红→绿证据，不把编译失败作业务复现。
 
 本轮 rebase 后固定 base `ae891c455031fca1098ff26ff2c06d3530c51683`，与历史 `1279b4748bc006dc286cc58484926b5d2bd1889f` tree 相同；保留原 r1 artifact。正式 r2 定向 race 已通过（退出 0，81.205 秒），包含全部 lifecycle（含新增 queued share 正负控）、unknown-action 及 3 个既有 logical settle/迟到回复对照；app vet 退出 0，格式/空白检查通过。增量及正式组合独立复核通过；最终完整 make check 退出 0（UTC 19:58:42 至 20:34:42），app race 2105.482 秒、mainthread 391.337 秒及全部 Web 检查通过（281 个测试）。日志 SHA-256 `91e1ec84e23830fb57b12801715c30c907cfcc883aa66b802cca2bc5745788e4`；本轮前后所有实现文件与已审 r2 冻结字节一致，随后仅更新这四份进度文档。r1 的规定 CLI finding 与停止记录保留；最小修复经独立 delta review 后未重复整次 CLI。公共/task/manager 入口、部署及 live 验收未启用。
+
+本次 owner 公开组合 r1 CLI 的两项发现和最小 r2 修复见 [组合计划](issue-owner-delivery.md)：新 stage/task 绑定才检查终态准入，既有绑定与终态历史保留；canonical secondary 成果引用不得进入 legacy 关闭责任或等待边，真实 legacy 共享关系保持。主 Agent 仍可转录真实 owner 对已有 decision/version 的选择，不开放自由 canonical task 规划入口。

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -454,13 +455,16 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 
 func validateIssueDispositions(ctx context.Context, q store.Querier, item protocol.WorkItem, next protocol.WorkItemPlan, dispositions []protocol.WorkItemTaskDisposition) error {
 	affected := map[string]bool{}
-	for _, stage := range item.Stages {
-		for _, id := range stage.TaskIDs {
-			if domain.IssueTaskPlanChanged(item.WorkItemPlan, next, id) {
-				affected[id] = true
-			}
+	ids, err := store.IssueTaskIDs(ctx, q, item.WorkItemID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if domain.IssueTaskPlanChanged(item.WorkItemPlan, next, id) {
+			affected[id] = true
 		}
 	}
+
 	byTask := map[string]protocol.WorkItemTaskDisposition{}
 	dispositionIndices := map[string]int{}
 	for i, d := range dispositions {
@@ -470,6 +474,16 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 		byTask[d.TaskID] = d
 		dispositionIndices[d.TaskID] = i
 	}
+	liveRunQuery := `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state NOT IN ('finished','failed','interrupted'))`
+	var canonical bool
+	if len(affected) > 0 {
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, item.WorkItemID).Scan(&canonical); err != nil {
+			return err
+		}
+		if canonical {
+			liveRunQuery = `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state NOT IN ('finished','failed'))`
+		}
+	}
 	for id := range affected {
 		task, err := store.GetTask(ctx, q, id)
 		if err != nil {
@@ -477,7 +491,7 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 		}
 		if domain.IssueTaskRetired(item.WorkItemPlan, next, id) {
 			var live bool
-			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state NOT IN ('finished','failed','interrupted'))`, id).Scan(&live); err != nil {
+			if err := q.QueryRowContext(ctx, liveRunQuery, id).Scan(&live); err != nil {
 				return err
 			}
 			if live {
@@ -505,7 +519,7 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 				return err
 			}
 			var updated bool
-			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE object_type='task' AND object_id=? AND kind='task.spec_updated' AND json_extract(body_json,'$.spec_version')=? AND event_seq > COALESCE((SELECT MAX(event_seq) FROM events WHERE object_type='work_item' AND object_id=? AND object_version=?),0))`, id, task.SpecVersion, item.WorkItemID, revision).Scan(&updated); err != nil {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE object_type='task' AND object_id=? AND kind='task.spec_updated' AND json_extract(body_json,'$.spec_version')=? AND event_seq > COALESCE((SELECT MAX(event_seq) FROM events WHERE object_type IN ('work_item','issue') AND object_id=? AND object_version=?),0))`, id, task.SpecVersion, item.WorkItemID, revision).Scan(&updated); err != nil {
 				return err
 			}
 			if !updated {
@@ -514,7 +528,7 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 		}
 		if d.Action == "stopped" {
 			var live bool
-			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state NOT IN ('finished','failed','interrupted'))`, id).Scan(&live); err != nil {
+			if err := q.QueryRowContext(ctx, liveRunQuery, id).Scan(&live); err != nil {
 				return err
 			}
 			if task.ControlMode != protocol.ControlPaused || live {
@@ -525,14 +539,24 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 	return nil
 }
 func issueCloseGuard(ctx context.Context, q store.Querier, id string) error {
+	// A canonical task referenced by a legacy plan is evidence, not that
+	// plan's execution responsibility. Reuse the same membership as reads.
+	members, err := store.IssueTaskIDs(ctx, q, id)
+	if err != nil {
+		return err
+	}
+	membership, err := json.Marshal(members)
+	if err != nil {
+		return err
+	}
 	var blocked bool
-	err := q.QueryRowContext(ctx, `WITH linked AS (SELECT DISTINCT task_id FROM work_item_task_links WHERE work_item_id=?) SELECT
+	err = q.QueryRowContext(ctx, `WITH linked AS (SELECT value AS task_id FROM json_each(?)) SELECT
  EXISTS(SELECT 1 FROM tasks WHERE task_id IN linked AND lifecycle NOT IN ('completed','cancelled')) OR
  EXISTS(SELECT 1 FROM runs WHERE task_id IN linked AND observed_state NOT IN ('finished','failed','interrupted')) OR
  EXISTS(SELECT 1 FROM decisions WHERE task_id IN linked AND status='open') OR
  EXISTS(SELECT 1 FROM work_item_choices WHERE work_item_id=? AND status='open') OR
  EXISTS(SELECT 1 FROM plan_actions a JOIN request_records r ON r.request_id=a.created_request_id WHERE a.task_id IN linked AND r.status IN ('unknown','accepted')) OR
- EXISTS(SELECT 1 FROM events e JOIN request_records r ON r.request_id=e.request_id WHERE r.status IN ('unknown','accepted') AND ((e.object_type='task' AND e.object_id IN linked) OR (e.object_type='work_item' AND e.object_id=?)))`, id, id, id).Scan(&blocked)
+ EXISTS(SELECT 1 FROM events e JOIN request_records r ON r.request_id=e.request_id WHERE r.status IN ('unknown','accepted') AND ((e.object_type='task' AND e.object_id IN linked) OR (e.object_type='work_item' AND e.object_id=?)))`, string(membership), id, id).Scan(&blocked)
 	if err != nil {
 		return err
 	}

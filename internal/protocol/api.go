@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		IssueView{}, IssuePage{}, CreateIssuePayload{}, UpdateIssuePayload{}, IssueControlPayload{}, IssueEndpointPayload{}, ReparentIssuePayload{}, SetIssueDependenciesPayload{}, ReviewIssueSourcesPayload{}, ReviewIssueCompletionsPayload{}, CreateIssueTaskPayload{}, UpdateIssueTaskPayload{},
 		AgentCategory{}, PutAgentCategoryPayload{},
 		RepositoryRegistration{}, RegisterRepositoryPayload{}, RunnerRepository{}, RunRolloutPage{}, TokenUsageSample{}, TokenUsageView{},
 		AgentRolloutPage{}, AgentRolloutWindow{}, AgentConversation{}, AgentConversationPage{}, MessageAssociations{}, SetMessageAssociationsPayload{}, WorkItemContext{}, ContextFact{}, PrepareWorkItemContextPayload{}, BackgroundAssessmentPayload{}, AgentContextUsage{}, AgentCompactionPage{}, BackgroundSourcePage{}, CoordinationMetrics{}, FollowupPage{}, FollowupHistoryPage{}, FollowupSpec{}, UpdateFollowupPayload{}, ConversationQueuePage{}, TranscriptPage{}, TranscriptBlock{}, WithdrawMessagePayload{}, WithdrawMessageResult{}, Envelope{}, APIResponse{}, Snapshot{}, RepoRegistry{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ConversationPage{}, LedgerEvent{}, StreamStart{}, ArtifactDetail{}, RequestView{},
@@ -17,6 +18,8 @@ func APITypes() []any {
 // APIEnums lists the values of every string enum in the owner API.
 func APIEnums() []any {
 	return []any{
+		[]IssueState{IssueActive, IssuePaused, IssueCancelling, IssueCancelled, IssueClosed},
+		[]IssueAssigneeKind{IssueAssigneeOwner, IssueAssigneeAgent},
 		ExecutionStateValues(), QueueWaitCodeValues(),
 		SharedFactKindValues(), WorkItemStatusValues(), WorkItemUpdateStatusValues(),
 		WorkItemStageStatusValues(), WorkItemFollowOnKindValues(), WorkItemFollowOnStatusValues(),

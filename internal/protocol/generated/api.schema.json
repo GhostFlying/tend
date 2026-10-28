@@ -8,6 +8,9 @@
         "current": {
           "$ref": "#/definitions/TaskSummary"
         },
+        "current_issue": {
+          "$ref": "#/definitions/IssueView"
+        },
         "current_work_item": {
           "$ref": "#/definitions/WorkItemView"
         },
@@ -1623,6 +1626,88 @@
       "title": "CreateActionPayload",
       "type": "object"
     },
+    "CreateIssuePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expected_parent_revision": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "parent_issue_id": {
+          "type": "string"
+        },
+        "plan": {
+          "$ref": "#/definitions/WorkItemPlan"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "title": "CreateIssuePayload",
+      "type": "object"
+    },
+    "CreateIssueTaskPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "rating": {
+          "$ref": "#/definitions/Rating"
+        },
+        "relations": {
+          "items": {
+            "$ref": "#/definitions/TaskRelation"
+          },
+          "type": "array"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/definitions/OwnerTaskSpec"
+        },
+        "stage_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "use_default_workspace": {
+          "type": "boolean"
+        },
+        "workspace_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "title",
+        "spec"
+      ],
+      "title": "CreateIssueTaskPayload",
+      "type": "object"
+    },
     "CreateWorkItemChoicePayload": {
       "additionalProperties": false,
       "properties": {
@@ -2103,6 +2188,22 @@
         "idle"
       ],
       "title": "ExecutionCounts",
+      "type": "object"
+    },
+    "ExecutionProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "effort": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "ExecutionProfile",
       "type": "object"
     },
     "ExecutionRecovery": {
@@ -2719,6 +2820,418 @@
       "title": "InterruptReplyPayload",
       "type": "object"
     },
+    "IssueAssignee": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/IssueAssigneeKind"
+        },
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "title": "IssueAssignee",
+      "type": "object"
+    },
+    "IssueAssigneeKind": {
+      "enum": [
+        "owner",
+        "agent"
+      ],
+      "title": "IssueAssigneeKind",
+      "type": "string"
+    },
+    "IssueControlPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch"
+      ],
+      "title": "IssueControlPayload",
+      "type": "object"
+    },
+    "IssueEndpointPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "closure": {
+          "$ref": "#/definitions/WorkItemClosure"
+        },
+        "completion_reviews": {
+          "items": {
+            "$ref": "#/definitions/CompletionReviewAcknowledgement"
+          },
+          "type": "array"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_context_revision": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "follow_on_dispositions": {
+          "items": {
+            "$ref": "#/definitions/IssueFollowOnDisposition"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_dispositions": {
+          "items": {
+            "$ref": "#/definitions/IssueSourceDisposition"
+          },
+          "type": "array"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch"
+      ],
+      "title": "IssueEndpointPayload",
+      "type": "object"
+    },
+    "IssueFollowOnDisposition": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/WorkItemEvidence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "follow_on_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "follow_on_id",
+        "reason",
+        "evidence"
+      ],
+      "title": "IssueFollowOnDisposition",
+      "type": "object"
+    },
+    "IssuePage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueSummary"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "IssuePage",
+      "type": "object"
+    },
+    "IssueSourceDisposition": {
+      "additionalProperties": false,
+      "properties": {
+        "association_revision": {
+          "type": "integer"
+        },
+        "content_revision": {
+          "type": "integer"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "content_revision",
+        "association_revision",
+        "reason"
+      ],
+      "title": "IssueSourceDisposition",
+      "type": "object"
+    },
+    "IssueSourceReview": {
+      "additionalProperties": false,
+      "properties": {
+        "association_revision": {
+          "type": "integer"
+        },
+        "author": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "content_revision": {
+          "type": "integer"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "withdrawn": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message_id",
+        "author",
+        "body",
+        "content_revision",
+        "association_revision",
+        "withdrawn"
+      ],
+      "title": "IssueSourceReview",
+      "type": "object"
+    },
+    "IssueState": {
+      "enum": [
+        "active",
+        "paused",
+        "cancelling",
+        "cancelled",
+        "closed"
+      ],
+      "title": "IssueState",
+      "type": "string"
+    },
+    "IssueSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "assignment_state": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "parent_issue_id": {
+          "type": "string"
+        },
+        "pending_assignee": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "pending_handoff_id": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/definitions/IssueState"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "state",
+        "assignee",
+        "assignment_epoch",
+        "assignment_state",
+        "revision",
+        "title",
+        "project"
+      ],
+      "title": "IssueSummary",
+      "type": "object"
+    },
+    "IssueTaskSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "block_reason": {
+          "$ref": "#/definitions/BlockReason"
+        },
+        "control_mode": {
+          "$ref": "#/definitions/ControlMode"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "execution": {
+          "$ref": "#/definitions/TaskExecutionView"
+        },
+        "lifecycle": {
+          "$ref": "#/definitions/TaskLifecycle"
+        },
+        "rating": {
+          "$ref": "#/definitions/Rating"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "title",
+        "lifecycle",
+        "control_mode",
+        "control_revision",
+        "spec_version",
+        "rating",
+        "block_reason"
+      ],
+      "title": "IssueTaskSummary",
+      "type": "object"
+    },
+    "IssueView": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "assignment_state": {
+          "type": "string"
+        },
+        "closure": {
+          "$ref": "#/definitions/WorkItemClosure"
+        },
+        "context_revision": {
+          "type": "integer"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "depends_on": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "historical": {
+          "type": "boolean"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "parent_issue_id": {
+          "type": "string"
+        },
+        "pending_assignee": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "pending_handoff_id": {
+          "type": "string"
+        },
+        "pending_reviews": {
+          "items": {
+            "$ref": "#/definitions/WorkItemCompletionReview"
+          },
+          "type": "array"
+        },
+        "plan": {
+          "$ref": "#/definitions/WorkItemPlan"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "source_reviews": {
+          "items": {
+            "$ref": "#/definitions/IssueSourceReview"
+          },
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/definitions/IssueState"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/definitions/IssueTaskSummary"
+          },
+          "type": "array"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "issue_id",
+        "state",
+        "assignee",
+        "assignment_epoch",
+        "assignment_state",
+        "revision",
+        "plan",
+        "depends_on",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "IssueView",
+      "type": "object"
+    },
     "LedgerEvent": {
       "additionalProperties": false,
       "properties": {
@@ -2997,6 +3510,22 @@
       "title": "MountView",
       "type": "object"
     },
+    "ObservationScope": {
+      "additionalProperties": false,
+      "properties": {
+        "deployment": {
+          "type": "boolean"
+        },
+        "work_item_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "title": "ObservationScope",
+      "type": "object"
+    },
     "OpStatus": {
       "enum": [
         "succeeded",
@@ -3026,6 +3555,181 @@
         "status"
       ],
       "title": "Operation",
+      "type": "object"
+    },
+    "OwnerTaskBase": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        }
+      },
+      "title": "OwnerTaskBase",
+      "type": "object"
+    },
+    "OwnerTaskInput": {
+      "additionalProperties": false,
+      "properties": {
+        "file_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_id"
+      ],
+      "title": "OwnerTaskInput",
+      "type": "object"
+    },
+    "OwnerTaskMount": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "$ref": "#/definitions/OwnerTaskBase"
+        },
+        "path": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo"
+      ],
+      "title": "OwnerTaskMount",
+      "type": "object"
+    },
+    "OwnerTaskRequirements": {
+      "additionalProperties": false,
+      "properties": {
+        "host_id": {
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "os": {
+          "type": "string"
+        }
+      },
+      "title": "OwnerTaskRequirements",
+      "type": "object"
+    },
+    "OwnerTaskSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acceptance_execution": {
+          "$ref": "#/definitions/ExecutionProfile"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deliverables": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "delivery": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "implementation_context": {
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/definitions/OwnerTaskInput"
+          },
+          "type": "array"
+        },
+        "max_implement_attempts": {
+          "type": "integer"
+        },
+        "observation": {
+          "$ref": "#/definitions/ObservationScope"
+        },
+        "requirements": {
+          "$ref": "#/definitions/OwnerTaskRequirements"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "workspace": {
+          "$ref": "#/definitions/OwnerTaskWorkspace"
+        }
+      },
+      "required": [
+        "goal",
+        "acceptance",
+        "workspace"
+      ],
+      "title": "OwnerTaskSpec",
+      "type": "object"
+    },
+    "OwnerTaskWorkspace": {
+      "additionalProperties": false,
+      "properties": {
+        "include_existing_changes": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "mounts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/OwnerTaskMount"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile": {
+          "type": "string"
+        },
+        "source_task_id": {
+          "type": "string"
+        },
+        "template": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mounts"
+      ],
+      "title": "OwnerTaskWorkspace",
       "type": "object"
     },
     "PrepareWorkItemContextPayload": {
@@ -3317,6 +4021,35 @@
       "title": "ReopenWorkItemPayload",
       "type": "object"
     },
+    "ReparentIssuePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_parent_revision": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "parent_issue_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "parent_issue_id"
+      ],
+      "title": "ReparentIssuePayload",
+      "type": "object"
+    },
     "RepoRegistry": {
       "additionalProperties": false,
       "properties": {
@@ -3418,6 +4151,89 @@
         "body"
       ],
       "title": "ResultReport",
+      "type": "object"
+    },
+    "ReviewIssueCompletionsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reviews": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/CompletionReviewAcknowledgement"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "reviews"
+      ],
+      "title": "ReviewIssueCompletionsPayload",
+      "type": "object"
+    },
+    "ReviewIssueSourcesPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_context_revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_dispositions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueSourceDisposition"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "source_dispositions",
+        "expected_context_revision"
+      ],
+      "title": "ReviewIssueSourcesPayload",
       "type": "object"
     },
     "RunLogPage": {
@@ -3697,6 +4513,42 @@
         "effort"
       ],
       "title": "SetConversationSettingsPayload",
+      "type": "object"
+    },
+    "SetIssueDependenciesPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "depends_on": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "depends_on"
+      ],
+      "title": "SetIssueDependenciesPayload",
       "type": "object"
     },
     "SetMessageAssociationsPayload": {
@@ -4155,6 +5007,23 @@
         "tasks"
       ],
       "title": "TaskPage",
+      "type": "object"
+    },
+    "TaskRelation": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/TaskRelationKind"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "task_id"
+      ],
+      "title": "TaskRelation",
       "type": "object"
     },
     "TaskRelationKind": {
@@ -4948,6 +5817,60 @@
         }
       },
       "title": "UpdateFollowupPayload",
+      "type": "object"
+    },
+    "UpdateIssuePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "plan": {
+          "$ref": "#/definitions/WorkItemPlan"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "task_dispositions": {
+          "items": {
+            "$ref": "#/definitions/WorkItemTaskDisposition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "plan",
+        "expected_assignment_epoch"
+      ],
+      "title": "UpdateIssuePayload",
+      "type": "object"
+    },
+    "UpdateIssueTaskPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "rating": {
+          "$ref": "#/definitions/Rating"
+        },
+        "relations": {
+          "items": {
+            "$ref": "#/definitions/TaskRelation"
+          },
+          "type": "array"
+        },
+        "spec": {
+          "$ref": "#/definitions/OwnerTaskSpec"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch"
+      ],
+      "title": "UpdateIssueTaskPayload",
       "type": "object"
     },
     "UpdateWorkItemChoicePayload": {
@@ -5750,6 +6673,62 @@
       "title": "WorkItemPage",
       "type": "object"
     },
+    "WorkItemPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "items": {
+            "$ref": "#/definitions/SharedFact"
+          },
+          "type": "array"
+        },
+        "default_workspace_task_id": {
+          "type": "string"
+        },
+        "deliveries": {
+          "items": {
+            "$ref": "#/definitions/WorkItemDelivery"
+          },
+          "type": "array"
+        },
+        "follow_ons": {
+          "items": {
+            "$ref": "#/definitions/WorkItemFollowOn"
+          },
+          "type": "array"
+        },
+        "intent": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "stages": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/WorkItemStage"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "project",
+        "intent",
+        "stages"
+      ],
+      "title": "WorkItemPlan",
+      "type": "object"
+    },
     "WorkItemStage": {
       "additionalProperties": false,
       "properties": {
@@ -6161,6 +7140,12 @@
     "CreateActionPayload": {
       "$ref": "#/definitions/CreateActionPayload"
     },
+    "CreateIssuePayload": {
+      "$ref": "#/definitions/CreateIssuePayload"
+    },
+    "CreateIssueTaskPayload": {
+      "$ref": "#/definitions/CreateIssueTaskPayload"
+    },
     "CreateWorkItemChoicePayload": {
       "$ref": "#/definitions/CreateWorkItemChoicePayload"
     },
@@ -6187,6 +7172,18 @@
     },
     "InterruptReplyPayload": {
       "$ref": "#/definitions/InterruptReplyPayload"
+    },
+    "IssueControlPayload": {
+      "$ref": "#/definitions/IssueControlPayload"
+    },
+    "IssueEndpointPayload": {
+      "$ref": "#/definitions/IssueEndpointPayload"
+    },
+    "IssuePage": {
+      "$ref": "#/definitions/IssuePage"
+    },
+    "IssueView": {
+      "$ref": "#/definitions/IssueView"
     },
     "LedgerEvent": {
       "$ref": "#/definitions/LedgerEvent"
@@ -6215,6 +7212,9 @@
     "ReopenWorkItemPayload": {
       "$ref": "#/definitions/ReopenWorkItemPayload"
     },
+    "ReparentIssuePayload": {
+      "$ref": "#/definitions/ReparentIssuePayload"
+    },
     "RepoRegistry": {
       "$ref": "#/definitions/RepoRegistry"
     },
@@ -6223,6 +7223,12 @@
     },
     "RequestView": {
       "$ref": "#/definitions/RequestView"
+    },
+    "ReviewIssueCompletionsPayload": {
+      "$ref": "#/definitions/ReviewIssueCompletionsPayload"
+    },
+    "ReviewIssueSourcesPayload": {
+      "$ref": "#/definitions/ReviewIssueSourcesPayload"
     },
     "RunLogPage": {
       "$ref": "#/definitions/RunLogPage"
@@ -6247,6 +7253,9 @@
     },
     "SetConversationSettingsPayload": {
       "$ref": "#/definitions/SetConversationSettingsPayload"
+    },
+    "SetIssueDependenciesPayload": {
+      "$ref": "#/definitions/SetIssueDependenciesPayload"
     },
     "SetMessageAssociationsPayload": {
       "$ref": "#/definitions/SetMessageAssociationsPayload"
@@ -6283,6 +7292,12 @@
     },
     "UpdateFollowupPayload": {
       "$ref": "#/definitions/UpdateFollowupPayload"
+    },
+    "UpdateIssuePayload": {
+      "$ref": "#/definitions/UpdateIssuePayload"
+    },
+    "UpdateIssueTaskPayload": {
+      "$ref": "#/definitions/UpdateIssueTaskPayload"
     },
     "UpdateWorkItemChoicePayload": {
       "$ref": "#/definitions/UpdateWorkItemChoicePayload"

@@ -56,8 +56,8 @@ type IssueBlocker struct {
 	RequestID string `json:"request_id,omitempty"`
 }
 
-// Issue is the canonical aggregate used by internal coordination commands.
-// Public API registration is separate from these storage contracts.
+// Issue is the canonical aggregate shared by owner API and coordination.
+// Legacy ledger identities remain opaque; the public identity is issue_id.
 type Issue struct {
 	IssueControl
 	Revision  int64            `json:"revision"`
