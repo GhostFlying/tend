@@ -451,10 +451,7 @@ func (o owner) writeResult(ctx context.Context, op string, target protocol.Targe
 	var res protocol.APIResponse
 	// A lost answer is resent once under the same request ID: the server
 	// returns the recorded outcome instead of acting twice.
-	err = o.c.do(ctx, "POST", "/api/v1/ops", env, &res)
-	if isTransport(err) {
-		err = o.c.do(ctx, "POST", "/api/v1/ops", env, &res)
-	}
+	res, err = o.sendEnvelope(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -565,4 +562,15 @@ func (o owner) cancel(ctx context.Context, id string) error {
 	}
 	rev := d.ControlRevision
 	return o.write(ctx, "tasks.cancel", protocol.Target{Type: "task", ID: id}, &rev, map[string]any{})
+}
+
+// sendEnvelope is shared transport only: every retry retains the exact request.
+// It does not re-read a revision, rebuild a payload, or infer a new owner action.
+func (o owner) sendEnvelope(ctx context.Context, env protocol.Envelope) (protocol.APIResponse, error) {
+	var res protocol.APIResponse
+	err := o.c.do(ctx, "POST", "/api/v1/ops", env, &res)
+	if isTransport(err) {
+		err = o.c.do(ctx, "POST", "/api/v1/ops", env, &res)
+	}
+	return res, err
 }

@@ -324,8 +324,20 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 			if err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_contexts(logical_turn_id,work_item_id) SELECT le.logical_turn_id,w.work_item_id FROM logical_turn_executions le JOIN work_items w ON ((?='work_item' AND w.work_item_id=?) OR (?='task' AND EXISTS(SELECT 1 FROM work_item_task_links wl WHERE wl.work_item_id=w.work_item_id AND wl.task_id=?))) WHERE le.request_id=? ON CONFLICT(logical_turn_id,work_item_id) DO NOTHING`, e.ObjectType, e.ObjectID, e.ObjectType, e.ObjectID, request); err != nil {
-				return err
+			items := []protocol.WorkItem{}
+			if e.ObjectType == "work_item" {
+				items = append(items, protocol.WorkItem{WorkItemID: e.ObjectID})
+			}
+			if e.ObjectType == "task" {
+				items, err = store.TaskIssueResponsibilities(ctx, tx.Q(), e.ObjectID)
+				if err != nil {
+					return err
+				}
+			}
+			for _, item := range items {
+				if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_contexts(logical_turn_id,work_item_id) SELECT logical_turn_id,? FROM logical_turn_executions WHERE request_id=? ON CONFLICT(logical_turn_id,work_item_id) DO NOTHING`, item.WorkItemID, request); err != nil {
+					return err
+				}
 			}
 		}
 		body, err := json.Marshal(e.Body)
@@ -403,8 +415,8 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 				affected = true
 			}
 			if e.ObjectType == "task" {
-				var linked bool
-				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_item_task_links WHERE task_id=? AND work_item_id=?)`, e.ObjectID, id).Scan(&linked); err != nil {
+				linked, err := store.TaskIssueResponsible(ctx, tx.Q(), e.ObjectID, id)
+				if err != nil {
 					return err
 				}
 				affected = affected || linked

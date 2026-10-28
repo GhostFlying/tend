@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -191,8 +192,15 @@ func (s *Service) backgroundEvidence(ctx context.Context, c Call) (any, error) {
 			return err
 		}
 		if p.ArtifactID != "" {
-			var linked bool
-			if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM artifacts a JOIN work_item_task_links l ON l.task_id=a.task_id WHERE a.artifact_id=? AND l.work_item_id=?)`, p.ArtifactID, conv.WorkItemID).Scan(&linked); err != nil {
+			row, err := store.GetArtifact(ctx, tx.Q(), p.ArtifactID)
+			if errors.Is(err, store.ErrNotFound) {
+				return protocol.Errorf(protocol.CodeForbidden, "artifact outside work item")
+			}
+			if err != nil {
+				return err
+			}
+			linked, err := store.TaskIssueEvidenceReadable(ctx, tx.Q(), row.TaskID, conv.WorkItemID)
+			if err != nil {
 				return err
 			}
 			if !linked {

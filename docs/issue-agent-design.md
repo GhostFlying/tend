@@ -1,6 +1,8 @@
 # Issue、Agent 与个人规划架构
 
-状态：设计已确认，P1a 内部命名整理已完成本地检查与独立评审，P1b1 存储/纯规则及 P2a 纯配置基础已完成本地检查与独立评审，P1b2a 内部定义/边界代码、本地完整检查和独立复审已完成，P2b 本地配置持久化及 journal CAS 恢复已通过本地完整检查和独立复审；P1b2b owner 内部生命周期及逐批来源收尾已纳入；正式 review 的迟到份额缺陷已修正，r2 定向 race/vet 通过，独立复核及完整 make check 已通过；P1 task/manager 与公开入口未启用；P2c–P2d 本机配置及 Category/安全库存 CLI/API 入口已纳入，三片候选独立预审及正式组合定向检查通过，规定 CLI 独立 review 和完整 make check 均已通过，新 Agent 执行/factory/hosted/调度未启用；其余行为及 CI/合并/部署未完成（P0 文档及基线修复已合并）。本文规定 D121–D126 的目标行为；现有工作项、后台会话和 runner 能力只作为可复用基础，不代表以下功能已经发布。实施顺序及验收见[实施计划](plans/issue-agent-refactor.md)。
+状态：设计已确认，P0 与 P1a 已经 CI 和 rebase 合并；P1b1/P1b2、P2 本机配置/Category/安全库存链路完成本地完整检查及独立 review。P1b3+b4 r2+P1c 已正式纳入 owner Issue API/CLI、primary/no-stage 上下文和独立执行/验收/owner 核对闭环，各候选预审通过，r1 review 两项 P2 已采纳修复、完整检查主动停止未完成，r2 已正式应用，定向 race/vet、独立增量复审与完整 make check 均通过；命名 Agent 调度、issue manager 与 hosted factory 尚未启用。其余行为、后续 CI/合并、archive cutover、部署和真实 E2E 尚未完成。本文规定 D121–D126 的目标行为，代码纳入不等于发布；实施顺序及验收见 [实施计划](plans/issue-agent-refactor.md)。
+
+主 Agent 可依据真实 owner 原文，转录既有 decision/version 的既定选项；仍经原 AskedRevision 与领域规则应用已有效果。这是个人助理传递用户决定，不是主 Agent 自由规划 canonical task、修改其冻结合同或接管 owner 权限；不为 owner 普通回答添加语义证明链。
 
 ## 1. 职责与领域对象
 

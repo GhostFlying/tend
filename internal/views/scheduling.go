@@ -38,10 +38,11 @@ func SchedulingCandidates(rows []store.CandidateRow) ([]scheduler.Candidate, err
 func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []scheduler.Candidate) error {
 	for i := range candidates {
 		c := &candidates[i]
-		items, err := store.ListTaskIssues(ctx, q, c.TaskID)
+		scope, err := store.ResolveTaskIssueScope(ctx, q, c.TaskID)
 		if err != nil {
 			return err
 		}
+		items := scope.Responsibilities
 		var frozen struct {
 			SharedContext []protocol.TaskWorkContext `json:"shared_context"`
 		}
@@ -53,6 +54,12 @@ func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []s
 			if err := json.Unmarshal([]byte(raw), &frozen); err != nil {
 				return err
 			}
+		}
+		if scope.Canonical {
+			if err := applyCanonicalTaskAdmission(ctx, q, c, scope.PrimaryID, frozen.SharedContext); err != nil {
+				return err
+			}
+			continue
 		}
 		for _, item := range items {
 			// Only registered new-message responsibility gates dispatch; historical
@@ -84,38 +91,8 @@ func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []s
 				c.DependenciesDone = false
 				continue
 			}
-			stages := map[string]protocol.WorkItemStage{}
-			for _, stage := range item.Stages {
-				stages[stage.StageID] = stage
-			}
-			for _, stage := range item.Stages {
-				if !slices.Contains(stage.TaskIDs, c.TaskID) {
-					continue
-				}
-				if stage.Status == "retired" || stage.Status == "cancelled" {
-					c.DependenciesDone = false
-				}
-				// A child inherits the prerequisites of every containing group.
-				for ancestor := stage; ; ancestor = stages[ancestor.ParentID] {
-					if ancestor.Status == "retired" || ancestor.Status == "cancelled" {
-						c.DependenciesDone = false
-					}
-					for _, dependency := range ancestor.DependsOn {
-						dep := stages[dependency]
-						if dep.Status != "done" && !slices.Contains(dep.TaskIDs, c.TaskID) {
-							c.DependenciesDone = false
-							if c.DependencyTaskID == "" {
-								c.DependencyTaskID, err = unfinishedStageTask(ctx, q, item, dep.StageID, c.TaskID)
-								if err != nil {
-									return err
-								}
-							}
-						}
-					}
-					if ancestor.ParentID == "" {
-						break
-					}
-				}
+			if err := applyStageDependencies(ctx, q, c, item); err != nil {
+				return err
 			}
 		}
 	}
@@ -152,4 +129,43 @@ func unfinishedStageTask(ctx context.Context, q store.Querier, item protocol.Wor
 		}
 	}
 	return "", nil
+}
+
+// Optional stages retain their existing prerequisites without inventing stages.
+func applyStageDependencies(ctx context.Context, q store.Querier, c *scheduler.Candidate, item protocol.WorkItem) error {
+	var err error
+	stages := map[string]protocol.WorkItemStage{}
+	for _, stage := range item.Stages {
+		stages[stage.StageID] = stage
+	}
+	for _, stage := range item.Stages {
+		if !slices.Contains(stage.TaskIDs, c.TaskID) {
+			continue
+		}
+		if stage.Status == "retired" || stage.Status == "cancelled" {
+			c.DependenciesDone = false
+		}
+		// A child inherits the prerequisites of every containing group.
+		for ancestor := stage; ; ancestor = stages[ancestor.ParentID] {
+			if ancestor.Status == "retired" || ancestor.Status == "cancelled" {
+				c.DependenciesDone = false
+			}
+			for _, dependency := range ancestor.DependsOn {
+				dep := stages[dependency]
+				if dep.Status != "done" && !slices.Contains(dep.TaskIDs, c.TaskID) {
+					c.DependenciesDone = false
+					if c.DependencyTaskID == "" {
+						c.DependencyTaskID, err = unfinishedStageTask(ctx, q, item, dep.StageID, c.TaskID)
+						if err != nil {
+							return err
+						}
+					}
+				}
+			}
+			if ancestor.ParentID == "" {
+				break
+			}
+		}
+	}
+	return nil
 }

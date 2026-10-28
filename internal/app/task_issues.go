@@ -96,11 +96,11 @@ func missingIssueStageIDs(itemID string, values []string) *protocol.Error {
 }
 
 func refreshTaskWorkContext(ctx context.Context, q store.Querier, taskID string, spec *domain.Spec, previous []protocol.TaskWorkContext) error {
-	items, err := store.ListTaskIssues(ctx, q, taskID)
+	items, canonical, err := store.TaskIssueContextItems(ctx, q, taskID)
 	if err != nil {
 		return err
 	}
-	fingerprint := false
+	fingerprint := canonical
 	for _, old := range previous {
 		fingerprint = fingerprint || old.ContextDigest != ""
 	}
@@ -137,6 +137,31 @@ func validateIssueTaskDependencies(ctx context.Context, q store.Querier, candida
 	}
 	items = slices.DeleteFunc(items, func(item protocol.WorkItem) bool { return item.WorkItemID == candidate.WorkItemID })
 	items = append(items, candidate)
+	// Project only dispatch responsibility into stage waits. A candidate's new
+	// legacy links are not persisted yet, so retain noncanonical shared tasks;
+	// only canonical tasks have one immutable primary and evidence-only refs.
+	scopes := map[string]store.TaskIssueScope{}
+	for i := range items {
+		items[i].Stages = slices.Clone(items[i].Stages)
+		for j := range items[i].Stages {
+			stage := &items[i].Stages[j]
+			members := make([]string, 0, len(stage.TaskIDs))
+			for _, id := range stage.TaskIDs {
+				scope, found := scopes[id]
+				if !found {
+					scope, err = store.ResolveTaskIssueScope(ctx, q, id)
+					if err != nil {
+						return err
+					}
+					scopes[id] = scope
+				}
+				if !scope.Canonical || scope.PrimaryID == items[i].WorkItemID {
+					members = append(members, id)
+				}
+			}
+			stage.TaskIDs = members
+		}
+	}
 	lifecycles := map[string]protocol.TaskLifecycle{}
 	for _, item := range items {
 		for _, stage := range item.Stages {

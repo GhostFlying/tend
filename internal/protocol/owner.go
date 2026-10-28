@@ -51,6 +51,7 @@ type APIResponse struct {
 	// Current is the task's state after a stale write about it, so the
 	// caller can decide again.
 	Current         *TaskSummary  `json:"current,omitempty"`
+	CurrentIssue    *IssueView    `json:"current_issue,omitempty"`
 	CurrentWorkItem *WorkItemView `json:"current_work_item,omitempty"`
 }
 

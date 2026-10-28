@@ -13,7 +13,7 @@ import (
 
 // queueBackgroundSource retains every notice and merges only unclaimed input.
 func queueBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, message, event, kind string, data json.RawMessage) error {
-	groups, err := store.FollowupIDs(ctx, tx.Q(), `SELECT work_item_id FROM message_work_items WHERE message_id=? AND active=1 UNION SELECT l.work_item_id FROM work_item_task_links l JOIN conversation_bindings b ON b.object_id=l.task_id AND b.object_type='task' WHERE b.message_id=? AND NOT EXISTS(SELECT 1 FROM message_work_items a WHERE a.message_id=b.message_id AND a.work_item_id=l.work_item_id AND a.active=0 AND a.owner_locked=1) ORDER BY 1`, message, message)
+	groups, err := store.FollowupIDs(ctx, tx.Q(), `SELECT work_item_id FROM message_work_items WHERE message_id=? AND active=1 UNION SELECT l.work_item_id FROM (SELECT o.task_id,o.work_item_id FROM task_work_item_owners o JOIN issue_controls c ON c.issue_id=o.work_item_id UNION SELECT l.task_id,l.work_item_id FROM work_item_task_links l WHERE NOT EXISTS(SELECT 1 FROM issue_controls c WHERE c.issue_id=l.work_item_id) AND NOT EXISTS(SELECT 1 FROM task_work_item_owners o JOIN issue_controls c ON c.issue_id=o.work_item_id WHERE o.task_id=l.task_id)) l JOIN conversation_bindings b ON b.object_id=l.task_id AND b.object_type='task' WHERE b.message_id=? AND NOT EXISTS(SELECT 1 FROM message_work_items a WHERE a.message_id=b.message_id AND a.work_item_id=l.work_item_id AND a.active=0 AND a.owner_locked=1) ORDER BY 1`, message, message)
 	if err != nil {
 		return err
 	}
@@ -35,6 +35,15 @@ func queueBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, message, 
 	return nil
 }
 func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, item, message, event, kind string, data json.RawMessage) error {
+	if item != "" {
+		var canonical bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, item).Scan(&canonical); err != nil {
+			return err
+		}
+		if canonical {
+			return nil
+		} // Durable owner facts remain; P4 must admit an isolated manager first.
+	}
 	now := x.Now.UnixMilli()
 	conversation := "main"
 	if item != "" {

@@ -10,7 +10,16 @@ import (
 // TaskContextBlockers exposes stale execution bindings separately from semantic
 // context readiness, so it cannot prevent a background reader from reconciling.
 func TaskContextBlockers(ctx context.Context, q Querier, item string) ([]protocol.ContextBlocker, error) {
-	rows, err := q.QueryContext(ctx, `SELECT t.task_id,t.spec_version,t.control_revision,s.body_json FROM tasks t JOIN work_item_task_links l ON l.task_id=t.task_id JOIN task_specs s ON s.task_id=t.task_id AND s.spec_version=t.spec_version WHERE l.work_item_id=? AND t.lifecycle NOT IN ('completed','cancelled') ORDER BY t.task_id`, item)
+	rows, err := q.QueryContext(ctx, `WITH RECURSIVE inherited(issue_id) AS (
+ SELECT issue_id FROM issue_controls WHERE issue_id=?
+ UNION SELECT c.issue_id FROM issue_controls c JOIN inherited p ON c.parent_issue_id=p.issue_id
+ ) SELECT DISTINCT t.task_id,t.spec_version,t.control_revision,s.body_json FROM tasks t
+ JOIN task_specs s ON s.task_id=t.task_id AND s.spec_version=t.spec_version
+ WHERE t.lifecycle NOT IN ('completed','cancelled') AND (
+ EXISTS(SELECT 1 FROM task_work_item_owners o JOIN inherited i ON i.issue_id=o.work_item_id WHERE o.task_id=t.task_id)
+ OR (NOT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)
+ AND NOT EXISTS(SELECT 1 FROM task_work_item_owners o JOIN issue_controls c ON c.issue_id=o.work_item_id WHERE o.task_id=t.task_id)
+ AND EXISTS(SELECT 1 FROM work_item_task_links l WHERE l.task_id=t.task_id AND l.work_item_id=?))) ORDER BY t.task_id`, item, item, item)
 	if err != nil {
 		return nil, err
 	}

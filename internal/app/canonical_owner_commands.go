@@ -15,7 +15,7 @@ import (
 )
 
 // CanonicalOwnerIssueCommand changes definitions without registering a public
-// operation or enabling canonical task or manager execution.
+// operation or enabling manager execution.
 type CanonicalOwnerIssueCommand struct{ Action string }
 
 func (c CanonicalOwnerIssueCommand) Operation() string { return "issues." + c.Action }
@@ -37,13 +37,14 @@ type canonicalOwnerIssueCreate struct {
 }
 type canonicalOwnerIssueUpdate struct {
 	canonicalOwnerIssueSource
-	Plan                    protocol.WorkItemPlan `json:"plan"`
-	ExpectedAssignmentEpoch int64                 `json:"expected_assignment_epoch"`
+	Plan                    protocol.WorkItemPlan              `json:"plan"`
+	ExpectedAssignmentEpoch int64                              `json:"expected_assignment_epoch"`
+	TaskDispositions        []protocol.WorkItemTaskDisposition `json:"task_dispositions,omitempty"`
 }
 
 func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	switch c.Action {
-	case "create", "update", "pause", "resume", "cancel", "finish_cancel", "close", "reopen", "reparent", "dependencies", "assign", "review_sources":
+	case "create", "update", "pause", "resume", "cancel", "finish_cancel", "close", "reopen", "reparent", "dependencies", "assign", "review_sources", "review_completions":
 	default:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported canonical operation")
 	}
@@ -130,22 +131,17 @@ func updateCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx, curre
 	if p.Plan.Stages == nil {
 		p.Plan.Stages = []protocol.WorkItemStage{}
 	}
-	if err := validateCanonicalUnboundPlan(x, p.Plan, &current.Plan); err != nil {
+	if err := validateCanonicalBoundPlan(ctx, x, tx.Q(), current.IssueID, p.Plan, &current.Plan); err != nil {
 		return Outcome{}, err
 	}
 	if err := validateCanonicalSourceReference(ctx, tx.Q(), p.canonicalOwnerIssueSource); err != nil {
 		return Outcome{}, err
 	}
-	// A lifecycle-safe future update must inspect immutable primary task agreements.
-	// b2 keeps canonical task creation disabled; still refuse an unexpected persisted
-	// primary rather than silently treating empty stages as an empty responsibility.
-	var primary bool
-	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_work_item_owners WHERE work_item_id=?)`, current.IssueID).Scan(&primary); err != nil {
+	projection := protocol.WorkItem{WorkItemID: current.IssueID, Revision: current.Revision, WorkItemPlan: current.Plan}
+	if err := validateIssueDispositions(ctx, tx.Q(), projection, p.Plan, p.TaskDispositions); err != nil {
 		return Outcome{}, err
 	}
-	if primary {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "canonical task agreement updates are not enabled")
-	}
+
 	if reflect.DeepEqual(current.Plan, p.Plan) && p.SourceMessageID == "" {
 		// Canonical controls retain an exact success receipt even without a business
 		// change. Replays reauthorize and return this result after later revisions.
@@ -172,6 +168,10 @@ func validateCanonicalUnboundPlan(x *Exec, plan protocol.WorkItemPlan, previous 
 			return protocol.Errorf(protocol.CodeInvalidTransition, "canonical task binding is not enabled")
 		}
 	}
+	return validateCanonicalOwnerPlan(x, plan, previous)
+}
+
+func validateCanonicalOwnerPlan(x *Exec, plan protocol.WorkItemPlan, previous *protocol.WorkItemPlan) error {
 	// This minimal definition slice supports authentic current-owner evidence and
 	// unchanged server-frozen prior evidence only. Additional proof kinds need the
 	// lifecycle/observation reader before being enabled, not a trusted JSON blob.
@@ -227,6 +227,12 @@ func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, ne
 	next.DependsOn = slices.Clone(next.DependsOn)
 	slices.Sort(next.DependsOn)
 	if err := tx.SaveCanonicalIssue(ctx, next, expected, store.IssueRevisionProvenance{Actor: x.Principal, RequestID: x.Env.RequestID, SourceMessageID: source.SourceMessageID, Reason: reason}); err != nil {
+		return Outcome{}, err
+	}
+	if err := validateCanonicalTaskDependencies(ctx, tx.Q()); err != nil {
+		return Outcome{}, err
+	}
+	if err := tx.EnsureCompletionReviews(ctx, next.IssueID); err != nil {
 		return Outcome{}, err
 	}
 	// No BindMessage(work_item), native conversation or legacy background notice:

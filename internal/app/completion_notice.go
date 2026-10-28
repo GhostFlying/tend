@@ -43,15 +43,19 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 	var body strings.Builder
 	fmt.Fprintf(&body, "任务已完成：%s\n\n独立验收通过 · spec %d。\n\n产物：`%s`。", taskID, task.SpecVersion, task.CurrentArtifactID)
 	fmt.Fprintf(&body, "\n\n验收证据：`%s`（acceptance_id）。", acceptanceID)
-	items, err := store.ListTaskIssues(ctx, tx.Q(), taskID)
+	scope, err := store.ResolveTaskIssueScope(ctx, tx.Q(), taskID)
 	if err != nil {
 		return err
 	}
-	for _, item := range items {
+	for _, item := range scope.Responsibilities {
 		if item.Status != "closed" {
 			if err := tx.PutCompletionReview(ctx, item.WorkItemID, protocol.WorkItemCompletionReview{EventID: sourceEventID, TaskID: taskID, AcceptanceID: acceptanceID, CreatedAt: x.Now.UnixMilli()}); err != nil {
 				return err
 			}
+		}
+		if scope.Canonical {
+			fmt.Fprintf(&body, "\n\n事项：%s（%s）。独立验收已通过，等待 owner 核对本事项剩余范围并记录完成核对。任务完成不会自动关闭事项。", item.WorkItemID, item.Title)
+			continue
 		}
 		fmt.Fprintf(&body, "\n\n工作项：%s（%s）。本轮执行完成不代表后续跟进结束；请核对已有承诺、交付状态和下一步安排；完成阶段后更新计划，仍有阶段责任时用 completion_reviews 明确记录核对结论。若已授权上线则继续；否则在核对现有选择后通过工作项选择卡询问下一步，明确尚需提交、PR、合入或部署的哪些步骤，已决定稍后处理的不要重复问。", item.WorkItemID, item.Title)
 	}
@@ -93,5 +97,8 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 	if err != nil {
 		return err
 	}
+	if scope.Canonical {
+		return nil
+	} // Owner sees the durable pending review; no manager runtime is active.
 	return queueEventTurn(ctx, x, tx, id, sourceEventID, "task.completed", nil)
 }
