@@ -124,6 +124,13 @@
 
 | D117 | 消费用量独立于 context 占用：按原生请求身份追加事实、请求 revision 替换贡献，重传、模型校正、父累计不得重复相加；同身份冲突单列并排除。全局/单 run 共享读模型，固定 Asia/Shanghai 自然周期，未知发生时点单列而非冒充接收时间。输入包含缓存明细，输出单列，缺失不填零。worker 历史/live 使用同一持久分页窗口与正式运行身份，缺口/截断可见。卡片显示当前动作和最近步骤，完整模式提供正文阅读流和工具详情；共用身份投影与轮询，切换不改变跟随状态，返回保留阅读位置。见 docs/plans/rollout-token-panel.md 与 docs/plans/rollout-reading-modes.md。 | 实施中 |
 
+| D121 | Issue/sub-issue 为同一递归责任实体，单一具体 assignee 与 assignment epoch；task 唯一 primary issue，stage 可选，执行合同及独立验收保持。支持生命周期、重挂载与围栏交接，子项、在途控制和 unknown 未核清不伪关闭。机械命名迁移先保持历史存储/wire/UI 行为，公共切换后退役活动旧入口。见 docs/issue-agent-design.md、docs/plans/issue-agent-refactor.md。 | 已确认，未实施（2026-10-28） |
+| D122 | 主 Agent 为默认个人助理和全局规划者，issue manager 在继承授权内独立澄清、规划、委派和推进；二者均禁止实际执行，调查也走 task。Issue 直接 owner 指令由本项审核，不经 main 重复审批；协调 execution/effect_seq 与 owner 来源分离，epoch、context 和请求身份共同围栏。取代 D111 后台原生执行开放及仅能评估、主协调独占本项派发的规则，保留 D88 的执行隔离。见 docs/issue-agent-design.md。 | 已确认，未实施（2026-10-28） |
+| D123 | 全局 category 与 runner/runtime 本机多 Agent 库存分离，hosted main/issue/consultation 同样登记；只投影非密钥来源、版本和 hash。按 category 加可选 HARD runner 及 workspace host 选择，首次 host 必须同时支持实现及同 workspace host 的正式验收；稳定固定配置快照，恢复不重选，类别不授角色。复用既有 harness，通信按能力协商或完整协议升级。见 docs/issue-agent-design.md。 | 已确认，未实施（2026-10-28） |
+| D124 | 开放 main、issue、active run 和独立 named-agent consultation 的直接聊天，保留真实 owner 来源；普通咨询无 issue/task、无实际执行，显式 promotion 去重后才进入业务合同。精确 run 补充不改 spec、不复活终态、不泄露实施 rationale 给验收。Orca 查看不等于接管，owner-only human_control/handback 保留；Cove 仅定义合同。见 docs/issue-agent-design.md。 | 已确认，未实施（2026-10-28） |
+| D125 | Attention 的 decision/action/information 与 assignment 分离，chat/Inbox/detail 共用身份，读取或归档不回答。手动来源注入先行，无飞书连接器；next action 与 deadline 保留来源，默认到期前 24 小时/到期提醒 main。Task/child 结果、owner 答复与期限明确路由到责任 manager/parent/main，复用 outbox/followup/batch，无变化静默，不增加定时器或巡逻 Agent。见 docs/issue-agent-design.md。 | 已确认，未实施（2026-10-28） |
+| D126 | 旧账本一致性只读离线归档加新空业务账本，取代 D113 及 mandatory-message-context 部署计划中删除历史、不保留归档/恢复材料的安排。历史迁移不改写，archive reader 不走正常 store.Open 或服务循环；manifest 与原件独立校验，unknown 阻止切换。仅显式导入静态设置，新 deployment identity、runner journal/凭据隔离；已有新副作用后回退先对账。UI 先 Image Gen 设计、独立 xhigh review、用户确认再编码；分批 PR 不中途部署，完整后受控发布与真实 E2E。见 docs/issue-agent-design.md、docs/plans/issue-agent-refactor.md。 | 已确认，未实施（2026-10-28） |
+
 ## 2. 上下文注入（修订 v0.1 §7）
 
 > D45：当前先做的外挂形态里，上下文由各 agent 的 hook 追加，水位、完整快照与增量的规则不变，具体机制见阶段 C 计划。本节描述的 `thread/inject_items` 方式属于托管形态，随托管一起延后；记录的 app-server 能力也适用于 worker。
