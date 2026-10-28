@@ -1,6 +1,6 @@
 # Issue 与 Agent 重构实施计划
 
-状态：P0 文档、独立评审和本地 make check 已通过，PR #155 等待 CI/合并；P1a 内部改名代码、本地检查及独立评审已完成，CI/合并/部署未完成；P1b–P9 尚未实施。本文是实施合同，不是发布声明。设计见 [Issue、Agent 与个人规划架构](../issue-agent-design.md)，Refs: D121–D126。
+状态：P0 文档、独立评审和本地 make check 已通过，PR #155 等待 CI/合并；P1a 内部改名代码、本地检查及独立评审已完成，CI/合并/部署未完成；P1b1 存储/纯规则代码、本地完整检查及独立评审已完成，未启用入口，PR CI/合并未完成；P1b2–P9 尚未实施。本文是实施合同，不是发布声明。设计见 [Issue、Agent 与个人规划架构](../issue-agent-design.md)，Refs: D121–D126。
 
 ## 进度账本与角色
 
@@ -9,13 +9,13 @@
 | 批次 | 依赖 | 设计 | 代码 | 独立评审 | 合并 | 部署 | Live 验收 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P0 | 无 | 文档完成 | 无运行代码；本地 make check 通过 | 已通过，澄清增量确认 | PR #155 待 CI/合并 | 本批不部署 | 无 |
-| P1 | P0 评审通过 | P1a 子计划已写，P1b/c 接口待核定 | P1a 代码及本地检查通过；P1b/c 未开始 | P1a 独立 review 通过 | CI/合并未完成 | 本批不部署 | 未执行 |
+| P1 | P0 评审通过 | P1a 子计划已写，P1b 控制分片合同已评审可实施；P1c 待核定 | P1a、P1b1 代码及本地检查通过；P1b1 入口未启用；其余未开始 | P1a/P1b1 独立 review 通过；本次台账增量待核对 | CI/合并未完成 | 本批不部署 | 未执行 |
 | P2 | P1 身份基础 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P3 | P1、P2 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P4 | P1–P3 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P5 | P4 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P6 | P3–P5 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
-| P7 | 稳定 API、设计 review、用户确认 | 待概念图和确认 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
+| P7 | 稳定 API、设计 review、用户确认 | 主界面及现有风格方向已获用户确认；其他页面待单独出图/review/确认 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P8 | P1 开发，P2–P6 演练 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P9 | P0–P8 | 合同已写，发布清单待核验 | 未开始 | 未开始 | 未合并 | 未执行 | 未执行 |
 
@@ -24,8 +24,9 @@
 | 批次 | 固定 base SHA | 实施 head SHA | PR / CI | reviewer / 结论 | 部署 build / manifest | Live 对象 / 结论 |
 | --- | --- | --- | --- | --- | --- | --- |
 | P0 | `7761e61c0e9acdb0209fddff7f5d0e55830b4c65` | `5b20a8ad4536cb70341607066452a07e487a702e` | [PR #155](https://github.com/GhostFlying/tend/pull/155)；本地 make check 通过，CI 待回读 | GPT-6.1-Sol xhigh 通过，澄清增量已确认 | 不适用 | 不适用 |
-| P1a | `5b20a8ad4536cb70341607066452a07e487a702e` | 待提交；冻结实现快照 SHA-256 `b94229bf4efe0dc91932358af1091004951c7b101be73442fb3dc288863b218f` | 本地 make check 通过；PR/CI 未完成 | GPT-6.1-Sol xhigh 无 findings；后续仅状态记录增量 | 未部署 | 未执行 |
-| P1b–P9（逐批追加） | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 |
+| P1a | `5b20a8ad4536cb70341607066452a07e487a702e` | `d52d093741da41e78dc60effb0493a67058eded5`；冻结实现快照 SHA-256 `b94229bf4efe0dc91932358af1091004951c7b101be73442fb3dc288863b218f` | 本地 make check 通过；PR/CI 未完成 | GPT-6.1-Sol xhigh 无 findings；后续仅状态记录增量 | 未部署 | 未执行 |
+| P1b1 | `242ff5200c7bda28c70de3c313ffef7a55d64717`（含独立基线测试修复） | 待提交；r2 实施快照 SHA-256 `8f99a5d2fbb478ce8a28fec78312a9cdff8a4549d4255e5fa99b867d4d2c06c6`；入口未启用 | 首轮完整检查因 schema fixture 上限失败；修复后定向升级/维护 race、第二轮 make check 均通过；PR CI 未完成 | GPT-6.1-Sol xhigh 首轮及 r2 增量均通过，无 findings；随后仅本次台账增量 | 未部署 | 未执行 |
+| P1b2–P9（逐批追加） | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 |
 
 Base 在开始批次与评审前分别固定，若 rebase 改变 head 则更新并判断是否重审。公开账本只记录公开 PR、commit 和无私密信息的证据引用；机器运行路径、凭据及原始发布证据保存在忽略的本地记录中。
 
@@ -48,7 +49,7 @@ Base 在开始批次与评审前分别固定，若 rebase 改变 head 则更新�
 
 P1a 先做机械命名整理，详见[独立子计划](issue-internal-names.md)：核对 protocol DTO、domain/store/app、task ownership/context 和 views 的依赖图，把可独立迁移的 Go 函数/命令名称及 helper 改为 Issue。保留 protocol DTO 反射名、已提交 migration、table/JSON/wire 身份、旧 owner API 和旧 UI 行为；不添加无用途 aliases，不手改 UI；schema/types 重新生成后验证原字节不变。此批不改变授权、状态机或派发行为，不宣称公共 cutover 完成。
 
-P1b 增加 canonical Issue revision、parent/dependency、assignment epoch、task primary ownership 和 create/update、pause/resume、cancel、close/reopen、reparent/assign 行为；追加 migration，不改历史文件。采用新列或新表前在本批接口说明中固定历史读取与新活动路径，不让旧 work_item JSON 暗中变义。Stages 可选，第二 issue 引用仅表达结果引用。共享 helper 只在不改变历史语义时提取，task/run/artifact/acceptance 状态机保留。
+P1b 的独立存储/命令/上下文/执行闭环分片和启用门槛见[控制实施计划](issue-controls.md)，合同已获独立评审确认可实施；P1b1 代码、本地检查与独立评审已完成，入口仍未启用。P1b 增加 canonical Issue revision、parent/dependency、assignment epoch、task primary ownership 和 create/update、pause/resume、cancel、close/reopen、reparent/assign 行为；追加 migration，不改历史文件。采用新列或新表前在本批接口说明中固定历史读取与新活动路径，不让旧 work_item JSON 暗中变义。Stages 可选，第二 issue 引用仅表达结果引用。共享 helper 只在不改变历史语义时提取，task/run/artifact/acceptance 状态机保留。
 
 P1c 增加 owner API/CLI、views 与生成 schema/type 胶水，提供准确 revision、epoch 和阻塞原因。旧活动 facade 的调用点和移除批次登记在本计划，最终 P6/P7/P8 cutover 就绪后移除写入口；历史 reader 不退役。涉及通信兼容的 facade 同时登记协议退役版本。P1a/P1b/P1c 分别是可构建、可评审 PR，不混入未经批准的可见 UI 改动。
 
@@ -98,7 +99,9 @@ Issue owner 消息直接进入其 manager；run 补充沿 D116，owner request �
 
 ## P7：经确认的 UI
 
-UI 编码前必须读取 frontend-app-builder skill，检查现有页面并保留当前蓝灰中性色风格和导航基础，再使用 Image Gen 形成主聊天/Inbox、Issue 树与详情、Agent 库存、直接聊天、attention 和档案入口设计；独立 xhigh 设计 review，修订后请用户确认。目前没有用户批准的设计，先前被否决的概念不能作为实现依据。确认记录是 UI 编码前置条件，总体实现授权不能替代该明确停点。后端和无 UI 验收可继续。
+用户已确认主界面的现有风格方案；该确认仅覆盖主界面设计和风格方向。其余五张页面方案暂不确认，按用户指定的工作日统一确认，在此之前不再请求类似确认。其他页面仍须独立设计、review 与用户确认；当前不编码可见布局和交互，待对应 API 与设计就绪后实施。CLI、API、领域/存储/权限/调度以及不引入新 UI 决策的生成类型和数据状态逻辑可独立推进，不依赖 P7 审图。
+
+UI 编码前必须读取 frontend-app-builder skill，检查现有页面并保留当前蓝灰中性色风格和导航基础，再使用 Image Gen 形成主聊天/Inbox、Issue 树与详情、Agent 库存、直接聊天、attention 和档案入口设计；独立 xhigh 设计 review，修订后请用户确认。主界面以本次已确认的现有风格方案为准，其他页面尚未批准；先前被否决的概念不能作为实现依据。确认记录是 UI 编码前置条件，总体实现授权不能替代该明确停点。后端和无 UI 验收可继续。
 
 确认后复用 detail overlay、会话、rollout 和状态组件，按生成 API 类型实现。展示 issue 责任/执行角色、队列/实际运行、待确认/unknown，直接聊天不强制跳主 Agent。管理 Inbox 和全局 next action，不以机器实现细节替代用户决策。新 UI 切换后移除活动旧读 facade，历史档案读取保留。
 

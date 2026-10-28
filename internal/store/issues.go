@@ -63,6 +63,14 @@ func queryIssues(ctx context.Context, q Querier, query string, args ...any) ([]p
 // SaveIssue writes the current plan, immutable revision and stage links in
 // the caller's transaction. expected=0 inserts the first revision.
 func (t *Tx) SaveIssue(ctx context.Context, w protocol.WorkItem, expected int64, reason any) error {
+	if err := RejectCanonicalLegacyIssueWrite(ctx, t.Q(), w.WorkItemID); err != nil {
+		return err
+	}
+	return t.saveIssueProjection(ctx, w, expected, reason)
+}
+
+// saveIssueProjection is shared only with the canonical aggregate saver.
+func (t *Tx) saveIssueProjection(ctx context.Context, w protocol.WorkItem, expected int64, reason any) error {
 	raw, err := json.Marshal(w)
 	if err != nil {
 		return err
