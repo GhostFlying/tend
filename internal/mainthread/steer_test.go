@@ -379,40 +379,60 @@ func TestSteerToolSnapshotCannotAdvanceEarlierReplyFocus(t *testing.T) {
 }
 
 func TestSteerMessageInterruptsItsOriginalTurn(t *testing.T) {
-	h := testkit.NewHarness()
-	started := make(chan *testkit.FakeThread, 1)
-	release := make(chan struct{})
-	defer close(release)
-	h.Turn = func(th *testkit.FakeThread, _ string, _ harness.TurnInput) string {
-		started <- th
-		<-release
-		return ""
-	}
-	inputs := make(chan harness.TurnInput, 1)
-	e := newEnv(t, h, withSteer(h, func(_ context.Context, _ harness.Thread, _ string, in harness.TurnInput) error {
-		inputs <- in
-		return nil
-	}))
-	first := e.say("original")
-	th := <-started
-	second := e.say("steer")
-	in := <-inputs
-	e.m.mu.Lock()
-	id := e.m.active.turnID
-	e.m.mu.Unlock()
-	th.Emit(harness.Event{Kind: harness.EventItemCompleted, TurnID: id, ItemID: "steer-user", ItemType: harness.ItemUserMessage, Text: in.Text})
-	eventually(t, "consumed", func() bool { return e.count(`SELECT COUNT(*) FROM main_steers WHERE status='consumed'`) == 1 })
-	e.exec(owner, "conversation.interrupt_reply", protocol.Target{Type: "message", ID: second}, protocol.InterruptReplyPayload{MessageID: second}, app.InterruptReply{})
-	eventually(t, "original turn interrupted", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND status='interrupted'`, first) == 1
-	})
-	if e.count(`SELECT COUNT(*) FROM main_steers WHERE message_id=? AND status='interrupted'`, second) != 1 {
-		t.Fatal("steer control did not settle the same turn")
-	}
-	if e.count(`SELECT COUNT(*) FROM logical_turns WHERE message_id=? AND status='stopped'`, first) != 1 {
-		t.Fatal("supplement stop left the original logical responsibility active")
-	}
-	if len(businessStarts(h)) != 1 {
-		t.Fatal("stop started another turn")
+	for _, consumed := range []bool{false, true} {
+		name := "accepted"
+		if consumed {
+			name = "consumed"
+		}
+		t.Run(name, func(t *testing.T) {
+			h := testkit.NewHarness()
+			started := make(chan *testkit.FakeThread, 1)
+			release := make(chan struct{})
+			defer close(release)
+			h.Turn = func(th *testkit.FakeThread, _ string, _ harness.TurnInput) string {
+				started <- th
+				<-release
+				return ""
+			}
+			inputs := make(chan harness.TurnInput, 1)
+			e := newEnv(t, h, withSteer(h, func(_ context.Context, _ harness.Thread, _ string, in harness.TurnInput) error {
+				inputs <- in
+				return nil
+			}))
+			first := e.say("original")
+			th := <-started
+			second := e.say("steer")
+			in := <-inputs
+			e.m.mu.Lock()
+			id := e.m.active.turnID
+			e.m.mu.Unlock()
+			eventually(t, "accepted", func() bool {
+				return e.count(`SELECT COUNT(*) FROM main_steers WHERE message_id=? AND status='accepted'`, second) == 1
+			})
+			expected := "unknown"
+			if consumed {
+				th.Emit(harness.Event{Kind: harness.EventItemCompleted, TurnID: id, ItemID: "steer-user", ItemType: harness.ItemUserMessage, Text: in.Text})
+				eventually(t, "consumed", func() bool {
+					return e.count(`SELECT COUNT(*) FROM main_steers WHERE message_id=? AND status='consumed'`, second) == 1
+				})
+				expected = "interrupted"
+			}
+			e.exec(owner, "conversation.interrupt_reply", protocol.Target{Type: "message", ID: second}, protocol.InterruptReplyPayload{MessageID: second}, app.InterruptReply{})
+			eventually(t, "original turn interrupted", func() bool {
+				return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND status='interrupted'`, first) == 1
+			})
+			if e.count(`SELECT COUNT(*) FROM main_steers WHERE message_id=? AND status=?`, second, expected) != 1 {
+				t.Fatal("steer control did not settle the same turn")
+			}
+			if e.count(`SELECT COUNT(*) FROM logical_turns WHERE message_id=? AND status='stopped'`, first) != 1 {
+				t.Fatal("supplement stop left the original logical responsibility active")
+			}
+			if e.count(`SELECT COUNT(*) FROM logical_turn_executions WHERE logical_turn_id=(SELECT logical_turn_id FROM logical_turns WHERE message_id=?) AND repair=1`, first) != 0 {
+				t.Fatal("owner stop queued automatic repair")
+			}
+			if len(businessStarts(h)) != 1 {
+				t.Fatal("stop started another turn")
+			}
+		})
 	}
 }

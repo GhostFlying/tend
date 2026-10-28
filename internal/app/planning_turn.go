@@ -25,3 +25,22 @@ func (c planningTurnCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 	defer func() { x.planningSource = previous }()
 	return c.Command.Apply(ctx, x, tx)
 }
+
+// WithExecutionRequest carries the host's current native execution independently
+// of the owner source recorded as the audit parent.
+func WithExecutionRequest(cmd Command, request string) Command {
+	return executionCommand{Command: cmd, request: request}
+}
+
+type executionCommand struct {
+	Command
+	request string
+}
+
+func (c executionCommand) executionRequestID() string { return c.request }
+func (x *Exec) reviewExecution(ctx context.Context, q store.Querier) (string, error) {
+	if x.executionRequest != "" {
+		return x.executionRequest, nil
+	}
+	return store.MainExecutionRequest(ctx, q, x.Env.ParentRequestID)
+}

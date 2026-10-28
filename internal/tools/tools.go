@@ -302,6 +302,9 @@ func (s *Service) execute(ctx context.Context, c Call, op string, target protoco
 	if c.PlanningSourceMessageID != "" {
 		cmd = app.WithPlanningSource(cmd, c.PlanningSourceMessageID)
 	}
+	if c.ExecutionRequestID != "" {
+		cmd = app.WithExecutionRequest(cmd, c.ExecutionRequestID)
+	}
 	res, err := s.app.Execute(ctx, c.Principal, env, cmd)
 	if err != nil {
 		return nil, err
