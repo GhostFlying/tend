@@ -233,7 +233,15 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		state = protocol.MessageQueued
 	}
 	result := map[string]any{"message_id": p.MessageID, "state": state}
-	stopped, err := tx.Exec(ctx, `UPDATE logical_turns SET status='stopped',reason='Stopped by owner; resume explicitly.',updated_at=? WHERE logical_turn_id IN (SELECT logical_turn_id FROM logical_turn_messages WHERE message_id=?) AND status NOT IN ('completed','stopped')`, x.Now.UnixMilli(), p.MessageID)
+	turn, turnErr := store.GetOpenTurn(ctx, tx.Q(), p.MessageID)
+	if turnErr != nil && !errors.Is(turnErr, store.ErrNotFound) {
+		return Outcome{}, turnErr
+	}
+	logicalSource := p.MessageID
+	if turnErr == nil {
+		logicalSource = turn.MessageID
+	}
+	stopped, err := tx.Exec(ctx, `UPDATE logical_turns SET status='stopped',reason='Stopped by owner; resume explicitly.',updated_at=? WHERE logical_turn_id IN (SELECT logical_turn_id FROM logical_turn_messages WHERE message_id=? UNION SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?) AND status NOT IN ('completed','stopped')`, x.Now.UnixMilli(), p.MessageID, turn.RequestID)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -245,15 +253,12 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if changed > 0 {
 		events = []Event{{ObjectType: "message", ObjectID: p.MessageID, Kind: "conversation.processing_stopped"}}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE outbox SET status='failed',updated_at=? WHERE operation='conversation.repair_turn' AND status='pending' AND request_id IN (SELECT e.request_id FROM logical_turn_executions e JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE l.message_id=? AND l.status='stopped')`, x.Now.UnixMilli(), p.MessageID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE outbox SET status='failed',updated_at=? WHERE operation='conversation.repair_turn' AND status='pending' AND request_id IN (SELECT e.request_id FROM logical_turn_executions e JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE l.message_id=? AND l.status='stopped')`, x.Now.UnixMilli(), logicalSource); err != nil {
 		return Outcome{}, err
 	}
 
-	turn, err := store.GetOpenTurn(ctx, tx.Q(), p.MessageID)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(turnErr, store.ErrNotFound) {
 		return Outcome{Result: result, Events: events, Notify: changed > 0}, nil
-	} else if err != nil {
-		return Outcome{}, err
 	}
 	return Outcome{
 		Result:   result,

@@ -457,7 +457,7 @@ func attachReviewSource(ctx context.Context, x *Exec, tx *store.Tx, message stri
 	if message == "" {
 		return nil
 	}
-	request, err := store.MainExecutionRequest(ctx, tx.Q(), x.Env.ParentRequestID)
+	request, err := x.reviewExecution(ctx, tx.Q())
 	if err != nil {
 		return err
 	}

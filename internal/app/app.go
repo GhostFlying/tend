@@ -37,6 +37,7 @@ type Command interface {
 type Exec struct {
 	// planningSource is the turn's initial delivery, supplied by the host.
 	planningSource   string
+	executionRequest string
 	FollowupsEnabled bool
 	FollowupQueued   bool
 	Env              *protocol.Envelope
@@ -161,6 +162,12 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	}
 	domain := p.DedupDomain()
 	x := &Exec{FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	if scoped, ok := cmd.(interface{ executionRequestID() string }); ok {
+		if p.Kind != protocol.PrincipalMainAgent {
+			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "execution scope requires a hosted main agent")
+		}
+		x.executionRequest = scoped.executionRequestID()
+	}
 	if x.TraceID == "" {
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}
@@ -264,8 +271,8 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		return fmt.Errorf("app: encode principal: %w", err)
 	}
 	for _, e := range out.Events {
-		if x.Env.ParentRequestID != "" {
-			request, err := store.MainExecutionRequest(ctx, tx.Q(), x.Env.ParentRequestID)
+		if x.Env.ParentRequestID != "" || x.executionRequest != "" {
+			request, err := x.reviewExecution(ctx, tx.Q())
 			if err != nil {
 				return err
 			}

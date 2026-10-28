@@ -104,3 +104,34 @@ func TestMainSteerDoesNotCrossHandoffOrSteerSystemEvents(t *testing.T) {
 		t.Fatal("wrong current turn accepted")
 	}
 }
+
+func TestExecutionScopeKeepsEventReviewWithHistoricalAuditParent(t *testing.T) {
+	h := newHarness(t)
+	work := h.createWork(workPlan())
+	oldMessage := queueMessage(t, h, "old owner input")
+	currentMessage := queueMessage(t, h, "current owner input")
+	oldRequest, currentRequest := h.ids.New(protocol.PrefixRequest), h.ids.New(protocol.PrefixRequest)
+	for _, turn := range []store.MainTurn{
+		{RequestID: oldRequest, MessageID: oldMessage, ThreadID: "native", TurnID: "old", Status: store.TurnStarted},
+		{RequestID: currentRequest, MessageID: currentMessage, ThreadID: "native", TurnID: "current", Status: store.TurnStarted},
+	} {
+		if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	work.Title = "Revised within the current execution"
+	env := h.env("work_items.update", workTarget(work.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: work.WorkItemPlan}, rev(work.Revision))
+	env.ParentRequestID = oldRequest
+	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "main", Thread: "native"}
+	if op := h.exec(principal, env, WithExecutionRequest(UpdateWorkItem{}, currentRequest)); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	state, err := h.app.LogicalTurn(t.Context(), currentRequest)
+	if err != nil || len(state.Contexts) != 1 || state.Contexts[0].WorkItemID != work.WorkItemID {
+		t.Fatalf("event review escaped current execution: %+v, %v", state, err)
+	}
+	old, err := h.app.LogicalTurn(t.Context(), oldRequest)
+	if err != nil || len(old.Contexts) != 0 {
+		t.Fatalf("audit parent acquired current event review: %+v, %v", old, err)
+	}
+}

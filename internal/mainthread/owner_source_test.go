@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
@@ -45,5 +47,53 @@ func TestOwnerSourceCannotSelectUnconsumedOrSystemMessage(t *testing.T) {
 	result = e.m.onToolCall(t.Context(), harness.ToolCall{ThreadID: th.ID(), TurnID: id, CallID: "invalid-source", Tool: "tasks_create", Arguments: args})
 	if result.Success || e.count(`SELECT COUNT(*) FROM tasks`) != 0 {
 		t.Fatal("non-owner source gained authority")
+	}
+}
+
+func TestHistoricalOwnerAnswerKeepsCurrentLogicalExecution(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	original := e.say("Which scope should apply?")
+	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "main", Thread: "native"}
+	var decision struct {
+		ID string `json:"decision_id"`
+	}
+	if err := json.Unmarshal(e.exec(principal, "decisions.open", protocol.Target{Type: "decision"}, map[string]any{"question": "Which scope?", "options": []string{"keep scope", "stop scope"}, "source_message_id": original}, app.OpenDecision{}), &decision); err != nil {
+		t.Fatal(err)
+	}
+	var answer struct {
+		ID string `json:"message_id"`
+	}
+	choice := protocol.DecisionChoice{DecisionID: decision.ID, Version: 1, Option: "keep scope"}
+	if err := json.Unmarshal(e.exec(owner, "conversation.submit_message", protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{Body: "keep scope", ReplyTo: original, Decision: &choice}, app.SubmitMessage{}), &answer); err != nil {
+		t.Fatal(err)
+	}
+	oldRequest := e.ids.New(protocol.PrefixRequest)
+	if err := e.app.PutMainTurn(t.Context(), store.MainTurn{RequestID: oldRequest, MessageID: answer.ID, ThreadID: "native", TurnID: "old-turn", Status: store.TurnCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	current := e.say("Resolve the earlier admitted answer")
+	currentRequest := e.ids.New(protocol.PrefixRequest)
+	if err := e.app.PutMainTurn(t.Context(), store.MainTurn{RequestID: currentRequest, MessageID: current, ThreadID: "native", TurnID: "current-turn", Status: store.TurnStarted}); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"decision_id": decision.ID, "version": 1, "option": "keep scope", "source_message_id": answer.ID})
+	call := harness.ToolCall{ThreadID: "native", TurnID: "current-turn", CallID: "historical-answer", Tool: "decisions_resolve", Arguments: args}
+	if result := e.m.onToolCall(t.Context(), call); !result.Success {
+		t.Fatal(result.Text)
+	}
+	state, err := e.app.LogicalTurn(t.Context(), currentRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, message := range state.Messages {
+		found = found || message.MessageID == answer.ID
+	}
+	if !found {
+		t.Fatal("historical answer bypassed current logical review")
+	}
+	if e.count(`SELECT COUNT(*) FROM request_records WHERE operation='decisions.resolve_from_message' AND parent_request_id=?`, oldRequest) != 1 {
+		t.Fatal("historical answer lost its original audit parent")
 	}
 }
