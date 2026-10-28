@@ -77,6 +77,13 @@ func (c CommitLogicalTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if rev != c.Revision {
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "context changed during review")
 		}
+		ended, err := reviewCanonicalTerminalContext(ctx, tx, v.ID, c.WorkItemID, c.Revision)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if ended {
+			continue
+		}
 		var unresolved bool
 		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_item_context_facts WHERE superseded=0 AND needs_review=1 AND (work_item_id=? OR scope='global' OR (scope='project' AND project=(SELECT project FROM work_items WHERE work_item_id=?))))`, c.WorkItemID, c.WorkItemID).Scan(&unresolved); err != nil {
 			return Outcome{}, err
@@ -240,7 +247,7 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 		return false, err
 	}
 	var unready int
-	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM work_item_contexts c WHERE (c.baseline_revision=0 OR NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews cr WHERE cr.logical_turn_id=? AND cr.work_item_id=c.work_item_id AND cr.revision=c.revision) OR EXISTS(SELECT 1 FROM message_context_obligations o JOIN logical_turn_messages lm ON lm.message_id=o.message_id WHERE lm.logical_turn_id=? AND o.work_item_id=c.work_item_id AND o.needs_review=1)) AND c.work_item_id IN (SELECT work_item_id FROM logical_turn_contexts WHERE logical_turn_id=?)`, v.ID, v.ID, v.ID).Scan(&unready); err != nil {
+	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM work_item_contexts c WHERE ((c.baseline_revision=0 AND NOT EXISTS(SELECT 1 FROM issue_controls ci WHERE ci.issue_id=c.work_item_id AND ci.state IN ('closed','cancelled'))) OR NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews cr WHERE cr.logical_turn_id=? AND cr.work_item_id=c.work_item_id AND cr.revision=c.revision) OR EXISTS(SELECT 1 FROM message_context_obligations o JOIN logical_turn_messages lm ON lm.message_id=o.message_id WHERE lm.logical_turn_id=? AND o.work_item_id=c.work_item_id AND o.needs_review=1)) AND c.work_item_id IN (SELECT work_item_id FROM logical_turn_contexts WHERE logical_turn_id=?)`, v.ID, v.ID, v.ID).Scan(&unready); err != nil {
 		return false, err
 	}
 	if v.Status == "stopped" || v.Status == "awaiting_clarification" {

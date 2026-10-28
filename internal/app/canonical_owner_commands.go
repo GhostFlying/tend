@@ -15,7 +15,7 @@ import (
 )
 
 // CanonicalOwnerIssueCommand changes definitions without registering a public
-// operation or enabling canonical task, manager or lifecycle execution.
+// operation or enabling canonical task or manager execution.
 type CanonicalOwnerIssueCommand struct{ Action string }
 
 func (c CanonicalOwnerIssueCommand) Operation() string { return "issues." + c.Action }
@@ -42,8 +42,10 @@ type canonicalOwnerIssueUpdate struct {
 }
 
 func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	if c.Action != "create" && c.Action != "update" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported canonical definition operation")
+	switch c.Action {
+	case "create", "update", "pause", "resume", "cancel", "finish_cancel", "close", "reopen", "reparent", "dependencies", "assign", "review_sources":
+	default:
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported canonical operation")
 	}
 	if x.Env.Target.Type != "issue" || x.Env.ParentRequestID != "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "canonical owner operation requires its own issue request")
@@ -68,7 +70,10 @@ func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *stor
 	if current.Revision != expected {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "issue revision changed")
 	}
-	return updateCanonicalOwnerIssue(ctx, x, tx, current)
+	if c.Action == "update" {
+		return updateCanonicalOwnerIssue(ctx, x, tx, current)
+	}
+	return applyCanonicalOwnerLifecycle(ctx, x, tx, c.Action, current)
 }
 
 func createCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
