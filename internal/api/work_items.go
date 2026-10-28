@@ -17,7 +17,7 @@ func (s *Server) workItems(w http.ResponseWriter, r *http.Request) {
 	var page protocol.WorkItemPage
 	err := s.store.Read(r.Context(), func(tx *store.ReadTx) error {
 		var err error
-		page, err = views.WorkItems(r.Context(), tx.Q(), r.URL.Query().Get("project"), r.URL.Query().Get("include_closed") == "true", r.URL.Query().Get("column"))
+		page, err = views.Issues(r.Context(), tx.Q(), r.URL.Query().Get("project"), r.URL.Query().Get("include_closed") == "true", r.URL.Query().Get("column"))
 		return err
 	})
 	if err != nil {
@@ -45,11 +45,11 @@ func (s *Server) workItem(w http.ResponseWriter, r *http.Request) {
 	err := s.store.Read(r.Context(), func(tx *store.ReadTx) error {
 		var err error
 		if revision != 0 {
-			item.WorkItem, err = store.GetWorkItemRevision(r.Context(), tx.Q(), r.PathValue("id"), revision)
+			item.WorkItem, err = store.GetIssueRevision(r.Context(), tx.Q(), r.PathValue("id"), revision)
 			item.Column = "historical"
 			return err
 		}
-		item, err = views.WorkItem(r.Context(), tx.Q(), r.PathValue("id"))
+		item, err = views.Issue(r.Context(), tx.Q(), r.PathValue("id"))
 		return err
 	})
 	if err != nil {

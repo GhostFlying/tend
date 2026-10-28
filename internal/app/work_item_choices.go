@@ -24,7 +24,7 @@ func (CreateWorkItemChoice) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	w, err := store.GetWorkItem(ctx, tx.Q(), x.Env.Target.ID)
+	w, err := store.GetIssue(ctx, tx.Q(), x.Env.Target.ID)
 	if err != nil {
 		return Outcome{}, errNotFound(err, "work item does not exist")
 	}
@@ -171,7 +171,7 @@ func (cmd UpdateWorkItemChoice) Apply(ctx context.Context, x *Exec, tx *store.Tx
 			if p.Replacement == nil {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "replacement is required")
 			}
-			w, e := store.GetWorkItem(ctx, tx.Q(), c.WorkItemID)
+			w, e := store.GetIssue(ctx, tx.Q(), c.WorkItemID)
 			if e != nil {
 				return Outcome{}, e
 			}

@@ -96,7 +96,7 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err != nil {
 		return Outcome{}, err
 	}
-	item, itemEvents, err := taskWorkItem(ctx, x, tx, &p, project.Project)
+	item, itemEvents, err := taskIssue(ctx, x, tx, &p, project.Project)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -161,10 +161,10 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err := tx.InsertSpec(ctx, taskID, d.Task.SpecVersion, string(spec), p.SourceMessageID, now); err != nil {
 		return Outcome{}, err
 	}
-	if err := tx.InsertTaskWorkItemOwner(ctx, taskID, item.WorkItemID); err != nil {
+	if err := tx.InsertTaskIssueOwner(ctx, taskID, item.WorkItemID); err != nil {
 		return Outcome{}, err
 	}
-	_, linkedEvents, err := BindWorkItemTask(ctx, x, tx, item.WorkItemID, item.Revision, taskID, p.StageIDs)
+	_, linkedEvents, err := BindIssueTask(ctx, x, tx, item.WorkItemID, item.Revision, taskID, p.StageIDs)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -256,7 +256,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		if err := refreshTaskWorkContext(ctx, tx.Q(), row.TaskID, p.Spec, current.SharedContext); err != nil {
 			return Outcome{}, err
 		}
-		owner, err := store.GetTaskWorkItemOwner(ctx, tx.Q(), row.TaskID)
+		owner, err := store.GetTaskIssueOwner(ctx, tx.Q(), row.TaskID)
 		if err != nil {
 			return Outcome{}, err
 		}

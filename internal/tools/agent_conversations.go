@@ -71,7 +71,7 @@ func (s *Service) contextRead(ctx context.Context, c Call) (any, error) {
 			return err
 		}
 		var err error
-		v, err = views.WorkItemContext(ctx, tx.Q(), p.WorkItemID, p.After)
+		v, err = views.IssueContext(ctx, tx.Q(), p.WorkItemID, p.After)
 		return err
 	})
 	return v, err
@@ -155,7 +155,7 @@ func (s *Service) backgroundItemRead(ctx context.Context, c Call) (any, error) {
 			return err
 		}
 		var err error
-		v, err = views.WorkItem(ctx, tx.Q(), p.WorkItemID)
+		v, err = views.Issue(ctx, tx.Q(), p.WorkItemID)
 		return err
 	})
 	return v, err

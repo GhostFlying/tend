@@ -43,7 +43,7 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 	var body strings.Builder
 	fmt.Fprintf(&body, "任务已完成：%s\n\n独立验收通过 · spec %d。\n\n产物：`%s`。", taskID, task.SpecVersion, task.CurrentArtifactID)
 	fmt.Fprintf(&body, "\n\n验收证据：`%s`（acceptance_id）。", acceptanceID)
-	items, err := store.ListTaskWorkItems(ctx, tx.Q(), taskID)
+	items, err := store.ListTaskIssues(ctx, tx.Q(), taskID)
 	if err != nil {
 		return err
 	}

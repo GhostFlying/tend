@@ -50,7 +50,7 @@ func TestTaskWorkItemStandaloneCreatesOnlyForNewTasks(t *testing.T) {
 		t.Fatal(op)
 	}
 	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
-		all, err := store.ListTaskWorkItems(context.Background(), tx.Q(), task.TaskID)
+		all, err := store.ListTaskIssues(context.Background(), tx.Q(), task.TaskID)
 		if err == nil && (len(all) != 1 || all[0].Status != "open" || all[0].Title != "Standalone") {
 			t.Fatalf("standalone mapping %+v", all)
 		}
@@ -88,7 +88,7 @@ func TestTaskWorkItemDependencyAndSnoozeGateClaims(t *testing.T) {
 			w = h.work(w.WorkItemID)
 			w.Stages[0].Status = "done"
 			w.Stages[0].Evidence = []protocol.WorkItemEvidence{h.ownerEvidence()}
-			op = h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: "snoozed"}, rev(w.Revision)), UpdateWorkItem{})
+			op = h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: "snoozed"}, rev(w.Revision)), UpdateIssue{})
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
@@ -96,7 +96,7 @@ func TestTaskWorkItemDependencyAndSnoozeGateClaims(t *testing.T) {
 				t.Fatal("snoozed item started work")
 			}
 			w = h.work(w.WorkItemID)
-			op = h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: "open"}, rev(w.Revision)), UpdateWorkItem{})
+			op = h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: "open"}, rev(w.Revision)), UpdateIssue{})
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
@@ -154,9 +154,9 @@ func TestTaskWorkItemAncestorChangesRequireDispositionAndGateClaims(t *testing.T
 	w = h.work(w.WorkItemID)
 	w.Stages[1].DependsOn = []string{"before"}
 	p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}
-	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateWorkItem{}), protocol.CodeInvalidRequest)
+	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{}), protocol.CodeInvalidRequest)
 	p.TaskDispositions = []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Keep the task agreement after the prerequisite is ready"}}
-	op = h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateWorkItem{})
+	op = h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -167,20 +167,20 @@ func TestTaskWorkItemAncestorChangesRequireDispositionAndGateClaims(t *testing.T
 	w.Stages[1].Status = "retired"
 	w.Stages[1].Reason = "Replace group"
 	p.WorkItemPlan = w.WorkItemPlan
-	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateWorkItem{}), protocol.CodeInvalidTransition)
+	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{}), protocol.CodeInvalidTransition)
 	// A retired group's descendants remain unavailable, including historical
 	// ledgers where retirement happened before a child task was linked.
 	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
 		old := w.Revision
 		w.Stages[1].DependsOn = nil
 		w.Revision++
-		return tx.SaveWorkItem(context.Background(), w, old, "historical group retirement")
+		return tx.SaveIssue(context.Background(), w, old, "historical group retirement")
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
 		candidates := []scheduler.Candidate{{TaskID: task.TaskID, DependenciesDone: true}}
-		if err := applyWorkItemDependencies(context.Background(), tx.Q(), candidates); err != nil {
+		if err := applyIssueDependencies(context.Background(), tx.Q(), candidates); err != nil {
 			return err
 		}
 		if candidates[0].DependenciesDone {
@@ -200,12 +200,12 @@ func TestTaskWorkItemSharedTaskHonorsEveryLinkedItem(t *testing.T) {
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	op = h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: task.TaskID, StageIDs: []string{"investigate"}}, rev(1)), LinkWorkItemTask{})
+	op = h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: task.TaskID, StageIDs: []string{"investigate"}}, rev(1)), LinkIssueTask{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	b = h.work(b.WorkItemID)
-	op = h.exec(owner, h.env("work_items.update", workTarget(b.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: b.WorkItemPlan, Status: "snoozed"}, rev(b.Revision)), UpdateWorkItem{})
+	op = h.exec(owner, h.env("work_items.update", workTarget(b.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: b.WorkItemPlan, Status: "snoozed"}, rev(b.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -213,7 +213,7 @@ func TestTaskWorkItemSharedTaskHonorsEveryLinkedItem(t *testing.T) {
 		t.Fatal("open primary item overrode snoozed secondary item")
 	}
 	b = h.work(b.WorkItemID)
-	op = h.exec(owner, h.env("work_items.update", workTarget(b.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: b.WorkItemPlan, Status: "open"}, rev(b.Revision)), UpdateWorkItem{})
+	op = h.exec(owner, h.env("work_items.update", workTarget(b.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: b.WorkItemPlan, Status: "open"}, rev(b.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -231,7 +231,7 @@ func TestTaskWorkItemUpdatedDispositionRequiresNewAgreementNotOldSpecVersion(t *
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	op = h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: task.TaskID, StageIDs: []string{"investigate"}}, rev(1)), LinkWorkItemTask{})
+	op = h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: task.TaskID, StageIDs: []string{"investigate"}}, rev(1)), LinkIssueTask{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -244,7 +244,7 @@ func TestTaskWorkItemUpdatedDispositionRequiresNewAgreementNotOldSpecVersion(t *
 	// Cosmetic plan revisions do not consume the evidence of an explicit update.
 	a = h.work(a.WorkItemID)
 	a.Title = "Renamed concern"
-	op = h.exec(owner, h.env("work_items.update", workTarget(a.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: a.WorkItemPlan}, rev(a.Revision)), UpdateWorkItem{})
+	op = h.exec(owner, h.env("work_items.update", workTarget(a.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: a.WorkItemPlan}, rev(a.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -252,7 +252,7 @@ func TestTaskWorkItemUpdatedDispositionRequiresNewAgreementNotOldSpecVersion(t *
 		w := h.work(id)
 		w.Stages[0].Title = "Expanded investigation"
 		p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, TaskDispositions: []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: 2, Action: "updated", Reason: "Task spec explicitly updated for this plan"}}}
-		op = h.exec(owner, h.env("work_items.update", workTarget(id), p, rev(w.Revision)), UpdateWorkItem{})
+		op = h.exec(owner, h.env("work_items.update", workTarget(id), p, rev(w.Revision)), UpdateIssue{})
 		if op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
@@ -260,7 +260,7 @@ func TestTaskWorkItemUpdatedDispositionRequiresNewAgreementNotOldSpecVersion(t *
 	a = h.work(a.WorkItemID)
 	a.Stages[0].Title = "Another scope change"
 	p := protocol.UpdateWorkItemPayload{WorkItemPlan: a.WorkItemPlan, TaskDispositions: []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: 2, Action: "updated", Reason: "Claim earlier update again"}}}
-	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(a.WorkItemID), p, rev(a.Revision)), UpdateWorkItem{}), protocol.CodeInvalidTransition)
+	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(a.WorkItemID), p, rev(a.Revision)), UpdateIssue{}), protocol.CodeInvalidTransition)
 }
 
 func TestTaskWorkItemCannotCreateUnderRetiredGroup(t *testing.T) {
@@ -279,7 +279,7 @@ func TestTaskWorkItemCannotCreateUnderRetiredGroup(t *testing.T) {
 		t.Fatal(op)
 	}
 	w.Stages[1].TaskIDs = []string{task.TaskID}
-	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(1)), UpdateWorkItem{}), protocol.CodeInvalidTransition)
+	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(1)), UpdateIssue{}), protocol.CodeInvalidTransition)
 }
 
 func taskCyclePlan() protocol.WorkItemPlan {
@@ -308,7 +308,7 @@ func TestTaskWorkItemCollapsedCycleRejectsCreationAtomically(t *testing.T) {
 	}
 	// One task can instead cover the whole continuous chain. Internal stage
 	// prerequisites must not require another run of that same task.
-	op = h.exec(owner, h.env("work_items.link_task", workTarget(w.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: one.TaskID, StageIDs: []string{"middle"}}, rev(w.Revision)), LinkWorkItemTask{})
+	op = h.exec(owner, h.env("work_items.link_task", workTarget(w.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: one.TaskID, StageIDs: []string{"middle"}}, rev(w.Revision)), LinkIssueTask{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -338,7 +338,7 @@ func TestTaskWorkItemSharedTaskCycleRejectsLink(t *testing.T) {
 				plan.Stages = append(plan.Stages, protocol.WorkItemStage{StageID: "child", Title: "Child", Status: "planned", ParentID: "middle"})
 			}
 			b := h.createWork(plan)
-			op = h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: two.TaskID, StageIDs: []string{"first"}}, rev(b.Revision)), LinkWorkItemTask{})
+			op = h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: two.TaskID, StageIDs: []string{"first"}}, rev(b.Revision)), LinkIssueTask{})
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
@@ -347,7 +347,7 @@ func TestTaskWorkItemSharedTaskCycleRejectsLink(t *testing.T) {
 			if grouped {
 				target = "child"
 			}
-			op = h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: one.TaskID, StageIDs: []string{target}}, rev(b.Revision)), LinkWorkItemTask{})
+			op = h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: one.TaskID, StageIDs: []string{target}}, rev(b.Revision)), LinkIssueTask{})
 			expectWorkCode(t, op, protocol.CodeInvalidRequest)
 			if h.work(b.WorkItemID).Revision != b.Revision {
 				t.Fatal("rejected cross-item link advanced revision")
@@ -380,7 +380,7 @@ func TestTaskWorkItemCollapsedCycleRejectsPlanRevision(t *testing.T) {
 		{TaskID: one.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Keep agreement"},
 		{TaskID: two.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Keep agreement"},
 	}}
-	op = h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(w.Revision)), UpdateWorkItem{})
+	op = h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(w.Revision)), UpdateIssue{})
 	expectWorkCode(t, op, protocol.CodeInvalidRequest)
 	if h.work(w.WorkItemID).Revision != w.Revision {
 		t.Fatal("cycle revision persisted")
@@ -403,7 +403,7 @@ func TestTaskWorkItemMixedLegacyDependencyCycleRejectsNewPlan(t *testing.T) {
 	plan.Stages = plan.Stages[:2]
 	plan.Stages[0].TaskIDs, plan.Stages[1].TaskIDs = []string{one.TaskID}, []string{two.TaskID}
 	before := h.count("work_items")
-	op := h.exec(owner, h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: plan}, nil), CreateWorkItem{})
+	op := h.exec(owner, h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: plan}, nil), CreateIssue{})
 	expectWorkCode(t, op, protocol.CodeInvalidRequest)
 	if h.count("work_items") != before {
 		t.Fatal("new cyclic item persisted")

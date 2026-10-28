@@ -155,7 +155,7 @@ func TestIntegration_NaturalLanguagePlanning(t *testing.T) {
 		t.Fatal("model did not successfully create both work item and task")
 	}
 	err = e.store.Read(ctx, func(tx *store.ReadTx) error {
-		items, err := store.ListWorkItems(ctx, tx.Q(), "", "")
+		items, err := store.ListIssues(ctx, tx.Q(), "", "")
 		if err != nil {
 			return err
 		}

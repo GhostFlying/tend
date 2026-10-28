@@ -61,7 +61,7 @@ func coordinationReceipt(ctx context.Context, x *Exec, tx *store.Tx, out *Outcom
 	}
 	sort.Strings(keys)
 	for _, id := range keys {
-		w, err := store.GetWorkItem(ctx, tx.Q(), id)
+		w, err := store.GetIssue(ctx, tx.Q(), id)
 		if err != nil {
 			return err
 		}

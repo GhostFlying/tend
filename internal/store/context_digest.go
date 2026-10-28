@@ -12,7 +12,7 @@ import (
 // EffectiveContext freezes semantic inputs independently of plan/receipt counters.
 // Progress messages and task-link revisions do not change an execution agreement.
 func EffectiveContext(ctx context.Context, q Querier, id string) (string, []protocol.SharedFact, error) {
-	w, err := GetWorkItem(ctx, q, id)
+	w, err := GetIssue(ctx, q, id)
 	if err != nil {
 		return "", nil, err
 	}

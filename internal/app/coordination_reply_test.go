@@ -18,7 +18,7 @@ func TestCoordinationThreeWritesAndSameTurnClaim(t *testing.T) {
 	initial := protocol.InitialWorkItemContext{Coverage: "Owner request and all seven kinds reviewed", Gaps: "Investigation pending", SourceMessageIDs: []string{source}, SourceReviews: []protocol.LogicalTurnReview{{MessageID: source, ContentRevision: before.ContentRevision, AssociationRevision: before.Revision}}, ReviewedKinds: allFactKinds, Facts: []protocol.ContextFact{{Kind: "goal", Scope: "work_item", Body: "Investigate", SourceMessageID: source}}}
 	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), InitialContext: &initial, SourceMessageID: source, CommitSeq: 1}, nil)
 	env.ParentRequestID = turn.RequestID
-	created := h.exec(mainAgent, env, CreateWorkItem{})
+	created := h.exec(mainAgent, env, CreateIssue{})
 	if created.Status != protocol.OpSucceeded {
 		t.Fatal(created)
 	}
@@ -152,7 +152,7 @@ func TestInitialSourceConflictLeavesNoWorkItem(t *testing.T) {
 	p := protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), InitialContext: &protocol.InitialWorkItemContext{SourceMessageIDs: []string{source}, SourceReviews: []protocol.LogicalTurnReview{{MessageID: source, ContentRevision: 99}}, Coverage: "Checked", ReviewedKinds: allFactKinds}, SourceMessageID: source, CommitSeq: 1}
 	env := h.env("work_items.create", workTarget(""), p, nil)
 	env.ParentRequestID = turn.RequestID
-	expectWorkCode(t, h.exec(mainAgent, env, CreateWorkItem{}), protocol.CodeStaleRevision)
+	expectWorkCode(t, h.exec(mainAgent, env, CreateIssue{}), protocol.CodeStaleRevision)
 	if h.count("work_items") != before || h.count("work_item_context_facts") != 0 {
 		t.Fatal("stale source left partial state")
 	}
@@ -189,7 +189,7 @@ func TestNoEffectReceiptReplaysOriginalVersions(t *testing.T) {
 	w := h.createWork(workPlan())
 	args := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}
 	env := h.env("work_items.update", workTarget(w.WorkItemID), args, rev(w.Revision))
-	first := h.exec(mainAgent, env, UpdateWorkItem{})
+	first := h.exec(mainAgent, env, UpdateIssue{})
 	if first.Status != protocol.OpSucceeded || !json.Valid(first.Result) {
 		t.Fatal(first)
 	}
@@ -198,10 +198,10 @@ func TestNoEffectReceiptReplaysOriginalVersions(t *testing.T) {
 		t.Fatal("no-effect omitted receipt", err)
 	}
 	args.Intent += " and document evidence"
-	if op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), args, rev(w.Revision)), UpdateWorkItem{}); op.Status != protocol.OpSucceeded {
+	if op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), args, rev(w.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	replay := h.exec(mainAgent, env, UpdateWorkItem{})
+	replay := h.exec(mainAgent, env, UpdateIssue{})
 	if string(replay.Result) != string(first.Result) {
 		t.Fatal("replay refreshed an old receipt")
 	}
@@ -271,7 +271,7 @@ func TestPlanContinueExistingPreservesFrozenAgreement(t *testing.T) {
 	p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, TaskDispositions: []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Keep the existing execution agreement unchanged"}}}
 	env = h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision))
 	env.ParentRequestID = turn.RequestID
-	op = h.exec(mainAgent, env, UpdateWorkItem{})
+	op = h.exec(mainAgent, env, UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -511,7 +511,7 @@ func TestLedgerChangeInvalidatesSummaryCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.Intent = "New current owner intent"
-	if op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(w.Revision)), UpdateWorkItem{}); op.Status != protocol.OpSucceeded {
+	if op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(w.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	after, err := h.app.HandoffSummaryInput(t.Context(), "main", 4096)
@@ -709,7 +709,7 @@ func TestNewSharedWorkItemFreezesSourcedContext(t *testing.T) {
 	h.prepareAgent(b.WorkItemID)
 	commitFixtureTurn(t, h, turn.RequestID)
 	id := createFingerprintTask(t, h, source, turn, a)
-	op := h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: id, StageIDs: []string{"investigate"}}, rev(b.Revision)), LinkWorkItemTask{})
+	op := h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: id, StageIDs: []string{"investigate"}}, rev(b.Revision)), LinkIssueTask{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -830,7 +830,7 @@ func TestNewFrozenSecondaryNeedsItsInitialBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := h.createWork(workPlan())
-	if op := h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: id, StageIDs: []string{"investigate"}}, rev(b.Revision)), LinkWorkItemTask{}); op.Status != protocol.OpSucceeded {
+	if op := h.exec(owner, h.env("work_items.link_task", workTarget(b.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: id, StageIDs: []string{"investigate"}}, rev(b.Revision)), LinkIssueTask{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	next := h.storedSpec(id, 1)
@@ -1135,7 +1135,7 @@ func TestSupplementCoordinationUsesNativeExecutionAndAdmittedReplySources(t *tes
 	}
 	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), InitialContext: &initial, SourceMessageID: supplement, CommitSeq: 1}, nil)
 	env.ParentRequestID = parent
-	op := h.exec(principal, env, WithExecutionRequest(WithPlanningSource(CreateWorkItem{}, root.MessageID), active.RequestID))
+	op := h.exec(principal, env, WithExecutionRequest(WithPlanningSource(CreateIssue{}, root.MessageID), active.RequestID))
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

@@ -17,7 +17,7 @@ func (h *harness) primaryOwner(taskID string) string {
 	var id string
 	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
 		var err error
-		id, err = store.GetTaskWorkItemOwner(context.Background(), tx.Q(), taskID)
+		id, err = store.GetTaskIssueOwner(context.Background(), tx.Q(), taskID)
 		return err
 	}); err != nil {
 		h.t.Fatal(err)
@@ -51,7 +51,7 @@ func TestWorkspaceOwnershipRejectsCrossItemReuseAndSecondaryLinks(t *testing.T) 
 		t.Fatalf("resource owner is not creation primary: %+v", resource)
 	}
 	secondary := h.createWork(workPlan())
-	link := h.exec(owner, h.env("work_items.link_task", workTarget(secondary.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: source.TaskID, StageIDs: []string{"investigate"}}, rev(secondary.Revision)), LinkWorkItemTask{})
+	link := h.exec(owner, h.env("work_items.link_task", workTarget(secondary.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: source.TaskID, StageIDs: []string{"investigate"}}, rev(secondary.Revision)), LinkIssueTask{})
 	if link.Status != protocol.OpSucceeded {
 		t.Fatal(link)
 	}
@@ -76,7 +76,7 @@ func TestWorkspaceOwnershipRejectsCrossItemReuseAndSecondaryLinks(t *testing.T) 
 		}
 	}
 	secondary.DefaultWorkspaceTaskID = source.TaskID
-	op := h.exec(owner, h.env("work_items.update", workTarget(secondary.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: secondary.WorkItemPlan}, rev(secondary.Revision)), UpdateWorkItem{})
+	op := h.exec(owner, h.env("work_items.update", workTarget(secondary.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: secondary.WorkItemPlan}, rev(secondary.Revision)), UpdateIssue{})
 	expectWorkCode(t, op, protocol.CodeInvalidRequest)
 	if h.work(secondary.WorkItemID).DefaultWorkspaceTaskID != "" {
 		t.Fatal("cross-item default workspace was accepted")

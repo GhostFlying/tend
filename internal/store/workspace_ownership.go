@@ -7,9 +7,9 @@ import (
 	"fmt"
 )
 
-// GetTaskWorkItemOwner returns the immutable primary work item, or an empty
+// GetTaskIssueOwner returns the immutable primary work item, or an empty
 // string for legacy tasks whose original spec supplies no attributable owner.
-func GetTaskWorkItemOwner(ctx context.Context, q Querier, taskID string) (string, error) {
+func GetTaskIssueOwner(ctx context.Context, q Querier, taskID string) (string, error) {
 	var owner string
 	err := q.QueryRowContext(ctx, `SELECT work_item_id FROM task_work_item_owners WHERE task_id=?`, taskID).Scan(&owner)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -21,8 +21,8 @@ func GetTaskWorkItemOwner(ctx context.Context, q Querier, taskID string) (string
 	return owner, nil
 }
 
-// TaskWorkItemLabel returns the primary item's current title for task listings.
-func TaskWorkItemLabel(ctx context.Context, q Querier, taskID string) (id, title string, err error) {
+// TaskIssueLabel returns the primary item's current title for task listings.
+func TaskIssueLabel(ctx context.Context, q Querier, taskID string) (id, title string, err error) {
 	err = q.QueryRowContext(ctx, `SELECT o.work_item_id, json_extract(w.body_json, '$.title') FROM task_work_item_owners o
  JOIN work_items w ON w.work_item_id=o.work_item_id WHERE o.task_id=?`, taskID).Scan(&id, &title)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -34,8 +34,8 @@ func TaskWorkItemLabel(ctx context.Context, q Querier, taskID string) (id, title
 	return id, title, nil
 }
 
-// InsertTaskWorkItemOwner records creation provenance once, after spec v1 exists.
-func (t *Tx) InsertTaskWorkItemOwner(ctx context.Context, taskID, itemID string) error {
+// InsertTaskIssueOwner records creation provenance once, after spec v1 exists.
+func (t *Tx) InsertTaskIssueOwner(ctx context.Context, taskID, itemID string) error {
 	_, err := t.Exec(ctx, `INSERT INTO task_work_item_owners(task_id,work_item_id,source_spec_version) VALUES(?,?,1)`, taskID, itemID)
 	if err != nil {
 		return fmt.Errorf("store: insert task work item owner: %w", err)

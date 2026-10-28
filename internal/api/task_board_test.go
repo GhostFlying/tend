@@ -202,7 +202,7 @@ func TestRecentTasksUseCompletionEvidenceAndPrimaryWorkItem(t *testing.T) {
 				}
 			}
 		}
-		owner, err := store.GetTaskWorkItemOwner(t.Context(), tx.Q(), ids[1])
+		owner, err := store.GetTaskIssueOwner(t.Context(), tx.Q(), ids[1])
 		if err != nil {
 			return err
 		}

@@ -55,7 +55,7 @@ func TestWorkspaceOwnershipMigrationUsesOnlyInitialPrimaryContext(t *testing.T) 
 	defer upgraded.Close()
 	if err := upgraded.Read(ctx, func(tx *ReadTx) error {
 		for taskID, want := range map[string]string{"task_attributed": "wi_primary", "task_unknown": "", "task_missing_item": ""} {
-			owner, err := GetTaskWorkItemOwner(ctx, tx.Q(), taskID)
+			owner, err := GetTaskIssueOwner(ctx, tx.Q(), taskID)
 			if err != nil || owner != want {
 				t.Fatalf("owner %s = %q, want %q: %v", taskID, owner, want, err)
 			}
@@ -81,7 +81,7 @@ func TestWorkspaceOwnershipMigrationUsesOnlyInitialPrimaryContext(t *testing.T) 
 	}
 	// Reopening cannot change immutable provenance after newer links/specs exist.
 	if err := upgraded.Write(context.Background(), func(tx *Tx) error {
-		return tx.InsertTaskWorkItemOwner(ctx, "task_attributed", "wi_secondary")
+		return tx.InsertTaskIssueOwner(ctx, "task_attributed", "wi_secondary")
 	}); err == nil {
 		t.Fatal("existing primary owner was overwritten")
 	}

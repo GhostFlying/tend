@@ -23,7 +23,7 @@ func checkObservationScope(ctx context.Context, q store.Querier, scope *protocol
 		return nil
 	}
 	for _, id := range scope.WorkItemIDs {
-		if _, err := store.GetWorkItem(ctx, q, id); err != nil {
+		if _, err := store.GetIssue(ctx, q, id); err != nil {
 			return errNotFound(err, "observation work item does not exist")
 		}
 	}
@@ -101,7 +101,7 @@ func (a *App) ReadRunObservation(ctx context.Context, p protocol.Principal) (pro
 			return err
 		}
 		for _, id := range allowed.WorkItemIDs {
-			v, err := views.WorkItem(ctx, q, id)
+			v, err := views.Issue(ctx, q, id)
 			if err != nil {
 				return err
 			}

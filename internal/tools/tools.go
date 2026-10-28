@@ -226,7 +226,7 @@ func (s *Service) currentFor(ctx context.Context, c Call) any {
 	if args.WorkItemID != "" {
 		var current any
 		_ = s.store.Read(ctx, func(tx *store.ReadTx) error {
-			v, err := views.WorkItem(ctx, tx.Q(), args.WorkItemID)
+			v, err := views.Issue(ctx, tx.Q(), args.WorkItemID)
 			if err == nil {
 				current = v
 			}

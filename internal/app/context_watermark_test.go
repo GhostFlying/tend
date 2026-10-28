@@ -41,7 +41,7 @@ func TestContextWatermarkIgnoresToolRowsButRetainsMessageBarrier(t *testing.T) {
 		t.Helper()
 		var watermark int64
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			v, err := views.WorkItemContext(t.Context(), tx.Q(), w.WorkItemID, 0)
+			v, err := views.IssueContext(t.Context(), tx.Q(), w.WorkItemID, 0)
 			watermark = v.Watermark
 			return err
 		}); err != nil {

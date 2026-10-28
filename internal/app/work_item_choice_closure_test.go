@@ -14,7 +14,7 @@ func TestWorkItemChoiceMustBeResolvedBeforeClosure(t *testing.T) {
 	c := h.askChoice(w, h.ownerEvidence().Reference)
 	check := func() error {
 		return h.store.Read(context.Background(), func(tx *store.ReadTx) error {
-			return workItemCloseGuard(context.Background(), tx.Q(), w.WorkItemID)
+			return issueCloseGuard(context.Background(), tx.Q(), w.WorkItemID)
 		})
 	}
 	if check() == nil {
@@ -40,7 +40,7 @@ func TestWorkItemChoiceAnswerCanSupplyClosureEvidence(t *testing.T) {
 			c := h.askChoice(w, h.ownerEvidence().Reference)
 			closeWith := func(item protocol.WorkItem, reference string) protocol.Operation {
 				p := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "Owner declined further work", Evidence: []protocol.WorkItemEvidence{{Kind: "owner_decision", Reference: reference, Summary: "Owner asked to close this concern"}}}}
-				return h.exec(mainAgent, h.env("work_items.close", workTarget(item.WorkItemID), p, rev(item.Revision)), CloseWorkItem{})
+				return h.exec(mainAgent, h.env("work_items.close", workTarget(item.WorkItemID), p, rev(item.Revision)), CloseIssue{})
 			}
 			expectWorkCode(t, closeWith(w, c.ChoiceID), protocol.CodeInvalidTransition)
 			principal := owner

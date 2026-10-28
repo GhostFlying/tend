@@ -32,7 +32,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if rt.Mode != protocol.RunnerNormal {
 		return Outcome{Result: result, NoEffect: true}, nil
 	}
-	items, err := store.ListWorkItems(ctx, tx.Q(), "", "")
+	items, err := store.ListIssues(ctx, tx.Q(), "", "")
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -155,7 +155,7 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if _, err := deliveryRuntime(ctx, x, tx.Q(), p.InstanceID); err != nil {
 		return Outcome{}, err
 	}
-	item, err := store.GetWorkItem(ctx, tx.Q(), p.WorkItemID)
+	item, err := store.GetIssue(ctx, tx.Q(), p.WorkItemID)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -246,7 +246,7 @@ func (RefreshDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	item, err := store.GetWorkItem(ctx, tx.Q(), x.Env.Target.ID)
+	item, err := store.GetIssue(ctx, tx.Q(), x.Env.Target.ID)
 	if err != nil {
 		return Outcome{}, err
 	}

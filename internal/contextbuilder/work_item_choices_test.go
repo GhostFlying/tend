@@ -15,7 +15,7 @@ func TestWorkItemChoiceEventsReachConfirmedHostedDelta(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			e := newEnv(t)
 			var item protocol.WorkItem
-			raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Track delivery", Intent: "Review next steps", Project: "default"}}, app.CreateWorkItem{})
+			raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Track delivery", Intent: "Review next steps", Project: "default"}}, app.CreateIssue{})
 			if err := json.Unmarshal(raw, &item); err != nil {
 				t.Fatal(err)
 			}

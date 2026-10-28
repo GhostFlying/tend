@@ -8,8 +8,8 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-// GetWorkItem reads the current aggregate.
-func GetWorkItem(ctx context.Context, q Querier, id string) (protocol.WorkItem, error) {
+// GetIssue reads the current aggregate.
+func GetIssue(ctx context.Context, q Querier, id string) (protocol.WorkItem, error) {
 	var raw string
 	if err := q.QueryRowContext(ctx, `SELECT body_json FROM work_items WHERE work_item_id=?`, id).Scan(&raw); err != nil {
 		return protocol.WorkItem{}, notFound(err, "work item "+id)
@@ -19,8 +19,8 @@ func GetWorkItem(ctx context.Context, q Querier, id string) (protocol.WorkItem, 
 	return w, err
 }
 
-// GetWorkItemRevision reads an immutable historical revision.
-func GetWorkItemRevision(ctx context.Context, q Querier, id string, revision int64) (protocol.WorkItem, error) {
+// GetIssueRevision reads an immutable historical revision.
+func GetIssueRevision(ctx context.Context, q Querier, id string, revision int64) (protocol.WorkItem, error) {
 	var raw string
 	if err := q.QueryRowContext(ctx, `SELECT body_json FROM work_item_revisions WHERE work_item_id=? AND revision=?`, id, revision).Scan(&raw); err != nil {
 		return protocol.WorkItem{}, notFound(err, "work item revision")
@@ -30,16 +30,16 @@ func GetWorkItemRevision(ctx context.Context, q Querier, id string, revision int
 	return w, err
 }
 
-// ListWorkItems returns the ledger, optionally filtered by project and status.
-func ListWorkItems(ctx context.Context, q Querier, project, status string) ([]protocol.WorkItem, error) {
-	return queryWorkItems(ctx, q, `SELECT body_json FROM work_items WHERE (?='' OR project=?) AND (?='' OR status=?) ORDER BY updated_at DESC,work_item_id`, project, project, status, status)
+// ListIssues returns the ledger, optionally filtered by project and status.
+func ListIssues(ctx context.Context, q Querier, project, status string) ([]protocol.WorkItem, error) {
+	return queryIssues(ctx, q, `SELECT body_json FROM work_items WHERE (?='' OR project=?) AND (?='' OR status=?) ORDER BY updated_at DESC,work_item_id`, project, project, status, status)
 }
 
-// ListTaskWorkItems returns all responsibilities covered by a shared task.
-func ListTaskWorkItems(ctx context.Context, q Querier, taskID string) ([]protocol.WorkItem, error) {
-	return queryWorkItems(ctx, q, `SELECT body_json FROM work_items WHERE work_item_id IN (SELECT work_item_id FROM work_item_task_links WHERE task_id=?) ORDER BY work_item_id`, taskID)
+// ListTaskIssues returns all responsibilities covered by a shared task.
+func ListTaskIssues(ctx context.Context, q Querier, taskID string) ([]protocol.WorkItem, error) {
+	return queryIssues(ctx, q, `SELECT body_json FROM work_items WHERE work_item_id IN (SELECT work_item_id FROM work_item_task_links WHERE task_id=?) ORDER BY work_item_id`, taskID)
 }
-func queryWorkItems(ctx context.Context, q Querier, query string, args ...any) ([]protocol.WorkItem, error) {
+func queryIssues(ctx context.Context, q Querier, query string, args ...any) ([]protocol.WorkItem, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list work items: %w", err)
@@ -60,9 +60,9 @@ func queryWorkItems(ctx context.Context, q Querier, query string, args ...any) (
 	return out, rows.Err()
 }
 
-// SaveWorkItem writes the current plan, immutable revision and stage links in
+// SaveIssue writes the current plan, immutable revision and stage links in
 // the caller's transaction. expected=0 inserts the first revision.
-func (t *Tx) SaveWorkItem(ctx context.Context, w protocol.WorkItem, expected int64, reason any) error {
+func (t *Tx) SaveIssue(ctx context.Context, w protocol.WorkItem, expected int64, reason any) error {
 	raw, err := json.Marshal(w)
 	if err != nil {
 		return err

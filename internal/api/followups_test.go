@@ -15,7 +15,7 @@ func TestFollowupOwnerAPIReadWriteAndCapability(t *testing.T) {
 	e.configure()
 	token := e.login(protocol.ScopeOwner)
 	var w protocol.WorkItem
-	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Existing work", Intent: "Implement agreed change"}}, app.CreateWorkItem{}), &w); err != nil {
+	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Existing work", Intent: "Implement agreed change"}}, app.CreateIssue{}), &w); err != nil {
 		t.Fatal(err)
 	}
 	p := protocol.FollowupSpec{Purpose: "Check result", Instruction: "Read current facts", Kind: "at", At: e.clock.Now().Add(time.Hour).UnixMilli(), Timezone: "UTC"}

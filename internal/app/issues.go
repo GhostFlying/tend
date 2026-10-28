@@ -13,14 +13,14 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// CreateWorkItem starts an open responsibility without automatically creating work.
-type CreateWorkItem struct{}
+// CreateIssue starts an open responsibility without automatically creating work.
+type CreateIssue struct{}
 
-func (CreateWorkItem) Operation() string { return "work_items.create" }
-func (CreateWorkItem) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+func (CreateIssue) Operation() string { return "work_items.create" }
+func (CreateIssue) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
 	return allowKinds(x.Principal, planners...)
 }
-func (CreateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func (CreateIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.CreateWorkItemPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -33,7 +33,7 @@ func (CreateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if p.Stages == nil {
 		p.Stages = []protocol.WorkItemStage{}
 	}
-	if err := domain.ValidateWorkItem(p.WorkItemPlan, nil); err != nil {
+	if err := domain.ValidateIssue(p.WorkItemPlan, nil); err != nil {
 		return Outcome{}, err
 	}
 	if p.InitialContext != nil {
@@ -42,14 +42,14 @@ func (CreateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 	}
 	w := protocol.WorkItem{WorkItemPlan: p.WorkItemPlan, WorkItemID: x.IDs.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
-	if err := validateWorkItemReferences(ctx, x, tx.Q(), w, nil); err != nil {
+	if err := validateIssueReferences(ctx, x, tx.Q(), w, nil); err != nil {
 		return Outcome{}, err
 	}
-	if err := claimWorkItemSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
+	if err := claimIssueSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
-	freezeWorkItemCurrentEvidence(&w, x.Env.RequestID)
-	out, err := saveWorkItem(ctx, tx, w, 0, "work_item.created", p)
+	freezeIssueCurrentEvidence(&w, x.Env.RequestID)
+	out, err := saveIssue(ctx, tx, w, 0, "work_item.created", p)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -64,19 +64,19 @@ func (CreateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	return out, nil
 }
 
-// UpdateWorkItem revises a plan while preserving execution agreements and history.
-type UpdateWorkItem struct{}
+// UpdateIssue revises a plan while preserving execution agreements and history.
+type UpdateIssue struct{}
 
-func (UpdateWorkItem) Operation() string { return "work_items.update" }
-func (UpdateWorkItem) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+func (UpdateIssue) Operation() string { return "work_items.update" }
+func (UpdateIssue) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
 	return allowKinds(x.Principal, planners...)
 }
-func (UpdateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func (UpdateIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.UpdateWorkItemPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	w, err := workItemForWrite(ctx, x, tx.Q())
+	w, err := issueForWrite(ctx, x, tx.Q())
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -91,31 +91,31 @@ func (UpdateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if p.Stages == nil {
 		p.Stages = []protocol.WorkItemStage{}
 	}
-	if err := domain.ValidateWorkItem(p.WorkItemPlan, nil); err != nil {
+	if err := domain.ValidateIssue(p.WorkItemPlan, nil); err != nil {
 		return Outcome{}, err
 	}
 	candidate := w
 	candidate.WorkItemPlan = p.WorkItemPlan
-	if err := validateWorkItemReferences(ctx, x, tx.Q(), candidate, &w); err != nil {
+	if err := validateIssueReferences(ctx, x, tx.Q(), candidate, &w); err != nil {
 		return Outcome{}, err
 	}
 	p.WorkItemPlan = candidate.WorkItemPlan
-	if err := domain.ValidateWorkItem(p.WorkItemPlan, &w.WorkItemPlan); err != nil {
+	if err := domain.ValidateIssue(p.WorkItemPlan, &w.WorkItemPlan); err != nil {
 		return Outcome{}, err
 	}
-	if err := domain.ValidateWorkItemUpdateStatus(p.Status); err != nil {
+	if err := domain.ValidateIssueUpdateStatus(p.Status); err != nil {
 		return Outcome{}, err
 	}
 	status := protocol.WorkItemStatus(p.Status)
 	if status == "" {
 		status = w.Status
 	}
-	if err := validateWorkItemDispositions(ctx, tx.Q(), w, p.WorkItemPlan, p.TaskDispositions); err != nil {
+	if err := validateIssueDispositions(ctx, tx.Q(), w, p.WorkItemPlan, p.TaskDispositions); err != nil {
 		return Outcome{}, err
 	}
 	old := w.Revision
-	changed := domain.WorkItemPlanChanged(w.WorkItemPlan, p.WorkItemPlan) || status != w.Status || len(p.CompletionReviews) > 0
-	if err := claimWorkItemSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
+	changed := domain.IssuePlanChanged(w.WorkItemPlan, p.WorkItemPlan) || status != w.Status || len(p.CompletionReviews) > 0
+	if err := claimIssueSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
 	if !changed {
@@ -125,42 +125,42 @@ func (UpdateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	w.Status = status
 	w.Revision++
 	w.UpdatedAt = x.Now.UnixMilli()
-	freezeWorkItemCurrentEvidence(&w, x.Env.RequestID)
+	freezeIssueCurrentEvidence(&w, x.Env.RequestID)
 	if err := acknowledgeCompletionReviews(ctx, tx, w, p.CompletionReviews); err != nil {
 		return Outcome{}, err
 	}
-	return saveWorkItem(ctx, tx, w, old, "work_item.updated", p)
+	return saveIssue(ctx, tx, w, old, "work_item.updated", p)
 }
 
-// CloseWorkItem records an explicit endpoint only after all execution is settled.
-type CloseWorkItem struct{}
+// CloseIssue records an explicit endpoint only after all execution is settled.
+type CloseIssue struct{}
 
-func (CloseWorkItem) Operation() string { return "work_items.close" }
-func (CloseWorkItem) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+func (CloseIssue) Operation() string { return "work_items.close" }
+func (CloseIssue) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
 	return allowKinds(x.Principal, planners...)
 }
-func (CloseWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func (CloseIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.CloseWorkItemPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	w, err := workItemForWrite(ctx, x, tx.Q())
+	w, err := issueForWrite(ctx, x, tx.Q())
 	if err != nil {
 		return Outcome{}, err
 	}
 	if w.Status == "closed" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "work item is already closed")
 	}
-	if err := domain.ValidateWorkItemClosure(w, p.Closure); err != nil {
+	if err := domain.ValidateIssueClosure(w, p.Closure); err != nil {
 		return Outcome{}, err
 	}
-	if err := workItemCloseGuard(ctx, tx.Q(), w.WorkItemID); err != nil {
+	if err := issueCloseGuard(ctx, tx.Q(), w.WorkItemID); err != nil {
 		return Outcome{}, err
 	}
-	if err := validateWorkItemEvidenceReferences(ctx, x, tx.Q(), w, p.Closure.Evidence, &w, "closure.evidence"); err != nil {
+	if err := validateIssueEvidenceReferences(ctx, x, tx.Q(), w, p.Closure.Evidence, &w, "closure.evidence"); err != nil {
 		return Outcome{}, err
 	}
-	if err := claimWorkItemSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
+	if err := claimIssueSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
 	old := w.Revision
@@ -168,33 +168,33 @@ func (CloseWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	w.Status = "closed"
 	w.Closure = &p.Closure
 	w.UpdatedAt = x.Now.UnixMilli()
-	freezeWorkItemCurrentEvidence(&w, x.Env.RequestID)
+	freezeIssueCurrentEvidence(&w, x.Env.RequestID)
 	if err := cancelDeliveryQueries(ctx, tx, w); err != nil {
 		return Outcome{}, err
 	}
-	return saveWorkItem(ctx, tx, w, old, "work_item.closed", p)
+	return saveIssue(ctx, tx, w, old, "work_item.closed", p)
 }
 
-// ReopenWorkItem resumes responsibility without changing any old task state.
-type ReopenWorkItem struct{}
+// ReopenIssue resumes responsibility without changing any old task state.
+type ReopenIssue struct{}
 
-func (ReopenWorkItem) Operation() string { return "work_items.reopen" }
-func (ReopenWorkItem) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+func (ReopenIssue) Operation() string { return "work_items.reopen" }
+func (ReopenIssue) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
 	return allowKinds(x.Principal, planners...)
 }
-func (ReopenWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func (ReopenIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.ReopenWorkItemPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	w, err := workItemForWrite(ctx, x, tx.Q())
+	w, err := issueForWrite(ctx, x, tx.Q())
 	if err != nil {
 		return Outcome{}, err
 	}
 	if w.Status != "closed" || strings.TrimSpace(p.Reason) == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reopening requires a closed work item and reason")
 	}
-	if err := claimWorkItemSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
+	if err := claimIssueSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
 	old := w.Revision
@@ -202,17 +202,17 @@ func (ReopenWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	w.Status = "open"
 	w.Closure = nil
 	w.UpdatedAt = x.Now.UnixMilli()
-	return saveWorkItem(ctx, tx, w, old, "work_item.reopened", p)
+	return saveIssue(ctx, tx, w, old, "work_item.reopened", p)
 }
 
-// LinkWorkItemTask associates an existing task, including a shared publishing task.
-type LinkWorkItemTask struct{}
+// LinkIssueTask associates an existing task, including a shared publishing task.
+type LinkIssueTask struct{}
 
-func (LinkWorkItemTask) Operation() string { return "work_items.link_task" }
-func (LinkWorkItemTask) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+func (LinkIssueTask) Operation() string { return "work_items.link_task" }
+func (LinkIssueTask) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
 	return allowKinds(x.Principal, planners...)
 }
-func (LinkWorkItemTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func (LinkIssueTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.LinkWorkItemTaskPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -221,16 +221,16 @@ func (LinkWorkItemTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := claimWorkItemSource(ctx, x, tx, x.Env.Target.ID, p.SourceMessageID, p.CommitSeq); err != nil {
+	if err := claimIssueSource(ctx, x, tx, x.Env.Target.ID, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
-	w, events, err := BindWorkItemTask(ctx, x, tx, x.Env.Target.ID, revision, p.TaskID, p.StageIDs)
+	w, events, err := BindIssueTask(ctx, x, tx, x.Env.Target.ID, revision, p.TaskID, p.StageIDs)
 	return Outcome{Result: w, Events: events, NoEffect: len(events) == 0}, err
 }
 
-// BindWorkItemTask is also called from task creation inside the same transaction.
-func BindWorkItemTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string, revision int64, taskID string, stageIDs []string) (protocol.WorkItem, []Event, error) {
-	w, err := store.GetWorkItem(ctx, tx.Q(), itemID)
+// BindIssueTask is also called from task creation inside the same transaction.
+func BindIssueTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string, revision int64, taskID string, stageIDs []string) (protocol.WorkItem, []Event, error) {
+	w, err := store.GetIssue(ctx, tx.Q(), itemID)
 	if err != nil {
 		return w, nil, errNotFound(err, "work item does not exist")
 	}
@@ -241,7 +241,7 @@ func BindWorkItemTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string,
 		return w, nil, protocol.Errorf(protocol.CodeInvalidTransition, "reopen work item before linking a task")
 	}
 	if len(stageIDs) == 0 {
-		return w, nil, missingWorkItemStageIDs(w.WorkItemID, stageIDs)
+		return w, nil, missingIssueStageIDs(w.WorkItemID, stageIDs)
 	}
 	task, spec, err := loadTask(ctx, tx.Q(), taskID)
 	if err != nil {
@@ -256,7 +256,7 @@ func BindWorkItemTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string,
 			}
 			found = true
 			if !slices.Contains(w.Stages[i].TaskIDs, taskID) {
-				if !task.Lifecycle.Terminal() && !domain.WorkItemStageAcceptsWork(w.WorkItemPlan, id) {
+				if !task.Lifecycle.Terminal() && !domain.IssueStageAcceptsWork(w.WorkItemPlan, id) {
 					return w, nil, protocol.Errorf(protocol.CodeInvalidTransition, "new work requires an unfinished stage")
 				}
 				w.Stages[i].TaskIDs = append(w.Stages[i].TaskIDs, taskID)
@@ -271,7 +271,7 @@ func BindWorkItemTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string,
 		return w, nil, nil
 	}
 	if w.DefaultWorkspaceTaskID == "" && len(spec.Workspace.Mounts) > 0 {
-		owner, err := store.GetTaskWorkItemOwner(ctx, tx.Q(), taskID)
+		owner, err := store.GetTaskIssueOwner(ctx, tx.Q(), taskID)
 		if err != nil {
 			return w, nil, err
 		}
@@ -281,15 +281,15 @@ func BindWorkItemTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string,
 	}
 	w.Revision++
 	w.UpdatedAt = x.Now.UnixMilli()
-	out, err := saveWorkItem(ctx, tx, w, revision, "work_item.task_linked", map[string]any{"task_id": taskID, "stage_ids": stageIDs})
+	out, err := saveIssue(ctx, tx, w, revision, "work_item.task_linked", map[string]any{"task_id": taskID, "stage_ids": stageIDs})
 	return w, out.Events, err
 }
-func workItemForWrite(ctx context.Context, x *Exec, q store.Querier) (protocol.WorkItem, error) {
+func issueForWrite(ctx context.Context, x *Exec, q store.Querier) (protocol.WorkItem, error) {
 	revision, err := requireRevision(x.Env)
 	if err != nil {
 		return protocol.WorkItem{}, err
 	}
-	w, err := store.GetWorkItem(ctx, q, x.Env.Target.ID)
+	w, err := store.GetIssue(ctx, q, x.Env.Target.ID)
 	if err != nil {
 		return w, errNotFound(err, "work item does not exist")
 	}
@@ -298,11 +298,11 @@ func workItemForWrite(ctx context.Context, x *Exec, q store.Querier) (protocol.W
 	}
 	return w, nil
 }
-func saveWorkItem(ctx context.Context, tx *store.Tx, w protocol.WorkItem, expected int64, kind string, reason any) (Outcome, error) {
-	if err := validateWorkItemTaskDependencies(ctx, tx.Q(), w); err != nil {
+func saveIssue(ctx context.Context, tx *store.Tx, w protocol.WorkItem, expected int64, kind string, reason any) (Outcome, error) {
+	if err := validateIssueTaskDependencies(ctx, tx.Q(), w); err != nil {
 		return Outcome{}, err
 	}
-	if err := tx.SaveWorkItem(ctx, w, expected, reason); err != nil {
+	if err := tx.SaveIssue(ctx, w, expected, reason); err != nil {
 		return Outcome{}, err
 	}
 	if err := tx.EnsureCompletionReviews(ctx, w.WorkItemID); err != nil {
@@ -313,14 +313,14 @@ func saveWorkItem(ctx context.Context, tx *store.Tx, w protocol.WorkItem, expect
 	}
 	return Outcome{Result: w, Events: []Event{{ObjectType: "work_item", ObjectID: w.WorkItemID, ObjectVersion: w.Revision, Kind: kind, Body: map[string]any{"revision": w.Revision, "status": w.Status}}}}, nil
 }
-func claimWorkItemSource(ctx context.Context, x *Exec, tx *store.Tx, id, source string, seq int64) error {
+func claimIssueSource(ctx context.Context, x *Exec, tx *store.Tx, id, source string, seq int64) error {
 	if err := claimPlanCommit(ctx, x, tx, source, seq); err != nil {
 		return err
 	}
 	return bindSource(ctx, tx, source, "work_item", id)
 }
 
-func validateWorkItemReferences(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, previous *protocol.WorkItem) error {
+func validateIssueReferences(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, previous *protocol.WorkItem) error {
 	for i, s := range w.Stages {
 		for _, id := range s.TaskIDs {
 			task, err := store.GetTask(ctx, q, id)
@@ -335,17 +335,17 @@ func validateWorkItemReferences(ctx context.Context, x *Exec, q store.Querier, w
 					}
 				}
 			}
-			if !existed && !task.Lifecycle.Terminal() && !domain.WorkItemStageAcceptsWork(w.WorkItemPlan, s.StageID) {
+			if !existed && !task.Lifecycle.Terminal() && !domain.IssueStageAcceptsWork(w.WorkItemPlan, s.StageID) {
 				return protocol.Errorf(protocol.CodeInvalidTransition, "new work requires an unfinished stage and containing groups")
 			}
 
 		}
-		if err := validateWorkItemEvidenceReferences(ctx, x, q, w, s.Evidence, previous, fmt.Sprintf("stages[%d].evidence", i)); err != nil {
+		if err := validateIssueEvidenceReferences(ctx, x, q, w, s.Evidence, previous, fmt.Sprintf("stages[%d].evidence", i)); err != nil {
 			return err
 		}
 	}
 	for i, f := range w.FollowOns {
-		if err := validateWorkItemEvidenceReferences(ctx, x, q, w, f.Evidence, previous, fmt.Sprintf("follow_ons[%d].evidence", i)); err != nil {
+		if err := validateIssueEvidenceReferences(ctx, x, q, w, f.Evidence, previous, fmt.Sprintf("follow_ons[%d].evidence", i)); err != nil {
 			return err
 		}
 	}
@@ -376,15 +376,15 @@ func validateWorkItemReferences(ctx context.Context, x *Exec, q store.Querier, w
 	return nil
 }
 
-func validateWorkItemEvidenceReferences(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, evidence []protocol.WorkItemEvidence, previous *protocol.WorkItem, field string) error {
+func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, evidence []protocol.WorkItemEvidence, previous *protocol.WorkItem, field string) error {
 	if len(evidence) == 0 {
 		return nil
 	}
-	if err := domain.ValidateWorkItemEvidenceAt(evidence, field); err != nil {
+	if err := domain.ValidateIssueEvidenceAt(evidence, field); err != nil {
 		return err
 	}
 	for i, e := range evidence {
-		if old, ok := savedWorkItemEvidence(previous, e); ok {
+		if old, ok := savedIssueEvidence(previous, e); ok {
 			evidence[i] = old
 			continue
 		}
@@ -443,11 +443,11 @@ func validateWorkItemEvidenceReferences(ctx context.Context, x *Exec, q store.Qu
 	return nil
 }
 
-func validateWorkItemDispositions(ctx context.Context, q store.Querier, item protocol.WorkItem, next protocol.WorkItemPlan, dispositions []protocol.WorkItemTaskDisposition) error {
+func validateIssueDispositions(ctx context.Context, q store.Querier, item protocol.WorkItem, next protocol.WorkItemPlan, dispositions []protocol.WorkItemTaskDisposition) error {
 	affected := map[string]bool{}
 	for _, stage := range item.Stages {
 		for _, id := range stage.TaskIDs {
-			if domain.WorkItemTaskPlanChanged(item.WorkItemPlan, next, id) {
+			if domain.IssueTaskPlanChanged(item.WorkItemPlan, next, id) {
 				affected[id] = true
 			}
 		}
@@ -466,7 +466,7 @@ func validateWorkItemDispositions(ctx context.Context, q store.Querier, item pro
 		if err != nil {
 			return err
 		}
-		if domain.WorkItemTaskRetired(item.WorkItemPlan, next, id) {
+		if domain.IssueTaskRetired(item.WorkItemPlan, next, id) {
 			var live bool
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state NOT IN ('finished','failed','interrupted'))`, id).Scan(&live); err != nil {
 				return err
@@ -480,18 +480,18 @@ func validateWorkItemDispositions(ctx context.Context, q store.Querier, item pro
 		}
 		d, ok := byTask[id]
 		if ok {
-			if err := domain.ValidateWorkItemDispositionAction(d.Action, fmt.Sprintf("task_dispositions[%d].action", dispositionIndices[id])); err != nil {
+			if err := domain.ValidateIssueDispositionAction(d.Action, fmt.Sprintf("task_dispositions[%d].action", dispositionIndices[id])); err != nil {
 				return err
 			}
 		}
 		if !ok || d.Reason == "" || d.SpecVersion != task.SpecVersion {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "plan change requires current spec disposition for active task %s", id)
 		}
-		if domain.WorkItemTaskRetired(item.WorkItemPlan, next, id) && d.Action != "stopped" {
+		if domain.IssueTaskRetired(item.WorkItemPlan, next, id) && d.Action != "stopped" {
 			return protocol.Errorf(protocol.CodeInvalidTransition, "stop active task agreements before retiring or cancelling their stage")
 		}
 		if d.Action == "updated" {
-			revision, err := workItemTaskAgreementRevision(ctx, q, item, id)
+			revision, err := issueTaskAgreementRevision(ctx, q, item, id)
 			if err != nil {
 				return err
 			}
@@ -515,7 +515,7 @@ func validateWorkItemDispositions(ctx context.Context, q store.Querier, item pro
 	}
 	return nil
 }
-func workItemCloseGuard(ctx context.Context, q store.Querier, id string) error {
+func issueCloseGuard(ctx context.Context, q store.Querier, id string) error {
 	var blocked bool
 	err := q.QueryRowContext(ctx, `WITH linked AS (SELECT DISTINCT task_id FROM work_item_task_links WHERE work_item_id=?) SELECT
  EXISTS(SELECT 1 FROM tasks WHERE task_id IN linked AND lifecycle NOT IN ('completed','cancelled')) OR
@@ -534,7 +534,7 @@ func workItemCloseGuard(ctx context.Context, q store.Querier, id string) error {
 }
 
 // Freeze direct owner evidence to the durable request identity before persisting.
-func freezeWorkItemCurrentEvidence(w *protocol.WorkItem, requestID string) {
+func freezeIssueCurrentEvidence(w *protocol.WorkItem, requestID string) {
 	freeze := func(evidence []protocol.WorkItemEvidence) {
 		for i := range evidence {
 			if evidence[i].Kind == "owner_decision" && evidence[i].Reference == "current_request" {
@@ -555,7 +555,7 @@ func freezeWorkItemCurrentEvidence(w *protocol.WorkItem, requestID string) {
 
 // The evidence identity excludes caller-supplied snapshots: once recorded,
 // its facts stay fixed even if the provider is queried again or unavailable.
-func savedWorkItemEvidence(previous *protocol.WorkItem, wanted protocol.WorkItemEvidence) (protocol.WorkItemEvidence, bool) {
+func savedIssueEvidence(previous *protocol.WorkItem, wanted protocol.WorkItemEvidence) (protocol.WorkItemEvidence, bool) {
 	if previous == nil {
 		return protocol.WorkItemEvidence{}, false
 	}
@@ -580,14 +580,14 @@ func savedWorkItemEvidence(previous *protocol.WorkItem, wanted protocol.WorkItem
 }
 
 // Ignore revisions such as title edits when proving an explicit task update.
-func workItemTaskAgreementRevision(ctx context.Context, q store.Querier, item protocol.WorkItem, taskID string) (int64, error) {
+func issueTaskAgreementRevision(ctx context.Context, q store.Querier, item protocol.WorkItem, taskID string) (int64, error) {
 	current := item
 	for current.Revision > 1 {
-		previous, err := store.GetWorkItemRevision(ctx, q, item.WorkItemID, current.Revision-1)
+		previous, err := store.GetIssueRevision(ctx, q, item.WorkItemID, current.Revision-1)
 		if err != nil {
 			return 0, err
 		}
-		if domain.WorkItemTaskPlanChanged(previous.WorkItemPlan, current.WorkItemPlan, taskID) {
+		if domain.IssueTaskPlanChanged(previous.WorkItemPlan, current.WorkItemPlan, taskID) {
 			break
 		}
 		current = previous

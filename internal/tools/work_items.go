@@ -128,7 +128,7 @@ func (s *Service) workItemsList(ctx context.Context, c Call) (any, error) {
 			project = *a.Project
 		}
 		var err error
-		page, err = views.WorkItems(ctx, tx.Q(), project, a.IncludeClosed, a.Column)
+		page, err = views.Issues(ctx, tx.Q(), project, a.IncludeClosed, a.Column)
 		return err
 	})
 	return page, err
@@ -141,12 +141,12 @@ func (s *Service) workItemsRead(ctx context.Context, c Call) (any, error) {
 	var item protocol.WorkItemView
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		if a.Revision > 0 {
-			w, err := store.GetWorkItemRevision(ctx, tx.Q(), a.WorkItemID, a.Revision)
+			w, err := store.GetIssueRevision(ctx, tx.Q(), a.WorkItemID, a.Revision)
 			item = protocol.WorkItemView{WorkItem: w, Column: "historical"}
 			return notFound(err, "work item revision does not exist")
 		}
 		var err error
-		item, err = views.WorkItem(ctx, tx.Q(), a.WorkItemID)
+		item, err = views.Issue(ctx, tx.Q(), a.WorkItemID)
 		return notFound(err, "work item does not exist")
 	})
 	return item, err
@@ -168,7 +168,7 @@ func (s *Service) workItemsCreate(ctx context.Context, c Call) (any, error) {
 		return nil, err
 	}
 	p := protocol.CreateWorkItemPayload{InitialContext: &a.InitialContext, WorkItemPlan: a.Plan, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}
-	return s.execute(ctx, c, "work_items.create", protocol.Target{Type: "work_item"}, nil, a.Reason, p, app.CreateWorkItem{})
+	return s.execute(ctx, c, "work_items.create", protocol.Target{Type: "work_item"}, nil, a.Reason, p, app.CreateIssue{})
 }
 func (s *Service) workItemsUpdate(ctx context.Context, c Call) (any, error) {
 	var a workItemUpdateArgs
@@ -179,7 +179,7 @@ func (s *Service) workItemsUpdate(ctx context.Context, c Call) (any, error) {
 		return nil, err
 	}
 	p := protocol.UpdateWorkItemPayload{WorkItemPlan: a.Plan, Status: a.Status, CompletionReviews: a.CompletionReviews, TaskDispositions: a.TaskDispositions, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}
-	return s.execute(ctx, c, "work_items.update", protocol.Target{Type: "work_item", ID: a.WorkItemID}, &a.ExpectedControlRevision, a.Reason, p, app.UpdateWorkItem{})
+	return s.execute(ctx, c, "work_items.update", protocol.Target{Type: "work_item", ID: a.WorkItemID}, &a.ExpectedControlRevision, a.Reason, p, app.UpdateIssue{})
 }
 func (s *Service) workItemsClose(ctx context.Context, c Call) (any, error) {
 	var a workItemCloseArgs
@@ -189,7 +189,7 @@ func (s *Service) workItemsClose(ctx context.Context, c Call) (any, error) {
 	if err := requireMessage(c); err != nil {
 		return nil, err
 	}
-	return s.execute(ctx, c, "work_items.close", protocol.Target{Type: "work_item", ID: a.WorkItemID}, &a.ExpectedControlRevision, a.Reason, protocol.CloseWorkItemPayload{Closure: a.Closure, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}, app.CloseWorkItem{})
+	return s.execute(ctx, c, "work_items.close", protocol.Target{Type: "work_item", ID: a.WorkItemID}, &a.ExpectedControlRevision, a.Reason, protocol.CloseWorkItemPayload{Closure: a.Closure, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}, app.CloseIssue{})
 }
 func (s *Service) workItemsReopen(ctx context.Context, c Call) (any, error) {
 	var a workItemReopenArgs
@@ -199,7 +199,7 @@ func (s *Service) workItemsReopen(ctx context.Context, c Call) (any, error) {
 	if err := requireMessage(c); err != nil {
 		return nil, err
 	}
-	return s.execute(ctx, c, "work_items.reopen", protocol.Target{Type: "work_item", ID: a.WorkItemID}, &a.ExpectedControlRevision, a.Reason, protocol.ReopenWorkItemPayload{Reason: a.Reason, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}, app.ReopenWorkItem{})
+	return s.execute(ctx, c, "work_items.reopen", protocol.Target{Type: "work_item", ID: a.WorkItemID}, &a.ExpectedControlRevision, a.Reason, protocol.ReopenWorkItemPayload{Reason: a.Reason, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}, app.ReopenIssue{})
 }
 func (s *Service) workItemsLink(ctx context.Context, c Call) (any, error) {
 	var a workItemLinkArgs
@@ -209,5 +209,5 @@ func (s *Service) workItemsLink(ctx context.Context, c Call) (any, error) {
 	if err := requireMessage(c); err != nil {
 		return nil, err
 	}
-	return s.execute(ctx, c, "work_items.link_task", protocol.Target{Type: "work_item", ID: a.WorkItemID}, &a.ExpectedControlRevision, a.Reason, protocol.LinkWorkItemTaskPayload{TaskID: a.TaskID, StageIDs: a.StageIDs, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}, app.LinkWorkItemTask{})
+	return s.execute(ctx, c, "work_items.link_task", protocol.Target{Type: "work_item", ID: a.WorkItemID}, &a.ExpectedControlRevision, a.Reason, protocol.LinkWorkItemTaskPayload{TaskID: a.TaskID, StageIDs: a.StageIDs, SourceMessageID: c.SourceMessageID, CommitSeq: a.CommitSeq}, app.LinkIssueTask{})
 }

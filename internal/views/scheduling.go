@@ -34,11 +34,11 @@ func SchedulingCandidates(rows []store.CandidateRow) ([]scheduler.Candidate, err
 	return out, nil
 }
 
-// ApplyWorkItemDependencies applies current plan prerequisites to scheduling facts.
-func ApplyWorkItemDependencies(ctx context.Context, q store.Querier, candidates []scheduler.Candidate) error {
+// ApplyIssueDependencies applies current plan prerequisites to scheduling facts.
+func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []scheduler.Candidate) error {
 	for i := range candidates {
 		c := &candidates[i]
-		items, err := store.ListTaskWorkItems(ctx, q, c.TaskID)
+		items, err := store.ListTaskIssues(ctx, q, c.TaskID)
 		if err != nil {
 			return err
 		}

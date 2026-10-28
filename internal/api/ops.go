@@ -21,7 +21,7 @@ var ownerCommands = commandMap(app.RegisterRepository{}, app.SetMessageAssociati
 	app.FollowupCommand{Action: "cancel"},
 	app.FollowupCommand{Action: "trigger"},
 	app.WithdrawMessage{},
-	app.UpdateWorkItem{}, app.CloseWorkItem{}, app.ReopenWorkItem{},
+	app.UpdateIssue{}, app.CloseIssue{}, app.ReopenIssue{},
 	app.RefreshDelivery{}, app.UpdateWorkItemChoice{Action: "respond"},
 	app.HostMaintenance{},
 	app.ControlUpgrade{},
@@ -89,7 +89,7 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 	res := protocol.APIResponse{Operation: &op}
 	if op.Status == protocol.OpFailed && op.Error != nil && op.Error.Code == protocol.CodeStaleRevision && env.Target.Type == "work_item" {
 		_ = s.store.Read(r.Context(), func(tx *store.ReadTx) error {
-			v, err := views.WorkItem(r.Context(), tx.Q(), env.Target.ID)
+			v, err := views.Issue(r.Context(), tx.Q(), env.Target.ID)
 			if err == nil {
 				res.CurrentWorkItem = &v
 			}

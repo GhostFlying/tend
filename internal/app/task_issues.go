@@ -13,20 +13,20 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-func freezeWorkItemContext(item protocol.WorkItem) protocol.TaskWorkContext {
+func freezeIssueContext(item protocol.WorkItem) protocol.TaskWorkContext {
 	return protocol.TaskWorkContext{WorkItemID: item.WorkItemID, Revision: item.Revision, Intent: item.Intent, Facts: slices.Clone(item.Background)}
 }
 
-func applyWorkItemDependencies(ctx context.Context, q store.Querier, candidates []scheduler.Candidate) error {
-	return views.ApplyWorkItemDependencies(ctx, q, candidates)
+func applyIssueDependencies(ctx context.Context, q store.Querier, candidates []scheduler.Candidate) error {
+	return views.ApplyIssueDependencies(ctx, q, candidates)
 }
 
-// taskWorkItem resolves the explicit concern or creates one for a standalone
+// taskIssue resolves the explicit concern or creates one for a standalone
 // task from an older client. It never infers that a follow-up should be merged
 // into another concern or inherits a workspace merely from a relationship.
-func taskWorkItem(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPayload, project string) (protocol.WorkItem, []Event, error) {
+func taskIssue(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPayload, project string) (protocol.WorkItem, []Event, error) {
 	if p.WorkItemID != "" {
-		item, err := store.GetWorkItem(ctx, tx.Q(), p.WorkItemID)
+		item, err := store.GetIssue(ctx, tx.Q(), p.WorkItemID)
 		if err != nil {
 			return item, nil, errNotFound(err, "work item does not exist")
 		}
@@ -40,7 +40,7 @@ func taskWorkItem(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPaylo
 			return item, nil, protocol.Errorf(protocol.CodeInvalidRequest, "task and primary work item must share a project")
 		}
 		if len(p.StageIDs) == 0 {
-			return item, nil, missingWorkItemStageIDs(item.WorkItemID, p.StageIDs)
+			return item, nil, missingIssueStageIDs(item.WorkItemID, p.StageIDs)
 		}
 		if p.UseDefaultWorkspace {
 			if item.DefaultWorkspaceTaskID == "" {
@@ -51,7 +51,7 @@ func taskWorkItem(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPaylo
 			}
 			p.Spec.Workspace = domain.Workspace{Mode: domain.WorkspaceReuse, SourceTaskID: item.DefaultWorkspaceTaskID, IncludeExistingChanges: p.Spec.Workspace.IncludeExistingChanges}
 		}
-		p.Spec.SharedContext = []protocol.TaskWorkContext{freezeWorkItemContext(item)}
+		p.Spec.SharedContext = []protocol.TaskWorkContext{freezeIssueContext(item)}
 		return item, nil, nil
 	}
 	if p.UseDefaultWorkspace || len(p.StageIDs) > 0 || p.WorkItemRevision != 0 {
@@ -63,7 +63,7 @@ func taskWorkItem(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPaylo
 		facts = append(facts, protocol.SharedFact{Kind: "user_constraint", Text: constraint, Source: "initial task specification"})
 	}
 	item := protocol.WorkItem{WorkItemPlan: protocol.WorkItemPlan{Title: p.Title, Project: project, Intent: p.Spec.Goal, Background: facts, Stages: []protocol.WorkItemStage{{StageID: "initial", Title: p.Title, Status: "planned"}}}, WorkItemID: x.IDs.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
-	out, err := saveWorkItem(ctx, tx, item, 0, "work_item.created", map[string]string{"source": "standalone task"})
+	out, err := saveIssue(ctx, tx, item, 0, "work_item.created", map[string]string{"source": "standalone task"})
 	if err != nil {
 		return item, nil, err
 	}
@@ -77,11 +77,11 @@ func taskWorkItem(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPaylo
 		return item, nil, err
 	}
 	p.WorkItemID, p.WorkItemRevision, p.StageIDs = item.WorkItemID, item.Revision, []string{"initial"}
-	p.Spec.SharedContext = []protocol.TaskWorkContext{freezeWorkItemContext(item)}
+	p.Spec.SharedContext = []protocol.TaskWorkContext{freezeIssueContext(item)}
 	return item, out.Events, nil
 }
 
-func missingWorkItemStageIDs(itemID string, values []string) *protocol.Error {
+func missingIssueStageIDs(itemID string, values []string) *protocol.Error {
 	details, _ := json.Marshal(struct {
 		Field      string   `json:"field"`
 		Value      []string `json:"value"`
@@ -93,7 +93,7 @@ func missingWorkItemStageIDs(itemID string, values []string) *protocol.Error {
 }
 
 func refreshTaskWorkContext(ctx context.Context, q store.Querier, taskID string, spec *domain.Spec, previous []protocol.TaskWorkContext) error {
-	items, err := store.ListTaskWorkItems(ctx, q, taskID)
+	items, err := store.ListTaskIssues(ctx, q, taskID)
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func refreshTaskWorkContext(ctx context.Context, q store.Querier, taskID string,
 	}
 	spec.SharedContext = nil
 	for _, item := range items {
-		next := freezeWorkItemContext(item)
+		next := freezeIssueContext(item)
 		if fingerprint {
 			digest, facts, err := store.EffectiveContext(ctx, q, item.WorkItemID)
 			if err != nil {
@@ -124,11 +124,11 @@ func refreshTaskWorkContext(ctx context.Context, q store.Querier, taskID string,
 	return nil
 }
 
-// validateWorkItemTaskDependencies observes the candidate plan and all existing
+// validateIssueTaskDependencies observes the candidate plan and all existing
 // shared-task links in the same write transaction. Legacy task dependencies
 // participate because the scheduler enforces both kinds of prerequisites.
-func validateWorkItemTaskDependencies(ctx context.Context, q store.Querier, candidate protocol.WorkItem) error {
-	items, err := store.ListWorkItems(ctx, q, "", "")
+func validateIssueTaskDependencies(ctx context.Context, q store.Querier, candidate protocol.WorkItem) error {
+	items, err := store.ListIssues(ctx, q, "", "")
 	if err != nil {
 		return err
 	}
@@ -168,5 +168,5 @@ func validateWorkItemTaskDependencies(ctx context.Context, q store.Querier, cand
 		}
 		lifecycles[taskID] = task.Lifecycle
 	}
-	return domain.ValidateWorkItemTaskDependencies(items, lifecycles, taskDependencies)
+	return domain.ValidateIssueTaskDependencies(items, lifecycles, taskDependencies)
 }

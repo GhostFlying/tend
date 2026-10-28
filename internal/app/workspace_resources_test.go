@@ -36,7 +36,7 @@ func (h *harness) sameItemReusePayload(title string, spec domain.Spec) createTas
 	var itemID string
 	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
 		var err error
-		itemID, err = store.GetTaskWorkItemOwner(context.Background(), tx.Q(), spec.Workspace.SourceTaskID)
+		itemID, err = store.GetTaskIssueOwner(context.Background(), tx.Q(), spec.Workspace.SourceTaskID)
 		return err
 	}); err != nil || itemID == "" {
 		h.t.Fatalf("source has no primary work item: %s %v", itemID, err)

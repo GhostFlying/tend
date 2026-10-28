@@ -434,7 +434,7 @@ func bindSource(ctx context.Context, tx *store.Tx, messageID, objectType, object
 		return err
 	}
 	if objectType == "task" {
-		items, err := store.ListTaskWorkItems(ctx, tx.Q(), objectID)
+		items, err := store.ListTaskIssues(ctx, tx.Q(), objectID)
 		if err != nil {
 			return err
 		}

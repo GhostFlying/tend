@@ -45,69 +45,69 @@ func TestWorkItemEnumValidationUsesSchemaVocabulary(t *testing.T) {
 	for _, kind := range protocol.SharedFactKindValues() {
 		plan := base()
 		plan.Background = []protocol.SharedFact{{Kind: kind, Text: "Required context", Source: "owner-source"}}
-		if err := ValidateWorkItem(plan, nil); err != nil {
+		if err := ValidateIssue(plan, nil); err != nil {
 			t.Fatalf("valid background %s: %v", kind, err)
 		}
 		plan.Background[0].Kind = "owner_request"
-		checkWorkEnumError(t, ValidateWorkItem(plan, nil), "background[0].kind", "owner_request", protocol.SharedFactKindValues())
+		checkWorkEnumError(t, ValidateIssue(plan, nil), "background[0].kind", "owner_request", protocol.SharedFactKindValues())
 	}
 	for _, status := range protocol.WorkItemStageStatusValues() {
 		plan := base()
 		plan.Stages = []protocol.WorkItemStage{{StageID: "design", Title: "Custom design phase", Status: status, Reason: "Owner revised scope", Evidence: evidence}}
-		if err := ValidateWorkItem(plan, nil); err != nil {
+		if err := ValidateIssue(plan, nil); err != nil {
 			t.Fatalf("valid stage %s: %v", status, err)
 		}
 		plan.Stages[0].Status = "ready"
-		checkWorkEnumError(t, ValidateWorkItem(plan, nil), "stages[0].status", "ready", protocol.WorkItemStageStatusValues())
+		checkWorkEnumError(t, ValidateIssue(plan, nil), "stages[0].status", "ready", protocol.WorkItemStageStatusValues())
 	}
 	for _, kind := range protocol.WorkItemFollowOnKindValues() {
 		for _, status := range protocol.WorkItemFollowOnStatusValues() {
 			plan := base()
 			plan.FollowOns = []protocol.WorkItemFollowOn{{FollowOnID: "follow", Kind: kind, Status: status, Text: "Remaining work", Source: "owner-source", TransferredTo: "next-owner", Evidence: evidence}}
-			if err := ValidateWorkItem(plan, nil); err != nil {
+			if err := ValidateIssue(plan, nil); err != nil {
 				t.Fatalf("valid follow-on %s/%s: %v", kind, status, err)
 			}
 			plan.FollowOns[0].Kind = "issue"
-			checkWorkEnumError(t, ValidateWorkItem(plan, nil), "follow_ons[0].kind", "issue", protocol.WorkItemFollowOnKindValues())
+			checkWorkEnumError(t, ValidateIssue(plan, nil), "follow_ons[0].kind", "issue", protocol.WorkItemFollowOnKindValues())
 			plan.FollowOns[0].Kind, plan.FollowOns[0].Status = kind, "done"
-			checkWorkEnumError(t, ValidateWorkItem(plan, nil), "follow_ons[0].status", "done", protocol.WorkItemFollowOnStatusValues())
+			checkWorkEnumError(t, ValidateIssue(plan, nil), "follow_ons[0].status", "done", protocol.WorkItemFollowOnStatusValues())
 		}
 	}
 	for _, provider := range protocol.WorkItemDeliveryProviderValues() {
 		plan := base()
 		plan.Deliveries = []protocol.WorkItemDelivery{{DeliveryID: "review", Provider: provider, Repository: "example/project", Number: 1}}
-		if err := ValidateWorkItem(plan, nil); err != nil {
+		if err := ValidateIssue(plan, nil); err != nil {
 			t.Fatalf("valid provider %s: %v", provider, err)
 		}
 		plan.Deliveries[0].Provider = "git"
-		checkWorkEnumError(t, ValidateWorkItem(plan, nil), "deliveries[0].provider", "git", protocol.WorkItemDeliveryProviderValues())
+		checkWorkEnumError(t, ValidateIssue(plan, nil), "deliveries[0].provider", "git", protocol.WorkItemDeliveryProviderValues())
 	}
 	for _, kind := range protocol.WorkItemEvidenceKindValues() {
 		evidence := []protocol.WorkItemEvidence{{Kind: kind, Reference: "ref", Summary: "Verified fact"}}
-		if err := ValidateWorkItemEvidence(evidence); err != nil {
+		if err := ValidateIssueEvidence(evidence); err != nil {
 			t.Fatalf("valid evidence %s: %v", kind, err)
 		}
 		evidence[0].Kind = "report"
-		checkWorkEnumError(t, ValidateWorkItemEvidenceAt(evidence, "stages[1].evidence"), "stages[1].evidence[0].kind", "report", protocol.WorkItemEvidenceKindValues())
+		checkWorkEnumError(t, ValidateIssueEvidenceAt(evidence, "stages[1].evidence"), "stages[1].evidence[0].kind", "report", protocol.WorkItemEvidenceKindValues())
 	}
 	for _, kind := range protocol.WorkItemClosureKindValues() {
 		closure := protocol.WorkItemClosure{Kind: kind, Reason: "Owner endpoint", Evidence: evidence}
-		if err := ValidateWorkItemClosure(protocol.WorkItem{}, closure); err != nil {
+		if err := ValidateIssueClosure(protocol.WorkItem{}, closure); err != nil {
 			t.Fatalf("valid closure %s: %v", kind, err)
 		}
 		closure.Kind = "done"
-		checkWorkEnumError(t, ValidateWorkItemClosure(protocol.WorkItem{}, closure), "closure.kind", "done", protocol.WorkItemClosureKindValues())
+		checkWorkEnumError(t, ValidateIssueClosure(protocol.WorkItem{}, closure), "closure.kind", "done", protocol.WorkItemClosureKindValues())
 	}
 	for _, status := range protocol.WorkItemUpdateStatusValues() {
-		if err := ValidateWorkItemUpdateStatus(status); err != nil {
+		if err := ValidateIssueUpdateStatus(status); err != nil {
 			t.Fatalf("valid update status %q: %v", status, err)
 		}
 	}
-	checkWorkEnumError(t, ValidateWorkItemUpdateStatus("closed"), "status", "closed", protocol.WorkItemUpdateStatusValues())
+	checkWorkEnumError(t, ValidateIssueUpdateStatus("closed"), "status", "closed", protocol.WorkItemUpdateStatusValues())
 	for _, action := range protocol.WorkItemTaskDispositionActionValues() {
-		if err := ValidateWorkItemDispositionAction(action, "task_dispositions[1].action"); err != nil {
+		if err := ValidateIssueDispositionAction(action, "task_dispositions[1].action"); err != nil {
 			t.Fatalf("valid disposition %s: %v", action, err)
 		}
 	}
-	checkWorkEnumError(t, ValidateWorkItemDispositionAction("continue", "task_dispositions[1].action"), "task_dispositions[1].action", "continue", protocol.WorkItemTaskDispositionActionValues())
+	checkWorkEnumError(t, ValidateIssueDispositionAction("continue", "task_dispositions[1].action"), "task_dispositions[1].action", "continue", protocol.WorkItemTaskDispositionActionValues())
 }

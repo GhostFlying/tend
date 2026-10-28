@@ -42,7 +42,7 @@ func workItemLine(w protocol.WorkItemView) string {
 }
 
 func gatherWorkItems(ctx context.Context, q store.Querier, s *Snapshot, sc *scope) error {
-	page, err := views.WorkItems(ctx, q, "", false, "")
+	page, err := views.Issues(ctx, q, "", false, "")
 	if err != nil {
 		return err
 	}

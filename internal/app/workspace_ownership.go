@@ -40,7 +40,7 @@ func unusedWorkspaceRebind(ctx context.Context, q store.Querier, task store.Task
 }
 
 func checkDefaultWorkspaceOwner(ctx context.Context, q store.Querier, itemID, sourceTaskID string) error {
-	owner, err := store.GetTaskWorkItemOwner(ctx, q, sourceTaskID)
+	owner, err := store.GetTaskIssueOwner(ctx, q, sourceTaskID)
 	if err != nil {
 		return err
 	}

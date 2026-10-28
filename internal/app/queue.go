@@ -28,7 +28,7 @@ func Queue(ctx context.Context, q store.Querier, o scheduler.Order) ([]protocol.
 	if err != nil {
 		return nil, err
 	}
-	if err := applyWorkItemDependencies(ctx, q, candidates); err != nil {
+	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
 		return nil, err
 	}
 	tasks := make(map[string]store.CandidateRow, len(rows))

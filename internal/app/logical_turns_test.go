@@ -337,7 +337,7 @@ func TestInitialContextDoesNotMutateCreateEnvelope(t *testing.T) {
 	p := protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), InitialContext: &protocol.InitialWorkItemContext{SourceMessageIDs: []string{source}, Coverage: "Initial owner message", ReviewedKinds: []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}, Facts: []protocol.ContextFact{{Kind: "goal", Scope: "work_item", Body: "Initial goal", SourceMessageID: source}}}}
 	env := h.env("work_items.create", workTarget(""), p, nil)
 	before, _ := json.Marshal(env)
-	op := h.exec(mainAgent, env, CreateWorkItem{})
+	op := h.exec(mainAgent, env, CreateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -345,7 +345,7 @@ func TestInitialContextDoesNotMutateCreateEnvelope(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("nested fact changed caller envelope")
 	}
-	retry := h.exec(mainAgent, env, CreateWorkItem{})
+	retry := h.exec(mainAgent, env, CreateIssue{})
 	if retry.Status != protocol.OpSucceeded || string(retry.Result) != string(op.Result) {
 		t.Fatal(retry)
 	}

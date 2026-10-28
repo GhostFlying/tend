@@ -55,7 +55,7 @@ func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows
 				return nil, fmt.Errorf("views: read task terminal time: %w", err)
 			}
 		}
-		summary.PrimaryWorkItemID, summary.PrimaryWorkItemTitle, err = store.TaskWorkItemLabel(ctx, q, row.TaskID)
+		summary.PrimaryWorkItemID, summary.PrimaryWorkItemTitle, err = store.TaskIssueLabel(ctx, q, row.TaskID)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +78,7 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 	if err != nil {
 		return facts, err
 	}
-	if err := ApplyWorkItemDependencies(ctx, q, candidates); err != nil {
+	if err := ApplyIssueDependencies(ctx, q, candidates); err != nil {
 		return facts, err
 	}
 	for _, c := range candidates {

@@ -65,10 +65,10 @@ func TestWorkItemPlanningGuessReplayPreservesCompleteAgreement(t *testing.T) {
 				plan.Stages[1].Status = protocol.WorkItemStageStatus(guess.value)
 			}
 			env := h.env("work_items.update", workTarget(original.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: plan}, rev(original.Revision))
-			op := h.exec(mainAgent, env, UpdateWorkItem{})
+			op := h.exec(mainAgent, env, UpdateIssue{})
 			assertWorkEnumFailure(t, op, guess.field, guess.value, allowed)
 			// The deterministic failure is durable across same-ID retries.
-			replay := h.exec(mainAgent, env, UpdateWorkItem{})
+			replay := h.exec(mainAgent, env, UpdateIssue{})
 			if !reflect.DeepEqual(replay.Error, op.Error) {
 				t.Fatalf("replayed error lost actionable details: %+v", replay.Error)
 			}
@@ -87,7 +87,7 @@ func TestWorkItemPlanningGuessReplayPreservesCompleteAgreement(t *testing.T) {
 	corrected.Background[0].Kind = protocol.SharedFactUserConstraint
 	corrected.Stages[0].Status = protocol.WorkItemStageActive
 	// A new request identity carries the corrected intent; one call succeeds.
-	op := h.exec(mainAgent, h.env("work_items.update", workTarget(original.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: corrected}, rev(original.Revision)), UpdateWorkItem{})
+	op := h.exec(mainAgent, h.env("work_items.update", workTarget(original.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: corrected}, rev(original.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatalf("corrected complete request failed: %+v", op)
 	}
@@ -121,9 +121,9 @@ func TestWorkItemNestedEvidenceErrorsRetainContainerPath(t *testing.T) {
 				field = "closure.evidence[0].kind"
 			}
 			if location == "closure" {
-				op = h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "completed", Reason: "Finished", Evidence: badEvidence}}, rev(w.Revision)), CloseWorkItem{})
+				op = h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "completed", Reason: "Finished", Evidence: badEvidence}}, rev(w.Revision)), CloseIssue{})
 			} else {
-				op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(w.Revision)), UpdateWorkItem{})
+				op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(w.Revision)), UpdateIssue{})
 			}
 			assertWorkEnumFailure(t, op, field, "report", protocol.WorkItemEvidenceKindValues())
 		})
@@ -134,7 +134,7 @@ func TestWorkItemDispositionEnumRetainsExistingIgnoredEntryBehavior(t *testing.T
 	h := newHarness(t)
 	_, task := h.createTask(owner, createTaskPayload{Title: "Design", Spec: testSpec})
 	w := h.createWork(workPlan())
-	link := h.exec(mainAgent, h.env("work_items.link_task", workTarget(w.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: task.TaskID, StageIDs: []string{"investigate"}}, rev(w.Revision)), LinkWorkItemTask{})
+	link := h.exec(mainAgent, h.env("work_items.link_task", workTarget(w.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: task.TaskID, StageIDs: []string{"investigate"}}, rev(w.Revision)), LinkIssueTask{})
 	if link.Status != protocol.OpSucceeded {
 		t.Fatal(link)
 	}
@@ -142,7 +142,7 @@ func TestWorkItemDispositionEnumRetainsExistingIgnoredEntryBehavior(t *testing.T
 	p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}
 	p.Intent = "Change investigation scope while honoring the original task agreement"
 	p.TaskDispositions = []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: task.SpecVersion, Action: "continue", Reason: "Preserve the original agreement"}}
-	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateWorkItem{})
+	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{})
 	assertWorkEnumFailure(t, op, "task_dispositions[0].action", "continue", protocol.WorkItemTaskDispositionActionValues())
 	if stored := h.work(w.WorkItemID); !reflect.DeepEqual(stored, w) {
 		t.Fatal("invalid task disposition changed the plan")
@@ -151,7 +151,7 @@ func TestWorkItemDispositionEnumRetainsExistingIgnoredEntryBehavior(t *testing.T
 	// Historically unused extra dispositions are ignored; enum discovery does
 	// not add new validation to unrelated entries in an existing valid request.
 	p.TaskDispositions = append(p.TaskDispositions, protocol.WorkItemTaskDisposition{TaskID: "unused", Action: "ignored"})
-	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateWorkItem{})
+	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded || h.task(task.TaskID).SpecVersion != task.SpecVersion {
 		t.Fatalf("corrected disposition changed compatibility or task spec: %+v", op)
 	}
@@ -161,7 +161,7 @@ func TestWorkItemUpdateExplicitEmptyStatusRemainsValid(t *testing.T) {
 	h := newHarness(t)
 	w := h.createWork(workPlan())
 	p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: protocol.WorkItemUpdateSnoozed}
-	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateWorkItem{})
+	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -172,12 +172,12 @@ func TestWorkItemUpdateExplicitEmptyStatusRemainsValid(t *testing.T) {
 	_ = json.Unmarshal(env.Payload, &payload)
 	payload["status"] = ""
 	env.Payload, _ = json.Marshal(payload)
-	op = h.exec(mainAgent, env, UpdateWorkItem{})
+	op = h.exec(mainAgent, env, UpdateIssue{})
 	if op.Status != protocol.OpSucceeded || h.work(w.WorkItemID).Status != protocol.WorkItemSnoozed || h.work(w.WorkItemID).Revision != w.Revision {
 		t.Fatalf("explicit empty status no longer preserves current status: %+v", op)
 	}
 	p.Status = "closed"
-	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateWorkItem{})
+	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{})
 	assertWorkEnumFailure(t, op, "status", "closed", protocol.WorkItemUpdateStatusValues())
 }
 

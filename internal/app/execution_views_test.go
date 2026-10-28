@@ -42,7 +42,7 @@ func TestExecutionViewDistinguishesPlanQueueAndMixedWorkers(t *testing.T) {
 		var v protocol.WorkItemView
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 			var err error
-			v, err = views.WorkItem(t.Context(), tx.Q(), item.WorkItemID)
+			v, err = views.Issue(t.Context(), tx.Q(), item.WorkItemID)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -169,7 +169,7 @@ func TestWorkItemFactsAdvanceWithoutPlanRevision(t *testing.T) {
 		var view protocol.WorkItemView
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 			var err error
-			view, err = views.WorkItem(t.Context(), tx.Q(), item.WorkItemID)
+			view, err = views.Issue(t.Context(), tx.Q(), item.WorkItemID)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -211,7 +211,7 @@ func TestWorkItemFactsAdvanceWhenDeliveryQueryBecomesVisible(t *testing.T) {
 		var view protocol.WorkItemView
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 			var err error
-			view, err = views.WorkItem(t.Context(), tx.Q(), item.WorkItemID)
+			view, err = views.Issue(t.Context(), tx.Q(), item.WorkItemID)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -603,7 +603,7 @@ func TestExecutionFactsAdvanceForCapabilityOnlyHeartbeat(t *testing.T) {
 		var v protocol.WorkItemView
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 			var err error
-			v, err = views.WorkItem(t.Context(), tx.Q(), item.WorkItemID)
+			v, err = views.Issue(t.Context(), tx.Q(), item.WorkItemID)
 			return err
 		}); err != nil {
 			t.Fatal(err)
