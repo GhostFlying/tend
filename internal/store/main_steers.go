@@ -30,9 +30,10 @@ func (t *Tx) PutMainSteer(ctx context.Context, m MainSteer, now int64) error {
 }
 
 // HeadSteer excludes the active delivery, preserves owner order, and respects
-// earlier handoffs. Background facts are never selected as owner input.
+// earlier handoffs. Pending metadata repairs have lower priority than owner input;
+// in-flight work and control barriers remain ordered. Background facts are skipped.
 func HeadSteer(ctx context.Context, q Querier, activeRequestID string) (OutboxMessage, error) {
-	m, err := scanOutbox(q.QueryRowContext(ctx, `SELECT `+outboxColumns+` FROM outbox WHERE destination='main_thread' AND request_id<>? AND operation<>'main_thread.handle_event' AND status IN ('pending','sending') ORDER BY seq LIMIT 1`, activeRequestID))
+	m, err := scanOutbox(q.QueryRowContext(ctx, `SELECT `+outboxColumns+` FROM outbox WHERE destination='main_thread' AND request_id<>? AND operation<>'main_thread.handle_event' AND NOT (operation='conversation.repair_turn' AND status='pending') AND status IN ('pending','sending') ORDER BY seq LIMIT 1`, activeRequestID))
 	if err != nil {
 		return m, notFound(err, "pending steer")
 	}
