@@ -1,6 +1,6 @@
 # P1b：递归 Issue 控制与 primary task 接入
 
-状态：P1b1 聚合存储与纯规则代码、本地完整检查及独立评审已完成，未注册产品入口；PR CI/合并未完成，P1b2a 内部定义命令与 legacy guard 已纳入，r3 最终定向 race、既有 integration 编译、完整 make check 和独立复审通过，本次状态记录已独立核对；公开入口未启用，CI/合并/部署未完成，其余分片尚未实施，本批无发布。Refs: D121、D124、D126；依赖 [P0 总合同](issue-agent-refactor.md)及 [P1a 内部改名](issue-internal-names.md)。本批起点为 `d52d093741da41e78dc60effb0493a67058eded5`；子批开始和评审时各自固定实际 base/head。准备草稿不属于已实现代码。
+状态：P1b1 聚合存储与纯规则代码、本地完整检查及独立评审已完成，未注册产品入口；PR CI/合并未完成，P1b2a 内部定义命令与 legacy guard 已纳入，r3 最终定向 race、既有 integration 编译、完整 make check 和独立复审通过，本次状态记录已独立核对；公开入口未启用，CI/合并/部署未完成，P1b2b 正式纳入 owner 内部生命周期与逐批来源收尾，候选 r2 已独立复审通过，正式 r1 定向 race/vet 已通过；正式 CLI 一项迟到 share 缺陷已采纳修正，r2 正式定向 race/vet 已通过，独立复核及完整 make check 已通过；task、manager 及公开入口仍未启用，其余分片尚未正式纳入，本批无发布。Refs: D121、D124、D126；依赖 [P0 总合同](issue-agent-refactor.md)及 [P1a 内部改名](issue-internal-names.md)。本批起点为 `d52d093741da41e78dc60effb0493a67058eded5`；子批开始和评审时各自固定实际 base/head。准备草稿不属于已实现代码。
 
 ## 交付分片与启用门槛
 
@@ -23,7 +23,7 @@ P1b 保留 task/run 的独立状态机、冻结 spec、正式验收及 workspace
 | 子片 | 可验证行为 | 本片不提供的入口 | 状态 |
 | --- | --- | --- | --- |
 | P1b2a 定义与边界 | owner-only create/update，经 App.Execute 去重和版本/epoch；精确来源、组合图检查；当前/两快照一致；各 legacy 写入口及共享 fact 实际作用域围栏 | 不支持生命周期 action；无 canonical task/manager；无 API/tool/CLI 注册 | 代码、本地完整检查和独立复审已完成，本次状态记录已核对；公开入口未启用，CI/合并/部署未完成 |
-| P1b2b 生命周期 | pause/resume、cancel/finish_cancel、close/reopen/reparent/dependencies、同 owner assignment；覆盖本片可达持久责任/unknown 的 blocker，空责任可真实取消终结 | Agent 转交等真实 P2/P4 registry/runtime；task/native 投影在 P1b4/P4 入口启用前接入 | 待实施；完整 blocker 前不开放控制动作 |
+| P1b2b 生命周期 | pause/resume、cancel/finish_cancel、close/reopen/reparent/dependencies、同 owner assignment；覆盖本片可达持久责任/unknown 的 blocker，空责任可真实取消终结 | Agent 转交等真实 P2/P4 registry/runtime；task/native 投影在 P1b4/P4 入口启用前接入 | 已纳入 owner 内部命令；候选 r2 复审通过，r1 定向检查通过、CLI 一项缺陷已修正，r2 正式定向 race/vet 已通过，独立复核及完整 make check 已通过，task/manager/公开入口不启用 |
 
 P1b2a 只声明私有 owner payload 和独立 canonical 命令；旧 CreateIssue/JSON/schema/工具保留当前含义。create 分配新 opaque ID，assignee 为认证 owner Subject、epoch1；不能采用历史行、写入任意 Agent 或其他 owner。plan 不接受 stage TaskIDs/default workspace task。update 必须同项目、活动或暂停、精确 aggregate revision/epoch；意外存在 primary task 时拒绝，直到后续正式 task 合同接入。Parent/dependency 必须 canonical/同项目，create 校验完整 ancestor 准入；定义编辑重检图，不把既有 child 当新激活。
 
@@ -192,3 +192,42 @@ r3 规定 CLI review 已运行且最终输出 clean，独立人工复审确认�
 原实施/评审 base 为 `ffd0cf92510fce66496b81bef8c676ad08639263`；rebase 后验证 base 为 `3fcc88b37ae2c71971dfd7c38facb8652037ed64`，两者 tree 完全一致。原 r3 实施 patch SHA-256 `cb0a8786e5670d91e83e6e0b9391e0bd0b3e458a641daf9792f36420ae59078c` 保留，完整检查前后 16 文件与该评审快照逐 hash 一致；本次仅状态文档变化，不改变运行代码。
 
 r1/r2 完整检查均为等待修复主动终止 143，不计通过或失败。r3 首个完整检查进程意外收到 TERM、退出 143，没有测试失败记录，也不计通过或失败；脱离交互进程的重跑最终通过、退出 0，UTC 18:28:06 至 19:02:18，app race 2016.963 秒、mainthread 388.341 秒，全部 Web 检查和构建通过。完整日志 SHA-256 为 `3bfe1500d1f55cbe7c4ea45d7ab14a77792c18268ca8eb6cb3ae5d4d54905801`。PR CI/合并仍未完成；本片无公开、生命周期、task 或 manager 入口，无部署和 live 验收。
+
+
+## P1b2b owner 内部生命周期
+
+
+此片复用 CanonicalOwnerIssueCommand 的认证、request_id、聚合 revision/assignment epoch 和 SaveCanonicalIssue，接入 pause/resume、cancel/finish_cancel、close/reopen、reparent/dependencies、terminal review_sources 及同 owner assignment 确认。只开放内部 app 命令，不注册 HTTP/tool/CLI，不创建 task/manager。仅当前真实可达责任被声明覆盖；若子树存在 primary task 即明确 unsupported，P1b4/P4 在真实执行入口启用前仍须补齐正式任务验收、run/control/lease 与 manager/native/unknown 投影。候选仅有定向 app 检查；正式组合补丁尚待检查和独立 review。
+
+cancel 先保存意图，允许子项或承诺尚待处置。finish_cancel 对每个既有 open follow-on 指定稳定 ID、理由和当前 owner evidence，在同一 revision 保留旧证据并明确结束这些承诺；不接受通用 resolved 开关，不清实际执行或子项责任。cancelled 没有 completed closure，不放行完成依赖。close 使用当前 owner 明确的 endpoint/evidence，completed 依赖只接受 app 已验证持久的 closed/completed endpoint，不扫描 request/event 真实性链；declined/cancelled 均不是 achieved。reopen 清当前 closure 投影、保留不可变历史，并重检整个 ancestor；图修改始终在保存事务内重检树与组合义务环。
+
+源处置只操作本项 message_context_obligations：指定 message、精确 content/association/context revision 和理由，明确结束该源在本项的责任，引用记录留在该 revision 的 reason 中。不得改消息全局 facts_revision、其他 Issue 或共享事实。来源关联触发的 logical_turn_contexts 是上下文审阅份额，不是对整条 main 原生 turn 的执行所有权；它随本项稳定 ID 重挂，不阻正常 owner reparent，也不变成授权。
+
+owner endpoint 保存后，0043 先推进本项 context revision，再在同事务记录本项仍在途 logical context 的精确审阅份额。CommitLogicalTurn 对显式精确当前 revision、全项无剩余源义务的 terminal canonical 份额记录当前 logical share 审阅，包括 owner 来源收尾后才注册的份额；settleLogicalTurn 保留精确审阅和 pending source 检查，只免除该 terminal 份额的执行 baseline0 要求。它不完成整条 logical turn、不停止 main、不清 native receipt，也不产生执行就绪的 baseline。新内容或 reopen 导致 revision 改变后，旧审阅失效。
+
+endpoint 检查直接子项及子树实际来源义务。已 terminal 的 child 收到真实迟到内容修订后，新源义务仍作为 child_source_review 返回，不由父项删除；owner 可在该 terminal child 使用 review_sources 明确处置新源份额，保留终态、原 closure、plan/assignment 和全部旧历史；新 revision 记录这次 owner 决定维持终态。该动作不做 ancestor activation，因此 cancelling ancestor 不会迫使重开新执行。来源可按 named message 分批处置；未提及的义务保留并继续阻止父项收尾，只在本项真实清完后记录当前 context 审阅份额。空 baseline0 且无真实义务的项可真实 create→cancel→finish_cancel。
+
+定向真实 app 回归覆盖上述闭环、main 忙时本项独立处置且其他 Issue 保持、精确源版本冲突、子项 blocker 触发后的源处置回滚、无执行 ownership 的重挂、same-owner 成功 receipt 重放、completed/declined/cancelled 依赖区别、组合图和 ancestor gate，以及 parent close 与 child create/reopen 并发只能一方激活成功。plain 最终退出 0（2.031 秒）；同范围定向 race 退出 0（48.593 秒），覆盖 12 个新测试及其子用例、一个已调整的 unknown-action 边界测试；独立 review、完整 make check、CI/合并/部署仍分别待记录。源码归档副本的验证不是产品发布。
+
+
+### P1b2b r2 评审修正：cancelling 父项下的 terminal 来源收尾
+
+独立评审发现真实闭锁：P 已 cancelling，terminal C 收到迟到来源修订；P 的 finish_cancel 被 child_source_review 阻止，C 的 reopen 又正确受 cancelling ancestor 限制。不能删除子项义务或放宽执行重开来绕过。本片增加仅 owner 内部 review_sources，仍无公共注册；复用精确 aggregate/epoch/context/message 版本约束和当前 owner 授权，不新增证明链。
+
+review_sources 只改变所列本项来源义务，维持 closed/cancelled、既有 closure、plan 和 assignment；即使业务终态相同，也写新不可变 revision 与 issue.sources_reviewed 事件，原 endpoint 证据及旧快照保持。逐批成功都保存精确 receipt；遗漏来源仍可见且阻止父项，只有实际清完才写 current context review，不清其他 Issue 或整个子树。
+
+closed/cancelled 两个真实 parent-cancelling 变体先在 r1 复现（预期退出 1，0.345 秒），修复后通过（0.318 秒）；随后多来源逐批处置、未清义务保留、其他 Issue 保持、历史/replay 与父项合法完成的精确定向通过（0.460 秒）。r2 最终同范围 scoped plain 通过（退出 0，2.368 秒），scoped race 通过（退出 0，57.987 秒），覆盖 14 个新增 app 测试及子用例和一个已调整的 unknown-action 用例；r2 候选独立复审已通过；正式纳入后的检查和规定 CLI review 仍待执行。r1 原验证证据保留其原代码快照边界。
+
+### 正式纳入基线与验证
+
+固定 base `1279b4748bc006dc286cc58484926b5d2bd1889f`，包含已提交 P1b2a r3、P2b 本地配置持久化/journal 11 及独立基线 fixture 修复。原样纳入已复审候选的六个 app 文件，原 full patch SHA-256 `a19ff2ade03b0293a85103eb1342c2fe575802eba0b515c5992cc53d8d35baa4`；现有设计/台账按当前状态窄增量更新，不覆盖历史评审证据。正式定向 race 已通过（退出 0，71.361 秒），包含全部 14 个 lifecycle 新测试及子用例、已调整 unknown-action 用例和 3 个既有 logical settle/迟到回复对照；app vet 退出 0，六个 app 文件与已复审候选逐 hash 一致。规定独立 review 和唯一完整 make check 待执行；PR CI/合并、部署及 live 验收未完成。无 b3/P2c、schema、协议、CLI/UI 或 task 创建/派发接入。
+
+### 正式 r1 review 与 r2：排队交付的迟到 terminal share
+
+r1 规定 CLI 独立 review 确认一项正常时序缺陷：owner 消息或关联通知排队时，owner 已结束本项并处置来源；稍后 PutMainTurn 注册的新 logical share 没有 endpoint 时刻的 review marker，CommitLogicalTurn 被 baseline0 拒绝，来源已清又无法重新处置。采纳此项；r1 唯一完整检查因该已知缺陷主动停止、未完成，不计通过或失败。历史候选定向/复审及正式 r1 定向通过仍保留各自快照边界。
+
+r2 只在现有 CommitLogicalTurn 显式精确当前版本接点补写 terminal share 的 review；必须 closed/cancelled 且本项全部 source obligations 无 pending，仍校验实际 logical membership 和逐条消息版本。不新增证明表/owner action，不放开旧 ContextCommand，不构造新来源、不重开、不写执行 baseline，也不停止或完成 native turn。新内容或 reopen 使该条件失效；待审来源保持独立。
+
+真实 queued SubmitMessage/association→owner terminal source settlement→later PutMainTurn 回归，在正式 r1 的 closed/cancelled 两变体均因 baseline0 失败（预期退出 1，0.295 秒）；修复后正例通过（退出 0，0.268 秒），包含 reopen、真实 assistant streaming 迟到内容及 native 仍 started 不伪完成的最终 plain 通过（退出 0，0.481 秒）。首次副本命令未正确路由新文件而产生编译失败，随后逐 hash 校准正式 r1 源码后才取得上述红→绿证据，不把编译失败作业务复现。
+
+本轮 rebase 后固定 base `ae891c455031fca1098ff26ff2c06d3530c51683`，与历史 `1279b4748bc006dc286cc58484926b5d2bd1889f` tree 相同；保留原 r1 artifact。正式 r2 定向 race 已通过（退出 0，81.205 秒），包含全部 lifecycle（含新增 queued share 正负控）、unknown-action 及 3 个既有 logical settle/迟到回复对照；app vet 退出 0，格式/空白检查通过。增量及正式组合独立复核通过；最终完整 make check 退出 0（UTC 19:58:42 至 20:34:42），app race 2105.482 秒、mainthread 391.337 秒及全部 Web 检查通过（281 个测试）。日志 SHA-256 `91e1ec84e23830fb57b12801715c30c907cfcc883aa66b802cca2bc5745788e4`；本轮前后所有实现文件与已审 r2 冻结字节一致，随后仅更新这四份进度文档。r1 的规定 CLI finding 与停止记录保留；最小修复经独立 delta review 后未重复整次 CLI。公共/task/manager 入口、部署及 live 验收未启用。

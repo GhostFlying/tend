@@ -370,7 +370,7 @@ func TestCanonicalOwnerSourceRejectsInvalidReferences(t *testing.T) {
 	}
 }
 
-func TestCanonicalOwnerCommandsRejectOtherPrincipalAndLifecycleAction(t *testing.T) {
+func TestCanonicalOwnerCommandsRejectOtherPrincipalAndUnknownAction(t *testing.T) {
 	h := newHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	before := canonicalGuardBusinessSnapshot(t, h)
@@ -379,7 +379,7 @@ func TestCanonicalOwnerCommandsRejectOtherPrincipalAndLifecycleAction(t *testing
 	if _, err := h.app.Execute(t.Context(), mainAgent, env, CanonicalOwnerIssueCommand{Action: "update"}); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatalf("main principal got canonical owner permission: %v", err)
 	}
-	unsupported := h.exec(owner, h.env("issues.cancel", env.Target, map[string]any{"expected_assignment_epoch": issue.AssignmentEpoch, "reason": "not implemented"}, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "cancel"})
+	unsupported := h.exec(owner, h.env("issues.unsupported", env.Target, map[string]any{"expected_assignment_epoch": issue.AssignmentEpoch, "reason": "not implemented"}, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "unsupported"})
 	expectWorkCode(t, unsupported, protocol.CodeInvalidRequest)
 	if !bytes.Equal(before, canonicalGuardBusinessSnapshot(t, h)) {
 		t.Fatal("disabled command changed business state")
