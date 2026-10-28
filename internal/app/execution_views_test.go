@@ -585,3 +585,59 @@ func TestExecutionViewStageDependencyLinksOnlyUnfinishedTask(t *testing.T) {
 		})
 	}
 }
+
+func TestExecutionFactsAdvanceForCapabilityOnlyHeartbeat(t *testing.T) {
+	h := newHarness(t)
+	runtime := testRuntime("capability-watermark")
+	if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	item := h.createWork(workPlan())
+	spec := testSpec
+	spec.Observation = &protocol.ObservationScope{Deployment: true}
+	if op, _ := h.createTask(owner, createTaskPayload{Title: "Observe deployment", Spec: spec, WorkItemID: item.WorkItemID, WorkItemRevision: item.Revision, StageIDs: []string{"investigate"}}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	read := func() protocol.WorkItemView {
+		t.Helper()
+		var v protocol.WorkItemView
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			var err error
+			v, err = views.WorkItem(t.Context(), tx.Q(), item.WorkItemID)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	before := read()
+	if len(before.Tasks) != 1 || before.Tasks[0].Execution.QueueReason.Code != protocol.QueueHostRequirements {
+		t.Fatalf("missing capability was not projected: %+v", before)
+	}
+	runtime.Sequence++
+	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityWorkerObservation)
+	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: runtime}); err != nil {
+		t.Fatal(err)
+	}
+	ready := read()
+	if ready.Revision != before.Revision || ready.FactsSeq <= before.FactsSeq || ready.Tasks[0].Execution.QueueReason.Code != protocol.QueueReady {
+		t.Fatalf("capability heartbeat did not advance execution facts: before=%+v after=%+v", before, ready)
+	}
+	runtime.Sequence++
+	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: runtime}); err != nil {
+		t.Fatal(err)
+	}
+	unchanged := read()
+	if unchanged.FactsSeq != ready.FactsSeq {
+		t.Fatal("ordinary heartbeat manufactured a fact change")
+	}
+	runtime.Sequence++
+	runtime.Capabilities = runtime.Capabilities[:len(runtime.Capabilities)-1]
+	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: runtime}); err != nil {
+		t.Fatal(err)
+	}
+	removed := read()
+	if removed.Revision != before.Revision || removed.FactsSeq <= ready.FactsSeq || removed.Tasks[0].Execution.QueueReason.Code != protocol.QueueHostRequirements {
+		t.Fatalf("capability removal did not advance execution facts: %+v", removed)
+	}
+}

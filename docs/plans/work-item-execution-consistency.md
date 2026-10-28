@@ -28,3 +28,7 @@
 ## 发布前独立评审修订
 
 Owner 已授权合入与部署。独立评审复现：浏览器缓存带 facts_seq 的响应后，server 回退到没有该字段的版本时，同 revision 的动态事实会被冻结。仅当两份响应均有事实水位时比较水位；无法比较时沿用旧 server 的最后响应规则。增加新旧版本切换及恢复水位比较的回归，重新运行完整检查和独立评审后更新 PR。
+
+### 能力变更的事实水位
+
+后续独立评审复现 runner 仅 capabilities 变化时，任务可从 host_requirements 变为 ready，但观察序号更新没有产生事件，facts_seq 因而相同。将能力列表变化纳入 observeRuntime 的语义变更检测，经已有 hello/heartbeat 的持久事件路径推进事实水位；不对仅 sequence/heartbeat 时间变化生成事件。App/SQLite 回归覆盖增加能力、移除能力、相同能力的普通心跳，以及不改变工作项计划 revision。
