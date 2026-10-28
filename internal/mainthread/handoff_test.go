@@ -632,6 +632,17 @@ func TestHandoffRetryRefreshesSourceBeyondRecentMessageFocus(t *testing.T) {
 		})
 	}
 	eventually(t, "owner delivery outbox settles", func() bool {
+		// A delivery can be retried while the preceding native turn settles.
+		// Drive the frozen fixture clock to its durable retry deadline.
+		var next int64
+		if err := f.e.store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MIN(next_attempt_at),0) FROM outbox WHERE destination='main_thread' AND status='pending' AND next_attempt_at>?`, f.clock.Now().UnixMilli()).Scan(&next)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if delay := time.UnixMilli(next).Sub(f.clock.Now()); delay > 0 {
+			f.clock.Advance(delay)
+		}
 		snap, err := f.e.app.HandoffSnapshot(ctx, "main")
 		return err == nil && !snap.Pending && !snap.Active && f.e.count(`SELECT COUNT(*) FROM logical_turns WHERE status<>'completed'`) == 0
 	})
