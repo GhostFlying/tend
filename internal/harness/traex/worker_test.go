@@ -59,6 +59,51 @@ func TestNativeLifecycleDoesNotRepeatSupplementalInput(t *testing.T) {
 	}
 }
 
+func TestWorkerDescendantsRedactInputsBeforePublishingRunLogs(t *testing.T) {
+	ws, servers := fakeWorkers(t)
+	w, err := ws.Start(t.Context(), harness.WorkerSpec{Role: protocol.RoleImplement, Dir: "/w", Spec: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := <-servers
+	// Descendant input can arrive before its ancestor links are known.
+	f.send(map[string]any{"method": notifyItemCompleted, "params": map[string]any{"threadId": "grandchild", "turnId": "child-turn", "item": map[string]any{"id": "private-item", "type": "userMessage", "content": []any{map[string]string{"type": "text", "text": "PRIVATE_CHILD_INPUT"}}}}})
+	f.send(map[string]any{"method": "thread/started", "params": map[string]any{"thread": map[string]any{"id": "grandchild", "source": map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": "child", "depth": 2}}}}}})
+	f.send(map[string]any{"method": "thread/started", "params": map[string]any{"thread": map[string]any{"id": "child", "source": map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": "th_w", "depth": 1}}}}}})
+	f.send(map[string]any{"method": notifyItemCompleted, "params": map[string]any{"threadId": "grandchild", "turnId": "child-turn", "item": map[string]any{"id": "answer", "type": "agentMessage", "text": "CHILD_ANSWER_SAFE"}}})
+	f.send(map[string]any{"method": notifyTurnCompleted, "params": map[string]any{"threadId": "grandchild", "turn": map[string]any{"id": "child-turn", "status": "completed", "items": []any{map[string]any{"id": "private-item", "type": "userMessage", "content": []any{map[string]string{"type": "text", "text": "PRIVATE_CHILD_INPUT"}}}}}}})
+	f.send(map[string]any{"method": notifyTurnCompleted, "params": map[string]any{"threadId": "th_w", "turn": map[string]any{"id": "tu_w", "status": "completed"}}})
+	children := 0
+	answer := false
+	for event := range w.Events() {
+		if bytes.Contains(event.Body, []byte("PRIVATE_CHILD_INPUT")) {
+			t.Fatal("private input escaped through a descendant log", string(event.Body))
+		}
+		if event.Kind != "native.child" {
+			continue
+		}
+		children++
+		var body struct {
+			Thread string `json:"thread_id"`
+			Turn   string `json:"turn_id"`
+			Kind   string `json:"kind"`
+		}
+		if err := json.Unmarshal(event.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Thread != "grandchild" || body.Turn != "child-turn" {
+			t.Fatal("descendant lost its original scope", string(event.Body))
+		}
+		answer = answer || bytes.Contains(event.Body, []byte("CHILD_ANSWER_SAFE"))
+	}
+	if _, err := w.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if children != 3 || !answer {
+		t.Fatalf("descendant logs=%d answer=%t", children, answer)
+	}
+}
+
 // fakeWorkers returns Workers that talk to a fake app-server; setup adds
 // to what the server answers.
 func fakeWorkers(t *testing.T, setup ...func(*fakeServer)) (*Workers, chan *fakeServer) {

@@ -189,7 +189,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 				}
 				if ev.Kind == harness.EventChildRollout {
 					select {
-					case w.events <- harness.WorkerEvent{Kind: "native.child", Body: ev.Raw}:
+					case w.events <- childRolloutEvent(ev):
 					case <-ctx.Done():
 						return
 					}
@@ -234,13 +234,43 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 }
 
 func workerItemEvent(ev harness.Event) harness.WorkerEvent {
-	body := ev.Raw
+	return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "item.completed", Body: redactedRolloutPayload("", ev)}
+}
+
+func redactedRolloutPayload(threadID string, ev harness.Event) json.RawMessage {
 	if ev.ItemType == harness.ItemUserMessage {
-		// Incoming supplements are already in the private queue record. Do not
-		// duplicate their text into run logs or provider diagnostic events.
-		body = []byte(`{"type":"userMessage"}`)
+		return json.RawMessage(`{"type":"userMessage"}`)
 	}
-	return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "item.completed", Body: body}
+	if ev.Kind == harness.EventTurnStarted || ev.Kind == harness.EventTurnCompleted {
+		raw, _ := json.Marshal(map[string]any{"threadId": threadID, "turn": map[string]string{"id": ev.TurnID, "status": ev.TurnStatus}})
+		return raw
+	}
+	return ev.Raw
+}
+
+func childRolloutEvent(ev harness.Event) harness.WorkerEvent {
+	var child struct {
+		Thread string            `json:"thread_id"`
+		Turn   string            `json:"turn_id"`
+		Kind   harness.EventKind `json:"kind"`
+		Data   json.RawMessage   `json:"data,omitempty"`
+	}
+	if json.Unmarshal(ev.Raw, &child) != nil {
+		return harness.WorkerEvent{Kind: "native.child", Body: json.RawMessage(`{"kind":"unavailable"}`)}
+	}
+	var identity struct {
+		Type string `json:"type"`
+		Turn struct {
+			Status string `json:"status"`
+		} `json:"turn"`
+	}
+	if json.Unmarshal(child.Data, &identity) != nil {
+		child.Data = nil
+	} else {
+		child.Data = redactedRolloutPayload(child.Thread, harness.Event{Kind: child.Kind, TurnID: child.Turn, ItemType: identity.Type, TurnStatus: identity.Turn.Status, Raw: child.Data})
+	}
+	raw, _ := json.Marshal(child)
+	return harness.WorkerEvent{Kind: "native.child", Body: raw}
 }
 
 // thread continues the thread of an earlier attempt of the run, or starts
@@ -264,14 +294,7 @@ func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSp
 }
 
 func nativeRolloutEvent(threadID string, ev harness.Event) harness.WorkerEvent {
-	if ev.Kind == harness.EventTurnStarted || ev.Kind == harness.EventTurnCompleted {
-		// Native lifecycle payloads can repeat every user item in the turn.
-		// Only execution identity and status belong in worker run logs.
-		ev.Raw, _ = json.Marshal(map[string]any{"threadId": threadID, "turn": map[string]string{"id": ev.TurnID, "status": ev.TurnStatus}})
-	}
-	if ev.ItemType == harness.ItemUserMessage {
-		ev.Raw = json.RawMessage(`{"type":"userMessage"}`)
-	}
+	ev.Raw = redactedRolloutPayload(threadID, ev)
 	body, _ := json.Marshal(struct {
 		ThreadID string          `json:"thread_id"`
 		TurnID   string          `json:"turn_id"`
