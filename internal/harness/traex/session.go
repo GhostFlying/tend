@@ -36,9 +36,10 @@ type Options struct {
 
 // Session is a running app-server. It implements harness.Session.
 type Session struct {
-	conn *conn
-	log  *slog.Logger
-	stop func() error
+	codex bool // Confirmed Codex CLI; forked CLIs also return codexHome.
+	conn  *conn
+	log   *slog.Logger
+	stop  func() error
 
 	mu      sync.Mutex
 	threads map[string]*thread
@@ -108,6 +109,18 @@ func Start(ctx context.Context, opts Options) (*Session, error) {
 		_ = s.Close()
 		return nil, err
 	}
+	if s.codex {
+		// TraeX also reports codexHome. Confirm the configured CLI itself before
+		// using Codex-specific input identity and empty-input continuation.
+		versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		versionCmd := exec.CommandContext(versionCtx, bin, "--version")
+		versionCmd.Dir, versionCmd.Env = opts.Dir, cmd.Env
+		procx.Contain(versionCmd)
+		output, err := versionCmd.Output()
+		procx.KillGroup(versionCmd)
+		cancel()
+		s.codex = err == nil && strings.HasPrefix(strings.TrimSpace(string(output)), "codex-cli ")
+	}
 	return s, nil
 }
 
@@ -148,13 +161,17 @@ func (s *Session) initialize(ctx context.Context, version string) error {
 	if version == "" {
 		version = "dev"
 	}
+	var initialized struct {
+		CodexHome string `json:"codexHome"`
+	}
 	err := s.conn.call(ctx, methodInitialize, InitializeParams{
 		ClientInfo:   ClientInfo{Name: "tend", Version: version},
 		Capabilities: &InitializeCapabilities{ExperimentalAPI: true},
-	}, nil)
+	}, &initialized)
 	if err != nil {
 		return err
 	}
+	s.codex = initialized.CodexHome != ""
 	return s.conn.notify(ctx, methodInitialized, nil)
 }
 
@@ -372,6 +389,18 @@ func (s *Session) notification(method string, params json.RawMessage) {
 		// guaranteed actual model. Neither is inferred from arrival/config.
 		threadID = n.ThreadID
 		ev = harness.Event{Kind: harness.EventRequestUsage, TurnID: n.TurnID, RequestUsage: &sample}
+	case "error":
+		var n struct {
+			ThreadID  string          `json:"threadId"`
+			TurnID    string          `json:"turnId"`
+			Error     json.RawMessage `json:"error"`
+			WillRetry bool            `json:"willRetry"`
+		}
+		if json.Unmarshal(params, &n) != nil || n.ThreadID == "" || n.TurnID == "" {
+			return
+		}
+		threadID = n.ThreadID
+		ev = harness.Event{Kind: harness.EventTurnError, TurnID: n.TurnID, Failure: nativeFailure(n.Error, n.WillRetry), Raw: params}
 	case "thread/tokenUsage/updated":
 		var n struct {
 			ThreadID string `json:"threadId"`
@@ -404,6 +433,7 @@ func (s *Session) notification(method string, params json.RawMessage) {
 		ev = harness.Event{Kind: harness.EventTurnStarted, TurnID: n.Turn.ID, Raw: params}
 		if method == notifyTurnCompleted {
 			ev.Kind, ev.TurnStatus = harness.EventTurnCompleted, n.Turn.Status
+			ev.Failure = nativeFailure(n.Turn.Error, false)
 		}
 	case notifyItemStarted, notifyItemCompleted:
 		var n ItemNotification
@@ -596,16 +626,32 @@ func (t *thread) StartTurn(ctx context.Context, in harness.TurnInput) (string, e
 	if t.toolsReleased() {
 		return "", fmt.Errorf("%w: disposable thread released", harness.ErrRejected)
 	}
-	inputs := []UserInput{{Type: userInputText, Text: in.Text, TextElements: []any{}}}
-	for _, image := range in.ImageURLs {
-		inputs = append(inputs, UserInput{Type: "image", imageURL: image})
+	inputs := []UserInput{}
+	if !in.Continue {
+		inputs = append(inputs, UserInput{Type: userInputText, Text: in.Text, TextElements: []any{}})
+	}
+	if !in.Continue {
+		for _, image := range in.ImageURLs {
+			inputs = append(inputs, UserInput{Type: "image", imageURL: image})
+		}
 	}
 	var res TurnStartResponse
-	err := t.s.conn.call(ctx, methodTurnStart, TurnStartParams{
-		ThreadID: t.id, UserMessageID: in.UserMessageID,
-		Model: in.Model, ModelProvider: in.ModelProvider, Effort: in.Effort,
-		Input: inputs, SandboxPolicy: t.turnNetworkPolicy(),
-	}, &res)
+	params := TurnStartParams{ThreadID: t.id, UserMessageID: in.UserMessageID, Model: in.Model, ModelProvider: in.ModelProvider, Effort: in.Effort, Input: inputs, SandboxPolicy: t.turnNetworkPolicy()}
+	var wire any = params
+	if t.s.codex {
+		// Codex 0.163 uses clientUserMessageId; TraeX retains userMessageId.
+		data, _ := json.Marshal(params)
+		var fields map[string]any
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return "", err
+		}
+		delete(fields, "userMessageId")
+		if in.UserMessageID != "" && !in.Continue {
+			fields["clientUserMessageId"] = in.UserMessageID
+		}
+		wire = fields
+	}
+	err := t.s.conn.call(ctx, methodTurnStart, wire, &res)
 	if err != nil {
 		return "", err
 	}

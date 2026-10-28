@@ -360,6 +360,11 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 	it := protocol.ConversationItem{ConversationID: r.ConversationID, Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
 		ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC(),
 		AssistantState: protocol.AssistantState(r.AssistantState), AssistantRevision: r.AssistantRevision}
+	recovery, err := store.MessageRecovery(ctx, q, r.MessageID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return it, err
+	}
+	it.Recovery = recovery
 	associations, err := store.MessageAssociations(ctx, q, r.MessageID)
 	if err != nil {
 		return it, err

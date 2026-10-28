@@ -26,6 +26,9 @@ func (a *App) ObserveNativeStart(ctx context.Context, request, thread, turn stri
 		if err := tx.PutMainTurn(ctx, rec, a.now().UnixMilli()); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_recoveries SET status='running',updated_at=? WHERE active_request_id=? AND status='starting'`, a.now().UnixMilli(), request); err != nil {
+			return err
+		}
 		return a.insertMessageState(ctx, tx, rec.MessageID, protocol.MessageProcessing, a.now().UnixMilli())
 	})
 }

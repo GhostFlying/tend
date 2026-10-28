@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -94,17 +95,18 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
-	followupsEnabled  bool
-	observeDeployment func(context.Context) (protocol.ObservedDeployment, error)
-	store             *store.Store
-	ids               protocol.IDGen
-	now               func() time.Time
-	notifier          Notifier
-	changes           *Broadcast
-	logs              *Broadcast
-	leaseTTL          time.Duration
-	waitPer           float64
-	hostLost          time.Duration
+	agentRecoveryPolicy domain.AgentRecoveryPolicy
+	followupsEnabled    bool
+	observeDeployment   func(context.Context) (protocol.ObservedDeployment, error)
+	store               *store.Store
+	ids                 protocol.IDGen
+	now                 func() time.Time
+	notifier            Notifier
+	changes             *Broadcast
+	logs                *Broadcast
+	leaseTTL            time.Duration
+	waitPer             float64
+	hostLost            time.Duration
 }
 
 // Option configures an App.
@@ -117,7 +119,7 @@ func WithNotifier(n Notifier) Option {
 
 // New returns an App.
 func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Option) *App {
-	a := &App{store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, changes: NewBroadcast(), logs: NewBroadcast()}
+	a := &App{agentRecoveryPolicy: domain.DefaultAgentRecoveryPolicy(), store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, changes: NewBroadcast(), logs: NewBroadcast()}
 	for _, o := range opts {
 		o(a)
 	}

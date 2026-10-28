@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -89,6 +90,23 @@ func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 		if err != nil {
 			return err
 		}
+		receipts, err := store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT r.conversation_id FROM agent_recoveries r JOIN main_turns t ON t.request_id=r.active_request_id OR t.message_id=r.successor_message_id JOIN native_turn_receipts_pending p ON p.request_id=t.request_id WHERE r.conversation_id<>'main' AND (COALESCE(t.turn_id,'')<>'' OR NOT EXISTS(SELECT 1 FROM agent_recovery_attempts e WHERE e.request_id=t.request_id)) AND r.next_reconcile_at<=? ORDER BY r.conversation_id`, a.now().UnixMilli())
+		if err != nil {
+			return err
+		}
+		dueReceipts := make(map[string]bool, len(receipts))
+		seen := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			seen[id] = true
+		}
+		for _, id := range receipts {
+			dueReceipts[id] = true
+			if !seen[id] {
+				ids = append(ids, id)
+				seen[id] = true
+			}
+		}
+		sort.Strings(ids)
 		var runnable []string
 		for _, id := range ids {
 			c, err := store.AgentConversation(ctx, tx.Q(), id)
@@ -103,7 +121,7 @@ func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 			if err != nil {
 				return err
 			}
-			if inflight || ready {
+			if inflight || ready || dueReceipts[id] {
 				runnable = append(runnable, id)
 			}
 		}

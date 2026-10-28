@@ -237,6 +237,11 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 			if err := json.Unmarshal(d.Payload, &m); err != nil {
 				return fmt.Errorf("app: decode message delivery: %w", err)
 			}
+			if r.Outcome == Failed {
+				if err := a.failRecoverySuccessors(ctx, tx, m.MessageID, now.UnixMilli()); err != nil {
+					return err
+				}
+			}
 			state := protocol.MessageFailed
 			if r.Outcome == Unknown {
 				state = protocol.MessageUnknown

@@ -294,6 +294,33 @@
       "title": "AgentConversationPage",
       "type": "object"
     },
+    "AgentRecoveryView": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer"
+        },
+        "deadline": {
+          "type": "integer"
+        },
+        "next_attempt_at": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "attempts",
+        "deadline"
+      ],
+      "title": "AgentRecoveryView",
+      "type": "object"
+    },
     "AgentRolloutPage": {
       "additionalProperties": false,
       "properties": {
@@ -1184,6 +1211,9 @@
         },
         "notice_type": {
           "type": "string"
+        },
+        "recovery": {
+          "$ref": "#/definitions/AgentRecoveryView"
         },
         "reply_sources": {
           "items": {

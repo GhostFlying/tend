@@ -422,6 +422,12 @@ func (m *Manager) migrateThread(ctx context.Context, s harness.Session, source h
 }
 
 func (m *Manager) migrateOneThread(ctx context.Context, s harness.Session, source harness.Thread, hash, requestID string) (harness.Thread, error) {
+	if blocked, err := m.app.AgentRecoveryUncertain(ctx, m.cfg.ConversationID); err != nil {
+		return nil, err
+	} else if blocked {
+		return nil, errors.New("mainthread: native continuation must be reconciled before handoff")
+	}
+
 	// Startup schema recovery uses this same path without deliverHandoff. Keep
 	// the original binding until its native compaction has been reconciled.
 	if blocked, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID); err != nil {

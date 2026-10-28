@@ -133,6 +133,8 @@ type ToolHandler func(ctx context.Context, call ToolCall) ToolResult
 
 // TurnInput is a user turn.
 type TurnInput struct {
+	// Continue starts a new turn with no new user input, preserving native history.
+	Continue bool
 	// Repair marks a coordinator continuation with no business-write authority.
 	Repair    bool
 	ImageURLs []string
@@ -165,6 +167,9 @@ type Thread interface {
 // EventKind classifies thread events.
 type EventKind string
 
+// EventTurnError is a native error fact; the terminal status still settles the turn.
+const EventTurnError EventKind = "turn_error"
+
 // Event kinds.
 const (
 	EventTurnStarted       EventKind = "turn_started"
@@ -187,6 +192,7 @@ const (
 // Event is something that happened in a thread.
 type Event struct {
 	RequestUsage *protocol.TokenUsageSample
+	Failure      *protocol.AgentFailure
 	ContextUsage *protocol.AgentContextUsage
 	Kind         EventKind
 	TurnID       string
@@ -230,9 +236,11 @@ type TurnReader interface {
 	FindTurn(context.Context, string, string) (TurnReceipt, bool, error)
 }
 type TurnReceipt struct {
-	ID       string
-	Status   string
-	Messages []Event
+	Failure          *protocol.AgentFailure
+	ContinuationSafe bool
+	ID               string
+	Status           string
+	Messages         []Event
 	// Items retains native user/assistant order for source attribution. Nil
 	// means the reader did not provide that evidence, rather than empty history.
 	Items []Event

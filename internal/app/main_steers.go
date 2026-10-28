@@ -360,7 +360,7 @@ func (a *App) settleMainSteers(ctx context.Context, tx *store.Tx, threadID, turn
 		state := steerState(m.Status)
 		if m.Status == "completed" {
 			var replied bool
-			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_reply_sources s JOIN conversation_agent_messages r ON r.message_id=s.reply_id WHERE s.source_id=? AND r.thread_id=? AND r.turn_id=? AND r.status='completed')`, m.MessageID, m.ThreadID, m.TurnID).Scan(&replied); err != nil {
+			if err := tx.Q().QueryRowContext(ctx, `WITH RECURSIVE executions(request_id) AS (SELECT request_id FROM main_turns WHERE thread_id=? AND turn_id=? UNION SELECT r.request_id FROM agent_recovery_attempts r JOIN executions e ON e.request_id=r.source_request_id) SELECT EXISTS(SELECT 1 FROM conversation_reply_sources s JOIN conversation_agent_messages r ON r.message_id=s.reply_id JOIN main_turns t ON t.thread_id=r.thread_id AND t.turn_id=r.turn_id JOIN executions e ON e.request_id=t.request_id WHERE s.source_id=? AND r.status='completed')`, m.ThreadID, m.TurnID, m.MessageID).Scan(&replied); err != nil {
 				return err
 			}
 			if !replied {
@@ -461,7 +461,13 @@ func (a *App) NativeItemSources(ctx context.Context, threadID, turnID, itemID st
 // exposes provenance, not additional tool permissions or future queued input.
 func (a *App) OwnerMessageDelivery(ctx context.Context, messageID, threadID, turnID string, historical bool) (requestID string, err error) {
 	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT request_id FROM main_turns WHERE message_id=m.message_id AND status IN ('started','completed','interrupted','failed') AND (? OR (thread_id=? AND turn_id=?)) ORDER BY updated_at DESC LIMIT 1),(SELECT request_id FROM main_steers WHERE message_id=m.message_id AND native_item_id<>'' AND (? OR (thread_id=? AND turn_id=?))),'') FROM conversation_messages m LEFT JOIN conversation_message_controls c ON c.message_id=m.message_id WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0`, historical, threadID, turnID, historical, threadID, turnID, messageID).Scan(&requestID)
+		err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT request_id FROM main_turns WHERE message_id=m.message_id AND status IN ('started','completed','interrupted','failed') AND (? OR (thread_id=? AND turn_id=?)) ORDER BY updated_at DESC LIMIT 1),(SELECT request_id FROM main_steers WHERE message_id=m.message_id AND native_item_id<>'' AND (? OR (thread_id=? AND turn_id=?))),'') FROM conversation_messages m LEFT JOIN conversation_message_controls c ON c.message_id=m.message_id WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0`, historical, threadID, turnID, historical, threadID, turnID, messageID).Scan(&requestID)
+		if err != nil || requestID != "" {
+			return err
+		}
+		// An empty-input execution retains the admitted sources of its logical
+		// responsibility; no new native user item exists in this turn.
+		return tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT request_id FROM main_steers s WHERE s.message_id=m.message_id AND s.native_item_id<>''),(SELECT request_id FROM main_turns t WHERE t.message_id=m.message_id AND t.status IN ('started','completed','interrupted','failed') ORDER BY updated_at DESC LIMIT 1),'') FROM conversation_messages m LEFT JOIN conversation_message_controls c ON c.message_id=m.message_id WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0 AND EXISTS(SELECT 1 FROM main_turns current JOIN agent_recovery_attempts r ON r.request_id=current.request_id JOIN logical_turn_executions e ON e.request_id=current.request_id JOIN logical_turn_messages lm ON lm.logical_turn_id=e.logical_turn_id WHERE current.thread_id=? AND current.turn_id=? AND lm.message_id=m.message_id)`, messageID, threadID, turnID).Scan(&requestID)
 	})
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && requestID == "") {
 		err = protocol.Errorf(protocol.CodeInvalidRequest, "source must be an admitted owner message")
@@ -516,6 +522,19 @@ func (a *App) settleMainSteerSources(ctx context.Context, tx *store.Tx, logical 
 		return err
 	}
 	for _, turn := range turns {
+		var final string
+		err := tx.Q().QueryRowContext(ctx, `SELECT final.status FROM main_turns predecessor LEFT JOIN agent_recovery_attempts e ON e.request_id=predecessor.request_id JOIN agent_recoveries r ON r.root_request_id=COALESCE(e.root_request_id,predecessor.request_id) JOIN main_turns final ON final.request_id=r.active_request_id WHERE predecessor.thread_id=? AND predecessor.turn_id=? AND r.status='completed'`, turn.thread, turn.turn).Scan(&final)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			turn.status = final
+		}
+		if turn.status == store.TurnCompleted && final == store.TurnCompleted {
+			if _, err := tx.Exec(ctx, `UPDATE main_steers SET status='consumed',reason='Awaiting recovered business settlement.',updated_at=? WHERE thread_id=? AND turn_id=? AND native_item_id<>'' AND status='failed'`, now, turn.thread, turn.turn); err != nil {
+				return err
+			}
+		}
 		if turn.status == store.TurnCompleted || turn.status == store.TurnInterrupted || turn.status == store.TurnFailed {
 			if err := a.settleMainSteers(ctx, tx, turn.thread, turn.turn, turn.status, now); err != nil {
 				return err

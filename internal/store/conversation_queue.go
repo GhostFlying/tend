@@ -177,9 +177,12 @@ func ConversationActive(ctx context.Context, q Querier, session ...string) (*Con
 		id = ConversationID(session[0])
 	}
 	var r ConversationQueueRow
-	err := q.QueryRowContext(ctx, `SELECT json_extract(o.payload_json,'$.message_id'),o.seq,o.status,COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),COALESCE(t.status,'') FROM outbox o LEFT JOIN conversation_message_controls c ON c.message_id=json_extract(o.payload_json,'$.message_id') LEFT JOIN main_turns t ON t.request_id=o.request_id WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn') AND o.status='sending' AND COALESCE(t.status,'') NOT IN ('completed','interrupted','failed','unknown') AND EXISTS(SELECT 1 FROM conversation_messages cm WHERE cm.message_id=json_extract(o.payload_json,'$.message_id') AND cm.conversation_id=?) ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
+	err := q.QueryRowContext(ctx, `SELECT json_extract(o.payload_json,'$.message_id'),o.seq,o.status,COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),COALESCE(t.status,'') FROM outbox o LEFT JOIN conversation_message_controls c ON c.message_id=json_extract(o.payload_json,'$.message_id') LEFT JOIN main_turns t ON t.request_id=o.request_id WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn','conversation.recover_agent') AND o.status='sending' AND COALESCE(t.status,'') NOT IN ('completed','interrupted','failed','unknown') AND EXISTS(SELECT 1 FROM conversation_messages cm WHERE cm.message_id=json_extract(o.payload_json,'$.message_id') AND cm.conversation_id=?) ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
 	if err == sql.ErrNoRows {
-		return nil, nil
+		err = q.QueryRowContext(ctx, `SELECT r.message_id,o.seq,'sending',COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),'started' FROM agent_recoveries r JOIN outbox o ON o.request_id=r.active_request_id LEFT JOIN conversation_message_controls c ON c.message_id=r.message_id WHERE r.conversation_id=? AND r.status IN ('waiting','starting','running') AND o.status IN ('pending','sending') ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: active conversation: %w", err)

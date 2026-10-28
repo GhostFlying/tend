@@ -25,6 +25,7 @@ import { ToolRow } from "./ToolRow.tsx";
 import { MessageImages, OutgoingImages } from "./Images.tsx";
 import { MessageAttachments, OutgoingAttachments } from "./Attachments.tsx";
 import { outgoingImages } from "./images.ts";
+import { recoveryNotice } from "./recovery.ts";
 import { steerNotice } from "./steer.ts";
 
 export function Divider({ at }: { at: number }) {
@@ -43,6 +44,11 @@ export function OwnerMessage({ item }: { item: ConversationItem }) {
       )}
       {item.body && <div className={styles.bubble}>{item.body}</div>}
       <MessageTags item={item} />
+      {item.recovery && (
+        <div className={styles.state} role="status">
+          {recoveryNotice(item.recovery)}
+        </div>
+      )}
       <div className={styles.state} data-state={state}>
         {item.control?.withdrawn_at ? "已撤回" : messageStateLabels[state]} ·{" "}
         {clock(Date.parse(item.created_at))}
@@ -184,6 +190,7 @@ export function SystemMessage({ item, scrollID }: { item: ConversationItem; scro
       <details data-scroll-id={scrollID ?? item.message_id}>
         <summary>后台核对来源 · {clock(Date.parse(item.created_at))}</summary>
         <Markdown text={systemMessageBody(item)} />
+        {item.recovery && <div role="status">{recoveryNotice(item.recovery)}</div>}
       </details>
     );
   return (
@@ -196,6 +203,11 @@ export function SystemMessage({ item, scrollID }: { item: ConversationItem; scro
         {title} <time dateTime={item.created_at}>{clock(Date.parse(item.created_at))}</time>
       </div>
       <Markdown text={systemMessageBody(item)} />
+      {item.recovery && (
+        <div className={styles.state} role="status">
+          {recoveryNotice(item.recovery)}
+        </div>
+      )}
       {item.return_link && <MessageTags item={item} />}
       {item.state && (
         <div className={styles.state} data-state={item.state} role="status">
