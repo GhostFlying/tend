@@ -33,6 +33,7 @@ type env struct {
 	store   *store.Store
 	app     *app.App
 	ids     protocol.IDGen
+	now     func() time.Time
 	h       *testkit.Harness
 	m       *Manager
 	signal  *dispatch.Signal
@@ -51,7 +52,7 @@ func newEnv(t *testing.T, h *testkit.Harness, opts ...func(*Config)) *env {
 	ids := protocol.NewULIDGen(time.Now, nil)
 	sig := dispatch.NewSignal()
 	a := app.New(s, ids, time.Now, app.WithNotifier(sig))
-	e := &env{t: t, store: s, app: a, ids: ids, h: h, signal: sig}
+	e := &env{t: t, store: s, app: a, ids: ids, now: time.Now, h: h, signal: sig}
 	e.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 	}, app.SyncConfig{})
@@ -86,7 +87,8 @@ func newEnv(t *testing.T, h *testkit.Harness, opts ...func(*Config)) *env {
 func (e *env) start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
-	d := dispatch.New(e.app, map[string]dispatch.Handler{app.MainThreadDestination: e.m, app.MainThreadControlDestination: e.m.Control()}, e.signal, time.Now, dispatch.Config{PollInterval: 50 * time.Millisecond}, quiet())
+	// Retry deadlines and dispatcher waits must use the same business clock.
+	d := dispatch.New(e.app, map[string]dispatch.Handler{app.MainThreadDestination: e.m, app.MainThreadControlDestination: e.m.Control()}, e.signal, e.now, dispatch.Config{PollInterval: 50 * time.Millisecond}, quiet())
 	e.stopped.Go(func() { _ = e.m.Run(ctx) })
 	e.stopped.Go(func() { _ = d.Run(ctx) })
 }

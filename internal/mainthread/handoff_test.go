@@ -191,7 +191,7 @@ func newHandoffFixture(t *testing.T) *handoffFixture {
 	}
 	cb := contextbuilder.New(a, db, ids, contextbuilder.Config{})
 	m := New(a, cb, tools.New(a, db, cb, quiet()), Config{Instance: "main", Thread: harness.ThreadConfig{Cwd: "/agent"}, Log: quiet(), MaintenanceEnabled: true, SummaryIdleMinutes: 50, Now: clock.Now, SummaryTimeout: time.Second})
-	e := &env{t: t, store: db, app: a, ids: ids, h: h, m: m}
+	e := &env{t: t, store: db, app: a, ids: ids, now: clock.Now, h: h, m: m}
 	source, err := session.StartThread(ctx, m.threadConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -214,6 +214,27 @@ func (f *handoffFixture) saveSummary(t *testing.T) store.HandoffSummary {
 		t.Fatal(err)
 	}
 	return summary
+}
+
+// logSettlementState preserves the separate durable reasons a handoff can wait.
+// It reads only identity and state, not conversation bodies or tool payloads.
+func (f *handoffFixture) logSettlementState(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	t.Logf("fixture business time: %s", f.clock.Now().Format(time.RFC3339Nano))
+	for _, query := range []struct{ name, sql string }{
+		{"outbox", `SELECT COALESCE(json_group_array(json_object('request_id',request_id,'operation',operation,'status',status,'attempts',attempts,'next_attempt_at',next_attempt_at)), '[]') FROM outbox WHERE destination='main_thread' AND status<>'delivered'`},
+		{"logical turns", `SELECT COALESCE(json_group_array(json_object('logical_turn_id',logical_turn_id,'status',status,'repair_attempts',repair_attempts,'reason',reason,'revision',revision)), '[]') FROM logical_turns`},
+		{"logical executions", `SELECT COALESCE(json_group_array(json_object('request_id',request_id,'logical_turn_id',logical_turn_id,'settled',settled,'repair',repair)), '[]') FROM logical_turn_executions`},
+		{"native turns", `SELECT COALESCE(json_group_array(json_object('request_id',t.request_id,'thread_id',t.thread_id,'turn_id',t.turn_id,'status',t.status,'receipt_pending',EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id))), '[]') FROM main_turns t`},
+	} {
+		var state string
+		err := f.e.store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, query.sql).Scan(&state)
+		})
+		t.Logf("%s: %s; read error: %v", query.name, state, err)
+	}
 }
 
 func TestHandoffUsesCurrentSummaryAndFreshToolset(t *testing.T) {
@@ -631,6 +652,16 @@ func TestHandoffRetryRefreshesSourceBeyondRecentMessageFocus(t *testing.T) {
 			return f.e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == want
 		})
 	}
+	var lastSnapshot store.HandoffSnapshot
+	var snapshotErr, logicalErr error
+	var unfinished int
+	settled := false
+	defer func() {
+		if !settled {
+			t.Logf("last handoff snapshot: %+v; snapshot error: %v; unfinished logical turns: %d; logical read error: %v", lastSnapshot, snapshotErr, unfinished, logicalErr)
+			f.logSettlementState(t)
+		}
+	}()
 	eventually(t, "owner delivery outbox settles", func() bool {
 		// A delivery can be retried while the preceding native turn settles.
 		// Drive the frozen fixture clock to its durable retry deadline.
@@ -643,9 +674,13 @@ func TestHandoffRetryRefreshesSourceBeyondRecentMessageFocus(t *testing.T) {
 		if delay := time.UnixMilli(next).Sub(f.clock.Now()); delay > 0 {
 			f.clock.Advance(delay)
 		}
-		snap, err := f.e.app.HandoffSnapshot(ctx, "main")
-		return err == nil && !snap.Pending && !snap.Active && f.e.count(`SELECT COUNT(*) FROM logical_turns WHERE status<>'completed'`) == 0
+		lastSnapshot, snapshotErr = f.e.app.HandoffSnapshot(ctx, "main")
+		logicalErr = f.e.store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM logical_turns WHERE status<>'completed'`).Scan(&unfinished)
+		})
+		return snapshotErr == nil && !lastSnapshot.Pending && !lastSnapshot.Active && logicalErr == nil && unfinished == 0
 	})
+	settled = true
 	if len(businessStarts(f.e.h)) != 12 {
 		t.Fatal("fixture did not process all source native turns")
 	}
