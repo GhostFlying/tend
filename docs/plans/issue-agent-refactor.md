@@ -1,6 +1,6 @@
 # Issue 与 Agent 重构实施计划
 
-状态：P0 文档、独立评审和本地 make check 已通过，PR #155 最新 CI 因 idle 摘要 fixture 失败仍未通过，合并未完成；P1a 内部改名代码、本地检查及独立评审已完成，CI/合并/部署未完成；P1b1 存储/纯规则代码、本地完整检查及独立评审已完成，未启用入口，PR CI/合并未完成；P2a 纯配置基础、本地检查及独立 review 已通过，PR CI/合并未完成；P1b2a 内部定义与 legacy 边界代码、本地完整检查和独立复审已完成，公开及生命周期入口未启用，CI/合并/部署未完成；P1b2b、P1b3–P1c 与其余 P2–P9 尚未实施。本文是实施合同，不是发布声明。设计见 [Issue、Agent 与个人规划架构](../issue-agent-design.md)，Refs: D121–D126。
+状态：P0 文档、独立评审和本地 make check 已通过，PR #155 最新 CI 因 idle 摘要 fixture 失败仍未通过，独立修复 PR #157 的 CI 等待中，合并未完成；P1a 内部改名代码、本地检查及独立评审已完成，CI/合并/部署未完成；P1b1 存储/纯规则代码、本地完整检查及独立评审已完成，未启用入口，PR CI/合并未完成；P2a 纯配置基础、本地检查及独立 review 已通过，PR CI/合并未完成；P1b2a 内部定义与 legacy 边界代码、本地完整检查和独立复审已完成，公开及生命周期入口未启用，CI/合并/部署未完成；P2b 本地存储与 journal CAS 恢复已纳入，本地完整检查和独立 review 已通过，配置缺陷已修复并复核，CI/合并未完成；P1b2b、P1b3–P1c 与其余 P2–P9 尚未正式纳入。本文是实施合同，不是发布声明。设计见 [Issue、Agent 与个人规划架构](../issue-agent-design.md)，Refs: D121–D126。
 
 ## 进度账本与角色
 
@@ -10,7 +10,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P0 | 无 | 文档完成 | 无运行代码；本地 make check 通过 | 已通过，澄清增量确认 | PR #155 最新 CI idle 摘要 fixture 失败，未通过/未合并 | 本批不部署 | 无 |
 | P1 | P0 评审通过 | P1a 子计划已写，P1b 控制分片合同已评审可实施；P1c 待核定 | P1a、P1b1 代码及本地检查通过；P1b2a 内部定义/边界代码、本地完整检查和独立复审已完成，公开及生命周期入口未启用；其余未开始 | P1a/P1b1/P1b2a 独立 review 通过，本次状态记录已独立核对 | CI/合并未完成 | 本批不部署 | 未执行 |
-| P2 | P1 身份基础 | P2a 子计划已写，其余接口待核定 | P2a 纯配置基础及本地检查完成，未接生产入口；其余未开始 | P2a 独立人工及规定 CLI review 通过，无 findings | 未合并 | 本批不部署 | 未执行 |
+| P2 | P1 身份基础 | P2a/P2b 子计划已写，其余接口待核定 | P2a 纯配置基础及本地检查完成；P2b 本地存储及 journal CAS 恢复已纳入，r2 完整检查和独立复核通过，未接生产入口 | P2a 独立人工及规定 CLI review 通过；P2b 正式 r1 review 一项缺陷已修复，r2 独立复核通过 | 未合并 | 本批不部署 | 未执行 |
 | P3 | P1、P2 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P4 | P1–P3 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P5 | P4 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
@@ -27,10 +27,11 @@
 | P1a | `5b20a8ad4536cb70341607066452a07e487a702e` | 原评审 `d52d093741da41e78dc60effb0493a67058eded5`；rebase 本地 `71ae095858626acae6a9ad5e5450724c0e4ea936`；冻结实现快照 SHA-256 `b94229bf4efe0dc91932358af1091004951c7b101be73442fb3dc288863b218f` | 本地 make check 通过；PR/CI 未完成 | GPT-6.1-Sol xhigh 无 findings；后续仅状态记录增量 | 未部署 | 未执行 |
 | P1b1 | `242ff5200c7bda28c70de3c313ffef7a55d64717`（含独立基线测试修复） | 原评审 `9b7b85530b65dc2516425c8e7a131d762ead08a1`；rebase 本地 `07effd5231375a31460eb384682e65969b062fd7`；r2 实施快照 SHA-256 `8f99a5d2fbb478ce8a28fec78312a9cdff8a4549d4255e5fa99b867d4d2c06c6`；入口未启用 | 首轮完整检查因 schema fixture 上限失败；修复后定向升级/维护 race、第二轮 make check 均通过；PR CI 未完成 | GPT-6.1-Sol xhigh 首轮及 r2 增量均通过，无 findings；随后仅本次台账增量 | 未部署 | 未执行 |
 | P2a | `9b7b85530b65dc2516425c8e7a131d762ead08a1` | 原评审 `e2929e1f4c2cf170e24dbc580cf0f31b39289ab0`；rebase 本地 `3fcc88b37ae2c71971dfd7c38facb8652037ed64`；纯配置包无生产调用点 | 定向 race/vet 与本地 make check 通过；PR CI 未完成 | GPT-6.1-Sol xhigh 人工及规定 CLI review 通过，无 findings；随后仅本次状态增量 | 未部署 | 未执行 |
-| P1b2a | 原评审 `ffd0cf92510fce66496b81bef8c676ad08639263`；rebase 验证 `3fcc88b37ae2c71971dfd7c38facb8652037ed64`（tree 一致） | 未提交；r3 实施 patch SHA-256 `cb0a8786e5670d91e83e6e0b9391e0bd0b3e458a641daf9792f36420ae59078c`；随后仅状态文档增量 | 定向 race/integration 编译及 r3 完整 make check 通过（app 2016.963 秒、mainthread 388.341 秒、Web 全部）；过程证据见子计划；PR CI 未完成 | r1/r2 findings 均采纳；r3 独立复审、本次状态记录窄范围核对通过 | 未部署 | 未执行 |
+| P1b2a | 原评审 `ffd0cf92510fce66496b81bef8c676ad08639263`；rebase 验证 `3fcc88b37ae2c71971dfd7c38facb8652037ed64`（tree 一致） | 已提交 `2edfda826ea247ea46d7a4cca121d5afb3f6d36d`；r3 实施 patch SHA-256 `cb0a8786e5670d91e83e6e0b9391e0bd0b3e458a641daf9792f36420ae59078c`；随后仅状态文档增量 | 定向 race/integration 编译及 r3 完整 make check 通过（app 2016.963 秒、mainthread 388.341 秒、Web 全部）；过程证据见子计划；PR CI 未完成 | r1/r2 findings 均采纳；r3 独立复审、本次状态记录窄范围核对通过 | 未部署 | 未执行 |
+| P2b | `fdd81c682875bfeeefceb2dfc1a9405c6acdae99` | 未提交；本地配置存储与 journal 11 CAS 恢复，公开/生产调用未启用 | 定向 registry/journal race/vet 及发布兼容回归通过；r1/r2 完整检查及修正定向 race/vet 通过；PR/CI 未完成 | 正式 r1 review 一项 typed 空列表缺陷已修正，r2 独立复核通过 | 未部署 | 未执行 |
 | P1b2b–P9（其余逐批追加） | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 | 待记录 |
 
-本次 rebase 保留历史评审 SHA/实施快照，以上本地新 head 不等于 PR 已更新或 CI/合并已完成。P0 最新 CI 阻塞为 idle 摘要 fixture，先前 handoff 修复不代表全 CI 通过。P1b2a r3 完整检查时段 UTC 18:28:06 至 19:02:18，退出 0；日志 SHA-256 `3bfe1500d1f55cbe7c4ea45d7ab14a77792c18268ca8eb6cb3ae5d4d54905801`。本次状态收口不带入尚在忽略目录验证的后续候选。
+本次 rebase 保留历史评审 SHA/实施快照，以上本地新 head 不等于 PR 已更新或 CI/合并已完成。P0 最新 CI 阻塞为 idle 摘要 fixture；独立修复 `315f0c5f` 已提交至 [PR #157](https://github.com/GhostFlying/tend/pull/157)，CI 等待中，不能视为已通过。先前 handoff 修复不代表全 CI 通过。P1b2a r3 完整检查时段 UTC 18:28:06 至 19:02:18，退出 0；日志 SHA-256 `3bfe1500d1f55cbe7c4ea45d7ab14a77792c18268ca8eb6cb3ae5d4d54905801`。P1b2a 已提交；本片只纳入 P2b 本地持久化与 journal 前置修复，不带入后续生命周期候选。
 
 Base 在开始批次与评审前分别固定，若 rebase 改变 head 则更新并判断是否重审。公开账本只记录公开 PR、commit 和无私密信息的证据引用；机器运行路径、凭据及原始发布证据保存在忽略的本地记录中。
 
@@ -62,6 +63,8 @@ P1c 增加 owner API/CLI、views 与生成 schema/type 胶水，提供准确 rev
 ## P2：本机 Agent 库存与冻结配置
 
 P2a 的纯配置校验、身份与公共投影见[独立子计划](agent-definition-config.md)，纯配置基础及本地检查已完成，尚无生产加载、登记或执行入口。定义全部 staged/unavailable；后续仍需真实角色指令注入、原 runtime/snapshot 可验证恢复、同 host 全局 workspace/backend 协调及通信协商，不以纯包测试替代启用门槛。
+
+P2b 的本地配置持久化和通用 journal CAS 恢复见[本地存储子计划](agent-registry.md)。本片追加 journal 11，旧请求 NULL 不回填；本地快照、成功 receipt、CAS 和 unknown 恢复不等于 server 库存或 runtime 已启用。定向 race/vet 和发布兼容回归及 r1 完整检查通过，正式 review 的 typed 空列表缺陷已修正并通过小包回归、r2 独立复核与完整检查；CI/合并未完成。
 
 依赖 P1 身份基础。新增全局 category、runner/runtime 本机 Agent definition 的非密钥投影；hosted main、issue、consultation 同样登记。提供来源类型、版本、规范化 hash、能力、加载/健康时点、退役状态及 owner 可读原因。
 

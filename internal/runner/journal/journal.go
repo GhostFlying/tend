@@ -25,7 +25,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 10
+const CurrentVersion int64 = 11
 
 // Run phases.
 const (
@@ -160,8 +160,8 @@ func putRequest(ctx context.Context, tx *sql.Tx, r Request, now time.Time) error
 	if payload == "" {
 		payload = "null"
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO requests (request_id, operation, run_id, target_json, payload_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, r.Envelope.RequestID, r.Envelope.Operation, nullString(r.RunID), string(target), payload, now.UnixMilli())
+	_, err = tx.ExecContext(ctx, `INSERT INTO requests (request_id, operation, run_id, target_json, payload_json, created_at, expected_control_revision)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, r.Envelope.RequestID, r.Envelope.Operation, nullString(r.RunID), string(target), payload, now.UnixMilli(), r.Envelope.ExpectedControlRevision)
 	if err != nil {
 		return fmt.Errorf("journal: put request: %w", err)
 	}
@@ -179,7 +179,7 @@ func (j *Journal) DeleteRequest(ctx context.Context, requestID string) error {
 
 // Requests returns the journaled requests, oldest first.
 func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
-	rows, err := j.db.QueryContext(ctx, `SELECT request_id, operation, run_id, target_json, payload_json, created_at
+	rows, err := j.db.QueryContext(ctx, `SELECT request_id, operation, run_id, target_json, payload_json, created_at, expected_control_revision
 		FROM requests ORDER BY created_at, request_id`)
 	if err != nil {
 		return nil, fmt.Errorf("journal: list requests: %w", err)
@@ -190,9 +190,10 @@ func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
 		var (
 			r               Request
 			runID           sql.NullString
+			revision        sql.NullInt64
 			target, payload string
 		)
-		if err := rows.Scan(&r.Envelope.RequestID, &r.Envelope.Operation, &runID, &target, &payload, &r.CreatedAtMillis); err != nil {
+		if err := rows.Scan(&r.Envelope.RequestID, &r.Envelope.Operation, &runID, &target, &payload, &r.CreatedAtMillis, &revision); err != nil {
 			return nil, fmt.Errorf("journal: scan request: %w", err)
 		}
 		if err := json.Unmarshal([]byte(target), &r.Envelope.Target); err != nil {
@@ -200,6 +201,9 @@ func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
 		}
 		if payload != "null" {
 			r.Envelope.Payload = json.RawMessage(payload)
+		}
+		if revision.Valid {
+			r.Envelope.ExpectedControlRevision = &revision.Int64
 		}
 		r.RunID = runID.String
 		out = append(out, r)
