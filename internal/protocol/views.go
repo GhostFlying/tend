@@ -272,6 +272,7 @@ const (
 // owner, main agent or system, or a tool the main agent used. Items share
 // one order, by seq.
 type ConversationItem struct {
+	Recovery       *AgentRecoveryView       `json:"recovery,omitempty"`
 	ConversationID string                   `json:"conversation_id,omitempty"`
 	Associations   *MessageAssociations     `json:"associations,omitempty"`
 	ReturnLink     *ConversationReturnLink  `json:"return_link,omitempty"`

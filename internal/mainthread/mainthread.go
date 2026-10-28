@@ -82,6 +82,8 @@ type Manager struct {
 
 // turn is the delivery the front thread is working on.
 type turn struct {
+	failure                          *protocol.AgentFailure
+	recovery                         bool
 	requestID                        string
 	messageID                        string
 	turnID                           string
@@ -380,19 +382,35 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 		if err := m.recordToolUse(ctx, th, ev); err != nil {
 			m.cfg.Log.ErrorContext(ctx, "could not record the agent's tool use", "turn", ev.TurnID, "item", ev.ItemID, "err", err)
 		}
+	case ev.Kind == harness.EventTurnError:
+		m.mu.Lock()
+		if a := m.active; a != nil && (a.turnID == "" || a.turnID == ev.TurnID) {
+			a.failure = ev.Failure
+		}
+		m.mu.Unlock()
 	case ev.Kind == harness.EventTurnStarted:
 		// One turn at a time: the first turn to start after a turn/start
 		// is that delivery's, even before the start response arrives.
 		m.mu.Lock()
-		if a := m.active; a != nil && a.turnID == "" {
+		var startRequest string
+		if a := m.active; a != nil && (a.turnID == "" || a.turnID == ev.TurnID) {
 			a.turnID = ev.TurnID
+			startRequest = a.requestID
 		}
 		m.mu.Unlock()
+		if startRequest != "" {
+			if err := m.app.ObserveNativeStart(ctx, startRequest, th.ID(), ev.TurnID); err != nil {
+				m.cfg.Log.ErrorContext(ctx, "persist native start notification", "err", err)
+			}
+		}
 	case ev.Kind == harness.EventTurnCompleted:
 		m.refreshUsage(ctx, th)
 		m.mu.Lock()
 		a := m.active
 		if a != nil && a.turnID == ev.TurnID {
+			if ev.Failure != nil {
+				a.failure = ev.Failure
+			}
 			a.finished = true
 			select {
 			case a.done <- ev.TurnStatus:
@@ -526,6 +544,19 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 	// recovery; the active delivery covers callbacks during turn/start.
 	call.ExecutionRequestID = call.ParentRequestID
 	call.PlanningSourceMessageID = call.SourceMessageID
+	m.mu.Lock()
+	inheritedOwner := ""
+	if a := m.active; a != nil && a.recovery && (a.turnID == "" || a.turnID == c.TurnID) {
+		inheritedOwner = a.sourceMessageID
+	}
+	m.mu.Unlock()
+	if inheritedOwner != "" && inheritedOwner != call.SourceMessageID {
+		sourceRequest, err := m.app.OwnerMessageDelivery(ctx, inheritedOwner, c.ThreadID, c.TurnID, true)
+		if err != nil {
+			return harness.ToolResult{Text: "Could not restore the tool's retained owner input; no tool was executed."}
+		}
+		call.SourceMessageID, call.ParentRequestID = inheritedOwner, sourceRequest
+	}
 	if c.UserText != "" && !backgroundTool(c.Tool) {
 		// The adapter captured the user item in native wire order. Its event
 		// pump may still be waiting on serve; admit this exact receipt first.
@@ -573,6 +604,16 @@ func (m *Manager) waitThread(ctx context.Context) (harness.Thread, error) {
 // Deliver implements dispatch.Handler: it hands a message to the front
 // thread as one turn and returns when the turn ended.
 func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	if d.Operation == app.OpRecoverAgent {
+		return m.deliverRecovery(ctx, d)
+	}
+	if d.Operation == "conversation.compact" || d.Operation == "conversation.handoff" {
+		if blocked, err := m.app.AgentRecoveryUncertain(ctx, m.cfg.ConversationID); err != nil {
+			return retry(err)
+		} else if blocked {
+			return retry(errors.New("native continuation must be reconciled before maintenance"))
+		}
+	}
 	if d.Operation == "conversation.compact" {
 		return m.deliverCompact(ctx, d)
 	}
@@ -581,6 +622,11 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	}
 	m.workMu.Lock()
 	defer m.workMu.Unlock()
+	if blocked, err := m.app.AgentRecoveryUncertain(ctx, m.cfg.ConversationID); err != nil {
+		return retry(err)
+	} else if blocked {
+		return app.DeliveryResult{Outcome: app.Retry, RetryAfter: 5 * time.Second, Reason: "Native continuation receipt requires reconciliation before subsequent input."}
+	}
 	if blocked, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID); err != nil {
 		return retry(err)
 	} else if blocked {
@@ -822,6 +868,7 @@ wait:
 			}
 		}
 	}
+	rec.Failure = m.captureFailure(a)
 	if err := m.app.SettleMainSteers(context.WithoutCancel(ctx), th.ID(), turnID, rec.Status); err != nil {
 		m.cfg.Log.ErrorContext(ctx, "could not settle main steers", "err", err)
 	}
@@ -842,6 +889,13 @@ func (m *Manager) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryRes
 	}
 	pending, err := m.app.NativeReceiptPending(ctx, d.RequestID)
 	if err != nil || pending {
+		if pending {
+			if source, sourceErr := m.app.RecoverySourceRequest(ctx, d.RequestID); sourceErr == nil && source != "" {
+				if err := m.app.BlockAgentRecovery(ctx, d.RequestID, "Native continuation receipt requires reconciliation; automatic resend is disabled."); err != nil {
+					return app.DeliveryResult{Outcome: app.Unknown, Reason: "Could not persist the native recovery uncertainty."}
+				}
+			}
+		}
 		return app.DeliveryResult{Outcome: app.Unknown, Reason: "Native execution history requires reconciliation"}
 	}
 	rec, ok, err := m.app.MainTurn(ctx, d.RequestID)

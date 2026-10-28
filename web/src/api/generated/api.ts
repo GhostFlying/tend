@@ -1025,6 +1025,7 @@ export interface ConversationItem {
   kind: string;
   message_id: string;
   notice_type?: string;
+  recovery?: AgentRecoveryView;
   reply_sources?: string[];
   reply_to?: string;
   return_link?: ConversationReturnLink;
@@ -1094,6 +1095,17 @@ export interface ConversationImage {
   media_type: string;
   name: string;
   size: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentRecoveryView".
+ */
+export interface AgentRecoveryView {
+  attempts: number;
+  deadline: number;
+  next_attempt_at?: number;
+  reason?: string;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

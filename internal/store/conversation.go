@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -152,6 +153,7 @@ const (
 
 // MainTurn is a delivery of a message to the front thread.
 type MainTurn struct {
+	Failure                      *protocol.AgentFailure
 	NativeReconciled             bool // Set only after reading the exact native execution history.
 	RequestID                    string
 	MessageID                    string
@@ -166,8 +168,12 @@ type MainTurn struct {
 func GetMainTurn(ctx context.Context, q Querier, requestID string) (MainTurn, error) {
 	m := MainTurn{RequestID: requestID}
 	var turn sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT message_id, thread_id, turn_id, status, model, model_provider, effort, settings_revision FROM main_turns WHERE request_id = ?`, requestID).
-		Scan(&m.MessageID, &m.ThreadID, &turn, &m.Status, &m.Model, &m.ModelProvider, &m.Effort, &m.SettingsRevision)
+	var failure string
+	err := q.QueryRowContext(ctx, `SELECT message_id, thread_id, turn_id, status, model, model_provider, effort, settings_revision, failure_json FROM main_turns WHERE request_id = ?`, requestID).
+		Scan(&m.MessageID, &m.ThreadID, &turn, &m.Status, &m.Model, &m.ModelProvider, &m.Effort, &m.SettingsRevision, &failure)
+	if err == nil && failure != "" {
+		err = json.Unmarshal([]byte(failure), &m.Failure)
+	}
 	if err != nil {
 		return MainTurn{}, notFound(err, "main turn "+requestID)
 	}
@@ -192,6 +198,9 @@ func GetOpenTurn(ctx context.Context, q Querier, messageID string) (MainTurn, er
 	var requestID string
 	err := q.QueryRowContext(ctx, `SELECT request_id FROM main_turns WHERE message_id = ? AND status IN ('starting', 'started')
 		ORDER BY created_at DESC LIMIT 1`, messageID).Scan(&requestID)
+	if err == sql.ErrNoRows {
+		err = q.QueryRowContext(ctx, `WITH RECURSIVE successors(message_id) AS (SELECT ? UNION SELECT r.successor_message_id FROM agent_recoveries r JOIN successors s ON s.message_id=r.message_id WHERE r.status='cancelled' AND r.successor_message_id<>'') SELECT t.request_id FROM main_turns t JOIN successors s ON s.message_id=t.message_id WHERE t.status IN ('starting','started') ORDER BY t.created_at DESC LIMIT 1`, messageID).Scan(&requestID)
+	}
 	if err == sql.ErrNoRows {
 		ids, lookupErr := LogicalResponsibilities(ctx, q, messageID)
 		if lookupErr != nil {
@@ -222,13 +231,21 @@ func LogicalResponsibilities(ctx context.Context, q Querier, messageID string) (
 
 // PutMainTurn records or updates a delivery's turn.
 func (t *Tx) PutMainTurn(ctx context.Context, m MainTurn, now int64) error {
+	failure := ""
+	if m.Failure != nil {
+		data, err := json.Marshal(m.Failure)
+		if err != nil {
+			return err
+		}
+		failure = string(data)
+	}
 	_, err := t.Exec(ctx, `INSERT INTO main_turns (request_id, message_id, thread_id, turn_id, status, created_at, updated_at,
-		model, model_provider, effort, settings_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		model, model_provider, effort, settings_revision, failure_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (request_id) DO UPDATE SET thread_id = excluded.thread_id, turn_id = excluded.turn_id,
 		status = excluded.status, updated_at = excluded.updated_at, model = excluded.model,
-		model_provider = excluded.model_provider, effort = excluded.effort, settings_revision = excluded.settings_revision`,
+		model_provider = excluded.model_provider, effort = excluded.effort, settings_revision = excluded.settings_revision, failure_json=excluded.failure_json`,
 		m.RequestID, m.MessageID, m.ThreadID, nullString(m.TurnID), m.Status, now, now,
-		m.Model, m.ModelProvider, m.Effort, m.SettingsRevision)
+		m.Model, m.ModelProvider, m.Effort, m.SettingsRevision, failure)
 	if err != nil {
 		return fmt.Errorf("store: put main turn: %w", err)
 	}

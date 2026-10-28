@@ -63,13 +63,24 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 	}
 }
 func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
+	receiptRead, err := p.App.DeferAgentReceiptRead(ctx, id)
+	if err != nil {
+		return
+	}
 	run, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() { defer close(done); _ = m.Run(run) }()
 	defer func() { cancel(); <-done }()
 	// Startup settles abandoned turns before reconciliation can acknowledge
 	// their deliveries. Do not tear down an uninitialized recovery process.
-	if _, err := m.waitThread(run); err != nil {
+	waitCtx := run
+	stopWait := func() {}
+	if receiptRead {
+		waitCtx, stopWait = context.WithTimeout(run, 20*time.Second)
+	}
+	_, err = m.waitThread(waitCtx)
+	stopWait()
+	if err != nil {
 		return
 	}
 	dest := "background_thread:" + id
@@ -93,6 +104,23 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 			return
 		}
 		result := m.Deliver(run, d)
+		if d.Operation == app.OpRecoverAgent {
+			pending, err := p.App.NativeReceiptPending(run, d.RequestID)
+			if err != nil {
+				return
+			}
+			if pending {
+				// Let the replacement session read the known native execution
+				// before releasing this background process and delivery.
+				readCtx, stopRead := context.WithTimeout(run, 20*time.Second)
+				_, err := m.waitThread(readCtx)
+				stopRead()
+				if err != nil {
+					return
+				}
+				result = m.Reconcile(run, d)
+			}
+		}
 		if result.Outcome == app.Retry {
 			result.RetryAfter = max(result.RetryAfter, time.Second*5)
 		}

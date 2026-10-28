@@ -103,7 +103,7 @@ func GetHandoffSnapshot(ctx context.Context, q Querier, instance string) (Handof
 		return v, err
 	}
 	v.ThreadID, v.BindingGeneration = binding.ThreadID, binding.Generation
-	err = q.QueryRowContext(ctx, `SELECT version,MAX(last_activity,COALESCE((SELECT updated_at FROM main_threads WHERE instance=?),0)),COALESCE((SELECT MAX(seq) FROM conversation_messages WHERE conversation_id='main'),0),EXISTS(SELECT 1 FROM outbox WHERE destination='main_thread' AND operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn') AND status IN ('pending','sending')) FROM conversation_coverage WHERE singleton=1`, instance).Scan(&v.Version, &v.LastActivityMillis, &v.MaxSeq, &v.Pending)
+	err = q.QueryRowContext(ctx, `SELECT version,MAX(last_activity,COALESCE((SELECT updated_at FROM main_threads WHERE instance=?),0)),COALESCE((SELECT MAX(seq) FROM conversation_messages WHERE conversation_id='main'),0),EXISTS(SELECT 1 FROM outbox WHERE destination='main_thread' AND operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn','conversation.recover_agent') AND status IN ('pending','sending')) FROM conversation_coverage WHERE singleton=1`, instance).Scan(&v.Version, &v.LastActivityMillis, &v.MaxSeq, &v.Pending)
 	if err != nil {
 		return v, err
 	}
@@ -196,6 +196,6 @@ func SummaryObservationIDs(ctx context.Context, q Querier, since *int64, limit i
 // absent delivery evidence remains conservatively active.
 func HasActiveMainTurn(ctx context.Context, q Querier, threadID string) (bool, error) {
 	var active bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_turns t WHERE t.thread_id=? AND (EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id) OR t.status='started' OR (t.status='starting' AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.request_id=t.request_id AND o.destination='main_thread' AND o.operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn') AND o.status='unknown'))))`, threadID).Scan(&active)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_turns t WHERE t.thread_id=? AND (EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id) OR t.status='started' OR (t.status='starting' AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.request_id=t.request_id AND o.destination='main_thread' AND o.operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn','conversation.recover_agent') AND o.status='unknown'))))`, threadID).Scan(&active)
 	return active, err
 }

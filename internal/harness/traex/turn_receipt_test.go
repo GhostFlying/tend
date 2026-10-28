@@ -54,3 +54,23 @@ func TestNativeReceiptPreservesSupplementAndReplyOrder(t *testing.T) {
 		t.Fatal(r.Items)
 	}
 }
+
+func TestCodexReceiptMatchesClientIdentity(t *testing.T) {
+	f, s := newFake(t)
+	s.codex = true
+	f.on(methodThreadStart, func(json.RawMessage) any { return map[string]any{"thread": map[string]string{"id": "thread"}} })
+	f.on("thread/read", func(json.RawMessage) any {
+		return map[string]any{"thread": map[string]any{"turns": []any{
+			map[string]any{"id": "wanted", "status": "failed", "items": []any{map[string]string{"type": "userMessage", "id": "native-generated-id", "clientId": "owner-id"}}},
+			map[string]any{"id": "different", "status": "completed", "items": []any{map[string]string{"type": "userMessage", "id": "owner-id", "clientId": "another-owner"}}},
+		}}}
+	})
+	th, err := s.StartThread(t.Context(), harness.ThreadConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, found, err := th.(harness.TurnReader).FindTurn(t.Context(), "owner-id", "")
+	if err != nil || !found || r.ID != "wanted" {
+		t.Fatal(r, found, err)
+	}
+}

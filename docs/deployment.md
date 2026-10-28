@@ -27,6 +27,7 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
   - 启动时保留 `TEND_ADDON=off`，仅用于仍指向旧版二进制的遗留配置；它不能让新 CLI 的已退役命令成功。替换 CLI 和启动 Agent 前必须清理已确认的 Tend 外挂 hook/MCP。
   - 权限（D118）：主 Agent 文件只读、approval 为 never，显式允许网络，但 shell、编辑文件、浏览器、插件、应用、skill 和 memory 等原生路径仍关闭；业务写入通过 Tend 工具。后台 Agent 使用自己的工作目录、workspace-write + on-request + auto_review，显式允许网络；Tend 工具只允许所属工作项读取与正式评估，不赋予业务调度权。网络独立通过原生 turn sandboxPolicy 设置，恢复会话也重新应用。
   - 模型默认用 traex 的默认模型，`main_agent.model` 可以指定。
+  - `main_agent.recovery` 控制托管主/后台会话的限流恢复（D120）：`base_delay_seconds` 默认 5，`max_delay_seconds` 默认 120，`max_elapsed_seconds` 默认 900，`max_attempts` 默认 8、设为 0 禁用。只处理原生最终明确限流；保留会话与工具结果，以新执行空输入续接。原生仍在重试或启动结果未知时不叠加重试。等待、次数及下一次时间持久化，owner 可停止；耗尽或未知会产生一次需处理提醒。
   - `main_agent.summary_idle_minutes` 设置预备摘要的空闲分钟，省略默认 50，0 关闭自动准备，范围 0..10080。Web 的独立 owner 设置持久化覆盖该默认值，不依赖模型目录。交接维护仍启用；工具 schema 升级会使用 fresh native thread，Web 对话历史与原 native 历史保留（D81）。
   - `tend conversation handoff --prepare-only` 只准备摘要，`tend conversation handoff` 排队执行交接，`tend conversation handoff --status [--json]` 读取共享设置与摘要状态。网络重试沿用原请求 ID；结果未知时先核对原请求，不重复发起交接。
 

@@ -124,6 +124,9 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := supersedeAgentRecoveries(ctx, tx, p.ConversationID, id, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
 	for position, image := range images {
 		image.ImageID = x.IDs.New(protocol.PrefixFile)
 		if err := tx.InsertConversationImage(ctx, id, position, image); err != nil {
@@ -241,7 +244,15 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err != nil {
 		return Outcome{}, err
 	}
-	var changed int64
+	if turnErr == nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_recovery_stops(message_id,stopped_at) VALUES(?,?) ON CONFLICT DO NOTHING`, turn.MessageID, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
+	}
+	changed, err := cancelAgentRecoveries(ctx, tx, x.IDs, p.MessageID, state == protocol.MessageProcessing || state == protocol.MessageUnknown, turnErr == nil, x.Now.UnixMilli())
+	if err != nil {
+		return Outcome{}, err
+	}
 	for _, id := range responsibilities {
 		stopped, err := tx.Exec(ctx, `UPDATE logical_turns SET status='stopped',reason='Stopped by owner; resume explicitly.',updated_at=? WHERE logical_turn_id=? AND status NOT IN ('completed','stopped')`, x.Now.UnixMilli(), id)
 		if err != nil {
@@ -262,6 +273,11 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 
 	if errors.Is(turnErr, store.ErrNotFound) {
+		if changed > 0 {
+			if err := recordMessageState(ctx, tx, x.IDs, p.MessageID, protocol.MessageInterrupted, x.Now.UnixMilli()); err != nil {
+				return Outcome{}, err
+			}
+		}
 		return Outcome{Result: result, Events: events, Notify: changed > 0}, nil
 	}
 	return Outcome{
@@ -374,6 +390,16 @@ func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx, recon
 				return Outcome{}, err
 			}
 			if !allowed {
+				// Empty-input continuations retain the exact predecessor chain,
+				// including witnessed owner supplements from those native turns.
+				if err := tx.Q().QueryRowContext(ctx, `WITH RECURSIVE chain(request_id) AS (
+ SELECT request_id FROM main_turns WHERE thread_id=? AND turn_id=?
+ UNION SELECT r.source_request_id FROM agent_recovery_attempts r JOIN chain c ON c.request_id=r.request_id)
+ SELECT EXISTS(SELECT 1 FROM chain c JOIN main_turns t ON t.request_id=c.request_id WHERE t.message_id=? OR EXISTS(SELECT 1 FROM main_steers s WHERE s.thread_id=t.thread_id AND s.turn_id=t.turn_id AND s.message_id=? AND s.native_item_id<>''))`, x.Principal.Thread, p.TurnID, source, source).Scan(&allowed); err != nil {
+					return Outcome{}, err
+				}
+			}
+			if !allowed {
 				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "reply source was not consumed by this turn")
 			}
 			if _, err := tx.Exec(ctx, `INSERT INTO conversation_reply_sources(reply_id,source_id) VALUES(?,?) ON CONFLICT DO NOTHING`, id, source); err != nil {
@@ -468,12 +494,16 @@ var turnStates = map[string]protocol.MessageState{
 
 // insertMessageState records that an owner or event message reached a new state.
 func (a *App) insertMessageState(ctx context.Context, tx *store.Tx, messageID string, state protocol.MessageState, now int64) error {
+	return recordMessageState(ctx, tx, a.ids, messageID, state, now)
+}
+
+func recordMessageState(ctx context.Context, tx *store.Tx, ids protocol.IDGen, messageID string, state protocol.MessageState, now int64) error {
 	body, err := json.Marshal(map[string]any{"state": state})
 	if err != nil {
 		return fmt.Errorf("app: encode message state: %w", err)
 	}
 	_, err = tx.InsertEvent(ctx, store.EventRow{
-		EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: messageID,
+		EventID: ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: messageID,
 		Kind: "conversation.message_state", BodyJSON: string(body), CreatedAt: now,
 	})
 	return err
@@ -506,7 +536,7 @@ func mainTurnBusinessStatus(ctx context.Context, q store.Querier, m store.MainTu
 	}
 	status := m.Status
 	if repair {
-		if err := q.QueryRowContext(ctx, `SELECT t.status FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?) AND e.repair=0 ORDER BY e.rowid LIMIT 1`, m.RequestID).Scan(&status); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT t.status FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?) AND e.repair=0 ORDER BY e.rowid DESC LIMIT 1`, m.RequestID).Scan(&status); err != nil {
 			return "", false, err
 		}
 	}
@@ -547,6 +577,26 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 				return protocol.Errorf(protocol.CodeInvalidTransition, "main thread is draining for server upgrade")
 			}
 		}
+		if m.Status == store.TurnStarting {
+			var isRecovery bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_recovery_attempts WHERE request_id=?)`, m.RequestID).Scan(&isRecovery); err != nil {
+				return err
+			}
+			if isRecovery {
+				r, err := store.RecoveryForRequest(ctx, tx.Q(), m.RequestID)
+				if err != nil {
+					return err
+				}
+				if r.ActiveRequestID != m.RequestID || r.Status != "starting" {
+					return ErrRepairCancelled
+				}
+			}
+		}
+		if m.Status == store.TurnStarted {
+			if _, err := tx.Exec(ctx, `UPDATE agent_recoveries SET status='running',updated_at=? WHERE active_request_id=? AND status='starting'`, now, m.RequestID); err != nil {
+				return err
+			}
+		}
 		if err := a.registerLogicalTurn(ctx, tx, m, now); err != nil {
 			return err
 		}
@@ -583,6 +633,30 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 				return err
 			}
 		}
+		// Older execution receipts remain facts, but cannot regress the current
+		// recovery's owner-facing state or settle its successor responsibility.
+		recovery, recoveryErr := store.RecoveryForRequest(ctx, tx.Q(), m.RequestID)
+		if recoveryErr != nil && !errors.Is(recoveryErr, store.ErrNotFound) {
+			return recoveryErr
+		}
+		if recoveryErr == nil && recovery.ActiveRequestID != m.RequestID {
+			return nil
+		}
+		recovering, err := a.scheduleAgentRecovery(ctx, tx, m, now)
+		if err != nil {
+			return err
+		}
+		if recovering {
+			state := protocol.MessageProcessing
+			recovery, err := store.RecoveryForRequest(ctx, tx.Q(), m.RequestID)
+			if err != nil {
+				return err
+			}
+			if recovery.Status == "unknown" {
+				state = protocol.MessageUnknown
+			}
+			return a.insertMessageState(ctx, tx, m.MessageID, state, now)
+		}
 		if prev.Status != m.Status || m.NativeReconciled {
 			incomplete, err := a.settleLogicalTurn(ctx, tx, m, now)
 			if err != nil {
@@ -599,6 +673,9 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 				}
 				if stopped {
 					state = protocol.MessageInterrupted
+					if err := a.settleRecoverySuccessors(ctx, tx, m.MessageID, store.TurnInterrupted, now); err != nil {
+						return err
+					}
 					if err := a.settleReviewedMainSteers(ctx, tx, m.RequestID, businessStatus, now); err != nil {
 						return err
 					}
@@ -614,6 +691,9 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 		}
 		if settleBusiness {
 			if err := a.settleReviewedMainSteers(ctx, tx, m.RequestID, businessStatus, now); err != nil {
+				return err
+			}
+			if err := a.settleRecoverySuccessors(ctx, tx, m.MessageID, businessStatus, now); err != nil {
 				return err
 			}
 			if err := a.settleBackground(ctx, tx, m.MessageID, businessStatus, now); err != nil {
@@ -671,6 +751,16 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 			businessStatus, repair, err := mainTurnBusinessStatus(ctx, tx.Q(), turn)
 			if err != nil {
 				return err
+			}
+			recovery, recoveryErr := store.RecoveryForRequest(ctx, tx.Q(), turn.RequestID)
+			if recoveryErr != nil && !errors.Is(recoveryErr, store.ErrNotFound) {
+				return recoveryErr
+			}
+			if recoveryErr == nil && recovery.ActiveRequestID == turn.RequestID && recovery.Status == "unknown" {
+				if err := a.insertMessageState(ctx, tx, turn.MessageID, protocol.MessageUnknown, now); err != nil {
+					return err
+				}
+				continue
 			}
 			if !repair {
 				if err := a.settleBackground(ctx, tx, turn.MessageID, store.TurnInterrupted, now); err != nil {

@@ -186,8 +186,9 @@ type TurnStartResponse struct {
 
 // Turn is the harness's turn record.
 type Turn struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
+	Error  json.RawMessage `json:"error,omitempty"`
+	ID     string          `json:"id"`
+	Status string          `json:"status"`
 }
 
 // TurnInterruptParams stops a turn.

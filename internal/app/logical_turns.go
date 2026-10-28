@@ -148,7 +148,10 @@ func (a *App) registerLogicalTurn(ctx context.Context, tx *store.Tx, m store.Mai
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT OR IGNORE INTO logical_turn_messages(logical_turn_id,message_id) SELECT ?,r.source_message_id FROM conversation_return_links r JOIN conversation_messages m ON m.message_id=r.source_message_id WHERE r.message_id=?`, m.RequestID, m.MessageID)
-	return err
+	if err != nil {
+		return err
+	}
+	return adoptRecoveryResponsibilities(ctx, tx, m, now)
 }
 
 func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainTurn, now int64) (bool, error) {
@@ -475,7 +478,10 @@ func attachReviewSource(ctx context.Context, x *Exec, tx *store.Tx, message stri
 }
 
 func markNativeReceiptsPending(ctx context.Context, tx *store.Tx, thread string, now int64) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO native_turn_receipts_pending(request_id) SELECT t.request_id FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE t.thread_id=? AND t.status IN ('started','starting') ON CONFLICT(request_id) DO NOTHING`, thread); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO native_turn_receipts_pending(request_id) SELECT t.request_id FROM main_turns t WHERE t.thread_id=? AND t.status IN ('started','starting') AND (EXISTS(SELECT 1 FROM logical_turn_executions e WHERE e.request_id=t.request_id) OR EXISTS(SELECT 1 FROM agent_recovery_attempts r WHERE r.request_id=t.request_id) OR EXISTS(SELECT 1 FROM agent_recoveries r WHERE r.successor_message_id=t.message_id)) ON CONFLICT(request_id) DO NOTHING`, thread); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent_recoveries SET status='unknown',next_attempt_at=0,reason='Native continuation receipt requires reconciliation.',updated_at=? WHERE status IN ('starting','running') AND active_request_id IN (SELECT t.request_id FROM main_turns t JOIN native_turn_receipts_pending p ON p.request_id=t.request_id WHERE t.thread_id=?)`, now, thread); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE logical_turns SET status='unknown',reason='Native execution history must be reconciled before metadata repair.',updated_at=? WHERE status NOT IN ('stopped','awaiting_clarification') AND logical_turn_id IN (SELECT e.logical_turn_id FROM logical_turn_executions e JOIN native_turn_receipts_pending p ON p.request_id=e.request_id JOIN main_turns t ON t.request_id=e.request_id WHERE t.thread_id=?)`, now, thread)

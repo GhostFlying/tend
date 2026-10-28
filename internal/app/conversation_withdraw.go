@@ -43,6 +43,9 @@ func (WithdrawMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		}
 		return Outcome{}, err
 	}
+	if err := restoreWithdrawnRecovery(ctx, x, tx, id); err != nil {
+		return Outcome{}, err
+	}
 	c, err = store.MessageControl(ctx, tx.Q(), id)
 	if err != nil {
 		return Outcome{}, err

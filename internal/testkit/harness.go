@@ -278,8 +278,12 @@ func (t *FakeThread) Emit(ev harness.Event) {
 	h.mu.Lock()
 	receipt, exists := h.receipts[ev.TurnID]
 	if exists {
+		if ev.Failure != nil {
+			receipt.Failure = ev.Failure
+		}
 		if ev.Kind == harness.EventTurnCompleted {
 			receipt.Status = ev.TurnStatus
+			receipt.ContinuationSafe = ev.TurnStatus == "failed"
 		}
 		if ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemAgentMessage {
 			receipt.Messages = append(receipt.Messages, ev)

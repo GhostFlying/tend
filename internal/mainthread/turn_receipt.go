@@ -30,11 +30,27 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 		if repair {
 			identity = rec.RequestID
 		}
+		source, err := m.app.RecoverySourceRequest(ctx, rec.RequestID)
+		if err != nil {
+			return err
+		}
+		// Empty continuations have no new user item to match an unknown start.
+		if source != "" && rec.TurnID == "" {
+			if err := m.app.BlockAgentRecovery(ctx, rec.RequestID, "Native continuation identity is missing; automatic resend is disabled."); err != nil {
+				return err
+			}
+			continue
+		}
 		receipt, found, err := reader.FindTurn(ctx, identity, rec.TurnID)
 		if err != nil {
 			return err
 		}
 		if !found || (receipt.Status != "completed" && receipt.Status != "interrupted" && receipt.Status != "failed") {
+			if source != "" {
+				if err := m.app.BlockAgentRecovery(ctx, rec.RequestID, "Native continuation has no confirmed terminal receipt; reconciliation is required."); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		consumed, err := m.app.ConsumedMainSteers(ctx, th.ID(), receipt.ID)
@@ -73,6 +89,13 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 			items = receipt.Messages
 		}
 		replyTo, sources := rec.MessageID, []string{rec.MessageID}
+		if source != "" {
+			var err error
+			replyTo, sources, _, err = m.retainedRecoverySources(ctx, rec.RequestID, rec.MessageID)
+			if err != nil {
+				return err
+			}
+		}
 		for _, message := range items {
 			if repair {
 				continue
@@ -111,6 +134,7 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 		// finish metadata after the known native turn, without replaying its actions.
 		rec.Status = receipt.Status
 		rec.NativeReconciled = true
+		rec.Failure = receipt.Failure
 
 		if err := m.app.PutMainTurn(ctx, rec); err != nil {
 			return err

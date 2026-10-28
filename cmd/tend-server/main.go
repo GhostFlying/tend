@@ -93,8 +93,9 @@ type config struct {
 // mainAgentConfig configures the hosted main agent (D68). Every field is
 // optional.
 type mainAgentConfig struct {
-	ConversationID        string `json:"-"`
-	BackgroundConcurrency int    `json:"background_concurrency"`
+	Recovery              *agentRecoveryConfig `json:"recovery"`
+	ConversationID        string               `json:"-"`
+	BackgroundConcurrency int                  `json:"background_concurrency"`
 	// Instance names the main agent; default "main".
 	Instance string `json:"instance"`
 	TraexBin string `json:"traex_bin"`
@@ -182,6 +183,13 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	}
 	opts = append(opts, observationOption)
 	opts = append(opts, app.WithFollowups(cfg.MainAgent != nil))
+	if cfg.MainAgent != nil && cfg.MainAgent.Recovery != nil {
+		policy, err := cfg.MainAgent.Recovery.policy()
+		if err != nil {
+			return err
+		}
+		opts = append(opts, app.WithAgentRecoveryPolicy(policy))
+	}
 	a := app.New(s, ids, time.Now, opts...)
 	if err := syncConfig(ctx, a, ids, cfg); err != nil {
 		return err

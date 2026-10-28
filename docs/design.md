@@ -117,6 +117,7 @@
 | D114 | 退役外挂主协调 Agent，主协调统一由 Tend 托管。删除外挂 MCP/hook/setup、会话项目绑定及专用检查工具，不签发或接受外挂 agent token；保留 owner CLI、worker MCP、runner 和 provider。历史迁移与来源仍可读取，旧入口拒绝执行。取代 D45/D47/D48/D54/D59/D68 中外挂并存的运行规则。见 docs/plans/mandatory-message-context.md。 | 已确认（2026-10-27） |
 | D119 | 主协调工具原子返回版本与剩余义务；准确版本的 initial_context 完成首次准备与来源审核，conversation_reply 合并正文、关联和事实审核。内容审核、协调回合与派发分别表达，已提交有效来源可在原生回合完成前派发；未知执行和失效事实仍围栏。格式 3 摘要以原生历史 H、当前有效账本 L、来源更正 D 合并，不重放工具输入输出；按模型预算选择一次或先历史后干净私有会话，分批必须完整覆盖。输入准备前登记持久退避，既有摘要与历史保留。细化 D81、D113，见 docs/plans/agent-ledger-handoff.md。 | 已实现（2026-10-28） |
 | D118 | Worker 统一 YOLO，主/后台显式开放网络且保留文件及 Tend 工具边界；scratch 规范路径与独立验收目录、无每次探针；验收模型/强度支持 runner 默认与任务冻结选择。worker 可选结构化问题与主协调说明独立留痕，环境故障、证据缺口、授权及 owner 选择直接展示。新增通信字段通过能力协商，旧请求形状与默认选择保持，存储只追加迁移。见 docs/plans/worker-scratch-decision-context.md。 | 已实现（2026-10-28） |
+| D120 | 托管主/后台 Agent 的明确限流终态采用持久指数退避与有界空输入续接；原生内部重试优先，保留工具结果和原责任，每次 native 执行独立记账。未知启动不重发，owner 停止、新指令及维护围栏在实际启动前校验。恢复状态和终止提醒持久投影。见 docs/plans/hosted-agent-rate-limit-recovery.md。 | 已实现（2026-10-28） |
 
 | D115 | Owner 的补充消息由当前主会话投递循环领取，经原生 `turn/steer` 的 thread/expected-turn 前置条件送入同一回合；只有 owner 原文可 steer，系统事件仍排队，handoff 保持屏障。发送意图、接受回执和原生 user-item 消费证据独立保存；unknown 不重发、不作为后续 context 指令。工具首次 source/request 持久固定；规划 effect 使用原 turn 初始消息与 commit_seq 去重，实际 owner 审计来源独立保留，换 native call ID 或消费状态询问不创建新序号空间；回复固定开始时来源并关联该时点已消费的 owner 消息。已消费补充消息加入原逻辑轮，正式消息归类与事实检查不因原生回合完成而跳过；修正轮不接收 steer。接受不承诺即时消费，不支持路径继续等待。见 docs/plans/owner-main-turn-steer.md 与 docs/owner-message-steer.md。 | 已实现，未上线（2026-10-27） |
 | D116 | 运行中 run 的补充消息独立于正式 task spec、owner decision 和控制通路。主代理工具显式冻结 task/run/action/spec/代次/控制修订和认证来源，服务端持久队列与投递历史按 run 有序领取；runner 在原生调用或工具响应前记录意图，未知不重发、不迁移到后续 run。TraeX app-server 以原 thread/expectedTurnId 调用 turn/steer；Orca TUI 经原 run 专属 MCP receive_messages/ack_message 在同一执行中的安全点协作接收，禁止 PTY 输入、interrupt、重开 turn 或重建模拟。工具响应产生不证明接收，TUI 显式 ack 与原生接受回执才记录 accepted，均不声明模型已读取或执行要求。暂停/取消/结束使未领取消息失败，已领取结果保留 unknown 待真实回执。新增 run-messages-v1 能力协商、可选 assignment 字段及迁移 0051/journal 0010，旧通信含义不变。专用回执在最终阶段与 done 后独立恢复，沿原请求身份上传；released 租约只允许匹配原领取身份的历史 report_message，不能恢复控制或领取权限。待回执阻止维护就绪。见 docs/plans/run-messages.md 与 docs/run-messages.md。 回执修复计划见 docs/plans/run-message-receipts.md。 | 已实现（2026-10-27） |
@@ -299,3 +300,10 @@ D114 状态投影补充：主 Agent 的 `agent_conversations_list` 根据已认�
 模型与思考强度入口持续显示服务端确认的设置值，保存、待核对和错误状态独立提示，不将状态文字替换成强度值。上下文圆环默认只展示用量弧线，百分比保留在无障碍名称和详情中；鼠标悬停及键盘聚焦展示详情，指针可进入面板操作，也可返回圆环继续悬停，离开且焦点不在面板内时关闭。触屏保留点击入口，Escape 在 hover 或面板聚焦时均可关闭；从面板或圆环关闭时返回圆环焦点，hover 查看时保留原输入焦点。详见 `docs/plans/composer-settings-context-hover.md`。
 
 D119 后台发布补充：conversation_reply 在主协调后台批次中也表示明确即时发布，原子保存消息、关联及审核。它撤销本轮此前的静默选择，持久发布身份阻止同轮后续 check-in 将已发布正文变成静默；普通原生后台文本仍保留既有延后结算语义。
+## 15. 托管 Agent 限流恢复（D120）
+
+原生 `willRetry=true` 仍由 harness 管理；只有回合最终失败且结构化错误确认为限流，才创建恢复链。原消息 outbox 保持 delivered，含义仍是输入已送达。恢复链、独立执行关联、下一次时间及 outbox 在同一事务提交，重复回执不重复安排。默认等待 5 秒，指数增长到 120 秒并加 0–20% 正向抖动，最多 8 次、首次失败后 15 分钟内安排；等待退出后台进程并释放并发名额。`main_agent.recovery` 可覆盖 `base_delay_seconds`、`max_delay_seconds`、`max_elapsed_seconds`、`max_attempts`，次数为 0 禁用。
+
+续接前核对同一 native thread 的失败回执、已结算工具、owner 控制、工作项状态、设置版本与维护围栏。仅经已验证的 Codex 协议 `turn/start input=[]` 创建新执行，不再次传入原消息、附件或合成用户提示；通过已有 developer 注入更新账本事实。Traex 或缺少可核验回执的实现保留需处理状态。空输入没有持久原生幂等键：先存启动意图，再从响应或 turn/started 保存 turn_id；响应丢失且无法确定身份时保留 unknown，禁止重发。
+
+owner 停止取消等待计划；新的 owner 指令取消旧的等待续接并显式承接未完成前台逻辑责任。执行已开始后的新输入沿 D115 处理。恢复预算、时间及身份跨重启不重置。owner 会话视图增加可选 recovery 信息；停止复用已有幂等控制请求。耗尽预算或受阻只生成一次来源可追溯提醒，并交给现有主协调者；提醒自身不会再次产生自动恢复提醒链。runner 协议未改变，存储使用追加迁移。
