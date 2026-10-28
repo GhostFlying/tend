@@ -292,3 +292,12 @@ func (s *Service) turnAdopt(ctx context.Context, c Call) (any, error) {
 	cmd := app.AdoptClarification{RequestID: c.executionRequest()}
 	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: p.LogicalTurnID}, &p.Revision, "", p, cmd)
 }
+
+func (s *Service) conversationReply(ctx context.Context, c Call) (any, error) {
+	var p protocol.CoordinationReply
+	if err := decode(c.Arguments, &p); err != nil {
+		return nil, err
+	}
+	cmd := app.CoordinationReply{}
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "logical_turn", ID: c.ParentRequestID}, nil, "", p, cmd)
+}

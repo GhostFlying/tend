@@ -73,6 +73,13 @@ func (c BackgroundCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		return Outcome{Result: page}, nil
 	}
+	var published bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_agent_messages a JOIN conversation_messages m ON m.message_id=a.message_id JOIN request_records r ON r.request_id=m.request_id WHERE a.thread_id=? AND a.turn_id=? AND r.operation='conversation.reply' AND r.status='succeeded')`, x.Principal.Thread, c.TurnID).Scan(&published); err != nil {
+		return Outcome{}, err
+	}
+	if published {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "this turn already published a formal reply and cannot check in silently")
+	}
 	var p protocol.BackgroundCheckin
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err

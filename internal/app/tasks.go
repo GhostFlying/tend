@@ -100,6 +100,14 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err != nil {
 		return Outcome{}, err
 	}
+	if x.Principal.Kind == protocol.PrincipalMainAgent && x.Env.ParentRequestID != "" {
+		digest, facts, err := store.EffectiveContext(ctx, tx.Q(), item.WorkItemID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		p.Spec.SharedContext[0].ContextDigest = digest
+		p.Spec.SharedContext[0].Facts = append(p.Spec.SharedContext[0].Facts, facts...)
+	}
 	ws, resource, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, project.Template, taskID, item.WorkItemID)
 	if err != nil {
 		return Outcome{}, err

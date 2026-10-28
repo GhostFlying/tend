@@ -203,7 +203,8 @@ func TestSummaryBackoffAndStalenessSurviveAnotherAppReader(t *testing.T) {
 	if ok, err := other.ClaimSummaryAttempt(ctx, snap, 15*time.Minute.Milliseconds()); err != nil || !ok {
 		t.Fatalf("backoff expiry: %t %v", ok, err)
 	}
-	if _, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: snap, Body: "ready", FormatVersion: 1}); err != nil {
+	snap.Summary = &store.SummaryCoverage{Complete: true}
+	if _, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: snap, Body: "ready", FormatVersion: 3}); err != nil {
 		t.Fatal(err)
 	}
 	h.clock.Advance(time.Hour)
@@ -372,5 +373,29 @@ func TestHandoffActivityStartsIdleWindowWithoutSummaryOrResumeReset(t *testing.T
 	}
 	if active.LastActivityMillis != h.clock.Now().UnixMilli() {
 		t.Fatalf("new owner activity lost: %+v", active)
+	}
+}
+
+func TestLegacySuccessfulAttemptCanRegenerateV3(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	if _, err := h.app.BindMainThread(ctx, "main", "source", "tools", "source.rollout"); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := h.app.HandoffSnapshot(ctx, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := h.app.ClaimSummaryAttempt(ctx, snap, 0); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if _, err := h.app.SaveHandoffSummary(ctx, store.HandoffSummary{Instance: "main", Snapshot: snap, Body: "legacy", FormatVersion: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.FinishSummaryAttempt(ctx, snap, true); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := h.app.ClaimSummaryAttempt(ctx, snap, 0); err != nil || !ok {
+		t.Fatal("v2 success suppressed v3", ok, err)
 	}
 }

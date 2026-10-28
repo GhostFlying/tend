@@ -97,11 +97,24 @@ func refreshTaskWorkContext(ctx context.Context, q store.Querier, taskID string,
 	if err != nil {
 		return err
 	}
+	fingerprint := false
+	for _, old := range previous {
+		fingerprint = fingerprint || old.ContextDigest != ""
+	}
 	spec.SharedContext = nil
 	for _, item := range items {
 		next := freezeWorkItemContext(item)
+		if fingerprint {
+			digest, facts, err := store.EffectiveContext(ctx, q, item.WorkItemID)
+			if err != nil {
+				return err
+			}
+			next.ContextDigest = digest
+			next.Facts = append(next.Facts, facts...)
+		}
+
 		for _, old := range previous {
-			if old.WorkItemID == next.WorkItemID && old.Intent == next.Intent && slices.Equal(old.Facts, next.Facts) && slices.Equal(old.Constraints, next.Constraints) {
+			if old.WorkItemID == next.WorkItemID && old.ContextDigest == next.ContextDigest && old.Intent == next.Intent && slices.Equal(old.Facts, next.Facts) && slices.Equal(old.Constraints, next.Constraints) {
 				next = old
 				break
 			}

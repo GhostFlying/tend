@@ -175,6 +175,11 @@ const currentSummary: ConversationHandoffView = {
   ...initial,
   summary: {
     id: "summary_1",
+    format_version: 3,
+    ledger_bytes: 100,
+    correction_bytes: 0,
+    batches: 1,
+    complete: true,
     source_thread_id: "thread_1",
     version: 2,
     max_seq: 10,

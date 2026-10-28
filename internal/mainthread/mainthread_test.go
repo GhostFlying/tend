@@ -205,7 +205,7 @@ func TestMessageBecomesTask(t *testing.T) {
 		t.Errorf("agent replies = %d, want 1", n)
 	}
 	starts := businessStarts(h)
-	if len(starts) != 1 || starts[0].UserMessageID != msg || !strings.HasPrefix(starts[0].Text, "[message "+msg+"]") {
+	if len(starts) != 1 || starts[0].UserMessageID != msg || !strings.Contains(starts[0].Text, "[message "+msg+"]") || !strings.Contains(starts[0].Text, `"content_revision":1`) {
 		t.Errorf("turn input = %+v", starts)
 	}
 	var thread string
@@ -812,4 +812,93 @@ func completeFixtureReview(t *testing.T, th *testkit.FakeThread, turn string) st
 		return "failed"
 	}
 	return "completed"
+}
+
+func TestEarlyFormalReplyBeforeStartResponse(t *testing.T) {
+	h := testkit.NewHarness()
+	result := make(chan harness.ToolResult, 1)
+	var once sync.Once
+	h.BeforeAnswer = func(th *testkit.FakeThread, turn string) {
+		args := json.RawMessage(`{"body":"A scoped reply is published.","purpose":"final","disposition":"unassigned","work_item_ids":[],"contexts":[],"facts":[],"reviewed_kinds":["goal","constraint","authorization","refusal","commitment","question","suggestion"]}`)
+		once.Do(func() { result <- th.CallTool(context.Background(), turn, "early-formal", "conversation_reply", args) })
+	}
+	e := newEnv(t, h)
+	msg := e.say("hello")
+	eventually(t, "early formal reply persists", func() bool {
+		return e.count(`SELECT COUNT(*) FROM conversation_messages WHERE author='main_agent' AND reply_to=?`, msg) == 1
+	})
+	eventually(t, "early native identity is durable", func() bool {
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND turn_id IS NOT NULL`, msg) == 1
+	})
+	select {
+	case answer := <-result:
+		if !answer.Success {
+			t.Fatal(answer.Text)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("early reply callback did not finish")
+	}
+}
+
+func TestFault_AdmissionVersionReadRetriesOnlyKnownUnsentTurn(t *testing.T) {
+	f := newHandoffFixture(t)
+	f.e.say("An owner request that has not reached native")
+	d, _, ok, err := f.e.app.NextDelivery(t.Context(), app.MainThreadDestination)
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	f.e.m.mu.Lock()
+	f.e.m.session, f.e.m.thread = f.session, f.source
+	f.e.m.mu.Unlock()
+	original := f.e.m.readAdmittedTurn
+	f.e.m.readAdmittedTurn = func(context.Context, string) (protocol.LogicalTurnState, error) {
+		return protocol.LogicalTurnState{}, errors.New("transient admitted-version read failure")
+	}
+	failed := f.e.m.Deliver(t.Context(), d)
+	if failed.Outcome != app.Retry {
+		t.Fatal(failed)
+	}
+	rec, ok, err := f.e.app.MainTurn(t.Context(), d.RequestID)
+	if err != nil || !ok || rec.Status != store.TurnRejected {
+		t.Fatalf("known-unsent admission was stranded: %+v %v", rec, err)
+	}
+	if len(f.e.h.Starts()) != 0 {
+		t.Fatal("native turn started despite local read failure")
+	}
+	if err := f.e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var pending int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM context_packets WHERE status<>'failed'`).Scan(&pending); err != nil {
+			return err
+		}
+		if pending != 0 {
+			t.Errorf("unsent attempt retained an unfinished context packet: %d", pending)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.e.m.readAdmittedTurn = original
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-f.source.Events():
+				if !ok {
+					return
+				}
+				f.e.m.handle(ctx, f.source, event)
+			}
+		}
+	}()
+	retried := f.e.m.Deliver(ctx, d)
+	cancel()
+	<-done
+	if retried.Outcome != app.Delivered || len(f.e.h.Starts()) != 1 {
+		t.Fatalf("known-unsent retry failed: %+v starts=%d", retried, len(f.e.h.Starts()))
+	}
 }

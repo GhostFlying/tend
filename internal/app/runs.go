@@ -200,8 +200,14 @@ func (SubmitArtifact) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		s := domain.RunStarted(task, rc.fact())
 		task, started = s.Task, s.Events
 	}
-	d := domain.ArtifactSubmitted(task, rc.fact(), artifactID)
-	d.Events = append(started, d.Events...)
+	d, fenced, err := fenceChangedTaskContext(ctx, tx.Q(), rc, "artifact.submitted", artifactID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !fenced {
+		d = domain.ArtifactSubmitted(task, rc.fact(), artifactID)
+		d.Events = append(started, d.Events...)
+	}
 	actions, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "artifact.submitted", "artifact_id": artifactID})
 	if err != nil {
 		return Outcome{}, err
@@ -286,12 +292,18 @@ func (SubmitAcceptance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		rc.action.TargetArtifactID, p.Verdict, evidence, issues, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
-	d, err := domain.AcceptanceSubmitted(toDomain(rc.task, rc.spec.Budget()), domain.AcceptanceFact{
-		RunID: rc.run.RunID, Role: x.Principal.Role, SpecVersion: rc.action.TargetSpecVersion,
-		ArtifactID: rc.action.TargetArtifactID, Verdict: p.Verdict,
-	})
+	d, fenced, err := fenceChangedTaskContext(ctx, tx.Q(), rc, "acceptance.submitted", acceptanceID)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if !fenced {
+		d, err = domain.AcceptanceSubmitted(toDomain(rc.task, rc.spec.Budget()), domain.AcceptanceFact{
+			RunID: rc.run.RunID, Role: x.Principal.Role, SpecVersion: rc.action.TargetSpecVersion,
+			ArtifactID: rc.action.TargetArtifactID, Verdict: p.Verdict,
+		})
+		if err != nil {
+			return Outcome{}, err
+		}
 	}
 	actions, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "acceptance.submitted", "acceptance_id": acceptanceID})
 	if err != nil {

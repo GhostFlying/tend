@@ -42,6 +42,18 @@ func ApplyWorkItemDependencies(ctx context.Context, q store.Querier, candidates 
 		if err != nil {
 			return err
 		}
+		var frozen struct {
+			SharedContext []protocol.TaskWorkContext `json:"shared_context"`
+		}
+		if c.SpecVersion > 0 {
+			raw, err := store.GetSpec(ctx, q, c.TaskID, c.SpecVersion)
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal([]byte(raw), &frozen); err != nil {
+				return err
+			}
+		}
 		for _, item := range items {
 			// Only registered new-message responsibility gates dispatch; historical
 			// tasks without a D112 classification are not backfilled.
@@ -49,12 +61,24 @@ func ApplyWorkItemDependencies(ctx context.Context, q store.Querier, candidates 
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM message_context_obligations WHERE work_item_id=?) OR EXISTS(SELECT 1 FROM logical_turn_contexts WHERE work_item_id=?)`, item.WorkItemID, item.WorkItemID).Scan(&tracked); err != nil {
 				return err
 			}
+			for _, binding := range frozen.SharedContext {
+				tracked = tracked || (binding.WorkItemID == item.WorkItemID && binding.ContextDigest != "")
+			}
 			if tracked {
 				ready, err := store.WorkItemContextReady(ctx, q, item.WorkItemID)
 				if err != nil {
 					return err
 				}
 				c.ContextPending = c.ContextPending || !ready
+			}
+			for _, binding := range frozen.SharedContext {
+				if binding.WorkItemID == item.WorkItemID && binding.ContextDigest != "" {
+					digest, _, err := store.EffectiveContext(ctx, q, item.WorkItemID)
+					if err != nil {
+						return err
+					}
+					c.ContextPending = c.ContextPending || binding.ContextDigest != digest
+				}
 			}
 			if item.Status != "open" {
 				c.DependenciesDone = false

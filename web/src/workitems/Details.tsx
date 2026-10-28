@@ -92,6 +92,18 @@ export function WorkItemDetails({ connection }: { connection: Connection }) {
               <p>
                 版本 {context.revision} · 消息水位 {context.watermark}
               </p>
+              <p>
+                协调回合：
+                {context.coordination_state === "idle"
+                  ? "空闲"
+                  : context.coordination_state === "processing"
+                    ? "进行中"
+                    : context.coordination_state}
+                {" · "}派发：{context.dispatch_ready ? "已就绪" : "等待条件满足"}
+              </p>
+              {context.dispatch_blockers?.map((reason) => (
+                <p key={`${reason.code}:${reason.object_id}`}>{reason.message}</p>
+              ))}
               <p>检查范围：{context.coverage || "尚未登记"}</p>
               <p>已知缺口：{context.gaps || "尚未登记"}</p>
             </details>

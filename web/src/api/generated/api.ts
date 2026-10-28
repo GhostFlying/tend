@@ -963,11 +963,17 @@ export interface ConversationMaintenanceView {
  * via the `definition` "ConversationSummaryView".
  */
 export interface ConversationSummaryView {
+  batches: number;
+  complete: boolean;
+  correction_bytes: number;
   created_at_millis: number;
   current: boolean;
+  format_version: number;
   id: string;
   last_completed_turn_id?: string;
+  ledger_bytes: number;
   max_seq: number;
+  method?: string;
   source_thread_id: string;
   version: number;
 }
@@ -1229,6 +1235,16 @@ export interface InitialWorkItemContext {
   gaps: string;
   reviewed_kinds: string[] | null;
   source_message_ids: string[] | null;
+  source_reviews?: LogicalTurnReview[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LogicalTurnReview".
+ */
+export interface LogicalTurnReview {
+  association_revision: number;
+  content_revision: number;
+  message_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2104,7 +2120,10 @@ export interface WorkItemChoicePage {
  * via the `definition` "WorkItemContext".
  */
 export interface WorkItemContext {
+  coordination_state: string;
   coverage: string;
+  dispatch_blockers: ContextBlocker[] | null;
+  dispatch_ready: boolean;
   facts: ContextFact[] | null;
   gaps: string;
   more: boolean;
@@ -2115,6 +2134,18 @@ export interface WorkItemContext {
   sync_status: string;
   watermark: number;
   work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ContextBlocker".
+ */
+export interface ContextBlocker {
+  code: string;
+  control_revision?: number;
+  message: string;
+  object_id: string;
+  revision: number;
+  spec_version?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

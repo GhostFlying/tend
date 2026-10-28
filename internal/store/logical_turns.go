@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -54,13 +55,25 @@ func LogicalTurn(ctx context.Context, q Querier, request string) (protocol.Logic
 	return v, rows.Err()
 }
 
-// WorkItemContextReady gates background dispatch on actual source review and
-// logical completion, not just a nonempty summary or a classification label.
-func WorkItemContextReady(ctx context.Context, q Querier, item string) (bool, error) {
+// WorkItemContextReviewed checks initialization and semantic review independently
+// of native/logical execution lifecycle.
+func WorkItemContextReviewed(ctx context.Context, q Querier, item string) (bool, error) {
 	var ready bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_item_contexts WHERE work_item_id=? AND baseline_revision>0)
  AND NOT EXISTS(SELECT 1 FROM message_work_items a JOIN conversation_messages m ON m.message_id=a.message_id LEFT JOIN message_dispositions d ON d.message_id=m.message_id WHERE a.work_item_id=? AND a.active=1 AND m.conversation_id='main' AND (d.message_id IS NULL OR d.disposition='pending' OR d.facts_revision<>d.content_revision))
  AND NOT EXISTS(SELECT 1 FROM message_context_obligations WHERE work_item_id=? AND needs_review=1)
- AND NOT EXISTS(SELECT 1 FROM logical_turn_contexts lc JOIN logical_turns l ON l.logical_turn_id=lc.logical_turn_id WHERE lc.work_item_id=? AND l.status<>'completed')`, item, item, item, item).Scan(&ready)
+ AND NOT EXISTS(SELECT 1 FROM work_item_context_facts f JOIN work_items w ON w.work_item_id=? WHERE f.superseded=0 AND f.needs_review=1 AND (f.work_item_id=w.work_item_id OR f.scope='global' OR (f.scope='project' AND f.project=w.project)))`, item, item, item, item).Scan(&ready)
 	return ready, err
+}
+
+// WorkItemContextReady admits reviewed facts before native completion, while
+// retaining fences for uncertain execution and unreviewed context revisions.
+func WorkItemContextReady(ctx context.Context, q Querier, item string) (bool, error) {
+	ready, err := WorkItemContextReviewed(ctx, q, item)
+	if err != nil || !ready {
+		return ready, err
+	}
+	var blocked bool
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_contexts lc JOIN logical_turns l USING(logical_turn_id) JOIN work_item_contexts c ON c.work_item_id=lc.work_item_id WHERE lc.work_item_id=? AND l.status<>'completed' AND (l.status<>'processing' OR EXISTS(SELECT 1 FROM logical_turn_messages lm LEFT JOIN message_dispositions d ON d.message_id=lm.message_id WHERE lm.logical_turn_id=l.logical_turn_id AND (d.message_id IS NULL OR d.disposition='pending' OR d.classified_revision<>d.content_revision OR d.facts_revision<>d.content_revision)) OR NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews r WHERE r.logical_turn_id=l.logical_turn_id AND r.work_item_id=c.work_item_id AND r.revision=c.revision))) OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p JOIN logical_turn_executions e ON e.request_id=p.request_id JOIN logical_turn_contexts lc USING(logical_turn_id) WHERE lc.work_item_id=?)`, item, item).Scan(&blocked)
+	return !blocked, err
 }

@@ -856,6 +856,37 @@
       "title": "CompletionReviewAcknowledgement",
       "type": "object"
     },
+    "ContextBlocker": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "spec_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code",
+        "object_id",
+        "revision",
+        "message"
+      ],
+      "title": "ContextBlocker",
+      "type": "object"
+    },
     "ContextFact": {
       "additionalProperties": false,
       "properties": {
@@ -1411,11 +1442,23 @@
     "ConversationSummaryView": {
       "additionalProperties": false,
       "properties": {
+        "batches": {
+          "type": "integer"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "correction_bytes": {
+          "type": "integer"
+        },
         "created_at_millis": {
           "type": "integer"
         },
         "current": {
           "type": "boolean"
+        },
+        "format_version": {
+          "type": "integer"
         },
         "id": {
           "type": "string"
@@ -1423,8 +1466,14 @@
         "last_completed_turn_id": {
           "type": "string"
         },
+        "ledger_bytes": {
+          "type": "integer"
+        },
         "max_seq": {
           "type": "integer"
+        },
+        "method": {
+          "type": "string"
         },
         "source_thread_id": {
           "type": "string"
@@ -1434,6 +1483,11 @@
         }
       },
       "required": [
+        "format_version",
+        "ledger_bytes",
+        "correction_bytes",
+        "batches",
+        "complete",
         "id",
         "source_thread_id",
         "version",
@@ -2575,6 +2629,12 @@
               "type": "null"
             }
           ]
+        },
+        "source_reviews": {
+          "items": {
+            "$ref": "#/definitions/LogicalTurnReview"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -2664,6 +2724,27 @@
         "stage_ids"
       ],
       "title": "LinkWorkItemTaskPayload",
+      "type": "object"
+    },
+    "LogicalTurnReview": {
+      "additionalProperties": false,
+      "properties": {
+        "association_revision": {
+          "type": "integer"
+        },
+        "content_revision": {
+          "type": "integer"
+        },
+        "message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "content_revision",
+        "association_revision"
+      ],
+      "title": "LogicalTurnReview",
       "type": "object"
     },
     "MainSteerView": {
@@ -5343,8 +5424,27 @@
     "WorkItemContext": {
       "additionalProperties": false,
       "properties": {
+        "coordination_state": {
+          "type": "string"
+        },
         "coverage": {
           "type": "string"
+        },
+        "dispatch_blockers": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ContextBlocker"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dispatch_ready": {
+          "type": "boolean"
         },
         "facts": {
           "anyOf": [
@@ -5398,6 +5498,9 @@
         }
       },
       "required": [
+        "dispatch_ready",
+        "coordination_state",
+        "dispatch_blockers",
         "sync_status",
         "watermark",
         "work_item_id",

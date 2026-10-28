@@ -175,5 +175,26 @@ func TestIntegrationEphemeralSummaryFork(t *testing.T) {
 	if sourceRead.Thread.ID != source.ID() {
 		t.Fatal("source no longer accessible")
 	}
+	clean, err := s.StartThread(ctx, harness.ThreadConfig{Cwd: cwd, Model: "probe-model", Ephemeral: true, ApprovalPolicy: "never", Sandbox: "read-only", DeveloperInstructions: "clean summary merger"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.ReleaseThread(context.WithoutCancel(ctx), clean.ID())
+	if clean.(harness.ThreadLocation).RolloutPath() != "" {
+		t.Fatal("clean ephemeral thread persisted a rollout")
+	}
+	if _, status := turn(t, clean, "CLEAN_MERGE_MARKER"); status != "completed" {
+		t.Fatal(status)
+	}
+	mu.Lock()
+	last := requests[len(requests)-1]
+	mu.Unlock()
+	if strings.Contains(last, "SOURCE_HISTORY_MARKER") || strings.Contains(last, "legacy_tend_mutation") || !strings.Contains(last, "CLEAN_MERGE_MARKER") {
+		t.Fatal("second stage inherited source history or tools")
+	}
+	if err := s.ReleaseThread(ctx, clean.ID()); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Log("loopback fake model: source history inherited; summary tool denied; source unchanged; ephemeral fork unsubscribed")
 }

@@ -285,3 +285,29 @@ func TestIdleSummaryFailureBackoffSurvivesManagerRestart(t *testing.T) {
 		t.Fatalf("retry not attempted at backoff boundary: forks=%d", forks)
 	}
 }
+
+func TestInputPreparationFailureUsesPersistentBackoff(t *testing.T) {
+	f := newHandoffFixture(t)
+	seedIdleConversation(t, f)
+	f.clock.Advance(time.Hour)
+	if err := f.e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `ALTER TABLE followup_rules RENAME TO unavailable_followup_rules`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.m.idleSummary(t.Context()); err == nil {
+		t.Fatal("missing input did not fail")
+	}
+	if n := f.e.count(`SELECT COUNT(*) FROM conversation_summary_attempts WHERE status='failed'`); n != 1 {
+		t.Fatal("preparation failure was not recorded", n)
+	}
+	f.clock.Advance(time.Minute)
+	if err := f.e.m.idleSummary(t.Context()); err != nil {
+		t.Fatal("failure retried inside backoff", err)
+	}
+	f.clock.Advance(15 * time.Minute)
+	if err := f.e.m.idleSummary(t.Context()); err == nil {
+		t.Fatal("failure was not retried after backoff")
+	}
+}

@@ -36,6 +36,11 @@ func (CreateWorkItem) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := domain.ValidateWorkItem(p.WorkItemPlan, nil); err != nil {
 		return Outcome{}, err
 	}
+	if p.InitialContext != nil {
+		if err := validateInitialReviews(ctx, x, tx, *p.InitialContext); err != nil {
+			return Outcome{}, err
+		}
+	}
 	w := protocol.WorkItem{WorkItemPlan: p.WorkItemPlan, WorkItemID: x.IDs.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
 	if err := validateWorkItemReferences(ctx, x, tx.Q(), w, nil); err != nil {
 		return Outcome{}, err

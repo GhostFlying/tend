@@ -278,6 +278,7 @@ func tags(v any) []string {
 func TestSchemasMatchArgs(t *testing.T) {
 	args := map[string]any{
 		"decisions_explain":        explainDecisionArgs{},
+		"conversation_reply":       protocol.CoordinationReply{},
 		"background_evidence_read": evidenceArgs{},
 		"conversation_turn_adopt":  protocol.AdoptClarificationPayload{},
 		"conversation_turn_wait":   protocol.TurnClarification{}, "conversation_turn_read": turnReadArgs{}, "conversation_turn_commit": protocol.LogicalTurnCommit{},

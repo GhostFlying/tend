@@ -157,7 +157,7 @@ func (s Spec) Equal(o Spec) bool {
 
 func equalSharedContext(a, b []protocol.TaskWorkContext) bool {
 	return slices.EqualFunc(a, b, func(x, y protocol.TaskWorkContext) bool {
-		return x.WorkItemID == y.WorkItemID && x.Revision == y.Revision && x.Intent == y.Intent &&
+		return x.WorkItemID == y.WorkItemID && x.Revision == y.Revision && x.ContextDigest == y.ContextDigest && x.Intent == y.Intent &&
 			slices.Equal(x.Constraints, y.Constraints) && slices.Equal(x.Facts, y.Facts)
 	})
 }

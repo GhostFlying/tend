@@ -51,22 +51,50 @@ func (t *Tx) PutMainThreadBinding(ctx context.Context, v MainThreadBinding, now 
 	return err
 }
 
+// SummaryCoverage records the input contract and generation diagnostics.
+type SummaryBatchCoverage struct {
+	FirstRecord          int    `json:"first_record"`
+	LastRecord           int    `json:"last_record"`
+	Pieces               int    `json:"pieces"`
+	InputTokenUpperBound int64  `json:"input_token_upper_bound"`
+	SHA256               string `json:"sha256"`
+}
+
+type SummaryCoverage struct {
+	BatchCoverage           []SummaryBatchCoverage `json:"batch_coverage,omitempty"`
+	LedgerBytes             int                    `json:"ledger_bytes"`
+	CorrectionBytes         int                    `json:"correction_bytes"`
+	HistoryTokens           *int64                 `json:"history_tokens,omitempty"`
+	TokenEstimate           string                 `json:"token_estimate"`
+	MaxStageTokenUpperBound int64                  `json:"max_stage_token_upper_bound"`
+	LedgerRecords           int                    `json:"ledger_records"`
+	CorrectionRecords       int                    `json:"correction_records"`
+	Method                  string                 `json:"method"`
+	InputTokenUpperBound    int64                  `json:"input_token_upper_bound"`
+	BudgetTokens            int64                  `json:"budget_tokens"`
+	Batches                 int                    `json:"batches"`
+	Complete                bool                   `json:"complete"`
+}
+
 // HandoffSnapshot captures a transactionally consistent content watermark.
 type HandoffSnapshot struct {
-	Instance            string `json:"instance"`
-	ThreadID            string `json:"thread_id"`
-	Version             int64  `json:"version"`
-	MaxSeq              int64  `json:"max_seq"`
-	LastCompletedTurnID string `json:"last_completed_turn_id"`
-	LastActivityMillis  int64  `json:"last_activity_millis"`
-	BindingGeneration   int64  `json:"binding_generation"`
-	Pending             bool   `json:"pending"`
-	Active              bool   `json:"active"`
+	ConversationVersion int64            `json:"conversation_version"`
+	LedgerVersion       int64            `json:"ledger_version"`
+	Summary             *SummaryCoverage `json:"summary,omitempty"`
+	Instance            string           `json:"instance"`
+	ThreadID            string           `json:"thread_id"`
+	Version             int64            `json:"version"`
+	MaxSeq              int64            `json:"max_seq"`
+	LastCompletedTurnID string           `json:"last_completed_turn_id"`
+	LastActivityMillis  int64            `json:"last_activity_millis"`
+	BindingGeneration   int64            `json:"binding_generation"`
+	Pending             bool             `json:"pending"`
+	Active              bool             `json:"active"`
 }
 
 // Covers excludes a changed conversation or binding, and any unhandled activity.
 func (v HandoffSnapshot) Covers(other HandoffSnapshot) bool {
-	return v.Instance == other.Instance && v.ThreadID == other.ThreadID && v.BindingGeneration == other.BindingGeneration && v.Version == other.Version && v.MaxSeq == other.MaxSeq && v.LastCompletedTurnID == other.LastCompletedTurnID && !v.Pending && !v.Active && !other.Pending && !other.Active
+	return v.Instance == other.Instance && v.ThreadID == other.ThreadID && v.BindingGeneration == other.BindingGeneration && v.Version == other.Version && v.ConversationVersion == other.ConversationVersion && v.LedgerVersion == other.LedgerVersion && v.MaxSeq == other.MaxSeq && v.LastCompletedTurnID == other.LastCompletedTurnID && !v.Pending && !v.Active && !other.Pending && !other.Active
 }
 func GetHandoffSnapshot(ctx context.Context, q Querier, instance string) (HandoffSnapshot, error) {
 	v := HandoffSnapshot{Instance: instance}
@@ -79,6 +107,13 @@ func GetHandoffSnapshot(ctx context.Context, q Querier, instance string) (Handof
 	if err != nil {
 		return v, err
 	}
+	v.ConversationVersion = v.Version
+	// Both watermarks are monotonic. Their sum retains the existing unique
+	// source-version key while recording each coverage boundary explicitly.
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(event_seq),0) FROM events WHERE object_type<>'message' AND kind NOT LIKE 'conversation.%'`).Scan(&v.LedgerVersion); err != nil {
+		return v, err
+	}
+	v.Version += v.LedgerVersion
 	v.Active, err = HasActiveMainTurn(ctx, q, v.ThreadID)
 	if err != nil {
 		return v, err
