@@ -735,3 +735,63 @@ func TestStoppedSteerResumesOnlyCompletedNativeReview(t *testing.T) {
 		})
 	}
 }
+
+func TestMainSteerSkipsPendingRepairButRetainsControlBarriers(t *testing.T) {
+	for _, barrier := range []string{"", "conversation.handoff", "conversation.compact", "sending repair"} {
+		name := barrier
+		if name == "" {
+			name = "pending repair"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, previous := activeSteerEnv(t)
+			original, _, err := h.app.MainTurn(t.Context(), previous.RequestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original.Status = store.TurnCompleted
+			if err := h.app.PutMainTurn(t.Context(), original); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.app.FinishDelivery(t.Context(), previous, DeliveryResult{Outcome: Delivered}); err != nil {
+				t.Fatal(err)
+			}
+			if h.count("outbox WHERE operation='conversation.repair_turn' AND status='pending'") != 1 {
+				t.Fatal("missing older pending repair")
+			}
+			message := queueMessage(t, h, "new business takes priority over metadata repair")
+			active, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
+			if err != nil || !ok || active.Operation != OpHandleMessage {
+				t.Fatal(active, ok, err)
+			}
+			var payload HandleMessage
+			if err := json.Unmarshal(active.Payload, &payload); err != nil || payload.MessageID != message {
+				t.Fatal(payload, err)
+			}
+			if err := h.app.PutMainTurn(t.Context(), store.MainTurn{RequestID: active.RequestID, MessageID: message, ThreadID: "native", TurnID: "new-business", Status: store.TurnStarted}); err != nil {
+				t.Fatal(err)
+			}
+			if barrier != "" {
+				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+					if barrier == "sending repair" {
+						_, err := tx.Exec(t.Context(), "UPDATE outbox SET status='sending' WHERE operation='conversation.repair_turn'")
+						return err
+					}
+					return tx.InsertOutbox(t.Context(), store.OutboxRow{OutboxID: h.ids.New(protocol.PrefixOutbox), RequestID: h.ids.New(protocol.PrefixRequest), Destination: MainThreadDestination, Operation: barrier, PayloadJSON: `{}`})
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			supplement := queueMessage(t, h, "supplement to the active business turn")
+			got, claimed, err := h.app.ClaimMainSteer(t.Context(), active.RequestID, "native", "new-business")
+			if err != nil || claimed != (barrier == "") {
+				t.Fatal(got, claimed, err)
+			}
+			if claimed {
+				var payload HandleMessage
+				if err := json.Unmarshal(got.Payload, &payload); err != nil || payload.MessageID != supplement {
+					t.Fatal(payload, err)
+				}
+			}
+		})
+	}
+}
