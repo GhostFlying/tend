@@ -151,8 +151,8 @@ export class WorkItems {
           const incomingFacts = item.facts_seq;
           // Older servers have no facts_seq; preserve their last-response-wins
           // behavior until both sides carry a comparable transaction watermark.
-          if (currentFacts !== undefined || incomingFacts !== undefined) {
-            if ((currentFacts ?? 0) >= (incomingFacts ?? 0)) return current;
+          if (currentFacts !== undefined && incomingFacts !== undefined) {
+            if (currentFacts >= incomingFacts) return current;
           }
         }
       }

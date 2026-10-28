@@ -174,6 +174,24 @@ describe("live work-item projections", () => {
     expect(live.cache.get().get("b")?.title).toBe("second");
     live.stop();
   });
+  test("a rollback to legacy facts refreshes and later watermarks compare again", async () => {
+    const api = new Deferred();
+    const live = new WorkItems(api);
+    live.startOverview();
+    await api.answer("/api/v1/work-items", { items: [projected(10, "running")] });
+    expect(live.cache.get().get("a")?.facts_seq).toBe(10);
+    void live.overview.refresh();
+    const legacy = { ...projected(0, "unknown"), facts_seq: undefined };
+    await api.answer("/api/v1/work-items", { items: [legacy] });
+    expect(live.cache.get().get("a")).toEqual(legacy);
+    void live.overview.refresh();
+    await api.answer("/api/v1/work-items", { items: [projected(12, "running")] });
+    void live.overview.refresh();
+    await api.answer("/api/v1/work-items", { items: [projected(11, "unknown")] });
+    expect(live.overview.state.get().value?.items?.[0]).toEqual(projected(12, "running"));
+    expect(live.cache.get().get("a")).toEqual(projected(12, "running"));
+    live.stop();
+  });
   test("events arriving during a read cause one follow-up projection read", async () => {
     vi.useFakeTimers();
     const api = new Deferred();
