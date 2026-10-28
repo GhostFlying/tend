@@ -54,7 +54,7 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 	if err != nil {
 		return d, err
 	}
-	items, err := store.ListTaskWorkItems(ctx, q, taskID)
+	items, err := store.ListTaskIssues(ctx, q, taskID)
 	if err != nil {
 		return d, err
 	}

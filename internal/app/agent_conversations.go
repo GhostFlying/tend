@@ -26,7 +26,7 @@ func (OpenAgentConversation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 	return Outcome{Result: map[string]any{"conversation_id": id}, Events: []Event{{ObjectType: "conversation", ObjectID: id, Kind: "conversation.created"}}}, nil
 }
 func ensureAgentConversation(ctx context.Context, x *Exec, tx *store.Tx, item string) (string, error) {
-	if _, err := store.GetWorkItem(ctx, tx.Q(), item); err != nil {
+	if _, err := store.GetIssue(ctx, tx.Q(), item); err != nil {
 		return "", errNotFound(err, "work item does not exist")
 	}
 	settings, err := store.GetConversationSettings(ctx, tx.Q())
@@ -53,11 +53,11 @@ func (a *App) AgentContext(ctx context.Context, id string, request string) (stri
 		if err != nil {
 			return err
 		}
-		v, err := views.WorkItemContext(ctx, tx.Q(), c.WorkItemID, 0)
+		v, err := views.IssueContext(ctx, tx.Q(), c.WorkItemID, 0)
 		if err != nil {
 			return err
 		}
-		item, err := views.WorkItem(ctx, tx.Q(), c.WorkItemID)
+		item, err := views.Issue(ctx, tx.Q(), c.WorkItemID)
 		if err != nil {
 			return err
 		}

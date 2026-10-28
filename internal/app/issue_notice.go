@@ -8,7 +8,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func workItemNotice(e Event) bool {
+func issueNotice(e Event) bool {
 	switch e.Kind {
 	case "work_item.closed", "work_item.reopened":
 		return true
@@ -25,8 +25,8 @@ func workItemNotice(e Event) bool {
 	return false
 }
 
-func recordWorkItemNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, eventID string) error {
-	item, err := store.GetWorkItem(ctx, tx.Q(), e.ObjectID)
+func recordIssueNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, eventID string) error {
+	item, err := store.GetIssue(ctx, tx.Q(), e.ObjectID)
 	if err != nil {
 		return err
 	}

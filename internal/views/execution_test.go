@@ -40,7 +40,7 @@ func TestExecutionCountsIgnorePlanStatusAndDeduplicateLinkedTasks(t *testing.T) 
 		{TaskID: "one", Execution: &protocol.TaskExecutionView{State: protocol.ExecutionStarting, Role: protocol.RoleAccept}},
 		{TaskID: "two", Execution: &protocol.TaskExecutionView{State: protocol.ExecutionQueued, Role: protocol.RoleAccept}},
 	}}
-	projectWorkItemExecution(&v)
+	projectIssueExecution(&v)
 	if v.Execution.Starting != 1 || v.Execution.Accepting != 0 || v.Execution.Queued != 1 || v.Execution.Running != 0 {
 		t.Fatal(v.Execution)
 	}

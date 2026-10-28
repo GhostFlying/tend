@@ -37,7 +37,7 @@ func prepareWorkspace(ctx context.Context, q store.Querier, w domain.Workspace, 
 			return w, nil, err
 		}
 		if !pinned {
-			sourceOwner, err := store.GetTaskWorkItemOwner(ctx, q, w.SourceTaskID)
+			sourceOwner, err := store.GetTaskIssueOwner(ctx, q, w.SourceTaskID)
 			if err != nil {
 				return w, nil, err
 			}

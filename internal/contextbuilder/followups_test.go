@@ -17,7 +17,7 @@ func TestFollowupRegressionCancelledFollowupFullContext(t *testing.T) {
 	e := newEnv(t)
 	app.WithFollowups(true)(e.app)
 	var w protocol.WorkItem
-	raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Check", Intent: "Existing goal"}}, app.CreateWorkItem{})
+	raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Check", Intent: "Existing goal"}}, app.CreateIssue{})
 	if err := json.Unmarshal(raw, &w); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestFollowupDeltaRespectsProjectScope(t *testing.T) {
 	e := newEnv(t)
 	app.WithFollowups(true)(e.app)
 	var w protocol.WorkItem
-	raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Check", Intent: "Existing goal"}}, app.CreateWorkItem{})
+	raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Check", Intent: "Existing goal"}}, app.CreateIssue{})
 	if err := json.Unmarshal(raw, &w); err != nil {
 		t.Fatal(err)
 	}

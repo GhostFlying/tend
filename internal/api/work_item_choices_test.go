@@ -16,7 +16,7 @@ func TestWorkItemChoiceOwnerAPIReadAnswerAndStaleVersion(t *testing.T) {
 	token := e.login(protocol.ScopeOwner)
 	agent := e.retiredAgentToken("choice-agent")
 	var item protocol.WorkItem
-	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Implement page", Intent: "Improve the page"}}, app.CreateWorkItem{}), &item); err != nil {
+	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Implement page", Intent: "Improve the page"}}, app.CreateIssue{}), &item); err != nil {
 		t.Fatal(err)
 	}
 	submitted := e.envelope("conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{Body: "Implement the page, then ask about deployment"})

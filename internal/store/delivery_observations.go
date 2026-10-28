@@ -50,7 +50,7 @@ func (t *Tx) PutDeliveryObservation(ctx context.Context, row DeliveryObservation
 // ListDeliveryObservations never includes removed plan references or private
 // query nonces. Plans cannot overwrite independently recorded provider facts.
 func ListDeliveryObservations(ctx context.Context, q Querier, item string) ([]protocol.DeliveryObservation, error) {
-	work, err := GetWorkItem(ctx, q, item)
+	work, err := GetIssue(ctx, q, item)
 	if err != nil {
 		return nil, err
 	}

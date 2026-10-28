@@ -214,7 +214,7 @@ func TestFollowupReplacementAndCloseCancelUnclaimedInput(t *testing.T) {
 	}
 	evidence := h.ownerEvidence()
 	close := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "completed", Reason: "owner endpoint reached", Evidence: []protocol.WorkItemEvidence{evidence}}}
-	op := h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), close, rev(w.Revision)), CloseWorkItem{})
+	op := h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), close, rev(w.Revision)), CloseIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -225,7 +225,7 @@ func TestFollowupReplacementAndCloseCancelUnclaimedInput(t *testing.T) {
 		t.Fatal("close left active rules")
 	}
 	w = h.work(w.WorkItemID)
-	op = h.exec(owner, h.env("work_items.reopen", workTarget(w.WorkItemID), protocol.ReopenWorkItemPayload{Reason: "new scope"}, rev(w.Revision)), ReopenWorkItem{})
+	op = h.exec(owner, h.env("work_items.reopen", workTarget(w.WorkItemID), protocol.ReopenWorkItemPayload{Reason: "new scope"}, rev(w.Revision)), ReopenIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -246,7 +246,7 @@ func TestFollowupSnoozeExpiryAndManualSchedule(t *testing.T) {
 	if next.NextAt != r.NextAt || next.TriggerCount != 1 {
 		t.Fatal("manual check reset the schedule or failed to count its occurrence")
 	}
-	op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: "snoozed"}, rev(w.Revision)), UpdateWorkItem{})
+	op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: "snoozed"}, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -329,7 +329,7 @@ func TestFollowupFrozenTaskSetDoesNotTreatCancellationAsCompletion(t *testing.T)
 		t.Fatal("cancelled is not completed")
 	}
 	_, extra := h.createTask(owner, createTaskPayload{Title: "later", Spec: testSpec})
-	op := h.exec(owner, h.env("work_items.link_task", workTarget(w.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: extra.TaskID, StageIDs: []string{"investigate"}}, rev(w.Revision)), LinkWorkItemTask{})
+	op := h.exec(owner, h.env("work_items.link_task", workTarget(w.WorkItemID), protocol.LinkWorkItemTaskPayload{TaskID: extra.TaskID, StageIDs: []string{"investigate"}}, rev(w.Revision)), LinkIssueTask{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

@@ -15,7 +15,7 @@ import (
 func observerItem(t *testing.T, h *harness) protocol.WorkItem {
 	t.Helper()
 	item := protocol.WorkItem{WorkItemID: h.ids.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: h.clock.Now().UnixMilli(), UpdatedAt: h.clock.Now().UnixMilli(), WorkItemPlan: protocol.WorkItemPlan{Title: "observe", Project: DefaultProject, Intent: "track publication", Deliveries: []protocol.WorkItemDelivery{{DeliveryID: "delivery-1", Provider: "github", Repository: "example/project", Number: 7}}}}
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.SaveWorkItem(t.Context(), item, 0, map[string]any{}) }); err != nil {
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.SaveIssue(t.Context(), item, 0, map[string]any{}) }); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -111,7 +111,7 @@ func TestDeliveryObservationPreservesFactsAndStopsTerminalPolling(t *testing.T) 
 	var current protocol.WorkItem
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error
-		current, err = store.GetWorkItem(t.Context(), tx.Q(), item.WorkItemID)
+		current, err = store.GetIssue(t.Context(), tx.Q(), item.WorkItemID)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -151,7 +151,7 @@ func TestDeliveryObservationFailureProjectsAttentionAndRecovers(t *testing.T) {
 	checkColumn := func(want string) {
 		t.Helper()
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			view, err := views.WorkItem(t.Context(), tx.Q(), item.WorkItemID)
+			view, err := views.Issue(t.Context(), tx.Q(), item.WorkItemID)
 			if err == nil && view.Column != want {
 				t.Fatalf("column = %q, want %q", view.Column, want)
 			}
@@ -235,7 +235,7 @@ func TestDeliverySnoozeIntervalAndExplicitTerminalRefresh(t *testing.T) {
 	observerHello(t, h, "linux-1", "observer")
 	item.Status = "snoozed"
 	item.Revision = 2
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.SaveWorkItem(t.Context(), item, 1, map[string]any{}) }); err != nil {
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.SaveIssue(t.Context(), item, 1, map[string]any{}) }); err != nil {
 		t.Fatal(err)
 	}
 	a := pollDelivery(t, h, "linux-1", "observer")[0]
@@ -269,7 +269,7 @@ func observerQueue(t *testing.T, h *harness, count int) protocol.WorkItem {
 	for i := 2; i <= count; i++ {
 		item.Deliveries = append(item.Deliveries, protocol.WorkItemDelivery{DeliveryID: fmt.Sprintf("delivery-%d", i), Provider: "github", Repository: "example/project", Number: int64(i)})
 	}
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.SaveWorkItem(t.Context(), item, 1, map[string]any{}) }); err != nil {
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.SaveIssue(t.Context(), item, 1, map[string]any{}) }); err != nil {
 		t.Fatal(err)
 	}
 	observerHello(t, h, "linux-1", "observer")
@@ -380,7 +380,7 @@ func TestDeliveryCloseCancelsOutstandingQueries(t *testing.T) {
 				t.Fatal("fixture has no pending query")
 			}
 			closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "Owner ended responsibility", Evidence: []protocol.WorkItemEvidence{h.ownerEvidence(), {Kind: "delivery", Reference: "delivery-1", Summary: "Last verified provider state"}}}}
-			op := h.exec(owner, h.env("work_items.close", workTarget(item.WorkItemID), closure, rev(1)), CloseWorkItem{})
+			op := h.exec(owner, h.env("work_items.close", workTarget(item.WorkItemID), closure, rev(1)), CloseIssue{})
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
@@ -428,7 +428,7 @@ func TestDeliveryClosedItemManualRefreshRecoversFromTimeoutAndFailure(t *testing
 	observerHello(t, h, "linux-1", "observer")
 	old := pollDelivery(t, h, "linux-1", "observer")[0]
 	closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "Owner ended responsibility", Evidence: []protocol.WorkItemEvidence{h.ownerEvidence()}}}
-	op := h.exec(owner, h.env("work_items.close", workTarget(item.WorkItemID), closure, rev(1)), CloseWorkItem{})
+	op := h.exec(owner, h.env("work_items.close", workTarget(item.WorkItemID), closure, rev(1)), CloseIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

@@ -14,13 +14,13 @@ func workInvalid(format string, args ...any) error {
 	return protocol.Errorf(protocol.CodeInvalidRequest, format, args...)
 }
 
-// ValidateWorkItem validates a plan and preserves stable ledger identity.
-func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPlan) error {
+// ValidateIssue validates a plan and preserves stable ledger identity.
+func ValidateIssue(next protocol.WorkItemPlan, previous *protocol.WorkItemPlan) error {
 	if strings.TrimSpace(next.Title) == "" || strings.TrimSpace(next.Intent) == "" || next.Project == "" {
 		return workInvalid("title, intent and project are required")
 	}
 	for i, f := range next.Background {
-		if err := validateWorkItemEnum(fmt.Sprintf("background[%d].kind", i), f.Kind, protocol.SharedFactKindValues()); err != nil {
+		if err := validateIssueEnum(fmt.Sprintf("background[%d].kind", i), f.Kind, protocol.SharedFactKindValues()); err != nil {
 			return err
 		}
 		if strings.TrimSpace(f.Text) == "" || strings.TrimSpace(f.Source) == "" {
@@ -35,11 +35,11 @@ func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPla
 		if _, ok := stages[s.StageID]; ok {
 			return workInvalid("duplicate stage_id %s", s.StageID)
 		}
-		if err := validateWorkItemEnum(fmt.Sprintf("stages[%d].status", i), s.Status, protocol.WorkItemStageStatusValues()); err != nil {
+		if err := validateIssueEnum(fmt.Sprintf("stages[%d].status", i), s.Status, protocol.WorkItemStageStatusValues()); err != nil {
 			return err
 		}
 		if s.Status == "done" {
-			if err := ValidateWorkItemEvidenceAt(s.Evidence, fmt.Sprintf("stages[%d].evidence", i)); err != nil {
+			if err := ValidateIssueEvidenceAt(s.Evidence, fmt.Sprintf("stages[%d].evidence", i)); err != nil {
 				return err
 			}
 		}
@@ -137,14 +137,14 @@ func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPla
 		if _, ok := follows[f.FollowOnID]; ok {
 			return workInvalid("duplicate follow-on id")
 		}
-		if err := validateWorkItemEnum(fmt.Sprintf("follow_ons[%d].kind", i), f.Kind, protocol.WorkItemFollowOnKindValues()); err != nil {
+		if err := validateIssueEnum(fmt.Sprintf("follow_ons[%d].kind", i), f.Kind, protocol.WorkItemFollowOnKindValues()); err != nil {
 			return err
 		}
-		if err := validateWorkItemEnum(fmt.Sprintf("follow_ons[%d].status", i), f.Status, protocol.WorkItemFollowOnStatusValues()); err != nil {
+		if err := validateIssueEnum(fmt.Sprintf("follow_ons[%d].status", i), f.Status, protocol.WorkItemFollowOnStatusValues()); err != nil {
 			return err
 		}
 		if f.Status != "open" {
-			if err := ValidateWorkItemEvidenceAt(f.Evidence, fmt.Sprintf("follow_ons[%d].evidence", i)); err != nil {
+			if err := ValidateIssueEvidenceAt(f.Evidence, fmt.Sprintf("follow_ons[%d].evidence", i)); err != nil {
 				return err
 			}
 		}
@@ -155,7 +155,7 @@ func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPla
 	}
 	deliveries := map[string]protocol.WorkItemDelivery{}
 	for i, d := range next.Deliveries {
-		if err := validateWorkItemEnum(fmt.Sprintf("deliveries[%d].provider", i), d.Provider, protocol.WorkItemDeliveryProviderValues()); err != nil {
+		if err := validateIssueEnum(fmt.Sprintf("deliveries[%d].provider", i), d.Provider, protocol.WorkItemDeliveryProviderValues()); err != nil {
 			return err
 		}
 		if d.DeliveryID == "" || d.Repository == "" || d.Number <= 0 {
@@ -211,18 +211,18 @@ func ValidateWorkItem(next protocol.WorkItemPlan, previous *protocol.WorkItemPla
 	return nil
 }
 
-// ValidateWorkItemEvidence requires an explicit, attributable completion basis.
-func ValidateWorkItemEvidence(evidence []protocol.WorkItemEvidence) error {
-	return ValidateWorkItemEvidenceAt(evidence, "evidence")
+// ValidateIssueEvidence requires an explicit, attributable completion basis.
+func ValidateIssueEvidence(evidence []protocol.WorkItemEvidence) error {
+	return ValidateIssueEvidenceAt(evidence, "evidence")
 }
 
-// ValidateWorkItemEvidenceAt retains the containing field path for nested errors.
-func ValidateWorkItemEvidenceAt(evidence []protocol.WorkItemEvidence, field string) error {
+// ValidateIssueEvidenceAt retains the containing field path for nested errors.
+func ValidateIssueEvidenceAt(evidence []protocol.WorkItemEvidence, field string) error {
 	if len(evidence) == 0 {
 		return workInvalid("%s: completion requires evidence", field)
 	}
 	for i, e := range evidence {
-		if err := validateWorkItemEnum(fmt.Sprintf("%s[%d].kind", field, i), e.Kind, protocol.WorkItemEvidenceKindValues()); err != nil {
+		if err := validateIssueEnum(fmt.Sprintf("%s[%d].kind", field, i), e.Kind, protocol.WorkItemEvidenceKindValues()); err != nil {
 			return err
 		}
 		if strings.TrimSpace(e.Reference) == "" || strings.TrimSpace(e.Summary) == "" {
@@ -232,17 +232,17 @@ func ValidateWorkItemEvidenceAt(evidence []protocol.WorkItemEvidence, field stri
 	return nil
 }
 
-// ValidateWorkItemUpdateStatus preserves empty-as-unchanged update semantics.
-func ValidateWorkItemUpdateStatus(status protocol.WorkItemUpdateStatus) error {
-	return validateWorkItemEnum("status", status, protocol.WorkItemUpdateStatusValues())
+// ValidateIssueUpdateStatus preserves empty-as-unchanged update semantics.
+func ValidateIssueUpdateStatus(status protocol.WorkItemUpdateStatus) error {
+	return validateIssueEnum("status", status, protocol.WorkItemUpdateStatusValues())
 }
 
-// ValidateWorkItemDispositionAction checks an action when its task agreement is used.
-func ValidateWorkItemDispositionAction(action protocol.WorkItemTaskDispositionAction, field string) error {
-	return validateWorkItemEnum(field, action, protocol.WorkItemTaskDispositionActionValues())
+// ValidateIssueDispositionAction checks an action when its task agreement is used.
+func ValidateIssueDispositionAction(action protocol.WorkItemTaskDispositionAction, field string) error {
+	return validateIssueEnum(field, action, protocol.WorkItemTaskDispositionActionValues())
 }
 
-func validateWorkItemEnum[T ~string](field string, value T, allowed []T) error {
+func validateIssueEnum[T ~string](field string, value T, allowed []T) error {
 	if slices.Contains(allowed, value) {
 		return nil
 	}
@@ -258,15 +258,15 @@ func validateWorkItemEnum[T ~string](field string, value T, allowed []T) error {
 		Message: fmt.Sprintf("%s has invalid value %q; allowed values: %s", field, value, choices), Details: details}
 }
 
-// ValidateWorkItemClosure does not infer responsibility completion from task count.
-func ValidateWorkItemClosure(w protocol.WorkItem, c protocol.WorkItemClosure) error {
-	if err := validateWorkItemEnum("closure.kind", c.Kind, protocol.WorkItemClosureKindValues()); err != nil {
+// ValidateIssueClosure does not infer responsibility completion from task count.
+func ValidateIssueClosure(w protocol.WorkItem, c protocol.WorkItemClosure) error {
+	if err := validateIssueEnum("closure.kind", c.Kind, protocol.WorkItemClosureKindValues()); err != nil {
 		return err
 	}
 	if strings.TrimSpace(c.Reason) == "" {
 		return workInvalid("closure.reason is required")
 	}
-	if err := ValidateWorkItemEvidenceAt(c.Evidence, "closure.evidence"); err != nil {
+	if err := ValidateIssueEvidenceAt(c.Evidence, "closure.evidence"); err != nil {
 		return err
 	}
 	hasOwner := false
@@ -291,18 +291,18 @@ func ValidateWorkItemClosure(w protocol.WorkItem, c protocol.WorkItemClosure) er
 	return nil
 }
 
-// WorkItemPlanChanged reports a substantive planning change.
-func WorkItemPlanChanged(a, b protocol.WorkItemPlan) bool { return !reflect.DeepEqual(a, b) }
+// IssuePlanChanged reports a substantive planning change.
+func IssuePlanChanged(a, b protocol.WorkItemPlan) bool { return !reflect.DeepEqual(a, b) }
 
-// WorkItemTaskPlanChanged compares only the plan affecting an existing task.
+// IssueTaskPlanChanged compares only the plan affecting an existing task.
 // Renaming the work item or editing unrelated stages is not a new agreement.
-func WorkItemTaskPlanChanged(a, b protocol.WorkItemPlan, taskID string) bool {
+func IssueTaskPlanChanged(a, b protocol.WorkItemPlan, taskID string) bool {
 	if a.Intent != b.Intent || a.Project != b.Project || !reflect.DeepEqual(a.Background, b.Background) {
 		return true
 	}
-	return !reflect.DeepEqual(workItemTaskStages(a, taskID), workItemTaskStages(b, taskID))
+	return !reflect.DeepEqual(issueTaskStages(a, taskID), issueTaskStages(b, taskID))
 }
-func workItemTaskStages(plan protocol.WorkItemPlan, taskID string) map[string]protocol.WorkItemStage {
+func issueTaskStages(plan protocol.WorkItemPlan, taskID string) map[string]protocol.WorkItemStage {
 	stages := map[string]protocol.WorkItemStage{}
 	for _, stage := range plan.Stages {
 		stages[stage.StageID] = stage
@@ -321,10 +321,10 @@ func workItemTaskStages(plan protocol.WorkItemPlan, taskID string) map[string]pr
 	return out
 }
 
-// WorkItemTaskRetired reports whether an agreement newly became unavailable,
+// IssueTaskRetired reports whether an agreement newly became unavailable,
 // including when its stage was moved into a retired containing group.
-func WorkItemTaskRetired(a, b protocol.WorkItemPlan, taskID string) bool {
-	old, next := workItemTaskStages(a, taskID), workItemTaskStages(b, taskID)
+func IssueTaskRetired(a, b protocol.WorkItemPlan, taskID string) bool {
+	old, next := issueTaskStages(a, taskID), issueTaskStages(b, taskID)
 	for id, stage := range next {
 		if slices.Contains([]protocol.WorkItemStageStatus{protocol.WorkItemStageRetired, protocol.WorkItemStageCancelled}, stage.Status) && old[id].Status != stage.Status {
 			return true
@@ -333,8 +333,8 @@ func WorkItemTaskRetired(a, b protocol.WorkItemPlan, taskID string) bool {
 	return false
 }
 
-// WorkItemStageAcceptsWork excludes completed or retired containing groups.
-func WorkItemStageAcceptsWork(plan protocol.WorkItemPlan, id string) bool {
+// IssueStageAcceptsWork excludes completed or retired containing groups.
+func IssueStageAcceptsWork(plan protocol.WorkItemPlan, id string) bool {
 	stages := map[string]protocol.WorkItemStage{}
 	for _, stage := range plan.Stages {
 		stages[stage.StageID] = stage
@@ -349,11 +349,11 @@ func WorkItemStageAcceptsWork(plan protocol.WorkItemPlan, id string) bool {
 	return true
 }
 
-// ValidateWorkItemTaskDependencies checks the actual waiting graph after tasks
+// ValidateIssueTaskDependencies checks the actual waiting graph after tasks
 // cover multiple stages or work items. Stage DAG validation alone cannot detect
 // cycles introduced by that shared execution identity. Plans must already have
 // valid parent and dependency references.
-func ValidateWorkItemTaskDependencies(items []protocol.WorkItem, lifecycles map[string]protocol.TaskLifecycle, taskDependencies map[string][]string) error {
+func ValidateIssueTaskDependencies(items []protocol.WorkItem, lifecycles map[string]protocol.TaskLifecycle, taskDependencies map[string][]string) error {
 	type node struct {
 		item string // Empty for a task, otherwise the containing work item.
 		id   string

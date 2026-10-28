@@ -15,7 +15,7 @@ func TestWorkItemOwnerReadsHistoryAndStaleUpdate(t *testing.T) {
 	token := e.login(protocol.ScopeOwner)
 	plan := protocol.WorkItemPlan{Title: "Investigate", Intent: "Understand the issue", Stages: []protocol.WorkItemStage{{StageID: "research", Title: "Research", Status: "planned"}}}
 	var item protocol.WorkItem
-	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: plan}, app.CreateWorkItem{}), &item); err != nil {
+	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: plan}, app.CreateIssue{}), &item); err != nil {
 		t.Fatal(err)
 	}
 	path := "/api/v1/work-items/" + item.WorkItemID

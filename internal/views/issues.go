@@ -7,9 +7,9 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// WorkItem reads one dynamic plan and the task facts needed by its card.
-func WorkItem(ctx context.Context, q store.Querier, id string) (protocol.WorkItemView, error) {
-	w, err := store.GetWorkItem(ctx, q, id)
+// Issue reads one dynamic plan and the task facts needed by its card.
+func Issue(ctx context.Context, q store.Querier, id string) (protocol.WorkItemView, error) {
+	w, err := store.GetIssue(ctx, q, id)
 	if err != nil {
 		return protocol.WorkItemView{}, err
 	}
@@ -21,10 +21,10 @@ func WorkItem(ctx context.Context, q store.Querier, id string) (protocol.WorkIte
 	if err != nil {
 		return protocol.WorkItemView{}, err
 	}
-	return workItemView(ctx, q, w, facts, factsSeq)
+	return issueView(ctx, q, w, facts, factsSeq)
 }
 
-func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem, facts executionFacts, factsSeq int64) (protocol.WorkItemView, error) {
+func issueView(ctx context.Context, q store.Querier, w protocol.WorkItem, facts executionFacts, factsSeq int64) (protocol.WorkItemView, error) {
 	v := protocol.WorkItemView{WorkItem: w, FactsSeq: factsSeq, Column: "unplanned"}
 	seen := map[string]bool{}
 	var tasks []store.TaskRow
@@ -59,17 +59,17 @@ func workItemView(ctx context.Context, q store.Querier, w protocol.WorkItem, fac
 	if err != nil {
 		return v, err
 	}
-	projectWorkItemExecution(&v)
+	projectIssueExecution(&v)
 	v.Observations, err = store.ListDeliveryObservations(ctx, q, w.WorkItemID)
 	if err != nil {
 		return v, err
 	}
-	v.Column = WorkItemColumn(v)
+	v.Column = IssueColumn(v)
 	return v, nil
 }
 
-// WorkItemColumn uses attention first, retaining concurrent task facts in Tasks.
-func WorkItemColumn(v protocol.WorkItemView) string {
+// IssueColumn uses attention first, retaining concurrent task facts in Tasks.
+func IssueColumn(v protocol.WorkItemView) string {
 	if v.Status == "closed" {
 		return "closed"
 	}
@@ -116,9 +116,9 @@ func WorkItemColumn(v protocol.WorkItemView) string {
 	return "unplanned"
 }
 
-// WorkItems lists work-item concerns independently of terminal task filtering.
-func WorkItems(ctx context.Context, q store.Querier, project string, includeClosed bool, column string) (protocol.WorkItemPage, error) {
-	items, err := store.ListWorkItems(ctx, q, project, "")
+// Issues lists work-item concerns independently of terminal task filtering.
+func Issues(ctx context.Context, q store.Querier, project string, includeClosed bool, column string) (protocol.WorkItemPage, error) {
+	items, err := store.ListIssues(ctx, q, project, "")
 	if err != nil {
 		return protocol.WorkItemPage{}, err
 	}
@@ -138,7 +138,7 @@ func WorkItems(ctx context.Context, q store.Querier, project string, includeClos
 		if !includeClosed && item.Status == "closed" {
 			continue
 		}
-		v, err := workItemView(ctx, q, item, facts, factsSeq)
+		v, err := issueView(ctx, q, item, facts, factsSeq)
 		if err != nil {
 			return page, err
 		}
@@ -149,9 +149,9 @@ func WorkItems(ctx context.Context, q store.Querier, project string, includeClos
 	return page, nil
 }
 
-// projectWorkItemExecution aggregates distinct tasks; parent stages include their
+// projectIssueExecution aggregates distinct tasks; parent stages include their
 // children, but neither stage status nor completion is changed by this read.
-func projectWorkItemExecution(v *protocol.WorkItemView) {
+func projectIssueExecution(v *protocol.WorkItemView) {
 	v.Execution = &protocol.ExecutionCounts{}
 	tasks := map[string]*protocol.TaskExecutionView{}
 	for _, task := range v.Tasks {

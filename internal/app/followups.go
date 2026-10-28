@@ -33,7 +33,7 @@ func (c FollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		if x.Env.Target.Type != "work_item" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "followup creation targets a work item")
 		}
-		w, err := workItemForWrite(ctx, x, tx.Q())
+		w, err := issueForWrite(ctx, x, tx.Q())
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -92,7 +92,7 @@ func (c FollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != r.Revision {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "followup revision changed")
 	}
-	w, err := store.GetWorkItem(ctx, tx.Q(), r.WorkItemID)
+	w, err := store.GetIssue(ctx, tx.Q(), r.WorkItemID)
 	if err != nil {
 		return Outcome{}, err
 	}

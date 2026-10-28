@@ -16,7 +16,7 @@ func TestWorkItemChangesReachIncrementalContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	var item protocol.WorkItem
-	raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Track investigation", Intent: "Understand and discuss next steps", Stages: []protocol.WorkItemStage{}}}, app.CreateWorkItem{})
+	raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Track investigation", Intent: "Understand and discuss next steps", Stages: []protocol.WorkItemStage{}}}, app.CreateIssue{})
 	if err := json.Unmarshal(raw, &item); err != nil {
 		t.Fatal(err)
 	}
@@ -32,13 +32,13 @@ func TestWorkItemChangesReachIncrementalContext(t *testing.T) {
 	}
 	confirm("work_item.created", item.WorkItemID)
 	revision := item.Revision
-	raw = e.exec(owner, "work_items.update", protocol.Target{Type: "work_item", ID: item.WorkItemID}, &revision, protocol.UpdateWorkItemPayload{WorkItemPlan: item.WorkItemPlan, Status: "snoozed"}, app.UpdateWorkItem{})
+	raw = e.exec(owner, "work_items.update", protocol.Target{Type: "work_item", ID: item.WorkItemID}, &revision, protocol.UpdateWorkItemPayload{WorkItemPlan: item.WorkItemPlan, Status: "snoozed"}, app.UpdateIssue{})
 	if err := json.Unmarshal(raw, &item); err != nil {
 		t.Fatal(err)
 	}
 	confirm("work_item.updated", "snoozed")
 	revision = item.Revision
-	e.exec(owner, "work_items.close", protocol.Target{Type: "work_item", ID: item.WorkItemID}, &revision, protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "Owner ended this concern", Evidence: []protocol.WorkItemEvidence{{Kind: "owner_decision", Reference: "current_request", Summary: "Owner explicitly ends tracking"}}}}, app.CloseWorkItem{})
+	e.exec(owner, "work_items.close", protocol.Target{Type: "work_item", ID: item.WorkItemID}, &revision, protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "Owner ended this concern", Evidence: []protocol.WorkItemEvidence{{Kind: "owner_decision", Reference: "current_request", Summary: "Owner explicitly ends tracking"}}}}, app.CloseIssue{})
 	// Rebuilding after compaction must preserve an unseen closed item even
 	// though it has left the open work-item snapshot.
 	if err := e.b.Invalidate(t.Context(), thread); err != nil {
@@ -53,7 +53,7 @@ func TestWorkItemChangesReachIncrementalContext(t *testing.T) {
 func TestDeliveryFailureAppearsInContextAttention(t *testing.T) {
 	e := newEnv(t)
 	var item protocol.WorkItem
-	raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Delivery", Intent: "Track review", Stages: []protocol.WorkItemStage{}}}, app.CreateWorkItem{})
+	raw := e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Delivery", Intent: "Track review", Stages: []protocol.WorkItemStage{}}}, app.CreateIssue{})
 	if err := json.Unmarshal(raw, &item); err != nil {
 		t.Fatal(err)
 	}

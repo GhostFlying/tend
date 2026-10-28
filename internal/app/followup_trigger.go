@@ -172,7 +172,7 @@ func followupEvents(ctx context.Context, x *Exec, tx *store.Tx, events []Event) 
 		if err != nil {
 			return false, err
 		}
-		w, err := store.GetWorkItem(ctx, tx.Q(), r.WorkItemID)
+		w, err := store.GetIssue(ctx, tx.Q(), r.WorkItemID)
 		if err != nil {
 			return false, err
 		}
@@ -229,7 +229,7 @@ func (SweepFollowups) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if err != nil {
 			return Outcome{}, err
 		}
-		w, err := store.GetWorkItem(ctx, tx.Q(), r.WorkItemID)
+		w, err := store.GetIssue(ctx, tx.Q(), r.WorkItemID)
 		if err != nil {
 			return Outcome{}, err
 		}

@@ -32,7 +32,7 @@ func (s *Server) workItemContext(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid cursor")
 		}
-		return views.WorkItemContext(r.Context(), q, r.PathValue("id"), after)
+		return views.IssueContext(r.Context(), q, r.PathValue("id"), after)
 	})
 }
 func (s *Server) agentRollout(w http.ResponseWriter, r *http.Request) {

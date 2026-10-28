@@ -82,7 +82,7 @@ func (t *Tx) InsertWorkspace(ctx context.Context, w WorkspaceRow, now int64) err
 	if w.Mode == "" {
 		w.Mode = "new"
 	}
-	owner, err := GetTaskWorkItemOwner(ctx, t.Q(), w.TaskID)
+	owner, err := GetTaskIssueOwner(ctx, t.Q(), w.TaskID)
 	if err != nil {
 		return err
 	}

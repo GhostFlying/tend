@@ -7,10 +7,10 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// WorkItemContext returns a coherent context revision and a bounded source page.
-func WorkItemContext(ctx context.Context, q store.Querier, id string, after int64) (protocol.WorkItemContext, error) {
+// IssueContext returns a coherent context revision and a bounded source page.
+func IssueContext(ctx context.Context, q store.Querier, id string, after int64) (protocol.WorkItemContext, error) {
 	v := protocol.WorkItemContext{WorkItemID: id, Facts: []protocol.ContextFact{}, Sources: []protocol.ConversationItem{}}
-	w, err := store.GetWorkItem(ctx, q, id)
+	w, err := store.GetIssue(ctx, q, id)
 	if err != nil {
 		return v, err
 	}

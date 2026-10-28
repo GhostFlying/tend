@@ -411,7 +411,7 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			if err != nil {
 				return err
 			}
-			item, err := store.GetWorkItem(ctx, q, rule.WorkItemID)
+			item, err := store.GetIssue(ctx, q, rule.WorkItemID)
 			if err != nil {
 				return err
 			}
@@ -426,7 +426,7 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			if err != nil {
 				return err
 			}
-			item, err := store.GetWorkItem(ctx, q, choice.WorkItemID)
+			item, err := store.GetIssue(ctx, q, choice.WorkItemID)
 			if err != nil {
 				return err
 			}
@@ -444,7 +444,7 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			continue
 		}
 		if e.ObjectType == "work_item" {
-			item, err := views.WorkItem(ctx, q, e.ObjectID)
+			item, err := views.Issue(ctx, q, e.ObjectID)
 			if err != nil {
 				return err
 			}

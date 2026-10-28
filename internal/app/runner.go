@@ -272,7 +272,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := applyWorkItemDependencies(ctx, q, candidates); err != nil {
+	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
 		return Outcome{}, err
 	}
 	pick, ok := scheduler.Pick(scheduler.Host{

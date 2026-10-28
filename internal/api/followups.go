@@ -15,7 +15,7 @@ func (s *Server) followups(w http.ResponseWriter, r *http.Request) {
 	}
 	var page protocol.FollowupPage
 	err := s.store.Read(r.Context(), func(tx *store.ReadTx) error {
-		if _, err := store.GetWorkItem(r.Context(), tx.Q(), r.PathValue("id")); err != nil {
+		if _, err := store.GetIssue(r.Context(), tx.Q(), r.PathValue("id")); err != nil {
 			return err
 		}
 		var err error

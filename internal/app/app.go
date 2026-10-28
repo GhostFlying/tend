@@ -359,8 +359,8 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 				return err
 			}
 		}
-		if workItemNotice(e) {
-			if err := recordWorkItemNotice(ctx, x, tx, e, eventID); err != nil {
+		if issueNotice(e) {
+			if err := recordIssueNotice(ctx, x, tx, e, eventID); err != nil {
 				return err
 			}
 		}

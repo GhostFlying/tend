@@ -47,7 +47,7 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "duplicate work item")
 		}
 		desired[id] = true
-		if _, err := store.GetWorkItem(ctx, tx.Q(), id); err != nil {
+		if _, err := store.GetIssue(ctx, tx.Q(), id); err != nil {
 			return Outcome{}, errNotFound(err, "work item does not exist")
 		}
 	}
