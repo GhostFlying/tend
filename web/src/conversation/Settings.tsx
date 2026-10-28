@@ -191,6 +191,7 @@ export function Settings({ connection }: { connection: Connection }) {
         aria-label="主会话设置"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-busy={state.saving}
         aria-controls={open ? `${id}-menu` : undefined}
         title={`${modelLabel} · ${effortLabel(view?.effort ?? "")} ${status}`}
         onClick={() => (open ? close() : show())}
@@ -203,14 +204,18 @@ export function Settings({ connection }: { connection: Connection }) {
         }}
       >
         <span className={styles.triggerLabel}>{modelLabel}</span>
-        <span
-          className={styles.triggerEffort}
-          data-warning={warning || undefined}
-          role={status ? "status" : undefined}
-        >
-          {status || effortLabel(view?.effort ?? "")}
+        <span className={styles.triggerEffort} data-warning={warning || undefined}>
+          {effortLabel(view?.effort ?? "")}
         </span>
         <Chevron className={styles.chevron} data-open={open || undefined} />
+        {status && (
+          <span
+            className={styles.indicator}
+            data-warning={warning || undefined}
+            role="status"
+            aria-label={status}
+          />
+        )}
       </button>
       {open &&
         createPortal(

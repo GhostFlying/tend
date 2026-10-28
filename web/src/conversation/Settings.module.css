@@ -5,6 +5,7 @@
   max-width: 220px;
 }
 .trigger {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -36,6 +37,18 @@
 }
 .triggerEffort[data-warning] {
   color: var(--warn-text);
+}
+.indicator {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.indicator[data-warning] {
+  background: var(--warn);
 }
 .chevron {
   flex: none;
