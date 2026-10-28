@@ -24,6 +24,9 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
+// CurrentVersion is the journal schema installed by this binary.
+const CurrentVersion int64 = 10
+
 // Run phases.
 const (
 	PhaseClaimed    = "claimed"
@@ -100,6 +103,9 @@ func (j *Journal) migrate(ctx context.Context) error {
 		names = append(names, e.Name())
 	}
 	sort.Strings(names)
+	if int64(len(names)) != CurrentVersion {
+		return fmt.Errorf("journal: %d migrations do not match schema version %d", len(names), CurrentVersion)
+	}
 	return j.tx(ctx, func(tx *sql.Tx) error {
 		var version int
 		if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {

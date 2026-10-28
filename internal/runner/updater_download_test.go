@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/runner/journal"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -74,7 +76,7 @@ func TestReleaseBundleVerifiedBeforeIdempotentUpdaterSubmission(t *testing.T) {
 	artifact := []byte("runner binary fixture")
 	sum := sha256.Sum256(artifact)
 	artifactSHA := hex.EncodeToString(sum[:])
-	manifest := release.Manifest{Format: 1, ReleaseID: "release", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: 9, Max: 9}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "bin/runner", Size: int64(len(artifact)), SHA256: artifactSHA}}}
+	manifest := release.Manifest{Format: 1, ReleaseID: "release", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "bin/runner", Size: int64(len(artifact)), SHA256: artifactSHA}}}
 	raw, _ := json.Marshal(manifest)
 	manifestHash := sha256.Sum256(raw)
 	manifestSHA := hex.EncodeToString(manifestHash[:])
@@ -140,6 +142,39 @@ func TestReleaseBundleVerifiedBeforeIdempotentUpdaterSubmission(t *testing.T) {
 	defer mu.Unlock()
 	if submitted != 1 {
 		t.Fatalf("duplicate updater submissions %d", submitted)
+	}
+}
+
+func TestReleaseBundleRejectsPreviousJournalOnlyBeforeArtifacts(t *testing.T) {
+	r := controlRunner(t)
+	r.cfg.UpdaterBundleDir = t.TempDir()
+	body := []byte("candidate")
+	sum := sha256.Sum256(body)
+	digest := hex.EncodeToString(sum[:])
+	manifest := release.Manifest{Format: 1, ReleaseID: "previous-only", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion - 1, Max: journal.CurrentVersion - 1}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: int64(len(body)), SHA256: digest}}}
+	raw, _ := json.Marshal(manifest)
+	hash := sha256.Sum256(raw)
+	var artifacts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		if q.URL.Path == "/manifest" {
+			w.Write(raw)
+			return
+		}
+		artifacts.Add(1)
+		w.Write(body)
+	}))
+	defer server.Close()
+	r.cfg.ServerURL = server.URL
+	r.c.http = server.Client()
+	control := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance, UpgradeID: "batch", ReleaseID: manifest.ReleaseID, Upgrade: &protocol.RunnerUpgradeTarget{ManifestPath: "/manifest", ManifestSHA256: hex.EncodeToString(hash[:]), ManifestSize: int64(len(raw)), ArtifactBasePath: "/artifacts/"}}
+	if err := r.applyControl(t.Context(), &control, r.cfg.Now(), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.downloadAndSubmit(t.Context(), control); err == nil {
+		t.Fatal("a candidate excluding the actual journal version was accepted")
+	}
+	if artifacts.Load() != 0 {
+		t.Fatalf("journal compatibility was checked after downloading %d artifacts", artifacts.Load())
 	}
 }
 

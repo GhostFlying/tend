@@ -17,6 +17,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/runner/journal"
 )
 
 func (r *Runner) maybeUpgrade(ctx context.Context) {
@@ -109,7 +110,7 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 	if manifest.ReleaseID != control.ReleaseID {
 		return errors.New("release identity mismatch")
 	}
-	if !manifest.Protocol.Contains(protocol.CurrentRunnerProtocol) || !manifest.Storage.RunnerJournal.Contains(9) {
+	if !manifest.Protocol.Contains(protocol.CurrentRunnerProtocol) || !manifest.Storage.RunnerJournal.Contains(journal.CurrentVersion) {
 		return errors.New("release does not support runner protocol or journal")
 	}
 	for _, artifact := range manifest.Artifacts {
