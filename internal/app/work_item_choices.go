@@ -28,6 +28,9 @@ func (CreateWorkItemChoice) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 	if err != nil {
 		return Outcome{}, errNotFound(err, "work item does not exist")
 	}
+	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), w.WorkItemID); err != nil {
+		return Outcome{}, err
+	}
 	if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != w.Revision {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "work item revision changed")
 	}
@@ -117,6 +120,9 @@ func (cmd UpdateWorkItemChoice) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	c, err := store.GetWorkItemChoice(ctx, tx.Q(), x.Env.Target.ID)
 	if err != nil {
 		return Outcome{}, errNotFound(err, "choice does not exist")
+	}
+	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), c.WorkItemID); err != nil {
+		return Outcome{}, err
 	}
 	if c.Status != "open" || x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != c.Version {
 		pe := protocol.Errorf(protocol.CodeStaleRevision, "choice is no longer open at this version")

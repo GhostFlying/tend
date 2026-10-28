@@ -1,6 +1,6 @@
 # P1b：递归 Issue 控制与 primary task 接入
 
-状态：P1b1 聚合存储与纯规则代码、本地完整检查及独立评审已完成，未注册产品入口；PR CI/合并未完成，后续分片尚未实施，本批无发布。Refs: D121、D124、D126；依赖 [P0 总合同](issue-agent-refactor.md)及 [P1a 内部改名](issue-internal-names.md)。本批起点为 `d52d093741da41e78dc60effb0493a67058eded5`；子批开始和评审时各自固定实际 base/head。准备草稿不属于已实现代码。
+状态：P1b1 聚合存储与纯规则代码、本地完整检查及独立评审已完成，未注册产品入口；PR CI/合并未完成，P1b2a 内部定义命令与 legacy guard 已纳入，r3 最终定向 race、既有 integration 编译、完整 make check 和独立复审通过，本次状态记录已独立核对；公开入口未启用，CI/合并/部署未完成，其余分片尚未实施，本批无发布。Refs: D121、D124、D126；依赖 [P0 总合同](issue-agent-refactor.md)及 [P1a 内部改名](issue-internal-names.md)。本批起点为 `d52d093741da41e78dc60effb0493a67058eded5`；子批开始和评审时各自固定实际 base/head。准备草稿不属于已实现代码。
 
 ## 交付分片与启用门槛
 
@@ -9,12 +9,35 @@ P1b 保留 task/run 的独立状态机、冻结 spec、正式验收及 workspace
 | 分片 | 完整且可核查的行为 | 依赖与门槛 | 明确未启用 |
 | --- | --- | --- | --- |
 | P1b1 聚合存储与纯规则 | 追加控制/边/不可变快照；单 revision 原子存取；树、组合义务环、生命周期谓词；旧 saver 的中央拒绝边界 | P1a；migration 与事务故障测试、legacy 回归通过 | 无 canonical app/HTTP/tool 创建入口，无 task 接入、manager 自动推进或 Agent assignment |
-| P1b2 owner 内部命令 | 经 App.Execute 的 canonical create/update、父子/依赖修改和 owner 生命周期；逐入口 legacy guard；精确执行/unknown blocker；支持无执行义务时的取消闭环 | P1b1；来源/身份/版本/原子回滚、并发父项关闭测试；不允许创建 canonical task | 不接入公共 API；有活动 task 的 cancel 返回明确阻塞，不能声称已停止；无 Agent 转交/manager 控制 |
+| P1b2 owner 内部命令 | 经 App.Execute 的 canonical create/update、父子/依赖修改和 owner 生命周期；逐入口 legacy guard；精确执行/unknown blocker；支持无执行义务时的取消闭环 | P1b1；来源/身份/版本/原子回滚、并发父项关闭测试；不允许创建 canonical task | 不接入公共 API；canonical task 未启用，未来 cancel 记录意图而 finish_cancel 不越过在途责任；无 Agent 转交/manager 控制 |
 | P1b3 primary 读模型与上下文 | 显式 primary/reference 解析，stage-free detail/观察/上下文/证据范围、来源与 digest trigger；完成评估成员枚举改为 primary | P1b2；按下表逐消费者审计；验收 narrative 隔离、legacy 行为不变 | 无生产 canonical task 创建/领取入口；内部命令不越过此前生命周期 blocker；不启用未来 P5 attention/期限 |
 | P1b4 task 与控制闭环 | canonical task 内部创建/绑定、primary/ancestor 领取门槛、正式取消协调、close/reopen、completion review 和已有 durable 通知目标接入 | P1b2、P1b3；所有 primary 消费者及 guard/unknown/cancel 故障测试通过，才开放内部 canonical task 分支 | 无公共创建注册；P2/P3 Agent 选择及 P4 manager 自主行为、P5 完整唤醒合同未启用 |
 | P1c owner 接口 | 独立计划确定公开 DTO/ops/CLI；完整 P1b 闭环后注册新入口和生成 schema/type | P1b1–P1b4；重新评估实际 API/通信兼容边界 | 无未经用户确认的可见 UI；仍不部署 |
 
 分片按实际 patch 大小可进一步拆出纯读取与通知接入，但不能把安全前提留给后续补丁后先启用路径。P1b1 的存储原子性和纯规则本身是交付行为；P1b2 命令仅由 app 测试验证，HTTP/tools 分发器没有引用。P1b4 之前不允许 canonical task 创建；测试若需要持久活动事实，通过正式 app fixture 或明确标注的底层故障 fixture 构造，不把临时测试写入当作产品入口。禁止用环境开关或全局 bypass 绕过 guard。任何执行路径缺少取消/unknown/primary 安全闭环则保持不可达。
+
+## P1b2 实际应用合同与分批
+
+固定起点 `ffd0cf92510fce66496b81bef8c676ad08639263`，含已独立检查的 P2a 纯配置及基线测试同步修复；本批开始时工作树干净。按实际代码规模拆成下列两片，各自固定 review artifact、定向测试和 make check，不把前片当整个 P1b2 完成。
+
+| 子片 | 可验证行为 | 本片不提供的入口 | 状态 |
+| --- | --- | --- | --- |
+| P1b2a 定义与边界 | owner-only create/update，经 App.Execute 去重和版本/epoch；精确来源、组合图检查；当前/两快照一致；各 legacy 写入口及共享 fact 实际作用域围栏 | 不支持生命周期 action；无 canonical task/manager；无 API/tool/CLI 注册 | 代码、本地完整检查和独立复审已完成，本次状态记录已核对；公开入口未启用，CI/合并/部署未完成 |
+| P1b2b 生命周期 | pause/resume、cancel/finish_cancel、close/reopen/reparent/dependencies、同 owner assignment；覆盖本片可达持久责任/unknown 的 blocker，空责任可真实取消终结 | Agent 转交等真实 P2/P4 registry/runtime；task/native 投影在 P1b4/P4 入口启用前接入 | 待实施；完整 blocker 前不开放控制动作 |
+
+P1b2a 只声明私有 owner payload 和独立 canonical 命令；旧 CreateIssue/JSON/schema/工具保留当前含义。create 分配新 opaque ID，assignee 为认证 owner Subject、epoch1；不能采用历史行、写入任意 Agent 或其他 owner。plan 不接受 stage TaskIDs/default workspace task。update 必须同项目、活动或暂停、精确 aggregate revision/epoch；意外存在 primary task 时拒绝，直到后续正式 task 合同接入。Parent/dependency 必须 canonical/同项目，create 校验完整 ancestor 准入；定义编辑重检图，不把既有 child 当新激活。
+
+本轮单用户边界：信任唯一 owner 及其控制的主机、数据库和本地配置，不防 owner/root 主动篡改，也不设计多租户隔离。Tend 的业务角色/对象控制由服务端执行，CLI 原生工具限制按适配器实际能力落实；不承诺同 OS 用户下恶意进程隔离，不新建 OS 沙箱或多租户凭据体系。main/issue/consultation 禁原生执行是产品合同，不能仅靠 prompt；worker 沿现有 CLI 能力执行。必要边界是 agent 角色/Issue 作用域、冻结 task 与独立验收、外部资料不自动授权；重启、重复、迟到、并发和 unknown 属于正确性。新增校验必须对应实际入口及具体用户损失；未来 task/native 全量投影留对应接入批次，不为未启用子系统预建真实性证明账本。
+
+可选 source 是本次已授权 owner 请求显式引用的资料，保存 message ID 和精确 content revision；仅校验当前真实消息类型、存在、版本及未撤回。允许跨 Issue 引用既有 owner/assistant 消息，保留原 author；不重查原 request actor/result/event 证明链，不要求同 Subject 或 issue/ancestor 范围，也不等待 main/native turn 审批。引用不 BindMessage、不转交责任、不建立 canonical 分类或 context baseline，也不把资料转换成 owner 授权。worker 独立通道的来源适配留 P6，不能伪造当前没有的消息入口；P4 agent 自动来源准入单独在实际执行入口校验，不能复用此 owner 资料读取规则放权。
+
+r3 计划修复两项真实正常路径：legacy UpdateIssue 的 source 经 claimPlanCommit 可绕过 association/fact 局部围栏，重新纳入 owner 已移除的 canonical 残留义务；planned stage/open follow-on 接受空 summary 证据后冻结历史，导致以后无法完成。前者在最窄共同 legacy planning attachment 包装中复用既有精确 guard，正式 decision/choice 回答保持原路径；后者对全部提供的 evidence 复用领域基本校验，再冻结历史。
+
+plan 相同且无 source 时，返回当前 Result，不设置 NoEffect/events/outbox/Notify，复用既有 persistOutcome 保存成功 receipt；重复请求仍 Authorize 并返回原结果，即使后来 revision 已变。显式新 source 或同消息新 content revision，即使 plan 相同也保存真实 revision、两快照和 source/reason；省略 source 不清历史。事件使用明确的过去时映射，后片 close 必须生成 issue.closed 供验证证据读取，不能拼出 issue.close。
+
+legacy ContextCommand 不能只围栏 target。新 fact 按规范化 global/item/project 的真实 SQL 作用域检查；supersedes 另查旧 fact 的持久 scope/item/project；prepare 只在实际确认/退休 shared fact 写前检查其范围。无 canonical、不同项目或真正 local legacy 操作保留，已审 fact 的无事实变化确认不一概拒绝。legacy plan commit、association、existing-fact dedup、新 fact 和初始化来源均通过共同 legacy planning attachment 边界：仅在当前 execution 对应 logical 未 completed、该 message 尚未 attached 时，检查其 active canonical association/pending source obligation 会否触发 0046；缺 logical、已完成或已附加且不新增影响时不误拒绝。保留正式 run/decision/observation 回执。所有拒绝须回滚事先新增的 legacy logical membership 与后续业务写，正常失败 request 审计可保留。
+
+P1b2b 的基线 context initializing 只限制新执行，不能凭 baseline0 阻止无真实义务的 create→cancel→finish_cancel。精确 source/logical/unknown/child/task/承诺另查；同 main thread 不同 turn/Issue 不归入此责任。关闭证据来自可信 app 已校验并持久化的 achieved endpoint/revision，不能以请求布尔值自报 proof；request/event 仅作审计与去重定位，不另建防本地改库的真实性证明链。P1b4 再验证混合等待：A parent B 且 A depends B、B task depends A task 是真实死锁；没有 A 显式依赖时父 task 先执行后 child task 的顺序合法，不把父 Issue 的 closure 等待变成父 task 派发等待。
 
 ## 身份、持久化与历史边界
 
@@ -48,6 +71,7 @@ Legacy 必须逐实际写入口 guard，不能只靠中央 saver 的迟到拒绝
 | app.CreateWorkItemChoice / UpdateWorkItemChoice | 直接读 issue 或解析 choice.WorkItemID 后拒绝，再写 choice/message/version |
 | app.FollowupCommand create | 复用 issueForWrite；其余 update/pause/resume/cancel/trigger 解析 rule.WorkItemID 后显式拒绝 |
 | app.taskIssue / BindIssueTask | 旧 task 分支拒绝 canonical；P1b4 新 binder 走完整聚合事务 |
+| app.OpenAgentConversation | 显式旧 background 创建请求先拒绝 canonical；不把深层 ensure/fact receipt 一概拒绝，manager 在 P4 接入 |
 | app.workItemUpgradeEvidence | 是证据读取，不按文件名误判写入；保留有效历史证据读取 |
 
 对每个旧 mutation 以其他字段均有效的 payload 验证 cutover 拒绝和业务零泄漏：current/revisions/spec/links/choice/followup/source binding/event/outbox 不变。保持 legacy-only 用例原行为。Run 结果、正式 decision 答复、delivery observation 等事实回执继续按原 task/run/版本校验接纳，不能一概因 primary canonical 而拒绝；事实接纳也不授旧入口修改 canonical 计划的权限。
@@ -58,7 +82,7 @@ Parent tree 单独无环；另建“完成义务图”，`A → B` 表示 A 完�
 
 新领取只继承 ancestor 的状态/授权准入，另检查任务 primary 的自身显式完成依赖和可选 stage 前置条件；不继承 parent 的全部 completion dependencies。必须证明 A 是 B 的 parent 且 A depends_on B 时，B task 可领取，A task 等待，B 验证完成后 A 可领取；ancestor pause 则确实阻止 B 的新领取。不能把 parent 等 child 的完成义务误投成 child 自等待。
 
-Prerequisite 满足要求 canonical closed + 实际 achieved completed endpoint + 服务端验证的持久证据，关联成功 `issues.close` 的 actor 去重域、request/event 与不可变 revision。Cancelled、declined、handed_off、superseded、legacy closed、导入 JSON 中自报 proof 均不能放行；缺证据返回 blocker，owner 可显式修改/移除/替换依赖。领域 `EvidenceVerified` 只能是服务端投影事实，不能成为 owner 请求布尔值。事实变化约束新领取，不隐式停止/重启现有 run 或改其 spec。
+Prerequisite 满足要求 canonical closed + 实际 achieved completed endpoint + app 正式 close 时已验证的持久证据及 revision，不重复扫描 request/actor/event 证明数据真实性。Cancelled、declined、handed_off、superseded、legacy closed 均不是 achieved 完成；缺证据返回 blocker，owner 可显式修改/移除/替换依赖。领域 `EvidenceVerified` 只能是服务端投影事实，不能成为 owner 请求布尔值。事实变化约束新领取，不隐式停止/重启现有 run 或改其 spec。
 
 | 动作 | 要求与结果 |
 | --- | --- |
@@ -70,9 +94,9 @@ Prerequisite 满足要求 canonical closed + 实际 achieved completed endpoint 
 | reparent | 移动子树无活动 responsible/native/logical turn、执行或 unknown；同项目/授权，完整图同事务重检；不移动/共享 workspace、不扩大来源授权 |
 | assign | 单 assignee；先推进 epoch 围栏旧控制，再核对旧 turn/unknown，最后启用新责任；旧 epoch 仅留事实。相同 owner 是 no-op；真实 Agent 转交在 P2/P4 前不可用 |
 
-P1b owner close 保守阻止活动 manager turn；P4 再定义“发起关闭的当前协调 turn”准确豁免，不广泛忽略活动轮。未来 attention 等义务尚无表时不能假称覆盖；存在的 decisions、source/逻辑责任和 completion review 必须查询。新增 P5 义务接入同一 blocker 合同后才启用其生产路径。
+P4 manager 入口启用前，owner close 必须阻止该 Issue 的真实活动 manager turn；P4 定义“发起关闭的当前协调 turn”准确豁免，不广泛忽略活动轮。未来 attention 等义务尚无表时不能假称覆盖；存在的 decisions、source/逻辑责任和 completion review 必须查询。新增 P5 义务接入同一 blocker 合同后才启用其生产路径。
 
-Unknown/blocker 使用实际持久表和身份：复用 `store/context_blockers.go`、`task_context_blockers.go`，查 task/action/run/lease/control/request/outbox，查 main_turns→conversation_messages→准确 conversation 的 starting/started、未完成 logical execution/context、`native_turn_receipts_pending`、recovery root/attempt/successor 及 compact/steer/handoff。`MainTurn.NativeReconciled` 是内存值，不能假造 SQL 列；main_turns 没有通用 unknown 状态。现有 HasActiveMainTurn 针对 main destination，不能直接当全部 manager 检测器。每类 blocker 返回具体 object/request/revision，重启后可复核，不重放 unknown。
+Unknown/blocker 按实际启用入口分批接入，使用真实持久身份和状态，不由缺少 event 推断无 unknown。P1b2b 先覆盖内部 owner 定义操作可达的 child、plan follow-on、source/逻辑责任与未决写入，基线 context initializing 不算活动执行；P1b4 开 canonical task 前必须完成 primary task/action/run、lease/control/request/outbox 的正式状态与验收检查，P4 开 manager/native 入口前完成其准确 conversation/execution/receipt/recovery 关联。复用已有 blocker，不在本片预建全库扫描器。`MainTurn.NativeReconciled` 是内存值、main_turns 没有通用 unknown 列；同 main thread 的无关 turn 不算本 issue 的责任。每项实际 blocker 给具体对象/请求及用户损失，重启能核对、unknown 不重放；这些未来前置门槛不表示已实现。
 
 ## primary / no-stage 消费者审计与分片落点
 
@@ -134,3 +158,37 @@ Task outcome 只给 primary manager；child outcome/escalation 给 parent 是另
 第二轮 make check 在包含独立基线测试修复的 base `242ff5200c7bda28c70de3c313ffef7a55d64717` 上通过，退出码 0，日志时段约 31 分 23 秒（app race 1846.234 秒），包含 Go 检查/race 与全部 Web 检查、281 个 Web 测试和构建。该轮前后 12 文件 r2 实施快照字节一致，patch SHA-256 为 `8f99a5d2fbb478ce8a28fec78312a9cdff8a4549d4255e5fa99b867d4d2c06c6`；随后仅更新本计划和总台账状态。原实施起点 `d52d093741da41e78dc60effb0493a67058eded5` 与首轮失败记录保留。尚无本批 PR CI、合并、部署或 live 验收结果。
 
 P1b4 还需验证 Issue 与 Task 的混合等待：A 为 B 的 parent 且 A 显式 depends_on B，再加 B task 依赖 A task，会形成真实派发死锁；仅 B task 依赖 A task、A 没有显式 depends_on B 时合法，不能把父 Issue 的 closure 义务误作父 task 的派发门槛。使用不同完成/执行节点及实际未满足事实建图，保留 live run 和冻结 spec；该接入仍属于 P1b4，不扩大本批基础启用范围。
+
+## P1b2a 实施快照
+
+owner 定义由独立 CanonicalOwnerIssueCommand 实现，只接受 create/update；旧 wire/DTO/协议/迁移不改。逐入口围栏包括 explicit background conversation 创建；LinkIssueTask 在 claim source/plan commit 之前拒绝，BindIssueTask 为独立调用再兜底。共享 fact 围栏按真实写集合，不扩大到正式 run/decision/observation 回执。旧 choice/followup 指向 canonical 的故障 fixture 明确只用于 guard，terminal storage fixture 只验证 legacy reopen 拒绝，不冒充产品 close 或 achieved proof。
+
+首轮 plain canonical 定向通过（2.311 秒）；随后覆盖新 canonical、既有 work item/choice/followup 及相关 logical 回归的定向 race 通过（201.457 秒）。该轮之后增加精确 source 拒绝、source binding 前置围栏、legacy reopen 与显式 background 创建的验证，增量 canonical race 已通过（154.143 秒），包含这些最终代码；integration-tag 全包仅编译通过，无真实模型调用。重新生成 schema/TypeScript 和工具定义后与基线逐字节一致。r1 独立 review 与根复核发现以下三项问题；完整检查未完成，PR CI/合并未完成。本片没有公共注册、生命周期命令、canonical task 或 manager runtime；P1b2 整体未完成，无部署或 live 验收。
+
+### P1b2a r1 评审与 r2 修正
+
+r1 规定 CLI 独立 review 指出两项 P2：非 owner association no-op/修改分支可能经残留 canonical source obligation 接纳新的 logical 责任，以及同证据 identity 附加 caller 伪 Observation/Upgrade 可落入历史。另有自查并经根复核采纳的多依赖排序问题：store 排序保存，而 create receipt 保留输入顺序，导致响应与 current/history 不一致。三项全部采纳，不把实施者自查当独立 review 结论。
+
+修正仅在 canonical save 前规范化依赖顺序；非 owner 的两处 association source attachment 前复用实际 INSERT 围栏，仍允许 owner 修正及已 attached/completed 的无新增影响引用；复用已有证据要求整个冻结值相等，拒绝同 identity 的附加伪快照。没有扩大角色、生命周期、task 或公开入口。
+
+新回归先在 r1 代码复现全部三项（预期 red，退出 1，1.354 秒），修复后同组通过（退出 0，1.340 秒）：多依赖 create/read/history 与后续 revision 后原 receipt 重放；stage/follow-on 各 Observation/Upgrade 伪副本及原冻结值的合法编辑；真实 owner 移除关联后 linked/unassigned no-op 拒绝、第二 attachment 分支回滚与 owner/已 attached/已 completed 负控。第二分支解锁分类只作精确故障 fixture，不冒充产品 owner 解锁功能。
+
+r1 完整 make check 已启动，但为等待这三项修正主动终止，退出 143；不计为通过或失败。r2 最终 canonical 与相关 legacy association/owner lock 定向 race 已通过，退出 0，154.125 秒，包含全部最终代码和上述正负控；增量独立核对和之后唯一完整检查尚未完成。r1 已通过的定向检查仍保留其原快照边界，不将其当 r2 全检结果。
+
+
+### P1b2a r2 评审与 r3 修正
+
+r2 独立 CLI review 确认前三项修复已存在，同时指出两项正常操作缺陷：legacy plan commit 仍能重新附加已移除关联的 canonical 来源义务，及 planned/open 状态可保存空摘要证据而使之后永远无法完成。两项均采纳。r2 完整检查为等待修复主动终止、退出 143，不计通过或失败。
+
+r3 对全部 attachReviewSource caller 做实际审计：claimPlanCommit、association、fact dedup/新 fact、初始化来源共用一个 legacy planning wrapper；decision 与 choice 的正式回答保留原专用校验和 attachment，owner 修正、已 attached 或 completed 的无新增影响行为保留。全部提供的 stage/follow-on evidence 在冻结前复用领域基本校验。新回归分别在 r2 复现（预期退出 1，空摘要组 0.447 秒、真实 legacy plan 组 0.192 秒），修复后全 canonical plain 通过（6.573 秒）。有效证据可在真实 create 后 update 成 done/resolved，无需改写冻结历史。
+
+同时按最新单用户合同删除 owner source 的 request/result/event、Subject 和跨 Issue 范围证明链，保留消息类型/存在、精确版本及未撤回校验。真实跨 Issue owner 资料可创建新 root，assistant 资料保留真实作者且不产生 binding/association/obligation；非 owner 命令仍拒绝。原内容修订 fixture 改用真实 assistant streaming→completed 更新路径，验证旧来源版本拒绝、新版本可保存，不再以 SQL 改正文证明该行为；该定向通过（0.162 秒）。r3 最终定向 race 已通过（退出 0，222.316 秒），覆盖全部 canonical、旧 association/owner lock 及 decision/choice/worker 正式回答相关回归；r3 独立复审和本地完整检查已完成，详细过程证据见下文。无新增公开/生命周期/task/manager 入口。
+
+
+### P1b2a r3 最终验证与 rebase
+
+r3 规定 CLI review 已运行且最终输出 clean，独立人工复审确认无 actionable findings；CLI 外层收到终止、退出 143，未取得正常 exit 0，不把输出结论改写成正常进程完成。本次四份状态文档增量已独立窄范围核对通过，随后仅精简顶部状态措辞，未改运行代码。
+
+原实施/评审 base 为 `ffd0cf92510fce66496b81bef8c676ad08639263`；rebase 后验证 base 为 `3fcc88b37ae2c71971dfd7c38facb8652037ed64`，两者 tree 完全一致。原 r3 实施 patch SHA-256 `cb0a8786e5670d91e83e6e0b9391e0bd0b3e458a641daf9792f36420ae59078c` 保留，完整检查前后 16 文件与该评审快照逐 hash 一致；本次仅状态文档变化，不改变运行代码。
+
+r1/r2 完整检查均为等待修复主动终止 143，不计通过或失败。r3 首个完整检查进程意外收到 TERM、退出 143，没有测试失败记录，也不计通过或失败；脱离交互进程的重跑最终通过、退出 0，UTC 18:28:06 至 19:02:18，app race 2016.963 秒、mainthread 388.341 秒，全部 Web 检查和构建通过。完整日志 SHA-256 为 `3bfe1500d1f55cbe7c4ea45d7ab14a77792c18268ca8eb6cb3ae5d4d54905801`。PR CI/合并仍未完成；本片无公开、生命周期、task 或 manager 入口，无部署和 live 验收。

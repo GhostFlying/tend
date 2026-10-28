@@ -19,6 +19,9 @@ func (OpenAgentConversation) Authorize(_ context.Context, x *Exec, _ store.Queri
 	return allowKinds(x.Principal, protocol.PrincipalOwner, protocol.PrincipalMainAgent)
 }
 func (OpenAgentConversation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), x.Env.Target.ID); err != nil {
+		return Outcome{}, err
+	}
 	id, err := ensureAgentConversation(ctx, x, tx, x.Env.Target.ID)
 	if err != nil {
 		return Outcome{}, err

@@ -89,6 +89,9 @@ func (c FollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if err != nil {
 		return Outcome{}, errNotFound(err, "followup does not exist")
 	}
+	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), r.WorkItemID); err != nil {
+		return Outcome{}, err
+	}
 	if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != r.Revision {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "followup revision changed")
 	}

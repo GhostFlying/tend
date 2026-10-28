@@ -18,7 +18,7 @@ func claimPlanCommit(ctx context.Context, x *Exec, tx *store.Tx, sourceMessageID
 	if sourceMessageID == "" {
 		return nil
 	}
-	if err := attachReviewSource(ctx, x, tx, sourceMessageID); err != nil {
+	if err := attachLegacyReviewSource(ctx, x, tx, sourceMessageID); err != nil {
 		return err
 	}
 	effectSource := sourceMessageID

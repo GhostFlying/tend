@@ -30,6 +30,9 @@ func taskIssue(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPayload,
 		if err != nil {
 			return item, nil, errNotFound(err, "work item does not exist")
 		}
+		if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), item.WorkItemID); err != nil {
+			return item, nil, err
+		}
 		if item.Revision != p.WorkItemRevision {
 			return item, nil, protocol.Errorf(protocol.CodeStaleRevision, "work item revision changed")
 		}
