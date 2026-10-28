@@ -646,10 +646,22 @@ func TestHandoffRetryRefreshesSourceBeyondRecentMessageFocus(t *testing.T) {
 		if i == 0 {
 			body = constraint
 		}
-		f.e.say(body)
+		message := f.e.say(body)
 		want := i + 1
 		eventually(t, "source completes owner exchange", func() bool {
 			return f.e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status='completed'`) == want
+		})
+		// Native completion leaves classification and fact review outstanding.
+		// Finish this exchange's real repair before queuing the next owner input,
+		// so the final handoff check does not drain twelve repairs in one budget.
+		eventually(t, "source completes logical exchange", func() bool {
+			var status string
+			if err := f.e.store.Read(ctx, func(tx *store.ReadTx) error {
+				return tx.Q().QueryRowContext(ctx, `SELECT status FROM logical_turns WHERE message_id=?`, message).Scan(&status)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			return status == "completed"
 		})
 	}
 	var lastSnapshot store.HandoffSnapshot
