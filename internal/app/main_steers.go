@@ -46,6 +46,13 @@ func (a *App) ClaimMainSteer(ctx context.Context, activeRequestID, threadID, tur
 		if active.Status != store.TurnStarted || active.ThreadID != threadID || active.TurnID != turnID {
 			return nil
 		}
+		var admitted bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE e.request_id=? AND e.repair=0 AND l.status='processing') AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending WHERE request_id=?)`, activeRequestID, activeRequestID).Scan(&admitted); err != nil {
+			return err
+		}
+		if !admitted {
+			return nil
+		}
 		paused, err := upgradePausesMain(ctx, tx.Q())
 		if err != nil || paused {
 			return err
@@ -228,13 +235,23 @@ func (a *App) ConsumeMainSteer(ctx context.Context, threadID, turnID, text, item
 		}
 		m.Status, m.NativeItemID, m.Reason = "consumed", itemID, ""
 		now := a.now().UnixMilli()
+		if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='pending_repair',reason='A late owner supplement requires review.',updated_at=? WHERE status='completed' AND logical_turn_id IN (SELECT e.logical_turn_id FROM logical_turn_executions e JOIN main_turns t ON t.request_id=e.request_id WHERE t.thread_id=? AND t.turn_id=?)`, now, threadID, turnID); err != nil {
+			return err
+		}
+		var stopped bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_messages lm JOIN logical_turns l ON l.logical_turn_id=lm.logical_turn_id WHERE lm.message_id=? AND l.status='stopped')`, m.MessageID).Scan(&stopped); err != nil {
+			return err
+		}
+		if stopped {
+			m.Status, m.Reason = "interrupted", "owner stopped the logical responsibility before its late consumption receipt"
+		}
 		if err := tx.PutMainSteer(ctx, m, now); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE outbox SET status='delivered',updated_at=? WHERE request_id=? AND status='unknown'`, now, requestID); err != nil {
 			return err
 		}
-		if err := a.insertMessageState(ctx, tx, m.MessageID, protocol.MessageProcessing, now); err != nil {
+		if err := a.insertMessageState(ctx, tx, m.MessageID, steerState(m.Status), now); err != nil {
 			return err
 		}
 		ok = true
@@ -244,6 +261,27 @@ func (a *App) ConsumeMainSteer(ctx context.Context, threadID, turnID, text, item
 		a.notifyChange()
 	}
 	return m, ok, err
+}
+
+// ConsumedMainSteers identifies witnessed user items that retained history must
+// include before it can settle the turn and reconstruct reply attribution.
+func (a *App) ConsumedMainSteers(ctx context.Context, threadID, turnID string) ([]store.MainSteer, error) {
+	var result []store.MainSteer
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT request_id FROM main_steers WHERE thread_id=? AND turn_id=? AND native_item_id<>''`, threadID, turnID)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			m, err := store.GetMainSteer(ctx, tx.Q(), id)
+			if err != nil {
+				return err
+			}
+			result = append(result, m)
+		}
+		return nil
+	})
+	return result, err
 }
 
 func (a *App) SettleMainSteers(ctx context.Context, threadID, turnID, status string) error {
@@ -257,6 +295,13 @@ func (a *App) SettleMainSteers(ctx context.Context, threadID, turnID, status str
 }
 
 func (a *App) settleMainSteers(ctx context.Context, tx *store.Tx, threadID, turnID, status string, now int64) error {
+	var pending bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM native_turn_receipts_pending p JOIN main_turns t ON t.request_id=p.request_id WHERE t.thread_id=? AND t.turn_id=?)`, threadID, turnID).Scan(&pending); err != nil {
+		return err
+	}
+	if pending {
+		return a.markMainSteersUncertain(ctx, tx, threadID, turnID, now)
+	}
 	rows, err := tx.Q().QueryContext(ctx, `SELECT request_id FROM main_steers WHERE thread_id=? AND (?='' OR turn_id=?) AND status IN ('sending','accepted','consumed')`, threadID, turnID, turnID)
 	if err != nil {
 		return err
@@ -286,6 +331,15 @@ func (a *App) settleMainSteers(ctx context.Context, tx *store.Tx, threadID, turn
 				return err
 			}
 			if incomplete {
+				if m.Reason != "awaiting classification and fact review" {
+					m.Reason = "awaiting classification and fact review"
+					if err := tx.PutMainSteer(ctx, m, now); err != nil {
+						return err
+					}
+					if err := a.insertMessageState(ctx, tx, m.MessageID, protocol.MessageProcessing, now); err != nil {
+						return err
+					}
+				}
 				continue
 			}
 		}
@@ -317,14 +371,47 @@ func (a *App) settleMainSteers(ctx context.Context, tx *store.Tx, threadID, turn
 }
 
 // BindMainToolSource freezes the first callback's source across native replay.
-func (a *App) BindMainToolSource(ctx context.Context, native, messageID, requestID string) (string, string, error) {
+func (a *App) BindMainToolSource(ctx context.Context, native, messageID, requestID string, item store.ToolUseRow) (string, string, error) {
+	changed := false
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO main_tool_sources(native_key,message_id,request_id) VALUES(?,?,?) ON CONFLICT DO NOTHING`, native, messageID, requestID); err != nil {
 			return fmt.Errorf("app: bind native source: %w", err)
 		}
-		return tx.Q().QueryRowContext(ctx, `SELECT message_id,request_id FROM main_tool_sources WHERE native_key=?`, native).Scan(&messageID, &requestID)
+		if err := tx.Q().QueryRowContext(ctx, `SELECT message_id,request_id FROM main_tool_sources WHERE native_key=?`, native).Scan(&messageID, &requestID); err != nil {
+			return err
+		}
+		var id, previous, status string
+		err := tx.Q().QueryRowContext(ctx, `SELECT u.message_id,COALESCE(m.reply_to,''),u.status FROM conversation_tool_uses u JOIN conversation_messages m ON m.message_id=u.message_id WHERE u.thread_id=? AND u.turn_id=? AND u.item_id=?`, item.ThreadID, item.TurnID, item.ItemID).Scan(&id, &previous, &status)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if previous == messageID {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `UPDATE conversation_messages SET reply_to=? WHERE message_id=?`, messageID, id); err != nil {
+			return err
+		}
+		changed = true
+		return a.insertToolUseEvent(ctx, tx, id, protocol.ToolStatus(status), a.now().UnixMilli())
 	})
+	if err == nil && changed {
+		a.notifyChange()
+	}
 	return messageID, requestID, err
+}
+
+func (a *App) MainToolSource(ctx context.Context, native string) (string, bool, error) {
+	var source string
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(ctx, `SELECT message_id FROM main_tool_sources WHERE native_key=?`, native).Scan(&source)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return source, err == nil, err
 }
 
 // NativeItemSources recovers an item's immutable reply binding for late native
@@ -382,13 +469,62 @@ func (a *App) settleReviewedMainSteers(ctx context.Context, tx *store.Tx, reques
 	if status != store.TurnCompleted && status != store.TurnInterrupted && status != store.TurnFailed {
 		return nil
 	}
-	var thread, turn string
-	err := tx.Q().QueryRowContext(ctx, `SELECT t.thread_id,t.turn_id FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?) AND e.repair=0 ORDER BY e.rowid LIMIT 1`, request).Scan(&thread, &turn)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
+	rows, err := tx.Q().QueryContext(ctx, `WITH RECURSIVE responsibility(id) AS (
+ SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?
+ UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON l.resumed_by=r.id)
+ SELECT DISTINCT t.thread_id,t.turn_id,t.status FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id
+ JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id
+ WHERE e.repair=0 AND l.status='completed' AND t.status IN ('completed','interrupted','failed') AND t.turn_id IS NOT NULL AND t.turn_id<>'' AND l.logical_turn_id IN (SELECT id FROM responsibility)`, request)
 	if err != nil {
 		return err
 	}
-	return a.settleMainSteers(ctx, tx, thread, turn, status, now)
+	type nativeTurn struct{ thread, turn, status string }
+	var turns []nativeTurn
+	for rows.Next() {
+		var turn nativeTurn
+		if err := rows.Scan(&turn.thread, &turn.turn, &turn.status); err != nil {
+			rows.Close()
+			return err
+		}
+		turns = append(turns, turn)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, turn := range turns {
+		if turn.status == store.TurnCompleted || turn.status == store.TurnInterrupted || turn.status == store.TurnFailed {
+			if err := a.settleMainSteers(ctx, tx, turn.thread, turn.turn, turn.status, now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Losing a session preserves known consumption while fencing unknown native
+// outcomes. Only matching terminal receipts may settle these steers later.
+func (a *App) markMainSteersUncertain(ctx context.Context, tx *store.Tx, thread, turn string, now int64) error {
+	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT request_id FROM main_steers WHERE thread_id=? AND turn_id=? AND status IN ('sending','accepted','consumed')`, thread, turn)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		m, err := store.GetMainSteer(ctx, tx.Q(), id)
+		if err != nil {
+			return err
+		}
+		if m.Status != "consumed" {
+			m.Status = "unknown"
+		}
+		m.Reason = "native execution history requires reconciliation; input will not be resent"
+		if err := tx.PutMainSteer(ctx, m, now); err != nil {
+			return err
+		}
+		if err := a.insertMessageState(ctx, tx, m.MessageID, protocol.MessageUnknown, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }

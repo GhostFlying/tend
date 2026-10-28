@@ -73,6 +73,7 @@ type Manager struct {
 	maintenanceBlocked bool
 	summaryActive      bool
 	lastActivity       time.Time
+	toolSourceMu       sync.Mutex        // serializes callback source binding with visible tool records
 	workMu             sync.Mutex        // serializes deliveries with fork snapshot acquisition
 	settled            map[string]string // turn ID -> final status, for turns that ended before Deliver saw them start
 	ownerSourcesReady  bool              // persisted toolset proves hosted source selection is installed
@@ -409,6 +410,8 @@ func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harne
 	if repair {
 		return nil
 	}
+	m.toolSourceMu.Lock()
+	defer m.toolSourceMu.Unlock()
 	phase := "started"
 	if ev.Kind == harness.EventItemCompleted {
 		phase = "completed:" + string(ev.Tool.Status)
@@ -434,9 +437,14 @@ func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harne
 	} else if found {
 		replyTo = prior
 	}
+	if source, found, err := m.app.MainToolSource(ctx, th.ID()+"/"+ev.TurnID+"/"+ev.ItemID); err != nil {
+		return err
+	} else if found {
+		replyTo = source
+	}
 	payload := map[string]any{"turn_id": ev.TurnID, "item_id": ev.ItemID, "reply_to": replyTo,
 		"tool": ev.Tool.Name, "input": ev.Tool.Input, "output": ev.Tool.Output, "status": ev.Tool.Status}
-	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID+"/"+phase, "conversation.record_tool_use", payload, app.RecordToolUse{})
+	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID+"/"+phase+"/source:"+replyTo, "conversation.record_tool_use", payload, app.RecordToolUse{})
 }
 
 // record executes a conversation write of the main agent under a request
@@ -523,7 +531,9 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		return harness.ToolResult{Text: string(body)}
 	}
 	var bindErr error
-	call.SourceMessageID, call.ParentRequestID, bindErr = m.app.BindMainToolSource(ctx, call.Native, call.SourceMessageID, call.ParentRequestID)
+	m.toolSourceMu.Lock()
+	call.SourceMessageID, call.ParentRequestID, bindErr = m.app.BindMainToolSource(ctx, call.Native, call.SourceMessageID, call.ParentRequestID, store.ToolUseRow{ThreadID: c.ThreadID, TurnID: c.TurnID, ItemID: c.CallID})
+	m.toolSourceMu.Unlock()
 	if bindErr != nil {
 		return harness.ToolResult{Text: "Could not persist the tool's source; no tool was executed."}
 	}

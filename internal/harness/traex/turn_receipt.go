@@ -27,9 +27,12 @@ func (t *thread) FindTurn(ctx context.Context, identity, knownTurn string) (harn
 			ID     string `json:"id"`
 			Status string `json:"status"`
 			Items  []struct {
-				ID   string `json:"id"`
-				Type string `json:"type"`
-				Text string `json:"text"`
+				ID      string `json:"id"`
+				Type    string `json:"type"`
+				Text    string `json:"text"`
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
 			} `json:"items"`
 		}
 		if err := json.Unmarshal(turnRaw, &turn); err != nil {
@@ -48,10 +51,19 @@ func (t *thread) FindTurn(ctx context.Context, identity, knownTurn string) (harn
 			return harness.TurnReceipt{}, false, fmt.Errorf("native history contains more than one matching execution")
 		}
 		found = true
-		receipt = harness.TurnReceipt{ID: turn.ID, Status: turn.Status, Raw: turnRaw}
+		receipt = harness.TurnReceipt{ID: turn.ID, Status: turn.Status, Raw: turnRaw, Items: []harness.Event{}}
 		for _, item := range turn.Items {
+			ev := harness.Event{Kind: harness.EventItemCompleted, TurnID: turn.ID, ItemID: item.ID, ItemType: item.Type, Text: item.Text}
+			if item.Type == harness.ItemUserMessage {
+				ev.Text = ""
+				for _, part := range item.Content {
+					ev.Text += part.Text
+				}
+				receipt.Items = append(receipt.Items, ev)
+			}
 			if item.Type == harness.ItemAgentMessage {
-				receipt.Messages = append(receipt.Messages, harness.Event{Kind: harness.EventItemCompleted, TurnID: turn.ID, ItemID: item.ID, ItemType: item.Type, Text: item.Text})
+				receipt.Messages = append(receipt.Messages, ev)
+				receipt.Items = append(receipt.Items, ev)
 			}
 		}
 	}

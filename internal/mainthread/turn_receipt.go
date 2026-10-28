@@ -6,6 +6,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"slices"
 	"time"
 )
 
@@ -36,6 +37,22 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 		if !found || (receipt.Status != "completed" && receipt.Status != "interrupted" && receipt.Status != "failed") {
 			continue
 		}
+		consumed, err := m.app.ConsumedMainSteers(ctx, th.ID(), receipt.ID)
+		if err != nil {
+			return err
+		}
+		completeSources := true
+		for _, source := range consumed {
+			if !slices.ContainsFunc(receipt.Items, func(item harness.Event) bool {
+				return item.ItemType == harness.ItemUserMessage && item.ItemID == source.NativeItemID && item.Text == source.InputText
+			}) {
+				completeSources = false
+				break
+			}
+		}
+		if !completeSources {
+			continue
+		}
 		rec.TurnID = receipt.ID
 		rec.Status = store.TurnStarted
 		if err := m.app.PutMainTurn(ctx, rec); err != nil {
@@ -51,11 +68,41 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 		if receipt.Status == "failed" {
 			state = protocol.AssistantFailed
 		}
-		for _, message := range receipt.Messages {
+		items := receipt.Items
+		if items == nil {
+			items = receipt.Messages
+		}
+		replyTo, sources := rec.MessageID, []string{rec.MessageID}
+		for _, message := range items {
 			if repair {
 				continue
 			}
-			payload := map[string]string{"body": message.Text, "reply_to": rec.MessageID, "turn_id": rec.TurnID, "item_id": message.ItemID, "status": string(state)}
+			if message.ItemType == harness.ItemUserMessage {
+				if _, _, err := m.app.ConsumeMainSteer(ctx, th.ID(), rec.TurnID, message.Text, message.ItemID); err != nil {
+					return err
+				}
+				source, ok, err := m.app.MainSteerByInput(ctx, th.ID(), rec.TurnID, message.Text)
+				if err != nil {
+					return err
+				}
+				if ok && source.NativeItemID == message.ItemID && message.ItemID != "" {
+					replyTo = source.MessageID
+					if !slices.Contains(sources, replyTo) {
+						sources = append(sources, replyTo)
+					}
+				}
+				continue
+			}
+			itemReplyTo, itemSources := replyTo, sources
+			if prior, refs, found, err := m.app.NativeItemSources(ctx, th.ID(), rec.TurnID, message.ItemID); err != nil {
+				return err
+			} else if found {
+				itemReplyTo, itemSources = prior, refs
+			}
+			payload := map[string]any{"body": message.Text, "reply_to": itemReplyTo, "turn_id": rec.TurnID, "item_id": message.ItemID, "status": string(state)}
+			if len(itemSources) > 1 {
+				payload["reply_sources"] = itemSources
+			}
 			if err := m.record(ctx, th, "native-receipt/"+rec.TurnID+"/"+message.ItemID, "conversation.record_agent_message", payload, app.RecordAgentMessage{Reconciled: true}); err != nil {
 				return err
 			}

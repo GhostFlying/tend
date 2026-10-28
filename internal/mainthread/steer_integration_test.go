@@ -118,7 +118,7 @@ func hostedOwnerSteerRealModel(t *testing.T, mode string) {
 	t.Logf("steer owner=%s accepted in original turn while tool awaited completion; consumption not yet witnessed", second)
 	close(release)
 	await("original native turn completes", func() bool {
-		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND status='completed'`, first) == 1
+		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND thread_id=? AND turn_id=? AND status='completed'`, first, call.ThreadID, call.TurnID) == 1
 	})
 	var body string
 	_ = e.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -131,7 +131,7 @@ func hostedOwnerSteerRealModel(t *testing.T, mode string) {
 	if e.count(`SELECT COUNT(*) FROM conversation_reply_sources s JOIN conversation_agent_messages a ON a.message_id=s.reply_id WHERE s.source_id=? AND a.thread_id=? AND a.turn_id=? AND a.status='completed'`, second, call.ThreadID, call.TurnID) == 0 {
 		t.Fatal("reply did not retain the exact consumed owner source")
 	}
-	if calls.Load() != 1 || opens.Load() != 1 || e.count(`SELECT COUNT(*) FROM main_turns`) != 1 || e.count(`SELECT COUNT(*) FROM main_steers WHERE message_id=? AND thread_id=? AND turn_id=? AND status='completed' AND native_item_id<>''`, second, call.ThreadID, call.TurnID) != 1 {
+	if calls.Load() != 1 || opens.Load() != 1 || e.count(`SELECT COUNT(*) FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.repair=0`) != 1 || e.count(`SELECT COUNT(*) FROM main_steers WHERE message_id=? AND thread_id=? AND turn_id=? AND status IN ('consumed','completed') AND native_item_id<>''`, second, call.ThreadID, call.TurnID) != 1 {
 		t.Fatal("duplicate tool, coordinator, turn, or missing native consumption proof")
 	}
 	if e.count(`SELECT COUNT(*) FROM tasks`) != 0 {

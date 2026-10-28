@@ -54,6 +54,101 @@ func withSteer(h *testkit.Harness, f func(context.Context, harness.Thread, strin
 	}
 }
 
+func TestToolDisplayUsesFrozenOwnerSourceRegardlessOfCallbackOrder(t *testing.T) {
+	for _, name := range []string{"item first", "callback first", "concurrent"} {
+		itemFirst := name == "item first"
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, testkit.NewHarness())
+			e.stop()
+			original := e.say("original action")
+			d, _, ok, err := e.app.NextDelivery(t.Context(), app.MainThreadDestination)
+			if err != nil || !ok {
+				t.Fatal(d, ok, err)
+			}
+			session, err := e.h.Open(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			th, err := session.StartThread(t.Context(), harness.ThreadConfig{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := e.app.RegisterAgentThread(t.Context(), "main", th.ID()); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.app.PutMainTurn(t.Context(), store.MainTurn{RequestID: d.RequestID, MessageID: original, ThreadID: th.ID(), TurnID: "turn", Status: store.TurnStarted}); err != nil {
+				t.Fatal(err)
+			}
+			latest := e.say("status question")
+			sd, ok, err := e.app.ClaimMainSteer(t.Context(), d.RequestID, th.ID(), "turn")
+			if err != nil || !ok {
+				t.Fatal(sd, ok, err)
+			}
+			steer, _, err := e.app.MainSteer(t.Context(), sd.RequestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			steer.InputText = "status-native"
+			if err := e.app.UpdateMainSteer(t.Context(), steer); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok, err := e.app.ConsumeMainSteer(t.Context(), th.ID(), "turn", steer.InputText, "user-status"); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			e.m.mu.Lock()
+			e.m.thread = th
+			e.m.active = &turn{turnID: "turn", requestID: d.RequestID, messageID: original, sourceMessageID: latest, sources: []string{original, latest}}
+			e.m.mu.Unlock()
+			ev := harness.Event{Kind: harness.EventItemStarted, TurnID: "turn", ItemID: "call", Tool: &harness.ToolUse{Name: "tasks_list", Input: `{}`, Status: protocol.ToolRunning}}
+			if itemFirst {
+				if err := e.m.recordToolUse(t.Context(), th, ev); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args, _ := json.Marshal(map[string]any{"source_message_id": original})
+			call := harness.ToolCall{ThreadID: th.ID(), TurnID: "turn", CallID: "call", Tool: "tasks_list", Arguments: args, UserText: steer.InputText, UserItemID: "user-status"}
+			var result harness.ToolResult
+			if name == "concurrent" {
+				results := make(chan harness.ToolResult, 1)
+				recorded := make(chan error, 1)
+				go func() { results <- e.m.onToolCall(t.Context(), call) }()
+				go func() { recorded <- e.m.recordToolUse(t.Context(), th, ev) }()
+				result = <-results
+				if err := <-recorded; err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				result = e.m.onToolCall(t.Context(), call)
+			}
+			if !result.Success {
+				t.Fatal(result)
+			}
+			if name == "callback first" {
+				if err := e.m.recordToolUse(t.Context(), th, ev); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ev.Kind = harness.EventItemCompleted
+			ev.Tool.Status = protocol.ToolCompleted
+			ev.Tool.Output = result.Text
+			if err := e.m.recordToolUse(t.Context(), th, ev); err != nil {
+				t.Fatal(err)
+			}
+			replay := harness.Event{Kind: harness.EventItemStarted, TurnID: "turn", ItemID: "call", Tool: &harness.ToolUse{Name: "tasks_list", Input: `{}`, Status: protocol.ToolRunning}}
+			if err := e.m.recordToolUse(t.Context(), th, replay); err != nil {
+				t.Fatal("replayed start conflicted after source correction", err)
+			}
+			if e.count(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m ON m.message_id=u.message_id WHERE u.item_id='call' AND m.reply_to=?`, original) != 1 {
+				t.Fatal("tool display did not follow selected action source")
+			}
+			if e.count(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m ON m.message_id=u.message_id WHERE u.item_id='call' AND m.reply_to=?`, latest) != 0 {
+				t.Fatal("tool display remained attached to status question")
+			}
+		})
+	}
+}
+
 func TestSteerReceiptsOrderReplyToAndFrozenTools(t *testing.T) {
 	h := testkit.NewHarness()
 	started := make(chan *testkit.FakeThread, 1)
@@ -152,11 +247,11 @@ func TestSteerReceiptsOrderReplyToAndFrozenTools(t *testing.T) {
 		t.Fatal("wrong final reply")
 	}
 	// Native replay keeps the original tool source even after a new owner input.
-	m, r, err := e.app.BindMainToolSource(t.Context(), "native-call", first, "first-request")
+	m, r, err := e.app.BindMainToolSource(t.Context(), "native-call", first, "first-request", store.ToolUseRow{})
 	if err != nil || m != first || r != "first-request" {
 		t.Fatal(err)
 	}
-	m, r, err = e.app.BindMainToolSource(t.Context(), "native-call", third, "third-request")
+	m, r, err = e.app.BindMainToolSource(t.Context(), "native-call", third, "third-request", store.ToolUseRow{})
 	if err != nil || m != first || r != "first-request" {
 		t.Fatal("tool source changed on replay")
 	}
