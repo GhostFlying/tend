@@ -68,6 +68,21 @@ const reply: ConversationItem = {
 };
 const streams = new Set<ServerResponse>();
 const writes: Envelope[] = [];
+const settings = {
+  enabled: true,
+  available: true,
+  revision: 1,
+  model: "gpt-6.1-sol",
+  effort: "medium",
+  models: [
+    {
+      id: "gpt-6.1-sol",
+      label: "GPT-6.1-Sol",
+      supported_efforts: ["medium", "high"],
+      default_effort: "medium",
+    },
+  ],
+};
 let dropAssociationReply = false;
 let dropLookupReply = false;
 let lostRequestID = "";
@@ -241,22 +256,7 @@ const server = createServer(async (req, res) => {
       more: false,
       event_seq: 1,
     });
-  if (p === "/api/v1/conversation/settings")
-    return json(res, {
-      enabled: true,
-      available: true,
-      revision: 1,
-      model: "gpt-6.1-sol",
-      effort: "medium",
-      models: [
-        {
-          id: "gpt-6.1-sol",
-          label: "GPT-6.1-Sol",
-          supported_efforts: ["medium", "high"],
-          default_effort: "medium",
-        },
-      ],
-    });
+  if (p === "/api/v1/conversation/settings") return json(res, settings);
   if (p === "/api/v1/conversation/handoff") return json(res, { enabled: false, revision: 1 });
   if (p.startsWith("/api/v1/requests/")) {
     if (dropLookupReply) return res.destroy();
@@ -278,6 +278,10 @@ const server = createServer(async (req, res) => {
       });
     }
     writes.push(e);
+    if (e.operation === "conversation.set_settings") {
+      Object.assign(settings, e.payload);
+      settings.revision++;
+    }
     if (e.operation === "conversation.set_associations") {
       if (e.expected_control_revision !== associations.revision)
         return json(res, {
@@ -326,6 +330,7 @@ const browser = await chromium.launch({
 });
 try {
   for (const width of [1505, 1280, 390]) {
+    settings.effort = "medium";
     associations.disposition = "linked";
     associations.items = names.map((title, i) => ({
       work_item_id: `work-${i}`,
@@ -335,12 +340,19 @@ try {
     }));
     const context = await browser.newContext({
       viewport: { width, height: width === 1505 ? 1045 : 900 },
+      hasTouch: width === 390,
+      isMobile: width === 390,
       serviceWorkers: "block",
       reducedMotion: "reduce",
     });
     const page = await context.newPage();
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
+    const consoleErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.text() === "Service Worker registration blocked by Playwright") return;
+      if (["warning", "error"].includes(message.type())) consoleErrors.push(message.text());
+    });
     page.setDefaultTimeout(15000);
     await page.goto(`http://127.0.0.1:${address.port}`);
     if (process.env.TEND_LAYOUT_FONT) {
@@ -351,8 +363,116 @@ try {
       await page.evaluate(() => document.fonts.ready);
     }
     await page.getByRole("button", { name: "上下文用量 42%" }).waitFor();
+    assert.equal(await page.title(), "tend");
+    assert.equal(new URL(page.url()).host, `127.0.0.1:${address.port}`);
+    assert.equal(await page.locator("vite-error-overlay").count(), 0);
+    const selector = page.getByRole("button", { name: "主会话设置", exact: true });
+    await selector.waitFor();
+    const before = await selector.boundingBox();
+    assert(before);
+    const labels: string[] = [];
+    await page.exposeFunction("recordSettingLabel", (label: string) => labels.push(label));
+    await selector.evaluate((element) => {
+      new MutationObserver(() => {
+        (window as unknown as { recordSettingLabel: (value: string) => void }).recordSettingLabel(
+          element.textContent ?? "",
+        );
+      }).observe(element, { subtree: true, childList: true, characterData: true });
+    });
+    let releaseSave!: () => void;
+    const saveHeld = new Promise<void>((done) => (releaseSave = done));
+    await page.route("**/api/v1/ops", async (route) => {
+      if (route.request().postDataJSON().operation === "conversation.set_settings") await saveHeld;
+      await route.continue();
+    });
+    await selector.click();
+    await page.getByRole("menuitem", { name: "思考强度", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: "high", exact: true }).click();
+    await selector.locator('[role="status"][aria-label="保存中"]').waitFor();
+    assert.equal(await selector.innerText(), "GPT-6.1-Sol\nmedium");
+    assert.deepEqual(await selector.boundingBox(), before, "saving must not move the selector");
+    releaseSave();
+    await page.waitForFunction(() =>
+      document.querySelector('[aria-label="主会话设置"]')?.textContent?.includes("high"),
+    );
+    assert(labels.every((label) => ["GPT-6.1-Solmedium", "GPT-6.1-Solhigh"].includes(label)));
+    await page.unroute("**/api/v1/ops");
+    const ring = page.getByRole("button", { name: "上下文用量 42%" });
+    const details = page.getByRole("dialog", { name: "上下文用量", exact: true });
+    const input = page.getByRole("textbox", { name: "消息", exact: true });
+    await input.focus();
+    assert.equal(await ring.innerText(), "", "percentage must only appear in details");
+    const focusBeforeHover = await page.evaluate(() =>
+      document.activeElement?.getAttribute("aria-label"),
+    );
+    await ring.hover();
+    await details.waitFor();
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.getAttribute("aria-label")),
+      focusBeforeHover,
+      "hover must not move keyboard focus",
+    );
+    await details.getByText("42% 已使用", { exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await details.waitFor({ state: "hidden" });
+    assert(await input.evaluate((element) => element === document.activeElement));
+    await page.mouse.move(1, 1);
+    await ring.hover();
+    await details.waitFor();
+    await details.getByRole("button", { name: "手动 compact", exact: true }).hover();
+    await page.waitForTimeout(250);
+    assert(await details.isVisible(), "pointer can enter and use details across the gap");
+    await ring.hover();
+    await page.waitForTimeout(250);
+    assert(await details.isVisible(), "details stay open when the pointer returns to the ring");
+    await selector.focus();
+    await page.keyboard.press("ArrowDown");
+    const settingsMenu = page.getByRole("menu", { name: "主会话设置菜单", exact: true });
+    await settingsMenu.waitFor();
+    await page.keyboard.press("ArrowRight");
+    await page.getByRole("menu", { name: "选择模型", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await settingsMenu.waitFor();
+    assert.equal(await selector.getAttribute("aria-expanded"), "true");
+    await page.keyboard.press("Escape");
+    await settingsMenu.waitFor({ state: "hidden" });
+    assert(await details.isVisible(), "the focused menu handles Escape before hover details");
+    await page.keyboard.press("Escape");
+    await details.waitFor({ state: "hidden" });
+    assert(await selector.evaluate((element) => element === document.activeElement));
+    await page.mouse.move(1, 1);
+    await ring.hover();
+    await details.waitFor();
+    await page.screenshot({ path: join(output, `context-hover-${width}.png`), fullPage: true });
+    await page.mouse.move(1, 1);
+    await details.waitFor({ state: "hidden" });
+    await selector.focus();
+    await page.keyboard.press("Tab");
+    assert(await ring.evaluate((element) => element === document.activeElement));
+    await details.waitFor();
+    await page.keyboard.press("Enter");
+    assert(await details.evaluate((element) => element === document.activeElement));
+    await page.keyboard.press("Tab");
+    assert(
+      await details
+        .getByRole("button", { name: "手动 compact", exact: true })
+        .evaluate((element) => element === document.activeElement),
+    );
+    await page.keyboard.press("Escape");
+    await details.waitFor({ state: "hidden" });
+    assert(await ring.evaluate((element) => element === document.activeElement));
+    if (width === 390) await ring.tap();
+    else await ring.click();
+    await details.waitFor();
+    await page.mouse.click(1, 1);
+    await details.waitFor({ state: "hidden" });
+    assert.deepEqual(consoleErrors, [], "composer interactions must not emit console errors");
     await page.getByText(owner.body!, { exact: true }).waitFor();
     await page.getByRole("textbox", { name: "消息", exact: true }).fill("主会话草稿保留");
+    await page
+      .getByRole("textbox", { name: "消息", exact: true })
+      .locator("..")
+      .screenshot({ path: join(output, `composer-after-${width}.png`) });
     await page.screenshot({ path: join(output, `tags-${width}.png`), fullPage: true });
     await page.getByRole("button", { name: "后台 Agent ▾" }).click();
     await page.getByRole("dialog", { name: "后台 Agent 会话" }).waitFor();
@@ -362,11 +482,11 @@ try {
       .getByRole("button")
       .filter({ hasText: names[0]! })
       .click();
-    const input = page.getByPlaceholder(new RegExp(names[0]!));
-    await input.waitFor();
-    assert((await input.getAttribute("placeholder"))?.includes(names[0]!));
-    assert.equal(await input.inputValue(), "");
-    await input.fill("后台独立草稿");
+    const backgroundInput = page.getByPlaceholder(new RegExp(names[0]!));
+    await backgroundInput.waitFor();
+    assert((await backgroundInput.getAttribute("placeholder"))?.includes(names[0]!));
+    assert.equal(await backgroundInput.inputValue(), "");
+    await backgroundInput.fill("后台独立草稿");
     await page.getByRole("button", { name: "上下文用量 42%" }).click();
     await page.getByRole("dialog", { name: "上下文用量", exact: true }).waitFor();
     const box = await page.getByRole("dialog", { name: "上下文用量", exact: true }).boundingBox();

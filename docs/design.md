@@ -286,3 +286,7 @@ D113 补充：程序可确定处理 owner 无自由文本、精确匹配持久�
 D114 当前运行边界：D45、D47、D48、D54、D59、D68、D94 及旧部署章节中的外挂行为仅保留为历史设计，不再提供入口。owner 登录只签发 owner token，旧 agent token 和非托管主 Agent 身份拒绝执行。主 Agent 工具只有一套托管 schema；历史 `addon_relay` 及 actor 来源仍按真实身份读取。runner 的 `worker-mcp` 和 provider 类型独立保留，server/runner 通信协议不变。
 
 D114 状态投影补充：主 Agent 的 `agent_conversations_list` 根据已认证的托管身份明确返回后台能力可用，与 owner API 的托管配置语义一致；`runtime_available` 表示能力已配置，会话排队、上下文就绪和运行失败仍由各自状态表达，不由存储查询的布尔零值推断运行时故障。
+
+## 14. Composer 设置与上下文详情（D73、D89、D111）
+
+模型与思考强度入口持续显示服务端确认的设置值，保存、待核对和错误状态独立提示，不将状态文字替换成强度值。上下文圆环默认只展示用量弧线，百分比保留在无障碍名称和详情中；鼠标悬停及键盘聚焦展示详情，指针可进入面板操作，也可返回圆环继续悬停，离开且焦点不在面板内时关闭。触屏保留点击入口，Escape 在 hover 或面板聚焦时均可关闭；从面板或圆环关闭时返回圆环焦点，hover 查看时保留原输入焦点。详见 `docs/plans/composer-settings-context-hover.md`。

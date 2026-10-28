@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Connection } from "../api/client.ts";
 import type {
@@ -17,21 +17,85 @@ export function ContextUsage({ connection }: { connection: Connection }) {
   const [usage, setUsage] = useState<AgentContextUsage | null>(null);
   const [history, setHistory] = useState<AgentCompactionPage | null>(null);
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const focusOnOpen = useRef(false);
+  const suppressFocus = useRef(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const panelID = useId();
   const position = useAnchoredPanel(open, trigger, 340);
+  const cancelClose = () => clearTimeout(closeTimer.current);
+  const show = () => {
+    cancelClose();
+    setOpen(true);
+  };
+  const leave = () => {
+    cancelClose();
+    // The panel is portaled with a small gap above the ring. Allow the pointer
+    // to cross it, and keep keyboard focus inside the details until it leaves.
+    closeTimer.current = setTimeout(() => {
+      if (
+        !trigger.current?.matches(":hover") &&
+        !panel.current?.matches(":hover") &&
+        !root.current?.contains(document.activeElement) &&
+        !panel.current?.contains(document.activeElement)
+      )
+        setOpen(false);
+    }, 200);
+  };
+  const close = useCallback(() => {
+    clearTimeout(closeTimer.current);
+    const restoreFocus =
+      root.current?.contains(document.activeElement) ||
+      panel.current?.contains(document.activeElement);
+    setOpen(false);
+    focusOnOpen.current = false;
+    if (restoreFocus) {
+      suppressFocus.current = true;
+      trigger.current?.focus();
+      suppressFocus.current = false;
+    }
+  }, []);
+  useEffect(() => {
+    if (!open || position.visibility === "hidden") return;
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        if (
+          root.current?.contains(document.activeElement) ||
+          panel.current?.contains(document.activeElement)
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        close();
+      }
+    };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [open, position.visibility, close]);
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !root.current?.contains(event.target) &&
+        !panel.current?.contains(event.target)
+      ) {
+        clearTimeout(closeTimer.current);
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [open]);
   useLayoutEffect(() => {
     if (open && position.visibility !== "hidden" && focusOnOpen.current) {
       panel.current?.focus();
       focusOnOpen.current = false;
     }
   }, [open, position.visibility]);
-  const close = () => {
-    setOpen(false);
-    focusOnOpen.current = false;
-    trigger.current?.focus();
-  };
   const [error, setError] = useState("");
   const operation = useDurableOp(client, `compact:${id}`);
   const base = `/api/v1/agent-conversations/${encodeURIComponent(id)}`;
@@ -80,36 +144,57 @@ export function ContextUsage({ connection }: { connection: Connection }) {
   );
   const percent = usage?.used_percentage;
   return (
-    <div className={styles.usage}>
+    <div
+      ref={root}
+      className={styles.usage}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "touch") show();
+      }}
+      onPointerLeave={leave}
+      onBlur={(event) => {
+        if (
+          !root.current?.contains(event.relatedTarget) &&
+          !panel.current?.contains(event.relatedTarget) &&
+          !root.current?.matches(":hover") &&
+          !panel.current?.matches(":hover")
+        ) {
+          cancelClose();
+          setOpen(false);
+        }
+      }}
+    >
       <button
         ref={trigger}
+        type="button"
         className={styles.ring}
         style={{ background: `conic-gradient(var(--accent) ${percent ?? 0}%,var(--border) 0)` }}
         aria-label={`上下文用量 ${percent === undefined ? "未测量" : percent + "%"}`}
         aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-controls={open ? panelID : undefined}
+        onFocus={() => {
+          if (!suppressFocus.current && trigger.current?.matches(":focus-visible")) show();
+        }}
         onClick={() => {
-          focusOnOpen.current = !open;
-          setOpen(!open);
+          show();
+          if (open && position.visibility !== "hidden") panel.current?.focus();
+          else focusOnOpen.current = true;
         }}
       >
-        <span>{percent === undefined ? "—" : percent + "%"}</span>
+        <span aria-hidden="true" />
       </button>
       {open &&
         createPortal(
           <div
             ref={panel}
+            id={panelID}
             tabIndex={-1}
             className={styles.popover}
             style={position}
             role="dialog"
             aria-label="上下文用量"
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.preventDefault();
-                e.stopPropagation();
-                close();
-              }
-            }}
+            onPointerEnter={cancelClose}
+            onPointerLeave={leave}
           >
             <h3>上下文 · {conversation?.title ?? "主 Agent"}</h3>
             <strong>{percent === undefined ? "尚无当前窗口测量" : `${percent}% 已使用`}</strong>

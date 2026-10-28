@@ -919,6 +919,10 @@ async function checkComposerOverlays() {
       if (width === 390) {
         const navigation = page.getByRole("navigation", { name: "视图", exact: true });
         await navigation.getByRole("button", { name: "对话", exact: true }).click();
+        await usage.waitFor();
+        assert.equal(await usage.getAttribute("aria-expanded"), "false");
+        await popover.waitFor({ state: "hidden" });
+        await usage.click();
         await popover.waitFor();
         await navigation.getByRole("button", { name: "待处理", exact: true }).click();
         await popover.waitFor({ state: "hidden" });
