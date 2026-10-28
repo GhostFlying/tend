@@ -1,6 +1,7 @@
 package traex
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,52 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
+
+func TestCompletedRolloutPreservesAttributionAndSupplementRedaction(t *testing.T) {
+	for _, kind := range []string{harness.ItemUserMessage, harness.ItemAgentMessage} {
+		raw, err := json.Marshal(map[string]any{"type": kind, "text": "private input marker", "content": []any{map[string]string{"text": "private input marker"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ev := completedRolloutEvent("thread", harness.Event{ItemID: "item", TurnID: "turn", ItemType: kind, Raw: raw})
+		var body map[string]any
+		if err := json.Unmarshal(ev.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if ev.Kind != "item.completed" || body["thread_id"] != "thread" || body["turn_id"] != "turn" || body["item_id"] != "item" || body["type"] != kind {
+			t.Fatal(ev, body)
+		}
+		if kind == harness.ItemUserMessage && bytes.Contains(ev.Body, []byte("private input marker")) {
+			t.Fatal("supplement plaintext escaped into run rollout")
+		}
+		if kind == harness.ItemAgentMessage && body["text"] != "private input marker" {
+			t.Fatal("assistant prose was lost", body)
+		}
+	}
+}
+
+func TestNativeLifecycleDoesNotRepeatSupplementalInput(t *testing.T) {
+	for _, kind := range []harness.EventKind{harness.EventTurnStarted, harness.EventTurnCompleted} {
+		raw := json.RawMessage(`{"threadId":"thread","turn":{"id":"turn","status":"completed","items":[{"id":"private-user","type":"userMessage","content":[{"type":"text","text":"private supplemental marker"}]}]}}`)
+		ev := nativeRolloutEvent("thread", harness.Event{Kind: kind, TurnID: "turn", TurnStatus: "completed", Raw: raw})
+		if bytes.Contains(ev.Body, []byte("private supplemental marker")) || bytes.Contains(ev.Body, []byte("private-user")) {
+			t.Fatal("lifecycle payload leaked user input")
+		}
+		var body struct {
+			ThreadID string `json:"thread_id"`
+			TurnID   string `json:"turn_id"`
+			Data     struct {
+				Turn struct{ ID, Status string } `json:"turn"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(ev.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.ThreadID != "thread" || body.TurnID != "turn" || body.Data.Turn.ID != "turn" || body.Data.Turn.Status != "completed" {
+			t.Fatal(string(ev.Body))
+		}
+	}
+}
 
 // fakeWorkers returns Workers that talk to a fake app-server; setup adds
 // to what the server answers.

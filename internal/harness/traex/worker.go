@@ -264,6 +264,11 @@ func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSp
 }
 
 func nativeRolloutEvent(threadID string, ev harness.Event) harness.WorkerEvent {
+	if ev.Kind == harness.EventTurnStarted || ev.Kind == harness.EventTurnCompleted {
+		// Native lifecycle payloads can repeat every user item in the turn.
+		// Only execution identity and status belong in worker run logs.
+		ev.Raw, _ = json.Marshal(map[string]any{"threadId": threadID, "turn": map[string]string{"id": ev.TurnID, "status": ev.TurnStatus}})
+	}
 	if ev.ItemType == harness.ItemUserMessage {
 		ev.Raw = json.RawMessage(`{"type":"userMessage"}`)
 	}
