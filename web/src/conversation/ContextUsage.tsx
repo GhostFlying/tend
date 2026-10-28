@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Connection } from "../api/client.ts";
 import type {
@@ -18,7 +18,20 @@ export function ContextUsage({ connection }: { connection: Connection }) {
   const [history, setHistory] = useState<AgentCompactionPage | null>(null);
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const focusOnOpen = useRef(false);
   const position = useAnchoredPanel(open, trigger, 340);
+  useLayoutEffect(() => {
+    if (open && position.visibility !== "hidden" && focusOnOpen.current) {
+      panel.current?.focus();
+      focusOnOpen.current = false;
+    }
+  }, [open, position.visibility]);
+  const close = () => {
+    setOpen(false);
+    focusOnOpen.current = false;
+    trigger.current?.focus();
+  };
   const [error, setError] = useState("");
   const operation = useDurableOp(client, `compact:${id}`);
   const base = `/api/v1/agent-conversations/${encodeURIComponent(id)}`;
@@ -74,19 +87,28 @@ export function ContextUsage({ connection }: { connection: Connection }) {
         style={{ background: `conic-gradient(var(--accent) ${percent ?? 0}%,var(--border) 0)` }}
         aria-label={`上下文用量 ${percent === undefined ? "未测量" : percent + "%"}`}
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          focusOnOpen.current = !open;
+          setOpen(!open);
+        }}
       >
         <span>{percent === undefined ? "—" : percent + "%"}</span>
       </button>
       {open &&
         createPortal(
           <div
+            ref={panel}
+            tabIndex={-1}
             className={styles.popover}
             style={position}
             role="dialog"
             aria-label="上下文用量"
             onKeyDown={(e) => {
-              if (e.key === "Escape") setOpen(false);
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                close();
+              }
             }}
           >
             <h3>上下文 · {conversation?.title ?? "主 Agent"}</h3>
@@ -141,7 +163,7 @@ export function ContextUsage({ connection }: { connection: Connection }) {
             ) : (
               <p>暂无记录</p>
             )}
-            <button onClick={() => setOpen(false)}>关闭</button>
+            <button onClick={close}>关闭</button>
           </div>,
           document.body,
         )}
