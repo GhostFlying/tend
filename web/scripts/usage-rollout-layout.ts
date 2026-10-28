@@ -30,6 +30,7 @@ let correction = false;
 let runsAvailable = true;
 let eventSeq = 1;
 let rolloutFailure = false;
+let rolloutEmpty = false;
 const taskID = "task_01M5YH00000000000000000000";
 const runID = "run_fixture";
 const task = {
@@ -210,6 +211,17 @@ const server = createServer(async (req, res) => {
       res.statusCode = 503;
       return json({ error: { code: "unavailable", message: "Fixture failure" } });
     }
+    if (rolloutEmpty)
+      return json({
+        run_id: runID,
+        observed: "running",
+        logs: [],
+        before: 0,
+        after: 0,
+        watermark: 0,
+        more_before: false,
+        more_after: false,
+      });
     const before = Number(url.searchParams.get("before"));
     const after = Number(url.searchParams.get("after"));
     const selected = before
@@ -546,6 +558,35 @@ try {
     assert.deepEqual(errors, []);
     await context.close();
     console.log(`PASS ${viewport.width}x${viewport.height}`);
+  }
+
+  // The first nonempty poll after an empty window can be a full newest page.
+  rolloutEmpty = true;
+  const backlogContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    serviceWorkers: "block",
+  });
+  try {
+    const backlog = await backlogContext.newPage();
+    const errors: string[] = [];
+    backlog.on("pageerror", (error) => errors.push(error.message));
+    await backlog.goto(`http://127.0.0.1:${address.port}/?task=${taskID}`);
+    const card = backlog.getByRole("region", { name: "执行过程与用量" });
+    await card.getByRole("button", { name: "展开执行步骤" }).click();
+    await card.getByRole("button", { name: /查看完整过程/ }).click();
+    const reader = backlog.getByRole("dialog", { name: "完整执行过程", exact: true });
+    await reader.getByText("尚无已采集记录。", { exact: true }).waitFor();
+    rolloutEmpty = false;
+    await reader.getByText("隔离记录 150", { exact: true }).waitFor();
+    await reader.getByRole("button", { name: "加载更早记录", exact: true }).click();
+    await reader.getByText("隔离记录 1", { exact: true }).waitFor();
+    assert.equal(await reader.getByText("隔离记录 150", { exact: true }).count(), 1);
+    assert.deepEqual(errors, []);
+    await backlog.screenshot({ path: join(output, "empty-backlog-390.png") });
+    console.log("PASS initially empty rollout retains paginated backlog");
+  } finally {
+    rolloutEmpty = false;
+    await backlogContext.close();
   }
 
   // A complete short history must not acquire a false "older" boundary when
