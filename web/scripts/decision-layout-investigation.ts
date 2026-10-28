@@ -152,6 +152,33 @@ const history = Array.from({ length: 14 }, (_, index): ConversationItem[] => {
   ];
 }).flat();
 const appendedHistory: ConversationItem[] = [];
+const sharedHistory: ConversationItem[] = Array.from({ length: 6 }, (_, index) => {
+  const seq = index + 1;
+  const agent = seq === 3 || seq === 5 || seq === 6;
+  return {
+    seq,
+    message_id: `msg_shared_${seq}`,
+    kind: "message",
+    author: agent ? "main_agent" : "owner",
+    body: [
+      "SHARED_ORIGINAL_INPUT",
+      "SHARED_SUPPLEMENT_INPUT",
+      "SHARED_REPLY_ONCE",
+      "SHARED_LATER_INPUT",
+      "SHARED_FINAL_ONCE",
+      "SHARED_MORE_OUTPUT",
+    ][index]!,
+    created_at: new Date(Date.UTC(2026, 9, 28, 1, 0, seq)).toISOString(),
+    ...(agent
+      ? {
+          reply_to: `msg_shared_${seq === 3 ? 2 : seq === 5 ? 4 : 1}`,
+          assistant_revision: 1,
+          assistant_state: "completed" as const,
+        }
+      : { state: "replied" as const }),
+  };
+});
+let sharedTranscript = false;
 
 let currentOptions = originalOptions;
 let decisionVisible = true;
@@ -166,6 +193,7 @@ const writes: Envelope[] = [];
 const streams = new Set<ServerResponse>();
 
 function reset(options = originalOptions) {
+  sharedTranscript = false;
   currentOptions = options;
   decisionVisible = true;
   upgradeVisible = true;
@@ -208,6 +236,7 @@ function snapshot(): Snapshot {
 }
 
 function conversation() {
+  if (sharedTranscript) return sharedHistory.slice(0, 5);
   const items = [...history, ...appendedHistory];
   if (!pendingOption) return items;
   return [
@@ -334,6 +363,42 @@ const server = createServer(async (req, res) => {
       total: items.length,
     });
   }
+  if (sharedTranscript && path === "/api/v1/conversation/blocks/msg_shared_1")
+    return sendJSON(res, {
+      position: 1,
+      trigger: sharedHistory[0],
+      items: [sharedHistory[5]],
+      more: false,
+      next_seq: 6,
+    });
+  if (sharedTranscript && path === "/api/v1/conversation/transcript")
+    return sendJSON(res, {
+      blocks: [
+        {
+          position: 1,
+          trigger: sharedHistory[0],
+          items: [sharedHistory[2], sharedHistory[4]],
+          more: true,
+          next_seq: 5,
+        },
+        {
+          position: 2,
+          trigger: sharedHistory[1],
+          items: [sharedHistory[2], sharedHistory[4]],
+          more: false,
+          next_seq: 5,
+        },
+        {
+          position: 4,
+          trigger: sharedHistory[3],
+          items: [sharedHistory[4]],
+          more: false,
+          next_seq: 5,
+        },
+      ],
+      event_seq: eventSeq,
+      more: false,
+    });
   if (path === "/api/v1/conversation/transcript")
     return sendJSON(res, {
       blocks: [...history, ...appendedHistory].reduce<unknown[]>((blocks, item, index, items) => {
@@ -1358,6 +1423,41 @@ async function checkDecisionContext() {
   }
 }
 
+async function checkSharedSteerTranscript() {
+  for (const width of [390, 1440]) {
+    reset();
+    sharedTranscript = true;
+    decisionVisible = false;
+    upgradeVisible = false;
+    const opened = await openPage(width, 900);
+    try {
+      const { page, errors } = opened;
+      const transcript = page.getByRole("region", { name: "对话记录", exact: true });
+      await transcript.getByText("SHARED_FINAL_ONCE", { exact: true }).waitFor();
+      assert.equal(await transcript.getByText("SHARED_REPLY_ONCE", { exact: true }).count(), 1);
+      assert.equal(await transcript.getByText("SHARED_FINAL_ONCE", { exact: true }).count(), 1);
+      const text = await transcript.innerText();
+      assert(text.indexOf("SHARED_SUPPLEMENT_INPUT") < text.indexOf("SHARED_REPLY_ONCE"));
+      assert(text.indexOf("SHARED_LATER_INPUT") < text.indexOf("SHARED_FINAL_ONCE"));
+      const more = transcript.getByRole("button", { name: "继续读取本轮消息", exact: true });
+      assert.equal(await more.count(), 1, "deduplication lost a source block's continuation");
+      await more.click();
+      await transcript.getByText("SHARED_MORE_OUTPUT", { exact: true }).waitFor();
+      assert.equal(await more.count(), 0);
+      assert.equal(await transcript.getByText("SHARED_REPLY_ONCE", { exact: true }).count(), 1);
+      assert.equal(await transcript.getByText("SHARED_FINAL_ONCE", { exact: true }).count(), 1);
+      assert.equal(errors.length, 0, errors.join("\n"));
+      assert.equal(writes.length, 0);
+      await page.screenshot({ path: join(output, `${browserName}-shared-steer-${width}.png`) });
+      console.log(
+        `PASS shared steer transcript ${browserName}-${width}: unique replies, source order, continuation`,
+      );
+    } finally {
+      await opened.context.close();
+    }
+  }
+}
+
 try {
   if (process.env.TEND_DECISION_CONTEXT === "1") {
     await checkDecisionContext();
@@ -1373,6 +1473,7 @@ try {
     await checkConstrainedDockScroll();
     await checkAttachmentDraftDock();
     await checkDecisionStates();
+    await checkSharedSteerTranscript();
   }
   await writeFile(
     join(output, `${browserName}-geometry.json`),

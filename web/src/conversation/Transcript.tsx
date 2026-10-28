@@ -1,26 +1,17 @@
-import { showTranscriptBlock } from "./background.ts";
-import type { TranscriptBlock } from "../api/generated/api.ts";
+import { buildTranscriptEntries, type TranscriptEntry } from "./transcriptBlocks.ts";
 import { notify } from "../app/notice.ts";
 // The scrolling conversation. It opens at the latest page and follows new
 // content only while the reader is near the bottom; otherwise it offers a
 // jump to the latest. Scrolling near the top reads the page before, and
 // the reading position stays where it was.
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useServices } from "../app/services.tsx";
 import { noOutbox } from "../queue/sendQueue.ts";
 import { ArrowDown } from "../shell/icons.tsx";
 import { StatusDot } from "../shell/StatusDot.tsx";
 import { useStore } from "../state/store.ts";
 import { AgentTurn, Divider, OutgoingRow, OwnerMessage, SystemMessage } from "./Messages.tsx";
-import { buildEntries, duration, processing, type Entry } from "./model.ts";
+import { buildEntries, duration, processing } from "./model.ts";
 import styles from "./Transcript.module.css";
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "./scrollAnchor.ts";
 
@@ -49,18 +40,12 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
       }
     : raw;
   const outbox = useStore(queue?.list ?? noOutbox);
-  const entries = useMemo<(Entry & { block?: TranscriptBlock })[]>(
+  const entries = useMemo<TranscriptEntry[]>(
     () =>
       blocks.supported === undefined
         ? []
         : blocks.supported
-          ? blocks.blocks.filter(showTranscriptBlock).flatMap((b) =>
-              buildEntries([b.trigger, ...(b.items ?? [])], []).map((e) => ({
-                ...e,
-                key: `${b.position}:${e.key}`,
-                block: b,
-              })),
-            )
+          ? buildTranscriptEntries(blocks.blocks)
           : buildEntries(conversation.items, outbox),
     [blocks.supported, blocks.blocks, conversation.items, outbox],
   );
@@ -240,21 +225,19 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
               case "outgoing":
                 return <OutgoingRow key={e.key} message={e.message} queue={queue} />;
               case "agent":
+                return <AgentTurn key={e.key} entry={e} />;
+              case "block-more":
                 return (
-                  <Fragment key={e.key}>
-                    <AgentTurn entry={e} />
-                    {e.block?.more && (
-                      <button
-                        onClick={() =>
-                          void live.queueView
-                            .moreBlock(e.block!)
-                            .catch((error) => notify(String(error), "warn"))
-                        }
-                      >
-                        继续读取本轮消息
-                      </button>
-                    )}
-                  </Fragment>
+                  <button
+                    key={e.key}
+                    onClick={() =>
+                      void live.queueView
+                        .moreBlock(e.block)
+                        .catch((error) => notify(String(error), "warn"))
+                    }
+                  >
+                    继续读取本轮消息
+                  </button>
                 );
             }
           })}
