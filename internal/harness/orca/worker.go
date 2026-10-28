@@ -23,8 +23,9 @@ type WorkerOptions struct {
 	Agent protocol.AgentKind
 	// Model and Effort override the agent's defaults when set; orca takes
 	// an effort only with a model.
-	Model  string
-	Effort string
+	Model      string
+	Effort     string
+	Acceptance *protocol.ExecutionProfile
 	// BridgeCommand and BridgeArgs start the runner's worker-mcp
 	// subcommand, which serves the run's tools to the agent.
 	BridgeCommand string
@@ -346,7 +347,7 @@ func (w *worker) openBridge(ctx context.Context) error {
 		tools = append(tools, harness.DownloadFileToolSpec)
 	}
 	if w.spec.AskOwner != nil {
-		tools = append(tools, harness.AskOwnerToolSpec)
+		tools = append(tools, harness.OwnerQuestionTool(w.spec.QuestionContext))
 	}
 	sock := filepath.Join(w.ws.opts.SocketDir, "tend-"+w.spec.RunID+".sock")
 	token := w.ws.opts.IDs.New(protocol.PrefixToken)
@@ -516,6 +517,7 @@ func (w *worker) launch(ctx context.Context, agent string) error {
 			return err
 		}
 	}
+	profile := harness.WorkerProfile(w.spec, w.ws.opts.Model, w.ws.opts.Effort, w.ws.opts.Acceptance)
 	prompt := w.prompt()
 	if w.st.Said != said(prompt) {
 		w.st.Said = said(prompt)
@@ -526,7 +528,7 @@ func (w *worker) launch(ctx context.Context, agent string) error {
 	for i := 0; ; i++ {
 		l, err := w.ws.opts.Client.LaunchAgent(ctx, LaunchOptions{
 			Dir: w.spec.Dir, Agent: agent, Worktree: workspaceSelector(w.wt), Prompt: prompt,
-			Model: w.ws.opts.Model, Effort: w.ws.opts.Effort, RetryLaunch: w.st.Launch,
+			Model: profile.Model, Effort: profile.Effort, RetryLaunch: w.st.Launch,
 		})
 		if err == nil {
 			return w.launched(ctx, l, prompt)

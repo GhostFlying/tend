@@ -63,6 +63,13 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 			role = "验收"
 		}
 		body = fmt.Sprintf("%s worker 需要你的回答：\n\n%s", role, d.Question)
+		if len(d.Worker.Issues) > 0 {
+			raw, err := json.Marshal(d.Worker.Issues)
+			if err != nil {
+				return err
+			}
+			body += "\n\n问题、影响与处理归属：\n" + string(raw)
+		}
 		if d.Worker.Evidence != "" {
 			body += "\n\n调查证据与背景：\n" + d.Worker.Evidence
 		}

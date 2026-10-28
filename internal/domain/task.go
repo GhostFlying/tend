@@ -18,11 +18,12 @@ const DefaultMaxImplementAttempts = 3
 
 // Spec is the content of one immutable task spec version.
 type Spec struct {
-	Observation *protocol.ObservationScope `json:"observation,omitempty"`
-	Goal        string                     `json:"goal"`
-	Scope       string                     `json:"scope,omitempty"`
-	Constraints []string                   `json:"constraints,omitempty"`
-	Acceptance  []string                   `json:"acceptance"`
+	AcceptanceExecution *protocol.ExecutionProfile `json:"acceptance_execution,omitempty"`
+	Observation         *protocol.ObservationScope `json:"observation,omitempty"`
+	Goal                string                     `json:"goal"`
+	Scope               string                     `json:"scope,omitempty"`
+	Constraints         []string                   `json:"constraints,omitempty"`
+	Acceptance          []string                   `json:"acceptance"`
 	// Delivery preserves the legacy commit-only wire representation.
 	Delivery string `json:"delivery"`
 	// Deliverables lists required outputs; absent means legacy Delivery.
@@ -88,6 +89,11 @@ func (s Spec) Executable() bool {
 
 // Validate checks the spec for values the ledger cannot act on.
 func (s Spec) Validate() error {
+	if p := s.AcceptanceExecution; p != nil {
+		if err := p.Validate(); err != nil {
+			return err
+		}
+	}
 	if s.Observation != nil {
 		if !s.Observation.Deployment && len(s.Observation.WorkItemIDs) == 0 {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "observation requires work_item_ids or deployment")
@@ -143,7 +149,7 @@ func (s Spec) Budget() int64 {
 
 // Equal reports whether two specs ask for the same thing.
 func (s Spec) Equal(o Spec) bool {
-	return observationEqual(s.Observation, o.Observation) && s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
+	return executionEqual(s.AcceptanceExecution, o.AcceptanceExecution) && observationEqual(s.Observation, o.Observation) && s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
 		s.Budget() == o.Budget() && slices.Equal(s.Constraints, o.Constraints) && slices.Equal(s.Acceptance, o.Acceptance) &&
 		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements) && slices.Equal(s.Inputs, o.Inputs) &&
 		s.ImplementationContext == o.ImplementationContext && equalSharedContext(s.SharedContext, o.SharedContext)
@@ -533,4 +539,11 @@ func RequestAcceptance(t Task, latest, generation, expectedRevision int64) (Deci
 		Actions: []ActionDraft{action},
 		Events:  []EventDraft{{Kind: "task.acceptance_requested", Body: map[string]any{"artifact_id": t.CurrentArtifactID, "generation": generation}}},
 	}, nil
+}
+
+func executionEqual(a, b *protocol.ExecutionProfile) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

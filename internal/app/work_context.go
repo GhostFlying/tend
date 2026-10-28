@@ -14,6 +14,8 @@ import (
 // boundary. It uses Scope, understood by older runners, rather than relying on
 // a new prompt field being interpreted by an old harness.
 func workerSpec(spec domain.Spec, role protocol.RunRole) (json.RawMessage, error) {
+	// Selection is negotiated separately; retain the legacy spec wire shape.
+	spec.AcceptanceExecution = nil
 	var b strings.Builder
 	b.WriteString(spec.Scope)
 	for _, c := range spec.SharedContext {

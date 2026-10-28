@@ -190,6 +190,7 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	t := s.register(res.Thread.ID, cfg.OnToolCall)
 	t.setModelDefaults(res)
 	t.setPermissionDefaults(res)
+	t.setNetworkPolicy(cfg, res)
 	t.setRolloutPath(res.Thread.Path)
 	return t, nil
 }
@@ -226,6 +227,7 @@ func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness
 	t.setToolHandler(cfg.OnToolCall)
 	t.setModelDefaults(res)
 	t.setPermissionDefaults(res)
+	t.setNetworkPolicy(cfg, res)
 	t.setRolloutPath(res.Thread.Path)
 	return t, nil
 }
@@ -365,17 +367,18 @@ type thread struct {
 	id     string
 	onTool harness.ToolHandler
 
-	mu          sync.Mutex
-	queue       []harness.Event
-	wake        chan struct{}
-	ended       bool
-	events      chan harness.Event
-	permissions harness.PermissionSettings
-	defaults    harness.ModelSelection
-	rolloutPath string
-	fork        bool
-	released    bool
-	releaseDone chan struct{}
+	mu            sync.Mutex
+	queue         []harness.Event
+	wake          chan struct{}
+	ended         bool
+	events        chan harness.Event
+	permissions   harness.PermissionSettings
+	networkPolicy map[string]any
+	defaults      harness.ModelSelection
+	rolloutPath   string
+	fork          bool
+	released      bool
+	releaseDone   chan struct{}
 }
 
 func newThread(s *Session, id string, onTool harness.ToolHandler) *thread {
@@ -477,7 +480,7 @@ func (t *thread) StartTurn(ctx context.Context, in harness.TurnInput) (string, e
 	err := t.s.conn.call(ctx, methodTurnStart, TurnStartParams{
 		ThreadID: t.id, UserMessageID: in.UserMessageID,
 		Model: in.Model, ModelProvider: in.ModelProvider, Effort: in.Effort,
-		Input: inputs,
+		Input: inputs, SandboxPolicy: t.turnNetworkPolicy(),
 	}, &res)
 	if err != nil {
 		return "", err

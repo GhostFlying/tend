@@ -34,7 +34,7 @@ func (w *worker) startupEvent(ctx context.Context, phase string) error {
 			diagnostic = s.Diagnostic
 		}
 	}
-	body, err := json.Marshal(map[string]any{"phase": phase, "attempts": attempts, "diagnostic": diagnostic})
+	body, err := json.Marshal(map[string]any{"phase": phase, "attempts": attempts, "diagnostic": diagnostic, "requested_execution": harness.WorkerProfile(w.spec, w.ws.opts.Model, w.ws.opts.Effort, w.ws.opts.Acceptance), "role": w.spec.Role})
 	if err != nil {
 		return err
 	}

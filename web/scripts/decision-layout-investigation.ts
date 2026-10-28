@@ -55,6 +55,39 @@ const heldTask: TaskSummary = {
 
 function workerDecision(options = currentOptions): DecisionView {
   return {
+    ...(process.env.TEND_DECISION_CONTEXT === "1"
+      ? {
+          briefing: {
+            revision: 1,
+            summary: "环境故障与外部取证缺口分别处理。",
+            owner_choice: "是否按现有证据交付，保留未核验项。",
+            source_message_id: "msg_context",
+            created_at: 1,
+            issues: [
+              {
+                issue_id: "scratch",
+                category: "environment",
+                summary: "临时目录写入受阻",
+                impact: "临时分析在内存中继续；不解释业务源码的访问失败。",
+                next_action: "修复执行环境",
+                actor: "main_agent",
+                status: "workaround",
+                source: "worker 执行结果",
+              },
+              {
+                issue_id: "source",
+                category: "evidence",
+                summary: "业务源码尚未核验",
+                impact: "根因仍为候选，不能宣称证实。",
+                next_action: "确认只读访问条件",
+                actor: "worker",
+                status: "open",
+                source: "代码读取结果",
+              },
+            ],
+          },
+        }
+      : {}),
     decision_id: "decision_fixture",
     options,
     question,
@@ -1291,18 +1324,56 @@ async function checkDecisionStates() {
   }
 }
 
+async function checkDecisionContext() {
+  for (const width of [390, 1440]) {
+    reset();
+    const { context, page, errors } = await openPage(width, 900);
+    try {
+      const card = cardFor(page);
+      await card.waitFor();
+      const explanation = card.getByRole("region", { name: "问题与决策说明" });
+      // section with aria-label is a named region; its text must not be folded.
+      await explanation.getByText("临时目录写入受阻", { exact: true }).waitFor();
+      assert.equal(await explanation.locator("details").count(), 0);
+      assert.equal(await explanation.getByText("业务源码尚未核验", { exact: true }).count(), 1);
+      assert.equal(await card.locator("details[open]").count(), 0);
+      await page.screenshot({
+        path: join(output, `decision-context-${width}.png`),
+        fullPage: true,
+      });
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        true,
+      );
+      await card.getByRole("button", { name: originalOptions[0]!, exact: true }).click();
+      await page.waitForFunction(() => !document.body.innerText.includes("Worker 提问"));
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0]!.operation, "decisions.respond");
+      assert.equal(writes[0]!.target.id, "decision_fixture");
+      assert.equal(errors.length, 0, errors.join("\n"));
+      console.log(`PASS visible decision context and original answer ${width}`);
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 try {
-  await checkLayoutMatrix();
-  await checkLowHeightAndSharedButtons();
-  await checkJumpRecovery();
-  await checkTranscriptExpansionWithoutFocus();
-  await checkFocusedTranscriptResizeFollowing();
-  await checkComposerOverlays();
-  await checkUsageKeyboard();
-  await checkInitialSettingsKeyboard();
-  await checkConstrainedDockScroll();
-  await checkAttachmentDraftDock();
-  await checkDecisionStates();
+  if (process.env.TEND_DECISION_CONTEXT === "1") {
+    await checkDecisionContext();
+  } else {
+    await checkLayoutMatrix();
+    await checkLowHeightAndSharedButtons();
+    await checkJumpRecovery();
+    await checkTranscriptExpansionWithoutFocus();
+    await checkFocusedTranscriptResizeFollowing();
+    await checkComposerOverlays();
+    await checkUsageKeyboard();
+    await checkInitialSettingsKeyboard();
+    await checkConstrainedDockScroll();
+    await checkAttachmentDraftDock();
+    await checkDecisionStates();
+  }
   await writeFile(
     join(output, `${browserName}-geometry.json`),
     `${JSON.stringify(geometry, null, 2)}\n`,

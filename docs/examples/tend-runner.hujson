@@ -16,6 +16,8 @@
   // optionally override the agent's defaults; orca takes effort only with
   // a model.
   // "worker": {"kind": "orca", "agent": "codex"},
+  // Independent acceptance defaults (omit to inherit worker model/effort):
+  // "worker": {"kind": "orca", "agent": "traex", "acceptance": {"model": "GPT-6.1-Sol", "effort": "xhigh"}},
 
   "repos": {
     "tend": {

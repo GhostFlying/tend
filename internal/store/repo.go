@@ -474,6 +474,7 @@ func (t *Tx) Release(ctx context.Context, name string) error {
 
 // DecisionRow is a question for the owner.
 type DecisionRow struct {
+	Briefing          *protocol.DecisionBriefing
 	Worker            *protocol.WorkerQuestionSource
 	DecisionID        string
 	TaskID            string
@@ -512,9 +513,13 @@ func GetDecision(ctx context.Context, q Querier, decisionID string) (DecisionRow
 		if err != nil {
 			return DecisionRow{}, err
 		}
-		d.Worker = &protocol.WorkerQuestionSource{RunID: w.RunID, Role: run.Role, SpecVersion: w.SpecVersion, QuestionKey: w.QuestionKey, Evidence: w.Evidence, QuestionMessageID: d.AskedMessageID}
+		d.Worker = &protocol.WorkerQuestionSource{RunID: w.RunID, Role: run.Role, SpecVersion: w.SpecVersion, QuestionKey: w.QuestionKey, Evidence: w.Evidence, Issues: w.Issues, QuestionMessageID: d.AskedMessageID}
 	} else if !errors.Is(workerErr, ErrNotFound) {
 		return DecisionRow{}, workerErr
+	}
+	d.Briefing, err = GetDecisionBriefing(ctx, q, decisionID)
+	if err != nil {
+		return DecisionRow{}, err
 	}
 	return d, nil
 }

@@ -267,8 +267,8 @@ func TestInstallConfiguresTheAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(traexConfig), "permission_mode = \"auto\"") || strings.Contains(string(traexConfig), "sandbox_mode") || strings.Contains(string(traexConfig), "approval_policy") {
-		t.Fatalf("Traex must use native auto mode without conflicting legacy permission settings: %s", traexConfig)
+	if !strings.Contains(string(traexConfig), "permission_mode = \"bypass_permissions\"") || strings.Contains(string(traexConfig), "sandbox_mode") || strings.Contains(string(traexConfig), "approval_policy") {
+		t.Fatalf("Traex must use native bypass mode without conflicting legacy permission settings: %s", traexConfig)
 	}
 	// Neither the work nor the owner's checkout sees the files.
 	if s := runGit(t, wt, "status", "--porcelain", "--untracked-files=all"); s != "" {

@@ -182,6 +182,7 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		return protocol.Assignment{}, err
 	}
 	if action.Kind == protocol.ActionAccept {
+		as.AcceptanceExecution = spec.AcceptanceExecution
 		ref, err := store.GetArtifactRef(ctx, q, action.TargetArtifactID)
 		if err != nil {
 			return protocol.Assignment{}, err
@@ -277,7 +278,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	pick, ok := scheduler.Pick(scheduler.Host{
 		ID: host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
-		TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
+		AcceptanceExecution: runtimeSupportsAcceptanceExecution(p.Runtime), TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
 	}, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil

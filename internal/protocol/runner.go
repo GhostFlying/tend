@@ -79,6 +79,8 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
+	AcceptanceExecution *ExecutionProfile `json:"acceptance_execution,omitempty"`
+	QuestionContext     bool              `json:"question_context,omitempty"`
 	// WorkerQuestions is negotiated before exposing ask_owner to the worker.
 	WorkerQuestions bool             `json:"worker_questions,omitempty"`
 	Questions       []WorkerQuestion `json:"questions,omitempty"`

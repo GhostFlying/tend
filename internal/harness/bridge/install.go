@@ -152,7 +152,7 @@ func checkOwn(path string) error {
 }
 
 // config is the agent's TOML configuration. A JSON string is a valid TOML
-// basic string. Traex uses native auto review; Codex retains its unattended
+// basic string. Traex uses native bypass permissions; Codex retains its unattended
 // worker policy (D38, D39).
 func config(agent protocol.AgentKind, command string, args []string) string {
 	q := func(s string) string {
@@ -169,7 +169,7 @@ func config(agent protocol.AgentKind, command string, args []string) string {
 	// expiry never deletes or answers the durable question.
 	permissions := "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n"
 	if agent == protocol.AgentTraex {
-		permissions = "permission_mode = \"auto\"\n"
+		permissions = "permission_mode = \"bypass_permissions\"\n"
 	}
 	return configHeader + "\n" + permissions + "check_for_update_on_startup = false\n" +
 		"\n[mcp_servers.tend_worker]\ncommand = " + q(command) + "\nargs = [" + strings.Join(quoted, ", ") + "]\n" +

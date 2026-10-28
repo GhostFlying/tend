@@ -74,7 +74,7 @@ var classes = map[string]class{
 	"work_item.created": intent, "work_item.updated": intent, "work_item.task_linked": intent,
 	"work_item.closed": result, "work_item.reopened": intent, "work_item.delivery_changed": result,
 	"task.relations_backlinks_updated": intent, "task.relations_updated": intent, "task.created": intent, "task.spec_updated": intent, "task.rating_changed": intent, "task.project_changed": intent, "task.control_changed": intent,
-	"task.implement_requested": intent, "task.acceptance_requested": intent, "decision.answered": intent,
+	"decision.explained": intent, "task.implement_requested": intent, "task.acceptance_requested": intent, "decision.answered": intent,
 	"task.started_over": intent, "task.workspace_abandoned": intent, "task.workspace_available": intent,
 	"task.completed": result, "task.cancelled": result,
 	"decision.opened": attention, "run.failed": attention, "run.unknown": attention, "run.lost": attention, "task.workspace_unavailable": attention,
@@ -478,7 +478,7 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 		}
 		var line string
 		switch e.Kind {
-		case "decision.opened", "decision.answered":
+		case "decision.opened", "decision.answered", "decision.explained":
 			d, err := store.GetDecision(ctx, q, e.ObjectID)
 			if err != nil {
 				return err
@@ -722,6 +722,12 @@ func decisionLine(d store.DecisionRow) string {
 	}
 	line := fmt.Sprintf("%s v%d%s: %s", d.DecisionID, d.Version, task, d.Question)
 	line += workerQuestionLine(d)
+	if d.Briefing != nil {
+		raw, _ := json.Marshal(d.Briefing)
+		line += "; coordinator briefing: " + string(raw)
+	} else {
+		line += "; coordinator briefing revision: 0"
+	}
 	if len(options) > 0 {
 		for i, o := range options {
 			if _, ok := effects[o]; ok {
@@ -772,6 +778,10 @@ func workerQuestionLine(d store.DecisionRow) string {
 	line := fmt.Sprintf("; worker %s run %s, spec v%d, question_key %q, question message %s", w.Role, w.RunID, w.SpecVersion, w.QuestionKey, w.QuestionMessageID)
 	if d.Status == store.DecisionOpen {
 		line += "; waiting in the original run and holding its execution slot"
+	}
+	if len(w.Issues) > 0 {
+		raw, _ := json.Marshal(w.Issues)
+		line += "; structured issues: " + string(raw)
 	}
 	if w.Evidence != "" {
 		line += "; investigation evidence: " + w.Evidence

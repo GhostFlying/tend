@@ -19,6 +19,7 @@ const specSchema = `{
     "deliverables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["commit", "report", "files"]}, "description": "Required outputs as an array of names, e.g. [\"report\", \"files\"] for a report and downloadable prototype. Do not use a boolean object. Combine commit/report/files as needed; report does not require Git changes."},
     "inputs": {"type":"array","description":"Explicit original file inputs for both implementation and acceptance. Pass file_id from conversation attachments, submitted artifact files or a prior task input; the server freezes metadata and provenance. Select the needed subset from tasks_read/artifacts_read without requiring re-upload or owner-provided IDs. A submitted artifact need not have passed acceptance. Follow-up relations do not inherit inputs. Binding failures must be corrected, not bypassed by moving IDs into prose.","items":{"type":"object","properties":{"file_id":{"type":"string"},"name":{"type":"string"},"media_type":{"type":"string"},"size":{"type":"integer"},"sha256":{"type":"string"},"source_message_id":{"type":"string"},"source_task_id":{"type":"string","description":"Server-frozen source; callers only need file_id."},"source_artifact_id":{"type":"string","description":"Server-frozen source; callers only need file_id."}},"required":["file_id"],"additionalProperties":false}},
     "observation": {"type":"object","description":"Explicit read-only production Tend facts required by this task and its independent acceptance. Both roles use read_observation. Does not grant owner API, chat, design background, SSH or browser access. Bind this before requiring live internal facts; an unavailable capability leaves the task queued.","properties":{"work_item_ids":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"deployment":{"type":"boolean"}},"additionalProperties":false},
+    "acceptance_execution": {"type":"object","description":"Optional independent acceptance model and reasoning effort. Requires a capable runner; omission preserves runner defaults.","properties":{"model":{"type":"string"},"effort":{"type":"string","enum":["minimal","low","medium","high","xhigh","max","ultra"]}},"required":["model"],"additionalProperties":false},
     "max_implement_attempts": {"type": "integer", "minimum": 0},
     "workspace": {
       "type": "object",
@@ -57,6 +58,7 @@ const relationsSchema = `{
 }`
 
 var schemas = map[string]string{
+	"decisions_explain":            argumentSchema(explainDecisionArgs{}),
 	"conversation_turn_adopt":      argumentSchema(protocol.AdoptClarificationPayload{}),
 	"conversation_turn_wait":       argumentSchema(protocol.TurnClarification{}),
 	"conversation_turn_read":       argumentSchema(turnReadArgs{}),

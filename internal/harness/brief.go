@@ -176,6 +176,9 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 	if spec.Guide != "" {
 		common = "You work in " + spec.Dir + ".\n\n" + spec.Guide + "\nKeep temporary files in " + spec.ScratchDir + ". "
 	}
+	if spec.Execution != nil {
+		fmt.Fprintf(&b, "\nRequested acceptance execution: model=%s, effort=%s (empty means native model default). This is requested configuration, not independent proof of the running model.\n", spec.Execution.Model, spec.Execution.Effort)
+	}
 	if spec.Role == protocol.RoleAccept {
 		instructions = "You are an independent reviewer for tend. " + common +
 			"The workspace is the task's own, holding the work to review exactly as submitted. Do not fix it: judge it. " +
