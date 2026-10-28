@@ -13,7 +13,7 @@ import (
 // ownerCommands are the writes the owner API accepts, by operation. Work
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
-var ownerCommands = commandMap(app.RegisterRepository{}, app.SetMessageAssociations{}, app.OpenAgentConversation{},
+var ownerCommands = commandMap(app.PutAgentCategory{}, app.RegisterRepository{}, app.SetMessageAssociations{}, app.OpenAgentConversation{},
 	app.FollowupCommand{Action: "create"},
 	app.FollowupCommand{Action: "update"},
 	app.FollowupCommand{Action: "pause"},

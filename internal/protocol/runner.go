@@ -69,6 +69,7 @@ type RunVerdict struct {
 // that the runner did not report; they never started, so the runner takes
 // them over as if it had just claimed them.
 type HelloResult struct {
+	AgentInventory     bool           `json:"agent_inventory,omitempty"`
 	RepositoryBindings bool           `json:"repository_bindings,omitempty"`
 	Control            *RunnerControl `json:"control,omitempty"`
 	// LeaseTTLMillis is the lease duration tend currently grants.

@@ -16,7 +16,7 @@ import (
 func TestLocalRepositoryControlPublishesWithoutRestart(t *testing.T) {
 	home := t.TempDir()
 	workspaces := gitws.New(gitws.Config{Home: home})
-	closeControl, err := startRepositoryControl(t.Context(), home, workspaces)
+	closeControl, err := startRepositoryControl(t.Context(), home, workspaces, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestLocalRepositoryControlPublishesWithoutRestart(t *testing.T) {
 	if revision := workspaces.BindingRevision(); revision != 1 {
 		t.Fatal("retry repeated mutation", revision)
 	}
-	if _, err := startRepositoryControl(t.Context(), home, gitws.New(gitws.Config{Home: home})); err == nil {
+	if _, err := startRepositoryControl(t.Context(), home, gitws.New(gitws.Config{Home: home}), nil); err == nil {
 		t.Fatal("another process took over the live control socket")
 	}
 }
@@ -54,7 +54,7 @@ func TestLocalRepositoryControlPublishesWithoutRestart(t *testing.T) {
 func TestLocalRepositoryControlSupportsLongHome(t *testing.T) {
 	home := filepath.Join(t.TempDir(), strings.Repeat("long-directory-", 12))
 	workspaces := gitws.New(gitws.Config{Home: home})
-	closeControl, err := startRepositoryControl(t.Context(), home, workspaces)
+	closeControl, err := startRepositoryControl(t.Context(), home, workspaces, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 const privateSentinel = "PRIVATE_SOURCE_AND_CREDENTIAL_SENTINEL"
@@ -239,10 +241,10 @@ func TestDefinitionsAndProjectionsAreDetached(t *testing.T) {
 	c.Agents[0].Model = "mutated"
 	p := d.Public()
 	p.Agents[0].Categories[0] = "mutated-again"
-	p.Agents[0].Purposes[0] = Consultation
-	p.Runtimes[0].DeclaredPurposes[0] = Consultation
+	p.Agents[0].Purposes[0] = string(Consultation)
+	p.Runtimes[0].DeclaredPurposes[0] = string(Consultation)
 	p.Agents[0].Availability.Available = true
-	p.SourceKind = Inline
+	p.SourceKind = protocol.AgentSourceInline
 	after, hash2 := publicBytes(t, d)
 	if !bytes.Equal(before, after) || hash != hash2 {
 		t.Fatal("caller mutation changed validated configuration")
@@ -256,7 +258,7 @@ func TestConfigurationNeverProvesAvailabilityOrActualModel(t *testing.T) {
 		if r.Availability.Available || r.Registration != "staged" {
 			t.Fatal("configured binding was called verified/available")
 		}
-		if r.Kind == HostedManager && r.Availability.Reason != "isolation_not_verified" {
+		if r.Kind == string(HostedManager) && r.Availability.Reason != "isolation_not_verified" {
 			t.Fatal("hosted isolation gate absent")
 		}
 	}
@@ -318,7 +320,7 @@ func TestSourceKindIsPublicAndChangesDigest(t *testing.T) {
 	if bytes.Equal(fileBytes, inlineBytes) || fileDigest == inlineDigest {
 		t.Fatal("public source-kind change missing from canonical bytes or hash")
 	}
-	if d.Public().SourceKind != LocalFile || inline.Public().SourceKind != Inline {
+	if d.Public().SourceKind != protocol.AgentSourceLocalFile || inline.Public().SourceKind != protocol.AgentSourceInline {
 		t.Fatal("validated typed source kind was not projected")
 	}
 	for _, v := range []*Definitions{d, inline} {

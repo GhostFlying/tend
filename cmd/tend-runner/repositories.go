@@ -77,7 +77,7 @@ func saveRepositorySocket(home, path string) error {
 }
 
 // startRepositoryControl owns a private local socket, never a network listener.
-func startRepositoryControl(ctx context.Context, home string, w *gitws.Workspaces) (func(), error) {
+func startRepositoryControl(ctx context.Context, home string, w *gitws.Workspaces, agents http.Handler) (func(), error) {
 	if err := w.LoadBindings(ctx); err != nil {
 		return nil, err
 	}
@@ -140,6 +140,9 @@ func startRepositoryControl(ctx context.Context, home string, w *gitws.Workspace
 		}
 	}
 	mux := http.NewServeMux()
+	if agents != nil {
+		mux.Handle("/agents/", agents)
+	}
 	mux.HandleFunc("GET /repositories", func(out http.ResponseWriter, _ *http.Request) {
 		out.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(out).Encode(repositoryStatus{Revision: w.BindingRevision(), Repositories: w.RepositoryBindings()})

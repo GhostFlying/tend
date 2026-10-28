@@ -28,6 +28,7 @@ import (
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
+	"github.com/GhostFlying/tend/internal/runner/agentcontrol"
 	"github.com/GhostFlying/tend/internal/runner/gitws"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
@@ -45,6 +46,7 @@ func (p profile) gitws() gitws.Profile {
 
 // config is the runner's configuration file.
 type config struct {
+	Agents           *agentcontrol.Config   `json:"agents,omitempty"`
 	DeliveryObserver deliveryObserverConfig `json:"delivery_observer"`
 	// ServerURL is tend's address, such as http://tend on the tailnet.
 	ServerURL            string `json:"server_url"`
@@ -91,6 +93,9 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "agents" {
+		os.Exit(runAgentsCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "repo" {
 		os.Exit(runRepositoryCommand(os.Args[2:]))
 	}
@@ -258,13 +263,20 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		workers = traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: cfg.Worker.TraexBin, Version: version, Log: log}, Model: cfg.Worker.Model, Effort: cfg.Worker.Effort, Acceptance: cfg.Worker.Acceptance})
 		workspaces = gitws.New(wsCfg)
 	}
+	agents, err := assembleAgentControl(ctx, home, cfg.HostID, cfg.Agents, time.Now, ids)
+	if err != nil {
+		return err
+	}
+	if agents != nil {
+		defer agents.Close()
+	}
+	var agentInventory func(context.Context) (protocol.LocalAgentConfiguration, error)
+	var agentChanges <-chan struct{}
+	if agents != nil {
+		agentInventory, agentChanges = agents.Status, agents.Changes()
+	}
 	var repositoryBindings func() []protocol.RunnerRepository
 	if runtime.GOOS != "windows" {
-		closeRepositoryControl, err := startRepositoryControl(ctx, home, workspaces)
-		if err != nil {
-			return err
-		}
-		defer closeRepositoryControl()
 		repositoryBindings = workspaces.RepositoryBindings
 	}
 	build, err := runnerBuild(version)
@@ -298,11 +310,22 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		return err
 	}
 	r := runner.New(runner.Config{
-		RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
+		AgentInventory: agentInventory, AgentChanges: agentChanges, RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
 		InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: cfg.UpdaterSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,
 	})
+	if runtime.GOOS != "windows" {
+		var agentHandler http.Handler
+		if agents != nil {
+			agentHandler = r.AgentInventoryHandler(agents.Handler())
+		}
+		closeRepositoryControl, err := startRepositoryControl(ctx, home, workspaces, agentHandler)
+		if err != nil {
+			return err
+		}
+		defer closeRepositoryControl()
+	}
 	log.Info("tend-runner running", "host", cfg.HostID, "home", home)
 	return r.Run(ctx)
 }

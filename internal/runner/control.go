@@ -136,6 +136,9 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	}
 	capabilities := []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
 	capabilities = append(capabilities, protocol.CapabilityRunMessages)
+	if r.cfg.AgentInventory != nil {
+		capabilities = append(capabilities, protocol.CapabilityAgentInventory)
+	}
 	for _, provider := range r.cfg.DeliveryProviders {
 		if r.cfg.DeliveryObserver != nil {
 			switch provider {

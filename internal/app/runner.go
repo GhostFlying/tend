@@ -404,6 +404,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		}
 		res.Control = &c
 		res.RepositoryBindings = slices.Contains(p.Runtime.Capabilities, protocol.CapabilityRepositoryBindings)
+		res.AgentInventory = p.Runtime.Protocol == protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityAgentInventory)
 	}
 	var events []Event
 	if changed {

@@ -46,6 +46,7 @@ Owner commands:
   retry <task_id> --kind implement|accept
   rate <task_id> <p0|p1|p2|p3>     rate a task: urgent, high, normal or low
   pause|resume|cancel <task_id>
+  category put|show <id>           manage global agent classifications
   repo register|show <name>       manage repositories online
   upgrade [start|status|retry|cancel] [--release <directory>] [--json]
   conversation handoff [--prepare-only | --status] [--json]
@@ -65,6 +66,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	switch cmd {
 	case "login":
 		return report(e, runLogin(ctx, e, rest))
+	case "category":
+		return report(e, runAgentCategory(ctx, e, rest))
 	case "repo":
 		return report(e, runRepository(ctx, e, rest))
 	case "upgrade":
