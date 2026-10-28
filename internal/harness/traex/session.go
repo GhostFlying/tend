@@ -445,7 +445,13 @@ func (s *Session) enqueueNative(threadID string, ev harness.Event) {
 			parent = s.parents[parent]
 		}
 		if ev.RequestUsage != nil {
-			ev.RequestUsage.ParentThreadID = s.parents[original]
+			// A buffered descendant may already carry its direct native parent.
+			// Learning another ancestor changes routing, not that identity.
+			if ev.RequestUsage.ParentThreadID == "" {
+				ev.RequestUsage.ParentThreadID = s.parents[original]
+			}
+		} else if ev.Kind == harness.EventChildRollout {
+			// Preserve the original child envelope when forwarding it again.
 		} else if ev.ContextUsage == nil && ev.Kind != harness.EventAgentMessageDelta {
 			raw, _ := json.Marshal(struct {
 				Thread string            `json:"thread_id"`

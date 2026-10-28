@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/GhostFlying/tend/internal/harness"
 	"testing"
+	"time"
 )
 
 func TestRequestUsagePreservesMissingCacheDetailAndNativeRequestIdentity(t *testing.T) {
@@ -58,5 +59,99 @@ func TestChildRequestUsesExplicitNativeLineageWithoutTurnCumulative(t *testing.T
 	s.mu.Unlock()
 	if n != 2 {
 		t.Fatal("counted a cumulative usage notification")
+	}
+}
+
+func TestNestedChildEventsKeepIdentityAcrossLateAncestorRouting(t *testing.T) {
+	for _, registeredFirst := range []bool{false, true} {
+		rootName := "late root registration"
+		if registeredFirst {
+			rootName = "registered root"
+		}
+		t.Run(rootName, func(t *testing.T) {
+			for _, order := range [][]string{
+				{"grandchild", "usage", "tool", "child"},
+				{"usage", "tool", "grandchild", "child"},
+				{"child", "grandchild", "usage", "tool"},
+				{"grandchild", "usage", "child", "tool"},
+			} {
+				t.Run(order[0]+"-"+order[1]+"-"+order[2]+"-"+order[3], func(t *testing.T) {
+					_, s := newFake(t)
+					var root *thread
+					if registeredFirst {
+						root = s.register("root", nil)
+					}
+					usage := json.RawMessage(`{"threadId":"grandchild","turnId":"g-turn","responseId":"g-response","usage":{"inputTokens":10,"outputTokens":2,"totalTokens":12}}`)
+					events := map[string]struct {
+						method string
+						params json.RawMessage
+					}{
+						"grandchild": {"thread/started", json.RawMessage(`{"thread":{"id":"grandchild","source":{"subAgent":{"thread_spawn":{"parent_thread_id":"child","depth":2}}}}}`)},
+						"child":      {"thread/started", json.RawMessage(`{"thread":{"id":"child","source":{"subAgent":{"thread_spawn":{"parent_thread_id":"root","depth":1}}}}}`)},
+						"usage":      {"rawResponse/completed", usage},
+						"tool":       {notifyItemStarted, json.RawMessage(`{"threadId":"grandchild","turnId":"g-turn","item":{"id":"g-tool","type":"commandExecution","command":"echo grandchild","status":"inProgress"}}`)},
+					}
+					for _, name := range order {
+						n := events[name]
+						s.notification(n.method, n.params)
+					}
+					// Identical replay after the complete lineage is known must not change
+					// the usage fact or manufacture an attribution conflict downstream.
+					s.notification("rawResponse/completed", usage)
+					if root == nil {
+						root = s.register("root", nil)
+					}
+					var samples []json.RawMessage
+					tools := 0
+					for range 3 {
+						var event harness.Event
+						select {
+						case event = <-root.Events():
+						case <-time.After(3 * time.Second):
+							t.Fatal("nested event never reached its root")
+						}
+						if event.RequestUsage != nil {
+							u := event.RequestUsage
+							if u.ThreadID != "grandchild" || u.ParentThreadID != "child" || u.RequestID != "g-response" {
+								t.Fatalf("native usage identity changed: %+v", u)
+							}
+							b, err := json.Marshal(u)
+							if err != nil {
+								t.Fatal(err)
+							}
+							samples = append(samples, b)
+						} else {
+							if event.Kind != harness.EventChildRollout {
+								t.Fatalf("lost child rollout: %+v", event)
+							}
+							var envelope struct {
+								Thread string            `json:"thread_id"`
+								Turn   string            `json:"turn_id"`
+								Kind   harness.EventKind `json:"kind"`
+								Data   json.RawMessage   `json:"data"`
+							}
+							if err := json.Unmarshal(event.Raw, &envelope); err != nil {
+								t.Fatal(err)
+							}
+							var item struct {
+								ID      string `json:"id"`
+								Type    string `json:"type"`
+								Command string `json:"command"`
+							}
+							if err := json.Unmarshal(envelope.Data, &item); err != nil {
+								t.Fatal(err)
+							}
+							if envelope.Thread != "grandchild" || envelope.Turn != "g-turn" || envelope.Kind != harness.EventItemStarted || item.ID != "g-tool" || item.Type != itemCommand || item.Command != "echo grandchild" {
+								t.Fatalf("nested envelope changed native tool identity: %s", event.Raw)
+							}
+							tools++
+						}
+					}
+					if len(samples) != 2 || string(samples[0]) != string(samples[1]) || tools != 1 {
+						t.Fatalf("replay changed the native fact: samples=%s tools=%d", samples, tools)
+					}
+				})
+			}
+		})
 	}
 }
