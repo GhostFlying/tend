@@ -139,6 +139,17 @@ test("empty live polls preserve historical cursor and do not fabricate an older 
   });
 });
 
+test("an empty live window preserves the incoming backlog boundary", () => {
+  const empty = { ...page(0, 0, false), logs: [], before: 0, after: 0, more_after: false };
+  const tail = { ...page(151, 250, true), more_after: false };
+  const live = mergePage(empty, tail, "after");
+  expect(live).toMatchObject({ before: 151, after: 250, more_before: true, more_after: false });
+  const middle = mergePage(live, page(51, 150, true), "before");
+  const full = mergePage(middle, page(1, 50, false), "before");
+  expect(full).toMatchObject({ before: 1, after: 250, more_before: false, more_after: false });
+  expect(full.logs).toHaveLength(250);
+});
+
 test("Orca's persisted reply is readable prose rather than an empty lifecycle event", () => {
   const [step] = buildSteps([
     {

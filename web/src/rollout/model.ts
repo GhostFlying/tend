@@ -207,7 +207,9 @@ export function mergePage(
     before: logs[0]?.seq ?? old.before,
     after: logs.at(-1)?.seq ?? old.after,
     more_before:
-      mode === "before" ? next.more_before : old.more_before || merged.length > logs.length,
+      mode === "before"
+        ? next.more_before
+        : (old.logs?.length ? old.more_before : next.more_before) || merged.length > logs.length,
     more_after: mode === "before" ? old.more_after || merged.length > logs.length : next.more_after,
   };
 }
