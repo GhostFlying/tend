@@ -102,6 +102,35 @@
       "title": "ActionView",
       "type": "object"
     },
+    "AgentCategory": {
+      "additionalProperties": false,
+      "properties": {
+        "category_id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category_id",
+        "revision",
+        "title",
+        "description",
+        "state"
+      ],
+      "title": "AgentCategory",
+      "type": "object"
+    },
     "AgentCompaction": {
       "additionalProperties": false,
       "properties": {
@@ -3062,6 +3091,27 @@
         "queued"
       ],
       "title": "ProjectView",
+      "type": "object"
+    },
+    "PutAgentCategoryPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "state"
+      ],
+      "title": "PutAgentCategoryPayload",
       "type": "object"
     },
     "QueueEntry": {
@@ -6039,6 +6089,9 @@
     "APIResponse": {
       "$ref": "#/definitions/APIResponse"
     },
+    "AgentCategory": {
+      "$ref": "#/definitions/AgentCategory"
+    },
     "AgentCompactionPage": {
       "$ref": "#/definitions/AgentCompactionPage"
     },
@@ -6146,6 +6199,9 @@
     },
     "PrepareWorkItemContextPayload": {
       "$ref": "#/definitions/PrepareWorkItemContextPayload"
+    },
+    "PutAgentCategoryPayload": {
+      "$ref": "#/definitions/PutAgentCategoryPayload"
     },
     "RateTaskPayload": {
       "$ref": "#/definitions/RateTaskPayload"

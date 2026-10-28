@@ -268,6 +268,21 @@ var runCommands = map[string]app.Command{
 
 func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protocol.Envelope) (protocol.Operation, error) {
 	switch env.Operation {
+	case protocol.OpRunnerInventoryRegister:
+		return s.app.Execute(ctx, p, env, app.RegisterAgentInventory{})
+	case protocol.OpRunnerInventoryStatus:
+		if env.Target.Type != "host" || env.Target.ID != p.Subject {
+			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "inventory belongs to the authenticated host")
+		}
+		var input protocol.AgentInventoryStatusPayload
+		if err := decodeStrict(env.Payload, &input); err != nil {
+			return protocol.Operation{}, err
+		}
+		result, err := s.app.ReadAgentInventory(ctx, p, input)
+		if err != nil {
+			return protocol.Operation{}, err
+		}
+		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, result)
 	case protocol.OpRunnerHello:
 		op, err := s.app.Execute(ctx, p, env, app.Hello{})
 		if err != nil || op.Status != protocol.OpSucceeded {

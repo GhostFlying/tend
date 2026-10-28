@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func rid(n int) string {
@@ -170,7 +171,7 @@ func TestPublishPrivateIdentityAndFormattedRestart(t *testing.T) {
 	if !bytes.Equal(old.PrivatePayload(), before) {
 		t.Fatal("returned snapshot aliases state")
 	}
-	var public agentconfig.PublicInventory
+	var public protocol.AgentInventoryProjection
 	if err = json.Unmarshal(old.PublicBytes(), &public); err != nil {
 		t.Fatal(err)
 	}

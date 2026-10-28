@@ -211,6 +211,7 @@ export type WorkItemTaskDispositionAction = "continue_existing" | "updated" | "s
 
 export interface TendAPI {
   APIResponse?: APIResponse;
+  AgentCategory?: AgentCategory;
   AgentCompactionPage?: AgentCompactionPage;
   AgentContextUsage?: AgentContextUsage;
   AgentConversation?: AgentConversation;
@@ -247,6 +248,7 @@ export interface TendAPI {
   LinkWorkItemTaskPayload?: LinkWorkItemTaskPayload;
   MessageAssociations?: MessageAssociations;
   PrepareWorkItemContextPayload?: PrepareWorkItemContextPayload;
+  PutAgentCategoryPayload?: PutAgentCategoryPayload;
   RateTaskPayload?: RateTaskPayload;
   RefreshDeliveryPayload?: RefreshDeliveryPayload;
   RegisterRepositoryPayload?: RegisterRepositoryPayload;
@@ -626,6 +628,17 @@ export interface Operation {
   request_id: string;
   result?: unknown;
   status: OpStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentCategory".
+ */
+export interface AgentCategory {
+  category_id: string;
+  description: string;
+  revision: number;
+  state: string;
+  title: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1450,6 +1463,15 @@ export interface PrepareWorkItemContextPayload {
   coverage: string;
   gaps: string;
   retired_fact_ids?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "PutAgentCategoryPayload".
+ */
+export interface PutAgentCategoryPayload {
+  description: string;
+  state: string;
+  title: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

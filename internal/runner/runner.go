@@ -89,6 +89,8 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
+	AgentInventory      func(context.Context) (protocol.LocalAgentConfiguration, error)
+	AgentChanges        <-chan struct{}
 	RepositoryBindings  func() []protocol.RunnerRepository
 	DeliveryObserver    DeliveryObserver
 	ConfigurationSHA256 string
@@ -167,6 +169,8 @@ type Runner struct {
 	active  map[string]*active
 	wg      sync.WaitGroup
 
+	inventoryMu                 sync.Mutex
+	agentInventorySupported     bool
 	controlMu                   sync.Mutex
 	control                     protocol.RunnerControl
 	controlLoaded               bool
@@ -260,6 +264,12 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil {
 		return err
+	}
+	if err := r.RegisterAgentInventory(ctx); err != nil {
+		r.cfg.Log.WarnContext(ctx, "agent inventory registration pending", "err", err)
+		if isRetryable(err) {
+			r.requestReconcile()
+		}
 	}
 	r.wg.Go(func() { r.workspaceLifecycle(ctx) })
 	if r.cfg.DeliveryObserver != nil && len(r.cfg.DeliveryProviders) > 0 {
@@ -468,6 +478,7 @@ func (r *Runner) claimOnce(ctx context.Context, env *protocol.Envelope, sentAt t
 func (r *Runner) hello(ctx context.Context) error {
 	r.controlMu.Lock()
 	r.repositoryBindingsSupported = false
+	r.agentInventorySupported = false
 	r.controlMu.Unlock()
 	runs, err := r.cfg.Journal.Runs(ctx)
 	if err != nil {
@@ -498,6 +509,7 @@ func (r *Runner) hello(ctx context.Context) error {
 	}
 	r.controlMu.Lock()
 	r.repositoryBindingsSupported = res.RepositoryBindings
+	r.agentInventorySupported = res.AgentInventory && r.cfg.AgentInventory != nil
 	r.controlMu.Unlock()
 	r.setTTL(res.LeaseTTLMillis)
 	if err := r.applyControl(ctx, res.Control, sent, true); err != nil {
@@ -791,16 +803,39 @@ func (r *Runner) requestReconcile() {
 
 // reconciler runs hello whenever a run was fenced, until it succeeds.
 func (r *Runner) reconciler(ctx context.Context) {
+	var retry <-chan time.Time
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-r.reconcile:
+		case <-r.cfg.AgentChanges:
+		case <-retry:
 		}
-		// Let fenced executors record the fence before reporting.
+		retry = nil
 		r.waitIdleFenced(ctx)
-		if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil && ctx.Err() == nil {
-			r.cfg.Log.ErrorContext(ctx, "reconciliation failed", "err", err)
+		if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil {
+			if ctx.Err() == nil {
+				r.cfg.Log.ErrorContext(ctx, "reconciliation failed", "err", err)
+			}
+			continue
+		}
+		if err := r.RegisterAgentInventory(ctx); err != nil && ctx.Err() == nil {
+			r.cfg.Log.WarnContext(ctx, "agent inventory registration pending", "err", err)
+			if isRetryable(err) {
+				if timer == nil {
+					timer = time.NewTimer(r.cfg.RetryDelay)
+				} else {
+					timer.Reset(r.cfg.RetryDelay)
+				}
+				retry = timer.C
+			}
 		}
 	}
 }

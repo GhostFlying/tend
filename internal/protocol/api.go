@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		AgentCategory{}, PutAgentCategoryPayload{},
 		RepositoryRegistration{}, RegisterRepositoryPayload{}, RunnerRepository{}, RunRolloutPage{}, TokenUsageSample{}, TokenUsageView{},
 		AgentRolloutPage{}, AgentRolloutWindow{}, AgentConversation{}, AgentConversationPage{}, MessageAssociations{}, SetMessageAssociationsPayload{}, WorkItemContext{}, ContextFact{}, PrepareWorkItemContextPayload{}, BackgroundAssessmentPayload{}, AgentContextUsage{}, AgentCompactionPage{}, BackgroundSourcePage{}, CoordinationMetrics{}, FollowupPage{}, FollowupHistoryPage{}, FollowupSpec{}, UpdateFollowupPayload{}, ConversationQueuePage{}, TranscriptPage{}, TranscriptBlock{}, WithdrawMessagePayload{}, WithdrawMessageResult{}, Envelope{}, APIResponse{}, Snapshot{}, RepoRegistry{}, TaskPage{}, TaskDetail{}, RunLogPage{}, ConversationPage{}, LedgerEvent{}, StreamStart{}, ArtifactDetail{}, RequestView{},
 		WorkItemChoice{}, WorkItemChoicePage{}, CreateWorkItemChoicePayload{}, UpdateWorkItemChoicePayload{}, RefreshDeliveryPayload{}, WorkItemPage{}, WorkItemView{}, CreateWorkItemPayload{}, UpdateWorkItemPayload{}, CloseWorkItemPayload{}, ReopenWorkItemPayload{}, LinkWorkItemTaskPayload{},
