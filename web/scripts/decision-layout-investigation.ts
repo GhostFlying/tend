@@ -812,6 +812,60 @@ async function checkInitialSettingsKeyboard() {
   }
 }
 
+async function checkUsageKeyboard() {
+  for (const { width, height } of [
+    { width: 390, height: 844 },
+    { width: 1440, height: 900 },
+    { width: 1440, height: 400 },
+  ]) {
+    reset();
+    decisionVisible = false;
+    const { context, page, errors, consoleErrors } = await openPage(width, height);
+    try {
+      const draft = page.getByRole("textbox", { name: "消息", exact: true });
+      await draft.fill("Keep this unfinished draft");
+      const usage = page.getByRole("button", { name: "上下文用量 42%", exact: true });
+      await usage.waitFor();
+      await usage.focus();
+      await page.keyboard.press("Enter");
+      const panel = page.getByRole("dialog", { name: "上下文用量", exact: true });
+      await panel.waitFor();
+      await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "dialog");
+      await page.keyboard.press("Tab");
+      assert.equal(
+        await panel
+          .getByRole("button", { name: "手动 compact", exact: true })
+          .evaluate((e) => e === document.activeElement),
+        true,
+      );
+      await page.keyboard.press("Escape");
+      await panel.waitFor({ state: "hidden" });
+      assert.equal(await usage.evaluate((e) => e === document.activeElement), true);
+      await page.keyboard.press("Enter");
+      await panel.waitFor();
+      await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "dialog");
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      assert.equal(
+        await panel
+          .getByRole("button", { name: "关闭", exact: true })
+          .evaluate((e) => e === document.activeElement),
+        true,
+      );
+      await page.keyboard.press("Enter");
+      await panel.waitFor({ state: "hidden" });
+      assert.equal(await usage.evaluate((e) => e === document.activeElement), true);
+      assert.equal(await draft.inputValue(), "Keep this unfinished draft");
+      assert.equal(writes.length, 0, "usage keyboard navigation submitted a business request");
+      assert.equal(errors.length, 0, errors.join("\n"));
+      assert.equal(consoleErrors.length, 0, consoleErrors.join("\n"));
+      console.log(`PASS usage keyboard ${browserName}-${width}x${height}`);
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 async function checkComposerOverlays() {
   reset();
   decisionVisible = false;
@@ -999,6 +1053,9 @@ async function checkAttachmentDraftDock() {
     try {
       const card = cardFor(page);
       await card.waitFor();
+      // File inputs can be populated before IndexedDB draft hydration finishes.
+      // Wait for the public attachment control to admit interaction first.
+      await page.getByRole("button", { name: "添加附件", exact: true }).click({ trial: true });
       await page.getByLabel("选择附件", { exact: true }).setInputFiles(
         Array.from({ length: 16 }, (_, index) => ({
           name: `draft-${index + 1}.txt`,
@@ -1237,6 +1294,7 @@ try {
   await checkTranscriptExpansionWithoutFocus();
   await checkFocusedTranscriptResizeFollowing();
   await checkComposerOverlays();
+  await checkUsageKeyboard();
   await checkInitialSettingsKeyboard();
   await checkConstrainedDockScroll();
   await checkAttachmentDraftDock();

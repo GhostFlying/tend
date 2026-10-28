@@ -200,3 +200,7 @@ fixture 使用 Chromium 140.0.7339.186 和临时 Noto CJK 字体；设备像素�
 独立评审复现：桌面窗口中，16 个附件和 30 行草稿可将决定区压缩到零高度，选项及 worker 回答控件不可达。将决定区的非零最小预算及 seat 滚动兜底扩展到桌面，同时保留空决定区不占高度的行为；transcript 保持在 seat 滚动范围之外。设置与用量弹层通过 portal 定位到触发控件，限制在视口内并可滚动，不受 seat 裁剪。
 
 先在隔离真实应用 fixture 增加附件与多行草稿的组合场景，确认旧样式失败，再修复样式。覆盖桌面正常/受限高度和移动端；验证选项、回复、提交、队列、附件移除与 composer 可通过滚动到达；聚焦高 composer 后直接点击 header 跳转必须显示最新 transcript；短桌面用量弹层的标题、百分比、token 与按钮均可达。复跑已有弹层、跳转、提交状态及其他布局回归。Browser plugin not available；使用既有 Playwright 流程。
+
+## M6：Portal 用量面板的键盘焦点
+
+独立评审复现：存在草稿时，通过 Enter 打开用量面板后，焦点留在触发按钮；portal 改变 DOM 顺序，下一次 Tab 会落到发送。面板完成定位后把焦点移入自身，使 Tab 进入 compact/关闭控件；关闭和 Escape 将焦点交还触发按钮。移动视图隐藏/恢复不重复抢占焦点。隔离真实应用 fixture 在移动、桌面及低高度窗口验证 Enter、Tab、Escape、关闭按钮以及原草稿保留；不触发发送或 compact 业务请求。Browser plugin not available；继续使用 Playwright。
