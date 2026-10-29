@@ -62,6 +62,8 @@ Owner commands:
   attachment upload <path>          retain an immutable original for a source
   conversation handoff [--prepare-only | --status] [--json]
   attachment download <file_id> --out <path>  save an original attachment
+  category list|show|put           global Agent classifications
+  agents show --host <id>          registered public runner catalog
   conversation list|show|send|consult|promote  direct owner conversations
   source inject|show              preserve external originals and attribution
   run message|messages|native-entry  exact run supplements and owner facts
@@ -87,6 +89,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 		return report(e, runAttention(ctx, e, rest))
 	case "issue":
 		return report(e, runIssue(ctx, e, rest))
+	case "agents":
+		return report(e, runAgentCatalog(ctx, e, rest))
 	case "category":
 		return report(e, runAgentCategory(ctx, e, rest))
 	case "repo":

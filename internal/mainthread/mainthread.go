@@ -688,7 +688,7 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 			return harness.ToolResult{Text: "Could not reconcile the tool's owner input; read the ledger before retrying."}
 		}
 	}
-	if m.namedSelection() != nil && strings.HasPrefix(c.Tool, "issues_") || m.namedSelection() != nil && c.Tool == "agents_hosted_list" {
+	if m.namedSelection() != nil && strings.HasPrefix(c.Tool, "issues_") || m.namedSelection() != nil && (c.Tool == "agents_hosted_list" || c.Tool == "agent_categories_list" || c.Tool == "agents_runner_read") {
 		return m.tools.Handle(ctx, call)
 	}
 	if call.SourceMessageID == "" {

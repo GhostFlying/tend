@@ -39,7 +39,15 @@ func TestNamedPlannerUsesActualAttentionTools(t *testing.T) {
 	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Attention: true})
 }
 
-type namedManagerTestOptions struct{ Attention, ReadSources, Associations bool }
+type namedManagerTestOptions struct{ Attention, ReadSources, Associations, Catalog, Callers bool }
+
+func TestNamedPlannerAndPooledManagerReadAgentCatalog(t *testing.T) {
+	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Catalog: true})
+}
+
+func TestNamedPlannerAndPooledManagerUseCanonicalIssueCallers(t *testing.T) {
+	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Callers: true})
+}
 
 func TestNamedManagerReadsOwnBackgroundSources(t *testing.T) {
 	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{ReadSources: true})
@@ -61,7 +69,9 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 	var otherTask string
 	allowManagers := make(chan struct{})
 	var allowOnce sync.Once
-	managerDone := make(chan string, 1)
+	managerDone := make(chan string, 2)
+	var followupRule protocol.IssueFollowupRule
+	followupSeen := make(chan struct{}, 1)
 	failed := make(chan string, 4)
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		if in.Repair && managerRepair && (!strings.Contains(in.Text, "issues_turn_read") || !strings.Contains(in.Text, "issues_context_review") || strings.Contains(in.Text, "conversation_turn_commit")) {
@@ -116,6 +126,18 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		for _, s := range th.Config.Tools {
 			if s.Name == "issues_context_review" {
 				manager = true
+			}
+		}
+		if opts.Catalog {
+			var categories protocol.AgentCategoryPage
+			if !invoke("agent_categories_list", map[string]any{"limit": 1}, &categories) || len(categories.Items) != 1 || categories.Items[0].CategoryID != "planning" {
+				failed <- "actual named caller could not discover categories"
+				return "failed"
+			}
+			var catalog protocol.RunnerAgentCatalog
+			if !invoke("agents_runner_read", map[string]any{"host_id": "worker-host"}, &catalog) || catalog.Current == nil || catalog.Current.SnapshotID != "catalog-snapshot" || catalog.Projection == nil || len(catalog.Projection.Agents) != 1 || catalog.Projection.Agents[0].Identity.LocalID != "worker" || !catalog.Online {
+				failed <- "actual named caller could not read registered public facts"
+				return "failed"
 			}
 		}
 		if !manager {
@@ -298,6 +320,18 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 			if opts.Associations {
 				allowOnce.Do(func() { close(allowManagers) })
 			}
+			if opts.Callers {
+				var page protocol.IssuePage
+				if !invoke("issues_list", map[string]any{}, &page) || len(page.Items) != 1 || page.Items[0].IssueID != created.Outcome.IssueID {
+					failed <- "planner discovery lost delegated Issue"
+					return "failed"
+				}
+				var context protocol.IssueContextView
+				if !invoke("issues_context_read", map[string]any{"issue_id": created.Outcome.IssueID}, &context) || context.IssueID != created.Outcome.IssueID {
+					failed <- "planner canonical context failed"
+					return "failed"
+				}
+			}
 			if opts.Attention {
 				due := e.now().Add(48 * time.Hour).UnixMilli()
 				deadline := protocol.PutIssueDeadlinePayload{IssueID: created.Outcome.IssueID, Title: "Temporary owner commitment", Nature: "user_commitment", Strength: "soft", DueAt: &due, Timezone: "UTC", SourceMessageID: source.MessageID, ExpectedSourceRevision: &revision, Reason: "Retain the owner's supplied date without executing work"}
@@ -364,6 +398,25 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		if !invoke("issues_read", map[string]any{}, &item) {
 			return "failed"
 		}
+		followupTurn := false
+		if opts.Callers {
+			var sources struct {
+				Outcome protocol.BackgroundSourcePage `json:"outcome"`
+			}
+			if !invoke("background_sources", map[string]any{}, &sources) {
+				return "failed"
+			}
+			for _, source := range sources.Outcome.Sources {
+				if source.Kind == "followup.triggered" {
+					followupTurn = true
+				}
+			}
+			for _, name := range []string{"issues_context_read", "issues_followups_list", "issues_deliveries_read"} {
+				if !invoke(name, map[string]any{}, nil) {
+					return "failed"
+				}
+			}
+		}
 		p := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: item.AssignmentEpoch, Title: "Investigate and return an independently checked report", Spec: protocol.OwnerTaskSpec{Goal: "Investigate the owner's unclear goal", Acceptance: []string{"Report identifies feasible choices and unknowns with evidence"}, Deliverables: []string{"report"}, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary"}}}
 		var made struct {
 			Outcome struct {
@@ -374,7 +427,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 			if !reject("issues_create_task", map[string]any{"effect_seq": 1000, "expected_control_revision": item.Revision, "payload": p}, protocol.CodeForbidden) {
 				return "failed"
 			}
-		} else {
+		} else if !followupTurn {
 			if !invoke("issues_create_task", map[string]any{"effect_seq": 1, "expected_control_revision": item.Revision, "payload": p}, &made) {
 				return "failed"
 			}
@@ -383,6 +436,30 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 			}
 		}
 		seq := int64(2)
+		if opts.Callers && !followupTurn {
+			if !invoke("issues_read", map[string]any{}, &item) {
+				return "failed"
+			}
+			var result struct {
+				Outcome protocol.IssueFollowupRule `json:"outcome"`
+			}
+			spec := protocol.FollowupSpec{Purpose: "Review the retained investigation", Instruction: "Read latest facts without creating another task", Kind: "at", At: e.now().Add(time.Hour).UnixMilli(), Timezone: "UTC"}
+			if !invoke("issues_followups_create", map[string]any{"effect_seq": seq, "expected_control_revision": item.Revision, "payload": protocol.IssueFollowupPayload{ExpectedAssignmentEpoch: item.AssignmentEpoch, Spec: &spec}}, &result) {
+				return "failed"
+			}
+			seq++
+			followupRule = result.Outcome
+			for _, action := range []string{"pause", "resume"} {
+				if !invoke("issues_followups_"+action, map[string]any{"effect_seq": seq, "target_id": followupRule.RuleID, "expected_control_revision": followupRule.Revision, "reason": "Keep the bounded followup", "payload": protocol.IssueFollowupPayload{ExpectedAssignmentEpoch: item.AssignmentEpoch}}, &result) {
+					return "failed"
+				}
+				seq++
+				followupRule = result.Outcome
+			}
+			if !invoke("issues_followups_history", map[string]any{"rule_id": followupRule.RuleID}, nil) {
+				return "failed"
+			}
+		}
 		if taskControls {
 			var task protocol.TaskDetail
 			read := func() bool { return invoke("tasks_read", map[string]any{"task_id": made.Outcome.TaskID}, &task) }
@@ -455,6 +532,9 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		if !invoke("issues_turn_commit", map[string]any{"effect_seq": seq + 1, "payload": commit}, nil) {
 			return "failed"
 		}
+		if followupTurn {
+			followupSeen <- struct{}{}
+		}
 		managerDone <- item.IssueID
 		return "completed"
 	}
@@ -475,14 +555,32 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		t.Helper()
 		raw, _ := json.Marshal(payload)
 		zero := int64(0)
-		result, err := e.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: target, ExpectedControlRevision: &zero, Payload: raw}, command)
+		if op == "issues.followups_trigger" {
+			zero = followupRule.Revision
+		}
+		result, err := e.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: target, ExpectedControlRevision: &zero, Reason: "Review existing followup", Payload: raw}, command)
 		if err != nil || result.Status != protocol.OpSucceeded {
 			t.Fatal(result, err)
 		}
 	}
 	execute(owner, "categories.put", protocol.Target{Type: "category", ID: "planning"}, protocol.PutAgentCategoryPayload{Title: "Planning", State: "active"}, app.PutAgentCategory{})
+	if opts.Catalog {
+		workerConfig := agentconfig.Config{FormatVersion: 1, Runtimes: []agentconfig.RuntimeBinding{{ID: "worker", Revision: 1, Kind: agentconfig.AppServerWorker, ExecutableRef: "private-worker", Enabled: true, DeclaredPurposes: []agentconfig.Purpose{agentconfig.WorkerRun}}}, Agents: []agentconfig.AgentDefinition{{LocalID: "worker", Revision: 1, DisplayName: "Worker", RuntimeID: "worker", Categories: []string{"planning"}, Purposes: []agentconfig.Purpose{agentconfig.WorkerRun}, Model: "manager-model", Enabled: true}}}
+		definition, err := agentconfig.Validate("worker-host", workerConfig, agentconfig.SourceReference{Kind: agentconfig.Inline, Reference: "private-source"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, hash, err := definition.CanonicalPublic()
+		if err != nil {
+			t.Fatal(err)
+		}
+		runtime := &protocol.RunnerRuntime{InstanceID: "catalog-process", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityRunnerHeartbeat}}
+		principal := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "worker-host"}
+		execute(principal, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "worker-host"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: runtime}, app.Hello{})
+		execute(principal, protocol.OpRunnerInventoryRegister, protocol.Target{Type: "host", ID: "worker-host"}, protocol.RegisterAgentInventoryPayload{Runtime: runtime, LocalRevision: 1, SnapshotID: "catalog-snapshot", PublicSHA256: hash, Projection: definition.Public()}, app.RegisterAgentInventory{})
+	}
 	execute(protocol.Principal{Kind: protocol.PrincipalSystem}, "hosted.configure", protocol.Target{Type: "hosted_configuration"}, map[string]any{"revision": prepared.Revision(), "hash": prepared.Hash()}, app.AcceptHostedConfiguration{Prepared: prepared})
-	e.app = app.New(e.store, e.ids, e.now, app.WithNotifier(e.signal), app.WithHostedConfiguration(prepared))
+	e.app = app.New(e.store, e.ids, e.now, app.WithNotifier(e.signal), app.WithHostedConfiguration(prepared), app.WithFollowups(opts.Callers))
 	cb := contextbuilder.New(e.app, e.store, e.ids, contextbuilder.Config{})
 	service := tools.New(e.app, e.store, cb, quiet())
 	makeManager := func(conversation string) *Manager {
@@ -580,6 +678,17 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 	eventually(t, "separate planner, manager and exact owner continuation settle", func() bool {
 		return e.count(`SELECT COUNT(*) FROM logical_turns WHERE status='completed'`) == expectedTurns
 	})
+	if opts.Callers {
+		execute(owner, "issues.followups_trigger", protocol.Target{Type: "followup", ID: followupRule.RuleID}, protocol.IssueFollowupPayload{ExpectedAssignmentEpoch: 1}, app.IssueFollowupCommand{Action: "trigger"})
+		select {
+		case <-followupSeen:
+		case err := <-failed:
+			t.Fatal(err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("followup did not reach actual pooled manager")
+		}
+		eventually(t, "followup manager completion", func() bool { return e.count(`SELECT COUNT(*) FROM logical_turns WHERE status='completed'`) == 3 })
+	}
 	if ownerTransfer {
 		if e.count(`SELECT COUNT(*) FROM issue_controls`) != 3 || e.count(`SELECT COUNT(*) FROM background_batches WHERE group_key LIKE 'owner-issue:%' AND checkin_json IS NOT NULL`) != 1 || e.count(`SELECT COUNT(*) FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.group_key LIKE 'owner-issue:%' AND s.kind='issue.delegated'`) != 1 {
 			t.Fatal("owner continuation repeated delegation or lost original source")
@@ -598,6 +707,9 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		t.Fatal("coordination did not delegate exactly one independent worker task")
 	}
 	expectedManagerExecutions := 1
+	if opts.Callers {
+		expectedManagerExecutions = 2
+	}
 	if managerRepair {
 		expectedManagerExecutions = 2
 	}

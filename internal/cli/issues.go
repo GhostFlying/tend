@@ -15,15 +15,24 @@ import (
 )
 
 var issueOperations = map[string]string{
+	"refresh-delivery": "issues.refresh_delivery", "followups-create": "issues.followups_create", "followups-update": "issues.followups_update", "followups-pause": "issues.followups_pause", "followups-resume": "issues.followups_resume", "followups-cancel": "issues.followups_cancel", "followups-trigger": "issues.followups_trigger",
+
 	"create": "issues.create", "update": "issues.update", "pause": "issues.pause", "resume": "issues.resume", "cancel": "issues.cancel", "finish-cancel": "issues.finish_cancel", "close": "issues.close", "reopen": "issues.reopen", "reparent": "issues.reparent", "dependencies": "issues.dependencies", "review-sources": "issues.review_sources", "review-completions": "issues.review_completions", "create-task": "issues.create_task", "update-task": "issues.update_task",
 }
 
 func runIssue(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "context", "followups", "followup-history", "deliveries", "refresh-delivery", "followup":
+			return runIssueCaller(ctx, e, args)
+		}
+	}
+
 	if len(args) > 0 && args[0] == "deadline" {
 		return runPlanningRecord(ctx, e, args[1:], true)
 	}
 	if len(args) == 0 {
-		return usagef("issue expects list|show|create|update|pause|resume|cancel|finish-cancel|close|reopen|reparent|dependencies|review-sources|review-completions|create-task|update-task|request|replay")
+		return usagef("issue expects list|show|context|followups|followup-history|followup|deliveries|refresh-delivery|create|update|pause|resume|cancel|finish-cancel|close|reopen|reparent|dependencies|review-sources|review-completions|create-task|update-task|request|replay")
 	}
 	action := args[0]
 	fs := newFlags(e, "issue "+action)

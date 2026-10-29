@@ -2,6 +2,7 @@ package views
 
 import (
 	"context"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -62,6 +63,7 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 }
 
 type CanonicalIssueFilter struct {
+	ReadRoot      string
 	Project       string
 	ParentID      *string
 	State         protocol.IssueState
@@ -73,8 +75,23 @@ type CanonicalIssueFilter struct {
 // CanonicalIssues never adopts old plans that lack canonical controls.
 func CanonicalIssues(ctx context.Context, q store.Querier, f CanonicalIssueFilter) (protocol.IssuePage, error) {
 	out := protocol.IssuePage{Items: []protocol.IssueSummary{}}
+	if f.Limit == 0 {
+		f.Limit = 50
+	}
+	if f.Limit < 1 || f.Limit > 100 {
+		return out, protocol.Errorf(protocol.CodeInvalidRequest, "limit must be between 1 and 100")
+	}
+	if f.State != "" && !slices.Contains([]protocol.IssueState{protocol.IssueActive, protocol.IssuePaused, protocol.IssueCancelling, protocol.IssueCancelled, protocol.IssueClosed}, f.State) {
+		return out, protocol.Errorf(protocol.CodeInvalidRequest, "invalid Issue state")
+	}
+
 	query := `SELECT c.issue_id FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id WHERE c.issue_id>?`
 	args := []any{f.After}
+	if f.ReadRoot != "" {
+		query += ` AND c.issue_id IN (WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT i.issue_id FROM issue_controls i JOIN tree p ON i.parent_issue_id=p.id) SELECT id FROM tree)`
+		args = append(args, f.ReadRoot)
+	}
+
 	if f.Project != "" {
 		query += ` AND w.project=?`
 		args = append(args, f.Project)

@@ -106,9 +106,17 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			if p.ParentIssueID != current.IssueID || p.Plan.Project != current.Plan.Project {
 				return protocol.Errorf(protocol.CodeForbidden, "a manager may create only child issues in its inherited project")
 			}
-		case "issues.update", "issues.pause", "issues.resume", "issues.cancel", "issues.finish_cancel", "issues.close", "issues.reopen", "issues.dependencies", "issues.review_completions", "issues.review_sources", "issues.create_task", "issues.review_context", "issues.context_fact":
+		case "issues.followups_create", "issues.refresh_delivery", "issues.update", "issues.pause", "issues.resume", "issues.cancel", "issues.finish_cancel", "issues.close", "issues.reopen", "issues.dependencies", "issues.review_completions", "issues.review_sources", "issues.create_task", "issues.review_context", "issues.context_fact":
 			if x.Env.Target.Type != "issue" || x.Env.Target.ID != current.IssueID {
 				return protocol.Errorf(protocol.CodeForbidden, "tool target is outside this issue")
+			}
+		case "issues.followups_update", "issues.followups_pause", "issues.followups_resume", "issues.followups_cancel", "issues.followups_trigger":
+			rule, err := store.GetFollowup(ctx, q, x.Env.Target.ID)
+			if err != nil {
+				return err
+			}
+			if x.Env.Target.Type != "followup" || rule.WorkItemID != current.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "followup is outside this Issue")
 			}
 		case protocol.OpRunsSendMessage:
 			run, err := store.GetRun(ctx, q, x.Env.Target.ID)
