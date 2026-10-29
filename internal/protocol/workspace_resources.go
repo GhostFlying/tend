@@ -19,11 +19,13 @@ type WorkspaceReleaseResult struct {
 
 // WorkspaceCleanupRequest reserves eligible resources for removal.
 type WorkspaceCleanupRequest struct {
-	Limit int `json:"limit,omitempty"`
+	AgentExecution bool `json:"agent_execution,omitempty"`
+	Limit          int  `json:"limit,omitempty"`
 }
 
 // WorkspaceCleanup is an immutable, host-bound removal authorization.
 type WorkspaceCleanup struct {
+	BackendID          string `json:"backend_id,omitempty"`
 	CleanupID          string `json:"cleanup_id"`
 	WorkspaceID        string `json:"workspace_id"`
 	Kind               string `json:"kind"`

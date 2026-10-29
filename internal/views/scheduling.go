@@ -21,6 +21,7 @@ func SchedulingCandidates(rows []store.CandidateRow) ([]scheduler.Candidate, err
 			return nil, fmt.Errorf("views: decode spec of %s: %w", r.Action.TaskID, err)
 		}
 		out = append(out, scheduler.Candidate{
+			NamedExecutionAssigned: r.NamedExecutionAssigned, WorkspaceLegacyBindings: r.WorkspaceLegacyBindings, AgentSelection: spec.AgentSelection, AcceptanceProfile: spec.AcceptanceExecution, WorkspaceBackendID: r.WorkspaceBackendID,
 			ActionID: r.Action.ActionID, TaskID: r.Action.TaskID, Kind: r.Action.Kind, Status: r.Action.Status,
 			Generation: r.Action.Generation, TargetSpecVersion: r.Action.TargetSpecVersion,
 			TargetArtifactID: r.Action.TargetArtifactID, CreatedAt: r.Action.CreatedAt,

@@ -110,7 +110,7 @@ func (r *Runner) reconcileWorkspace(ctx context.Context, p protocol.WorkspaceRec
 			return err
 		}
 		if origin == protocol.WorkerAppServer {
-			if run.Assignment.Workspace.ProviderID != "" || run.Assignment.Workspace.ProviderInstanceID != "" {
+			if run.Assignment.Execution == nil && (run.Assignment.Workspace.ProviderID != "" || run.Assignment.Workspace.ProviderInstanceID != "") {
 				return errors.New("historical app-server origin conflicts with an external provider")
 			}
 			if !slices.Contains(p.FinishedRunIDs, id) {
@@ -123,10 +123,14 @@ func (r *Runner) reconcileWorkspace(ctx context.Context, p protocol.WorkspaceRec
 				return err
 			}
 		} else {
-			if origin != protocol.WorkerOrca || r.cfg.Worker != protocol.WorkerOrca {
+			if origin != protocol.WorkerOrca || assignmentWorker(run.Assignment, r.cfg.Worker) != protocol.WorkerOrca {
 				return errors.New("historical process proof requires its original harness")
 			}
-			rel, ok := r.cfg.Workers.(harness.HistoricalReleaser)
+			execution, err := r.resolveExecution(ctx, run.Assignment)
+			if err != nil {
+				return err
+			}
+			rel, ok := execution.Workers.(harness.HistoricalReleaser)
 			if !ok {
 				return errors.New("historical process proof is unavailable for this harness")
 			}

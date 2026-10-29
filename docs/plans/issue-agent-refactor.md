@@ -1,6 +1,6 @@
 # Issue 与 Agent 重构实施计划
 
-状态：P0 与基线修复已合并；P1a 经 PR #158 CI 全通过并 rebase 合并至 `2b39915f`；P1b1 经 PR #159 CI 全通过并 rebase 合并至 `7cb99669`。P1b1/P1b2 与 P2 配置/库存链路已完成本地完整检查和独立 review，后续 PR CI/合并按各行记录。P1b3+b4 r2+P1c 已正式纳入，提供 owner Issue API/CLI、primary/no-stage 读与上下文、task 实现/独立验收/owner 核对闭环；各候选预审通过，正式组合定向 race/vet、schema/types 与真实 CLI 路径检查已通过，r1 规定 CLI review 两项 P2 已采纳修复，r1 完整检查主动停止未完成；r2 已正式应用，定向 race/vet、独立增量复审及完整 make check 均通过。P3 命名调度与 P4 manager 正在隔离候选中实施，尚未正式纳入；新可见 UI、archive cutover 和部署未实施。本文是实施合同，不是发布声明。设计见 [Issue、Agent 与个人规划架构](../issue-agent-design.md)，Refs: D121–D126。
+状态：P0、P1a、P1b1、P2a 与 P1b2a 已经 CI 和 rebase 合并；其余 P1/P2 owner 与配置库存子批完成本地完整检查及独立 review，后续 PR 按台账推进。P3 显式 named 执行已纳入，正式规定 CLI review、独立 schema 增量复审、完整 make check 与 Windows/macOS 交叉编译通过。P4 r4 负责人自治候选独立预审通过，尚未正式纳入；P5 与 P8b 在线准备在隔离副本实施，P8a 离线工具及 P8c owner 只读 API 候选预审通过。未确认页面不编码；本轮尚未部署或完成真实 E2E。本文区分设计合同、代码、检查、合并与验收，实施事实以下文台账为准。
 
 ## 进度账本与角色
 
@@ -9,14 +9,14 @@
 | 批次 | 依赖 | 设计 | 代码 | 独立评审 | 合并 | 部署 | Live 验收 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P0 | 无 | 文档完成 | 无运行代码；本地 make check 通过 | 已通过，澄清增量确认 | PR #157 修复已合并；PR #155 CI 通过，rebase 合并至 `8c8c6ec6` | 本批不部署 | 无 |
-| P1 | P0 评审通过 | P1a、控制分片及 owner API/CLI 组合计划已写 | P1a 已合并；P1b1/P1b2 本地完整检查通过；P1b3+b4 r2+P1c 已正式纳入，组合定向检查已通过；manager/Agent assignment 未启用 | 历史子批及 b3/b4 r2/P1c 候选预审通过；r1 CLI 两项 P2 已修复，r2 复审待执行 | P1a PR #158、P1b1 PR #159 已合并；其余 CI/合并未完成 | 本批不部署 | 未执行 |
-| P2 | P1 身份基础 | P2a/P2b/P2c–P2d 子计划已写 | P2a/P2b 本地检查和独立复核通过；P2c–P2d 本机配置、Category/安全库存登记及恢复入口已纳入，正式定向检查和完整 make check 均已通过；新 Agent 执行/调度未启用 | P2a/P2b 正式独立 review 通过；P2c/P2d1/P2d2 候选独立预审通过，正式组合人工及规定 CLI review 均通过，无 findings | 未合并 | 本批不部署 | 未执行 |
-| P3 | P1、P2 | 候选执行计划已写 | 隔离候选实施中，未正式纳入 | 候选预审发现正在修复，正式 review 未执行 | 未合并 | 本批不部署 | 未执行 |
-| P4 | P1–P3 | 实际接入范围已核定 | 隔离候选实施中，未正式纳入 | 未开始 | 未合并 | 本批不部署 | 未执行 |
-| P5 | P4 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
+| P1 | P0 评审通过 | P1a、控制分片及 owner API/CLI 组合计划已写 | P1a 已合并；P1b1/P1b2 本地完整检查通过；P1b3+b4 r2+P1c 已正式纳入，组合定向检查已通过；manager/Agent assignment 未启用 | 历史子批及 b3/b4 r2/P1c 候选预审通过；r1 CLI 两项 P2 已修复，r2 独立复审及完整检查已通过，已提交 | P1a PR #158、P1b1 PR #159、P1b2a PR #161 已合并；其余 CI/合并未完成 | 本批不部署 | 未执行 |
+| P2 | P1 身份基础 | P2a/P2b/P2c–P2d 子计划已写 | P2a/P2b 本地检查和独立复核通过；P2c–P2d 本机配置、Category/安全库存登记及恢复入口已纳入，正式定向检查和完整 make check 均已通过；执行/调度由 P3 接续 | P2a/P2b 正式独立 review 通过；P2c/P2d1/P2d2 候选独立预审通过，正式组合人工及规定 CLI review 均通过，无 findings | P2a PR #160 CI 全通过并 rebase 合并；其余未合并 | 本批不部署 | 未执行 |
+| P3 | P1、P2 | [执行计划](category-agent-execution.md)已写 | 显式 named factory、调度、模型/effort/指令及原 pin 恢复已正式纳入；组合定向 race/vet、schema/TS 生成与类型检查通过 | 候选 r1/r2/r3 独立复核通过，已采纳首资格、profile 和 start-over 修正；正式 r2 规定 CLI review 无 findings，r3 schema 独立窄复审及完整 make check/交叉编译通过 | 未合并 | 本批不部署 | 未执行 |
+| P4 | P1–P3 | 实际接入范围已核定 | r4 隔离候选完成，未正式纳入 | 三项正常路径 P2 已修复，独立增量预审通过；正式 CLI/全检待完成 | 未合并 | 本批不部署 | 未执行 |
+| P5 | P4 | 最小实施合同已收口 | 隔离副本实施中，无可见 UI | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P6 | P3–P5 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
 | P7 | 稳定 API、设计 review、用户确认 | 主界面及现有风格方向已获用户确认；其他页面待单独出图/review/确认 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
-| P8 | P1 开发，P2–P6 演练 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
+| P8 | P1 开发，P2–P6 演练 | 离线、只读 API 与在线准备最小合同已收口 | P8a/P8c 候选完成，P8b 隔离实施中 | P8a r3/P8c 预审通过；正式组合及在线准备待验 | 未合并 | 本批不部署 | 未执行 |
 | P9 | P0–P8 | 合同已写，发布清单待核验 | 未开始 | 未开始 | 未合并 | 未执行 | 未执行 |
 
 每个批次/子批建立如下证据行，开始下一阶段时填真实值，未发生项保持“待记录”，不能以计划填成完成：
@@ -31,9 +31,9 @@
 | P2b | `fdd81c682875bfeeefceb2dfc1a9405c6acdae99` | 已提交 `1279b4748bc006dc286cc58484926b5d2bd1889f`；本地配置存储与 journal 11 CAS 恢复，该片未接公开/生产调用；后续入口见 P2c–P2d | 定向 registry/journal race/vet 及发布兼容回归通过；r1/r2 完整检查及修正定向 race/vet 通过；PR/CI 未完成 | 正式 r1 review 一项 typed 空列表缺陷已修正，r2 独立复核通过 | 未部署 | 未执行 |
 | P1b2b | 原 `1279b4748bc006dc286cc58484926b5d2bd1889f`；rebase `ae891c455031fca1098ff26ff2c06d3530c51683`（tree 相同） | 已提交并 rebase 为 `2ed83de7944773d5a0a416666bcb35884c62fe56`；六个 app 文件匹配原已复审候选后，正式 CLI 迟到 share 修正已纳入；无 task/manager/公开入口 | r1 定向 race/vet 通过（app 71.361 秒）；r1 完整检查为已知 finding 主动未完成；r2 定向 race/vet 通过（81.205 秒）；r2 完整 make check 通过；PR/CI 未完成 | 原候选复审通过；正式 r1 CLI 一项迟到 share 缺陷已采纳修正，r2 独立增量及正式组合复核通过 | 未部署 | 未执行 |
 | P2c–P2d | `2ed83de7944773d5a0a416666bcb35884c62fe56` | 本批纳入本机配置/Category/安全库存登记和恢复入口；无 factory/调度/hosted 可用性 | 候选及正式组合定向 race/vet、roots 生成/类型检查和完整 make check 均通过；PR/CI 未完成 | 三片候选及正式组合人工/规定 CLI review 均通过，无 findings | 未部署 | 未执行 |
-| P1b3+b4 r2+P1c | `7b0edfb4ce7d340a4f2e26546d4e5d0608de92e5`（tree 等价 P2 已验证提交） | 正式组合纳入中；b3 候选 migration 0055→0056，P2 roots/CLI/API 语义合并 | 定向 race/vet 与 schema/types/CLI 检查通过；r1 CLI 两项 P2 已修复，r1 make check 主动未完成；r2 复审/make check/CI 待执行 | b3、b4 r2、P1c 候选预审均通过；r1 CLI 两项 P2 已采纳修复，r2 独立复核通过 | 未部署 | 未执行 |
+| P1b3+b4 r2+P1c | `7b0edfb4ce7d340a4f2e26546d4e5d0608de92e5`（tree 等价 P2 已验证提交） | 已提交并 rebase 为 `964167d50923fd5ce5053e1187c9624f5540856f`；b3 候选 migration 0055→0056，P2 roots/CLI/API 语义合并 | 定向 race/vet 与 schema/types/CLI 检查通过；r1 CLI 两项 P2 已修复，r1 make check 主动未完成；r2 独立复审及完整 make check 已通过；PR/CI 未完成 | b3、b4 r2、P1c 候选预审均通过；r1 CLI 两项 P2 已采纳修复，r2 独立复核通过 | 未部署 | 未执行 |
 
-本次 rebase 保留历史评审 SHA/实施快照，以上本地新 head 不等于 PR 已更新或 CI/合并已完成。P0 先前 CI 因 idle 摘要 fixture 失败；独立修复 `315f0c5f` 已经 [PR #157](https://github.com/GhostFlying/tend/pull/157) 合并。PR #155 rebase 至 `7435b030` 后的[新 CI](https://github.com/GhostFlying/tend/actions/runs/40757992209)已通过（包括浏览器回归及 Windows/macOS 交叉编译），PR 已 rebase 合并至 `8c8c6ec6`。P1b2a r3 完整检查时段 UTC 18:28:06 至 19:02:18，退出 0；日志 SHA-256 `3bfe1500d1f55cbe7c4ea45d7ab14a77792c18268ca8eb6cb3ae5d4d54905801`。P1b2a、P2b、P1b2b 已提交；P2c–P2d 子批当时在 P1b2b 完成基线上纳入配置/库存链路，不带入 P1b3/b4、factory 或调度；该子批已经本地完整检查与独立 review 通过并提交，当前正式组合另从 `7b0edfb4` 纳入已预审的 P1b3/b4 r2/P1c owner 链路，仍无 factory 或命名调度。
+本次 rebase 保留历史评审 SHA/实施快照，以上本地新 head 不等于 PR 已更新或 CI/合并已完成。P0 先前 CI 因 idle 摘要 fixture 失败；独立修复 `315f0c5f` 已经 [PR #157](https://github.com/GhostFlying/tend/pull/157) 合并。PR #155 rebase 至 `7435b030` 后的[新 CI](https://github.com/GhostFlying/tend/actions/runs/40757992209)已通过（包括浏览器回归及 Windows/macOS 交叉编译），PR 已 rebase 合并至 `8c8c6ec6`。P1b2a r3 完整检查时段 UTC 18:28:06 至 19:02:18，退出 0；日志 SHA-256 `3bfe1500d1f55cbe7c4ea45d7ab14a77792c18268ca8eb6cb3ae5d4d54905801`。P1b2a、P2b、P1b2b 已提交；P2c–P2d 子批当时在 P1b2b 完成基线上纳入配置/库存链路，不带入 P1b3/b4、factory 或调度；该子批已经本地完整检查与独立 review 通过并提交，P1 owner 组合当时从 `7b0edfb4` 纳入已预审的 P1b3/b4 r2/P1c owner 链路，该片本身无 factory 或命名调度；P3 接续见下文。
 
 Base 在开始批次与评审前分别固定，若 rebase 改变 head 则更新并判断是否重审。公开账本只记录公开 PR、commit 和无私密信息的证据引用；机器运行路径、凭据及原始发布证据保存在忽略的本地记录中。
 
@@ -78,7 +78,7 @@ P2c–P2d 的[配置与库存控制计划](agent-inventory-control.md)接通固�
 
 ## P3：按 category 和硬约束调度
 
-依赖 P1/P2。扩展纯函数 scheduler 和领取事务，输入包含 category、可选 HARD runner/runtime、workspace host、实现/验收可用配置。首次 host 候选必须同时支持两个正式角色；稳定选择并固定快照，恢复不重选、不跨 host 搬验收。
+依赖 P1/P2，实际调用与验证见[执行计划](category-agent-execution.md)。扩展纯函数 scheduler 和领取事务，输入包含 category、可选 HARD runner/runtime、每 role model/effort 筛选、workspace host、实现/验收可用配置。当前 task/spec 首次 named 分配及 start-over 后新资源必须在同 host/backend 同时有双方候选，只冻结当前 run；验收到分配时再选择。同 run 恢复不重选、不跨 host 搬 workspace。实际 factory 使用 ExecutableRef，LocalReference 仅来源元数据；多个 runtime 共用全局槽位与唯一 workspace 协调器。私有 instructions 经真实适配器注入，验收会话/凭据/上下文隔离保持。wire 1/0 通过 capability/条件 ack 增量接入，server migration 57、journal 12，旧 reader 拒绝新执行状态。
 
 为不支持 category、runner、模型、验收、workspace 和离线 runtime 返回明确 queue reason。新增通信先评估 breaking；需要升协议时同批实现 N+1、保留 N、退役 N−1 并更新登记/拒绝测试。
 
@@ -154,3 +154,11 @@ UI 编码前必须读取 frontend-app-builder skill，检查现有页面并保�
 验收至少覆盖领域状态、app 回滚/去重/冲突、角色/作用域、run 恢复和 unknown、schema 一致性、真实前端、档案无副作用。故障测试使用 TestFault 命名，真实 harness 使用 integration tag 显式执行；单元测试不联网或调用模型。
 
 P1b1 发布链路补记：[PR #159](https://github.com/GhostFlying/tend/pull/159) 在 head `16c415306b8df659c2cec94dd49f1f84428dd786` 的 CI `40771577330` 全通过（含浏览器与 Windows/macOS 交叉编译），rebase 合并至 `7cb9966965e2b184676a831cef3073d28a89a1ee`。本轮 owner 公开组合 r2 完整检查与独立复核通过，证据见 [组合计划](issue-owner-delivery.md)，其 PR/CI 尚待后续。
+
+P2a 当前 PR 状态补记：[PR #160](https://github.com/GhostFlying/tend/pull/160) 的 base 为 `7cb9966965e2b184676a831cef3073d28a89a1ee`，head 为 `84d2c1e7d926caf7ee180ba6bbc07ed7a8cf6f9f`；CI 待完成，尚未合并。P3 本批从已完成 P1 组合的 `964167d50923fd5ce5053e1187c9624f5540856f` 纳入 68 文件候选，正式组合定向 race/vet、schema/TS 生成与类型检查已通过，规定 CLI review 和完整 make check 待执行；CI/合并/部署未完成。
+
+## P3 正式检查与合并进度补记
+
+P3 正式 r2 规定 CLI review 正常退出且无 findings；r3 仅补原 tools schema 的可选 agent_selection，原严格测试不变，独立窄复审通过。r3 完整 `make check TEST_TIMEOUT=60m` 于 UTC 2026-10-28 23:56:24 至 2026-10-29 00:38:14 退出 0（app 2465.547 秒、mainthread 411.145 秒、tools 71.456 秒、Web 全部通过），使用已有本机参数，未修改仓库默认超时；Windows amd64 与 macOS arm64 交叉编译通过。全检日志 SHA-256 `6aa8abb8095508e2fc33d8d52a201cdacfb7d111301c596a26f77f5c0a472613`。首轮格式失败、第二轮 schema 缺项及 40 分钟 package timeout 均保留为失败记录，不记作通过。PR CI/合并、部署和真实模型验收仍待完成。
+
+P2a [PR #160](https://github.com/GhostFlying/tend/pull/160) 的 CI `40781168826` 全通过，rebase 合并至 `b66a94838fc045f317be1cc819d1090d0d486588`。P1b2a [PR #161](https://github.com/GhostFlying/tend/pull/161) 的 CI `40790535737` 全通过，包含浏览器回归和 Windows/macOS 交叉编译，rebase 合并至 `c806b859a8a39cf0c72165b9d135f26667f126e1`。既有历史 base/head 和过程记录保持，不以本地候选通过替代其他批次 CI。

@@ -79,8 +79,7 @@ func TestStrictDecode(t *testing.T) {
 		{"source-kind-cannot-be-claimed-in-config", "unknown_field", "$", []byte(`{"format_version":1,"source_kind":"inline"}`)},
 		{"unknown-nested", "unknown_field", "$.runtimes[0]", replace(`"runtime_id":"orca"`, `"runtime_id":"orca","native_config":"`+privateSentinel+`"`)},
 		{"case-variant", "unknown_field", "$.runtimes[0]", replace(`"runtime_id":"orca"`, `"Runtime_ID":"orca"`)},
-		{"instructions-not-yet-supported", "unknown_field", "$.agents[0]", replace(`"local_id":"implement-a"`, `"local_id":"implement-a","instructions":"`+privateSentinel+`"`)},
-		{"role-instructions-not-yet-supported", "unknown_field", "$.agents[0]", replace(`"local_id":"implement-a"`, `"local_id":"implement-a","role_instructions":"`+privateSentinel+`"`)},
+		{"unknown-role-instructions-alias", "unknown_field", "$.agents[0]", replace(`"local_id":"implement-a"`, `"local_id":"implement-a","role_instructions":"`+privateSentinel+`"`)},
 		{"duplicate-root", "duplicate_field", "$.format_version", replace(`"format_version":1`, `"format_version":1,"format_version":1`)},
 		{"duplicate-nested", "duplicate_field", "$.runtimes[0].runtime_id", replace(`"runtime_id":"orca"`, `"runtime_id":"orca","runtime_id":"other"`)},
 		{"root-null", "invalid_shape", "$", []byte(`null`)},
@@ -339,4 +338,25 @@ func TestSourceKindIsPublicAndChangesDigest(t *testing.T) {
 	if fileID != inlineID || !reflect.DeepEqual(d.Public().Agents, inline.Public().Agents) {
 		t.Fatal("source kind change changed identity or Agent requests/availability")
 	}
+}
+
+func TestInstructionsRemainPrivateAndDoNotChangePublicProjection(t *testing.T) {
+	cfg := fixture()
+	before, hash := publicBytes(t, requireValid(t, "runner-a", cfg))
+	cfg.Agents[0].Instructions = privateSentinel
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(raw)
+	if err != nil || decoded.Agents[0].Instructions != privateSentinel {
+		t.Fatal(decoded, err)
+	}
+	after, next := publicBytes(t, requireValid(t, "runner-a", decoded))
+	if string(before) != string(after) || hash != next || bytes.Contains(after, []byte(privateSentinel)) {
+		t.Fatal("private instructions leaked into public identity")
+	}
+	cfg.Agents[0].Instructions = string([]byte{0xff})
+	_, err = Validate("runner-a", cfg, source())
+	requireError(t, err, "invalid_instructions", "$.agents[0].instructions")
 }

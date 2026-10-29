@@ -141,6 +141,11 @@ export type Code =
 export type OpStatus = "succeeded" | "failed" | "accepted" | "unknown";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkerKind".
+ */
+export type WorkerKind = "appserver" | "orca";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "DecisionEffect".
  */
 export type DecisionEffect = "implement" | "accept" | "cancel" | "start_over";
@@ -195,11 +200,6 @@ export type RunObserved =
 export type TokenScope = "owner";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkerKind".
- */
-export type WorkerKind = "appserver" | "orca";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ActionStatus".
  */
 export type ActionStatus = "pending" | "ready" | "dispatched" | "done" | "cancelled" | "superseded";
@@ -226,6 +226,7 @@ export interface TendAPI {
   AgentContextUsage?: AgentContextUsage;
   AgentConversation?: AgentConversation;
   AgentConversationPage?: AgentConversationPage;
+  AgentExecutor?: AgentExecutor;
   AgentRolloutPage?: AgentRolloutPage;
   AgentRolloutWindow?: AgentRolloutWindow;
   AnswerDecisionPayload?: AnswerDecisionPayload;
@@ -275,6 +276,7 @@ export interface TendAPI {
   RequestView?: RequestView;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
   ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
+  RunExecutionPin?: RunExecutionPin;
   RunLogPage?: RunLogPage;
   RunRolloutPage?: RunRolloutPage;
   RunnerRepository?: RunnerRepository;
@@ -288,6 +290,7 @@ export interface TendAPI {
   Snapshot?: Snapshot;
   StreamStart?: StreamStart;
   SubmitMessagePayload?: SubmitMessagePayload;
+  TaskAgentSelection?: TaskAgentSelection;
   TaskDetail?: TaskDetail;
   TaskPage?: TaskPage;
   TokenUsageSample?: TokenUsageSample;
@@ -800,6 +803,54 @@ export interface AgentConversationPage {
   items: AgentConversation[] | null;
   next?: string;
   runtime_available: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentExecutor".
+ */
+export interface AgentExecutor {
+  available: boolean;
+  pin: RunExecutionPin;
+  reason?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunExecutionPin".
+ */
+export interface RunExecutionPin {
+  agent_revision: number;
+  backend_id: string;
+  identity: AgentIdentity;
+  inventory_revision: number;
+  profile: ExecutionProfile;
+  public_sha256: string;
+  runtime: AgentRuntimeReference;
+  snapshot_id: string;
+  worker: WorkerKind;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentIdentity".
+ */
+export interface AgentIdentity {
+  execution_environment_id: string;
+  local_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutionProfile".
+ */
+export interface ExecutionProfile {
+  effort?: string;
+  model: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentRuntimeReference".
+ */
+export interface AgentRuntimeReference {
+  revision: number;
+  runtime_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1362,6 +1413,7 @@ export interface TaskRelation {
 export interface OwnerTaskSpec {
   acceptance: string[] | null;
   acceptance_execution?: ExecutionProfile;
+  agent_selection?: TaskAgentSelection;
   constraints?: string[];
   deliverables?: string[];
   delivery?: string;
@@ -1376,11 +1428,21 @@ export interface OwnerTaskSpec {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "ExecutionProfile".
+ * via the `definition` "TaskAgentSelection".
  */
-export interface ExecutionProfile {
+export interface TaskAgentSelection {
+  acceptance: AgentRequirement;
+  implementation: AgentRequirement;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentRequirement".
+ */
+export interface AgentRequirement {
+  category_id: string;
   effort?: string;
-  model: string;
+  model?: string;
+  runtime_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

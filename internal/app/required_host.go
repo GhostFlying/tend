@@ -12,6 +12,9 @@ import (
 // checkRequiredHost validates stable configuration only: transient availability
 // and free capacity belong to scheduling, so offline hosts remain valid targets.
 func checkRequiredHost(ctx context.Context, q store.Querier, spec domain.Spec, resource *store.WorkspaceRow) error {
+	if resource != nil && resource.BackendID != "" && spec.AgentSelection == nil {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "spec.agent_selection: this workspace uses named execution; retain or provide both role categories")
+	}
 	id := spec.Requirements.HostID
 	if id == "" {
 		return nil

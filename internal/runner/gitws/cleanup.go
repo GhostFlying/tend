@@ -13,6 +13,13 @@ import (
 
 // Cleanup removes only a reserved, locally owned directory resource.
 func (w *Workspaces) Cleanup(ctx context.Context, p protocol.WorkspaceCleanup) error {
+	if p.BackendID != "" && p.BackendID != w.backendID {
+		view, err := w.Backend(p.BackendID)
+		if err != nil {
+			return err
+		}
+		return view.Cleanup(ctx, p)
+	}
 	if p.Kind != "directory" {
 		return fmt.Errorf("gitws: cleanup of %s is not supported", p.Kind)
 	}
@@ -39,6 +46,9 @@ func (w *Workspaces) Cleanup(ctx context.Context, p protocol.WorkspaceCleanup) e
 	}
 	_, statErr := os.Stat(statePath(home))
 	if statErr == nil {
+		if st.BackendID != "" && st.BackendID != p.BackendID {
+			return errors.New("gitws: cleanup backend differs from recorded origin")
+		}
 		if st.ResourceID != p.WorkspaceID || st.ProviderID != p.ProviderID || st.ProviderInstanceID != p.ProviderInstanceID {
 			return errors.New("gitws: cleanup identity mismatch")
 		}

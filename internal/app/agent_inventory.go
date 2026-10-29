@@ -143,6 +143,9 @@ func (a *App) ReadAgentInventory(ctx context.Context, p protocol.Principal, inpu
 		if err != nil {
 			return err
 		}
+		if runtimeSupportsAgentExecution(input.Runtime) && runtimeSupportsAgentExecution(&runtime.Runtime) {
+			result.Executors = runtime.Runtime.AgentExecutors
+		}
 		result.Online = runtime.Online && a.now().UnixMilli()-runtime.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds()
 		result.LastHeartbeatAtMillis = runtime.LastHeartbeatAt
 		current, err := store.GetAgentInventory(ctx, tx.Q(), p.Subject)

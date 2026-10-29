@@ -206,6 +206,19 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 			}
 		}
 	}
+	if pin, e := store.GetRunExecution(ctx, q, run.RunID); e == nil {
+		runtime, err := store.GetHostRuntime(ctx, q, run.HostID)
+		if err != nil {
+			return as, err
+		}
+		if !runtimeSupportsAgentExecution(&runtime.Runtime) {
+			return as, protocol.Errorf(protocol.CodeInvalidTransition, "runner cannot recover named execution without its negotiated adapter")
+		}
+		as.Execution = pin
+		as.Workspace.BackendID = pin.BackendID
+	} else if !errors.Is(e, store.ErrNotFound) {
+		return as, e
+	}
 	return as, nil
 }
 
@@ -275,11 +288,20 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
 		return Outcome{}, err
 	}
-	pick, ok := scheduler.Pick(scheduler.Host{
+	var executors []scheduler.Executor
+	if runtimeSupportsAgentExecution(p.Runtime) {
+		executors, err = hostExecutors(ctx, q, host.HostID, x.Now.UnixMilli())
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
+	schedulingHost := scheduler.Host{
 		ID: host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
 		AcceptanceExecution: runtimeSupportsAcceptanceExecution(p.Runtime), TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
-	}, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
+		Executors: executors,
+	}
+	pick, ok := scheduler.Pick(schedulingHost, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
 	}
@@ -296,6 +318,16 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err := tx.InsertRun(ctx, run); err != nil {
 		return Outcome{}, err
 	}
+	execution, reason := scheduler.SelectExecution(schedulingHost, pick)
+	if reason != "" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "named execution became ineligible")
+	}
+	if execution != nil {
+		if err := tx.InsertRunExecution(ctx, run.RunID, *execution); err != nil {
+			return Outcome{}, err
+		}
+	}
+
 	if p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityRunMessages) {
 		if err := tx.EnableRunMessages(ctx, run.RunID); err != nil {
 			return Outcome{}, err
@@ -323,6 +355,11 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	resource, err := store.GetWorkspaceByTask(ctx, q, run.TaskID)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if execution != nil {
+		if err := tx.BindWorkspaceBackend(ctx, resource.WorkspaceID, execution.BackendID); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if err = tx.AcquireWorkspace(ctx, resource.WorkspaceID, run.TaskID, now); err != nil {
 		return Outcome{}, err
@@ -359,6 +396,9 @@ func (Hello) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
 		return err
 	}
 	if err := checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, true); err != nil {
+		return err
+	}
+	if err := checkNamedRunRecovery(ctx, q, x.Principal.Subject, p.Runtime); err != nil {
 		return err
 	}
 	if err := checkRunCapabilitiesRecovery(ctx, q, x.Principal.Subject, p.Runtime); err != nil {
@@ -404,6 +444,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		}
 		res.Control = &c
 		res.RepositoryBindings = slices.Contains(p.Runtime.Capabilities, protocol.CapabilityRepositoryBindings)
+		res.AgentExecution = runtimeSupportsAgentExecution(p.Runtime)
 		res.AgentInventory = p.Runtime.Protocol == protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityAgentInventory)
 	}
 	var events []Event
@@ -573,6 +614,9 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	}
 	if ws.OccupiedBy != "" && ws.OccupiedBy != rc.task.TaskID {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "workspace is occupied by another task")
+	}
+	if ws.BackendID != "" && p.BackendID != ws.BackendID {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "workspace backend differs from its assigned origin")
 	}
 	if ws.ProviderID != "" && p.ProviderID != ws.ProviderID || ws.ProviderInstanceID != "" && p.ProviderInstanceID != ws.ProviderInstanceID || ws.Path != "" && p.Path != ws.Path {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "workspace provider identity or path changed")

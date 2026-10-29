@@ -8,6 +8,7 @@ import (
 
 // WorkspaceRow combines a resource with the requesting task's binding.
 type WorkspaceRow struct {
+	BackendID          string
 	WorkspaceID        string
 	TaskID             string
 	CreatorTaskID      string
@@ -36,12 +37,12 @@ const (
 
 const resourceColumns = `w.workspace_id,w.task_id,w.name,w.host_id,w.status,w.kind,
 	COALESCE(w.occupied_by,''),w.provider_id,w.provider_instance_id,w.path,
-	COALESCE(w.released_at,0),COALESCE(w.cleanup_id,''),COALESCE(w.owner_work_item_id,'')`
+	COALESCE(w.released_at,0),COALESCE(w.cleanup_id,''),COALESCE(w.owner_work_item_id,''),w.backend_id`
 
 func scanWorkspace(s interface{ Scan(...any) error }) (WorkspaceRow, error) {
 	var w WorkspaceRow
 	err := s.Scan(&w.WorkspaceID, &w.CreatorTaskID, &w.Name, &w.HostID, &w.Status, &w.Kind,
-		&w.OccupiedBy, &w.ProviderID, &w.ProviderInstanceID, &w.Path, &w.ReleasedAt, &w.CleanupID, &w.OwnerWorkItemID)
+		&w.OccupiedBy, &w.ProviderID, &w.ProviderInstanceID, &w.Path, &w.ReleasedAt, &w.CleanupID, &w.OwnerWorkItemID, &w.BackendID)
 	return w, err
 }
 

@@ -89,6 +89,7 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
+	Executions          ExecutionResolver
 	AgentInventory      func(context.Context) (protocol.LocalAgentConfiguration, error)
 	AgentChanges        <-chan struct{}
 	RepositoryBindings  func() []protocol.RunnerRepository
@@ -170,6 +171,7 @@ type Runner struct {
 	wg      sync.WaitGroup
 
 	inventoryMu                 sync.Mutex
+	agentExecutionSupported     bool
 	agentInventorySupported     bool
 	controlMu                   sync.Mutex
 	control                     protocol.RunnerControl
@@ -264,6 +266,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil {
 		return err
+	}
+	if r.cfg.Executions != nil {
+		r.requestReconcile()
 	}
 	if err := r.RegisterAgentInventory(ctx); err != nil {
 		r.cfg.Log.WarnContext(ctx, "agent inventory registration pending", "err", err)
@@ -462,7 +467,7 @@ func (r *Runner) claimOnce(ctx context.Context, env *protocol.Envelope, sentAt t
 	if res.Assignment == nil {
 		return r.cfg.Journal.DeleteRequest(ctx, env.RequestID)
 	}
-	if err := r.cfg.Journal.AcceptAssignmentFromWorker(ctx, *res.Assignment, env.RequestID, r.cfg.Worker); err != nil {
+	if err := r.cfg.Journal.AcceptAssignmentFromWorker(ctx, *res.Assignment, env.RequestID, assignmentWorker(*res.Assignment, r.cfg.Worker)); err != nil {
 		return err
 	}
 	as := res.Assignment
@@ -479,6 +484,7 @@ func (r *Runner) hello(ctx context.Context) error {
 	r.controlMu.Lock()
 	r.repositoryBindingsSupported = false
 	r.agentInventorySupported = false
+	r.agentExecutionSupported = false
 	r.controlMu.Unlock()
 	runs, err := r.cfg.Journal.Runs(ctx)
 	if err != nil {
@@ -510,6 +516,7 @@ func (r *Runner) hello(ctx context.Context) error {
 	r.controlMu.Lock()
 	r.repositoryBindingsSupported = res.RepositoryBindings
 	r.agentInventorySupported = res.AgentInventory && r.cfg.AgentInventory != nil
+	r.agentExecutionSupported = res.AgentExecution && r.cfg.Executions != nil
 	r.controlMu.Unlock()
 	r.setTTL(res.LeaseTTLMillis)
 	if err := r.applyControl(ctx, res.Control, sent, true); err != nil {
@@ -544,7 +551,7 @@ func (r *Runner) hello(ctx context.Context) error {
 		}
 	}
 	for _, as := range res.Reassigned {
-		if err := r.cfg.Journal.AcceptAssignmentFromWorker(ctx, as, "", r.cfg.Worker); err != nil {
+		if err := r.cfg.Journal.AcceptAssignmentFromWorker(ctx, as, "", assignmentWorker(as, r.cfg.Worker)); err != nil {
 			return err
 		}
 		r.start(ctx, as, sent)
@@ -810,6 +817,14 @@ func (r *Runner) reconciler(ctx context.Context) {
 			timer.Stop()
 		}
 	}()
+	scheduleRetry := func() {
+		if timer == nil {
+			timer = time.NewTimer(r.cfg.RetryDelay)
+		} else {
+			timer.Reset(r.cfg.RetryDelay)
+		}
+		retry = timer.C
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -829,14 +844,16 @@ func (r *Runner) reconciler(ctx context.Context) {
 		if err := r.RegisterAgentInventory(ctx); err != nil && ctx.Err() == nil {
 			r.cfg.Log.WarnContext(ctx, "agent inventory registration pending", "err", err)
 			if isRetryable(err) {
-				if timer == nil {
-					timer = time.NewTimer(r.cfg.RetryDelay)
-				} else {
-					timer.Reset(r.cfg.RetryDelay)
-				}
-				retry = timer.C
+				scheduleRetry()
 			}
 		}
+		if r.cfg.Executions != nil {
+			if err := r.cfg.Executions.Refresh(ctx); err != nil && ctx.Err() == nil {
+				r.cfg.Log.WarnContext(ctx, "named execution readiness unavailable", "err", err)
+				scheduleRetry()
+			}
+		}
+
 	}
 }
 

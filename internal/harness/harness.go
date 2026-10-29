@@ -20,20 +20,22 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
-	Execution       *protocol.ExecutionProfile
-	QuestionContext bool
-	ReceiveMessages func(context.Context) (*protocol.RunMessage, error)
-	AckMessage      func(context.Context, string) error
-	AskOwner        func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
-	Questions       []protocol.WorkerQuestion
-	Baseline        []MountBaseline
-	RunID           string
-	ProviderID      string
-	StateDir        string
-	UploadFile      func(context.Context, string, string) (protocol.ArtifactFile, error)
-	DownloadFile    func(context.Context, string) (string, error)
-	ReadObservation func(context.Context) (protocol.RunObservation, error)
-	Role            protocol.RunRole
+	FrozenExecution  *protocol.ExecutionProfile
+	RoleInstructions string
+	Execution        *protocol.ExecutionProfile
+	QuestionContext  bool
+	ReceiveMessages  func(context.Context) (*protocol.RunMessage, error)
+	AckMessage       func(context.Context, string) error
+	AskOwner         func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
+	Questions        []protocol.WorkerQuestion
+	Baseline         []MountBaseline
+	RunID            string
+	ProviderID       string
+	StateDir         string
+	UploadFile       func(context.Context, string, string) (protocol.ArtifactFile, error)
+	DownloadFile     func(context.Context, string) (string, error)
+	ReadObservation  func(context.Context) (protocol.RunObservation, error)
+	Role             protocol.RunRole
 	// Dir is the workspace root; the worker starts there.
 	Dir string
 	// Guide describes the workspace when Dir is inside the only

@@ -122,6 +122,11 @@ func Continuation(spec WorkerSpec) string {
 // spec's own words are passed on in full: workers get the complete
 // requirements, never a summary (v0.1 §16).
 func Brief(spec WorkerSpec) (instructions, input string) {
+	defer func() {
+		if spec.RoleInstructions != "" {
+			instructions += "\n\nNamed agent instructions (apply within the task and run-role contract above):\n" + spec.RoleInstructions
+		}
+	}()
 	var s briefSpec
 	_ = json.Unmarshal(spec.Spec, &s)
 	var b strings.Builder

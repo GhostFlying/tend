@@ -1,6 +1,6 @@
 # Issue、Agent 与个人规划架构
 
-状态：设计已确认，P0 与 P1a 已经 CI 和 rebase 合并；P1b1/P1b2、P2 本机配置/Category/安全库存链路完成本地完整检查及独立 review。P1b3+b4 r2+P1c 已正式纳入 owner Issue API/CLI、primary/no-stage 上下文和独立执行/验收/owner 核对闭环，各候选预审通过，r1 review 两项 P2 已采纳修复、完整检查主动停止未完成，r2 已正式应用，定向 race/vet、独立增量复审与完整 make check 均通过；命名 Agent 调度、issue manager 与 hosted factory 尚未启用。其余行为、后续 CI/合并、archive cutover、部署和真实 E2E 尚未完成。本文规定 D121–D126 的目标行为，代码纳入不等于发布；实施顺序及验收见 [实施计划](plans/issue-agent-refactor.md)。
+状态：P0、P1a、P1b1、P2a 与 P1b2a 已经 CI 和 rebase 合并；其余 P1/P2 owner 与配置库存子批完成本地完整检查及独立 review，后续 PR 按台账推进。P3 显式 named 执行已纳入，正式规定 CLI review、独立 schema 增量复审、完整 make check 与 Windows/macOS 交叉编译通过。P4 r4 负责人自治候选独立预审通过，尚未正式纳入；P5 与 P8b 在线准备在隔离副本实施，P8a 离线工具及 P8c owner 只读 API 候选预审通过。未确认页面不编码；本轮尚未部署或完成真实 E2E。本文区分设计合同、代码、检查、合并与验收，实施事实以下文台账为准。
 
 主 Agent 可依据真实 owner 原文，转录既有 decision/version 的既定选项；仍经原 AskedRevision 与领域规则应用已有效果。这是个人助理传递用户决定，不是主 Agent 自由规划 canonical task、修改其冻结合同或接管 owner 权限；不为 owner 普通回答添加语义证明链。
 
@@ -44,15 +44,19 @@ Reparent 必须没有活动责任 turn 或执行，再在一个事务中检查�
 
 Category 是全局能力分类，不是正式角色。每个 runner/runtime 可登记多个本机 Agent definition，每个 definition 可属于多个 category。Hosted main、issue manager 和独立 consultation runtime 同样进入库存，不将可选项局限于 worker runner。
 
-Definition 包含稳定身份、runtime/runner 身份、类别、角色指令、model、effort、支持能力、配置版本及来源。配置来自用户本机 CLI/Agent 设置；只上传允许的非密钥元数据、来源类型、版本和规范化内容 hash，不上传 token、私钥、完整环境或认证文件。路径等机器细节留本机，公共文档与提交不记录真实部署信息。
+Definition 的稳定身份是执行环境 ID 加本机 local Agent ID，runtime 是可版本化绑定引用。Definition 包含类别、私有角色指令、model、effort、支持能力、配置版本及来源。配置来自用户本机 CLI/Agent 设置；只上传允许的非密钥元数据、来源类型、版本和规范化内容 hash，不上传 token、私钥、完整环境或认证文件。路径等机器细节留本机，公共文档与提交不记录真实部署信息。
 
 库存表达已加载、当前可用能力，不只登记候选配置。Runtime 健康、CLI 可用、能力协商和身份验证分别记录；目录中出现一个 Agent 不证明它能在某 host 执行。退役或更新阻止后续新选择，不改写已有 run。
 
-选择条件为 category 加可选 HARD runner/runtime 约束；workspace host 也是硬约束。首次选择执行 host 必须证明该 host 可完成本 task 的实现和正式验收，两个角色使用同一 workspace host，模型或 Agent definition 可不同。正式验收沿用同一 task workspace 身份及冻结的基点/产物合同，验收自己的 scratch 和原生会话仍独立，不能换成另一份未证明等价的工作状态。缺少任一能力则明确排队，不能先实现再迁移验收工作区、忽略硬约束或回退默认 Agent。
+选择条件为 category 加可选 HARD runner/runtime 约束；每个正式 role 可附 model/effort 要求，仅筛选实际 definition 配置，不覆盖它。省略字段不增加门槛，空 effort 不要求本机也为空。旧 acceptance_execution 仍按完整 profile 精确匹配；与新 acceptance 要求矛盾的 owner 输入直接 invalid_request。workspace host 也是硬约束。首次选择执行 host 必须证明该 host 可完成本 task 的实现和正式验收，两个角色使用同一 workspace host，模型或 Agent definition 可不同。正式验收沿用同一 task workspace 身份及冻结的基点/产物合同，验收自己的 scratch 和原生会话仍独立，不能换成另一份未证明等价的工作状态。缺少任一能力则明确排队，不能先实现再迁移验收工作区、忽略硬约束或回退默认 Agent。
 
-候选按持久稳定次序选择，开始分配时固定选择及完整非密钥配置快照/hash。Run 恢复使用原快照和原生身份；更新本机定义只作用于未来选择。快照缺失、能力消失或原 runtime 不可恢复时明确受阻/对账，不静默重选。正式验收仍由 acceptance run、凭据和服务端路径授予，不能由 category 推导。
+首次资格依据当前 task/spec 的 named 分配事实，不以复用 workspace、legacy run 或旧 spec 分配代替。Owner start-over 放弃 workspace 后即使 spec 不变，也在新 host/backend 重新检查双方能力；不新增资格标志。首次检查只证明双方可选，当前 run 才冻结自己的身份，正式验收到真正分配时再选择其配置。
 
-复用现有 TraeX 和 Orca harness，扩展已有验收 model/effort 选择，不增加 provider。新增通信字段先评估 breaking：仅当能力协商能保持旧有效请求、默认语义和 wire 形状时采用增量；否则提升协议，完整执行 N/N−1 和适配退役约束。
+候选按持久稳定次序选择，每个新 run 分配时固定选择及非密钥 pin 和本机配置 snapshot 引用。Run 恢复使用原快照和原生身份；更新本机定义只作用于未来选择。快照缺失、能力消失或原 runtime 不可恢复时明确受阻/对账，不静默重选。正式验收仍由 acceptance run、凭据和服务端路径授予，不能由 category 推导。
+
+复用现有 TraeX 和 Orca harness，不增加 provider。命名执行显式启用，单主机多个 runtime 共用全局槽位与唯一 workspace 协调器、backend/provider 身份和锁；unknown 仍占资源。RuntimeBinding.ExecutableRef 是实际启动命令，Installation.LocalReference 只作冻结来源元数据，不是第二启动覆盖值。model/effort/私有 instructions 从原 snapshot 经实际适配器注入，不上传指令或路径；独立验收不继承实现会话与 implementation-only context。
+
+P3 wire 保持 1/0：新 capability 与条件 ack 才发送执行观察或新回复字段，旧无选择请求及默认不变。Server migration 57 保存 backend/run pin，本机 journal 12 阻止旧 11 reader 忽略 pin 后按 legacy worker 恢复；升级旧 run 不回填 pin，旧缺 instructions 快照保持原 hash。发布产物仍需声明真实存储兼容范围；代码纳入不代表已发布。新增通信字段先评估 breaking：仅当能力协商能保持旧有效请求、默认语义和 wire 形状时采用增量；否则提升协议，完整执行 N/N−1 和适配退役约束。
 
 ## 4. 所有直接聊天
 
@@ -109,3 +113,9 @@ Cove 本次只定义兼容的入口身份、controller 观察、能力、未知�
 UI 先使用 frontend-app-builder 与 Image Gen 形成设计，经独立 xhigh 设计 review 后由用户确认；确认前不写 UI 实现。API/领域和无 UI 验收可继续。UI 忠实表达真实账本，不以本地标签替代服务端语义。
 
 每批独立构建、测试和 PR，运行 make check、独立 xhigh code review、CI，rebase 后线性合并。中间批次不部署；完整功能、档案/切换演练和真实 harness E2E 就绪后，按受控流程一次部署并做真实 owner 闭环验收。实际机器与发布证据只保存在忽略的本地记录中。
+
+## P3 正式检查与合并进度补记
+
+P3 正式 r2 规定 CLI review 正常退出且无 findings；r3 仅补原 tools schema 的可选 agent_selection，原严格测试不变，独立窄复审通过。r3 完整 `make check TEST_TIMEOUT=60m` 于 UTC 2026-10-28 23:56:24 至 2026-10-29 00:38:14 退出 0（app 2465.547 秒、mainthread 411.145 秒、tools 71.456 秒、Web 全部通过），使用已有本机参数，未修改仓库默认超时；Windows amd64 与 macOS arm64 交叉编译通过。全检日志 SHA-256 `6aa8abb8095508e2fc33d8d52a201cdacfb7d111301c596a26f77f5c0a472613`。首轮格式失败、第二轮 schema 缺项及 40 分钟 package timeout 均保留为失败记录，不记作通过。PR CI/合并、部署和真实模型验收仍待完成。
+
+P2a [PR #160](https://github.com/GhostFlying/tend/pull/160) 的 CI `40781168826` 全通过，rebase 合并至 `b66a94838fc045f317be1cc819d1090d0d486588`。P1b2a [PR #161](https://github.com/GhostFlying/tend/pull/161) 的 CI `40790535737` 全通过，包含浏览器回归和 Windows/macOS 交叉编译，rebase 合并至 `c806b859a8a39cf0c72165b9d135f26667f126e1`。既有历史 base/head 和过程记录保持，不以本地候选通过替代其他批次 CI。

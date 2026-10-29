@@ -22,6 +22,10 @@ func validateRuntime(r *protocol.RunnerRuntime) error {
 	if r == nil {
 		return nil
 	}
+	if len(r.AgentExecutors) > 0 && !slices.Contains(r.Capabilities, protocol.CapabilityAgentExecution) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "execution observations require capability")
+	}
+
 	if negotiated != r.Protocol {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "runner protocol does not match negotiation")
 	}
@@ -104,7 +108,7 @@ func observeRuntime(ctx context.Context, tx *store.Tx, host string, r *protocol.
 			return false, err
 		}
 	}
-	changed := fresh || !old.Online || old.Runtime.InstanceID != r.InstanceID || old.Runtime.Mode != r.Mode || old.Runtime.AppliedControlRevision != r.AppliedControlRevision || old.Runtime.AuthorizationID != r.AuthorizationID || old.Runtime.UpgradeID != r.UpgradeID || old.Runtime.UpgradePhase != r.UpgradePhase || old.Runtime.UpgradeError != r.UpgradeError || old.Runtime.DownloadedBytes != r.DownloadedBytes || old.Runtime.Build != r.Build || !slices.Equal(old.Runtime.Repositories, r.Repositories) || !slices.Equal(old.Runtime.Capabilities, r.Capabilities)
+	changed := fresh || !old.Online || old.Runtime.InstanceID != r.InstanceID || old.Runtime.Mode != r.Mode || old.Runtime.AppliedControlRevision != r.AppliedControlRevision || old.Runtime.AuthorizationID != r.AuthorizationID || old.Runtime.UpgradeID != r.UpgradeID || old.Runtime.UpgradePhase != r.UpgradePhase || old.Runtime.UpgradeError != r.UpgradeError || old.Runtime.DownloadedBytes != r.DownloadedBytes || old.Runtime.Build != r.Build || !slices.Equal(old.Runtime.Repositories, r.Repositories) || !slices.Equal(old.Runtime.Capabilities, r.Capabilities) || !slices.Equal(old.Runtime.AgentExecutors, r.AgentExecutors)
 	if err := tx.PutHostRuntime(ctx, host, store.HostRuntimeRow{Runtime: *r, LastHeartbeatAt: now, Online: true}); err != nil {
 		return false, err
 	}
@@ -120,6 +124,16 @@ func checkClaimRuntime(ctx context.Context, x *Exec, q store.Querier) error {
 		return err
 	}
 	if err := checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, false); err != nil {
+		return err
+	}
+
+	rec, err := store.GetRequest(ctx, q, x.Principal.DedupDomain(), x.Env.RequestID)
+	if err == nil {
+		var result claimResult
+		if json.Unmarshal([]byte(rec.ResultJSON), &result) == nil && result.Assignment.Execution != nil && !runtimeSupportsAgentExecution(p.Runtime) {
+			return protocol.Errorf(protocol.CodeInvalidTransition, "recorded named assignment requires its negotiated adapter")
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
 	return checkQuestionRunRecovery(ctx, q, x.Principal.Subject, p.Runtime)

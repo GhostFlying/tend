@@ -247,3 +247,12 @@ func decodeSnapshot(raw []byte, entry indexEntry, env string) (*Candidate, error
 	}
 	return c, nil
 }
+
+// Configuration returns detached private values for the local execution adapter.
+func (s *Snapshot) Configuration() (agentconfig.Config, []InstallationReference, error) {
+	var p privatePayload
+	if err := json.Unmarshal(s.candidate.raw, &p); err != nil {
+		return agentconfig.Config{}, nil, err
+	}
+	return p.Config, p.Installations, nil
+}

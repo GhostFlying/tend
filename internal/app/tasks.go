@@ -147,7 +147,7 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 	if err := checkRepos(ctx, tx.Q(), p.Spec.Workspace.Repos()); err != nil {
 		return Outcome{}, err
 	}
-	if err := checkMounts(ctx, tx.Q(), p.Spec.Workspace); err != nil {
+	if err := checkSpecMounts(ctx, tx.Q(), p.Spec); err != nil {
 		return Outcome{}, err
 	}
 	name, err := reserveWorkspaceName(ctx, tx.Q(), p.WorkspaceName, taskID)
@@ -315,7 +315,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		// A task that already has several mounts keeps them and waits for
 		// a host that supports them, but takes no new ones.
 		if addsMounts(current.Workspace, p.Spec.Workspace) {
-			if err := checkMounts(ctx, tx.Q(), p.Spec.Workspace); err != nil {
+			if err := checkSpecMounts(ctx, tx.Q(), *p.Spec); err != nil {
 				return Outcome{}, err
 			}
 		}

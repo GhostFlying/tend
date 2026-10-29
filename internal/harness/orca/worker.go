@@ -18,7 +18,8 @@ import (
 
 // WorkerOptions configure the TUI workers a runner starts in orca (D66).
 type WorkerOptions struct {
-	Client *Client
+	TerminalSurface bool
+	Client          *Client
 	// Agent is the agent to launch: codex or traex.
 	Agent protocol.AgentKind
 	// Model and Effort override the agent's defaults when set; orca takes
@@ -497,8 +498,10 @@ func (w *worker) begin(ctx context.Context, agent string) error {
 
 // prompt is the brief a new agent starts with. A TUI has no separate
 // developer instructions, so they lead the brief, after the marker.
-func (w *worker) prompt() string {
-	instructions, input := harness.Brief(w.spec)
+func (w *worker) prompt() string { return w.promptFor(w.spec) }
+
+func (w *worker) promptFor(spec harness.WorkerSpec) string {
+	instructions, input := harness.Brief(spec)
 	prompt := "[tend run " + w.spec.RunID + ", launch " + w.st.Marker + "]\n\n" + instructions + "\n\n" + input
 	if w.st.Recovery != nil {
 		prompt += "\n\n" + w.recoveryBrief()
@@ -531,7 +534,7 @@ func (w *worker) launch(ctx context.Context, agent string) error {
 	for i := 0; ; i++ {
 		l, err := w.ws.opts.Client.LaunchAgent(ctx, LaunchOptions{
 			Dir: w.spec.Dir, Agent: agent, Worktree: workspaceSelector(w.wt), Prompt: prompt,
-			Model: profile.Model, Effort: profile.Effort, RetryLaunch: w.st.Launch,
+			TerminalSurface: w.ws.opts.TerminalSurface, Model: profile.Model, Effort: profile.Effort, RetryLaunch: w.st.Launch,
 		})
 		if err == nil {
 			return w.launched(ctx, l, prompt)
@@ -589,6 +592,13 @@ func (w *worker) launched(ctx context.Context, l Launch, prompt string) error {
 			return err
 		}
 		w.emitRecoveryPhase(ctx)
+	}
+	if w.spec.RoleInstructions != "" {
+		// The native launch receives the private definition. The uploaded lifecycle
+		// view retains the Tend/task brief but never that local configuration.
+		public := w.spec
+		public.RoleInstructions = ""
+		prompt = w.promptFor(public)
 	}
 	w.emit(ctx, "turn.started", map[string]string{"prompt": prompt})
 	return nil
