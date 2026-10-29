@@ -251,6 +251,11 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		}
 	}
 	q := tx.Q()
+	if prepared, err := archivePrepared(ctx, q); err != nil {
+		return Outcome{}, err
+	} else if prepared {
+		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
+	}
 	host, err := requireActiveHost(ctx, x, q)
 	if err != nil {
 		return Outcome{}, err

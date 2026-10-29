@@ -28,6 +28,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/api"
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/archive"
 	"github.com/GhostFlying/tend/internal/cfgfile"
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/dispatch"
@@ -40,11 +41,14 @@ import (
 	"github.com/GhostFlying/tend/internal/runnerapi"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/tools"
+	"github.com/GhostFlying/tend/internal/upgradectl"
 	"github.com/GhostFlying/tend/internal/webui"
 )
 
 // config is the server's configuration file.
 type config struct {
+	Archives map[string]string `json:"archives,omitempty"`
+
 	// DataDir holds the ledger and the tailnet state.
 	DataDir string `json:"data_dir"`
 	// Tailnet joins the tailnet as this node; without it the server
@@ -53,7 +57,8 @@ type config struct {
 		Hostname  string `json:"hostname"`
 		Ephemeral bool   `json:"ephemeral"`
 	} `json:"tailnet"`
-	Listen string `json:"listen"`
+	Listen        string `json:"listen"`
+	ControlSocket string `json:"control_socket"`
 	// Owners are the tailnet logins allowed to use the owner API, through
 	// the tend CLI and the agents it connects (D49).
 	Owners []string `json:"owners"`
@@ -122,11 +127,18 @@ func serverHandler(runners, owner http.Handler) http.Handler {
 }
 
 func main() {
-	path := flag.String("config", "", "configuration file (HuJSON)")
-	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) > 1 && os.Args[1] == "archive" {
+		if err := runOfflineArchive(ctx, os.Args[2:], os.Stdout, os.Stderr, defaultArchiveDependencies()); err != nil {
+			log.Error("offline archive command failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+	path := flag.String("config", "", "configuration file (HuJSON)")
+	flag.Parse()
 	if err := run(ctx, *path, log); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("tend-server stopped", "err", err)
 		os.Exit(1)
@@ -295,7 +307,28 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	ownerConfig := api.Config{Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}
+	archives, closeArchives, err := prepareArchives(ctx, cfg.Archives, log, archive.Open)
+	if err != nil {
+		return err
+	}
+	defer closeArchives()
+	localSocket, err := archiveControlSocket(cfg.ControlSocket, cfg.Upgrades, dataDir)
+	if err != nil {
+		return err
+	}
+	archiveControl := upgradectl.ArchiveControl{App: a, ObserveHosted: func(ctx context.Context) (bool, error) {
+		if front != nil {
+			ready, err := front.ArchiveDrainStatus(ctx)
+			if err != nil || !ready {
+				return false, err
+			}
+		}
+		if background != nil {
+			return background.ArchiveDrainStatus(ctx)
+		}
+		return true, nil
+	}}
+	ownerConfig := api.Config{Archives: archives, Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
 		ownerConfig.ConversationHandoff = front.HandoffStatus
@@ -309,10 +342,16 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	var wg sync.WaitGroup
-	if upgradeController != nil {
+	if localSocket != "" {
 		wg.Go(func() {
-			if err := upgradeController.Run(runCtx); err != nil && runCtx.Err() == nil {
-				log.Error("local upgrade controller stopped", "err", err)
+			var err error
+			if upgradeController != nil {
+				err = upgradeController.RunWith(runCtx, archiveControl.Handler())
+			} else {
+				err = upgradectl.ServeLocal(runCtx, localSocket, archiveControl.Handler())
+			}
+			if err != nil && runCtx.Err() == nil {
+				log.Error("local server control stopped", "err", err)
 				stop()
 			}
 		})
@@ -327,11 +366,10 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	wg.Go(func() { _ = d.Run(runCtx) })
 	wg.Go(func() { runners.SweepLeases(runCtx, a.LeaseTTL()/4) })
 	wg.Go(func() { runners.SweepWorkspaces(runCtx, time.Minute) })
+	shutdownResult := make(chan error, 1)
 	wg.Go(func() {
 		<-runCtx.Done()
-		shutdown, cancel := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdown)
+		shutdownResult <- shutdownHTTP(context.WithoutCancel(runCtx), server, 10*time.Second, log)
 	})
 	if secure {
 		wg.Go(func() {
@@ -351,13 +389,17 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	err = <-served
 	stop()
 	wg.Wait()
+	shutdownErr := <-shutdownResult
 	for range len(listeners) - 1 {
 		<-served
 	}
 	if errors.Is(err, http.ErrServerClosed) {
+		if shutdownErr != nil {
+			return shutdownErr
+		}
 		return ctx.Err()
 	}
-	return err
+	return errors.Join(err, shutdownErr)
 }
 
 // hostedMainThread prepares the hosted main agent (D68).

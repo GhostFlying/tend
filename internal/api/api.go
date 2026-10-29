@@ -21,6 +21,9 @@ const maxBody = 1 << 20
 
 // Config configures the API. Zero values select the defaults.
 type Config struct {
+	// Archives are explicitly configured, already verified read-only handles.
+	Archives map[string]ConfiguredArchive
+
 	// Owners are the tailnet logins allowed to use the API.
 	Owners []string
 	// OwnerNodes maps nodes, by machine name or "tag:", to the owner whose
@@ -44,6 +47,8 @@ type Config struct {
 
 // Server serves the owner API.
 type Server struct {
+	archives map[string]archiveHandle
+
 	app   *app.App
 	store *store.Store
 	whois netx.WhoIs
@@ -71,12 +76,23 @@ func New(a *app.App, s *store.Store, whois netx.WhoIs, secret []byte, cfg Config
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Server{app: a, store: s, whois: whois, key: tokenKey(secret), cfg: cfg, log: log, ending: make(chan struct{})}
+	return &Server{archives: archiveHandles(cfg.Archives), app: a, store: s, whois: whois, key: tokenKey(secret), cfg: cfg, log: log, ending: make(chan struct{})}
 }
 
 // Handler returns the API's routes, all under /api/v1/.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/archives", s.archiveCatalog)
+	mux.HandleFunc("GET /api/v1/archives/{archive}", s.archiveDetail)
+	mux.HandleFunc("GET /api/v1/archives/{archive}/records/{kind}", s.archiveRecords)
+	mux.HandleFunc("GET /api/v1/archives/{archive}/records/{kind}/{id}", s.archiveRecord)
+	mux.HandleFunc("GET /api/v1/archives/{archive}/originals/{kind}", s.archiveOriginals)
+	mux.HandleFunc("GET /api/v1/archives/{archive}/originals/{kind}/{id}/metadata", s.archiveOriginalMetadata)
+	mux.HandleFunc("GET /api/v1/archives/{archive}/originals/{kind}/{id}/download-url", s.archiveOriginalURL)
+	mux.HandleFunc("GET /api/v1/archives/{archive}/originals/{kind}/{id}", s.archiveOriginal)
+	mux.HandleFunc("GET /api/v1/archives/{archive}/resources", s.archiveResources)
+	mux.HandleFunc("GET /api/v1/archives/{archive}/resources/{id}/files/{index}/download-url", s.archiveResourceURL)
+	mux.HandleFunc("GET /api/v1/archives/{archive}/resources/{id}/files/{index}", s.archiveResourceFile)
 	mux.HandleFunc("GET /api/v1/deployment", s.deployment)
 	mux.HandleFunc("POST /api/v1/session", s.createSession)
 	mux.HandleFunc("GET /api/v1/session", s.readSession)
@@ -134,7 +150,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/conversation/settings", s.conversationSettings)
 	mux.HandleFunc("GET /api/v1/conversation/handoff", s.conversationHandoff)
 	mux.HandleFunc("GET /api/v1/events", s.events)
-	return s.deploymentGuard(mux)
+	return s.deploymentGuard(s.archiveAdmission(mux))
 }
 
 var statusOf = map[protocol.Code]int{

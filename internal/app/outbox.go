@@ -80,6 +80,13 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 		ok   bool
 	)
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
+		if destination == MainThreadDestination || strings.HasPrefix(destination, "background_thread:") {
+			if prepared, err := archivePrepared(ctx, tx.Q()); err != nil {
+				return err
+			} else if prepared {
+				return nil
+			}
+		}
 		if destination == MainThreadDestination {
 			if err := a.recoverLateTurnMessages(ctx, tx); err != nil {
 				return err

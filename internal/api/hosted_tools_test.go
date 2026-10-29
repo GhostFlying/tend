@@ -25,11 +25,22 @@ func TestExternalCoordinatorRetired(t *testing.T) {
 		t.Fatal(st)
 	}
 	before := e.count("SELECT count(*) FROM request_records")
-	for _, tok := range []string{old, e.login(protocol.ScopeOwner)} {
+	for _, identity := range []struct {
+		token      string
+		postStatus int
+	}{{old, http.StatusUnauthorized}, {e.login(protocol.ScopeOwner), http.StatusNotFound}} {
+		// The existing mutation-admission middleware authenticates before routing.
+		// A retired agent token is rejected there; a genuine owner still proves
+		// the retired route is absent. Neither case reaches an app mutation.
+		tok := identity.token
 		for _, route := range []struct{ method, path string }{{"POST", "/api/v1/agent/hook"}, {"GET", "/api/v1/agent/tools"}, {"POST", "/api/v1/agent/tools/tasks_create"}} {
 			st := e.do(route.method, route.path, tok, map[string]any{}, nil)
-			if st != http.StatusNotFound {
-				t.Errorf("%s %s = %d", route.method, route.path, st)
+			want := http.StatusNotFound
+			if route.method == http.MethodPost {
+				want = identity.postStatus
+			}
+			if st != want {
+				t.Errorf("%s %s = %d, want %d", route.method, route.path, st, want)
 			}
 		}
 	}

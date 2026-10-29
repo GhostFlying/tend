@@ -13,6 +13,13 @@ import (
 )
 
 func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.FollowupRule, w protocol.WorkItem, manual bool) (bool, error) {
+	// Results still commit while prepared; both event and sweep callers must
+	// leave occurrence admission and the rule unchanged until explicit cancel.
+	if prepared, err := archivePrepared(ctx, tx.Q()); err != nil {
+		return false, err
+	} else if prepared {
+		return false, nil
+	}
 	before := r.Revision
 	if handled, err := evaluateDeadlineFollowup(ctx, x, tx, r); handled || err != nil {
 		return r.Revision != before, err
@@ -59,6 +66,16 @@ func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.Fo
 		if w.Status == "snoozed" && (r.NextAt <= now || (r.ExpiresAt > 0 && r.ExpiresAt <= now)) {
 			_, err := tx.Exec(ctx, `UPDATE followup_rules SET next_due=? WHERE rule_id=?`, now+30000, r.RuleID)
 			return true, err
+		}
+		if r.Kind == "condition" {
+			// A one-time recheck after cancel must not keep an unsatisfied
+			// condition hot; its public rule and expiry remain unchanged.
+			result, err := tx.Exec(ctx, `UPDATE followup_rules SET next_due=? WHERE rule_id=? AND next_due<>?`, r.ExpiresAt, r.RuleID, r.ExpiresAt)
+			if err != nil {
+				return false, err
+			}
+			changed, err := result.RowsAffected()
+			return changed != 0, err
 		}
 		return false, nil
 	}
@@ -220,6 +237,11 @@ func (SweepFollowups) Authorize(_ context.Context, x *Exec, _ store.Querier) err
 	return allowKinds(x.Principal, protocol.PrincipalSystem)
 }
 func (SweepFollowups) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	if prepared, err := archivePrepared(ctx, tx.Q()); err != nil {
+		return Outcome{}, err
+	} else if prepared {
+		return Outcome{NoEffect: true}, nil
+	}
 	if !x.FollowupsEnabled {
 		return Outcome{NoEffect: true}, nil
 	}

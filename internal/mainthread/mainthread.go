@@ -77,12 +77,14 @@ type Manager struct {
 	session            harness.Session
 	thread             harness.Thread
 	ready              chan struct{} // closed while a thread is up
-	startupFailed      chan error    // first local startup failure; used by the pool
+	startupExited      chan error    // pre-ready local exit (nil means intentional pause); used by the pool
 	active             *turn
 	maintenanceBlocked bool
 	summaryActive      bool
 	lastActivity       time.Time
-	toolSourceMu       sync.Mutex        // serializes callback source binding with visible tool records
+	toolSourceMu       sync.Mutex // serializes callback source binding with visible tool records
+	archiveStarting    bool
+	archiveTeardown    bool
 	workMu             sync.Mutex        // serializes deliveries with fork snapshot acquisition
 	settled            map[string]string // turn ID -> final status, for turns that ended before Deliver saw them start
 	ownerSourcesReady  bool              // persisted toolset proves hosted source selection is installed
@@ -122,7 +124,7 @@ func New(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg Config) 
 	if cfg.SteerTimeout <= 0 {
 		cfg.SteerTimeout = 10 * time.Second
 	}
-	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, readAdmittedTurn: a.LogicalTurn, ready: make(chan struct{}), startupFailed: make(chan error, 1), settled: map[string]string{}}
+	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, readAdmittedTurn: a.LogicalTurn, ready: make(chan struct{}), startupExited: make(chan error, 1), settled: map[string]string{}}
 }
 
 func (m *Manager) threadKey(threadID string) string { return m.bindingInstance() + "/" + threadID }
@@ -137,8 +139,26 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 	defer func() { cancel(); background.Wait() }()
 	for ctx.Err() == nil {
-		if err := m.serve(ctx); err != nil && ctx.Err() == nil {
-			m.cfg.Log.ErrorContext(ctx, "main thread session ended", "err", err)
+
+		preparation, err := m.app.ArchivePreparation(ctx)
+		if err != nil {
+			m.notifyStartupExit(err)
+			return err
+		}
+		needsRead := true
+		if preparation.Prepared {
+			needsRead, err = m.app.ArchiveNeedsReceiptRead(ctx, m.cfg.ConversationID)
+			if err != nil {
+				m.notifyStartupExit(err)
+				return err
+			}
+		}
+		if needsRead {
+			if err := m.serve(ctx); err != nil && ctx.Err() == nil {
+				m.cfg.Log.ErrorContext(ctx, "main thread session ended", "err", err)
+			}
+		} else {
+			m.notifyStartupExit(nil)
 		}
 		select {
 		case <-ctx.Done():
@@ -153,13 +173,29 @@ func (m *Manager) Run(ctx context.Context) error {
 func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	started := false
 	defer func() {
-		if !started && startupErr != nil && ctx.Err() == nil {
-			select {
-			case m.startupFailed <- startupErr:
-			default:
-			}
+		if !started && ctx.Err() == nil {
+			m.notifyStartupExit(startupErr)
 		}
 	}()
+	m.mu.Lock()
+	m.archiveStarting = true
+	m.mu.Unlock()
+	defer func() { m.mu.Lock(); m.archiveStarting = false; m.archiveTeardown = false; m.mu.Unlock() }()
+	preparation, err := m.app.ArchivePreparation(ctx)
+	if err != nil {
+		return err
+	}
+	receiptOnly := preparation.Prepared
+	if receiptOnly {
+		needed, err := m.app.ArchiveNeedsReceiptRead(ctx, m.cfg.ConversationID)
+		if err != nil {
+			return err
+		}
+		if !needed {
+			return nil
+		}
+	}
+
 	selected, named, err := m.app.HostedRuntimeSelection(ctx, m.cfg.ConversationID)
 	if err != nil {
 		return err
@@ -186,6 +222,9 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	if named {
 		var models []harness.Model
 		if selected.AppliedModel == "" {
+			if receiptOnly {
+				return errors.New("original hosted execution model is unavailable for receipt-only attachment")
+			}
 			catalog, ok := s.(harness.ModelCatalog)
 			if !ok {
 				return errors.New("named executor model catalog is unavailable")
@@ -231,6 +270,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	}
 	m.mu.Lock()
 	m.session, m.thread = s, th
+	m.archiveStarting = false
 	m.ownerSourcesReady = installed == hash || (bound && binding.ThreadID == th.ID() && binding.ToolsetHash == hash)
 	close(m.ready)
 	started = true
@@ -240,6 +280,9 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	defer func() {
+		m.mu.Lock()
+		m.archiveTeardown = true
+		m.mu.Unlock()
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		if err := m.app.AwaitNativeReceipts(cleanup, th.ID()); err != nil {
@@ -407,6 +450,25 @@ func (m *Manager) threadConfig() harness.ThreadConfig {
 // when there is none or it cannot be resumed. A new thread has no
 // baseline, so its first turn gets a full snapshot.
 func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Thread, error) {
+	p, err := m.app.ArchivePreparation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if p.Prepared {
+		id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, errors.New("original native thread is unavailable for archive reconciliation")
+		}
+		if err := m.app.SettleOpenTurns(ctx, id); err != nil {
+			return nil, err
+		}
+		// Never replace a rejected thread, migrate its toolset or run a model.
+		return s.ResumeThread(ctx, id, m.threadConfig())
+	}
+
 	if m.cfg.MaintenanceEnabled {
 		return m.openManagedThread(ctx, s)
 	}
@@ -672,8 +734,16 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 	return m.tools.Handle(ctx, call)
 }
 
-// waitStartup lets a pool release capacity after a known local failure. Once
-// ready, normal session restarts and native receipt reconciliation stay intact.
+func (m *Manager) notifyStartupExit(err error) {
+	select {
+	case m.startupExited <- err:
+	default:
+	}
+}
+
+// waitStartup lets a pool release capacity after a pre-ready local exit.
+// A nil thread/error denotes an intentional pause. Once ready, normal session
+// restarts and native receipt reconciliation stay intact.
 func (m *Manager) waitStartup(ctx context.Context) (harness.Thread, error) {
 	m.mu.Lock()
 	ready := m.ready
@@ -681,7 +751,7 @@ func (m *Manager) waitStartup(ctx context.Context) (harness.Thread, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case err := <-m.startupFailed:
+	case err := <-m.startupExited:
 		return nil, err
 	case <-ready:
 		return m.waitThread(ctx)

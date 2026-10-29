@@ -797,6 +797,524 @@
       "title": "AnswerResult",
       "type": "object"
     },
+    "ArchiveCatalog": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ArchiveSummary"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "ArchiveCatalog",
+      "type": "object"
+    },
+    "ArchiveControlRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_control_revision": {
+          "type": "integer"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "expected_control_revision"
+      ],
+      "title": "ArchiveControlRequest",
+      "type": "object"
+    },
+    "ArchiveHostControlRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_control_revision": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "expected_control_revision",
+        "host_id",
+        "mode"
+      ],
+      "title": "ArchiveHostControlRequest",
+      "type": "object"
+    },
+    "ArchiveHostStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "control": {
+          "$ref": "#/definitions/RunnerControl"
+        },
+        "fresh": {
+          "type": "boolean"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "open_runs": {
+          "type": "integer"
+        },
+        "runtime": {
+          "$ref": "#/definitions/RunnerRuntime"
+        }
+      },
+      "required": [
+        "host_id",
+        "control",
+        "fresh",
+        "open_runs",
+        "blockers"
+      ],
+      "title": "ArchiveHostStatus",
+      "type": "object"
+    },
+    "ArchiveMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "format_version": {
+          "type": "integer"
+        },
+        "original_count": {
+          "type": "integer"
+        },
+        "record_kinds": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resource_count": {
+          "type": "integer"
+        },
+        "schema": {
+          "type": "integer"
+        },
+        "source_build": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format_version",
+        "deployment_id",
+        "schema",
+        "created_at",
+        "record_kinds",
+        "original_count",
+        "resource_count"
+      ],
+      "title": "ArchiveMetadata",
+      "type": "object"
+    },
+    "ArchiveOnlineStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "active_owner_requests": {
+          "type": "integer"
+        },
+        "blockers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hosted_drained": {
+          "type": "boolean"
+        },
+        "hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ArchiveHostStatus"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "online_ready": {
+          "type": "boolean"
+        },
+        "preparation": {
+          "$ref": "#/definitions/ArchivePreparation"
+        }
+      },
+      "required": [
+        "preparation",
+        "active_owner_requests",
+        "hosted_drained",
+        "hosts",
+        "blockers",
+        "online_ready"
+      ],
+      "title": "ArchiveOnlineStatus",
+      "type": "object"
+    },
+    "ArchiveOriginal": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "name",
+        "size",
+        "sha256"
+      ],
+      "title": "ArchiveOriginal",
+      "type": "object"
+    },
+    "ArchiveOriginalPage": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_id": {
+          "type": "string"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ArchiveOriginal"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_after": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "archive_id",
+        "items"
+      ],
+      "title": "ArchiveOriginalPage",
+      "type": "object"
+    },
+    "ArchivePreparation": {
+      "additionalProperties": false,
+      "properties": {
+        "prepared": {
+          "type": "boolean"
+        },
+        "prepared_at_ms": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "updated_at_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision",
+        "prepared",
+        "prepared_at_ms",
+        "updated_at_ms"
+      ],
+      "title": "ArchivePreparation",
+      "type": "object"
+    },
+    "ArchiveRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_id": {
+          "type": "string"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "archive_id",
+        "schema",
+        "kind",
+        "id",
+        "data"
+      ],
+      "title": "ArchiveRecord",
+      "type": "object"
+    },
+    "ArchiveRecordsPage": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_id": {
+          "type": "string"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": {},
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "next_after": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "archive_id",
+        "schema",
+        "kind",
+        "items"
+      ],
+      "title": "ArchiveRecordsPage",
+      "type": "object"
+    },
+    "ArchiveResource": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ArchiveResourceFile"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "journal_schema": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "parent_thread_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "scope",
+        "status",
+        "files"
+      ],
+      "title": "ArchiveResource",
+      "type": "object"
+    },
+    "ArchiveResourceFile": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "name",
+        "size",
+        "sha256"
+      ],
+      "title": "ArchiveResourceFile",
+      "type": "object"
+    },
+    "ArchiveResourcePage": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_id": {
+          "type": "string"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ArchiveResource"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_after": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "archive_id",
+        "items"
+      ],
+      "title": "ArchiveResourcePage",
+      "type": "object"
+    },
+    "ArchiveState": {
+      "enum": [
+        "ready",
+        "unsupported",
+        "unavailable"
+      ],
+      "title": "ArchiveState",
+      "type": "string"
+    },
+    "ArchiveSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/ArchiveMetadata"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/ArchiveState"
+        }
+      },
+      "required": [
+        "archive_id",
+        "state"
+      ],
+      "title": "ArchiveSummary",
+      "type": "object"
+    },
     "ArtifactDetail": {
       "additionalProperties": false,
       "properties": {
@@ -4030,6 +4548,41 @@
       "title": "MainSteerView",
       "type": "object"
     },
+    "MaintenanceAuthorization": {
+      "additionalProperties": false,
+      "properties": {
+        "deadline_ms": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "remaining_ms": {
+          "type": "integer"
+        },
+        "run_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "deadline_ms",
+        "remaining_ms",
+        "run_ids"
+      ],
+      "title": "MaintenanceAuthorization",
+      "type": "object"
+    },
     "MessageAssociations": {
       "additionalProperties": false,
       "properties": {
@@ -5361,6 +5914,97 @@
       "title": "RunView",
       "type": "object"
     },
+    "RunnerBuild": {
+      "additionalProperties": false,
+      "properties": {
+        "binary_sha256": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "goarch": {
+          "type": "string"
+        },
+        "goos": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "started_at_ms": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "title": "RunnerBuild",
+      "type": "object"
+    },
+    "RunnerConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "previous_sha256": {
+          "type": "string"
+        },
+        "providers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "previous_sha256",
+        "sha256",
+        "providers"
+      ],
+      "title": "RunnerConfiguration",
+      "type": "object"
+    },
+    "RunnerControl": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization": {
+          "$ref": "#/definitions/MaintenanceAuthorization"
+        },
+        "cancelled_upgrade_id": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "upgrade": {
+          "$ref": "#/definitions/RunnerUpgradeTarget"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "revision",
+        "mode"
+      ],
+      "title": "RunnerControl",
+      "type": "object"
+    },
     "RunnerRepository": {
       "additionalProperties": false,
       "properties": {
@@ -5376,6 +6020,149 @@
         "remote_identity"
       ],
       "title": "RunnerRepository",
+      "type": "object"
+    },
+    "RunnerRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_executors": {
+          "items": {
+            "$ref": "#/definitions/AgentExecutor"
+          },
+          "type": "array"
+        },
+        "applied_control_revision": {
+          "type": "integer"
+        },
+        "authorization_deadline_ms": {
+          "type": "integer"
+        },
+        "authorization_id": {
+          "type": "string"
+        },
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "build": {
+          "$ref": "#/definitions/RunnerBuild"
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "configuration_sha256": {
+          "type": "string"
+        },
+        "confirmed_cancelled_upgrade_id": {
+          "type": "string"
+        },
+        "downloaded_bytes": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "journal_version": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "pending_claims": {
+          "type": "integer"
+        },
+        "pending_operations": {
+          "type": "integer"
+        },
+        "protocol": {
+          "type": "integer"
+        },
+        "protocol_max": {
+          "type": "integer"
+        },
+        "protocol_min": {
+          "type": "integer"
+        },
+        "repositories": {
+          "items": {
+            "$ref": "#/definitions/RunnerRepository"
+          },
+          "type": "array"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "updater_receipt": {
+          "$ref": "#/definitions/UpdaterReceipt"
+        },
+        "upgrade_error": {
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        },
+        "upgrade_phase": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "generation",
+        "sequence",
+        "protocol",
+        "protocol_min",
+        "protocol_max",
+        "build",
+        "capabilities",
+        "mode",
+        "applied_control_revision",
+        "pending_claims",
+        "pending_operations"
+      ],
+      "title": "RunnerRuntime",
+      "type": "object"
+    },
+    "RunnerUpgradeTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_base_path": {
+          "type": "string"
+        },
+        "configuration": {
+          "$ref": "#/definitions/RunnerConfiguration"
+        },
+        "manifest_path": {
+          "type": "string"
+        },
+        "manifest_sha256": {
+          "type": "string"
+        },
+        "manifest_size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "manifest_path",
+        "manifest_sha256",
+        "manifest_size",
+        "artifact_base_path"
+      ],
+      "title": "RunnerUpgradeTarget",
       "type": "object"
     },
     "SessionRequest": {
@@ -8098,6 +8885,39 @@
     },
     "AnswerResult": {
       "$ref": "#/definitions/AnswerResult"
+    },
+    "ArchiveCatalog": {
+      "$ref": "#/definitions/ArchiveCatalog"
+    },
+    "ArchiveControlRequest": {
+      "$ref": "#/definitions/ArchiveControlRequest"
+    },
+    "ArchiveHostControlRequest": {
+      "$ref": "#/definitions/ArchiveHostControlRequest"
+    },
+    "ArchiveOnlineStatus": {
+      "$ref": "#/definitions/ArchiveOnlineStatus"
+    },
+    "ArchiveOriginal": {
+      "$ref": "#/definitions/ArchiveOriginal"
+    },
+    "ArchiveOriginalPage": {
+      "$ref": "#/definitions/ArchiveOriginalPage"
+    },
+    "ArchiveRecord": {
+      "$ref": "#/definitions/ArchiveRecord"
+    },
+    "ArchiveRecordsPage": {
+      "$ref": "#/definitions/ArchiveRecordsPage"
+    },
+    "ArchiveResource": {
+      "$ref": "#/definitions/ArchiveResource"
+    },
+    "ArchiveResourcePage": {
+      "$ref": "#/definitions/ArchiveResourcePage"
+    },
+    "ArchiveSummary": {
+      "$ref": "#/definitions/ArchiveSummary"
     },
     "ArtifactDetail": {
       "$ref": "#/definitions/ArtifactDetail"

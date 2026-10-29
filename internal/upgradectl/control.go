@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -231,37 +230,12 @@ func (c *Controller) Handler() http.Handler {
 		_ = json.NewEncoder(w).Encode(value)
 	})
 }
-func (c *Controller) Run(ctx context.Context) error {
-	if err := os.MkdirAll(filepath.Dir(c.cfg.ControlSocket), 0o700); err != nil {
-		return err
-	}
-	if info, err := os.Lstat(c.cfg.ControlSocket); err == nil {
-		if info.Mode()&os.ModeSocket == 0 {
-			return errors.New("upgradectl: control path is not a socket")
-		}
-		probe, err := net.DialTimeout("unix", c.cfg.ControlSocket, time.Second)
-		if err == nil {
-			_ = probe.Close()
-			return errors.New("upgradectl: another local controller is active")
-		}
-		if err := os.Remove(c.cfg.ControlSocket); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	listener, err := net.Listen("unix", c.cfg.ControlSocket)
-	if err != nil {
-		return err
-	}
-	defer listener.Close()
-	defer os.Remove(c.cfg.ControlSocket)
-	if err := os.Chmod(c.cfg.ControlSocket, 0o600); err != nil {
-		return err
-	}
+func (c *Controller) Run(ctx context.Context) error { return c.RunWith(ctx, nil) }
+
+// RunWith adds archive commands to the same listener and existing upgrade tick.
+func (c *Controller) RunWith(ctx context.Context, archive http.Handler) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	server := &http.Server{Handler: c.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 30 * time.Second}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -278,14 +252,16 @@ func (c *Controller) Run(ctx context.Context) error {
 			}
 		}
 	}()
-	go func() { <-ctx.Done(); _ = server.Close() }()
-	err = server.Serve(listener)
-	cancel()
-	_ = server.Close()
-	<-done
-	if errors.Is(err, http.ErrServerClosed) && ctx.Err() != nil {
-		return nil
+	handler := c.Handler()
+	if archive != nil {
+		mux := http.NewServeMux()
+		mux.Handle("/archive/", archive)
+		mux.Handle("/", handler)
+		handler = mux
 	}
+	err := ServeLocal(ctx, c.cfg.ControlSocket, handler)
+	cancel()
+	<-done
 	return err
 }
 
