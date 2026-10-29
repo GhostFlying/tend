@@ -41,7 +41,7 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 	execute(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, app.Hello{}, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1}, nil)
 	create := func(parent string) protocol.Issue {
 		t.Helper()
-		op := execute(owner, app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{ParentIssueID: parent, Plan: protocol.WorkItemPlan{Title: "Investigation", Project: "default", Intent: "Review exact delegated result"}}, nil)
+		op := execute(owner, app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{ParentIssueID: parent, Plan: protocol.IssuePlan{Title: "Investigation", Project: "default", Intent: "Review exact delegated result"}}, nil)
 		var issue protocol.Issue
 		if err := json.Unmarshal(op.Result, &issue); err != nil {
 			t.Fatal(err)

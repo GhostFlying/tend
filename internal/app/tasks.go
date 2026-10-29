@@ -108,7 +108,7 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 	if canonical == nil {
 		item, itemEvents, err = taskIssue(ctx, x, tx, &p, project.Project)
 	} else {
-		item = protocol.WorkItem{WorkItemID: canonical.Issue.IssueID, Revision: canonical.Issue.Revision, WorkItemPlan: canonical.Issue.Plan}
+		item = protocol.WorkItem{WorkItemID: canonical.Issue.IssueID, Revision: canonical.Issue.Revision, IssuePlan: canonical.Issue.Plan}
 		p.Spec.SharedContext, err = freezeCanonicalTaskContext(ctx, tx.Q(), canonical.Issue)
 	}
 	if err != nil {

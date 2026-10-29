@@ -41,13 +41,13 @@ func TestWorkItemEnumSchemaPreservesExistingVocabulary(t *testing.T) {
 		{"SharedFact", "kind", "SharedFactKind", []string{"goal", "observation", "user_constraint", "decision", "input", "fact"}},
 		{"WorkItemView", "status", "WorkItemStatus", []string{"open", "snoozed", "closed"}},
 		{"UpdateWorkItemPayload", "status", "WorkItemUpdateStatus", []string{"", "open", "snoozed"}},
-		{"WorkItemStage", "status", "WorkItemStageStatus", []string{"planned", "active", "done", "cancelled", "retired"}},
-		{"WorkItemFollowOn", "kind", "WorkItemFollowOnKind", []string{"commitment", "problem", "suggestion"}},
-		{"WorkItemFollowOn", "status", "WorkItemFollowOnStatus", []string{"open", "resolved", "transferred"}},
-		{"WorkItemDelivery", "provider", "WorkItemDeliveryProvider", []string{"github", "codebase"}},
-		{"WorkItemEvidence", "kind", "WorkItemEvidenceKind", []string{"acceptance", "delivery", "owner_decision", "upgrade"}},
-		{"WorkItemClosure", "kind", "WorkItemClosureKind", []string{"completed", "declined", "handed_off", "superseded"}},
-		{"WorkItemTaskDisposition", "action", "WorkItemTaskDispositionAction", []string{"continue_existing", "updated", "stopped"}},
+		{"IssueStage", "status", "IssueStageStatus", []string{"planned", "active", "done", "cancelled", "retired"}},
+		{"IssueFollowOn", "kind", "IssueFollowOnKind", []string{"commitment", "problem", "suggestion"}},
+		{"IssueFollowOn", "status", "IssueFollowOnStatus", []string{"open", "resolved", "transferred"}},
+		{"IssueDelivery", "provider", "IssueDeliveryProvider", []string{"github", "codebase"}},
+		{"IssueEvidence", "kind", "IssueEvidenceKind", []string{"acceptance", "delivery", "owner_decision", "upgrade"}},
+		{"IssueClosure", "kind", "IssueClosureKind", []string{"completed", "declined", "handed_off", "superseded"}},
+		{"IssueTaskDisposition", "action", "IssueTaskDispositionAction", []string{"continue_existing", "updated", "stopped"}},
 	} {
 		t.Run(tc.enum, func(t *testing.T) {
 			if got := document.Definitions[tc.owner].Properties[tc.field].Ref; got != "#/definitions/"+tc.enum {

@@ -36,7 +36,7 @@ func TestExportedPlanningSchemaRetainsNestedInputContracts(t *testing.T) {
 			if err := json.Unmarshal([]byte(schemas[tool.Name]), &original); err != nil {
 				t.Fatal(err)
 			}
-			frozen := original["definitions"].(map[string]any)["WorkItemEvidence"].(map[string]any)["properties"].(map[string]any)
+			frozen := original["definitions"].(map[string]any)["IssueEvidence"].(map[string]any)["properties"].(map[string]any)
 			if frozen["observation"] == nil || frozen["upgrade"] == nil {
 				t.Fatal("model export changed the runtime validation schema")
 			}

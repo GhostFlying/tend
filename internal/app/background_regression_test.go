@@ -92,7 +92,7 @@ func TestBackgroundSettlementRechecksSourceEventReviews(t *testing.T) {
 		for _, r := range reviews {
 			acks = append(acks, protocol.CompletionReviewAcknowledgement{EventID: r.EventID, Reason: "Reviewed accepted facts; responsibility continues"})
 		}
-		if op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, CompletionReviews: acks}, rev(w.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
+		if op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan, CompletionReviews: acks}, rev(w.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
 	}

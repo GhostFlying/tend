@@ -188,7 +188,7 @@ func TestDirectCLIConsultationAndOwnerPromotionUseSelectedOriginal(t *testing.T)
 		MessageID string `json:"message_id"`
 	}
 	_ = json.Unmarshal(response.Operation.Result, &intent)
-	payload := protocol.PromoteConsultationPayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: intent.MessageID, ExpectedSourceRevision: func() *int64 { v := int64(1); return &v }()}, Plan: protocol.WorkItemPlan{Title: "Prepare investigation report", Project: "default", Intent: "Return independently reviewed evidence"}, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/adviser"}}
+	payload := protocol.PromoteConsultationPayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: intent.MessageID, ExpectedSourceRevision: func() *int64 { v := int64(1); return &v }()}, Plan: protocol.IssuePlan{Title: "Prepare investigation report", Project: "default", Intent: "Return independently reviewed evidence"}, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/adviser"}}
 	raw, _ := json.Marshal(payload)
 	request := e.ids.New(protocol.PrefixRequest)
 	command("conversation", "promote", consultation.ID, "--data", string(raw), "--request-id", request)

@@ -34,9 +34,9 @@ type ObservedWorkItem struct {
 }
 
 type ObservedStage struct {
-	StageID string              `json:"stage_id"`
-	Status  WorkItemStageStatus `json:"status"`
-	TaskIDs []string            `json:"task_ids"`
+	StageID string           `json:"stage_id"`
+	Status  IssueStageStatus `json:"status"`
+	TaskIDs []string         `json:"task_ids"`
 }
 
 type ObservedTask struct {
@@ -90,9 +90,9 @@ type ObservedUpgradeHost struct {
 
 // ObservedFollowOn omits prose, sources and evidence from the responsibility ledger.
 type ObservedFollowOn struct {
-	FollowOnID string                 `json:"follow_on_id"`
-	Kind       WorkItemFollowOnKind   `json:"kind"`
-	Status     WorkItemFollowOnStatus `json:"status"`
+	FollowOnID string              `json:"follow_on_id"`
+	Kind       IssueFollowOnKind   `json:"kind"`
+	Status     IssueFollowOnStatus `json:"status"`
 }
 
 // ObservedRun preserves raw execution state separately from task projections.

@@ -2,8 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { Connection } from "../api/client.ts";
 import type {
   DeliveryObservation,
-  WorkItemDelivery,
-  WorkItemEvidence,
+  IssueDelivery,
+  IssueEvidence,
   WorkItemView,
 } from "../api/generated/api.ts";
 import { runOp } from "../app/ops.ts";
@@ -470,7 +470,7 @@ function TaskButton({ item, id }: { item: WorkItemView; id: string }) {
     </div>
   );
 }
-function Evidence({ items }: { items: readonly WorkItemEvidence[] | null | undefined }) {
+function Evidence({ items }: { items: readonly IssueEvidence[] | null | undefined }) {
   if (!items?.length) return null;
   return (
     <details className={styles.evidence}>
@@ -604,7 +604,7 @@ function DeliveryRefreshControl({
   readOnly,
 }: {
   item: WorkItemView;
-  delivery: WorkItemDelivery;
+  delivery: IssueDelivery;
   observed: DeliveryObservation | undefined;
   readOnly: boolean;
 }) {

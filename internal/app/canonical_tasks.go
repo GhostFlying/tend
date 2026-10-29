@@ -72,7 +72,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	}
 	seen := map[string]bool{}
 	for _, id := range p.StageIDs {
-		if seen[id] || !slices.ContainsFunc(current.Plan.Stages, func(s protocol.WorkItemStage) bool {
+		if seen[id] || !slices.ContainsFunc(current.Plan.Stages, func(s protocol.IssueStage) bool {
 			return s.StageID == id && domain.IssueStageAcceptsWork(current.Plan, id)
 		}) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "stage_ids must name distinct available issue stages")
@@ -96,7 +96,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 func freezeCanonicalTaskContext(ctx context.Context, q store.Querier, current protocol.Issue) ([]protocol.TaskWorkContext, error) {
 	out := []protocol.TaskWorkContext{}
 	for {
-		item := protocol.WorkItem{WorkItemID: current.IssueID, Revision: current.Revision, WorkItemPlan: current.Plan}
+		item := protocol.WorkItem{WorkItemID: current.IssueID, Revision: current.Revision, IssuePlan: current.Plan}
 		frozen := freezeIssueContext(item)
 		digest, facts, err := store.EffectiveContext(ctx, q, current.IssueID)
 		if err != nil {
@@ -130,7 +130,7 @@ func bindCanonicalPrimaryTask(ctx context.Context, x *Exec, tx *store.Tx, creati
 	return out.Events, err
 }
 
-func validateCanonicalBoundPlan(ctx context.Context, x *Exec, q store.Querier, issue string, plan protocol.WorkItemPlan, previous *protocol.WorkItemPlan) error {
+func validateCanonicalBoundPlan(ctx context.Context, x *Exec, q store.Querier, issue string, plan protocol.IssuePlan, previous *protocol.IssuePlan) error {
 	if plan.DefaultWorkspaceTaskID != "" {
 		if err := checkDefaultWorkspaceOwner(ctx, q, issue, plan.DefaultWorkspaceTaskID); err != nil {
 			return err
@@ -145,7 +145,7 @@ func validateCanonicalBoundPlan(ctx context.Context, x *Exec, q store.Querier, i
 			if primary != issue {
 				return protocol.Errorf(protocol.CodeInvalidRequest, "stage task must belong to this primary issue")
 			}
-			existed := previous != nil && slices.ContainsFunc(previous.Stages, func(old protocol.WorkItemStage) bool {
+			existed := previous != nil && slices.ContainsFunc(previous.Stages, func(old protocol.IssueStage) bool {
 				return old.StageID == stage.StageID && slices.Contains(old.TaskIDs, id)
 			})
 			if !existed {
@@ -163,10 +163,10 @@ func validateCanonicalBoundPlan(ctx context.Context, x *Exec, q store.Querier, i
 		if err := domain.ValidateIssue(plan, previous); err != nil {
 			return err
 		}
-		projected := protocol.WorkItem{WorkItemID: issue, WorkItemPlan: plan}
+		projected := protocol.WorkItem{WorkItemID: issue, IssuePlan: plan}
 		var prior *protocol.WorkItem
 		if previous != nil {
-			prior = &protocol.WorkItem{WorkItemID: issue, WorkItemPlan: *previous}
+			prior = &protocol.WorkItem{WorkItemID: issue, IssuePlan: *previous}
 		}
 		for i := range plan.Stages {
 			if err := validateHostedIssueEvidence(ctx, x, q, projected, prior, plan.Stages[i].Evidence); err != nil {

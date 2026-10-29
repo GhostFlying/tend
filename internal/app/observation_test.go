@@ -21,7 +21,7 @@ func observationFixture(t *testing.T, role protocol.RunRole) (*harness, protocol
 	}
 	plan := workPlan()
 	plan.Intent = "PRIVATE_IMPLEMENTATION_DESIGN"
-	plan.FollowOns = []protocol.WorkItemFollowOn{{FollowOnID: "follow", Kind: "commitment", Text: "PRIVATE_FOLLOW_ON", Source: "owner", Status: "open"}}
+	plan.FollowOns = []protocol.IssueFollowOn{{FollowOnID: "follow", Kind: "commitment", Text: "PRIVATE_FOLLOW_ON", Source: "owner", Status: "open"}}
 	w := h.createWork(plan)
 	other := workPlan()
 	other.Title = "OTHER_PRIVATE_ITEM"

@@ -12,7 +12,7 @@ import (
 
 func createOwnerIssueHTTP(t *testing.T, e *env, token, parent string) protocol.Issue {
 	t.Helper()
-	payload := protocol.CreateIssuePayload{Plan: protocol.WorkItemPlan{Title: "Owner intent", Project: "default", Intent: "Investigate a vague goal", Stages: []protocol.WorkItemStage{}}, ParentIssueID: parent}
+	payload := protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Owner intent", Project: "default", Intent: "Investigate a vague goal", Stages: []protocol.IssueStage{}}, ParentIssueID: parent}
 	return issueHTTP(t, e, token, e.envelope("issues.create", protocol.Target{Type: "issue"}, nil, payload))
 }
 func issueHTTP(t *testing.T, e *env, token string, envelope protocol.Envelope) protocol.Issue {
@@ -186,7 +186,7 @@ func TestIssueOwnerHTTPNoStageWorkerAcceptanceReviewAndContractRecovery(t *testi
 	if issue.Revision != view.Revision+1 {
 		t.Fatal("completion review lost revision")
 	}
-	closed := issueHTTP(t, e, token, e.envelope("issues.close", review.Target, &issue.Revision, protocol.IssueEndpointPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, Closure: &protocol.WorkItemClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "Scope achieved", Evidence: []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner confirms accepted result and scope"}}}}))
+	closed := issueHTTP(t, e, token, e.envelope("issues.close", review.Target, &issue.Revision, protocol.IssueEndpointPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, Closure: &protocol.IssueClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "Scope achieved", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner confirms accepted result and scope"}}}}))
 	if closed.State != protocol.IssueClosed {
 		t.Fatal(closed)
 	}

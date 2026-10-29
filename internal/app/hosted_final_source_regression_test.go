@@ -190,7 +190,7 @@ func TestHostedUnknownOrdinaryStartIsNotSourceConsumption(t *testing.T) {
 	command := HostedCoordinationCommand{Command: CanonicalOwnerIssueCommand{Action: "update"}, ExecutionID: manager.RequestID, EffectSeq: 1}
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	plan := issue.Plan
-	plan.Stages = []protocol.WorkItemStage{{StageID: "result", Title: "Result", Status: protocol.WorkItemStageDone, Evidence: []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: source, Summary: "Owner confirmed the result"}}}}
+	plan.Stages = []protocol.IssueStage{{StageID: "result", Title: "Result", Status: protocol.WorkItemStageDone, Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: source, Summary: "Owner confirmed the result"}}}}
 	op, err := h.app.Execute(t.Context(), p, h.env(command.Operation(), protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.UpdateIssuePayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Plan: plan}, rev(issue.Revision)), command)
 	if protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal("unknown start treated as a consumed owner decision", op, err)

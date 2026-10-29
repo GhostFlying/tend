@@ -126,7 +126,7 @@ func TestCanonicalManagerFollowupUsesOwnEpochAndWakesActualManager(t *testing.T)
 }
 func TestCanonicalDeliveryRefreshPreservesRunnerFactsAndRequest(t *testing.T) {
 	h := newHarness(t)
-	payload := protocol.CreateIssuePayload{Plan: protocol.WorkItemPlan{Title: "Track the agreed PR", Project: "default", Intent: "Observe the publication", Deliveries: []protocol.WorkItemDelivery{{DeliveryID: "delivery-1", Provider: "github", Repository: "example/project", Number: 7}}}}
+	payload := protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Track the agreed PR", Project: "default", Intent: "Observe the publication", Deliveries: []protocol.IssueDelivery{{DeliveryID: "delivery-1", Provider: "github", Repository: "example/project", Number: 7}}}}
 	issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, payload, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 	observerHello(t, h, "linux-1", "observer")
 	as := pollDelivery(t, h, "linux-1", "observer")

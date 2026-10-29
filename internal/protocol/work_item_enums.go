@@ -43,90 +43,90 @@ func WorkItemUpdateStatusValues() []WorkItemUpdateStatus {
 	return []WorkItemUpdateStatus{WorkItemUpdateUnchanged, WorkItemUpdateOpen, WorkItemUpdateSnoozed}
 }
 
-// WorkItemStageStatus is a lifecycle; custom stage labels belong in Title.
-type WorkItemStageStatus string
+// IssueStageStatus is a lifecycle; custom stage labels belong in Title.
+type IssueStageStatus string
 
 const (
-	WorkItemStagePlanned   WorkItemStageStatus = "planned"
-	WorkItemStageActive    WorkItemStageStatus = "active"
-	WorkItemStageDone      WorkItemStageStatus = "done"
-	WorkItemStageCancelled WorkItemStageStatus = "cancelled"
-	WorkItemStageRetired   WorkItemStageStatus = "retired"
+	WorkItemStagePlanned   IssueStageStatus = "planned"
+	WorkItemStageActive    IssueStageStatus = "active"
+	WorkItemStageDone      IssueStageStatus = "done"
+	WorkItemStageCancelled IssueStageStatus = "cancelled"
+	WorkItemStageRetired   IssueStageStatus = "retired"
 )
 
-func WorkItemStageStatusValues() []WorkItemStageStatus {
-	return []WorkItemStageStatus{WorkItemStagePlanned, WorkItemStageActive, WorkItemStageDone, WorkItemStageCancelled, WorkItemStageRetired}
+func IssueStageStatusValues() []IssueStageStatus {
+	return []IssueStageStatus{WorkItemStagePlanned, WorkItemStageActive, WorkItemStageDone, WorkItemStageCancelled, WorkItemStageRetired}
 }
 
-type WorkItemFollowOnKind string
+type IssueFollowOnKind string
 
 const (
-	WorkItemFollowOnCommitment WorkItemFollowOnKind = "commitment"
-	WorkItemFollowOnProblem    WorkItemFollowOnKind = "problem"
-	WorkItemFollowOnSuggestion WorkItemFollowOnKind = "suggestion"
+	WorkItemFollowOnCommitment IssueFollowOnKind = "commitment"
+	WorkItemFollowOnProblem    IssueFollowOnKind = "problem"
+	WorkItemFollowOnSuggestion IssueFollowOnKind = "suggestion"
 )
 
-func WorkItemFollowOnKindValues() []WorkItemFollowOnKind {
-	return []WorkItemFollowOnKind{WorkItemFollowOnCommitment, WorkItemFollowOnProblem, WorkItemFollowOnSuggestion}
+func IssueFollowOnKindValues() []IssueFollowOnKind {
+	return []IssueFollowOnKind{WorkItemFollowOnCommitment, WorkItemFollowOnProblem, WorkItemFollowOnSuggestion}
 }
 
-type WorkItemFollowOnStatus string
+type IssueFollowOnStatus string
 
 const (
-	WorkItemFollowOnOpen        WorkItemFollowOnStatus = "open"
-	WorkItemFollowOnResolved    WorkItemFollowOnStatus = "resolved"
-	WorkItemFollowOnTransferred WorkItemFollowOnStatus = "transferred"
+	WorkItemFollowOnOpen        IssueFollowOnStatus = "open"
+	WorkItemFollowOnResolved    IssueFollowOnStatus = "resolved"
+	WorkItemFollowOnTransferred IssueFollowOnStatus = "transferred"
 )
 
-func WorkItemFollowOnStatusValues() []WorkItemFollowOnStatus {
-	return []WorkItemFollowOnStatus{WorkItemFollowOnOpen, WorkItemFollowOnResolved, WorkItemFollowOnTransferred}
+func IssueFollowOnStatusValues() []IssueFollowOnStatus {
+	return []IssueFollowOnStatus{WorkItemFollowOnOpen, WorkItemFollowOnResolved, WorkItemFollowOnTransferred}
 }
 
-type WorkItemDeliveryProvider string
+type IssueDeliveryProvider string
 
 const (
-	WorkItemDeliveryGitHub   WorkItemDeliveryProvider = "github"
-	WorkItemDeliveryCodebase WorkItemDeliveryProvider = "codebase"
+	WorkItemDeliveryGitHub   IssueDeliveryProvider = "github"
+	WorkItemDeliveryCodebase IssueDeliveryProvider = "codebase"
 )
 
-func WorkItemDeliveryProviderValues() []WorkItemDeliveryProvider {
-	return []WorkItemDeliveryProvider{WorkItemDeliveryGitHub, WorkItemDeliveryCodebase}
+func IssueDeliveryProviderValues() []IssueDeliveryProvider {
+	return []IssueDeliveryProvider{WorkItemDeliveryGitHub, WorkItemDeliveryCodebase}
 }
 
-type WorkItemEvidenceKind string
+type IssueEvidenceKind string
 
 const (
-	WorkItemEvidenceAcceptance    WorkItemEvidenceKind = "acceptance"
-	WorkItemEvidenceUpgrade       WorkItemEvidenceKind = "upgrade"
-	WorkItemEvidenceDelivery      WorkItemEvidenceKind = "delivery"
-	WorkItemEvidenceOwnerDecision WorkItemEvidenceKind = "owner_decision"
+	WorkItemEvidenceAcceptance    IssueEvidenceKind = "acceptance"
+	WorkItemEvidenceUpgrade       IssueEvidenceKind = "upgrade"
+	WorkItemEvidenceDelivery      IssueEvidenceKind = "delivery"
+	WorkItemEvidenceOwnerDecision IssueEvidenceKind = "owner_decision"
 )
 
-func WorkItemEvidenceKindValues() []WorkItemEvidenceKind {
-	return []WorkItemEvidenceKind{WorkItemEvidenceAcceptance, WorkItemEvidenceDelivery, WorkItemEvidenceOwnerDecision, WorkItemEvidenceUpgrade}
+func IssueEvidenceKindValues() []IssueEvidenceKind {
+	return []IssueEvidenceKind{WorkItemEvidenceAcceptance, WorkItemEvidenceDelivery, WorkItemEvidenceOwnerDecision, WorkItemEvidenceUpgrade}
 }
 
-type WorkItemClosureKind string
+type IssueClosureKind string
 
 const (
-	WorkItemClosureCompleted  WorkItemClosureKind = "completed"
-	WorkItemClosureDeclined   WorkItemClosureKind = "declined"
-	WorkItemClosureHandedOff  WorkItemClosureKind = "handed_off"
-	WorkItemClosureSuperseded WorkItemClosureKind = "superseded"
+	WorkItemClosureCompleted  IssueClosureKind = "completed"
+	WorkItemClosureDeclined   IssueClosureKind = "declined"
+	WorkItemClosureHandedOff  IssueClosureKind = "handed_off"
+	WorkItemClosureSuperseded IssueClosureKind = "superseded"
 )
 
-func WorkItemClosureKindValues() []WorkItemClosureKind {
-	return []WorkItemClosureKind{WorkItemClosureCompleted, WorkItemClosureDeclined, WorkItemClosureHandedOff, WorkItemClosureSuperseded}
+func IssueClosureKindValues() []IssueClosureKind {
+	return []IssueClosureKind{WorkItemClosureCompleted, WorkItemClosureDeclined, WorkItemClosureHandedOff, WorkItemClosureSuperseded}
 }
 
-type WorkItemTaskDispositionAction string
+type IssueTaskDispositionAction string
 
 const (
-	WorkItemTaskContinueExisting WorkItemTaskDispositionAction = "continue_existing"
-	WorkItemTaskUpdated          WorkItemTaskDispositionAction = "updated"
-	WorkItemTaskStopped          WorkItemTaskDispositionAction = "stopped"
+	WorkItemTaskContinueExisting IssueTaskDispositionAction = "continue_existing"
+	WorkItemTaskUpdated          IssueTaskDispositionAction = "updated"
+	WorkItemTaskStopped          IssueTaskDispositionAction = "stopped"
 )
 
-func WorkItemTaskDispositionActionValues() []WorkItemTaskDispositionAction {
-	return []WorkItemTaskDispositionAction{WorkItemTaskContinueExisting, WorkItemTaskUpdated, WorkItemTaskStopped}
+func IssueTaskDispositionActionValues() []IssueTaskDispositionAction {
+	return []IssueTaskDispositionAction{WorkItemTaskContinueExisting, WorkItemTaskUpdated, WorkItemTaskStopped}
 }

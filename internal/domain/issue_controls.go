@@ -157,7 +157,7 @@ func ValidateIssueAncestorActivation(parent string, controls map[string]protocol
 // JSON boolean; absent/older evidence remains an explicit blocker.
 type IssueCompletionFact struct {
 	State            protocol.IssueState
-	ClosureKind      protocol.WorkItemClosureKind
+	ClosureKind      protocol.IssueClosureKind
 	EvidenceVerified bool
 }
 

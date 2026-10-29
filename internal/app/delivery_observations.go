@@ -38,7 +38,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	now := x.Now.UnixMilli()
 	var selected *store.DeliveryObservationRow
-	var selectedDelivery protocol.WorkItemDelivery
+	var selectedDelivery protocol.IssueDelivery
 	var selectedItem protocol.WorkItem
 	for _, item := range items {
 		for _, delivery := range item.Deliveries {
@@ -82,7 +82,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	event.Kind = "work_item.delivery_query_started"
 	return Outcome{Result: result, Events: []Event{event}}, nil
 }
-func deliveryCapability(provider protocol.WorkItemDeliveryProvider) string {
+func deliveryCapability(provider protocol.IssueDeliveryProvider) string {
 	switch provider {
 	case "github":
 		return protocol.CapabilityDeliveryGitHub
@@ -221,13 +221,13 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	return Outcome{Result: protocol.DeliveryReportResult{Accepted: true}, Events: events}, nil
 }
-func findDelivery(item protocol.WorkItem, id string) (protocol.WorkItemDelivery, bool) {
+func findDelivery(item protocol.WorkItem, id string) (protocol.IssueDelivery, bool) {
 	for _, d := range item.Deliveries {
 		if d.DeliveryID == id {
 			return d, true
 		}
 	}
-	return protocol.WorkItemDelivery{}, false
+	return protocol.IssueDelivery{}, false
 }
 func deliveryChanged(item protocol.WorkItem, o protocol.DeliveryObservation) Event {
 	return Event{ObjectType: "work_item", ObjectID: item.WorkItemID, ObjectVersion: item.Revision, Kind: "work_item.delivery_changed", Body: map[string]any{"delivery_id": o.DeliveryID, "state": o.State, "previous_state": "", "error_kind": o.ErrorKind, "checked_at": o.CheckedAt, "generation": o.Generation, "refresh_pending": o.RefreshPending}}

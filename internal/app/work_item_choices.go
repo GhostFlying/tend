@@ -60,7 +60,7 @@ func createChoice(ctx context.Context, x *Exec, tx *store.Tx, w protocol.WorkIte
 		}
 	}
 	for _, id := range p.DeliveryIDs {
-		if !slices.ContainsFunc(w.Deliveries, func(d protocol.WorkItemDelivery) bool { return d.DeliveryID == id }) {
+		if !slices.ContainsFunc(w.Deliveries, func(d protocol.IssueDelivery) bool { return d.DeliveryID == id }) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "choice delivery must belong to work item")
 		}
 	}

@@ -24,8 +24,8 @@ func TestWorkItemUpgradeEvidenceVerifiesAndFreezesBatch(t *testing.T) {
 	}
 	put()
 	w.Stages[0].Status = "done"
-	w.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: "upgrade", Reference: "batch", Summary: "Fleet update completed", Upgrade: &protocol.UpgradeEvidence{ReleaseID: "forged"}}}
-	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(w.Revision)), UpdateIssue{})
+	w.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: "upgrade", Reference: "batch", Summary: "Fleet update completed", Upgrade: &protocol.UpgradeEvidence{ReleaseID: "forged"}}}
+	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -39,14 +39,14 @@ func TestWorkItemUpgradeEvidenceVerifiesAndFreezesBatch(t *testing.T) {
 	r.View.Status = "cancelled"
 	put()
 	updated.Title = "Retain historical proof"
-	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: updated.WorkItemPlan}, rev(updated.Revision)), UpdateIssue{})
+	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: updated.IssuePlan}, rev(updated.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	other := h.createWork(workPlan())
 	other.Stages[0].Status = "done"
 	other.Stages[0].Evidence = w.Stages[0].Evidence
-	expectWorkCode(t, h.exec(mainAgent, h.env("work_items.update", workTarget(other.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: other.WorkItemPlan}, rev(other.Revision)), UpdateIssue{}), protocol.CodeInvalidRequest)
+	expectWorkCode(t, h.exec(mainAgent, h.env("work_items.update", workTarget(other.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: other.IssuePlan}, rev(other.Revision)), UpdateIssue{}), protocol.CodeInvalidRequest)
 }
 
 func TestWorkItemUpgradeEvidenceRejectsIncompleteOrMismatchedInstallations(t *testing.T) {
@@ -77,8 +77,8 @@ func TestWorkItemUpgradeEvidenceRejectsIncompleteOrMismatchedInstallations(t *te
 			}
 			w := h.createWork(workPlan())
 			w.Stages[0].Status = "done"
-			w.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: "upgrade", Reference: "batch", Summary: "Batch proof"}}
-			op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(w.Revision)), UpdateIssue{})
+			w.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: "upgrade", Reference: "batch", Summary: "Batch proof"}}
+			op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(w.Revision)), UpdateIssue{})
 			if scenario == "complete" {
 				if op.Status != protocol.OpSucceeded {
 					t.Fatal(op)

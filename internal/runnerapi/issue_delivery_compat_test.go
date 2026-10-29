@@ -30,7 +30,7 @@ func TestIssueDeliveryObserverPreservesRunnerOneAndZero(t *testing.T) {
 				}
 				return op
 			}
-			op := execute(app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.WorkItemPlan{Title: "Track publication", Project: "default", Intent: "Retain provider facts", Deliveries: []protocol.WorkItemDelivery{{DeliveryID: "delivery", Provider: "github", Repository: "example/project", Number: 7}}}}, nil)
+			op := execute(app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Track publication", Project: "default", Intent: "Retain provider facts", Deliveries: []protocol.IssueDelivery{{DeliveryID: "delivery", Provider: "github", Repository: "example/project", Number: 7}}}}, nil)
 			var issue protocol.Issue
 			if err := json.Unmarshal(op.Result, &issue); err != nil {
 				t.Fatal(err)
@@ -39,10 +39,10 @@ func TestIssueDeliveryObserverPreservesRunnerOneAndZero(t *testing.T) {
 			e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "linux-1", protocol.HelloPayload{Runtime: runtime, Held: []protocol.HeldRun{}}))
 			// This frozen shape deliberately does not acquire canonical owner fields.
 			type oldAssignment struct {
-				WorkItemID string                    `json:"work_item_id"`
-				Delivery   protocol.WorkItemDelivery `json:"delivery"`
-				Generation int64                     `json:"generation"`
-				Nonce      string                    `json:"nonce"`
+				WorkItemID string                 `json:"work_item_id"`
+				Delivery   protocol.IssueDelivery `json:"delivery"`
+				Generation int64                  `json:"generation"`
+				Nonce      string                 `json:"nonce"`
 			}
 			type oldPoll struct {
 				Assignments []oldAssignment `json:"assignments"`

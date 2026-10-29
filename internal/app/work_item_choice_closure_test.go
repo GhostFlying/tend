@@ -39,7 +39,7 @@ func TestWorkItemChoiceAnswerCanSupplyClosureEvidence(t *testing.T) {
 			w := h.createWork(plan)
 			c := h.askChoice(w, h.ownerEvidence().Reference)
 			closeWith := func(item protocol.WorkItem, reference string) protocol.Operation {
-				p := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "Owner declined further work", Evidence: []protocol.WorkItemEvidence{{Kind: "owner_decision", Reference: reference, Summary: "Owner asked to close this concern"}}}}
+				p := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "declined", Reason: "Owner declined further work", Evidence: []protocol.IssueEvidence{{Kind: "owner_decision", Reference: reference, Summary: "Owner asked to close this concern"}}}}
 				return h.exec(mainAgent, h.env("work_items.close", workTarget(item.WorkItemID), p, rev(item.Revision)), CloseIssue{})
 			}
 			expectWorkCode(t, closeWith(w, c.ChoiceID), protocol.CodeInvalidTransition)

@@ -594,7 +594,7 @@ func TestCanonicalTaskUnknownBlocksCancelAndReparentUntilRealReconcile(t *testin
 
 func TestCanonicalTaskOptionalStageKeepsExplicitPrerequisites(t *testing.T) {
 	h := newHarness(t)
-	p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Lightweight steps", Project: "default", Intent: "Investigate then implement", Stages: []protocol.WorkItemStage{{StageID: "investigate", Title: "Investigation", Status: protocol.WorkItemStagePlanned}, {StageID: "implement", Title: "Implementation", Status: protocol.WorkItemStagePlanned, DependsOn: []string{"investigate"}}}}}
+	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Lightweight steps", Project: "default", Intent: "Investigate then implement", Stages: []protocol.IssueStage{{StageID: "investigate", Title: "Investigation", Status: protocol.WorkItemStagePlanned}, {StageID: "implement", Title: "Implementation", Status: protocol.WorkItemStagePlanned, DependsOn: []string{"investigate"}}}}}
 	issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Explicit later step", Spec: testSpec, Rating: protocol.RatingP1, StageIDs: []string{"implement"}}
 	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
@@ -613,8 +613,8 @@ func TestCanonicalTaskOptionalStageKeepsExplicitPrerequisites(t *testing.T) {
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	plan := issue.Plan
 	plan.Stages[0].Status = protocol.WorkItemStageDone
-	plan.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner completed the investigation"}}
-	up := canonicalOwnerIssueUpdate{Plan: plan, ExpectedAssignmentEpoch: issue.AssignmentEpoch, TaskDispositions: []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: protocol.WorkItemTaskContinueExisting, Reason: "Keep the explicit implementation agreement"}}}
+	plan.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner completed the investigation"}}
+	up := canonicalOwnerIssueUpdate{Plan: plan, ExpectedAssignmentEpoch: issue.AssignmentEpoch, TaskDispositions: []protocol.IssueTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: protocol.WorkItemTaskContinueExisting, Reason: "Keep the explicit implementation agreement"}}}
 	op = h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: issue.IssueID}, up, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "update"})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -757,7 +757,7 @@ func TestCanonicalTaskUpdatedDispositionConsumesActualIssueRevision(t *testing.T
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	plan := issue.Plan
 	plan.Intent = "Revised owner intent"
-	payload := canonicalOwnerIssueUpdate{Plan: plan, ExpectedAssignmentEpoch: issue.AssignmentEpoch, TaskDispositions: []protocol.WorkItemTaskDisposition{{TaskID: task, SpecVersion: 2, Action: protocol.WorkItemTaskUpdated, Reason: "Task spec2 explicitly updated"}}}
+	payload := canonicalOwnerIssueUpdate{Plan: plan, ExpectedAssignmentEpoch: issue.AssignmentEpoch, TaskDispositions: []protocol.IssueTaskDisposition{{TaskID: task, SpecVersion: 2, Action: protocol.WorkItemTaskUpdated, Reason: "Task spec2 explicitly updated"}}}
 	issue = canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "update"}))
 	payload.Plan = issue.Plan
 	payload.Plan.Title = "A metadata-only edit"
@@ -765,7 +765,7 @@ func TestCanonicalTaskUpdatedDispositionConsumesActualIssueRevision(t *testing.T
 	issue = canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "update"}))
 	payload.Plan = issue.Plan
 	payload.Plan.Intent = "Another execution scope"
-	payload.TaskDispositions = []protocol.WorkItemTaskDisposition{{TaskID: task, SpecVersion: 2, Action: protocol.WorkItemTaskUpdated, Reason: "Attempt to reuse the prior task update"}}
+	payload.TaskDispositions = []protocol.IssueTaskDisposition{{TaskID: task, SpecVersion: 2, Action: protocol.WorkItemTaskUpdated, Reason: "Attempt to reuse the prior task update"}}
 	expectWorkCode(t, h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "update"}), protocol.CodeInvalidTransition)
 	if current := canonicalTaskIssue(t, h, issue.IssueID); current.Revision != issue.Revision {
 		t.Fatal("reused task update advanced issue revision")
@@ -774,7 +774,7 @@ func TestCanonicalTaskUpdatedDispositionConsumesActualIssueRevision(t *testing.T
 
 func TestCanonicalTaskCannotAttachNewWorkToCompletedStage(t *testing.T) {
 	h := newHarness(t)
-	payload := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Settled step", Project: "default", Intent: "Owner completed the step", Stages: []protocol.WorkItemStage{{StageID: "done", Title: "Done", Status: protocol.WorkItemStageDone, Evidence: []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner completed the step"}}}}}}
+	payload := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Settled step", Project: "default", Intent: "Owner completed the step", Stages: []protocol.IssueStage{{StageID: "done", Title: "Done", Status: protocol.WorkItemStageDone, Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner completed the step"}}}}}}
 	issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, payload, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 	create := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "New work", Spec: testSpec, StageIDs: []string{"done"}}
 	expectWorkCode(t, h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, create, rev(issue.Revision)), CanonicalOwnerTaskCreate{}), protocol.CodeInvalidRequest)

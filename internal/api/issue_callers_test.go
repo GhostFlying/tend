@@ -23,7 +23,7 @@ func TestCanonicalIssueCallerHTTPAndCLILifecycle(t *testing.T) {
 	token := e.login(protocol.ScopeOwner)
 	issue := createOwnerIssueHTTP(t, e, token, "")
 	plan := issue.Plan
-	plan.Deliveries = []protocol.WorkItemDelivery{{DeliveryID: "delivery-1", Provider: "github", Repository: "example/project", Number: 7}}
+	plan.Deliveries = []protocol.IssueDelivery{{DeliveryID: "delivery-1", Provider: "github", Repository: "example/project", Number: 7}}
 	code, op := e.op(token, e.envelope("issues.update", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.UpdateIssuePayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Plan: plan}))
 	if code != http.StatusOK || op.Operation.Status != protocol.OpSucceeded {
 		t.Fatal(code, op)

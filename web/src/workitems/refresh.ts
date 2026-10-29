@@ -2,7 +2,7 @@
 import type {
   DeliveryObservation,
   Envelope,
-  WorkItemDelivery,
+  IssueDelivery,
   WorkItemView,
 } from "../api/generated/api.ts";
 import { newRequestId } from "../api/ids.ts";
@@ -24,7 +24,7 @@ export class DeliveryRefresh {
 
   async start(
     item: WorkItemView,
-    delivery: WorkItemDelivery,
+    delivery: IssueDelivery,
     observation?: DeliveryObservation,
   ): Promise<void> {
     if (this.state.get().pending) return;

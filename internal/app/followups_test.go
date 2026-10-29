@@ -213,7 +213,7 @@ func TestFollowupReplacementAndCloseCancelUnclaimedInput(t *testing.T) {
 		t.Fatal("expected queued one-time rule to finish scheduling")
 	}
 	evidence := h.ownerEvidence()
-	close := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "completed", Reason: "owner endpoint reached", Evidence: []protocol.WorkItemEvidence{evidence}}}
+	close := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "completed", Reason: "owner endpoint reached", Evidence: []protocol.IssueEvidence{evidence}}}
 	op := h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), close, rev(w.Revision)), CloseIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -246,7 +246,7 @@ func TestFollowupSnoozeExpiryAndManualSchedule(t *testing.T) {
 	if next.NextAt != r.NextAt || next.TriggerCount != 1 {
 		t.Fatal("manual check reset the schedule or failed to count its occurrence")
 	}
-	op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: "snoozed"}, rev(w.Revision)), UpdateIssue{})
+	op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan, Status: "snoozed"}, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

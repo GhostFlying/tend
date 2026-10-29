@@ -257,7 +257,7 @@ func TestHostedPlannerDelegationPersistsActualManagerWake(t *testing.T) {
 	turn := startHostedReview(t, h, "main", delivery)
 	message := h.associations(source)
 	version := message.ContentRevision
-	p := protocol.CreateIssuePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source, ExpectedSourceRevision: &version}, Plan: protocol.WorkItemPlan{Title: "Delegate the vague intent", Project: "default", Intent: "Investigate before choosing execution"}, Assignee: &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "server-hosted/planner"}}
+	p := protocol.CreateIssuePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source, ExpectedSourceRevision: &version}, Plan: protocol.IssuePlan{Title: "Delegate the vague intent", Project: "default", Intent: "Investigate before choosing execution"}, Assignee: &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "server-hosted/planner"}}
 	created := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, CanonicalOwnerIssueCommand{Action: "create"})
 	if created.Status != protocol.OpSucceeded {
 		t.Fatal(created)
@@ -321,11 +321,11 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 	h := hostedManagerHarness(t)
 	parent := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	if len(closeParent) == 0 {
-		parent.Plan.FollowOns = []protocol.WorkItemFollowOn{{FollowOnID: "remaining", Kind: protocol.WorkItemFollowOnCommitment, Text: "Parent still needs a separate delivery decision", Source: "owner brief", Status: protocol.WorkItemFollowOnOpen}}
+		parent.Plan.FollowOns = []protocol.IssueFollowOn{{FollowOnID: "remaining", Kind: protocol.WorkItemFollowOnCommitment, Text: "Parent still needs a separate delivery decision", Source: "owner brief", Status: protocol.WorkItemFollowOnOpen}}
 		parent = canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: parent.IssueID}, protocol.UpdateIssuePayload{Plan: parent.Plan, ExpectedAssignmentEpoch: parent.AssignmentEpoch}, rev(parent.Revision)), CanonicalOwnerIssueCommand{Action: "update"}))
 	}
 
-	childPayload := protocol.CreateIssuePayload{ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision), Plan: protocol.WorkItemPlan{Title: "Investigate child scope", Project: "default", Intent: "Return a verified result"}}
+	childPayload := protocol.CreateIssuePayload{ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision), Plan: protocol.IssuePlan{Title: "Investigate child scope", Project: "default", Intent: "Return a verified result"}}
 	child := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, childPayload, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 	child = assignHostedManager(t, h, child)
 	turn, manager := startHostedIssueReview(t, h, child)
@@ -453,7 +453,7 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 	if _, err := h.app.Execute(t.Context(), manager, h.env(forbidden.Operation(), protocol.Target{Type: "issue", ID: child.IssueID}, fake, rev(child.Revision)), forbidden); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal("manager command became owner decision", err)
 	}
-	close := protocol.IssueEndpointPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch}, Closure: &protocol.WorkItemClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "The delegated child deliverable passed independent acceptance", Evidence: []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceAcceptance, Reference: pending[0].AcceptanceID, Summary: "Current primary task passed independent acceptance"}}}}
+	close := protocol.IssueEndpointPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch}, Closure: &protocol.IssueClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "The delegated child deliverable passed independent acceptance", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceAcceptance, Reference: pending[0].AcceptanceID, Summary: "Current primary task passed independent acceptance"}}}}
 	child = canonicalLifecycleIssue(t, hostedEffect(t, h, manager, turn, 3, protocol.Target{Type: "issue", ID: child.IssueID}, rev(child.Revision), close, CanonicalOwnerIssueCommand{Action: "close"}))
 	if child.State != protocol.IssueClosed {
 		t.Fatal(child)

@@ -14,7 +14,7 @@ import (
 // review duties remain Issue responsibilities, not a global execution baseline.
 func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *scheduler.Candidate, primary string, frozen []protocol.TaskWorkContext) error {
 	controls := map[string]protocol.IssueControl{}
-	inheritedPlans := map[string]protocol.WorkItemPlan{}
+	inheritedPlans := map[string]protocol.IssuePlan{}
 	issue, err := store.GetCanonicalIssue(ctx, q, primary)
 	if err != nil {
 		return err
@@ -45,7 +45,7 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 	if len(domain.IssueDispatchBlockers(primary, controls, dependencies, achieved)) > 0 {
 		c.DependenciesDone = false
 	}
-	if err := applyStageDependencies(ctx, q, c, protocol.WorkItem{WorkItemID: issue.IssueID, WorkItemPlan: issue.Plan}); err != nil {
+	if err := applyStageDependencies(ctx, q, c, protocol.WorkItem{WorkItemID: issue.IssueID, IssuePlan: issue.Plan}); err != nil {
 		return err
 	}
 	frozenItems := map[string]bool{}

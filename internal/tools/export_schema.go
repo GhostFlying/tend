@@ -38,7 +38,7 @@ func exportSchema(raw json.RawMessage) json.RawMessage {
 					panic("unresolved tool schema: " + name)
 				}
 				result := expand(target, next).(map[string]any)
-				if name == "WorkItemEvidence" {
+				if name == "IssueEvidence" {
 					// Only the server freezes these snapshots from the reference.
 					// Keep them in validation, but omit them from model inputs.
 					props := result["properties"].(map[string]any)

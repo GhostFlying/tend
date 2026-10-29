@@ -84,14 +84,14 @@ export type AgentKind = "claude" | "codex" | "traex";
 export type IssueAssigneeKind = "owner" | "agent";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemEvidenceKind".
+ * via the `definition` "IssueEvidenceKind".
  */
-export type WorkItemEvidenceKind = "acceptance" | "delivery" | "owner_decision" | "upgrade";
+export type IssueEvidenceKind = "acceptance" | "delivery" | "owner_decision" | "upgrade";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemClosureKind".
+ * via the `definition` "IssueClosureKind".
  */
-export type WorkItemClosureKind = "completed" | "declined" | "handed_off" | "superseded";
+export type IssueClosureKind = "completed" | "declined" | "handed_off" | "superseded";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "SharedFactKind".
@@ -100,24 +100,24 @@ export type SharedFactKind =
   "goal" | "observation" | "user_constraint" | "decision" | "input" | "fact";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemDeliveryProvider".
+ * via the `definition` "IssueDeliveryProvider".
  */
-export type WorkItemDeliveryProvider = "github" | "codebase";
+export type IssueDeliveryProvider = "github" | "codebase";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemFollowOnKind".
+ * via the `definition` "IssueFollowOnKind".
  */
-export type WorkItemFollowOnKind = "commitment" | "problem" | "suggestion";
+export type IssueFollowOnKind = "commitment" | "problem" | "suggestion";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemFollowOnStatus".
+ * via the `definition` "IssueFollowOnStatus".
  */
-export type WorkItemFollowOnStatus = "open" | "resolved" | "transferred";
+export type IssueFollowOnStatus = "open" | "resolved" | "transferred";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemStageStatus".
+ * via the `definition` "IssueStageStatus".
  */
-export type WorkItemStageStatus = "planned" | "active" | "done" | "cancelled" | "retired";
+export type IssueStageStatus = "planned" | "active" | "done" | "cancelled" | "retired";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueState".
@@ -220,9 +220,9 @@ export type ActionStatus = "pending" | "ready" | "dispatched" | "done" | "cancel
 export type RelationDirection = "outgoing" | "incoming";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemTaskDispositionAction".
+ * via the `definition` "IssueTaskDispositionAction".
  */
-export type WorkItemTaskDispositionAction = "continue_existing" | "updated" | "stopped";
+export type IssueTaskDispositionAction = "continue_existing" | "updated" | "stopped";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkItemUpdateStatus".
@@ -576,7 +576,7 @@ export interface IssueView {
   assignment_epoch: number;
   assignment_state: string;
   attentions?: AttentionPage;
-  closure?: WorkItemClosure;
+  closure?: IssueClosure;
   context_revision?: number;
   created_at: number;
   deadlines?: IssueDeadline[];
@@ -587,7 +587,7 @@ export interface IssueView {
   pending_assignee?: IssueAssignee;
   pending_handoff_id?: string;
   pending_reviews?: WorkItemCompletionReview[];
-  plan: WorkItemPlan;
+  plan: IssuePlan;
   revision: number;
   source_reviews?: IssueSourceReview[];
   state: IssueState;
@@ -613,19 +613,19 @@ export interface AttentionPage {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemClosure".
+ * via the `definition` "IssueClosure".
  */
-export interface WorkItemClosure {
-  evidence: WorkItemEvidence[] | null;
-  kind: WorkItemClosureKind;
+export interface IssueClosure {
+  evidence: IssueEvidence[] | null;
+  kind: IssueClosureKind;
   reason: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemEvidence".
+ * via the `definition` "IssueEvidence".
  */
-export interface WorkItemEvidence {
-  kind: WorkItemEvidenceKind;
+export interface IssueEvidence {
+  kind: IssueEvidenceKind;
   observation?: DeliveryObservation;
   reference: string;
   summary: string;
@@ -748,16 +748,16 @@ export interface WorkItemCompletionReview {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemPlan".
+ * via the `definition` "IssuePlan".
  */
-export interface WorkItemPlan {
+export interface IssuePlan {
   background?: SharedFact[];
   default_workspace_task_id?: string;
-  deliveries?: WorkItemDelivery[];
-  follow_ons?: WorkItemFollowOn[];
+  deliveries?: IssueDelivery[];
+  follow_ons?: IssueFollowOn[];
   intent: string;
   project: string;
-  stages: WorkItemStage[] | null;
+  stages: IssueStage[] | null;
   title: string;
 }
 /**
@@ -771,40 +771,40 @@ export interface SharedFact {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemDelivery".
+ * via the `definition` "IssueDelivery".
  */
-export interface WorkItemDelivery {
+export interface IssueDelivery {
   delivery_id: string;
   host_id?: string;
   number: number;
-  provider: WorkItemDeliveryProvider;
+  provider: IssueDeliveryProvider;
   repository: string;
   url?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemFollowOn".
+ * via the `definition` "IssueFollowOn".
  */
-export interface WorkItemFollowOn {
-  evidence?: WorkItemEvidence[];
+export interface IssueFollowOn {
+  evidence?: IssueEvidence[];
   follow_on_id: string;
-  kind: WorkItemFollowOnKind;
+  kind: IssueFollowOnKind;
   source: string;
-  status: WorkItemFollowOnStatus;
+  status: IssueFollowOnStatus;
   text: string;
   transferred_to?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemStage".
+ * via the `definition` "IssueStage".
  */
-export interface WorkItemStage {
+export interface IssueStage {
   depends_on?: string[];
-  evidence?: WorkItemEvidence[];
+  evidence?: IssueEvidence[];
   parent_id?: string;
   reason?: string;
   stage_id: string;
-  status: WorkItemStageStatus;
+  status: IssueStageStatus;
   task_ids?: string[];
   title: string;
 }
@@ -842,14 +842,14 @@ export interface IssueTaskSummary {
 export interface WorkItemView {
   background?: SharedFact[];
   choices?: WorkItemChoice[];
-  closure?: WorkItemClosure;
+  closure?: IssueClosure;
   column: string;
   created_at: number;
   default_workspace_task_id?: string;
-  deliveries?: WorkItemDelivery[];
+  deliveries?: IssueDelivery[];
   execution?: ExecutionCounts;
   facts_seq?: number;
-  follow_ons?: WorkItemFollowOn[];
+  follow_ons?: IssueFollowOn[];
   followups?: FollowupSummary;
   intent: string;
   observations?: DeliveryObservation[];
@@ -857,7 +857,7 @@ export interface WorkItemView {
   project: string;
   revision: number;
   stage_execution?: StageExecutionView[];
-  stages: WorkItemStage[] | null;
+  stages: IssueStage[] | null;
   status: WorkItemStatus;
   tasks?: TaskSummary[];
   title: string;
@@ -1527,7 +1527,7 @@ export interface CancelIssueDeadlinePayload {
  * via the `definition` "CloseWorkItemPayload".
  */
 export interface CloseWorkItemPayload {
-  closure: WorkItemClosure;
+  closure: IssueClosure;
   commit_seq?: number;
   source_message_id?: string;
 }
@@ -1885,7 +1885,7 @@ export interface CreateIssuePayload {
   expected_parent_revision?: number;
   expected_source_revision?: number;
   parent_issue_id?: string;
-  plan: WorkItemPlan;
+  plan: IssuePlan;
   source_message_id?: string;
 }
 /**
@@ -2024,13 +2024,13 @@ export interface CreateWorkItemPayload {
   background?: SharedFact[];
   commit_seq?: number;
   default_workspace_task_id?: string;
-  deliveries?: WorkItemDelivery[];
-  follow_ons?: WorkItemFollowOn[];
+  deliveries?: IssueDelivery[];
+  follow_ons?: IssueFollowOn[];
   initial_context?: InitialWorkItemContext;
   intent: string;
   project: string;
   source_message_id?: string;
-  stages: WorkItemStage[] | null;
+  stages: IssueStage[] | null;
   title: string;
 }
 /**
@@ -2384,7 +2384,7 @@ export interface IssueDeliveryPage {
  * via the `definition` "IssueDeliveryView".
  */
 export interface IssueDeliveryView {
-  delivery: WorkItemDelivery;
+  delivery: IssueDelivery;
   observation: IssueDeliveryObservation;
 }
 /**
@@ -2414,7 +2414,7 @@ export interface IssueDeliveryObservation {
  * via the `definition` "IssueEndpointPayload".
  */
 export interface IssueEndpointPayload {
-  closure?: WorkItemClosure;
+  closure?: IssueClosure;
   completion_reviews?: CompletionReviewAcknowledgement[];
   expected_assignment_epoch: number;
   expected_context_revision?: number;
@@ -2437,7 +2437,7 @@ export interface CompletionReviewAcknowledgement {
  * via the `definition` "IssueFollowOnDisposition".
  */
 export interface IssueFollowOnDisposition {
-  evidence: WorkItemEvidence[] | null;
+  evidence: IssueEvidence[] | null;
   follow_on_id: string;
   reason: string;
 }
@@ -2701,7 +2701,7 @@ export interface PromoteConsultationPayload {
   expected_assignment_epoch?: number;
   expected_issue_revision?: number;
   expected_source_revision?: number;
-  plan?: WorkItemPlan;
+  plan?: IssuePlan;
   source_message_id?: string;
   sources?: IssueSourceReference[];
 }
@@ -3459,16 +3459,16 @@ export interface UpdateFollowupPayload {
 export interface UpdateIssuePayload {
   expected_assignment_epoch: number;
   expected_source_revision?: number;
-  plan: WorkItemPlan;
+  plan: IssuePlan;
   source_message_id?: string;
-  task_dispositions?: WorkItemTaskDisposition[];
+  task_dispositions?: IssueTaskDisposition[];
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkItemTaskDisposition".
+ * via the `definition` "IssueTaskDisposition".
  */
-export interface WorkItemTaskDisposition {
-  action: WorkItemTaskDispositionAction;
+export interface IssueTaskDisposition {
+  action: IssueTaskDispositionAction;
   reason: string;
   spec_version: number;
   task_id: string;
@@ -3501,14 +3501,14 @@ export interface UpdateWorkItemPayload {
   commit_seq?: number;
   completion_reviews?: CompletionReviewAcknowledgement[];
   default_workspace_task_id?: string;
-  deliveries?: WorkItemDelivery[];
-  follow_ons?: WorkItemFollowOn[];
+  deliveries?: IssueDelivery[];
+  follow_ons?: IssueFollowOn[];
   intent: string;
   project: string;
   source_message_id?: string;
-  stages: WorkItemStage[] | null;
+  stages: IssueStage[] | null;
   status?: WorkItemUpdateStatus;
-  task_dispositions?: WorkItemTaskDisposition[];
+  task_dispositions?: IssueTaskDisposition[];
   title: string;
 }
 /**

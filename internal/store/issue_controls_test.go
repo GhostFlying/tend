@@ -16,7 +16,7 @@ import (
 func canonicalIssueFixture(id string) protocol.Issue {
 	return protocol.Issue{
 		IssueControl: protocol.IssueControl{IssueID: id, State: protocol.IssueActive, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: "fixture-owner"}, AssignmentEpoch: 1, AssignmentState: "active"},
-		Revision:     1, Plan: protocol.WorkItemPlan{Title: "Investigate a goal", Project: "default", Intent: "Produce verified results", Stages: []protocol.WorkItemStage{}}, DependsOn: []string{}, CreatedAt: 1, UpdatedAt: 1,
+		Revision:     1, Plan: protocol.IssuePlan{Title: "Investigate a goal", Project: "default", Intent: "Produce verified results", Stages: []protocol.IssueStage{}}, DependsOn: []string{}, CreatedAt: 1, UpdatedAt: 1,
 	}
 }
 
@@ -119,7 +119,7 @@ func TestCanonicalIssueLegacySaveCannotMutateAdoptedIdentity(t *testing.T) {
 		t.Fatalf("legacy write escaped: %+v", got)
 	}
 	// Unadopted compatibility identities remain writable and cannot be read as canonical.
-	legacy := protocol.WorkItem{WorkItemPlan: issue.Plan, WorkItemID: "wi_00000000000000000000000004", Revision: 1, Status: protocol.WorkItemOpen, CreatedAt: 1, UpdatedAt: 1}
+	legacy := protocol.WorkItem{IssuePlan: issue.Plan, WorkItemID: "wi_00000000000000000000000004", Revision: 1, Status: protocol.WorkItemOpen, CreatedAt: 1, UpdatedAt: 1}
 	if err := s.Write(t.Context(), func(tx *Tx) error { return tx.SaveIssue(t.Context(), legacy, 0, "legacy") }); err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestIssueControlsMigrationPreservesLegacyBytesAndPrimary(t *testing.T) {
 		write.Close()
 		t.Fatal(err)
 	}
-	legacy := protocol.WorkItem{WorkItemPlan: protocol.WorkItemPlan{Title: "Original", Project: "default", Intent: "Original intent", Stages: []protocol.WorkItemStage{}}, WorkItemID: "wi_00000000000000000000000011", Revision: 1, Status: protocol.WorkItemOpen, CreatedAt: 1, UpdatedAt: 1}
+	legacy := protocol.WorkItem{IssuePlan: protocol.IssuePlan{Title: "Original", Project: "default", Intent: "Original intent", Stages: []protocol.IssueStage{}}, WorkItemID: "wi_00000000000000000000000011", Revision: 1, Status: protocol.WorkItemOpen, CreatedAt: 1, UpdatedAt: 1}
 	raw, err := json.Marshal(legacy)
 	if err != nil {
 		t.Fatal(err)

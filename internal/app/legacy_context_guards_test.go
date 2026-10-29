@@ -62,7 +62,7 @@ func canonicalGuardBusinessSnapshot(t *testing.T, h *harness) []byte {
 
 func createCanonicalGuardIssue(t *testing.T, h *harness, project string) protocol.Issue {
 	t.Helper()
-	p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Independent canonical responsibility", Intent: "Obtain an accepted result", Project: project, Stages: []protocol.WorkItemStage{}}}
+	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Independent canonical responsibility", Intent: "Obtain an accepted result", Project: project, Stages: []protocol.IssueStage{}}}
 	op := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -339,9 +339,9 @@ func TestCanonicalAssociationAttachmentKeepsRemovedSideResponsibility(t *testing
 			}
 			var command Command = SetMessageAssociations{}
 			if mode == "legacy plan" {
-				plan := legacy.WorkItemPlan
+				plan := legacy.IssuePlan
 				plan.Title = "Revised legacy plan"
-				env = h.env("work_items.update", workTarget(legacy.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: plan, SourceMessageID: old, CommitSeq: 99}, rev(legacy.Revision))
+				env = h.env("work_items.update", workTarget(legacy.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: plan, SourceMessageID: old, CommitSeq: 99}, rev(legacy.Revision))
 				env.ParentRequestID = second.RequestID
 				command = UpdateIssue{}
 			}

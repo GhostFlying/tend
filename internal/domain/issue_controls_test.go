@@ -174,7 +174,7 @@ func TestIssueControlAncestorEndpointPreventsChildActivation(t *testing.T) {
 }
 
 func TestIssueControlDependencyRequiresVerifiedAchievedEndpoint(t *testing.T) {
-	for _, kind := range []protocol.WorkItemClosureKind{protocol.WorkItemClosureDeclined, protocol.WorkItemClosureHandedOff, protocol.WorkItemClosureSuperseded} {
+	for _, kind := range []protocol.IssueClosureKind{protocol.WorkItemClosureDeclined, protocol.WorkItemClosureHandedOff, protocol.WorkItemClosureSuperseded} {
 		if IssueDependencySatisfied(IssueCompletionFact{State: protocol.IssueClosed, ClosureKind: kind, EvidenceVerified: true}) {
 			t.Fatalf("unachieved endpoint released dependency: %s", kind)
 		}

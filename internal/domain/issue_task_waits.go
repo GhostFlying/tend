@@ -42,13 +42,13 @@ func ValidateIssuePrimaryTaskWaits(issues []protocol.Issue, primary map[string][
 			}
 		}
 
-		stages := map[string]protocol.WorkItemStage{}
+		stages := map[string]protocol.IssueStage{}
 		for _, stage := range issue.Plan.Stages {
 			stages[stage.StageID] = stage
 		}
 		for _, stage := range issue.Plan.Stages {
 			stageNode := node{"stage:" + issue.IssueID, stage.StageID}
-			if stage.ParentID != "" && !slices.Contains([]protocol.WorkItemStageStatus{protocol.WorkItemStageDone, protocol.WorkItemStageCancelled, protocol.WorkItemStageRetired}, stage.Status) && stages[stage.ParentID].Status != protocol.WorkItemStageDone {
+			if stage.ParentID != "" && !slices.Contains([]protocol.IssueStageStatus{protocol.WorkItemStageDone, protocol.WorkItemStageCancelled, protocol.WorkItemStageRetired}, stage.Status) && stages[stage.ParentID].Status != protocol.WorkItemStageDone {
 				edges[node{"stage:" + issue.IssueID, stage.ParentID}] = append(edges[node{"stage:" + issue.IssueID, stage.ParentID}], stageNode)
 			}
 			for _, task := range stage.TaskIDs {

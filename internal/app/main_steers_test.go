@@ -166,7 +166,7 @@ func TestExecutionScopeKeepsEventReviewWithHistoricalAuditParent(t *testing.T) {
 		}
 	}
 	work.Title = "Revised within the current execution"
-	env := h.env("work_items.update", workTarget(work.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: work.WorkItemPlan}, rev(work.Revision))
+	env := h.env("work_items.update", workTarget(work.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: work.IssuePlan}, rev(work.Revision))
 	env.ParentRequestID = oldRequest
 	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "main", Thread: "native"}
 	if op := h.exec(principal, env, WithExecutionRequest(UpdateIssue{}, currentRequest)); op.Status != protocol.OpSucceeded {
