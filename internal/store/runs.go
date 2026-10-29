@@ -27,10 +27,15 @@ type CandidateRow struct {
 	Project             string
 	Title               string
 	// Weight is the weight of the task's project.
-	Weight            int64
-	DependenciesDone  bool
-	WorkspaceHost     string
-	WorkspaceOccupied bool
+	Weight           int64
+	DependenciesDone bool
+	// NamedExecutionAssigned refers only to this task and current spec, never
+	// a reused workspace owner or an earlier execution agreement.
+	NamedExecutionAssigned  bool
+	WorkspaceLegacyBindings bool
+	WorkspaceBackendID      string
+	WorkspaceHost           string
+	WorkspaceOccupied       bool
 	// AbandonedHosts are the hosts the task gave up a workspace on.
 	AbandonedHosts []string
 	SpecJSON       string
@@ -47,6 +52,18 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dt ON dt.task_id = d.depends_on
 			WHERE d.task_id = t.task_id AND dt.lifecycle <> 'completed'),
 		COALESCE((SELECT w.host_id FROM task_workspace_bindings b JOIN workspaces w ON w.workspace_id=b.workspace_id WHERE b.task_id=t.task_id), ''),
+		COALESCE((SELECT CASE WHEN w.backend_id<>'' THEN w.backend_id WHEN w.path<>'' AND w.provider_id<>'' THEN 'orca' WHEN w.path<>'' THEN 'git' ELSE '' END FROM task_workspace_bindings b JOIN workspaces w ON w.workspace_id=b.workspace_id WHERE b.task_id=t.task_id), ''),
+        EXISTS (SELECT 1 FROM runs nr JOIN run_agent_executions ne ON ne.run_id=nr.run_id
+          JOIN plan_actions na ON na.action_id=nr.action_id
+          WHERE nr.task_id=t.task_id AND na.target_spec_version=t.spec_version),
+        EXISTS (SELECT 1 FROM task_workspace_bindings current_binding
+          JOIN workspaces shared ON shared.workspace_id=current_binding.workspace_id
+          JOIN task_workspace_bindings peer ON peer.workspace_id=shared.workspace_id
+          JOIN tasks peer_task ON peer_task.task_id=peer.task_id
+          JOIN task_specs peer_spec ON peer_spec.task_id=peer_task.task_id AND peer_spec.spec_version=peer_task.spec_version
+          WHERE current_binding.task_id=t.task_id AND shared.backend_id=''
+          AND peer.task_id<>t.task_id AND peer_task.lifecycle NOT IN ('completed','cancelled')
+          AND json_extract(peer_spec.body_json,'$.agent_selection') IS NULL),
 		EXISTS (SELECT 1 FROM task_workspace_bindings b JOIN workspaces w ON w.workspace_id=b.workspace_id
 			WHERE b.task_id=t.task_id AND (w.status IN ('removing','removed') OR (w.occupied_by IS NOT NULL AND w.occupied_by<>t.task_id)))
 		OR EXISTS (SELECT 1 FROM runs r JOIN workspace_runs rb ON rb.run_id=r.run_id
@@ -71,7 +88,7 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		if err := rows.Scan(&a.ActionID, &a.TaskID, &a.Kind, &a.EffectKey, &a.TriggerJSON, &a.TargetSpecVersion, &artifact,
 			&a.AuthorizationJSON, &a.Generation, &a.Status, &commit, &a.CreatedRequestID, &a.CreatedAt,
 			&c.Lifecycle, &c.Control, &c.Block, &c.SpecVersion, &c.ImplementGeneration, &c.CurrentArtifactID, &c.Rating, &c.Project, &c.Title, &c.Weight,
-			&c.DependenciesDone, &c.WorkspaceHost, &c.WorkspaceOccupied, &abandoned, &c.SpecJSON); err != nil {
+			&c.DependenciesDone, &c.WorkspaceHost, &c.WorkspaceBackendID, &c.NamedExecutionAssigned, &c.WorkspaceLegacyBindings, &c.WorkspaceOccupied, &abandoned, &c.SpecJSON); err != nil {
 			return nil, fmt.Errorf("store: scan claim candidate: %w", err)
 		}
 		if c.AbandonedHosts, err = parseList(abandoned); err != nil {

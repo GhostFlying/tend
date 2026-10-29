@@ -1036,3 +1036,42 @@ func TestOrcaBothWorkerRolesReadScopedObservationThroughBridge(t *testing.T) {
 		})
 	}
 }
+
+func TestPrivateNamedInstructionsStayInNativePromptNotLifecycleUpload(t *testing.T) {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		t.Run(string(role), func(t *testing.T) {
+			f := newWorkerFixture(t)
+			spec := f.spec(role)
+			spec.RoleInstructions = "PRIVATE_NAMED_ROLE_INSTRUCTIONS"
+			w, events, drained := f.start(t.Context(), spec)
+			native := f.orca.prompt("tab:1")
+			if !strings.Contains(native, spec.RoleInstructions) || !strings.Contains(native, "add a flag") {
+				t.Fatal("native launch lost requested instructions", native)
+			}
+			if role == protocol.RoleAccept {
+				f.submit(protocol.VerdictPassed)
+			}
+			f.orca.finish("term_1", "completed requested work")
+			_, err := w.Wait()
+			<-drained
+			if err != nil {
+				t.Fatal(err)
+			}
+			started := false
+			for _, event := range *events {
+				if event.Kind == "turn.started" {
+					started = true
+					if strings.Contains(string(event.Body), spec.RoleInstructions) {
+						t.Fatal("private definition uploaded in lifecycle event", string(event.Body))
+					}
+					if !strings.Contains(string(event.Body), "add a flag") {
+						t.Fatal("safe lifecycle prompt lost public task input")
+					}
+				}
+			}
+			if !started {
+				t.Fatal("missing lifecycle event")
+			}
+		})
+	}
+}

@@ -35,7 +35,7 @@ func Queue(ctx context.Context, q store.Querier, o scheduler.Order) ([]protocol.
 	for _, r := range rows {
 		tasks[r.Action.TaskID] = r
 	}
-	hosts, err := schedulingHosts(ctx, q)
+	hosts, err := schedulingHosts(ctx, q, o.Now)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func Queue(ctx context.Context, q store.Querier, o scheduler.Order) ([]protocol.
 
 // schedulingHosts returns the active hosts as the scheduler sees them,
 // each with every slot free.
-func schedulingHosts(ctx context.Context, q store.Querier) ([]scheduler.Host, error) {
+func schedulingHosts(ctx context.Context, q store.Querier, now int64) ([]scheduler.Host, error) {
 	rows, err := store.ListActiveHosts(ctx, q)
 	if err != nil {
 		return nil, err
@@ -65,8 +65,13 @@ func schedulingHosts(ctx context.Context, q store.Querier) ([]scheduler.Host, er
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return nil, err
 		}
+		executors, err := hostExecutors(ctx, q, h.HostID, now)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, scheduler.Host{
-			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots,
+			Executors: executors,
+			ID:        h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots,
 			Worker: h.Worker.Capabilities(), WorkspaceProtocol: h.WorkspaceProtocol, TaskInputs: runtimeSupportsTaskInputs(&runtime.Runtime), WorkerObservation: runtimeSupportsObservation(&runtime.Runtime), AcceptanceExecution: slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAcceptanceExecution),
 		})
 	}

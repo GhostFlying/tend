@@ -44,17 +44,18 @@ type RuntimeBinding struct {
 }
 
 type AgentDefinition struct {
-	LocalID     string    `json:"local_id"`
-	Revision    uint64    `json:"revision"`
-	DisplayName string    `json:"display_name"`
-	RuntimeID   string    `json:"runtime_id"`
-	Categories  []string  `json:"categories"`
-	Purposes    []Purpose `json:"purposes"`
-	Model       string    `json:"model"`
-	Effort      string    `json:"effort,omitempty"`
-	Skills      []string  `json:"skills,omitempty"`
-	MCPServers  []string  `json:"mcp_servers,omitempty"`
-	Enabled     bool      `json:"enabled"`
+	Instructions string    `json:"instructions,omitempty"`
+	LocalID      string    `json:"local_id"`
+	Revision     uint64    `json:"revision"`
+	DisplayName  string    `json:"display_name"`
+	RuntimeID    string    `json:"runtime_id"`
+	Categories   []string  `json:"categories"`
+	Purposes     []Purpose `json:"purposes"`
+	Model        string    `json:"model"`
+	Effort       string    `json:"effort,omitempty"`
+	Skills       []string  `json:"skills,omitempty"`
+	MCPServers   []string  `json:"mcp_servers,omitempty"`
+	Enabled      bool      `json:"enabled"`
 }
 
 // SourceReference identifies local provenance. Only Kind is public metadata.
@@ -150,6 +151,9 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 	seen := make(map[string]bool, len(cfg.Agents))
 	for i, a := range cfg.Agents {
 		path := fmt.Sprintf("$.agents[%d]", i)
+		if !utf8.ValidString(a.Instructions) {
+			return nil, invalid("invalid_instructions", path+".instructions")
+		}
 		if !validID(a.LocalID) {
 			return nil, invalid("invalid_id", path+".local_id")
 		}

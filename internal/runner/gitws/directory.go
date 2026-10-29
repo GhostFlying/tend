@@ -70,6 +70,15 @@ func (w *Workspaces) prepareDirectory(ctx context.Context, as protocol.Assignmen
 	if st.ResourceID != "" && st.ResourceID != as.Workspace.ID {
 		return runner.Prepared{}, errors.New("gitws: directory resource identity changed")
 	}
+	if st.BackendID != "" && st.BackendID != as.Workspace.BackendID {
+		return runner.Prepared{}, errors.New("directory workspace backend differs from recorded origin")
+	}
+	if as.Workspace.BackendID != "" {
+		st.BackendID = as.Workspace.BackendID
+		if err := saveState(home, st); err != nil {
+			return runner.Prepared{}, err
+		}
+	}
 	st.ResourceID = as.Workspace.ID
 	if l, ok := w.layout.(orcaLayout); ok {
 		if err := w.ensureFolder(ctx, as, home, &st, l.orca); err != nil {
@@ -97,7 +106,7 @@ func (w *Workspaces) prepareDirectory(ctx context.Context, as protocol.Assignmen
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	return runner.Prepared{Dir: home, StateDir: stateDir, ScratchDir: scratch, ProviderID: st.ProviderID, Guide: "This is a retained ordinary directory. It need not contain a Git repository. Preserve inherited files and perform only the task's authorized work.", Report: protocol.WorkspaceReport{Path: home, ProviderID: st.ProviderID, ProviderInstanceID: st.ProviderInstanceID, Baseline: baselineReport(baseline, "directory", as.TaskID)}}, nil
+	return runner.Prepared{Dir: home, StateDir: stateDir, ScratchDir: scratch, ProviderID: st.ProviderID, Guide: "This is a retained ordinary directory. It need not contain a Git repository. Preserve inherited files and perform only the task's authorized work.", Report: protocol.WorkspaceReport{BackendID: as.Workspace.BackendID, Path: home, ProviderID: st.ProviderID, ProviderInstanceID: st.ProviderInstanceID, Baseline: baselineReport(baseline, "directory", as.TaskID)}}, nil
 }
 
 func (w *Workspaces) ensureFolder(ctx context.Context, as protocol.Assignment, home string, st *state, c *orca.Client) error {

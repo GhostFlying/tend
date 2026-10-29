@@ -25,7 +25,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 11
+const CurrentVersion int64 = 12
 
 // Run phases.
 const (
@@ -238,6 +238,9 @@ func (j *Journal) AcceptAssignment(ctx context.Context, as protocol.Assignment, 
 func (j *Journal) AcceptAssignmentFromWorker(ctx context.Context, as protocol.Assignment, claimID string, worker protocol.WorkerKind) error {
 	if worker != "" && worker != protocol.WorkerAppServer && worker != protocol.WorkerOrca {
 		return errors.New("journal: invalid worker origin")
+	}
+	if as.Execution != nil && (worker != as.Execution.Worker || as.Workspace.BackendID != as.Execution.BackendID) {
+		return errors.New("journal: named assignment origin differs from execution pin")
 	}
 	body, err := json.Marshal(as)
 	if err != nil {

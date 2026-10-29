@@ -25,9 +25,15 @@ type Installation struct {
 	LocalReference  string `json:"local_reference"`
 }
 
+type ExecutionConfig struct {
+	WorkspaceBackend string `json:"workspace_backend,omitempty"`
+	OrcaBin          string `json:"orca_bin,omitempty"`
+}
+
 type Config struct {
-	SourceFile    string         `json:"source_file"`
-	Installations []Installation `json:"installations"`
+	Execution     *ExecutionConfig `json:"execution,omitempty"`
+	SourceFile    string           `json:"source_file"`
+	Installations []Installation   `json:"installations"`
 }
 
 type Options struct {
@@ -173,4 +179,9 @@ func (c *Control) notifyAccepted() {
 	case c.changes <- struct{}{}:
 	default:
 	}
+}
+
+// ResolveAccepted returns only a previously accepted local snapshot.
+func (c *Control) ResolveAccepted(ctx context.Context, id string) (*agentregistry.Snapshot, error) {
+	return c.registry.Resolve(ctx, agentregistry.SnapshotRef{ID: id})
 }

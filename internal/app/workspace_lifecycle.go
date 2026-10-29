@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -74,11 +75,21 @@ func (ReserveWorkspaceCleanup) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	if p.Limit < 1 || p.Limit > 32 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "cleanup limit must be between 1 and 32")
 	}
-	rows, err := tx.Q().QueryContext(ctx, `SELECT w.workspace_id FROM workspaces w WHERE w.host_id=? AND
+	namedSupported := false
+	if p.AgentExecution {
+		runtime, err := store.GetHostRuntime(ctx, tx.Q(), x.Principal.Subject)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return Outcome{}, err
+		}
+		if err == nil {
+			namedSupported = runtimeSupportsAgentExecution(&runtime.Runtime)
+		}
+	}
+	rows, err := tx.Q().QueryContext(ctx, `SELECT w.workspace_id FROM workspaces w WHERE w.host_id=? AND (w.backend_id='' OR ?) AND
 	 (w.status='removing' OR (w.kind='directory' AND w.status='retained' AND w.occupied_by IS NULL AND w.path<>'' AND w.released_at<=?
 	 AND NOT EXISTS(SELECT 1 FROM task_workspace_bindings b JOIN tasks t ON t.task_id=b.task_id WHERE b.workspace_id=w.workspace_id AND t.lifecycle NOT IN ('completed','cancelled'))
 	 AND NOT EXISTS(SELECT 1 FROM workspace_runs wr JOIN runs r ON r.run_id=wr.run_id WHERE wr.workspace_id=w.workspace_id AND r.observed_state IN ('starting','running','waiting','interrupted','unknown'))))
-	 ORDER BY w.updated_at,w.workspace_id LIMIT ?`, x.Principal.Subject, x.Now.Add(-7*24*time.Hour).UnixMilli(), p.Limit)
+	 ORDER BY w.updated_at,w.workspace_id LIMIT ?`, x.Principal.Subject, namedSupported, x.Now.Add(-7*24*time.Hour).UnixMilli(), p.Limit)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("app: list expired workspaces: %w", err)
 	}
@@ -114,7 +125,7 @@ func (ReserveWorkspaceCleanup) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 			return Outcome{}, fmt.Errorf("app: reserve workspace cleanup: %w", err)
 		}
 		events = append(events, Event{ObjectType: "workspace", ObjectID: id, Kind: kind, Body: map[string]any{"cleanup_id": w.CleanupID}})
-		result.Workspaces = append(result.Workspaces, protocol.WorkspaceCleanup{CleanupID: w.CleanupID, WorkspaceID: id, Kind: w.Kind, Name: w.Name, Path: w.Path, ProviderID: w.ProviderID, ProviderInstanceID: w.ProviderInstanceID})
+		result.Workspaces = append(result.Workspaces, protocol.WorkspaceCleanup{BackendID: w.BackendID, CleanupID: w.CleanupID, WorkspaceID: id, Kind: w.Kind, Name: w.Name, Path: w.Path, ProviderID: w.ProviderID, ProviderInstanceID: w.ProviderInstanceID})
 	}
 	return Outcome{Result: result, Events: events, NoEffect: len(events) == 0}, nil
 }

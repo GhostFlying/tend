@@ -155,7 +155,7 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 		var env *protocol.Envelope
 		var reserveErr error
 		if r.control.Mode != protocol.RunnerMaintenance && !r.bootstrapMaintenance {
-			env, reserveErr = r.newEnvelope(protocol.OpWorkspaceCleanup, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.WorkspaceCleanupRequest{Limit: 10})
+			env, reserveErr = r.newEnvelope(protocol.OpWorkspaceCleanup, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.WorkspaceCleanupRequest{Limit: 10, AgentExecution: r.agentExecutionSupported && r.cfg.Executions != nil})
 			if reserveErr == nil {
 				reserveErr = r.cfg.Journal.PutRequest(ctx, journal.Request{Envelope: *env})
 			}

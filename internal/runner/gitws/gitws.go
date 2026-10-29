@@ -76,9 +76,12 @@ type Config struct {
 
 // Workspaces implements runner.Workspaces with git worktrees.
 type Workspaces struct {
-	cfg    Config
-	git    git
-	layout layout
+	shared    *Workspaces
+	backendID string
+	backends  map[string]*Workspaces
+	cfg       Config
+	git       git
+	layout    layout
 
 	bindMu          sync.Mutex
 	repoMu          sync.RWMutex
@@ -163,13 +166,13 @@ var ErrWorkspaceMoved = runner.ErrWorkspaceMoved
 // gives up when ctx ends, so a fenced run does not wait for another run's
 // slow fetch.
 func (w *Workspaces) lock(ctx context.Context, key string) (func(), error) {
-	w.mu.Lock()
-	l, ok := w.locks[key]
+	w.owner().mu.Lock()
+	l, ok := w.owner().locks[key]
 	if !ok {
 		l = make(chan struct{}, 1)
-		w.locks[key] = l
+		w.owner().locks[key] = l
 	}
-	w.mu.Unlock()
+	w.owner().mu.Unlock()
 	select {
 	case l <- struct{}{}:
 		return func() { <-l }, nil
@@ -194,6 +197,7 @@ func (w *Workspaces) home(as protocol.Assignment) string {
 // state is what the runner remembers about a workspace, kept in the
 // workspace directory.
 type state struct {
+	BackendID          string                `json:"backend_id,omitempty"`
 	ResourceID         string                `json:"resource_id,omitempty"`
 	ProviderID         string                `json:"provider_id,omitempty"`
 	ProviderInstanceID string                `json:"provider_instance_id,omitempty"`
@@ -378,6 +382,13 @@ func (w *Workspaces) hasCommitIn(ctx context.Context, path, sha string) bool {
 
 // Prepare implements runner.Workspaces.
 func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {
+	if as.Workspace.BackendID != "" && as.Workspace.BackendID != w.backendID {
+		view, err := w.Backend(as.Workspace.BackendID)
+		if err != nil {
+			return runner.Prepared{}, err
+		}
+		return view.Prepare(ctx, as)
+	}
 	home := w.home(as)
 	if as.Workspace.Kind == "directory" {
 		return w.prepareDirectory(ctx, as, home)
@@ -402,6 +413,16 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 	if st.ResourceID != "" && st.ResourceID != as.Workspace.ID {
 		return runner.Prepared{}, fmt.Errorf("gitws: workspace resource identity changed")
 	}
+	if st.BackendID != "" && st.BackendID != as.Workspace.BackendID {
+		return runner.Prepared{}, errors.New("workspace backend differs from recorded origin")
+	}
+	if as.Workspace.BackendID != "" && st.BackendID == "" {
+		st.BackendID = as.Workspace.BackendID
+		if err := saveState(home, st); err != nil {
+			return runner.Prepared{}, err
+		}
+	}
+
 	st.ResourceID = as.Workspace.ID
 	if as.Role == protocol.RoleAccept {
 		err = w.layoutAcceptance(ctx, as, home, &st)
@@ -467,6 +488,7 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 		st.DisplayTask = as.TaskID
 		st.DisplayComment = comment
 	}
+	p.Report.BackendID = as.Workspace.BackendID
 	p.Report.ProviderID, p.Report.ProviderInstanceID, p.Report.Path = st.ProviderID, st.ProviderInstanceID, root
 	if len(fullBaseline) > 0 {
 		p.Report.Baseline = baselineReport(fullBaseline, "git", as.TaskID)
@@ -683,11 +705,25 @@ func (w *Workspaces) read(ctx context.Context, home, dir string) (mountNow, erro
 // changes HEAD does not, a snapshot commit of them kept under the run's
 // ref. Neither the branch, the index nor the files are changed.
 func (w *Workspaces) Collect(ctx context.Context, as protocol.Assignment) (protocol.ArtifactPayload, error) {
+	if as.Workspace.BackendID != "" && as.Workspace.BackendID != w.backendID {
+		view, err := w.Backend(as.Workspace.BackendID)
+		if err != nil {
+			return protocol.ArtifactPayload{}, err
+		}
+		return view.Collect(ctx, as)
+	}
 	return w.collect(ctx, as, true)
 }
 
 // Snapshot records Git state for reports without requiring a change.
 func (w *Workspaces) Snapshot(ctx context.Context, as protocol.Assignment) (protocol.ArtifactPayload, error) {
+	if as.Workspace.BackendID != "" && as.Workspace.BackendID != w.backendID {
+		view, err := w.Backend(as.Workspace.BackendID)
+		if err != nil {
+			return protocol.ArtifactPayload{}, err
+		}
+		return view.Snapshot(ctx, as)
+	}
 	return w.collect(ctx, as, false)
 }
 
@@ -779,7 +815,14 @@ func (w *Workspaces) snapshot(ctx context.Context, dir string, as protocol.Assig
 // Finish implements runner.Workspaces. Workspaces stay for the task's
 // next run, whatever an acceptance run left in them (D41); only an
 // acceptance run's scratch directory is removed.
-func (w *Workspaces) Finish(_ context.Context, as protocol.Assignment) error {
+func (w *Workspaces) Finish(ctx context.Context, as protocol.Assignment) error {
+	if as.Workspace.BackendID != "" && as.Workspace.BackendID != w.backendID {
+		view, err := w.Backend(as.Workspace.BackendID)
+		if err != nil {
+			return err
+		}
+		return view.Finish(ctx, as)
+	}
 	if as.Role != protocol.RoleAccept {
 		return nil
 	}

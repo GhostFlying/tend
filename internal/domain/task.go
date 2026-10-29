@@ -18,12 +18,13 @@ const DefaultMaxImplementAttempts = 3
 
 // Spec is the content of one immutable task spec version.
 type Spec struct {
-	AcceptanceExecution *protocol.ExecutionProfile `json:"acceptance_execution,omitempty"`
-	Observation         *protocol.ObservationScope `json:"observation,omitempty"`
-	Goal                string                     `json:"goal"`
-	Scope               string                     `json:"scope,omitempty"`
-	Constraints         []string                   `json:"constraints,omitempty"`
-	Acceptance          []string                   `json:"acceptance"`
+	AgentSelection      *protocol.TaskAgentSelection `json:"agent_selection,omitempty"`
+	AcceptanceExecution *protocol.ExecutionProfile   `json:"acceptance_execution,omitempty"`
+	Observation         *protocol.ObservationScope   `json:"observation,omitempty"`
+	Goal                string                       `json:"goal"`
+	Scope               string                       `json:"scope,omitempty"`
+	Constraints         []string                     `json:"constraints,omitempty"`
+	Acceptance          []string                     `json:"acceptance"`
 	// Delivery preserves the legacy commit-only wire representation.
 	Delivery string `json:"delivery"`
 	// Deliverables lists required outputs; absent means legacy Delivery.
@@ -89,9 +90,17 @@ func (s Spec) Executable() bool {
 
 // Validate checks the spec for values the ledger cannot act on.
 func (s Spec) Validate() error {
+	if s.AgentSelection != nil {
+		if err := s.AgentSelection.Validate(); err != nil {
+			return err
+		}
+	}
 	if p := s.AcceptanceExecution; p != nil {
 		if err := p.Validate(); err != nil {
 			return err
+		}
+		if s.AgentSelection != nil && !s.AgentSelection.Acceptance.MatchesProfile(*p) {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "acceptance_execution conflicts with the named acceptance model/effort requirement")
 		}
 	}
 	if s.Observation != nil {
@@ -149,7 +158,7 @@ func (s Spec) Budget() int64 {
 
 // Equal reports whether two specs ask for the same thing.
 func (s Spec) Equal(o Spec) bool {
-	return executionEqual(s.AcceptanceExecution, o.AcceptanceExecution) && observationEqual(s.Observation, o.Observation) && s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
+	return agentSelectionEqual(s.AgentSelection, o.AgentSelection) && executionEqual(s.AcceptanceExecution, o.AcceptanceExecution) && observationEqual(s.Observation, o.Observation) && s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
 		s.Budget() == o.Budget() && slices.Equal(s.Constraints, o.Constraints) && slices.Equal(s.Acceptance, o.Acceptance) &&
 		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements) && slices.Equal(s.Inputs, o.Inputs) &&
 		s.ImplementationContext == o.ImplementationContext && equalSharedContext(s.SharedContext, o.SharedContext)
@@ -544,6 +553,13 @@ func RequestAcceptance(t Task, latest, generation, expectedRevision int64) (Deci
 func executionEqual(a, b *protocol.ExecutionProfile) bool {
 	if a == nil || b == nil {
 		return a == b
+	}
+	return *a == *b
+}
+
+func agentSelectionEqual(a, b *protocol.TaskAgentSelection) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
 	}
 	return *a == *b
 }

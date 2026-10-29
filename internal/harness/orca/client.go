@@ -248,6 +248,7 @@ func (c *Client) RemoveWorktree(ctx context.Context, worktree string) error {
 
 // LaunchOptions start an agent in a worktree.
 type LaunchOptions struct {
+	TerminalSurface bool
 	// Dir is where the CLI runs. A replay must run from the same
 	// directory as the launch it replays.
 	Dir      string
@@ -298,6 +299,9 @@ const OutcomeTerminal = "terminal"
 // RetryLaunch.
 func (c *Client) LaunchAgent(ctx context.Context, o LaunchOptions) (Launch, error) {
 	args := []string{"agent", "launch", "--agent", o.Agent, "--worktree", o.Worktree}
+	if o.TerminalSurface {
+		args = append(args, "--surface", "terminal")
+	}
 	if o.Prompt != "" {
 		args = append(args, "--prompt", o.Prompt)
 	}

@@ -51,6 +51,17 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	if err := r.loadControl(ctx); err != nil {
 		return nil, err
 	}
+	var executors []protocol.AgentExecutor
+	r.controlMu.Lock()
+	supported := r.agentExecutionSupported
+	r.controlMu.Unlock()
+	if supported && r.cfg.Executions != nil {
+		var err error
+		executors, err = r.cfg.Executions.Observe(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	r.maybeCancelStaged(ctx)
 	receipt := r.updaterProcessReceipt(ctx)
 	r.controlMu.Lock()
@@ -136,6 +147,9 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	}
 	capabilities := []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
 	capabilities = append(capabilities, protocol.CapabilityRunMessages)
+	if r.cfg.Executions != nil {
+		capabilities = append(capabilities, protocol.CapabilityAgentExecution)
+	}
 	if r.cfg.AgentInventory != nil {
 		capabilities = append(capabilities, protocol.CapabilityAgentInventory)
 	}
@@ -168,7 +182,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		repositories = r.cfg.RepositoryBindings()
 	}
 	r.sequence++
-	return &protocol.RunnerRuntime{Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
+	return &protocol.RunnerRuntime{AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
 }
 
 func sameGrant(a, b *protocol.MaintenanceAuthorization) bool {

@@ -309,8 +309,12 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	executions, err := assembleAgentExecutions(ctx, cfg, agents, workspaces, ids, time.Now, log)
+	if err != nil {
+		return err
+	}
 	r := runner.New(runner.Config{
-		AgentInventory: agentInventory, AgentChanges: agentChanges, RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
+		Executions: executions, AgentInventory: agentInventory, AgentChanges: agentChanges, RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
 		InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: cfg.UpdaterSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,

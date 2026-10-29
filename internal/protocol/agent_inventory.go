@@ -110,6 +110,7 @@ type AgentInventoryStatusPayload struct {
 }
 
 type AgentInventoryStatus struct {
+	Executors             []AgentExecutor           `json:"executors,omitempty"`
 	Current               *AgentInventoryReceipt    `json:"current,omitempty"`
 	Projection            *AgentInventoryProjection `json:"projection,omitempty"`
 	Request               *Operation                `json:"request,omitempty"`

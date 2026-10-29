@@ -45,10 +45,10 @@ func (w *Workspaces) bindingsPath() string {
 }
 
 func (w *Workspaces) repo(name string) Repo {
-	w.repoMu.RLock()
-	defer w.repoMu.RUnlock()
+	w.owner().repoMu.RLock()
+	defer w.owner().repoMu.RUnlock()
 	r := w.cfg.Repos[name]
-	if b, ok := w.bindings.Bindings[name]; ok {
+	if b, ok := w.owner().bindings.Bindings[name]; ok {
 		r.Orca = b.Orca
 	}
 	return r
@@ -56,8 +56,8 @@ func (w *Workspaces) repo(name string) Repo {
 
 // LoadBindings validates persistent bindings before the runner advertises them.
 func (w *Workspaces) LoadBindings(ctx context.Context) error {
-	w.bindMu.Lock()
-	defer w.bindMu.Unlock()
+	w.owner().bindMu.Lock()
+	defer w.owner().bindMu.Unlock()
 	raw, err := os.ReadFile(w.bindingsPath())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -84,9 +84,9 @@ func (w *Workspaces) LoadBindings(ctx context.Context) error {
 	if err := syncBindingsDirectory(w.bindingsPath()); err != nil {
 		return fmt.Errorf("gitws: confirm binding persistence: %w", err)
 	}
-	w.repoMu.Lock()
-	defer w.repoMu.Unlock()
-	w.bindings = saved
+	w.owner().repoMu.Lock()
+	defer w.owner().repoMu.Unlock()
+	w.owner().bindings = saved
 	return nil
 }
 
@@ -94,7 +94,13 @@ func (w *Workspaces) validateBinding(ctx context.Context, b RepositoryBinding, c
 	if !repositoryName.MatchString(b.Repo) || (b.RemoteURL == "" || strings.TrimSpace(b.RemoteURL) != b.RemoteURL) || strings.HasPrefix(b.RemoteURL, "-") || strings.ContainsAny(b.RemoteURL, "\r\n\x00") {
 		return b, errors.New("gitws: a repository name and remote URL are required")
 	}
-	if l, ok := w.layout.(orcaLayout); ok {
+	bindingLayout := w.layout
+	if b.Orca != "" {
+		if named := w.owner().backends["orca"]; named != nil {
+			bindingLayout = named.layout
+		}
+	}
+	if l, ok := bindingLayout.(orcaLayout); ok {
 		if b.Orca == "" {
 			return b, errors.New("gitws: an existing Orca repository selector is required")
 		}
@@ -130,20 +136,20 @@ func (w *Workspaces) BindRepository(ctx context.Context, request BindRepositoryR
 		return 0, errors.New("gitws: a valid request_id is required")
 	}
 	// Serialize writers independently of the read path used by live heartbeats.
-	w.bindMu.Lock()
-	defer w.bindMu.Unlock()
-	if w.bindingsPending != nil {
+	w.owner().bindMu.Lock()
+	defer w.owner().bindMu.Unlock()
+	if w.owner().bindingsPending != nil {
 		if err := syncBindingsDirectory(w.bindingsPath()); err != nil {
 			return 0, fmt.Errorf("gitws: binding persistence remains uncertain: %w", err)
 		}
-		w.repoMu.Lock()
-		w.bindings = *w.bindingsPending
-		w.repoMu.Unlock()
-		w.bindingsPending = nil
+		w.owner().repoMu.Lock()
+		w.owner().bindings = *w.owner().bindingsPending
+		w.owner().repoMu.Unlock()
+		w.owner().bindingsPending = nil
 	}
-	w.repoMu.RLock()
-	current := w.bindings
-	w.repoMu.RUnlock()
+	w.owner().repoMu.RLock()
+	current := w.owner().bindings
+	w.owner().repoMu.RUnlock()
 	if receipt, ok := current.Requests[request.RequestID]; ok {
 		if receipt.Request != request {
 			return 0, errors.New("gitws: request identity conflicts with recorded binding")
@@ -176,14 +182,14 @@ func (w *Workspaces) BindRepository(ctx context.Context, request BindRepositoryR
 	}
 	if published, err := persistBindings(w.bindingsPath(), append(raw, '\n')); err != nil {
 		if published {
-			w.bindingsPending = &next
+			w.owner().bindingsPending = &next
 			return 0, fmt.Errorf("gitws: binding outcome unknown; reconcile the original request: %w", err)
 		}
 		return 0, err
 	}
-	w.repoMu.Lock()
-	w.bindings = next
-	w.repoMu.Unlock()
+	w.owner().repoMu.Lock()
+	w.owner().bindings = next
+	w.owner().repoMu.Unlock()
 	return next.Revision, nil
 }
 
@@ -224,16 +230,16 @@ func syncBindingsDirectory(path string) error {
 
 // RepositoryBindings returns a detached observation, with no local identities.
 func (w *Workspaces) RepositoryBindings() []protocol.RunnerRepository {
-	w.repoMu.RLock()
-	defer w.repoMu.RUnlock()
-	names := make([]string, 0, len(w.bindings.Bindings))
-	for name := range w.bindings.Bindings {
+	w.owner().repoMu.RLock()
+	defer w.owner().repoMu.RUnlock()
+	names := make([]string, 0, len(w.owner().bindings.Bindings))
+	for name := range w.owner().bindings.Bindings {
 		names = append(names, name)
 	}
 	slices.Sort(names)
 	out := make([]protocol.RunnerRepository, 0, len(names))
 	for _, name := range names {
-		b := w.bindings.Bindings[name]
+		b := w.owner().bindings.Bindings[name]
 		out = append(out, protocol.RunnerRepository{Repo: name, RemoteIdentity: protocol.RepositoryRemoteKey(b.RemoteURL)})
 	}
 	return out
@@ -241,7 +247,7 @@ func (w *Workspaces) RepositoryBindings() []protocol.RunnerRepository {
 
 // BindingRevision is the local catalog's optimistic control revision.
 func (w *Workspaces) BindingRevision() int64 {
-	w.repoMu.RLock()
-	defer w.repoMu.RUnlock()
-	return w.bindings.Revision
+	w.owner().repoMu.RLock()
+	defer w.owner().repoMu.RUnlock()
+	return w.owner().bindings.Revision
 }

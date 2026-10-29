@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
@@ -123,10 +124,14 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 // prepare lays out the workspace, reports it and the start, and moves the
 // run to started.
 func (r *Runner) prepare(ctx context.Context, as protocol.Assignment) error {
+	execution, err := r.resolveExecution(ctx, as)
+	if err != nil {
+		return &completionPending{err}
+	}
 	if err := r.requireRunWorker(ctx, as.RunID); err != nil {
 		return &completionPending{err}
 	}
-	p, err := r.cfg.Workspaces.Prepare(ctx, as)
+	p, err := execution.Workspaces.Prepare(ctx, as)
 	if err != nil {
 		return failed(reasonFor(err, "workspace_prepare_failed"), err)
 	}
@@ -203,7 +208,11 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if err := r.requireRunWorker(runCtx, as.RunID); err != nil {
 		return &completionPending{err}
 	}
-	p, err := r.cfg.Workspaces.Prepare(runCtx, as)
+	execution, err := r.resolveExecution(runCtx, as)
+	if err != nil {
+		return &completionPending{err}
+	}
+	p, err := execution.Workspaces.Prepare(runCtx, as)
 	if err != nil {
 		return stopped(failed(reasonFor(err, "workspace_prepare_failed"), err))
 	}
@@ -225,7 +234,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	var questions []protocol.WorkerQuestion
 	var receiveMessages func(context.Context) (*protocol.RunMessage, error)
 	var ackMessage func(context.Context, string) error
-	if as.RunMessages && r.cfg.Worker == protocol.WorkerOrca {
+	if as.RunMessages && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerOrca {
 		messages := &workerMessages{r: r, as: as, receiver: r.cfg.IDs.New(protocol.PrefixRequest)}
 		withRun := func(call context.Context) (context.Context, func()) {
 			callCtx, cancel := context.WithCancel(call)
@@ -257,7 +266,8 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return owner.ask(callCtx, payload)
 		}
 	}
-	w, err := r.cfg.Workers.Start(runCtx, harness.WorkerSpec{
+	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{
+		FrozenExecution: execution.Profile, RoleInstructions: execution.Instructions,
 		Execution: as.AcceptanceExecution, QuestionContext: as.QuestionContext, RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
 		AskOwner: askOwner, Questions: questions,
 		ReceiveMessages: receiveMessages, AckMessage: ackMessage,
@@ -292,6 +302,13 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		HandBack:   run.Held,
 	})
 	if err != nil {
+		if native, ok := errors.AsType[*orca.Error](err); ok && as.Execution != nil && (native.Code == "invalid_argument" || native.Code == "capability_unsupported" || native.Code == "incompatible_runtime") {
+			if rejected, ok := r.cfg.Executions.(interface {
+				Reject(protocol.RunExecutionPin, string)
+			}); ok {
+				rejected.Reject(*as.Execution, "adapter_rejected_configuration")
+			}
+		}
 		proofCtx := context.WithoutCancel(ctx)
 		var proofErr error
 		if errors.Is(err, harness.ErrWorkerNotStarted) && attempt == 1 && run.Thread == "" {
@@ -369,6 +386,10 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 
 // completeWork resumes a known outcome after the owner returns control.
 func (r *Runner) completeWork(ctx, runCtx context.Context, as protocol.Assignment, a *active, body json.RawMessage) error {
+	execution, resolveErr := r.resolveExecution(ctx, as)
+	if resolveErr != nil {
+		return &completionPending{resolveErr}
+	}
 	if err := r.awaitCompletedStop(ctx, runCtx, as, a); err != nil {
 		return err
 	}
@@ -399,13 +420,13 @@ func (r *Runner) completeWork(ctx, runCtx context.Context, as protocol.Assignmen
 		artifact = *res.Result
 	}
 	if requiresDelivery(as, "commit") {
-		git, err := r.cfg.Workspaces.Collect(runCtx, as)
+		git, err := execution.Workspaces.Collect(runCtx, as)
 		if err != nil {
 			return stopped(failed(reasonFor(err, "collect_failed"), err))
 		}
 		artifact.Mounts = git.Mounts
 	} else if len(as.Workspace.Mounts) > 0 {
-		if snapshots, ok := r.cfg.Workspaces.(interface {
+		if snapshots, ok := execution.Workspaces.(interface {
 			Snapshot(context.Context, protocol.Assignment) (protocol.ArtifactPayload, error)
 		}); ok {
 			git, err := snapshots.Snapshot(runCtx, as)
@@ -589,7 +610,11 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 			}
 		}
 	}
-	if err := r.cfg.Workspaces.Finish(ctx, as); err != nil {
+	execution, err := r.resolveExecution(ctx, as)
+	if err != nil {
+		return &completionPending{err}
+	}
+	if err := execution.Workspaces.Finish(ctx, as); err != nil {
 		r.cfg.Log.WarnContext(ctx, "workspace cleanup failed", "run_id", as.RunID, "err", err)
 	}
 	if as.Workspace.ID != "" {
@@ -602,6 +627,10 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 
 // stopAgent confirms that an external agent can no longer write before reporting.
 func (r *Runner) stopAgent(ctx context.Context, as protocol.Assignment) error {
+	execution, resolveErr := r.resolveExecution(ctx, as)
+	if resolveErr != nil {
+		return resolveErr
+	}
 	run, err := r.cfg.Journal.Run(ctx, as.RunID)
 	if err != nil {
 		return err
@@ -615,14 +644,14 @@ func (r *Runner) stopAgent(ctx context.Context, as protocol.Assignment) error {
 	if err := r.checkRunWorker(run); err != nil {
 		return err
 	}
-	if rel, ok := r.cfg.Workers.(harness.Releaser); ok {
+	if rel, ok := execution.Workers.(harness.Releaser); ok {
 		if err := rel.Release(ctx, as.RunID, run.Thread); err != nil {
 			if ctx.Err() == nil {
 				r.cfg.Log.WarnContext(ctx, "could not stop the agent of a released run", "run_id", as.RunID, "err", err)
 			}
 			return err
 		}
-	} else if r.cfg.Worker != protocol.WorkerAppServer || len(run.WorkerResult) == 0 || run.WorkerDoneAtMillis <= 0 {
+	} else if assignmentWorker(as, r.cfg.Worker) != protocol.WorkerAppServer || len(run.WorkerResult) == 0 || run.WorkerDoneAtMillis <= 0 {
 		return errors.New("runner: original process closure is unconfirmed")
 	}
 	return r.cfg.Journal.ConfirmStopped(ctx, as.RunID)
@@ -632,8 +661,12 @@ func (r *Runner) stopAgent(ctx context.Context, as protocol.Assignment) error {
 // Start fail or Wait return. That harness closes its per-run session first;
 // absence of a Releaser alone never establishes closure after a restart.
 func (r *Runner) recordClosedSession(ctx context.Context, as protocol.Assignment) error {
-	if r.cfg.Worker == protocol.WorkerAppServer {
-		if _, external := r.cfg.Workers.(harness.Releaser); !external {
+	execution, resolveErr := r.resolveExecution(ctx, as)
+	if resolveErr != nil {
+		return resolveErr
+	}
+	if assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer {
+		if _, external := execution.Workers.(harness.Releaser); !external {
 			return r.cfg.Journal.ConfirmStopped(ctx, as.RunID)
 		}
 	}
@@ -647,7 +680,7 @@ func (r *Runner) checkRunWorker(run journal.Run) error {
 	if err != nil {
 		return err
 	}
-	if origin != r.cfg.Worker {
+	if origin != assignmentWorker(run.Assignment, r.cfg.Worker) {
 		return errors.New("runner: run requires its original worker harness")
 	}
 	return nil
@@ -666,7 +699,7 @@ func (r *Runner) requireRunWorker(ctx context.Context, runID string) error {
 	if err := r.checkRunWorker(run); err != nil {
 		return err
 	}
-	if r.cfg.Worker == protocol.WorkerAppServer && run.Attempts > 0 && !run.StoppedConfirmed {
+	if assignmentWorker(run.Assignment, r.cfg.Worker) == protocol.WorkerAppServer && run.Attempts > 0 && !run.StoppedConfirmed {
 		return errors.New("runner: original app-server session closure is unconfirmed")
 	}
 	return nil
@@ -823,6 +856,10 @@ func (r *Runner) awaitCompletedStop(ctx, runCtx context.Context, as protocol.Ass
 }
 
 func (r *Runner) stopCompletedAgent(ctx context.Context, as protocol.Assignment, handBack bool) error {
+	execution, resolveErr := r.resolveExecution(ctx, as)
+	if resolveErr != nil {
+		return resolveErr
+	}
 	run, err := r.cfg.Journal.Run(ctx, as.RunID)
 	if err != nil {
 		return err
@@ -838,18 +875,18 @@ func (r *Runner) stopCompletedAgent(ctx context.Context, as protocol.Assignment,
 	if err := r.checkRunWorker(run); err != nil {
 		return err
 	}
-	verified, hasCompletedGuard := r.cfg.Workers.(harness.CompletedReleaser)
+	verified, hasCompletedGuard := execution.Workers.(harness.CompletedReleaser)
 	if run.Held && !handBack {
 		// Cancellation ends tend's work; it does not hand an owner's live
 		// terminal back. Only its independently confirmed absence releases it.
-		historical, ok := r.cfg.Workers.(harness.HistoricalReleaser)
+		historical, ok := execution.Workers.(harness.HistoricalReleaser)
 		if !ok {
 			return harness.ErrHeld
 		}
 		stopErr = historical.ReleaseHistorical(ctx, as.RunID, run.Thread, true, run.WorkerDoneAtMillis)
 	} else if !hasCompletedGuard {
 		return r.stopAgent(ctx, as)
-	} else if finalizing, ok := r.cfg.Workers.(harness.FinalizingReleaser); ok && len(run.WorkerResult) == 0 {
+	} else if finalizing, ok := execution.Workers.(harness.FinalizingReleaser); ok && len(run.WorkerResult) == 0 {
 		req, found, err := r.cfg.Journal.RequestForRun(ctx, as.RunID)
 		if err != nil {
 			return err

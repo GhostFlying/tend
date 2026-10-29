@@ -14,12 +14,13 @@ import (
 
 // Host is the claiming host as configured, with its current load.
 type Host struct {
-	ID     string
-	OS     string
-	Active bool
-	Labels []string
-	Repos  []string
-	Slots  int64
+	Executors []Executor
+	ID        string
+	OS        string
+	Active    bool
+	Labels    []string
+	Repos     []string
+	Slots     int64
 	// Busy counts the host's runs that have not finished.
 	WorkspaceProtocol int64
 	Busy              int64
@@ -32,11 +33,18 @@ type Host struct {
 
 // Candidate is a pending action together with the facts the rules need.
 type Candidate struct {
-	ActionID   string
-	TaskID     string
-	Kind       protocol.ActionKind
-	Status     protocol.ActionStatus
-	Generation int64
+	// NamedExecutionAssigned is derived from existing run pins for this spec.
+	NamedExecutionAssigned bool
+	// WorkspaceLegacyBindings prevents changing the backend contract of queued legacy peers.
+	WorkspaceLegacyBindings bool
+	AgentSelection          *protocol.TaskAgentSelection
+	AcceptanceProfile       *protocol.ExecutionProfile
+	WorkspaceBackendID      string
+	ActionID                string
+	TaskID                  string
+	Kind                    protocol.ActionKind
+	Status                  protocol.ActionStatus
+	Generation              int64
 	// TargetSpecVersion and TargetArtifactID are what the action was
 	// created for.
 	TargetSpecVersion int64
@@ -114,7 +122,7 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 		return waitReason(protocol.QueueHostRequirements, "host lacks a required label")
 	case !containsAll(h.Repos, c.Repos):
 		return waitReason(protocol.QueueHostRequirements, "host does not serve every repository")
-	case c.RequiresAcceptanceExecution && !h.AcceptanceExecution:
+	case c.AgentSelection == nil && c.RequiresAcceptanceExecution && !h.AcceptanceExecution:
 		return waitReason(protocol.QueueHostRequirements, "runner does not support acceptance model selection")
 	case c.RequiresObservation && !h.WorkerObservation:
 		return waitReason(protocol.QueueHostRequirements, "runner does not support scoped worker observation")
@@ -122,7 +130,7 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 		return waitReason(protocol.QueueHostRequirements, "runner does not support task input attachments")
 	case c.RequiresWorkspaceProtocol && h.WorkspaceProtocol < 1:
 		return waitReason(protocol.QueueHostRequirements, "runner does not support workspace resources and composable deliverables")
-	case c.Mounts > 1 && !h.Worker.MultiMount:
+	case c.AgentSelection == nil && c.Mounts > 1 && !h.Worker.MultiMount:
 		return waitReason(protocol.QueueHostRequirements, MultiMountUnsupported)
 	case c.WorkspaceHost != "" && c.WorkspaceHost != h.ID:
 		// The workspace, and the artifact commits in its repositories,
@@ -132,6 +140,11 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 		// The abandoned workspace and its branches are still there and
 		// would be taken up again.
 		return waitReason(protocol.QueueHostRequirements, "task gave up its workspace on this host")
+	}
+	if c.AgentSelection != nil {
+		if _, reason := SelectExecution(h, c); reason != "" {
+			return waitReason(protocol.QueueHostRequirements, reason)
+		}
 	}
 	return nil
 }
@@ -160,6 +173,8 @@ func HeldReason(c Candidate) *protocol.QueueWaitReason {
 		return waitReason(protocol.QueueTaskBlocked, "implement action is not the current generation")
 	case c.Kind == protocol.ActionAccept && (c.Lifecycle != protocol.TaskAwaitingAcceptance || c.TargetArtifactID != c.CurrentArtifactID):
 		return waitReason(protocol.QueueTaskBlocked, "acceptance targets an artifact that is no longer under acceptance")
+	case c.AgentSelection != nil && c.WorkspaceLegacyBindings:
+		return waitReason(protocol.QueueWorkspaceBusy, "named workspace promotion waits for unfinished legacy task bindings")
 	case c.WorkspaceOccupied:
 		// Includes unknown runs: losing contact does not prove the old
 		// run stopped writing.

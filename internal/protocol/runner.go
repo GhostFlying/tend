@@ -69,6 +69,7 @@ type RunVerdict struct {
 // that the runner did not report; they never started, so the runner takes
 // them over as if it had just claimed them.
 type HelloResult struct {
+	AgentExecution     bool           `json:"agent_execution,omitempty"`
 	AgentInventory     bool           `json:"agent_inventory,omitempty"`
 	RepositoryBindings bool           `json:"repository_bindings,omitempty"`
 	Control            *RunnerControl `json:"control,omitempty"`
@@ -80,6 +81,7 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
+	Execution           *RunExecutionPin  `json:"execution,omitempty"`
 	AcceptanceExecution *ExecutionProfile `json:"acceptance_execution,omitempty"`
 	QuestionContext     bool              `json:"question_context,omitempty"`
 	// RunMessages enables the additive, run-scoped supplement delivery protocol.
@@ -125,6 +127,7 @@ type Feedback struct {
 
 // AssignmentWorkspace tells the runner how to lay out the workspace.
 type AssignmentWorkspace struct {
+	BackendID          string          `json:"backend_id,omitempty"`
 	ID                 string          `json:"id,omitempty"`
 	Kind               string          `json:"kind,omitempty"`
 	Reused             bool            `json:"reused,omitempty"`
@@ -211,6 +214,7 @@ type EventsResult struct {
 
 // WorkspaceReport records how the runner laid out a run's workspace.
 type WorkspaceReport struct {
+	BackendID          string          `json:"backend_id,omitempty"`
 	ProviderID         string          `json:"provider_id,omitempty"`
 	ProviderInstanceID string          `json:"provider_instance_id,omitempty"`
 	Path               string          `json:"path,omitempty"`

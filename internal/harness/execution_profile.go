@@ -5,6 +5,9 @@ import "github.com/GhostFlying/tend/internal/protocol"
 // WorkerProfile resolves a whole role-specific selection; an omitted effort
 // leaves that model's native default rather than inheriting another model's.
 func WorkerProfile(spec WorkerSpec, model, effort string, acceptance *protocol.ExecutionProfile) protocol.ExecutionProfile {
+	if spec.FrozenExecution != nil {
+		return *spec.FrozenExecution
+	}
 	profile := protocol.ExecutionProfile{Model: model, Effort: effort}
 	if spec.Role == protocol.RoleAccept {
 		if acceptance != nil {

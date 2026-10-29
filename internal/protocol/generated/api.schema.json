@@ -326,6 +326,43 @@
       "title": "AgentConversationPage",
       "type": "object"
     },
+    "AgentExecutor": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "pin": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pin",
+        "available"
+      ],
+      "title": "AgentExecutor",
+      "type": "object"
+    },
+    "AgentIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_environment_id": {
+          "type": "string"
+        },
+        "local_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_environment_id",
+        "local_id"
+      ],
+      "title": "AgentIdentity",
+      "type": "object"
+    },
     "AgentRecoveryView": {
       "additionalProperties": false,
       "properties": {
@@ -351,6 +388,28 @@
         "deadline"
       ],
       "title": "AgentRecoveryView",
+      "type": "object"
+    },
+    "AgentRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "category_id": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "runtime_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category_id"
+      ],
+      "title": "AgentRequirement",
       "type": "object"
     },
     "AgentRolloutPage": {
@@ -470,6 +529,23 @@
         "more"
       ],
       "title": "AgentRolloutWindow",
+      "type": "object"
+    },
+    "AgentRuntimeReference": {
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer"
+        },
+        "runtime_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_id",
+        "revision"
+      ],
+      "title": "AgentRuntimeReference",
       "type": "object"
     },
     "AnswerDecisionPayload": {
@@ -3643,6 +3719,9 @@
         "acceptance_execution": {
           "$ref": "#/definitions/ExecutionProfile"
         },
+        "agent_selection": {
+          "$ref": "#/definitions/TaskAgentSelection"
+        },
         "constraints": {
           "items": {
             "type": "string"
@@ -4236,6 +4315,51 @@
       "title": "ReviewIssueSourcesPayload",
       "type": "object"
     },
+    "RunExecutionPin": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_revision": {
+          "type": "integer"
+        },
+        "backend_id": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/definitions/AgentIdentity"
+        },
+        "inventory_revision": {
+          "type": "integer"
+        },
+        "profile": {
+          "$ref": "#/definitions/ExecutionProfile"
+        },
+        "public_sha256": {
+          "type": "string"
+        },
+        "runtime": {
+          "$ref": "#/definitions/AgentRuntimeReference"
+        },
+        "snapshot_id": {
+          "type": "string"
+        },
+        "worker": {
+          "$ref": "#/definitions/WorkerKind"
+        }
+      },
+      "required": [
+        "identity",
+        "agent_revision",
+        "runtime",
+        "inventory_revision",
+        "snapshot_id",
+        "public_sha256",
+        "profile",
+        "worker",
+        "backend_id"
+      ],
+      "title": "RunExecutionPin",
+      "type": "object"
+    },
     "RunLogPage": {
       "additionalProperties": false,
       "properties": {
@@ -4782,6 +4906,23 @@
         "type"
       ],
       "title": "Target",
+      "type": "object"
+    },
+    "TaskAgentSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance": {
+          "$ref": "#/definitions/AgentRequirement"
+        },
+        "implementation": {
+          "$ref": "#/definitions/AgentRequirement"
+        }
+      },
+      "required": [
+        "implementation",
+        "acceptance"
+      ],
+      "title": "TaskAgentSelection",
       "type": "object"
     },
     "TaskDetail": {
@@ -7083,6 +7224,9 @@
     "AgentConversationPage": {
       "$ref": "#/definitions/AgentConversationPage"
     },
+    "AgentExecutor": {
+      "$ref": "#/definitions/AgentExecutor"
+    },
     "AgentRolloutPage": {
       "$ref": "#/definitions/AgentRolloutPage"
     },
@@ -7230,6 +7374,9 @@
     "ReviewIssueSourcesPayload": {
       "$ref": "#/definitions/ReviewIssueSourcesPayload"
     },
+    "RunExecutionPin": {
+      "$ref": "#/definitions/RunExecutionPin"
+    },
     "RunLogPage": {
       "$ref": "#/definitions/RunLogPage"
     },
@@ -7268,6 +7415,9 @@
     },
     "SubmitMessagePayload": {
       "$ref": "#/definitions/SubmitMessagePayload"
+    },
+    "TaskAgentSelection": {
+      "$ref": "#/definitions/TaskAgentSelection"
     },
     "TaskDetail": {
       "$ref": "#/definitions/TaskDetail"
