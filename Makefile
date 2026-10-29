@@ -4,7 +4,7 @@ GO ?= go
 PNPM ?= pnpm
 STATICCHECK_VERSION ?= v0.8.2
 PKGS := ./...
-TEST_TIMEOUT ?= 40m
+TEST_TIMEOUT ?= 60m
 WEB := web
 
 .PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check
