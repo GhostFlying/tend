@@ -254,10 +254,16 @@
     "AgentConversation": {
       "additionalProperties": false,
       "properties": {
+        "agent_ref": {
+          "type": "string"
+        },
         "conversation_id": {
           "type": "string"
         },
         "effort": {
+          "type": "string"
+        },
+        "kind": {
           "type": "string"
         },
         "last_message_at": {
@@ -287,6 +293,7 @@
       },
       "required": [
         "conversation_id",
+        "kind",
         "title",
         "status",
         "revision",
@@ -2616,6 +2623,23 @@
       "title": "CreateAttentionPayload",
       "type": "object"
     },
+    "CreateConsultationPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_ref": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_ref",
+        "title"
+      ],
+      "title": "CreateConsultationPayload",
+      "type": "object"
+    },
     "CreateIssuePayload": {
       "additionalProperties": false,
       "properties": {
@@ -3851,6 +3875,31 @@
       "title": "InitialWorkItemContext",
       "type": "object"
     },
+    "InjectSourcePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "attachments": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/ManualSourceMetadata"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "metadata"
+      ],
+      "title": "InjectSourcePayload",
+      "type": "object"
+    },
     "InterruptReplyPayload": {
       "additionalProperties": false,
       "properties": {
@@ -4190,6 +4239,19 @@
         "reason"
       ],
       "title": "IssueSourceDisposition",
+      "type": "object"
+    },
+    "IssueSourceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "title": "IssueSourceReference",
       "type": "object"
     },
     "IssueSourceReview": {
@@ -4583,6 +4645,72 @@
       "title": "MaintenanceAuthorization",
       "type": "object"
     },
+    "ManualSource": {
+      "additionalProperties": false,
+      "properties": {
+        "attachments": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConversationAttachment"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/ManualSourceMetadata"
+        },
+        "supplied_by": {
+          "$ref": "#/definitions/Principal"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "conversation_id",
+        "text",
+        "attachments",
+        "metadata",
+        "supplied_by",
+        "created_at"
+      ],
+      "title": "ManualSource",
+      "type": "object"
+    },
+    "ManualSourceMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "at_ms": {
+          "type": "integer"
+        },
+        "author": {
+          "type": "string"
+        },
+        "correction_of": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "title": "ManualSourceMetadata",
+      "type": "object"
+    },
     "MessageAssociations": {
       "additionalProperties": false,
       "properties": {
@@ -4745,6 +4873,135 @@
         "branch"
       ],
       "title": "MountView",
+      "type": "object"
+    },
+    "NativeEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_implemented": {
+          "type": "boolean"
+        },
+        "control_mode": {
+          "$ref": "#/definitions/ControlMode"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "controller_observation": {
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/definitions/NativeIdentity"
+        },
+        "identity_recorded_at": {
+          "type": "integer"
+        },
+        "identity_sequence": {
+          "type": "integer"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "provider_instance_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "run_observed": {
+          "$ref": "#/definitions/RunObserved"
+        },
+        "session_recorded": {
+          "type": "boolean"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "worker": {
+          "$ref": "#/definitions/WorkerKind"
+        },
+        "workspace_id": {
+          "type": "string"
+        },
+        "workspace_path": {
+          "type": "string"
+        },
+        "workspace_recorded": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "run_id",
+        "task_id",
+        "host_id",
+        "provider",
+        "adapter_implemented",
+        "workspace_recorded",
+        "run_observed",
+        "control_mode",
+        "control_revision",
+        "controller_observation",
+        "session_recorded",
+        "reason"
+      ],
+      "title": "NativeEntry",
+      "type": "object"
+    },
+    "NativeIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "controller_observation": {
+          "type": "string"
+        },
+        "launch_id": {
+          "type": "string"
+        },
+        "observed_session_id": {
+          "type": "string"
+        },
+        "pane": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "runtime_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "terminal": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "state",
+        "controller_observation"
+      ],
+      "title": "NativeIdentity",
       "type": "object"
     },
     "NextActionPage": {
@@ -5179,6 +5436,40 @@
         "queued"
       ],
       "title": "ProjectView",
+      "type": "object"
+    },
+    "PromoteConsultationPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "existing_issue_id": {
+          "type": "string"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_issue_revision": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "plan": {
+          "$ref": "#/definitions/WorkItemPlan"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/definitions/IssueSourceReference"
+          },
+          "type": "array"
+        }
+      },
+      "title": "PromoteConsultationPayload",
       "type": "object"
     },
     "PutAgentCategoryPayload": {
@@ -5810,6 +6101,152 @@
       "title": "RunLogView",
       "type": "object"
     },
+    "RunMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "history": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RunMessageHistory"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "receiver": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/definitions/Principal"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "message_id",
+        "receiver",
+        "task_id",
+        "run_id",
+        "action_id",
+        "spec_version",
+        "generation",
+        "control_revision",
+        "sequence",
+        "text",
+        "status",
+        "request_id",
+        "source",
+        "created_at",
+        "updated_at",
+        "history"
+      ],
+      "title": "RunMessage",
+      "type": "object"
+    },
+    "RunMessageHistory": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "created_at"
+      ],
+      "title": "RunMessageHistory",
+      "type": "object"
+    },
+    "RunMessagePage": {
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RunMessage"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "messages",
+        "more",
+        "next"
+      ],
+      "title": "RunMessagePage",
+      "type": "object"
+    },
     "RunObserved": {
       "enum": [
         "starting",
@@ -6163,6 +6600,37 @@
         "artifact_base_path"
       ],
       "title": "RunnerUpgradeTarget",
+      "type": "object"
+    },
+    "SendRunMessagePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "commit_seq": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "spec_version",
+        "generation",
+        "text"
+      ],
+      "title": "SendRunMessagePayload",
       "type": "object"
     },
     "SessionRequest": {
@@ -8979,6 +9447,9 @@
     "CreateAttentionPayload": {
       "$ref": "#/definitions/CreateAttentionPayload"
     },
+    "CreateConsultationPayload": {
+      "$ref": "#/definitions/CreateConsultationPayload"
+    },
     "CreateIssuePayload": {
       "$ref": "#/definitions/CreateIssuePayload"
     },
@@ -9015,6 +9486,9 @@
     "HostedAgentInventory": {
       "$ref": "#/definitions/HostedAgentInventory"
     },
+    "InjectSourcePayload": {
+      "$ref": "#/definitions/InjectSourcePayload"
+    },
     "InterruptReplyPayload": {
       "$ref": "#/definitions/InterruptReplyPayload"
     },
@@ -9045,8 +9519,14 @@
     "LinkWorkItemTaskPayload": {
       "$ref": "#/definitions/LinkWorkItemTaskPayload"
     },
+    "ManualSource": {
+      "$ref": "#/definitions/ManualSource"
+    },
     "MessageAssociations": {
       "$ref": "#/definitions/MessageAssociations"
+    },
+    "NativeEntry": {
+      "$ref": "#/definitions/NativeEntry"
     },
     "NextActionPage": {
       "$ref": "#/definitions/NextActionPage"
@@ -9059,6 +9539,9 @@
     },
     "PresentAttentionPayload": {
       "$ref": "#/definitions/PresentAttentionPayload"
+    },
+    "PromoteConsultationPayload": {
+      "$ref": "#/definitions/PromoteConsultationPayload"
     },
     "PutAgentCategoryPayload": {
       "$ref": "#/definitions/PutAgentCategoryPayload"
@@ -9108,11 +9591,17 @@
     "RunLogPage": {
       "$ref": "#/definitions/RunLogPage"
     },
+    "RunMessagePage": {
+      "$ref": "#/definitions/RunMessagePage"
+    },
     "RunRolloutPage": {
       "$ref": "#/definitions/RunRolloutPage"
     },
     "RunnerRepository": {
       "$ref": "#/definitions/RunnerRepository"
+    },
+    "SendRunMessagePayload": {
+      "$ref": "#/definitions/SendRunMessagePayload"
     },
     "SessionRequest": {
       "$ref": "#/definitions/SessionRequest"

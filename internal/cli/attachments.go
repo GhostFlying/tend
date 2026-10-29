@@ -19,6 +19,9 @@ import (
 )
 
 func runAttachment(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "upload" {
+		return runAttachmentUpload(ctx, e, args[1:])
+	}
 	if len(args) == 0 || args[0] != "download" {
 		return usagef("attachment download <file_id> --out <path>")
 	}

@@ -132,7 +132,13 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 			if err != nil {
 				return err
 			}
-			canonical, ready, err := a.canonicalManagerAdmission(ctx, tx.Q(), c.ID, c.WorkItemID, m.RequestID)
+			var ready bool
+			canonical := c.Kind == "consultation"
+			if canonical {
+				_, ready, err = namedHostedSelection(ctx, tx.Q(), a.hostedConfiguration, c.ID)
+			} else {
+				canonical, ready, err = a.canonicalManagerAdmission(ctx, tx.Q(), c.ID, c.WorkItemID, m.RequestID)
+			}
 			if err != nil {
 				return err
 			}

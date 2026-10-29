@@ -8,6 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -17,7 +18,7 @@ type SendRunMessage struct{}
 
 func (SendRunMessage) Operation() string { return protocol.OpRunsSendMessage }
 func (SendRunMessage) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
-	return allowKinds(x.Principal, protocol.PrincipalMainAgent)
+	return allowKinds(x.Principal, protocol.PrincipalOwner, protocol.PrincipalMainAgent)
 }
 
 func (SendRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
@@ -45,20 +46,27 @@ func (SendRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if desiredFor(rc.run, rc.action, rc.task) != protocol.DesiredRun || (rc.run.ObservedState != protocol.RunRunning && rc.run.ObservedState != protocol.RunWaiting) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "target run must be running or waiting under managed control")
 	}
-	if p.SourceMessageID == "" || p.CommitSeq < 1 {
-		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "hosted supplements require their source message and commit sequence")
-	}
-	source, err := store.GetMessage(ctx, tx.Q(), p.SourceMessageID)
-	if err != nil {
-		return Outcome{}, errNotFound(err, "source message does not exist")
-	}
-	// Background notices are provenance for already-authorized work, never
-	// fabricated owner decisions. Persist the actual author separately.
-	if source.Author != "owner" && source.Author != "system" {
-		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "source must be owner input or a ledger notice")
-	}
-	if err := claimPlanCommit(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
-		return Outcome{}, err
+	if x.coordinationExecution == nil && x.Principal.Kind == protocol.PrincipalMainAgent {
+		if p.SourceMessageID == "" || p.CommitSeq < 1 {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "hosted supplements require their source message and commit sequence")
+		}
+		source, err := store.GetMessage(ctx, tx.Q(), p.SourceMessageID)
+		if err != nil {
+			return Outcome{}, errNotFound(err, "source message does not exist")
+		}
+		// Background notices are provenance for already-authorized work, never
+		// fabricated owner decisions. Persist the actual author separately.
+		if source.Author != "owner" && source.Author != "system" {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "source must be owner input or a ledger notice")
+		}
+		if err := claimPlanCommit(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
+			return Outcome{}, err
+		}
+
+	} else if p.SourceMessageID != "" {
+		if _, err := store.GetMessage(ctx, tx.Q(), p.SourceMessageID); err != nil {
+			return Outcome{}, errNotFound(err, "source message does not exist")
+		}
 	}
 	m := protocol.RunMessage{RunMessageDelivery: protocol.RunMessageDelivery{MessageID: x.IDs.New(protocol.PrefixMessage)},
 		TaskID: rc.task.TaskID, RunID: rc.run.RunID, ActionID: rc.action.ActionID, SpecVersion: rc.action.TargetSpecVersion,
@@ -68,13 +76,24 @@ func (SendRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
 	}
-	host, hostErr := store.GetHost(ctx, tx.Q(), rc.run.HostID)
-	if hostErr != nil {
-		return Outcome{}, hostErr
+	worker := protocol.WorkerAppServer
+	pin, pinErr := store.GetRunExecution(ctx, tx.Q(), rc.run.RunID)
+	if pinErr == nil {
+		worker = pin.Worker
+	} else if !errors.Is(pinErr, store.ErrNotFound) {
+		return Outcome{}, pinErr
+	} else {
+		host, e := store.GetHost(ctx, tx.Q(), rc.run.HostID)
+		if e != nil {
+			return Outcome{}, e
+		}
+		if host.Worker != "" {
+			worker = host.Worker
+		}
 	}
 	if err != nil || !slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityRunMessages) {
 		m.Status, m.Reason = protocol.RunMessageUnsupported, "runner_unsupported"
-	} else if host.Worker != "" && host.Worker != protocol.WorkerAppServer && host.Worker != protocol.WorkerOrca {
+	} else if worker != protocol.WorkerAppServer && worker != protocol.WorkerOrca {
 		m.Status, m.Reason = protocol.RunMessageUnsupported, "executor_unsupported"
 	}
 	enabled, err := store.RunMessagesEnabled(ctx, tx.Q(), rc.run.RunID)
@@ -87,8 +106,10 @@ func (SendRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := tx.InsertRunMessage(ctx, m); err != nil {
 		return Outcome{}, err
 	}
-	if err := bindSource(ctx, tx, p.SourceMessageID, "run", m.RunID); err != nil {
-		return Outcome{}, err
+	if p.SourceMessageID != "" {
+		if err := bindSource(ctx, tx, p.SourceMessageID, "run", m.RunID); err != nil {
+			return Outcome{}, err
+		}
 	}
 	m, err = store.GetRunMessage(ctx, tx.Q(), m.MessageID)
 	return messageOutcome(m), err
@@ -241,7 +262,7 @@ func (a *App) RunMessages(ctx context.Context, p protocol.Principal, run string,
 	if p.Validate() != nil {
 		return protocol.RunMessagePage{}, protocol.Errorf(protocol.CodeForbidden, "valid control or run identity is required")
 	}
-	if p.Kind != protocol.PrincipalMainAgent && (p.Kind != protocol.PrincipalRun || p.Subject != run) {
+	if p.Kind != protocol.PrincipalOwner && p.Kind != protocol.PrincipalBackgroundAgent && p.Kind != protocol.PrincipalMainAgent && (p.Kind != protocol.PrincipalRun || p.Subject != run) {
 		return protocol.RunMessagePage{}, protocol.Errorf(protocol.CodeForbidden, "main agent or target run identity is required")
 	}
 	if after < 0 || limit < 1 || limit > 100 {
@@ -252,6 +273,11 @@ func (a *App) RunMessages(ctx context.Context, p protocol.Principal, run string,
 		rc, err := loadRun(ctx, tx.Q(), run)
 		if err != nil {
 			return errNotFound(err, "run does not exist")
+		}
+		if p.Kind == protocol.PrincipalBackgroundAgent {
+			if err := authorizeRunMessageManagerRead(ctx, tx.Q(), p, rc.task.TaskID); err != nil {
+				return err
+			}
 		}
 		if p.Kind == protocol.PrincipalRun && p.Role != rc.run.Role {
 			return protocol.Errorf(protocol.CodeForbidden, "run role does not match")
@@ -321,6 +347,37 @@ func settleObsoleteRunMessages(ctx context.Context, x *Exec, tx *store.Tx, out *
 			}
 			out.Events = append(out.Events, messageOutcome(m).Events...)
 		}
+	}
+	return nil
+}
+
+func authorizeRunMessageManagerRead(ctx context.Context, q store.Querier, p protocol.Principal, task string) error {
+	conversation, err := store.AgentConversation(ctx, q, p.ConversationID)
+	if err != nil {
+		return err
+	}
+	primary, err := store.GetTaskIssueOwner(ctx, q, task)
+	if err != nil {
+		return err
+	}
+	if primary == "" || primary != conversation.WorkItemID {
+		return protocol.Errorf(protocol.CodeForbidden, "run messages are outside this manager's primary Issue")
+	}
+	issue, err := store.GetCanonicalIssue(ctx, q, primary)
+	if err != nil {
+		return err
+	}
+	var executionID string
+	err = q.QueryRowContext(ctx, `SELECT h.execution_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id WHERE h.conversation_id=? AND h.issue_id=? AND h.assignment_epoch=? AND t.thread_id=? AND t.status IN ('starting','started') ORDER BY t.updated_at DESC LIMIT 1`, p.ConversationID, primary, issue.AssignmentEpoch, p.Thread).Scan(&executionID)
+	if err != nil {
+		return protocol.Errorf(protocol.CodeForbidden, "manager has no current admitted execution for this run")
+	}
+	execution, err := store.GetHostedExecution(ctx, q, executionID)
+	if err != nil {
+		return err
+	}
+	if issue.AssignmentState != "active" || issue.Assignee.Kind != protocol.IssueAssigneeAgent || issue.Assignee.Ref != hostedconfig.IdentityRef(execution.Selection.Identity) {
+		return protocol.Errorf(protocol.CodeForbidden, "manager assignment has changed")
 	}
 	return nil
 }

@@ -3,6 +3,8 @@ package protocol
 // AgentConversation is a logical conversation; native thread generations are separate.
 type AgentConversation struct {
 	ID             string `json:"conversation_id"`
+	Kind           string `json:"kind"`
+	AgentRef       string `json:"agent_ref,omitempty"`
 	WorkItemID     string `json:"work_item_id,omitempty"`
 	Title          string `json:"title"`
 	Status         string `json:"status"`

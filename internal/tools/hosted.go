@@ -46,6 +46,8 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"consultation_promote", "Delegate an explicit owner execution request from this consultation to a concrete Issue manager using only selected persisted source versions. Ordinary Q&A creates no task. Never execute native work.", "conversation", protocol.PromoteConsultationPayload{}, app.PromoteConsultation{}, false},
+	{"runs_send_message", "Send supplemental evidence to this Issue primary task exact active run. It cannot revise its frozen contract or answer worker decisions; unknown is not resent.", "run", protocol.SendRunMessagePayload{}, app.SendRunMessage{}, false},
 	{"issues_deadline_put", "Record a sourced deadline or estimate, with known/unknown time and default 24h/due reminders; never silently change a user commitment.", "deadline", protocol.PutIssueDeadlinePayload{}, app.IssueDeadlineCommand{}, true},
 	{"issues_deadline_cancel", "Cancel a deadline with an explicit reason, preserving already claimed/unknown reminder facts.", "deadline", protocol.CancelIssueDeadlinePayload{}, app.IssueDeadlineCommand{Cancel: true}, true},
 	{"planner_entry_put", "Record a personal next action or explicit Issue planning rank; task execution priority remains tasks_rate.", "planner_entry", protocol.PutPlannerEntryPayload{}, app.PutPlannerEntry{}, true},
@@ -100,7 +102,7 @@ func hostedMutationSchema(payload any) json.RawMessage {
 func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	var out []harness.ToolSpec
 	for _, m := range hostedMutations {
-		if purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && m.name != "issues_create" && !strings.HasPrefix(m.name, "attentions_") && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" || purpose == agentconfig.Consultation {
+		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && m.name != "issues_create" && !strings.HasPrefix(m.name, "attentions_") && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" {
 			continue
 		}
 		out = append(out, harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)})
@@ -127,6 +129,9 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	return out
 }
 func namedLegacyRead(purpose agentconfig.Purpose, name string) bool {
+	if purpose == agentconfig.Consultation {
+		return name == "conversation_read"
+	}
 	if purpose == agentconfig.Main {
 		switch name {
 		case "tend_context", "repos_list", "tasks_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "decisions_list", "decisions_read", "decisions_resolve", "decisions_explain", "conversation_read", "conversation_turn_read", "conversation_turn_commit", "conversation_turn_wait", "conversation_turn_adopt", "agent_conversations_list", "agent_rollout_read", "background_sources", "background_checkin":
@@ -135,7 +140,7 @@ func namedLegacyRead(purpose agentconfig.Purpose, name string) bool {
 	}
 	if purpose == agentconfig.IssueManager {
 		switch name {
-		case "repos_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "work_item_context_read", "background_evidence_read", "background_sources", "agent_rollout_read", "conversation_read":
+		case "runs_read_messages", "repos_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "work_item_context_read", "background_evidence_read", "background_sources", "agent_rollout_read", "conversation_read":
 			return true
 		}
 	}
@@ -186,12 +191,15 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		if c.Tool != m.name {
 			continue
 		}
-		if execution.Selection.Purpose == agentconfig.Consultation || execution.Selection.Purpose == agentconfig.Main && !m.main {
+		if (m.name == "consultation_promote") != (execution.Selection.Purpose == agentconfig.Consultation) || execution.Selection.Purpose == agentconfig.Main && !m.main {
 			return fail(protocol.Errorf(protocol.CodeForbidden, "this role must delegate Issue execution"))
 		}
 		var args hostedMutationArgs
 		if err := decode(c.Arguments, &args); err != nil {
 			return fail(err)
+		}
+		if c.Tool == "consultation_promote" && args.TargetID == "" {
+			args.TargetID = execution.ConversationID
 		}
 		if c.Tool == "attentions_create" && execution.IssueID != "" {
 			var p protocol.CreateAttentionPayload
@@ -337,6 +345,17 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return nil
 		})
 		return hostedAnswer(value, err), true
+	}
+	if execution.Selection.Purpose == agentconfig.Consultation && c.Tool == "conversation_read" {
+		var p conversationArgs
+		if err := decode(c.Arguments, &p); err != nil {
+			return fail(err)
+		}
+		if p.ConversationID != "" && p.ConversationID != execution.ConversationID {
+			return fail(protocol.Errorf(protocol.CodeForbidden, "read only this consultation"))
+		}
+		p.ConversationID = execution.ConversationID
+		c.Arguments, _ = json.Marshal(p)
 	}
 	if !namedLegacyRead(execution.Selection.Purpose, c.Tool) {
 		return fail(protocol.Errorf(protocol.CodeForbidden, "tool is unavailable to this named role"))

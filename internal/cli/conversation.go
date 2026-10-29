@@ -8,6 +8,9 @@ import (
 )
 
 func runConversation(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] != "handoff" {
+		return runDirectConversation(ctx, e, "conversation", args)
+	}
 	if len(args) == 0 || args[0] != "handoff" {
 		return usagef("conversation expects handoff [--prepare-only | --status] [--json]")
 	}

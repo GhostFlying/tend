@@ -247,8 +247,9 @@ type worker struct {
 	unseen time.Time
 	seq    int
 	// pending holds the facts of starting, until run delivers them.
-	pending []harness.WorkerEvent
-	running bool
+	lastNativeIdentity string
+	pending            []harness.WorkerEvent
+	running            bool
 }
 
 func (w *worker) Events() <-chan harness.WorkerEvent { return w.events }
@@ -289,7 +290,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	}
 	// From begin onward, launch/send/recovery outcomes can be unknown. Never
 	// attach the prelaunch proof to those errors, even if the thread is empty.
-	if err := w.beginStartup(ctx, agent); err != nil {
+	startErr := w.beginStartup(ctx, agent)
+	if identityErr := w.reportNativeIdentity(ctx, startErr != nil); identityErr != nil {
+		startErr = errors.Join(startErr, identityErr)
+	}
+	if err := startErr; err != nil {
 		if errors.Is(err, errRecoveryUncertain) {
 			w.reconciling = true
 			go w.run(ctx)
@@ -807,6 +812,9 @@ func (w *worker) run(ctx context.Context) {
 			return
 		}
 		a, done, err := w.step(ctx)
+		if identityErr := w.reportNativeIdentity(ctx, err != nil); identityErr != nil {
+			err = errors.Join(err, identityErr)
+		}
 		if errors.Is(err, harness.ErrHeld) {
 			w.holding = err.Error()
 		}

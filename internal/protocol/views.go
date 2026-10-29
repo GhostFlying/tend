@@ -288,7 +288,7 @@ type ConversationItem struct {
 	// Kind is "message" or "tool_use".
 	Kind      string `json:"kind"`
 	MessageID string `json:"message_id"`
-	// Author is "owner", "main_agent" or "system" (a factual notification).
+	// Author is "owner", "main_agent", "external" (quoted evidence) or "system" (a factual notification).
 	Author string `json:"author"`
 	// Body is a message's text; empty for a tool use.
 	Body string `json:"body,omitempty"`

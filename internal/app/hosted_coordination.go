@@ -42,13 +42,15 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		return protocol.Errorf(protocol.CodeForbidden, "tool caller does not own this native execution")
 	}
 	if execution.Selection.Purpose == agentconfig.Consultation {
-		return protocol.Errorf(protocol.CodeForbidden, "consultation has no business mutation tools")
+		if x.Principal.Kind != protocol.PrincipalBackgroundAgent || c.Operation() != "conversation.promote" || x.Env.Target.Type != "conversation" || x.Env.Target.ID != execution.ConversationID {
+			return protocol.Errorf(protocol.CodeForbidden, "consultation can only delegate its own selected owner request")
+		}
 	}
 	if execution.Selection.Purpose == agentconfig.Main {
 		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{"conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put"}, c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "the personal planner must delegate issue work, not execute its task planning")
 		}
-	} else {
+	} else if execution.Selection.Purpose != agentconfig.Consultation {
 		if x.Principal.Kind != protocol.PrincipalBackgroundAgent || execution.IssueID == "" {
 			return protocol.Errorf(protocol.CodeForbidden, "issue coordination needs its registered conversation")
 		}
@@ -108,6 +110,18 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			if x.Env.Target.Type != "issue" || x.Env.Target.ID != current.IssueID {
 				return protocol.Errorf(protocol.CodeForbidden, "tool target is outside this issue")
 			}
+		case protocol.OpRunsSendMessage:
+			run, err := store.GetRun(ctx, q, x.Env.Target.ID)
+			if err != nil {
+				return err
+			}
+			primary, err := store.GetTaskIssueOwner(ctx, q, run.TaskID)
+			if err != nil {
+				return err
+			}
+			if x.Env.Target.Type != "run" || primary != current.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "run supplement requires this Issue's immutable primary task")
+			}
 		case "issues.update_task", "tasks.cancel", "tasks.rate", "actions.create":
 			primary, err := store.GetTaskIssueOwner(ctx, q, x.Env.Target.ID)
 			if err != nil {
@@ -150,8 +164,10 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 		return Outcome{}, err
 	}
 	var logical string
-	if err := tx.Q().QueryRowContext(ctx, `SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?`, execution.ID).Scan(&logical); err != nil {
-		return Outcome{}, err
+	if execution.Selection.Purpose != agentconfig.Consultation {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?`, execution.ID).Scan(&logical); err != nil {
+			return Outcome{}, err
+		}
 	}
 
 	var original string

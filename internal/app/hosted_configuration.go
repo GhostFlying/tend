@@ -149,6 +149,13 @@ func namedHostedSelection(ctx context.Context, q store.Querier, prepared *hosted
 	if err != nil {
 		return hostedconfig.Selection{}, false, err
 	}
+	if current.Kind == "consultation" {
+		if prepared == nil {
+			return hostedconfig.Selection{}, false, protocol.Errorf(protocol.CodeInvalidTransition, "consultation requires the server-local named configuration")
+		}
+		selected, err := store.ConsultationSelection(ctx, q, current.ID)
+		return selected, true, err
+	}
 	issue, err := store.GetCanonicalIssue(ctx, q, current.WorkItemID)
 	if errors.Is(err, store.ErrNotFound) {
 		return hostedconfig.Selection{}, false, nil

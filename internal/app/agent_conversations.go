@@ -58,6 +58,13 @@ func (a *App) AgentContext(ctx context.Context, id string, request string) (stri
 		if err != nil {
 			return err
 		}
+		if c.Kind == "consultation" {
+			if _, _, err := namedHostedSelection(ctx, tx.Q(), a.hostedConfiguration, id); err != nil {
+				return err
+			}
+			text = "This is an ordinary consultation with the authenticated owner, not an Issue or task. Discuss and advise without native execution. Only an explicit owner request for execution may be delegated with consultation_promote, naming the actual owner message and selected persisted source versions. Do not promote ordinary questions. Do not forward the whole transcript or implementation reasoning into independent acceptance."
+			return nil
+		}
 		v, err := views.IssueContext(ctx, tx.Q(), c.WorkItemID, 0)
 		if err != nil {
 			return err
@@ -152,6 +159,13 @@ func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 			head, headErr := a.hostedServiceableHead(ctx, tx.Q(), "background_thread:"+c.ID)
 			if headErr != nil && !errors.Is(headErr, store.ErrNotFound) {
 				return headErr
+			}
+			if c.Kind == "consultation" {
+				_, named, selectErr := namedHostedSelection(ctx, tx.Q(), a.hostedConfiguration, id)
+				if (selectErr == nil && named && headErr == nil && head.NextAttemptAt <= a.now().UnixMilli()) || inflight || dueReceipts[id] {
+					runnable = append(runnable, id)
+				}
+				continue
 			}
 			canonical, ready, err := a.canonicalManagerAdmission(ctx, tx.Q(), c.ID, c.WorkItemID, head.RequestID)
 			if err != nil {

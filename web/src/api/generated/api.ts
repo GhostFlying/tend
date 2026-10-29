@@ -272,6 +272,7 @@ export interface TendAPI {
   CoordinationMetrics?: CoordinationMetrics;
   CreateActionPayload?: CreateActionPayload;
   CreateAttentionPayload?: CreateAttentionPayload;
+  CreateConsultationPayload?: CreateConsultationPayload;
   CreateIssuePayload?: CreateIssuePayload;
   CreateIssueTaskPayload?: CreateIssueTaskPayload;
   CreateWorkItemChoicePayload?: CreateWorkItemChoicePayload;
@@ -284,6 +285,7 @@ export interface TendAPI {
   FollowupPage?: FollowupPage;
   FollowupSpec?: FollowupSpec;
   HostedAgentInventory?: HostedAgentInventory;
+  InjectSourcePayload?: InjectSourcePayload;
   InterruptReplyPayload?: InterruptReplyPayload;
   IssueAssignmentPayload?: IssueAssignmentPayload;
   IssueContextReview?: IssueContextReview;
@@ -294,11 +296,14 @@ export interface TendAPI {
   IssueView?: IssueView;
   LedgerEvent?: LedgerEvent;
   LinkWorkItemTaskPayload?: LinkWorkItemTaskPayload;
+  ManualSource?: ManualSource;
   MessageAssociations?: MessageAssociations;
+  NativeEntry?: NativeEntry;
   NextActionPage?: NextActionPage;
   PlannerEntry?: PlannerEntry;
   PrepareWorkItemContextPayload?: PrepareWorkItemContextPayload;
   PresentAttentionPayload?: PresentAttentionPayload;
+  PromoteConsultationPayload?: PromoteConsultationPayload;
   PutAgentCategoryPayload?: PutAgentCategoryPayload;
   PutIssueDeadlinePayload?: PutIssueDeadlinePayload;
   PutPlannerEntryPayload?: PutPlannerEntryPayload;
@@ -315,8 +320,10 @@ export interface TendAPI {
   ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
   RunExecutionPin?: RunExecutionPin;
   RunLogPage?: RunLogPage;
+  RunMessagePage?: RunMessagePage;
   RunRolloutPage?: RunRolloutPage;
   RunnerRepository?: RunnerRepository;
+  SendRunMessagePayload?: SendRunMessagePayload;
   SessionRequest?: SessionRequest;
   SessionView?: SessionView;
   SetControlModePayload?: SetControlModePayload;
@@ -959,8 +966,10 @@ export interface AgentContextUsage {
  * via the `definition` "AgentConversation".
  */
 export interface AgentConversation {
+  agent_ref?: string;
   conversation_id: string;
   effort: string;
+  kind: string;
   last_message_at: number;
   last_message_seq: number;
   model: string;
@@ -1843,6 +1852,14 @@ export interface CreateAttentionPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CreateConsultationPayload".
+ */
+export interface CreateConsultationPayload {
+  agent_ref: string;
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "CreateIssuePayload".
  */
 export interface CreateIssuePayload {
@@ -2233,6 +2250,26 @@ export interface AgentInventoryRuntime {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "InjectSourcePayload".
+ */
+export interface InjectSourcePayload {
+  attachments?: string[];
+  conversation_id?: string;
+  metadata: ManualSourceMetadata;
+  text?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ManualSourceMetadata".
+ */
+export interface ManualSourceMetadata {
+  at_ms?: number;
+  author?: string;
+  correction_of?: string;
+  url?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "InterruptReplyPayload".
  */
 export interface InterruptReplyPayload {
@@ -2361,6 +2398,63 @@ export interface LinkWorkItemTaskPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ManualSource".
+ */
+export interface ManualSource {
+  attachments: ConversationAttachment[] | null;
+  conversation_id: string;
+  created_at: number;
+  message_id: string;
+  metadata: ManualSourceMetadata;
+  supplied_by: Principal;
+  text: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "NativeEntry".
+ */
+export interface NativeEntry {
+  adapter_implemented: boolean;
+  control_mode: ControlMode;
+  control_revision: number;
+  controller_observation: string;
+  execution?: RunExecutionPin;
+  host_id: string;
+  identity?: NativeIdentity;
+  identity_recorded_at?: number;
+  identity_sequence?: number;
+  provider: string;
+  provider_id?: string;
+  provider_instance_id?: string;
+  reason: string;
+  run_id: string;
+  run_observed: RunObserved;
+  session_recorded: boolean;
+  task_id: string;
+  worker?: WorkerKind;
+  workspace_id?: string;
+  workspace_path?: string;
+  workspace_recorded: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "NativeIdentity".
+ */
+export interface NativeIdentity {
+  controller_observation: string;
+  launch_id?: string;
+  observed_session_id?: string;
+  pane?: string;
+  provider: string;
+  provider_id?: string;
+  reason?: string;
+  runtime_id?: string;
+  session_id?: string;
+  state: string;
+  terminal?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "NextActionPage".
  */
 export interface NextActionPage {
@@ -2405,6 +2499,28 @@ export interface PrepareWorkItemContextPayload {
 export interface PresentAttentionPayload {
   archived?: boolean;
   read?: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "PromoteConsultationPayload".
+ */
+export interface PromoteConsultationPayload {
+  assignee?: IssueAssignee;
+  existing_issue_id?: string;
+  expected_assignment_epoch?: number;
+  expected_issue_revision?: number;
+  expected_source_revision?: number;
+  plan?: WorkItemPlan;
+  source_message_id?: string;
+  sources?: IssueSourceReference[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueSourceReference".
+ */
+export interface IssueSourceReference {
+  expected_source_revision?: number;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2577,6 +2693,50 @@ export interface RunLogView {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunMessagePage".
+ */
+export interface RunMessagePage {
+  messages: RunMessage[] | null;
+  more: boolean;
+  next: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunMessage".
+ */
+export interface RunMessage {
+  action_id: string;
+  control_revision: number;
+  created_at: number;
+  generation: number;
+  history: RunMessageHistory[] | null;
+  message_id: string;
+  reason?: string;
+  receiver: string;
+  request_id: string;
+  run_id: string;
+  sequence: number;
+  source: Principal;
+  source_message_id?: string;
+  spec_version: number;
+  status: string;
+  task_id: string;
+  text: string;
+  thread_id?: string;
+  turn_id?: string;
+  updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunMessageHistory".
+ */
+export interface RunMessageHistory {
+  created_at: number;
+  reason?: string;
+  status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RunRolloutPage".
  */
 export interface RunRolloutPage {
@@ -2588,6 +2748,18 @@ export interface RunRolloutPage {
   observed: RunObserved;
   run_id: string;
   watermark: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SendRunMessagePayload".
+ */
+export interface SendRunMessagePayload {
+  commit_seq?: number;
+  generation: number;
+  source_message_id?: string;
+  spec_version: number;
+  task_id: string;
+  text: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

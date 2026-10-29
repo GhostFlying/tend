@@ -51,7 +51,9 @@ const maxMessageBytes = 64 << 10
 // something, from any client. The message joins the conversation in the
 // order tend received it and is queued for the main thread, which handles
 // one message per turn.
-type SubmitMessage struct{}
+type SubmitMessage struct {
+	externalSource bool
+}
 
 // Operation implements Command.
 func (SubmitMessage) Operation() string { return "conversation.submit_message" }
@@ -62,7 +64,7 @@ func (SubmitMessage) Authorize(_ context.Context, x *Exec, _ store.Querier) erro
 }
 
 // Apply implements Command.
-func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func (c SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.SubmitMessagePayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -76,7 +78,7 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		return Outcome{}, errNotFound(err, "conversation does not exist")
 	}
 	if p.ConversationID != "main" && p.Decision != nil {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "answer business decisions in the main conversation")
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "use the explicit decision or attention response with its current version; ordinary chat is not an answer")
 	}
 	if p.ReplyTo != "" {
 		target, err := store.MessageConversation(ctx, tx.Q(), p.ReplyTo)
@@ -116,16 +118,22 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 			return Outcome{}, fmt.Errorf("app: encode decision choice: %w", err)
 		}
 	}
+	author := "owner"
+	if c.externalSource {
+		author = "external"
+	}
 	id := x.IDs.New(protocol.PrefixMessage)
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{
-		ConversationID: p.ConversationID, MessageID: id, Author: "owner", ClientID: x.Principal.Client, Body: p.Body, ReplyTo: p.ReplyTo,
+		ConversationID: p.ConversationID, MessageID: id, Author: author, ClientID: x.Principal.Client, Body: p.Body, ReplyTo: p.ReplyTo,
 		LastSeenSeq: p.LastSeenSeq, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(), DecisionJSON: string(choice),
 	})
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := supersedeAgentRecoveries(ctx, tx, p.ConversationID, id, x.Now.UnixMilli()); err != nil {
-		return Outcome{}, err
+	if !c.externalSource {
+		if err := supersedeAgentRecoveries(ctx, tx, p.ConversationID, id, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
 	}
 	for position, image := range images {
 		image.ImageID = x.IDs.New(protocol.PrefixFile)
@@ -157,12 +165,13 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 			}
 		}
 	}
-	return Outcome{
+	out := Outcome{
 		Result:   map[string]any{"message_id": id, "seq": seq},
-		Events:   []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": "owner", "seq": seq}}},
+		Events:   []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": author, "seq": seq}}},
 		Outbox:   []OutboxMessage{{Destination: store.ConversationDestination(p.ConversationID), Operation: OpHandleMessage, Payload: HandleMessage{MessageID: id}}},
 		Accepted: true,
-	}, nil
+	}
+	return out, nil
 }
 
 // checkChoice accepts a message's choice of a decision option only for an
@@ -222,15 +231,21 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, errNotFound(err, "message %s does not exist", p.MessageID)
 	}
 	if msg.Author != "owner" {
-		var eventTurn bool
-		if msg.Author == "system" {
-			eventTurn, err = store.HasMessageTurnOperation(ctx, tx.Q(), p.MessageID, OpHandleEvent)
-			if err != nil {
+		if msg.Author == "external" {
+			if _, err := store.ManualSource(ctx, tx.Q(), p.MessageID); err != nil {
 				return Outcome{}, err
 			}
-		}
-		if !eventTurn {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "message %s did not initiate an owner or event turn", p.MessageID)
+		} else {
+			var eventTurn bool
+			if msg.Author == "system" {
+				eventTurn, err = store.HasMessageTurnOperation(ctx, tx.Q(), p.MessageID, OpHandleEvent)
+				if err != nil {
+					return Outcome{}, err
+				}
+			}
+			if !eventTurn {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "message %s did not initiate an owner or event turn", p.MessageID)
+			}
 		}
 	}
 	item, err := store.GetConversationItem(ctx, tx.Q(), p.MessageID)
