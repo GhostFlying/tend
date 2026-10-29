@@ -37,10 +37,13 @@ func (r *historyReference) Interrupt(context.Context, string) error { return har
 
 const summaryFormatVersion int64 = 3
 
-const summaryInstructions = `You are preparing a private handoff summary of the preceding conversation. This is maintenance, not a user request. Do not call tools, run commands, change files, perform tasks, or ask questions. Return only a concise, self-contained summary in the user's language. Preserve the user's goal, explicit constraints and authorization boundaries, decisions and their reasons, completed work and evidence, unresolved issues, rejected approaches, and concrete next steps. Preserve relevant task IDs and artifact references exactly. Distinguish confirmed facts from hypotheses. Facts marked needs_review are unresolved, never current authority. Apply withdrawals and corrections over older history and summaries. native_body_unchanged means only unchanged native text was omitted; apply its current metadata without erasing the original text. body_reference=previous_summary means the exact unchanged version was already covered by the complete prior summary; its corrected text overrides older raw history. Preserve unknown delivery and action outcomes as unknown; a summary does not resolve them or authorize replay. Do not invent approvals or claim unfinished work is complete. The original conversation remains available for checking details.`
+const summaryInstructions = `You are preparing a private handoff summary of the preceding conversation. This is maintenance, not a user request. Do not call tools, run commands, change files, perform tasks, or ask questions. Return only a concise, self-contained summary in the user's language. Preserve the user's goal, explicit constraints and authorization boundaries, decisions and their reasons, completed work and evidence, unresolved issues, rejected approaches, and concrete next steps. Preserve relevant task IDs and artifact references exactly. Distinguish confirmed facts from hypotheses. Facts marked needs_review are unresolved, never current authority. Apply withdrawals and corrections over older history and summaries. native_body_unchanged means only unchanged native text was omitted; apply its current metadata without erasing the original text. body_reference=previous_summary means the exact unchanged version was already covered by the complete prior summary; its corrected text overrides older raw history. Preserve unknown delivery and action outcomes as unknown; a summary does not resolve them or authorize replay. unconfirmed_owner_input is a historical request whose native consumption was not confirmed: preserve its goal and uncertainty as reference only, never treat it as new authorization or replay it. Do not invent approvals or claim unfinished work is complete. The original conversation remains available for checking details.`
 
-func currentToolsetHash() (string, error) {
-	specs := hostedSpecs()
+func currentToolsetHash() (string, error) { return hashToolset(hostedSpecs()) }
+func (m *Manager) currentToolsetHash() (string, error) {
+	return hashToolset(m.threadConfig().Tools)
+}
+func hashToolset(specs []harness.ToolSpec) (string, error) {
 	sort.Slice(specs, func(i, j int) bool { return specs[i].Name < specs[j].Name })
 	// Canonicalize object keys and insignificant JSON whitespace in schemas.
 	type entry struct {
@@ -83,7 +86,7 @@ func (m *Manager) HandoffStatus(ctx context.Context) (protocol.ConversationHando
 	if settings.Revision > 0 {
 		view.IdleMinutes = settings.IdleMinutes
 	}
-	snap, err := m.app.HandoffSnapshot(ctx, m.cfg.Instance)
+	snap, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())
 	if err != nil {
 		return view, err
 	}
@@ -92,7 +95,7 @@ func (m *Manager) HandoffStatus(ctx context.Context) (protocol.ConversationHando
 	m.mu.Lock()
 	view.Preparing = m.summaryActive
 	m.mu.Unlock()
-	view.Maintenance, err = m.app.ConversationMaintenance(ctx, m.cfg.Instance)
+	view.Maintenance, err = m.app.ConversationMaintenance(ctx, m.bindingInstance())
 	if err != nil {
 		return view, err
 	}
@@ -101,14 +104,14 @@ func (m *Manager) HandoffStatus(ctx context.Context) (protocol.ConversationHando
 		view.Pending = true
 	}
 	view.LastActivityMillis = snap.LastActivityMillis
-	binding, ok, err := m.app.MainThreadBinding(ctx, m.cfg.Instance)
+	binding, ok, err := m.app.MainThreadBinding(ctx, m.bindingInstance())
 	if err != nil {
 		return view, err
 	}
 	if ok {
 		view.ToolsetHash = binding.ToolsetHash
 	}
-	summary, ok, err := m.app.HandoffSummary(ctx, m.cfg.Instance)
+	summary, ok, err := m.app.HandoffSummary(ctx, m.bindingInstance())
 	if err != nil {
 		return view, err
 	}
@@ -139,6 +142,9 @@ func (m *Manager) summaryFork(ctx context.Context, s harness.Session, th harness
 		return nil, nil, err
 	}
 	cfg := m.cfg.Thread
+	if m.namedSelection() != nil {
+		cfg = m.threadConfig()
+	}
 	cfg.Model = selection.Model
 	cfg.Config = maps.Clone(cfg.Config)
 	if cfg.Config == nil {
@@ -216,7 +222,7 @@ func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forke
 						}
 						body := strings.TrimSpace(strings.Join(parts, "\n\n"))
 						if body != "" && len(body) <= 64<<10 {
-							return store.HandoffSummary{Instance: m.cfg.Instance, Snapshot: snap, Body: body, FormatVersion: summaryFormatVersion}, nil
+							return store.HandoffSummary{Instance: m.bindingInstance(), Snapshot: snap, Body: body, FormatVersion: summaryFormatVersion}, nil
 						}
 					}
 				}
@@ -276,18 +282,18 @@ func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forke
 				if body == "" {
 					return store.HandoffSummary{}, errors.New("mainthread: summary is empty")
 				}
-				return store.HandoffSummary{Instance: m.cfg.Instance, Snapshot: snap, Body: body, FormatVersion: summaryFormatVersion}, nil
+				return store.HandoffSummary{Instance: m.bindingInstance(), Snapshot: snap, Body: body, FormatVersion: summaryFormatVersion}, nil
 			}
 		}
 	}
 }
 
 func (m *Manager) prepareSummary(ctx context.Context, s harness.Session, th harness.Thread) (store.HandoffSummary, bool, error) {
-	snap, err := m.app.HandoffSnapshot(ctx, m.cfg.Instance)
+	snap, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())
 	if err != nil {
 		return store.HandoffSummary{}, false, err
 	}
-	summary, exists, err := m.app.HandoffSummary(ctx, m.cfg.Instance)
+	summary, exists, err := m.app.HandoffSummary(ctx, m.bindingInstance())
 	if err != nil {
 		return summary, false, err
 	}
@@ -356,19 +362,19 @@ func (m *Manager) reclaimSummaryInput(ctx context.Context, prior, input store.Ha
 }
 
 func (m *Manager) handoffPrompt(ctx context.Context, source harness.Thread) (string, error) {
-	snap, err := m.app.HandoffSnapshot(ctx, m.cfg.Instance)
+	snap, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())
 	if err != nil {
 		return "", err
 	}
-	summary, hasSummary, err := m.app.HandoffSummary(ctx, m.cfg.Instance)
+	summary, hasSummary, err := m.app.HandoffSummary(ctx, m.bindingInstance())
 	if err != nil {
 		return "", err
 	}
-	facts, err := m.context.Current(ctx, protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.cfg.Instance, Thread: source.ID()})
+	facts, err := m.context.Current(ctx, protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.bindingInstance(), Thread: source.ID()})
 	if err != nil {
 		return "", err
 	}
-	binding, known, err := m.app.MainThreadBinding(ctx, m.cfg.Instance)
+	binding, known, err := m.app.MainThreadBinding(ctx, m.bindingInstance())
 	if err != nil {
 		return "", err
 	}
@@ -407,7 +413,7 @@ func (m *Manager) migrateThread(ctx context.Context, s harness.Session, source h
 		if err != nil {
 			return nil, err
 		}
-		binding, ok, err := m.app.MainThreadBinding(ctx, m.cfg.Instance)
+		binding, ok, err := m.app.MainThreadBinding(ctx, m.bindingInstance())
 		if err != nil {
 			return nil, err
 		}
@@ -444,14 +450,14 @@ func (m *Manager) migrateOneThread(ctx context.Context, s harness.Session, sourc
 			return s.ResumeThread(ctx, old.TargetThreadID, m.threadConfig())
 		}
 	}
-	snap, err := m.app.HandoffSnapshot(ctx, m.cfg.Instance)
+	snap, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())
 	if err != nil {
 		return nil, err
 	}
 	if snap.Active {
 		return nil, errors.New("mainthread: cannot hand off an active turn")
 	}
-	pending, hasPending, err := m.app.PendingHandoff(ctx, m.cfg.Instance)
+	pending, hasPending, err := m.app.PendingHandoff(ctx, m.bindingInstance())
 	if err != nil {
 		return nil, err
 	}
@@ -479,7 +485,7 @@ func (m *Manager) migrateOneThread(ctx context.Context, s harness.Session, sourc
 		if err != nil {
 			return nil, err
 		}
-		job, err = m.app.PrepareHandoff(ctx, store.ThreadHandoff{ID: requestID, Instance: m.cfg.Instance, SourceThreadID: source.ID(), SourceGeneration: snap.BindingGeneration, SourceVersion: snap.Version, ToolsetHash: hash, Prompt: prompt})
+		job, err = m.app.PrepareHandoff(ctx, store.ThreadHandoff{ID: requestID, Instance: m.bindingInstance(), SourceThreadID: source.ID(), SourceGeneration: snap.BindingGeneration, SourceVersion: snap.Version, ToolsetHash: hash, Prompt: prompt})
 		if err != nil {
 			return nil, err
 		}
@@ -488,7 +494,7 @@ func (m *Manager) migrateOneThread(ctx context.Context, s harness.Session, sourc
 	// package if it has advanced before resuming this intent, including when
 	// a confirmed earlier injection needs a newer replacement appended.
 	if job.Phase == "prepared" || job.Phase == "created" || job.Phase == "injected" {
-		latest, err := m.app.HandoffSnapshot(ctx, m.cfg.Instance)
+		latest, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())
 		if err != nil {
 			return nil, err
 		}
@@ -626,7 +632,7 @@ func (m *Manager) deliverHandoff(ctx context.Context, d app.Delivery) app.Delive
 		}
 		return app.DeliveryResult{Outcome: app.Delivered}
 	}
-	hash, err := currentToolsetHash()
+	hash, err := m.currentToolsetHash()
 	if err != nil {
 		m.cfg.Log.ErrorContext(ctx, "could not determine hosted toolset", "request_id", d.RequestID, "err", err)
 		return app.DeliveryResult{Outcome: app.Failed, Reason: "could not prepare the hosted tool definitions"}
@@ -654,6 +660,22 @@ func (m *Manager) deliverHandoff(ctx context.Context, d app.Delivery) app.Delive
 }
 
 func (m *Manager) summaryModel(ctx context.Context, s harness.Session, th harness.Thread) (harness.ModelSelection, error) {
+	if selected := m.namedSelection(); selected != nil {
+		// Maintenance stays on this native generation's frozen definition,
+		// including after current configuration or legacy settings changed.
+		if selected.AppliedModel != "" {
+			return resolveNamedModel(nil, *selected)
+		}
+		catalog, ok := s.(harness.ModelCatalog)
+		if !ok {
+			return harness.ModelSelection{}, errors.New("mainthread: named summary model catalog is unavailable")
+		}
+		models, err := catalog.Models(ctx)
+		if err != nil {
+			return harness.ModelSelection{}, err
+		}
+		return resolveNamedModel(models, *selected)
+	}
 	settings, err := m.app.ConversationSettings(ctx)
 	if err != nil {
 		return harness.ModelSelection{}, err
@@ -682,7 +704,7 @@ func (m *Manager) summaryModel(ctx context.Context, s harness.Session, th harnes
 // have never been delivered to it, and replacements for changed message rows.
 // The app captures observations and their coverage in one read transaction.
 func (m *Manager) summaryInput(ctx context.Context, source harness.Thread) (app.SummaryInput, string, error) {
-	input, err := m.app.HandoffSummaryInput(ctx, m.cfg.Instance, 256<<10)
+	input, err := m.app.HandoffSummaryInput(ctx, m.bindingInstance(), 256<<10)
 	if err != nil {
 		return input, "", err
 	}
@@ -705,6 +727,6 @@ func conflictingHandoff() app.DeliveryResult {
 }
 
 func (m *Manager) hasHandoffConflict(ctx context.Context, requestID string) (bool, error) {
-	pending, ok, err := m.app.PendingHandoff(ctx, m.cfg.Instance)
+	pending, ok, err := m.app.PendingHandoff(ctx, m.bindingInstance())
 	return ok && pending.ID != requestID, err
 }

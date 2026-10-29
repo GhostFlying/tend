@@ -433,6 +433,16 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 	if srv.count("SELECT COUNT(*) FROM decisions") != 2 {
 		t.Fatal("decision coordination duplicated a question")
 	}
+	// The background callback is asynchronous. Do not let an empty channel
+	// pass this assertion before the first source read has actually happened.
+	select {
+	case read := <-sourceResults:
+		if !read.Success {
+			t.Fatal(read.Text)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("background decision sources were never read")
+	}
 	for len(sourceResults) > 0 {
 		if read := <-sourceResults; !read.Success {
 			t.Fatal(read.Text)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -139,6 +140,8 @@ const (
 
 // MainTurn is a delivery of a message to the front thread.
 type MainTurn struct {
+	// Hosted is an admission input; persisted separately in hosted_executions.
+	Hosted                       *hostedconfig.Selection
 	Failure                      *protocol.AgentFailure
 	NativeReconciled             bool // Set only after reading the exact native execution history.
 	RequestID                    string

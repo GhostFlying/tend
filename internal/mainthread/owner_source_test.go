@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/tools"
 )
 
 func TestOwnerSourceCannotSelectUnconsumedOrSystemMessage(t *testing.T) {
@@ -96,4 +98,23 @@ func TestHistoricalOwnerAnswerKeepsCurrentLogicalExecution(t *testing.T) {
 	if e.count(`SELECT COUNT(*) FROM request_records WHERE operation='decisions.resolve_from_message' AND parent_request_id=?`, oldRequest) != 1 {
 		t.Fatal("historical answer lost its original audit parent")
 	}
+}
+
+func TestNamedMainRetainsHostedOwnerSourceSelector(t *testing.T) {
+	for _, spec := range tools.NamedSpecs(agentconfig.Main) {
+		if spec.Name != "decisions_resolve" {
+			continue
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(spec.InputSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := schema.Properties["source_message_id"]; !ok {
+			t.Fatal("named owner-answer tool lost earlier admitted source selector")
+		}
+		return
+	}
+	t.Fatal("missing decisions_resolve")
 }

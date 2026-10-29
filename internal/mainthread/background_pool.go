@@ -78,9 +78,14 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 	if receiptRead {
 		waitCtx, stopWait = context.WithTimeout(run, 20*time.Second)
 	}
-	_, err = m.waitThread(waitCtx)
+	_, err = m.waitStartup(waitCtx)
 	stopWait()
 	if err != nil {
+		if !receiptRead && run.Err() == nil {
+			if deferErr := p.App.DeferAgentStartup(run, id); deferErr != nil {
+				m.cfg.Log.WarnContext(run, "could not defer failed background startup", "err", deferErr)
+			}
+		}
 		return
 	}
 	dest := "background_thread:" + id

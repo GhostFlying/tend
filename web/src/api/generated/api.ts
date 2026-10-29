@@ -253,10 +253,14 @@ export interface TendAPI {
   DownloadURLResponse?: DownloadURLResponse;
   Envelope?: Envelope;
   ExplainDecisionPayload?: ExplainDecisionPayload;
+  FinishIssueAssignmentPayload?: FinishIssueAssignmentPayload;
   FollowupHistoryPage?: FollowupHistoryPage;
   FollowupPage?: FollowupPage;
   FollowupSpec?: FollowupSpec;
+  HostedAgentInventory?: HostedAgentInventory;
   InterruptReplyPayload?: InterruptReplyPayload;
+  IssueAssignmentPayload?: IssueAssignmentPayload;
+  IssueContextReview?: IssueContextReview;
   IssueControlPayload?: IssueControlPayload;
   IssueEndpointPayload?: IssueEndpointPayload;
   IssuePage?: IssuePage;
@@ -1332,7 +1336,9 @@ export interface ConversationSettingsView {
   enabled: boolean;
   model: string;
   models: ConversationModel[] | null;
+  read_only?: boolean;
   revision: number;
+  source?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1604,6 +1610,15 @@ export interface DecisionIssue {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FinishIssueAssignmentPayload".
+ */
+export interface FinishIssueAssignmentPayload {
+  expected_assignment_epoch: number;
+  handoff_id: string;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "FollowupHistoryPage".
  */
 export interface FollowupHistoryPage {
@@ -1704,10 +1719,93 @@ export interface FollowupSpec {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "HostedAgentInventory".
+ */
+export interface HostedAgentInventory {
+  accepted_request_id: string;
+  configuration_revision: number;
+  main_agent_id: string;
+  projection: AgentInventoryProjection;
+  public_sha256: string;
+  state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentInventoryProjection".
+ */
+export interface AgentInventoryProjection {
+  agents: AgentInventoryDefinition[] | null;
+  execution_environment_id: string;
+  format_version: number;
+  runtimes: AgentInventoryRuntime[] | null;
+  source_kind: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentInventoryDefinition".
+ */
+export interface AgentInventoryDefinition {
+  availability: AgentInventoryAvailability;
+  categories: string[] | null;
+  display_name: string;
+  enabled: boolean;
+  identity: AgentIdentity;
+  purposes: string[] | null;
+  registration: string;
+  requested_effort: string;
+  requested_model: string;
+  revision: number;
+  runtime_binding_ref: AgentRuntimeReference;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentInventoryAvailability".
+ */
+export interface AgentInventoryAvailability {
+  available: boolean;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentInventoryRuntime".
+ */
+export interface AgentInventoryRuntime {
+  availability: AgentInventoryAvailability;
+  cli?: string;
+  declared_purposes: string[] | null;
+  enabled: boolean;
+  kind: string;
+  registration: string;
+  revision: number;
+  runtime_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "InterruptReplyPayload".
  */
 export interface InterruptReplyPayload {
   message_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueAssignmentPayload".
+ */
+export interface IssueAssignmentPayload {
+  assignee: IssueAssignee;
+  expected_assignment_epoch: number;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextReview".
+ */
+export interface IssueContextReview {
+  confirmed_fact_ids?: string[];
+  context_revision: number;
+  expected_assignment_epoch: number;
+  retired_fact_ids?: string[];
+  sources: LogicalTurnReview[] | null;
+  summary: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

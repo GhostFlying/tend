@@ -30,6 +30,9 @@ func (c CommitLogicalTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
+	if x.coordinationExecution != nil && x.coordinationExecution.IssueID != "" {
+		return commitHostedIssueTurn(ctx, x, tx, v, p)
+	}
 	allowed := map[string]bool{}
 	for _, m := range v.Messages {
 		allowed[m.MessageID] = true
@@ -76,6 +79,13 @@ func (c CommitLogicalTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		if rev != c.Revision {
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "context changed during review")
+		}
+		delegated, err := reviewCanonicalDelegatedContext(ctx, tx, v.ID, c.WorkItemID, c.Revision)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if delegated {
+			continue
 		}
 		ended, err := reviewCanonicalTerminalContext(ctx, tx, v.ID, c.WorkItemID, c.Revision)
 		if err != nil {
@@ -128,7 +138,11 @@ func (a *App) registerLogicalTurn(ctx context.Context, tx *store.Tx, m store.Mai
 	if err != nil {
 		return err
 	}
-	if conversation != "main" {
+	scope, err := store.HostedIssueScope(ctx, tx.Q(), m.RequestID)
+	if err != nil {
+		return err
+	}
+	if conversation != "main" && scope == "" {
 		return nil
 	}
 	var exists bool
@@ -158,6 +172,20 @@ func (a *App) registerLogicalTurn(ctx context.Context, tx *store.Tx, m store.Mai
 	if err != nil {
 		return err
 	}
+	if scope != "" {
+		// Only this manager's share belongs to this execution. Association triggers
+		// may project sibling shares from a shared source; they remain in their own turns.
+		if _, err := tx.Exec(ctx, `INSERT OR IGNORE INTO logical_turn_messages(logical_turn_id,message_id)
+ SELECT ?,s.message_id FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.message_id=?`, m.RequestID, m.MessageID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT OR IGNORE INTO logical_turn_contexts(logical_turn_id,work_item_id) VALUES(?,?)`, m.RequestID, scope); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM logical_turn_contexts WHERE logical_turn_id=? AND work_item_id<>?`, m.RequestID, scope); err != nil {
+			return err
+		}
+	}
 	return adoptRecoveryResponsibilities(ctx, tx, m, now)
 }
 
@@ -177,7 +205,11 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 	if err != nil {
 		return false, err
 	}
-	if conversation != "main" {
+	scope, err := store.HostedIssueScope(ctx, tx.Q(), m.RequestID)
+	if err != nil {
+		return false, err
+	}
+	if conversation != "main" && scope == "" {
 		return false, nil
 	}
 	var settled, registered bool
@@ -246,10 +278,34 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM logical_turn_messages lm LEFT JOIN message_dispositions d ON d.message_id=lm.message_id WHERE lm.logical_turn_id=? AND (d.message_id IS NULL OR d.disposition='pending' OR d.classified_revision<>d.content_revision OR d.facts_revision<>d.content_revision)`, v.ID).Scan(&missing); err != nil {
 		return false, err
 	}
-	var unready int
-	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM work_item_contexts c WHERE ((c.baseline_revision=0 AND NOT EXISTS(SELECT 1 FROM issue_controls ci WHERE ci.issue_id=c.work_item_id AND ci.state IN ('closed','cancelled'))) OR NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews cr WHERE cr.logical_turn_id=? AND cr.work_item_id=c.work_item_id AND cr.revision=c.revision) OR EXISTS(SELECT 1 FROM message_context_obligations o JOIN logical_turn_messages lm ON lm.message_id=o.message_id WHERE lm.logical_turn_id=? AND o.work_item_id=c.work_item_id AND o.needs_review=1)) AND c.work_item_id IN (SELECT work_item_id FROM logical_turn_contexts WHERE logical_turn_id=?)`, v.ID, v.ID, v.ID).Scan(&unready); err != nil {
+	if scope != "" {
+		if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM work_item_contexts c WHERE c.work_item_id=? AND (NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews r WHERE r.logical_turn_id=? AND r.work_item_id=c.work_item_id AND r.revision=c.revision))`, scope, v.ID).Scan(&missing); err != nil {
+			return false, err
+		}
+	}
+	if scope != "" {
+		pending, e := hostedIssueContextPending(ctx, tx.Q(), scope)
+		if e != nil {
+			return false, e
+		}
+		if pending {
+			missing++
+		}
+	}
+	var planner bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions h JOIN logical_turn_executions e ON e.request_id=h.execution_id WHERE e.logical_turn_id=? AND h.role='main')`, v.ID).Scan(&planner); err != nil {
 		return false, err
 	}
+	var unready int
+	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM work_item_contexts c
+ WHERE c.work_item_id IN (SELECT work_item_id FROM logical_turn_contexts WHERE logical_turn_id=?)
+ AND (?='' OR c.work_item_id=?)
+ AND (NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews cr WHERE cr.logical_turn_id=? AND cr.work_item_id=c.work_item_id AND cr.revision=c.revision)
+ OR (c.baseline_revision=0 AND NOT EXISTS(SELECT 1 FROM issue_controls ci WHERE ci.issue_id=c.work_item_id AND (ci.state IN ('closed','cancelled') OR (? AND ci.assignment_state='active') OR (?<>'' AND ci.assignee_kind='agent'))))
+ OR (NOT EXISTS(SELECT 1 FROM issue_controls ci WHERE ci.issue_id=c.work_item_id AND ci.assignment_state='active' AND ?) AND EXISTS(SELECT 1 FROM message_context_obligations o JOIN logical_turn_messages lm ON lm.message_id=o.message_id WHERE lm.logical_turn_id=? AND o.work_item_id=c.work_item_id AND o.needs_review=1)))`, v.ID, scope, scope, v.ID, planner, scope, planner, v.ID).Scan(&unready); err != nil {
+		return false, err
+	}
+
 	if v.Status == "stopped" || v.Status == "awaiting_clarification" {
 		return true, nil
 	}
@@ -287,7 +343,11 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 	}
 	payload, _ := json.Marshal(HandleMessage{MessageID: m.MessageID})
 	outbox := a.ids.New(protocol.PrefixOutbox)
-	if err = tx.InsertOutbox(ctx, store.OutboxRow{OutboxID: outbox, RequestID: request, ParentRequestID: m.RequestID, Destination: MainThreadDestination, Operation: "conversation.repair_turn", PayloadJSON: string(payload), CreatedAt: now}); err != nil {
+	destination := MainThreadDestination
+	if scope != "" {
+		destination = "background_thread:" + conversation
+	}
+	if err = tx.InsertOutbox(ctx, store.OutboxRow{OutboxID: outbox, RequestID: request, ParentRequestID: m.RequestID, Destination: destination, Operation: "conversation.repair_turn", PayloadJSON: string(payload), CreatedAt: now}); err != nil {
 		return true, err
 	}
 	delay := []int64{0, 0, 30000, 120000, 600000}[attempt-1]

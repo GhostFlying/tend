@@ -20,6 +20,9 @@ import (
 
 // Options start an app-server.
 type Options struct {
+	// HostedCoordination restricts this process to Tend coordination and owner material presentation.
+	// Worker sessions leave this false.
+	HostedCoordination bool
 	// Bin is the traex binary; empty means "traex" on PATH.
 	Bin string
 	// Env is added to the inherited environment, for example TRAE_HOME
@@ -52,8 +55,9 @@ type Session struct {
 	ended   bool
 	// stopped is closed by Close, releasing event pumps whose consumer
 	// went away.
-	stopped chan struct{}
-	closed  sync.Once
+	stopped        chan struct{}
+	closed         sync.Once
+	hostedBoundary *hostedToolBoundary
 }
 
 // maxOrphans bounds the events kept for threads not registered yet.
@@ -63,12 +67,20 @@ var _ harness.Session = (*Session)(nil)
 
 // Start launches `traex app-server` and completes the handshake.
 func Start(ctx context.Context, opts Options) (*Session, error) {
+	if opts.HostedCoordination {
+		return startHostedCoordinator(ctx, opts)
+	}
+	return startProcess(ctx, opts, nil)
+}
+
+func startProcess(ctx context.Context, opts Options, overrides []string) (*Session, error) {
 	bin := opts.Bin
 	if bin == "" {
 		bin = "traex"
 	}
 	procCtx, kill := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(procCtx, bin, "app-server")
+	args := append(append([]string{}, overrides...), "app-server")
+	cmd := exec.CommandContext(procCtx, bin, args...)
 	cmd.Dir = opts.Dir
 	cmd.Env = appServerEnv(os.Environ(), opts.Env)
 	cmd.Stderr = opts.Stderr
@@ -198,6 +210,9 @@ func dynamicTools(specs []harness.ToolSpec) []DynamicToolSpec {
 
 // StartThread implements harness.Session.
 func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (harness.Thread, error) {
+	if err := s.checkHostedConfig(ctx, cfg); err != nil {
+		return nil, err
+	}
 	var res ThreadStartResponse
 	err := s.conn.call(ctx, methodThreadStart, ThreadStartParams{
 		ExperimentalRawEvents: true,
@@ -223,6 +238,9 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 
 // ResumeThread implements harness.Session.
 func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness.ThreadConfig) (harness.Thread, error) {
+	if err := s.checkHostedConfig(ctx, cfg); err != nil {
+		return nil, err
+	}
 	unlock, err := s.lockThreadLifecycle(ctx)
 	if err != nil {
 		return nil, err
@@ -623,6 +641,17 @@ func (t *thread) InjectDeveloper(ctx context.Context, texts ...string) error {
 
 // StartTurn implements harness.Thread.
 func (t *thread) StartTurn(ctx context.Context, in harness.TurnInput) (string, error) {
+	if err := t.s.checkHostedBoundary(ctx); err != nil {
+		// No turn/start RPC has been sent. Keep the transport cause without
+		// turning this local admission failure into an unknown native start.
+		return "", fmt.Errorf("%w: hosted pre-start check: %w", harness.ErrRejected, err)
+	}
+	if t.s.hostedBoundary != nil {
+		permissions := t.PermissionDefaults()
+		if permissions.Sandbox != "read-only" || permissions.ApprovalPolicy != "never" {
+			return "", fmt.Errorf("%w: hosted native permissions differ from the required read-only boundary", harness.ErrRejected)
+		}
+	}
 	if t.toolsReleased() {
 		return "", fmt.Errorf("%w: disposable thread released", harness.ErrRejected)
 	}

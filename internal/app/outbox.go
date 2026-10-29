@@ -85,11 +85,7 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 				return err
 			}
 		}
-		backgroundOperation := ""
-		if destination == MainThreadDestination || strings.HasPrefix(destination, "background_thread:") {
-			backgroundOperation = OpHandleEvent
-		}
-		m, err := store.HeadOutboxPrioritized(ctx, tx.Q(), destination, backgroundOperation)
+		m, err := a.hostedServiceableHead(ctx, tx.Q(), destination)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil
 		}
@@ -102,7 +98,7 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 		}
 		if strings.HasPrefix(destination, "background_thread:") && m.Operation == OpHandleEvent {
 			var closed bool
-			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_conversations c JOIN work_items w ON w.work_item_id=c.work_item_id WHERE c.conversation_id=? AND w.status='closed')`, strings.TrimPrefix(destination, "background_thread:")).Scan(&closed); err != nil {
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_conversations c JOIN work_items w ON w.work_item_id=c.work_item_id WHERE c.conversation_id=? AND w.status='closed' AND NOT EXISTS(SELECT 1 FROM issue_controls ci WHERE ci.issue_id=w.work_item_id))`, strings.TrimPrefix(destination, "background_thread:")).Scan(&closed); err != nil {
 				return err
 			}
 			if closed {
@@ -114,9 +110,15 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 			if err != nil {
 				return err
 			}
-			ready, err := store.WorkItemContextReady(ctx, tx.Q(), c.WorkItemID)
+			canonical, ready, err := a.canonicalManagerAdmission(ctx, tx.Q(), c.ID, c.WorkItemID, m.RequestID)
 			if err != nil {
 				return err
+			}
+			if !canonical {
+				ready, err = store.WorkItemContextReady(ctx, tx.Q(), c.WorkItemID)
+				if err != nil {
+					return err
+				}
 			}
 			if !ready {
 				return nil
@@ -208,7 +210,7 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		if err := tx.TransitionOutbox(ctx, tr); err != nil {
 			return err
 		}
-		if d.Destination == MainThreadDestination && d.Operation == "conversation.repair_turn" && r.Outcome == Failed {
+		if (d.Destination == MainThreadDestination || strings.HasPrefix(d.Destination, "background_thread:")) && d.Operation == "conversation.repair_turn" && r.Outcome == Failed {
 			var m HandleMessage
 			if err := json.Unmarshal(d.Payload, &m); err != nil {
 				return fmt.Errorf("app: decode repair delivery: %w", err)

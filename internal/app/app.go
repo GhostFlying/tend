@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/domain"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -36,6 +37,11 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	coordinationExecution *store.HostedExecution
+	coordinationEffectSeq int64
+	coordinationID        string
+	coordinationLogicalID string
+	hostedConfiguration   *hostedconfig.Prepared
 	// planningSource is the turn's initial delivery, supplied by the host.
 	planningSource   string
 	executionRequest string
@@ -95,6 +101,7 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
+	hostedConfiguration *hostedconfig.Prepared
 	agentRecoveryPolicy domain.AgentRecoveryPolicy
 	followupsEnabled    bool
 	observeDeployment   func(context.Context) (protocol.ObservedDeployment, error)
@@ -164,7 +171,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	if scoped, ok := cmd.(interface{ executionRequestID() string }); ok {
 		if p.Kind != protocol.PrincipalMainAgent {
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "execution scope requires a hosted main agent")
@@ -368,6 +375,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		}
 		if e.Kind == "task.completed" {
 			if err := recordCompletionNotice(ctx, x, tx, e.ObjectID, eventID); err != nil {
+				return err
+			}
+		}
+		if e.Kind == "issue.closed" || e.Kind == "issue.cancelled" {
+			if err := recordCanonicalParentResult(ctx, x, tx, e, eventID); err != nil {
 				return err
 			}
 		}

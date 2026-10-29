@@ -16,10 +16,11 @@ import (
 // Native history (H) is supplied exclusively by the isolated harness fork.
 type summaryCorrection struct {
 	protocol.ConversationItem
-	CoverageUncertain   bool   `json:"coverage_uncertain"`
-	Withdrawn           bool   `json:"withdrawn"`
-	NativeBodyUnchanged bool   `json:"native_body_unchanged,omitempty"`
-	BodyReference       string `json:"body_reference,omitempty"`
+	CoverageUncertain     bool   `json:"coverage_uncertain"`
+	Withdrawn             bool   `json:"withdrawn"`
+	NativeBodyUnchanged   bool   `json:"native_body_unchanged,omitempty"`
+	BodyReference         string `json:"body_reference,omitempty"`
+	UnconfirmedOwnerInput bool   `json:"unconfirmed_owner_input,omitempty"`
 }
 
 type SummaryInput struct {
@@ -155,8 +156,15 @@ func (a *App) HandoffSummaryInput(ctx context.Context, instance string, pageByte
 				if err := store.HideUndeliveredOwner(ctx, q, &it); err != nil {
 					return err
 				}
+				unconfirmedOwnerInput := false
 				if row.Author == "owner" && it.Body != row.Body && !withdrawn {
-					continue
+					if it.State != protocol.MessageUnknown {
+						continue
+					}
+					// Maintenance preserves the unknown historical request, not
+					// its admission as a new instruction or consumable source.
+					it.Body = row.Body
+					unconfirmedOwnerInput = true
 				}
 				// Corrections are explicitly authoritative over old history and summaries.
 				priorCoversBody := false
@@ -178,7 +186,7 @@ func (a *App) HandoffSummaryInput(ctx context.Context, instance string, pageByte
 					it.Body = ""
 					it.Images, it.Attachments = nil, nil
 				}
-				observations = append(observations, summaryCorrection{ConversationItem: it, CoverageUncertain: !native || associationChanged, Withdrawn: withdrawn, NativeBodyUnchanged: unchanged && native && assoc.ContentRevision <= 1, BodyReference: reference})
+				observations = append(observations, summaryCorrection{ConversationItem: it, CoverageUncertain: !native || associationChanged, Withdrawn: withdrawn, NativeBodyUnchanged: unchanged && native && assoc.ContentRevision <= 1, BodyReference: reference, UnconfirmedOwnerInput: unconfirmedOwnerInput})
 			}
 			after = ids[len(ids)-1]
 		}

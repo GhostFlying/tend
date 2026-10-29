@@ -12,11 +12,11 @@ import (
 )
 
 func (m *Manager) openManagedThread(ctx context.Context, s harness.Session) (harness.Thread, error) {
-	hash, err := currentToolsetHash()
+	hash, err := m.currentToolsetHash()
 	if err != nil {
 		return nil, err
 	}
-	id, exists, err := m.app.MainThread(ctx, m.cfg.Instance)
+	id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
 	if err != nil {
 		return nil, err
 	}
@@ -25,7 +25,7 @@ func (m *Manager) openManagedThread(ctx context.Context, s harness.Session) (har
 		if err != nil {
 			return nil, err
 		}
-		if _, err := m.app.BindMainThread(ctx, m.cfg.Instance, th.ID(), hash, rolloutPath(th)); err != nil {
+		if _, err := m.app.BindMainThread(ctx, m.bindingInstance(), th.ID(), hash, rolloutPath(th)); err != nil {
 			return nil, err
 		}
 		return th, nil
@@ -33,7 +33,7 @@ func (m *Manager) openManagedThread(ctx context.Context, s harness.Session) (har
 	if err := m.app.SettleOpenTurns(ctx, id); err != nil {
 		return nil, err
 	}
-	binding, known, err := m.app.MainThreadBinding(ctx, m.cfg.Instance)
+	binding, known, err := m.app.MainThreadBinding(ctx, m.bindingInstance())
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (m *Manager) openManagedThread(ctx context.Context, s harness.Session) (har
 		m.mu.Lock()
 		m.maintenanceBlocked = true
 		m.mu.Unlock()
-	} else if err := m.app.RecordMainThreadLocation(ctx, m.cfg.Instance, id, rolloutPath(th)); err != nil {
+	} else if err := m.app.RecordMainThreadLocation(ctx, m.bindingInstance(), id, rolloutPath(th)); err != nil {
 		return nil, err
 	}
 	if !needsHandoff {
@@ -128,7 +128,7 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 	if s == nil || th == nil || active != nil || summaryActive {
 		return nil
 	}
-	snap, err := m.app.HandoffSnapshot(ctx, m.cfg.Instance)
+	snap, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())
 	if err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 	if m.cfg.Now().Sub(activity) < time.Duration(minutes)*time.Minute {
 		return nil
 	}
-	summary, exists, err := m.app.HandoffSummary(ctx, m.cfg.Instance)
+	summary, exists, err := m.app.HandoffSummary(ctx, m.bindingInstance())
 	if err != nil {
 		return err
 	}
@@ -195,11 +195,11 @@ func (m *Manager) reconcileHandoff(ctx context.Context, d app.Delivery) app.Deli
 		return app.DeliveryResult{Outcome: app.Failed, Reason: "invalid handoff request"}
 	}
 	if p.PrepareOnly {
-		summary, ok, err := m.app.HandoffSummary(ctx, m.cfg.Instance)
+		summary, ok, err := m.app.HandoffSummary(ctx, m.bindingInstance())
 		if err != nil {
 			return retry(err)
 		}
-		snap, err := m.app.HandoffSnapshot(ctx, m.cfg.Instance)
+		snap, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())
 		if err != nil {
 			return retry(err)
 		}
@@ -215,7 +215,7 @@ func (m *Manager) reconcileHandoff(ctx context.Context, d app.Delivery) app.Deli
 		return retry(err)
 	}
 	if !exists {
-		pending, ok, err := m.app.PendingHandoff(ctx, m.cfg.Instance)
+		pending, ok, err := m.app.PendingHandoff(ctx, m.bindingInstance())
 		if err != nil {
 			return retry(err)
 		}

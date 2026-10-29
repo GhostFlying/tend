@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/domain"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -83,7 +84,18 @@ func createCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		return Outcome{}, err
 	}
 	owner := protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: x.Principal.Subject}
-	if p.Assignee != nil && *p.Assignee != owner {
+	if x.coordinationExecution != nil {
+		if p.Assignee == nil && x.coordinationExecution.IssueID != "" {
+			p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: hostedconfig.IdentityRef(x.coordinationExecution.Selection.Identity)}
+		}
+		if p.Assignee == nil {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "main delegation must name a concrete registered assignee")
+		}
+		if err := resolveHostedAssignee(ctx, tx.Q(), x, *p.Assignee); err != nil {
+			return Outcome{}, err
+		}
+		owner = *p.Assignee
+	} else if p.Assignee != nil && *p.Assignee != owner {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only the authenticated owner is registered for assignment")
 	}
 	project, err := resolveProject(ctx, tx.Q(), p.Plan.Project, x.Principal)
@@ -111,7 +123,26 @@ func createCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if err := validateCanonicalOwnerGraph(ctx, tx.Q(), next, p.ExpectedParentRevision, true); err != nil {
 		return Outcome{}, err
 	}
-	return saveCanonicalOwnerDefinition(ctx, x, tx, next, 0, p.canonicalOwnerIssueSource, p, "issue.created")
+	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, next, 0, p.canonicalOwnerIssueSource, p, "issue.created")
+	if err != nil {
+		return Outcome{}, err
+	}
+	if x.coordinationExecution != nil {
+		if p.SourceMessageID != "" {
+			if err := tx.BindMessage(ctx, p.SourceMessageID, "work_item", next.IssueID, "delegation"); err != nil {
+				return Outcome{}, err
+			}
+		}
+	}
+	if x.coordinationExecution != nil && next.Assignee.Kind == protocol.IssueAssigneeAgent {
+		if _, err := ensureCanonicalManagerConversation(ctx, tx, next, now); err != nil {
+			return Outcome{}, err
+		}
+		if err := appendBackgroundSource(ctx, x, tx, "work_item:"+next.IssueID, next.IssueID, p.SourceMessageID, "", "issue.delegated", nil); err != nil {
+			return Outcome{}, err
+		}
+	}
+	return out, nil
 }
 
 func updateCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx, current protocol.Issue) (Outcome, error) {
@@ -226,7 +257,7 @@ func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, ne
 	// request receipt must describe that same aggregate, regardless of input order.
 	next.DependsOn = slices.Clone(next.DependsOn)
 	slices.Sort(next.DependsOn)
-	if err := tx.SaveCanonicalIssue(ctx, next, expected, store.IssueRevisionProvenance{Actor: x.Principal, RequestID: x.Env.RequestID, SourceMessageID: source.SourceMessageID, Reason: reason}); err != nil {
+	if err := tx.SaveCanonicalIssue(ctx, next, expected, store.IssueRevisionProvenance{Actor: x.Principal, RequestID: x.Env.RequestID, SourceMessageID: source.SourceMessageID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: reason}); err != nil {
 		return Outcome{}, err
 	}
 	if err := validateCanonicalTaskDependencies(ctx, tx.Q()); err != nil {

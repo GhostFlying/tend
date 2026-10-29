@@ -24,6 +24,10 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	return applyMessageAssociations(ctx, x, tx, p, false)
+}
+
+func applyMessageAssociations(ctx context.Context, x *Exec, tx *store.Tx, p protocol.SetMessageAssociationsPayload, canonical bool) (Outcome, error) {
 	if len(p.WorkItemIDs) > 50 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "at most 50 associations")
 	}
@@ -47,11 +51,16 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "duplicate work item")
 		}
 		desired[id] = true
+		if canonical {
+			if _, err := store.GetCanonicalIssue(ctx, tx.Q(), id); err != nil {
+				return Outcome{}, errNotFound(err, "issue does not exist")
+			}
+		}
 		if _, err := store.GetIssue(ctx, tx.Q(), id); err != nil {
 			return Outcome{}, errNotFound(err, "work item does not exist")
 		}
 	}
-	if x.Principal.Kind != protocol.PrincipalOwner {
+	if !canonical && x.Principal.Kind != protocol.PrincipalOwner {
 		for id := range desired {
 			if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), id); err != nil {
 				return Outcome{}, err
@@ -68,7 +77,7 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		same = same && desired[item.WorkItemID]
 	}
 	if same && (x.Principal.Kind != protocol.PrincipalOwner || old.OwnerLocked) {
-		if err := attachLegacyReviewSource(ctx, x, tx, old.MessageID); err != nil {
+		if err := attachAssociationReviewSource(ctx, x, tx, old.MessageID, canonical); err != nil {
 			return Outcome{}, err
 		}
 		return Outcome{Result: map[string]any{"revision": old.Revision}}, nil
@@ -127,7 +136,7 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if _, err := tx.Exec(ctx, `INSERT INTO message_disposition_history(message_id,content_revision,association_revision,disposition,actor,created_at) VALUES(?,?,?,?,?,?)`, old.MessageID, p.ContentRevision, updated.Revision, p.Disposition, string(actor), x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
-	if err := attachLegacyReviewSource(ctx, x, tx, old.MessageID); err != nil {
+	if err := attachAssociationReviewSource(ctx, x, tx, old.MessageID, canonical); err != nil {
 		return Outcome{}, err
 	}
 	out := Outcome{Result: map[string]any{"revision": updated.Revision}, Events: []Event{{ObjectType: "message", ObjectID: old.MessageID, Kind: "conversation.associations_changed"}}}
@@ -137,6 +146,11 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		out.Notify = true
 	}
+	notified, err := notifyCanonicalAssociationChange(ctx, x, tx, old.MessageID, affected)
+	if err != nil {
+		return Outcome{}, err
+	}
+	out.Notify = out.Notify || notified
 	return out, nil
 }
 
@@ -149,8 +163,11 @@ func (c ContextCommand) Authorize(_ context.Context, x *Exec, _ store.Querier) e
 }
 func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	id := x.Env.Target.ID
-	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), id); err != nil {
-		return Outcome{}, err
+	scoped := x.coordinationExecution != nil && x.coordinationExecution.IssueID == id && c.Action == "fact"
+	if !scoped {
+		if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), id); err != nil {
+			return Outcome{}, err
+		}
 	}
 	var revision int64
 	if err := tx.Q().QueryRowContext(ctx, `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, id).Scan(&revision); err != nil {
@@ -252,6 +269,14 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		if !slices.Contains([]string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}, p.Kind) || strings.TrimSpace(p.Body) == "" || len(p.Body) > 8000 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid fact kind or body")
 		}
+		if scoped && p.Scope != "work_item" {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "manager facts belong only to this Issue")
+		}
+		if scoped {
+			if err := hostedSourceInIssueScope(ctx, tx.Q(), id, p.SourceMessageID); err != nil {
+				return Outcome{}, err
+			}
+		}
 		msg, err := store.GetMessage(ctx, tx.Q(), p.SourceMessageID)
 		if err != nil {
 			return Outcome{}, errNotFound(err, "source message does not exist")
@@ -296,7 +321,7 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		var existing string
 		err = tx.Q().QueryRowContext(ctx, `SELECT fact_id FROM work_item_context_facts WHERE scope=? AND COALESCE(work_item_id,'')=? AND project=? AND kind=? AND body=? AND source_message_id=? AND COALESCE(supersedes,'')=? AND superseded=0 AND needs_review=0 LIMIT 1`, p.Scope, p.WorkItemID, p.Project, p.Kind, p.Body, p.SourceMessageID, p.Supersedes).Scan(&existing)
 		if err == nil {
-			if err := attachLegacyReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
+			if err := attachContextReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
 				return Outcome{}, err
 			}
 			return Outcome{Result: map[string]any{"work_item_id": id, "fact_id": existing}}, nil
@@ -304,16 +329,20 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		if !errors.Is(err, sql.ErrNoRows) {
 			return Outcome{}, err
 		}
-		if err := rejectCanonicalLegacyFactScope(ctx, tx.Q(), p.Scope, p.WorkItemID, p.Project); err != nil {
-			return Outcome{}, err
+		if !scoped {
+			if err := rejectCanonicalLegacyFactScope(ctx, tx.Q(), p.Scope, p.WorkItemID, p.Project); err != nil {
+				return Outcome{}, err
+			}
 		}
 		if p.Supersedes != "" {
 			var oldScope, oldItem, oldProject string
 			if err := tx.Q().QueryRowContext(ctx, `SELECT scope,COALESCE(work_item_id,''),project FROM work_item_context_facts WHERE fact_id=? AND superseded=0`, p.Supersedes).Scan(&oldScope, &oldItem, &oldProject); err != nil {
 				return Outcome{}, errNotFound(err, "superseded fact does not exist")
 			}
-			if err := rejectCanonicalLegacyFactScope(ctx, tx.Q(), oldScope, oldItem, oldProject); err != nil {
-				return Outcome{}, err
+			if !scoped {
+				if err := rejectCanonicalLegacyFactScope(ctx, tx.Q(), oldScope, oldItem, oldProject); err != nil {
+					return Outcome{}, err
+				}
 			}
 			res, err := tx.Exec(ctx, `UPDATE work_item_context_facts SET superseded=1 WHERE fact_id=? AND scope=? AND COALESCE(work_item_id,'')=? AND project=? AND superseded=0`, p.Supersedes, p.Scope, p.WorkItemID, p.Project)
 			if err != nil {
@@ -324,7 +353,7 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "superseded fact must have the same scope")
 			}
 		}
-		if err := attachLegacyReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
+		if err := attachContextReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
 			return Outcome{}, err
 		}
 		p.ID = x.IDs.New(protocol.Prefix("fact"))

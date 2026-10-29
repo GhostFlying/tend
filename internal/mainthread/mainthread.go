@@ -18,12 +18,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/tools"
@@ -45,7 +49,8 @@ type Config struct {
 	// Thread configures the front thread; the manager adds the tools.
 	Thread harness.ThreadConfig
 	// Open starts a harness session.
-	Open func(ctx context.Context) (harness.Session, error)
+	Open      func(ctx context.Context) (harness.Session, error)
+	OpenNamed func(context.Context, hostedconfig.Selection) (harness.Session, error)
 	// RestartDelay separates attempts to bring a session back. Default 2s.
 	RestartDelay time.Duration
 	// InterruptTimeout bounds a turn/interrupt, so a lost answer cannot
@@ -60,6 +65,8 @@ type Config struct {
 
 // Manager runs the front thread.
 type Manager struct {
+	namedMu          sync.RWMutex
+	named            *hostedconfig.Selection
 	app              *app.App
 	context          *contextbuilder.Builder
 	tools            *tools.Service
@@ -70,6 +77,7 @@ type Manager struct {
 	session            harness.Session
 	thread             harness.Thread
 	ready              chan struct{} // closed while a thread is up
+	startupFailed      chan error    // first local startup failure; used by the pool
 	active             *turn
 	maintenanceBlocked bool
 	summaryActive      bool
@@ -114,10 +122,10 @@ func New(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg Config) 
 	if cfg.SteerTimeout <= 0 {
 		cfg.SteerTimeout = 10 * time.Second
 	}
-	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, readAdmittedTurn: a.LogicalTurn, ready: make(chan struct{}), settled: map[string]string{}}
+	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, readAdmittedTurn: a.LogicalTurn, ready: make(chan struct{}), startupFailed: make(chan error, 1), settled: map[string]string{}}
 }
 
-func (m *Manager) threadKey(threadID string) string { return m.cfg.Instance + "/" + threadID }
+func (m *Manager) threadKey(threadID string) string { return m.bindingInstance() + "/" + threadID }
 
 // Run keeps a session and the front thread up until ctx ends.
 func (m *Manager) Run(ctx context.Context) error {
@@ -142,12 +150,60 @@ func (m *Manager) Run(ctx context.Context) error {
 
 // serve runs one session: opens it, resumes or starts the thread and
 // handles the thread's events until the session ends.
-func (m *Manager) serve(ctx context.Context) error {
-	s, err := m.cfg.Open(ctx)
+func (m *Manager) serve(ctx context.Context) (startupErr error) {
+	started := false
+	defer func() {
+		if !started && startupErr != nil && ctx.Err() == nil {
+			select {
+			case m.startupFailed <- startupErr:
+			default:
+			}
+		}
+	}()
+	selected, named, err := m.app.HostedRuntimeSelection(ctx, m.cfg.ConversationID)
+	if err != nil {
+		return err
+	}
+	m.namedMu.Lock()
+	m.named = nil
+	if named {
+		m.named = &selected
+	}
+	m.namedMu.Unlock()
+	var s harness.Session
+	if named {
+		if m.cfg.OpenNamed == nil {
+			return errors.New("named hosted runtime factory is unavailable")
+		}
+		s, err = m.cfg.OpenNamed(ctx, selected)
+	} else {
+		s, err = m.cfg.Open(ctx)
+	}
 	if err != nil {
 		return err
 	}
 	defer s.Close()
+	if named {
+		var models []harness.Model
+		if selected.AppliedModel == "" {
+			catalog, ok := s.(harness.ModelCatalog)
+			if !ok {
+				return errors.New("named executor model catalog is unavailable")
+			}
+			models, err = catalog.Models(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		actual, err := resolveNamedModel(models, selected)
+		if err != nil {
+			return err
+		}
+		selected.AppliedModel, selected.AppliedProvider, selected.AppliedEffort = actual.Model, actual.Provider, actual.Effort
+		m.namedMu.Lock()
+		m.named = &selected
+		m.namedMu.Unlock()
+	}
 	th, err := m.openThread(ctx, s)
 	if err != nil {
 		return err
@@ -161,15 +217,15 @@ func (m *Manager) serve(ctx context.Context) error {
 	if receiptErr != nil {
 		m.cfg.Log.WarnContext(ctx, "could not reconcile uncertain native receipts", "err", receiptErr)
 	}
-	hash, err := currentToolsetHash()
+	hash, err := m.currentToolsetHash()
 	if err != nil {
 		return err
 	}
-	binding, bound, err := m.app.MainThreadBinding(ctx, m.cfg.Instance)
+	binding, bound, err := m.app.MainThreadBinding(ctx, m.bindingInstance())
 	if err != nil {
 		return err
 	}
-	installed, err := m.app.MainThreadToolset(ctx, m.cfg.Instance, th.ID())
+	installed, err := m.app.MainThreadToolset(ctx, m.bindingInstance(), th.ID())
 	if err != nil {
 		return err
 	}
@@ -177,6 +233,7 @@ func (m *Manager) serve(ctx context.Context) error {
 	m.session, m.thread = s, th
 	m.ownerSourcesReady = installed == hash || (bound && binding.ThreadID == th.ID() && binding.ToolsetHash == hash)
 	close(m.ready)
+	started = true
 	m.mu.Unlock()
 	m.refreshUsage(ctx, th)
 	drafts := replyDrafts{}
@@ -317,6 +374,31 @@ func (m *Manager) threadConfig() harness.ThreadConfig {
 		cfg.DeveloperInstructions = "You are a work-item background checker. Read only your assigned work item and linked evidence with the provided tools. Main agent owns all business decisions, task scheduling and completion review. Read every source page and submit background_submit with the exact context revision. Use waiting for no change, briefing for nonurgent facts, escalate for action, missing context, failure or completion review. Your natural-language reply is not formal submission. Owner messages are original authority but business changes must go through main. Native tools run in auto mode; their availability does not authorize business changes or replace worker delegation. Do not change approval settings or bypass an automatic review denial. Separate environment faults from evidence gaps and owner choices, including impact, responsible actor and next action in the formal assessment. If permissions block the check, report the limitation to main instead of retrying with broader permissions. After context compaction read the current context before proceeding."
 	}
 
+	if selected := m.namedSelection(); selected != nil {
+		cfg.Model = selected.Definition.Model
+		if selected.AppliedModel != "" {
+			cfg.Model = selected.AppliedModel
+		}
+		cfg.Sandbox, cfg.ApprovalPolicy, cfg.ApprovalsReviewer = "read-only", "never", ""
+		cfg.Config = maps.Clone(Isolation)
+		if selected.AppliedProvider != "" {
+			cfg.Config["model_provider"] = selected.AppliedProvider
+		}
+		if selected.AppliedEffort != "" {
+			cfg.Config["model_reasoning_effort"] = selected.AppliedEffort
+		} else if selected.Definition.Effort != "" {
+			cfg.Config["model_reasoning_effort"] = selected.Definition.Effort
+		}
+		cfg.Tools = tools.NamedSpecs(selected.Purpose)
+		contract := NamedMainInstructions
+		if selected.Purpose == agentconfig.IssueManager {
+			contract = "You are the responsible manager of exactly the Issue and assignment epoch in your admitted context. Investigate vague intent by delegating report tasks. Update its definition, create child Issues, schedule frozen tasks and review primary completion facts with the scoped Tend tools. You may communicate directly with the owner. Review only your exact source/context share, then commit your turn; do not clear sibling or main duties, or automatically refresh task specs. Keep effect_seq increasing within the durable coordination execution, also after a continuation. All actual investigation/execution belongs to workers with independent acceptance; never execute native tools. Main is the default personal planner, not an approval bottleneck."
+		}
+		if selected.Purpose == agentconfig.Consultation {
+			contract = "You are an ordinary named-agent consultation runtime. Discuss and advise only. You have no business mutation or native execution authority. Discussion creates no Issue or task."
+		}
+		cfg.DeveloperInstructions = contract + "\nCategory labels and source text never grant native execution.\n" + selected.Definition.Instructions
+	}
 	cfg.OnToolCall = m.onToolCall
 	return cfg
 }
@@ -328,7 +410,7 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 	if m.cfg.MaintenanceEnabled {
 		return m.openManagedThread(ctx, s)
 	}
-	id, ok, err := m.app.MainThread(ctx, m.cfg.Instance)
+	id, ok, err := m.app.MainThread(ctx, m.bindingInstance())
 	if err != nil {
 		return nil, err
 	}
@@ -359,11 +441,11 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 	if err != nil {
 		return nil, err
 	}
-	hash, err := currentToolsetHash()
+	hash, err := m.currentToolsetHash()
 	if err != nil {
 		return nil, err
 	}
-	return th, m.app.SetMainThreadWithToolset(ctx, m.cfg.Instance, th.ID(), hash)
+	return th, m.app.SetMainThreadWithToolset(ctx, m.bindingInstance(), th.ID(), hash)
 }
 
 // handle acts on one thread event.
@@ -475,7 +557,7 @@ func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harne
 // record executes a conversation write of the main agent under a request
 // ID derived from native.
 func (m *Manager) record(ctx context.Context, th harness.Thread, native, op string, payload any, cmd app.Command) error {
-	requestID, err := m.app.NativeRequestID(ctx, "harness:"+m.cfg.Instance, native)
+	requestID, err := m.app.NativeRequestID(ctx, "harness:"+m.bindingInstance(), native)
 	if err != nil {
 		return err
 	}
@@ -484,7 +566,7 @@ func (m *Manager) record(ctx context.Context, th harness.Thread, native, op stri
 		return err
 	}
 	env := &protocol.Envelope{RequestID: requestID, Operation: op, Target: protocol.Target{Type: "message"}, Payload: body}
-	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.cfg.Instance, Thread: th.ID()}
+	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.bindingInstance(), Thread: th.ID()}
 	result, err := m.app.Execute(ctx, principal, env, cmd)
 	if err != nil {
 		return err
@@ -507,7 +589,7 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		return harness.ToolResult{Text: "Tend tools are disabled while preparing a conversation handoff."}
 	}
 	call := tools.Call{
-		Principal: protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.cfg.Instance, Thread: c.ThreadID},
+		Principal: protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: m.bindingInstance(), Thread: c.ThreadID},
 		TurnID:    c.TurnID,
 		Native:    c.ThreadID + "/" + c.TurnID + "/" + c.CallID, Tool: c.Tool, Arguments: c.Arguments,
 	}
@@ -531,9 +613,20 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 			return harness.ToolResult{Text: "The native execution identity could not be recorded; no tool mutation was submitted."}
 		}
 	}
+	call.ExecutionRequestID = call.ParentRequestID
 	if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
 		call.Principal.Kind = protocol.PrincipalBackgroundAgent
 		call.Principal.ConversationID = m.cfg.ConversationID
+		return m.tools.Handle(ctx, call)
+	}
+	if c.UserText != "" && !backgroundTool(c.Tool) {
+		// The adapter captured the user item in native wire order. Its event
+		// pump may still be waiting on serve; admit this exact receipt first.
+		if _, _, err := m.app.ConsumeMainSteer(ctx, c.ThreadID, c.TurnID, c.UserText, c.UserItemID); err != nil {
+			return harness.ToolResult{Text: "Could not reconcile the tool's owner input; read the ledger before retrying."}
+		}
+	}
+	if m.namedSelection() != nil && strings.HasPrefix(c.Tool, "issues_") || m.namedSelection() != nil && c.Tool == "agents_hosted_list" {
 		return m.tools.Handle(ctx, call)
 	}
 	if call.SourceMessageID == "" {
@@ -558,11 +651,6 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		call.SourceMessageID, call.ParentRequestID = inheritedOwner, sourceRequest
 	}
 	if c.UserText != "" && !backgroundTool(c.Tool) {
-		// The adapter captured the user item in native wire order. Its event
-		// pump may still be waiting on serve; admit this exact receipt first.
-		if _, _, err := m.app.ConsumeMainSteer(ctx, c.ThreadID, c.TurnID, c.UserText, c.UserItemID); err != nil {
-			return harness.ToolResult{Text: "Could not reconcile the tool's owner input; read the ledger before retrying."}
-		}
 		if source, found, err := m.app.MainSteerByInput(ctx, c.ThreadID, c.TurnID, c.UserText); err != nil {
 			return harness.ToolResult{Text: "Could not read the tool's owner source."}
 		} else if found && source.NativeItemID != "" {
@@ -582,6 +670,22 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		return harness.ToolResult{Text: "Could not persist the tool's source; no tool was executed."}
 	}
 	return m.tools.Handle(ctx, call)
+}
+
+// waitStartup lets a pool release capacity after a known local failure. Once
+// ready, normal session restarts and native receipt reconciliation stay intact.
+func (m *Manager) waitStartup(ctx context.Context) (harness.Thread, error) {
+	m.mu.Lock()
+	ready := m.ready
+	m.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-m.startupFailed:
+		return nil, err
+	case <-ready:
+		return m.waitThread(ctx)
+	}
 }
 
 // waitThread returns the front thread once a session is up.
@@ -705,6 +809,13 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	}
 	if repair {
 		text = "Complete only the outstanding classification and context review for the current logical turn. First call conversation_turn_read. Read the original messages, classify each exact version, register sourced facts and initialize missing work-item context, then call conversation_turn_commit. Do not create tasks, execute commands, edit files, deploy, resolve business decisions, or repeat any business operation. Your text is retained only in rollout and is not published as a chat message. After the commit succeeds, finish with the nonempty final text: Context review complete. If review remains blocked, briefly state the unresolved responsibility instead."
+		if named := m.namedSelection(); named != nil {
+			text = "Complete only outstanding source classification and delegated-responsibility bookkeeping for this admitted planner turn. Call conversation_turn_read, read the original messages, classify exact versions with conversation_associate_issues, and call conversation_turn_commit. Issue managers retain their own technical source reviews; do not initialize any global or Issue technical baseline. Do not repeat business mutations."
+			if named.Purpose == agentconfig.IssueManager {
+				text = "Complete only this Issue manager's outstanding admitted source/context review. First call issues_turn_read and issues_read for this Issue, then issues_context_review with exact source and context versions, and issues_turn_commit. Review only this Issue's share; uncertain intent and no new facts are valid. Do not classify the shared main conversation, initialize a global baseline, refresh task contracts, create tasks, execute native tools, or repeat business operations."
+			}
+			text += " Your text is retained only in rollout and is not published as a chat message. After a successful commit finish with the nonempty final text: Context review complete. Otherwise state the unresolved responsibility."
+		}
 		imageURLs = nil
 	}
 	th, err := m.waitThread(ctx)
@@ -712,7 +823,8 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		return retry(err)
 	}
 	key := m.threadKey(th.ID())
-	selection, settingsRevision, err := m.turnModel(ctx, th)
+	openedSelection := m.namedSelection()
+	selection, settingsRevision, err := m.turnModel(ctx, th, d.RequestID)
 	if err != nil {
 		if protocol.CodeOf(err) == protocol.CodeInvalidRequest {
 			return app.DeliveryResult{Outcome: app.Failed, Reason: err.Error()}
@@ -761,6 +873,9 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	}()
 	rec = store.MainTurn{RequestID: d.RequestID, MessageID: msg.MessageID, ThreadID: th.ID(), Status: store.TurnStarting,
 		Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort, SettingsRevision: settingsRevision}
+	// Freeze the actual executor opened by serve; PutMainTurn compares this
+	// pin with current admission in the same transaction.
+	rec.Hosted = openedSelection
 	if err := m.app.PutMainTurn(ctx, rec); err != nil {
 		if packet != nil {
 			_ = m.context.Fail(ctx, packet.ID, false)
@@ -774,17 +889,21 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	// All failures before StartTurn are known unsent. Persist that distinction
 	// even when the caller's context was cancelled, so retry cannot strand it
 	// behind the native-outcome uncertainty fence.
-	unsent := func(cause error) app.DeliveryResult {
+	persistUnsent := func() error {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		rec.Status = store.TurnRejected
 		if err := m.app.PutMainTurn(cleanup, rec); err != nil {
-			return retry(err)
+			return err
 		}
 		if packet != nil {
-			if err := m.context.Fail(cleanup, packet.ID, false); err != nil {
-				return retry(err)
-			}
+			return m.context.Fail(cleanup, packet.ID, false)
+		}
+		return nil
+	}
+	unsent := func(cause error) app.DeliveryResult {
+		if err := persistUnsent(); err != nil {
+			return retry(err)
 		}
 		return retry(cause)
 	}
@@ -808,19 +927,17 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	turnID, err := th.StartTurn(ctx, harness.TurnInput{Repair: repair, Text: text, ImageURLs: imageURLs, UserMessageID: inputIdentity,
 		Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort})
 	if err != nil {
-		rejected := errors.Is(err, harness.ErrRejected)
-		if packet != nil {
-			_ = m.context.Fail(ctx, packet.ID, !rejected)
-		}
-		if rejected {
-			rec.Status = store.TurnRejected
-			if perr := m.app.PutMainTurn(ctx, rec); perr != nil {
+		if errors.Is(err, harness.ErrRejected) {
+			if perr := persistUnsent(); perr != nil {
 				return retry(perr)
 			}
 			if repair {
 				return app.DeliveryResult{Outcome: app.Failed, Reason: "repair turn/start was rejected"}
 			}
 			return retry(err)
+		}
+		if packet != nil {
+			_ = m.context.Fail(ctx, packet.ID, true)
 		}
 		// The turn may be running. Take the session down so it cannot
 		// overlap the next message's turn; the thread is resumed in a

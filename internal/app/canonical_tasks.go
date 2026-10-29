@@ -159,6 +159,27 @@ func validateCanonicalBoundPlan(ctx context.Context, x *Exec, q store.Querier, i
 			}
 		}
 	}
+	if x.coordinationExecution != nil {
+		if err := domain.ValidateIssue(plan, previous); err != nil {
+			return err
+		}
+		projected := protocol.WorkItem{WorkItemID: issue, WorkItemPlan: plan}
+		var prior *protocol.WorkItem
+		if previous != nil {
+			prior = &protocol.WorkItem{WorkItemID: issue, WorkItemPlan: *previous}
+		}
+		for i := range plan.Stages {
+			if err := validateHostedIssueEvidence(ctx, x, q, projected, prior, plan.Stages[i].Evidence); err != nil {
+				return err
+			}
+		}
+		for i := range plan.FollowOns {
+			if err := validateHostedIssueEvidence(ctx, x, q, projected, prior, plan.FollowOns[i].Evidence); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	return validateCanonicalOwnerPlan(x, plan, previous)
 }
 
@@ -167,6 +188,16 @@ func validateCanonicalBoundPlan(ctx context.Context, x *Exec, q store.Querier, i
 func canonicalTaskPlannerAccess(ctx context.Context, q store.Querier, x *Exec) error {
 	if x.Principal.Kind == protocol.PrincipalOwner {
 		return nil
+	}
+	if x.coordinationExecution != nil && x.coordinationExecution.IssueID != "" {
+		primary, err := store.GetTaskIssueOwner(ctx, q, x.Env.Target.ID)
+		if err != nil {
+			return err
+		}
+		if primary == x.coordinationExecution.IssueID {
+			return nil
+		}
+		return protocol.Errorf(protocol.CodeForbidden, "task is outside the admitted Issue")
 	}
 	scope, err := store.ResolveTaskIssueScope(ctx, q, x.Env.Target.ID)
 	if err != nil {

@@ -363,6 +363,195 @@
       "title": "AgentIdentity",
       "type": "object"
     },
+    "AgentInventoryAvailability": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "available",
+        "reason"
+      ],
+      "title": "AgentInventoryAvailability",
+      "type": "object"
+    },
+    "AgentInventoryDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/AgentInventoryAvailability"
+        },
+        "categories": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "identity": {
+          "$ref": "#/definitions/AgentIdentity"
+        },
+        "purposes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registration": {
+          "type": "string"
+        },
+        "requested_effort": {
+          "type": "string"
+        },
+        "requested_model": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "runtime_binding_ref": {
+          "$ref": "#/definitions/AgentRuntimeReference"
+        }
+      },
+      "required": [
+        "identity",
+        "revision",
+        "display_name",
+        "runtime_binding_ref",
+        "categories",
+        "purposes",
+        "requested_model",
+        "requested_effort",
+        "enabled",
+        "registration",
+        "availability"
+      ],
+      "title": "AgentInventoryDefinition",
+      "type": "object"
+    },
+    "AgentInventoryProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "agents": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentInventoryDefinition"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_environment_id": {
+          "type": "string"
+        },
+        "format_version": {
+          "type": "integer"
+        },
+        "runtimes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentInventoryRuntime"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format_version",
+        "execution_environment_id",
+        "source_kind",
+        "runtimes",
+        "agents"
+      ],
+      "title": "AgentInventoryProjection",
+      "type": "object"
+    },
+    "AgentInventoryRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/AgentInventoryAvailability"
+        },
+        "cli": {
+          "type": "string"
+        },
+        "declared_purposes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "registration": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "runtime_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_id",
+        "revision",
+        "kind",
+        "declared_purposes",
+        "enabled",
+        "registration",
+        "availability"
+      ],
+      "title": "AgentInventoryRuntime",
+      "type": "object"
+    },
     "AgentRecoveryView": {
       "additionalProperties": false,
       "properties": {
@@ -1562,8 +1751,14 @@
             }
           ]
         },
+        "read_only": {
+          "type": "boolean"
+        },
         "revision": {
           "type": "integer"
+        },
+        "source": {
+          "type": "string"
         }
       },
       "required": [
@@ -2389,6 +2584,27 @@
       "title": "ExplainDecisionPayload",
       "type": "object"
     },
+    "FinishIssueAssignmentPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "handoff_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "handoff_id",
+        "reason"
+      ],
+      "title": "FinishIssueAssignmentPayload",
+      "type": "object"
+    },
     "FollowupCondition": {
       "additionalProperties": false,
       "properties": {
@@ -2818,6 +3034,39 @@
       "title": "HostView",
       "type": "object"
     },
+    "HostedAgentInventory": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_request_id": {
+          "type": "string"
+        },
+        "configuration_revision": {
+          "type": "integer"
+        },
+        "main_agent_id": {
+          "type": "string"
+        },
+        "projection": {
+          "$ref": "#/definitions/AgentInventoryProjection"
+        },
+        "public_sha256": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "configuration_revision",
+        "public_sha256",
+        "main_agent_id",
+        "accepted_request_id",
+        "state",
+        "projection"
+      ],
+      "title": "HostedAgentInventory",
+      "type": "object"
+    },
     "InitialWorkItemContext": {
       "additionalProperties": false,
       "properties": {
@@ -2920,6 +3169,74 @@
       ],
       "title": "IssueAssigneeKind",
       "type": "string"
+    },
+    "IssueAssignmentPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "assignee",
+        "reason"
+      ],
+      "title": "IssueAssignmentPayload",
+      "type": "object"
+    },
+    "IssueContextReview": {
+      "additionalProperties": false,
+      "properties": {
+        "confirmed_fact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "context_revision": {
+          "type": "integer"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "retired_fact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/LogicalTurnReview"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "context_revision",
+        "sources",
+        "summary"
+      ],
+      "title": "IssueContextReview",
+      "type": "object"
     },
     "IssueControlPayload": {
       "additionalProperties": false,
@@ -7305,6 +7622,9 @@
     "ExplainDecisionPayload": {
       "$ref": "#/definitions/ExplainDecisionPayload"
     },
+    "FinishIssueAssignmentPayload": {
+      "$ref": "#/definitions/FinishIssueAssignmentPayload"
+    },
     "FollowupHistoryPage": {
       "$ref": "#/definitions/FollowupHistoryPage"
     },
@@ -7314,8 +7634,17 @@
     "FollowupSpec": {
       "$ref": "#/definitions/FollowupSpec"
     },
+    "HostedAgentInventory": {
+      "$ref": "#/definitions/HostedAgentInventory"
+    },
     "InterruptReplyPayload": {
       "$ref": "#/definitions/InterruptReplyPayload"
+    },
+    "IssueAssignmentPayload": {
+      "$ref": "#/definitions/IssueAssignmentPayload"
+    },
+    "IssueContextReview": {
+      "$ref": "#/definitions/IssueContextReview"
     },
     "IssueControlPayload": {
       "$ref": "#/definitions/IssueControlPayload"

@@ -164,13 +164,15 @@ type LogicalContextReview struct {
 	Revision   int64  `json:"revision"`
 }
 type LogicalTurnState struct {
-	Awaiting       []PendingClarification `json:"awaiting"`
-	ID             string                 `json:"logical_turn_id"`
-	Status         string                 `json:"status"`
-	Reason         string                 `json:"reason"`
-	RepairAttempts int                    `json:"repair_attempts"`
-	Messages       []MessageAssociations  `json:"messages"`
-	Contexts       []LogicalContextReview `json:"contexts"`
+	CoordinationExecutionID string                 `json:"coordination_execution_id,omitempty"`
+	NextEffectSeq           int64                  `json:"next_effect_seq,omitempty"`
+	Awaiting                []PendingClarification `json:"awaiting"`
+	ID                      string                 `json:"logical_turn_id"`
+	Status                  string                 `json:"status"`
+	Reason                  string                 `json:"reason"`
+	RepairAttempts          int                    `json:"repair_attempts"`
+	Messages                []MessageAssociations  `json:"messages"`
+	Contexts                []LogicalContextReview `json:"contexts"`
 }
 
 type TurnClarification struct {

@@ -20,7 +20,7 @@ var ownerCommands = commandMap(
 	app.CanonicalOwnerIssueCommand{Action: "close"}, app.CanonicalOwnerIssueCommand{Action: "reopen"},
 	app.CanonicalOwnerIssueCommand{Action: "reparent"}, app.CanonicalOwnerIssueCommand{Action: "dependencies"},
 	app.CanonicalOwnerIssueCommand{Action: "review_sources"}, app.CanonicalOwnerIssueCommand{Action: "review_completions"},
-	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetMessageAssociations{}, app.OpenAgentConversation{},
+	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.HostedIssueAssignment{}, app.HostedIssueAssignment{Finish: true}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetMessageAssociations{}, app.OpenAgentConversation{},
 	app.FollowupCommand{Action: "create"},
 	app.FollowupCommand{Action: "update"},
 	app.FollowupCommand{Action: "pause"},

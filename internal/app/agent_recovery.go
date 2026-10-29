@@ -272,11 +272,22 @@ func (a *App) admitAgentRecovery(ctx context.Context, request, thread string, co
 			return a.endAgentRecovery(ctx, tx, r, "exhausted", "Automatic rate-limit recovery deadline elapsed; attention required.", now)
 		}
 		if len(expectedRevision) != 0 {
-			settings, err := store.GetConversationSettings(ctx, tx.Q(), r.ConversationID)
-			if err != nil {
+			var revision int64
+			original, err := store.GetHostedExecution(ctx, tx.Q(), r.RootRequestID)
+			if err == nil {
+				// Named recovery belongs to the original frozen configuration,
+				// not the legacy settings projection or a reloaded definition.
+				revision = original.Selection.ConfigurationRevision
+			} else if !errors.Is(err, store.ErrNotFound) {
 				return err
+			} else {
+				settings, err := store.GetConversationSettings(ctx, tx.Q(), r.ConversationID)
+				if err != nil {
+					return err
+				}
+				revision = settings.Revision
 			}
-			if settings.Revision != expectedRevision[0] {
+			if revision != expectedRevision[0] {
 				return nil
 			}
 		}
@@ -532,7 +543,15 @@ func (a *App) DeferAgentReceiptRead(ctx context.Context, conversation string) (b
 			return err
 		}
 		n, err := res.RowsAffected()
-		pending = n > 0
+		if err != nil {
+			return err
+		}
+		ordinary, err := tx.Exec(ctx, `UPDATE native_turn_receipts_pending SET next_reconcile_at=? WHERE request_id IN (SELECT t.request_id FROM main_turns t JOIN hosted_executions h ON h.execution_id=t.request_id WHERE h.conversation_id=? AND NOT EXISTS(SELECT 1 FROM agent_recoveries r WHERE r.active_request_id=t.request_id OR r.successor_message_id=t.message_id))`, a.now().Add(30*time.Second).UnixMilli(), conversation)
+		if err != nil {
+			return err
+		}
+		count, err := ordinary.RowsAffected()
+		pending = n+count > 0
 		return err
 	})
 	return pending, err

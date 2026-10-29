@@ -168,6 +168,11 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 			if e != nil {
 				return Outcome{}, e
 			}
+			managers, e := hostedReparentBlockers(ctx, tx.Q(), current.IssueID)
+			if e != nil {
+				return Outcome{}, e
+			}
+			f.ManagerTurns = append(f.ManagerTurns, managers...)
 			err = domain.ValidateIssueReparentFacts(f)
 		}
 	case "review_completions":
@@ -192,7 +197,9 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		if action == "finish_cancel" && (endpoint.Closure != nil || strings.TrimSpace(common.Reason) == "") {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "cancellation requires an explicit reason, not a completion closure")
 		}
-		if err = applyCanonicalFollowOnDispositions(&next.Plan, endpoint.FollowOnDispositions); err != nil {
+		if err = applyCanonicalFollowOnDispositions(&next.Plan, endpoint.FollowOnDispositions, func(evidence []protocol.WorkItemEvidence) error {
+			return canonicalEndpointEvidence(ctx, x, tx.Q(), next, evidence)
+		}); err != nil {
 			return Outcome{}, err
 		}
 		if err = validateCanonicalBoundPlan(ctx, x, tx.Q(), current.IssueID, next.Plan, &current.Plan); err != nil {
@@ -215,11 +222,15 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 			next.Closure = endpoint.Closure
 			// This slice accepts the explicit current owner's endpoint, not a caller
 			// supplied acceptance/observation snapshot or a request/event proof chain.
-			if err = validateCanonicalOwnerEndpointEvidence(next.Closure.Evidence); err != nil {
+			if err = canonicalEndpointEvidence(ctx, x, tx.Q(), next, next.Closure.Evidence); err != nil {
 				return Outcome{}, err
 			}
 			projection := protocol.WorkItem{WorkItemPlan: next.Plan, Closure: next.Closure}
-			if err = domain.ValidateIssueClosure(projection, *next.Closure); err != nil {
+			validateClosure := domain.ValidateIssueClosure
+			if x.coordinationExecution != nil {
+				validateClosure = domain.ValidateResponsibleIssueClosure
+			}
+			if err = validateClosure(projection, *next.Closure); err != nil {
 				return Outcome{}, err
 			}
 			if next.Closure.Kind == protocol.WorkItemClosureCompleted {
@@ -270,7 +281,7 @@ func canonicalLifecycleEvent(action string) string {
 	return map[string]string{"pause": "issue.paused", "resume": "issue.resumed", "cancel": "issue.cancelling", "finish_cancel": "issue.cancelled", "close": "issue.closed", "reopen": "issue.reopened", "reparent": "issue.reparented", "dependencies": "issue.dependencies_changed", "assign": "issue.assignment_confirmed", "review_sources": "issue.sources_reviewed"}[action]
 }
 
-func applyCanonicalFollowOnDispositions(plan *protocol.WorkItemPlan, dispositions []canonicalOwnerFollowOnDisposition) error {
+func applyCanonicalFollowOnDispositions(plan *protocol.WorkItemPlan, dispositions []canonicalOwnerFollowOnDisposition, validateEvidence func([]protocol.WorkItemEvidence) error) error {
 	next := *plan
 	next.FollowOns = slices.Clone(plan.FollowOns)
 	indexes := map[string]int{}
@@ -287,7 +298,7 @@ func applyCanonicalFollowOnDispositions(plan *protocol.WorkItemPlan, disposition
 		if next.FollowOns[i].Status != protocol.WorkItemFollowOnOpen {
 			return protocol.Errorf(protocol.CodeInvalidTransition, "only open follow-ons admit disposition")
 		}
-		if err := validateCanonicalOwnerEndpointEvidence(d.Evidence); err != nil {
+		if err := validateEvidence(d.Evidence); err != nil {
 			return err
 		}
 		next.FollowOns[i].Status = protocol.WorkItemFollowOnResolved

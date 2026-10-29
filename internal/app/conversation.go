@@ -147,8 +147,14 @@ func (SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		if err := tx.BindMessage(ctx, id, "work_item", conversation.WorkItemID, "conversation"); err != nil {
 			return Outcome{}, err
 		}
-		if err := queueCoordinationNotice(ctx, x, tx, "The owner sent an original message to the work-item background conversation. Read its exact text and attachments; reconcile any business or authority changes as main coordinator.", id, p.ConversationID); err != nil {
+		var canonical bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, conversation.WorkItemID).Scan(&canonical); err != nil {
 			return Outcome{}, err
+		}
+		if !canonical {
+			if err := queueCoordinationNotice(ctx, x, tx, "The owner sent an original message to the work-item background conversation. Read its exact text and attachments; reconcile any business or authority changes as main coordinator.", id, p.ConversationID); err != nil {
+				return Outcome{}, err
+			}
 		}
 	}
 	return Outcome{
@@ -595,6 +601,24 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 		if m.Status == store.TurnStarted {
 			if _, err := tx.Exec(ctx, `UPDATE agent_recoveries SET status='running',updated_at=? WHERE active_request_id=? AND status='starting'`, now, m.RequestID); err != nil {
 				return err
+			}
+		}
+		if m.Status == store.TurnStarting {
+			conversation, err := store.MessageConversation(ctx, tx.Q(), m.MessageID)
+			if err != nil {
+				return err
+			}
+			_, named, err := a.hostedSelectionForAdmission(ctx, tx.Q(), m.RequestID, conversation)
+			if err != nil {
+				return err
+			}
+			if named && m.Hosted == nil {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "named coordination admission requires its frozen selection")
+			}
+			if m.Hosted != nil {
+				if err := a.freezeHostedExecution(ctx, tx, m, now); err != nil {
+					return err
+				}
 			}
 		}
 		if err := a.registerLogicalTurn(ctx, tx, m, now); err != nil {

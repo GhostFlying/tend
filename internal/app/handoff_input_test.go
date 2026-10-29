@@ -338,3 +338,38 @@ func TestSummaryDeltaCorrectsPriorUnknownNativeDeliveryState(t *testing.T) {
 		t.Fatalf("state-only correction disappeared; prior=%s current=%s", first.Observations, delta.Observations)
 	}
 }
+
+func TestSummaryWithdrawnOwnerInputRemainsRedacted(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	if _, err := h.app.BindMainThread(ctx, "main", "source", "schema", ""); err != nil {
+		t.Fatal(err)
+	}
+	const body = "WITHDRAWN_OWNER_REQUEST_MUST_NOT_SURVIVE_AS_REFERENCE"
+	op := h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{Body: body}, nil), SubmitMessage{})
+	var sent struct {
+		MessageID string `json:"message_id"`
+	}
+	if op.Status != protocol.OpAccepted || json.Unmarshal(op.Result, &sent) != nil {
+		t.Fatal(op)
+	}
+	var control protocol.MessageControl
+	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		control, err = store.MessageControl(ctx, tx.Q(), sent.MessageID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if op := h.exec(owner, h.env("conversation.withdraw_message", protocol.Target{Type: "message", ID: sent.MessageID}, protocol.WithdrawMessagePayload{}, rev(control.Revision)), WithdrawMessage{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	input, err := h.app.HandoffSummaryInput(ctx, "main", 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(input.Observations)
+	if strings.Contains(text, body) || strings.Contains(text, `"unconfirmed_owner_input":true`) || !strings.Contains(text, `"withdrawn":true`) || !strings.Contains(text, sent.MessageID) {
+		t.Fatal("withdrawn request became an unknown historical authorization", text)
+	}
+}

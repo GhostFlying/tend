@@ -66,6 +66,19 @@ func (c BackgroundCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		// Cancelled, unclaimed instructions remain available to the owner's
 		// audit API, but are not reintroduced through the model's source tool.
 		for i := range page.Sources {
+			message, err := store.GetMessage(ctx, tx.Q(), page.Sources[i].MessageID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			// Project an empty body through the same source filter. A nonempty
+			// result is its withholding marker, not any original material.
+			visible := protocol.ConversationItem{MessageID: message.MessageID, Author: message.Author}
+			if err := store.HideUndeliveredOwner(ctx, tx.Q(), &visible); err != nil {
+				return Outcome{}, err
+			}
+			if visible.Body != "" {
+				page.Sources[i].Body, page.Sources[i].Data = visible.Body, nil
+			}
 			if page.Sources[i].CancelledAt != 0 {
 				page.Sources[i].Body = "[cancelled before delivery; instruction withheld]"
 				page.Sources[i].Data = nil

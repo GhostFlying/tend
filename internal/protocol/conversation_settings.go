@@ -12,6 +12,8 @@ type ConversationModel struct {
 // ConversationSettingsView describes the shared settings for the next turn.
 // A running turn keeps the settings it started with (D73).
 type ConversationSettingsView struct {
+	Source    string              `json:"source,omitempty"`
+	ReadOnly  bool                `json:"read_only,omitempty"`
 	Enabled   bool                `json:"enabled"`
 	Available bool                `json:"available"`
 	Revision  int64               `json:"revision"`
