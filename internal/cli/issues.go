@@ -19,6 +19,9 @@ var issueOperations = map[string]string{
 }
 
 func runIssue(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "deadline" {
+		return runPlanningRecord(ctx, e, args[1:], true)
+	}
 	if len(args) == 0 {
 		return usagef("issue expects list|show|create|update|pause|resume|cancel|finish-cancel|close|reopen|reparent|dependencies|review-sources|review-completions|create-task|update-task|request|replay")
 	}

@@ -40,6 +40,9 @@ const usage = `usage: tend <command> [arguments]
 Owner commands:
   login --server <url>             get an owner token for this machine
   status [--project <p>] [--json]  projects with their tasks and queue, open decisions and hosts
+  attention list|show|create|respond|confirm  original questions and human actions
+  next-action list|put                    personal action / Issue planning order
+  issue deadline list|show|put|cancel     sourced time and bounded reminders
   issue list|show|create|update|<control>  canonical issues; JSON input/output
   issue create-task|update-task          owner task contracts, independent workers
   issue request|replay                   inspect/replay an original request
@@ -69,6 +72,10 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	switch cmd {
 	case "login":
 		return report(e, runLogin(ctx, e, rest))
+	case "next-action", "planner":
+		return report(e, runPlanningRecord(ctx, e, rest, false))
+	case "attention":
+		return report(e, runAttention(ctx, e, rest))
 	case "issue":
 		return report(e, runIssue(ctx, e, rest))
 	case "category":

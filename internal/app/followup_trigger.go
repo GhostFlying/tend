@@ -13,6 +13,10 @@ import (
 )
 
 func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.FollowupRule, w protocol.WorkItem, manual bool) (bool, error) {
+	before := r.Revision
+	if handled, err := evaluateDeadlineFollowup(ctx, x, tx, r); handled || err != nil {
+		return r.Revision != before, err
+	}
 	if !manual && r.Status == "cancelled" {
 		return false, nil
 	}

@@ -85,12 +85,27 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 				return err
 			}
 		}
-		m, err := a.hostedServiceableHead(ctx, tx.Q(), destination)
-		if errors.Is(err, store.ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
+		var m store.OutboxMessage
+		for {
+			var err error
+			m, err = a.hostedServiceableHead(ctx, tx.Q(), destination)
+			if errors.Is(err, store.ErrNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if destination == MainThreadDestination && m.Status == store.OutboxPending && m.Operation == OpHandleEvent {
+				x := &Exec{Env: &protocol.Envelope{RequestID: m.RequestID}, IDs: a.ids, Now: a.now()}
+				changed, err := cancelExpiredDeadlineNear(ctx, x, tx, m.PayloadJSON)
+				if err != nil {
+					return err
+				}
+				if changed {
+					continue
+				}
+			}
+			break
 		}
 		if m.Status == store.OutboxSending {
 			// Left over by a previous process; reconciliation decides.

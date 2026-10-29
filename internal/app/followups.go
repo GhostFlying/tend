@@ -318,12 +318,12 @@ func cancelPendingFollowups(ctx context.Context, x *Exec, tx *store.Tx, id strin
 	if err := cancelBackgroundFollowups(ctx, x, tx, id); err != nil {
 		return err
 	}
-	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT f.message_id FROM followup_occurrences f WHERE f.rule_id=? AND f.status='queued' AND EXISTS(SELECT 1 FROM outbox o WHERE o.destination='main_thread' AND json_extract(o.payload_json,'$.message_id')=f.message_id AND o.status='pending') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=f.message_id AND t.status<>'rejected')`, id)
+	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT f.message_id FROM followup_occurrences f WHERE f.rule_id=? AND f.status='queued' AND EXISTS(SELECT 1 FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND json_extract(o.payload_json,'$.message_id')=f.message_id AND o.status='pending') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=f.message_id AND t.status<>'rejected')`, id)
 	if err != nil {
 		return err
 	}
 	for _, message := range ids {
-		if _, err := tx.Exec(ctx, `UPDATE outbox SET status='cancelled' WHERE destination='main_thread' AND json_extract(payload_json,'$.message_id')=? AND status='pending'`, message); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE outbox SET status='cancelled' WHERE (destination='main_thread' OR destination LIKE 'background_thread:%') AND json_extract(payload_json,'$.message_id')=? AND status='pending'`, message); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE followup_occurrences SET status='cancelled' WHERE message_id=?`, message); err != nil {

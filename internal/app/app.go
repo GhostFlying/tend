@@ -289,7 +289,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			}
 			queued = out.Notify || x.FollowupQueued || len(out.Outbox) > 0
 			for _, event := range out.Events {
-				queued = queued || wakesMain(x.Principal, event.Kind)
+				queued = queued || wakesMain(x.Principal, event.Kind) || questionEvent(event) || event.ObjectType == "attention"
 			}
 			applied = true
 		}
@@ -388,7 +388,20 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 				return err
 			}
 		}
-		if e.Kind != "task.completed" && wakesMain(x.Principal, e.Kind) {
+		questionIssue := ""
+		if questionEvent(e) {
+			var err error
+			questionIssue, err = syncAttentionDecision(ctx, x, tx, e)
+			if err != nil {
+				return err
+			}
+		}
+		if e.Kind == "attention.changed" {
+			if err := recordAttentionNotice(ctx, x, tx, e, eventID); err != nil {
+				return err
+			}
+		}
+		if e.Kind != "task.completed" && (wakesMain(x.Principal, e.Kind) || questionIssue != "" && (e.Kind == "decision.opened" || e.Kind == "decision.answered" || e.Kind == "work_item_choice.answered")) {
 			if e.Kind == "task.context_changed" {
 				if err := recordTaskContextWake(ctx, x, tx, e, eventID); err != nil {
 					return err

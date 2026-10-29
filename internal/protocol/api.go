@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		AttentionView{}, AttentionPage{}, CreateAttentionPayload{}, UpdateAttentionPayload{}, RespondAttentionPayload{}, ConfirmAttentionPayload{}, PresentAttentionPayload{}, IssueDeadline{}, PutIssueDeadlinePayload{}, CancelIssueDeadlinePayload{}, PlannerEntry{}, PutPlannerEntryPayload{}, NextActionPage{},
 		IssueView{}, IssuePage{}, CreateIssuePayload{}, UpdateIssuePayload{}, IssueControlPayload{}, IssueEndpointPayload{}, ReparentIssuePayload{}, SetIssueDependenciesPayload{}, ReviewIssueSourcesPayload{}, ReviewIssueCompletionsPayload{}, CreateIssueTaskPayload{}, UpdateIssueTaskPayload{},
 		HostedAgentInventory{}, AgentCategory{}, PutAgentCategoryPayload{}, TaskAgentSelection{}, RunExecutionPin{}, AgentExecutor{}, IssueAssignmentPayload{}, FinishIssueAssignmentPayload{}, IssueContextReview{},
 		RepositoryRegistration{}, RegisterRepositoryPayload{}, RunnerRepository{}, RunRolloutPage{}, TokenUsageSample{}, TokenUsageView{},

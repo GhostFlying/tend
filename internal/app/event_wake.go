@@ -142,6 +142,14 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 			}
 		}
 	}
+	var attentionID string
+	if err := tx.Q().QueryRowContext(ctx, `SELECT attention_id FROM attentions WHERE decision_id=?`, d.DecisionID).Scan(&attentionID); err == nil {
+		if err := tx.BindMessage(ctx, id, "attention", attentionID, "notice"); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	if _, err := tx.InsertEvent(ctx, store.EventRow{
 		EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id,
 		ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"system"}`,
@@ -157,7 +165,13 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 		if _, err := tx.Exec(ctx, `INSERT INTO conversation_return_links(message_id,conversation_id,source_message_id) VALUES(?,?,?)`, id, conversation, d.AnsweredMessageID); err != nil {
 			return err
 		}
+		if routed, err := routeQuestionAttention(ctx, x, tx, e, id, eventID, recordedAnswer); routed || err != nil {
+			return err
+		}
 		return queueSingleEventTurn(ctx, x, tx, id, eventID, e.Kind, recordedAnswer)
+	}
+	if routed, err := routeQuestionAttention(ctx, x, tx, e, id, eventID, recordedAnswer); routed || err != nil {
+		return err
 	}
 	return queueEventTurn(ctx, x, tx, id, eventID, e.Kind, recordedAnswer)
 }
@@ -196,6 +210,9 @@ func recordWorkItemChoiceWake(ctx context.Context, x *Exec, tx *store.Tx, e Even
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO conversation_return_links(message_id,conversation_id,source_message_id) VALUES(?,?,?)`, id, conversation, c.AnswerSourceID); err != nil {
+		return err
+	}
+	if routed, err := routeQuestionAttention(ctx, x, tx, e, id, eventID, answer); routed || err != nil {
 		return err
 	}
 	return queueSingleEventTurn(ctx, x, tx, id, eventID, e.Kind, answer)

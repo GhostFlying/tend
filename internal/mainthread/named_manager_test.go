@@ -15,6 +15,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/tools"
 )
@@ -34,16 +35,26 @@ func TestNamedPlannerRepairRejectsBusinessMutation(t *testing.T) {
 func TestNamedManagerRepairRejectsBusinessMutation(t *testing.T) {
 	testNamedManagerTools(t, false, false, false, true)
 }
+func TestNamedPlannerUsesActualAttentionTools(t *testing.T) {
+	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Attention: true})
+}
+
+type namedManagerTestOptions struct{ Attention, ReadSources, Associations bool }
+
 func TestNamedManagerReadsOwnBackgroundSources(t *testing.T) {
-	testNamedManagerTools(t, false, false, false, false, true)
+	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{ReadSources: true})
 }
 func TestNamedPlannerRepairClassifiesCanonicalSource(t *testing.T) {
-	testNamedManagerTools(t, false, false, true, false, false, true)
+	testNamedManagerTools(t, false, false, true, false, namedManagerTestOptions{Associations: true})
 }
 func TestNamedPlannerClassifiesCanonicalSourceAndCommits(t *testing.T) {
-	testNamedManagerTools(t, false, false, false, false, false, true)
+	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Associations: true})
 }
-func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode, managerRepair bool, readSources ...bool) {
+func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode, managerRepair bool, options ...namedManagerTestOptions) {
+	var opts namedManagerTestOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	h := testkit.NewHarness()
 	h.Models = []harness.Model{{ID: "manager-model", Name: "native-manager-model", SupportedEfforts: []string{"high"}, DefaultEffort: "high"}}
 	var e *env
@@ -108,6 +119,56 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 			}
 		}
 		if !manager {
+			if strings.Contains(in.Text, "[Tend ledger event ") {
+				if !ownerTransfer {
+					failed <- "unexpected ledger continuation"
+					return "failed"
+				}
+				var read struct {
+					Outcome protocol.BackgroundSourcePage `json:"outcome"`
+				}
+				if !invoke("background_sources", map[string]any{}, &read) {
+					return "failed"
+				}
+				page := read.Outcome
+				if page.More || len(page.Sources) != 1 || page.Sources[0].Kind != "issue.delegated" {
+					failed <- fmt.Sprintf("owner continuation lost exact delegated source: %+v", page)
+					return "failed"
+				}
+				if !invoke("background_checkin", map[string]any{"note": "The owner retains this responsibility; no new goal or execution is authorized", "evidence_ids": []string{page.Sources[0].EventID}}, nil) {
+					return "failed"
+				}
+				var state protocol.LogicalTurnState
+				if !invoke("conversation_turn_read", map[string]any{}, &state) {
+					return "failed"
+				}
+				for _, m := range state.Messages {
+					if m.Disposition == "pending" {
+						ids := []string{}
+						for _, item := range m.Items {
+							ids = append(ids, item.WorkItemID)
+						}
+						disposition := "unassigned"
+						if len(ids) > 0 {
+							disposition = "linked"
+						}
+						if !invoke("conversation_associate", map[string]any{"message_id": m.MessageID, "content_revision": m.ContentRevision, "expected_control_revision": m.Revision, "disposition": disposition, "work_item_ids": ids}, nil) {
+							return "failed"
+						}
+					}
+				}
+				if !invoke("conversation_turn_read", map[string]any{}, &state) {
+					return "failed"
+				}
+				review := protocol.LogicalTurnCommit{Contexts: state.Contexts}
+				for _, m := range state.Messages {
+					review.Messages = append(review.Messages, protocol.LogicalTurnReview{MessageID: m.MessageID, ContentRevision: m.ContentRevision, AssociationRevision: m.Revision})
+				}
+				if !invoke("conversation_turn_commit", review, nil) {
+					return "failed"
+				}
+				return "completed"
+			}
 			var state protocol.LogicalTurnState
 			if !invoke("conversation_turn_read", map[string]any{}, &state) || len(state.Messages) == 0 {
 				return "failed"
@@ -119,7 +180,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 				if !reject("issues_create", map[string]any{"effect_seq": 1000, "payload": p}, protocol.CodeForbidden) {
 					return "failed"
 				}
-				if len(readSources) > 1 && readSources[1] {
+				if opts.Associations {
 					for _, message := range state.Messages {
 						ids := []string{}
 						for _, item := range message.Items {
@@ -150,6 +211,20 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 				Outcome protocol.Issue `json:"outcome"`
 			}
 			seq := int64(1)
+			if opts.Attention {
+				var asked struct {
+					Outcome protocol.Attention `json:"outcome"`
+				}
+				if !invoke("attentions_create", map[string]any{"effect_seq": seq, "payload": protocol.CreateAttentionPayload{Kind: "information", Title: "Personal planner retained the owner's source", SourceMessageID: source.MessageID}}, &asked) {
+					return "failed"
+				}
+				seq++
+				var view protocol.AttentionView
+				if !invoke("attentions_read", map[string]any{"attention_id": asked.Outcome.AttentionID}, &view) || view.AttentionID != asked.Outcome.AttentionID || view.BlocksClose {
+					failed <- "hosted attention lost original identity"
+					return "failed"
+				}
+			}
 			if ownerTransfer {
 				own := p
 				own.Plan.Title = "Owner retains concrete responsibility"
@@ -195,13 +270,13 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 					return "failed"
 				}
 			}
-			if !(len(readSources) > 1 && readSources[1]) {
+			if !(opts.Associations) {
 				allowOnce.Do(func() { close(allowManagers) })
 			}
 			if !invoke("issues_create", map[string]any{"effect_seq": seq, "payload": p}, &created) {
 				return "failed"
 			}
-			if len(readSources) > 1 && readSources[1] {
+			if opts.Associations {
 				var page protocol.ConversationPage
 				if !invoke("conversation_read", map[string]any{}, &page) {
 					return "failed"
@@ -220,8 +295,26 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 					return "failed"
 				}
 			}
-			if len(readSources) > 1 && readSources[1] {
+			if opts.Associations {
 				allowOnce.Do(func() { close(allowManagers) })
+			}
+			if opts.Attention {
+				due := e.now().Add(48 * time.Hour).UnixMilli()
+				deadline := protocol.PutIssueDeadlinePayload{IssueID: created.Outcome.IssueID, Title: "Temporary owner commitment", Nature: "user_commitment", Strength: "soft", DueAt: &due, Timezone: "UTC", SourceMessageID: source.MessageID, ExpectedSourceRevision: &revision, Reason: "Retain the owner's supplied date without executing work"}
+				var dated struct {
+					Outcome protocol.IssueDeadline `json:"outcome"`
+				}
+				if !invoke("issues_deadline_put", map[string]any{"effect_seq": seq + 1, "payload": deadline}, &dated) {
+					return "failed"
+				}
+				cancellation := protocol.CancelIssueDeadlinePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source.MessageID, ExpectedSourceRevision: &revision}, Reason: "Owner asked to record and then cancel the temporary commitment"}
+				if !invoke("issues_deadline_cancel", map[string]any{"effect_seq": seq + 2, "target_id": dated.Outcome.DeadlineID, "expected_control_revision": dated.Outcome.Revision, "payload": cancellation}, nil) {
+					return "failed"
+				}
+				entry := protocol.PutPlannerEntryPayload{Entry: protocol.PlannerEntry{Kind: "issue_priority", IssueID: created.Outcome.IssueID, Title: "First responsibility to coordinate", Responsible: owner.Subject, Status: "open", Rank: 1, Reason: "Explicit planner order; execution still uses task rating"}}
+				if !invoke("planner_entry_put", map[string]any{"effect_seq": seq + 3, "payload": entry}, nil) {
+					return "failed"
+				}
 			}
 			if repairMode {
 				return "completed"
@@ -255,7 +348,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 				return "failed"
 			}
 		}
-		if len(readSources) > 0 && readSources[0] {
+		if opts.ReadSources {
 			var read struct {
 				Outcome protocol.BackgroundSourcePage `json:"outcome"`
 			}
@@ -439,7 +532,11 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 	done := make(chan struct{})
 	go func() { defer close(done); pool.Run(ctx) }()
 	defer func() { cancel(); <-done }()
-	e.say("Investigate this unclear goal; the assistant should delegate the actual investigation")
+	message := "Investigate this unclear goal; the assistant should delegate the actual investigation"
+	if len(options) > 0 && options[0].Attention {
+		message += ". Record a temporary delivery commitment for 48 hours from now, then cancel it and retain the Issue priority."
+	}
+	e.say(message)
 	var issue string
 	select {
 	case issue = <-managerDone:
@@ -453,7 +550,46 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		t.Fatal(err)
 	default:
 	}
-	eventually(t, "separate planner and manager logical turns settle", func() bool { return e.count(`SELECT COUNT(*) FROM logical_turns WHERE status='completed'`) == 2 })
+	if ownerTransfer {
+		t.Cleanup(func() {
+			if !t.Failed() {
+				return
+			}
+			_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
+				rows, err := tx.Q().QueryContext(context.Background(), `SELECT b.group_key,b.status,s.kind,COUNT(*) FROM background_batches b JOIN background_sources s USING(batch_id) GROUP BY b.group_key,b.status,s.kind ORDER BY b.group_key,b.status,s.kind`)
+				if err != nil {
+					return err
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var group, status, kind string
+					var count int
+					if err := rows.Scan(&group, &status, &kind, &count); err != nil {
+						return err
+					}
+					t.Log("actual background input", group, status, kind, count)
+				}
+				return rows.Err()
+			})
+		})
+	}
+	expectedTurns := 2
+	if ownerTransfer {
+		expectedTurns = 3
+	}
+	eventually(t, "separate planner, manager and exact owner continuation settle", func() bool {
+		return e.count(`SELECT COUNT(*) FROM logical_turns WHERE status='completed'`) == expectedTurns
+	})
+	if ownerTransfer {
+		if e.count(`SELECT COUNT(*) FROM issue_controls`) != 3 || e.count(`SELECT COUNT(*) FROM background_batches WHERE group_key LIKE 'owner-issue:%' AND checkin_json IS NOT NULL`) != 1 || e.count(`SELECT COUNT(*) FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.group_key LIKE 'owner-issue:%' AND s.kind='issue.delegated'`) != 1 {
+			t.Fatal("owner continuation repeated delegation or lost original source")
+		}
+	}
+	if opts.Attention {
+		if e.count(`SELECT COUNT(*) FROM issue_deadlines WHERE status='cancelled'`) != 1 || e.count(`SELECT COUNT(*) FROM planner_entries`) != 1 || e.count(`SELECT COUNT(*) FROM attentions WHERE kind='information' AND status='open'`) != 1 {
+			t.Fatal("actual planner tool chain lost the original objects or failed to cancel its commitment")
+		}
+	}
 	expectedTasks := 1
 	if taskControls {
 		expectedTasks = 2
