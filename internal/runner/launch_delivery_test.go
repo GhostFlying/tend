@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -122,6 +123,7 @@ func TestFault_UndeliveredLaunchFinalizesAfterRestart(t *testing.T) {
 			if err != nil || saved.StoppedConfirmed || saved.Phase != journal.PhaseReleasing || !alive {
 				t.Fatalf("failure state changed: %+v %v", saved, err)
 			}
+			beforeRestart := append([]protocol.Envelope(nil), sent...)
 			if err := j.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -139,8 +141,26 @@ func TestFault_UndeliveredLaunchFinalizesAfterRestart(t *testing.T) {
 			if alive || launches != 1 || sends != 0 || closes != 2 {
 				t.Fatalf("recovery external calls: alive=%v launch=%d send=%d close=%d", alive, launches, sends, closes)
 			}
-			if len(sent) != 1 || sent[0].Operation != protocol.OpRunsRelease || sent[0].RequestID != request.Envelope.RequestID {
-				t.Fatalf("recovery changed failure request: %+v", sent)
+			// Startup navigation facts may already have been flushed before
+			// the failed launch returns. Recovery must not replay that upload.
+			if len(beforeRestart) != 1 || beforeRestart[0].Operation != protocol.OpRunnerEvents || len(sent) != len(beforeRestart)+1 || !reflect.DeepEqual(sent[:len(beforeRestart)], beforeRestart) {
+				t.Fatalf("recovery rewrote or replayed startup observations: before=%+v after=%+v", beforeRestart, sent)
+			}
+			var observed protocol.EventsPayload
+			if err := json.Unmarshal(beforeRestart[0].Payload, &observed); err != nil || len(observed.Events) != 1 || observed.Events[0].Kind != protocol.EventNativeIdentity || observed.Events[0].Seq != 1 || beforeRestart[0].Target.ID != as.RunID {
+				t.Fatalf("unexpected recorded startup observation: %+v (%v)", observed, err)
+			}
+			release := sent[len(beforeRestart)]
+			if release.Operation != protocol.OpRunsRelease || release.RequestID != request.Envelope.RequestID {
+				t.Fatalf("recovery changed failure request: %+v", release)
+			}
+			beforeHash, err := protocol.PayloadHash(&request.Envelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			afterHash, err := protocol.PayloadHash(&release)
+			if err != nil || beforeHash != afterHash {
+				t.Fatalf("recovery changed failure payload: %s != %s (%v)", beforeHash, afterHash, err)
 			}
 			historical, err := j.HistoricalRun(ctx, as.RunID)
 			if err != nil || historical.Phase != journal.PhaseDone || !historical.StoppedConfirmed {

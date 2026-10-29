@@ -228,6 +228,8 @@ r18 正式纳入：独立 reviewer 确认局部错误判断和真实 named 工�
 
 P4 r11 本体独立复核通过。与归档 prepare 组合时，pool 选中后、serve 读取 prepare 前仍有正常提交窗口；prepared 且没有待核对 native receipt 时正常退出也必须通知 pool，不能永久等待 ready。Run 的 prepare 前置 gate 与 serve 内部 gate 共用原启动退出通知，同时记录错误退出和有意暂停，后者不领取输入、不追加退避、不启动原生进程；已运行/unknown 与 receipt-only 对账不变。实际窗口回归及窄复审结果单列，本项不等于正式完整检查或部署完成。
 
+组合收口：普通咨询的发现也按同一实际 serviceable 队头的持久 next_attempt_at 判断，后到的 due 消息不能绕过已延期的早先问题。沿既有 pool 与 outbox 退避；in-flight/receipt-only 例外保持，不新增 timer/queue。复用已独审咨询 backoff 修正，结合 r18 的 wrapped not-found 与当前 request 准入；正式组合检查另记。
+
 ## r19：维护摘要保留未知历史而不准入新来源
 
 正式完整检查发现两个同源失败：普通 owner lost-start 的 turn 仍 starting、outbox 已 unknown，r17 正确不把其视为已确认消费，但维护摘要将隐藏正文后的整条记录删除，连真实 message ID/unknown 状态都丢失。仅修私有 handoff 摘要投影：真正 unknown 的原请求正文作为 `unconfirmed_owner_input` 历史引用保留，明确未确认消费、不能授权或重放；普通 queued 仍不进入摘要，withdrawn 仍脱敏。当前 agent read/source、Issue 作用域、原 turn/outbox/receipt 与派发状态均不修改；没有新增公共协议或持久状态。两个原例继续验证未知原文/状态、手动/idle 摘要和原请求不重放，另核普通来源仍拒绝及撤回脱敏。当前隔离定向验证中，正式整检与交付另记。

@@ -14,6 +14,7 @@ import (
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
 var ownerCommands = commandMap(
+	app.SendRunMessage{}, app.InjectSource{}, app.CreateConsultation{}, app.PromoteConsultation{},
 	app.IssueDeadlineCommand{}, app.IssueDeadlineCommand{Cancel: true}, app.PutPlannerEntry{},
 	app.AttentionCommand{Action: "create"}, app.AttentionCommand{Action: "update"}, app.AttentionCommand{Action: "respond"}, app.AttentionCommand{Action: "confirm"}, app.AttentionCommand{Action: "withdraw"}, app.AttentionCommand{Action: "present"},
 	app.CanonicalOwnerIssueCommand{Action: "create"}, app.CanonicalOwnerIssueCommand{Action: "update"},

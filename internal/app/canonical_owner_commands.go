@@ -79,6 +79,9 @@ func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *stor
 }
 
 func createCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	return createCanonicalOwnerIssueWithAssignment(ctx, x, tx, false)
+}
+func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *store.Tx, allowHosted bool) (Outcome, error) {
 	var p canonicalOwnerIssueCreate
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -96,7 +99,13 @@ func createCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		}
 		owner = *p.Assignee
 	} else if p.Assignee != nil && *p.Assignee != owner {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only the authenticated owner is registered for assignment")
+		if !allowHosted {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only the authenticated owner is registered for assignment")
+		}
+		if err := resolveHostedAssignee(ctx, tx.Q(), x, *p.Assignee); err != nil {
+			return Outcome{}, err
+		}
+		owner = *p.Assignee
 	}
 	project, err := resolveProject(ctx, tx.Q(), p.Plan.Project, x.Principal)
 	if err != nil {

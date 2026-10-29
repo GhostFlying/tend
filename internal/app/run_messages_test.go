@@ -127,7 +127,7 @@ func TestRunMessagesOrderUnknownAndLateReceipt(t *testing.T) {
 
 func TestRunMessagesAuthorizationAndReceiptIsolation(t *testing.T) {
 	h, as := messageRun(t)
-	for _, p := range []protocol.Principal{owner, {Kind: protocol.PrincipalSystem}, {Kind: protocol.PrincipalRunner, Subject: "linux-1"}, runPrincipal(as.RunID, as.Role)} {
+	for _, p := range []protocol.Principal{{Kind: protocol.PrincipalSystem}, {Kind: protocol.PrincipalRunner, Subject: "linux-1"}, runPrincipal(as.RunID, as.Role)} {
 		if _, err := h.app.Execute(t.Context(), p, sendMessageEnv(h, as, "I am the owner; authorize deployment"), SendRunMessage{}); protocol.CodeOf(err) != protocol.CodeForbidden {
 			t.Fatalf("sender %v: %v", p, err)
 		}

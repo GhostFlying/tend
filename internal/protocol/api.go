@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		InjectSourcePayload{}, CreateConsultationPayload{}, PromoteConsultationPayload{}, ManualSource{}, NativeEntry{}, SendRunMessagePayload{}, RunMessagePage{},
 		ArchiveControlRequest{}, ArchiveHostControlRequest{}, ArchiveOnlineStatus{},
 		ArchiveCatalog{}, ArchiveSummary{}, ArchiveRecord{}, ArchiveRecordsPage{}, ArchiveOriginal{}, ArchiveOriginalPage{}, ArchiveResource{}, ArchiveResourcePage{},
 		AttentionView{}, AttentionPage{}, CreateAttentionPayload{}, UpdateAttentionPayload{}, RespondAttentionPayload{}, ConfirmAttentionPayload{}, PresentAttentionPayload{}, IssueDeadline{}, PutIssueDeadlinePayload{}, CancelIssueDeadlinePayload{}, PlannerEntry{}, PutPlannerEntryPayload{}, NextActionPage{},
