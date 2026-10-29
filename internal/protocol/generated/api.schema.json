@@ -8,6 +8,9 @@
         "current": {
           "$ref": "#/definitions/TaskSummary"
         },
+        "current_attention": {
+          "$ref": "#/definitions/AttentionView"
+        },
         "current_issue": {
           "$ref": "#/definitions/IssueView"
         },
@@ -552,6 +555,15 @@
       "title": "AgentInventoryRuntime",
       "type": "object"
     },
+    "AgentKind": {
+      "enum": [
+        "claude",
+        "codex",
+        "traex"
+      ],
+      "title": "AgentKind",
+      "type": "string"
+    },
     "AgentRecoveryView": {
       "additionalProperties": false,
       "properties": {
@@ -939,6 +951,122 @@
       "title": "AssistantState",
       "type": "string"
     },
+    "AttentionPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AttentionView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "AttentionPage",
+      "type": "object"
+    },
+    "AttentionView": {
+      "additionalProperties": false,
+      "properties": {
+        "archived_at": {
+          "type": "integer"
+        },
+        "attention_id": {
+          "type": "string"
+        },
+        "blocks_close": {
+          "type": "boolean"
+        },
+        "choice": {
+          "$ref": "#/definitions/WorkItemChoice"
+        },
+        "choice_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "decision": {
+          "$ref": "#/definitions/DecisionView"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "question_options": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "question_version": {
+          "type": "integer"
+        },
+        "raised_by": {
+          "$ref": "#/definitions/Principal"
+        },
+        "read_at": {
+          "type": "integer"
+        },
+        "resolution": {
+          "type": "string"
+        },
+        "resolution_source_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attention_id",
+        "kind",
+        "title",
+        "revision",
+        "status",
+        "raised_by",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "AttentionView",
+      "type": "object"
+    },
     "BackgroundAssessmentPayload": {
       "additionalProperties": false,
       "properties": {
@@ -1127,6 +1255,22 @@
       "title": "BlockReason",
       "type": "string"
     },
+    "CancelIssueDeadlinePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "title": "CancelIssueDeadlinePayload",
+      "type": "object"
+    },
     "CloseWorkItemPayload": {
       "additionalProperties": false,
       "properties": {
@@ -1178,6 +1322,22 @@
         "reason"
       ],
       "title": "CompletionReviewAcknowledgement",
+      "type": "object"
+    },
+    "ConfirmAttentionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "source_message_id": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary"
+      ],
+      "title": "ConfirmAttentionPayload",
       "type": "object"
     },
     "ContextBlocker": {
@@ -1895,6 +2055,47 @@
         "generation"
       ],
       "title": "CreateActionPayload",
+      "type": "object"
+    },
+    "CreateAttentionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks_close": {
+          "type": "boolean"
+        },
+        "choice_id": {
+          "type": "string"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "title"
+      ],
+      "title": "CreateAttentionPayload",
       "type": "object"
     },
     "CreateIssuePayload": {
@@ -3260,6 +3461,87 @@
       "title": "IssueControlPayload",
       "type": "object"
     },
+    "IssueDeadline": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "type": "integer"
+        },
+        "deadline_id": {
+          "type": "string"
+        },
+        "due_at": {
+          "type": "integer"
+        },
+        "due_rule_id": {
+          "type": "string"
+        },
+        "estimate_seconds": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "latest_start_at": {
+          "type": "integer"
+        },
+        "nature": {
+          "type": "string"
+        },
+        "near_rule_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reminders": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "source_needs_review": {
+          "type": "boolean"
+        },
+        "source_revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "strength": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deadline_id",
+        "issue_id",
+        "revision",
+        "status",
+        "title",
+        "nature",
+        "strength",
+        "timezone",
+        "reminders",
+        "reason",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "IssueDeadline",
+      "type": "object"
+    },
     "IssueEndpointPayload": {
       "additionalProperties": false,
       "properties": {
@@ -3542,6 +3824,9 @@
         "assignment_state": {
           "type": "string"
         },
+        "attentions": {
+          "$ref": "#/definitions/AttentionPage"
+        },
         "closure": {
           "$ref": "#/definitions/WorkItemClosure"
         },
@@ -3550,6 +3835,12 @@
         },
         "created_at": {
           "type": "integer"
+        },
+        "deadlines": {
+          "items": {
+            "$ref": "#/definitions/IssueDeadline"
+          },
+          "type": "array"
         },
         "depends_on": {
           "anyOf": [
@@ -3903,6 +4194,43 @@
       "title": "MountView",
       "type": "object"
     },
+    "NextActionPage": {
+      "additionalProperties": false,
+      "properties": {
+        "deadlines": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueDeadline"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/PlannerEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "deadlines"
+      ],
+      "title": "NextActionPage",
+      "type": "object"
+    },
     "ObservationScope": {
       "additionalProperties": false,
       "properties": {
@@ -4128,6 +4456,69 @@
       "title": "OwnerTaskWorkspace",
       "type": "object"
     },
+    "PlannerEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "attention_id": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "string"
+        },
+        "entry_id": {
+          "type": "string"
+        },
+        "estimate_seconds": {
+          "type": "integer"
+        },
+        "expected_at": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "rank": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "responsible": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entry_id",
+        "revision",
+        "kind",
+        "title",
+        "responsible",
+        "rank",
+        "status",
+        "reason",
+        "updated_at"
+      ],
+      "title": "PlannerEntry",
+      "type": "object"
+    },
     "PrepareWorkItemContextPayload": {
       "additionalProperties": false,
       "properties": {
@@ -4155,6 +4546,50 @@
         "gaps"
       ],
       "title": "PrepareWorkItemContextPayload",
+      "type": "object"
+    },
+    "PresentAttentionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "archived": {
+          "type": "boolean"
+        },
+        "read": {
+          "type": "boolean"
+        }
+      },
+      "title": "PresentAttentionPayload",
+      "type": "object"
+    },
+    "Principal": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/definitions/AgentKind"
+        },
+        "client": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "thread": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Principal",
       "type": "object"
     },
     "ProjectView": {
@@ -4212,6 +4647,67 @@
         "state"
       ],
       "title": "PutAgentCategoryPayload",
+      "type": "object"
+    },
+    "PutIssueDeadlinePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "due_at": {
+          "type": "integer"
+        },
+        "estimate_seconds": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "nature": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reminders": {
+          "type": "boolean"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "strength": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "title",
+        "nature",
+        "strength",
+        "timezone",
+        "reason"
+      ],
+      "title": "PutIssueDeadlinePayload",
+      "type": "object"
+    },
+    "PutPlannerEntryPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "$ref": "#/definitions/PlannerEntry"
+        }
+      },
+      "required": [
+        "entry"
+      ],
+      "title": "PutPlannerEntryPayload",
       "type": "object"
     },
     "QueueEntry": {
@@ -4522,6 +5018,28 @@
         "status"
       ],
       "title": "RequestView",
+      "type": "object"
+    },
+    "RespondAttentionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "option": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "RespondAttentionPayload",
       "type": "object"
     },
     "ResultReport": {
@@ -6267,6 +6785,31 @@
       "title": "TranscriptPage",
       "type": "object"
     },
+    "UpdateAttentionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks_close": {
+          "type": "boolean"
+        },
+        "decision_version": {
+          "type": "integer"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "title": "UpdateAttentionPayload",
+      "type": "object"
+    },
     "UpdateFollowupPayload": {
       "additionalProperties": false,
       "properties": {
@@ -7562,14 +8105,26 @@
     "ArtifactPayload": {
       "$ref": "#/definitions/ArtifactPayload"
     },
+    "AttentionPage": {
+      "$ref": "#/definitions/AttentionPage"
+    },
+    "AttentionView": {
+      "$ref": "#/definitions/AttentionView"
+    },
     "BackgroundAssessmentPayload": {
       "$ref": "#/definitions/BackgroundAssessmentPayload"
     },
     "BackgroundSourcePage": {
       "$ref": "#/definitions/BackgroundSourcePage"
     },
+    "CancelIssueDeadlinePayload": {
+      "$ref": "#/definitions/CancelIssueDeadlinePayload"
+    },
     "CloseWorkItemPayload": {
       "$ref": "#/definitions/CloseWorkItemPayload"
+    },
+    "ConfirmAttentionPayload": {
+      "$ref": "#/definitions/ConfirmAttentionPayload"
     },
     "ContextFact": {
       "$ref": "#/definitions/ContextFact"
@@ -7600,6 +8155,9 @@
     },
     "CreateActionPayload": {
       "$ref": "#/definitions/CreateActionPayload"
+    },
+    "CreateAttentionPayload": {
+      "$ref": "#/definitions/CreateAttentionPayload"
     },
     "CreateIssuePayload": {
       "$ref": "#/definitions/CreateIssuePayload"
@@ -7649,6 +8207,9 @@
     "IssueControlPayload": {
       "$ref": "#/definitions/IssueControlPayload"
     },
+    "IssueDeadline": {
+      "$ref": "#/definitions/IssueDeadline"
+    },
     "IssueEndpointPayload": {
       "$ref": "#/definitions/IssueEndpointPayload"
     },
@@ -7667,11 +8228,26 @@
     "MessageAssociations": {
       "$ref": "#/definitions/MessageAssociations"
     },
+    "NextActionPage": {
+      "$ref": "#/definitions/NextActionPage"
+    },
+    "PlannerEntry": {
+      "$ref": "#/definitions/PlannerEntry"
+    },
     "PrepareWorkItemContextPayload": {
       "$ref": "#/definitions/PrepareWorkItemContextPayload"
     },
+    "PresentAttentionPayload": {
+      "$ref": "#/definitions/PresentAttentionPayload"
+    },
     "PutAgentCategoryPayload": {
       "$ref": "#/definitions/PutAgentCategoryPayload"
+    },
+    "PutIssueDeadlinePayload": {
+      "$ref": "#/definitions/PutIssueDeadlinePayload"
+    },
+    "PutPlannerEntryPayload": {
+      "$ref": "#/definitions/PutPlannerEntryPayload"
     },
     "RateTaskPayload": {
       "$ref": "#/definitions/RateTaskPayload"
@@ -7696,6 +8272,9 @@
     },
     "RequestView": {
       "$ref": "#/definitions/RequestView"
+    },
+    "RespondAttentionPayload": {
+      "$ref": "#/definitions/RespondAttentionPayload"
     },
     "ReviewIssueCompletionsPayload": {
       "$ref": "#/definitions/ReviewIssueCompletionsPayload"
@@ -7768,6 +8347,9 @@
     },
     "TranscriptPage": {
       "$ref": "#/definitions/TranscriptPage"
+    },
+    "UpdateAttentionPayload": {
+      "$ref": "#/definitions/UpdateAttentionPayload"
     },
     "UpdateFollowupPayload": {
       "$ref": "#/definitions/UpdateFollowupPayload"

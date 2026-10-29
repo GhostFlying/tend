@@ -14,6 +14,8 @@ import (
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
 var ownerCommands = commandMap(
+	app.IssueDeadlineCommand{}, app.IssueDeadlineCommand{Cancel: true}, app.PutPlannerEntry{},
+	app.AttentionCommand{Action: "create"}, app.AttentionCommand{Action: "update"}, app.AttentionCommand{Action: "respond"}, app.AttentionCommand{Action: "confirm"}, app.AttentionCommand{Action: "withdraw"}, app.AttentionCommand{Action: "present"},
 	app.CanonicalOwnerIssueCommand{Action: "create"}, app.CanonicalOwnerIssueCommand{Action: "update"},
 	app.CanonicalOwnerIssueCommand{Action: "pause"}, app.CanonicalOwnerIssueCommand{Action: "resume"},
 	app.CanonicalOwnerIssueCommand{Action: "cancel"}, app.CanonicalOwnerIssueCommand{Action: "finish_cancel"},
@@ -114,6 +116,15 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 	}
 	if op.Status == protocol.OpFailed && op.Error != nil && op.Error.Code == protocol.CodeStaleRevision && env.Target.Type == "task" {
 		res.Current = s.currentTask(r.Context(), env.Target.ID)
+	}
+	if op.Status == protocol.OpFailed && op.Error != nil && op.Error.Code == protocol.CodeStaleRevision && env.Target.Type == "attention" {
+		_ = s.store.Read(r.Context(), func(tx *store.ReadTx) error {
+			v, err := views.Attention(r.Context(), tx.Q(), env.Target.ID)
+			if err == nil {
+				res.CurrentAttention = &v
+			}
+			return err
+		})
 	}
 	writeJSON(w, http.StatusOK, res)
 }

@@ -90,6 +90,11 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 				return Outcome{}, err
 			}
 		}
+		if next.Assignee.Kind == protocol.IssueAssigneeOwner {
+			if err := redirectPendingIssueInputsToOwner(ctx, x, tx, next.IssueID); err != nil {
+				return Outcome{}, err
+			}
+		}
 		return out, nil
 	}
 	var p protocol.IssueAssignmentPayload

@@ -45,7 +45,7 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		return protocol.Errorf(protocol.CodeForbidden, "consultation has no business mutation tools")
 	}
 	if execution.Selection.Purpose == agentconfig.Main {
-		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{"conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment"}, c.Operation()) {
+		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{"conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put"}, c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "the personal planner must delegate issue work, not execute its task planning")
 		}
 	} else {
@@ -60,6 +60,38 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			return protocol.Errorf(protocol.CodeForbidden, "assignment no longer permits this coordination execution")
 		}
 		switch c.Operation() {
+		case "issues.deadlines_put":
+			var p protocol.PutIssueDeadlinePayload
+			if err := decodePayload(x.Env, &p); err != nil {
+				return err
+			}
+			if p.IssueID != current.IssueID || p.Nature != "estimate" {
+				return protocol.Errorf(protocol.CodeForbidden, "manager proposes only its Issue estimate")
+			}
+		case "planner.entries_put":
+			var p protocol.PutPlannerEntryPayload
+			if err := decodePayload(x.Env, &p); err != nil {
+				return err
+			}
+			if p.Entry.IssueID != current.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "propose next actions only in this Issue")
+			}
+		case "attentions.create":
+			var p protocol.CreateAttentionPayload
+			if err := decodePayload(x.Env, &p); err != nil {
+				return err
+			}
+			if p.IssueID != current.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "raise attention only in this Issue")
+			}
+		case "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw":
+			a, err := store.GetAttention(ctx, q, x.Env.Target.ID)
+			if err != nil {
+				return err
+			}
+			if x.Env.Target.Type != "attention" || a.IssueID != current.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "attention is outside this Issue")
+			}
 		case "conversation.commit_turn":
 			if x.Env.Target.Type != "logical_turn" || x.Env.Target.ID != execution.ID {
 				return protocol.Errorf(protocol.CodeForbidden, "commit only this execution")
@@ -86,6 +118,15 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			}
 		default:
 			return protocol.Errorf(protocol.CodeForbidden, "operation is unavailable to the issue manager")
+		}
+	}
+	if execution.Selection.Purpose == agentconfig.Main && c.Operation() == "tasks.rate" {
+		primary, err := store.GetTaskIssueOwner(ctx, q, x.Env.Target.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := store.GetCanonicalIssue(ctx, q, primary); err != nil {
+			return err
 		}
 	}
 	if turn.Status != store.TurnStarting && turn.Status != store.TurnStarted {

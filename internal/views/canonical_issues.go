@@ -48,7 +48,17 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 		}
 		out.SourceReviews = append(out.SourceReviews, source)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows.Close()
+	page, err := Attentions(ctx, q, AttentionFilter{IssueID: id, IncludeArchived: true})
+	if err != nil {
+		return out, err
+	}
+	out.Attentions = &page
+	out.Deadlines, err = Deadlines(ctx, q, id)
+	return out, err
 }
 
 type CanonicalIssueFilter struct {

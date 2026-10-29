@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/app"
@@ -14,11 +15,23 @@ import (
 )
 
 type hostedMutationArgs struct {
+	Reason                  string          `json:"reason,omitempty"`
 	TargetID                string          `json:"target_id,omitempty"`
 	ExpectedControlRevision *int64          `json:"expected_control_revision,omitempty"`
 	EffectSeq               int64           `json:"effect_seq"`
 	Payload                 json.RawMessage `json:"payload"`
 }
+type hostedPlanningReadArgs struct {
+	IssueID string `json:"issue_id,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Status  string `json:"status,omitempty"`
+	After   string `json:"after,omitempty"`
+}
+
+type hostedAttentionReadArgs struct {
+	AttentionID string `json:"attention_id"`
+}
+
 type hostedReadArgs struct {
 	IssueID  string `json:"issue_id,omitempty"`
 	Revision int64  `json:"revision,omitempty"`
@@ -33,6 +46,14 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"issues_deadline_put", "Record a sourced deadline or estimate, with known/unknown time and default 24h/due reminders; never silently change a user commitment.", "deadline", protocol.PutIssueDeadlinePayload{}, app.IssueDeadlineCommand{}, true},
+	{"issues_deadline_cancel", "Cancel a deadline with an explicit reason, preserving already claimed/unknown reminder facts.", "deadline", protocol.CancelIssueDeadlinePayload{}, app.IssueDeadlineCommand{Cancel: true}, true},
+	{"planner_entry_put", "Record a personal next action or explicit Issue planning rank; task execution priority remains tasks_rate.", "planner_entry", protocol.PutPlannerEntryPayload{}, app.PutPlannerEntry{}, true},
+	{"attentions_create", "Ask the owner a distinct decision or human action, or record nonblocking information. Assignment stays unchanged.", "attention", protocol.CreateAttentionPayload{}, app.AttentionCommand{Action: "create"}, true},
+	{"attentions_update", "Revise this stable attention without replacing or answering its original decision.", "attention", protocol.UpdateAttentionPayload{}, app.AttentionCommand{Action: "update"}, true},
+	{"attentions_respond", "Relay the owner's actual message to the original decision/version. Never answer on the owner's behalf.", "attention", protocol.RespondAttentionPayload{}, app.AttentionCommand{Action: "respond", FromMessage: true}, true},
+	{"attentions_confirm", "Relay an actual owner's confirmation of a human action; agent narration is insufficient.", "attention", protocol.ConfirmAttentionPayload{}, app.AttentionCommand{Action: "confirm", FromMessage: true}, true},
+	{"attentions_withdraw", "Withdraw an ordinary open action/information with a reason; decisions retain their original business path.", "attention", hostedEmptyPayload{}, app.AttentionCommand{Action: "withdraw"}, true},
 	{"conversation_associate_issues", "Classify this exact message into canonical Issues or explicitly leave it unassigned. Preserve owner corrections; this acknowledges routing only and never clears Issue source-review duties or authorizes execution.", "message", protocol.SetIssueMessageAssociationsPayload{}, app.SetIssueMessageAssociations{}, true},
 	{"issues_create", "Delegate a vague goal to a concrete registered Issue manager. Managers create only child Issues within their own scope.", "issue", protocol.CreateIssuePayload{}, app.CanonicalOwnerIssueCommand{Action: "create"}, true},
 	{"issues_assign", "Fence a concrete Issue assignee before reconciling and enabling its replacement. Does not stop independent workers.", "issue", protocol.IssueAssignmentPayload{}, app.HostedIssueAssignment{}, true},
@@ -50,7 +71,7 @@ var hostedMutations = []hostedMutation{
 	{"issues_create_task", "Delegate all investigation and execution through a frozen no-stage or explicitly staged task with independent acceptance. Never execute native work yourself.", "issue", protocol.CreateIssueTaskPayload{}, app.CanonicalOwnerTaskCreate{}, false},
 	{"issues_update_task", "Explicitly refresh an existing primary task contract through its current revision and Issue epoch; active runs retain their frozen contracts.", "task", protocol.UpdateIssueTaskPayload{}, app.CanonicalOwnerTaskUpdate{}, false},
 	{"tasks_cancel", "Cancel only this Issue's primary task through its current revision and existing run reconciliation rules.", "task", hostedEmptyPayload{}, app.CancelTask{}, false},
-	{"tasks_rate", "Set this Issue's primary task priority through its current revision.", "task", protocol.RateTaskPayload{}, app.RateTask{}, false},
+	{"tasks_rate", "Set an explicitly selected primary task priority through its current revision; this does not change its contract.", "task", protocol.RateTaskPayload{}, app.RateTask{}, true},
 	{"actions_create", "Request only an implement or independent acceptance generation for this Issue's primary task; native takeover and handback remain owner-only.", "task", protocol.CreateActionPayload{}, app.CreateAction{}, false},
 	{"issues_context_fact", "Record or replace a sourced fact only in this Issue. Original attribution is preserved; agent narration is not owner authority.", "issue", protocol.ContextFact{}, app.HostedIssueContextFact{}, false},
 	{"issues_context_review", "Review only this Issue's exact source versions and context revision. Uncertainty and no new facts are valid; no global baseline or task-spec refresh is manufactured.", "issue", protocol.IssueContextReview{}, app.ReviewHostedIssueContext{}, false},
@@ -79,10 +100,16 @@ func hostedMutationSchema(payload any) json.RawMessage {
 func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	var out []harness.ToolSpec
 	for _, m := range hostedMutations {
-		if purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && m.name != "issues_create" || purpose == agentconfig.Consultation {
+		if purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && m.name != "issues_create" && !strings.HasPrefix(m.name, "attentions_") && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" || purpose == agentconfig.Consultation {
 			continue
 		}
 		out = append(out, harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)})
+	}
+	if purpose != agentconfig.Consultation {
+		for _, name := range []string{"attentions_list", "planner_read", "deadlines_list"} {
+			out = append(out, harness.ToolSpec{Name: name, Description: "Read current person-facing obligations, next actions or deadlines with original identities; reading never resolves them.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedPlanningReadArgs{})))})
+		}
+		out = append(out, harness.ToolSpec{Name: "attentions_read", Description: "Read the same original decision/answer and attention identity used by owner Inbox.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedAttentionReadArgs{})))})
 	}
 	out = append(out, harness.ToolSpec{Name: "issues_read", Description: "Read an Issue and its primary execution/completion facts; managers are limited to their Issue and descendants.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedReadArgs{})))})
 	out = append(out, harness.ToolSpec{Name: "agents_hosted_list", Description: "Read accepted hosted identities, roles and configuration revision. Private instructions and local credentials are not exposed.", InputSchema: exportSchema(json.RawMessage(argumentSchema(turnReadArgs{})))})
@@ -166,6 +193,16 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		if err := decode(c.Arguments, &args); err != nil {
 			return fail(err)
 		}
+		if c.Tool == "attentions_create" && execution.IssueID != "" {
+			var p protocol.CreateAttentionPayload
+			if err := json.Unmarshal(args.Payload, &p); err != nil {
+				return fail(protocol.Errorf(protocol.CodeInvalidRequest, "invalid attention payload"))
+			}
+			if p.IssueID == "" {
+				p.IssueID = execution.IssueID
+			}
+			args.Payload, _ = json.Marshal(p)
+		}
 		command := m.command
 		if c.Tool == "issues_turn_commit" {
 			command = app.CommitLogicalTurn{RequestID: execution.ID}
@@ -188,7 +225,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 				return fail(err)
 			}
 		}
-		env := &protocol.Envelope{RequestID: request, Operation: command.Operation(), Target: protocol.Target{Type: m.target, ID: args.TargetID}, ExpectedControlRevision: args.ExpectedControlRevision, Payload: args.Payload}
+		env := &protocol.Envelope{RequestID: request, Operation: command.Operation(), Target: protocol.Target{Type: m.target, ID: args.TargetID}, ExpectedControlRevision: args.ExpectedControlRevision, Reason: args.Reason, Payload: args.Payload}
 		result, err := s.app.Execute(ctx, c.Principal, env, cmd)
 		if err != nil {
 			return fail(err)
@@ -197,6 +234,56 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return fail(result.Error)
 		}
 		return hostedAnswer(map[string]any{"request_id": result.RequestID, "status": result.Status, "outcome": result.Result}, nil), true
+	}
+	if c.Tool == "attentions_list" || c.Tool == "planner_read" || c.Tool == "deadlines_list" {
+		if execution.Selection.Purpose == agentconfig.Consultation {
+			return fail(protocol.Errorf(protocol.CodeForbidden, "consultation has no planner tools"))
+		}
+		var p hostedPlanningReadArgs
+		if err := decode(c.Arguments, &p); err != nil {
+			return fail(err)
+		}
+		if execution.IssueID != "" {
+			if p.IssueID != "" && p.IssueID != execution.IssueID {
+				return fail(protocol.Errorf(protocol.CodeForbidden, "planning read is outside this Issue"))
+			}
+			p.IssueID = execution.IssueID
+		}
+		var value any
+		err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			var err error
+			switch c.Tool {
+			case "attentions_list":
+				value, err = views.Attentions(ctx, tx.Q(), views.AttentionFilter{IssueID: p.IssueID, Kind: p.Kind, Status: p.Status, After: p.After})
+			case "planner_read":
+				value, err = views.NextActions(ctx, tx.Q(), p.Kind, p.IssueID)
+			case "deadlines_list":
+				value, err = views.Deadlines(ctx, tx.Q(), p.IssueID)
+			}
+			return err
+		})
+		return hostedAnswer(value, err), true
+	}
+	if c.Tool == "attentions_read" {
+		if execution.Selection.Purpose == agentconfig.Consultation {
+			return fail(protocol.Errorf(protocol.CodeForbidden, "consultation has no planner tools"))
+		}
+		var p struct {
+			AttentionID string `json:"attention_id"`
+		}
+		if err := decode(c.Arguments, &p); err != nil {
+			return fail(err)
+		}
+		var value protocol.AttentionView
+		err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			var err error
+			value, err = views.Attention(ctx, tx.Q(), p.AttentionID)
+			if err == nil && execution.IssueID != "" && value.IssueID != execution.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "attention is outside this Issue")
+			}
+			return err
+		})
+		return hostedAnswer(value, err), true
 	}
 	if c.Tool == "agents_hosted_list" {
 		v, e := s.app.HostedAgentInventory(ctx)

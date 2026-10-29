@@ -74,6 +74,13 @@ func canonicalOwnerEndpointFacts(ctx context.Context, q store.Querier, current p
 	if err != nil {
 		return facts, err
 	}
+	attentionIDs, err := store.FollowupIDs(ctx, q, `SELECT attention_id FROM attentions WHERE issue_id=? AND status='open' AND kind IN ('decision','action') AND json_extract(body_json,'$.blocks_close')=1 ORDER BY attention_id`, current.IssueID)
+	if err != nil {
+		return facts, err
+	}
+	for _, id := range attentionIDs {
+		facts.OpenAttention = append(facts.OpenAttention, protocol.IssueBlocker{Code: "attention", ObjectID: id})
+	}
 	for _, f := range current.Plan.FollowOns {
 		if (f.Kind == protocol.WorkItemFollowOnCommitment || f.Kind == protocol.WorkItemFollowOnProblem) && f.Status == protocol.WorkItemFollowOnOpen {
 			facts.OpenCommitments = append(facts.OpenCommitments, protocol.IssueBlocker{Code: "follow_on", ObjectID: f.FollowOnID, Revision: current.Revision})
