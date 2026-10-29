@@ -33,6 +33,7 @@ import (
 	"github.com/GhostFlying/tend/internal/dispatch"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/traex"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -93,9 +94,10 @@ type config struct {
 // mainAgentConfig configures the hosted main agent (D68). Every field is
 // optional.
 type mainAgentConfig struct {
-	Recovery              *agentRecoveryConfig `json:"recovery"`
-	ConversationID        string               `json:"-"`
-	BackgroundConcurrency int                  `json:"background_concurrency"`
+	Named                 *hostedconfig.Configuration `json:"named,omitempty"`
+	Recovery              *agentRecoveryConfig        `json:"recovery"`
+	ConversationID        string                      `json:"-"`
+	BackgroundConcurrency int                         `json:"background_concurrency"`
 	// Instance names the main agent; default "main".
 	Instance string `json:"instance"`
 	TraexBin string `json:"traex_bin"`
@@ -190,9 +192,22 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		}
 		opts = append(opts, app.WithAgentRecoveryPolicy(policy))
 	}
+	var named *hostedconfig.Prepared
+	if cfg.MainAgent != nil && cfg.MainAgent.Named != nil {
+		named, err = hostedconfig.Prepare(*cfg.MainAgent.Named)
+		if err != nil {
+			return err
+		}
+		opts = append(opts, app.WithHostedConfiguration(named))
+	}
 	a := app.New(s, ids, time.Now, opts...)
 	if err := syncConfig(ctx, a, ids, cfg); err != nil {
 		return err
+	}
+	if named != nil {
+		if err := syncHostedConfiguration(ctx, a, ids, named); err != nil {
+			return err
+		}
 	}
 
 	var (
@@ -375,6 +390,13 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 		SummaryIdleMinutes: idle,
 		Now:                time.Now,
 		Thread:             mainthread.ThreadConfig(cwd, cfg.Model),
+		OpenNamed: func(ctx context.Context, selected hostedconfig.Selection) (harness.Session, error) {
+			bin, err := hostedExecutable(selected.Runtime.ExecutableRef)
+			if err != nil {
+				return nil, err
+			}
+			return traex.Start(ctx, traex.Options{Bin: bin, Env: env, Dir: cwd, Version: "tend", Log: log, HostedCoordination: true})
+		},
 		Open: func(ctx context.Context) (harness.Session, error) {
 			return traex.Start(ctx, traex.Options{Bin: cfg.TraexBin, Env: env, Dir: cwd, Version: "tend", Log: log})
 		},

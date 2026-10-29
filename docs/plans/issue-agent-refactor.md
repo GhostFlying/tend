@@ -1,6 +1,6 @@
 # Issue 与 Agent 重构实施计划
 
-状态：P0、P1a、P1b1、P2a 与 P1b2a 已经 CI 和 rebase 合并；其余 P1/P2 owner 与配置库存子批完成本地完整检查及独立 review，后续 PR 按台账推进。P3 显式 named 执行已纳入，正式规定 CLI review、独立 schema 增量复审、完整 make check 与 Windows/macOS 交叉编译通过。P4 r4 负责人自治候选独立预审通过，尚未正式纳入；P5 与 P8b 在线准备在隔离副本实施，P8a 离线工具及 P8c owner 只读 API 候选预审通过。未确认页面不编码；本轮尚未部署或完成真实 E2E。本文区分设计合同、代码、检查、合并与验收，实施事实以下文台账为准。
+状态：P0、P1 owner API/CLI、P2 配置库存及 P3 执行调度已 CI 和 rebase 合并。P4 r19 的独立 review、正式完整检查及交叉编译已通过，待 PR/CI。后继 Attention、直接对话、归档及最终接口/UI 组合已形成独立审查的候选。已确认 UI 的真实只读浏览器检查发现长标题换行缺陷，窄修复待复审和实际页面复验。隔离原主会话 A 已恢复完成，B 正在接续；生产未部署，完整产品验收未完成。
 
 ## 进度账本与角色
 
@@ -9,15 +9,15 @@
 | 批次 | 依赖 | 设计 | 代码 | 独立评审 | 合并 | 部署 | Live 验收 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P0 | 无 | 文档完成 | 无运行代码；本地 make check 通过 | 已通过，澄清增量确认 | PR #157 修复已合并；PR #155 CI 通过，rebase 合并至 `8c8c6ec6` | 本批不部署 | 无 |
-| P1 | P0 评审通过 | P1a、控制分片及 owner API/CLI 组合计划已写 | P1a 已合并；P1b1/P1b2 本地完整检查通过；P1b3+b4 r2+P1c 已正式纳入，组合定向检查已通过；manager/Agent assignment 未启用 | 历史子批及 b3/b4 r2/P1c 候选预审通过；r1 CLI 两项 P2 已修复，r2 独立复审及完整检查已通过，已提交 | P1a PR #158、P1b1 PR #159、P1b2a PR #161 已合并；其余 CI/合并未完成 | 本批不部署 | 未执行 |
-| P2 | P1 身份基础 | P2a/P2b/P2c–P2d 子计划已写 | P2a/P2b 本地检查和独立复核通过；P2c–P2d 本机配置、Category/安全库存登记及恢复入口已纳入，正式定向检查和完整 make check 均已通过；执行/调度由 P3 接续 | P2a/P2b 正式独立 review 通过；P2c/P2d1/P2d2 候选独立预审通过，正式组合人工及规定 CLI review 均通过，无 findings | P2a PR #160 CI 全通过并 rebase 合并；其余未合并 | 本批不部署 | 未执行 |
-| P3 | P1、P2 | [执行计划](category-agent-execution.md)已写 | 显式 named factory、调度、模型/effort/指令及原 pin 恢复已正式纳入；组合定向 race/vet、schema/TS 生成与类型检查通过 | 候选 r1/r2/r3 独立复核通过，已采纳首资格、profile 和 start-over 修正；正式 r2 规定 CLI review 无 findings，r3 schema 独立窄复审及完整 make check/交叉编译通过 | 未合并 | 本批不部署 | 未执行 |
-| P4 | P1–P3 | 实际接入范围已核定 | r4 隔离候选完成，未正式纳入 | 三项正常路径 P2 已修复，独立增量预审通过；正式 CLI/全检待完成 | 未合并 | 本批不部署 | 未执行 |
-| P5 | P4 | 最小实施合同已收口 | 隔离副本实施中，无可见 UI | 未开始 | 未合并 | 本批不部署 | 未执行 |
-| P6 | P3–P5 | 合同已写，接口待核定 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
-| P7 | 稳定 API、设计 review、用户确认 | 主界面及现有风格方向已获用户确认；其他页面待单独出图/review/确认 | 未开始 | 未开始 | 未合并 | 本批不部署 | 未执行 |
-| P8 | P1 开发，P2–P6 演练 | 离线、只读 API 与在线准备最小合同已收口 | P8a/P8c 候选完成，P8b 隔离实施中 | P8a r3/P8c 预审通过；正式组合及在线准备待验 | 未合并 | 本批不部署 | 未执行 |
-| P9 | P0–P8 | 合同已写，发布清单待核验 | 未开始 | 未开始 | 未合并 | 未执行 | 未执行 |
+| P1 | P0 评审通过 | P1a、控制分片及 owner API/CLI 组合计划已写 | P1a 已合并；P1b1/P1b2 本地完整检查通过；P1b3+b4 r2+P1c 已正式纳入，组合定向检查已通过；manager/Agent assignment 未启用 | 历史子批及 b3/b4 r2/P1c 候选预审通过；r1 CLI 两项 P2 已修复，r2 独立复审及完整检查已通过，已提交 | P1a PR #158、P1b1 PR #159、P1b2a PR #161、P1b2b PR #163 已合并；owner API/CLI PR #165 CI 通过并 rebase 合并 | 本批不部署 | 未执行 |
+| P2 | P1 身份基础 | P2a/P2b/P2c–P2d 子计划已写 | P2a/P2b 本地检查和独立复核通过；P2c–P2d 本机配置、Category/安全库存登记及恢复入口已纳入，正式定向检查和完整 make check 均已通过；执行/调度由 P3 接续 | P2a/P2b 正式独立 review 通过；P2c/P2d1/P2d2 候选独立预审通过，正式组合人工及规定 CLI review 均通过，无 findings | P2a PR #160、P2b PR #162、P2c–P2d PR #164 CI 全通过并 rebase 合并；只读目录增量待正式检查 | 本批不部署 | 未执行 |
+| P3 | P1、P2 | [执行计划](category-agent-execution.md)已写 | 显式 named factory、调度、模型/effort/指令及原 pin 恢复已正式纳入；组合定向 race/vet、schema/TS 生成与类型检查通过 | 候选 r1/r2/r3 独立复核通过，已采纳首资格、profile 和 start-over 修正；正式 r2 规定 CLI review 无 findings，r3 schema 独立窄复审及完整 make check/交叉编译通过 | PR #166 CI 全通过并 rebase 合并至 `bfb0ffff` | 本批不部署 | 未执行 |
+| P4 | P1–P3 | [实际接入计划](hosted-issue-agents.md)已写 | r19 已纳入，正式 r13 完整 make check 与交叉编译通过 | 规定 CLI review 及 r17–r19 独立修正审查通过；不采纳意见有明确业务依据 | 待 PR/CI | 本批不部署 | 隔离原 A 已恢复完成、B 接续中，非最终产品验收 |
+| P5 | P4 | 最小实施合同已收口 | r3 及最晚行动时间/原提醒机制候选定向检查通过；真实字段已接 UI | r3 与最晚行动时间增量均独立复审通过 | 未合并 | 本批不部署 | 未执行 |
+| P6 | P3–P5 | 对话/来源合同已复核；原生身份增量计划已写 | P6a/P6b 与完整依赖组合定向检查通过，正式全检待执行 | P6a/P6b 及最终组合预审通过 | 未合并 | 本批不部署 | 未执行 |
+| P7 | 稳定 API、设计 review、用户确认 | 主界面及剩余十二张黑白设计均已确认 | 全部批准表面实现；实际八条 CI 浏览器命令和 Web 检查通过；真实只读检查发现长标题换行问题，r9 窄修复待复验 | r8 和累计 UI 集成独立审查通过；r9 窄审待完成 | 未合并 | 本批不部署 | 原对象与下载只读验证通过，完整产品交互仍待验 |
+| P8 | P1 开发，P2–P6 演练 | 离线、只读 API 与在线准备最小合同已收口 | P8a/P8b/P8c 与 P5 组合定向检查通过，正式全检待执行 | P8a/P8c、P8b 及最终组合预审通过 | 未合并 | 本批不部署 | 未执行 |
+| P9 | P0–P8 | 合同及真实验收矩阵已写 | 最终隔离候选已构建并核对实际资产；原账本责任恢复中 | 候选组合独立核对通过；真实只读结果按范围核验 | 未合并 | 生产未执行 | 局部真实链及原文件读取已验证；双主机、完整交互、期限/原生控制及切换待完成 |
 
 每个批次/子批建立如下证据行，开始下一阶段时填真实值，未发生项保持“待记录”，不能以计划填成完成：
 
@@ -86,6 +86,8 @@ P2c–P2d 的[配置与库存控制计划](agent-inventory-control.md)接通固�
 
 ## P4：Issue scoped 自主协调
 
+具体实际接点与范围见 [P4 具名托管 Agent](hosted-issue-agents.md)。候选基于正式 P3 r2，追加 migration 58；具名配置是唯一设置源，canonical 管理执行缺失冻结 selection 时阻塞，不退回旧 D111。
+
 依赖 P1–P3。演进 background pool 和每项逻辑会话；manager 使用主 Agent 同等原生执行隔离，按 issue scope 扩展 Tend 工具，不放开全局白名单。
 
 允许来源审核、定义/计划修订、子项/task 委派、completion review、attention 及范围内继续推进。全局主 Agent 规划优先级和期限，不是每次本项写入的必经环节。持久化 coordination execution/effect_seq，独立保留 owner source、native identity 和 assignment epoch；调整 D119 的来源/回执/逻辑轮，不允许 call ID 绕过去重。
@@ -112,9 +114,9 @@ Issue owner 消息直接进入其 manager；run 补充沿 D116，owner request �
 
 ## P7：经确认的 UI
 
-用户已确认主界面的现有风格方案；该确认仅覆盖主界面设计和风格方向。其余五张页面方案暂不确认，按用户指定的工作日统一确认，在此之前不再请求类似确认。其他页面仍须独立设计、review 与用户确认；当前不编码可见布局和交互，待对应 API 与设计就绪后实施。CLI、API、领域/存储/权限/调度以及不引入新 UI 决策的生成类型和数据状态逻辑可独立推进，不依赖 P7 审图。
+用户已确认主界面及剩余 02–13 全部十二张黑白设计稿。按已批准页面分组实施，不重复请求这组确认；新增或明显改变布局、信息结构和交互流程时重新出图、独立 review 并由用户确认。CLI、API、领域逻辑及前端数据适配继续独立推进。
 
-UI 编码前必须读取 frontend-app-builder skill，检查现有页面并保留当前蓝灰中性色风格和导航基础，再使用 Image Gen 形成主聊天/Inbox、Issue 树与详情、Agent 库存、直接聊天、attention 和档案入口设计；独立 xhigh 设计 review，修订后请用户确认。主界面以本次已确认的现有风格方案为准，其他页面尚未批准；先前被否决的概念不能作为实现依据。确认记录是 UI 编码前置条件，总体实现授权不能替代该明确停点。后端和无 UI 验收可继续。
+UI 实现沿用 frontend-app-builder 与 Image Gen 已形成的设计，保留实际现有黑白风格：白色内容、黑色文字、浅灰侧栏和细边框。已否决的概念稿不作为实现依据。实现后以真实桌面和移动端浏览器截图逐张对照已确认设计，并使用 view_image 检查，记录差异和修正；代码 review 不替代设计确认。
 
 确认后复用 detail overlay、会话、rollout 和状态组件，按生成 API 类型实现。展示 issue 责任/执行角色、队列/实际运行、待确认/unknown，直接聊天不强制跳主 Agent。管理 Inbox 和全局 next action，不以机器实现细节替代用户决策。新 UI 切换后移除活动旧读 facade，历史档案读取保留。
 
@@ -162,3 +164,58 @@ P2a 当前 PR 状态补记：[PR #160](https://github.com/GhostFlying/tend/pull/
 P3 正式 r2 规定 CLI review 正常退出且无 findings；r3 仅补原 tools schema 的可选 agent_selection，原严格测试不变，独立窄复审通过。r3 完整 `make check TEST_TIMEOUT=60m` 于 UTC 2026-10-28 23:56:24 至 2026-10-29 00:38:14 退出 0（app 2465.547 秒、mainthread 411.145 秒、tools 71.456 秒、Web 全部通过），使用已有本机参数，未修改仓库默认超时；Windows amd64 与 macOS arm64 交叉编译通过。全检日志 SHA-256 `6aa8abb8095508e2fc33d8d52a201cdacfb7d111301c596a26f77f5c0a472613`。首轮格式失败、第二轮 schema 缺项及 40 分钟 package timeout 均保留为失败记录，不记作通过。PR CI/合并、部署和真实模型验收仍待完成。
 
 P2a [PR #160](https://github.com/GhostFlying/tend/pull/160) 的 CI `40781168826` 全通过，rebase 合并至 `b66a94838fc045f317be1cc819d1090d0d486588`。P1b2a [PR #161](https://github.com/GhostFlying/tend/pull/161) 的 CI `40790535737` 全通过，包含浏览器回归和 Windows/macOS 交叉编译，rebase 合并至 `c806b859a8a39cf0c72165b9d135f26667f126e1`。既有历史 base/head 和过程记录保持，不以本地候选通过替代其他批次 CI。
+
+P4 正式纳入补记：固定候选 r4 patch SHA-256 `3ac992986f6ba8dc380072e8418c3b5fc4d572fa893b63df7717fdc40db292d4`，59 文件；三项修正已独立复审通过。正式前件为 `c69c66b2be9b49aa1fbe824d9ea6283bec5dc880`；本次保留 P3 完整检查、上游 CI/合并记录及其 tools schema 修正，仅合并最新状态文档，不改变已预审的运行代码。正式组合检查与规定 CLI review 待完成。
+
+正式第二轮冻结补记：r1 完整检查自然结束为 exit 2，App、mainthread、tools、store 通过；API 的过时 assignment 断言及两项后台身份适配 E2E 失败已分别修正，Web 因 Go 阶段失败未运行。r5 六项修复和 E2E 四文件增量独立复审均无新增 findings。最新前件 `3ec40b016a28f2e0ae1a7c2b2528698520d58c9c` 与原前件的源码树一致；本轮仅更新前件提交身份和进度记录，不覆盖 r1 失败事实。第二轮规定 CLI review 和完整检查结果另行补记，不将定向通过写成全检通过。
+
+正式第三轮准备补记：r2 规定 CLI review 正常退出但提出四项 P2，均采纳并形成 r6 九文件修正。独立复审确认 owner assignee 来源绑定、交接时已明确未发送旧回合退役、named 工具前的 steer 来源回执以及维护摘要冻结模型均按实际 caller 修复；四条旧代码红例与新代码定向 race 保留。r2 全检在运行中主动中止以检查修正版，属于未完成，不作为产品失败或通过证据；当时 API 已通过，Web 未执行。r2 Windows/macOS 交叉编译通过仅归属于其冻结候选。r6 完整检查与规定 CLI review 另行记录。
+
+P1b2b PR #163 的 CI `40800622561` 全通过，包含完整检查、浏览器回归与 Windows/macOS 交叉编译；rebase 合并至 `cae8f956fd177cf90abd21d6b737c802e127b0ca`。P4 第三轮前件更新为 `cd6ac785c44876ce08dd102c14cc3e2c9f9da8d5`，与先前前件的源码树一致，既有检查证据仍保留原提交身份。
+
+P2c–P2d PR #164 的 CI `40805226503` 于 UTC 2026-10-29 02:59:23 全通过，包含完整检查、浏览器回归与 Windows/macOS 交叉编译；rebase 合并至 `2210f315a62efb49a28662a69dbc074110481fd7`。P1 owner API/CLI [PR #165](https://github.com/GhostFlying/tend/pull/165) 的 base 为该提交、head 为 `4f66351444b127026ad99f9cef7895bf31434755`，CI 待完成。P4 新前件 `e159e70e22b0f36a8e72d7e7a7985fd4acd6a1f6` 与原前件源码树一致；本次不改变已检查的前件实现。
+
+P4 第三轮完整检查于 UTC 2026-10-29 02:14:00 至 02:58:35 自然退出 2：App 2647.905 秒，两条负责人交接回归因旧普通投递仍 sending 而失败；API、E2E 及其他 Go 包通过，Web 未执行。日志 SHA-256 `96deb4efcf00e1d386a97e8947c84ec5a8ddc782e9e5d9e9d7a96237acbf8908`。本轮正式 CLI review 提出的重挂领取窗口与父负责人读取后代成果问题已由 r7/r8 修正、定向检查和独立复审通过；两条完整检查失败仍另行修正后再正式验证，不将定向通过当作全检通过。
+
+第四轮正式验证准备：r8 的首次普通投递重挂围栏及后代成果读取均已独立复核；r9 仅修正两条测试的实际投递收束顺序，保留 sending 时拒绝交接和原有收尾断言，生产代码不变。r9 单文件独立复核通过。当前前件 `e159e70e22b0f36a8e72d7e7a7985fd4acd6a1f6`，正式组合为 66 文件；规定 CLI review、完整检查及 CI/合并仍须分别完成。
+
+
+## 第六轮正式验证准备
+
+P1 owner API/CLI [PR #165](https://github.com/GhostFlying/tend/pull/165) 的 CI `40809780053` 第二次尝试全部通过（包括浏览器回归与交叉编译），rebase 合并至 `b7d9a3c229b5b8b26a257ad6b2dfa24322cc6daa`。首次仅暂停接管回归超时，原 head 的该用例三次定向 race 通过；未确定根因、未修改测试，不宣称已修复。P3 [PR #166](https://github.com/GhostFlying/tend/pull/166) 从此 base 提交，head `a690deb806b0800500aadc50edd5886fc8e4b27d`，CI 尚在运行。其源码树与原已验证提交相同。
+
+P4 第四轮完整检查于 UTC 2026-10-29 03:56:56 自然通过，但该轮规定 CLI review 的四项实际缺陷另经 r10 修正和独立复审。第五轮规定 CLI review 正常退出并提出两项 P2：子负责人缺少继承上下文、不可用模型占满后台池；均采纳并由 r11 修正。第五轮完整检查主动中止为 INCOMPLETE_SUPERSEDED，不作为通过或产品失败；交叉编译通过仍仅属于第五轮冻结候选。r11 七文件独立窄审通过，正式第六轮基于上述 P3 head 重新冻结，完整检查与规定 CLI review 待执行。组合候选中归档准备和启动退出通知的交错问题属于后继 P8 接点，单独修正和复核，不提前声明完整依赖链通过。
+
+
+## 第七轮正式验证与 UI 批准补记
+
+P4 第六轮规定 CLI review 于 UTC 2026-10-29 05:04:33 正常退出，但提出三项 P2，不记为通过：启动前 hook 读取失败误判未知、已冻结普通事件重试绕过同项待核回执，以及终态 canonical Issue 的待投递事件在重启后失去发现。均经实际调用核实并采纳；第六轮全检于 05:08:20 主动中止为 INCOMPLETE_SUPERSEDED，不是通过或产品测试失败。第六轮交叉编译通过仅属于原冻结候选。
+
+r12 补齐上述路径及原 context 取消后的已知未发送清理，保留真正 turn/start 未知、原执行快照、合法恢复、原 batch 和旧历史行为。定向 race 为 TraeX 1.153 秒、App 18.481 秒、mainthread 44.737 秒，vet 通过；固定十文件增量和 74 文件组合已独立窄审通过。第七轮从相同前件重新冻结，完整检查和规定 CLI review 尚待完成。
+
+UI 剩余十二张图已对照当前实际黑白界面逐张独立校对，用户明确回复“全部确认，可以按图实现”。连同此前批准的主界面，现有图稿范围全部进入实现；新增或明显改变布局、信息结构、交互时仍重新设计 review。前端实现与后台字段/薄读取适配分工，复用现有请求身份、读取失效与来源保存机制。
+
+第八轮正式验证准备：P3 PR #166 的 CI `40819277346` 全通过，rebase 合并至 `bfb0ffff3b715ffa9b88a03b4a8e982231bfb414`。第七轮规定 CLI 正常退出但发现 canonical 主会话来源分类与延期队头阻挡冻结续接两项 P2，均采纳；第七轮全检主动中止为 INCOMPLETE_SUPERSEDED。r13 及后继自身回复唤醒/提示词修正均完成真实调用回归与独立窄审；本轮正式组合冻结为 79 文件，规定 CLI、完整检查、CI/合并及部署仍须分别记录。隔离真实账本保留原责任，待新不可变构建恢复，不以人工改分类或清理待决掩盖缺陷。
+
+
+P4 r14 当前候选：formal r8 独立 review 四项实际 caller finding 已采纳（来源准入、后代验收引用、named owner-source schema、分角色 metadata repair）；r8 本地全检主动未完成，原执行证据保留。r14 在独立副本进行实际 red→green 和定向 race/vet/生成一致性，待独立复审与唯一正式全检；未合并、未部署。后继 B1 stable definition/controller slice 已独立复核，owner metadata 后片与真实隔离验收保持独立，不将候选当线上能力。
+
+第九轮正式验证准备：第八轮规定 CLI review 自然退出但提出四项实际调用缺陷，均采纳；第八轮完整检查主动中止为 INCOMPLETE_SUPERSEDED，交叉编译通过仍只归属该冻结版本。r14 的 queued 来源准入/后继份额、后代验收引用、source selector schema 和角色对应 repair 指令已完成定向 race/vet 及独立窄审。当前 84 文件组合基于 `bfb0ffff3b715ffa9b88a03b4a8e982231bfb414`，规定 CLI 与完整检查另行执行，不以候选预审代替合并门槛。
+
+P4 r15 后继修正候选：第九轮规定 review 的四项实际来源消费/owner 纠正唤醒缺陷已通过正常调用复现，有限入口清单覆盖分类 target、嵌套完成证据、会话 preview、context/task/fact 来源及 owner 旧分类入口。本片沿原准入与事务 fanout 最小修正，独立 review/正式完整检查待执行；第九轮 fullcheck 为主动停止、未完成，不记通过或产品失败。B1 owner 投影、可见 UI 和原真实模型隔离账本保持独立。
+
+第十轮正式验证准备：第九轮规定 CLI review 自然退出，但提出分类目标、嵌套 owner 证据、会话预览的来源准入，以及 owner 显式纠正关联后的负责人唤醒四项实际缺陷，均采纳。第九轮完整检查于 UTC 2026-10-29 07:09:37 主动中止为 INCOMPLETE_SUPERSEDED；此前 API 已通过，App 未结束，不记作全检通过或产品失败。r15 的实际 red→green、定向 race/vet、生成一致性及独立窄审通过，复用现有准入和同事务唤醒规则，不限制用户查看原文或直接整理关联。当前 85 文件组合基于 `bfb0ffff3b715ffa9b88a03b4a8e982231bfb414`，规定 CLI、完整检查、CI/合并仍须独立完成。隔离测试对停滞的 metadata 修复使用了一次明确 owner 中断，并在归档准备与实际执行收束后停止测试服务；原责任和数据完整保留，不表述为自然恢复成功。
+
+P4 r16 后继候选：formal r10 规定CLI的两项准入缺陷已用正常caller复现并修正，定向App/mainthread race与vet已通过，独立review/正式完整检查待执行。冻结manager续接受同Issue普通receipt围栏；main当前配置缺失时继续原合法pin、新输入不抢先准入。第三条blanket子树native endpoint门槛经独立caller核对不采纳：已确认child.close并非业务unknown，原native回执保留对账，父项不能因没有后继wake的纯尾部被永久阻塞。现业务unknown与迟到激活约束不改。
+
+第十一轮正式验证准备：第十轮规定 CLI 自然完成并提出三项 P2；冻结 manager 续接绕过实际 receipt，以及当前 main 配置缺失阻塞原冻结 repair 两项均采纳并修复，第三项要求子树原生会话完全收束的门槛不采纳，原报告与业务调用依据保留。r16 五文件增量、86 文件组合经独立复核；真实正常 caller、普通 receipt 对账与原 foreground 优先的定向 race/vet 通过。第十轮完整检查于 UTC 2026-10-29 08:07:50 主动中止为 INCOMPLETE_SUPERSEDED，API 已通过而 App 未完成，不记为通过或产品失败。当前正式组合仍基于 `bfb0ffff3b715ffa9b88a03b4a8e982231bfb414`；第十一轮规定 CLI、完整检查、CI/合并另行记录。
+
+收口补记：P4 r17 独立复审通过并纳入，第十一轮全检自然失败的实际用例另行诊断；不把定向通过或 CLI 正常退出写成全检通过。UI r2 原四项修复已核实，新增刷新后旧请求版本冲突丢草稿场景由实现 agent 修复；Task 当前 Issue 字段候选已冻结并送独立审阅，活动旧入口退役仍待组合完成。
+
+r18 收口：原全检三组失败已确定复现，局部修正与原真实调用回归通过并独立审过；正式完整检查与交叉编译使用新冻结字节。Task 当前 Issue 投影独立 review 已通过，UI 正在切换其真实调用，未替代活动旧入口退役或部署验收。
+
+## P4 正式完整检查通过
+
+r19 的私有维护摘要修正及实际撤回 CAS 测试经独立窄审通过。正式 r13 在 UTC 2026-10-29 11:03:46 至 11:51:26 自然退出 0：`make check TEST_TIMEOUT=60m` 使用仅为 `go test` 添加 JSON 事件输出的透传入口，测试范围、race、超时及退出码不变。605 个 App 测试、其余 Go 检查、45 个 Web 测试文件/281 项测试、类型/lint/格式和构建通过；Windows amd64/macOS arm64 编译通过。源文件与冻结的 92 路径快照逐字一致，日志 SHA-256 为 `4fc97ee4fd4606fefddc5984fa562e8efecc1f38ffece4d8e975d114f92001df`。
+
+第十二轮未知中断与重试的真实摘要失败保留；本次结果不改写历史。规定第十一轮 CLI review 及后继独立修正审查关闭代码 review，不重复已关闭的全量审查。当前仅追加进度文档，尚待 PR/CI 与 rebase 合并，不声明生产部署或完整 P9 通过。

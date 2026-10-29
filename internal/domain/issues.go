@@ -260,6 +260,15 @@ func validateIssueEnum[T ~string](field string, value T, allowed []T) error {
 
 // ValidateIssueClosure does not infer responsibility completion from task count.
 func ValidateIssueClosure(w protocol.WorkItem, c protocol.WorkItemClosure) error {
+	return validateIssueClosure(w, c, true)
+}
+
+// ValidateResponsibleIssueClosure is used only after app authenticates the
+// delegated manager and resolves actual evidence. It does not impersonate an owner.
+func ValidateResponsibleIssueClosure(w protocol.WorkItem, c protocol.WorkItemClosure) error {
+	return validateIssueClosure(w, c, false)
+}
+func validateIssueClosure(w protocol.WorkItem, c protocol.WorkItemClosure, requireOwner bool) error {
 	if err := validateIssueEnum("closure.kind", c.Kind, protocol.WorkItemClosureKindValues()); err != nil {
 		return err
 	}
@@ -275,7 +284,7 @@ func ValidateIssueClosure(w protocol.WorkItem, c protocol.WorkItemClosure) error
 			hasOwner = true
 		}
 	}
-	if !hasOwner {
+	if requireOwner && !hasOwner {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "closure requires an explicit owner responsibility endpoint")
 	}
 	for _, f := range w.FollowOns {

@@ -97,8 +97,5 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 	if err != nil {
 		return err
 	}
-	if scope.Canonical {
-		return nil
-	} // Owner sees the durable pending review; no manager runtime is active.
 	return queueEventTurn(ctx, x, tx, id, sourceEventID, "task.completed", nil)
 }

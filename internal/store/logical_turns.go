@@ -8,11 +8,28 @@ import (
 
 // LogicalTurn returns obligations for one registered execution, never all history.
 func LogicalTurn(ctx context.Context, q Querier, request string) (protocol.LogicalTurnState, error) {
+	scope, err := HostedIssueScope(ctx, q, request)
+	if err != nil {
+		return protocol.LogicalTurnState{}, err
+	}
 	v := protocol.LogicalTurnState{Messages: []protocol.MessageAssociations{}, Contexts: []protocol.LogicalContextReview{}, Awaiting: []protocol.PendingClarification{}}
 	if err := q.QueryRowContext(ctx, `SELECT l.logical_turn_id,l.status,l.reason,l.repair_attempts FROM logical_turns l JOIN logical_turn_executions e ON e.logical_turn_id=l.logical_turn_id WHERE e.request_id=?`, request).Scan(&v.ID, &v.Status, &v.Reason, &v.RepairAttempts); err != nil {
 		return v, notFound(err, "logical turn")
 	}
-	pending, err := q.QueryContext(ctx, `SELECT logical_turn_id,message_id,revision,reason FROM logical_turns WHERE status='awaiting_clarification' AND logical_turn_id<>? ORDER BY rowid LIMIT 50`, v.ID)
+	var hosted bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions WHERE execution_id=?)`, request).Scan(&hosted); err != nil {
+		return v, err
+	}
+	if hosted {
+		v.CoordinationExecutionID, err = HostedCoordinationIdentity(ctx, q, request)
+		if err != nil {
+			return v, err
+		}
+		if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(effect_seq),0)+1 FROM hosted_coordination_effects WHERE execution_id=?`, v.CoordinationExecutionID).Scan(&v.NextEffectSeq); err != nil {
+			return v, err
+		}
+	}
+	pending, err := q.QueryContext(ctx, `SELECT logical_turn_id,message_id,revision,reason FROM logical_turns WHERE status='awaiting_clarification' AND logical_turn_id<>? AND ?='' ORDER BY rowid LIMIT 50`, v.ID, scope)
 	if err != nil {
 		return v, err
 	}
@@ -40,7 +57,7 @@ func LogicalTurn(ctx context.Context, q Querier, request string) (protocol.Logic
 		}
 		v.Messages = append(v.Messages, m)
 	}
-	rows, err := q.QueryContext(ctx, `SELECT c.work_item_id,c.revision FROM work_item_contexts c JOIN logical_turn_contexts lc ON lc.work_item_id=c.work_item_id WHERE lc.logical_turn_id=? ORDER BY c.work_item_id`, v.ID)
+	rows, err := q.QueryContext(ctx, `SELECT c.work_item_id,c.revision FROM work_item_contexts c JOIN logical_turn_contexts lc ON lc.work_item_id=c.work_item_id WHERE lc.logical_turn_id=? AND (?='' OR c.work_item_id=?) ORDER BY c.work_item_id`, v.ID, scope, scope)
 	if err != nil {
 		return v, err
 	}

@@ -1,6 +1,6 @@
 # Issue、Agent 与个人规划架构
 
-状态：P0、P1a、P1b1、P2a 与 P1b2a 已经 CI 和 rebase 合并；其余 P1/P2 owner 与配置库存子批完成本地完整检查及独立 review，后续 PR 按台账推进。P3 显式 named 执行已纳入，正式规定 CLI review、独立 schema 增量复审、完整 make check 与 Windows/macOS 交叉编译通过。P4 r4 负责人自治候选独立预审通过，尚未正式纳入；P5 与 P8b 在线准备在隔离副本实施，P8a 离线工具及 P8c owner 只读 API 候选预审通过。未确认页面不编码；本轮尚未部署或完成真实 E2E。本文区分设计合同、代码、检查、合并与验收，实施事实以下文台账为准。
+状态：P0、P1 基础控制与 P2 配置库存子批已经 CI 和 rebase 合并，P1 owner API/CLI 的 PR #165 正在 CI。P3 完整本地检查、交叉编译与独立 review 通过，等待前件交付。P4 第三轮完整检查结束，两条交接回归失败；正式 review 的重挂与成果读取问题已在 r8 修正并独立复审通过，两条测试准备顺序已在 r9 修正并独立复核通过，第四轮正式验证待执行。P5、P6、P8 候选及依赖组合完成定向检查和独立预审，正式全检/CI 尚未完成；只读 Agent 目录候选独立复审通过。前端非可视数据逻辑候选完成定向检查，未确认页面仍不编码。本轮尚未部署或完成真实模型验收。以下台账区分设计、候选检查、合并与验收，历史失败记录保留。
 
 主 Agent 可依据真实 owner 原文，转录既有 decision/version 的既定选项；仍经原 AskedRevision 与领域规则应用已有效果。这是个人助理传递用户决定，不是主 Agent 自由规划 canonical task、修改其冻结合同或接管 owner 权限；不为 owner 普通回答添加语义证明链。
 
@@ -114,8 +114,13 @@ UI 先使用 frontend-app-builder 与 Image Gen 形成设计，经独立 xhigh �
 
 每批独立构建、测试和 PR，运行 make check、独立 xhigh code review、CI，rebase 后线性合并。中间批次不部署；完整功能、档案/切换演练和真实 harness E2E 就绪后，按受控流程一次部署并做真实 owner 闭环验收。实际机器与发布证据只保存在忽略的本地记录中。
 
+
+P4 的实际配置权威、CLI 原生工具限制、assignment 围栏与 scoped context 接点见 [托管 Issue Agent 实施计划](plans/hosted-issue-agents.md)。具名主会话/本项协调不因配置或冻结 selection 缺失而回退旧 D111；main 接收并委派后可处理下个请求，本项审阅保留给负责 manager。固定 inline CLI hook 不依赖外部脚本或业务 IO，配合原生登记/回读及 readonly/never 限制实际执行；允许理解 owner 提供材料。底层 CLI hook 故障仍 fail-open，不把此适配承诺扩展成恶意同 UID 隔离或原子 fail-closed。Attention 回答的完整跨角色唤醒仍由 P5 接通。
+
 ## P3 正式检查与合并进度补记
 
 P3 正式 r2 规定 CLI review 正常退出且无 findings；r3 仅补原 tools schema 的可选 agent_selection，原严格测试不变，独立窄复审通过。r3 完整 `make check TEST_TIMEOUT=60m` 于 UTC 2026-10-28 23:56:24 至 2026-10-29 00:38:14 退出 0（app 2465.547 秒、mainthread 411.145 秒、tools 71.456 秒、Web 全部通过），使用已有本机参数，未修改仓库默认超时；Windows amd64 与 macOS arm64 交叉编译通过。全检日志 SHA-256 `6aa8abb8095508e2fc33d8d52a201cdacfb7d111301c596a26f77f5c0a472613`。首轮格式失败、第二轮 schema 缺项及 40 分钟 package timeout 均保留为失败记录，不记作通过。PR CI/合并、部署和真实模型验收仍待完成。
 
 P2a [PR #160](https://github.com/GhostFlying/tend/pull/160) 的 CI `40781168826` 全通过，rebase 合并至 `b66a94838fc045f317be1cc819d1090d0d486588`。P1b2a [PR #161](https://github.com/GhostFlying/tend/pull/161) 的 CI `40790535737` 全通过，包含浏览器回归和 Windows/macOS 交叉编译，rebase 合并至 `c806b859a8a39cf0c72165b9d135f26667f126e1`。既有历史 base/head 和过程记录保持，不以本地候选通过替代其他批次 CI。
+
+P4 正式纳入补记：固定候选 r4 patch SHA-256 `3ac992986f6ba8dc380072e8418c3b5fc4d572fa893b63df7717fdc40db292d4`，59 文件；三项修正已独立复审通过。正式前件为 `c69c66b2be9b49aa1fbe824d9ea6283bec5dc880`；本次保留 P3 完整检查、上游 CI/合并记录及其 tools schema 修正，仅合并最新状态文档，不改变已预审的运行代码。正式组合检查与规定 CLI review 待完成。

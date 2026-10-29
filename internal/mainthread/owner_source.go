@@ -3,7 +3,6 @@ package mainthread
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -17,25 +16,7 @@ func hostedSpecs() []harness.ToolSpec {
 		if backgroundTool(specs[i].Name) {
 			continue
 		}
-		var schema map[string]any
-		if err := json.Unmarshal(specs[i].InputSchema, &schema); err != nil {
-			panic(fmt.Sprintf("mainthread: invalid tool schema: %v", err))
-		}
-		props, ok := schema["properties"].(map[string]any)
-		if !ok {
-			props = map[string]any{}
-			schema["properties"] = props
-		}
-		description := "Optional actual owner message this action answers within the current native turn. Use its [message ID] when an earlier request is followed by a status question. Only current or consumed owner input from this turn is allowed; this does not grant authority or override newer constraints. Omit to use the latest native source. Keep commit_seq increasing within this turn."
-		if specs[i].Name == "decisions_resolve" {
-			description = "Optional actual admitted owner answer message ID. Use the earlier answer's [message ID] when a later status question arrives, or when recovering an already admitted answer. Queued, withdrawn or system input cannot answer decisions; this does not override newer owner constraints."
-		}
-		props["source_message_id"] = map[string]any{"type": "string", "minLength": 1, "description": description}
-		encoded, err := json.Marshal(schema)
-		if err != nil {
-			panic(fmt.Sprintf("mainthread: encode tool schema: %v", err))
-		}
-		specs[i].InputSchema = encoded
+		specs[i] = tools.HostedOwnerSourceSpec(specs[i])
 	}
 	return specs
 }

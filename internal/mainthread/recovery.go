@@ -92,7 +92,8 @@ func (m *Manager) deliverRecovery(ctx context.Context, d app.Delivery) app.Deliv
 		// No startup intent exists yet: retry only this read, not native input.
 		return app.DeliveryResult{Outcome: app.Retry, RetryAfter: 5 * time.Second, Reason: "Waiting for a confirmed failed predecessor with settled native operations."}
 	}
-	selection, revision, err := m.turnModel(ctx, th)
+	openedSelection := m.namedSelection()
+	selection, revision, err := m.turnModel(ctx, th, d.RequestID)
 	if err != nil {
 		if protocol.CodeOf(err) == protocol.CodeInvalidRequest {
 			return m.rejectRecovery(ctx, d, "The selected model is unavailable; review conversation settings.")
@@ -134,6 +135,9 @@ func (m *Manager) deliverRecovery(ctx context.Context, d app.Delivery) app.Deliv
 		m.mu.Unlock()
 	}()
 	rec = store.MainTurn{RequestID: d.RequestID, MessageID: r.MessageID, ThreadID: th.ID(), Status: store.TurnStarting, Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort, SettingsRevision: revision}
+	// Freeze the actual executor opened by serve; PutMainTurn compares this
+	// pin with current admission in the same transaction.
+	rec.Hosted = openedSelection
 	if err := m.app.PutMainTurn(ctx, rec); err != nil {
 		if errors.Is(err, app.ErrRepairCancelled) {
 			return app.DeliveryResult{Outcome: app.Delivered}
@@ -191,11 +195,13 @@ func (m *Manager) deliverRecovery(ctx context.Context, d app.Delivery) app.Deliv
 	id, err := th.StartTurn(ctx, harness.TurnInput{Continue: true, Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort})
 	if err != nil {
 		if errors.Is(err, harness.ErrRejected) {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
 			rec.Status = store.TurnRejected
-			if err := m.app.PutMainTurn(ctx, rec); err != nil {
+			if err := m.app.PutMainTurn(cleanup, rec); err != nil {
 				return retry(err)
 			}
-			if err := m.app.RequeueRejectedAgentRecovery(ctx, d.RequestID); err != nil {
+			if err := m.app.RequeueRejectedAgentRecovery(cleanup, d.RequestID); err != nil {
 				return retry(err)
 			}
 			return app.DeliveryResult{Outcome: app.Retry, RetryAfter: 5 * time.Second}

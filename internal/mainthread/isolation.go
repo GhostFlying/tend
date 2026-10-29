@@ -6,8 +6,9 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 )
 
-// ThreadConfig gives the hosted dispatcher only tend coordination tools and
-// read-only presentation. Investigation and execution belong to workers (D88).
+// ThreadConfig selects Tend coordination tools and read-only presentation.
+// The named hosted adapter also blocks native delegation through its fixed CLI
+// hook; native tool schema names alone do not establish isolation (D88/D122).
 // An empty model leaves the harness default.
 func ThreadConfig(cwd, model string) harness.ThreadConfig {
 	return harness.ThreadConfig{
@@ -18,9 +19,9 @@ func ThreadConfig(cwd, model string) harness.ThreadConfig {
 }
 
 // Isolation disables native execution and independent research paths so the
-// hosted dispatcher delegates them through tend. Images and bounded ledger/file
-// reads remain useful for understanding the owner. Keys are dotted harness
-// configuration paths, also applied when a thread resumes or hands off.
+// hosted dispatcher delegates them through Tend. Images and bounded material
+// presentation remain useful for understanding the owner. Keys are dotted
+// harness configuration paths, also applied on resume or handoff.
 var Isolation = map[string]any{
 	"features.shell_tool":                           false,
 	"features.js_repl":                              false,

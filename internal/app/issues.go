@@ -421,6 +421,15 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 					valid = true
 				}
 			}
+			var canonical bool
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, w.WorkItemID).Scan(&canonical); err != nil {
+				return err
+			}
+			if canonical {
+				if err := q.QueryRowContext(ctx, `WITH RECURSIVE descendants(id) AS (SELECT ? UNION ALL SELECT c.issue_id FROM issue_controls c JOIN descendants d ON c.parent_issue_id=d.id) SELECT EXISTS(SELECT 1 FROM task_work_item_owners o JOIN descendants d ON d.id=o.work_item_id JOIN tasks t ON t.task_id=o.task_id JOIN acceptances a ON a.task_id=t.task_id WHERE a.acceptance_id=? AND a.verdict='passed' AND t.lifecycle='completed' AND a.spec_version=t.spec_version AND a.artifact_id=t.current_artifact_id)`, w.WorkItemID, e.Reference).Scan(&valid); err != nil {
+					return err
+				}
+			}
 
 		case "upgrade":
 			snapshot, err := workItemUpgradeEvidence(ctx, x, q, e.Reference)

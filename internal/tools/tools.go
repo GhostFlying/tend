@@ -29,6 +29,7 @@ import (
 
 // Call is one tool call from a main agent.
 type Call struct {
+	hostedRead bool // Set only after persisted hosted role/scope checks.
 	// Principal is the caller, established by the connection.
 	Principal protocol.Principal
 	// RequestID is the call's request ID when the caller gives one.
@@ -163,6 +164,11 @@ type answer struct {
 
 // Handle answers one tool call.
 func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
+	if c.executionRequest() != "" && !c.hostedRead {
+		if result, handled := s.handleHosted(ctx, c); handled {
+			return result
+		}
+	}
 	if c.ParentRequestID != "" {
 		repair, err := s.app.IsRepairExecution(ctx, c.executionRequest())
 		if err != nil {
@@ -181,7 +187,7 @@ func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
 	var a answer
 	if c.Principal.Kind == protocol.PrincipalMainAgent && c.Principal.Agent != "" {
 		a.Error = protocol.Errorf(protocol.CodeForbidden, "external coordinator access has been retired")
-	} else if c.Principal.Kind == protocol.PrincipalBackgroundAgent && !backgroundTools[c.Tool] {
+	} else if c.Principal.Kind == protocol.PrincipalBackgroundAgent && !c.hostedRead && !backgroundTools[c.Tool] {
 		a.Error = protocol.Errorf(protocol.CodeForbidden, "tool is unavailable to background agents")
 	} else if t == nil {
 		a.Error = protocol.Errorf(protocol.CodeInvalidRequest, "there is no tool %q", c.Tool)
@@ -305,7 +311,9 @@ func (s *Service) execute(ctx context.Context, c Call, op string, target protoco
 	if c.PlanningSourceMessageID != "" {
 		cmd = app.WithPlanningSource(cmd, c.PlanningSourceMessageID)
 	}
-	if c.ExecutionRequestID != "" {
+	// This wrapper identifies the main agent's source/context processing.
+	// Background commands validate their own native delivery, thread and scope.
+	if c.ExecutionRequestID != "" && c.Principal.Kind == protocol.PrincipalMainAgent {
 		cmd = app.WithExecutionRequest(cmd, c.ExecutionRequestID)
 	}
 	res, err := s.app.Execute(ctx, c.Principal, env, cmd)

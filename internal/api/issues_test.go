@@ -78,10 +78,17 @@ func TestIssueOwnerHTTPRecursiveIdentityHistoryAndReplay(t *testing.T) {
 	if e.count(`SELECT count(*) FROM request_records`) != before {
 		t.Fatal("history read wrote a request")
 	}
-	// Reassignment has no public command while agent assignment admission is absent.
-	status, notPublished := e.op(token, e.envelope("issues.assign", update.Target, &current.Revision, map[string]any{"expected_assignment_epoch": 1}))
-	if status != http.StatusBadRequest || notPublished.Error == nil {
-		t.Fatal("unimplemented assignment was published")
+	// P4 publishes assignment. Incomplete requests reach domain validation;
+	// retaining the actual authenticated owner is an idempotent responsibility
+	// choice, not a new epoch or an implicit resume of this paused Issue.
+	status, invalidAssignment := e.op(token, e.envelope("issues.assign", update.Target, &current.Revision, map[string]any{"expected_assignment_epoch": current.AssignmentEpoch}))
+	if status != http.StatusOK || invalidAssignment.Operation == nil || invalidAssignment.Operation.Status != protocol.OpFailed || invalidAssignment.Operation.Error == nil || invalidAssignment.Operation.Error.Code != protocol.CodeInvalidRequest {
+		t.Fatalf("published assignment domain rejection=%d %+v", status, invalidAssignment)
+	}
+	payload := protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, Assignee: current.Assignee, Reason: "Retain concrete responsibility with the authenticated owner"}
+	assigned := issueHTTP(t, e, token, e.envelope("issues.assign", update.Target, &current.Revision, payload))
+	if assigned.Revision != current.Revision || assigned.AssignmentEpoch != current.AssignmentEpoch || assigned.Assignee != current.Assignee || assigned.State != current.State {
+		t.Fatalf("same-owner assignment changed responsibility or lifecycle: %+v", assigned)
 	}
 	var raw map[string]any
 	e.do("GET", "/api/v1/issues/"+child.IssueID, token, nil, &raw)

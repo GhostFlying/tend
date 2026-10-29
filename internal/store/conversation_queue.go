@@ -156,11 +156,15 @@ func HideUndeliveredOwner(ctx context.Context, q Querier, it *protocol.Conversat
 		}
 		return nil
 	}
-	var hidden bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_message_controls WHERE message_id=? AND withdrawn_at<>0) OR EXISTS(SELECT 1 FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation='main_thread.handle_message' AND json_extract(o.payload_json,'$.message_id')=? AND o.status IN ('pending','sending') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status IN ('started','completed','interrupted','failed')) AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=o.request_id AND s.native_item_id<>'')) OR EXISTS(SELECT 1 FROM main_steers s WHERE s.message_id=? AND s.status IN ('sending','accepted','unknown','waiting') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=s.request_id AND t.status IN ('started','completed','interrupted','failed')))`, it.MessageID, it.MessageID, it.MessageID).Scan(&hidden)
-	if err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("store: message visibility: %w", err)
+	admitted, err := OwnerInputAdmitted(ctx, q, it.MessageID)
+	if err != nil {
+		return err
 	}
+	var withdrawn bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_message_controls WHERE message_id=? AND withdrawn_at<>0)`, it.MessageID).Scan(&withdrawn); err != nil {
+		return err
+	}
+	hidden := !admitted || withdrawn
 	if hidden {
 		it.Body = "[Owner input not admitted or withdrawn; not an instruction.]"
 		it.Attachments = nil
@@ -204,4 +208,15 @@ func HideUnadmittedForCoordinator(ctx context.Context, q Querier, it *protocol.C
 		}
 	}
 	return HideUndeliveredOwner(ctx, q, it)
+}
+
+// OwnerInputAdmitted distinguishes queued owner input from material already
+// delivered to a native turn. Withdrawal remains a separate source correction.
+func OwnerInputAdmitted(ctx context.Context, q Querier, message string) (bool, error) {
+	var pending bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='owner') AND (EXISTS(SELECT 1 FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation='main_thread.handle_message' AND json_extract(o.payload_json,'$.message_id')=? AND o.status IN ('pending','sending','unknown') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status IN ('started','completed','interrupted','failed')) AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=o.request_id AND s.native_item_id<>'')) OR EXISTS(SELECT 1 FROM main_steers s WHERE s.message_id=? AND s.status IN ('sending','accepted','unknown','waiting') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=s.request_id AND t.status IN ('started','completed','interrupted','failed'))))`, message, message, message).Scan(&pending)
+	if err != nil {
+		return false, fmt.Errorf("store: owner input admission: %w", err)
+	}
+	return !pending, nil
 }

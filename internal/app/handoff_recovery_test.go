@@ -57,6 +57,25 @@ func TestHandoffOnlyIgnoresExactAbandonedStartingDelivery(t *testing.T) {
 				if !strings.Contains(string(input.Observations), `"state":"unknown"`) || !strings.Contains(string(input.Observations), "original uncertain message") {
 					t.Fatalf("unknown reference state lost: %s", input.Observations)
 				}
+				if !strings.Contains(string(input.Observations), `"unconfirmed_owner_input":true`) {
+					t.Fatalf("unconfirmed history became authority: %s", input.Observations)
+				}
+				if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+					admitted, err := store.OwnerInputAdmitted(ctx, tx.Q(), messageID)
+					if err != nil {
+						return err
+					}
+					it := protocol.ConversationItem{MessageID: messageID, Author: "owner", Body: "original uncertain message"}
+					if err := store.HideUndeliveredOwner(ctx, tx.Q(), &it); err != nil {
+						return err
+					}
+					if admitted || strings.Contains(it.Body, "original uncertain message") {
+						t.Fatal("summary admitted unknown history for ordinary source consumption", admitted, it)
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
 				claimed, err := h.app.ClaimSummaryAttempt(ctx, input.Snapshot, 1000)
 				if err != nil || !claimed {
 					t.Fatalf("historical unknown blocked summary %v %v", claimed, err)

@@ -44,6 +44,12 @@ func (m *Manager) defaults(th harness.Thread) harness.ModelSelection {
 // Settings returns the shared next-turn settings and the live harness catalog.
 // A disconnected harness leaves persisted selections readable but unavailable.
 func (m *Manager) Settings(ctx context.Context) (protocol.ConversationSettingsView, error) {
+	if selected, named, err := m.app.NamedHostedSelection(ctx, m.cfg.ConversationID); err != nil {
+		return protocol.ConversationSettingsView{}, err
+	} else if named {
+		models, catalogErr := m.modelCatalog(ctx)
+		return protocol.ConversationSettingsView{Enabled: true, Available: catalogErr == nil && len(models) > 0, Revision: selected.ConfigurationRevision, Model: selected.Definition.Model, Effort: selected.Definition.Effort, Models: modelViews(models), Source: "named_definition", ReadOnly: true}, nil
+	}
 	settings, err := m.app.ConversationSettings(ctx, m.cfg.ConversationID)
 	if err != nil {
 		return protocol.ConversationSettingsView{}, err
@@ -94,7 +100,29 @@ func (m *Manager) Settings(ctx context.Context) (protocol.ConversationSettingsVi
 
 // turnModel snapshots settings once a queued message starts processing. Later
 // owner writes affect subsequent turns, including queued offline messages.
-func (m *Manager) turnModel(ctx context.Context, th harness.Thread) (harness.ModelSelection, int64, error) {
+func (m *Manager) turnModel(ctx context.Context, th harness.Thread, request string) (harness.ModelSelection, int64, error) {
+	if selected, named, err := m.app.HostedSelectionForAdmission(ctx, request, m.cfg.ConversationID); err != nil {
+		return harness.ModelSelection{}, 0, err
+	} else if named {
+		if current := m.namedSelection(); current != nil && !sameNamedBinding(*current, selected) {
+			m.mu.Lock()
+			session, active := m.session, m.active
+			m.mu.Unlock()
+			if active == nil && session != nil {
+				_ = session.Close()
+			}
+			return harness.ModelSelection{}, 0, protocol.Errorf(protocol.CodeInvalidTransition, "named definition changed; resume its frozen generation before starting this execution")
+		}
+		var models []harness.Model
+		if selected.AppliedModel == "" {
+			models, err = m.modelCatalog(ctx)
+			if err != nil {
+				return harness.ModelSelection{}, 0, err
+			}
+		}
+		actual, err := resolveNamedModel(models, selected)
+		return actual, selected.ConfigurationRevision, err
+	}
 	settings, err := m.app.ConversationSettings(ctx, m.cfg.ConversationID)
 	if err != nil {
 		return harness.ModelSelection{}, 0, err

@@ -102,6 +102,26 @@ func (s *Service) agentList(ctx context.Context, c Call) (any, error) {
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
 		v, err = store.AgentConversations(ctx, tx.Q(), p.Search, p.Status, p.After, 30)
+		if err != nil {
+			return err
+		}
+		for i := range v.Items {
+			item := &v.Items[i]
+			if item.LastMessageSeq == 0 {
+				continue
+			}
+			var message protocol.ConversationItem
+			if err := tx.Q().QueryRowContext(ctx, `SELECT message_id,author,body FROM conversation_messages WHERE seq=?`, item.LastMessageSeq).Scan(&message.MessageID, &message.Author, &message.Body); err != nil {
+				return err
+			}
+			original := message.Body
+			if err := store.HideUndeliveredOwner(ctx, tx.Q(), &message); err != nil {
+				return err
+			}
+			if message.Body != original {
+				item.Preview = message.Body
+			}
+		}
 		// Hosted main-agent startup always enables the background pool (D114).
 		// This is capability availability, not the state of an individual turn.
 		v.RuntimeAvailable = c.Principal.Kind == protocol.PrincipalMainAgent && c.Principal.Validate() == nil
@@ -199,7 +219,11 @@ func (s *Service) backgroundEvidence(ctx context.Context, c Call) (any, error) {
 			if err != nil {
 				return err
 			}
-			linked, err := store.TaskIssueEvidenceReadable(ctx, tx.Q(), row.TaskID, conv.WorkItemID)
+			readable := store.TaskIssueEvidenceReadable
+			if c.hostedRead {
+				readable = hostedTaskResultReadable
+			}
+			linked, err := readable(ctx, tx.Q(), row.TaskID, conv.WorkItemID)
 			if err != nil {
 				return err
 			}

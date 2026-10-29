@@ -112,6 +112,12 @@ func (a *App) settleAgentAssessment(ctx context.Context, tx *store.Tx, message, 
 	if settled {
 		return nil
 	}
+	if issue, err := store.HostedIssueScope(ctx, tx.Q(), request); err != nil {
+		return err
+	} else if issue != "" {
+		_, err := tx.Exec(ctx, `UPDATE agent_turn_contexts SET settled=1 WHERE request_id=?`, request)
+		return err
+	}
 	var valid, escalated bool
 	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM background_assessments b JOIN agent_conversations c ON c.conversation_id=b.conversation_id JOIN work_item_contexts v ON v.work_item_id=c.work_item_id WHERE b.delivery_id=? AND b.context_revision=v.revision AND b.stale=0),EXISTS(SELECT 1 FROM background_assessments WHERE delivery_id=? AND (disposition='escalate' OR return_message_id<>''))`, request, request).Scan(&valid, &escalated); err != nil {
 		return err

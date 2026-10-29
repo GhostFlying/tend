@@ -44,14 +44,14 @@ func HeadOutbox(ctx context.Context, q Querier, destination string) (OutboxMessa
 	return HeadOutboxPrioritized(ctx, q, destination, "")
 }
 
+const outboxPriorityOrder = ` ORDER BY CASE WHEN status = 'sending' THEN 0 ELSE 1 END,
+        CASE WHEN operation='conversation.compact' THEN -1 WHEN operation='conversation.repair_turn' THEN 2 WHEN operation = ? THEN 1 ELSE 0 END, seq`
+
 // HeadOutboxPrioritized keeps in-flight work first, then foreground work,
 // then backgroundOperation. Each group retains commit order. An empty
 // backgroundOperation preserves the normal destination FIFO.
 func HeadOutboxPrioritized(ctx context.Context, q Querier, destination, backgroundOperation string) (OutboxMessage, error) {
-	m, err := scanOutbox(q.QueryRowContext(ctx, `SELECT `+outboxColumns+` FROM outbox
-		WHERE destination = ? AND status IN ('pending', 'sending')
-		ORDER BY CASE WHEN status = 'sending' THEN 0 ELSE 1 END,
-		CASE WHEN operation='conversation.compact' THEN -1 WHEN operation='conversation.repair_turn' THEN 2 WHEN operation = ? THEN 1 ELSE 0 END, seq LIMIT 1`, destination, backgroundOperation))
+	m, err := scanOutbox(q.QueryRowContext(ctx, `SELECT `+outboxColumns+` FROM outbox WHERE destination=? AND status IN ('pending','sending')`+outboxPriorityOrder+` LIMIT 1`, destination, backgroundOperation))
 	if err != nil {
 		return OutboxMessage{}, notFound(err, "outbox head")
 	}
@@ -106,4 +106,23 @@ func (t *Tx) TransitionOutbox(ctx context.Context, tr OutboxTransition) error {
 		return ErrStale
 	}
 	return nil
+}
+
+// ListOutboxPrioritized returns the same priority order as HeadOutboxPrioritized
+// so canonical admission can skip an unavailable new request for a frozen continuation.
+func ListOutboxPrioritized(ctx context.Context, q Querier, destination, backgroundOperation string) ([]OutboxMessage, error) {
+	rows, err := q.QueryContext(ctx, `SELECT `+outboxColumns+` FROM outbox WHERE destination=? AND status IN ('pending','sending')`+outboxPriorityOrder, destination, backgroundOperation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []OutboxMessage
+	for rows.Next() {
+		m, err := scanOutbox(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, m)
+	}
+	return result, rows.Err()
 }

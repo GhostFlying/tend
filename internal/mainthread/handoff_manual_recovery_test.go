@@ -139,7 +139,7 @@ func TestHistoricalUnknownDoesNotBlockFreshSourceManualOrIdleSummary(t *testing.
 	assertCurrentRecoveredThread(t, f, target)
 	select {
 	case originalInput := <-inputs:
-		if !strings.Contains(originalInput, body) || !strings.Contains(originalInput, `"state":"unknown"`) {
+		if !strings.Contains(originalInput, body) || !strings.Contains(originalInput, `"state":"unknown"`) || !strings.Contains(originalInput, `"unconfirmed_owner_input":true`) {
 			t.Fatal("actual unknown message state/body omitted from first complete summary input")
 		}
 	default:

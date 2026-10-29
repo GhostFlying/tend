@@ -41,14 +41,28 @@ func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, i
 			return err
 		}
 		if canonical {
-			return nil
-		} // Durable owner facts remain; P4 must admit an isolated manager first.
+			conversation, err := ensureCanonicalManagerConversationForWake(ctx, x, tx, item)
+			if err != nil {
+				return err
+			}
+			if conversation == "" {
+				return nil
+			}
+		}
 	}
 	now := x.Now.UnixMilli()
 	conversation := "main"
 	if item != "" {
 		var err error
-		conversation, err = ensureAgentConversation(ctx, x, tx, item)
+		var canonical bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, item).Scan(&canonical); err != nil {
+			return err
+		}
+		if canonical {
+			conversation, err = ensureCanonicalManagerConversationForWake(ctx, x, tx, item)
+		} else {
+			conversation, err = ensureAgentConversation(ctx, x, tx, item)
+		}
 		if err != nil {
 			return err
 		}
@@ -96,6 +110,17 @@ func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, i
 		if err := json.Unmarshal(data, &occurrence); err != nil {
 			return fmt.Errorf("app: followup source: %w", err)
 		}
+	}
+	if message == "" {
+		return nil
+	}
+	if event == "" {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT event_id FROM events WHERE object_type='message' AND object_id=? ORDER BY event_seq DESC LIMIT 1`, message).Scan(&event); err != nil {
+			return err
+		}
+	}
+	if len(data) == 0 {
+		data = json.RawMessage(`{}`)
 	}
 	_, err = tx.Exec(ctx, `INSERT OR IGNORE INTO background_sources(batch_id,message_id,event_id,kind,rule_id,occurrence_id,data_json) VALUES(?,?,?,?,?,?,?)`, batch, message, event, kind, occurrence.RuleID, occurrence.OccurrenceID, string(data))
 	if err != nil {

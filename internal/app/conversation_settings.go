@@ -43,6 +43,15 @@ func (c SetConversationSettings) Apply(ctx context.Context, x *Exec, tx *store.T
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if x.hostedConfiguration != nil {
+		_, named, err := namedHostedSelection(ctx, tx.Q(), x.hostedConfiguration, p.ConversationID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if named {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "named conversation settings come from its agent definition; update the server configuration revision")
+		}
+	}
 	expected, err := requireRevision(x.Env)
 	if err != nil {
 		return Outcome{}, err
