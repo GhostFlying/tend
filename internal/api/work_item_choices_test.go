@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 func TestWorkItemChoiceOwnerAPIReadAnswerAndStaleVersion(t *testing.T) {
@@ -71,9 +72,16 @@ func TestWorkItemChoiceOwnerAPIReadAnswerAndStaleVersion(t *testing.T) {
 	if status := e.do("GET", path, token, nil, &read); status != http.StatusOK || read.Version != 2 || read.Answer != "Later, after I inspect the result" {
 		t.Fatalf("stale changed answer: %d %+v", status, read)
 	}
-	var detail protocol.WorkItemView
-	if status := e.do("GET", "/api/v1/work-items/"+item.WorkItemID, token, nil, &detail); status != http.StatusOK || len(detail.Choices) != 1 || detail.Choices[0].Status != "answered" {
-		t.Fatalf("detail projection: %d %+v", status, detail)
+	// The question's original read/respond surface remains current; its old
+	// WorkItem backlink is only historical ledger data, not an active facade.
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		choices, err := store.ListWorkItemChoices(t.Context(), tx.Q(), item.WorkItemID, "")
+		if err == nil && (len(choices) != 1 || choices[0].Status != "answered") {
+			t.Fatalf("historical choice fact: %+v", choices)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 	_, page = e.conversation(token, "?limit=50")
 	answeredMessages, projectedCards := 0, 0

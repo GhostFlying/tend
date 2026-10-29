@@ -12,7 +12,6 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/dispatch"
-	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -22,14 +21,14 @@ import (
 
 // startMainThread runs the main thread manager and the dispatcher with a
 // fake main agent.
-func (s *server) startMainThread(h *testkit.Harness, background ...func(*testkit.FakeThread, string, harness.TurnInput) string) {
+func (s *server) startHistoricalMainThread(h *testkit.Harness, background ...func(*testkit.FakeThread, string, harness.TurnInput) string) {
 	originalTurn := h.Turn
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		if strings.HasPrefix(th.Config.Cwd, "/background/") && len(background) > 0 {
 			return background[0](th, turn, in)
 		}
 		if in.Repair {
-			return completeFixtureReview(s.t, th, turn)
+			return completeHistoricalFixtureReview(s, th, turn)
 		}
 		if originalTurn != nil {
 			return originalTurn(th, turn, in)
@@ -65,59 +64,8 @@ func (s *server) say(body string) {
 	s.exec(owner, "conversation.submit_message", protocol.Target{Type: "message"}, map[string]string{"body": body}, app.SubmitMessage{})
 }
 
-// TestEndToEnd_FakeHarness drives the whole loop: a message to the main
-// agent creates a task, a runner implements it, acceptance asks for
-// changes, the second generation passes and the task completes.
-func TestEndToEnd_FakeHarness(t *testing.T) {
-	srv := newServer(t, time.Minute)
-	agent := testkit.NewHarness()
-	agent.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
-		res := th.CallTool(context.Background(), turn, "call_1", "tasks_create", map[string]any{
-			"title": "fix the build", "commit_seq": 1, "workspace_name": "fix-build",
-			"spec": domain.Spec{Goal: "fix the build", Acceptance: []string{"build passes"}, Delivery: domain.DeliveryCommit,
-				Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}}},
-		})
-		th.Say(turn, "item_1", "On it: "+res.Text)
-		return "completed"
-	}
-	srv.startMainThread(agent)
-
-	var mu sync.Mutex
-	verdicts := []protocol.Verdict{protocol.VerdictChangesRequired, protocol.VerdictPassed}
-	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
-		if spec.Role != protocol.RoleAccept {
-			return passing(spec)
-		}
-		mu.Lock()
-		v := verdicts[0]
-		verdicts = verdicts[1:]
-		mu.Unlock()
-		return testkit.WorkerScript{Result: harness.WorkerResult{Verdict: &protocol.VerdictPayload{Verdict: v, Evidence: json.RawMessage(`{}`)}}}
-	})
-	n.start()
-
-	srv.say("The build is broken, please fix it.")
-	eventually(t, "the task completes", func() bool {
-		return srv.count(`SELECT COUNT(*) FROM tasks WHERE lifecycle = 'completed'`) == 1
-	})
-	for query, want := range map[string]int{
-		`SELECT COUNT(*) FROM tasks`:                         1,
-		`SELECT COUNT(*) FROM runs WHERE role = 'implement'`: 2,
-		`SELECT COUNT(*) FROM runs WHERE role = 'accept'`:    2,
-		`SELECT COUNT(*) FROM artifacts`:                     2,
-		`SELECT COUNT(*) FROM acceptances`:                   2,
-		`SELECT COUNT(*) FROM main_turns WHERE status = 'completed' AND request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1)`: 1,
-		`SELECT COUNT(*) FROM conversation_messages WHERE author = 'main_agent'`:                                                                           1,
-		`SELECT COUNT(*) FROM (SELECT effect_key FROM plan_actions GROUP BY effect_key HAVING COUNT(*) > 1)`:                                               0,
-		`SELECT COUNT(*) FROM (SELECT event_id FROM events GROUP BY event_id HAVING COUNT(*) > 1)`:                                                         0,
-	} {
-		if got := srv.count(query); got != want {
-			t.Errorf("%s = %d, want %d", query, got, want)
-		}
-	}
-}
-
-func completeFixtureReview(t *testing.T, th *testkit.FakeThread, turn string) string {
+func completeHistoricalFixtureReview(s *server, th *testkit.FakeThread, turn string) string {
+	t := s.t
 	t.Helper()
 	call := 0
 	invoke := func(name string, args any, out any) bool {
@@ -155,11 +103,22 @@ func completeFixtureReview(t *testing.T, th *testkit.FakeThread, turn string) st
 	if !invoke("conversation_turn_read", struct{}{}, &state) {
 		return "failed"
 	}
+	// Explicit old-ledger setup for historical transport tests, never a
+	// runtime alias or fake successful call to the retired planning tool.
 	for _, c := range state.Contexts {
-		if !invoke("work_item_context_prepare", map[string]any{"work_item_id": c.WorkItemID, "expected_control_revision": c.Revision, "coverage": "Reviewed transport fixture messages; no additional semantic facts", "gaps": "None in this fixture"}, nil) {
+		delivery, found, err := s.app.TurnDelivery(t.Context(), th.ID(), turn)
+		if err != nil || !found {
+			t.Errorf("historical delivery: %v %v", found, err)
+			return "failed"
+		}
+		payload, _ := json.Marshal(protocol.PrepareWorkItemContextPayload{Coverage: "Reviewed transport fixture messages; no additional semantic facts", Gaps: "None in this fixture"})
+		op, err := s.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "historical-fixture", Thread: th.ID()}, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), ParentRequestID: delivery.RequestID, Operation: "work_item_context.prepare", Target: protocol.Target{Type: "work_item", ID: c.WorkItemID}, ExpectedControlRevision: &c.Revision, Payload: payload}, app.WithExecutionRequest(app.ContextCommand{Action: "prepare"}, delivery.RequestID))
+		if err != nil || op.Status != protocol.OpSucceeded {
+			t.Errorf("historical context setup: %+v %v", op, err)
 			return "failed"
 		}
 	}
+
 	if !invoke("conversation_turn_read", struct{}{}, &state) {
 		return "failed"
 	}
@@ -181,4 +140,21 @@ func businessStarts(h *testkit.Harness) []harness.TurnInput {
 		}
 	}
 	return out
+}
+
+// Legacy assessments bind to the immutable context actually delivered at turn
+// admission, rather than a later read of current work-item metadata.
+func historicalDeliveredContextRevision(t *testing.T, h *testkit.Harness, thread string) int64 {
+	t.Helper()
+	var delivered int64
+	for _, text := range h.Injected(thread) {
+		var revision int64
+		if _, err := fmt.Sscanf(text, "Work-item context at revision %d.", &revision); err == nil {
+			delivered = revision
+		}
+	}
+	if delivered == 0 {
+		t.Error("missing injected historical context revision")
+	}
+	return delivered
 }

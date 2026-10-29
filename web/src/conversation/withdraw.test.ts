@@ -1,7 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ApiClient } from "../api/client.ts";
-import type { ConversationQueueEntry } from "../api/generated/api.ts";
+import type { IssueConversationQueueEntry as ConversationQueueEntry } from "../api/generated/api.ts";
 import { ComposerDraft } from "./draft.ts";
 import { DraftStorage } from "./draftStore.ts";
 import { Withdrawals } from "./withdraw.ts";
@@ -148,3 +148,57 @@ test.each([undefined, "work-item:background"])(
     await (await draft.durableStorage()).release();
   },
 );
+
+test("unmount releases this draft and strict remount keeps original file and one renewal", async () => {
+  const draft = new ComposerDraft("source:fixture");
+  const opening = draft.open();
+  const closing = draft.close();
+  const remount = draft.open();
+  await Promise.all([opening, closing, remount]);
+  expect(vi.getTimerCount()).toBe(1);
+  draft.write("original text");
+  draft.addFiles([new File(["original file"], "evidence.txt")]);
+  await draft.flush();
+  const id = draft.id;
+  await draft.close();
+  expect(vi.getTimerCount()).toBe(0);
+  // Closed page listeners cannot reacquire a lease or revive a timer.
+  window.dispatchEvent(new Event("pageshow"));
+  await Promise.resolve();
+  expect(vi.getTimerCount()).toBe(0);
+  const reopened = new ComposerDraft("source:fixture");
+  await reopened.open();
+  expect(reopened.id).toBe(id);
+  expect(reopened.state.get().text).toBe("original text");
+  expect(await reopened.state.get().files[0]?.text()).toBe("original file");
+  expect(vi.getTimerCount()).toBe(1);
+  await reopened.close();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test("closing during an already started claim releases that claim before a fresh editor opens", async () => {
+  let markStarted = () => {};
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const claim = DraftStorage.prototype.claim;
+  const spy = vi.spyOn(DraftStorage.prototype, "claim").mockImplementation(function (
+    this: DraftStorage,
+    ...args: Parameters<DraftStorage["claim"]>
+  ) {
+    const pending = claim.apply(this, args);
+    markStarted();
+    return pending;
+  });
+  const first = new ComposerDraft("source:claim-race");
+  const id = first.id;
+  const opening = first.open();
+  await started;
+  await Promise.all([first.close(), opening]);
+  spy.mockRestore();
+  const next = new ComposerDraft("source:claim-race");
+  await next.open();
+  expect(next.id).toBe(id);
+  expect(next.state.get().error).toBeUndefined();
+  await next.close();
+});

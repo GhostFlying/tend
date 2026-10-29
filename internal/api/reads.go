@@ -78,7 +78,15 @@ func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
 		limit = conversationPageSize
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.Conversation(r.Context(), q, before, after, int(limit), r.URL.Query().Get("conversation_id"))
+		if projection := query.Get("projection"); projection != "" && projection != "issues" {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "unknown conversation projection")
+		}
+		page, err := views.Conversation(r.Context(), q, before, after, int(limit), query.Get("conversation_id"))
+		if err != nil {
+			return page, err
+		}
+		items, err := views.OwnerIssueMessages(r.Context(), q, page.Items)
+		return protocol.IssueConversationPage{Items: items, More: page.More}, err
 	})
 }
 

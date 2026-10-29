@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { workItemPage } from "./work-items-fixture.ts";
+import { issuePage, issueView } from "./issue-fixture.ts";
 // Exercise the built app with an isolated owner API, never a deployed server.
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
@@ -43,8 +43,8 @@ const tasks = Array.from({ length: 5 }, (_, i) => ({
   title:
     ["启动设计稿 Web 预览", "调整附件入口图标", "调整仓库归档文案与排序"][i] ??
     `Example completed task ${i + 1}`,
-  primary_work_item_id: "wi_01M5M3ME31875GDA8F7P5XTD74",
-  primary_work_item_title: "移动端工作项页重新设计",
+  primary_issue_id: "wi_01M5M3ME31875GDA8F7P5XTD74",
+  primary_issue_title: "移动端工作项页重新设计",
   completed_at: Date.now() - (i + 1) * 5 * 60_000,
   project: "sample",
   lifecycle: "completed",
@@ -77,13 +77,13 @@ const server = createServer(async (req, res) => {
       deployment_id: "layout-fixture",
     });
   if (path === "/api/v1/repos") return json({ repos: [] });
-  if (path === "/api/v1/work-items") {
-    const fixture = workItemPage(url.searchParams.get("project") || "sample");
+  if (path === "/api/v1/issues") {
+    const fixture = issuePage(url.searchParams.get("project") || "sample");
     const original = fixture.items![0]!;
     return json({
       items: Array.from({ length: 6 }, (_, i) => ({
         ...original,
-        work_item_id: original.work_item_id.slice(0, -1) + i,
+        issue_id: original.issue_id.slice(0, -1) + i,
         title:
           ["移动端工作项页重新设计", "后续任务自动关联已有交付文件", "附件入口图标调整"][i] ??
           `示例工作项 ${i + 1}`,
@@ -101,6 +101,10 @@ const server = createServer(async (req, res) => {
       })),
     });
   }
+  if (/^\/api\/v1\/issues\/[^/]+$/.test(path))
+    return json({ ...issueView(), issue_id: path.split("/").at(-1) });
+  if (path.endsWith("/context")) return json({ sources: [], context_revision: 1 });
+  if (path === "/api/v1/inbox" || path === "/api/v1/next") return json({ items: [] });
   if (path === "/api/v1/snapshot") return json(snapshot);
   if (path === "/api/v1/conversation/settings") return json({ enabled: false });
   if (path === "/api/v1/conversation/handoff") return json(handoff);
@@ -211,15 +215,15 @@ try {
     );
     if (!mobile) {
       const sidebar = page.locator("aside").first();
-      const overview = sidebar.getByRole("region", { name: "工作项概览" });
-      await overview.getByRole("button", { name: "查看全部 6 个工作项 ›" }).waitFor();
+      const overview = sidebar.getByRole("region", { name: "持续跟进" });
+      await overview.getByRole("button", { name: "查看全部Issue" }).waitFor();
       assert.equal(await overview.getByRole("button").count(), 4);
       assert.equal(await sidebar.getByText("执行任务与记录", { exact: true }).count(), 0);
       const results = sidebar.getByRole("region", { name: "最近完成的任务" });
       await results.getByRole("button").nth(2).waitFor();
       assert.equal(await results.getByRole("button").count(), 3);
       assert.equal(
-        await results.getByText("所属工作项：移动端工作项页重新设计", { exact: true }).count(),
+        await results.getByText("所属Issue：移动端工作项页重新设计", { exact: true }).count(),
         3,
       );
       assert.equal(await results.locator("time").count(), 3);
@@ -238,26 +242,34 @@ try {
       await page.getByLabel("按项目筛选", { exact: true }).fill("filtered-project");
       await records.click();
       assert.equal(await page.getByLabel("按项目筛选", { exact: true }).inputValue(), "");
-      await overview.getByRole("button", { name: "查看全部 6 个工作项 ›" }).click();
-      await page.getByRole("heading", { name: "工作项", exact: true }).waitFor();
+      await overview.getByRole("button", { name: "查看全部Issue" }).click();
+      await page.getByRole("heading", { name: "Issue", exact: true }).waitFor();
     }
-    if (mobile) await tabs.getByRole("button", { name: "工作项", exact: true }).click();
-    else await page.getByRole("button", { name: "工作项 · 白板 ›" }).click();
-    await page.getByRole("heading", { name: "工作项" }).waitFor();
+    if (mobile) await tabs.getByRole("button", { name: "Issue", exact: true }).click();
+    else await page.getByRole("button", { name: "Issue · 白板 ›" }).click();
+    await page.getByRole("heading", { name: "Issue" }).waitFor();
     assert.equal(
       await page.locator("header").getByRole("button", { name: "设置", exact: true }).count(),
       0,
     );
-    const resource = page.getByRole("dialog", { name: "资源与记录", exact: true });
+    const resource = page
+      .locator("details")
+      .filter({ has: page.locator(":scope > summary", { hasText: /^资源与记录$/ }) });
     if (mobile) {
       await page.screenshot({
         path: join(output, `board-${viewport.width}x${viewport.height}.png`),
       });
-      await page.getByRole("button", { name: /^资源与记录/ }).click();
-      await resource.getByRole("tab", { name: "最近完成" }).click();
+      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await resource.locator(":scope > summary").click();
+      await resource
+        .locator("summary")
+        .filter({ hasText: /^最近完成的任务$/ })
+        .click();
       await resource.getByText("Example completed task 5").waitFor();
-      await unobscured(resource.getByRole("tab", { name: "执行主机" }));
-      await resource.getByRole("tab", { name: "执行主机" }).click();
+      const hostSummary = resource.locator("summary").filter({ hasText: /^执行主机/ });
+      await hostSummary.scrollIntoViewIfNeeded();
+      await unobscured(hostSummary);
+      await hostSummary.click();
     }
     const list = page.getByRole("region", { name: "执行主机占用" }).filter({ visible: true });
     const rows = list.getByRole("button", { name: /^主机详情：/ });
@@ -313,22 +325,28 @@ try {
     assert.equal(await detail.getByRole("heading", { level: 3 }).textContent(), "Example Solo");
     assert.match((await detail.textContent())!, /维护/);
     await detail.getByRole("button", { name: "关闭主机详情" }).click();
-    if (mobile) await resource.getByRole("button", { name: "关闭资源与记录" }).click();
-    const board = page.getByRole("region", { name: "工作项白板" });
+    if (mobile) await page.getByRole("button", { name: "返回Issue", exact: true }).click();
+    const board = page.getByRole("region", { name: "Issue白板" });
     assert((await board.boundingBox())!.height > 80);
     const filtered = page.waitForResponse((response) =>
       response.url().includes("project=unrelated"),
     );
-    await page.getByLabel("按项目筛选工作项").fill("unrelated");
+    await page.getByLabel("按项目筛选Issue").fill("unrelated");
     await filtered;
     if (mobile) {
-      await page.getByRole("button", { name: /^资源与记录/ }).click();
+      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
     }
     assert.equal(await rows.count(), 2);
-    if (mobile) await resource.getByRole("button", { name: "关闭资源与记录" }).click();
+    if (mobile) await page.getByRole("button", { name: "返回Issue", exact: true }).click();
     assert(reads.some((path) => path.includes("project=unrelated")));
     assert(!reads.some((path) => path.startsWith("/api/v1/snapshot?")));
-    if (mobile) await tabs.getByRole("button", { name: "待处理", exact: true }).click();
+    if (mobile) {
+      await tabs.getByRole("button", { name: "待处理", exact: true }).click();
+      await page
+        .getByRole("dialog", { name: "待处理" })
+        .getByRole("button", { name: "关闭详情" })
+        .click();
+    }
     const settings = page.getByRole("button", { name: "设置", exact: true });
     await unobscured(settings);
     await settings.click();
@@ -343,7 +361,7 @@ try {
     await panel.getByRole("button", { name: "关闭设置" }).click();
     assert(await settings.evaluate((el) => el === document.activeElement));
     if (mobile) await tabs.getByRole("button", { name: "对话", exact: true }).click();
-    else await page.getByRole("button", { name: "返回聊天" }).click();
+    else await page.getByRole("button", { name: "返回对话" }).click();
     await page.getByRole("heading", { name: "主 Agent" }).waitFor();
     assert.deepEqual(errors, []);
     await context.close();

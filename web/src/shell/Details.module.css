@@ -248,3 +248,9 @@
 .relation:hover {
   border-color: var(--caption);
 }
+
+@media (max-width: 760px) {
+  .actions > button {
+    min-height: 36px;
+  }
+}

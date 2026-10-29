@@ -15,8 +15,8 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// CanonicalOwnerIssueCommand changes definitions without registering a public
-// operation or enabling manager execution.
+// CanonicalOwnerIssueCommand applies authenticated owner changes through the
+// canonical definition and registered-assignee rules.
 type CanonicalOwnerIssueCommand struct{ Action string }
 
 func (c CanonicalOwnerIssueCommand) Operation() string { return "issues." + c.Action }
@@ -79,7 +79,7 @@ func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *stor
 }
 
 func createCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	return createCanonicalOwnerIssueWithAssignment(ctx, x, tx, false)
+	return createCanonicalOwnerIssueWithAssignment(ctx, x, tx, true)
 }
 func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *store.Tx, allowHosted bool) (Outcome, error) {
 	var p canonicalOwnerIssueCreate
@@ -143,7 +143,7 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 			}
 		}
 	}
-	if x.coordinationExecution != nil && next.Assignee.Kind == protocol.IssueAssigneeAgent {
+	if next.Assignee.Kind == protocol.IssueAssigneeAgent {
 		if _, err := ensureCanonicalManagerConversation(ctx, tx, next, now); err != nil {
 			return Outcome{}, err
 		}

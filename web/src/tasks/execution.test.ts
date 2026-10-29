@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { ExecutionCounts, TaskSummary, WorkItemView } from "../api/generated/api.ts";
+import type { ExecutionCounts, TaskSummary } from "../api/generated/api.ts";
 import { ExecutionSummary, TaskExecution } from "./Execution.tsx";
 import { executionCounts, executionLook, queueReasonText } from "./execution.ts";
 import { taskLook } from "./status.ts";
@@ -99,14 +99,7 @@ describe("server execution facts", () => {
     );
   });
   test("an active plan without execution facts never fabricates running workers", () => {
-    const plan = {
-      stages: [{ stage_id: "design", title: "Design", status: "active" }],
-    } satisfies Partial<WorkItemView>;
-    expect(
-      renderToStaticMarkup(
-        createElement(ExecutionSummary, { counts: (plan as Partial<WorkItemView>).execution }),
-      ),
-    ).toBe("");
+    expect(renderToStaticMarkup(createElement(ExecutionSummary, { counts: undefined }))).toBe("");
     expect(renderToStaticMarkup(createElement(ExecutionSummary, { counts }))).toContain(
       "尚无执行任务",
     );

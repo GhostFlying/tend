@@ -79,7 +79,7 @@ func AgentConversations(ctx context.Context, q Querier, search, status, cursor s
 	return out, rows.Err()
 }
 func MessageAssociations(ctx context.Context, q Querier, id string) (protocol.MessageAssociations, error) {
-	out := protocol.MessageAssociations{MessageID: id, Items: []protocol.MessageWorkItem{}}
+	out := protocol.MessageAssociations{Items: []protocol.MessageWorkItem{}, MessageAssociationState: protocol.MessageAssociationState{MessageID: id}}
 	err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT revision FROM message_association_revisions WHERE message_id=m.message_id),0),COALESCE(d.disposition,'pending'),COALESCE(d.content_revision,1),COALESCE(d.facts_revision=d.content_revision,0),COALESCE(d.owner_locked,0) FROM conversation_messages m LEFT JOIN message_dispositions d ON d.message_id=m.message_id WHERE m.message_id=?`, id).Scan(&out.Revision, &out.Disposition, &out.ContentRevision, &out.FactsReviewed, &out.OwnerLocked)
 	if err != nil {
 		return out, notFound(err, "message")

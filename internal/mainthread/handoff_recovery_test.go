@@ -163,7 +163,7 @@ func TestStartupCompletesConfirmedObsoleteTargetBeforeCurrentSchemaReadiness(t *
 				if !quarantined {
 					t.Error("intermediate target resumed outside maintenance quarantine")
 				}
-				result := cfg.OnToolCall(ctx, harness.ToolCall{ThreadID: id, TurnID: "late-old-turn", CallID: "obsolete-callback", Tool: "tasks_create", Arguments: json.RawMessage(`not-valid-json`)})
+				result := cfg.OnToolCall(ctx, harness.ToolCall{ThreadID: id, TurnID: "late-old-turn", CallID: "obsolete-callback", Tool: "decisions_open", Arguments: json.RawMessage(`not-valid-json`)})
 				if result.Success || !strings.Contains(result.Text, "disabled") {
 					t.Error("obsolete intermediate callback reached current tool parser")
 				}

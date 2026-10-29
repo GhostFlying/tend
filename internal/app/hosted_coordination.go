@@ -282,6 +282,16 @@ func validateHostedIssueEvidence(ctx context.Context, x *Exec, q store.Querier, 
 			if e.Reference == "current_request" {
 				return protocol.Errorf(protocol.CodeForbidden, "manager coordination is not an owner decision")
 			}
+			attention, err := resolvedIssueAttentionDecision(ctx, q, w.WorkItemID, e.Reference)
+			if err != nil {
+				return err
+			}
+			if attention {
+				continue
+			}
+			if protocol.ValidID(protocol.Prefix("attn"), e.Reference) {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "owner_decision attention evidence must be a resolved decision or action for this issue")
+			}
 			var answered bool
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM decisions d JOIN task_work_item_owners o ON o.task_id=d.task_id WHERE d.decision_id=? AND d.status='answered' AND o.work_item_id=?) OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, w.WorkItemID, e.Reference, w.WorkItemID).Scan(&answered); err != nil {
 				return err

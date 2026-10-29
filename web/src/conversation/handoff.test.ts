@@ -28,7 +28,13 @@ function fixture() {
   };
   let record: RequestView | null = null;
   const get = vi.fn(async (path: string) => {
-    if (path !== "/api/v1/conversation/handoff") throw Error("unexpected dependency");
+    const url = new URL(path, "https://tend.invalid");
+    if (
+      url.pathname !== "/api/v1/conversation/handoff" ||
+      (url.searchParams.has("conversation_id") &&
+        url.searchParams.get("conversation_id") !== "main")
+    )
+      throw Error("unexpected dependency");
     return structuredClone(view);
   });
   const api = { get: async <T>(path: string) => (await get(path)) as T };

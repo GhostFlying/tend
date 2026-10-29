@@ -2,6 +2,7 @@ package contextbuilder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -50,6 +51,16 @@ func gatherWorkItems(ctx context.Context, q store.Querier, s *Snapshot, sc *scop
 		return err
 	}
 	for _, item := range page.Items {
+		current, err := store.GetCanonicalIssue(ctx, q, item.WorkItemID)
+		if err == nil {
+			if sc.covers(item.Project) {
+				s.Issues = append(s.Issues, sc.label(item.Project, canonicalIssueLine(current)))
+			}
+			continue
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
 		line := sc.label(item.Project, workItemLine(item))
 		if sc.covers(item.Project) {
 			s.WorkItems = append(s.WorkItems, line)
@@ -79,4 +90,23 @@ func workItemChoiceLine(choice protocol.WorkItemChoice) string {
 		line += "; replaces " + choice.Supersedes
 	}
 	return line + " (read work_item_choices_list; do not repeat a deferred or answered question)"
+}
+
+// canonicalIssueLine describes actual responsibility, independent of the legacy
+// stage-derived board column. Reading it grants no task execution authority.
+func canonicalIssueLine(issue protocol.Issue) string {
+	line := fmt.Sprintf("Issue %s %q, revision %d, state %s; assignee %s:%s epoch %d", issue.IssueID, issue.Plan.Title, issue.Revision, issue.State, issue.Assignee.Kind, issue.Assignee.Ref, issue.AssignmentEpoch)
+	if issue.ParentIssueID != "" {
+		line += "; parent " + issue.ParentIssueID
+	}
+	if issue.Plan.Intent != "" {
+		line += "; intent: " + clipRunes(issue.Plan.Intent, 240)
+	}
+	if issue.Plan.Scope != "" {
+		line += "; scope: " + clipRunes(issue.Plan.Scope, 240)
+	}
+	if len(issue.Plan.CompletionCriteria) > 0 {
+		line += "; responsibility completion: " + clipRunes(strings.Join(issue.Plan.CompletionCriteria, "; "), 300)
+	}
+	return line + "; read issues_read / issues_context_read for current responsibility and sourced context; delegate execution through its responsible manager"
 }

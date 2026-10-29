@@ -50,12 +50,15 @@
 }
 .tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   gap: 4px 20px;
   padding: 0 22px;
   border-bottom: 1px solid var(--border-soft);
 }
 .tabs button {
+  flex: none;
+  white-space: nowrap;
   color: var(--label-3);
   font: inherit;
   background: none;

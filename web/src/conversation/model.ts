@@ -1,6 +1,9 @@
 // What the conversation shows, worked out from the items tend holds and
 // the messages still in this device's outbox. Pure, so it can be tested.
-import type { ConversationItem, MessageState } from "../api/generated/api.ts";
+import type {
+  IssueConversationItem as ConversationItem,
+  MessageState,
+} from "../api/generated/api.ts";
 import type { OutgoingMessage } from "../queue/outbox.ts";
 
 /** A task ID: task_ and a ULID, 26 Crockford base32 digits (D72). */

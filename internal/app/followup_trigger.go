@@ -193,6 +193,14 @@ func followupEvents(ctx context.Context, x *Exec, tx *store.Tx, events []Event) 
 		if err != nil {
 			return false, err
 		}
+		before := r.Revision
+		if handled, _, err := evaluateAttentionFollowup(ctx, x, tx, &r); handled || err != nil {
+			if err != nil {
+				return false, err
+			}
+			changed = changed || r.Revision != before
+			continue
+		}
 		w, err := store.GetIssue(ctx, tx.Q(), r.WorkItemID)
 		if err != nil {
 			return false, err
@@ -250,10 +258,24 @@ func (SweepFollowups) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	out := Outcome{Notify: true}
+	deferred := 0
 	for _, id := range ids {
 		r, err := store.GetFollowup(ctx, tx.Q(), id)
 		if err != nil {
 			return Outcome{}, err
+		}
+		before := r.Revision
+		if handled, postponed, err := evaluateAttentionFollowup(ctx, x, tx, &r); handled || err != nil {
+			if err != nil {
+				return Outcome{}, err
+			}
+			if postponed {
+				deferred++
+			}
+			if r.Revision != before {
+				out.Events = append(out.Events, followupEvent(r))
+			}
+			continue
 		}
 		w, err := store.GetIssue(ctx, tx.Q(), r.WorkItemID)
 		if err != nil {
@@ -267,10 +289,15 @@ func (SweepFollowups) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			out.Events = append(out.Events, followupEvent(r))
 		}
 	}
-	if len(out.Events) == 0 {
+	if len(out.Events) == 0 && deferred == 0 {
 		return Outcome{NoEffect: true}, nil
 	}
-	out.Result = map[string]int{"evaluated": len(out.Events)}
+	out.Notify = len(out.Events) > 0
+	result := map[string]int{"evaluated": len(out.Events)}
+	if deferred > 0 {
+		result["deferred"] = deferred
+	}
+	out.Result = result
 	return out, nil
 }
 func (a *App) FollowupsEnabled() bool   { return a.followupsEnabled }

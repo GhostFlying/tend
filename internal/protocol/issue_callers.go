@@ -15,20 +15,20 @@ type IssueContextFact struct {
 }
 
 type IssueContextView struct {
-	IssueID           string             `json:"issue_id"`
-	Revision          int64              `json:"revision"`
-	Prepared          bool               `json:"prepared"`
-	Coverage          string             `json:"coverage"`
-	Gaps              string             `json:"gaps"`
-	DispatchReady     bool               `json:"dispatch_ready"`
-	CoordinationState string             `json:"coordination_state"`
-	DispatchBlockers  []ContextBlocker   `json:"dispatch_blockers"`
-	SyncStatus        string             `json:"sync_status"`
-	Watermark         int64              `json:"watermark"`
-	Facts             []IssueContextFact `json:"facts"`
-	Sources           []ConversationItem `json:"sources"`
-	More              bool               `json:"more"`
-	Next              int64              `json:"next,omitempty"`
+	IssueID           string                  `json:"issue_id"`
+	Revision          int64                   `json:"revision"`
+	Prepared          bool                    `json:"prepared"`
+	Coverage          string                  `json:"coverage"`
+	Gaps              string                  `json:"gaps"`
+	DispatchReady     bool                    `json:"dispatch_ready"`
+	CoordinationState string                  `json:"coordination_state"`
+	DispatchBlockers  []ContextBlocker        `json:"dispatch_blockers"`
+	SyncStatus        string                  `json:"sync_status"`
+	Watermark         int64                   `json:"watermark"`
+	Facts             []IssueContextFact      `json:"facts"`
+	Sources           []IssueConversationItem `json:"sources"`
+	More              bool                    `json:"more"`
+	Next              int64                   `json:"next,omitempty"`
 }
 
 type IssueFollowupPayload struct {

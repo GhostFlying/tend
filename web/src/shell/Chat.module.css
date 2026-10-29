@@ -203,3 +203,14 @@
     justify-content: flex-start;
   }
 }
+
+.roleNote {
+  flex: none;
+  padding: 8px 18px;
+  font-size: var(--text-xs);
+  color: var(--label-3);
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}

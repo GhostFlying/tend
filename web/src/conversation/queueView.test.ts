@@ -1,9 +1,9 @@
+import type { MessageContent as ConversationItem } from "./eventContent.ts";
 import { expect, test } from "vitest";
 import type {
-  ConversationItem,
-  ConversationQueueEntry,
+  IssueConversationQueueEntry,
   LedgerEvent,
-  TranscriptBlock,
+  IssueTranscriptBlock as TranscriptBlock,
 } from "../api/generated/api.ts";
 import { ConversationQueue } from "./queueView.ts";
 function item(id: string, seq: number, author = "owner"): ConversationItem {
@@ -18,7 +18,7 @@ const event = (it: ConversationItem): LedgerEvent => ({
   item: it,
 });
 test("queue counts and pagination do not depend on the transcript page", async () => {
-  const all: ConversationQueueEntry[] = Array.from({ length: 120 }, (_, n) => ({
+  const all: IssueConversationQueueEntry[] = Array.from({ length: 120 }, (_, n) => ({
     item: item(`m${n}`, n + 1),
     position: n + 1,
     revision: 1,

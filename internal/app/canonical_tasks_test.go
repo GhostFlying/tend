@@ -784,7 +784,7 @@ func TestCanonicalTaskCannotAttachNewWorkToCompletedStage(t *testing.T) {
 }
 
 func TestCanonicalTaskAncestorSemanticEditsRequireExplicitContractRefresh(t *testing.T) {
-	for _, kind := range []string{"title", "intent", "background", "active_intent"} {
+	for _, kind := range []string{"title", "intent", "background", "scope", "completion_criteria", "active_intent"} {
 		t.Run(kind, func(t *testing.T) {
 			h := newHarness(t)
 			parent := createCanonicalOwnerTestIssue(t, h)
@@ -803,6 +803,10 @@ func TestCanonicalTaskAncestorSemanticEditsRequireExplicitContractRefresh(t *tes
 			switch kind {
 			case "title":
 				plan.Title = "Metadata-only parent title"
+			case "scope":
+				plan.Scope = "NEW_PARENT_SCOPE"
+			case "completion_criteria":
+				plan.CompletionCriteria = []string{"NEW_PARENT_COMPLETION"}
 			case "background":
 				plan.Background = []protocol.SharedFact{{Kind: protocol.SharedFactUserConstraint, Text: "NEW_PARENT_CONSTRAINT", Source: "Owner brief"}}
 			default:
@@ -834,8 +838,13 @@ func TestCanonicalTaskAncestorSemanticEditsRequireExplicitContractRefresh(t *tes
 			}
 			run, ok, _ = h.claim("linux-1")
 			expected := "NEW_PARENT_GOAL"
-			if kind == "background" {
+			switch kind {
+			case "background":
 				expected = "NEW_PARENT_CONSTRAINT"
+			case "scope":
+				expected = "NEW_PARENT_SCOPE"
+			case "completion_criteria":
+				expected = "NEW_PARENT_COMPLETION"
 			}
 			if !ok || run.TaskID != task || run.SpecVersion != 2 || run.Role != protocol.RoleImplement || !strings.Contains(string(run.Spec), expected) {
 				t.Fatalf("explicit refreshed inherited contract: %+v", run)

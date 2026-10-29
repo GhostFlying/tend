@@ -15,6 +15,11 @@ import (
 )
 
 func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
+	for _, spec := range NamedSpecs(agentconfig.IssueManager) {
+		if spec.Name == "work_item_context_read" {
+			t.Fatal("named manager still advertises retired legacy context facade")
+		}
+	}
 	e := newEnv(t)
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 91)
@@ -146,6 +151,20 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 		}
 		return answer
 	}
+	legacyContext := call("work_item_context_read", contextReadArgs{WorkItemID: parent.IssueID})
+	if legacyContext.OK || legacyContext.Error == nil || legacyContext.Error.Code != protocol.CodeForbidden {
+		t.Fatal("named manager still accepts retired legacy context facade", legacyContext)
+	}
+	a := call("issues_list", map[string]any{"limit": 2})
+	var page protocol.IssuePage
+	if !a.OK || json.Unmarshal(a.Result, &page) != nil || len(page.Items) != 2 || !page.More {
+		t.Fatal("manager scoped discovery", a)
+	}
+	for _, item := range page.Items {
+		if item.IssueID != parent.IssueID && item.IssueID != child.IssueID && item.IssueID != descendant.IssueID {
+			t.Fatal("unrelated Issue in scoped discovery", item)
+		}
+	}
 	queued := execute(owner, app.SubmitMessage{}, protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "QUEUED_OWNER_MATERIAL_MUST_NOT_LEAK"}, nil)
 	var accepted struct {
 		MessageID string `json:"message_id"`
@@ -156,6 +175,10 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 	projection := call("issues_read", map[string]any{"issue_id": parent.IssueID})
 	if !projection.OK || strings.Contains(string(projection.Result), "QUEUED_OWNER_MATERIAL_MUST_NOT_LEAK") || strings.Contains(string(projection.Result), accepted.MessageID) {
 		t.Fatal("agent Issue projection exposed queued owner material", projection)
+	}
+	contextProjection := call("issues_context_read", map[string]any{"issue_id": parent.IssueID})
+	if !contextProjection.OK || strings.Contains(string(contextProjection.Result), "QUEUED_OWNER_MATERIAL_MUST_NOT_LEAK") {
+		t.Fatal("canonical context bypassed shared source projection", contextProjection)
 	}
 	t.Run("named-main-preview", func(t *testing.T) {
 		// The owner/store view keeps the original queued body. The named main
@@ -217,17 +240,11 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 		if !answer.OK || strings.Contains(string(answer.Result), "QUEUED_OWNER_MATERIAL_MUST_NOT_LEAK") {
 			t.Fatal("withdrawn preview became agent input", response.Text)
 		}
-	})
-	a := call("issues_list", map[string]any{"limit": 2})
-	var page protocol.IssuePage
-	if !a.OK || json.Unmarshal(a.Result, &page) != nil || len(page.Items) != 2 || !page.More {
-		t.Fatal("manager scoped discovery", a)
-	}
-	for _, item := range page.Items {
-		if item.IssueID != parent.IssueID && item.IssueID != child.IssueID && item.IssueID != descendant.IssueID {
-			t.Fatal("unrelated Issue in scoped discovery", item)
+		contextProjection := call("issues_context_read", map[string]any{"issue_id": parent.IssueID})
+		if !contextProjection.OK || strings.Contains(string(contextProjection.Result), "QUEUED_OWNER_MATERIAL_MUST_NOT_LEAK") {
+			t.Fatal("withdrawn source became canonical context input", contextProjection)
 		}
-	}
+	})
 	for name, r := range cases {
 		t.Run(name, func(t *testing.T) {
 			for _, read := range []struct {

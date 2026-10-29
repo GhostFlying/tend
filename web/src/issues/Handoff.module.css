@@ -1,0 +1,48 @@
+.root {
+  padding: 24px 28px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.root h2 {
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 28px;
+  margin: 28px 0;
+}
+.columns > div > label {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 24px;
+}
+.columns select {
+  font: inherit;
+  width: 100%;
+  padding: 11px 12px;
+  color: var(--label);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.columns h3 {
+  font-size: 15px;
+  margin: 8px 0 0;
+}
+.columns ul {
+  line-height: 2;
+  padding-left: 20px;
+}
+@media (max-width: 760px) {
+  .root {
+    padding: 20px 16px;
+  }
+  .columns {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 24px 0;
+  }
+}

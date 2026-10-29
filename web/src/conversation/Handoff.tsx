@@ -5,7 +5,15 @@ import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Handoff.module.css";
 
-export function Handoff({ connection, onClose }: { connection: Connection; onClose(): void }) {
+export function Handoff({
+  connection,
+  onClose,
+  onCatalog,
+}: {
+  connection: Connection;
+  onClose(): void;
+  onCatalog?: () => void;
+}) {
   const { client, live } = useServices();
   const handoff = live.handoff;
   const state = useStore(handoff.state);
@@ -86,6 +94,11 @@ export function Handoff({ connection, onClose }: { connection: Connection; onClo
           ×
         </button>
       </div>
+      {onCatalog && (
+        <button type="button" className={styles.save} onClick={onCatalog}>
+          Agent与类别
+        </button>
+      )}
       <section aria-label="主 agent">
         <h2 className={styles.sectionHeading}>主 agent</h2>
         <h3 className={styles.heading}>预备摘要</h3>

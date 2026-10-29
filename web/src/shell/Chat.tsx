@@ -1,3 +1,8 @@
+import { MainPending } from "../attention/MainPending.tsx";
+import type { AttentionPage } from "../api/generated/api.ts";
+import type { ReadState } from "../workitems/live.ts";
+import { ManualSource } from "../conversation/ManualSource.tsx";
+import { DetailOverlay } from "./DetailOverlay.tsx";
 import { Rollout } from "../conversation/Rollout.tsx";
 import { PendingQueue } from "../conversation/PendingQueue.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
@@ -17,10 +22,23 @@ import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import controls from "./controls.module.css";
 import { ArrowDown } from "./icons.tsx";
 
-export function Chat({ connection, visible }: { connection: Connection; visible: boolean }) {
+export function Chat({
+  connection,
+  visible,
+  mainAttention,
+  onAttention,
+  onIssue,
+}: {
+  connection: Connection;
+  visible: boolean;
+  mainAttention?: ReadState<AttentionPage>;
+  onAttention?: (id?: string) => void;
+  onIssue?: (id: string) => void;
+}) {
   const choice = useStore(theme);
-  const { conversation, openAgentDrawer, selectConversation, openWorkItem } = useServices();
+  const { conversation, openAgentDrawer, selectConversation, openIssue } = useServices();
   const [jump, setJump] = useState(0);
+  const [sourceOpen, setSourceOpen] = useState(false);
   const toLatest = () => setJump((n) => n + 1);
 
   return (
@@ -28,22 +46,29 @@ export function Chat({ connection, visible }: { connection: Connection; visible:
       <header className={styles.head}>
         <h1>{conversation?.title ?? "主 Agent"}</h1>
         <span className={styles.sub}>
-          {conversation?.workItemID ? "工作项后台会话" : "一个会话，所有设备共享"}
+          {conversation?.kind === "consultation"
+            ? "独立咨询 · 普通问答不创建任务"
+            : conversation?.workItemID
+              ? "讨论目标、规划与委派任务"
+              : "一个会话，所有设备共享"}
         </span>
         <span className={styles.spacer} />
         {
           <nav aria-label="Agent 切换" className={styles.agentNav}>
-            {conversation?.workItemID && (
+            {conversation?.id !== "main" && conversation?.id && (
               <button onClick={() => selectConversation?.("main")}>主 Agent</button>
             )}
             <button aria-pressed={!!conversation?.workItemID} onClick={openAgentDrawer}>
-              后台 Agent ▾
+              会话 ▾
             </button>
             {conversation?.workItemID && (
-              <button onClick={() => openWorkItem(conversation.workItemID!)}>工作项 ↗</button>
+              <button onClick={() => openIssue(conversation.workItemID!)}>Issue ↗</button>
             )}
           </nav>
         }
+        <button className={controls.chipBtn} onClick={() => setSourceOpen(true)}>
+          来源
+        </button>
         <Rollout />
         <button
           type="button"
@@ -66,6 +91,23 @@ export function Chat({ connection, visible }: { connection: Connection; visible:
           <ArrowDown />
         </button>
       </header>
+      {conversation?.kind === "consultation" && (
+        <div className={styles.roleNote}>
+          独立咨询 · 普通问答不创建任务
+          {conversation.agentRef && <span>咨询Agent：{conversation.agentRef}</span>}
+        </div>
+      )}
+      {conversation?.workItemID && (
+        <div className={styles.roleNote}>
+          Issue负责人 · 澄清目标、规划与委派
+          {conversation.agentRef && <span>负责人Agent：{conversation.agentRef}</span>}
+        </div>
+      )}
+      {sourceOpen && (
+        <DetailOverlay task={false} label="补充来源" onClose={() => setSourceOpen(false)}>
+          <ManualSource onBack={() => setSourceOpen(false)} />
+        </DetailOverlay>
+      )}
       <UpgradeBanner connection={connection} />
       <div className={styles.body}>
         <Transcript jump={jump} visible={visible} />
@@ -73,7 +115,10 @@ export function Chat({ connection, visible }: { connection: Connection; visible:
           <div className={styles.seatInner}>
             <Note />
             <div className={styles.seatScroll}>
-              {!conversation?.workItemID && <DecisionDock />}
+              {conversation?.id === "main" && mainAttention?.value && onAttention && onIssue && (
+                <MainPending summary={mainAttention} onOpen={onAttention} onIssue={onIssue} />
+              )}
+              {!conversation?.workItemID && !mainAttention?.value && <DecisionDock />}
               <PendingQueue connection={connection} />
             </div>
             <Composer connection={connection} />

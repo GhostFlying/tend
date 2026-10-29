@@ -208,7 +208,7 @@ export function TaskBoard({
       <UpgradeBanner connection={connection} />
       <BoardResources connection={connection} onRepos={onRepos} />
       <section className={styles.board} aria-label="任务执行列表">
-        <p className={styles.note}>按任务查看执行与历史；工作项计划仍在工作项白板中跟进。</p>
+        <p className={styles.note}>按任务查看执行与历史；Issue计划在Issue白板中跟进。</p>
         <div className={styles.tabs} role="tablist" aria-label="任务范围">
           {taskTabs.map((entry, index) => (
             <button
@@ -292,12 +292,14 @@ function TaskRows({ feed }: { feed: TaskFeed }) {
   );
 }
 function parentLabel(task: TaskSummary): string {
-  return task.primary_work_item_id
-    ? `所属工作项：${task.primary_work_item_title ?? task.primary_work_item_id}`
-    : "未关联工作项";
+  return task.primary_issue_id
+    ? `所属Issue：${task.primary_issue_title ?? task.primary_issue_id}`
+    : task.primary_work_item_id
+      ? `历史关联：${task.primary_work_item_title ?? task.primary_work_item_id}`
+      : "未关联Issue";
 }
 function TaskCard({ task }: { task: TaskSummary }) {
-  const { openTask, openWorkItem } = useServices();
+  const { openTask, openIssue } = useServices();
   const look = task.execution ? executionLook(task.execution) : taskLook(task);
   return (
     <article className={styles.card}>
@@ -322,15 +324,12 @@ function TaskCard({ task }: { task: TaskSummary }) {
           <span className={styles.meta}>
             {task.project || "未分组"} · {ratingLabels[task.rating]} · spec {task.spec_version}
           </span>
-          {task.primary_work_item_id ? (
-            <button
-              className={styles.parentLink}
-              onClick={() => openWorkItem(task.primary_work_item_id!)}
-            >
+          {task.primary_issue_id ? (
+            <button className={styles.parentLink} onClick={() => openIssue(task.primary_issue_id!)}>
               {parentLabel(task)} ›
             </button>
           ) : (
-            <span className={styles.meta}>未关联工作项</span>
+            <span className={styles.meta}>{parentLabel(task)}</span>
           )}
         </div>
         <TaskExecution task={task} showState={false} />

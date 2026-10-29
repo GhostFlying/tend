@@ -1,10 +1,14 @@
+import { NewConsultation } from "./NewConsultation.tsx";
+import { Close } from "../shell/icons.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type {
-  AgentConversation,
-  AgentConversationPage,
+  IssueAgentConversation as AgentConversation,
+  IssueAgentConversationPage as AgentConversationPage,
   SubmitMessagePayload,
+  AttentionPage,
 } from "../api/generated/api.ts";
+import type { ReadState } from "../workitems/live.ts";
 import { ServicesContext, useServices } from "../app/services.tsx";
 import { notify } from "../app/notice.ts";
 import { LiveData } from "../live/data.ts";
@@ -17,9 +21,15 @@ import styles from "./Agents.module.css";
 export function AgentWorkspace({
   connection,
   visible,
+  mainAttention,
+  onAttention,
+  onIssue,
 }: {
   connection: Connection;
   visible: boolean;
+  mainAttention: ReadState<AttentionPage>;
+  onAttention(id?: string): void;
+  onIssue(id: string): void;
 }) {
   const services = useServices();
   const [selected, setSelected] = useState("main");
@@ -28,6 +38,7 @@ export function AgentWorkspace({
   const [loadingMore, setLoadingMore] = useState(false);
   const [visited, setVisited] = useState<AgentConversation[]>([]);
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const drawer = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (open) drawer.current?.showModal();
@@ -42,7 +53,7 @@ export function AgentWorkspace({
     const timer = setTimeout(() => {
       void services.client
         .get<AgentConversationPage>(
-          `/api/v1/agent-conversations?search=${encodeURIComponent(search)}&status=${status}`,
+          `/api/v1/agent-conversations?projection=issues&search=${encodeURIComponent(search)}&status=${status}`,
           controller.signal,
         )
         .then(setPage)
@@ -64,7 +75,9 @@ export function AgentWorkspace({
         return;
       }
       void services.client
-        .get<AgentConversation>(`/api/v1/agent-conversations/${encodeURIComponent(id)}`)
+        .get<AgentConversation>(
+          `/api/v1/agent-conversations/${encodeURIComponent(id)}?projection=issues`,
+        )
         .then((c) => {
           if (request !== selection.current.revision) return;
           setVisited((v) =>
@@ -101,7 +114,9 @@ export function AgentWorkspace({
         const ids = [
           ...new Set(
             (await outbox.all())
-              .filter((m) => m.state !== "sent")
+              .filter(
+                (m) => m.state !== "sent" && m.envelope.operation === "conversation.submit_message",
+              )
               .map((m) => (m.envelope.payload as SubmitMessagePayload).conversation_id ?? "main"),
           ),
         ].filter((id) => id !== "main");
@@ -109,7 +124,7 @@ export function AgentWorkspace({
           if (!active) break;
           try {
             const c = await services.client.get<AgentConversation>(
-              `/api/v1/agent-conversations/${encodeURIComponent(id)}`,
+              `/api/v1/agent-conversations/${encodeURIComponent(id)}?projection=issues`,
             );
             if (active)
               setVisited((old) => (old.some((x) => x.conversation_id === id) ? old : [...old, c]));
@@ -136,7 +151,7 @@ export function AgentWorkspace({
     setLoadingMore(true);
     try {
       const next = await services.client.get<AgentConversationPage>(
-        `/api/v1/agent-conversations?search=${encodeURIComponent(search)}&status=${status}&after=${encodeURIComponent(page.next)}`,
+        `/api/v1/agent-conversations?projection=issues&search=${encodeURIComponent(search)}&status=${status}&after=${encodeURIComponent(page.next)}`,
       );
       if (revision === listRevision.current)
         setPage({ ...next, items: [...(page.items ?? []), ...(next.items ?? [])] });
@@ -150,7 +165,13 @@ export function AgentWorkspace({
     <>
       <ServicesContext value={{ ...shared, conversation: { id: "main", title: "主 Agent" } }}>
         <section className={styles.session} hidden={selected !== "main"}>
-          <Chat connection={connection} visible={visible && selected === "main"} />
+          <Chat
+            connection={connection}
+            visible={visible && selected === "main"}
+            mainAttention={mainAttention}
+            onAttention={onAttention}
+            onIssue={onIssue}
+          />
         </section>
       </ServicesContext>
       {visited.map((c) => (
@@ -166,68 +187,105 @@ export function AgentWorkspace({
         <dialog
           ref={drawer}
           className={styles.drawer}
-          aria-label="后台 Agent 会话"
+          aria-label="会话"
           onCancel={() => setOpen(false)}
         >
-          <header>
-            <div>
-              <h2>后台 Agent</h2>
-              <p>按工作项查看进展与处理过程</p>
-            </div>
-            <button onClick={() => setOpen(false)} aria-label="关闭会话抽屉">
-              ✕
-            </button>
-          </header>
-          <input
-            autoFocus
-            aria-label="搜索工作项会话"
-            placeholder="搜索工作项…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <select
-            aria-label="筛选会话状态"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            <option value="">全部状态</option>
-            {Object.entries(statusLabels).map(([v, label]) => (
-              <option key={v} value={v}>
-                {label}
-              </option>
-            ))}
-          </select>
-          {error && <p role="alert">{error}</p>}
-          {page && !page.runtime_available && (
-            <p role="alert">后台运行时不可用，消息和处理责任仍保留。</p>
-          )}
-          <div className={styles.sessionList}>
-            {page?.items?.map((c) => (
+          {creating ? (
+            <NewConsultation
+              onBack={() => setCreating(false)}
+              onCreated={(id) => {
+                setCreating(false);
+                select(id);
+              }}
+            />
+          ) : (
+            <>
+              <header>
+                <div>
+                  <h2>会话</h2>
+                  <p>主助理、Issue负责人会话与独立咨询</p>
+                </div>
+                <button onClick={() => setOpen(false)} aria-label="关闭会话抽屉">
+                  <Close width={18} height={18} />
+                </button>
+              </header>
               <button
-                key={c.conversation_id}
-                onClick={() => select(c.conversation_id)}
-                className={styles.sessionRow}
+                onClick={() => {
+                  setOpen(false);
+                  window.dispatchEvent(new Event("tend:open-catalog"));
+                }}
               >
-                <strong>{c.title}</strong>
-                <time>
-                  {c.last_message_at
-                    ? new Date(c.last_message_at).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : ""}
-                </time>
-                <span>{c.preview || "尚无消息"}</span>
-                <small data-status={c.status}>{statusLabels[c.status] ?? c.status}</small>
+                Agent与类别
               </button>
-            ))}
-            {page && !page.items?.length && <p>暂无匹配会话。新建工作项后会出现在这里。</p>}
-            {page?.next && (
-              <button disabled={loadingMore} onClick={() => void more()}>
-                加载更多
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  window.dispatchEvent(new Event("tend:open-archive"));
+                }}
+              >
+                历史归档
               </button>
-            )}
-          </div>
+              <button className={styles.primary} onClick={() => setCreating(true)}>
+                新建咨询
+              </button>
+              <button onClick={() => select("main")}>主 Agent</button>
+              <input
+                autoFocus
+                aria-label="搜索会话"
+                placeholder="搜索会话…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <select
+                aria-label="筛选会话状态"
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+              >
+                <option value="">全部状态</option>
+                {Object.entries(statusLabels).map(([v, label]) => (
+                  <option key={v} value={v}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              {error && <p role="alert">{error}</p>}
+              {page && !page.runtime_available && (
+                <p role="alert">后台运行时不可用，消息和处理责任仍保留。</p>
+              )}
+              <div className={styles.sessionList}>
+                {page?.items?.map((c) => (
+                  <button
+                    key={c.conversation_id}
+                    onClick={() => select(c.conversation_id)}
+                    className={styles.sessionRow}
+                  >
+                    <strong>{c.title}</strong>
+                    <time>
+                      {c.last_message_at
+                        ? new Date(c.last_message_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : ""}
+                    </time>
+                    <span>
+                      {c.kind === "consultation" ? "咨询 · " : "Issue · "}
+                      {c.preview || "尚无消息"}
+                    </span>
+                    <small data-status={c.status}>{statusLabels[c.status] ?? c.status}</small>
+                  </button>
+                ))}
+                {page && !page.items?.length && (
+                  <p>暂无匹配会话。可以开始独立咨询，或在Issue详情与负责人对话。</p>
+                )}
+                {page?.next && (
+                  <button disabled={loadingMore} onClick={() => void more()}>
+                    加载更多
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </dialog>
       )}
     </>
@@ -253,22 +311,7 @@ function BackgroundConversation({
 }) {
   const parent = useServices();
   const id = c.conversation_id;
-  const live = useMemo(
-    () =>
-      new LiveData(
-        {
-          get: <T,>(path: string, signal?: AbortSignal) =>
-            parent.client.get<T>(
-              path.startsWith("/api/v1/conversation")
-                ? `${path}${path.includes("?") ? "&" : "?"}conversation_id=${encodeURIComponent(id)}`
-                : path,
-              signal,
-            ),
-        },
-        id,
-      ),
-    [parent.client, id],
-  );
+  const live = useMemo(() => new LiveData(parent.client, id), [parent.client, id]);
   const draft = useMemo(() => new ComposerDraft(id), [id]);
   const [queue, setQueue] = useState<SendQueue | null>(null);
   const cleanup = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -286,9 +329,12 @@ function BackgroundConversation({
       .catch((e) => notify(String(e), "warn"));
     return () => {
       active = false;
-      cleanup.current = setTimeout(() => void live.stop(), 0);
+      cleanup.current = setTimeout(() => {
+        void live.stop();
+        void draft.close();
+      }, 0);
     };
-  }, [id, live, parent.client]);
+  }, [id, live, parent.client, draft]);
   useEffect(() => {
     if (connection.status !== "online") return;
     void queue?.resume();
@@ -304,7 +350,13 @@ function BackgroundConversation({
         live,
         draft,
         queue,
-        conversation: { id, title: c.title, workItemID: c.work_item_id ?? "" },
+        conversation: {
+          id,
+          title: c.title,
+          workItemID: c.issue_id ?? "",
+          kind: c.kind,
+          ...(c.agent_ref ? { agentRef: c.agent_ref } : {}),
+        },
       }}
     >
       <section className={styles.session} hidden={!visible}>

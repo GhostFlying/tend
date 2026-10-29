@@ -18,6 +18,7 @@ import type {
   SubmitMessagePayload,
   ConversationImageInput,
   ConversationAttachment,
+  InjectSourcePayload,
 } from "../api/generated/api.ts";
 import { newRequestId } from "../api/ids.ts";
 import { Store, type Readable } from "../state/store.ts";
@@ -32,6 +33,9 @@ export interface Sender {
 
 export interface QueueOptions {
   conversationID?: string;
+  /** Source workflows reuse durable transfers without becoming owner instructions. */
+  operation?: "conversation.submit_message" | "conversation.inject_source";
+  scope?: string;
   outbox: Outbox;
   sender: Sender;
   now?: () => number;
@@ -78,6 +82,8 @@ export class SendQueue {
   private readonly outbox: Outbox;
   private readonly conversationID: string;
   private readonly sender: Sender;
+  private readonly operation: "conversation.submit_message" | "conversation.inject_source";
+  private readonly scope: string | undefined;
   private readonly now: () => number;
   private readonly newId: (now: number) => string;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -96,6 +102,8 @@ export class SendQueue {
     this.outbox = options.outbox;
     this.conversationID = options.conversationID ?? "main";
     this.sender = options.sender;
+    this.operation = options.operation ?? "conversation.submit_message";
+    this.scope = options.scope;
     this.now = options.now ?? Date.now;
     this.newId = options.newId ?? ((now) => newRequestId(now));
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -110,11 +118,7 @@ export class SendQueue {
     const cutoff = q.now() - q.keepSentMs;
     const kept: OutgoingMessage[] = [];
     for (const m of await q.outbox.all()) {
-      if (
-        ((m.envelope.payload as SubmitMessagePayload).conversation_id ?? "main") !==
-        q.conversationID
-      )
-        continue;
+      if (!q.belongs(m)) continue;
       q.nextOrder = Math.max(q.nextOrder, m.order + 1);
       if (m.state === "sent" && m.updatedAt < cutoff) {
         await q.outbox.delete(m.requestId);
@@ -136,6 +140,31 @@ export class SendQueue {
    * outbox, before tend answers.
    */
   async enqueue(draft: Draft): Promise<OutgoingMessage> {
+    if (this.operation !== "conversation.submit_message") throw new Error("此入口只保存手动来源");
+    return this.enqueueDraft(draft);
+  }
+
+  async enqueueSource(
+    draft: Draft,
+    metadata: InjectSourcePayload["metadata"],
+  ): Promise<OutgoingMessage> {
+    if (this.operation !== "conversation.inject_source") throw new Error("此入口只发送聊天消息");
+    return this.enqueueDraft(draft, metadata);
+  }
+
+  private belongs(m: OutgoingMessage): boolean {
+    return (
+      m.envelope.operation === this.operation &&
+      m.queueScope === this.scope &&
+      ((m.envelope.payload as SubmitMessagePayload).conversation_id ?? "main") ===
+        this.conversationID
+    );
+  }
+
+  private async enqueueDraft(
+    draft: Draft,
+    metadata?: InjectSourcePayload["metadata"],
+  ): Promise<OutgoingMessage> {
     // Taken before any await, so concurrent calls keep their call order.
     const order = this.nextOrder++;
     const now = this.now();
@@ -158,15 +187,25 @@ export class SendQueue {
       payload.decision = draft.decision;
     }
     const message: OutgoingMessage = {
+      ...(this.scope !== undefined ? { queueScope: this.scope } : {}),
       requestId,
       order,
       submitAttempted: false,
       references: draft.attachments ?? [],
       envelope: {
         request_id: requestId,
-        operation: "conversation.submit_message",
-        target: { type: "conversation" },
-        payload,
+        operation: this.operation,
+        target: {
+          type: this.operation === "conversation.inject_source" ? "message" : "conversation",
+        },
+        payload: metadata
+          ? ({
+              text: draft.body,
+              metadata: { ...metadata },
+              ...(payload.attachments ? { attachments: payload.attachments } : {}),
+              ...(payload.conversation_id ? { conversation_id: payload.conversation_id } : {}),
+            } satisfies InjectSourcePayload)
+          : payload,
       },
       body: draft.body,
       createdAt: now,
@@ -193,15 +232,7 @@ export class SendQueue {
    * reconnect or the network coming back.
    */
   async resume(): Promise<void> {
-    this.messages.set(
-      sorted(
-        (await this.outbox.all()).filter(
-          (m) =>
-            ((m.envelope.payload as SubmitMessagePayload).conversation_id ?? "main") ===
-            this.conversationID,
-        ),
-      ),
-    );
+    this.messages.set(sorted((await this.outbox.all()).filter((m) => this.belongs(m))));
     for (const m of this.messages.get()) {
       if (m.state === "unknown") {
         await this.reconcile(m.requestId);

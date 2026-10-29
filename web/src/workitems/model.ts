@@ -3,7 +3,6 @@ import type {
   IssueDelivery,
   IssueStage,
   ExecutionCounts,
-  WorkItemView,
 } from "../api/generated/api.ts";
 
 export const columns = [
@@ -114,39 +113,6 @@ export function parallelStages(stages: readonly IssueStage[]): ReadonlySet<strin
       .map((s) => s.stage_id),
   );
 }
-export function concern(item: WorkItemView): string {
-  const issue = item.follow_ons?.find((next) => next.status === "open" && next.kind === "problem");
-  if (issue) return issue.text;
-  const commitment = item.follow_ons?.find(
-    (next) => next.status === "open" && next.kind === "commitment",
-  );
-  if (commitment) return commitment.text;
-  if (item.status === "closed") return item.closure?.reason ?? "已结束跟进";
-  if (item.status === "snoozed") return "已暂缓新领取；运行中的任务仍按原约定推进";
-  const active = item.stages?.find((stage) => stage.status === "active");
-  if (active) return active.title;
-  const planned = item.stages?.find((stage) => stage.status === "planned");
-  if (planned) return planned.title;
-  if (item.followups?.active) return `等待跟进：${item.followups.purpose}`;
-  if (item.followups?.paused) return "跟进安排已暂停";
-  return "本轮已结束，后续尚未安排";
-}
-export type WorkItemIntention = "discuss" | "close" | "snooze" | "resume" | "reopen";
-export function intentionText(item: WorkItemView, intention: WorkItemIntention): string {
-  const ref = `工作项 ${item.work_item_id}（${item.title}）`;
-  switch (intention) {
-    case "discuss":
-      return `继续讨论${ref}。\n\n我想补充或调整：\n`;
-    case "close":
-      return `我想结束跟进${ref}。请先检查未处理承诺、运行任务和未确认操作，讨论收尾依据与遗留去向，再按账本规则处理。\n\n我的结束依据：\n`;
-    case "snooze":
-      return `我想暂缓${ref}的新领取安排。运行中的任务继续按原约定推进，不停止 run；请核对影响后再更新工作项。\n\n暂缓原因：\n`;
-    case "resume":
-      return `我想恢复${ref}的后续安排。请先核对最新事实和已有承诺，再讨论下一步。\n`;
-    case "reopen":
-      return `我想重新跟进${ref}。请保留原收尾记录和任务终态，讨论重开原因及新的责任范围。\n\n重开原因：\n`;
-  }
-}
 export function splitWorkItemIds(text: string): (string | { workItemId: string })[] {
   const pattern = /(?<![0-9A-Za-z_])wi_[0-7][0-9A-HJKMNP-TV-Z]{25}(?![0-9A-Za-z_])/g;
   const out: (string | { workItemId: string })[] = [];
@@ -169,7 +135,10 @@ export interface RefreshBaseline {
 }
 export function refreshBaseline(
   delivery: IssueDelivery,
-  observation?: DeliveryObservation,
+  observation?: Pick<
+    DeliveryObservation,
+    "generation" | "checked_at" | "attempted_at" | "refresh_pending" | "error_kind"
+  >,
 ): RefreshBaseline {
   return {
     target: JSON.stringify([
@@ -187,7 +156,10 @@ export function refreshBaseline(
 export function refreshReconciled(
   baseline: RefreshBaseline,
   delivery: IssueDelivery,
-  observation?: DeliveryObservation,
+  observation?: Pick<
+    DeliveryObservation,
+    "generation" | "checked_at" | "attempted_at" | "refresh_pending" | "error_kind"
+  >,
 ): boolean {
   const current = refreshBaseline(delivery, observation);
   return (
@@ -221,20 +193,4 @@ export function stageProgressLabel(
     return pending ? "本轮执行已完成 · 阶段待核对" : "本轮执行已完成 · 后续责任未结束";
   if (counts.cancelled > 0) return "本轮已取消 · 后续待安排";
   return "待推进";
-}
-
-export function stageNeedsReview(item: WorkItemView, stageId: string): boolean {
-  const stages = new Map(item.stages?.map((stage) => [stage.stage_id, stage]));
-  const pendingTasks = new Set(item.pending_reviews?.map((review) => review.task_id));
-  for (const stage of stages.values()) {
-    if (!stage.task_ids?.some((id) => pendingTasks.has(id))) continue;
-    let current: IssueStage | undefined = stage;
-    const seen = new Set<string>();
-    while (current && !seen.has(current.stage_id)) {
-      if (current.stage_id === stageId) return true;
-      seen.add(current.stage_id);
-      current = current.parent_id ? stages.get(current.parent_id) : undefined;
-    }
-  }
-  return false;
 }

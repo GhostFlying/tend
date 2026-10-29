@@ -9,23 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
-func TestEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T) {
+func TestHistoricalEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T) {
 	srv := newServer(t, time.Minute)
 	agent := testkit.NewHarness()
+	failures := make(chan string, 8)
 	agent.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
-		if strings.Contains(in.Text, "create completion check") {
-			res := th.CallTool(context.Background(), turn, "create", "tasks_create", map[string]any{"title": "notice task", "commit_seq": 1, "workspace_name": "notice-task", "spec": domain.Spec{Goal: "notice task", Acceptance: []string{"works"}, Delivery: domain.DeliveryCommit, Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}}}})
-			if !res.Success {
-				return "failed"
-			}
-		}
+
 		th.Say(turn, "reply", "The ledger is the source of truth.")
 		return "completed"
 	}
@@ -33,29 +28,39 @@ func TestEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T
 		item := strings.TrimPrefix(th.Config.Cwd, "/background/work-item:")
 		sources := th.CallTool(context.Background(), turn, "sources", "background_sources", map[string]any{})
 		if !sources.Success {
+			failures <- sources.Text
 			return "failed"
 		}
-		result := th.CallTool(context.Background(), turn, "context", "work_item_context_read", map[string]any{"work_item_id": item})
+		result := th.CallTool(context.Background(), turn, "context", "background_item_read", map[string]any{"work_item_id": item})
 		var contextView struct {
-			OK     bool                     `json:"ok"`
-			Result protocol.WorkItemContext `json:"result"`
+			OK     bool                  `json:"ok"`
+			Result protocol.WorkItemView `json:"result"`
 		}
-		if !result.Success || json.Unmarshal([]byte(result.Text), &contextView) != nil || !contextView.OK {
+		if !result.Success || json.Unmarshal([]byte(result.Text), &contextView) != nil || !contextView.OK || contextView.Result.WorkItemID != item {
+			failures <- result.Text
 			return "failed"
 		}
+		// Assessment uses the frozen context actually injected into this turn,
+		// even if main has since prepared a newer historical baseline.
+		delivered := historicalDeliveredContextRevision(t, agent, th.ID())
+
 		th.Say(turn, "review", "Completion evidence retained; coordinator review required.")
-		result = th.CallTool(context.Background(), turn, "assessment", "background_submit", protocol.BackgroundAssessmentPayload{ContextRevision: contextView.Result.Revision, Disposition: "escalate", Note: "Completion requires coordinator review", EvidenceIDs: []string{}})
+		result = th.CallTool(context.Background(), turn, "assessment", "background_submit", protocol.BackgroundAssessmentPayload{ContextRevision: delivered, Disposition: "escalate", Note: "Completion requires coordinator review", EvidenceIDs: []string{}})
 		if !result.Success {
+			failures <- result.Text
 			return "failed"
 		}
 		return "completed"
 	}
-	srv.startMainThread(agent, background)
+	srv.startHistoricalMainThread(agent, background)
 	web := srv.webLogin(srv.startWeb().URL)
 	stream := web.stream("")
+	// Explicit historical owner setup; the active main tool registry cannot
+	// create standalone legacy tasks. The original notice/restart transport is retained.
+	srv.createTask()
 	n := newNode(t, srv, passing)
 	n.start()
-	web.send(protocol.SubmitMessagePayload{Body: "create completion check"})
+	web.send(protocol.SubmitMessagePayload{Body: "Observe the historical task completion"})
 	events := stream.until("system completion notice", func(e protocol.LedgerEvent) bool {
 		return e.Item != nil && e.Item.Author == "system" && strings.Contains(e.Item.Body, commitSHA)
 	})
@@ -65,6 +70,11 @@ func TestEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T
 		t.Fatal(notice)
 	}
 	eventually(t, "structured background escalation and main review settle", func() bool {
+		select {
+		case failure := <-failures:
+			t.Fatal(failure)
+		default:
+		}
 		return srv.count(`SELECT COUNT(*) FROM background_assessments WHERE disposition='escalate'`) == 1 &&
 			srv.count(`SELECT COUNT(*) FROM logical_turns WHERE status<>'completed'`) == 0 &&
 			srv.count(`SELECT COUNT(*) FROM outbox WHERE (destination='main_thread' OR destination LIKE 'background_thread:%') AND status IN ('pending','sending')`) == 0 &&
@@ -121,7 +131,7 @@ func TestEndToEnd_CompletionNoticeWakesMainAndPersistsAcrossRestart(t *testing.T
 	starts := len(businessStarts(agent))
 	n.stop()
 	srv = srv.restart()
-	srv.startMainThread(agent, background)
+	srv.startHistoricalMainThread(agent, background)
 	reloaded := srv.webLogin(srv.startWeb().URL)
 	assertNotice(reloaded)
 	replay := reloaded.stream("?after=" + strconv.FormatInt(ev.EventSeq-1, 10))

@@ -39,7 +39,14 @@ func TestNamedPlannerUsesActualAttentionTools(t *testing.T) {
 	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Attention: true})
 }
 
-type namedManagerTestOptions struct{ Attention, ReadSources, Associations, Catalog, Callers bool }
+type namedManagerTestOptions struct{ Attention, ReadSources, Catalog, Callers, Associations bool }
+
+func TestNamedPlannerRepairClassifiesCanonicalSource(t *testing.T) {
+	testNamedManagerTools(t, false, false, true, false, namedManagerTestOptions{Associations: true})
+}
+func TestNamedPlannerClassifiesCanonicalSourceAndCommits(t *testing.T) {
+	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Associations: true})
+}
 
 func TestNamedPlannerAndPooledManagerReadAgentCatalog(t *testing.T) {
 	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Catalog: true})
@@ -51,12 +58,6 @@ func TestNamedPlannerAndPooledManagerUseCanonicalIssueCallers(t *testing.T) {
 
 func TestNamedManagerReadsOwnBackgroundSources(t *testing.T) {
 	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{ReadSources: true})
-}
-func TestNamedPlannerRepairClassifiesCanonicalSource(t *testing.T) {
-	testNamedManagerTools(t, false, false, true, false, namedManagerTestOptions{Associations: true})
-}
-func TestNamedPlannerClassifiesCanonicalSourceAndCommits(t *testing.T) {
-	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Associations: true})
 }
 func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode, managerRepair bool, options ...namedManagerTestOptions) {
 	var opts namedManagerTestOptions
@@ -174,7 +175,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 						if len(ids) > 0 {
 							disposition = "linked"
 						}
-						if !invoke("conversation_associate", map[string]any{"message_id": m.MessageID, "content_revision": m.ContentRevision, "expected_control_revision": m.Revision, "disposition": disposition, "work_item_ids": ids}, nil) {
+						if !invoke("conversation_associate_issues", map[string]any{"effect_seq": 100 + int64(n), "target_id": m.MessageID, "expected_control_revision": m.Revision, "payload": map[string]any{"content_revision": m.ContentRevision, "disposition": disposition, "issue_ids": ids}}, nil) {
 							return "failed"
 						}
 					}
@@ -292,7 +293,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 					return "failed"
 				}
 			}
-			if !(opts.Associations) {
+			if !opts.Associations {
 				allowOnce.Do(func() { close(allowManagers) })
 			}
 			if !invoke("issues_create", map[string]any{"effect_seq": seq, "payload": p}, &created) {
@@ -310,15 +311,12 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 					}
 				}
 				if message.Associations == nil {
-					failed <- "source revisions missing"
+					failed <- "source association revisions missing"
 					return "failed"
 				}
 				if !invoke("conversation_associate_issues", map[string]any{"effect_seq": seq + 1, "target_id": message.MessageID, "expected_control_revision": message.Associations.Revision, "payload": map[string]any{"disposition": "linked", "content_revision": message.Associations.ContentRevision, "issue_ids": []string{created.Outcome.IssueID}}}, nil) {
 					return "failed"
 				}
-			}
-			if opts.Associations {
-				allowOnce.Do(func() { close(allowManagers) })
 			}
 			if opts.Callers {
 				var page protocol.IssuePage
@@ -349,6 +347,9 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 				if !invoke("planner_entry_put", map[string]any{"effect_seq": seq + 3, "payload": entry}, nil) {
 					return "failed"
 				}
+			}
+			if opts.Associations {
+				allowOnce.Do(func() { close(allowManagers) })
 			}
 			if repairMode {
 				return "completed"

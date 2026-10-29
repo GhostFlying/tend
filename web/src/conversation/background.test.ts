@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
-import type { TranscriptBlock } from "../api/generated/api.ts";
+import type { IssueTranscriptBlock } from "../api/generated/api.ts";
 import { showTranscriptBlock } from "./background.ts";
 test("only an actually completed silent batch leaves the transcript", () => {
-  const block: TranscriptBlock = {
+  const block: IssueTranscriptBlock = {
     position: 1,
     trigger: {
       seq: 1,

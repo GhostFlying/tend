@@ -23,13 +23,13 @@ import (
 )
 
 // TestIntegration_TraexLoop runs the whole loop with real traex: the owner
-// asks through the web client's API, the main agent plans a task, a runner
+// asks through the web client's API, the named main delegates to an Issue manager that freezes a task, a runner
 // implements it in a git workspace, an independent run accepts it and the
 // client observes completion over its event stream.
 func TestIntegration_TraexLoop(t *testing.T) {
 	env := gitIdentity(t)
 	url := calcRemote(t, env)
-	srv := newServer(t, time.Minute)
+	srv := newNamedFixtureServer(t, traexModel(), "traex")
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "calc", RemoteURL: url}},
 		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"calc"}, Slots: 2,

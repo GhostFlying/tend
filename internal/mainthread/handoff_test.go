@@ -364,7 +364,7 @@ func TestSummaryRejectsToolsAndNeverAppendsSourceOrWebMessages(t *testing.T) {
 		if th.Config.Sandbox != "read-only" || th.Config.ApprovalPolicy != "never" || len(th.Config.Tools) != 0 {
 			t.Error("summary branch not isolated")
 		}
-		attempt <- th.CallTool(context.Background(), id, "mutate-call", "tasks_create", map[string]any{"malformed": true})
+		attempt <- th.CallTool(context.Background(), id, "mutate-call", "decisions_open", map[string]any{"malformed": true})
 		th.Say(id, "summary", "Private summary")
 		return "completed"
 	}
@@ -612,7 +612,7 @@ func TestHandoffRetryRefreshesSourceBeyondRecentMessageFocus(t *testing.T) {
 	f.saveSummary(t)
 	f.e.h.Turn = func(th *testkit.FakeThread, id string, in harness.TurnInput) string {
 		if in.Repair {
-			return completeFixtureReview(t, th, id)
+			return completeHistoricalFixtureReview(t, f.e, th, id)
 		}
 		th.Say(id, "owner-reply", "Acknowledged the owner's instruction.")
 		return "completed"

@@ -255,7 +255,7 @@ func (s *Service) backgroundEvidence(ctx context.Context, c Call) (any, error) {
 		if err != nil {
 			return err
 		}
-		visible := protocol.ConversationItem{MessageID: msg.MessageID, Author: msg.Author, Body: msg.Body}
+		visible := protocol.ConversationItem{ConversationContent: protocol.ConversationContent{MessageID: msg.MessageID, Author: msg.Author, Body: msg.Body}}
 		if err = store.HideUndeliveredOwner(ctx, tx.Q(), &visible); err != nil {
 			return err
 		}

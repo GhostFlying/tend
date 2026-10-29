@@ -1,5 +1,8 @@
 import { expect, test } from "vitest";
-import type { ConversationItem, TranscriptBlock } from "../api/generated/api.ts";
+import type {
+  IssueConversationItem as ConversationItem,
+  IssueTranscriptBlock as TranscriptBlock,
+} from "../api/generated/api.ts";
 import { buildTranscriptEntries } from "./transcriptBlocks.ts";
 
 function item(seq: number, replyTo?: string, revision = 1): ConversationItem {

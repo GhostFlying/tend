@@ -99,6 +99,13 @@ func applyFollowup(ctx context.Context, x *Exec, tx *store.Tx, action string, ca
 	if err != nil {
 		return Outcome{}, errNotFound(err, "followup does not exist")
 	}
+	var managed bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM followup_targets WHERE rule_id=? AND kind IN ('deadline','attention'))`, r.RuleID).Scan(&managed); err != nil {
+		return Outcome{}, err
+	}
+	if managed {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manage owned reminder rules through their deadline or Attention operation")
+	}
 	if canonical == nil {
 		if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), r.WorkItemID); err != nil {
 			return Outcome{}, err

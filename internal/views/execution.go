@@ -59,6 +59,13 @@ func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows
 		if err != nil {
 			return nil, err
 		}
+		canonical, err := ownerCanonicalIdentity(ctx, q, summary.PrimaryWorkItemID)
+		if err != nil {
+			return nil, err
+		}
+		if canonical {
+			summary.PrimaryIssueID, summary.PrimaryIssueTitle = summary.PrimaryWorkItemID, summary.PrimaryWorkItemTitle
+		}
 		summary.Execution, err = facts.task(ctx, q, row)
 		if err != nil {
 			return nil, err

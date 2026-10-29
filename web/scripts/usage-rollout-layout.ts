@@ -162,7 +162,7 @@ const server = createServer(async (req, res) => {
       queue: [],
       decisions: [],
     });
-  if (path === "/api/v1/work-items") return json({ items: [], more: false });
+  if (path === "/api/v1/issues") return json({ items: [], more: false });
   if (path === "/api/v1/agent-conversations") return json({ enabled: false, items: [] });
   if (path === "/api/v1/tasks") return json({ tasks: [task] });
   if (path === `/api/v1/tasks/${taskID}`)
@@ -297,9 +297,13 @@ try {
     if (viewport.width <= 760) {
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "工作项" })
+        .getByRole("button", { name: "Issue" })
         .click();
-      await page.getByRole("button", { name: /资源与记录/ }).click();
+      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await page
+        .locator("main details > summary")
+        .filter({ hasText: /^资源与记录$/ })
+        .click();
     }
     await page.getByRole("button", { name: "Token 用量 ›", exact: true }).click();
     const panel = page.getByRole("region", { name: "Token 用量", exact: true });

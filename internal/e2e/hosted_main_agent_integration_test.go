@@ -5,8 +5,6 @@ package e2e
 import (
 	"context"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +15,7 @@ import (
 	"github.com/GhostFlying/tend/internal/dispatch"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/traex"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -34,36 +33,34 @@ func (s *server) startHostedTraex() {
 		wg.Wait()
 	})
 	cb := contextbuilder.New(s.app, s.store, s.ids, contextbuilder.Config{})
-	front := mainthread.New(s.app, cb, tools.New(s.app, s.store, cb, quiet()), mainthread.Config{
-		Instance: "main",
-		Thread:   mainthread.ThreadConfig(s.t.TempDir(), traexModel()),
-		Open: func(ctx context.Context) (harness.Session, error) {
-			return traex.Start(ctx, traex.Options{Version: "it", Env: []string{protocol.AddonEnv + "=off"}})
-		},
-		Log: quiet(),
-	})
+	makeManager := func(conversation string) *mainthread.Manager {
+		dir := s.t.TempDir()
+		return mainthread.New(s.app, cb, tools.New(s.app, s.store, cb, quiet()), mainthread.Config{
+			Instance: "integration/" + conversation, ConversationID: conversation, Thread: mainthread.ThreadConfig(dir, "unused"),
+			OpenNamed: func(ctx context.Context, selection hostedconfig.Selection) (harness.Session, error) {
+				return traex.Start(ctx, traex.Options{Bin: selection.Runtime.ExecutableRef, Dir: dir, Version: "it", Env: []string{protocol.AddonEnv + "=off"}, HostedCoordination: true})
+			}, Log: quiet()})
+	}
+	front := makeManager("")
+	pool := &mainthread.BackgroundPool{App: s.app, Front: front, New: func(id string) (*mainthread.Manager, error) { return makeManager(id), nil }}
+	wg.Go(func() { pool.Run(ctx) })
+
 	d := dispatch.New(s.app, map[string]dispatch.Handler{
-		app.MainThreadDestination: front, app.MainThreadControlDestination: front.Control(),
+		app.MainThreadDestination: front, app.MainThreadControlDestination: pool,
 	}, s.signal, time.Now, dispatch.Config{}, quiet())
 	wg.Go(func() { _ = front.Run(ctx) })
 	wg.Go(func() { _ = d.Run(ctx) })
 }
 
-// TestIntegration_HostedMainAgentReads runs the hosted main agent as
-// tend-server does, in the traex home of the user running the test (D68),
-// and asks it about a file outside its directory: the sandbox lets it read
-// the file and the turn does not stop at an approval.
-func TestIntegration_HostedMainAgentReads(t *testing.T) {
-	srv := newServer(t, time.Minute)
-	dir := t.TempDir()
+// TestIntegration_HostedMainAgentReadsOwnerMaterial uses bounded owner-provided
+// material through Tend; the planner must not independently read native files.
+func TestIntegration_HostedMainAgentReadsOwnerMaterial(t *testing.T) {
+	srv := newNamedFixtureServer(t, traexModel(), "traex")
 	const word = "periwinkle-4127"
-	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("The code word is "+word+".\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 
 	srv.startHostedTraex()
 
-	srv.say("This is not about a task. Read the file " + filepath.Join(dir, "notes.txt") + " and tell me the code word in it.")
+	srv.say("Owner-provided bounded note: The code word is " + word + ". This is ordinary discussion; repeat the code word using only this message, without native file or research tools.")
 	deadline := time.Now().Add(10 * time.Minute)
 	for time.Now().Before(deadline) {
 		if srv.count(`SELECT COUNT(*) FROM conversation_messages WHERE author = 'main_agent' AND body LIKE ?`, "%"+word+"%") > 0 {
@@ -97,13 +94,13 @@ func TestIntegration_HostedMainAgentReads(t *testing.T) {
 // are deterministic substitutes: this tests the hosted control path,
 // not a model's implementation or acceptance of a repository change.
 func TestIntegration_HostedWebTask(t *testing.T) {
-	srv := newServer(t, time.Minute)
+	srv := newNamedFixtureServer(t, traexModel(), "traex")
 	srv.startHostedTraex()
 	n := newNode(t, srv, passing)
 	n.start()
 	web := srv.webLogin(srv.startWeb().URL)
 	events := web.stream("")
-	asked := web.send(protocol.SubmitMessagePayload{Body: `Create exactly one task titled "document the widget" in the registered tend repository, using workspace name "web-integration". Its goal is to document the widget in README.md, its acceptance check is that README.md describes the widget, and its delivery is a commit. Dispatch it now without asking a question, then tell me its task ID. Do not implement it yourself.`})
+	asked := web.send(protocol.SubmitMessagePayload{Body: `Delegate to the registered Issue manager exactly one task titled "document the widget" in the registered tend repository, using workspace name "web-integration". Its goal is to document the widget in README.md, its acceptance check is that README.md describes the widget, and its delivery is a commit. Dispatch it now without asking a question, then tell me the delegated Issue ID. Do not implement it yourself.`})
 
 	var taskID string
 	var replied, createdTool bool
@@ -122,14 +119,14 @@ func TestIntegration_HostedWebTask(t *testing.T) {
 			if ev.Kind == "task.completed" {
 				taskID = ev.ObjectID
 			}
-			if ev.Item != nil && ev.Item.ReplyTo == asked && ev.Item.Tool != nil && ev.Item.Tool.Name == "tasks_create" && ev.Item.Tool.Status == protocol.ToolCompleted {
+			if ev.Item != nil && ev.Item.Tool != nil && ev.Item.Tool.Name == "issues_create_task" && ev.Item.Tool.Status == protocol.ToolCompleted {
 				createdTool = true
 			}
 			if itemIs(asked, protocol.MessageReplied)(ev) {
 				replied = true
 			}
 		case <-deadline.C:
-			t.Fatalf("hosted web flow timed out: completed task=%q, replied=%t, tasks_create completed=%t; conversation=%+v", taskID, replied, createdTool, web.conversation(""))
+			t.Fatalf("hosted web flow timed out: completed task=%q, replied=%t, issues_create_task completed=%t; conversation=%+v", taskID, replied, createdTool, web.conversation(""))
 		}
 	}
 
@@ -137,7 +134,7 @@ func TestIntegration_HostedWebTask(t *testing.T) {
 	if st := web.do("GET", "/api/v1/tasks/"+taskID, nil, &detail); st != http.StatusOK {
 		t.Fatalf("read the completed task = %d", st)
 	}
-	if detail.Lifecycle != protocol.TaskCompleted || len(detail.Acceptances) != 1 || detail.Acceptances[0].Verdict != protocol.VerdictPassed || len(detail.Artifacts) != 1 {
+	if detail.PrimaryIssueID == "" || detail.Lifecycle != protocol.TaskCompleted || len(detail.Acceptances) != 1 || detail.Acceptances[0].Verdict != protocol.VerdictPassed || len(detail.Artifacts) != 1 {
 		t.Fatalf("task did not complete with independent acceptance: %+v", detail)
 	}
 	if srv.count(`SELECT COUNT(*) FROM tasks`) != 1 {
@@ -145,12 +142,12 @@ func TestIntegration_HostedWebTask(t *testing.T) {
 	}
 	var reply bool
 	for _, item := range web.conversation("").Items {
-		if item.Author == "main_agent" && item.ReplyTo == asked && strings.Contains(item.Body, taskID) {
+		if item.Author == "main_agent" && item.ReplyTo == asked && strings.Contains(item.Body, detail.PrimaryIssueID) {
 			reply = true
 		}
 	}
 	if !reply {
-		t.Fatal("the stored main agent reply does not identify the task")
+		t.Fatal("the stored main agent reply does not identify its delegated Issue")
 	}
-	t.Logf("owner API -> real hosted main agent -> task %s -> substitute workers -> acceptance passed -> task.completed event", taskID)
+	t.Logf("owner API -> real named main -> Issue manager -> task %s -> substitute workers -> acceptance passed -> task.completed event", taskID)
 }

@@ -10,5 +10,3 @@
 4. 验证现enum/schema/工具导出、存储roundtrip/冻结hash、实际runner1/0消息；相同输入Marshal输出保持原JSON。运行必要compile/vet/staticcheck、定向race与TS/type-only等价，不为每字段增加镜像测试。正式全检与规定独立review在后续集成安排。
 
 候选以已冻结canonical caller A r2及非可见Web数据链为前件，主协调者管理的hosted恢复修正独立组合，不能据本片声称前件已正式纳入或发布。没有部署/真实数据操作，无UI设计或可见页面实施。
-
-正式顺序导出以当前 P4、P5/P8/P6、P2e 与 A23 caller 为前件；非可见Web数据层随最终UI组合，不是类型改名的Go依赖。仍执行同一21符号映射和已审type-only文件，不产生新行为。

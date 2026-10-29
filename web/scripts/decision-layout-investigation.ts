@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, webkit, type BrowserType, type Locator, type Page } from "playwright";
 import type {
   ConversationItem,
+  AttentionView,
   DecisionView,
   Envelope,
   Snapshot,
@@ -179,6 +180,7 @@ const sharedHistory: ConversationItem[] = Array.from({ length: 6 }, (_, index) =
   };
 });
 let sharedTranscript = false;
+let normalInbox = false;
 
 let currentOptions = originalOptions;
 let decisionVisible = true;
@@ -194,6 +196,7 @@ const streams = new Set<ServerResponse>();
 
 function reset(options = originalOptions) {
   sharedTranscript = false;
+  normalInbox = false;
   currentOptions = options;
   decisionVisible = true;
   upgradeVisible = true;
@@ -205,6 +208,25 @@ function reset(options = originalOptions) {
   responseDelay = 0;
   appendedHistory.length = 0;
   writes.length = 0;
+}
+
+function attentionFixture(): AttentionView {
+  return {
+    attention_id: "attention_fixture",
+    kind: "decision",
+    title: question,
+    status: decisionVisible ? "open" : "resolved",
+    revision: 1,
+    decision_id: "decision_fixture",
+    question_version: 1,
+    question_options: currentOptions,
+    decision: workerDecision(),
+    task_id: task.task_id,
+    raised_by: { kind: "agent", role: "implement" },
+    created_at: 1,
+    updated_at: 1,
+    latest_action_reminders: false,
+  };
 }
 
 function snapshot(): Snapshot {
@@ -335,8 +357,46 @@ const server = createServer(async (req, res) => {
     });
   if (path.endsWith("/compactions")) return sendJSON(res, { items: [] });
   if (path === "/api/v1/agent-conversations") return sendJSON(res, { enabled: false, items: [] });
+  if (path === "/api/v1/hosted-agents" || path === "/api/v1/next-actions")
+    return sendJSON(res, { items: [] });
+  // Explicitly exercise the retained decision dock only when the new Inbox
+  // read is unavailable; normal empty Inbox pages must not masquerade as null.
+  if (path === "/api/v1/inbox")
+    return !normalInbox
+      ? sendJSON(
+          res,
+          {
+            error: {
+              code: "unavailable",
+              message: "Intentional Inbox read failure for dock fallback",
+            },
+          },
+          503,
+        )
+      : sendJSON(res, { items: decisionVisible ? [attentionFixture()] : [], more: false });
   if (path === "/api/v1/repos") return sendJSON(res, { repos: [] });
-  if (path === "/api/v1/work-items") return sendJSON(res, { items: [] });
+  if (path === "/api/v1/issues") return sendJSON(res, { items: [] });
+  if (path === "/api/v1/attentions/attention_fixture") return sendJSON(res, attentionFixture());
+  if (path === `/api/v1/tasks/${task.task_id}`)
+    return sendJSON(res, {
+      ...task,
+      spec: {},
+      runs: [],
+      actions: [],
+      decisions: decisionVisible ? [workerDecision()] : [],
+      artifacts: [],
+      acceptances: [],
+    });
+  if (path === `/api/v1/tasks/${heldTask.task_id}`)
+    return sendJSON(res, {
+      ...heldTask,
+      spec: {},
+      runs: [],
+      actions: [],
+      decisions: [],
+      artifacts: [],
+      acceptances: [],
+    });
   if (path === "/api/v1/tasks") return sendJSON(res, { tasks: [] });
   if (path === "/api/v1/conversation/queue") {
     const category = url.searchParams.get("category") ?? "owner";
@@ -580,7 +640,13 @@ async function openPage(width: number, height: number) {
   const consoleErrors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
+    if (message.type() === "error") {
+      const expectedInboxFailure =
+        !normalInbox &&
+        message.location().url.includes("/api/v1/inbox") &&
+        message.text().includes("503");
+      if (!expectedInboxFailure) consoleErrors.push(message.text());
+    }
   });
   await page.goto(`http://127.0.0.1:${fixturePort}/`);
   return { context, page, errors, consoleErrors };
@@ -662,6 +728,43 @@ async function checkLayoutMatrix() {
   }
 }
 
+async function checkNormalInboxAndTaskAnswer() {
+  for (const width of [390, 1440]) {
+    reset();
+    normalInbox = true;
+    const { context, page, errors, consoleErrors } = await openPage(width, 900);
+    try {
+      const pending = page.getByRole("complementary", { name: "当前待处理" });
+      await pending.getByText(question, { exact: true }).waitFor();
+      await pending.getByRole("button", { name: "查看并处理", exact: true }).click();
+      const inbox = page.getByRole("dialog", { name: "待处理", exact: true });
+      await inbox.getByRole("radio").first().waitFor();
+      assert.equal(await inbox.getByRole("radio").count(), originalOptions.length);
+      await inbox.getByRole("radio").first().check();
+      assert.equal(
+        writes.length,
+        0,
+        "reading/selecting the real pending question is not a submitted answer",
+      );
+      await inbox.getByRole("button", { name: "关闭详情", exact: true }).click();
+      await page.goto(`http://127.0.0.1:${fixturePort}/?task=${task.task_id}`);
+      const detail = page.getByRole("dialog", { name: "任务详情", exact: true });
+      await detail.getByRole("button", { name: originalOptions[0]!, exact: true }).waitFor();
+      await detail.getByLabel("补充说明或其他回答").fill("来自原任务详情的回答");
+      await detail.getByRole("button", { name: originalOptions[0]!, exact: true }).click();
+      assert.equal(writes.at(-1)?.operation, "decisions.respond");
+      assert.deepEqual(writes.at(-1)?.target, { type: "decision", id: "decision_fixture" });
+      assert.equal((writes.at(-1)?.payload as { version: number }).version, 1);
+      await page.screenshot({ path: join(output, `normal-inbox-task-answer-${width}.png`) });
+      assert.deepEqual(errors, []);
+      assert.deepEqual(consoleErrors, []);
+      console.log(`PASS normal Inbox and original TaskDetails worker answer ${width}`);
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 async function checkLowHeightAndSharedButtons() {
   reset(layoutOptions);
   includeAuxiliary = true;
@@ -693,19 +796,22 @@ async function checkLowHeightAndSharedButtons() {
     const textarea = card.getByLabel("补充说明或其他回答");
     await textarea.focus();
     assert(await textarea.evaluate((element) => element === document.activeElement));
-    await page
-      .getByRole("navigation", { name: "视图" })
-      .getByRole("button", { name: /^待处理/ })
-      .click();
-    const handback = page.getByRole("button", { name: "交还给 tend" });
-    const effect = page.getByRole("button").filter({ hasText: "重新实现" });
-    const workerSubmit = page.getByRole("button", { name: "发送给 worker" }).first();
-    for (const control of [handback, effect, workerSubmit]) await reachable(control);
-    const handbackBox = await rect(handback);
+    const workerSubmit = card.getByRole("button", { name: "发送给 worker" });
+    await reachable(workerSubmit);
     const submitBox = await rect(workerSubmit);
+    await page.getByRole("button", { name: "下一个待决事项" }).click();
+    const effect = page.getByRole("button").filter({ hasText: "重新实现" });
+    await reachable(effect);
+    assert((await effect.textContent())?.includes("tend 执行"));
+    // Task control remains in the actual task detail, not the Attention Inbox.
+    await page.goto(`http://127.0.0.1:${fixturePort}/?task=${heldTask.task_id}`);
+    const handback = page
+      .getByRole("dialog", { name: "任务详情" })
+      .getByRole("button", { name: "交还给 tend" });
+    await reachable(handback);
+    const handbackBox = await rect(handback);
     assert(handbackBox.height >= 36 && handbackBox.height < 44);
     assert(submitBox.height >= 36 && submitBox.height < 44);
-    assert((await effect.textContent())?.includes("tend 执行"));
     await page.screenshot({ path: join(output, `${browserName}-safe-area-390x568.png`) });
     assert.equal(errors.length, 0, errors.join("\n"));
     console.log(`PASS reachability ${browserName}-safe-area-390x568`);
@@ -1008,10 +1114,10 @@ async function checkComposerOverlays() {
       if (width === 390) {
         await page
           .getByRole("navigation", { name: "视图", exact: true })
-          .getByRole("button", { name: "工作项", exact: true })
+          .getByRole("button", { name: "Issue", exact: true })
           .click();
       } else {
-        await page.getByRole("button", { name: /工作项.*白板/ }).click();
+        await page.getByRole("button", { name: /Issue.*白板/ }).click();
       }
       await popover.waitFor({ state: "hidden" });
       if (width === 390) {
@@ -1462,6 +1568,7 @@ try {
   if (process.env.TEND_DECISION_CONTEXT === "1") {
     await checkDecisionContext();
   } else {
+    await checkNormalInboxAndTaskAnswer();
     await checkLayoutMatrix();
     await checkLowHeightAndSharedButtons();
     await checkJumpRecovery();

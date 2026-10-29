@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/domain"
@@ -93,11 +94,25 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	return createTask(ctx, x, tx, payload, &canonicalTaskCreateContext{Issue: current, Source: p.canonicalOwnerIssueSource, Reason: p})
 }
 
+// freezeCanonicalIssueDefinition projects responsibility semantics into the
+// existing worker facts. Issue closure criteria are not task Acceptance.
+func freezeCanonicalIssueDefinition(item protocol.WorkItem) protocol.TaskWorkContext {
+	frozen := freezeIssueContext(item)
+	source := fmt.Sprintf("issue:%s@revision:%d", item.WorkItemID, item.Revision)
+	if item.Scope != "" {
+		frozen.Facts = append(frozen.Facts, protocol.SharedFact{Kind: protocol.SharedFactUserConstraint, Text: "Issue scope: " + item.Scope, Source: source})
+	}
+	for _, criterion := range item.CompletionCriteria {
+		frozen.Facts = append(frozen.Facts, protocol.SharedFact{Kind: protocol.SharedFactGoal, Text: "Issue responsibility completion criterion (not task acceptance): " + criterion, Source: source})
+	}
+	return frozen
+}
+
 func freezeCanonicalTaskContext(ctx context.Context, q store.Querier, current protocol.Issue) ([]protocol.TaskWorkContext, error) {
 	out := []protocol.TaskWorkContext{}
 	for {
 		item := protocol.WorkItem{WorkItemID: current.IssueID, Revision: current.Revision, IssuePlan: current.Plan}
-		frozen := freezeIssueContext(item)
+		frozen := freezeCanonicalIssueDefinition(item)
 		digest, facts, err := store.EffectiveContext(ctx, q, current.IssueID)
 		if err != nil {
 			return nil, err

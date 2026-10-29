@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAttentionCLIRealHTTPOriginalDecisionAndInboxIdentity(t *testing.T) {
@@ -44,7 +45,8 @@ func TestAttentionCLIRealHTTPOriginalDecisionAndInboxIdentity(t *testing.T) {
 		}
 		return v
 	}
-	payload, _ := json.Marshal(protocol.CreateAttentionPayload{IssueID: issue.IssueID, Kind: "decision", Title: "Which result is needed?", Options: []string{"report", "changes"}, BlocksClose: true})
+	due := e.clock.Now().Add(30 * time.Hour).UnixMilli()
+	payload, _ := json.Marshal(protocol.CreateAttentionPayload{IssueID: issue.IssueID, Kind: "decision", Title: "Which result is needed?", Options: []string{"report", "changes"}, BlocksClose: true, LatestActionAt: &due})
 	created := run("create", "--data", string(payload))
 	var a protocol.Attention
 	if err := json.Unmarshal(created.Operation.Result, &a); err != nil {
@@ -52,6 +54,17 @@ func TestAttentionCLIRealHTTPOriginalDecisionAndInboxIdentity(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), created.Operation.RequestID) {
 		t.Fatal("request identity was not visible")
+	}
+	if a.LatestActionAt == nil || *a.LatestActionAt != due || a.LatestActionDueRuleID == "" {
+		t.Fatal("CLI discarded action time", a)
+	}
+	near, dueRule := a.LatestActionNearRuleID, a.LatestActionDueRuleID
+	updated := run("update", a.AttentionID, "--revision", strconv.FormatInt(a.Revision, 10), "--data", `{"title":"Which result is needed?","blocks_close":true,"latest_action_timezone":"Asia/Shanghai"}`)
+	if err := json.Unmarshal(updated.Operation.Result, &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.LatestActionAt == nil || *a.LatestActionAt != due || a.LatestActionNearRuleID != near || a.LatestActionDueRuleID != dueRule || a.QuestionVersion != 1 {
+		t.Fatal("display change changed clock or question", a)
 	}
 	var inbox protocol.AttentionPage
 	if status := e.do("GET", "/api/v1/inbox?issue_id="+issue.IssueID, token, nil, &inbox); status != http.StatusOK || len(inbox.Items) != 1 || inbox.Items[0].AttentionID != a.AttentionID || inbox.Items[0].Decision.DecisionID != a.DecisionID {

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -160,21 +161,41 @@ func TestCrossProjectBacklinkRemovalReachesAgentDelta(t *testing.T) {
 	e := newEnv(t)
 	e.configureProjects()
 	core := e.hostedSession("s-core", "core")
-	web := e.hostedSession("s-web", "web")
-	coreTask := created(t, core.call("tasks_create", createArgs("ledger", "ledger"), ""))
-	webTask := created(t, web.call("tasks_create", createArgs("site", "site"), ""))
-	revision := e.taskRow(webTask).ControlRevision
-	e.exec("tasks.update_intent", protocol.Target{Type: "task", ID: webTask}, &revision, map[string]any{
-		"relations": []protocol.TaskRelation{{Kind: protocol.RelationRelated, TaskID: coreTask}},
-	}, app.UpdateIntent{})
+	token := e.login(protocol.ScopeOwner)
+	create := func(project, title, repo string) (protocol.Issue, string) {
+		t.Helper()
+		issue := issueHTTP(t, e, token, e.envelope("issues.create", protocol.Target{Type: "issue"}, nil, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: title, Intent: "Keep the independent task responsibility", Project: project}}))
+		payload := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: title, WorkspaceName: title, Rating: protocol.RatingP2, Spec: protocol.OwnerTaskSpec{Goal: title, Acceptance: []string{"works"}, Delivery: "commit", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: repo}}}}}
+		status, result := e.op(token, e.envelope("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, payload))
+		if status != http.StatusOK || result.Operation == nil || result.Operation.Status != protocol.OpSucceeded {
+			t.Fatal(status, result)
+		}
+		var task struct {
+			TaskID string `json:"task_id"`
+		}
+		if err := json.Unmarshal(result.Operation.Result, &task); err != nil || task.TaskID == "" {
+			t.Fatal(result, err)
+		}
+		return issue, task.TaskID
+	}
+	_, coreTask := create("core", "ledger", "tend")
+	webIssue, webTask := create("web", "site", "site")
+	update := func(relations []protocol.TaskRelation) {
+		t.Helper()
+		revision := e.taskRow(webTask).ControlRevision
+		status, result := e.op(token, e.envelope("issues.update_task", protocol.Target{Type: "task", ID: webTask}, &revision, protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: webIssue.AssignmentEpoch, Relations: &relations}))
+		if status != http.StatusOK || result.Operation == nil || result.Operation.Status != protocol.OpSucceeded {
+			t.Fatal(status, result)
+		}
+	}
+	update([]protocol.TaskRelation{{Kind: protocol.RelationRelated, TaskID: coreTask}})
+
 	initial := core.read(true)
 	if !strings.Contains(initial, "related incoming: "+webTask) {
 		t.Fatalf("initial backlink missing: %s", initial)
 	}
-	revision = e.taskRow(webTask).ControlRevision
-	e.exec("tasks.update_intent", protocol.Target{Type: "task", ID: webTask}, &revision, map[string]any{
-		"relations": []protocol.TaskRelation{},
-	}, app.UpdateIntent{})
+	update([]protocol.TaskRelation{})
+
 	next := core.read(false)
 	if !strings.Contains(next, "task.relations_backlinks_updated") || !strings.Contains(next, webTask) {
 		t.Fatalf("backlink removal missing from delta: %s", next)

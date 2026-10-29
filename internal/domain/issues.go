@@ -306,7 +306,7 @@ func IssuePlanChanged(a, b protocol.IssuePlan) bool { return !reflect.DeepEqual(
 // IssueTaskPlanChanged compares only the plan affecting an existing task.
 // Renaming the work item or editing unrelated stages is not a new agreement.
 func IssueTaskPlanChanged(a, b protocol.IssuePlan, taskID string) bool {
-	if a.Intent != b.Intent || a.Project != b.Project || !reflect.DeepEqual(a.Background, b.Background) {
+	if a.Intent != b.Intent || a.Scope != b.Scope || !slices.Equal(a.CompletionCriteria, b.CompletionCriteria) || a.Project != b.Project || !reflect.DeepEqual(a.Background, b.Background) {
 		return true
 	}
 	return !reflect.DeepEqual(issueTaskStages(a, taskID), issueTaskStages(b, taskID))

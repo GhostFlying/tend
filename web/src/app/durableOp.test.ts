@@ -106,3 +106,21 @@ test.each(["missing", "offline", "committed"])(
     expect(await journal.pending()).toEqual(receipt === "committed" ? undefined : envelope);
   },
 );
+
+test("prefix inspection preserves every original pending request and excludes other controls", async () => {
+  const factory = new IDBFactory(),
+    sender = new Sender();
+  const a = new DurableOp("delivery:one:facts:1", factory),
+    b = new DurableOp("delivery:one:facts:2", factory),
+    other = new DurableOp("other-control", factory);
+  await a.submit(sender, envelope);
+  await b.submit(sender, { ...envelope, request_id: "req_second", expected_control_revision: 8 });
+  await other.submit(sender, { ...envelope, request_id: "req_other" });
+  const entries = await DurableOp.pendingScopes("delivery:one:", factory);
+  expect(entries.map((item) => item.envelope.request_id)).toEqual(["req_original", "req_second"]);
+  entries[0]!.envelope.request_id = "mutated-inspection";
+  expect((await a.pending())?.request_id).toBe("req_original");
+  expect((await b.pending())?.request_id).toBe("req_second");
+  expect((await other.pending())?.request_id).toBe("req_other");
+  expect(sender.submitted).toHaveLength(3);
+});

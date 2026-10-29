@@ -11,7 +11,6 @@ import { processing } from "../conversation/model.ts";
 import { taskLook } from "../tasks/status.ts";
 import { queueReasonText } from "../tasks/execution.ts";
 import { LiveData, summary, type Reader } from "./data.ts";
-import { WorkItemRead } from "../workitems/live.ts";
 
 /** A fake owner API whose answers the test releases one by one. */
 class FakeApi implements Reader {
@@ -97,45 +96,14 @@ function messageEvent(
 const snapshot = { event_seq: 1, tasks: [], decisions: [], hosts: [], projects: [], queue: [] };
 
 describe("LiveData", () => {
-  test("materials refresh on acceptance events without selecting a task", async () => {
-    const api = new FakeApi();
-    const live = new LiveData(api);
-    const read = new WorkItemRead<TaskDetail>(api);
-    const unwatch = live.watchMaterials("task-materials", read);
-    await api.answer("/api/v1/tasks/task-materials", {
-      task_id: "task-materials",
-      acceptances: [],
-    });
-    live.apply({
-      event_seq: 2,
-      object_type: "task",
-      object_id: "task-materials",
-      kind: "acceptance.submitted",
-      created_at: "2026-10-27T00:00:00Z",
-    });
-    await api.answer("/api/v1/tasks/task-materials", {
-      task_id: "task-materials",
-      acceptances: [{ verdict: "blocked" }],
-    });
-    expect(read.state.get().value?.acceptances).toEqual([{ verdict: "blocked" }]);
-    expect(live.detail.get()).toBeNull();
-    unwatch();
-    const count = api.calls.filter((path) => path === "/api/v1/tasks/task-materials").length;
-    live.apply({
-      event_seq: 3,
-      object_type: "task",
-      object_id: "task-materials",
-      kind: "acceptance.submitted",
-      created_at: "2026-10-27T00:00:01Z",
-    });
-    expect(api.calls.filter((path) => path === "/api/v1/tasks/task-materials")).toHaveLength(count);
-    await live.stop();
-  });
   test("a reload reads the snapshot and the latest page", async () => {
     const api = new FakeApi();
     const live = new LiveData(api);
     void live.reload();
-    expect(api.pending()).toEqual(["/api/v1/snapshot", "/api/v1/conversation?limit=50"]);
+    expect(api.pending()).toEqual([
+      "/api/v1/snapshot",
+      "/api/v1/conversation?limit=50&projection=issues&conversation_id=main",
+    ]);
     await api.answer("/api/v1/snapshot", snapshot);
     await api.answer("/api/v1/conversation", { items: [owner(1, "replied")], more: true });
     expect(live.snapshot.get()).toEqual(snapshot);
@@ -478,7 +446,9 @@ describe("LiveData", () => {
     live.apply(messageEvent(101, owner(1, "interrupted"), "conversation.message_state"));
     expect(live.conversation.get().before).toBe(51);
     void live.loadEarlier();
-    expect(api.pending()).toContain("/api/v1/conversation?before=51&limit=50");
+    expect(api.pending()).toContain(
+      "/api/v1/conversation?before=51&limit=50&projection=issues&conversation_id=main",
+    );
     await api.answer("/api/v1/conversation", {
       items: Array.from({ length: 50 }, (_, i) => owner(i + 1, "replied")),
       more: false,
@@ -506,7 +476,9 @@ describe("LiveData", () => {
           },
     );
     await api.answer("/api/v1/conversation", { items: recent, more: true });
-    expect(api.pending()).toContain("/api/v1/conversation?before=2&limit=50");
+    expect(api.pending()).toContain(
+      "/api/v1/conversation?before=2&limit=50&projection=issues&conversation_id=main",
+    );
     live.apply(messageEvent(103, owner(1, "processing"), "conversation.message_state"));
     await api.answer("/api/v1/conversation", { items: [owner(1)], more: false });
     expect(processing(live.conversation.get().items)?.message_id).toBe("msg_1");
@@ -672,6 +644,8 @@ const referenceTask: TaskDetail = {
   workspace: "sample",
   next_implement_generation: 2,
   primary_work_item_id: "wi_primary",
+  primary_issue_id: "canonical_primary",
+  primary_issue_title: "Current canonical Issue",
   execution: {
     state: "queued",
     queue_reason: { code: "workspace_busy", message: "occupied", task_id: "task_owner" },
@@ -707,6 +681,8 @@ test("detail summaries retain every summary fact used by cached task references"
     workspace: referenceTask.workspace,
     next_implement_generation: referenceTask.next_implement_generation,
     primary_work_item_id: "wi_primary",
+    primary_issue_id: "canonical_primary",
+    primary_issue_title: "Current canonical Issue",
     execution: referenceTask.execution!,
   };
   expect(summary(referenceTask)).toEqual(expected);
@@ -724,6 +700,12 @@ test("TaskRef's lookup and subsequent detail reads keep authoritative execution 
     await api.answer("/api/v1/tasks/task_reference", referenceTask);
     await looked;
     expect(live.lookups.get().get(referenceTask.task_id)?.primary_work_item_id).toBe("wi_primary");
+    expect(live.lookups.get().get(referenceTask.task_id)?.primary_issue_id).toBe(
+      "canonical_primary",
+    );
+    expect(live.lookups.get().get(referenceTask.task_id)?.primary_issue_title).toBe(
+      "Current canonical Issue",
+    );
     expect(taskLook(live.lookups.get().get(referenceTask.task_id)!).label).toBe("排队中");
     const opened = live.open(referenceTask.task_id);
     await api.answer("/api/v1/tasks/task_reference", {
@@ -778,6 +760,16 @@ test("outside-snapshot references refresh on other workspace, host and run facts
     const completedCalls = api.calls.filter((p) => p.includes("task_reference")).length;
     live.apply(referenceEvent("host"));
     expect(api.calls.filter((p) => p.includes("task_reference"))).toHaveLength(completedCalls);
+    live.apply(referenceEvent("issue", "canonical_primary"));
+    await api.answer("/api/v1/tasks/task_reference", {
+      ...referenceTask,
+      lifecycle: "completed",
+      execution: { state: "completed" },
+      primary_issue_title: "Renamed current Issue",
+    });
+    expect(live.lookups.get().get(referenceTask.task_id)?.primary_issue_title).toBe(
+      "Renamed current Issue",
+    );
   } finally {
     await live.stop();
   }
@@ -827,9 +819,9 @@ test("choice updates refresh retained transcript cards and resist older pages", 
 test("turn state events refresh an open followup projection", async () => {
   const api = new FakeApi();
   const live = new LiveData(api);
-  const path = "/api/v1/work-items/work-example/followups";
+  const path = "/api/v1/issues/issue-example/followups";
   try {
-    const first = live.workItems.followups.open(path);
+    const first = live.issues.openFollowups("issue-example");
     await api.answer(path, { enabled: true, items: [], latest: { rule: { status: "starting" } } });
     await first;
     live.apply(
@@ -845,8 +837,301 @@ test("turn state events refresh an open followup projection", async () => {
       items: [],
       latest: { rule: { status: "processing" } },
     });
-    expect(live.workItems.followups.state.get().value?.latest?.rule?.status).toBe("processing");
+    expect(live.issues.followups.state.get().value?.latest?.rule?.status).toBe("processing");
   } finally {
     live.stop();
+  }
+});
+
+test("canonical global reads invalidate before the selected-chat filter and stop without extra requests", async () => {
+  const api = new FakeApi(),
+    live = new LiveData(api);
+  expect(api.calls).toEqual([]);
+  const issue = live.issues.open("issue-one");
+  const inbox = live.attention.openInbox();
+  const next = live.attention.openNext();
+  const chats = live.directChats.openList();
+  await api.answer("/api/v1/issues/issue-one", { issue_id: "issue-one", revision: 1 });
+  await api.answer("/api/v1/inbox", { items: [], more: false });
+  await api.answer("/api/v1/next-actions", { items: [], deadlines: [] });
+  await api.answer("/api/v1/agent-conversations", { items: [] });
+  await Promise.all([issue, inbox, next, chats]);
+  live.apply(
+    messageEvent(20, { ...owner(2), conversation_id: "issue:other" }, "conversation.message"),
+  );
+  expect(api.pending()).toEqual([
+    "/api/v1/issues/issue-one",
+    "/api/v1/inbox",
+    "/api/v1/next-actions",
+    "/api/v1/agent-conversations?search=&status=&projection=issues",
+  ]);
+  expect(live.conversation.get().items).toEqual([]);
+  await api.answer("/api/v1/issues/issue-one", { issue_id: "issue-one", revision: 2 });
+  await api.answer("/api/v1/inbox", { items: [], more: false });
+  await api.answer("/api/v1/next-actions", {
+    items: [
+      { entry_id: "server-order-first", rank: 9 },
+      { entry_id: "server-order-second", rank: 1 },
+    ],
+    deadlines: [],
+  });
+  await api.answer("/api/v1/agent-conversations", {
+    items: [{ conversation_id: "issue:other", status: "queued" }],
+  });
+  expect(live.issues.detail.state.get().value?.revision).toBe(2);
+  expect(live.attention.next.state.get().value?.items?.map((entry) => entry.entry_id)).toEqual([
+    "server-order-first",
+    "server-order-second",
+  ]);
+  // Conversation status depends on native delivery as well as transcript items.
+  live.apply({
+    event_seq: 21,
+    object_type: "outbox",
+    object_id: "delivery",
+    kind: "delivery.unknown",
+    created_at: "2026-10-29T00:00:00Z",
+  });
+  expect(api.pending()).toEqual(["/api/v1/agent-conversations?search=&status=&projection=issues"]);
+  await live.stop();
+  expect(api.pending()).toEqual([]);
+  const count = api.calls.length;
+  live.apply(messageEvent(22, { ...owner(3), conversation_id: "issue:other" }));
+  expect(api.calls).toHaveLength(count);
+});
+
+test("opened Issue follows run recovery and resource facts without opening hidden Issue or attention reads", async () => {
+  const api = new FakeApi(),
+    live = new LiveData(api);
+  try {
+    // ExpireLeases emits only this run event, not a companion task update.
+    live.apply({
+      event_seq: 30,
+      object_type: "run",
+      object_id: "run-one",
+      kind: "run.unknown",
+      created_at: "2026-10-29T00:00:00Z",
+    });
+    expect(api.calls.filter((path) => path.startsWith("/api/v1/issues"))).toEqual([]);
+    await api.answer("/api/v1/snapshot", snapshot);
+    const opened = live.issues.open("issue-one");
+    await api.answer("/api/v1/issues/issue-one", {
+      issue_id: "issue-one",
+      tasks: [{ task_id: "task-one", execution: { state: "running" } }],
+    });
+    await opened;
+    const changes = [
+      { type: "run", kind: "run.unknown", execution: { state: "unknown" } },
+      {
+        type: "run",
+        kind: "run.recovery",
+        execution: { state: "recovering", recovery: { phase: "restarting" } },
+      },
+      {
+        type: "host",
+        kind: "host.maintenance_changed",
+        execution: { state: "queued", queue_reason: { code: "host_unavailable" } },
+      },
+      {
+        type: "workspace",
+        kind: "workspace.released",
+        execution: { state: "queued", queue_reason: { code: "ready" } },
+      },
+    ];
+    for (const [index, changed] of changes.entries()) {
+      live.apply({
+        event_seq: 31 + index,
+        object_type: changed.type,
+        object_id: "resource-one",
+        kind: changed.kind,
+        created_at: "2026-10-29T00:00:00Z",
+      });
+      expect(api.pending()).toContain("/api/v1/issues/issue-one");
+      await api.answer("/api/v1/issues/issue-one", {
+        issue_id: "issue-one",
+        tasks: [{ task_id: "task-one", execution: changed.execution }],
+      });
+      await api.answer("/api/v1/snapshot", snapshot);
+      expect(live.issues.detail.state.get().value?.tasks?.[0]?.execution).toEqual(
+        changed.execution,
+      );
+    }
+    expect(
+      api.calls.some(
+        (path) => path.startsWith("/api/v1/inbox") || path.startsWith("/api/v1/next-actions"),
+      ),
+    ).toBe(false);
+  } finally {
+    await live.stop();
+  }
+});
+
+test("public agent catalogs stay lazy and follow existing fact and reload lifecycle", async () => {
+  const api = new FakeApi(),
+    live = new LiveData(api);
+  try {
+    expect(api.calls).toEqual([]);
+    const categories = live.agents.openCategories("all", "last category");
+    const runner = live.agents.openRunner("runner-one");
+    const hosted = live.agents.openHosted();
+    await api.answer("/api/v1/categories", { items: [], more: true, next: "next-page" });
+    await api.answer("/api/v1/hosts/runner-one/agents", { host_id: "runner-one", online: false });
+    await api.answer("/api/v1/hosted-agents", { configuration_revision: 1 });
+    await Promise.all([categories, runner, hosted]);
+    expect(live.agents.categories.state.get().value?.next).toBe("next-page");
+    expect(new URL(api.calls[0]!, "https://tend.invalid").searchParams.get("after")).toBe(
+      "last category",
+    );
+    live.apply({
+      event_seq: 40,
+      object_type: "host",
+      object_id: "runner-one",
+      kind: "host.agent_inventory_registered",
+      created_at: "2026-10-29T00:00:00Z",
+    });
+    await api.answer("/api/v1/categories", { items: [], more: false });
+    await api.answer("/api/v1/hosts/runner-one/agents", { host_id: "runner-one", online: true });
+    await api.answer("/api/v1/hosted-agents", { configuration_revision: 2 });
+    await api.answer("/api/v1/snapshot", snapshot);
+    expect(live.agents.runner.state.get().value?.online).toBe(true);
+    const reloaded = live.reload();
+    await api.answer("/api/v1/categories", { items: [], more: false });
+    await api.answer("/api/v1/hosts/runner-one/agents", { host_id: "runner-one", online: false });
+    await api.answer("/api/v1/hosted-agents", { configuration_revision: 2 });
+    await api.answer("/api/v1/snapshot", snapshot);
+    await api.answer("/api/v1/conversation", { items: [], more: false });
+    await reloaded;
+    expect(live.agents.runner.state.get().value?.online).toBe(false);
+    live.agents.refresh();
+    expect(api.pending().some((path) => path.includes("/agents"))).toBe(true);
+    await live.stop();
+    expect(api.pending()).toEqual([]);
+  } finally {
+    await live.stop();
+  }
+});
+
+test("raw stream content preserves canonical links until the scoped HTTP association refresh", async () => {
+  const api = new FakeApi(),
+    live = new LiveData(api, "issue:one");
+  const association = {
+    message_id: "msg_1",
+    revision: 3,
+    content_revision: 1,
+    disposition: "linked",
+    facts_reviewed: true,
+    owner_locked: true,
+    items: [{ issue_id: "issue-one", title: "Current Issue", source: "owner", owner_locked: true }],
+  };
+  const reload = live.reload();
+  await api.answer("/api/v1/snapshot", snapshot);
+  await api.answer("/api/v1/conversation", {
+    items: [{ ...owner(1, "processing"), conversation_id: "issue:one", associations: association }],
+    more: false,
+  });
+  await reload;
+  const raw = {
+    ...owner(1, "replied"),
+    conversation_id: "issue:one",
+    body: "actual streamed body",
+    associations: {
+      ...association,
+      items: [
+        { work_item_id: "legacy-only", title: "Historical", source: "owner", owner_locked: true },
+      ],
+    },
+  };
+  live.apply(messageEvent(2, raw, "conversation.message_state"));
+  expect(live.conversation.get().items[0]?.body).toBe("actual streamed body");
+  expect(live.conversation.get().items[0]?.associations).toEqual(association);
+  live.apply(messageEvent(3, { ...raw, conversation_id: "issue:other", body: "wrong chat" }));
+  expect(live.conversation.get().items[0]?.body).toBe("actual streamed body");
+  live.apply({
+    event_seq: 4,
+    object_type: "message",
+    object_id: "msg_1",
+    kind: "conversation.associations_changed",
+    created_at: "2026-10-29T00:00:00Z",
+  });
+  expect(
+    api.calls.some((path) => {
+      const url = new URL(path, "https://test.invalid");
+      return (
+        url.pathname === "/api/v1/conversation" &&
+        url.searchParams.get("projection") === "issues" &&
+        url.searchParams.get("conversation_id") === "issue:one"
+      );
+    }),
+  ).toBe(true);
+  await api.answer("/api/v1/conversation", {
+    items: [
+      {
+        ...owner(1, "replied"),
+        conversation_id: "issue:one",
+        associations: { ...association, revision: 4, disposition: "unassigned", items: [] },
+      },
+    ],
+    more: false,
+  });
+  expect(live.conversation.get().items[0]?.associations).toMatchObject({
+    revision: 4,
+    disposition: "unassigned",
+    items: [],
+  });
+  await live.stop();
+});
+
+test("followup changes refresh opened canonical rule and history reads without opening hidden pages", async () => {
+  const api = new FakeApi(),
+    live = new LiveData(api);
+  try {
+    const opened = live.issues.openFollowups("issue-one");
+    await api.answer("/api/v1/issues/issue-one/followups", {
+      enabled: true,
+      issue_id: "issue-one",
+      items: [{ rule_id: "rule-one", revision: 1 }],
+      event_seq: 1,
+    });
+    await opened;
+    const history = live.issues.openFollowupHistory("issue-one", "rule-one");
+    await api.answer("/api/v1/issues/issue-one/followups/rule-one/history", {
+      rule: { rule_id: "rule-one", issue_id: "issue-one", revision: 1 },
+      occurrences: [],
+      revisions: [],
+      more: false,
+    });
+    await history;
+    api.calls.length = 0;
+    live.apply({
+      event_seq: 2,
+      object_type: "followup",
+      object_id: "rule-one",
+      kind: "followup.changed",
+      created_at: "2026-10-29T00:00:00Z",
+    });
+    expect(api.pending()).toContain("/api/v1/issues/issue-one/followups");
+    expect(api.pending()).toContain("/api/v1/issues/issue-one/followups/rule-one/history");
+    expect(
+      api.calls.some(
+        (path) => path.startsWith("/api/v1/inbox") || path.startsWith("/api/v1/next-actions"),
+      ),
+    ).toBe(false);
+    await api.answer("/api/v1/issues/issue-one/followups", {
+      enabled: true,
+      issue_id: "issue-one",
+      items: [{ rule_id: "rule-one", revision: 2 }],
+      event_seq: 2,
+    });
+    await api.answer("/api/v1/issues/issue-one/followups/rule-one/history", {
+      rule: { rule_id: "rule-one", issue_id: "issue-one", revision: 2 },
+      occurrences: [{ occurrence_id: "original-occurrence" }],
+      revisions: [],
+      more: false,
+    });
+    expect(live.issues.followups.state.get().value?.items?.[0]?.revision).toBe(2);
+    expect(live.issues.followupHistory.state.get().value?.occurrences?.[0]?.occurrence_id).toBe(
+      "original-occurrence",
+    );
+  } finally {
+    await live.stop();
   }
 });

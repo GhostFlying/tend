@@ -1,3 +1,4 @@
+import { NetworkError } from "./client.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, expect, test, vi } from "vitest";
 import { clearOldDeploymentData, deploymentChangeTarget } from "./deployment.ts";
@@ -50,7 +51,9 @@ test("delayed broadcasts cannot retire a newer deployment", () => {
 test("delayed cleanup preserves the new deployment's interrupt and followup journals", async () => {
   const { configureDeployment } = await import("./deployment.ts");
   const { Interrupt } = await import("../conversation/interrupt.ts");
-  const { FollowupActions } = await import("../workitems/followupActions.ts");
+  const { DurableOp } = await import("../app/durableOp.ts");
+  const factory = new IDBFactory();
+  vi.stubGlobal("indexedDB", factory);
   configureDeployment("new");
   const disk = {} as Storage;
   Object.defineProperties(disk, {
@@ -76,33 +79,34 @@ test("delayed cleanup preserves the new deployment's interrupt and followup jour
   vi.stubGlobal("localStorage", disk);
   const sender = {
     submit: vi.fn(async () => {
-      throw new Error("offline");
+      throw new NetworkError("offline");
     }),
     lookup: vi.fn(async () => null),
   };
   await new Interrupt(sender, { storage: disk, newId: () => "interrupt-original" }).start(
     "message",
   );
-  const action = new FollowupActions(sender, "item", disk, vi.fn());
-  await action.execute({
-    operation: "work_items.followups_pause",
-    target: { type: "followup", id: "followup" },
-    payload: {},
+  const action = new DurableOp("issue-followup:item", factory);
+  await action.submit(sender, {
+    request_id: "followup-original",
+    operation: "issues.followups_pause",
+    target: { type: "followup", id: "rule" },
+    expected_control_revision: 1,
+    payload: { expected_assignment_epoch: 1 },
   });
-  const original = action.state.get().pending[0]!.request_id;
-  disk.setItem("tend.followup-requests.item.legacy", "{}");
-  disk.setItem("tend.followup-requests.item.old:deployment:old", "{}");
-  expect(new FollowupActions(sender, "item", disk, vi.fn()).state.get().pending).toHaveLength(1);
+  expect((await new DurableOp("issue-followup:item", factory).pending())?.request_id).toBe(
+    "followup-original",
+  );
   await clearOldDeploymentData("old");
   expect(new Interrupt(sender, { storage: disk }).state.get()?.envelope.request_id).toBe(
     "interrupt-original",
   );
-  expect(
-    new FollowupActions(sender, "item", disk, vi.fn()).state.get().pending[0]?.request_id,
-  ).toBe(original);
+  expect((await new DurableOp("issue-followup:item", factory).pending())?.request_id).toBe(
+    "followup-original",
+  );
   await clearOldDeploymentData("new");
   expect(new Interrupt(sender, { storage: disk }).state.get()).toBeNull();
-  expect(new FollowupActions(sender, "item", disk, vi.fn()).state.get().pending).toEqual([]);
+  expect(await new DurableOp("issue-followup:item", factory).pending()).toBeUndefined();
 });
 
 test("instance reset preserves static shell and newer business caches", async () => {

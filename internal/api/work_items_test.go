@@ -2,63 +2,40 @@ package api
 
 import (
 	"encoding/json"
-	"net/http"
-	"testing"
-
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
+	"testing"
 )
 
-func TestWorkItemOwnerReadsHistoryAndStaleUpdate(t *testing.T) {
+// The old public facade is retired. Its immutable ledger representation still
+// has a dedicated historical reader; this test does not re-register HTTP routes.
+func TestHistoricalWorkItemViewsRetainRevisions(t *testing.T) {
 	e := newEnv(t)
 	e.configure()
-	token := e.login(protocol.ScopeOwner)
-	plan := protocol.IssuePlan{Title: "Investigate", Intent: "Understand the issue", Stages: []protocol.IssueStage{{StageID: "research", Title: "Research", Status: "planned"}}}
-	var item protocol.WorkItem
-	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{IssuePlan: plan}, app.CreateIssue{}), &item); err != nil {
+	var old protocol.WorkItem
+	raw := e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{IssuePlan: protocol.IssuePlan{Title: "Historical concern", Intent: "Preserve original intent"}}, app.CreateIssue{})
+	if err := json.Unmarshal(raw, &old); err != nil {
 		t.Fatal(err)
 	}
-	path := "/api/v1/work-items/" + item.WorkItemID
-	if st := e.do("GET", path, "", nil, nil); st != http.StatusUnauthorized {
-		t.Fatal(st)
-	}
-	agent := e.retiredAgentToken("agent-client")
-	if st := e.do("GET", path, agent, nil, nil); st != http.StatusUnauthorized {
-		t.Fatal(st)
-	}
-	var page protocol.WorkItemPage
-	if st := e.do("GET", "/api/v1/work-items", token, nil, &page); st != http.StatusOK || len(page.Items) != 1 {
-		t.Fatalf("list = %d %+v", st, page)
-	}
-	if page.Items[0].FactsSeq == 0 || page.Items[0].FactsSeq != int64(e.count(`SELECT MAX(event_seq) FROM events`)) {
-		t.Fatalf("list facts_seq = %d", page.Items[0].FactsSeq)
-	}
-	var current protocol.WorkItemView
-	if st := e.do("GET", path, token, nil, &current); st != http.StatusOK || current.FactsSeq != page.Items[0].FactsSeq {
-		t.Fatalf("detail = %d %+v, list facts_seq = %d", st, current, page.Items[0].FactsSeq)
-	}
-	plan = item.IssuePlan
-	plan.Title = "Investigate updated goal"
-	revision := item.Revision
-	update := e.envelope("work_items.update", protocol.Target{Type: "work_item", ID: item.WorkItemID}, &revision, protocol.UpdateWorkItemPayload{IssuePlan: plan})
-	if st, res := e.op(token, update); st != http.StatusOK || res.Operation == nil || res.Operation.Status != protocol.OpSucceeded {
-		t.Fatalf("update = %d %+v", st, res)
-	}
-	stale := e.envelope("work_items.update", update.Target, &revision, protocol.UpdateWorkItemPayload{IssuePlan: plan})
-	_, res := e.op(token, stale)
-	if res.Operation == nil || res.Operation.Error == nil || res.Operation.Error.Code != protocol.CodeStaleRevision || res.CurrentWorkItem == nil || res.CurrentWorkItem.Revision != 2 {
-		t.Fatalf("stale = %+v", res)
-	}
-	var historical protocol.WorkItemView
-	if st := e.do("GET", path+"?revision=1", token, nil, &historical); st != http.StatusOK || historical.Title != "Investigate" || historical.Column != "historical" || historical.FactsSeq != 0 || len(historical.Tasks) != 0 || len(historical.Observations) != 0 {
-		t.Fatalf("history = %d %+v", st, historical)
-	}
-	for _, suffix := range []string{"?revision=0", "?revision=oops"} {
-		if st := e.do("GET", path+suffix, token, nil, nil); st != http.StatusBadRequest {
-			t.Fatalf("invalid revision = %d", st)
+	plan := old.IssuePlan
+	plan.Title = "Later historical revision"
+	e.exec("work_items.update", protocol.Target{Type: "work_item", ID: old.WorkItemID}, &old.Revision, protocol.UpdateWorkItemPayload{IssuePlan: plan}, app.UpdateIssue{})
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		prior, err := store.GetIssueRevision(t.Context(), tx.Q(), old.WorkItemID, 1)
+		if err != nil {
+			return err
 		}
-	}
-	if st := e.do("GET", path+"?revision=99", token, nil, nil); st != http.StatusNotFound {
-		t.Fatal(st)
+		current, err := views.Issue(t.Context(), tx.Q(), old.WorkItemID)
+		if err != nil {
+			return err
+		}
+		if prior.Title != "Historical concern" || current.Title != "Later historical revision" || current.Revision != 2 {
+			t.Fatal(prior, current)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

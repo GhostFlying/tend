@@ -10,7 +10,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol/schema"
 )
 
-func TestWorkItemEnumSchemaPreservesExistingVocabulary(t *testing.T) {
+func TestCurrentAndHistoricalIssueEnumCodecsPreserveVocabulary(t *testing.T) {
 	g := schema.New()
 	for _, values := range protocol.APIEnums() {
 		g.Enum(values)
@@ -18,6 +18,11 @@ func TestWorkItemEnumSchemaPreservesExistingVocabulary(t *testing.T) {
 	for _, root := range protocol.APITypes() {
 		g.Add(root)
 	}
+	// These three roots are historical codec fixtures, deliberately not part
+	// of the current owner API. Vocabulary must survive facade retirement.
+	g.Add(protocol.WorkItemView{})
+	g.Add(protocol.UpdateWorkItemPayload{})
+	g.Add(protocol.CreateWorkItemPayload{})
 	body, err := g.Document("WorkItemContract")
 	if err != nil {
 		t.Fatal(err)
@@ -63,5 +68,32 @@ func TestWorkItemEnumSchemaPreservesExistingVocabulary(t *testing.T) {
 	}
 	if slices.Contains(document.Definitions["CreateWorkItemPayload"].Required, "background") {
 		t.Fatal("background became required")
+	}
+}
+
+func TestOwnerSchemaRetiresLegacyPlanningRoots(t *testing.T) {
+	g := schema.New()
+	for _, root := range protocol.APITypes() {
+		g.Add(root)
+	}
+	body, err := g.Document("OwnerCurrent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"WorkItemView", "WorkItemPage", "WorkItemContext", "CreateWorkItemPayload", "CreateWorkItemChoicePayload", "SetMessageAssociationsPayload", "ConversationPage", "TranscriptPage", "FollowupPage"} {
+		if _, ok := doc.Properties[name]; ok {
+			t.Errorf("retired owner root %s remains", name)
+		}
+	}
+	for _, name := range []string{"IssueView", "IssueContextView", "TaskDetail", "AttentionView", "WorkItemChoice", "UpdateWorkItemChoicePayload", "IssueConversationPage", "IssueTranscriptPage"} {
+		if _, ok := doc.Properties[name]; !ok {
+			t.Errorf("current/root history answer missing %s", name)
+		}
 	}
 }

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import type { ConversationItem, Envelope } from "../src/api/generated/api.ts";
+import type { IssueConversationItem, Envelope } from "../src/api/generated/api.ts";
 const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
 const output = process.env.TEND_LAYOUT_OUTPUT ?? join(tmpdir(), "tend-agent-layout");
 await mkdir(output, { recursive: true });
@@ -20,7 +20,7 @@ const associations = {
   owner_locked: true,
   revision: 1,
   items: names.map((title, i) => ({
-    work_item_id: `work-${i}`,
+    issue_id: `work-${i}`,
     title,
     source: "owner",
     owner_locked: true,
@@ -28,7 +28,7 @@ const associations = {
 };
 const conversations = names.map((title, i) => ({
   conversation_id: `work-item:work-${i}`,
-  work_item_id: `work-${i}`,
+  issue_id: `work-${i}`,
   title,
   revision: 1,
   model: "",
@@ -38,7 +38,7 @@ const conversations = names.map((title, i) => ({
   preview: "已读取相关消息，正在核对最新约束。",
   status: i === 0 ? "running" : "idle",
 }));
-const owner: ConversationItem = {
+const owner: IssueConversationItem = {
   message_id: "owner-main",
   seq: 1,
   kind: "message",
@@ -48,7 +48,7 @@ const owner: ConversationItem = {
   state: "replied",
   associations,
 };
-const reply: ConversationItem = {
+const reply: IssueConversationItem = {
   message_id: "reply-main",
   seq: 2,
   kind: "message",
@@ -117,6 +117,7 @@ const server = createServer(async (req, res) => {
       queue: [],
       projects: [],
     });
+  if (p === "/api/v1/hosted-agents") return json(res, { items: [] });
   if (p === "/api/v1/repos") return json(res, { items: [], revision: 0 });
   if (p === "/api/v1/tasks") return json(res, { items: [], more: false });
   if (p === "/api/v1/agent-conversations")
@@ -163,7 +164,7 @@ const server = createServer(async (req, res) => {
           turn_id: "turn-example",
           item_id: "tool-example",
           kind: "item_completed",
-          data: '{"tool":"work_item_context_read","result":"已读取最新来源"}',
+          data: '{"tool":"issue_context_read","result":"已读取最新来源"}',
           characters: 64,
           truncated: false,
           created_at: Date.now(),
@@ -182,23 +183,33 @@ const server = createServer(async (req, res) => {
       },
     );
   if (p.endsWith("/associations")) return json(res, associations);
-  if (p === "/api/v1/work-items")
+  if (p === "/api/v1/inbox" || p === "/api/v1/next-actions") return json(res, { items: [] });
+  if (p === "/api/v1/issues")
     return json(res, {
       items: names.map((title, i) => ({
-        work_item_id: `work-${i}`,
+        issue_id: `work-${i}`,
         title,
-        status: "open",
-        revision: 1,
-        column: "unplanned",
         project: "",
-        intent: "",
-        created_at: 1,
-        updated_at: 1,
-        stages: [],
-        tasks: [],
-        follow_ons: [],
+        state: "active",
+        revision: 1,
+        assignee: { kind: "owner" },
+        assignment_epoch: 1,
+        assignment_state: "active",
       })),
     });
+  if (/^\/api\/v1\/issues\/[^/]+$/.test(p)) {
+    const index = names.findIndex((_, i) => p.endsWith(`work-${i}`));
+    if (index >= 0)
+      return json(res, {
+        issue_id: `work-${index}`,
+        plan: { title: names[index], project: "", intent: "" },
+        state: "active",
+        revision: 1,
+        assignment_epoch: 1,
+        assignment_state: "active",
+        assignee: { kind: "owner" },
+      });
+  }
   if (p === "/api/v1/conversation")
     return json(res, {
       items:
@@ -282,7 +293,7 @@ const server = createServer(async (req, res) => {
       Object.assign(settings, e.payload);
       settings.revision++;
     }
-    if (e.operation === "conversation.set_associations") {
+    if (e.operation === "conversation.set_issue_associations") {
       if (e.expected_control_revision !== associations.revision)
         return json(res, {
           operation: {
@@ -293,20 +304,21 @@ const server = createServer(async (req, res) => {
         });
       associations.revision++;
       associations.disposition = (e.payload as { disposition: string }).disposition;
-      const selected = (e.payload as { work_item_ids: string[] }).work_item_ids;
+      const selected = (e.payload as { issue_ids: string[] }).issue_ids;
       associations.items = names.flatMap((title, i) =>
         selected.includes(`work-${i}`)
-          ? [{ work_item_id: `work-${i}`, title, source: "owner", owner_locked: true }]
+          ? [{ issue_id: `work-${i}`, title, source: "owner", owner_locked: true }]
           : [],
       );
     }
-    if (e.operation === "conversation.set_associations" && dropAssociationReply) {
+    if (e.operation === "conversation.set_issue_associations" && dropAssociationReply) {
       dropAssociationReply = false;
       lostRequestID = e.request_id;
       return res.destroy();
     }
     return json(res, { operation: { request_id: e.request_id, status: "succeeded", result: {} } });
   }
+  if (p.startsWith("/api/")) console.log("UNHANDLED", p, u.search);
   if (p.startsWith("/api/"))
     return json(res, { error: { code: "not_found", message: "Not in fixture" } }, 404);
   try {
@@ -333,7 +345,7 @@ try {
     settings.effort = "medium";
     associations.disposition = "linked";
     associations.items = names.map((title, i) => ({
-      work_item_id: `work-${i}`,
+      issue_id: `work-${i}`,
       title,
       source: "owner",
       owner_locked: true,
@@ -474,11 +486,11 @@ try {
       .locator("..")
       .screenshot({ path: join(output, `composer-after-${width}.png`) });
     await page.screenshot({ path: join(output, `tags-${width}.png`), fullPage: true });
-    await page.getByRole("button", { name: "后台 Agent ▾" }).click();
-    await page.getByRole("dialog", { name: "后台 Agent 会话" }).waitFor();
+    await page.getByRole("button", { name: "会话 ▾" }).click();
+    await page.getByRole("dialog", { name: "会话" }).waitFor();
     await page.screenshot({ path: join(output, `drawer-${width}.png`), fullPage: true });
     await page
-      .getByRole("dialog", { name: "后台 Agent 会话" })
+      .getByRole("dialog", { name: "会话" })
       .getByRole("button")
       .filter({ hasText: names[0]! })
       .click();
@@ -504,8 +516,8 @@ try {
       await page.getByRole("textbox", { name: "消息", exact: true }).inputValue(),
       "主会话草稿保留",
     );
-    await page.getByRole("button", { name: "修改工作项关联", exact: true }).first().click();
-    const editor = page.getByRole("dialog", { name: "修改工作项关联", exact: true });
+    await page.getByRole("button", { name: "修改Issue关联", exact: true }).first().click();
+    const editor = page.getByRole("dialog", { name: "修改Issue关联", exact: true });
     await editor.getByRole("checkbox").first().waitFor();
     const openedRevision = associations.revision;
     associations.revision++;
@@ -530,9 +542,9 @@ try {
     await editor.getByRole("checkbox").first().uncheck();
     await editor.getByRole("button", { name: "保存关联" }).click();
     await editor.waitFor({ state: "hidden" });
-    assert(writes.some((e) => e.operation === "conversation.set_associations"));
+    assert(writes.some((e) => e.operation === "conversation.set_issue_associations"));
     // The server commits but both the response and initial receipt lookup are lost.
-    await page.getByRole("button", { name: "修改工作项关联", exact: true }).first().click();
+    await page.getByRole("button", { name: "修改Issue关联", exact: true }).first().click();
     await editor.getByRole("checkbox").first().check();
     dropAssociationReply = true;
     dropLookupReply = true;
@@ -541,7 +553,7 @@ try {
     const beforeRecovery = writes.length;
     await page.reload();
     dropLookupReply = false;
-    await page.getByRole("button", { name: "修改工作项关联", exact: true }).first().click();
+    await page.getByRole("button", { name: "修改Issue关联", exact: true }).first().click();
     await editor.getByRole("button", { name: "核对原请求" }).click();
     await editor.waitFor({ state: "hidden" });
     assert.equal(writes.length, beforeRecovery, "reload recovery must not create a second write");
@@ -554,7 +566,7 @@ try {
     const arrived = new Promise<void>((resolve) => {
       requested = resolve;
     });
-    const route = `**/api/v1/agent-conversations/${encodeURIComponent(conversations[1]!.conversation_id)}`;
+    const route = `**/api/v1/agent-conversations/${encodeURIComponent(conversations[1]!.conversation_id)}?*`;
     await page.route(route, async (r) => {
       requested();
       await held;
@@ -611,7 +623,7 @@ try {
     reply.associations = { ...associations, disposition: "unassigned", items: [] };
     await page.reload();
     await page.getByText("关联处理中", { exact: true }).waitFor();
-    await page.getByText("无工作项", { exact: true }).waitFor();
+    await page.getByText("无Issue", { exact: true }).waitFor();
     await page.getByRole("button", { name: "继续处理", exact: true }).waitFor();
     await page.screenshot({
       path: join(output, `classification-recovery-${width}.png`),

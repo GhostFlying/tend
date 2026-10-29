@@ -83,8 +83,8 @@ var hostedMutations = []hostedMutation{
 	{"issues_deadline_put", "Record a sourced deadline or estimate, with known/unknown time and default 24h/due reminders; never silently change a user commitment.", "deadline", protocol.PutIssueDeadlinePayload{}, app.IssueDeadlineCommand{}, true},
 	{"issues_deadline_cancel", "Cancel a deadline with an explicit reason, preserving already claimed/unknown reminder facts.", "deadline", protocol.CancelIssueDeadlinePayload{}, app.IssueDeadlineCommand{Cancel: true}, true},
 	{"planner_entry_put", "Record a personal next action or explicit Issue planning rank; task execution priority remains tasks_rate.", "planner_entry", protocol.PutPlannerEntryPayload{}, app.PutPlannerEntry{}, true},
-	{"attentions_create", "Ask the owner a distinct decision or human action, or record nonblocking information. Assignment stays unchanged.", "attention", protocol.CreateAttentionPayload{}, app.AttentionCommand{Action: "create"}, true},
-	{"attentions_update", "Revise this stable attention without replacing or answering its original decision.", "attention", protocol.UpdateAttentionPayload{}, app.AttentionCommand{Action: "update"}, true},
+	{"attentions_create", "Ask the owner a distinct decision or human action, or record nonblocking information. Optional latest_action_at gives its true deadline with 24h/due reminders to main, even without an Issue. Assignment stays unchanged.", "attention", protocol.CreateAttentionPayload{}, app.AttentionCommand{Action: "create"}, true},
+	{"attentions_update", "Revise this stable attention without replacing or answering its original decision. Omit latest_action_at to retain it, set 0 to clear; timezone only changes display.", "attention", protocol.UpdateAttentionPayload{}, app.AttentionCommand{Action: "update"}, true},
 	{"attentions_respond", "Relay the owner's actual message to the original decision/version. Never answer on the owner's behalf.", "attention", protocol.RespondAttentionPayload{}, app.AttentionCommand{Action: "respond", FromMessage: true}, true},
 	{"attentions_confirm", "Relay an actual owner's confirmation of a human action; agent narration is insufficient.", "attention", protocol.ConfirmAttentionPayload{}, app.AttentionCommand{Action: "confirm", FromMessage: true}, true},
 	{"attentions_withdraw", "Withdraw an ordinary open action/information with a reason; decisions retain their original business path.", "attention", hostedEmptyPayload{}, app.AttentionCommand{Action: "withdraw"}, true},
@@ -97,7 +97,7 @@ var hostedMutations = []hostedMutation{
 	{"issues_resume", "Resume this Issue's new dispatch under its current assignment.", "issue", protocol.IssueControlPayload{}, app.CanonicalOwnerIssueCommand{Action: "resume"}, false},
 	{"issues_cancel", "Record cancellation intent before settling outstanding tasks and obligations.", "issue", protocol.IssueControlPayload{}, app.CanonicalOwnerIssueCommand{Action: "cancel"}, false},
 	{"issues_finish_cancel", "Finish cancellation with explicit source/follow-on dispositions after real execution has settled.", "issue", protocol.IssueEndpointPayload{}, app.CanonicalOwnerIssueCommand{Action: "finish_cancel"}, false},
-	{"issues_close", "Close only this Issue after child/task results and obligations have been explicitly reviewed.", "issue", protocol.IssueEndpointPayload{}, app.CanonicalOwnerIssueCommand{Action: "close"}, false},
+	{"issues_close", "Close only this Issue after reviewing child/task results and obligations. For task results use evidence kind acceptance with the passed acceptance_id; delivery requires a verified provider delivery observation, not an artifact_id. Owner evidence may reference this Issue's resolved decision/action Attention. Omit source_dispositions and expected_context_revision once source obligations have already been reviewed; context CAS accompanies actual source dispositions.", "issue", protocol.IssueEndpointPayload{}, app.CanonicalOwnerIssueCommand{Action: "close"}, false},
 	{"issues_reopen", "Explicitly reopen this responsibility; never automatically replay a finished run.", "issue", protocol.IssueControlPayload{}, app.CanonicalOwnerIssueCommand{Action: "reopen"}, false},
 	{"issues_dependencies", "Revise this Issue's explicit completion dependencies without adding task execution ownership.", "issue", protocol.SetIssueDependenciesPayload{}, app.CanonicalOwnerIssueCommand{Action: "dependencies"}, false},
 	{"issues_review_sources", "Review named late source shares on a terminal Issue while retaining its terminal history.", "issue", protocol.ReviewIssueSourcesPayload{}, app.CanonicalOwnerIssueCommand{Action: "review_sources"}, false},
@@ -180,7 +180,7 @@ func namedLegacyRead(purpose agentconfig.Purpose, name string) bool {
 	}
 	if purpose == agentconfig.IssueManager {
 		switch name {
-		case "runs_read_messages", "repos_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "work_item_context_read", "background_evidence_read", "background_sources", "agent_rollout_read", "conversation_read":
+		case "runs_read_messages", "repos_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "background_evidence_read", "background_sources", "agent_rollout_read", "conversation_read":
 			return true
 		}
 	}
@@ -398,7 +398,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 				if !admitted {
 					continue
 				}
-				item := protocol.ConversationItem{MessageID: source.MessageID, Author: source.Author, Body: source.Body}
+				item := protocol.ConversationItem{ConversationContent: protocol.ConversationContent{MessageID: source.MessageID, Author: source.Author, Body: source.Body}}
 				if err := store.HideUndeliveredOwner(ctx, tx.Q(), &item); err != nil {
 					return err
 				}

@@ -76,3 +76,38 @@ func TestIssueCLIRecoveryRequiresOriginalControlAndHasNoImplicitReads(t *testing
 		t.Fatal("stale control silently retried/refreshed or lost original values", te.out.String(), te.errOut.String())
 	}
 }
+
+func TestIssueTaskCLIUsesOnlyCanonicalPrimaryProjection(t *testing.T) {
+	for _, canonical := range []bool{true, false} {
+		t.Run(map[bool]string{true: "canonical", false: "historical-only"}[canonical], func(t *testing.T) {
+			f := newFakeServer(t)
+			te := newTestEnv(t, f.srv.URL)
+			task := protocol.TaskDetail{TaskSummary: protocol.TaskSummary{TaskID: "task-target", ControlRevision: 7, PrimaryWorkItemID: "wi_legacy"}}
+			if canonical {
+				task.PrimaryIssueID = "wi_current"
+			}
+			f.answer("GET /api/v1/tasks/task-target", task)
+			f.answer("GET /api/v1/issues/wi_current", protocol.IssueView{Issue: protocol.Issue{IssueControl: protocol.IssueControl{IssueID: "wi_current", AssignmentEpoch: 4}, Revision: 9}})
+			code := te.main("issue", "update-task", "task-target", "--data", `{}`, "--dry-run")
+			if !canonical {
+				if code != exitUsage || len(f.seen("GET /api/v1/issues/wi_legacy")) != 0 || len(f.seen("POST /api/v1/ops")) != 0 {
+					t.Fatal("historical primary became a current Issue", code, te.errOut.String())
+				}
+				return
+			}
+			if code != exitOK || len(f.seen("GET /api/v1/issues/wi_current")) != 1 || len(f.seen("GET /api/v1/issues/wi_legacy")) != 0 {
+				t.Fatal(code, te.errOut.String())
+			}
+			var env protocol.Envelope
+			if err := json.Unmarshal(te.out.Bytes(), &env); err != nil {
+				t.Fatal(err)
+			}
+			var payload struct {
+				Epoch int64 `json:"expected_assignment_epoch"`
+			}
+			if err := json.Unmarshal(env.Payload, &payload); err != nil || env.ExpectedControlRevision == nil || *env.ExpectedControlRevision != 7 || payload.Epoch != 4 || env.Target.Type != "task" || env.Target.ID != "task-target" {
+				t.Fatal(env, payload, err)
+			}
+		})
+	}
+}

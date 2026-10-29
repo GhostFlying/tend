@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
@@ -76,7 +77,7 @@ func planningSchemaAt(t *testing.T, root map[string]any, path ...string) map[str
 
 func TestPlanningSchemasExposeEnumsOnHostedToolSurface(t *testing.T) {
 	surfaces := map[string]map[string]json.RawMessage{"hosted": {}}
-	for _, spec := range Specs() {
+	for _, spec := range NamedSpecs(agentconfig.IssueManager) {
 		surfaces["hosted"][spec.Name] = spec.InputSchema
 	}
 	cases := []struct {
@@ -84,16 +85,14 @@ func TestPlanningSchemasExposeEnumsOnHostedToolSurface(t *testing.T) {
 		path []string
 		want any
 	}{
-		{"work_items_create", []string{"plan", "background", "[]", "kind"}, protocol.SharedFactKindValues()},
-		{"work_items_create", []string{"plan", "stages", "[]", "status"}, protocol.IssueStageStatusValues()},
-		{"work_items_update", []string{"plan", "stages", "[]", "status"}, protocol.IssueStageStatusValues()},
-		{"work_items_update", []string{"status"}, protocol.WorkItemUpdateStatusValues()},
-		{"work_items_update", []string{"task_dispositions", "[]", "action"}, protocol.IssueTaskDispositionActionValues()},
-		{"work_items_create", []string{"plan", "follow_ons", "[]", "kind"}, protocol.IssueFollowOnKindValues()},
-		{"work_items_create", []string{"plan", "follow_ons", "[]", "status"}, protocol.IssueFollowOnStatusValues()},
-		{"work_items_create", []string{"plan", "deliveries", "[]", "provider"}, protocol.IssueDeliveryProviderValues()},
-		{"work_items_close", []string{"closure", "kind"}, protocol.IssueClosureKindValues()},
-		{"work_items_close", []string{"closure", "evidence", "[]", "kind"}, protocol.IssueEvidenceKindValues()},
+		{"issues_create", []string{"payload", "plan", "background", "[]", "kind"}, protocol.SharedFactKindValues()},
+		{"issues_create", []string{"payload", "plan", "stages", "[]", "status"}, protocol.IssueStageStatusValues()},
+		{"issues_update", []string{"payload", "plan", "stages", "[]", "status"}, protocol.IssueStageStatusValues()},
+		{"issues_create", []string{"payload", "plan", "follow_ons", "[]", "kind"}, protocol.IssueFollowOnKindValues()},
+		{"issues_create", []string{"payload", "plan", "follow_ons", "[]", "status"}, protocol.IssueFollowOnStatusValues()},
+		{"issues_create", []string{"payload", "plan", "deliveries", "[]", "provider"}, protocol.IssueDeliveryProviderValues()},
+		{"issues_close", []string{"payload", "closure", "kind"}, protocol.IssueClosureKindValues()},
+		{"issues_close", []string{"payload", "closure", "evidence", "[]", "kind"}, protocol.IssueEvidenceKindValues()},
 	}
 	for surface, specs := range surfaces {
 		for _, tc := range cases {
@@ -113,30 +112,16 @@ func TestPlanningSchemasExposeEnumsOnHostedToolSurface(t *testing.T) {
 				}
 			})
 		}
-		t.Run(surface+"/task-link-requirements", func(t *testing.T) {
-			var root map[string]any
-			if err := json.Unmarshal(specs["tasks_create"], &root); err != nil {
-				t.Fatal(err)
-			}
-			condition := root["if"].(map[string]any)
-			if !reflect.DeepEqual(condition["required"], []any{"work_item_id"}) || planningSchemaAt(t, condition, "work_item_id")["minLength"] != float64(1) {
-				t.Fatal("linked-task condition must apply only to a nonempty work item ID")
-			}
-			then := root["then"].(map[string]any)
-			if !reflect.DeepEqual(then["required"], []any{"work_item_revision", "stage_ids"}) || planningSchemaAt(t, then, "stage_ids")["minItems"] != float64(1) {
-				t.Fatal("linked-task schema must require the revision and nonempty stages")
-			}
-		})
 	}
 }
 
-func TestPlanningTaskCorrectionPreservesPlanAndCreatesOnlyOnce(t *testing.T) {
+func TestHistoricalPlanningTaskCorrectionPreservesPlanAndCreatesOnlyOnce(t *testing.T) {
 	e := newPlanningEnv(t)
 	plan := protocol.IssuePlan{Title: "Improve settings", Intent: "Design, then independently review", Background: []protocol.SharedFact{{Kind: "observation", Text: "Duplicate settings entry", Source: "owner message"}}, Stages: []protocol.IssueStage{
 		{StageID: "design", Title: "Design", Status: "planned"},
 		{StageID: "review", Title: "Independent review", Status: "planned", DependsOn: []string{"design"}},
 	}}
-	created := e.call("work_items_create", workItemCreateArgs{InitialContext: initialFixtureContext(), Plan: plan, CommitSeq: 1, Reason: "Preserve the full concern"}, "")
+	created := e.historicalToolFixture("work_items_create", workItemCreateArgs{InitialContext: initialFixtureContext(), Plan: plan, CommitSeq: 1, Reason: "Preserve the full concern"}, "")
 	if !created.OK {
 		t.Fatal(created.Error)
 	}
@@ -151,7 +136,7 @@ func TestPlanningTaskCorrectionPreservesPlanAndCreatesOnlyOnce(t *testing.T) {
 		"spec": map[string]any{"goal": "Deliver a settings design", "acceptance": []string{"Report explains design and includes files"},
 			"workspace": map[string]any{"mode": "temporary"}, "deliverables": map[string]bool{"report": true, "files": true}},
 	}
-	bad := e.call("tasks_create", args, "")
+	bad := e.historicalToolFixture("tasks_create", args, "")
 	if bad.OK || bad.Error.Code != protocol.CodeInvalidRequest || !strings.Contains(bad.Error.Message, `spec.deliverables`) || !strings.Contains(bad.Error.Message, `["report","files"]`) {
 		t.Fatalf("object deliverables must explain the array shape: %+v", bad)
 	}
@@ -162,13 +147,13 @@ func TestPlanningTaskCorrectionPreservesPlanAndCreatesOnlyOnce(t *testing.T) {
 	args["spec"].(map[string]any)["deliverables"] = []string{"report", "files"}
 	args["spec"].(map[string]any)["scope"] = []string{"Design only"}
 	args["commit_seq"] = 3
-	bad = e.call("tasks_create", args, "")
+	bad = e.historicalToolFixture("tasks_create", args, "")
 	if bad.OK || bad.Error.Code != protocol.CodeInvalidRequest || !strings.Contains(bad.Error.Message, "spec.scope: expected string, got array") || !strings.Contains(bad.Error.Message, "plain-text string") {
 		t.Fatalf("scope array must explain the text shape: %+v", bad)
 	}
 	args["spec"].(map[string]any)["scope"] = "Design only"
 	args["commit_seq"] = 4
-	bad = e.call("tasks_create", args, "")
+	bad = e.historicalToolFixture("tasks_create", args, "")
 	if bad.OK || bad.Error.Code != protocol.CodeInvalidRequest || !strings.Contains(bad.Error.Message, "stage_ids") {
 		t.Fatalf("missing association must be explained: %+v", bad)
 	}
@@ -177,14 +162,14 @@ func TestPlanningTaskCorrectionPreservesPlanAndCreatesOnlyOnce(t *testing.T) {
 	}
 	args["stage_ids"] = []string{"design"}
 	args["commit_seq"] = 5
-	corrected := e.call("tasks_create", args, "")
+	corrected := e.historicalToolFixture("tasks_create", args, "")
 	if !corrected.OK {
 		t.Fatal(corrected.Error)
 	}
 	if n := e.tasks(); n != 1 {
 		t.Fatalf("corrected call created %d tasks, want 1", n)
 	}
-	read := e.call("work_items_read", workItemReadArgs{WorkItemID: w.WorkItemID}, "")
+	read := e.historicalToolFixture("work_items_read", workItemReadArgs{WorkItemID: w.WorkItemID}, "")
 	var item protocol.WorkItemView
 	if !read.OK || json.Unmarshal(read.Result, &item) != nil {
 		t.Fatalf("read corrected plan: %+v", read)

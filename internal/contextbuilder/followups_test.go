@@ -76,3 +76,31 @@ func TestFollowupDeltaRespectsProjectScope(t *testing.T) {
 		}
 	}
 }
+
+func TestAttentionWithoutIssueReminderReachesMainContext(t *testing.T) {
+	e := newEnv(t)
+	clock := testkit.NewClock()
+	e.app = app.New(e.store, e.ids, clock.Now, app.WithFollowups(true))
+	e.b = New(e.app, e.store, e.ids, Config{})
+	at := clock.Now().Add(30 * time.Hour).UnixMilli()
+	var attention protocol.Attention
+	raw := e.exec(owner, "attentions.create", protocol.Target{Type: "attention"}, nil, protocol.CreateAttentionPayload{Kind: "action", Title: "Send the signed form", LatestActionAt: &at}, app.AttentionCommand{Action: "create"})
+	if err := json.Unmarshal(raw, &attention); err != nil {
+		t.Fatal(err)
+	}
+	if attention.IssueID != "" || attention.LatestActionDueRuleID == "" {
+		t.Fatal(attention)
+	}
+	if err := e.b.Confirm(t.Context(), e.prepare(0).ID); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(31 * time.Hour)
+	e.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "followups.sweep", protocol.Target{Type: "followups"}, nil, struct{}{}, app.SweepFollowups{})
+	packet, err := e.b.Prepare(t.Context(), thread, 0)
+	if err != nil {
+		t.Fatal("actual no-Issue reminder broke main context", err)
+	}
+	if packet == nil || packet.Full || !strings.Contains(packet.Text, attention.AttentionID) || !strings.Contains(packet.Text, attention.Title) {
+		t.Fatalf("missing actual Attention reminder: %+v", packet)
+	}
+}

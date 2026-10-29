@@ -10,6 +10,37 @@ export class DurableOp {
     private readonly factory: IDBFactory = indexedDB,
   ) {}
 
+  /** Enumerate existing pending requests without replacing or settling any entry. */
+  static async pendingScopes(
+    prefix: string,
+    factory: IDBFactory = indexedDB,
+  ): Promise<{ scope: string; envelope: Envelope }[]> {
+    const open = factory.open(deploymentStorageName("tend-control-requests"), 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("requests");
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction("requests", "readonly");
+        const cursor = tx.objectStore("requests").openCursor();
+        const entries: { scope: string; envelope: Envelope }[] = [];
+        cursor.onsuccess = () => {
+          const entry = cursor.result;
+          if (!entry) return;
+          if (typeof entry.key === "string" && entry.key.startsWith(prefix))
+            entries.push({ scope: entry.key, envelope: entry.value as Envelope });
+          entry.continue();
+        };
+        tx.oncomplete = () => resolve(entries);
+        tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("无法读取原操作记录"));
+      });
+    } finally {
+      db.close();
+    }
+  }
+
   private async change(
     update: (current: Envelope | undefined) => Envelope | undefined,
   ): Promise<Envelope | undefined> {

@@ -2,7 +2,7 @@
 
 ## 基线、交付与非目标
 
-基于 P4 具名负责人闭环与 P3 schema 修正，追加 migration 59。依据 docs/issue-agent-design.md §5 与总计划 P5，Refs: D125。此文记录本批实际实施合同；规定 review、五项修正独立复审、正式完整检查及交叉编译已通过，CI/合并与部署仍分别待完成。
+基于 P4 具名负责人闭环与 P3 schema 修正，追加 migration 59。依据 docs/issue-agent-design.md §5 与总计划 P5，Refs: D125。此文记录本批实际实施合同；规定 review、五项修正独立复审、正式完整检查及交叉编译已通过，PR #168 的 CI 已全部通过，rebase 合入 `c54ee29b8dade5a1defb7952c3c2123998574fee`；生产部署仍待完成。
 
 完整交付为实际 owner API/CLI + hosted main/manager 工具：创建同身份 attention、通过原 decision 回答并接续等待 worker/当前责任人、owner 明确确认人工动作、来源/期限修订后准确提醒、可读 Inbox/Next Action 及独立后台 task rating。无 UI 布局交互、P6 chat/consultation/run supplement/manual source adapter、外部连接器、部署或新巡逻 agent。信任唯一 owner、其主机/配置；只校验实际角色/Issue scope、并发/版本、重复/迟到/unknown 和原 task/正式验收边界，不引入 request/event 真实性证明链。
 

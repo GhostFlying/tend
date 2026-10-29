@@ -827,7 +827,7 @@
     border-bottom-color: var(--accent);
   }
   .recordsButton {
-    color: white;
+    color: var(--bg);
     background: var(--accent);
   }
   .resourceDialog .detailHead {

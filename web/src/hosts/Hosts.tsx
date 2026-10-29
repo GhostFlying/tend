@@ -70,7 +70,8 @@ export function Hosts({
               <span className={styles.maintenance}>{hostMaintenanceLabel(h)}</span>
             )}
             <span>
-              {h.open_runs > 0 ? "执行中" : "空闲"} · {h.open_runs} / {h.slots} 槽位
+              {h.online === true && !waiting ? (h.open_runs > 0 ? "执行中" : "空闲") : "记录占用"} ·{" "}
+              {h.open_runs} / {h.slots} 槽位
             </span>
           </span>
         </button>

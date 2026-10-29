@@ -1,9 +1,7 @@
+import type { MessageContent as ConversationItem } from "./eventContent.ts";
 import { deploymentStorageName } from "../api/deployment.ts";
 import { DraftStorage, type SavedDraft, type Withdrawal } from "./draftStore.ts";
-import type { ConversationAttachment, ConversationItem } from "../api/generated/api.ts";
-// Shell-scoped composer text survives navigation without sending an intention.
-import { intentionText, type WorkItemIntention } from "../workitems/model.ts";
-import type { WorkItemView } from "../api/generated/api.ts";
+import type { ConversationAttachment } from "../api/generated/api.ts";
 import type { TaskSummary } from "../api/generated/api.ts";
 import { Store } from "../state/store.ts";
 
@@ -32,6 +30,11 @@ export class ComposerDraft {
   private owner: string = crypto.randomUUID();
   private timer: ReturnType<typeof setInterval> | undefined;
   private reporting = false;
+  private lifecycle = 0;
+  private opening: Promise<void> | undefined;
+  private closing: Promise<void> = Promise.resolve();
+  private unsubscribe: (() => void) | undefined;
+  private removeListeners: (() => void) | undefined;
   private storage: Promise<DraftStorage> | undefined;
   private saving: Promise<void> = Promise.resolve();
   constructor(private readonly conversationID = "main") {
@@ -46,8 +49,18 @@ export class ComposerDraft {
     }
     this.id = id;
   }
-  async open(): Promise<void> {
-    if (this.storage) return;
+  open(): Promise<void> {
+    if (this.opening) return this.opening;
+    const lifecycle = this.lifecycle;
+    const opening = this.openEditor(lifecycle).finally(() => {
+      if (this.opening === opening) this.opening = undefined;
+    });
+    this.opening = opening;
+    return opening;
+  }
+  private async openEditor(lifecycle: number): Promise<void> {
+    await this.closing;
+    if (lifecycle !== this.lifecycle || this.storage) return;
     try {
       const navigation = performance.getEntriesByType("navigation")[0] as
         PerformanceNavigationTiming | undefined;
@@ -83,11 +96,13 @@ export class ComposerDraft {
         }
         await storage.claim(this.id, this.owner);
       }
+      if (lifecycle !== this.lifecycle) return;
       const renew = async () => {
         if (!(await storage.claim(this.id, this.owner)))
           throw new Error("草稿正在另一标签页编辑；本页内容已保留");
       };
       const startTimer = () => {
+        if (lifecycle !== this.lifecycle) return;
         clearInterval(this.timer);
         this.timer = setInterval(() => {
           void renew().catch((error) => this.report(String(error)));
@@ -96,21 +111,29 @@ export class ComposerDraft {
       startTimer();
       if (typeof window !== "undefined") {
         let releasing = Promise.resolve();
-        window.addEventListener("pagehide", () => {
+        const hide = () => {
           clearInterval(this.timer);
           releasing = storage.release().catch(() => {});
-        });
-        window.addEventListener("pageshow", () => {
+        };
+        const show = () => {
           void releasing
-            .then(renew)
+            .then(() => (lifecycle === this.lifecycle ? renew() : undefined))
             .then(() => {
+              if (lifecycle !== this.lifecycle) return;
               startTimer();
               return this.flush();
             })
             .catch((error) => this.report(String(error)));
-        });
+        };
+        window.addEventListener("pagehide", hide);
+        window.addEventListener("pageshow", show);
+        this.removeListeners = () => {
+          window.removeEventListener("pagehide", hide);
+          window.removeEventListener("pageshow", show);
+        };
       }
       const saved = await storage.drafts();
+      if (lifecycle !== this.lifecycle) return;
       const current = saved.find((d) => d.id === this.id);
       this.state.set({
         ...this.state.get(),
@@ -120,7 +143,7 @@ export class ComposerDraft {
         ),
         loaded: true,
       });
-      this.state.subscribe(() => {
+      this.unsubscribe = this.state.subscribe(() => {
         if (this.reporting) return;
         const value = this.snapshot();
         this.saving = this.saving
@@ -130,12 +153,38 @@ export class ComposerDraft {
           );
       });
     } catch {
+      if (lifecycle !== this.lifecycle) return;
       this.state.set({
         ...this.state.get(),
         error: "草稿存储不可用，请保持页面打开",
         loaded: true,
       });
     }
+  }
+  /** Release only this editor's resources; durable content and uploads remain. */
+  close(): Promise<void> {
+    this.lifecycle++;
+    clearInterval(this.timer);
+    this.removeListeners?.();
+    this.unsubscribe?.();
+    this.removeListeners = undefined;
+    this.unsubscribe = undefined;
+    const storage = this.storage;
+    const opening = this.opening;
+    this.storage = undefined;
+    this.opening = undefined;
+    this.closing = this.closing
+      .then(async () => {
+        await opening;
+        await this.saving;
+        if (storage) {
+          const opened = await storage;
+          await opened.release();
+          opened.close();
+        }
+      })
+      .catch(() => {});
+    return this.closing;
   }
   private report(error: string): void {
     this.reporting = true;
@@ -237,15 +286,6 @@ export class ComposerDraft {
       text: current.text.includes(heading)
         ? current.text
         : current.text + (current.text.trim() ? "\n\n" : "") + intention,
-      focus: current.focus + 1,
-    });
-  }
-  workItem(item: WorkItemView, intention: WorkItemIntention): void {
-    const current = this.state.get();
-    const text = intentionText(item, intention);
-    this.state.set({
-      ...current,
-      text: current.text + (current.text.trim() ? "\n\n" : "") + text,
       focus: current.focus + 1,
     });
   }

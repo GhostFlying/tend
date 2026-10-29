@@ -7,7 +7,7 @@ export type View = "chat" | "tasks" | "decisions";
 
 const tabs: { view: View; label: string; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
   { view: "chat", label: "对话", Icon: Chat },
-  { view: "tasks", label: "工作项", Icon: Tasks },
+  { view: "tasks", label: "Issue", Icon: Tasks },
   { view: "decisions", label: "待处理", Icon: Pending },
 ];
 
@@ -15,11 +15,13 @@ export function TabBar({
   view,
   onChange,
   pending,
+  pendingMore = false,
 }: {
   view: View;
   onChange: (view: View) => void;
   /** How many things wait for the owner. */
   pending: number;
+  pendingMore?: boolean;
 }) {
   return (
     <nav className={styles.tabbar} aria-label="视图">
@@ -33,7 +35,12 @@ export function TabBar({
         >
           <Icon />
           {label}
-          {v === "decisions" && pending > 0 && <span className={styles.badge}>{pending}</span>}
+          {v === "decisions" && pending > 0 && (
+            <span className={styles.badge}>
+              {pending}
+              {pendingMore ? "+" : ""}
+            </span>
+          )}
         </button>
       ))}
     </nav>

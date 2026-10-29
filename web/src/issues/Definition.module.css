@@ -1,0 +1,168 @@
+.root {
+  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.root > h1 {
+  margin: 24px 28px 8px;
+  font-size: 23px;
+}
+.root > p {
+  margin: 0 28px 20px;
+}
+.columns {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  flex: 1;
+}
+.fields {
+  padding: 10px 28px 26px;
+  min-width: 0;
+}
+.fields > label,
+.field {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+  margin: 24px 0;
+}
+.fields > label > input,
+.fields > label > textarea,
+.fields > label > select,
+.criterion > input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px 12px;
+  background: var(--input);
+  color: var(--label);
+  font: inherit;
+}
+.fields textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+.criterion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.criterion button {
+  min-width: 32px;
+  min-height: 40px;
+}
+.add {
+  padding: 8px 0;
+  text-align: left;
+}
+.changes {
+  border-left: 1px solid var(--border);
+  background: var(--bg-l1);
+  padding: 28px 22px;
+  font-size: var(--text-s);
+}
+.changes h2 {
+  font-size: 17px;
+  margin: 0 0 24px;
+}
+.changes ul {
+  padding-left: 18px;
+  line-height: 2;
+}
+.changes > p {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 16px;
+}
+.footer {
+  flex: none;
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.footer > p {
+  flex: 1;
+  font-size: var(--text-s);
+  color: var(--label-3);
+}
+.footer > div {
+  margin: 0;
+  flex: none;
+}
+.source {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: var(--text-s);
+}
+@media (max-width: 760px) {
+  .columns {
+    display: block;
+  }
+  .fields {
+    padding: 0 16px 16px;
+  }
+  .fields > label,
+  .field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin: 18px 0;
+  }
+  .root > h1 {
+    margin: 20px 16px 8px;
+  }
+  .root > p {
+    margin: 0 16px 14px;
+  }
+  .changes {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 18px 16px;
+  }
+  .changes h2 {
+    margin-bottom: 12px;
+  }
+  .footer {
+    display: block;
+    padding: 10px 16px;
+  }
+  .footer > p {
+    margin: 0 0 10px;
+  }
+  .footer > div {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+.conflict {
+  flex: none;
+  border-block: 1px solid var(--border);
+  padding: 10px 24px;
+  font-size: var(--text-s);
+  background: var(--bg-l1);
+}
+.conflict p {
+  margin: 0 0 8px;
+}
+.changes li {
+  margin-bottom: 16px;
+}
+.changes li p {
+  margin: 4px 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

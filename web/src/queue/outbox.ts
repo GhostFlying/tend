@@ -21,6 +21,8 @@ export interface OutgoingAttachment {
 }
 
 export interface OutgoingMessage {
+  /** Optional UI source workflow; absent for the original chat queue. */
+  queueScope?: string;
   submitAttempted?: boolean;
   references?: ConversationAttachment[];
   uploads?: OutgoingAttachment[];
