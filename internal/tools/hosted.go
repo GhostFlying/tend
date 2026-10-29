@@ -28,6 +28,31 @@ type hostedPlanningReadArgs struct {
 	After   string `json:"after,omitempty"`
 }
 
+type hostedCategoryListArgs struct {
+	State string `json:"state,omitempty"`
+	After string `json:"after,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+type hostedIssueListArgs struct {
+	Project       string              `json:"project,omitempty"`
+	ParentID      *string             `json:"parent_id,omitempty"`
+	State         protocol.IssueState `json:"state,omitempty"`
+	IncludeClosed bool                `json:"include_closed,omitempty"`
+	After         string              `json:"after,omitempty"`
+	Limit         int                 `json:"limit,omitempty"`
+}
+type hostedIssueResourceArgs struct {
+	IssueID         string `json:"issue_id,omitempty"`
+	RuleID          string `json:"rule_id,omitempty"`
+	After           string `json:"after,omitempty"`
+	AfterSource     int64  `json:"after_source,omitempty"`
+	AfterRevision   int64  `json:"after_revision,omitempty"`
+	AfterOccurrence string `json:"after_occurrence,omitempty"`
+}
+type hostedRunnerReadArgs struct {
+	HostID string `json:"host_id"`
+}
+
 type hostedAttentionReadArgs struct {
 	AttentionID string `json:"attention_id"`
 }
@@ -46,6 +71,13 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"issues_followups_create", "Arrange a bounded check of this Issue's existing authorized work; it creates no worker, new goal or execution authority. Deadline-owned rules use the deadline API.", "issue", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "create"}, false},
+	{"issues_followups_update", "Revise this Issue's generic followup through its original rule revision; preserve unknown and previously claimed checks.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "update"}, false},
+	{"issues_followups_pause", "Pause this Issue's generic rule without erasing started checks.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "pause"}, false},
+	{"issues_followups_resume", "Resume this Issue's generic rule after rereading current facts; past time or expiry requires explicit update.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "resume"}, false},
+	{"issues_followups_cancel", "Cancel this Issue's generic rule while retaining original receipts and history.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "cancel"}, false},
+	{"issues_followups_trigger", "Request one bounded check of this Issue's generic rule; no new task or authority is implied.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "trigger"}, false},
+	{"issues_refresh_delivery", "Request a new provider observation for this Issue's linked delivery using the existing runner observer. Never merge, close or deploy.", "issue", protocol.IssueRefreshDeliveryPayload{}, app.IssueRefreshDelivery{}, false},
 	{"consultation_promote", "Delegate an explicit owner execution request from this consultation to a concrete Issue manager using only selected persisted source versions. Ordinary Q&A creates no task. Never execute native work.", "conversation", protocol.PromoteConsultationPayload{}, app.PromoteConsultation{}, false},
 	{"runs_send_message", "Send supplemental evidence to this Issue primary task exact active run. It cannot revise its frozen contract or answer worker decisions; unknown is not resent.", "run", protocol.SendRunMessagePayload{}, app.SendRunMessage{}, false},
 	{"issues_deadline_put", "Record a sourced deadline or estimate, with known/unknown time and default 24h/due reminders; never silently change a user commitment.", "deadline", protocol.PutIssueDeadlinePayload{}, app.IssueDeadlineCommand{}, true},
@@ -106,6 +138,14 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 			continue
 		}
 		out = append(out, harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)})
+	}
+	if purpose == agentconfig.Main || purpose == agentconfig.IssueManager {
+		out = append(out, harness.ToolSpec{Name: "issues_list", Description: "Discover canonical Issues and responsibility hierarchy. Managers see only their Issue and descendants; listing grants no write permission.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueListArgs{})))})
+		for _, name := range []string{"issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read"} {
+			out = append(out, harness.ToolSpec{Name: name, Description: "Read this canonical Issue's recorded context, followup history or delivery observations. Reading resolves nothing and never probes a provider.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueResourceArgs{})))})
+		}
+		out = append(out, harness.ToolSpec{Name: "agent_categories_list", Description: "Read the latest global Agent classifications; classification is not execution permission. Default active, limit 50, maximum 100.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedCategoryListArgs{})))})
+		out = append(out, harness.ToolSpec{Name: "agents_runner_read", Description: "Read a runner host public registration, last executor observations and heartbeat presence separately. Reading neither probes nor changes runtime capability.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedRunnerReadArgs{})))})
 	}
 	if purpose != agentconfig.Consultation {
 		for _, name := range []string{"attentions_list", "planner_read", "deadlines_list"} {
@@ -292,6 +332,31 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return err
 		})
 		return hostedAnswer(value, err), true
+	}
+	if c.Tool == "agent_categories_list" || c.Tool == "agents_runner_read" {
+		if execution.Selection.Purpose != agentconfig.Main && execution.Selection.Purpose != agentconfig.IssueManager {
+			return fail(protocol.Errorf(protocol.CodeForbidden, "catalog is available to the planner and Issue manager"))
+		}
+		if c.Tool == "agent_categories_list" {
+			var p hostedCategoryListArgs
+			if err := decode(c.Arguments, &p); err != nil {
+				return fail(err)
+			}
+			v, err := s.app.AgentCategories(ctx, p.State, p.After, p.Limit)
+			return hostedAnswer(v, err), true
+		}
+		var p hostedRunnerReadArgs
+		if err := decode(c.Arguments, &p); err != nil {
+			return fail(err)
+		}
+		if p.HostID == "" {
+			return fail(protocol.Errorf(protocol.CodeInvalidRequest, "host_id is required"))
+		}
+		v, err := s.app.RunnerAgentCatalog(ctx, p.HostID)
+		return hostedAnswer(v, err), true
+	}
+	if result, handled := s.canonicalIssueRead(ctx, c, execution); handled {
+		return result, true
 	}
 	if c.Tool == "agents_hosted_list" {
 		v, e := s.app.HostedAgentInventory(ctx)

@@ -60,7 +60,7 @@ func TestConsultationActualHostedPoolDelegatesOnlyExecutionRequest(t *testing.T)
 		}
 		if consultation {
 			for _, tool := range th.Config.Tools {
-				if tool.Name == "issues_create_task" || tool.Name == "runs_send_message" || tool.Name == "tasks_create" {
+				if tool.Name == "issues_create_task" || tool.Name == "runs_send_message" || tool.Name == "tasks_create" || tool.Name == "agent_categories_list" || tool.Name == "agents_runner_read" {
 					return fail("consultation advertised generic mutation")
 				}
 			}

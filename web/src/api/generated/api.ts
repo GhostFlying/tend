@@ -232,6 +232,7 @@ export type WorkItemUpdateStatus = "" | "open" | "snoozed";
 export interface TendAPI {
   APIResponse?: APIResponse;
   AgentCategory?: AgentCategory;
+  AgentCategoryPage?: AgentCategoryPage;
   AgentCompactionPage?: AgentCompactionPage;
   AgentContextUsage?: AgentContextUsage;
   AgentConversation?: AgentConversation;
@@ -289,10 +290,16 @@ export interface TendAPI {
   InterruptReplyPayload?: InterruptReplyPayload;
   IssueAssignmentPayload?: IssueAssignmentPayload;
   IssueContextReview?: IssueContextReview;
+  IssueContextView?: IssueContextView;
   IssueControlPayload?: IssueControlPayload;
   IssueDeadline?: IssueDeadline;
+  IssueDeliveryPage?: IssueDeliveryPage;
   IssueEndpointPayload?: IssueEndpointPayload;
+  IssueFollowupHistory?: IssueFollowupHistory;
+  IssueFollowupPage?: IssueFollowupPage;
+  IssueFollowupPayload?: IssueFollowupPayload;
   IssuePage?: IssuePage;
+  IssueRefreshDeliveryPayload?: IssueRefreshDeliveryPayload;
   IssueView?: IssueView;
   LedgerEvent?: LedgerEvent;
   LinkWorkItemTaskPayload?: LinkWorkItemTaskPayload;
@@ -322,6 +329,7 @@ export interface TendAPI {
   RunLogPage?: RunLogPage;
   RunMessagePage?: RunMessagePage;
   RunRolloutPage?: RunRolloutPage;
+  RunnerAgentCatalog?: RunnerAgentCatalog;
   RunnerRepository?: RunnerRepository;
   SendRunMessagePayload?: SendRunMessagePayload;
   SessionRequest?: SessionRequest;
@@ -921,6 +929,15 @@ export interface AgentCategory {
   revision: number;
   state: string;
   title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentCategoryPage".
+ */
+export interface AgentCategoryPage {
+  items: AgentCategory[] | null;
+  more: boolean;
+  next?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2298,6 +2315,54 @@ export interface IssueContextReview {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextView".
+ */
+export interface IssueContextView {
+  coordination_state: string;
+  coverage: string;
+  dispatch_blockers: ContextBlocker[] | null;
+  dispatch_ready: boolean;
+  facts: IssueContextFact[] | null;
+  gaps: string;
+  issue_id: string;
+  more: boolean;
+  next?: number;
+  prepared: boolean;
+  revision: number;
+  sources: ConversationItem[] | null;
+  sync_status: string;
+  watermark: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ContextBlocker".
+ */
+export interface ContextBlocker {
+  code: string;
+  control_revision?: number;
+  message: string;
+  object_id: string;
+  revision: number;
+  spec_version?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextFact".
+ */
+export interface IssueContextFact {
+  attribution: string;
+  body: string;
+  fact_id: string;
+  issue_id?: string;
+  kind: string;
+  needs_review: boolean;
+  project?: string;
+  scope: string;
+  source_message_id: string;
+  supersedes?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueControlPayload".
  */
 export interface IssueControlPayload {
@@ -2305,6 +2370,44 @@ export interface IssueControlPayload {
   expected_source_revision?: number;
   reason?: string;
   source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryPage".
+ */
+export interface IssueDeliveryPage {
+  issue_id: string;
+  items: IssueDeliveryView[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryView".
+ */
+export interface IssueDeliveryView {
+  delivery: WorkItemDelivery;
+  observation: IssueDeliveryObservation;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryObservation".
+ */
+export interface IssueDeliveryObservation {
+  attempted_at?: number;
+  checked_at?: number;
+  closed_at?: string;
+  closed_by?: DeliveryActor;
+  delivery_id: string;
+  error_kind?: string;
+  generation: number;
+  head_sha?: string;
+  issue_id: string;
+  merge_sha?: string;
+  merged_at?: string;
+  merged_by?: DeliveryActor;
+  provider_updated_at?: string;
+  refresh_pending?: boolean;
+  state: string;
+  url?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2350,6 +2453,86 @@ export interface IssueSourceDisposition {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueFollowupHistory".
+ */
+export interface IssueFollowupHistory {
+  more: boolean;
+  next_occurrence?: string;
+  next_revision?: number;
+  occurrences: IssueFollowupOccurrence[] | null;
+  revisions: IssueFollowupRule[] | null;
+  rule: IssueFollowupRule;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueFollowupOccurrence".
+ */
+export interface IssueFollowupOccurrence {
+  background_message_id?: string;
+  checkin?: BackgroundCheckin;
+  created_at: number;
+  evidence: string;
+  issue_id: string;
+  message_id: string;
+  occurrence_id: string;
+  reason: string;
+  revision: number;
+  rule_id: string;
+  status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueFollowupRule".
+ */
+export interface IssueFollowupRule {
+  at?: number;
+  condition?: FollowupCondition;
+  created_at: number;
+  deadline_id?: string;
+  every_seconds?: number;
+  expires_at?: number;
+  expiry_silent?: boolean;
+  follow_on_id?: string;
+  instruction: string;
+  issue_id: string;
+  kind: string;
+  max_triggers?: number;
+  next_at?: number;
+  purpose: string;
+  reason?: string;
+  revision: number;
+  rule_id: string;
+  source_id?: string;
+  status: string;
+  timezone: string;
+  trigger_count: number;
+  updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueFollowupPage".
+ */
+export interface IssueFollowupPage {
+  enabled: boolean;
+  event_seq: number;
+  issue_id: string;
+  items: IssueFollowupRule[] | null;
+  latest?: {
+    [k: string]: IssueFollowupOccurrence | undefined;
+  };
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueFollowupPayload".
+ */
+export interface IssueFollowupPayload {
+  expected_assignment_epoch: number;
+  spec?: FollowupSpec;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssuePage".
  */
 export interface IssuePage {
@@ -2373,6 +2556,14 @@ export interface IssueSummary {
   revision: number;
   state: IssueState;
   title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueRefreshDeliveryPayload".
+ */
+export interface IssueRefreshDeliveryPayload {
+  delivery_id: string;
+  expected_assignment_epoch: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2748,6 +2939,32 @@ export interface RunRolloutPage {
   observed: RunObserved;
   run_id: string;
   watermark: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerAgentCatalog".
+ */
+export interface RunnerAgentCatalog {
+  current?: AgentInventoryReceipt;
+  executors?: AgentExecutor[];
+  host_id: string;
+  last_heartbeat_at_ms: number;
+  online: boolean;
+  projection?: AgentInventoryProjection;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentInventoryReceipt".
+ */
+export interface AgentInventoryReceipt {
+  categories: AgentCategory[] | null;
+  host_id: string;
+  local_revision: number;
+  public_sha256: string;
+  request_id: string;
+  server_revision: number;
+  snapshot_id: string;
+  state: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3333,18 +3550,6 @@ export interface WorkItemContext {
   sync_status: string;
   watermark: number;
   work_item_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "ContextBlocker".
- */
-export interface ContextBlocker {
-  code: string;
-  control_revision?: number;
-  message: string;
-  object_id: string;
-  revision: number;
-  spec_version?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

@@ -28,12 +28,22 @@ func (c FollowupCommand) Authorize(_ context.Context, x *Exec, _ store.Querier) 
 	return nil
 }
 func (c FollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	return applyFollowup(ctx, x, tx, c.Action, nil)
+}
+
+func applyFollowup(ctx context.Context, x *Exec, tx *store.Tx, action string, canonical *protocol.Issue) (Outcome, error) {
 	now := x.Now.UnixMilli()
-	if c.Action == "create" {
-		if x.Env.Target.Type != "work_item" {
+	if action == "create" {
+		if canonical == nil && x.Env.Target.Type != "work_item" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "followup creation targets a work item")
 		}
-		w, err := issueForWrite(ctx, x, tx.Q())
+		var w protocol.WorkItem
+		var err error
+		if canonical == nil {
+			w, err = issueForWrite(ctx, x, tx.Q())
+		} else {
+			w, err = store.GetIssue(ctx, tx.Q(), canonical.IssueID)
+		}
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -89,8 +99,10 @@ func (c FollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if err != nil {
 		return Outcome{}, errNotFound(err, "followup does not exist")
 	}
-	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), r.WorkItemID); err != nil {
-		return Outcome{}, err
+	if canonical == nil {
+		if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), r.WorkItemID); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != r.Revision {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "followup revision changed")
@@ -105,7 +117,7 @@ func (c FollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if strings.TrimSpace(x.Env.Reason) == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "followup control requires a reason")
 	}
-	if c.Action == "trigger" {
+	if action == "trigger" {
 		if _, err := evaluateFollowup(ctx, x, tx, &r, w, true); err != nil {
 			return Outcome{}, err
 		}
@@ -115,7 +127,7 @@ func (c FollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	r.Revision++
 	r.UpdatedAt = now
 	r.Reason = x.Env.Reason
-	switch c.Action {
+	switch action {
 	case "update":
 		var p protocol.UpdateFollowupPayload
 		if err := decodePayload(x.Env, &p); err != nil {
@@ -170,7 +182,7 @@ func (c FollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if err := tx.SaveFollowup(ctx, r, old, x.Env.RequestID); err != nil {
 		return Outcome{}, err
 	}
-	if c.Action == "update" {
+	if action == "update" {
 		if _, err := tx.Exec(ctx, `DELETE FROM followup_targets WHERE rule_id=?`, r.RuleID); err != nil {
 			return Outcome{}, err
 		}
@@ -242,7 +254,11 @@ func bindFollowupTargets(ctx context.Context, tx *store.Tx, r protocol.FollowupR
 }
 func linkedFollowupTask(ctx context.Context, q store.Querier, item, id string) (bool, error) {
 	var linked bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_item_task_links WHERE work_item_id=? AND task_id=?)`, item, id).Scan(&linked)
+	// Canonical task membership is its single primary responsibility, including
+	// tasks with no stage. Legacy items retain their existing link semantics.
+	err := q.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)
+ THEN EXISTS(SELECT 1 FROM task_work_item_owners WHERE work_item_id=? AND task_id=?)
+ ELSE EXISTS(SELECT 1 FROM work_item_task_links WHERE work_item_id=? AND task_id=?) END`, item, item, id, item, id).Scan(&linked)
 	return linked, err
 }
 func followupFacts(ctx context.Context, q store.Querier, r protocol.FollowupRule, w protocol.WorkItem) (satisfied bool, invalid, evidence string, err error) {

@@ -96,13 +96,13 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 		return created.TaskID, artifact
 	}
 	type result struct {
-		task, artifact string
-		allowed        bool
+		task, artifact, issue string
+		allowed               bool
 	}
 	cases := map[string]result{}
 	for name, issue := range map[string]protocol.Issue{"own": parent, "child": child, "descendant": descendant, "ancestor": ancestor, "sibling": sibling} {
 		task, artifact := task(issue)
-		cases[name] = result{task, artifact, name != "ancestor" && name != "sibling"}
+		cases[name] = result{task, artifact, issue.IssueID, name != "ancestor" && name != "sibling"}
 	}
 	parent = current(parent.IssueID)
 	op := execute(owner, app.HostedIssueAssignment{}, protocol.Target{Type: "issue", ID: parent.IssueID}, protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/planner"}, Reason: "Review delegated results"}, &parent.Revision)
@@ -218,12 +218,22 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 			t.Fatal("withdrawn preview became agent input", response.Text)
 		}
 	})
+	a := call("issues_list", map[string]any{"limit": 2})
+	var page protocol.IssuePage
+	if !a.OK || json.Unmarshal(a.Result, &page) != nil || len(page.Items) != 2 || !page.More {
+		t.Fatal("manager scoped discovery", a)
+	}
+	for _, item := range page.Items {
+		if item.IssueID != parent.IssueID && item.IssueID != child.IssueID && item.IssueID != descendant.IssueID {
+			t.Fatal("unrelated Issue in scoped discovery", item)
+		}
+	}
 	for name, r := range cases {
 		t.Run(name, func(t *testing.T) {
 			for _, read := range []struct {
 				tool string
 				args any
-			}{{"tasks_read", taskArgs{TaskID: r.task}}, {"artifacts_read", artifactArgs{ArtifactID: r.artifact}}, {"background_evidence_read", evidenceArgs{ArtifactID: r.artifact}}} {
+			}{{"tasks_read", taskArgs{TaskID: r.task}}, {"artifacts_read", artifactArgs{ArtifactID: r.artifact}}, {"background_evidence_read", evidenceArgs{ArtifactID: r.artifact}}, {"issues_context_read", map[string]any{"issue_id": r.issue}}, {"issues_followups_list", map[string]any{"issue_id": r.issue}}, {"issues_deliveries_read", map[string]any{"issue_id": r.issue}}} {
 				a := call(read.tool, read.args)
 				if r.allowed {
 					if !a.OK {

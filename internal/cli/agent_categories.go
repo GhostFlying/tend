@@ -12,6 +12,9 @@ import (
 )
 
 func runAgentCategory(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "list" {
+		return runAgentCategoryList(ctx, e, args[1:])
+	}
 	if len(args) == 0 || (args[0] != "put" && args[0] != "show") {
 		return usagef("category expects put|show <id> [--title <text>] [--description <text>] [--state active|retired]")
 	}

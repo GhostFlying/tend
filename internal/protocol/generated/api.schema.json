@@ -137,6 +137,36 @@
       "title": "AgentCategory",
       "type": "object"
     },
+    "AgentCategoryPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentCategory"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "AgentCategoryPage",
+      "type": "object"
+    },
     "AgentCompaction": {
       "additionalProperties": false,
       "properties": {
@@ -510,6 +540,57 @@
         "agents"
       ],
       "title": "AgentInventoryProjection",
+      "type": "object"
+    },
+    "AgentInventoryReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "categories": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentCategory"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "local_revision": {
+          "type": "integer"
+        },
+        "public_sha256": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "server_revision": {
+          "type": "integer"
+        },
+        "snapshot_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host_id",
+        "server_revision",
+        "local_revision",
+        "snapshot_id",
+        "public_sha256",
+        "request_id",
+        "state",
+        "categories"
+      ],
+      "title": "AgentInventoryReceipt",
       "type": "object"
     },
     "AgentInventoryRuntime": {
@@ -3959,6 +4040,52 @@
       "title": "IssueAssignmentPayload",
       "type": "object"
     },
+    "IssueContextFact": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "fact_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "needs_review": {
+          "type": "boolean"
+        },
+        "project": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "supersedes": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_id",
+        "scope",
+        "kind",
+        "body",
+        "source_message_id",
+        "attribution",
+        "needs_review"
+      ],
+      "title": "IssueContextFact",
+      "type": "object"
+    },
     "IssueContextReview": {
       "additionalProperties": false,
       "properties": {
@@ -4004,6 +4131,100 @@
         "summary"
       ],
       "title": "IssueContextReview",
+      "type": "object"
+    },
+    "IssueContextView": {
+      "additionalProperties": false,
+      "properties": {
+        "coordination_state": {
+          "type": "string"
+        },
+        "coverage": {
+          "type": "string"
+        },
+        "dispatch_blockers": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ContextBlocker"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dispatch_ready": {
+          "type": "boolean"
+        },
+        "facts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueContextFact"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gaps": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "prepared": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConversationItem"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sync_status": {
+          "type": "string"
+        },
+        "watermark": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "issue_id",
+        "revision",
+        "prepared",
+        "coverage",
+        "gaps",
+        "dispatch_ready",
+        "coordination_state",
+        "dispatch_blockers",
+        "sync_status",
+        "watermark",
+        "facts",
+        "sources",
+        "more"
+      ],
+      "title": "IssueContextView",
       "type": "object"
     },
     "IssueControlPayload": {
@@ -4109,6 +4330,111 @@
       "title": "IssueDeadline",
       "type": "object"
     },
+    "IssueDeliveryObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "attempted_at": {
+          "type": "integer"
+        },
+        "checked_at": {
+          "type": "integer"
+        },
+        "closed_at": {
+          "type": "string"
+        },
+        "closed_by": {
+          "$ref": "#/definitions/DeliveryActor"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "error_kind": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "merge_sha": {
+          "type": "string"
+        },
+        "merged_at": {
+          "type": "string"
+        },
+        "merged_by": {
+          "$ref": "#/definitions/DeliveryActor"
+        },
+        "provider_updated_at": {
+          "type": "string"
+        },
+        "refresh_pending": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "issue_id",
+        "delivery_id",
+        "generation"
+      ],
+      "title": "IssueDeliveryObservation",
+      "type": "object"
+    },
+    "IssueDeliveryPage": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueDeliveryView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "issue_id",
+        "items"
+      ],
+      "title": "IssueDeliveryPage",
+      "type": "object"
+    },
+    "IssueDeliveryView": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery": {
+          "$ref": "#/definitions/WorkItemDelivery"
+        },
+        "observation": {
+          "$ref": "#/definitions/IssueDeliveryObservation"
+        }
+      },
+      "required": [
+        "delivery",
+        "observation"
+      ],
+      "title": "IssueDeliveryView",
+      "type": "object"
+    },
     "IssueEndpointPayload": {
       "additionalProperties": false,
       "properties": {
@@ -4186,6 +4512,258 @@
       "title": "IssueFollowOnDisposition",
       "type": "object"
     },
+    "IssueFollowupHistory": {
+      "additionalProperties": false,
+      "properties": {
+        "more": {
+          "type": "boolean"
+        },
+        "next_occurrence": {
+          "type": "string"
+        },
+        "next_revision": {
+          "type": "integer"
+        },
+        "occurrences": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueFollowupOccurrence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revisions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueFollowupRule"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rule": {
+          "$ref": "#/definitions/IssueFollowupRule"
+        }
+      },
+      "required": [
+        "rule",
+        "revisions",
+        "occurrences",
+        "more"
+      ],
+      "title": "IssueFollowupHistory",
+      "type": "object"
+    },
+    "IssueFollowupOccurrence": {
+      "additionalProperties": false,
+      "properties": {
+        "background_message_id": {
+          "type": "string"
+        },
+        "checkin": {
+          "$ref": "#/definitions/BackgroundCheckin"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "occurrence_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "occurrence_id",
+        "rule_id",
+        "revision",
+        "message_id",
+        "reason",
+        "status",
+        "evidence",
+        "created_at"
+      ],
+      "title": "IssueFollowupOccurrence",
+      "type": "object"
+    },
+    "IssueFollowupPage": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueFollowupRule"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latest": {
+          "additionalProperties": {
+            "$ref": "#/definitions/IssueFollowupOccurrence"
+          },
+          "type": "object"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "items",
+        "enabled",
+        "more",
+        "event_seq"
+      ],
+      "title": "IssueFollowupPage",
+      "type": "object"
+    },
+    "IssueFollowupPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "spec": {
+          "$ref": "#/definitions/FollowupSpec"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch"
+      ],
+      "title": "IssueFollowupPayload",
+      "type": "object"
+    },
+    "IssueFollowupRule": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "type": "integer"
+        },
+        "condition": {
+          "$ref": "#/definitions/FollowupCondition"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "deadline_id": {
+          "type": "string"
+        },
+        "every_seconds": {
+          "type": "integer"
+        },
+        "expires_at": {
+          "type": "integer"
+        },
+        "expiry_silent": {
+          "type": "boolean"
+        },
+        "follow_on_id": {
+          "type": "string"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "max_triggers": {
+          "type": "integer"
+        },
+        "next_at": {
+          "type": "integer"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "trigger_count": {
+          "type": "integer"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "purpose",
+        "instruction",
+        "kind",
+        "timezone",
+        "issue_id",
+        "rule_id",
+        "revision",
+        "status",
+        "trigger_count",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "IssueFollowupRule",
+      "type": "object"
+    },
     "IssuePage": {
       "additionalProperties": false,
       "properties": {
@@ -4214,6 +4792,23 @@
         "more"
       ],
       "title": "IssuePage",
+      "type": "object"
+    },
+    "IssueRefreshDeliveryPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_id": {
+          "type": "string"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "delivery_id"
+      ],
+      "title": "IssueRefreshDeliveryPayload",
       "type": "object"
     },
     "IssueSourceDisposition": {
@@ -6349,6 +6944,39 @@
         "observed"
       ],
       "title": "RunView",
+      "type": "object"
+    },
+    "RunnerAgentCatalog": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "$ref": "#/definitions/AgentInventoryReceipt"
+        },
+        "executors": {
+          "items": {
+            "$ref": "#/definitions/AgentExecutor"
+          },
+          "type": "array"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "last_heartbeat_at_ms": {
+          "type": "integer"
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "projection": {
+          "$ref": "#/definitions/AgentInventoryProjection"
+        }
+      },
+      "required": [
+        "host_id",
+        "online",
+        "last_heartbeat_at_ms"
+      ],
+      "title": "RunnerAgentCatalog",
       "type": "object"
     },
     "RunnerBuild": {
@@ -9327,6 +9955,9 @@
     "AgentCategory": {
       "$ref": "#/definitions/AgentCategory"
     },
+    "AgentCategoryPage": {
+      "$ref": "#/definitions/AgentCategoryPage"
+    },
     "AgentCompactionPage": {
       "$ref": "#/definitions/AgentCompactionPage"
     },
@@ -9498,17 +10129,35 @@
     "IssueContextReview": {
       "$ref": "#/definitions/IssueContextReview"
     },
+    "IssueContextView": {
+      "$ref": "#/definitions/IssueContextView"
+    },
     "IssueControlPayload": {
       "$ref": "#/definitions/IssueControlPayload"
     },
     "IssueDeadline": {
       "$ref": "#/definitions/IssueDeadline"
     },
+    "IssueDeliveryPage": {
+      "$ref": "#/definitions/IssueDeliveryPage"
+    },
     "IssueEndpointPayload": {
       "$ref": "#/definitions/IssueEndpointPayload"
     },
+    "IssueFollowupHistory": {
+      "$ref": "#/definitions/IssueFollowupHistory"
+    },
+    "IssueFollowupPage": {
+      "$ref": "#/definitions/IssueFollowupPage"
+    },
+    "IssueFollowupPayload": {
+      "$ref": "#/definitions/IssueFollowupPayload"
+    },
     "IssuePage": {
       "$ref": "#/definitions/IssuePage"
+    },
+    "IssueRefreshDeliveryPayload": {
+      "$ref": "#/definitions/IssueRefreshDeliveryPayload"
     },
     "IssueView": {
       "$ref": "#/definitions/IssueView"
@@ -9596,6 +10245,9 @@
     },
     "RunRolloutPage": {
       "$ref": "#/definitions/RunRolloutPage"
+    },
+    "RunnerAgentCatalog": {
+      "$ref": "#/definitions/RunnerAgentCatalog"
     },
     "RunnerRepository": {
       "$ref": "#/definitions/RunnerRepository"

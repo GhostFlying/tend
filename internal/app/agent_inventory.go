@@ -139,22 +139,15 @@ func (a *App) ReadAgentInventory(ctx context.Context, p protocol.Principal, inpu
 		if err := authorizeInventory(ctx, tx.Q(), p, input.Runtime); err != nil {
 			return err
 		}
-		runtime, err := store.GetHostRuntime(ctx, tx.Q(), p.Subject)
+		catalog, err := readRunnerAgentCatalog(ctx, tx.Q(), p.Subject, a.now().UnixMilli())
 		if err != nil {
 			return err
 		}
-		if runtimeSupportsAgentExecution(input.Runtime) && runtimeSupportsAgentExecution(&runtime.Runtime) {
-			result.Executors = runtime.Runtime.AgentExecutors
+		if runtimeSupportsAgentExecution(input.Runtime) {
+			result.Executors = catalog.Executors
 		}
-		result.Online = runtime.Online && a.now().UnixMilli()-runtime.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds()
-		result.LastHeartbeatAtMillis = runtime.LastHeartbeatAt
-		current, err := store.GetAgentInventory(ctx, tx.Q(), p.Subject)
-		if err == nil {
-			result.Current = &current.Receipt
-			result.Projection = &current.Projection
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
+		result.Online, result.LastHeartbeatAtMillis = catalog.Online, catalog.LastHeartbeatAtMillis
+		result.Current, result.Projection = catalog.Current, catalog.Projection
 		if input.RequestID != "" {
 			result.RequestState = "not_recorded"
 			rec, err := store.GetRequest(ctx, tx.Q(), p.DedupDomain(), input.RequestID)
