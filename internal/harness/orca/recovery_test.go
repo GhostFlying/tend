@@ -120,7 +120,7 @@ func TestRecoveryClosingSurvivesRestartAfterClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	restarted := &worker{ws: f.ws, wt: f.orca.wt, spec: f.spec(protocol.RoleImplement), st: persisted}
-	if err := restarted.begin(t.Context(), "codex"); err != nil {
+	if err := restarted.begin(t.Context(), orcaAgents[restarted.ws.opts.Agent]); err != nil {
 		t.Fatal(err)
 	}
 	if restarted.st.Recovery.Attempts != 1 || f.orca.count("agent launch", nil) != 1 {
@@ -276,7 +276,7 @@ func TestRecoveryDoesNotCloseOwnerReplacement(t *testing.T) {
 	f.orca.failClose = false
 	a.ProviderSession = &ProviderSession{ID: "owner-session"}
 	before := f.orca.count("terminal close", nil)
-	if err := w.begin(t.Context(), "codex"); err == nil {
+	if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err == nil {
 		t.Fatal("owner replacement accepted")
 	}
 	if f.orca.count("terminal close", nil) != before || f.orca.count("agent launch", nil) != 0 {
@@ -292,7 +292,7 @@ func TestRecoveryDoesNotStartBesideReplacementTerminal(t *testing.T) {
 	}
 	f.orca.failClose = false
 	f.orca.terms[0].Handle = "owner-terminal"
-	if err := w.begin(t.Context(), "codex"); err == nil {
+	if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err == nil {
 		t.Fatal("owner replacement accepted")
 	}
 	if f.orca.count("agent launch", nil) != 0 {
@@ -323,7 +323,7 @@ func TestRecoveryResumeBeforeContinuationSubmit(t *testing.T) {
 		t.Fatal(err)
 	}
 	resumed := &worker{ws: f.ws, wt: f.orca.wt, spec: f.spec(protocol.RoleImplement), st: persisted}
-	if err := resumed.begin(t.Context(), "codex"); err != nil {
+	if err := resumed.begin(t.Context(), orcaAgents[resumed.ws.opts.Agent]); err != nil {
 		t.Fatal(err)
 	}
 	if f.orca.count("terminal send", nil) != 1 {
@@ -379,7 +379,7 @@ func TestExplicitHandbackSupersedesAutomaticRecovery(t *testing.T) {
 			f, w, a := failedWorker(t)
 			w.st.Recovery = &recoveryState{Attempts: 1, Phase: phase, Code: "response_stream_disconnected", SessionID: a.ProviderSession.ID, TranscriptPath: a.ProviderSession.TranscriptPath, TurnAt: a.MainAgent.StateStartedAt, OriginalPrompt: w.st.Said}
 			w.spec.HandBack = true
-			if err := w.begin(t.Context(), "codex"); err != nil {
+			if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 				t.Fatal(err)
 			}
 			if f.orca.count("terminal send", nil) != 1 || f.orca.count("terminal close", nil) != 0 {
@@ -453,7 +453,7 @@ func TestHandbackAdoptsOwnersReplacementProviderSession(t *testing.T) {
 				w.st.Said = said(w.st.SendText)
 				w.st.Turn = time.Now().UnixMilli()
 			}
-			if err := w.begin(t.Context(), "codex"); err != nil {
+			if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 				t.Fatal(err)
 			}
 			if w.st.SessionID != "owner-session" {
@@ -478,7 +478,7 @@ func TestUnconfirmedRootOutcomesWaitForChildrenThenRequireReconciliation(t *test
 				a.Interrupted = true
 			}
 			a.State = stateWorking
-			if err := w.begin(t.Context(), "codex"); err != nil {
+			if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 				t.Fatal(err)
 			}
 			if _, done, err := w.step(t.Context()); err != nil || done {
@@ -513,7 +513,7 @@ func TestOldSendReceiptSettlesBeforeDistinctRecoveryPrompt(t *testing.T) {
 	}
 	w.st.Send = "old-request"
 	w.st.SendText = a.Prompt
-	if err := w.begin(t.Context(), "codex"); err != nil {
+	if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 		t.Fatal(err)
 	}
 	if w.st.Send != "" || w.st.Recovery != nil {
@@ -546,7 +546,7 @@ func TestPersistedRecoveryPhaseReplaysStableEvent(t *testing.T) {
 			}
 			a.State = stateWorking
 			restarted := &worker{ws: f.ws, wt: f.orca.wt, spec: f.spec(protocol.RoleImplement), st: st}
-			if err := restarted.begin(t.Context(), "codex"); err != nil {
+			if err := restarted.begin(t.Context(), orcaAgents[restarted.ws.opts.Agent]); err != nil {
 				t.Fatal(err)
 			}
 			if len(restarted.pending) == 0 {
@@ -584,7 +584,7 @@ func TestRecoveryRegressionHandbackAfterRootFailureBeforeRecovery(t *testing.T) 
 	a.Prompt = "owner reconciles failed turn"
 	w.spec.HandBack = true
 	w.pending = nil
-	if err := w.begin(t.Context(), "codex"); err != nil {
+	if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 		t.Fatal(err)
 	}
 	if a.Prompt != harness.HandBack(w.spec) {
@@ -663,7 +663,7 @@ func TestHandbackWithoutRecoveryReplaysCheckpoint(t *testing.T) {
 	}
 	w.spec.HandBack = true
 	w.pending = nil
-	if err := w.begin(t.Context(), "codex"); err != nil {
+	if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 		t.Fatal(err)
 	}
 	var first harness.WorkerEvent

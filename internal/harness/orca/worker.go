@@ -579,6 +579,9 @@ func (w *worker) launched(ctx context.Context, l Launch, prompt string) error {
 	}
 	w.st.Launch = ""
 	w.st.Terminal, w.st.Pane = l.Outcome.Handle, l.Outcome.PaneKey
+	if l.RuntimeID != "" {
+		w.st.RootRuntimeID = l.RuntimeID
+	}
 	w.st.PromptOutcome = l.Prompt.Outcome
 	w.st.LaunchDiagnostic = l.Prompt.Diagnostic
 	w.st.PromptReceiptAt = w.ws.opts.Now().UnixMilli()
@@ -763,6 +766,9 @@ func (w *worker) agent(ctx context.Context) (Agent, bool, error) {
 	}
 	alive := false
 	for _, t := range terms {
+		if t.PaneKey() == w.st.Pane && t.Handle != w.st.Terminal || t.Handle == w.st.Terminal && (t.PaneKey() != w.st.Pane || t.WorktreeID != w.wt) {
+			return Agent{}, true, fmt.Errorf("%w: managed terminal or pane changed", harness.ErrHeld)
+		}
 		alive = alive || t.Handle == w.st.Terminal
 	}
 	if !alive {
@@ -774,6 +780,9 @@ func (w *worker) agent(ctx context.Context) (Agent, bool, error) {
 	}
 	for _, a := range agents {
 		if a.PaneKey == w.st.Pane {
+			if err := w.observeCodexRoot(ctx, &a); err != nil {
+				return a, true, err
+			}
 			if err := w.bindRootObservation(&a); err != nil {
 				return a, true, err
 			}

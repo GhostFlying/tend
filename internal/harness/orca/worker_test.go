@@ -234,8 +234,10 @@ func newWorkerFixture(t *testing.T) *workerFixture {
 	}
 	t.Cleanup(func() { os.RemoveAll(sockets) })
 	f := &workerFixture{t: t, orca: newLiveOrca(), dir: dir}
+	// Generic orchestration exercises the supported legacy TUI provider. Codex
+	// observations use managedCodexFixture with actual session/root evidence.
 	f.ws = NewWorkers(WorkerOptions{
-		Client: &Client{Exec: f.orca.exec}, Agent: protocol.AgentCodex, BridgeCommand: "/opt/tend-runner", BridgeArgs: []string{"worker-mcp"},
+		Client: &Client{Exec: f.orca.exec}, Agent: protocol.AgentTraex, BridgeCommand: "/opt/tend-runner", BridgeArgs: []string{"worker-mcp"},
 		SocketDir: sockets, IDs: testkit.NewIDGen(testkit.NewClock(), 1), Now: time.Now,
 		Settle: 50 * time.Millisecond, Poll: time.Millisecond, WaitChunk: time.Millisecond,
 	})
@@ -314,7 +316,7 @@ func TestOrcaWorkerImplements(t *testing.T) {
 		strings.Contains(prompt, "AGENTS.md describes the workspace") {
 		t.Errorf("prompt = %q", prompt)
 	}
-	cfg := filepath.Join(f.dir, ".codex", "config.toml")
+	cfg := filepath.Join(f.dir, ".trae", "traecli.toml")
 	if _, err := os.Stat(cfg); err != nil {
 		t.Errorf("bridge config while working: %v", err)
 	}
@@ -503,7 +505,7 @@ func TestOrcaWorkerRefusesAChat(t *testing.T) {
 	if f.orca.count("terminal close", nil) != 1 || f.state().Marker != "" {
 		t.Errorf("chat not closed, or state %+v kept", f.state())
 	}
-	if _, err := os.Stat(filepath.Join(f.dir, ".codex", "config.toml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(f.dir, ".trae", "traecli.toml")); !os.IsNotExist(err) {
 		t.Errorf("bridge config left behind: %v", err)
 	}
 }

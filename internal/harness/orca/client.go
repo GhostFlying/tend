@@ -263,7 +263,8 @@ type LaunchOptions struct {
 
 // Launch is what an agent launch started.
 type Launch struct {
-	Outcome struct {
+	RuntimeID string `json:"-"`
+	Outcome   struct {
 		// Kind is "terminal" or "structured" (a chat).
 		Kind    string `json:"kind"`
 		Handle  string `json:"handle"`
@@ -315,7 +316,8 @@ func (c *Client) LaunchAgent(ctx context.Context, o LaunchOptions) (Launch, erro
 		args = append(args, "--retry-launch", o.RetryLaunch)
 	}
 	var res Launch
-	err := c.call(ctx, o.Dir, &res, args...)
+	runtimeID, err := c.callWithRuntime(ctx, o.Dir, &res, args...)
+	res.RuntimeID = runtimeID
 	return res, err
 }
 

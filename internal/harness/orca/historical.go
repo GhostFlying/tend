@@ -103,10 +103,30 @@ func (ws *Workers) releaseOwned(ctx context.Context, runID, thread string, held 
 	}
 	for _, a := range agents {
 		if a.PaneKey == st.Pane {
+			// Completion cleanup uses the same root facts as the running worker.
+			// A pane's later background prompt is neither owner input nor proof
+			// that this managed native turn has ended.
+			w := &worker{ws: ws, st: st, spec: harness.WorkerSpec{RunID: runID}}
+			if err := w.observeCodexRoot(ctx, &a); err != nil {
+				return err
+			}
+			if err := w.bindRootObservation(&a); err != nil {
+				return err
+			}
+			if a.RootTurn != nil && !validRootTurn(a, st.Turn) {
+				return errors.New("orca: historical root observation is unknown; leave the terminal running")
+			}
 			if completedAt <= 0 {
 				return fmt.Errorf("%w: completed turn timestamp is unknown; explicit handback required", harness.ErrHeld)
 			}
-			if a.StateStartedAt > completedAt || a.UpdatedAt > completedAt || a.Prompt != "" && st.Said != "" && !samePrompt(said(a.Prompt), st.Said) || a.Interrupted != st.Interrupted {
+			activityAt := a.UpdatedAt
+			if a.RootTurn != nil && a.RootTurn.Source == transcriptRootSource {
+				// Native bookkeeping after completion is not another user turn.
+				// The reader already rejects a later root input, even if its
+				// prompt repeats the managed text.
+				activityAt = max(a.RootTurn.StartedAt, a.RootTurn.CompletedAt)
+			}
+			if a.StateStartedAt > completedAt || activityAt > completedAt || a.Prompt != "" && st.Said != "" && !samePrompt(said(a.Prompt), st.Said) || a.Interrupted != st.Interrupted {
 				return fmt.Errorf("%w: the terminal has activity outside the completed tend turn", harness.ErrHeld)
 			}
 			if requireDone && (!answered(a, st.Turn) || a.State != stateDone) || a.Prompt == "" || st.Said == "" || !samePrompt(said(a.Prompt), st.Said) {

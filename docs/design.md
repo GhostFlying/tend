@@ -377,3 +377,9 @@ D125/D121 Attention 完成证据：同 Issue 实际 resolved decision/action 可
 D121/D122 最终 caller 修正：owner 创建直接使用原已登记 Issue manager 验证，创建、manager 会话及原责任 wake 在同一请求事务提交；不增加客户端双阶段创建状态。归档来源携带实际内容版本，information 只作通知，任务首 run 自动显示且保留显式历史选择。见 docs/plans/final-ui-contract-review-fixes.md。
 
 D121/D123 可选托管目录：未配置时，owner 只读目录返回明确 unconfigured 空投影（inline、格式版本 1、空 Agent/runtime，无伪造环境/登记身份）；仅 store.ErrNotFound 表示此空态，原鉴权、已配置结果及真实错误不变。目录沿已批准分组显示未配置提示。见 docs/plans/empty-hosted-catalog.md。
+
+D63/D67 原生根 turn 观测修正：Orca pane 的聚合 prompt/done 不是受管根 session 的输入或完成证明。Tend 先核对并保存原 runtime、terminal/pane、launch 与 provider session/根 turn 的归属，再判断人工控制或业务完成；原生 API 或既有 Codex 原记录提供事实，缺失时保持 unknown，不重放、不提前撤桥。真实同 session 新输入及身份改变仍受原接管规则约束，不使用后台文本白名单。运行与历史清理共用该根事实。见 docs/plans/orca-managed-root-observation.md。
+
+D63/D67 的原生投影保留已知 live child 的执行边界；调用返回与根结束不替代 child settled。宿主输入分类、launch/runtime 身份与能力探测分别使用原证据，受管发送回执对账不因新 turn 尚未可见而丢失旧根身份，也不将旧根完成套用于新轮。
+
+旧 Orca 缺少 child inventory 时，D67 从已定位的原生 durable execution receipt 保留原 child/process 的未完成事实；同身份明确终态才允许 settled，根 turn 切换或工具响应返回均不清空该事实。

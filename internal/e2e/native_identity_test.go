@@ -29,6 +29,32 @@ type nativeIdentityCLI struct {
 	started         int64
 	launched, sends int
 	exists          bool
+	transcript      string
+	turn            int
+}
+
+// The fixture records the configured Codex session's real managed input and
+// interruption boundaries, rather than presenting aggregate state as proof.
+func (n *nativeIdentityCLI) record(kind string, payload any) error {
+	row, err := json.Marshal(map[string]any{"type": kind, "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "payload": payload})
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(n.transcript, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(row, '\n'))
+	return err
+}
+
+func (n *nativeIdentityCLI) startTurn() error {
+	n.turn++
+	if err := n.record("event_msg", map[string]any{"type": "task_started", "turn_id": fmt.Sprintf("turn-%d", n.turn)}); err != nil {
+		return err
+	}
+	return n.record("response_item", map[string]any{"type": "message", "role": "user", "content": []any{map[string]string{"type": "input_text", "text": n.prompt}}})
 }
 
 func (n *nativeIdentityCLI) exec(_ context.Context, _ string, args []string) ([]byte, error) {
@@ -48,13 +74,19 @@ func (n *nativeIdentityCLI) exec(_ context.Context, _ string, args []string) ([]
 		n.exists = true
 		n.prompt = arg("--prompt")
 		n.started = time.Now().UnixMilli()
+		if err := n.record("session_meta", map[string]any{"id": "actual-provider-session"}); err != nil {
+			return nil, err
+		}
+		if err := n.startTurn(); err != nil {
+			return nil, err
+		}
 		result = map[string]any{"outcome": map[string]any{"kind": "terminal", "handle": "actual-terminal", "paneKey": "actual-tab:actual-pane"}, "worktreeId": "actual-worktree", "prompt": map[string]any{"outcome": "handed-to-terminal"}}
 	case "worktree show":
 		result = map[string]any{"worktree": map[string]any{"id": "actual-worktree"}}
 	case "worktree ps":
 		var agents []orca.Agent
 		if n.exists {
-			agents = append(agents, orca.Agent{PaneKey: "actual-tab:actual-pane", AgentType: "codex", State: "working", Prompt: n.prompt, StateStartedAt: n.started, ProviderSession: &orca.ProviderSession{ID: "actual-provider-session"}})
+			agents = append(agents, orca.Agent{PaneKey: "actual-tab:actual-pane", AgentType: "codex", State: "working", Prompt: n.prompt, StateStartedAt: n.started, ProviderSession: &orca.ProviderSession{ID: "actual-provider-session", TranscriptPath: n.transcript}})
 		}
 		result = map[string]any{"worktrees": []any{map[string]any{"worktreeId": "actual-worktree", "agents": agents}}}
 	case "terminal list":
@@ -67,9 +99,16 @@ func (n *nativeIdentityCLI) exec(_ context.Context, _ string, args []string) ([]
 		result = map[string]any{"wait": map[string]any{"satisfied": false, "status": "busy"}}
 	case "terminal send":
 		n.sends++
-		if arg("--text") != "\x1b" {
+		if arg("--text") == "\x1b" {
+			if err := n.record("event_msg", map[string]any{"type": "turn_aborted", "turn_id": fmt.Sprintf("turn-%d", n.turn)}); err != nil {
+				return nil, err
+			}
+		} else {
 			n.prompt = arg("--text")
 			n.started = time.Now().UnixMilli()
+			if err := n.startTurn(); err != nil {
+				return nil, err
+			}
 		}
 		result = map[string]any{"send": map[string]any{"handle": "actual-terminal"}}
 	case "terminal close":
@@ -132,7 +171,7 @@ func TestNativeIdentityOrcaJournalRestartAndOwnerCLI(t *testing.T) {
 	})
 
 	n := newNode(t, srv, passing)
-	native := &nativeIdentityCLI{}
+	native := &nativeIdentityCLI{transcript: filepath.Join(t.TempDir(), "native.jsonl")}
 	sockets, err := os.MkdirTemp("", "p6i")
 	if err != nil {
 		t.Fatal(err)
