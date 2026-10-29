@@ -31,7 +31,7 @@ type RootTurn struct {
 
 func rootTurnIdentity(a Agent) bool {
 	r := a.RootTurn
-	return r != nil && r.Version == 1 && r.Source == "native-api" && r.PaneKey == a.PaneKey &&
+	return r != nil && r.Version == 1 && (r.Source == "native-api" || r.Source == transcriptRootSource) && r.PaneKey == a.PaneKey &&
 		r.LaunchID != "" && r.SessionID != "" && r.TurnID != "" && a.ProviderSession != nil &&
 		r.SessionID == a.ProviderSession.ID
 }

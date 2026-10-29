@@ -173,7 +173,7 @@ func TestNativeResumeWaitsForRootAndOperationSettlement(t *testing.T) {
 			f, w, a := nativeFixture(t)
 			a.MainAgent.Outcome = "success"
 			a.RootTurn.State, a.RootTurn.Operations = tc.state, tc.operations
-			if err := w.begin(t.Context(), "codex"); err != nil {
+			if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 				t.Fatal(err)
 			}
 			if f.orca.count("terminal send", nil) != 0 {
@@ -188,7 +188,7 @@ func TestNativeUnknownObservationReconcilesOnlySavedRequest(t *testing.T) {
 	a.RootTurn.State, a.RootTurn.Operations = "unknown", "unknown"
 	a.MainAgent.Outcome = "success"
 	w.st.Send, w.st.SendText = "original-request", "original prompt"
-	if err := w.begin(t.Context(), "codex"); err != nil {
+	if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.orca.count("terminal send", func(args []string) bool { return flag(args, "--retry-request") == "original-request" }); n != 1 {
@@ -219,7 +219,7 @@ func TestNativeUnknownHistorySettlesSavedRecoveryReceipt(t *testing.T) {
 	w.st.Recovery = &recoveryState{Attempts: 1, Phase: recoveryContinuing, Code: "response_stream_disconnected", SessionID: a.ProviderSession.ID, TurnID: a.RootTurn.TurnID, TurnAt: 200, Terminal: w.st.Terminal, Pane: w.st.Pane, LaunchID: "launch", RuntimeID: "runtime", OriginalPrompt: w.st.Said, ContinuationIssued: true}
 	w.st.Send, w.st.SendText = "recovery-request", w.recoveryBrief()
 	a.RootTurn.State, a.RootTurn.Operations = "unknown", "unknown"
-	if err := w.begin(t.Context(), "codex"); err != nil {
+	if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 		t.Fatal(err)
 	}
 	if w.st.Recovery.Phase != recoveryRunning || w.st.Send != "" {
@@ -273,7 +273,7 @@ func TestNativeHandbackPersistsPendingIdentityRebind(t *testing.T) {
 	w.st.RootLaunchID, w.st.RootRuntimeID = "old-launch", "old-runtime"
 	w.spec.HandBack = true
 	a.RootTurn = nil
-	if err := w.begin(t.Context(), "codex"); err != nil {
+	if err := w.begin(t.Context(), orcaAgents[w.ws.opts.Agent]); err != nil {
 		t.Fatal(err)
 	}
 	if !w.st.RootRebindPending {
@@ -652,5 +652,31 @@ func TestNativeEndHookAllowsTwoPollsForReadableEndingClock(t *testing.T) {
 	}
 	if last.Code != "ending_unconfirmed" {
 		t.Fatalf("unresolved ending not escalated: %s", last.Code)
+	}
+}
+
+func TestLaunchRuntimeDoesNotProveLegacyCapability(t *testing.T) {
+	f, w, a := nativeFixture(t)
+	a.RootTurn = nil
+	a.MainAgent.Outcome = "success"
+	launch := Launch{RuntimeID: "runtime"}
+	launch.Outcome.Kind, launch.Outcome.Handle, launch.Outcome.PaneKey = OutcomeTerminal, w.st.Terminal, w.st.Pane
+	launch.Prompt.Outcome = promptHandedToTerminal
+	if err := w.launched(t.Context(), launch, w.st.Said); err != nil {
+		t.Fatal(err)
+	}
+	previous := f.ws.opts.Client.Exec
+	f.ws.opts.Client.Exec = func(ctx context.Context, dir string, args []string) ([]byte, error) {
+		if args[0] == "status" {
+			return nil, errors.New("capability probe unavailable")
+		}
+		return previous(ctx, dir, args)
+	}
+	got, done, err := w.step(t.Context())
+	if err != nil || done || got.RootTurn == nil || got.RootTurn.State != "unknown" {
+		t.Fatalf("unverified capability became legacy completion: done=%v err=%v root=%+v", done, err, got.RootTurn)
+	}
+	if w.st.RootLegacyRuntimeID != "" {
+		t.Fatal("launch receipt was stored as legacy capability proof")
 	}
 }
