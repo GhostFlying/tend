@@ -176,7 +176,7 @@ func TestIntegration_NaturalLanguagePlanning(t *testing.T) {
 		if len(item.Stages) != 2 {
 			t.Fatalf("stage count=%d, want 2", len(item.Stages))
 		}
-		var design, review *protocol.WorkItemStage
+		var design, review *protocol.IssueStage
 		for index := range item.Stages {
 			stage := &item.Stages[index]
 			if strings.Contains(stage.Title, "评审") {

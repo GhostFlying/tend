@@ -30,7 +30,7 @@ type canonicalOwnerIssueSource struct {
 }
 type canonicalOwnerIssueCreate struct {
 	canonicalOwnerIssueSource
-	Plan                   protocol.WorkItemPlan   `json:"plan"`
+	Plan                   protocol.IssuePlan      `json:"plan"`
 	Assignee               *protocol.IssueAssignee `json:"assignee,omitempty"`
 	ParentIssueID          string                  `json:"parent_issue_id,omitempty"`
 	ExpectedParentRevision *int64                  `json:"expected_parent_revision,omitempty"`
@@ -38,9 +38,9 @@ type canonicalOwnerIssueCreate struct {
 }
 type canonicalOwnerIssueUpdate struct {
 	canonicalOwnerIssueSource
-	Plan                    protocol.WorkItemPlan              `json:"plan"`
-	ExpectedAssignmentEpoch int64                              `json:"expected_assignment_epoch"`
-	TaskDispositions        []protocol.WorkItemTaskDisposition `json:"task_dispositions,omitempty"`
+	Plan                    protocol.IssuePlan              `json:"plan"`
+	ExpectedAssignmentEpoch int64                           `json:"expected_assignment_epoch"`
+	TaskDispositions        []protocol.IssueTaskDisposition `json:"task_dispositions,omitempty"`
 }
 
 func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
@@ -113,7 +113,7 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 	}
 	p.Plan.Project = project.Project
 	if p.Plan.Stages == nil {
-		p.Plan.Stages = []protocol.WorkItemStage{}
+		p.Plan.Stages = []protocol.IssueStage{}
 	}
 	if err := validateCanonicalUnboundPlan(x, p.Plan, nil); err != nil {
 		return Outcome{}, err
@@ -169,7 +169,7 @@ func updateCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx, curre
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "project transfer requires an explicit authority change")
 	}
 	if p.Plan.Stages == nil {
-		p.Plan.Stages = []protocol.WorkItemStage{}
+		p.Plan.Stages = []protocol.IssueStage{}
 	}
 	if err := validateCanonicalBoundPlan(ctx, x, tx.Q(), current.IssueID, p.Plan, &current.Plan); err != nil {
 		return Outcome{}, err
@@ -177,7 +177,7 @@ func updateCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx, curre
 	if err := validateCanonicalSourceReference(ctx, tx.Q(), p.canonicalOwnerIssueSource); err != nil {
 		return Outcome{}, err
 	}
-	projection := protocol.WorkItem{WorkItemID: current.IssueID, Revision: current.Revision, WorkItemPlan: current.Plan}
+	projection := protocol.WorkItem{WorkItemID: current.IssueID, Revision: current.Revision, IssuePlan: current.Plan}
 	if err := validateIssueDispositions(ctx, tx.Q(), projection, p.Plan, p.TaskDispositions); err != nil {
 		return Outcome{}, err
 	}
@@ -199,7 +199,7 @@ func updateCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx, curre
 	return saveCanonicalOwnerDefinition(ctx, x, tx, next, current.Revision, p.canonicalOwnerIssueSource, p, "issue.updated")
 }
 
-func validateCanonicalUnboundPlan(x *Exec, plan protocol.WorkItemPlan, previous *protocol.WorkItemPlan) error {
+func validateCanonicalUnboundPlan(x *Exec, plan protocol.IssuePlan, previous *protocol.IssuePlan) error {
 	if plan.DefaultWorkspaceTaskID != "" {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "canonical task binding is not enabled")
 	}
@@ -211,15 +211,15 @@ func validateCanonicalUnboundPlan(x *Exec, plan protocol.WorkItemPlan, previous 
 	return validateCanonicalOwnerPlan(x, plan, previous)
 }
 
-func validateCanonicalOwnerPlan(x *Exec, plan protocol.WorkItemPlan, previous *protocol.WorkItemPlan) error {
+func validateCanonicalOwnerPlan(x *Exec, plan protocol.IssuePlan, previous *protocol.IssuePlan) error {
 	// This minimal definition slice supports authentic current-owner evidence and
 	// unchanged server-frozen prior evidence only. Additional proof kinds need the
 	// lifecycle/observation reader before being enabled, not a trusted JSON blob.
 	var prior *protocol.WorkItem
 	if previous != nil {
-		prior = &protocol.WorkItem{WorkItemPlan: *previous}
+		prior = &protocol.WorkItem{IssuePlan: *previous}
 	}
-	validate := func(e protocol.WorkItemEvidence) error {
+	validate := func(e protocol.IssueEvidence) error {
 		if saved, ok := savedIssueEvidence(prior, e); ok {
 			if !reflect.DeepEqual(saved, e) {
 				return protocol.Errorf(protocol.CodeInvalidRequest, "recorded evidence snapshots are immutable")
@@ -259,9 +259,9 @@ func validateCanonicalOwnerPlan(x *Exec, plan protocol.WorkItemPlan, previous *p
 }
 
 func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, next protocol.Issue, expected int64, source canonicalOwnerIssueSource, reason any, kind string) (Outcome, error) {
-	projection := protocol.WorkItem{WorkItemPlan: next.Plan}
+	projection := protocol.WorkItem{IssuePlan: next.Plan}
 	freezeIssueCurrentEvidence(&projection, x.Env.RequestID)
-	next.Plan = projection.WorkItemPlan
+	next.Plan = projection.IssuePlan
 	// The store freezes dependencies in sorted order; the response and durable
 	// request receipt must describe that same aggregate, regardless of input order.
 	next.DependsOn = slices.Clone(next.DependsOn)

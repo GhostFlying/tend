@@ -44,10 +44,10 @@ func TestCanonicalLegacyDefinitionAndTaskGuardsRollback(t *testing.T) {
 			switch action {
 			case "update":
 				command = UpdateIssue{}
-				payload = protocol.UpdateWorkItemPayload{WorkItemPlan: issue.Plan}
+				payload = protocol.UpdateWorkItemPayload{IssuePlan: issue.Plan}
 			case "close":
 				command = CloseIssue{}
-				payload = protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: protocol.WorkItemClosureDeclined, Reason: "Owner ends this responsibility", Evidence: []protocol.WorkItemEvidence{evidence}}}
+				payload = protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: protocol.WorkItemClosureDeclined, Reason: "Owner ends this responsibility", Evidence: []protocol.IssueEvidence{evidence}}}
 			case "link task":
 				command = LinkIssueTask{}
 				payload = protocol.LinkWorkItemTaskPayload{TaskID: task.TaskID, StageIDs: []string{"investigate"}, SourceMessageID: evidence.Reference, CommitSeq: 1}
@@ -150,7 +150,7 @@ func TestCanonicalLegacyReopenRejectsStorageTerminalFixture(t *testing.T) {
 	// does not claim a product close, achieved proof or dependency satisfaction.
 	issue.State = protocol.IssueClosed
 	issue.Revision++
-	issue.Closure = &protocol.WorkItemClosure{Kind: protocol.WorkItemClosureDeclined, Reason: "Declined fixture endpoint"}
+	issue.Closure = &protocol.IssueClosure{Kind: protocol.WorkItemClosureDeclined, Reason: "Declined fixture endpoint"}
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 		return tx.SaveCanonicalIssue(t.Context(), issue, issue.Revision-1, store.IssueRevisionProvenance{Actor: owner, RequestID: h.ids.New(protocol.PrefixRequest), Reason: "terminal storage guard fixture"})
 	}); err != nil {

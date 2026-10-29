@@ -152,7 +152,7 @@ func (PromoteConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, protocol.Errorf(protocol.CodeInternal, "created Issue projection is unavailable")
 		}
 	} else {
-		if !reflect.DeepEqual(p.Plan, protocol.WorkItemPlan{}) {
+		if !reflect.DeepEqual(p.Plan, protocol.IssuePlan{}) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "an existing Issue retains its definition; provide only the target and selected sources")
 		}
 		issue, err = store.GetCanonicalIssue(ctx, tx.Q(), p.ExistingIssueID)

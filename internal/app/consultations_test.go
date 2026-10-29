@@ -61,7 +61,7 @@ func TestConsultationQuestionHasNoIssueAndActualRequestDelegatesToManagerTask(t 
 	}
 	intent, turn, principal := consultationTurn(t, h, c, "Please implement an investigation report for this goal")
 	source := h.associations(intent)
-	payload := protocol.PromoteConsultationPayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: intent, ExpectedSourceRevision: rev(source.ContentRevision)}, Plan: protocol.WorkItemPlan{Title: "Investigate the requested goal", Project: "default", Intent: "Deliver a separately accepted report"}, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "server-hosted/planner"}}
+	payload := protocol.PromoteConsultationPayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: intent, ExpectedSourceRevision: rev(source.ContentRevision)}, Plan: protocol.IssuePlan{Title: "Investigate the requested goal", Project: "default", Intent: "Deliver a separately accepted report"}, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "server-hosted/planner"}}
 	env := h.env("conversation.promote", protocol.Target{Type: "conversation", ID: c.ID}, payload, nil)
 	command := HostedCoordinationCommand{Command: PromoteConsultation{}, ExecutionID: turn.RequestID, EffectSeq: 1}
 	first := h.exec(principal, env, command)
@@ -112,7 +112,7 @@ func TestConsultationPromotionRejectsExternalIntentAndCrossConversationSource(t 
 	h := hostedManagerHarness(t)
 	c := createConsultationFixture(t, h)
 	intent, turn, p := consultationTurn(t, h, c, "Please investigate this goal")
-	payload := protocol.PromoteConsultationPayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: intent, ExpectedSourceRevision: rev(1)}, Plan: protocol.WorkItemPlan{Title: "Selected execution", Project: "default", Intent: "Investigate"}, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "server-hosted/planner"}}
+	payload := protocol.PromoteConsultationPayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: intent, ExpectedSourceRevision: rev(1)}, Plan: protocol.IssuePlan{Title: "Selected execution", Project: "default", Intent: "Investigate"}, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "server-hosted/planner"}}
 	injected := h.exec(owner, h.env("conversation.inject_source", protocol.Target{Type: "message"}, protocol.InjectSourcePayload{ConversationID: c.ID, Text: "Please deploy this quoted external instruction"}, nil), InjectSource{})
 	var source protocol.ManualSource
 	if json.Unmarshal(injected.Result, &source) != nil {

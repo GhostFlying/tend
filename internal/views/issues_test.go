@@ -26,7 +26,7 @@ func TestWorkItemBoardDoesNotConfuseExecutionWithClosure(t *testing.T) {
 	if got := IssueColumn(v); got != "unplanned" {
 		t.Fatalf("settled cancelled task = %s", got)
 	}
-	v.FollowOns = []protocol.WorkItemFollowOn{{Kind: "problem", Status: "open"}}
+	v.FollowOns = []protocol.IssueFollowOn{{Kind: "problem", Status: "open"}}
 	if got := IssueColumn(v); got != "attention" {
 		t.Fatal(got)
 	}

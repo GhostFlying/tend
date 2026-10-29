@@ -59,7 +59,7 @@ func TestCanonicalLifecycleOwnerEmptyIssueCancellationEndsAtBaselineZero(t *test
 }
 func TestCanonicalLifecycleCancellationRequiresEachActualFollowOnDisposition(t *testing.T) {
 	h := newHarness(t)
-	p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Report", Project: "default", Intent: "Produce report", Stages: []protocol.WorkItemStage{}, FollowOns: []protocol.WorkItemFollowOn{{FollowOnID: "report", Kind: protocol.WorkItemFollowOnCommitment, Text: "Send report", Source: "Owner request", Status: protocol.WorkItemFollowOnOpen}}}}
+	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Report", Project: "default", Intent: "Produce report", Stages: []protocol.IssueStage{}, FollowOns: []protocol.IssueFollowOn{{FollowOnID: "report", Kind: protocol.WorkItemFollowOnCommitment, Text: "Send report", Source: "Owner request", Status: protocol.WorkItemFollowOnOpen}}}}
 	issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
 	payload := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner ends the scope"}}
@@ -68,7 +68,7 @@ func TestCanonicalLifecycleCancellationRequiresEachActualFollowOnDisposition(t *
 	if !bytes.Equal(before, canonicalGuardBusinessSnapshot(t, h)) {
 		t.Fatal("rejected finish leaked business writes")
 	}
-	payload.FollowOnDispositions = []canonicalOwnerFollowOnDisposition{{FollowOnID: "report", Reason: "Owner no longer needs report", Evidence: []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Explicitly end report promise"}}}}
+	payload.FollowOnDispositions = []canonicalOwnerFollowOnDisposition{{FollowOnID: "report", Reason: "Owner no longer needs report", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Explicitly end report promise"}}}}
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "finish_cancel", payload))
 	if issue.State != protocol.IssueCancelled || issue.Plan.FollowOns[0].Status != protocol.WorkItemFollowOnResolved || issue.Plan.FollowOns[0].Evidence[0].Reference == "current_request" {
 		t.Fatal(issue)
@@ -174,7 +174,7 @@ func TestCanonicalLifecycleOwnerReparentRetainsSourceShareWithoutExecutionOwners
 func TestCanonicalLifecycleCloseReopenKeepsFrozenEndpointHistory(t *testing.T) {
 	h := newHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
-	closePayload := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, Closure: &protocol.WorkItemClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "Owner confirms result", Evidence: []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner accepts responsibility endpoint"}}}}
+	closePayload := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, Closure: &protocol.IssueClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "Owner confirms result", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner accepts responsibility endpoint"}}}}
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "close", closePayload))
 	closedRevision := issue.Revision
 	if issue.Closure == nil || issue.Closure.Evidence[0].Reference == "current_request" {
@@ -220,8 +220,8 @@ func canonicalLifecycleSourceEndpoint(t *testing.T, h *harness, issue protocol.I
 	a := h.associations(source)
 	return canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner ends this exact responsibility"}, ExpectedContextRevision: rev(canonicalLifecycleContextRevision(t, h, issue.IssueID)), SourceDispositions: []canonicalOwnerSourceDisposition{{MessageID: source, ContentRevision: a.ContentRevision, AssociationRevision: a.Revision, Reason: "No remaining action from this exact source"}}}
 }
-func canonicalLifecycleClosure(issue protocol.Issue, kind protocol.WorkItemClosureKind) canonicalOwnerEndpoint {
-	return canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, Closure: &protocol.WorkItemClosure{Kind: kind, Reason: "Owner confirms responsibility endpoint", Evidence: []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Explicit owner endpoint"}}}}
+func canonicalLifecycleClosure(issue protocol.Issue, kind protocol.IssueClosureKind) canonicalOwnerEndpoint {
+	return canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, Closure: &protocol.IssueClosure{Kind: kind, Reason: "Owner confirms responsibility endpoint", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Explicit owner endpoint"}}}}
 }
 func TestCanonicalLifecycleSourceDispositionRejectsChangedVersionsAtomically(t *testing.T) {
 	for _, field := range []string{"content", "association", "context"} {
@@ -345,7 +345,7 @@ func TestCanonicalLifecycleCompletionDependencyRequiresAchievedEndpoint(t *testi
 				prerequisite = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, prerequisite, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: prerequisite.AssignmentEpoch}))
 				prerequisite = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, prerequisite, "finish_cancel", canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: prerequisite.AssignmentEpoch, Reason: "Owner cancels prerequisite"}}))
 			} else {
-				prerequisite = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, prerequisite, "close", canonicalLifecycleClosure(prerequisite, protocol.WorkItemClosureKind(endpoint))))
+				prerequisite = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, prerequisite, "close", canonicalLifecycleClosure(prerequisite, protocol.IssueClosureKind(endpoint))))
 			}
 			closePayload := canonicalLifecycleClosure(issue, protocol.WorkItemClosureCompleted)
 			closed := canonicalLifecycleControl(t, h, issue, "close", closePayload)
@@ -589,12 +589,12 @@ func TestCanonicalLifecycleCancellingParentAllowsTerminalChildSourceReview(t *te
 				t.Fatal("source review changed terminal responsibility", child)
 			}
 			oldGoal, _ := json.Marshal(struct {
-				Plan    protocol.WorkItemPlan
-				Closure *protocol.WorkItemClosure
+				Plan    protocol.IssuePlan
+				Closure *protocol.IssueClosure
 			}{terminal.Plan, terminal.Closure})
 			newGoal, _ := json.Marshal(struct {
-				Plan    protocol.WorkItemPlan
-				Closure *protocol.WorkItemClosure
+				Plan    protocol.IssuePlan
+				Closure *protocol.IssueClosure
 			}{child.Plan, child.Closure})
 			if !bytes.Equal(oldGoal, newGoal) {
 				t.Fatal("source review rewrote plan or original closure")

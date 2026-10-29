@@ -41,7 +41,7 @@ func GetCanonicalIssue(ctx context.Context, q Querier, id string) (protocol.Issu
 	if err != nil {
 		return current, err
 	}
-	current.Revision, current.Plan, current.Closure = plan.Revision, plan.WorkItemPlan, plan.Closure
+	current.Revision, current.Plan, current.Closure = plan.Revision, plan.IssuePlan, plan.Closure
 	current.CreatedAt, current.UpdatedAt = plan.CreatedAt, plan.UpdatedAt
 	current.DependsOn = []string{}
 	rows, err := q.QueryContext(ctx, `SELECT depends_on FROM issue_dependencies WHERE issue_id=? ORDER BY depends_on`, id)
@@ -90,7 +90,7 @@ func GetCanonicalIssueRevision(ctx context.Context, q Querier, id string, revisi
 	if err != nil {
 		return protocol.Issue{}, err
 	}
-	out := protocol.Issue{IssueControl: snapshot.Control, Revision: revision, Plan: plan.WorkItemPlan, Closure: plan.Closure, CreatedAt: plan.CreatedAt, UpdatedAt: plan.UpdatedAt, DependsOn: []string{}}
+	out := protocol.Issue{IssueControl: snapshot.Control, Revision: revision, Plan: plan.IssuePlan, Closure: plan.Closure, CreatedAt: plan.CreatedAt, UpdatedAt: plan.UpdatedAt, DependsOn: []string{}}
 	for _, edge := range snapshot.Dependencies {
 		if edge.IssueID != id {
 			return protocol.Issue{}, fmt.Errorf("store: issue dependency snapshot identity mismatch")
@@ -167,7 +167,7 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 	if err != nil {
 		return err
 	}
-	projection := protocol.WorkItem{WorkItemPlan: next.Plan, WorkItemID: next.IssueID, Revision: next.Revision, Status: status, Closure: next.Closure, CreatedAt: next.CreatedAt, UpdatedAt: next.UpdatedAt}
+	projection := protocol.WorkItem{IssuePlan: next.Plan, WorkItemID: next.IssueID, Revision: next.Revision, Status: status, Closure: next.Closure, CreatedAt: next.CreatedAt, UpdatedAt: next.UpdatedAt}
 	if err := t.saveIssueProjection(ctx, projection, expected, p.Reason); err != nil {
 		return err
 	}

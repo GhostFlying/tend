@@ -32,7 +32,7 @@ func TestExecutionWaitOnlyCountsCapacityOnCompatibleAvailableHosts(t *testing.T)
 }
 
 func TestExecutionCountsIgnorePlanStatusAndDeduplicateLinkedTasks(t *testing.T) {
-	v := protocol.WorkItemView{WorkItem: protocol.WorkItem{WorkItemPlan: protocol.WorkItemPlan{Stages: []protocol.WorkItemStage{
+	v := protocol.WorkItemView{WorkItem: protocol.WorkItem{IssuePlan: protocol.IssuePlan{Stages: []protocol.IssueStage{
 		{StageID: "parent", Status: "active", TaskIDs: []string{"one"}},
 		{StageID: "child", ParentID: "parent", Status: "active", TaskIDs: []string{"one", "two"}},
 		{StageID: "empty", Status: "active"},

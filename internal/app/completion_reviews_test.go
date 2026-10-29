@@ -82,15 +82,15 @@ func TestCompletionReviewsSurviveFailedUpdateAndAcknowledgeSharedWork(t *testing
 	}); err != nil {
 		t.Fatal(err)
 	}
-	p := protocol.UpdateWorkItemPayload{WorkItemPlan: v.WorkItemPlan, CompletionReviews: []protocol.CompletionReviewAcknowledgement{{EventID: pending.EventID, Reason: "Review complete; service responsibility continues"}}}
-	p.Stages = append([]protocol.WorkItemStage(nil), p.Stages...)
+	p := protocol.UpdateWorkItemPayload{IssuePlan: v.IssuePlan, CompletionReviews: []protocol.CompletionReviewAcknowledgement{{EventID: pending.EventID, Reason: "Review complete; service responsibility continues"}}}
+	p.Stages = append([]protocol.IssueStage(nil), p.Stages...)
 	p.Stages[0].Status = "done"
-	p.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: "acceptance", Reference: detail.CurrentArtifactID, Summary: "wrong ID"}}
+	p.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: "acceptance", Reference: detail.CurrentArtifactID, Summary: "wrong ID"}}
 	op := h.exec(owner, h.env("work_items.update", workTarget(v.WorkItemID), p, rev(v.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpFailed || len(read(v.WorkItemID).PendingReviews) != 1 {
 		t.Fatal("failed update lost pending review", op)
 	}
-	p.WorkItemPlan = v.WorkItemPlan
+	p.IssuePlan = v.IssuePlan
 	op = h.exec(owner, h.env("work_items.update", workTarget(v.WorkItemID), p, rev(v.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -103,8 +103,8 @@ func TestCompletionReviewsSurviveFailedUpdateAndAcknowledgeSharedWork(t *testing
 		t.Fatal("shared work acknowledgement leaked")
 	}
 	other.Stages[0].Status = "done"
-	other.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: "acceptance", Reference: pending.AcceptanceID, Summary: "Independently accepted"}}
-	op = h.exec(owner, h.env("work_items.update", workTarget(other.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: other.WorkItemPlan}, rev(other.Revision)), UpdateIssue{})
+	other.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: "acceptance", Reference: pending.AcceptanceID, Summary: "Independently accepted"}}
+	op = h.exec(owner, h.env("work_items.update", workTarget(other.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: other.IssuePlan}, rev(other.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded || len(read(other.WorkItemID).PendingReviews) != 0 || read(other.WorkItemID).Status != "open" {
 		t.Fatal(op)
 	}
@@ -119,12 +119,12 @@ func TestCompletionReviewBackfillAndLateLink(t *testing.T) {
 	plan := workPlan()
 	plan.Stages[0].Status = "active"
 	plan.Stages[0].TaskIDs = []string{taskID}
-	plan.Stages = append(plan.Stages, protocol.WorkItemStage{StageID: "service", Title: "Retain service", Status: "active", TaskIDs: []string{taskID}})
+	plan.Stages = append(plan.Stages, protocol.IssueStage{StageID: "service", Title: "Retain service", Status: "active", TaskIDs: []string{taskID}})
 	open := h.createWork(plan)
 	plan.Stages[0].Status = "done"
 	detail := h.executionTask(taskID)
-	plan.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: "acceptance", Reference: detail.Acceptances[0].AcceptanceID, Summary: "Accepted investigation"}}
-	if op := h.exec(owner, h.env("work_items.update", workTarget(open.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: plan}, rev(open.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
+	plan.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: "acceptance", Reference: detail.Acceptances[0].AcceptanceID, Summary: "Accepted investigation"}}
+	if op := h.exec(owner, h.env("work_items.update", workTarget(open.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: plan}, rev(open.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	// One task may satisfy delivery while a second linked stage retains service responsibility.

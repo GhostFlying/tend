@@ -234,7 +234,7 @@ func TestWorkItemChoiceAnswerWakesWithSystemNoticeAndNoQueuedOwnerReply(t *testi
 		t.Fatal(err)
 	}
 	var item protocol.WorkItem
-	if err := json.Unmarshal(e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Delivery", Intent: "Implement and discuss deployment"}}, app.CreateIssue{}), &item); err != nil {
+	if err := json.Unmarshal(e.exec(owner, "work_items.create", protocol.Target{Type: "work_item"}, protocol.CreateWorkItemPayload{IssuePlan: protocol.IssuePlan{Title: "Delivery", Intent: "Implement and discuss deployment"}}, app.CreateIssue{}), &item); err != nil {
 		t.Fatal(err)
 	}
 	execute := func(cmd app.Command, target protocol.Target, version int64, payload any) protocol.Operation {

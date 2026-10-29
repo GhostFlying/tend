@@ -67,7 +67,7 @@ func TestHostedNestedOwnerEvidenceRequiresUsableSource(t *testing.T) {
 			}
 			issue = canonicalTaskIssue(t, h, issue.IssueID)
 			plan := issue.Plan
-			plan.Stages = []protocol.WorkItemStage{{StageID: "report", Title: "Report", Status: protocol.WorkItemStageDone, Evidence: []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: messageID, Summary: "Owner confirms the report"}}}}
+			plan.Stages = []protocol.IssueStage{{StageID: "report", Title: "Report", Status: protocol.WorkItemStageDone, Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: messageID, Summary: "Owner confirms the report"}}}}
 			command := HostedCoordinationCommand{Command: CanonicalOwnerIssueCommand{Action: "update"}, ExecutionID: turn.RequestID, EffectSeq: 1}
 			op, err := h.app.Execute(t.Context(), principal, h.env(command.Operation(), protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.UpdateIssuePayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Plan: plan}, rev(issue.Revision)), command)
 			if state == "admitted" {

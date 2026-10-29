@@ -266,14 +266,14 @@ func hostedPayloadSource(raw json.RawMessage) string {
 
 // Manager closure consumes verified facts from the existing evidence resolver,
 // never re-labeling its own command as an owner decision.
-func canonicalEndpointEvidence(ctx context.Context, x *Exec, q store.Querier, issue protocol.Issue, evidence []protocol.WorkItemEvidence) error {
+func canonicalEndpointEvidence(ctx context.Context, x *Exec, q store.Querier, issue protocol.Issue, evidence []protocol.IssueEvidence) error {
 	if x.coordinationExecution == nil {
 		return validateCanonicalOwnerEndpointEvidence(evidence)
 	}
-	w := protocol.WorkItem{WorkItemID: issue.IssueID, WorkItemPlan: issue.Plan}
+	w := protocol.WorkItem{WorkItemID: issue.IssueID, IssuePlan: issue.Plan}
 	return validateHostedIssueEvidence(ctx, x, q, w, nil, evidence)
 }
-func validateHostedIssueEvidence(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, previous *protocol.WorkItem, evidence []protocol.WorkItemEvidence) error {
+func validateHostedIssueEvidence(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, previous *protocol.WorkItem, evidence []protocol.IssueEvidence) error {
 	for _, e := range evidence {
 		if _, saved := savedIssueEvidence(previous, e); saved {
 			continue

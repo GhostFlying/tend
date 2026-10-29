@@ -1881,7 +1881,7 @@
       "additionalProperties": false,
       "properties": {
         "closure": {
-          "$ref": "#/definitions/WorkItemClosure"
+          "$ref": "#/definitions/IssueClosure"
         },
         "commit_seq": {
           "type": "integer"
@@ -2743,7 +2743,7 @@
           "type": "string"
         },
         "plan": {
-          "$ref": "#/definitions/WorkItemPlan"
+          "$ref": "#/definitions/IssuePlan"
         },
         "source_message_id": {
           "type": "string"
@@ -2866,13 +2866,13 @@
         },
         "deliveries": {
           "items": {
-            "$ref": "#/definitions/WorkItemDelivery"
+            "$ref": "#/definitions/IssueDelivery"
           },
           "type": "array"
         },
         "follow_ons": {
           "items": {
-            "$ref": "#/definitions/WorkItemFollowOn"
+            "$ref": "#/definitions/IssueFollowOn"
           },
           "type": "array"
         },
@@ -2892,7 +2892,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/definitions/WorkItemStage"
+                "$ref": "#/definitions/IssueStage"
               },
               "type": "array"
             },
@@ -4040,6 +4040,47 @@
       "title": "IssueAssignmentPayload",
       "type": "object"
     },
+    "IssueClosure": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueEvidence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/IssueClosureKind"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "reason",
+        "evidence"
+      ],
+      "title": "IssueClosure",
+      "type": "object"
+    },
+    "IssueClosureKind": {
+      "enum": [
+        "completed",
+        "declined",
+        "handed_off",
+        "superseded"
+      ],
+      "title": "IssueClosureKind",
+      "type": "string"
+    },
     "IssueContextFact": {
       "additionalProperties": false,
       "properties": {
@@ -4330,6 +4371,37 @@
       "title": "IssueDeadline",
       "type": "object"
     },
+    "IssueDelivery": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_id": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/definitions/IssueDeliveryProvider"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "delivery_id",
+        "provider",
+        "repository",
+        "number"
+      ],
+      "title": "IssueDelivery",
+      "type": "object"
+    },
     "IssueDeliveryObservation": {
       "additionalProperties": false,
       "properties": {
@@ -4418,11 +4490,19 @@
       "title": "IssueDeliveryPage",
       "type": "object"
     },
+    "IssueDeliveryProvider": {
+      "enum": [
+        "github",
+        "codebase"
+      ],
+      "title": "IssueDeliveryProvider",
+      "type": "string"
+    },
     "IssueDeliveryView": {
       "additionalProperties": false,
       "properties": {
         "delivery": {
-          "$ref": "#/definitions/WorkItemDelivery"
+          "$ref": "#/definitions/IssueDelivery"
         },
         "observation": {
           "$ref": "#/definitions/IssueDeliveryObservation"
@@ -4439,7 +4519,7 @@
       "additionalProperties": false,
       "properties": {
         "closure": {
-          "$ref": "#/definitions/WorkItemClosure"
+          "$ref": "#/definitions/IssueClosure"
         },
         "completion_reviews": {
           "items": {
@@ -4481,6 +4561,81 @@
       "title": "IssueEndpointPayload",
       "type": "object"
     },
+    "IssueEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/IssueEvidenceKind"
+        },
+        "observation": {
+          "$ref": "#/definitions/DeliveryObservation"
+        },
+        "reference": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "upgrade": {
+          "$ref": "#/definitions/UpgradeEvidence"
+        }
+      },
+      "required": [
+        "kind",
+        "reference",
+        "summary"
+      ],
+      "title": "IssueEvidence",
+      "type": "object"
+    },
+    "IssueEvidenceKind": {
+      "enum": [
+        "acceptance",
+        "delivery",
+        "owner_decision",
+        "upgrade"
+      ],
+      "title": "IssueEvidenceKind",
+      "type": "string"
+    },
+    "IssueFollowOn": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/IssueEvidence"
+          },
+          "type": "array"
+        },
+        "follow_on_id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/IssueFollowOnKind"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/IssueFollowOnStatus"
+        },
+        "text": {
+          "type": "string"
+        },
+        "transferred_to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "follow_on_id",
+        "kind",
+        "text",
+        "source",
+        "status"
+      ],
+      "title": "IssueFollowOn",
+      "type": "object"
+    },
     "IssueFollowOnDisposition": {
       "additionalProperties": false,
       "properties": {
@@ -4488,7 +4643,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/definitions/WorkItemEvidence"
+                "$ref": "#/definitions/IssueEvidence"
               },
               "type": "array"
             },
@@ -4511,6 +4666,24 @@
       ],
       "title": "IssueFollowOnDisposition",
       "type": "object"
+    },
+    "IssueFollowOnKind": {
+      "enum": [
+        "commitment",
+        "problem",
+        "suggestion"
+      ],
+      "title": "IssueFollowOnKind",
+      "type": "string"
+    },
+    "IssueFollowOnStatus": {
+      "enum": [
+        "open",
+        "resolved",
+        "transferred"
+      ],
+      "title": "IssueFollowOnStatus",
+      "type": "string"
     },
     "IssueFollowupHistory": {
       "additionalProperties": false,
@@ -4794,6 +4967,62 @@
       "title": "IssuePage",
       "type": "object"
     },
+    "IssuePlan": {
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "items": {
+            "$ref": "#/definitions/SharedFact"
+          },
+          "type": "array"
+        },
+        "default_workspace_task_id": {
+          "type": "string"
+        },
+        "deliveries": {
+          "items": {
+            "$ref": "#/definitions/IssueDelivery"
+          },
+          "type": "array"
+        },
+        "follow_ons": {
+          "items": {
+            "$ref": "#/definitions/IssueFollowOn"
+          },
+          "type": "array"
+        },
+        "intent": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "stages": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueStage"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "project",
+        "intent",
+        "stages"
+      ],
+      "title": "IssuePlan",
+      "type": "object"
+    },
     "IssueRefreshDeliveryPayload": {
       "additionalProperties": false,
       "properties": {
@@ -4882,6 +5111,62 @@
       "title": "IssueSourceReview",
       "type": "object"
     },
+    "IssueStage": {
+      "additionalProperties": false,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/IssueEvidence"
+          },
+          "type": "array"
+        },
+        "parent_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "stage_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/IssueStageStatus"
+        },
+        "task_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage_id",
+        "title",
+        "status"
+      ],
+      "title": "IssueStage",
+      "type": "object"
+    },
+    "IssueStageStatus": {
+      "enum": [
+        "planned",
+        "active",
+        "done",
+        "cancelled",
+        "retired"
+      ],
+      "title": "IssueStageStatus",
+      "type": "string"
+    },
     "IssueState": {
       "enum": [
         "active",
@@ -4943,6 +5228,40 @@
       "title": "IssueSummary",
       "type": "object"
     },
+    "IssueTaskDisposition": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/IssueTaskDispositionAction"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "action",
+        "spec_version",
+        "reason"
+      ],
+      "title": "IssueTaskDisposition",
+      "type": "object"
+    },
+    "IssueTaskDispositionAction": {
+      "enum": [
+        "continue_existing",
+        "updated",
+        "stopped"
+      ],
+      "title": "IssueTaskDispositionAction",
+      "type": "string"
+    },
     "IssueTaskSummary": {
       "additionalProperties": false,
       "properties": {
@@ -5003,7 +5322,7 @@
           "$ref": "#/definitions/AttentionPage"
         },
         "closure": {
-          "$ref": "#/definitions/WorkItemClosure"
+          "$ref": "#/definitions/IssueClosure"
         },
         "context_revision": {
           "type": "integer"
@@ -5052,7 +5371,7 @@
           "type": "array"
         },
         "plan": {
-          "$ref": "#/definitions/WorkItemPlan"
+          "$ref": "#/definitions/IssuePlan"
         },
         "revision": {
           "type": "integer"
@@ -6052,7 +6371,7 @@
           "type": "integer"
         },
         "plan": {
-          "$ref": "#/definitions/WorkItemPlan"
+          "$ref": "#/definitions/IssuePlan"
         },
         "source_message_id": {
           "type": "string"
@@ -8713,14 +9032,14 @@
           "type": "integer"
         },
         "plan": {
-          "$ref": "#/definitions/WorkItemPlan"
+          "$ref": "#/definitions/IssuePlan"
         },
         "source_message_id": {
           "type": "string"
         },
         "task_dispositions": {
           "items": {
-            "$ref": "#/definitions/WorkItemTaskDisposition"
+            "$ref": "#/definitions/IssueTaskDisposition"
           },
           "type": "array"
         }
@@ -8796,13 +9115,13 @@
         },
         "deliveries": {
           "items": {
-            "$ref": "#/definitions/WorkItemDelivery"
+            "$ref": "#/definitions/IssueDelivery"
           },
           "type": "array"
         },
         "follow_ons": {
           "items": {
-            "$ref": "#/definitions/WorkItemFollowOn"
+            "$ref": "#/definitions/IssueFollowOn"
           },
           "type": "array"
         },
@@ -8819,7 +9138,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/definitions/WorkItemStage"
+                "$ref": "#/definitions/IssueStage"
               },
               "type": "array"
             },
@@ -8833,7 +9152,7 @@
         },
         "task_dispositions": {
           "items": {
-            "$ref": "#/definitions/WorkItemTaskDisposition"
+            "$ref": "#/definitions/IssueTaskDisposition"
           },
           "type": "array"
         },
@@ -9242,47 +9561,6 @@
       "title": "WorkItemChoicePage",
       "type": "object"
     },
-    "WorkItemClosure": {
-      "additionalProperties": false,
-      "properties": {
-        "evidence": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/WorkItemEvidence"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "kind": {
-          "$ref": "#/definitions/WorkItemClosureKind"
-        },
-        "reason": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "reason",
-        "evidence"
-      ],
-      "title": "WorkItemClosure",
-      "type": "object"
-    },
-    "WorkItemClosureKind": {
-      "enum": [
-        "completed",
-        "declined",
-        "handed_off",
-        "superseded"
-      ],
-      "title": "WorkItemClosureKind",
-      "type": "string"
-    },
     "WorkItemCompletionReview": {
       "additionalProperties": false,
       "properties": {
@@ -9402,138 +9680,6 @@
       "title": "WorkItemContext",
       "type": "object"
     },
-    "WorkItemDelivery": {
-      "additionalProperties": false,
-      "properties": {
-        "delivery_id": {
-          "type": "string"
-        },
-        "host_id": {
-          "type": "string"
-        },
-        "number": {
-          "type": "integer"
-        },
-        "provider": {
-          "$ref": "#/definitions/WorkItemDeliveryProvider"
-        },
-        "repository": {
-          "type": "string"
-        },
-        "url": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "delivery_id",
-        "provider",
-        "repository",
-        "number"
-      ],
-      "title": "WorkItemDelivery",
-      "type": "object"
-    },
-    "WorkItemDeliveryProvider": {
-      "enum": [
-        "github",
-        "codebase"
-      ],
-      "title": "WorkItemDeliveryProvider",
-      "type": "string"
-    },
-    "WorkItemEvidence": {
-      "additionalProperties": false,
-      "properties": {
-        "kind": {
-          "$ref": "#/definitions/WorkItemEvidenceKind"
-        },
-        "observation": {
-          "$ref": "#/definitions/DeliveryObservation"
-        },
-        "reference": {
-          "type": "string"
-        },
-        "summary": {
-          "type": "string"
-        },
-        "upgrade": {
-          "$ref": "#/definitions/UpgradeEvidence"
-        }
-      },
-      "required": [
-        "kind",
-        "reference",
-        "summary"
-      ],
-      "title": "WorkItemEvidence",
-      "type": "object"
-    },
-    "WorkItemEvidenceKind": {
-      "enum": [
-        "acceptance",
-        "delivery",
-        "owner_decision",
-        "upgrade"
-      ],
-      "title": "WorkItemEvidenceKind",
-      "type": "string"
-    },
-    "WorkItemFollowOn": {
-      "additionalProperties": false,
-      "properties": {
-        "evidence": {
-          "items": {
-            "$ref": "#/definitions/WorkItemEvidence"
-          },
-          "type": "array"
-        },
-        "follow_on_id": {
-          "type": "string"
-        },
-        "kind": {
-          "$ref": "#/definitions/WorkItemFollowOnKind"
-        },
-        "source": {
-          "type": "string"
-        },
-        "status": {
-          "$ref": "#/definitions/WorkItemFollowOnStatus"
-        },
-        "text": {
-          "type": "string"
-        },
-        "transferred_to": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "follow_on_id",
-        "kind",
-        "text",
-        "source",
-        "status"
-      ],
-      "title": "WorkItemFollowOn",
-      "type": "object"
-    },
-    "WorkItemFollowOnKind": {
-      "enum": [
-        "commitment",
-        "problem",
-        "suggestion"
-      ],
-      "title": "WorkItemFollowOnKind",
-      "type": "string"
-    },
-    "WorkItemFollowOnStatus": {
-      "enum": [
-        "open",
-        "resolved",
-        "transferred"
-      ],
-      "title": "WorkItemFollowOnStatus",
-      "type": "string"
-    },
     "WorkItemPage": {
       "additionalProperties": false,
       "properties": {
@@ -9557,118 +9703,6 @@
       "title": "WorkItemPage",
       "type": "object"
     },
-    "WorkItemPlan": {
-      "additionalProperties": false,
-      "properties": {
-        "background": {
-          "items": {
-            "$ref": "#/definitions/SharedFact"
-          },
-          "type": "array"
-        },
-        "default_workspace_task_id": {
-          "type": "string"
-        },
-        "deliveries": {
-          "items": {
-            "$ref": "#/definitions/WorkItemDelivery"
-          },
-          "type": "array"
-        },
-        "follow_ons": {
-          "items": {
-            "$ref": "#/definitions/WorkItemFollowOn"
-          },
-          "type": "array"
-        },
-        "intent": {
-          "type": "string"
-        },
-        "project": {
-          "type": "string"
-        },
-        "stages": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/WorkItemStage"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "title",
-        "project",
-        "intent",
-        "stages"
-      ],
-      "title": "WorkItemPlan",
-      "type": "object"
-    },
-    "WorkItemStage": {
-      "additionalProperties": false,
-      "properties": {
-        "depends_on": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "evidence": {
-          "items": {
-            "$ref": "#/definitions/WorkItemEvidence"
-          },
-          "type": "array"
-        },
-        "parent_id": {
-          "type": "string"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "stage_id": {
-          "type": "string"
-        },
-        "status": {
-          "$ref": "#/definitions/WorkItemStageStatus"
-        },
-        "task_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "stage_id",
-        "title",
-        "status"
-      ],
-      "title": "WorkItemStage",
-      "type": "object"
-    },
-    "WorkItemStageStatus": {
-      "enum": [
-        "planned",
-        "active",
-        "done",
-        "cancelled",
-        "retired"
-      ],
-      "title": "WorkItemStageStatus",
-      "type": "string"
-    },
     "WorkItemStatus": {
       "enum": [
         "open",
@@ -9676,40 +9710,6 @@
         "closed"
       ],
       "title": "WorkItemStatus",
-      "type": "string"
-    },
-    "WorkItemTaskDisposition": {
-      "additionalProperties": false,
-      "properties": {
-        "action": {
-          "$ref": "#/definitions/WorkItemTaskDispositionAction"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "spec_version": {
-          "type": "integer"
-        },
-        "task_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "task_id",
-        "action",
-        "spec_version",
-        "reason"
-      ],
-      "title": "WorkItemTaskDisposition",
-      "type": "object"
-    },
-    "WorkItemTaskDispositionAction": {
-      "enum": [
-        "continue_existing",
-        "updated",
-        "stopped"
-      ],
-      "title": "WorkItemTaskDispositionAction",
       "type": "string"
     },
     "WorkItemUpdateStatus": {
@@ -9737,7 +9737,7 @@
           "type": "array"
         },
         "closure": {
-          "$ref": "#/definitions/WorkItemClosure"
+          "$ref": "#/definitions/IssueClosure"
         },
         "column": {
           "type": "string"
@@ -9750,7 +9750,7 @@
         },
         "deliveries": {
           "items": {
-            "$ref": "#/definitions/WorkItemDelivery"
+            "$ref": "#/definitions/IssueDelivery"
           },
           "type": "array"
         },
@@ -9762,7 +9762,7 @@
         },
         "follow_ons": {
           "items": {
-            "$ref": "#/definitions/WorkItemFollowOn"
+            "$ref": "#/definitions/IssueFollowOn"
           },
           "type": "array"
         },
@@ -9800,7 +9800,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/definitions/WorkItemStage"
+                "$ref": "#/definitions/IssueStage"
               },
               "type": "array"
             },

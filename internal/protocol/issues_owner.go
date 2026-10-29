@@ -9,7 +9,7 @@ type IssueSourceReference struct {
 
 type CreateIssuePayload struct {
 	IssueSourceReference
-	Plan                   WorkItemPlan   `json:"plan"`
+	Plan                   IssuePlan      `json:"plan"`
 	Assignee               *IssueAssignee `json:"assignee,omitempty"`
 	ParentIssueID          string         `json:"parent_issue_id,omitempty"`
 	ExpectedParentRevision *int64         `json:"expected_parent_revision,omitempty"`
@@ -18,9 +18,9 @@ type CreateIssuePayload struct {
 
 type UpdateIssuePayload struct {
 	IssueSourceReference
-	Plan                    WorkItemPlan              `json:"plan"`
-	ExpectedAssignmentEpoch int64                     `json:"expected_assignment_epoch"`
-	TaskDispositions        []WorkItemTaskDisposition `json:"task_dispositions,omitempty"`
+	Plan                    IssuePlan              `json:"plan"`
+	ExpectedAssignmentEpoch int64                  `json:"expected_assignment_epoch"`
+	TaskDispositions        []IssueTaskDisposition `json:"task_dispositions,omitempty"`
 }
 
 type IssueControlPayload struct {
@@ -30,9 +30,9 @@ type IssueControlPayload struct {
 }
 
 type IssueFollowOnDisposition struct {
-	FollowOnID string             `json:"follow_on_id"`
-	Reason     string             `json:"reason"`
-	Evidence   []WorkItemEvidence `json:"evidence"`
+	FollowOnID string          `json:"follow_on_id"`
+	Reason     string          `json:"reason"`
+	Evidence   []IssueEvidence `json:"evidence"`
 }
 
 type IssueSourceDisposition struct {
@@ -44,7 +44,7 @@ type IssueSourceDisposition struct {
 
 type IssueEndpointPayload struct {
 	IssueControlPayload
-	Closure                 *WorkItemClosure                  `json:"closure,omitempty"`
+	Closure                 *IssueClosure                     `json:"closure,omitempty"`
 	FollowOnDispositions    []IssueFollowOnDisposition        `json:"follow_on_dispositions,omitempty"`
 	SourceDispositions      []IssueSourceDisposition          `json:"source_dispositions,omitempty"`
 	ExpectedContextRevision *int64                            `json:"expected_context_revision,omitempty"`

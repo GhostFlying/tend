@@ -127,7 +127,7 @@ func TestFollowupRegressionOneTimeInvalidationAfterExpiry(t *testing.T) {
 func TestFollowupRegressionSnoozedExpiryStarvesOtherRules(t *testing.T) {
 	h := newHarness(t)
 	w := h.createWork(workPlan())
-	op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: "snoozed"}, rev(w.Revision)), UpdateIssue{})
+	op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan, Status: "snoozed"}, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

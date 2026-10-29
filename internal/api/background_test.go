@@ -17,7 +17,7 @@ func TestBackgroundOwnerSourcesAndMetrics(t *testing.T) {
 	app.WithFollowups(true)(e.app)
 	e.server.cfg.HostedMainAgent = true
 	var w protocol.WorkItem
-	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: protocol.WorkItemPlan{Title: "Check", Intent: "Agreed scope"}}, app.CreateIssue{}), &w); err != nil {
+	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{IssuePlan: protocol.IssuePlan{Title: "Check", Intent: "Agreed scope"}}, app.CreateIssue{}), &w); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {

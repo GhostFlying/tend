@@ -95,7 +95,7 @@ type IssueDeliveryObservation struct {
 }
 
 type IssueDeliveryView struct {
-	Delivery    WorkItemDelivery         `json:"delivery"`
+	Delivery    IssueDelivery            `json:"delivery"`
 	Observation IssueDeliveryObservation `json:"observation"`
 }
 type IssueDeliveryPage struct {

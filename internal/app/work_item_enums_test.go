@@ -35,7 +35,7 @@ func TestWorkItemPlanningGuessReplayPreservesCompleteAgreement(t *testing.T) {
 	h := newHarness(t)
 	plan := workPlan()
 	plan.Background = []protocol.SharedFact{{Kind: "goal", Text: "Owner needs design and a separate review before implementation", Source: "owner planning request"}}
-	plan.Stages = []protocol.WorkItemStage{
+	plan.Stages = []protocol.IssueStage{
 		{StageID: "design", Title: "Design the approach", Status: "planned"},
 		{StageID: "review", Title: "Review the complete design", Status: "planned", DependsOn: []string{"design"}},
 	}
@@ -54,17 +54,17 @@ func TestWorkItemPlanningGuessReplayPreservesCompleteAgreement(t *testing.T) {
 		{"stages[1].status", "ready"},
 	} {
 		t.Run(guess.value, func(t *testing.T) {
-			plan := original.WorkItemPlan
+			plan := original.IssuePlan
 			plan.Background = slices.Clone(plan.Background)
 			plan.Stages = slices.Clone(plan.Stages)
-			var allowed any = protocol.WorkItemStageStatusValues()
+			var allowed any = protocol.IssueStageStatusValues()
 			if guess.field == "background[0].kind" {
 				plan.Background[0].Kind = protocol.SharedFactKind(guess.value)
 				allowed = protocol.SharedFactKindValues()
 			} else {
-				plan.Stages[1].Status = protocol.WorkItemStageStatus(guess.value)
+				plan.Stages[1].Status = protocol.IssueStageStatus(guess.value)
 			}
-			env := h.env("work_items.update", workTarget(original.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: plan}, rev(original.Revision))
+			env := h.env("work_items.update", workTarget(original.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: plan}, rev(original.Revision))
 			op := h.exec(mainAgent, env, UpdateIssue{})
 			assertWorkEnumFailure(t, op, guess.field, guess.value, allowed)
 			// The deterministic failure is durable across same-ID retries.
@@ -81,18 +81,18 @@ func TestWorkItemPlanningGuessReplayPreservesCompleteAgreement(t *testing.T) {
 		})
 	}
 
-	corrected := original.WorkItemPlan
+	corrected := original.IssuePlan
 	corrected.Background = slices.Clone(corrected.Background)
 	corrected.Stages = slices.Clone(corrected.Stages)
 	corrected.Background[0].Kind = protocol.SharedFactUserConstraint
 	corrected.Stages[0].Status = protocol.WorkItemStageActive
 	// A new request identity carries the corrected intent; one call succeeds.
-	op := h.exec(mainAgent, h.env("work_items.update", workTarget(original.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: corrected}, rev(original.Revision)), UpdateIssue{})
+	op := h.exec(mainAgent, h.env("work_items.update", workTarget(original.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: corrected}, rev(original.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatalf("corrected complete request failed: %+v", op)
 	}
 	stored := h.work(original.WorkItemID)
-	if stored.Revision != original.Revision+1 || !reflect.DeepEqual(stored.WorkItemPlan, corrected) {
+	if stored.Revision != original.Revision+1 || !reflect.DeepEqual(stored.IssuePlan, corrected) {
 		t.Fatalf("corrected request lost context or review stage: %+v", stored)
 	}
 	if h.count("work_item_revisions") != beforeHistory+1 || h.count("events") != beforeEvents+1 {
@@ -107,25 +107,25 @@ func TestWorkItemNestedEvidenceErrorsRetainContainerPath(t *testing.T) {
 			plan := workPlan()
 			plan.Stages = nil
 			w := h.createWork(plan)
-			badEvidence := []protocol.WorkItemEvidence{{Kind: "report", Reference: "report-ref", Summary: "Claimed result"}}
+			badEvidence := []protocol.IssueEvidence{{Kind: "report", Reference: "report-ref", Summary: "Claimed result"}}
 			var op protocol.Operation
 			var field string
 			switch location {
 			case "stage":
-				w.Stages = []protocol.WorkItemStage{{StageID: "design", Title: "Design", Status: "planned", Evidence: badEvidence}}
+				w.Stages = []protocol.IssueStage{{StageID: "design", Title: "Design", Status: "planned", Evidence: badEvidence}}
 				field = "stages[0].evidence[0].kind"
 			case "follow_on":
-				w.FollowOns = []protocol.WorkItemFollowOn{{FollowOnID: "later", Kind: "suggestion", Text: "Optional follow-up", Source: "source", Status: "open", Evidence: badEvidence}}
+				w.FollowOns = []protocol.IssueFollowOn{{FollowOnID: "later", Kind: "suggestion", Text: "Optional follow-up", Source: "source", Status: "open", Evidence: badEvidence}}
 				field = "follow_ons[0].evidence[0].kind"
 			case "closure":
 				field = "closure.evidence[0].kind"
 			}
 			if location == "closure" {
-				op = h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "completed", Reason: "Finished", Evidence: badEvidence}}, rev(w.Revision)), CloseIssue{})
+				op = h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "completed", Reason: "Finished", Evidence: badEvidence}}, rev(w.Revision)), CloseIssue{})
 			} else {
-				op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(w.Revision)), UpdateIssue{})
+				op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(w.Revision)), UpdateIssue{})
 			}
-			assertWorkEnumFailure(t, op, field, "report", protocol.WorkItemEvidenceKindValues())
+			assertWorkEnumFailure(t, op, field, "report", protocol.IssueEvidenceKindValues())
 		})
 	}
 }
@@ -139,18 +139,18 @@ func TestWorkItemDispositionEnumRetainsExistingIgnoredEntryBehavior(t *testing.T
 		t.Fatal(link)
 	}
 	w = h.work(w.WorkItemID)
-	p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}
+	p := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
 	p.Intent = "Change investigation scope while honoring the original task agreement"
-	p.TaskDispositions = []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: task.SpecVersion, Action: "continue", Reason: "Preserve the original agreement"}}
+	p.TaskDispositions = []protocol.IssueTaskDisposition{{TaskID: task.TaskID, SpecVersion: task.SpecVersion, Action: "continue", Reason: "Preserve the original agreement"}}
 	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{})
-	assertWorkEnumFailure(t, op, "task_dispositions[0].action", "continue", protocol.WorkItemTaskDispositionActionValues())
+	assertWorkEnumFailure(t, op, "task_dispositions[0].action", "continue", protocol.IssueTaskDispositionActionValues())
 	if stored := h.work(w.WorkItemID); !reflect.DeepEqual(stored, w) {
 		t.Fatal("invalid task disposition changed the plan")
 	}
 	p.TaskDispositions[0].Action = protocol.WorkItemTaskContinueExisting
 	// Historically unused extra dispositions are ignored; enum discovery does
 	// not add new validation to unrelated entries in an existing valid request.
-	p.TaskDispositions = append(p.TaskDispositions, protocol.WorkItemTaskDisposition{TaskID: "unused", Action: "ignored"})
+	p.TaskDispositions = append(p.TaskDispositions, protocol.IssueTaskDisposition{TaskID: "unused", Action: "ignored"})
 	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded || h.task(task.TaskID).SpecVersion != task.SpecVersion {
 		t.Fatalf("corrected disposition changed compatibility or task spec: %+v", op)
@@ -160,7 +160,7 @@ func TestWorkItemDispositionEnumRetainsExistingIgnoredEntryBehavior(t *testing.T
 func TestWorkItemUpdateExplicitEmptyStatusRemainsValid(t *testing.T) {
 	h := newHarness(t)
 	w := h.createWork(workPlan())
-	p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, Status: protocol.WorkItemUpdateSnoozed}
+	p := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan, Status: protocol.WorkItemUpdateSnoozed}
 	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)

@@ -81,7 +81,7 @@ func TestConsultationActualHostedPoolDelegatesOnlyExecutionRequest(t *testing.T)
 				done <- "question"
 				return "completed"
 			}
-			p := protocol.PromoteConsultationPayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source.MessageID, ExpectedSourceRevision: &source.Associations.ContentRevision}, Plan: protocol.WorkItemPlan{Title: "Delegated consultation goal", Project: "default", Intent: "Return a reviewed report"}, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/adviser"}}
+			p := protocol.PromoteConsultationPayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source.MessageID, ExpectedSourceRevision: &source.Associations.ContentRevision}, Plan: protocol.IssuePlan{Title: "Delegated consultation goal", Project: "default", Intent: "Return a reviewed report"}, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/adviser"}}
 			args := map[string]any{"effect_seq": 1, "payload": p}
 			if !invoke("consultation_promote", args, nil) {
 				return "failed"

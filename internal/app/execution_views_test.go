@@ -26,7 +26,7 @@ func (h *harness) executionTask(id string) protocol.TaskDetail {
 func TestExecutionViewDistinguishesPlanQueueAndMixedWorkers(t *testing.T) {
 	h := newHarness(t)
 	plan := workPlan()
-	plan.Stages = []protocol.WorkItemStage{{StageID: "group", Title: "Group", Status: "active"}, {StageID: "child", ParentID: "group", Title: "Execution", Status: "active"}}
+	plan.Stages = []protocol.IssueStage{{StageID: "group", Title: "Group", Status: "active"}, {StageID: "child", ParentID: "group", Title: "Execution", Status: "active"}}
 	item := h.createWork(plan)
 	var ids []string
 	for _, title := range []string{"first", "second", "third"} {
@@ -270,7 +270,7 @@ func TestExecutionViewWorkspaceWaitIdentifiesOccupant(t *testing.T) {
 func TestExecutionViewDependencyUsesClaimRules(t *testing.T) {
 	h := newHarness(t)
 	plan := workPlan()
-	plan.Stages = append(plan.Stages, protocol.WorkItemStage{StageID: "after", Title: "After", Status: "active", DependsOn: []string{"investigate"}})
+	plan.Stages = append(plan.Stages, protocol.IssueStage{StageID: "after", Title: "After", Status: "active", DependsOn: []string{"investigate"}})
 	item := h.createWork(plan)
 	_, task := h.createTask(owner, createTaskPayload{Title: "dependent", Spec: testSpec, WorkItemID: item.WorkItemID, WorkItemRevision: item.Revision, StageIDs: []string{"after"}})
 	if got := h.executionTask(task.TaskID).Execution; got.State != protocol.ExecutionQueued || got.QueueReason.Code != protocol.QueueDependency {
@@ -545,10 +545,10 @@ func TestExecutionViewStageDependencyLinksOnlyUnfinishedTask(t *testing.T) {
 		t.Run(map[bool]string{false: "direct", true: "ancestor"}[parentDependency], func(t *testing.T) {
 			h := newHarness(t)
 			plan := workPlan()
-			plan.Stages = append(plan.Stages, protocol.WorkItemStage{StageID: "after", Title: "After", Status: "active", DependsOn: []string{"investigate"}})
+			plan.Stages = append(plan.Stages, protocol.IssueStage{StageID: "after", Title: "After", Status: "active", DependsOn: []string{"investigate"}})
 			dependentStage := "after"
 			if parentDependency {
-				plan.Stages = append(plan.Stages, protocol.WorkItemStage{StageID: "child", Title: "Child", ParentID: "after", Status: "active"})
+				plan.Stages = append(plan.Stages, protocol.IssueStage{StageID: "child", Title: "Child", ParentID: "after", Status: "active"})
 				dependentStage = "child"
 			}
 			item := h.createWork(plan)

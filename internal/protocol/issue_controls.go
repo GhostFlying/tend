@@ -60,10 +60,10 @@ type IssueBlocker struct {
 // Legacy ledger identities remain opaque; the public identity is issue_id.
 type Issue struct {
 	IssueControl
-	Revision  int64            `json:"revision"`
-	Plan      WorkItemPlan     `json:"plan"`
-	DependsOn []string         `json:"depends_on"`
-	Closure   *WorkItemClosure `json:"closure,omitempty"`
-	CreatedAt int64            `json:"created_at"`
-	UpdatedAt int64            `json:"updated_at"`
+	Revision  int64         `json:"revision"`
+	Plan      IssuePlan     `json:"plan"`
+	DependsOn []string      `json:"depends_on"`
+	Closure   *IssueClosure `json:"closure,omitempty"`
+	CreatedAt int64         `json:"created_at"`
+	UpdatedAt int64         `json:"updated_at"`
 }

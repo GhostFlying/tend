@@ -157,7 +157,7 @@ func projectIssueExecution(v *protocol.WorkItemView) {
 		tasks[task.TaskID] = task.Execution
 		countExecution(v.Execution, task.Execution)
 	}
-	stages := map[string]protocol.WorkItemStage{}
+	stages := map[string]protocol.IssueStage{}
 	for _, stage := range v.Stages {
 		stages[stage.StageID] = stage
 	}

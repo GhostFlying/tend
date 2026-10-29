@@ -32,9 +32,9 @@ func (CreateIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, e
 	}
 	p.Project = project.Project
 	if p.Stages == nil {
-		p.Stages = []protocol.WorkItemStage{}
+		p.Stages = []protocol.IssueStage{}
 	}
-	if err := domain.ValidateIssue(p.WorkItemPlan, nil); err != nil {
+	if err := domain.ValidateIssue(p.IssuePlan, nil); err != nil {
 		return Outcome{}, err
 	}
 	if p.InitialContext != nil {
@@ -42,7 +42,7 @@ func (CreateIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, e
 			return Outcome{}, err
 		}
 	}
-	w := protocol.WorkItem{WorkItemPlan: p.WorkItemPlan, WorkItemID: x.IDs.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
+	w := protocol.WorkItem{IssuePlan: p.IssuePlan, WorkItemID: x.IDs.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
 	if err := validateIssueReferences(ctx, x, tx.Q(), w, nil); err != nil {
 		return Outcome{}, err
 	}
@@ -90,18 +90,18 @@ func (UpdateIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, e
 	}
 	p.Project = project.Project
 	if p.Stages == nil {
-		p.Stages = []protocol.WorkItemStage{}
+		p.Stages = []protocol.IssueStage{}
 	}
-	if err := domain.ValidateIssue(p.WorkItemPlan, nil); err != nil {
+	if err := domain.ValidateIssue(p.IssuePlan, nil); err != nil {
 		return Outcome{}, err
 	}
 	candidate := w
-	candidate.WorkItemPlan = p.WorkItemPlan
+	candidate.IssuePlan = p.IssuePlan
 	if err := validateIssueReferences(ctx, x, tx.Q(), candidate, &w); err != nil {
 		return Outcome{}, err
 	}
-	p.WorkItemPlan = candidate.WorkItemPlan
-	if err := domain.ValidateIssue(p.WorkItemPlan, &w.WorkItemPlan); err != nil {
+	p.IssuePlan = candidate.IssuePlan
+	if err := domain.ValidateIssue(p.IssuePlan, &w.IssuePlan); err != nil {
 		return Outcome{}, err
 	}
 	if err := domain.ValidateIssueUpdateStatus(p.Status); err != nil {
@@ -111,18 +111,18 @@ func (UpdateIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, e
 	if status == "" {
 		status = w.Status
 	}
-	if err := validateIssueDispositions(ctx, tx.Q(), w, p.WorkItemPlan, p.TaskDispositions); err != nil {
+	if err := validateIssueDispositions(ctx, tx.Q(), w, p.IssuePlan, p.TaskDispositions); err != nil {
 		return Outcome{}, err
 	}
 	old := w.Revision
-	changed := domain.IssuePlanChanged(w.WorkItemPlan, p.WorkItemPlan) || status != w.Status || len(p.CompletionReviews) > 0
+	changed := domain.IssuePlanChanged(w.IssuePlan, p.IssuePlan) || status != w.Status || len(p.CompletionReviews) > 0
 	if err := claimIssueSource(ctx, x, tx, w.WorkItemID, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
 	if !changed {
 		return Outcome{Result: w, NoEffect: true}, nil
 	}
-	w.WorkItemPlan = p.WorkItemPlan
+	w.IssuePlan = p.IssuePlan
 	w.Status = status
 	w.Revision++
 	w.UpdatedAt = x.Now.UnixMilli()
@@ -263,7 +263,7 @@ func BindIssueTask(ctx context.Context, x *Exec, tx *store.Tx, itemID string, re
 			}
 			found = true
 			if !slices.Contains(w.Stages[i].TaskIDs, taskID) {
-				if !task.Lifecycle.Terminal() && !domain.IssueStageAcceptsWork(w.WorkItemPlan, id) {
+				if !task.Lifecycle.Terminal() && !domain.IssueStageAcceptsWork(w.IssuePlan, id) {
 					return w, nil, protocol.Errorf(protocol.CodeInvalidTransition, "new work requires an unfinished stage")
 				}
 				w.Stages[i].TaskIDs = append(w.Stages[i].TaskIDs, taskID)
@@ -345,7 +345,7 @@ func validateIssueReferences(ctx context.Context, x *Exec, q store.Querier, w pr
 					}
 				}
 			}
-			if !existed && !task.Lifecycle.Terminal() && !domain.IssueStageAcceptsWork(w.WorkItemPlan, s.StageID) {
+			if !existed && !task.Lifecycle.Terminal() && !domain.IssueStageAcceptsWork(w.IssuePlan, s.StageID) {
 				return protocol.Errorf(protocol.CodeInvalidTransition, "new work requires an unfinished stage and containing groups")
 			}
 
@@ -386,7 +386,7 @@ func validateIssueReferences(ctx context.Context, x *Exec, q store.Querier, w pr
 	return nil
 }
 
-func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, evidence []protocol.WorkItemEvidence, previous *protocol.WorkItem, field string) error {
+func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Querier, w protocol.WorkItem, evidence []protocol.IssueEvidence, previous *protocol.WorkItem, field string) error {
 	if len(evidence) == 0 {
 		return nil
 	}
@@ -462,19 +462,19 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 	return nil
 }
 
-func validateIssueDispositions(ctx context.Context, q store.Querier, item protocol.WorkItem, next protocol.WorkItemPlan, dispositions []protocol.WorkItemTaskDisposition) error {
+func validateIssueDispositions(ctx context.Context, q store.Querier, item protocol.WorkItem, next protocol.IssuePlan, dispositions []protocol.IssueTaskDisposition) error {
 	affected := map[string]bool{}
 	ids, err := store.IssueTaskIDs(ctx, q, item.WorkItemID)
 	if err != nil {
 		return err
 	}
 	for _, id := range ids {
-		if domain.IssueTaskPlanChanged(item.WorkItemPlan, next, id) {
+		if domain.IssueTaskPlanChanged(item.IssuePlan, next, id) {
 			affected[id] = true
 		}
 	}
 
-	byTask := map[string]protocol.WorkItemTaskDisposition{}
+	byTask := map[string]protocol.IssueTaskDisposition{}
 	dispositionIndices := map[string]int{}
 	for i, d := range dispositions {
 		if _, ok := byTask[d.TaskID]; ok {
@@ -498,7 +498,7 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 		if err != nil {
 			return err
 		}
-		if domain.IssueTaskRetired(item.WorkItemPlan, next, id) {
+		if domain.IssueTaskRetired(item.IssuePlan, next, id) {
 			var live bool
 			if err := q.QueryRowContext(ctx, liveRunQuery, id).Scan(&live); err != nil {
 				return err
@@ -519,7 +519,7 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 		if !ok || d.Reason == "" || d.SpecVersion != task.SpecVersion {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "plan change requires current spec disposition for active task %s", id)
 		}
-		if domain.IssueTaskRetired(item.WorkItemPlan, next, id) && d.Action != "stopped" {
+		if domain.IssueTaskRetired(item.IssuePlan, next, id) && d.Action != "stopped" {
 			return protocol.Errorf(protocol.CodeInvalidTransition, "stop active task agreements before retiring or cancelling their stage")
 		}
 		if d.Action == "updated" {
@@ -577,7 +577,7 @@ func issueCloseGuard(ctx context.Context, q store.Querier, id string) error {
 
 // Freeze direct owner evidence to the durable request identity before persisting.
 func freezeIssueCurrentEvidence(w *protocol.WorkItem, requestID string) {
-	freeze := func(evidence []protocol.WorkItemEvidence) {
+	freeze := func(evidence []protocol.IssueEvidence) {
 		for i := range evidence {
 			if evidence[i].Kind == "owner_decision" && evidence[i].Reference == "current_request" {
 				evidence[i].Reference = requestID
@@ -597,11 +597,11 @@ func freezeIssueCurrentEvidence(w *protocol.WorkItem, requestID string) {
 
 // The evidence identity excludes caller-supplied snapshots: once recorded,
 // its facts stay fixed even if the provider is queried again or unavailable.
-func savedIssueEvidence(previous *protocol.WorkItem, wanted protocol.WorkItemEvidence) (protocol.WorkItemEvidence, bool) {
+func savedIssueEvidence(previous *protocol.WorkItem, wanted protocol.IssueEvidence) (protocol.IssueEvidence, bool) {
 	if previous == nil {
-		return protocol.WorkItemEvidence{}, false
+		return protocol.IssueEvidence{}, false
 	}
-	groups := [][]protocol.WorkItemEvidence{}
+	groups := [][]protocol.IssueEvidence{}
 	for _, stage := range previous.Stages {
 		groups = append(groups, stage.Evidence)
 	}
@@ -618,7 +618,7 @@ func savedIssueEvidence(previous *protocol.WorkItem, wanted protocol.WorkItemEvi
 			}
 		}
 	}
-	return protocol.WorkItemEvidence{}, false
+	return protocol.IssueEvidence{}, false
 }
 
 // Ignore revisions such as title edits when proving an explicit task update.
@@ -629,7 +629,7 @@ func issueTaskAgreementRevision(ctx context.Context, q store.Querier, item proto
 		if err != nil {
 			return 0, err
 		}
-		if domain.IssueTaskPlanChanged(previous.WorkItemPlan, current.WorkItemPlan, taskID) {
+		if domain.IssueTaskPlanChanged(previous.IssuePlan, current.IssuePlan, taskID) {
 			break
 		}
 		current = previous

@@ -76,7 +76,7 @@ func TestWorkspaceOwnershipRejectsCrossItemReuseAndSecondaryLinks(t *testing.T) 
 		}
 	}
 	secondary.DefaultWorkspaceTaskID = source.TaskID
-	op := h.exec(owner, h.env("work_items.update", workTarget(secondary.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: secondary.WorkItemPlan}, rev(secondary.Revision)), UpdateIssue{})
+	op := h.exec(owner, h.env("work_items.update", workTarget(secondary.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: secondary.IssuePlan}, rev(secondary.Revision)), UpdateIssue{})
 	expectWorkCode(t, op, protocol.CodeInvalidRequest)
 	if h.work(secondary.WorkItemID).DefaultWorkspaceTaskID != "" {
 		t.Fatal("cross-item default workspace was accepted")

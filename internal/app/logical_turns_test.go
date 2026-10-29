@@ -334,7 +334,7 @@ func TestExplicitHistoricalSourceJoinsCurrentReview(t *testing.T) {
 func TestInitialContextDoesNotMutateCreateEnvelope(t *testing.T) {
 	h := newHarness(t)
 	source, _ := startReviewTurn(t, h)
-	p := protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), InitialContext: &protocol.InitialWorkItemContext{SourceMessageIDs: []string{source}, Coverage: "Initial owner message", ReviewedKinds: []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}, Facts: []protocol.ContextFact{{Kind: "goal", Scope: "work_item", Body: "Initial goal", SourceMessageID: source}}}}
+	p := protocol.CreateWorkItemPayload{IssuePlan: workPlan(), InitialContext: &protocol.InitialWorkItemContext{SourceMessageIDs: []string{source}, Coverage: "Initial owner message", ReviewedKinds: []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}, Facts: []protocol.ContextFact{{Kind: "goal", Scope: "work_item", Body: "Initial goal", SourceMessageID: source}}}}
 	env := h.env("work_items.create", workTarget(""), p, nil)
 	before, _ := json.Marshal(env)
 	op := h.exec(mainAgent, env, CreateIssue{})

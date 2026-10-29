@@ -40,9 +40,9 @@ func TestCanonicalPrimaryScopeHasNoStageAndSeparateReferences(t *testing.T) {
 	saveCanonicalFixture(t, s, primary, 0)
 	primaryReadTaskFixture(t, s, "task_primary", primary.IssueID, []protocol.TaskWorkContext{{WorkItemID: primary.IssueID, ContextDigest: "old"}, {WorkItemID: parent.IssueID, ContextDigest: "old"}})
 	reference := canonicalIssueFixture("wi_00000000000000000000000003")
-	reference.Plan.Stages = []protocol.WorkItemStage{{StageID: "result", Title: "Result", Status: "planned", TaskIDs: []string{"task_primary"}}}
+	reference.Plan.Stages = []protocol.IssueStage{{StageID: "result", Title: "Result", Status: "planned", TaskIDs: []string{"task_primary"}}}
 	saveCanonicalFixture(t, s, reference, 0)
-	legacy := protocol.WorkItem{WorkItemID: "wi_legacy", Revision: 1, Status: "open", WorkItemPlan: protocol.WorkItemPlan{Title: "Legacy", Project: "default", Stages: []protocol.WorkItemStage{{StageID: "result", Title: "Result", Status: "planned", TaskIDs: []string{"task_primary"}}}}}
+	legacy := protocol.WorkItem{WorkItemID: "wi_legacy", Revision: 1, Status: "open", IssuePlan: protocol.IssuePlan{Title: "Legacy", Project: "default", Stages: []protocol.IssueStage{{StageID: "result", Title: "Result", Status: "planned", TaskIDs: []string{"task_primary"}}}}}
 	if err := s.Write(t.Context(), func(tx *Tx) error { return tx.SaveIssue(t.Context(), legacy, 0, "fixture") }); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func contextRevisionFixture(t *testing.T, s *Store, id string) int64 {
 func TestCanonicalPrimaryScopePreservesLegacySharedResponsibilities(t *testing.T) {
 	s, _ := openTest(t)
 	for _, id := range []string{"wi_legacy_a", "wi_legacy_b"} {
-		item := protocol.WorkItem{WorkItemID: id, Revision: 1, Status: "open", WorkItemPlan: protocol.WorkItemPlan{Title: "Legacy", Project: "default", Stages: []protocol.WorkItemStage{{StageID: "stage", Title: "Stage", Status: "planned"}}}}
+		item := protocol.WorkItem{WorkItemID: id, Revision: 1, Status: "open", IssuePlan: protocol.IssuePlan{Title: "Legacy", Project: "default", Stages: []protocol.IssueStage{{StageID: "stage", Title: "Stage", Status: "planned"}}}}
 		if err := s.Write(t.Context(), func(tx *Tx) error { return tx.SaveIssue(t.Context(), item, 0, "fixture") }); err != nil {
 			t.Fatal(err)
 		}

@@ -20,7 +20,7 @@ func TestIssuePrimaryTaskWaitsSeparateParentClosureAndDispatch(t *testing.T) {
 		t.Fatal("explicit parent prerequisite plus task order cycle accepted")
 	}
 	child.State = protocol.IssueClosed
-	child.Closure = &protocol.WorkItemClosure{Kind: protocol.WorkItemClosureCompleted}
+	child.Closure = &protocol.IssueClosure{Kind: protocol.WorkItemClosureCompleted}
 	lives["ct"] = protocol.TaskCompleted
 	if err := ValidateIssuePrimaryTaskWaits([]protocol.Issue{parent, child}, primary, lives, waits); err != nil {
 		t.Fatal("achieved dependency was kept as a wait", err)
@@ -28,7 +28,7 @@ func TestIssuePrimaryTaskWaitsSeparateParentClosureAndDispatch(t *testing.T) {
 }
 
 func TestIssuePrimaryTaskWaitsIncludeExplicitStageWaits(t *testing.T) {
-	issue := protocol.Issue{IssueControl: protocol.IssueControl{IssueID: "issue", State: protocol.IssueActive}, Plan: protocol.WorkItemPlan{Stages: []protocol.WorkItemStage{
+	issue := protocol.Issue{IssueControl: protocol.IssueControl{IssueID: "issue", State: protocol.IssueActive}, Plan: protocol.IssuePlan{Stages: []protocol.IssueStage{
 		{StageID: "first", Status: protocol.WorkItemStagePlanned, TaskIDs: []string{"first"}},
 		{StageID: "second", Status: protocol.WorkItemStagePlanned, DependsOn: []string{"first"}, TaskIDs: []string{"second"}},
 	}}}

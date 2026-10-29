@@ -8,7 +8,7 @@ type CreateConsultationPayload struct {
 type PromoteConsultationPayload struct {
 	IssueSourceReference
 	Sources                 []IssueSourceReference `json:"sources,omitempty"`
-	Plan                    WorkItemPlan           `json:"plan,omitzero"`
+	Plan                    IssuePlan              `json:"plan,omitzero"`
 	Assignee                IssueAssignee          `json:"assignee,omitzero"`
 	ExistingIssueID         string                 `json:"existing_issue_id,omitempty"`
 	ExpectedIssueRevision   *int64                 `json:"expected_issue_revision,omitempty"`

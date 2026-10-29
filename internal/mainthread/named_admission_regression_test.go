@@ -67,7 +67,7 @@ func testNamedPoolAdmissionProgress(t *testing.T, disable bool, deferred ...bool
 		e.app = app.New(e.store, e.ids, e.now, app.WithHostedConfiguration(p))
 	}
 	accept(0)
-	issue := decodeIssue(execute(owner, "issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.WorkItemPlan{Title: "Investigate", Project: "default", Intent: "Delegate investigation"}}, 0, app.CanonicalOwnerIssueCommand{Action: "create"}))
+	issue := decodeIssue(execute(owner, "issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Investigate", Project: "default", Intent: "Delegate investigation"}}, 0, app.CanonicalOwnerIssueCommand{Action: "create"}))
 	issue = decodeIssue(execute(owner, "issues.assign", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/planner"}, Reason: "Delegate investigation"}, issue.Revision, app.HostedIssueAssignment{}))
 	issue = decodeIssue(execute(owner, "issues.finish_assignment", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, HandoffID: issue.PendingHandoffID, Reason: "No previous execution"}, issue.Revision, app.HostedIssueAssignment{Finish: true}))
 	conversation := "issue:" + issue.IssueID

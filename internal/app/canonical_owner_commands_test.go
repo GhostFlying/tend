@@ -12,7 +12,7 @@ import (
 
 func createCanonicalOwnerTestIssue(t *testing.T, h *harness) protocol.Issue {
 	t.Helper()
-	p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Investigate an intent", Project: "default", Intent: "Produce a verified result", Stages: []protocol.WorkItemStage{}}}
+	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Investigate an intent", Project: "default", Intent: "Produce a verified result", Stages: []protocol.IssueStage{}}}
 	op := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -194,7 +194,7 @@ func TestCanonicalOwnerSamePlanSourceOnlyCreatesRevision(t *testing.T) {
 
 func TestCanonicalOwnerCreateReplayKeepsOneIdentity(t *testing.T) {
 	h := newHarness(t)
-	payload := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Investigate an intent", Project: "default", Intent: "Produce an accepted report", Stages: []protocol.WorkItemStage{}}}
+	payload := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Investigate an intent", Project: "default", Intent: "Produce an accepted report", Stages: []protocol.IssueStage{}}}
 	envelope := h.env("issues.create", protocol.Target{Type: "issue"}, payload, nil)
 	first := h.exec(owner, envelope, CanonicalOwnerIssueCommand{Action: "create"})
 	if first.Status != protocol.OpSucceeded {
@@ -272,7 +272,7 @@ func TestCanonicalOwnerCreateRejectsUnregisteredAssignment(t *testing.T) {
 	for _, assignee := range []protocol.IssueAssignee{{Kind: protocol.IssueAssigneeAgent, Ref: "unregistered-agent"}, {Kind: protocol.IssueAssigneeOwner, Ref: "another-owner"}} {
 		t.Run(string(assignee.Kind), func(t *testing.T) {
 			h := newHarness(t)
-			p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Bounded intent", Project: "default", Intent: "Produce a result", Stages: []protocol.WorkItemStage{}}, Assignee: &assignee}
+			p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Bounded intent", Project: "default", Intent: "Produce a result", Stages: []protocol.IssueStage{}}, Assignee: &assignee}
 			before := canonicalGuardBusinessSnapshot(t, h)
 			op := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
 			expectWorkCode(t, op, protocol.CodeInvalidRequest)
@@ -286,7 +286,7 @@ func TestCanonicalOwnerCreateRejectsUnregisteredAssignment(t *testing.T) {
 func TestCanonicalOwnerCreateRejectsChildWaitingOnParentCompletion(t *testing.T) {
 	h := newHarness(t)
 	parent := createCanonicalOwnerTestIssue(t, h)
-	p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Child investigation", Project: "default", Intent: "Produce a child result", Stages: []protocol.WorkItemStage{}}, ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision), DependsOn: []string{parent.IssueID}}
+	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Child investigation", Project: "default", Intent: "Produce a child result", Stages: []protocol.IssueStage{}}, ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision), DependsOn: []string{parent.IssueID}}
 	before := canonicalGuardBusinessSnapshot(t, h)
 	rejected := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
 	expectWorkCode(t, rejected, protocol.CodeInvalidRequest)
@@ -307,7 +307,7 @@ func TestCanonicalOwnerEventPersistenceFailureRollsBackBothSnapshots(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Intent before event failure", Project: "default", Intent: "Produce an accepted report", Stages: []protocol.WorkItemStage{}}}
+	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Intent before event failure", Project: "default", Intent: "Produce an accepted report", Stages: []protocol.IssueStage{}}}
 	before := canonicalGuardBusinessSnapshot(t, h)
 	_, err := h.app.Execute(t.Context(), owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
 	if err == nil {
@@ -443,12 +443,12 @@ func TestCanonicalPriorEvidenceRejectsForgedSnapshots(t *testing.T) {
 		for _, snapshot := range []string{"observation", "upgrade"} {
 			t.Run(group+"/"+snapshot, func(t *testing.T) {
 				h := newHarness(t)
-				evidence := protocol.WorkItemEvidence{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner confirms the bounded result"}
-				p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Retain verified evidence", Intent: "Preserve original proof", Project: "default", Stages: []protocol.WorkItemStage{}}}
+				evidence := protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner confirms the bounded result"}
+				p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Retain verified evidence", Intent: "Preserve original proof", Project: "default", Stages: []protocol.IssueStage{}}}
 				if group == "stage" {
-					p.Plan.Stages = []protocol.WorkItemStage{{StageID: "report", Title: "Report", Status: protocol.WorkItemStageDone, Evidence: []protocol.WorkItemEvidence{evidence}}}
+					p.Plan.Stages = []protocol.IssueStage{{StageID: "report", Title: "Report", Status: protocol.WorkItemStageDone, Evidence: []protocol.IssueEvidence{evidence}}}
 				} else {
-					p.Plan.FollowOns = []protocol.WorkItemFollowOn{{FollowOnID: "answer", Kind: protocol.WorkItemFollowOnCommitment, Text: "Answer original question", Source: "Owner request", Status: protocol.WorkItemFollowOnResolved, Evidence: []protocol.WorkItemEvidence{evidence}}}
+					p.Plan.FollowOns = []protocol.IssueFollowOn{{FollowOnID: "answer", Kind: protocol.WorkItemFollowOnCommitment, Text: "Answer original question", Source: "Owner request", Status: protocol.WorkItemFollowOnResolved, Evidence: []protocol.IssueEvidence{evidence}}}
 				}
 				created := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
 				if created.Status != protocol.OpSucceeded {
@@ -459,7 +459,7 @@ func TestCanonicalPriorEvidenceRejectsForgedSnapshots(t *testing.T) {
 					t.Fatal(err)
 				}
 				update := canonicalOwnerIssueUpdate{Plan: issue.Plan, ExpectedAssignmentEpoch: issue.AssignmentEpoch}
-				var original protocol.WorkItemEvidence
+				var original protocol.IssueEvidence
 				if group == "stage" {
 					original = issue.Plan.Stages[0].Evidence[0]
 				} else {
@@ -474,9 +474,9 @@ func TestCanonicalPriorEvidenceRejectsForgedSnapshots(t *testing.T) {
 				// Retain the original item as well: checking only that it remains
 				// present must not let a same-identity forged copy into either history.
 				if group == "stage" {
-					update.Plan.Stages[0].Evidence = append([]protocol.WorkItemEvidence{original}, forged)
+					update.Plan.Stages[0].Evidence = append([]protocol.IssueEvidence{original}, forged)
 				} else {
-					update.Plan.FollowOns[0].Evidence = append([]protocol.WorkItemEvidence{original}, forged)
+					update.Plan.FollowOns[0].Evidence = append([]protocol.IssueEvidence{original}, forged)
 				}
 				before := canonicalGuardBusinessSnapshot(t, h)
 				rejected := h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: issue.IssueID}, update, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "update"})
@@ -486,9 +486,9 @@ func TestCanonicalPriorEvidenceRejectsForgedSnapshots(t *testing.T) {
 				}
 				// Keeping the exact frozen evidence remains a valid ordinary edit.
 				if group == "stage" {
-					update.Plan.Stages[0].Evidence = []protocol.WorkItemEvidence{original}
+					update.Plan.Stages[0].Evidence = []protocol.IssueEvidence{original}
 				} else {
-					update.Plan.FollowOns[0].Evidence = []protocol.WorkItemEvidence{original}
+					update.Plan.FollowOns[0].Evidence = []protocol.IssueEvidence{original}
 				}
 				update.Plan.Title = "Clarified title preserving frozen proof"
 				if op := h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: issue.IssueID}, update, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "update"}); op.Status != protocol.OpSucceeded {
@@ -504,12 +504,12 @@ func TestCanonicalProvidedEvidenceRequiresSummaryBeforeHistory(t *testing.T) {
 		for _, summary := range []string{"", " \t"} {
 			t.Run(group+"/"+summary, func(t *testing.T) {
 				h := newHarness(t)
-				p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Report", Project: "default", Intent: "Deliver report", Stages: []protocol.WorkItemStage{}}}
-				evidence := []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: summary}}
+				p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Report", Project: "default", Intent: "Deliver report", Stages: []protocol.IssueStage{}}}
+				evidence := []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: summary}}
 				if group == "stage" {
-					p.Plan.Stages = []protocol.WorkItemStage{{StageID: "report", Title: "Report", Status: protocol.WorkItemStagePlanned, Evidence: evidence}}
+					p.Plan.Stages = []protocol.IssueStage{{StageID: "report", Title: "Report", Status: protocol.WorkItemStagePlanned, Evidence: evidence}}
 				} else {
-					p.Plan.FollowOns = []protocol.WorkItemFollowOn{{FollowOnID: "report", Kind: protocol.WorkItemFollowOnCommitment, Text: "Report outcome", Source: "Owner request", Status: protocol.WorkItemFollowOnOpen, Evidence: evidence}}
+					p.Plan.FollowOns = []protocol.IssueFollowOn{{FollowOnID: "report", Kind: protocol.WorkItemFollowOnCommitment, Text: "Report outcome", Source: "Owner request", Status: protocol.WorkItemFollowOnOpen, Evidence: evidence}}
 				}
 				before := canonicalGuardBusinessSnapshot(t, h)
 				op := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
@@ -565,7 +565,7 @@ func TestCanonicalOwnerCitesCrossIssueMaterialWithoutResponsibilityTransfer(t *t
 				t.Fatal(err)
 			}
 			bindings, associations, obligations := h.count("conversation_bindings"), h.count("message_work_items"), h.count("message_context_obligations")
-			p := canonicalOwnerIssueCreate{canonicalOwnerIssueSource: canonicalOwnerIssueSource{SourceMessageID: source.MessageID, ExpectedSourceRevision: rev(1)}, Plan: protocol.WorkItemPlan{Title: "Use existing report", Project: "default", Intent: "Investigate a new goal", Stages: []protocol.WorkItemStage{}}}
+			p := canonicalOwnerIssueCreate{canonicalOwnerIssueSource: canonicalOwnerIssueSource{SourceMessageID: source.MessageID, ExpectedSourceRevision: rev(1)}, Plan: protocol.IssuePlan{Title: "Use existing report", Project: "default", Intent: "Investigate a new goal", Stages: []protocol.IssueStage{}}}
 			created := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
 			if created.Status != protocol.OpSucceeded {
 				t.Fatal(created)

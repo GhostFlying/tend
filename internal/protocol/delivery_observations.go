@@ -42,10 +42,10 @@ type DeliveryPollPayload struct {
 	InstanceID string `json:"instance_id"`
 }
 type DeliveryAssignment struct {
-	WorkItemID string           `json:"work_item_id"`
-	Delivery   WorkItemDelivery `json:"delivery"`
-	Generation int64            `json:"generation"`
-	Nonce      string           `json:"nonce"`
+	WorkItemID string        `json:"work_item_id"`
+	Delivery   IssueDelivery `json:"delivery"`
+	Generation int64         `json:"generation"`
+	Nonce      string        `json:"nonce"`
 }
 type DeliveryPollResult struct {
 	Assignments []DeliveryAssignment `json:"assignments"`

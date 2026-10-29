@@ -65,7 +65,7 @@ func taskIssue(ctx context.Context, x *Exec, tx *store.Tx, p *createTaskPayload,
 	for _, constraint := range p.Spec.Constraints {
 		facts = append(facts, protocol.SharedFact{Kind: "user_constraint", Text: constraint, Source: "initial task specification"})
 	}
-	item := protocol.WorkItem{WorkItemPlan: protocol.WorkItemPlan{Title: p.Title, Project: project, Intent: p.Spec.Goal, Background: facts, Stages: []protocol.WorkItemStage{{StageID: "initial", Title: p.Title, Status: "planned"}}}, WorkItemID: x.IDs.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
+	item := protocol.WorkItem{IssuePlan: protocol.IssuePlan{Title: p.Title, Project: project, Intent: p.Spec.Goal, Background: facts, Stages: []protocol.IssueStage{{StageID: "initial", Title: p.Title, Status: "planned"}}}, WorkItemID: x.IDs.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
 	out, err := saveIssue(ctx, tx, item, 0, "work_item.created", map[string]string{"source": "standalone task"})
 	if err != nil {
 		return item, nil, err

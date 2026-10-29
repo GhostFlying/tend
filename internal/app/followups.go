@@ -218,7 +218,7 @@ func validateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r protocol.Fol
 			return protocol.Errorf(protocol.CodeInvalidRequest, "followup source must be owner input or a background notice")
 		}
 	}
-	if r.FollowOnID != "" && !slices.ContainsFunc(w.FollowOns, func(f protocol.WorkItemFollowOn) bool { return f.FollowOnID == r.FollowOnID }) {
+	if r.FollowOnID != "" && !slices.ContainsFunc(w.FollowOns, func(f protocol.IssueFollowOn) bool { return f.FollowOnID == r.FollowOnID }) {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "follow-on must belong to the work item")
 	}
 	_, invalid, _, err := followupFacts(ctx, tx.Q(), r, w)
@@ -285,7 +285,7 @@ func followupFacts(ctx context.Context, q store.Querier, r protocol.FollowupRule
 			evidence += fmt.Sprintf("%s: %s (revision %d); ", id, t.Lifecycle, t.ControlRevision)
 		}
 	case "delivery_state":
-		if !slices.ContainsFunc(w.Deliveries, func(d protocol.WorkItemDelivery) bool { return d.DeliveryID == c.DeliveryID }) {
+		if !slices.ContainsFunc(w.Deliveries, func(d protocol.IssueDelivery) bool { return d.DeliveryID == c.DeliveryID }) {
 			return false, "target delivery was removed or replaced", "", nil
 		}
 		o, e := store.GetDeliveryObservation(ctx, q, w.WorkItemID, c.DeliveryID)

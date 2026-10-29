@@ -104,7 +104,7 @@ func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []s
 // actual unfinished task. A stage awaiting manual completion has no invented
 // task blocker; a completed task is not evidence that the stage is complete.
 func unfinishedStageTask(ctx context.Context, q store.Querier, item protocol.WorkItem, stageID, dependentTask string) (string, error) {
-	stages := map[string]protocol.WorkItemStage{}
+	stages := map[string]protocol.IssueStage{}
 	for _, stage := range item.Stages {
 		stages[stage.StageID] = stage
 	}
@@ -135,7 +135,7 @@ func unfinishedStageTask(ctx context.Context, q store.Querier, item protocol.Wor
 // Optional stages retain their existing prerequisites without inventing stages.
 func applyStageDependencies(ctx context.Context, q store.Querier, c *scheduler.Candidate, item protocol.WorkItem) error {
 	var err error
-	stages := map[string]protocol.WorkItemStage{}
+	stages := map[string]protocol.IssueStage{}
 	for _, stage := range item.Stages {
 		stages[stage.StageID] = stage
 	}

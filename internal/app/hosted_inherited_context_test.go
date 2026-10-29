@@ -13,7 +13,7 @@ import (
 func TestHostedManagerReceivesCurrentInheritedWorkerContext(t *testing.T) {
 	h := hostedManagerHarness(t)
 	createParent := func(intent, constraint string) protocol.Issue {
-		return canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.WorkItemPlan{Title: intent, Project: "default", Intent: intent, Background: []protocol.SharedFact{{Kind: protocol.SharedFactUserConstraint, Text: constraint, Source: "owner brief"}}}}, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+		return canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: intent, Project: "default", Intent: intent, Background: []protocol.SharedFact{{Kind: protocol.SharedFactUserConstraint, Text: constraint, Source: "owner brief"}}}}, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 	}
 	parent := createParent("Preserve the stable service", "Do not change the public API")
 	replacement := createParent("Investigate a separate local fixture", "Never deploy this fixture")

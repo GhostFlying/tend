@@ -13,9 +13,9 @@ func TestWorkItemOwnerReadsHistoryAndStaleUpdate(t *testing.T) {
 	e := newEnv(t)
 	e.configure()
 	token := e.login(protocol.ScopeOwner)
-	plan := protocol.WorkItemPlan{Title: "Investigate", Intent: "Understand the issue", Stages: []protocol.WorkItemStage{{StageID: "research", Title: "Research", Status: "planned"}}}
+	plan := protocol.IssuePlan{Title: "Investigate", Intent: "Understand the issue", Stages: []protocol.IssueStage{{StageID: "research", Title: "Research", Status: "planned"}}}
 	var item protocol.WorkItem
-	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{WorkItemPlan: plan}, app.CreateIssue{}), &item); err != nil {
+	if err := json.Unmarshal(e.exec("work_items.create", protocol.Target{Type: "work_item"}, nil, protocol.CreateWorkItemPayload{IssuePlan: plan}, app.CreateIssue{}), &item); err != nil {
 		t.Fatal(err)
 	}
 	path := "/api/v1/work-items/" + item.WorkItemID
@@ -37,14 +37,14 @@ func TestWorkItemOwnerReadsHistoryAndStaleUpdate(t *testing.T) {
 	if st := e.do("GET", path, token, nil, &current); st != http.StatusOK || current.FactsSeq != page.Items[0].FactsSeq {
 		t.Fatalf("detail = %d %+v, list facts_seq = %d", st, current, page.Items[0].FactsSeq)
 	}
-	plan = item.WorkItemPlan
+	plan = item.IssuePlan
 	plan.Title = "Investigate updated goal"
 	revision := item.Revision
-	update := e.envelope("work_items.update", protocol.Target{Type: "work_item", ID: item.WorkItemID}, &revision, protocol.UpdateWorkItemPayload{WorkItemPlan: plan})
+	update := e.envelope("work_items.update", protocol.Target{Type: "work_item", ID: item.WorkItemID}, &revision, protocol.UpdateWorkItemPayload{IssuePlan: plan})
 	if st, res := e.op(token, update); st != http.StatusOK || res.Operation == nil || res.Operation.Status != protocol.OpSucceeded {
 		t.Fatalf("update = %d %+v", st, res)
 	}
-	stale := e.envelope("work_items.update", update.Target, &revision, protocol.UpdateWorkItemPayload{WorkItemPlan: plan})
+	stale := e.envelope("work_items.update", update.Target, &revision, protocol.UpdateWorkItemPayload{IssuePlan: plan})
 	_, res := e.op(token, stale)
 	if res.Operation == nil || res.Operation.Error == nil || res.Operation.Error.Code != protocol.CodeStaleRevision || res.CurrentWorkItem == nil || res.CurrentWorkItem.Revision != 2 {
 		t.Fatalf("stale = %+v", res)

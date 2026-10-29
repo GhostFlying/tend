@@ -41,11 +41,11 @@ func TestCanonicalTaskDefinitionStageAdmissionUsesOnlyNewBindings(t *testing.T) 
 			issue = canonicalTaskIssue(t, h, issue.IssueID)
 			plan = issue.Plan
 			plan.Stages[0].Status = protocol.WorkItemStageDone
-			plan.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner confirms this lightweight step is settled"}}
+			plan.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner confirms this lightweight step is settled"}}
 			plan.Stages[0].TaskIDs = []string{created.TaskID}
 			update := canonicalOwnerIssueUpdate{Plan: plan, ExpectedAssignmentEpoch: issue.AssignmentEpoch}
 			if kind != "new_terminal" {
-				update.TaskDispositions = []protocol.WorkItemTaskDisposition{{TaskID: created.TaskID, SpecVersion: 1, Action: protocol.WorkItemTaskContinueExisting, Reason: "Continue the already frozen worker contract"}}
+				update.TaskDispositions = []protocol.IssueTaskDisposition{{TaskID: created.TaskID, SpecVersion: 1, Action: protocol.WorkItemTaskContinueExisting, Reason: "Continue the already frozen worker contract"}}
 			}
 			op = h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: issue.IssueID}, update, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "update"})
 			if kind == "new_active" {
@@ -95,18 +95,18 @@ func TestCanonicalTaskSecondaryEvidenceDoesNotBlockLegacyClosure(t *testing.T) {
 				t.Fatal(op)
 			}
 			legacy = h.work(legacy.WorkItemID)
-			plan := legacy.WorkItemPlan
+			plan := legacy.IssuePlan
 			plan.Stages[0].Status = protocol.WorkItemStageDone
-			plan.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner settled this separate concern"}}
-			update := protocol.UpdateWorkItemPayload{WorkItemPlan: plan}
+			plan.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner settled this separate concern"}}
+			update := protocol.UpdateWorkItemPayload{IssuePlan: plan}
 			if !canonical {
-				update.TaskDispositions = []protocol.WorkItemTaskDisposition{{TaskID: task, SpecVersion: 1, Action: protocol.WorkItemTaskContinueExisting, Reason: "Keep legacy shared responsibility"}}
+				update.TaskDispositions = []protocol.IssueTaskDisposition{{TaskID: task, SpecVersion: 1, Action: protocol.WorkItemTaskContinueExisting, Reason: "Keep legacy shared responsibility"}}
 			}
 			if op := h.exec(owner, h.env("work_items.update", workTarget(legacy.WorkItemID), update, rev(legacy.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			legacy = h.work(legacy.WorkItemID)
-			closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "Owner finished this concern", Evidence: []protocol.WorkItemEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "The separate concern is complete"}}}}
+			closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "Owner finished this concern", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "The separate concern is complete"}}}}
 			op := h.exec(owner, h.env("work_items.close", workTarget(legacy.WorkItemID), closure, rev(legacy.Revision)), CloseIssue{})
 			if canonical {
 				if op.Status != protocol.OpSucceeded {
@@ -132,7 +132,7 @@ func TestCanonicalTaskSecondaryEvidenceDoesNotCreateLegacyWaitCycle(t *testing.T
 			h := newHarness(t)
 			plan := workPlan()
 			plan.Project = "default"
-			plan.Stages = []protocol.WorkItemStage{{StageID: "first", Title: "First", Status: protocol.WorkItemStagePlanned}, {StageID: "second", Title: "Second", Status: protocol.WorkItemStagePlanned, DependsOn: []string{"first"}}}
+			plan.Stages = []protocol.IssueStage{{StageID: "first", Title: "First", Status: protocol.WorkItemStagePlanned}, {StageID: "second", Title: "Second", Status: protocol.WorkItemStagePlanned, DependsOn: []string{"first"}}}
 			var tasks []string
 			if canonical {
 				issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, canonicalOwnerIssueCreate{Plan: plan}, nil), CanonicalOwnerIssueCommand{Action: "create"}))

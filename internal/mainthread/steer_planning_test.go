@@ -118,7 +118,7 @@ func TestSteerPlanningNewCallIDRetriesKeepTurnIdentity(t *testing.T) {
 	call.Arguments, _ = json.Marshal(map[string]any{"task_id": taskID, "expected_control_revision": 1, "rating": "p2", "commit_seq": 1})
 	duplicate(e.m, "cross-tool-sequence-retry")
 	call.Tool = "work_items_create"
-	plan := protocol.WorkItemPlan{Title: "approved goal", Intent: "keep the continuing concern"}
+	plan := protocol.IssuePlan{Title: "approved goal", Intent: "keep the continuing concern"}
 	call.Arguments, _ = json.Marshal(map[string]any{"plan": plan, "commit_seq": 1})
 	duplicate(e.m, "work-item-sequence-retry")
 	call.CallID = "new-work-item-plan"

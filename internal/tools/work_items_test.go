@@ -10,7 +10,7 @@ import (
 
 func TestWorkItemToolsKeepUndecidedConcernVisibleAndRejectStalePlans(t *testing.T) {
 	e := newEnv(t)
-	plan := protocol.WorkItemPlan{Title: "Investigate layout", Intent: "Explain the overlapping controls", Stages: []protocol.WorkItemStage{{StageID: "inspect", Title: "Investigate", Status: "planned"}}, Background: []protocol.SharedFact{{Kind: "observation", Text: "Controls overlap on a short screen", Source: "owner screenshot"}}}
+	plan := protocol.IssuePlan{Title: "Investigate layout", Intent: "Explain the overlapping controls", Stages: []protocol.IssueStage{{StageID: "inspect", Title: "Investigate", Status: "planned"}}, Background: []protocol.SharedFact{{Kind: "observation", Text: "Controls overlap on a short screen", Source: "owner screenshot"}}}
 	created := e.call("work_items_create", workItemCreateArgs{InitialContext: initialFixtureContext(), Plan: plan, CommitSeq: 1, Reason: "Track the investigation and later discussion"}, "create-work")
 	if !created.OK {
 		t.Fatal(created.Error)
@@ -27,8 +27,8 @@ func TestWorkItemToolsKeepUndecidedConcernVisibleAndRejectStalePlans(t *testing.
 	if !listed.OK || !strings.Contains(string(listed.Result), w.WorkItemID) {
 		t.Fatalf("undecided concern hidden: %s %+v", listed.Result, listed.Error)
 	}
-	plan = w.WorkItemPlan
-	plan.Stages = append(plan.Stages, protocol.WorkItemStage{StageID: "check", Title: "Validate on two platforms", DependsOn: []string{"inspect"}, Status: "planned"})
+	plan = w.IssuePlan
+	plan.Stages = append(plan.Stages, protocol.IssueStage{StageID: "check", Title: "Validate on two platforms", DependsOn: []string{"inspect"}, Status: "planned"})
 	args := workItemUpdateArgs{WorkItemID: w.WorkItemID, ExpectedControlRevision: 1, Plan: plan, CommitSeq: 2, Reason: "Refine only the plan"}
 	updated := e.call("work_items_update", args, "update-work")
 	if !updated.OK {
@@ -51,7 +51,7 @@ func initialFixtureContext() protocol.InitialWorkItemContext {
 
 func TestInitialContextMissingKindsReturnsRepairableContract(t *testing.T) {
 	e := newEnv(t)
-	args := workItemCreateArgs{InitialContext: initialFixtureContext(), Plan: protocol.WorkItemPlan{Title: "Initialize source context", Intent: "Preserve the full owner concern"}, CommitSeq: 1}
+	args := workItemCreateArgs{InitialContext: initialFixtureContext(), Plan: protocol.IssuePlan{Title: "Initialize source context", Intent: "Preserve the full owner concern"}, CommitSeq: 1}
 	args.InitialContext.ReviewedKinds = []string{"goal", "constraint"}
 	rejected := e.call("work_items_create", args, "incomplete-kinds")
 	if rejected.OK || rejected.Error == nil || rejected.Error.Code != protocol.CodeInvalidRequest {

@@ -18,9 +18,9 @@ type canonicalOwnerControl struct {
 	Reason                  string `json:"reason,omitempty"`
 }
 type canonicalOwnerFollowOnDisposition struct {
-	FollowOnID string                      `json:"follow_on_id"`
-	Reason     string                      `json:"reason"`
-	Evidence   []protocol.WorkItemEvidence `json:"evidence"`
+	FollowOnID string                   `json:"follow_on_id"`
+	Reason     string                   `json:"reason"`
+	Evidence   []protocol.IssueEvidence `json:"evidence"`
 }
 type canonicalOwnerSourceDisposition struct {
 	MessageID           string `json:"message_id"`
@@ -30,7 +30,7 @@ type canonicalOwnerSourceDisposition struct {
 }
 type canonicalOwnerEndpoint struct {
 	canonicalOwnerControl
-	Closure                 *protocol.WorkItemClosure                  `json:"closure,omitempty"`
+	Closure                 *protocol.IssueClosure                     `json:"closure,omitempty"`
 	FollowOnDispositions    []canonicalOwnerFollowOnDisposition        `json:"follow_on_dispositions,omitempty"`
 	SourceDispositions      []canonicalOwnerSourceDisposition          `json:"source_dispositions,omitempty"`
 	ExpectedContextRevision *int64                                     `json:"expected_context_revision,omitempty"`
@@ -197,7 +197,7 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		if action == "finish_cancel" && (endpoint.Closure != nil || strings.TrimSpace(common.Reason) == "") {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "cancellation requires an explicit reason, not a completion closure")
 		}
-		if err = applyCanonicalFollowOnDispositions(&next.Plan, endpoint.FollowOnDispositions, func(evidence []protocol.WorkItemEvidence) error {
+		if err = applyCanonicalFollowOnDispositions(&next.Plan, endpoint.FollowOnDispositions, func(evidence []protocol.IssueEvidence) error {
 			return canonicalEndpointEvidence(ctx, x, tx.Q(), next, evidence)
 		}); err != nil {
 			return Outcome{}, err
@@ -225,7 +225,7 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 			if err = canonicalEndpointEvidence(ctx, x, tx.Q(), next, next.Closure.Evidence); err != nil {
 				return Outcome{}, err
 			}
-			projection := protocol.WorkItem{WorkItemPlan: next.Plan, Closure: next.Closure}
+			projection := protocol.WorkItem{IssuePlan: next.Plan, Closure: next.Closure}
 			validateClosure := domain.ValidateIssueClosure
 			if x.coordinationExecution != nil {
 				validateClosure = domain.ValidateResponsibleIssueClosure
@@ -255,9 +255,9 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 	}
 	next.Revision++
 	next.UpdatedAt = x.Now.UnixMilli()
-	projection := protocol.WorkItem{WorkItemPlan: next.Plan, Closure: next.Closure}
+	projection := protocol.WorkItem{IssuePlan: next.Plan, Closure: next.Closure}
 	freezeIssueCurrentEvidence(&projection, x.Env.RequestID)
-	next.Plan, next.Closure = projection.WorkItemPlan, projection.Closure
+	next.Plan, next.Closure = projection.IssuePlan, projection.Closure
 	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, next, current.Revision, common.canonicalOwnerIssueSource, reason, canonicalLifecycleEvent(action))
 	if err != nil {
 		return Outcome{}, err
@@ -281,7 +281,7 @@ func canonicalLifecycleEvent(action string) string {
 	return map[string]string{"pause": "issue.paused", "resume": "issue.resumed", "cancel": "issue.cancelling", "finish_cancel": "issue.cancelled", "close": "issue.closed", "reopen": "issue.reopened", "reparent": "issue.reparented", "dependencies": "issue.dependencies_changed", "assign": "issue.assignment_confirmed", "review_sources": "issue.sources_reviewed"}[action]
 }
 
-func applyCanonicalFollowOnDispositions(plan *protocol.WorkItemPlan, dispositions []canonicalOwnerFollowOnDisposition, validateEvidence func([]protocol.WorkItemEvidence) error) error {
+func applyCanonicalFollowOnDispositions(plan *protocol.IssuePlan, dispositions []canonicalOwnerFollowOnDisposition, validateEvidence func([]protocol.IssueEvidence) error) error {
 	next := *plan
 	next.FollowOns = slices.Clone(plan.FollowOns)
 	indexes := map[string]int{}
@@ -310,7 +310,7 @@ func applyCanonicalFollowOnDispositions(plan *protocol.WorkItemPlan, disposition
 	*plan = next
 	return nil
 }
-func validateCanonicalOwnerEndpointEvidence(evidence []protocol.WorkItemEvidence) error {
+func validateCanonicalOwnerEndpointEvidence(evidence []protocol.IssueEvidence) error {
 	if err := domain.ValidateIssueEvidence(evidence); err != nil {
 		return err
 	}

@@ -197,7 +197,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 			}
 			source := state.Messages[0]
 			revision := source.ContentRevision
-			p := protocol.CreateIssuePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source.MessageID, ExpectedSourceRevision: &revision}, Plan: protocol.WorkItemPlan{Title: "Investigate the vague owner goal", Project: "default", Intent: "Determine what is feasible without executing directly"}, Assignee: &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/manager"}}
+			p := protocol.CreateIssuePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source.MessageID, ExpectedSourceRevision: &revision}, Plan: protocol.IssuePlan{Title: "Investigate the vague owner goal", Project: "default", Intent: "Determine what is feasible without executing directly"}, Assignee: &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/manager"}}
 			if repairMode && in.Repair {
 				if !reject("issues_create", map[string]any{"effect_seq": 1000, "payload": p}, protocol.CodeForbidden) {
 					return "failed"
@@ -592,7 +592,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		}, RestartDelay: 20 * time.Millisecond, Log: quiet()})
 	}
 	if taskControls {
-		payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.WorkItemPlan{Title: "Separate owner's Issue", Project: "default", Intent: "Keep primary control separate"}})
+		payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Separate owner's Issue", Project: "default", Intent: "Keep primary control separate"}})
 		op, err := e.app.Execute(t.Context(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}, app.CanonicalOwnerIssueCommand{Action: "create"})
 		if err != nil || op.Status != protocol.OpSucceeded {
 			t.Fatal(op, err)

@@ -1,7 +1,7 @@
 import type {
   DeliveryObservation,
-  WorkItemDelivery,
-  WorkItemStage,
+  IssueDelivery,
+  IssueStage,
   ExecutionCounts,
   WorkItemView,
 } from "../api/generated/api.ts";
@@ -72,13 +72,11 @@ export const evidenceLabel = (kind: string) => evidenceLabels[kind] ?? `其他�
 export const observationErrorLabel = (kind: string) =>
   observationErrorLabels[kind] ?? `未知错误（${kind}）`;
 
-export function stageRows(
-  stages: readonly WorkItemStage[],
-): { stage: WorkItemStage; depth: number }[] {
-  const result: { stage: WorkItemStage; depth: number }[] = [];
+export function stageRows(stages: readonly IssueStage[]): { stage: IssueStage; depth: number }[] {
+  const result: { stage: IssueStage; depth: number }[] = [];
   const seen = new Set<string>();
   const byId = new Set(stages.map((s) => s.stage_id));
-  const visit = (stage: WorkItemStage, depth: number) => {
+  const visit = (stage: IssueStage, depth: number) => {
     if (seen.has(stage.stage_id)) return;
     seen.add(stage.stage_id);
     result.push({ stage, depth });
@@ -88,11 +86,11 @@ export function stageRows(
   for (const stage of stages) visit(stage, 0);
   return result;
 }
-export function parallelStages(stages: readonly WorkItemStage[]): ReadonlySet<string> {
+export function parallelStages(stages: readonly IssueStage[]): ReadonlySet<string> {
   const byId = new Map(stages.map((stage) => [stage.stage_id, stage]));
   const available = stages.filter((stage) => {
     const visited = new Set<string>();
-    let current: WorkItemStage | undefined = stage;
+    let current: IssueStage | undefined = stage;
     while (current) {
       if (visited.has(current.stage_id)) return false;
       visited.add(current.stage_id);
@@ -170,7 +168,7 @@ export interface RefreshBaseline {
   attemptedAt: number;
 }
 export function refreshBaseline(
-  delivery: WorkItemDelivery,
+  delivery: IssueDelivery,
   observation?: DeliveryObservation,
 ): RefreshBaseline {
   return {
@@ -188,7 +186,7 @@ export function refreshBaseline(
 /** New completed facts make another explicit refresh safe; they do not prove request success. */
 export function refreshReconciled(
   baseline: RefreshBaseline,
-  delivery: WorkItemDelivery,
+  delivery: IssueDelivery,
   observation?: DeliveryObservation,
 ): boolean {
   const current = refreshBaseline(delivery, observation);
@@ -202,7 +200,7 @@ export function refreshReconciled(
 
 /** Execution completion does not decide whether the plan stage is finished. */
 export function stageProgressLabel(
-  stage: WorkItemStage,
+  stage: IssueStage,
   counts?: ExecutionCounts,
   pending = false,
 ): string {
@@ -230,7 +228,7 @@ export function stageNeedsReview(item: WorkItemView, stageId: string): boolean {
   const pendingTasks = new Set(item.pending_reviews?.map((review) => review.task_id));
   for (const stage of stages.values()) {
     if (!stage.task_ids?.some((id) => pendingTasks.has(id))) continue;
-    let current: WorkItemStage | undefined = stage;
+    let current: IssueStage | undefined = stage;
     const seen = new Set<string>();
     while (current && !seen.has(current.stage_id)) {
       if (current.stage_id === stageId) return true;

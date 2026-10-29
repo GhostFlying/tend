@@ -37,7 +37,7 @@ func canonicalTaskReadFixture(t *testing.T, h *harness, issue protocol.Issue) st
 func TestCanonicalTaskNoStageDetailContextAndAcceptanceIsolation(t *testing.T) {
 	h := newHarness(t)
 	parent := createCanonicalOwnerTestIssue(t, h)
-	p := canonicalOwnerIssueCreate{Plan: protocol.WorkItemPlan{Title: "Child", Project: "default", Intent: "Child goal", Background: []protocol.SharedFact{{Kind: protocol.SharedFactUserConstraint, Text: "Preserve the public API", Source: "owner brief"}}, Stages: []protocol.WorkItemStage{}}, ParentIssueID: parent.IssueID}
+	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Child", Project: "default", Intent: "Child goal", Background: []protocol.SharedFact{{Kind: protocol.SharedFactUserConstraint, Text: "Preserve the public API", Source: "owner brief"}}, Stages: []protocol.IssueStage{}}, ParentIssueID: parent.IssueID}
 	op := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)

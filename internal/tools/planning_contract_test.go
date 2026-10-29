@@ -85,15 +85,15 @@ func TestPlanningSchemasExposeEnumsOnHostedToolSurface(t *testing.T) {
 		want any
 	}{
 		{"work_items_create", []string{"plan", "background", "[]", "kind"}, protocol.SharedFactKindValues()},
-		{"work_items_create", []string{"plan", "stages", "[]", "status"}, protocol.WorkItemStageStatusValues()},
-		{"work_items_update", []string{"plan", "stages", "[]", "status"}, protocol.WorkItemStageStatusValues()},
+		{"work_items_create", []string{"plan", "stages", "[]", "status"}, protocol.IssueStageStatusValues()},
+		{"work_items_update", []string{"plan", "stages", "[]", "status"}, protocol.IssueStageStatusValues()},
 		{"work_items_update", []string{"status"}, protocol.WorkItemUpdateStatusValues()},
-		{"work_items_update", []string{"task_dispositions", "[]", "action"}, protocol.WorkItemTaskDispositionActionValues()},
-		{"work_items_create", []string{"plan", "follow_ons", "[]", "kind"}, protocol.WorkItemFollowOnKindValues()},
-		{"work_items_create", []string{"plan", "follow_ons", "[]", "status"}, protocol.WorkItemFollowOnStatusValues()},
-		{"work_items_create", []string{"plan", "deliveries", "[]", "provider"}, protocol.WorkItemDeliveryProviderValues()},
-		{"work_items_close", []string{"closure", "kind"}, protocol.WorkItemClosureKindValues()},
-		{"work_items_close", []string{"closure", "evidence", "[]", "kind"}, protocol.WorkItemEvidenceKindValues()},
+		{"work_items_update", []string{"task_dispositions", "[]", "action"}, protocol.IssueTaskDispositionActionValues()},
+		{"work_items_create", []string{"plan", "follow_ons", "[]", "kind"}, protocol.IssueFollowOnKindValues()},
+		{"work_items_create", []string{"plan", "follow_ons", "[]", "status"}, protocol.IssueFollowOnStatusValues()},
+		{"work_items_create", []string{"plan", "deliveries", "[]", "provider"}, protocol.IssueDeliveryProviderValues()},
+		{"work_items_close", []string{"closure", "kind"}, protocol.IssueClosureKindValues()},
+		{"work_items_close", []string{"closure", "evidence", "[]", "kind"}, protocol.IssueEvidenceKindValues()},
 	}
 	for surface, specs := range surfaces {
 		for _, tc := range cases {
@@ -132,7 +132,7 @@ func TestPlanningSchemasExposeEnumsOnHostedToolSurface(t *testing.T) {
 
 func TestPlanningTaskCorrectionPreservesPlanAndCreatesOnlyOnce(t *testing.T) {
 	e := newPlanningEnv(t)
-	plan := protocol.WorkItemPlan{Title: "Improve settings", Intent: "Design, then independently review", Background: []protocol.SharedFact{{Kind: "observation", Text: "Duplicate settings entry", Source: "owner message"}}, Stages: []protocol.WorkItemStage{
+	plan := protocol.IssuePlan{Title: "Improve settings", Intent: "Design, then independently review", Background: []protocol.SharedFact{{Kind: "observation", Text: "Duplicate settings entry", Source: "owner message"}}, Stages: []protocol.IssueStage{
 		{StageID: "design", Title: "Design", Status: "planned"},
 		{StageID: "review", Title: "Independent review", Status: "planned", DependsOn: []string{"design"}},
 	}}

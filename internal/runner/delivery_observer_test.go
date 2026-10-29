@@ -49,7 +49,7 @@ func TestFault_DeliveryObservationRetryKeepsIdentityWithoutBlockingMaintenance(t
 		}
 		switch env.Operation {
 		case protocol.OpDeliveriesPoll:
-			raw, _ := json.Marshal(protocol.DeliveryPollResult{Assignments: []protocol.DeliveryAssignment{{WorkItemID: "item", Delivery: protocol.WorkItemDelivery{DeliveryID: "delivery", Provider: "github", Repository: "example/project", Number: 7}, Generation: 3, Nonce: "query"}}})
+			raw, _ := json.Marshal(protocol.DeliveryPollResult{Assignments: []protocol.DeliveryAssignment{{WorkItemID: "item", Delivery: protocol.IssueDelivery{DeliveryID: "delivery", Provider: "github", Repository: "example/project", Number: 7}, Generation: 3, Nonce: "query"}}})
 			json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: raw}})
 		case protocol.OpDeliveriesReport:
 			reports = append(reports, env)

@@ -14,7 +14,7 @@ func TestCanonicalNoStageArtifactScopeIsBoundedEvidence(t *testing.T) {
 	ids := []string{"wi_00000000000000000000000001", "wi_00000000000000000000000002", "wi_00000000000000000000000003"}
 	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
 		for _, id := range ids {
-			issue := protocol.Issue{IssueControl: protocol.IssueControl{IssueID: id, State: protocol.IssueActive, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: "owner"}, AssignmentEpoch: 1, AssignmentState: "active"}, Revision: 1, Plan: protocol.WorkItemPlan{Title: "Goal", Project: "default", Intent: "Result", Stages: []protocol.WorkItemStage{}}, DependsOn: []string{}, CreatedAt: 1, UpdatedAt: 1}
+			issue := protocol.Issue{IssueControl: protocol.IssueControl{IssueID: id, State: protocol.IssueActive, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: "owner"}, AssignmentEpoch: 1, AssignmentState: "active"}, Revision: 1, Plan: protocol.IssuePlan{Title: "Goal", Project: "default", Intent: "Result", Stages: []protocol.IssueStage{}}, DependsOn: []string{}, CreatedAt: 1, UpdatedAt: 1}
 			if err := tx.SaveCanonicalIssue(t.Context(), issue, 0, store.IssueRevisionProvenance{Actor: protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "fixture-client"}, RequestID: "req_fixture", Reason: "read fixture"}); err != nil {
 				return err
 			}

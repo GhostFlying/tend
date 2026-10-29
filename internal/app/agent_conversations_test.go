@@ -303,7 +303,7 @@ func TestAgentReplyDoesNotReorderMainConversation(t *testing.T) {
 func TestAgentInitialWorkItemSourceIsAssociatedAfterCreation(t *testing.T) {
 	h := newHarness(t)
 	source := h.ownerEvidence().Reference
-	p := protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), SourceMessageID: source, CommitSeq: 1}
+	p := protocol.CreateWorkItemPayload{IssuePlan: workPlan(), SourceMessageID: source, CommitSeq: 1}
 	op := h.exec(mainAgent, h.env("work_items.create", workTarget(""), p, nil), CreateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)

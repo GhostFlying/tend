@@ -4,7 +4,7 @@ import type {
   APIResponse,
   Envelope,
   RequestView,
-  WorkItemDelivery,
+  IssueDelivery,
   WorkItemView,
 } from "../api/generated/api.ts";
 import { DeliveryRefresh } from "./refresh.ts";
@@ -21,7 +21,7 @@ const item: WorkItemView = {
   created_at: 1,
   updated_at: 1,
 };
-const delivery: WorkItemDelivery = {
+const delivery: IssueDelivery = {
   delivery_id: "pr",
   provider: "github",
   repository: "example/repo",

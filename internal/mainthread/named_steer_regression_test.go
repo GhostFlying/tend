@@ -94,7 +94,7 @@ func TestNamedPlannerReconcilesSteerBeforeIssueCallback(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	payload := protocol.CreateIssuePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: supplement, ExpectedSourceRevision: &contentRevision}, Assignee: &protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: owner.Subject}, Plan: protocol.WorkItemPlan{Title: "Owner's additional responsibility", Project: "default", Intent: "Record exactly the consumed owner supplement"}}
+	payload := protocol.CreateIssuePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: supplement, ExpectedSourceRevision: &contentRevision}, Assignee: &protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: owner.Subject}, Plan: protocol.IssuePlan{Title: "Owner's additional responsibility", Project: "default", Intent: "Record exactly the consumed owner supplement"}}
 	args, _ := json.Marshal(map[string]any{"effect_seq": 1, "payload": payload})
 	result := e.m.onToolCall(t.Context(), harness.ToolCall{ThreadID: th.ID(), TurnID: turnID, CallID: "steered-issue", Tool: "issues_create", Arguments: args, UserText: input.Text, UserItemID: "native-supplement"})
 	if !result.Success {

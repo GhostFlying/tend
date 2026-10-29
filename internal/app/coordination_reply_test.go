@@ -16,7 +16,7 @@ func TestCoordinationThreeWritesAndSameTurnClaim(t *testing.T) {
 	source, turn := startReviewTurn(t, h)
 	before := h.associations(source)
 	initial := protocol.InitialWorkItemContext{Coverage: "Owner request and all seven kinds reviewed", Gaps: "Investigation pending", SourceMessageIDs: []string{source}, SourceReviews: []protocol.LogicalTurnReview{{MessageID: source, ContentRevision: before.ContentRevision, AssociationRevision: before.Revision}}, ReviewedKinds: allFactKinds, Facts: []protocol.ContextFact{{Kind: "goal", Scope: "work_item", Body: "Investigate", SourceMessageID: source}}}
-	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), InitialContext: &initial, SourceMessageID: source, CommitSeq: 1}, nil)
+	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: workPlan(), InitialContext: &initial, SourceMessageID: source, CommitSeq: 1}, nil)
 	env.ParentRequestID = turn.RequestID
 	created := h.exec(mainAgent, env, CreateIssue{})
 	if created.Status != protocol.OpSucceeded {
@@ -149,7 +149,7 @@ func TestInitialSourceConflictLeavesNoWorkItem(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	before := h.count("work_items")
-	p := protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), InitialContext: &protocol.InitialWorkItemContext{SourceMessageIDs: []string{source}, SourceReviews: []protocol.LogicalTurnReview{{MessageID: source, ContentRevision: 99}}, Coverage: "Checked", ReviewedKinds: allFactKinds}, SourceMessageID: source, CommitSeq: 1}
+	p := protocol.CreateWorkItemPayload{IssuePlan: workPlan(), InitialContext: &protocol.InitialWorkItemContext{SourceMessageIDs: []string{source}, SourceReviews: []protocol.LogicalTurnReview{{MessageID: source, ContentRevision: 99}}, Coverage: "Checked", ReviewedKinds: allFactKinds}, SourceMessageID: source, CommitSeq: 1}
 	env := h.env("work_items.create", workTarget(""), p, nil)
 	env.ParentRequestID = turn.RequestID
 	expectWorkCode(t, h.exec(mainAgent, env, CreateIssue{}), protocol.CodeStaleRevision)
@@ -187,7 +187,7 @@ func TestRepeatedPrepareAndAssociationKeepExactVersions(t *testing.T) {
 func TestNoEffectReceiptReplaysOriginalVersions(t *testing.T) {
 	h := newHarness(t)
 	w := h.createWork(workPlan())
-	args := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}
+	args := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
 	env := h.env("work_items.update", workTarget(w.WorkItemID), args, rev(w.Revision))
 	first := h.exec(mainAgent, env, UpdateIssue{})
 	if first.Status != protocol.OpSucceeded || !json.Valid(first.Result) {
@@ -268,7 +268,7 @@ func TestPlanContinueExistingPreservesFrozenAgreement(t *testing.T) {
 	}
 	w = h.work(w.WorkItemID)
 	w.Intent += "; expansion will be handled in a separate future task"
-	p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, TaskDispositions: []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Keep the existing execution agreement unchanged"}}}
+	p := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan, TaskDispositions: []protocol.IssueTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Keep the existing execution agreement unchanged"}}}
 	env = h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision))
 	env.ParentRequestID = turn.RequestID
 	op = h.exec(mainAgent, env, UpdateIssue{})
@@ -511,7 +511,7 @@ func TestLedgerChangeInvalidatesSummaryCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.Intent = "New current owner intent"
-	if op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(w.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
+	if op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(w.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	after, err := h.app.HandoffSummaryInput(t.Context(), "main", 4096)
@@ -1133,7 +1133,7 @@ func TestSupplementCoordinationUsesNativeExecutionAndAdmittedReplySources(t *tes
 		v := h.associations(id)
 		initial.SourceReviews = append(initial.SourceReviews, protocol.LogicalTurnReview{MessageID: id, ContentRevision: v.ContentRevision, AssociationRevision: v.Revision})
 	}
-	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), InitialContext: &initial, SourceMessageID: supplement, CommitSeq: 1}, nil)
+	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: workPlan(), InitialContext: &initial, SourceMessageID: supplement, CommitSeq: 1}, nil)
 	env.ParentRequestID = parent
 	op := h.exec(principal, env, WithExecutionRequest(WithPlanningSource(CreateIssue{}, root.MessageID), active.RequestID))
 	if op.Status != protocol.OpSucceeded {

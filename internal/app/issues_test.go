@@ -10,12 +10,12 @@ import (
 )
 
 func workTarget(id string) protocol.Target { return protocol.Target{Type: "work_item", ID: id} }
-func workPlan() protocol.WorkItemPlan {
-	return protocol.WorkItemPlan{Title: "Improve search", Intent: "Investigate and implement the agreed search improvements", Stages: []protocol.WorkItemStage{{StageID: "investigate", Title: "Investigate", Status: "planned"}}}
+func workPlan() protocol.IssuePlan {
+	return protocol.IssuePlan{Title: "Improve search", Intent: "Investigate and implement the agreed search improvements", Stages: []protocol.IssueStage{{StageID: "investigate", Title: "Investigate", Status: "planned"}}}
 }
-func (h *harness) createWork(plan protocol.WorkItemPlan) protocol.WorkItem {
+func (h *harness) createWork(plan protocol.IssuePlan) protocol.WorkItem {
 	h.t.Helper()
-	op := h.exec(owner, h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: plan}, nil), CreateIssue{})
+	op := h.exec(owner, h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: plan}, nil), CreateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		h.t.Fatalf("create work: %+v", op)
 	}
@@ -38,7 +38,7 @@ func (h *harness) work(id string) protocol.WorkItem {
 	}
 	return w
 }
-func (h *harness) ownerEvidence() protocol.WorkItemEvidence {
+func (h *harness) ownerEvidence() protocol.IssueEvidence {
 	h.t.Helper()
 	op := h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{Body: "The requested responsibility ends after the verified result. Remaining optional suggestions are not commitments."}, nil), SubmitMessage{})
 	var result struct {
@@ -47,7 +47,7 @@ func (h *harness) ownerEvidence() protocol.WorkItemEvidence {
 	if err := json.Unmarshal(op.Result, &result); err != nil || result.MessageID == "" {
 		h.t.Fatalf("owner message: %+v %v", op, err)
 	}
-	return protocol.WorkItemEvidence{Kind: "owner_decision", Reference: result.MessageID, Summary: "Owner defined the responsibility endpoint"}
+	return protocol.IssueEvidence{Kind: "owner_decision", Reference: result.MessageID, Summary: "Owner defined the responsibility endpoint"}
 }
 func expectWorkCode(t *testing.T, op protocol.Operation, code protocol.Code) {
 	t.Helper()
@@ -59,7 +59,7 @@ func expectWorkCode(t *testing.T, op protocol.Operation, code protocol.Code) {
 func TestWorkItemsRevisionDedupAndHistory(t *testing.T) {
 	h := newHarness(t)
 	plan := workPlan()
-	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: plan}, nil)
+	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: plan}, nil)
 	first := h.exec(mainAgent, env, CreateIssue{})
 	second := h.exec(mainAgent, env, CreateIssue{})
 	if first.Status != protocol.OpSucceeded || string(first.Result) != string(second.Result) || h.count("work_items") != 1 {
@@ -68,11 +68,11 @@ func TestWorkItemsRevisionDedupAndHistory(t *testing.T) {
 	var w protocol.WorkItem
 	_ = json.Unmarshal(first.Result, &w)
 	w.Title = "Improved search plan"
-	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(1)), UpdateIssue{})
+	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(1)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(1)), UpdateIssue{}), protocol.CodeStaleRevision)
+	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(1)), UpdateIssue{}), protocol.CodeStaleRevision)
 	if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
 		old, err := store.GetIssueRevision(context.Background(), tx.Q(), w.WorkItemID, 1)
 		if err == nil && old.Title != plan.Title {
@@ -82,7 +82,7 @@ func TestWorkItemsRevisionDedupAndHistory(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := h.app.Execute(context.Background(), runPrincipal(h.ids.New(protocol.PrefixRun), protocol.RoleImplement), h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: plan}, nil), CreateIssue{})
+	_, err := h.app.Execute(context.Background(), runPrincipal(h.ids.New(protocol.PrefixRun), protocol.RoleImplement), h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: plan}, nil), CreateIssue{})
 	if protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatalf("worker permission: %v", err)
 	}
@@ -110,9 +110,9 @@ func TestWorkItemsSharedTaskLinksAndPlanAgreement(t *testing.T) {
 	}
 	w = h.work(w.WorkItemID)
 	w.Stages[0].Title = "Broader investigation"
-	payload := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}
+	payload := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
 	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(2)), UpdateIssue{}), protocol.CodeInvalidRequest)
-	payload.TaskDispositions = []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, Action: "continue_existing", SpecVersion: 1, Reason: "Keep the original investigation agreement; expansion is a later task"}}
+	payload.TaskDispositions = []protocol.IssueTaskDisposition{{TaskID: task.TaskID, Action: "continue_existing", SpecVersion: 1, Reason: "Keep the original investigation agreement; expansion is a later task"}}
 	op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(2)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -122,7 +122,7 @@ func TestWorkItemsSharedTaskLinksAndPlanAgreement(t *testing.T) {
 	}
 	w = h.work(w.WorkItemID)
 	w.Stages[0].TaskIDs = nil
-	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(3)), UpdateIssue{}), protocol.CodeInvalidRequest)
+	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(3)), UpdateIssue{}), protocol.CodeInvalidRequest)
 }
 
 func TestWorkItemsExplicitCloseReopenAndUnresolvedCommitments(t *testing.T) {
@@ -130,25 +130,25 @@ func TestWorkItemsExplicitCloseReopenAndUnresolvedCommitments(t *testing.T) {
 	evidence := h.ownerEvidence()
 	plan := workPlan()
 	plan.Stages = nil
-	plan.FollowOns = []protocol.WorkItemFollowOn{{FollowOnID: "promise", Kind: "commitment", Text: "Provide follow-up", Source: evidence.Reference, Status: "open"}}
+	plan.FollowOns = []protocol.IssueFollowOn{{FollowOnID: "promise", Kind: "commitment", Text: "Provide follow-up", Source: evidence.Reference, Status: "open"}}
 	w := h.createWork(plan)
-	closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "completed", Reason: "Responsibility ended", Evidence: []protocol.WorkItemEvidence{evidence}}}
+	closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "completed", Reason: "Responsibility ended", Evidence: []protocol.IssueEvidence{evidence}}}
 	expectWorkCode(t, h.exec(mainAgent, h.env("work_items.close", workTarget(w.WorkItemID), closure, rev(1)), CloseIssue{}), protocol.CodeInvalidTransition)
 	// Removing or downgrading the commitment cannot bypass the guard.
 	for _, change := range []string{"remove", "downgrade"} {
-		p := w.WorkItemPlan
+		p := w.IssuePlan
 		if change == "remove" {
 			p.FollowOns = nil
 		} else {
-			p.FollowOns = append([]protocol.WorkItemFollowOn(nil), p.FollowOns...)
+			p.FollowOns = append([]protocol.IssueFollowOn(nil), p.FollowOns...)
 			p.FollowOns[0].Kind = "suggestion"
 		}
-		expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: p}, rev(1)), UpdateIssue{}), protocol.CodeInvalidRequest)
+		expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: p}, rev(1)), UpdateIssue{}), protocol.CodeInvalidRequest)
 	}
 	w.FollowOns[0].Status = "transferred"
 	w.FollowOns[0].TransferredTo = "Owner-maintained follow-up list"
-	w.FollowOns[0].Evidence = []protocol.WorkItemEvidence{evidence}
-	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(1)), UpdateIssue{})
+	w.FollowOns[0].Evidence = []protocol.IssueEvidence{evidence}
+	op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(1)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -173,13 +173,13 @@ func TestWorkItemsCloseGuardsAndEvidence(t *testing.T) {
 	plan.Stages[0].TaskIDs = []string{task.TaskID}
 	w := h.createWork(plan)
 	w.Stages[0].Status = "done"
-	w.Stages[0].Evidence = []protocol.WorkItemEvidence{evidence}
-	changed := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, TaskDispositions: []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Owner considers stage sufficient; let existing task settle"}}}, rev(1)), UpdateIssue{})
+	w.Stages[0].Evidence = []protocol.IssueEvidence{evidence}
+	changed := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan, TaskDispositions: []protocol.IssueTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Owner considers stage sufficient; let existing task settle"}}}, rev(1)), UpdateIssue{})
 	if changed.Status != protocol.OpSucceeded {
 		t.Fatal(changed)
 	}
 	w = h.work(w.WorkItemID)
-	closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "Explicit endpoint", Evidence: []protocol.WorkItemEvidence{evidence}}}
+	closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "declined", Reason: "Explicit endpoint", Evidence: []protocol.IssueEvidence{evidence}}}
 	closeWork := func() protocol.Operation {
 		return h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), closure, rev(w.Revision)), CloseIssue{})
 	}
@@ -227,7 +227,7 @@ func TestWorkItemsCloseGuardsAndEvidence(t *testing.T) {
 func TestWorkItemsSourceCommitDedup(t *testing.T) {
 	h := newHarness(t)
 	source := h.ownerEvidence().Reference
-	p := protocol.CreateWorkItemPayload{WorkItemPlan: workPlan(), SourceMessageID: source, CommitSeq: 1}
+	p := protocol.CreateWorkItemPayload{IssuePlan: workPlan(), SourceMessageID: source, CommitSeq: 1}
 	op := h.exec(mainAgent, h.env("work_items.create", workTarget(""), p, nil), CreateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -253,10 +253,10 @@ func TestWorkItemsUncertainOperationAndOpenDecisionPreventClosure(t *testing.T) 
 	}
 	plan := workPlan()
 	plan.Stages[0].Status = "done"
-	plan.Stages[0].Evidence = []protocol.WorkItemEvidence{evidence}
+	plan.Stages[0].Evidence = []protocol.IssueEvidence{evidence}
 	plan.Stages[0].TaskIDs = []string{task.TaskID}
 	w := h.createWork(plan)
-	closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "completed", Reason: "Owner endpoint", Evidence: []protocol.WorkItemEvidence{evidence}}}
+	closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "completed", Reason: "Owner endpoint", Evidence: []protocol.IssueEvidence{evidence}}}
 	closeWork := func() protocol.Operation {
 		return h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), closure, rev(1)), CloseIssue{})
 	}
@@ -293,8 +293,8 @@ func TestWorkItemsDirectOwnerEvidenceFreezesRequestIdentity(t *testing.T) {
 	h := newHarness(t)
 	plan := workPlan()
 	plan.Stages[0].Status = "done"
-	plan.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: "owner_decision", Reference: "current_request", Summary: "Owner confirms stage result"}}
-	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: plan}, nil)
+	plan.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: "owner_decision", Reference: "current_request", Summary: "Owner confirms stage result"}}
+	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: plan}, nil)
 	op := h.exec(owner, env, CreateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -305,22 +305,22 @@ func TestWorkItemsDirectOwnerEvidenceFreezesRequestIdentity(t *testing.T) {
 		t.Fatal("owner evidence lacks durable request identity")
 	}
 	w.Title = "Renamed"
-	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(1)), UpdateIssue{})
+	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(1)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	plan.Stages[0].Evidence[0].Reference = "current_request"
-	expectWorkCode(t, h.exec(mainAgent, h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: plan}, nil), CreateIssue{}), protocol.CodeInvalidRequest)
+	expectWorkCode(t, h.exec(mainAgent, h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: plan}, nil), CreateIssue{}), protocol.CodeInvalidRequest)
 }
 
 func TestWorkItemsDeliveryEvidenceAndPlanUpdatesPreserveObservations(t *testing.T) {
 	h := newHarness(t)
 	plan := workPlan()
-	plan.Deliveries = []protocol.WorkItemDelivery{{DeliveryID: "review", Provider: "github", Repository: "example/repo", Number: 1}}
+	plan.Deliveries = []protocol.IssueDelivery{{DeliveryID: "review", Provider: "github", Repository: "example/repo", Number: 1}}
 	w := h.createWork(plan)
 	w.Stages[0].Status = "done"
-	w.Stages[0].Evidence = []protocol.WorkItemEvidence{{Kind: "delivery", Reference: "review", Summary: "Provider confirms merge"}}
-	payload := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}
+	w.Stages[0].Evidence = []protocol.IssueEvidence{{Kind: "delivery", Reference: "review", Summary: "Provider confirms merge"}}
+	payload := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
 	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(1)), UpdateIssue{}), protocol.CodeInvalidRequest)
 	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
 		return tx.PutDeliveryObservation(context.Background(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: w.WorkItemID, DeliveryID: "review", Generation: 3, DeliverySnapshot: protocol.DeliverySnapshot{State: "merged"}, CheckedAt: h.clock.Now().UnixMilli()}})
@@ -340,7 +340,7 @@ func TestWorkItemsDeliveryEvidenceAndPlanUpdatesPreserveObservations(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "completed", Reason: "Merged", Evidence: w.Stages[0].Evidence}}
+	closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "completed", Reason: "Merged", Evidence: w.Stages[0].Evidence}}
 	expectWorkCode(t, h.exec(owner, h.env("work_items.close", workTarget(w.WorkItemID), closure, rev(2)), CloseIssue{}), protocol.CodeInvalidTransition)
 }
 
@@ -365,10 +365,10 @@ func TestWorkItemsStageAcceptsOnlyLinkedIndependentAcceptance(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	evidence := protocol.WorkItemEvidence{Kind: "acceptance", Reference: acceptanceID, Summary: "Independent acceptance verified the report"}
+	evidence := protocol.IssueEvidence{Kind: "acceptance", Reference: acceptanceID, Summary: "Independent acceptance verified the report"}
 	item.Stages[0].Status = "done"
-	item.Stages[0].Evidence = []protocol.WorkItemEvidence{evidence}
-	op := h.exec(mainAgent, h.env("work_items.update", workTarget(item.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: item.WorkItemPlan}, rev(item.Revision)), UpdateIssue{})
+	item.Stages[0].Evidence = []protocol.IssueEvidence{evidence}
+	op := h.exec(mainAgent, h.env("work_items.update", workTarget(item.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: item.IssuePlan}, rev(item.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -377,8 +377,8 @@ func TestWorkItemsStageAcceptsOnlyLinkedIndependentAcceptance(t *testing.T) {
 	}
 	unrelated := workPlan()
 	unrelated.Stages[0].Status = "done"
-	unrelated.Stages[0].Evidence = []protocol.WorkItemEvidence{evidence}
-	expectWorkCode(t, h.exec(owner, h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{WorkItemPlan: unrelated}, nil), CreateIssue{}), protocol.CodeInvalidRequest)
+	unrelated.Stages[0].Evidence = []protocol.IssueEvidence{evidence}
+	expectWorkCode(t, h.exec(owner, h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: unrelated}, nil), CreateIssue{}), protocol.CodeInvalidRequest)
 }
 
 func TestWorkItemsRetiringActiveStageCannotLeaveOldWorkRunning(t *testing.T) {
@@ -391,7 +391,7 @@ func TestWorkItemsRetiringActiveStageCannotLeaveOldWorkRunning(t *testing.T) {
 	w = h.work(w.WorkItemID)
 	w.Stages[0].Status = "retired"
 	w.Stages[0].Reason = "Replace with a new stage"
-	p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan, TaskDispositions: []protocol.WorkItemTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Keep original agreement"}}}
+	p := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan, TaskDispositions: []protocol.IssueTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Keep original agreement"}}}
 	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{}), protocol.CodeInvalidTransition)
 	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE tasks SET lifecycle='cancelled' WHERE task_id=?`, task.TaskID)
@@ -409,13 +409,13 @@ func TestWorkItemsRetiringActiveStageCannotLeaveOldWorkRunning(t *testing.T) {
 func TestWorkItemsDeliveryEvidenceFreezesVerifiedSnapshot(t *testing.T) {
 	h := newHarness(t)
 	plan := workPlan()
-	plan.Deliveries = []protocol.WorkItemDelivery{{DeliveryID: "review", Provider: "github", Repository: "example/repo", Number: 1}}
+	plan.Deliveries = []protocol.IssueDelivery{{DeliveryID: "review", Provider: "github", Repository: "example/repo", Number: 1}}
 	w := h.createWork(plan)
 	fake := protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: "invented"}, WorkItemID: w.WorkItemID, DeliveryID: "review", Generation: 999, CheckedAt: 999}
-	evidence := protocol.WorkItemEvidence{Kind: "delivery", Reference: "review", Summary: "Verified initial review state", Observation: &fake}
+	evidence := protocol.IssueEvidence{Kind: "delivery", Reference: "review", Summary: "Verified initial review state", Observation: &fake}
 	w.Stages[0].Status = "done"
-	w.Stages[0].Evidence = []protocol.WorkItemEvidence{evidence}
-	payload := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}
+	w.Stages[0].Evidence = []protocol.IssueEvidence{evidence}
+	payload := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
 	expectWorkCode(t, h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(1)), UpdateIssue{}), protocol.CodeInvalidRequest)
 	put := func(generation int64, state, head string) {
 		t.Helper()
@@ -439,7 +439,7 @@ func TestWorkItemsDeliveryEvidenceFreezesVerifiedSnapshot(t *testing.T) {
 	put(4, "open", "new-head")
 	w.Title = "Updated title"
 	w.Stages[0].Evidence[0].Observation = &fake
-	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(2)), UpdateIssue{})
+	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(2)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -449,7 +449,7 @@ func TestWorkItemsDeliveryEvidenceFreezesVerifiedSnapshot(t *testing.T) {
 	}
 	// Omitting a server-owned snapshot also retains identity without a revision.
 	w.Stages[0].Evidence[0].Observation = nil
-	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(3)), UpdateIssue{})
+	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(3)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded || h.work(w.WorkItemID).Revision != 3 {
 		t.Fatalf("unchanged evidence advanced revision %+v", op)
 	}
@@ -457,7 +457,7 @@ func TestWorkItemsDeliveryEvidenceFreezesVerifiedSnapshot(t *testing.T) {
 	fresh := evidence
 	fresh.Summary = "Verified newer review state"
 	w.Stages[0].Evidence = append(w.Stages[0].Evidence, fresh)
-	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}, rev(3)), UpdateIssue{})
+	op = h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(3)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -466,7 +466,7 @@ func TestWorkItemsDeliveryEvidenceFreezesVerifiedSnapshot(t *testing.T) {
 		t.Fatalf("new evidence did not freeze newer observation %+v", w.Stages[0].Evidence)
 	}
 	ownerFact := h.ownerEvidence()
-	closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "completed", Reason: "Explicit owner endpoint", Evidence: []protocol.WorkItemEvidence{ownerFact, evidence}}}
+	closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "completed", Reason: "Explicit owner endpoint", Evidence: []protocol.IssueEvidence{ownerFact, evidence}}}
 	op = h.exec(mainAgent, h.env("work_items.close", workTarget(w.WorkItemID), closure, rev(4)), CloseIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -496,7 +496,7 @@ func TestWorkItemsOwnerExternalCloseUsesExistingOwnerEvidence(t *testing.T) {
 	}
 	plan := workPlan()
 	plan.Stages = nil
-	plan.Deliveries = []protocol.WorkItemDelivery{{DeliveryID: "review", Provider: "github", Repository: "example/repo", Number: 1}}
+	plan.Deliveries = []protocol.IssueDelivery{{DeliveryID: "review", Provider: "github", Repository: "example/repo", Number: 1}}
 	w := h.createWork(plan)
 	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
 		return tx.PutDeliveryObservation(context.Background(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{State: "closed", ClosedAt: "2026-01-02T03:04:05Z", ClosedBy: &protocol.DeliveryActor{ID: "42", Login: "release-owner"}}, WorkItemID: w.WorkItemID, DeliveryID: "review", Generation: 1, CheckedAt: h.clock.Now().UnixMilli()}})
@@ -504,7 +504,7 @@ func TestWorkItemsOwnerExternalCloseUsesExistingOwnerEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	decisionsBefore := h.count("decisions")
-	closure := protocol.CloseWorkItemPayload{Closure: protocol.WorkItemClosure{Kind: "declined", Reason: "The owner closed the PR, ending the responsibility as previously instructed", Evidence: []protocol.WorkItemEvidence{{Kind: "owner_decision", Reference: source.MessageID, Summary: "Existing owner instruction identifies account 42 and says their close ends responsibility"}, {Kind: "delivery", Reference: "review", Summary: "Provider reports that account 42 closed the PR"}}}}
+	closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "declined", Reason: "The owner closed the PR, ending the responsibility as previously instructed", Evidence: []protocol.IssueEvidence{{Kind: "owner_decision", Reference: source.MessageID, Summary: "Existing owner instruction identifies account 42 and says their close ends responsibility"}, {Kind: "delivery", Reference: "review", Summary: "Provider reports that account 42 closed the PR"}}}}
 	op = h.exec(mainAgent, h.env("work_items.close", workTarget(w.WorkItemID), closure, rev(1)), CloseIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -538,7 +538,7 @@ func TestWorkItemsRetirementWaitsForCancelledTaskStopProof(t *testing.T) {
 	w = h.work(w.WorkItemID)
 	w.Stages[0].Status = "retired"
 	w.Stages[0].Reason = "Task cancelled"
-	p := protocol.UpdateWorkItemPayload{WorkItemPlan: w.WorkItemPlan}
+	p := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
 	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{}), protocol.CodeInvalidTransition)
 	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE runs SET observed_state='interrupted' WHERE run_id=?`, runID)
