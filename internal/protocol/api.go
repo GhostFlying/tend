@@ -5,6 +5,8 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		ArchiveControlRequest{}, ArchiveHostControlRequest{}, ArchiveOnlineStatus{},
+		ArchiveCatalog{}, ArchiveSummary{}, ArchiveRecord{}, ArchiveRecordsPage{}, ArchiveOriginal{}, ArchiveOriginalPage{}, ArchiveResource{}, ArchiveResourcePage{},
 		AttentionView{}, AttentionPage{}, CreateAttentionPayload{}, UpdateAttentionPayload{}, RespondAttentionPayload{}, ConfirmAttentionPayload{}, PresentAttentionPayload{}, IssueDeadline{}, PutIssueDeadlinePayload{}, CancelIssueDeadlinePayload{}, PlannerEntry{}, PutPlannerEntryPayload{}, NextActionPage{},
 		IssueView{}, IssuePage{}, CreateIssuePayload{}, UpdateIssuePayload{}, IssueControlPayload{}, IssueEndpointPayload{}, ReparentIssuePayload{}, SetIssueDependenciesPayload{}, ReviewIssueSourcesPayload{}, ReviewIssueCompletionsPayload{}, CreateIssueTaskPayload{}, UpdateIssueTaskPayload{},
 		HostedAgentInventory{}, AgentCategory{}, PutAgentCategoryPayload{}, TaskAgentSelection{}, RunExecutionPin{}, AgentExecutor{}, IssueAssignmentPayload{}, FinishIssueAssignmentPayload{}, IssueContextReview{},
@@ -19,6 +21,7 @@ func APITypes() []any {
 // APIEnums lists the values of every string enum in the owner API.
 func APIEnums() []any {
 	return []any{
+		[]ArchiveState{ArchiveReady, ArchiveUnsupported, ArchiveUnavailable},
 		[]IssueState{IssueActive, IssuePaused, IssueCancelling, IssueCancelled, IssueClosed},
 		[]IssueAssigneeKind{IssueAssigneeOwner, IssueAssigneeAgent},
 		ExecutionStateValues(), QueueWaitCodeValues(),

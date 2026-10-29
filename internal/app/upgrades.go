@@ -36,6 +36,11 @@ func (StartUpgrade) Authorize(_ context.Context, x *Exec, _ store.Querier) error
 	return allowKinds(x.Principal, protocol.PrincipalSystem)
 }
 func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	if prepared, err := archivePrepared(ctx, tx.Q()); err != nil {
+		return Outcome{}, err
+	} else if prepared {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "cancel archive preparation before starting an upgrade")
+	}
 	if err := c.Manifest.Validate(); err != nil || !release.ValidSHA(c.ManifestSHA256) || c.ManifestSize <= 0 || c.ServerInstance == "" || !release.ValidSHA(c.ServerHash) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid verified release")
 	}
@@ -567,6 +572,9 @@ func (a *App) UpgradePausesMain(ctx context.Context) (bool, error) {
 	return paused, err
 }
 func upgradePausesMain(ctx context.Context, q store.Querier) (bool, error) {
+	if prepared, err := archivePrepared(ctx, q); err != nil || prepared {
+		return prepared, err
+	}
 	r, err := store.LatestUpgrade(ctx, q)
 	if errors.Is(err, store.ErrNotFound) {
 		return false, nil

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/domain"
@@ -101,19 +102,21 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
-	hostedConfiguration *hostedconfig.Prepared
-	agentRecoveryPolicy domain.AgentRecoveryPolicy
-	followupsEnabled    bool
-	observeDeployment   func(context.Context) (protocol.ObservedDeployment, error)
-	store               *store.Store
-	ids                 protocol.IDGen
-	now                 func() time.Time
-	notifier            Notifier
-	changes             *Broadcast
-	logs                *Broadcast
-	leaseTTL            time.Duration
-	waitPer             float64
-	hostLost            time.Duration
+	archiveAdmission     sync.Mutex
+	archiveOwnerRequests int64
+	hostedConfiguration  *hostedconfig.Prepared
+	agentRecoveryPolicy  domain.AgentRecoveryPolicy
+	followupsEnabled     bool
+	observeDeployment    func(context.Context) (protocol.ObservedDeployment, error)
+	store                *store.Store
+	ids                  protocol.IDGen
+	now                  func() time.Time
+	notifier             Notifier
+	changes              *Broadcast
+	logs                 *Broadcast
+	leaseTTL             time.Duration
+	waitPer              float64
+	hostLost             time.Duration
 }
 
 // Option configures an App.

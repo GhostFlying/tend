@@ -54,6 +54,7 @@ Owner commands:
   pause|resume|cancel <task_id>
   category put|show <id>           manage global agent classifications
   repo register|show <name>       manage repositories online
+  archive prepare|status|cancel|host [--socket <path>] [--json]
   upgrade [start|status|retry|cancel] [--release <directory>] [--json]
   conversation handoff [--prepare-only | --status] [--json]
   attachment download <file_id> --out <path>  save an original attachment
@@ -82,6 +83,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 		return report(e, runAgentCategory(ctx, e, rest))
 	case "repo":
 		return report(e, runRepository(ctx, e, rest))
+	case "archive":
+		return report(e, runArchive(ctx, e, rest))
 	case "upgrade":
 		return report(e, runUpgrade(ctx, e, rest))
 	case "attachment":

@@ -41,9 +41,17 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 					continue
 				}
 				paused, err := p.App.UpgradePausesMain(ctx)
-				if err != nil || paused {
+				if err != nil {
 					p.mu.Unlock()
 					break
+				}
+				if paused {
+					preparation, err := p.App.ArchivePreparation(ctx)
+					needed, readErr := p.App.ArchiveNeedsReceiptRead(ctx, id)
+					if err != nil || readErr != nil || !preparation.Prepared || !needed {
+						p.mu.Unlock()
+						continue
+					}
 				}
 				m, err := p.New(id)
 				if err != nil {
@@ -78,7 +86,7 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 	if receiptRead {
 		waitCtx, stopWait = context.WithTimeout(run, 20*time.Second)
 	}
-	_, err = m.waitStartup(waitCtx)
+	thread, err := m.waitStartup(waitCtx)
 	stopWait()
 	if err != nil {
 		if !receiptRead && run.Err() == nil {
@@ -86,6 +94,11 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 				m.cfg.Log.WarnContext(run, "could not defer failed background startup", "err", deferErr)
 			}
 		}
+		return
+	}
+	if thread == nil {
+		// Preparation can commit after pool selection but before serve reads
+		// its admission gate. There is no native execution or retry to defer.
 		return
 	}
 	dest := "background_thread:" + id

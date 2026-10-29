@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,6 +22,12 @@ import (
 )
 
 func TestNamedPoolUnavailableModelsReleaseCapacityAndBackOff(t *testing.T) {
+	testNamedPoolStartup(t, false)
+}
+func TestNamedPoolArchivePreparationBetweenSelectionAndStartup(t *testing.T) {
+	testNamedPoolStartup(t, true)
+}
+func testNamedPoolStartup(t *testing.T, prepare bool) {
 	h := testkit.NewHarness()
 	h.Models = []harness.Model{{ID: "v1", Name: "v1", DefaultEffort: "high", SupportedEfforts: []string{"high"}}, {ID: "v2", Name: "v2", DefaultEffort: "high", SupportedEfforts: []string{"high"}}}
 	e := newEnv(t, h)
@@ -85,6 +92,24 @@ func TestNamedPoolUnavailableModelsReleaseCapacityAndBackOff(t *testing.T) {
 		}
 		requests[id] = result.MessageID
 	}
+	pendingBefore := map[string]store.OutboxMessage{}
+	if prepare {
+		if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			for _, id := range conversations {
+				head, err := store.HeadOutboxPrioritized(t.Context(), tx.Q(), "background_thread:"+id, app.OpHandleEvent)
+				if err != nil {
+					return err
+				}
+				if head.RequestID != requests[id] {
+					t.Fatal("fixture did not retain owner as queue head", head)
+				}
+				pendingBefore[id] = head
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	newManager := func(id string) *Manager {
 		cb := contextbuilder.New(e.app, e.store, e.ids, contextbuilder.Config{})
 		return New(e.app, cb, tools.New(e.app, e.store, cb, quiet()), Config{ConversationID: id, Instance: id, Thread: ThreadConfig(t.TempDir(), "unused"), Now: e.now, RestartDelay: 10 * time.Millisecond, Log: quiet(), OpenNamed: func(ctx context.Context, _ hostedconfig.Selection) (harness.Session, error) { return h.Open(ctx) }})
@@ -136,11 +161,45 @@ func TestNamedPoolUnavailableModelsReleaseCapacityAndBackOff(t *testing.T) {
 		return "completed"
 	}
 
-	pool := &BackgroundPool{App: e.app, Limit: 2, New: func(id string) (*Manager, error) { return newManager(id), nil }}
+	selected := make(chan struct{}, 1)
+	var once sync.Once
+	opensBefore := h.Sessions()
+	pool := &BackgroundPool{App: e.app, Limit: 2, New: func(id string) (*Manager, error) {
+		if prepare {
+			once.Do(func() { prepareArchive(t, e); selected <- struct{}{} })
+		}
+		return newManager(id), nil
+	}}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() { defer close(done); pool.Run(ctx) }()
 	defer func() { cancel(); <-done }()
+	if prepare {
+		select {
+		case <-selected:
+		case <-time.After(3 * time.Second):
+			t.Fatal("pool did not select original pending input")
+		}
+		eventually(t, "selected-but-unstarted manager leaves pool after prepare", func() bool { drained, err := pool.ArchiveDrainStatus(t.Context()); return err == nil && drained })
+		if h.Sessions() != opensBefore || len(h.Starts()) != 0 {
+			t.Fatal("prepare opened a native process/turn", h.Sessions(), opensBefore, h.Starts())
+		}
+		if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			for _, id := range conversations {
+				head, err := store.HeadOutboxPrioritized(t.Context(), tx.Q(), "background_thread:"+id, app.OpHandleEvent)
+				if err != nil {
+					return err
+				}
+				if head != pendingBefore[id] {
+					t.Fatalf("prepare changed queued input: before=%+v after=%+v", pendingBefore[id], head)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	eventually(t, "third healthy Issue commits despite two unavailable models", func() bool {
 		select {
 		case failure := <-failures:

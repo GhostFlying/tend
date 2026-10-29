@@ -156,6 +156,11 @@ export type OpStatus = "succeeded" | "failed" | "accepted" | "unknown";
 export type WorkerKind = "appserver" | "orca";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveState".
+ */
+export type ArchiveState = "ready" | "unsupported" | "unavailable";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "Verdict".
  */
 export type Verdict = "passed" | "changes_required" | "blocked" | "inconclusive";
@@ -236,6 +241,17 @@ export interface TendAPI {
   AgentRolloutWindow?: AgentRolloutWindow;
   AnswerDecisionPayload?: AnswerDecisionPayload;
   AnswerResult?: AnswerResult;
+  ArchiveCatalog?: ArchiveCatalog;
+  ArchiveControlRequest?: ArchiveControlRequest;
+  ArchiveHostControlRequest?: ArchiveHostControlRequest;
+  ArchiveOnlineStatus?: ArchiveOnlineStatus;
+  ArchiveOriginal?: ArchiveOriginal;
+  ArchiveOriginalPage?: ArchiveOriginalPage;
+  ArchiveRecord?: ArchiveRecord;
+  ArchiveRecordsPage?: ArchiveRecordsPage;
+  ArchiveResource?: ArchiveResource;
+  ArchiveResourcePage?: ArchiveResourcePage;
+  ArchiveSummary?: ArchiveSummary;
   ArtifactDetail?: ArtifactDetail;
   ArtifactPayload?: ArtifactPayload;
   AttentionPage?: AttentionPage;
@@ -1076,6 +1092,269 @@ export interface EffectResult {
   applied: boolean;
   effect: DecisionEffect;
   reason?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveCatalog".
+ */
+export interface ArchiveCatalog {
+  items: ArchiveSummary[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveSummary".
+ */
+export interface ArchiveSummary {
+  archive_id: string;
+  metadata?: ArchiveMetadata;
+  reason?: string;
+  state: ArchiveState;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveMetadata".
+ */
+export interface ArchiveMetadata {
+  created_at: string;
+  deployment_id: string;
+  format_version: number;
+  original_count: number;
+  record_kinds: string[] | null;
+  resource_count: number;
+  schema: number;
+  source_build?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveControlRequest".
+ */
+export interface ArchiveControlRequest {
+  expected_control_revision: number;
+  request_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveHostControlRequest".
+ */
+export interface ArchiveHostControlRequest {
+  expected_control_revision: number;
+  host_id: string;
+  mode: string;
+  request_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveOnlineStatus".
+ */
+export interface ArchiveOnlineStatus {
+  active_owner_requests: number;
+  blockers: string[] | null;
+  hosted_drained: boolean;
+  hosts: ArchiveHostStatus[] | null;
+  online_ready: boolean;
+  preparation: ArchivePreparation;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveHostStatus".
+ */
+export interface ArchiveHostStatus {
+  blockers: string[] | null;
+  control: RunnerControl;
+  fresh: boolean;
+  host_id: string;
+  open_runs: number;
+  runtime?: RunnerRuntime;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerControl".
+ */
+export interface RunnerControl {
+  authorization?: MaintenanceAuthorization;
+  cancelled_upgrade_id?: string;
+  mode: string;
+  release_id?: string;
+  revision: number;
+  upgrade?: RunnerUpgradeTarget;
+  upgrade_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MaintenanceAuthorization".
+ */
+export interface MaintenanceAuthorization {
+  deadline_ms: number;
+  id: string;
+  remaining_ms: number;
+  run_ids: string[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerUpgradeTarget".
+ */
+export interface RunnerUpgradeTarget {
+  artifact_base_path: string;
+  configuration?: RunnerConfiguration;
+  manifest_path: string;
+  manifest_sha256: string;
+  manifest_size: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerConfiguration".
+ */
+export interface RunnerConfiguration {
+  previous_sha256: string;
+  providers: string[] | null;
+  sha256: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerRuntime".
+ */
+export interface RunnerRuntime {
+  agent_executors?: AgentExecutor[];
+  applied_control_revision: number;
+  authorization_deadline_ms?: number;
+  authorization_id?: string;
+  blockers?: string[];
+  build: RunnerBuild;
+  capabilities: string[] | null;
+  configuration_sha256?: string;
+  confirmed_cancelled_upgrade_id?: string;
+  downloaded_bytes?: number;
+  generation: number;
+  instance_id: string;
+  journal_version?: number;
+  mode: string;
+  pending_claims: number;
+  pending_operations: number;
+  protocol: number;
+  protocol_max: number;
+  protocol_min: number;
+  repositories?: RunnerRepository[];
+  sequence: number;
+  updater_receipt?: UpdaterReceipt;
+  upgrade_error?: string;
+  upgrade_id?: string;
+  upgrade_phase?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerBuild".
+ */
+export interface RunnerBuild {
+  binary_sha256?: string;
+  commit?: string;
+  goarch?: string;
+  goos?: string;
+  pid?: number;
+  started_at_ms?: number;
+  version?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerRepository".
+ */
+export interface RunnerRepository {
+  remote_identity: string;
+  repo: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchivePreparation".
+ */
+export interface ArchivePreparation {
+  prepared: boolean;
+  prepared_at_ms: number;
+  revision: number;
+  updated_at_ms: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveOriginal".
+ */
+export interface ArchiveOriginal {
+  id: string;
+  kind: string;
+  media_type?: string;
+  name: string;
+  sha256: string;
+  size: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveOriginalPage".
+ */
+export interface ArchiveOriginalPage {
+  archive_id: string;
+  items: ArchiveOriginal[] | null;
+  next_after?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveRecord".
+ */
+export interface ArchiveRecord {
+  archive_id: string;
+  data: {
+    [k: string]: unknown | undefined;
+  } | null;
+  id: string;
+  kind: string;
+  schema: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveRecordsPage".
+ */
+export interface ArchiveRecordsPage {
+  archive_id: string;
+  items:
+    | {
+        [k: string]: unknown | undefined;
+      }[]
+    | null;
+  kind: string;
+  next_after?: string;
+  schema: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveResource".
+ */
+export interface ArchiveResource {
+  files: ArchiveResourceFile[] | null;
+  host_id?: string;
+  id: string;
+  journal_schema?: number;
+  kind: string;
+  parent_thread_id?: string;
+  reason?: string;
+  run_id?: string;
+  scope: string;
+  status: string;
+  thread_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveResourceFile".
+ */
+export interface ArchiveResourceFile {
+  index: number;
+  name: string;
+  sha256: string;
+  size: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArchiveResourcePage".
+ */
+export interface ArchiveResourcePage {
+  archive_id: string;
+  items: ArchiveResource[] | null;
+  next_after?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2309,14 +2588,6 @@ export interface RunRolloutPage {
   observed: RunObserved;
   run_id: string;
   watermark: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunnerRepository".
- */
-export interface RunnerRepository {
-  remote_identity: string;
-  repo: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
