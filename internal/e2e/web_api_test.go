@@ -251,7 +251,7 @@ func TestEndToEnd_WebConversation(t *testing.T) {
 		th.Say(turn, "item_say_"+turn, "Nothing is running.")
 		return "completed"
 	}
-	srv.startMainThread(agent)
+	srv.startHistoricalMainThread(agent)
 	hs := srv.startWeb()
 	web := srv.webLogin(hs.URL)
 
@@ -347,17 +347,17 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 		return "completed"
 	}
 	backgroundTurn := agent.Turn
-	srv.startMainThread(agent, func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
+	srv.startHistoricalMainThread(agent, func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		status := backgroundTurn(th, turn, in)
 		item := strings.TrimPrefix(th.Config.Cwd, "/background/work-item:")
-		res := th.CallTool(context.Background(), turn, "read-context", "work_item_context_read", map[string]any{"work_item_id": item})
+		res := th.CallTool(context.Background(), turn, "read-context", "background_item_read", map[string]any{"work_item_id": item})
 		var v struct {
-			Result protocol.WorkItemContext `json:"result"`
+			Result protocol.WorkItemView `json:"result"`
 		}
-		if !res.Success || json.Unmarshal([]byte(res.Text), &v) != nil {
+		if !res.Success || json.Unmarshal([]byte(res.Text), &v) != nil || v.Result.WorkItemID != item {
 			return "failed"
 		}
-		res = th.CallTool(context.Background(), turn, "submit-background", "background_submit", protocol.BackgroundAssessmentPayload{ContextRevision: v.Result.Revision, Disposition: "waiting", Note: "Decision state read", EvidenceIDs: []string{}})
+		res = th.CallTool(context.Background(), turn, "submit-background", "background_submit", protocol.BackgroundAssessmentPayload{ContextRevision: historicalDeliveredContextRevision(t, agent, th.ID()), Disposition: "waiting", Note: "Decision state read", EvidenceIDs: []string{}})
 		if !res.Success {
 			return "failed"
 		}
@@ -469,7 +469,7 @@ func TestFault_SendReceiptLost(t *testing.T) {
 		th.Say(turn, "item_"+turn, "Noted.")
 		return "completed"
 	}
-	srv.startMainThread(agent)
+	srv.startHistoricalMainThread(agent)
 	hs := srv.startWeb()
 	web := srv.webLogin(hs.URL)
 
@@ -528,7 +528,7 @@ func TestFault_StopReceiptLost(t *testing.T) {
 			return ctx.Err()
 		}
 	}
-	srv.startMainThread(agent)
+	srv.startHistoricalMainThread(agent)
 	web := srv.webLogin(srv.startWeb().URL)
 	events := web.stream("")
 
@@ -566,7 +566,7 @@ func TestFault_EventStreamAcrossRestart(t *testing.T) {
 		return "completed"
 	}
 	srv := newServer(t, time.Minute)
-	srv.startMainThread(agent)
+	srv.startHistoricalMainThread(agent)
 	web := srv.webLogin(srv.startWeb().URL)
 	events := web.stream("")
 	first := web.send(protocol.SubmitMessagePayload{Body: "first"})
@@ -583,7 +583,7 @@ func TestFault_EventStreamAcrossRestart(t *testing.T) {
 			t.Fatal("the stream did not end at shutdown")
 		}
 	}
-	srv.startMainThread(agent)
+	srv.startHistoricalMainThread(agent)
 	web.srv, web.url = srv, srv.startWeb().URL
 	// Work goes on before the client is back.
 	srv.say("written from another client")

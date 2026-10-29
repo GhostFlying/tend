@@ -9,28 +9,34 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
 import type {
   Envelope,
-  FollowupRule,
+  IssueFollowupRule,
   FollowupSpec,
-  WorkItemView,
+  IssueView,
 } from "../src/api/generated/api.ts";
 const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
 const output = process.env.TEND_LAYOUT_OUTPUT ?? join(tmpdir(), "tend-followups-layout");
 await mkdir(output, { recursive: true });
-const item: WorkItemView = {
-  work_item_id: "work-example",
-  project: "",
-  title: "等待交付并按约定继续",
-  intent: "核对已授权工作的结果",
+const item: IssueView = {
+  issue_id: "wi_01M5M3ME31875GDA8F7P5XTD74",
+  plan: {
+    project: "",
+    title: "等待交付并按约定继续",
+    intent: "核对已授权工作的结果",
+    stages: [],
+    follow_ons: [],
+  },
   revision: 1,
-  status: "open",
-  column: "unplanned",
+  context_revision: 1,
+  assignment_epoch: 1,
+  depends_on: [],
+  state: "active",
+  assignment_state: "active",
+  assignee: { kind: "owner", ref: "owner" },
+  tasks: [],
   created_at: 1,
   updated_at: 1,
-  stages: [],
-  tasks: [],
-  follow_ons: [],
 };
-let rules: FollowupRule[] = [];
+let rules: IssueFollowupRule[] = [];
 let seq = 1;
 let drop = false;
 let sourceCancelled = false;
@@ -42,12 +48,6 @@ function json(res: ServerResponse, value: unknown, status = 200) {
   res.end(JSON.stringify(value));
 }
 function publish() {
-  item.followups = {
-    active: rules.filter((r) => r.status === "active").length,
-    paused: rules.filter((r) => r.status === "paused").length,
-    purpose: rules[0]?.purpose ?? "",
-    next_at: rules[0]?.next_at ?? 0,
-  };
   seq++;
   for (const res of streams)
     res.write(
@@ -80,11 +80,21 @@ const server = createServer(async (req, res) => {
       queue: [],
       projects: [],
     });
-  if (path === "/api/v1/work-items") return json(res, { items: [item] });
-  if (path === `/api/v1/work-items/${item.work_item_id}/followups`)
+  if (path === "/api/v1/issues")
+    return json(res, {
+      items: u.searchParams.get("parent_id")
+        ? []
+        : [{ ...item, title: item.plan.title, project: item.plan.project }],
+    });
+  if (path === `/api/v1/issues/${item.issue_id}/followups`)
     return json(res, { enabled: true, items: rules, more: false, event_seq: seq });
-  if (path === `/api/v1/work-items/${item.work_item_id}`) return json(res, item);
-  if (path.startsWith("/api/v1/followups/"))
+  if (path === `/api/v1/issues/${item.issue_id}`) return json(res, item);
+  if (path === `/api/v1/issues/${item.issue_id}/context`)
+    return json(res, { issue_id: item.issue_id, sources: [], context_revision: 1 });
+  if (path === `/api/v1/issues/${item.issue_id}/deliveries`) return json(res, { items: [] });
+  if (path === "/api/v1/inbox") return json(res, { items: [] });
+  if (path === "/api/v1/next") return json(res, { items: [] });
+  if (path.endsWith("/history"))
     return json(res, {
       rule: rules[0],
       revisions: rules,
@@ -92,7 +102,7 @@ const server = createServer(async (req, res) => {
         occurrence_id: `occ-${i}`,
         rule_id: rules[0]!.rule_id,
         revision: 1,
-        work_item_id: item.work_item_id,
+        issue_id: item.issue_id,
         message_id: `source-${i}`,
         background_message_id: `batch-${i}`,
         reason: "every",
@@ -160,11 +170,16 @@ const server = createServer(async (req, res) => {
     if (!receipts.has(e.request_id)) {
       const verb = e.operation.split("_").at(-1);
       if (verb === "create") {
-        const spec = e.payload as FollowupSpec;
+        const spec = (e.payload as { spec: FollowupSpec }).spec;
+        assert.equal(
+          (e.payload as { expected_assignment_epoch: number }).expected_assignment_epoch,
+          item.assignment_epoch,
+        );
+        assert.equal(e.expected_control_revision, item.revision);
         rules.push({
           ...spec,
           rule_id: `followup-${rules.length + 1}`,
-          work_item_id: item.work_item_id,
+          issue_id: item.issue_id,
           status: "active",
           revision: 1,
           trigger_count: 0,
@@ -236,16 +251,16 @@ try {
       if (width < 760)
         await p
           .getByRole("navigation", { name: "视图" })
-          .getByRole("button", { name: "工作项", exact: true })
+          .getByRole("button", { name: "Issue", exact: true })
           .click();
-      else await p.getByRole("button", { name: "工作项 · 白板 ›" }).click();
+      else await p.getByRole("button", { name: "Issue · 白板 ›" }).click();
       await p
-        .getByRole("region", { name: "工作项白板", exact: true })
-        .getByRole("button", { name: item.title, exact: true })
+        .getByRole("region", { name: "Issue白板", exact: true })
+        .getByRole("button", { name: item.plan.title, exact: true })
         .click();
       await p
-        .getByRole("dialog", { name: "工作项详情", exact: true })
-        .getByRole("heading", { name: item.title, exact: true })
+        .getByRole("dialog", { name: "Issue详情", exact: true })
+        .getByRole("heading", { name: item.plan.title, exact: true })
         .waitFor();
       await p.getByRole("button", { name: "跟进与交付", exact: true }).click();
     };
@@ -260,7 +275,10 @@ try {
     await form.getByLabel("核对时间").fill("2026-10-27T09:30");
     await form.getByRole("button", { name: "保存安排" }).click();
     await section.getByText("明天核对交付", { exact: true }).waitFor();
-    assert.equal((writes[0]!.payload as FollowupSpec).at, Date.parse("2026-10-27T01:30:00Z"));
+    assert.equal(
+      (writes[0]!.payload as { spec: FollowupSpec }).spec.at,
+      Date.parse("2026-10-27T01:30:00Z"),
+    );
     await section.getByRole("button", { name: "暂停", exact: true }).click();
     await section.getByText("已暂停", { exact: true }).waitFor();
     await section.getByRole("button", { name: "恢复", exact: true }).click();
@@ -297,7 +315,34 @@ try {
     await page.getByRole("button", { name: "核对结果" }).waitFor({ state: "hidden" });
     assert.equal(writes.at(-1)!.request_id, unknown.request_id);
     await other.getByText("已触发 1 / 20", { exact: false }).waitFor();
-    const panel = page.getByRole("dialog", { name: "工作项详情", exact: true });
+    assert.equal(rules[0]!.kind, "every");
+    assert.equal(rules[0]!.every_seconds, 3600);
+    assert.equal(rules[0]!.timezone, "Asia/Shanghai");
+    assert.equal(
+      (writes.at(-1)!.payload as { expected_assignment_epoch: number }).expected_assignment_epoch,
+      item.assignment_epoch,
+    );
+    rules.push({
+      ...rules[0]!,
+      rule_id: "deadline-followup",
+      purpose: "时间约定维护的提醒",
+      deadline_id: "deadline-one",
+    });
+    publish();
+    const deadline = section.locator("article").filter({ hasText: "时间约定维护的提醒" });
+    await deadline.getByText("此安排由时间约定管理。", { exact: true }).waitFor();
+    for (const name of ["编辑", "暂停", "恢复", "取消安排", "现在检查"])
+      assert.equal(await deadline.getByRole("button", { name, exact: true }).count(), 0);
+    await deadline.getByRole("button", { name: "历史", exact: true }).waitFor();
+    const ordinary = section
+      .locator("article")
+      .filter({ has: page.getByText("明天核对交付", { exact: true }) });
+    await ordinary.getByLabel("调整说明（可选）").fill("保留已发生历史，停止后续安排");
+    await ordinary.getByRole("button", { name: "取消安排", exact: true }).click();
+    await ordinary.getByText("已取消", { exact: true }).waitFor();
+    assert.equal(writes.at(-1)?.reason, "保留已发生历史，停止后续安排");
+    assert.equal(rules[1]!.status, "active");
+    const panel = page.getByRole("dialog", { name: "Issue详情", exact: true });
     await panel.getByRole("heading", { name: "跟进安排" }).scrollIntoViewIfNeeded();
     assert(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
     await page.screenshot({ path: join(output, `followups-${width}.png`) });

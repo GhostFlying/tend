@@ -107,6 +107,9 @@ func refreshTaskWorkContext(ctx context.Context, q store.Querier, taskID string,
 	spec.SharedContext = nil
 	for _, item := range items {
 		next := freezeIssueContext(item)
+		if canonical {
+			next = freezeCanonicalIssueDefinition(item)
+		}
 		if fingerprint {
 			digest, facts, err := store.EffectiveContext(ctx, q, item.WorkItemID)
 			if err != nil {

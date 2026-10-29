@@ -70,12 +70,7 @@ func (s *hostedSession) call(name string, args map[string]any, requestID string)
 	if requestID == "" {
 		requestID = s.e.ids.New(protocol.PrefixRequest)
 	}
-	if name == "tasks_create" {
-		args["commit_seq"] = 1
-		if s.project != "" {
-			args["project"] = s.project
-		}
-	}
+
 	raw, _ := json.Marshal(args)
 	result := s.e.tools.Handle(s.e.t.Context(), tools.Call{Principal: protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "hosted", Thread: s.id}, SourceMessageID: s.source, RequestID: requestID, Tool: name, Arguments: raw})
 	var a toolAnswer

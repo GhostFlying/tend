@@ -3,13 +3,15 @@ import { RepositoryEntry } from "../repos/Repositories.tsx";
 // Work items are the primary navigation; execution records have a separate view.
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
-import { Attention } from "../decisions/Attention.tsx";
+import type { AttentionPage } from "../api/generated/api.ts";
+import type { ReadState } from "../workitems/live.ts";
+import { NextSummary } from "../attention/NextSummary.tsx";
 import { useStore } from "../state/store.ts";
 import { theme, themeLabels, toggleTheme } from "../theme/theme.ts";
 import { Note } from "./Chat.tsx";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import { RecentTasks } from "../tasks/Board.tsx";
-import { WorkItemOverview } from "../workitems/Board.tsx";
+import { IssueOverview } from "../issues/Overview.tsx";
 import controls from "./controls.module.css";
 import { Hosts } from "../hosts/Hosts.tsx";
 import styles from "./Sidebar.module.css";
@@ -22,6 +24,9 @@ export function Sidebar({
   onRecords,
   onSettings,
   onRepos,
+  mainAttention,
+  onInbox,
+  onIssue,
 }: {
   view: View;
   connection: Connection;
@@ -29,6 +34,9 @@ export function Sidebar({
   onRecords(): void;
   onSettings(): void;
   onRepos(): void;
+  mainAttention: ReadState<AttentionPage>;
+  onInbox(id?: string): void;
+  onIssue(id: string): void;
 }) {
   const { live } = useServices();
   const choice = useStore(theme);
@@ -43,23 +51,23 @@ export function Sidebar({
           <ConnectionBadge connection={connection} />
         </span>
       </div>
-      <h2 className={styles.mobileTitle}>{view === "decisions" ? "待处理" : "工作项"}</h2>
+      <h2 className={styles.mobileTitle}>{view === "decisions" ? "待处理" : "Issue"}</h2>
       <div className={styles.mobileNotice}>
         <Note />
       </div>
       <div className={styles.scroll}>
         <div className={styles.decisions}>
-          <Attention />
+          <NextSummary onOpen={onInbox} onIssue={onIssue} summary={mainAttention} />
         </div>
-        <section className={styles.tasks} aria-label="工作项与资源">
+        <section className={styles.tasks} aria-label="Issue与资源">
           <button
             type="button"
             className={`${controls.chipBtn} ${styles.allTasks}`}
             onClick={onBoard}
           >
-            工作项 · 白板 ›
+            Issue · 白板 ›
           </button>
-          <WorkItemOverview onAll={onBoard} />
+          <IssueOverview onSelect={onIssue} onAll={onBoard} active={view === "chat"} />
           <div className={styles.recent}>
             <RecentTasks limit={3} detailed />
           </div>

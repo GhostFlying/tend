@@ -153,6 +153,9 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	if err := cfgfile.Load(path, &cfg); err != nil {
 		return err
 	}
+	if cfg.MainAgent != nil && cfg.MainAgent.Named == nil {
+		return errors.New("main_agent requires an explicit named configuration; omit main_agent for owner-only service")
+	}
 	secret, err := hex.DecodeString(os.Getenv("TEND_SERVER_SECRET"))
 	if err != nil || len(secret) < 32 {
 		return errors.New("TEND_SERVER_SECRET must hold at least 32 bytes, hex-encoded")

@@ -17,6 +17,7 @@ import (
 var issueOperations = map[string]string{
 	"refresh-delivery": "issues.refresh_delivery", "followups-create": "issues.followups_create", "followups-update": "issues.followups_update", "followups-pause": "issues.followups_pause", "followups-resume": "issues.followups_resume", "followups-cancel": "issues.followups_cancel", "followups-trigger": "issues.followups_trigger",
 
+	"assign": "issues.assign", "finish-assignment": "issues.finish_assignment",
 	"create": "issues.create", "update": "issues.update", "pause": "issues.pause", "resume": "issues.resume", "cancel": "issues.cancel", "finish-cancel": "issues.finish_cancel", "close": "issues.close", "reopen": "issues.reopen", "reparent": "issues.reparent", "dependencies": "issues.dependencies", "review-sources": "issues.review_sources", "review-completions": "issues.review_completions", "create-task": "issues.create_task", "update-task": "issues.update_task",
 }
 
@@ -32,7 +33,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		return runPlanningRecord(ctx, e, args[1:], true)
 	}
 	if len(args) == 0 {
-		return usagef("issue expects list|show|context|followups|followup-history|followup|deliveries|refresh-delivery|create|update|pause|resume|cancel|finish-cancel|close|reopen|reparent|dependencies|review-sources|review-completions|create-task|update-task|request|replay")
+		return usagef("issue expects list|show|context|followups|followup-history|followup|deliveries|refresh-delivery|create|update|pause|resume|cancel|finish-cancel|close|reopen|reparent|dependencies|assign|finish-assignment|review-sources|review-completions|create-task|update-task|request|replay")
 	}
 	action := args[0]
 	fs := newFlags(e, "issue "+action)
@@ -188,7 +189,10 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 				if err := c.do(ctx, "GET", "/api/v1/tasks/"+url.PathEscape(target.ID), nil, &task); err != nil {
 					return err
 				}
-				issueID = task.PrimaryWorkItemID
+				issueID = task.PrimaryIssueID
+				if issueID == "" {
+					return usagef("task has no canonical primary Issue")
+				}
 				if *revision < 1 {
 					*revision = task.ControlRevision
 				}

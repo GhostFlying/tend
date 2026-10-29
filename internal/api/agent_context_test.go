@@ -7,10 +7,10 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func TestMissingWorkItemContextReturnsNotFound(t *testing.T) {
+func TestMissingIssueContextReturnsNotFound(t *testing.T) {
 	e := newEnv(t)
 	var result protocol.APIResponse
-	status := e.do("GET", "/api/v1/work-items/missing/context", e.login(protocol.ScopeOwner), nil, &result)
+	status := e.do("GET", "/api/v1/issues/missing/context", e.login(protocol.ScopeOwner), nil, &result)
 	t.Logf("status=%d error=%+v", status, result.Error)
 	if status != http.StatusNotFound {
 		t.Error("missing context is reported as an internal server failure")

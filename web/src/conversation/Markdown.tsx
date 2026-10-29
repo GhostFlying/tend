@@ -9,7 +9,7 @@ import type { Token } from "markdown-it";
 import { createElement, Fragment, memo, useMemo, useState, type ReactNode } from "react";
 import { splitTaskIds } from "./model.ts";
 import styles from "./Markdown.module.css";
-import { WorkItemRef } from "../workitems/WorkItemRef.tsx";
+import { IssueRef } from "../issues/IssueRef.tsx";
 import { splitWorkItemIds } from "../workitems/model.ts";
 import { TaskRef } from "./TaskRef.tsx";
 
@@ -166,7 +166,7 @@ function withTaskRefs(text: string, keys: Keys): ReactNode[] {
   return splitTaskIds(text).map((part) =>
     typeof part === "string" ? (
       splitWorkItemIds(part).map((run) =>
-        typeof run === "string" ? run : <WorkItemRef key={keys.next++} id={run.workItemId} />,
+        typeof run === "string" ? run : <IssueRef key={keys.next++} id={run.workItemId} />,
       )
     ) : (
       <TaskRef key={keys.next++} taskId={part.taskId} />

@@ -1,0 +1,202 @@
+.root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.head {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.head h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+.head p {
+  color: var(--label-3);
+  font-size: var(--text-s);
+  margin-bottom: 0;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+}
+.list {
+  border-right: 1px solid var(--border);
+  padding: 16px;
+  overflow: auto;
+}
+.list button {
+  display: block;
+  text-align: left;
+  width: 100%;
+  padding: 12px;
+  border-radius: 7px;
+}
+.list button[aria-pressed="true"] {
+  background: var(--bg-l2);
+  font-weight: 600;
+}
+.content {
+  overflow: auto;
+  padding: 20px 24px;
+}
+.content h2 {
+  font-size: 19px;
+}
+.content pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+  background: var(--bg-l1);
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.record {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 12px 0;
+  padding: 16px;
+}
+.record h3 {
+  font-size: 16px;
+  margin: 0 0 10px;
+}
+.record label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.record label input {
+  flex: none;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0;
+}
+.tabs button {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.tabs button[aria-pressed="true"] {
+  background: var(--bg-l2);
+  font-weight: 600;
+}
+@media (max-width: 760px) {
+  .head,
+  .content {
+    padding: 18px 16px;
+  }
+  .layout {
+    display: block;
+    overflow: auto;
+  }
+  .list {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    max-height: 180px;
+  }
+  .content {
+    overflow: visible;
+  }
+}
+
+.content select {
+  font: inherit;
+  background: var(--input);
+  color: var(--label);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  margin-left: 8px;
+  max-width: 100%;
+}
+.record input[type="checkbox"] {
+  accent-color: var(--label);
+}
+
+.archiveSelect {
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.archiveSelect label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.archiveSelect select,
+.list select {
+  font: inherit;
+  color: var(--label);
+  background: var(--input);
+  border: 1px solid var(--border);
+  padding: 9px 12px;
+  border-radius: 7px;
+  min-width: 0;
+}
+.archiveSelect select {
+  flex: 1;
+}
+.root > h2,
+.root > p,
+.root > section {
+  margin-left: 24px;
+  margin-right: 24px;
+}
+.list > label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: var(--text-s);
+}
+.list small {
+  display: block;
+  color: var(--label-3);
+  margin-top: 6px;
+  font-weight: 400;
+}
+.tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 20px;
+  border-bottom: 1px solid var(--border);
+  margin: 0 0 18px;
+}
+.tabs button {
+  flex: none;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  padding: 12px 0;
+}
+.tabs button[aria-pressed="true"] {
+  background: none;
+  border-bottom-color: var(--label);
+}
+@media (max-width: 760px) {
+  .archiveSelect {
+    padding: 12px 16px;
+  }
+  .root > h2,
+  .root > p,
+  .root > section {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+  .list {
+    max-height: 145px;
+  }
+  .list button {
+    padding: 8px;
+  }
+  .list small {
+    display: inline;
+    margin-left: 8px;
+  }
+}

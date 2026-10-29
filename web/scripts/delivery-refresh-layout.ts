@@ -1,11 +1,15 @@
 /// <reference lib="dom" />
 // Unknown writes reconcile only against later facts for the same delivery.
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+const output = process.env.TEND_LAYOUT_OUTPUT;
+if (output) await mkdir(output, { recursive: true });
 import type { ServerResponse } from "node:http";
 import { createServer } from "vite";
 import react from "@vitejs/plugin-react";
 import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
-import type { Envelope, WorkItemView } from "../src/api/generated/api.ts";
+import type { Envelope, IssueView, IssueDeliveryObservation } from "../src/api/generated/api.ts";
 
 const id = "wi_01M5M3ME31875GDA8F7P5XTD74";
 const taskId = "task_01M5M3ME31875GDA8F7P5XTD74";
@@ -21,35 +25,42 @@ const task = {
   block_reason: "none",
   workspace: "sample",
   next_implement_generation: 1,
-  work_item_ids: [id],
+  issue_ids: [id],
+  primary_issue_id: id,
+  primary_issue_title: "Refresh reconciliation",
   runs: [],
   artifacts: [],
   acceptances: [],
   decisions: [],
 };
-const item: WorkItemView = {
-  work_item_id: id,
-  title: "Refresh reconciliation",
-  intent: "Track review",
-  project: "sample",
+const item: IssueView = {
+  issue_id: id,
+  plan: {
+    title: "Refresh reconciliation",
+    intent: "Track review",
+    project: "sample",
+    stages: [],
+    deliveries: [{ delivery_id: "pr", provider: "github", repository: "example/repo", number: 1 }],
+  },
   revision: 1,
-  status: "open",
-  column: "unplanned",
+  assignment_epoch: 1,
+  depends_on: [],
+  assignment_state: "active",
+  assignee: { kind: "owner", ref: "owner" },
+  state: "active",
   created_at: 1,
   updated_at: 1,
-  stages: [],
-  deliveries: [{ delivery_id: "pr", provider: "github", repository: "example/repo", number: 1 }],
-  observations: [
-    {
-      work_item_id: id,
-      delivery_id: "pr",
-      generation: 1,
-      state: "open",
-      checked_at: 1000,
-      refresh_pending: false,
-    },
-  ],
 };
+let observations: IssueDeliveryObservation[] = [
+  {
+    issue_id: id,
+    delivery_id: "pr",
+    generation: 1,
+    state: "open",
+    checked_at: 1000,
+    refresh_pending: false,
+  },
+];
 const streams = new Set<ServerResponse>();
 const requests = new Set<string>();
 let event = 0;
@@ -86,8 +97,28 @@ const server = await createServer({
             res.on("close", () => streams.delete(res));
             return;
           }
-          if (path === `/api/v1/work-items/${id}`) return json(res, item);
-          if (path === "/api/v1/work-items") return json(res, { items: [item] });
+          if (path === `/api/v1/issues/${id}`) return json(res, item);
+          if (path === "/api/v1/issues")
+            return json(res, {
+              items: [{ ...item, title: item.plan.title, project: item.plan.project }],
+            });
+          if (path === `/api/v1/issues/${id}/deliveries`)
+            return json(res, {
+              items: (item.plan.deliveries ?? []).map((delivery) => ({
+                delivery,
+                observation: observations.find((o) => o.delivery_id === delivery.delivery_id) ?? {
+                  issue_id: id,
+                  delivery_id: delivery.delivery_id,
+                  generation: 0,
+                  state: "unknown",
+                },
+              })),
+            });
+          if (path === `/api/v1/issues/${id}/followups`)
+            return json(res, { issue_id: id, enabled: false, items: [], event_seq: event });
+          if (path === `/api/v1/issues/${id}/context`)
+            return json(res, { issue_id: id, sources: [], context_revision: 1 });
+          if (path === "/api/v1/inbox" || path === "/api/v1/next") return json(res, { items: [] });
           if (path === "/api/v1/ops") {
             let body = "";
             req.on("data", (chunk: Buffer) => {
@@ -164,10 +195,10 @@ try {
   const context = await browser.newContext({ serviceWorkers: "block" });
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
-  await page.goto(`http://127.0.0.1:${address.port}/?work_item=${id}`);
-  const panel = page.getByRole("dialog", { name: "工作项详情" });
+  await page.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
+  const panel = page.getByRole("dialog", { name: "Issue详情" });
   await panel.getByRole("button", { name: "跟进与交付", exact: true }).click();
-  const button = panel.getByRole("button", { name: "刷新交付状态", exact: true });
+  const button = panel.getByRole("button", { name: "重新观察交付", exact: true });
   await button.click();
   const unknown = panel.getByText("刷新请求尚未确认，等待账本事件或连接恢复；不会自动重发。", {
     exact: true,
@@ -175,63 +206,75 @@ try {
   await unknown.waitFor();
   assert(await button.isDisabled());
   assert.equal(requests.size, 1);
+  if (output) {
+    await unknown.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(output, "delivery-unknown.png") });
+  }
 
   // A fresh read and unrelated facts must leave the original uncertainty intact.
-  await panel.getByRole("button", { name: "背景与输入", exact: true }).click();
-  item.intent = "Unrelated plan update";
+  await panel.getByRole("button", { name: "概览", exact: true }).click();
+  item.plan.intent = "Unrelated plan update";
   publish();
-  await panel.getByRole("button", { name: "背景与输入", exact: true }).click();
-  await panel.getByText(item.intent, { exact: true }).waitFor();
+  await panel.getByRole("button", { name: "概览", exact: true }).click();
+  await panel.getByText(`目标：${item.plan.intent}`, { exact: true }).waitFor();
   await panel.getByRole("button", { name: "跟进与交付", exact: true }).click();
   assert(await button.isDisabled());
   await unknown.waitFor();
-  item.observations!.push({
-    work_item_id: id,
+  observations.push({
+    issue_id: id,
     delivery_id: "other",
     generation: 9,
     state: "merged",
     checked_at: 9000,
   });
-  item.intent = "Another delivery changed";
+  item.plan.intent = "Another delivery changed";
   publish();
-  await panel.getByRole("button", { name: "背景与输入", exact: true }).click();
-  await panel.getByText(item.intent, { exact: true }).waitFor();
+  await panel.getByRole("button", { name: "概览", exact: true }).click();
+  await panel.getByText(`目标：${item.plan.intent}`, { exact: true }).waitFor();
   await panel.getByRole("button", { name: "跟进与交付", exact: true }).click();
   assert(await button.isDisabled());
 
   // Reserving a query is not a completed observation.
-  item.observations![0] = { ...item.observations![0]!, generation: 2, refresh_pending: true };
+  observations[0] = { ...observations[0]!, generation: 2, refresh_pending: true };
   publish();
-  await panel.getByText("等待重新观察", { exact: true }).waitFor();
+  await panel.getByText(/观察请求待回报/).waitFor();
   assert(await button.isDisabled());
   assert.equal(requests.size, 1);
 
-  item.observations![0] = {
-    ...item.observations![0]!,
+  observations[0] = {
+    ...observations[0]!,
     generation: 3,
     checked_at: 2000,
     refresh_pending: false,
   };
   publish();
-  await unknown.waitFor({ state: "hidden" });
+  await panel
+    .getByText("交付事实已更新，可查看最新观察；原刷新请求的结果仍未确认。", { exact: true })
+    .waitFor();
   await page.waitForFunction(() =>
     [...document.querySelectorAll("button")].some(
-      (b) => b.textContent?.trim() === "刷新交付状态" && !b.disabled,
+      (b) => b.textContent?.trim() === "重新观察交付" && !b.disabled,
     ),
   );
   await panel
     .getByText("交付事实已更新，可查看最新观察；原刷新请求的结果仍未确认。", { exact: true })
     .waitFor();
   assert.equal(requests.size, 1, "no automatic re-submit after new ledger facts");
+  if (output)
+    await panel
+      .getByText("交付事实已更新，可查看最新观察；原刷新请求的结果仍未确认。", { exact: true })
+      .scrollIntoViewIfNeeded();
+  if (output)
+    await page.screenshot({ path: join(output, "delivery-completed-facts-original-unknown.png") });
   await button.click();
   await unknown.waitFor();
   assert.equal(requests.size, 2, "another refresh is explicit");
   assert(await button.isDisabled());
   await context.close();
   for (const terminal of ["merged", "closed"]) {
-    item.observations = [
+    observations = [
       {
-        work_item_id: id,
+        issue_id: id,
         delivery_id: "pr",
         generation: 10,
         state: terminal,
@@ -244,10 +287,10 @@ try {
     const terminalContext: BrowserContext = await browser.newContext({ serviceWorkers: "block" });
     const terminalPage: Page = await terminalContext.newPage();
     terminalPage.setDefaultTimeout(10000);
-    await terminalPage.goto(`http://127.0.0.1:${address.port}/?work_item=${id}`);
-    const details: Locator = terminalPage.getByRole("dialog", { name: "工作项详情" });
+    await terminalPage.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
+    const details: Locator = terminalPage.getByRole("dialog", { name: "Issue详情" });
     await details.getByRole("button", { name: "跟进与交付", exact: true }).click();
-    const refresh: Locator = details.getByRole("button", { name: "刷新交付状态", exact: true });
+    const refresh: Locator = details.getByRole("button", { name: "重新观察交付", exact: true });
     const before: number = requests.size;
     await refresh.click();
     await details.getByRole("button", { name: "核对刷新请求", exact: true }).waitFor();
@@ -266,18 +309,25 @@ try {
     assert.equal(requests.size, before + 1);
     // Closing the dialog must not discard the original operation.
     await details.getByRole("button", { name: "关闭详情" }).click();
-    await terminalPage
-      .locator("aside")
-      .getByRole("button", { name: /Refresh reconciliation/ })
-      .click();
+    await terminalPage.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
     await details.getByRole("button", { name: "跟进与交付", exact: true }).click();
+    if (output)
+      await details
+        .getByRole("button", { name: "核对刷新请求", exact: true })
+        .scrollIntoViewIfNeeded();
+    if (output)
+      await terminalPage.screenshot({
+        path: join(output, `delivery-${terminal}-reload-unknown.png`),
+      });
     await details.getByRole("button", { name: "核对刷新请求", exact: true }).click();
     await details.getByText("未查到原刷新请求，可显式重试同一请求。", { exact: true }).waitFor();
     assert(await refresh.isDisabled());
     assert.equal(requests.size, before + 1);
     acceptWrites = true;
     await details.getByRole("button", { name: "重试原刷新请求", exact: true }).click();
-    await details.getByText("已请求重新观察，等待执行主机回报。", { exact: true }).waitFor();
+    await details
+      .getByRole("button", { name: "核对刷新请求", exact: true })
+      .waitFor({ state: "hidden" });
     assert.deepEqual(
       submissions.at(-1),
       original,
@@ -287,64 +337,44 @@ try {
     assert.equal(await refresh.isDisabled(), false);
     await terminalContext.close();
   }
-  for (const [label, status] of [
-    ["继续讨论", "open"],
-    ["提出暂缓安排", "open"],
-    ["讨论结束跟进", "open"],
-    ["提出恢复安排", "snoozed"],
-    ["提出重新跟进", "closed"],
-  ] as const) {
-    item.status = status;
-    const mobileContext = await browser.newContext({
-      viewport: { width: 390, height: 760 },
-      serviceWorkers: "block",
-    });
-    const mobilePage = await mobileContext.newPage();
-    mobilePage.setDefaultTimeout(10000);
-    await mobilePage.goto(`http://127.0.0.1:${address.port}/?task=${taskId}`);
-    const taskDrawer = mobilePage.getByRole("dialog", { name: "任务详情", exact: true });
-    await taskDrawer.getByText("Linked task", { exact: true }).waitFor();
-    await taskDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
-    const composer = mobilePage.getByRole("textbox", { name: "消息", exact: true });
-    await composer.fill("Existing unsent constraint");
-    await mobilePage.locator('input[type="file"]').setInputFiles({
-      name: "evidence.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("fixture evidence"),
-    });
-    const before: number = requests.size;
-    await mobilePage
-      .locator("main")
-      .getByRole("button", { name: "Linked task", exact: true })
-      .click();
-    await taskDrawer.getByRole("button", { name: item.title, exact: true }).click();
-    await mobilePage
-      .getByRole("dialog", { name: "工作项详情" })
-      .getByRole("button", { name: label, exact: true })
-      .click();
-    await composer.click({ trial: true });
-    const proof = await composer.evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      const app = document.querySelector<HTMLElement>("[data-details]")!;
-      return {
-        details: app.dataset.details,
-        view: app.dataset.view,
-        covered: hit !== el && !el.contains(hit),
-      };
-    });
-    assert.deepEqual(proof, { details: "closed", view: "chat", covered: false });
-    assert((await composer.inputValue()).includes("Existing unsent constraint"));
-    assert((await composer.inputValue()).includes(id));
-    await mobilePage
-      .getByRole("list", { name: "待发送附件" })
-      .getByText("evidence.txt", { exact: true })
-      .waitFor();
-    assert.equal(requests.size, before, "discussion keeps text and files local without sending");
-    await mobileContext.close();
-  }
+  // The approved canonical detail replaces legacy discussion templates. Opening
+  // its real task backlink and returning must still retain the local text/files.
+  const mobileContext = await browser.newContext({
+    viewport: { width: 390, height: 760 },
+    serviceWorkers: "block",
+  });
+  const mobilePage = await mobileContext.newPage();
+  mobilePage.setDefaultTimeout(10000);
+  await mobilePage.goto(`http://127.0.0.1:${address.port}/?task=${taskId}`);
+  const taskDrawer = mobilePage.getByRole("dialog", { name: "任务详情", exact: true });
+  await taskDrawer.getByText("Linked task", { exact: true }).first().waitFor();
+  await taskDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+  const composer = mobilePage.getByRole("textbox", { name: "消息", exact: true });
+  await composer.fill("Existing unsent constraint");
+  await mobilePage.locator('input[type="file"]').setInputFiles({
+    name: "evidence.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("fixture evidence"),
+  });
+  const before = requests.size;
+  await mobilePage
+    .locator("main")
+    .getByRole("button", { name: "Linked task", exact: true })
+    .click();
+  await taskDrawer.getByRole("button", { name: "Refresh reconciliation", exact: true }).click();
+  const issueDrawer = mobilePage.getByRole("dialog", { name: "Issue详情", exact: true });
+  await issueDrawer.getByRole("heading", { name: item.plan.title, exact: true }).waitFor();
+  await issueDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await composer.click({ trial: true });
+  assert.equal(await composer.inputValue(), "Existing unsent constraint");
+  await mobilePage
+    .getByRole("list", { name: "待发送附件" })
+    .getByText("evidence.txt", { exact: true })
+    .waitFor();
+  assert.equal(requests.size, before, "reading and closing never sends the local draft");
+  await mobileContext.close();
   console.log(
-    "PASS unknown refresh: unrelated facts remain blocked; completed observation restores explicit refresh; no automatic writes; terminal lost-before-server reconnect and same-ID recovery; mobile task-to-work-item discussion preserves a reachable draft and attachment",
+    "PASS unknown refresh: unrelated facts remain blocked; completed observation restores explicit refresh; no automatic writes; terminal lost-before-server reconnect and same-ID recovery; mobile canonical task-to-Issue reading preserves a reachable draft and attachment",
   );
 } finally {
   if (browser) await browser.close();

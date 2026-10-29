@@ -35,7 +35,9 @@ type Snapshot struct {
 	Focus []string
 	// Tasks lists the other unfinished tasks, most important first.
 	Tasks []string
-	// WorkItems remain visible after their current execution tasks finish.
+	// Issues lists canonical responsibilities independently of task execution.
+	Issues []string
+	// WorkItems retains legacy historical responsibilities during the final cutover.
 	WorkItems []string
 	// Results are the task outcomes in a delta.
 	Results []string
@@ -99,6 +101,7 @@ func Render(s Snapshot, budget int) string {
 	if s.Full {
 		sections = []*section{
 			{title: "Current sourced context facts (replace earlier versions; needs_review is not current authority)", lines: s.Facts, protected: true},
+			{title: "Open Issues and responsibility", lines: s.Issues, priority: 5, omitted: "(%d more Issues; see issues_list)"},
 			{title: "Open work items and follow-up", lines: s.WorkItems, priority: 5, omitted: "(%d more work items; see work_items_list)"},
 			{title: "Limits", lines: s.Limits, protected: true},
 			{title: "Decisions", lines: s.Decisions, priority: 6, omitted: "(%d more decisions; see tasks_read)"},

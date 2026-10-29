@@ -26,7 +26,7 @@ func TestFollowupRegressionCancelledFollowupVisibility(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		it := protocol.ConversationItem{MessageID: m.MessageID, Author: m.Author, Body: m.Body}
+		it := protocol.ConversationItem{ConversationContent: protocol.ConversationContent{MessageID: m.MessageID, Author: m.Author, Body: m.Body}}
 		if err := store.HideUndeliveredOwner(t.Context(), tx.Q(), &it); err != nil {
 			return err
 		}

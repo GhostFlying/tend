@@ -1,3 +1,4 @@
+import { ExternalSourceMessage } from "./SourceDetails.tsx";
 import { MessageTags } from "./MessageTags.tsx";
 import { notify } from "../app/notice.ts";
 import { ChoiceCard } from "../workitems/Choice.tsx";
@@ -7,7 +8,10 @@ import { noticeTitle } from "../upgrades/status.ts";
 // their state below, and what the main agent did for each as full-width
 // Markdown with its tool uses.
 import { memo } from "react";
-import type { AssistantState, ConversationItem } from "../api/generated/api.ts";
+import type {
+  AssistantState,
+  IssueConversationItem as ConversationItem,
+} from "../api/generated/api.ts";
 import type { OutgoingMessage } from "../queue/outbox.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
 import controls from "../shell/controls.module.css";
@@ -160,6 +164,12 @@ const assistantLabels: Record<Exclude<AssistantState, "completed">, string> = {
 
 const AgentItem = memo(function AgentItem({ item }: { item: ConversationItem }) {
   const status = item.assistant_state;
+  if (item.author === "external")
+    return (
+      <div data-scroll-id={item.message_id}>
+        <ExternalSourceMessage item={item} />
+      </div>
+    );
   return (
     <div data-scroll-id={item.message_id}>
       {item.choices?.map((choice) => (

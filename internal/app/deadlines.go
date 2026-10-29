@@ -356,7 +356,10 @@ func deadlineSourceChanged(ctx context.Context, q store.Querier, d protocol.Issu
 }
 
 func deadlineHasUnknownOccurrence(ctx context.Context, q store.Querier, id string) (bool, error) {
-	rules, err := store.FollowupIDs(ctx, q, `SELECT rule_id FROM followup_targets WHERE kind='deadline' AND target_id=?`, id)
+	return ownedReminderHasUnknownOccurrence(ctx, q, "deadline", id)
+}
+func ownedReminderHasUnknownOccurrence(ctx context.Context, q store.Querier, kind, id string) (bool, error) {
+	rules, err := store.FollowupIDs(ctx, q, `SELECT rule_id FROM followup_targets WHERE kind=? AND target_id=?`, kind, id)
 	if err != nil {
 		return false, err
 	}

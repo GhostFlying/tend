@@ -21,7 +21,11 @@ func CanonicalIssueContext(ctx context.Context, q store.Querier, id string, afte
 	if err != nil {
 		return out, err
 	}
-	out = protocol.IssueContextView{IssueID: id, Revision: v.Revision, Prepared: v.Prepared, Coverage: v.Coverage, Gaps: v.Gaps, DispatchReady: v.DispatchReady, CoordinationState: v.CoordinationState, DispatchBlockers: v.DispatchBlockers, SyncStatus: v.SyncStatus, Watermark: v.Watermark, Facts: []protocol.IssueContextFact{}, Sources: v.Sources, More: v.More, Next: v.Next}
+	sources, err := OwnerIssueMessages(ctx, q, v.Sources)
+	if err != nil {
+		return out, err
+	}
+	out = protocol.IssueContextView{IssueID: id, Revision: v.Revision, Prepared: v.Prepared, Coverage: v.Coverage, Gaps: v.Gaps, DispatchReady: v.DispatchReady, CoordinationState: v.CoordinationState, DispatchBlockers: v.DispatchBlockers, SyncStatus: v.SyncStatus, Watermark: v.Watermark, Facts: []protocol.IssueContextFact{}, Sources: sources, More: v.More, Next: v.Next}
 	for _, f := range v.Facts {
 		scope := f.Scope
 		if scope == "work_item" {

@@ -33,23 +33,11 @@
   // worth one rating step at weight 1.
   "queue": {"wait_per_hour": 0.1},
 
-  // "main_agent" runs the hosted coordinator and its background agents
-  // (D114). With it, the owner API accepts conversation messages. External
-  // coordinator MCP/hook integration is no longer supported. Every
-  // field is optional: by default it uses traex on PATH with your own
-  // traex home and the default model, and works in data_dir/main-agent.
-  // "main_agent": {
-  //   "instance": "main",
-  //   "traex_bin": "traex",
-  //   // A traex home of its own instead of yours.
-  //   "traex_home": "~/.local/share/tend/traex-home",
-  //   "model": "",
-  //   // Prepare a handoff summary after this many idle minutes; 0 disables it.
-  //   // Default 50, maximum 10080. Web owner settings override this value.
-  //   "summary_idle_minutes": 50,
-  //   // Outside any repository, so no project AGENTS.md is loaded.
-  //   "cwd": "~/.local/share/tend/main-agent",
-  // },
+  // This example intentionally runs owner-only: main_agent is omitted.
+  // To enable managed main/Issue conversations, supply main_agent.named with
+  // explicit registered definitions and their model/effort/runtime selection
+  // (D122). An enabled unnamed main_agent is rejected; there is no automatic
+  // legacy model/native-execution fallback. Private CLI credentials remain local.
 
   "repos": [
     {"repo": "tend", "remote_url": "git@github.com:example/tend.git"},

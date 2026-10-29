@@ -176,8 +176,8 @@ func TestSteerReceiptsOrderReplyToAndFrozenTools(t *testing.T) {
 		return turnID != ""
 	})
 	th.Emit(harness.Event{Kind: harness.EventAgentMessageDelta, TurnID: turnID, ItemID: "before", Text: "initial"})
-	args, _ := json.Marshal(map[string]any{"title": "one planning effect", "spec": spec, "commit_seq": 1})
-	call := harness.ToolCall{ThreadID: th.ID(), TurnID: turnID, CallID: "planning-call", Tool: "tasks_create", Arguments: args}
+	args, _ := json.Marshal(map[string]any{"question": "Which scope?", "options": []string{"keep", "stop"}})
+	call := harness.ToolCall{ThreadID: th.ID(), TurnID: turnID, CallID: "planning-call", Tool: "decisions_open", Arguments: args}
 	if result := e.m.onToolCall(t.Context(), call); !result.Success {
 		t.Fatal(result.Text)
 	}
@@ -204,7 +204,7 @@ func TestSteerReceiptsOrderReplyToAndFrozenTools(t *testing.T) {
 	if result := e.m.onToolCall(t.Context(), call); !result.Success {
 		t.Fatal("replayed tool failed: ", result.Text)
 	}
-	if e.count(`SELECT COUNT(*) FROM tasks`) != 1 || e.count(`SELECT COUNT(*) FROM conversation_bindings WHERE message_id=? AND object_type='task'`, first) != 1 {
+	if e.count(`SELECT COUNT(*) FROM decisions`) != 1 || e.count(`SELECT COUNT(*) FROM conversation_bindings WHERE message_id=? AND object_type='decision'`, first) != 1 {
 		t.Fatal("steer repeated or rebound a committed planning write")
 	}
 	// An item that already began keeps its original reply reference.
@@ -327,7 +327,7 @@ func TestFault_SteerRejectedUnknownAndRecovery(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					it := protocol.ConversationItem{MessageID: second, Author: "owner", Body: row.Body}
+					it := protocol.ConversationItem{ConversationContent: protocol.ConversationContent{MessageID: second, Author: "owner", Body: row.Body}}
 					if err := store.HideUndeliveredOwner(t.Context(), tx.Q(), &it); err != nil {
 						return err
 					}

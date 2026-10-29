@@ -90,7 +90,7 @@ export async function answer(
  */
 export function messageAnswer(
   d: Pick<DecisionView, "decision_id" | "version">,
-  items: readonly ConversationItem[],
+  items: readonly Pick<ConversationItem, "seq" | "state" | "decision">[],
   outbox: readonly OutgoingMessage[],
 ): { option: string; state: "pending" | "failed" } | undefined {
   const mine = (c: { decision_id: string; version: number } | undefined) =>

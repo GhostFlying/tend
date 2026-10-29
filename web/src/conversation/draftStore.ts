@@ -1,6 +1,7 @@
+import type { MessageContent as ConversationItem } from "./eventContent.ts";
 import { deploymentStorageName } from "../api/deployment.ts";
 // Drafts and withdrawal intentions share one durable transaction boundary.
-import type { ConversationAttachment, ConversationItem, Envelope } from "../api/generated/api.ts";
+import type { ConversationAttachment, Envelope } from "../api/generated/api.ts";
 export interface SavedDraft {
   id: string;
   text: string;
@@ -52,6 +53,9 @@ export class DraftStorage {
     const db = await request(open);
     db.onversionchange = () => db.close();
     return new DraftStorage(db);
+  }
+  close(): void {
+    this.db.close();
   }
   async claim(id: string, owner: string, now = Date.now()): Promise<boolean> {
     const tx = this.db.transaction("leases", "readwrite");

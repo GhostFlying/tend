@@ -454,6 +454,15 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 		t.Fatal("manager command became owner decision", err)
 	}
 	close := protocol.IssueEndpointPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch}, Closure: &protocol.IssueClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "The delegated child deliverable passed independent acceptance", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceAcceptance, Reference: pending[0].AcceptanceID, Summary: "Current primary task passed independent acceptance"}}}}
+	misnamedDelivery := close
+	misnamedDelivery.Closure = &protocol.IssueClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "The task delivered its artifact", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceDelivery, Reference: h.task(created.TaskID).CurrentArtifactID, Summary: "Actual task artifact is not a provider delivery observation"}}}
+	invalidDelivery, err := h.app.Execute(t.Context(), manager, h.env(forbidden.Operation(), protocol.Target{Type: "issue", ID: child.IssueID}, misnamedDelivery, rev(child.Revision)), forbidden)
+	if err == nil {
+		err = invalidDelivery.Error
+	}
+	if protocol.CodeOf(err) != protocol.CodeInvalidRequest || !strings.Contains(err.Error(), "acceptance_id") {
+		t.Fatal("artifact mistaken for external delivery did not explain the actual task evidence path", invalidDelivery, err)
+	}
 	child = canonicalLifecycleIssue(t, hostedEffect(t, h, manager, turn, 3, protocol.Target{Type: "issue", ID: child.IssueID}, rev(child.Revision), close, CanonicalOwnerIssueCommand{Action: "close"}))
 	if child.State != protocol.IssueClosed {
 		t.Fatal(child)

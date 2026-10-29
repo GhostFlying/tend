@@ -106,8 +106,8 @@
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: var(--accent);
-  color: #fff;
+  background: var(--label);
+  color: var(--bg);
   display: grid;
   place-items: center;
   flex: none;

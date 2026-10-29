@@ -4,7 +4,7 @@ import type { Connection } from "../api/client.ts";
 import type {
   AgentContextUsage,
   AgentCompactionPage,
-  AgentConversation,
+  IssueAgentConversation as AgentConversation,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useDurableOp } from "../app/useDurableOp.ts";
@@ -122,7 +122,7 @@ export function ContextUsage({ connection }: { connection: Connection }) {
   }, [client, base, connection.status]);
   const compact = async (reconcile = false) => {
     try {
-      const c = await client.get<AgentConversation>(base);
+      const c = await client.get<AgentConversation>(`${base}?projection=issues`);
       const result = await operation.execute(
         reconcile
           ? undefined

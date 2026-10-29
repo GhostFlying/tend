@@ -7,6 +7,7 @@ import { DurableOp } from "./durableOp.ts";
 export function useDurableOp(sender: OpSender, scope: string) {
   const journal = useMemo(() => new DurableOp(scope), [scope]);
   const [pending, setPending] = useState(false);
+  const [original, setOriginal] = useState<Readonly<Envelope> | null>(null);
   const [busy, setBusy] = useState(true);
   const [storageError, setStorageError] = useState("");
   useEffect(() => {
@@ -15,6 +16,7 @@ export function useDurableOp(sender: OpSender, scope: string) {
       (request) => {
         if (active) {
           setPending(!!request);
+          setOriginal(request ?? null);
           setBusy(false);
         }
       },
@@ -37,11 +39,13 @@ export function useDurableOp(sender: OpSender, scope: string) {
         : await journal.reconcile(sender);
     } finally {
       try {
-        setPending(!!(await journal.pending()));
+        const request = await journal.pending();
+        setPending(!!request);
+        setOriginal(request ?? null);
       } finally {
         setBusy(false);
       }
     }
   };
-  return { pending, busy, storageError, execute };
+  return { pending, original, busy, storageError, execute };
 }

@@ -407,6 +407,14 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 				valid = true
 				break
 			}
+			attention, err := resolvedIssueAttentionDecision(ctx, q, w.WorkItemID, e.Reference)
+			if err != nil {
+				return err
+			}
+			if attention {
+				valid = true
+				break
+			}
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='owner') OR EXISTS(SELECT 1 FROM decisions WHERE decision_id=? AND status='answered') OR EXISTS(SELECT 1 FROM request_records WHERE request_id=? AND domain='owner' AND status='succeeded' AND operation LIKE 'work_items.%') OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, e.Reference, e.Reference, e.Reference, w.WorkItemID).Scan(&valid); err != nil {
 				return err
 			}
@@ -453,6 +461,9 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 
 		}
 		if !valid {
+			if e.Kind == "delivery" {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "%s[%d].reference must name a verified provider delivery observation; for task deliverables use kind acceptance with the passed acceptance_id (not artifact_id)", field, i)
+			}
 			if e.Kind == "acceptance" {
 				return protocol.Errorf(protocol.CodeInvalidRequest, "%s[%d].reference must be the acceptance_id of a passed acceptance for a linked task; read tasks_read.acceptances or artifacts_read.acceptances (artifact_id is not acceptance_id)", field, i)
 			}
@@ -460,6 +471,15 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 		}
 	}
 	return nil
+}
+
+// resolvedIssueAttentionDecision reads the existing owner confirmation, not
+// the caller's narration. Presentation and withdrawn/information records are
+// not decisions; a different Issue's confirmation is not inherited authority.
+func resolvedIssueAttentionDecision(ctx context.Context, q store.Querier, issueID, reference string) (bool, error) {
+	var resolved bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attentions WHERE attention_id=? AND issue_id=? AND kind IN ('decision','action') AND status='resolved')`, reference, issueID).Scan(&resolved)
+	return resolved, err
 }
 
 func validateIssueDispositions(ctx context.Context, q store.Querier, item protocol.WorkItem, next protocol.IssuePlan, dispositions []protocol.IssueTaskDisposition) error {

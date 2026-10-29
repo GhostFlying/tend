@@ -1,6 +1,6 @@
 /*
  * Design tokens, from the phase F mock (docs/plans/phase-f/app.html), which
- * follows dsh's ui-theme: neutral surfaces, one blue accent, system type.
+ * follows dsh's ui-theme: neutral surfaces, restrained monochrome controls, system type.
  * The light theme is the default; body[data-dark] switches to the dark one
  * (src/theme/theme.ts follows the system unless the owner picks a theme).
  */
@@ -25,9 +25,9 @@
   --border-soft: rgba(15, 17, 21, 0.06);
 
   /* accent and states */
-  --accent: rgb(65, 118, 230);
-  --accent-soft: rgba(65, 118, 230, 0.1);
-  --accent-ring: rgba(65, 118, 230, 0.45);
+  --accent: rgb(18, 20, 23);
+  --accent-soft: rgba(18, 20, 23, 0.06);
+  --accent-ring: rgba(18, 20, 23, 0.35);
   --ok: #22a06b;
   --warn: #e5a000;
   --warn-soft: rgba(229, 160, 0, 0.12);
@@ -94,7 +94,9 @@ body[data-dark] {
   --border: rgba(255, 255, 255, 0.1);
   --border-soft: rgba(255, 255, 255, 0.06);
 
-  --accent-soft: rgba(65, 118, 230, 0.2);
+  --accent: rgb(236, 237, 240);
+  --accent-soft: rgba(236, 237, 240, 0.12);
+  --accent-ring: rgba(236, 237, 240, 0.45);
   --warn-soft: rgba(229, 160, 0, 0.16);
   --warn-text: #f2c14e;
   --idle: rgba(236, 237, 240, 0.28);

@@ -3,8 +3,8 @@ import type { OutgoingMessage } from "../queue/outbox.ts";
 import type { SubmitMessagePayload } from "../api/generated/api.ts";
 import type { ApiClient } from "../api/client.ts";
 import type {
-  ConversationQueueEntry,
-  ConversationQueuePage,
+  IssueConversationQueueEntry as ConversationQueueEntry,
+  IssueConversationQueuePage as ConversationQueuePage,
   DownloadURLResponse,
 } from "../api/generated/api.ts";
 import { newRequestId } from "../api/ids.ts";
@@ -122,7 +122,7 @@ export class Withdrawals {
                 entry: ConversationQueueEntry | undefined;
               do {
                 const page = await this.client.get<ConversationQueuePage>(
-                  `/api/v1/conversation/queue?category=owner&after=${after}&conversation_id=${encodeURIComponent(conversation)}`,
+                  `/api/v1/conversation/queue?projection=issues&category=owner&after=${after}&conversation_id=${encodeURIComponent(conversation)}`,
                 );
                 entry = page.items?.find((it) => it.item.message_id === result.message_id);
                 after = page.next ?? 0;

@@ -10,6 +10,10 @@ import (
 
 // TaskSummary is a task as listed.
 type TaskSummary struct {
+	// Only an actual canonical primary responsibility is a current Issue link.
+	// The original work_item fields remain for the coordinated caller cutover.
+	PrimaryIssueID       string             `json:"primary_issue_id,omitempty"`
+	PrimaryIssueTitle    string             `json:"primary_issue_title,omitempty"`
 	EndedAt              int64              `json:"ended_at,omitempty"`
 	Execution            *TaskExecutionView `json:"execution,omitempty"`
 	PrimaryWorkItemTitle string             `json:"primary_work_item_title,omitempty"`
@@ -32,6 +36,8 @@ type TaskSummary struct {
 
 // TaskDetail is one task in full.
 type TaskDetail struct {
+	// IssueIDs contains canonical responsibilities, never secondary result links.
+	IssueIDs    []string `json:"issue_ids,omitempty"`
 	WorkItemIDs []string `json:"work_item_ids,omitempty"`
 	TaskSummary
 	CurrentArtifactID string             `json:"current_artifact_id,omitempty"`
@@ -272,19 +278,24 @@ const (
 // owner, main agent or system, or a tool the main agent used. Items share
 // one order, by seq.
 type ConversationItem struct {
-	Recovery       *AgentRecoveryView       `json:"recovery,omitempty"`
-	ConversationID string                   `json:"conversation_id,omitempty"`
-	Associations   *MessageAssociations     `json:"associations,omitempty"`
-	ReturnLink     *ConversationReturnLink  `json:"return_link,omitempty"`
-	Background     *BackgroundBatch         `json:"background,omitempty"`
-	Control        *MessageControl          `json:"control,omitempty"`
-	Choices        []WorkItemChoice         `json:"choices,omitempty"`
-	Images         []ConversationImage      `json:"images,omitempty"`
-	Attachments    []ConversationAttachment `json:"attachments,omitempty"`
-	NoticeType     string                   `json:"notice_type,omitempty"`
-	UpgradeID      string                   `json:"upgrade_id,omitempty"`
-	HostID         string                   `json:"host_id,omitempty"`
-	Seq            int64                    `json:"seq"`
+	Recovery       *AgentRecoveryView      `json:"recovery,omitempty"`
+	ConversationID string                  `json:"conversation_id,omitempty"`
+	Associations   *MessageAssociations    `json:"associations,omitempty"`
+	ReturnLink     *ConversationReturnLink `json:"return_link,omitempty"`
+	Background     *BackgroundBatch        `json:"background,omitempty"`
+	Control        *MessageControl         `json:"control,omitempty"`
+	Choices        []WorkItemChoice        `json:"choices,omitempty"`
+	ConversationContent
+}
+
+// ConversationContent preserves the actual message and media independently of owner metadata.
+type ConversationContent struct {
+	Images      []ConversationImage      `json:"images,omitempty"`
+	Attachments []ConversationAttachment `json:"attachments,omitempty"`
+	NoticeType  string                   `json:"notice_type,omitempty"`
+	UpgradeID   string                   `json:"upgrade_id,omitempty"`
+	HostID      string                   `json:"host_id,omitempty"`
+	Seq         int64                    `json:"seq"`
 	// Kind is "message" or "tool_use".
 	Kind      string `json:"kind"`
 	MessageID string `json:"message_id"`

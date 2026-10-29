@@ -68,6 +68,10 @@ const (
 )
 
 var classes = map[string]class{
+	"issue.created": intent, "issue.updated": intent, "issue.paused": intent, "issue.resumed": intent,
+	"issue.cancelling": intent, "issue.cancelled": result, "issue.closed": result, "issue.reopened": intent,
+	"issue.reparented": intent, "issue.dependencies_changed": intent,
+	"issue.assignment_fenced": intent, "issue.assigned": intent, "issue.completions_reviewed": intent,
 	"followup.changed":        intent,
 	"work_item_choice.opened": attention, "work_item_choice.answered": attention,
 	"work_item_choice.withdrawn": intent, "work_item_choice.superseded": intent,
@@ -361,7 +365,7 @@ func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, 
 	}
 	if single {
 		s.Limits = append(s.Limits, "No active host's worker supports a workspace with more than one mount: "+
-			"give every task a single repository, and tasks_create refuses more.")
+			"give every task a single repository, and issues_create_task refuses more.")
 	}
 	if messageSeq <= 1 {
 		return nil
@@ -371,7 +375,7 @@ func (b *Builder) gatherFull(ctx context.Context, q store.Querier, s *Snapshot, 
 		return err
 	}
 	for _, m := range msgs {
-		item := protocol.ConversationItem{MessageID: m.MessageID, Author: m.Author, Body: m.Body}
+		item := protocol.ConversationItem{ConversationContent: protocol.ConversationContent{MessageID: m.MessageID, Author: m.Author, Body: m.Body}}
 		if err := store.HideUndeliveredOwner(ctx, q, &item); err != nil {
 			return err
 		}
@@ -411,11 +415,33 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 			if err != nil {
 				return err
 			}
+			if rule.WorkItemID == "" {
+				var attentionID string
+				if err := q.QueryRowContext(ctx, `SELECT target_id FROM followup_targets WHERE rule_id=? AND kind='attention'`, rule.RuleID).Scan(&attentionID); err != nil {
+					return err
+				}
+				request, err := store.GetAttention(ctx, q, attentionID)
+				if err != nil {
+					return err
+				}
+				actionTime := "unknown"
+				if request.LatestActionAt != nil {
+					actionTime = strconv.FormatInt(*request.LatestActionAt, 10)
+				}
+				s.Changes = append(s.Changes, fmt.Sprintf("#%d %s: %s revision %d %s of Attention %s %q; latest action UTC-ms %s; %s (read attentions_read; a reminder is not an answer)", e.Seq, e.Kind, rule.RuleID, rule.Revision, rule.Status, request.AttentionID, clipRunes(request.Title, 160), actionTime, clipRunes(rule.Reason, 200)))
+				continue
+			}
 			item, err := store.GetIssue(ctx, q, rule.WorkItemID)
 			if err != nil {
 				return err
 			}
-			line := sc.label(item.Project, fmt.Sprintf("#%d %s: %s revision %d %s of %s; %s (read work_items_followups_list for current authority)", e.Seq, e.Kind, rule.RuleID, rule.Revision, rule.Status, item.WorkItemID, clipRunes(rule.Reason, 200)))
+			readTool := "work_items_followups_list"
+			if _, err := store.GetCanonicalIssue(ctx, q, item.WorkItemID); err == nil {
+				readTool = "issues_followups_list"
+			} else if !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+			line := sc.label(item.Project, fmt.Sprintf("#%d %s: %s revision %d %s of %s; %s (read %s for current authority)", e.Seq, e.Kind, rule.RuleID, rule.Revision, rule.Status, item.WorkItemID, clipRunes(rule.Reason, 200), readTool))
 			if sc.covers(item.Project) {
 				s.Changes = append(s.Changes, line)
 			}
@@ -440,6 +466,22 @@ func (b *Builder) gatherDelta(ctx context.Context, q store.Querier, s *Snapshot,
 				}
 			} else if c == attention {
 				s.OtherAttention = append(s.OtherAttention, line)
+			}
+			continue
+		}
+		if e.ObjectType == "issue" {
+			issue, err := store.GetCanonicalIssue(ctx, q, e.ObjectID)
+			if err != nil {
+				return err
+			}
+			line := sc.label(issue.Plan.Project, fmt.Sprintf("#%d %s: %s (by %s)", e.Seq, e.Kind, canonicalIssueLine(issue), actor(e.ActorJSON)))
+			if sc.covers(issue.Plan.Project) {
+				if e.Kind == "issue.closed" || e.Kind == "issue.cancelled" {
+					s.Results = append(s.Results, line)
+					s.Unseen = append(s.Unseen, line)
+				} else {
+					s.Changes = append(s.Changes, line)
+				}
 			}
 			continue
 		}

@@ -1,12 +1,18 @@
+import { issueAssociationCommand } from "./issueMetadata.ts";
 import { useEffect, useRef, useState } from "react";
-import type { ConversationItem, MessageAssociations, WorkItemPage } from "../api/generated/api.ts";
+import type {
+  IssueConversationItem as ConversationItem,
+  IssueMessageAssociations as MessageAssociations,
+  IssuePage as WorkItemPage,
+  SetIssueMessageAssociationsPayload,
+} from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useDurableOp } from "../app/useDurableOp.ts";
 import { Tag, ExternalLink } from "../shell/icons.tsx";
 import styles from "./Agents.module.css";
 
 export function MessageTags({ item }: { item: ConversationItem }) {
-  const { client, live, openWorkItem, selectConversation } = useServices();
+  const { client, live, openIssue, selectConversation } = useServices();
   const [savedValue, setValue] = useState(item.associations);
   const value =
     (item.associations?.revision ?? -1) >= (savedValue?.revision ?? -1)
@@ -22,66 +28,76 @@ export function MessageTags({ item }: { item: ConversationItem }) {
   const [editRevision, setEditRevision] = useState<number | null>(null);
   const [error, setError] = useState("");
   const operation = useDurableOp(client, `associations:${item.message_id}`);
+  const original =
+    operation.original?.operation === "conversation.set_issue_associations"
+      ? (operation.original.payload as SetIssueMessageAssociationsPayload)
+      : undefined;
+  const visibleSelection = original?.issue_ids ?? selection;
+  const visibleUnassigned = original ? original.disposition === "unassigned" : unassigned;
   const recovery = useDurableOp(client, `processing:${item.message_id}`);
   const dialog = useRef<HTMLDialogElement>(null);
+  const paging = useRef<AbortController | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => {
     if (!open) return;
     dialog.current?.showModal();
     const abort = new AbortController();
     void Promise.all([
       client.get<MessageAssociations>(
-        `/api/v1/messages/${encodeURIComponent(item.message_id)}/associations`,
+        `/api/v1/messages/${encodeURIComponent(item.message_id)}/associations?projection=issues`,
         abort.signal,
       ),
-      client.get<WorkItemPage>("/api/v1/work-items?include_closed=true", abort.signal),
+      client.get<WorkItemPage>("/api/v1/issues?include_closed=true", abort.signal),
     ])
       .then(([links, list]) => {
         setValue(links);
         setEditRevision(links.revision);
         setContentRevision(links.content_revision);
         setUnassigned(links.disposition === "unassigned");
-        setSelection((links.items ?? []).map((x) => x.work_item_id));
+        setSelection((links.items ?? []).map((x) => x.issue_id));
         setItems(list);
       })
       .catch((e) => {
         if (!abort.signal.aborted) setError(String(e));
       });
-    return () => abort.abort();
+    return () => {
+      abort.abort();
+      paging.current?.abort();
+    };
   }, [open, client, item.message_id]);
   const save = async (reconcile = false) => {
-    if (editRevision === null) return;
+    if (!reconcile && editRevision === null) return;
     try {
       const result = await operation.execute(
         reconcile
           ? undefined
-          : {
-              operation: "conversation.set_associations",
-              target: { type: "message", id: item.message_id },
-              expected_control_revision: editRevision,
-              payload: {
-                work_item_ids: selection,
-                disposition: unassigned ? "unassigned" : "linked",
+          : issueAssociationCommand(
+              {
+                message_id: item.message_id,
+                revision: editRevision!,
                 content_revision: contentRevision,
               },
-            },
+              unassigned ? "unassigned" : "linked",
+              selection,
+            ),
       );
       if (result.kind !== "done") {
         setError(result.message);
         if (result.kind === "stale") {
           const current = await client.get<MessageAssociations>(
-            `/api/v1/messages/${encodeURIComponent(item.message_id)}/associations`,
+            `/api/v1/messages/${encodeURIComponent(item.message_id)}/associations?projection=issues`,
           );
           setValue(current);
           setEditRevision(current.revision);
           setContentRevision(current.content_revision);
           setUnassigned(current.disposition === "unassigned");
-          setSelection((current.items ?? []).map((x) => x.work_item_id));
+          setSelection((current.items ?? []).map((x) => x.issue_id));
         }
         return;
       }
       setValue(
         await client.get<MessageAssociations>(
-          `/api/v1/messages/${encodeURIComponent(item.message_id)}/associations`,
+          `/api/v1/messages/${encodeURIComponent(item.message_id)}/associations?projection=issues`,
         ),
       );
       setOpen(false);
@@ -138,16 +154,20 @@ export function MessageTags({ item }: { item: ConversationItem }) {
               )}
             </span>
           )}
-        {value?.disposition === "unassigned" && <span className={styles.tag}>无工作项</span>}
-        {(!value || value.disposition === "pending") && (
-          <span className={styles.tag}>关联处理中</span>
+        {value?.disposition === "unassigned" && <span className={styles.tag}>无Issue</span>}
+        {(!value || value.disposition === "pending") &&
+          (item.author === "owner" || !!value?.processing) && (
+            <span className={styles.tag}>关联处理中</span>
+          )}
+        {value?.disposition === "linked" && links.length === 0 && (
+          <span className={styles.tag}>历史分类</span>
         )}
         {(expanded ? links : links.slice(0, 2)).map((link) => (
           <button
-            key={link.work_item_id}
+            key={link.issue_id}
             className={styles.tag}
             title={`${link.title} · ${link.source === "owner" ? "用户关联" : "Agent / 明确来源关联"}`}
-            onClick={() => openWorkItem(link.work_item_id)}
+            onClick={() => openIssue(link.issue_id)}
           >
             <Tag />
             <span>{link.title}</span>
@@ -160,8 +180,8 @@ export function MessageTags({ item }: { item: ConversationItem }) {
         )}
         <button
           className={styles.menu}
-          title="修改工作项关联"
-          aria-label="修改工作项关联"
+          title="修改Issue关联"
+          aria-label="修改Issue关联"
           onClick={() => {
             setError("");
             setEditRevision(null);
@@ -187,51 +207,80 @@ export function MessageTags({ item }: { item: ConversationItem }) {
           className={styles.editor}
           onCancel={() => setOpen(false)}
           onClose={() => setOpen(false)}
-          aria-label="修改工作项关联"
+          aria-label="修改Issue关联"
         >
-          <h3>关联工作项</h3>
+          <h3>关联Issue</h3>
           <p>关联用于汇集上下文，不代表授权或完成。</p>
           <input
             autoFocus
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索工作项"
-            aria-label="搜索工作项"
+            placeholder="搜索Issue"
+            aria-label="搜索Issue"
           />
           <label>
             <input
               type="checkbox"
-              checked={unassigned}
+              disabled={operation.busy || operation.pending}
+              checked={visibleUnassigned}
               onChange={(e) => {
                 setUnassigned(e.target.checked);
                 if (e.target.checked) setSelection([]);
               }}
             />
-            明确不属于任何工作项
+            明确不属于任何Issue
           </label>
           {items?.items
             ?.filter((x) => x.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
             .map((x) => (
-              <label key={x.work_item_id}>
+              <label key={x.issue_id}>
                 <input
                   type="checkbox"
-                  checked={selection.includes(x.work_item_id)}
+                  disabled={operation.busy || operation.pending}
+                  checked={visibleSelection.includes(x.issue_id)}
                   onChange={(e) => {
                     setUnassigned(false);
                     setSelection((old) =>
                       e.target.checked
-                        ? [...old, x.work_item_id]
-                        : old.filter((id) => id !== x.work_item_id),
+                        ? [...old, x.issue_id]
+                        : old.filter((id) => id !== x.issue_id),
                     );
                   }}
                 />
                 <span>
                   {x.title}
-                  {x.status === "closed" ? " · 已结束" : ""}
+                  {x.state === "closed" ? " · 已结束" : ""}
                 </span>
               </label>
             ))}
+          {items?.more && (
+            <button
+              disabled={operation.busy || operation.pending || loadingMore}
+              onClick={() => {
+                const abort = new AbortController();
+                paging.current?.abort();
+                paging.current = abort;
+                setLoadingMore(true);
+                void client
+                  .get<WorkItemPage>(
+                    `/api/v1/issues?include_closed=true&after=${encodeURIComponent(items.next ?? "")}`,
+                    abort.signal,
+                  )
+                  .then((next) =>
+                    setItems({ ...next, items: [...(items.items ?? []), ...(next.items ?? [])] }),
+                  )
+                  .catch((e) => {
+                    if (!abort.signal.aborted) setError(String(e));
+                  })
+                  .finally(() => {
+                    if (!abort.signal.aborted) setLoadingMore(false);
+                  });
+              }}
+            >
+              继续读取Issue
+            </button>
+          )}
           {error && <p role="alert">{error}</p>}
           {operation.storageError && <p role="alert">{operation.storageError}</p>}
           {operation.pending && (

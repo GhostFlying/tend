@@ -10,7 +10,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestBackgroundOwnerSourcesAndMetrics(t *testing.T) {
+func TestHistoricalBackgroundOwnerSourcesAndMetrics(t *testing.T) {
 	e := newEnv(t)
 	e.configure()
 	token := e.login(protocol.ScopeOwner)
@@ -21,10 +21,12 @@ func TestBackgroundOwnerSourcesAndMetrics(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
+		// Historical ledger setup is explicit App use; the old owner command
+		// is not registered by this test or by the current service.
 		env := e.envelope("work_items.followups_create", protocol.Target{Type: "work_item", ID: w.WorkItemID}, &w.Revision, protocol.FollowupSpec{Purpose: "Check", Instruction: "Read facts", Kind: "at", At: e.clock.Now().UnixMilli(), Timezone: "UTC"})
-		_, r := e.op(token, env)
-		if r.Operation == nil || r.Operation.Status != protocol.OpSucceeded {
-			t.Fatal(r)
+		op, err := e.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "fixture-owner", Client: "fixture"}, &env, app.FollowupCommand{Action: "create"})
+		if err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatal("historical owner setup", op, err)
 		}
 	}
 	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {

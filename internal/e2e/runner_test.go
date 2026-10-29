@@ -74,6 +74,11 @@ func openServer(t *testing.T, ttl time.Duration, path string, clock ...func() ti
 	if len(clock) > 0 {
 		now = clock[0]
 	}
+	return openServerWithOptions(t, ttl, path, now)
+}
+
+func openServerWithOptions(t *testing.T, ttl time.Duration, path string, now func() time.Time, options ...app.Option) *server {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	s, err := store.Open(ctx, path, now)
 	if err != nil {
@@ -82,7 +87,7 @@ func openServer(t *testing.T, ttl time.Duration, path string, clock ...func() ti
 	}
 	ids := protocol.NewULIDGen(now, nil)
 	sig := dispatch.NewSignal()
-	a := app.New(s, ids, now, app.WithLeaseTTL(ttl), app.WithNotifier(sig))
+	a := app.New(s, ids, now, append([]app.Option{app.WithLeaseTTL(ttl), app.WithNotifier(sig)}, options...)...)
 	srv := &server{t: t, store: s, app: a, ids: ids, signal: sig, path: path, ttl: ttl, now: now}
 	t.Cleanup(srv.shutdown)
 	srv.onStop(func() { s.Close() })

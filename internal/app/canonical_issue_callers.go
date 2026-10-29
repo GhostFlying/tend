@@ -40,11 +40,11 @@ func (c IssueFollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		id = r.WorkItemID
 		var deadline bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM followup_targets WHERE rule_id=? AND kind='deadline')`, r.RuleID).Scan(&deadline); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM followup_targets WHERE rule_id=? AND kind IN ('deadline','attention'))`, r.RuleID).Scan(&deadline); err != nil {
 			return Outcome{}, err
 		}
 		if deadline {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manage deadline-owned rules through the deadline operation")
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manage owned reminder rules through their deadline or Attention operation")
 		}
 	}
 	issue, err := store.GetCanonicalIssue(ctx, tx.Q(), id)

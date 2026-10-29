@@ -10,6 +10,8 @@ import type {
   OpStatus,
   RequestView,
   TaskSummary,
+  IssueView,
+  AttentionView,
 } from "../api/generated/api.ts";
 import { newRequestId } from "../api/ids.ts";
 
@@ -21,8 +23,14 @@ export interface OpSender {
 
 export type OpOutcome =
   | { kind: "done"; result: unknown }
-  /** Someone changed the object first; current is the task as it is now. */
-  | { kind: "stale"; message: string; current?: TaskSummary }
+  /** Someone changed the object first; preserve its server-projected current state. */
+  | {
+      kind: "stale";
+      message: string;
+      current?: TaskSummary;
+      currentIssue?: IssueView;
+      currentAttention?: AttentionView;
+    }
   | { kind: "refused"; message: string; code?: Code }
   /** tend may or may not have carried it out. */
   | { kind: "unknown"; message: string };
@@ -57,8 +65,10 @@ export async function runOp(
     return { kind: "unknown", message: "tend 的回答里没有结果" };
   }
   const outcome = settleOp(res.operation.status, res.operation.result, res.operation.error);
-  if (outcome.kind === "stale" && res.current) {
-    outcome.current = res.current;
+  if (outcome.kind === "stale") {
+    if (res.current) outcome.current = res.current;
+    if (res.current_issue) outcome.currentIssue = res.current_issue;
+    if (res.current_attention) outcome.currentAttention = res.current_attention;
   }
   return outcome;
 }

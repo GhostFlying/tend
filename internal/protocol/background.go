@@ -3,8 +3,13 @@ package protocol
 import "encoding/json"
 
 type BackgroundBatch struct {
+	BackgroundBatchState
+	WorkItemID string `json:"work_item_id,omitempty"`
+}
+
+// BackgroundBatchState is shared owner metadata; responsibility identity is projected by its caller.
+type BackgroundBatchState struct {
 	BatchID     string             `json:"batch_id"`
-	WorkItemID  string             `json:"work_item_id,omitempty"`
 	MessageID   string             `json:"message_id"`
 	Status      string             `json:"status"`
 	SourceCount int                `json:"source_count"`

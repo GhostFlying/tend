@@ -61,7 +61,7 @@ func TestIssueOwnerHTTPRecursiveIdentityHistoryAndReplay(t *testing.T) {
 	update := e.envelope("issues.update", protocol.Target{Type: "issue", ID: child.IssueID}, &child.Revision, protocol.UpdateIssuePayload{Plan: plan, ExpectedAssignmentEpoch: child.AssignmentEpoch})
 	current := issueHTTP(t, e, token, update)
 	status, stale := e.op(token, e.envelope(update.Operation, update.Target, &child.Revision, protocol.UpdateIssuePayload{Plan: plan, ExpectedAssignmentEpoch: child.AssignmentEpoch}))
-	if status != http.StatusOK || stale.Operation == nil || stale.Operation.Error == nil || stale.Operation.Error.Code != protocol.CodeStaleRevision || stale.CurrentIssue == nil || stale.CurrentIssue.Revision != current.Revision || stale.CurrentWorkItem != nil {
+	if status != http.StatusOK || stale.Operation == nil || stale.Operation.Error == nil || stale.Operation.Error.Code != protocol.CodeStaleRevision || stale.CurrentIssue == nil || stale.CurrentIssue.Revision != current.Revision {
 		t.Fatalf("canonical stale projection=%d %+v", status, stale)
 	}
 	later := protocol.IssueControlPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch}
@@ -212,7 +212,7 @@ func TestIssueOwnerHTTPSourceShareReadAndTerminalSettlement(t *testing.T) {
 	}
 	_ = json.Unmarshal(submitted.Operation.Result, &source)
 	revision := int64(0)
-	status, res := e.op(token, e.envelope("conversation.set_associations", protocol.Target{Type: "message", ID: source.MessageID}, &revision, protocol.SetMessageAssociationsPayload{Disposition: "linked", ContentRevision: 1, WorkItemIDs: []string{issue.IssueID}}))
+	status, res := e.op(token, e.envelope("conversation.set_issue_associations", protocol.Target{Type: "message", ID: source.MessageID}, &revision, protocol.SetIssueMessageAssociationsPayload{Disposition: "linked", ContentRevision: 1, IssueIDs: []string{issue.IssueID}}))
 	if status != http.StatusOK || res.Operation == nil || res.Operation.Status != protocol.OpSucceeded {
 		t.Fatalf("source association %d %+v", status, res)
 	}

@@ -177,7 +177,7 @@
 }
 .editor footer button:last-child {
   background: var(--accent);
-  color: white;
+  color: var(--bg);
 }
 .usage {
   position: relative;

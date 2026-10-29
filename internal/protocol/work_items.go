@@ -6,6 +6,8 @@ type IssuePlan struct {
 	Title                  string          `json:"title"`
 	Project                string          `json:"project"`
 	Intent                 string          `json:"intent"`
+	Scope                  string          `json:"scope,omitempty"`
+	CompletionCriteria     []string        `json:"completion_criteria,omitempty"`
 	Background             []SharedFact    `json:"background,omitempty"`
 	Stages                 []IssueStage    `json:"stages"`
 	FollowOns              []IssueFollowOn `json:"follow_ons,omitempty"`

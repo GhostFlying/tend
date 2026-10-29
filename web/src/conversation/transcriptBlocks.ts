@@ -1,4 +1,7 @@
-import type { ConversationItem, TranscriptBlock } from "../api/generated/api.ts";
+import type {
+  IssueConversationItem as ConversationItem,
+  IssueTranscriptBlock as TranscriptBlock,
+} from "../api/generated/api.ts";
 import { showTranscriptBlock } from "./background.ts";
 import { buildEntries, type Entry } from "./model.ts";
 

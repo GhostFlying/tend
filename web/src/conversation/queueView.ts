@@ -1,11 +1,12 @@
+import { eventContent } from "./eventContent.ts";
 // Queue and presentation blocks are independent of the raw conversation page.
 import { ApiError } from "../api/client.ts";
 import type {
-  ConversationQueuePage,
-  ConversationItem,
+  IssueConversationQueuePage as ConversationQueuePage,
+  IssueConversationItem as ConversationItem,
   LedgerEvent,
-  TranscriptBlock,
-  TranscriptPage,
+  IssueTranscriptBlock as TranscriptBlock,
+  IssueTranscriptPage as TranscriptPage,
 } from "../api/generated/api.ts";
 import type { Reader } from "../live/data.ts";
 import { Store } from "../state/store.ts";
@@ -67,7 +68,7 @@ export class ConversationQueue {
   }
   changed(event: LedgerEvent): void {
     if (!this.active) return;
-    const item = event.item;
+    const item = event.item ? eventContent(event.item) : undefined;
     if (item?.author === "main_agent" && item.reply_to) {
       const state = this.state.get();
       if (!state.blocks.some((b) => !b.notice_only && b.trigger.message_id === item.reply_to))
@@ -82,7 +83,7 @@ export class ConversationQueue {
             ...b,
             items: [
               ...(b.items ?? []).filter((it) => it.message_id !== item.message_id),
-              item,
+              { ...old, ...item },
             ].sort((a, b) => a.seq - b.seq),
           };
         }),

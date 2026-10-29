@@ -284,7 +284,7 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		if (p.Kind == "authorization" || p.Kind == "refusal") && msg.Author != "owner" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "authority requires an original owner message")
 		}
-		source := protocol.ConversationItem{MessageID: msg.MessageID, Author: msg.Author, Body: msg.Body}
+		source := protocol.ConversationItem{ConversationContent: protocol.ConversationContent{MessageID: msg.MessageID, Author: msg.Author, Body: msg.Body}}
 		if err := store.HideUnadmittedForCoordinator(ctx, tx.Q(), &source); err != nil {
 			return Outcome{}, err
 		}

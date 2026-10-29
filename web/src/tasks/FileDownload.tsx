@@ -8,10 +8,13 @@ export function FileDownload({
   fileId,
   name,
   scope = "files",
+  downloadURL,
 }: {
   fileId: string;
   name: string;
   scope?: "files" | "conversation/attachments" | "conversation/images";
+  /** Archive views supply their dedicated owner endpoint, never a current file ID. */
+  downloadURL?: (signal: AbortSignal) => Promise<DownloadURLResponse>;
 }) {
   const { client } = useServices();
   const pending = useRef<AbortController | null>(null);
@@ -27,10 +30,12 @@ export function FileDownload({
     setBusy(true);
     setMessage("");
     try {
-      const { url } = await client.get<DownloadURLResponse>(
-        `/api/v1/${scope}/${encodeURIComponent(fileId)}/download-url`,
-        controller.signal,
-      );
+      const { url } = await (downloadURL
+        ? downloadURL(controller.signal)
+        : client.get<DownloadURLResponse>(
+            `/api/v1/${scope}/${encodeURIComponent(fileId)}/download-url`,
+            controller.signal,
+          ));
       if (controller.signal.aborted) return;
       const link = document.createElement("a");
       link.href = url;

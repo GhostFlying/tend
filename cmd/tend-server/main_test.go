@@ -1,8 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,5 +75,48 @@ func TestBackgroundAutoModeWorkingDirectories(t *testing.T) {
 	}
 	if a != again || a == b || a == main {
 		t.Fatalf("background cwd identity not stable and independent: %q %q %q %q", a, again, b, main)
+	}
+}
+
+func TestServerRejectsUnnamedHostedConfigurationBeforeLedgerOpen(t *testing.T) {
+	t.Setenv("TEND_SERVER_SECRET", "")
+	for _, tc := range []struct {
+		name               string
+		main               any
+		wantNamedRejection bool
+	}{
+		{"unnamed", map[string]any{}, true},
+		{"named", map[string]any{"named": map[string]any{}}, false},
+		{"owner-only", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := filepath.Join(t.TempDir(), "not-created")
+			cfg := map[string]any{"data_dir": data}
+			if tc.main != nil {
+				cfg["main_agent"] = tc.main
+			}
+			raw, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "server.json")
+			if err := os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			err = run(t.Context(), path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err == nil {
+				t.Fatal("missing secret unexpectedly admitted startup")
+			}
+			if tc.wantNamedRejection {
+				if !strings.Contains(err.Error(), "main_agent requires an explicit named configuration") {
+					t.Fatal(err)
+				}
+			} else if !strings.Contains(err.Error(), "TEND_SERVER_SECRET") {
+				t.Fatal("legal named/owner-only mode rejected by legacy guard", err)
+			}
+			if _, err := os.Stat(data); !os.IsNotExist(err) {
+				t.Fatal("configuration rejection opened/created business data", err)
+			}
+		})
 	}
 }

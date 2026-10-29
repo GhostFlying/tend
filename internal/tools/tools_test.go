@@ -95,14 +95,14 @@ func (e *env) tasks() int {
 	return n
 }
 
-func TestFault_DuplicateToolCall(t *testing.T) {
+func TestHistoricalFault_DuplicateToolCall(t *testing.T) {
 	e := newEnv(t)
 	args := createArgs{Title: "fix", Spec: spec, CommitSeq: 1}
-	if a := e.call("tasks_create", args, ""); !a.OK {
+	if a := e.historicalToolFixture("tasks_create", args, ""); !a.OK {
 		t.Fatalf("first call: %+v", a.Error)
 	}
 	// The model calls again with the same arguments under a new call ID.
-	a := e.call("tasks_create", args, "")
+	a := e.historicalToolFixture("tasks_create", args, "")
 	if a.OK || a.Error.Code != protocol.CodeDuplicateEffect {
 		t.Errorf("second call = %+v, want duplicate_effect", a)
 	}
@@ -111,11 +111,11 @@ func TestFault_DuplicateToolCall(t *testing.T) {
 	}
 }
 
-func TestFault_ToolRetrySameCall(t *testing.T) {
+func TestHistoricalFault_ToolRetrySameCall(t *testing.T) {
 	e := newEnv(t)
 	args := createArgs{Title: "fix", Spec: spec, CommitSeq: 1}
-	first := e.call("tasks_create", args, "call_same")
-	again := e.call("tasks_create", args, "call_same")
+	first := e.historicalToolFixture("tasks_create", args, "call_same")
+	again := e.historicalToolFixture("tasks_create", args, "call_same")
 	if !first.OK || !again.OK || string(first.Result) != string(again.Result) {
 		t.Errorf("replay differs:\n%s\n%s", first.Result, again.Result)
 	}
@@ -138,7 +138,7 @@ func createdTask(t *testing.T, a answerView) (string, int64) {
 	return r.Outcome.TaskID, r.Outcome.ControlRevision
 }
 
-func TestCreateAsksForARating(t *testing.T) {
+func TestHistoricalCreateAsksForARating(t *testing.T) {
 	e := newEnv(t)
 	note := func(a answerView) string {
 		var r struct {
@@ -149,24 +149,24 @@ func TestCreateAsksForARating(t *testing.T) {
 		}
 		return r.Note
 	}
-	if got := note(e.call("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, "")); got != unratedNote {
+	if got := note(e.historicalToolFixture("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, "")); got != unratedNote {
 		t.Errorf("unrated create note = %q", got)
 	}
-	if got := note(e.call("tasks_create", createArgs{Title: "fix", Spec: spec, Rating: protocol.RatingP1, CommitSeq: 2}, "")); got != "" {
+	if got := note(e.historicalToolFixture("tasks_create", createArgs{Title: "fix", Spec: spec, Rating: protocol.RatingP1, CommitSeq: 2}, "")); got != "" {
 		t.Errorf("rated create note = %q, want none", got)
 	}
-	if a := e.call("tasks_create", createArgs{Title: "fix", Spec: spec, Rating: "urgent", CommitSeq: 3}, ""); a.OK || a.Error.Code != protocol.CodeInvalidRequest {
+	if a := e.historicalToolFixture("tasks_create", createArgs{Title: "fix", Spec: spec, Rating: "urgent", CommitSeq: 3}, ""); a.OK || a.Error.Code != protocol.CodeInvalidRequest {
 		t.Errorf("unknown rating = %+v, want invalid_request", a)
 	}
 }
 
-func TestStaleWriteReturnsCurrentState(t *testing.T) {
+func TestHistoricalStaleWriteReturnsCurrentState(t *testing.T) {
 	e := newEnv(t)
-	id, rev := createdTask(t, e.call("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, ""))
-	if a := e.call("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Rating: new(protocol.RatingP1), CommitSeq: 2}, ""); !a.OK {
+	id, rev := createdTask(t, e.historicalToolFixture("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, ""))
+	if a := e.historicalToolFixture("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Rating: new(protocol.RatingP1), CommitSeq: 2}, ""); !a.OK {
 		t.Fatalf("update: %+v", a.Error)
 	}
-	a := e.call("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Rating: new(protocol.RatingP3), CommitSeq: 3}, "")
+	a := e.historicalToolFixture("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Rating: new(protocol.RatingP3), CommitSeq: 3}, "")
 	if a.OK || a.Error.Code != protocol.CodeStaleRevision {
 		t.Fatalf("stale update = %+v", a)
 	}
@@ -176,14 +176,14 @@ func TestStaleWriteReturnsCurrentState(t *testing.T) {
 	}
 }
 
-func TestPlanningNeedsAMessage(t *testing.T) {
+func TestHistoricalPlanningNeedsAMessage(t *testing.T) {
 	e := newEnv(t)
 	raw, _ := json.Marshal(createArgs{Title: "fix", Spec: spec, CommitSeq: 1})
 	res := e.svc.Handle(context.Background(), Call{Principal: hosted, Native: "th_1/t/c", Tool: "tasks_create", Arguments: raw})
 	if res.Success || !strings.Contains(res.Text, "invalid_request") {
 		t.Errorf("create outside a message turn = %s", res.Text)
 	}
-	if a := e.call("tasks_create", map[string]any{"title": "x", "bogus": 1}, ""); a.OK || a.Error.Code != protocol.CodeInvalidRequest {
+	if a := e.historicalToolFixture("tasks_create", map[string]any{"title": "x", "bogus": 1}, ""); a.OK || a.Error.Code != protocol.CodeInvalidRequest {
 		t.Errorf("unknown argument accepted: %+v", a)
 	}
 	if a := e.call("no_such_tool", map[string]any{}, ""); a.OK {
@@ -193,7 +193,7 @@ func TestPlanningNeedsAMessage(t *testing.T) {
 
 func TestReadTools(t *testing.T) {
 	e := newEnv(t)
-	created := e.call("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, "")
+	created := e.historicalToolFixture("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, "")
 	id, _ := createdTask(t, created)
 
 	var list struct {
@@ -282,22 +282,12 @@ func TestSchemasMatchArgs(t *testing.T) {
 		"background_evidence_read": evidenceArgs{},
 		"conversation_turn_adopt":  protocol.AdoptClarificationPayload{},
 		"conversation_turn_wait":   protocol.TurnClarification{}, "conversation_turn_read": turnReadArgs{}, "conversation_turn_commit": protocol.LogicalTurnCommit{},
-		"conversation_associate": associateArgs{}, "work_item_context_read": contextReadArgs{}, "work_item_context_prepare": contextPrepareArgs{}, "work_item_context_fact": contextFactArgs{}, "agent_conversations_list": agentListArgs{}, "agent_rollout_read": rolloutArgs{}, "background_item_read": contextReadArgs{}, "background_submit": protocol.BackgroundAssessmentPayload{},
+		"conversation_associate": associateArgs{}, "agent_conversations_list": agentListArgs{}, "agent_rollout_read": rolloutArgs{}, "background_item_read": contextReadArgs{}, "background_submit": protocol.BackgroundAssessmentPayload{},
 		"background_sources": backgroundSourceArgs{}, "background_checkin": backgroundCheckinArgs{},
-		"work_items_followups_list":    followupListArgs{},
-		"work_items_followups_history": followupHistoryArgs{},
-		"work_items_followups_create":  followupCreateArgs{},
-		"work_items_followups_update":  followupControlArgs{},
-		"work_items_followups_pause":   followupControlArgs{},
-		"work_items_followups_resume":  followupControlArgs{},
-		"work_items_followups_cancel":  followupControlArgs{},
-		"work_items_followups_trigger": followupControlArgs{},
-		"work_item_choices_list":       choiceListArgs{}, "work_item_choices_create": choiceCreateArgs{}, "work_item_choices_resolve": choiceUpdateArgs{}, "work_item_choices_withdraw": choiceUpdateArgs{}, "work_item_choices_replace": choiceUpdateArgs{},
-		"work_items_refresh_delivery": workItemRefreshArgs{},
-		"work_items_list":             workItemsListArgs{}, "work_items_read": workItemReadArgs{}, "work_items_create": workItemCreateArgs{}, "work_items_update": workItemUpdateArgs{}, "work_items_close": workItemCloseArgs{}, "work_items_reopen": workItemReopenArgs{}, "work_items_link_task": workItemLinkArgs{},
+
 		"tool_failures_list": toolFailuresArgs{},
 		"conversation_read":  conversationArgs{},
-		"tasks_list":         listArgs{}, "tasks_read": taskArgs{}, "tasks_create": createArgs{}, "tasks_update_intent": updateArgs{},
+		"tasks_list":         listArgs{}, "tasks_read": taskArgs{},
 		"tasks_set_control": controlArgs{}, "tasks_cancel": cancelArgs{}, "actions_create": actionArgs{}, "decisions_open": openArgs{}, "decisions_resolve": resolveArgs{},
 		"runs_send_message": sendRunMessageArgs{}, "runs_read_messages": readRunMessagesArgs{},
 		"artifacts_read": artifactArgs{}, "attachments_read": fileArgs{}, "files_read": fileArgs{}, "requests_read": requestArgs{}, "repos_list": noArgs{}, "tend_context": noArgs{},
@@ -338,12 +328,12 @@ func TestSchemasMatchArgs(t *testing.T) {
 	}
 }
 
-func TestUpdateWithTemplateSpec(t *testing.T) {
+func TestHistoricalUpdateWithTemplateSpec(t *testing.T) {
 	e := newEnv(t)
-	id, rev := createdTask(t, e.call("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, ""))
+	id, rev := createdTask(t, e.historicalToolFixture("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, ""))
 	changed := spec
 	changed.Constraints = []string{"keep the API"}
-	if a := e.call("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Spec: &changed, CommitSeq: 2}, ""); !a.OK {
+	if a := e.historicalToolFixture("tasks_update_intent", updateArgs{TaskID: id, ExpectedControlRevision: rev, Spec: &changed, CommitSeq: 2}, ""); !a.OK {
 		t.Errorf("update with a template spec: %+v", a.Error)
 	}
 }
@@ -351,8 +341,8 @@ func TestUpdateWithTemplateSpec(t *testing.T) {
 func TestRequestsReadKeepsErrorDetails(t *testing.T) {
 	e := newEnv(t)
 	args := createArgs{Title: "fix", Spec: spec, CommitSeq: 1}
-	e.call("tasks_create", args, "")
-	e.call("tasks_create", args, "call_dup")
+	e.historicalToolFixture("tasks_create", args, "")
+	e.historicalToolFixture("tasks_create", args, "call_dup")
 	var dup string
 	_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
 		return tx.Q().QueryRowContext(context.Background(), `SELECT request_id FROM native_requests WHERE native_key LIKE '%call_dup'`).Scan(&dup)
@@ -365,7 +355,7 @@ func TestRequestsReadKeepsErrorDetails(t *testing.T) {
 
 func TestControlAndCancel(t *testing.T) {
 	e := newEnv(t)
-	id, rev := createdTask(t, e.call("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, ""))
+	id, rev := createdTask(t, e.historicalToolFixture("tasks_create", createArgs{Title: "fix", Spec: spec, CommitSeq: 1}, ""))
 	if a := e.call("tasks_set_control", controlArgs{TaskID: id, ExpectedControlRevision: rev, Mode: protocol.ControlPaused}, ""); !a.OK {
 		t.Fatalf("pause: %+v", a.Error)
 	}
@@ -389,17 +379,17 @@ func TestControlAndCancel(t *testing.T) {
 	}
 }
 
-func TestTaskRelationToolsCreateReadAndReplace(t *testing.T) {
+func TestHistoricalTaskRelationToolsCreateReadAndReplace(t *testing.T) {
 	e := newEnv(t)
-	parent, _ := createdTask(t, e.call("tasks_create", createArgs{Title: "original", Spec: spec, CommitSeq: 1}, ""))
+	parent, _ := createdTask(t, e.historicalToolFixture("tasks_create", createArgs{Title: "original", Spec: spec, CommitSeq: 1}, ""))
 	refs := []protocol.TaskRelation{{Kind: protocol.RelationFollowUp, TaskID: parent}}
-	child, revision := createdTask(t, e.call("tasks_create", createArgs{Title: "followup", Spec: spec, Relations: refs, CommitSeq: 2}, ""))
+	child, revision := createdTask(t, e.historicalToolFixture("tasks_create", createArgs{Title: "followup", Spec: spec, Relations: refs, CommitSeq: 2}, ""))
 	read := e.call("tasks_read", taskArgs{TaskID: parent}, "")
 	if !read.OK || !strings.Contains(string(read.Result), child) || !strings.Contains(string(read.Result), "incoming") {
 		t.Fatalf("backlink not visible: %+v", read)
 	}
 	refs = []protocol.TaskRelation{{Kind: protocol.RelationRelated, TaskID: parent}}
-	update := e.call("tasks_update_intent", updateArgs{TaskID: child, ExpectedControlRevision: revision, Relations: &refs, CommitSeq: 3}, "")
+	update := e.historicalToolFixture("tasks_update_intent", updateArgs{TaskID: child, ExpectedControlRevision: revision, Relations: &refs, CommitSeq: 3}, "")
 	if !update.OK {
 		t.Fatalf("update relation: %+v", update)
 	}
@@ -417,7 +407,7 @@ func TestTaskRelationToolsCreateReadAndReplace(t *testing.T) {
 	}
 }
 
-func TestLegacyCreateRequestReplayAfterRelationsUpgrade(t *testing.T) {
+func TestHistoricalCreateRequestReplayAfterRelationsUpgrade(t *testing.T) {
 	e := newEnv(t)
 	a := createArgs{Title: "fix", Spec: spec, CommitSeq: 1}
 	raw, _ := json.Marshal(a)
@@ -429,9 +419,9 @@ func TestLegacyCreateRequestReplayAfterRelationsUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := e.svc.Handle(t.Context(), call)
-	if !result.Success {
-		t.Fatalf("legacy retry rejected: %s", result.Text)
+	result, err := e.svc.tasksCreate(t.Context(), call)
+	if err != nil {
+		t.Fatalf("historical request replay rejected: %v", err)
 	}
 	if e.tasks() != 1 {
 		t.Fatal("legacy replay created another task")
@@ -439,11 +429,11 @@ func TestLegacyCreateRequestReplayAfterRelationsUpgrade(t *testing.T) {
 	var outcome struct {
 		Outcome json.RawMessage `json:"outcome"`
 	}
-	var answer answerView
-	if err := json.Unmarshal([]byte(result.Text), &answer); err != nil {
+	encoded, err := json.Marshal(result)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(answer.Result, &outcome); err != nil {
+	if err := json.Unmarshal(encoded, &outcome); err != nil {
 		t.Fatal(err)
 	}
 	if string(outcome.Outcome) != string(prior["outcome"].(json.RawMessage)) {

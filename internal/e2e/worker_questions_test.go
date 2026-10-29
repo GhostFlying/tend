@@ -18,7 +18,7 @@ func TestEndToEnd_WorkerQuestionsKeepRunAndLease(t *testing.T) {
 	clock := testkit.NewClock()
 	const ttl = time.Minute
 	srv := newServer(t, ttl, clock.Now)
-	srv.startMainThread(testkit.NewHarness())
+	srv.startHistoricalMainThread(testkit.NewHarness())
 	web := srv.webLogin(srv.startWeb().URL)
 	answers := make(chan protocol.WorkerQuestion, 2)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
@@ -128,7 +128,7 @@ func TestFault_WorkerQuestionSurvivesHeartbeatLoss(t *testing.T) {
 	clock := testkit.NewClock()
 	const ttl = time.Minute
 	srv := newServer(t, ttl, clock.Now)
-	srv.startMainThread(testkit.NewHarness())
+	srv.startHistoricalMainThread(testkit.NewHarness())
 	web := srv.webLogin(srv.startWeb().URL)
 	answers := make(chan protocol.WorkerQuestion, 1)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
@@ -227,7 +227,7 @@ func TestEndToEnd_MainRelaysOwnerAnswerToWaitingWorker(t *testing.T) {
 		}
 		return "completed"
 	}
-	srv.startMainThread(agent)
+	srv.startHistoricalMainThread(agent)
 	web := srv.webLogin(srv.startWeb().URL)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		script := passing(spec)
@@ -276,7 +276,7 @@ func TestEndToEnd_MainRelaysOwnerAnswerToWaitingWorker(t *testing.T) {
 
 func TestFault_WorkerQuestionSurvivesRunnerRestartAndLostReceipt(t *testing.T) {
 	srv := newServer(t, time.Minute)
-	srv.startMainThread(testkit.NewHarness())
+	srv.startHistoricalMainThread(testkit.NewHarness())
 	web := srv.webLogin(srv.startWeb().URL)
 	answers := make(chan protocol.WorkerQuestion, 1)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {

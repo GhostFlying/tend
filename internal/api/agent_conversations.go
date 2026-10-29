@@ -13,26 +13,36 @@ func (s *Server) agentConversations(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
 		v, err := store.AgentConversations(r.Context(), q, r.URL.Query().Get("search"), r.URL.Query().Get("status"), r.URL.Query().Get("after"), 30)
 		v.RuntimeAvailable = s.cfg.HostedMainAgent
-		return v, err
+		if err != nil {
+			return v, err
+		}
+		out := protocol.IssueAgentConversationPage{RuntimeAvailable: v.RuntimeAvailable, Next: v.Next, Items: make([]protocol.IssueAgentConversation, len(v.Items))}
+		for i, item := range v.Items {
+			projected, err := views.OwnerIssueConversation(r.Context(), q, item)
+			if err != nil {
+				return nil, err
+			}
+			out.Items[i] = projected
+		}
+		return out, nil
 	})
 }
 func (s *Server) agentConversation(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return store.AgentConversation(r.Context(), q, r.PathValue("id"))
+		v, err := store.AgentConversation(r.Context(), q, r.PathValue("id"))
+		if err != nil {
+			return v, err
+		}
+		return views.OwnerIssueConversation(r.Context(), q, v)
 	})
 }
 func (s *Server) messageAssociations(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return store.MessageAssociations(r.Context(), q, r.PathValue("id"))
-	})
-}
-func (s *Server) workItemContext(w http.ResponseWriter, r *http.Request) {
-	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		after, err := intParam(r.URL.Query().Get("after"))
+		v, err := store.MessageAssociations(r.Context(), q, r.PathValue("id"))
 		if err != nil {
-			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid cursor")
+			return v, err
 		}
-		return views.IssueContext(r.Context(), q, r.PathValue("id"), after)
+		return views.OwnerIssueAssociations(r.Context(), q, v)
 	})
 }
 func (s *Server) agentRollout(w http.ResponseWriter, r *http.Request) {

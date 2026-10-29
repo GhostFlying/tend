@@ -60,6 +60,13 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 	}
 	for _, item := range items {
 		d.WorkItemIDs = append(d.WorkItemIDs, item.WorkItemID)
+		canonical, err := ownerCanonicalIdentity(ctx, q, item.WorkItemID)
+		if err != nil {
+			return d, err
+		}
+		if canonical {
+			d.IssueIDs = append(d.IssueIDs, item.WorkItemID)
+		}
 	}
 	d.CurrentArtifactID = row.CurrentArtifactID
 	if d.Relations, err = TaskRelations(ctx, q, taskID); err != nil {
@@ -357,9 +364,9 @@ func Conversation(ctx context.Context, q store.Querier, before, after int64, lim
 
 // conversationItem shows a conversation row to the owner.
 func conversationItem(ctx context.Context, q store.Querier, r store.ConversationRow) (protocol.ConversationItem, error) {
-	it := protocol.ConversationItem{ConversationID: r.ConversationID, Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
+	it := protocol.ConversationItem{ConversationID: r.ConversationID, ConversationContent: protocol.ConversationContent{Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
 		ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC(),
-		AssistantState: protocol.AssistantState(r.AssistantState), AssistantRevision: r.AssistantRevision}
+		AssistantState: protocol.AssistantState(r.AssistantState), AssistantRevision: r.AssistantRevision}}
 	recovery, err := store.MessageRecovery(ctx, q, r.MessageID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return it, err

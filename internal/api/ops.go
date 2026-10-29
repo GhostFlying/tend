@@ -24,16 +24,9 @@ var ownerCommands = commandMap(
 	app.CanonicalOwnerIssueCommand{Action: "close"}, app.CanonicalOwnerIssueCommand{Action: "reopen"},
 	app.CanonicalOwnerIssueCommand{Action: "reparent"}, app.CanonicalOwnerIssueCommand{Action: "dependencies"},
 	app.CanonicalOwnerIssueCommand{Action: "review_sources"}, app.CanonicalOwnerIssueCommand{Action: "review_completions"},
-	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.HostedIssueAssignment{}, app.HostedIssueAssignment{Finish: true}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetMessageAssociations{}, app.OpenAgentConversation{},
-	app.FollowupCommand{Action: "create"},
-	app.FollowupCommand{Action: "update"},
-	app.FollowupCommand{Action: "pause"},
-	app.FollowupCommand{Action: "resume"},
-	app.FollowupCommand{Action: "cancel"},
-	app.FollowupCommand{Action: "trigger"},
+	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.HostedIssueAssignment{}, app.HostedIssueAssignment{Finish: true}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetIssueMessageAssociations{},
 	app.WithdrawMessage{},
-	app.UpdateIssue{}, app.CloseIssue{}, app.ReopenIssue{},
-	app.RefreshDelivery{}, app.UpdateWorkItemChoice{Action: "respond"},
+	app.UpdateWorkItemChoice{Action: "respond"},
 	app.HostMaintenance{},
 	app.ControlUpgrade{},
 	app.AnswerDecision{},
@@ -98,15 +91,6 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := protocol.APIResponse{Operation: &op}
-	if op.Status == protocol.OpFailed && op.Error != nil && op.Error.Code == protocol.CodeStaleRevision && env.Target.Type == "work_item" {
-		_ = s.store.Read(r.Context(), func(tx *store.ReadTx) error {
-			v, err := views.Issue(r.Context(), tx.Q(), env.Target.ID)
-			if err == nil {
-				res.CurrentWorkItem = &v
-			}
-			return err
-		})
-	}
 	if op.Status == protocol.OpFailed && op.Error != nil && op.Error.Code == protocol.CodeStaleRevision && env.Target.Type == "issue" {
 		_ = s.store.Read(r.Context(), func(tx *store.ReadTx) error {
 			v, err := views.CanonicalIssue(r.Context(), tx.Q(), env.Target.ID, 0)

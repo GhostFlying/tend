@@ -67,7 +67,11 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 		if a.Status != "open" || strings.TrimSpace(p.Title) == "" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only an open attention can be revised")
 		}
-		if p.Title == a.Title && p.BlocksClose == a.BlocksClose && (p.Options == nil || slices.Equal(p.Options, a.QuestionOptions)) {
+		previousClock := a
+		if err := setAttentionActionTime(&a, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
+			return Outcome{}, err
+		}
+		if p.Title == a.Title && p.BlocksClose == a.BlocksClose && (p.Options == nil || slices.Equal(p.Options, a.QuestionOptions)) && attentionActionTimeEqual(previousClock, a) && previousClock.LatestActionTimezone == a.LatestActionTimezone {
 			return Outcome{Result: a}, nil
 		}
 		if a.Kind == "decision" && (p.Title != a.Title || p.Options != nil) {
@@ -227,6 +231,17 @@ func saveAttention(ctx context.Context, x *Exec, tx *store.Tx, a *protocol.Atten
 			return err
 		}
 	}
+	var previous protocol.Attention
+	if old > 0 {
+		var err error
+		previous, err = store.GetAttention(ctx, tx.Q(), a.AttentionID)
+		if err != nil {
+			return err
+		}
+	}
+	if err := syncAttentionActionClock(ctx, x, tx, a, previous); err != nil {
+		return err
+	}
 	a.Revision = old + 1
 	a.UpdatedAt = x.Now.UnixMilli()
 	return tx.SaveAttention(ctx, *a, old, x.Env.RequestID)
@@ -272,6 +287,9 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only a decision attention references one question")
 	}
 	a := protocol.Attention{AttentionID: x.IDs.New(protocol.Prefix("attn")), IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.Principal, BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
+	if err := setAttentionActionTime(&a, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
+		return Outcome{}, err
+	}
 	var events []Event
 	if a.Kind == "decision" {
 		if a.DecisionID == "" && a.ChoiceID == "" {
@@ -292,6 +310,15 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 				old, e := store.GetAttention(ctx, tx.Q(), existing)
 				if e == nil && x.Principal.Kind == protocol.PrincipalBackgroundAgent && old.IssueID != p.IssueID {
 					return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "question belongs to another responsibility")
+				}
+				if e == nil && (p.LatestActionAt != nil || p.LatestActionTimezone != "" || p.LatestActionReminders != nil) {
+					requested := old
+					if err := setAttentionActionTime(&requested, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
+						return Outcome{}, err
+					}
+					if !attentionActionTimeEqual(old, requested) || old.LatestActionTimezone != requested.LatestActionTimezone {
+						return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "update the existing Attention action time with its current revision")
+					}
 				}
 				return Outcome{Result: old}, e
 			}

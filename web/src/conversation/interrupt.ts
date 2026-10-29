@@ -1,7 +1,8 @@
+import type { MessageContent as ConversationItem } from "./eventContent.ts";
 // A durable interrupt request: restore HTTP delivery under the same request ID,
 // and never replay an interrupt tend already recorded (D11, D69).
 import { ApiError, FallbackStorage, type KeyValueStorage } from "../api/client.ts";
-import type { ConversationItem, Envelope, Operation } from "../api/generated/api.ts";
+import type { Envelope, Operation } from "../api/generated/api.ts";
 import { deploymentStorageName } from "../api/deployment.ts";
 import { newRequestId } from "../api/ids.ts";
 import type { OpSender } from "../app/ops.ts";

@@ -13,7 +13,7 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 	}
 	action := args[0]
 	fs := newFlags(e, "attention "+action)
-	data := fs.String("data", "", "inline JSON payload or original Envelope")
+	data := fs.String("data", "", "inline JSON payload or original Envelope; latest_action_at omitted preserves, 0 clears the deadline")
 	file := fs.String("file", "", "JSON file; - reads stdin")
 	req := fs.String("request-id", "", "original request identity for retry")
 	revision := fs.Int64("revision", -1, "original expected attention revision")

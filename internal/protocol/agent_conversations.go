@@ -2,10 +2,15 @@ package protocol
 
 // AgentConversation is a logical conversation; native thread generations are separate.
 type AgentConversation struct {
+	AgentConversationState
+	WorkItemID string `json:"work_item_id,omitempty"`
+}
+
+// AgentConversationState is shared owner metadata; responsibility identity is projected by its caller.
+type AgentConversationState struct {
 	ID             string `json:"conversation_id"`
 	Kind           string `json:"kind"`
 	AgentRef       string `json:"agent_ref,omitempty"`
-	WorkItemID     string `json:"work_item_id,omitempty"`
 	Title          string `json:"title"`
 	Status         string `json:"status"`
 	Revision       int64  `json:"revision"`
@@ -34,6 +39,12 @@ type MessageProcessingState struct {
 }
 
 type MessageAssociations struct {
+	MessageAssociationState
+	Items []MessageWorkItem `json:"items"`
+}
+
+// MessageAssociationState is shared owner metadata; responsibility identity is projected by its caller.
+type MessageAssociationState struct {
 	Processing      *MessageProcessingState `json:"processing,omitempty"`
 	Disposition     string                  `json:"disposition"`
 	ContentRevision int64                   `json:"content_revision"`
@@ -41,7 +52,6 @@ type MessageAssociations struct {
 	OwnerLocked     bool                    `json:"owner_locked"`
 	MessageID       string                  `json:"message_id"`
 	Revision        int64                   `json:"revision"`
-	Items           []MessageWorkItem       `json:"items"`
 }
 type SetMessageAssociationsPayload struct {
 	Disposition     string   `json:"disposition"`

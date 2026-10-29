@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { ConversationItem } from "../api/generated/api.ts";
+import type { IssueConversationItem as ConversationItem } from "../api/generated/api.ts";
 import type { OutgoingMessage } from "../queue/outbox.ts";
 import {
   systemMessageBody,

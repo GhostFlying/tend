@@ -18,6 +18,7 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/traex"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
@@ -28,7 +29,8 @@ import (
 func TestIntegrationHostedSteerPlanningRetry(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	args, _ := json.Marshal(map[string]any{"title": "one approved task", "spec": spec, "commit_seq": 1})
+	var source string
+	sourceReady := make(chan struct{})
 	var modelCalls, opens atomic.Int32
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -36,6 +38,13 @@ func TestIntegrationHostedSteerPlanningRetry(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		select {
+		case <-sourceReady:
+		case <-r.Context().Done():
+			return
+		}
+		rev := int64(1)
+		args, _ := json.Marshal(map[string]any{"effect_seq": 1, "payload": protocol.CreateIssuePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source, ExpectedSourceRevision: &rev}, Assignee: &protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: owner.Subject}, Plan: protocol.IssuePlan{Title: "One approved responsibility", Project: "default", Intent: "Delegate without direct task execution"}}})
 		n := modelCalls.Add(1)
 		input, _ := json.Marshal(body["input"])
 		if n == 2 && !strings.Contains(string(input), "STATUS_ONLY_KEEP_GOAL") {
@@ -48,9 +57,9 @@ func TestIntegrationHostedSteerPlanningRetry(t *testing.T) {
 		}
 		send(map[string]any{"type": "response.created", "response": map[string]any{"id": fmt.Sprint(n)}})
 		if n <= 2 {
-			send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "call_id": fmt.Sprintf("plan-call-%d", n), "name": "tasks_create", "arguments": string(args)}})
+			send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "call_id": fmt.Sprintf("plan-call-%d", n), "name": "issues_create", "arguments": string(args)}})
 		} else {
-			send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "message", "id": "final", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "STATUS_ONLY_KEEP_GOAL: one task remains recorded; no duplicate work."}}}})
+			send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "message", "id": "final", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "STATUS_ONLY_KEEP_GOAL: one Issue remains recorded; no duplicate work."}}}})
 		}
 		send(map[string]any{"type": "response.completed", "response": map[string]any{"id": fmt.Sprint(n), "usage": map[string]any{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}})
 	}))
@@ -74,15 +83,15 @@ func TestIntegrationHostedSteerPlanningRetry(t *testing.T) {
 		}
 	}()
 	var tools atomic.Int32
-	e := newEnv(t, testkit.NewHarness(), func(cfg *Config) {
+	e := newNamedSteerFixture(t, testkit.NewHarness(), make(chan harness.TurnInput), func(cfg *Config) {
 		cfg.Thread = ThreadConfig(cwd, "probe")
-		cfg.Open = func(openCtx context.Context) (harness.Session, error) {
-			s, err := traex.Start(openCtx, traex.Options{Dir: cwd, Env: []string{"TRAE_HOME=" + home, "TEND_ADDON=off"}, Log: quiet()})
+		cfg.OpenNamed = func(openCtx context.Context, _ hostedconfig.Selection) (harness.Session, error) {
+			s, err := traex.Start(openCtx, traex.Options{HostedCoordination: true, Dir: cwd, Env: []string{"TRAE_HOME=" + home, "TEND_ADDON=off"}, Log: quiet()})
 			if err != nil {
 				return nil, err
 			}
 			opens.Add(1)
-			return nativeObservedSession{Session: s, onTool: func(toolCtx context.Context, c harness.ToolCall, h harness.ToolHandler) harness.ToolResult {
+			return planningCatalogSession{nativeObservedSession{Session: s, onTool: func(toolCtx context.Context, c harness.ToolCall, h harness.ToolHandler) harness.ToolResult {
 				result := h(toolCtx, c)
 				n := tools.Add(1)
 				results <- observed{c, result}
@@ -93,10 +102,12 @@ func TestIntegrationHostedSteerPlanningRetry(t *testing.T) {
 					}
 				}
 				return result
-			}}, nil
+			}}}, nil
 		}
 	})
-	first := e.say("Record exactly one approved task and preserve KEEP_GOAL")
+	first := e.say("Delegate exactly one responsibility to me and preserve KEEP_GOAL")
+	source = first
+	close(sourceReady)
 	getResult := func() observed {
 		t.Helper()
 		select {
@@ -108,7 +119,7 @@ func TestIntegrationHostedSteerPlanningRetry(t *testing.T) {
 		}
 	}
 	original := getResult()
-	if !original.result.Success || e.count(`SELECT COUNT(*) FROM tasks`) != 1 {
+	if !original.result.Success || e.count(`SELECT COUNT(*) FROM issue_controls`) != 1 {
 		t.Fatal("initial plan did not commit: ", original.result.Text)
 	}
 	var message struct {
@@ -137,7 +148,7 @@ func TestIntegrationHostedSteerPlanningRetry(t *testing.T) {
 	eventually(t, "same original turn completes", func() bool {
 		return e.count(`SELECT COUNT(*) FROM main_turns WHERE message_id=? AND thread_id=? AND turn_id=? AND status='completed'`, first, original.call.ThreadID, original.call.TurnID) == 1
 	})
-	if opens.Load() != 1 || tools.Load() != 2 || e.count(`SELECT COUNT(*) FROM tasks`) != 1 || e.count(`SELECT COUNT(*) FROM plan_commits WHERE source_message_id=?`, first) != 1 || e.count(`SELECT COUNT(*) FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.repair=0`) != 1 ||
+	if opens.Load() != 1 || tools.Load() != 2 || e.count(`SELECT COUNT(*) FROM issue_controls`) != 1 || e.count(`SELECT COUNT(*) FROM hosted_coordination_effects WHERE execution_id=(SELECT request_id FROM main_turns WHERE message_id=? AND request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1))`, first) != 1 || e.count(`SELECT COUNT(*) FROM main_turns t JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE e.repair=0`) != 1 ||
 		e.count(`SELECT COUNT(*) FROM main_steers WHERE message_id=? AND status='consumed' AND native_item_id<>''`, message.ID) != 1 ||
 		e.count(`SELECT COUNT(*) FROM conversation_messages WHERE author='main_agent' AND reply_to=? AND body LIKE '%STATUS_ONLY_KEEP_GOAL%'`, message.ID) != 1 {
 		t.Fatal("duplicate write/session/turn or missing native consumption and reply proof")
@@ -152,5 +163,13 @@ func TestIntegrationHostedSteerPlanningRetry(t *testing.T) {
 	if err != nil || state.Status == "completed" {
 		t.Fatal("native completion bypassed formal review", state, err)
 	}
-	t.Logf("thread=%s turn=%s original=%s status=%s native_calls=%s,%s tools=2 tasks=1 sessions=1; retry=%s", original.call.ThreadID, original.call.TurnID, first, message.ID, original.call.CallID, retry.call.CallID, retry.result.Text)
+	t.Logf("thread=%s turn=%s original=%s status=%s native_calls=%s,%s tools=2 issues=1 sessions=1; retry=%s", original.call.ThreadID, original.call.TurnID, first, message.ID, original.call.CallID, retry.call.CallID, retry.result.Text)
+}
+
+// This deterministic provider has one known model; the real native tool/steer
+// transport is exercised without depending on the owner's live model catalog.
+type planningCatalogSession struct{ nativeObservedSession }
+
+func (planningCatalogSession) Models(context.Context) ([]harness.Model, error) {
+	return []harness.Model{{ID: "named-model", Name: "probe", SupportedEfforts: []string{"high"}, DefaultEffort: "high"}}, nil
 }

@@ -1,3 +1,11 @@
+import { ChoiceResponse } from "../workitems/choice.ts";
+import type { OpSender } from "../app/ops.ts";
+import { issueConversationReader } from "../conversation/issueMetadata.ts";
+import { eventContent } from "../conversation/eventContent.ts";
+import { AgentCatalog } from "../agents/data.ts";
+import { Issues } from "../issues/data.ts";
+import { AttentionData } from "../attention/data.ts";
+import { DirectConversations } from "../conversation/api.ts";
 import { ConversationQueue } from "../conversation/queueView.ts";
 // The views the Web shows, kept current from the event stream (D69): the
 // snapshot, the conversation and the open task's details. Conversation
@@ -5,15 +13,15 @@ import { ConversationQueue } from "../conversation/queueView.ts";
 // only says something changed, and the affected views are read again. The
 // client never rebuilds ledger state from events itself.
 import { RepositoryRegistry } from "../repos/registry.ts";
-import { WorkItemRead, WorkItems } from "../workitems/live.ts";
+import { WorkItemRead } from "../workitems/live.ts";
 import { TaskLists } from "../tasks/lists.ts";
 import { ConversationHandoff } from "../conversation/handoff.ts";
 import { ConversationSettings } from "../conversation/settings.ts";
 import { ApiError } from "../api/client.ts";
 import type {
   WorkItemChoice,
-  ConversationItem,
-  ConversationPage,
+  IssueConversationItem as ConversationItem,
+  IssueConversationPage as ConversationPage,
   LedgerEvent,
   Snapshot,
   TaskDetail,
@@ -64,7 +72,10 @@ export class LiveData {
   readonly handoff: ConversationHandoff;
   readonly tasks: TaskLists;
   readonly repos: RepositoryRegistry;
-  readonly workItems: WorkItems;
+  readonly issues: Issues;
+  readonly attention: AttentionData;
+  readonly directChats: DirectConversations;
+  readonly agents: AgentCatalog;
   private readonly api: Reader;
   private readonly snapshotStore = new Store<Snapshot | null>(null);
   private readonly conversationStore = new Store<ConversationState>({
@@ -75,7 +86,6 @@ export class LiveData {
     processingSince: noProcessing,
   });
   private readonly detailStore = new Store<DetailState | null>(null);
-  private readonly materialReads = new Set<WorkItemRead<TaskDetail>>();
   private readonly lookupStore = new Store<TaskLookup>(new Map());
   private readonly lookingUp = new Set<string>();
   private readonly dirtyLookups = new Set<string>();
@@ -97,13 +107,17 @@ export class LiveData {
     api: Reader,
     readonly conversationID = "main",
   ) {
+    api = issueConversationReader(api, conversationID);
     this.api = api;
     this.queueView = new ConversationQueue(api, (item) => this.currentChoices(item));
     this.settings = new ConversationSettings(api, conversationID);
     this.handoff = new ConversationHandoff(api);
     this.tasks = new TaskLists(api);
     this.repos = new RepositoryRegistry(api);
-    this.workItems = new WorkItems(api);
+    this.issues = new Issues(api);
+    this.attention = new AttentionData(api);
+    this.directChats = new DirectConversations(api);
+    this.agents = new AgentCatalog(api);
     this.snapshotReads = new Coalesced(() => this.readSnapshot());
     this.detailReads = new Coalesced(() => this.readDetail());
     this.latestReads = new Coalesced(() => this.readLatest());
@@ -121,29 +135,21 @@ export class LiveData {
     return this.detailStore;
   }
 
-  /** Review materials follow ledger invalidation without taking over task navigation. */
-  watchMaterials(id: string, read: WorkItemRead<TaskDetail>): () => void {
-    this.materialReads.add(read);
-    void read.open(`/api/v1/tasks/${encodeURIComponent(id)}`);
-    return () => {
-      this.materialReads.delete(read);
-      read.close();
-    };
-  }
-
   get lookups(): Readable<TaskLookup> {
     return this.lookupStore;
   }
 
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
-    for (const read of this.materialReads) void read.refresh();
     void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
     void this.repos.refresh();
     void this.settings.refresh();
     void this.handoff.refresh();
     this.tasks.refresh();
-    this.workItems.refresh();
+    this.issues.refresh();
+    this.attention.refresh();
+    this.directChats.refresh();
+    this.agents.refresh();
     for (const read of this.choiceReads.values()) void read.refresh();
     this.detailController?.abort();
     this.lookupStore.set(new Map());
@@ -179,17 +185,25 @@ export class LiveData {
           ...state,
           items: state.items.map((item) => this.currentChoices(item)),
         });
-        this.workItems.changed();
       });
       this.choiceReads.set(id, read);
     }
     return read;
   }
 
+  private readonly choiceActions = new Map<string, ChoiceResponse>();
+  choiceResponse(id: string, sender: OpSender): ChoiceResponse {
+    let response = this.choiceActions.get(id);
+    if (!response) {
+      response = new ChoiceResponse(sender, () => void this.choiceChanged(id));
+      this.choiceActions.set(id, response);
+    }
+    return response;
+  }
+
   /** Refresh a card in place, including older loaded chat history. */
   async choiceChanged(id: string): Promise<void> {
     if (this.stopped) return;
-    this.workItems.changed();
     await this.choiceRead(id).open(`/api/v1/work-item-choices/${encodeURIComponent(id)}`);
   }
 
@@ -208,6 +222,46 @@ export class LiveData {
 
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
+    if (["category", "host", "hosted_configuration"].includes(event.object_type))
+      this.agents.refresh();
+    // Global responsibility views must not inherit the selected chat filter.
+    if (
+      [
+        "issue",
+        "work_item",
+        "task",
+        "context_fact",
+        "attention",
+        "deadline",
+        "planner_entry",
+        "followup",
+        "decision",
+        "work_item_choice",
+      ].includes(event.object_type)
+    ) {
+      this.issues.refresh();
+      this.attention.refresh();
+    }
+    // Execution and resource facts can change primary-task summaries without a
+    // task event (for example lease expiry). Hidden reads stay lazy.
+    if (["run", "host", "workspace"].includes(event.object_type)) this.issues.refresh();
+    if (event.object_type === "message" && event.item?.author !== "main_agent") {
+      this.issues.refresh();
+      this.attention.refresh();
+    }
+    if (
+      [
+        "conversation",
+        "message",
+        "run",
+        "run_message",
+        "task",
+        "issue",
+        "work_item",
+        "outbox",
+      ].includes(event.object_type)
+    )
+      this.directChats.refresh();
     if (event.item && (event.item.conversation_id ?? "main") !== this.conversationID) return;
     if (event.kind === "conversation.associations_changed") {
       void this.latestReads.run();
@@ -243,8 +297,6 @@ export class LiveData {
     }
     switch (event.object_type) {
       case "message":
-        // Followup occurrences project the current main-turn state.
-        if (event.kind === "conversation.message_state") this.workItems.changed();
         this.handoff.invalidate(event.event_seq);
         if (this.held) {
           this.held.push(event);
@@ -264,6 +316,8 @@ export class LiveData {
       const task = this.lookupStore.get().get(id);
       if (
         (event.object_type === "task" && event.object_id === id) ||
+        (["issue", "work_item"].includes(event.object_type) &&
+          task?.primary_issue_id === event.object_id) ||
         task === undefined ||
         (task !== null && task.lifecycle !== "completed" && task.lifecycle !== "cancelled")
       ) {
@@ -271,8 +325,6 @@ export class LiveData {
       }
     }
     this.tasks.changed();
-    this.workItems.changed();
-    for (const read of this.materialReads) void read.refresh();
     void this.refreshSnapshot();
     if (this.detailStore.get()) {
       void this.refreshDetail();
@@ -431,7 +483,16 @@ export class LiveData {
   }
 
   private applyItem(event: LedgerEvent): void {
-    const item = event.item ? this.currentChoices(event.item) : undefined;
+    const previous = this.conversationStore
+      .get()
+      .items.find((it) => it.message_id === event.item?.message_id);
+    const item = event.item
+      ? this.currentChoices({
+          ...eventContent(event.item),
+          ...(previous?.associations ? { associations: previous.associations } : {}),
+          ...(previous?.background ? { background: previous.background } : {}),
+        })
+      : undefined;
     if (!item) {
       return;
     }
@@ -490,9 +551,10 @@ export class LiveData {
     this.queueView.stop();
     this.dirtyLookups.clear();
     this.repos.stop();
-    this.workItems.stop();
-    for (const read of this.materialReads) read.close();
-    this.materialReads.clear();
+    this.issues.stop();
+    this.attention.stop();
+    this.directChats.stop();
+    this.agents.stop();
     for (const read of this.choiceReads.values()) read.close();
     this.detailController?.abort();
     clearTimeout(this.retryTimer);
@@ -615,6 +677,8 @@ export function summary(t: TaskDetail): TaskSummary {
     ...(t.primary_work_item_title === undefined
       ? {}
       : { primary_work_item_title: t.primary_work_item_title }),
+    ...(t.primary_issue_id === undefined ? {} : { primary_issue_id: t.primary_issue_id }),
+    ...(t.primary_issue_title === undefined ? {} : { primary_issue_title: t.primary_issue_title }),
     ...(t.ended_at === undefined ? {} : { ended_at: t.ended_at }),
     ...(t.completed_at === undefined ? {} : { completed_at: t.completed_at }),
   };

@@ -727,3 +727,92 @@ test("reloading and resuming isolates main and background queues and retry targe
     { body: "main only" },
   ]);
 });
+
+test("source files recover original upload and source request without entering any chat drain", async () => {
+  let uploads = 0;
+  let sourceEffects = 0;
+  let canReadUpload = false;
+  let canReadSource = false;
+  const uploadReceipt = {
+    file_id: "file_source",
+    name: "original.txt",
+    media_type: "text/plain",
+    size: 14,
+    sha256: "original-hash",
+  };
+  const sourceSender: Sender = {
+    upload: async (requestId, blob) => {
+      uploads++;
+      expect(await blob.text()).toBe("original bytes");
+      sender.records.set(requestId, {
+        request_id: requestId,
+        operation: "conversation.upload_attachment",
+        status: "succeeded",
+        result: uploadReceipt,
+      });
+      throw new NetworkError("lost upload response");
+    },
+    lookup: async (requestId) => {
+      const record = sender.records.get(requestId);
+      if (record && "file_id" in (record.result as object) && !canReadUpload)
+        throw new NetworkError("lookup unavailable");
+      if (record && "message_id" in (record.result as object) && !canReadSource)
+        throw new NetworkError("lookup unavailable");
+      return record ?? null;
+    },
+    submit: async (envelope) => {
+      sender.submitted.push(envelope);
+      expect(envelope.operation).toBe("conversation.inject_source");
+      expect(envelope.payload).toEqual({
+        text: "external source",
+        metadata: { author: "unknown" },
+        attachments: ["file_source"],
+      });
+      if (!sender.records.has(envelope.request_id)) sourceEffects++;
+      sender.records.set(envelope.request_id, {
+        request_id: envelope.request_id,
+        operation: "conversation.inject_source",
+        status: "succeeded",
+        result: { message_id: "source_message" },
+      });
+      throw new NetworkError("lost source response");
+    },
+  };
+  const options: Partial<QueueOptions> = {
+    sender: sourceSender,
+    operation: "conversation.inject_source",
+    scope: "attention:one",
+    backoffMs: [],
+  };
+  const first = await open(options);
+  const original = await first.enqueueSource(
+    { body: "external source", files: [new File(["original bytes"], "original.txt")] },
+    { author: "unknown" },
+  );
+  await first.idle();
+  expect(first.list.get()[0]?.state).toBe("unknown");
+  expect(uploads).toBe(1);
+  const chat = await open();
+  await chat.resume();
+  expect(chat.list.get()).toEqual([]);
+  expect(sender.submitted).toEqual([]);
+  const another = await open({ ...options, scope: "attention:two" });
+  expect(another.list.get()).toEqual([]);
+  canReadUpload = true;
+  const reloaded = await open(options);
+  await reloaded.resume();
+  expect(uploads).toBe(1);
+  expect(reloaded.list.get()[0]?.state).toBe("unknown");
+  expect(sender.submitted[0]?.request_id).toBe(original.requestId);
+  canReadSource = true;
+  const reopened = await open(options);
+  await reopened.resume();
+  expect(reopened.list.get()[0]).toMatchObject({
+    state: "sent",
+    messageId: "source_message",
+    requestId: original.requestId,
+  });
+  expect(uploads).toBe(1);
+  expect(sourceEffects).toBe(1);
+  expect(sender.submitted).toHaveLength(1);
+});

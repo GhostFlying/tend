@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Connection } from "../api/client.ts";
-import type { ConversationQueueEntry } from "../api/generated/api.ts";
+import type { IssueConversationQueueEntry as ConversationQueueEntry } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { notify } from "../app/notice.ts";
 import { useStore } from "../state/store.ts";

@@ -26,21 +26,34 @@ export function useTaskSummary(taskId: string): TaskSummary | null | undefined {
 }
 
 export function TaskRef({ taskId }: { taskId: string }) {
-  const { openTask } = useServices();
+  const { openTask, openIssue } = useServices();
   const task = useTaskSummary(taskId);
   if (!task) {
     return <>{taskId}</>;
   }
   const look = taskLook(task);
   return (
-    <button
-      type="button"
-      className={styles.chip}
-      onClick={() => openTask(taskId)}
-      title={`${look.label} · ${taskId}`}
-    >
-      <StatusDot tone={look.tone} />
-      <span className={styles.title}>{task.title}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        className={styles.chip}
+        onClick={() => openTask(taskId)}
+        title={`${look.label} · ${taskId}`}
+      >
+        <StatusDot tone={look.tone} />
+        <span className={styles.title}>{task.title}</span>
+      </button>
+      {task.primary_issue_id && (
+        <button
+          className={styles.chip}
+          onClick={() => openIssue(task.primary_issue_id!)}
+          title={task.primary_issue_id}
+        >
+          <span className={styles.title}>
+            所属Issue：{task.primary_issue_title || task.primary_issue_id}
+          </span>
+        </button>
+      )}
+    </>
   );
 }

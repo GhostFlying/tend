@@ -18,13 +18,9 @@ export function ChoiceCard({
   choice: WorkItemChoice;
   readOnly?: boolean;
 }) {
-  const { client, live, openWorkItem } = useServices();
+  const { client, live } = useServices();
   const connection = useStore(client.connection);
-  const response = live.workItems.choiceResponse(
-    choice.choice_id,
-    client,
-    () => void live.choiceChanged(choice.choice_id),
-  );
+  const response = live.choiceResponse(choice.choice_id, client);
   const state = useStore(response.state);
   const reading = useStore(live.choiceRead(choice.choice_id).state);
   const [text, setText] = useState("");
@@ -39,15 +35,7 @@ export function ChoiceCard({
         )}
         {choice.answer && <Markdown text={choice.answer} />}
         {choice.reason && <Markdown text={choice.reason} />}
-        {choice.replaced_by && (
-          <button
-            type="button"
-            className={controls.link}
-            onClick={() => openWorkItem(choice.work_item_id)}
-          >
-            查看最新安排
-          </button>
-        )}
+        {choice.replaced_by && <p className={styles.meta}>原关联：{choice.work_item_id}</p>}
       </details>
     );
   const disabled =

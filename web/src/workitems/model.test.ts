@@ -1,9 +1,7 @@
 import { describe, expect, test } from "vitest";
-import type { IssueDelivery, IssueStage, WorkItemView } from "../api/generated/api.ts";
-import { ComposerDraft } from "../conversation/draft.ts";
+import type { IssueDelivery, IssueStage } from "../api/generated/api.ts";
 import {
   columns,
-  concern,
   evidenceLabel,
   observationErrorLabel,
   parallelStages,
@@ -14,18 +12,7 @@ import {
   stageProgressLabel,
 } from "./model.ts";
 
-const item: WorkItemView = {
-  work_item_id: "wi_01M5M3ME31875GDA8F7P5XTD74",
-  title: "调查后的持续跟进",
-  project: "sample",
-  intent: "找到原因，再根据事实决定后续",
-  revision: 4,
-  status: "open",
-  column: "unplanned",
-  created_at: 1,
-  updated_at: 2,
-  stages: [{ stage_id: "investigate", title: "调查", status: "done" }],
-};
+const workItemID = "wi_01M5M3ME31875GDA8F7P5XTD74";
 describe("work-item presentation", () => {
   test("evidence and observation failures use readable labels with diagnostic fallback", () => {
     expect(["acceptance", "delivery", "owner_decision"].map(evidenceLabel)).toEqual([
@@ -46,7 +33,7 @@ describe("work-item presentation", () => {
       number: 1,
     };
     const observed = {
-      work_item_id: item.work_item_id,
+      work_item_id: workItemID,
       delivery_id: "pr",
       generation: 1,
       state: "open",
@@ -76,8 +63,7 @@ describe("work-item presentation", () => {
     ).toBe(true);
     expect(refreshReconciled(baseline, { ...delivery, number: 2 }, observed)).toBe(true);
   });
-  test("finishing this round remains visible as an unresolved next step", () => {
-    expect(concern(item)).toBe("本轮已结束，后续尚未安排");
+  test("plan column labels remain readable", () => {
     expect(columns.map((column) => column.title)).toEqual([
       "待安排",
       "推进中",
@@ -86,20 +72,6 @@ describe("work-item presentation", () => {
       "暂缓",
       "已结束",
     ]);
-    expect(
-      concern({
-        ...item,
-        follow_ons: [
-          {
-            follow_on_id: "next",
-            kind: "problem",
-            text: "需要 owner 决定范围",
-            source: "owner",
-            status: "open",
-          },
-        ],
-      }),
-    ).toBe("需要 owner 决定范围");
   });
   test("grouping preserves dynamic stage identities and dependency order", () => {
     const stages: IssueStage[] = [
@@ -165,7 +137,7 @@ describe("work-item presentation", () => {
     ]).toEqual([]);
   });
   test("references recognize only complete work-item IDs at text boundaries", () => {
-    const id = item.work_item_id;
+    const id = workItemID;
     expect(splitWorkItemIds(`继续 ${id}。`)).toEqual(["继续 ", { workItemId: id }, "。"]);
     for (const text of [
       `prefix_${id}`,
@@ -174,18 +146,6 @@ describe("work-item presentation", () => {
       "wi_01M5M3ME",
     ])
       expect(splitWorkItemIds(text)).toEqual([text]);
-  });
-  test("navigation adds a proposal without replacing an unsent message or files", () => {
-    const draft = new ComposerDraft();
-    draft.write("已有草稿");
-    draft.workItem(item, "snooze");
-    expect(draft.state.get().text).toContain("已有草稿\n\n");
-    expect(draft.state.get().text).toContain(item.work_item_id);
-    expect(draft.state.get().text).toContain("运行中的任务继续按原约定推进，不停止 run");
-    expect(draft.state.get().focus).toBe(1);
-    draft.workItem(item, "close");
-    expect(draft.state.get().text).toContain("未处理承诺、运行任务和未确认操作");
-    expect(draft.state.get().focus).toBe(2);
   });
 });
 

@@ -14,9 +14,6 @@
         "current_issue": {
           "$ref": "#/definitions/IssueView"
         },
-        "current_work_item": {
-          "$ref": "#/definitions/WorkItemView"
-        },
         "error": {
           "$ref": "#/definitions/Error"
         },
@@ -279,91 +276,6 @@
         "updated_at"
       ],
       "title": "AgentContextUsage",
-      "type": "object"
-    },
-    "AgentConversation": {
-      "additionalProperties": false,
-      "properties": {
-        "agent_ref": {
-          "type": "string"
-        },
-        "conversation_id": {
-          "type": "string"
-        },
-        "effort": {
-          "type": "string"
-        },
-        "kind": {
-          "type": "string"
-        },
-        "last_message_at": {
-          "type": "integer"
-        },
-        "last_message_seq": {
-          "type": "integer"
-        },
-        "model": {
-          "type": "string"
-        },
-        "preview": {
-          "type": "string"
-        },
-        "revision": {
-          "type": "integer"
-        },
-        "status": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        },
-        "work_item_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "conversation_id",
-        "kind",
-        "title",
-        "status",
-        "revision",
-        "model",
-        "effort",
-        "last_message_seq",
-        "last_message_at",
-        "preview"
-      ],
-      "title": "AgentConversation",
-      "type": "object"
-    },
-    "AgentConversationPage": {
-      "additionalProperties": false,
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/AgentConversation"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "next": {
-          "type": "string"
-        },
-        "runtime_available": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "runtime_available",
-        "items"
-      ],
-      "title": "AgentConversationPage",
       "type": "object"
     },
     "AgentExecutor": {
@@ -1620,6 +1532,21 @@
         "kind": {
           "type": "string"
         },
+        "latest_action_at": {
+          "type": "integer"
+        },
+        "latest_action_due_rule_id": {
+          "type": "string"
+        },
+        "latest_action_near_rule_id": {
+          "type": "string"
+        },
+        "latest_action_reminders": {
+          "type": "boolean"
+        },
+        "latest_action_timezone": {
+          "type": "string"
+        },
         "question_options": {
           "items": {
             "type": "string"
@@ -1661,6 +1588,7 @@
         }
       },
       "required": [
+        "latest_action_reminders",
         "attention_id",
         "kind",
         "title",
@@ -1671,41 +1599,6 @@
         "updated_at"
       ],
       "title": "AttentionView",
-      "type": "object"
-    },
-    "BackgroundAssessmentPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "context_revision": {
-          "type": "integer"
-        },
-        "disposition": {
-          "type": "string"
-        },
-        "evidence_ids": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "note": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "context_revision",
-        "disposition",
-        "note",
-        "evidence_ids"
-      ],
-      "title": "BackgroundAssessmentPayload",
       "type": "object"
     },
     "BackgroundBatch": {
@@ -1877,25 +1770,6 @@
       "title": "CancelIssueDeadlinePayload",
       "type": "object"
     },
-    "CloseWorkItemPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "closure": {
-          "$ref": "#/definitions/IssueClosure"
-        },
-        "commit_seq": {
-          "type": "integer"
-        },
-        "source_message_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "closure"
-      ],
-      "title": "CloseWorkItemPayload",
-      "type": "object"
-    },
     "Code": {
       "enum": [
         "invalid_request",
@@ -1975,52 +1849,6 @@
         "message"
       ],
       "title": "ContextBlocker",
-      "type": "object"
-    },
-    "ContextFact": {
-      "additionalProperties": false,
-      "properties": {
-        "attribution": {
-          "type": "string"
-        },
-        "body": {
-          "type": "string"
-        },
-        "fact_id": {
-          "type": "string"
-        },
-        "kind": {
-          "type": "string"
-        },
-        "needs_review": {
-          "type": "boolean"
-        },
-        "project": {
-          "type": "string"
-        },
-        "scope": {
-          "type": "string"
-        },
-        "source_message_id": {
-          "type": "string"
-        },
-        "supersedes": {
-          "type": "string"
-        },
-        "work_item_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "fact_id",
-        "scope",
-        "kind",
-        "body",
-        "source_message_id",
-        "attribution",
-        "needs_review"
-      ],
-      "title": "ContextFact",
       "type": "object"
     },
     "ControlMode": {
@@ -2375,103 +2203,6 @@
       "title": "ConversationModel",
       "type": "object"
     },
-    "ConversationPage": {
-      "additionalProperties": false,
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/ConversationItem"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "more": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "items",
-        "more"
-      ],
-      "title": "ConversationPage",
-      "type": "object"
-    },
-    "ConversationQueueEntry": {
-      "additionalProperties": false,
-      "properties": {
-        "can_withdraw": {
-          "type": "boolean"
-        },
-        "item": {
-          "$ref": "#/definitions/ConversationItem"
-        },
-        "position": {
-          "type": "integer"
-        },
-        "revision": {
-          "type": "integer"
-        },
-        "status": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "item",
-        "position",
-        "revision",
-        "status",
-        "can_withdraw"
-      ],
-      "title": "ConversationQueueEntry",
-      "type": "object"
-    },
-    "ConversationQueuePage": {
-      "additionalProperties": false,
-      "properties": {
-        "active": {
-          "$ref": "#/definitions/ConversationQueueEntry"
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "event_seq": {
-          "type": "integer"
-        },
-        "items": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/ConversationQueueEntry"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "next": {
-          "type": "integer"
-        },
-        "total": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "enabled",
-        "event_seq",
-        "items",
-        "total"
-      ],
-      "title": "ConversationQueuePage",
-      "type": "object"
-    },
     "ConversationReturnLink": {
       "additionalProperties": false,
       "properties": {
@@ -2681,6 +2412,15 @@
         "kind": {
           "type": "string"
         },
+        "latest_action_at": {
+          "type": "integer"
+        },
+        "latest_action_reminders": {
+          "type": "boolean"
+        },
+        "latest_action_timezone": {
+          "type": "string"
+        },
         "options": {
           "items": {
             "type": "string"
@@ -2847,71 +2587,6 @@
         "source_id"
       ],
       "title": "CreateWorkItemChoicePayload",
-      "type": "object"
-    },
-    "CreateWorkItemPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "background": {
-          "items": {
-            "$ref": "#/definitions/SharedFact"
-          },
-          "type": "array"
-        },
-        "commit_seq": {
-          "type": "integer"
-        },
-        "default_workspace_task_id": {
-          "type": "string"
-        },
-        "deliveries": {
-          "items": {
-            "$ref": "#/definitions/IssueDelivery"
-          },
-          "type": "array"
-        },
-        "follow_ons": {
-          "items": {
-            "$ref": "#/definitions/IssueFollowOn"
-          },
-          "type": "array"
-        },
-        "initial_context": {
-          "$ref": "#/definitions/InitialWorkItemContext"
-        },
-        "intent": {
-          "type": "string"
-        },
-        "project": {
-          "type": "string"
-        },
-        "source_message_id": {
-          "type": "string"
-        },
-        "stages": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/IssueStage"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "title",
-        "project",
-        "intent",
-        "stages"
-      ],
-      "title": "CreateWorkItemPayload",
       "type": "object"
     },
     "DecisionBriefing": {
@@ -3460,235 +3135,6 @@
       "title": "FollowupCondition",
       "type": "object"
     },
-    "FollowupHistoryPage": {
-      "additionalProperties": false,
-      "properties": {
-        "more": {
-          "type": "boolean"
-        },
-        "next_occurrence": {
-          "type": "string"
-        },
-        "next_revision": {
-          "type": "integer"
-        },
-        "occurrences": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/FollowupOccurrence"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "revisions": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/FollowupRule"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "rule": {
-          "$ref": "#/definitions/FollowupRule"
-        }
-      },
-      "required": [
-        "rule",
-        "revisions",
-        "occurrences",
-        "more"
-      ],
-      "title": "FollowupHistoryPage",
-      "type": "object"
-    },
-    "FollowupOccurrence": {
-      "additionalProperties": false,
-      "properties": {
-        "background_message_id": {
-          "type": "string"
-        },
-        "checkin": {
-          "$ref": "#/definitions/BackgroundCheckin"
-        },
-        "created_at": {
-          "type": "integer"
-        },
-        "evidence": {
-          "type": "string"
-        },
-        "message_id": {
-          "type": "string"
-        },
-        "occurrence_id": {
-          "type": "string"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "revision": {
-          "type": "integer"
-        },
-        "rule_id": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "work_item_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "occurrence_id",
-        "rule_id",
-        "revision",
-        "work_item_id",
-        "message_id",
-        "reason",
-        "status",
-        "evidence",
-        "created_at"
-      ],
-      "title": "FollowupOccurrence",
-      "type": "object"
-    },
-    "FollowupPage": {
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "event_seq": {
-          "type": "integer"
-        },
-        "items": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/FollowupRule"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "latest": {
-          "additionalProperties": {
-            "$ref": "#/definitions/FollowupOccurrence"
-          },
-          "type": "object"
-        },
-        "more": {
-          "type": "boolean"
-        },
-        "next": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "enabled",
-        "items",
-        "more",
-        "event_seq"
-      ],
-      "title": "FollowupPage",
-      "type": "object"
-    },
-    "FollowupRule": {
-      "additionalProperties": false,
-      "properties": {
-        "at": {
-          "type": "integer"
-        },
-        "condition": {
-          "$ref": "#/definitions/FollowupCondition"
-        },
-        "created_at": {
-          "type": "integer"
-        },
-        "every_seconds": {
-          "type": "integer"
-        },
-        "expires_at": {
-          "type": "integer"
-        },
-        "expiry_silent": {
-          "type": "boolean"
-        },
-        "follow_on_id": {
-          "type": "string"
-        },
-        "instruction": {
-          "type": "string"
-        },
-        "kind": {
-          "type": "string"
-        },
-        "max_triggers": {
-          "type": "integer"
-        },
-        "next_at": {
-          "type": "integer"
-        },
-        "purpose": {
-          "type": "string"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "revision": {
-          "type": "integer"
-        },
-        "rule_id": {
-          "type": "string"
-        },
-        "source_id": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "timezone": {
-          "type": "string"
-        },
-        "trigger_count": {
-          "type": "integer"
-        },
-        "updated_at": {
-          "type": "integer"
-        },
-        "work_item_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "purpose",
-        "instruction",
-        "kind",
-        "timezone",
-        "rule_id",
-        "work_item_id",
-        "revision",
-        "status",
-        "trigger_count",
-        "created_at",
-        "updated_at"
-      ],
-      "title": "FollowupRule",
-      "type": "object"
-    },
     "FollowupSpec": {
       "additionalProperties": false,
       "properties": {
@@ -3736,32 +3182,6 @@
         "timezone"
       ],
       "title": "FollowupSpec",
-      "type": "object"
-    },
-    "FollowupSummary": {
-      "additionalProperties": false,
-      "properties": {
-        "active": {
-          "type": "integer"
-        },
-        "next_at": {
-          "type": "integer"
-        },
-        "paused": {
-          "type": "integer"
-        },
-        "purpose": {
-          "type": "string"
-        },
-        "rule_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "active",
-        "paused"
-      ],
-      "title": "FollowupSummary",
       "type": "object"
     },
     "HostMaintenanceView": {
@@ -3891,71 +3311,6 @@
       "title": "HostedAgentInventory",
       "type": "object"
     },
-    "InitialWorkItemContext": {
-      "additionalProperties": false,
-      "properties": {
-        "coverage": {
-          "type": "string"
-        },
-        "facts": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/ContextFact"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "gaps": {
-          "type": "string"
-        },
-        "reviewed_kinds": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "source_message_ids": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "source_reviews": {
-          "items": {
-            "$ref": "#/definitions/LogicalTurnReview"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "coverage",
-        "gaps",
-        "source_message_ids",
-        "facts",
-        "reviewed_kinds"
-      ],
-      "title": "InitialWorkItemContext",
-      "type": "object"
-    },
     "InjectSourcePayload": {
       "additionalProperties": false,
       "properties": {
@@ -3992,6 +3347,91 @@
         "message_id"
       ],
       "title": "InterruptReplyPayload",
+      "type": "object"
+    },
+    "IssueAgentConversation": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_ref": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "last_message_at": {
+          "type": "integer"
+        },
+        "last_message_seq": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "preview": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "kind",
+        "title",
+        "status",
+        "revision",
+        "model",
+        "effort",
+        "last_message_seq",
+        "last_message_at",
+        "preview"
+      ],
+      "title": "IssueAgentConversation",
+      "type": "object"
+    },
+    "IssueAgentConversationPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueAgentConversation"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "type": "string"
+        },
+        "runtime_available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "runtime_available",
+        "items"
+      ],
+      "title": "IssueAgentConversationPage",
       "type": "object"
     },
     "IssueAssignee": {
@@ -4038,6 +3478,44 @@
         "reason"
       ],
       "title": "IssueAssignmentPayload",
+      "type": "object"
+    },
+    "IssueBackgroundBatch": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_id": {
+          "type": "string"
+        },
+        "checkin": {
+          "$ref": "#/definitions/BackgroundCheckin"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "frozen_at": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "source_count": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "batch_id",
+        "message_id",
+        "status",
+        "source_count",
+        "created_at"
+      ],
+      "title": "IssueBackgroundBatch",
       "type": "object"
     },
     "IssueClosure": {
@@ -4234,7 +3712,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/definitions/ConversationItem"
+                "$ref": "#/definitions/IssueConversationItem"
               },
               "type": "array"
             },
@@ -4288,6 +3766,208 @@
         "expected_assignment_epoch"
       ],
       "title": "IssueControlPayload",
+      "type": "object"
+    },
+    "IssueConversationItem": {
+      "additionalProperties": false,
+      "properties": {
+        "assistant_revision": {
+          "type": "integer"
+        },
+        "assistant_state": {
+          "$ref": "#/definitions/AssistantState"
+        },
+        "associations": {
+          "$ref": "#/definitions/IssueMessageAssociations"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/definitions/ConversationAttachment"
+          },
+          "type": "array"
+        },
+        "author": {
+          "type": "string"
+        },
+        "background": {
+          "$ref": "#/definitions/IssueBackgroundBatch"
+        },
+        "body": {
+          "type": "string"
+        },
+        "choices": {
+          "items": {
+            "$ref": "#/definitions/WorkItemChoice"
+          },
+          "type": "array"
+        },
+        "control": {
+          "$ref": "#/definitions/MessageControl"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/definitions/DecisionChoice"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "images": {
+          "items": {
+            "$ref": "#/definitions/ConversationImage"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "notice_type": {
+          "type": "string"
+        },
+        "recovery": {
+          "$ref": "#/definitions/AgentRecoveryView"
+        },
+        "reply_sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reply_to": {
+          "type": "string"
+        },
+        "return_link": {
+          "$ref": "#/definitions/ConversationReturnLink"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/definitions/MessageState"
+        },
+        "steer": {
+          "$ref": "#/definitions/MainSteerView"
+        },
+        "tool": {
+          "$ref": "#/definitions/ToolUseView"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "kind",
+        "message_id",
+        "author",
+        "created_at"
+      ],
+      "title": "IssueConversationItem",
+      "type": "object"
+    },
+    "IssueConversationPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueConversationItem"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "IssueConversationPage",
+      "type": "object"
+    },
+    "IssueConversationQueueEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "can_withdraw": {
+          "type": "boolean"
+        },
+        "item": {
+          "$ref": "#/definitions/IssueConversationItem"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "item",
+        "position",
+        "revision",
+        "status",
+        "can_withdraw"
+      ],
+      "title": "IssueConversationQueueEntry",
+      "type": "object"
+    },
+    "IssueConversationQueuePage": {
+      "additionalProperties": false,
+      "properties": {
+        "active": {
+          "$ref": "#/definitions/IssueConversationQueueEntry"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueConversationQueueEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled",
+        "event_seq",
+        "items",
+        "total"
+      ],
+      "title": "IssueConversationQueuePage",
       "type": "object"
     },
     "IssueDeadline": {
@@ -4937,6 +4617,81 @@
       "title": "IssueFollowupRule",
       "type": "object"
     },
+    "IssueMessageAssociation": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "owner_locked": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "title",
+        "source",
+        "owner_locked"
+      ],
+      "title": "IssueMessageAssociation",
+      "type": "object"
+    },
+    "IssueMessageAssociations": {
+      "additionalProperties": false,
+      "properties": {
+        "content_revision": {
+          "type": "integer"
+        },
+        "disposition": {
+          "type": "string"
+        },
+        "facts_reviewed": {
+          "type": "boolean"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueMessageAssociation"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "owner_locked": {
+          "type": "boolean"
+        },
+        "processing": {
+          "$ref": "#/definitions/MessageProcessingState"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "disposition",
+        "content_revision",
+        "facts_reviewed",
+        "owner_locked",
+        "message_id",
+        "revision",
+        "items"
+      ],
+      "title": "IssueMessageAssociations",
+      "type": "object"
+    },
     "IssuePage": {
       "additionalProperties": false,
       "properties": {
@@ -4976,6 +4731,12 @@
           },
           "type": "array"
         },
+        "completion_criteria": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "default_workspace_task_id": {
           "type": "string"
         },
@@ -4995,6 +4756,9 @@
           "type": "string"
         },
         "project": {
+          "type": "string"
+        },
+        "scope": {
           "type": "string"
         },
         "stages": {
@@ -5306,6 +5070,81 @@
       "title": "IssueTaskSummary",
       "type": "object"
     },
+    "IssueTranscriptBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueConversationItem"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_seq": {
+          "type": "integer"
+        },
+        "notice_only": {
+          "type": "boolean"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "trigger": {
+          "$ref": "#/definitions/IssueConversationItem"
+        }
+      },
+      "required": [
+        "position",
+        "trigger",
+        "items",
+        "more"
+      ],
+      "title": "IssueTranscriptBlock",
+      "type": "object"
+    },
+    "IssueTranscriptPage": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueTranscriptBlock"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_before": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "blocks",
+        "more",
+        "event_seq"
+      ],
+      "title": "IssueTranscriptPage",
+      "type": "object"
+    },
     "IssueView": {
       "additionalProperties": false,
       "properties": {
@@ -5441,39 +5280,6 @@
         "created_at"
       ],
       "title": "LedgerEvent",
-      "type": "object"
-    },
-    "LinkWorkItemTaskPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "commit_seq": {
-          "type": "integer"
-        },
-        "source_message_id": {
-          "type": "string"
-        },
-        "stage_ids": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "task_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "task_id",
-        "stage_ids"
-      ],
-      "title": "LinkWorkItemTaskPayload",
       "type": "object"
     },
     "LogicalTurnReview": {
@@ -6243,35 +6049,6 @@
       "title": "PlannerEntry",
       "type": "object"
     },
-    "PrepareWorkItemContextPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "confirmed_fact_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "coverage": {
-          "type": "string"
-        },
-        "gaps": {
-          "type": "string"
-        },
-        "retired_fact_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "coverage",
-        "gaps"
-      ],
-      "title": "PrepareWorkItemContextPayload",
-      "type": "object"
-    },
     "PresentAttentionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -6579,19 +6356,6 @@
       "title": "Rating",
       "type": "string"
     },
-    "RefreshDeliveryPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "delivery_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "delivery_id"
-      ],
-      "title": "RefreshDeliveryPayload",
-      "type": "object"
-    },
     "RegisterRepositoryPayload": {
       "additionalProperties": false,
       "properties": {
@@ -6651,25 +6415,6 @@
       ],
       "title": "RelationDirection",
       "type": "string"
-    },
-    "ReopenWorkItemPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "commit_seq": {
-          "type": "integer"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "source_message_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "reason"
-      ],
-      "title": "ReopenWorkItemPayload",
-      "type": "object"
     },
     "ReparentIssuePayload": {
       "additionalProperties": false,
@@ -7712,7 +7457,7 @@
       "title": "SetIssueDependenciesPayload",
       "type": "object"
     },
-    "SetMessageAssociationsPayload": {
+    "SetIssueMessageAssociationsPayload": {
       "additionalProperties": false,
       "properties": {
         "content_revision": {
@@ -7721,7 +7466,7 @@
         "disposition": {
           "type": "string"
         },
-        "work_item_ids": {
+        "issue_ids": {
           "anyOf": [
             {
               "items": {
@@ -7738,9 +7483,9 @@
       "required": [
         "disposition",
         "content_revision",
-        "work_item_ids"
+        "issue_ids"
       ],
-      "title": "SetMessageAssociationsPayload",
+      "title": "SetIssueMessageAssociationsPayload",
       "type": "object"
     },
     "SharedFact": {
@@ -7860,23 +7605,6 @@
         "queue"
       ],
       "title": "Snapshot",
-      "type": "object"
-    },
-    "StageExecutionView": {
-      "additionalProperties": false,
-      "properties": {
-        "execution": {
-          "$ref": "#/definitions/ExecutionCounts"
-        },
-        "stage_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "stage_id",
-        "execution"
-      ],
-      "title": "StageExecutionView",
       "type": "object"
     },
     "StreamStart": {
@@ -8038,11 +7766,23 @@
         "execution": {
           "$ref": "#/definitions/TaskExecutionView"
         },
+        "issue_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "lifecycle": {
           "$ref": "#/definitions/TaskLifecycle"
         },
         "next_implement_generation": {
           "type": "integer"
+        },
+        "primary_issue_id": {
+          "type": "string"
+        },
+        "primary_issue_title": {
+          "type": "string"
         },
         "primary_work_item_id": {
           "type": "string"
@@ -8259,6 +7999,12 @@
         },
         "next_implement_generation": {
           "type": "integer"
+        },
+        "primary_issue_id": {
+          "type": "string"
+        },
+        "primary_issue_title": {
+          "type": "string"
         },
         "primary_work_item_id": {
           "type": "string"
@@ -8912,81 +8658,6 @@
       "title": "ToolUseView",
       "type": "object"
     },
-    "TranscriptBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/ConversationItem"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "more": {
-          "type": "boolean"
-        },
-        "next_seq": {
-          "type": "integer"
-        },
-        "notice_only": {
-          "type": "boolean"
-        },
-        "position": {
-          "type": "integer"
-        },
-        "trigger": {
-          "$ref": "#/definitions/ConversationItem"
-        }
-      },
-      "required": [
-        "position",
-        "trigger",
-        "items",
-        "more"
-      ],
-      "title": "TranscriptBlock",
-      "type": "object"
-    },
-    "TranscriptPage": {
-      "additionalProperties": false,
-      "properties": {
-        "blocks": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/TranscriptBlock"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "event_seq": {
-          "type": "integer"
-        },
-        "more": {
-          "type": "boolean"
-        },
-        "next_before": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "blocks",
-        "more",
-        "event_seq"
-      ],
-      "title": "TranscriptPage",
-      "type": "object"
-    },
     "UpdateAttentionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -8995,6 +8666,15 @@
         },
         "decision_version": {
           "type": "integer"
+        },
+        "latest_action_at": {
+          "type": "integer"
+        },
+        "latest_action_reminders": {
+          "type": "boolean"
+        },
+        "latest_action_timezone": {
+          "type": "string"
         },
         "options": {
           "items": {
@@ -9010,16 +8690,6 @@
         "title"
       ],
       "title": "UpdateAttentionPayload",
-      "type": "object"
-    },
-    "UpdateFollowupPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "spec": {
-          "$ref": "#/definitions/FollowupSpec"
-        }
-      },
-      "title": "UpdateFollowupPayload",
       "type": "object"
     },
     "UpdateIssuePayload": {
@@ -9090,83 +8760,6 @@
         }
       },
       "title": "UpdateWorkItemChoicePayload",
-      "type": "object"
-    },
-    "UpdateWorkItemPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "background": {
-          "items": {
-            "$ref": "#/definitions/SharedFact"
-          },
-          "type": "array"
-        },
-        "commit_seq": {
-          "type": "integer"
-        },
-        "completion_reviews": {
-          "items": {
-            "$ref": "#/definitions/CompletionReviewAcknowledgement"
-          },
-          "type": "array"
-        },
-        "default_workspace_task_id": {
-          "type": "string"
-        },
-        "deliveries": {
-          "items": {
-            "$ref": "#/definitions/IssueDelivery"
-          },
-          "type": "array"
-        },
-        "follow_ons": {
-          "items": {
-            "$ref": "#/definitions/IssueFollowOn"
-          },
-          "type": "array"
-        },
-        "intent": {
-          "type": "string"
-        },
-        "project": {
-          "type": "string"
-        },
-        "source_message_id": {
-          "type": "string"
-        },
-        "stages": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/IssueStage"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "status": {
-          "$ref": "#/definitions/WorkItemUpdateStatus"
-        },
-        "task_dispositions": {
-          "items": {
-            "$ref": "#/definitions/IssueTaskDisposition"
-          },
-          "type": "array"
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "title",
-        "project",
-        "intent",
-        "stages"
-      ],
-      "title": "UpdateWorkItemPayload",
       "type": "object"
     },
     "UpdaterReceipt": {
@@ -9538,29 +9131,6 @@
       "title": "WorkItemChoice",
       "type": "object"
     },
-    "WorkItemChoicePage": {
-      "additionalProperties": false,
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/WorkItemChoice"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items"
-      ],
-      "title": "WorkItemChoicePage",
-      "type": "object"
-    },
     "WorkItemCompletionReview": {
       "additionalProperties": false,
       "properties": {
@@ -9584,263 +9154,6 @@
         "created_at"
       ],
       "title": "WorkItemCompletionReview",
-      "type": "object"
-    },
-    "WorkItemContext": {
-      "additionalProperties": false,
-      "properties": {
-        "coordination_state": {
-          "type": "string"
-        },
-        "coverage": {
-          "type": "string"
-        },
-        "dispatch_blockers": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/ContextBlocker"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "dispatch_ready": {
-          "type": "boolean"
-        },
-        "facts": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/ContextFact"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "gaps": {
-          "type": "string"
-        },
-        "more": {
-          "type": "boolean"
-        },
-        "next": {
-          "type": "integer"
-        },
-        "prepared": {
-          "type": "boolean"
-        },
-        "revision": {
-          "type": "integer"
-        },
-        "sources": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/ConversationItem"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "sync_status": {
-          "type": "string"
-        },
-        "watermark": {
-          "type": "integer"
-        },
-        "work_item_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "dispatch_ready",
-        "coordination_state",
-        "dispatch_blockers",
-        "sync_status",
-        "watermark",
-        "work_item_id",
-        "revision",
-        "prepared",
-        "coverage",
-        "gaps",
-        "facts",
-        "sources",
-        "more"
-      ],
-      "title": "WorkItemContext",
-      "type": "object"
-    },
-    "WorkItemPage": {
-      "additionalProperties": false,
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/WorkItemView"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items"
-      ],
-      "title": "WorkItemPage",
-      "type": "object"
-    },
-    "WorkItemStatus": {
-      "enum": [
-        "open",
-        "snoozed",
-        "closed"
-      ],
-      "title": "WorkItemStatus",
-      "type": "string"
-    },
-    "WorkItemUpdateStatus": {
-      "enum": [
-        "",
-        "open",
-        "snoozed"
-      ],
-      "title": "WorkItemUpdateStatus",
-      "type": "string"
-    },
-    "WorkItemView": {
-      "additionalProperties": false,
-      "properties": {
-        "background": {
-          "items": {
-            "$ref": "#/definitions/SharedFact"
-          },
-          "type": "array"
-        },
-        "choices": {
-          "items": {
-            "$ref": "#/definitions/WorkItemChoice"
-          },
-          "type": "array"
-        },
-        "closure": {
-          "$ref": "#/definitions/IssueClosure"
-        },
-        "column": {
-          "type": "string"
-        },
-        "created_at": {
-          "type": "integer"
-        },
-        "default_workspace_task_id": {
-          "type": "string"
-        },
-        "deliveries": {
-          "items": {
-            "$ref": "#/definitions/IssueDelivery"
-          },
-          "type": "array"
-        },
-        "execution": {
-          "$ref": "#/definitions/ExecutionCounts"
-        },
-        "facts_seq": {
-          "type": "integer"
-        },
-        "follow_ons": {
-          "items": {
-            "$ref": "#/definitions/IssueFollowOn"
-          },
-          "type": "array"
-        },
-        "followups": {
-          "$ref": "#/definitions/FollowupSummary"
-        },
-        "intent": {
-          "type": "string"
-        },
-        "observations": {
-          "items": {
-            "$ref": "#/definitions/DeliveryObservation"
-          },
-          "type": "array"
-        },
-        "pending_reviews": {
-          "items": {
-            "$ref": "#/definitions/WorkItemCompletionReview"
-          },
-          "type": "array"
-        },
-        "project": {
-          "type": "string"
-        },
-        "revision": {
-          "type": "integer"
-        },
-        "stage_execution": {
-          "items": {
-            "$ref": "#/definitions/StageExecutionView"
-          },
-          "type": "array"
-        },
-        "stages": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/IssueStage"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "status": {
-          "$ref": "#/definitions/WorkItemStatus"
-        },
-        "tasks": {
-          "items": {
-            "$ref": "#/definitions/TaskSummary"
-          },
-          "type": "array"
-        },
-        "title": {
-          "type": "string"
-        },
-        "updated_at": {
-          "type": "integer"
-        },
-        "work_item_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "title",
-        "project",
-        "intent",
-        "stages",
-        "work_item_id",
-        "revision",
-        "status",
-        "created_at",
-        "updated_at",
-        "column"
-      ],
-      "title": "WorkItemView",
       "type": "object"
     },
     "WorkerKind": {
@@ -9964,12 +9277,6 @@
     "AgentContextUsage": {
       "$ref": "#/definitions/AgentContextUsage"
     },
-    "AgentConversation": {
-      "$ref": "#/definitions/AgentConversation"
-    },
-    "AgentConversationPage": {
-      "$ref": "#/definitions/AgentConversationPage"
-    },
     "AgentExecutor": {
       "$ref": "#/definitions/AgentExecutor"
     },
@@ -10030,23 +9337,14 @@
     "AttentionView": {
       "$ref": "#/definitions/AttentionView"
     },
-    "BackgroundAssessmentPayload": {
-      "$ref": "#/definitions/BackgroundAssessmentPayload"
-    },
     "BackgroundSourcePage": {
       "$ref": "#/definitions/BackgroundSourcePage"
     },
     "CancelIssueDeadlinePayload": {
       "$ref": "#/definitions/CancelIssueDeadlinePayload"
     },
-    "CloseWorkItemPayload": {
-      "$ref": "#/definitions/CloseWorkItemPayload"
-    },
     "ConfirmAttentionPayload": {
       "$ref": "#/definitions/ConfirmAttentionPayload"
-    },
-    "ContextFact": {
-      "$ref": "#/definitions/ContextFact"
     },
     "ConversationAttachment": {
       "$ref": "#/definitions/ConversationAttachment"
@@ -10059,12 +9357,6 @@
     },
     "ConversationImageResponse": {
       "$ref": "#/definitions/ConversationImageResponse"
-    },
-    "ConversationPage": {
-      "$ref": "#/definitions/ConversationPage"
-    },
-    "ConversationQueuePage": {
-      "$ref": "#/definitions/ConversationQueuePage"
     },
     "ConversationSettingsView": {
       "$ref": "#/definitions/ConversationSettingsView"
@@ -10087,29 +9379,20 @@
     "CreateIssueTaskPayload": {
       "$ref": "#/definitions/CreateIssueTaskPayload"
     },
-    "CreateWorkItemChoicePayload": {
-      "$ref": "#/definitions/CreateWorkItemChoicePayload"
-    },
-    "CreateWorkItemPayload": {
-      "$ref": "#/definitions/CreateWorkItemPayload"
-    },
     "DownloadURLResponse": {
       "$ref": "#/definitions/DownloadURLResponse"
     },
     "Envelope": {
       "$ref": "#/definitions/Envelope"
     },
+    "ExecutionCounts": {
+      "$ref": "#/definitions/ExecutionCounts"
+    },
     "ExplainDecisionPayload": {
       "$ref": "#/definitions/ExplainDecisionPayload"
     },
     "FinishIssueAssignmentPayload": {
       "$ref": "#/definitions/FinishIssueAssignmentPayload"
-    },
-    "FollowupHistoryPage": {
-      "$ref": "#/definitions/FollowupHistoryPage"
-    },
-    "FollowupPage": {
-      "$ref": "#/definitions/FollowupPage"
     },
     "FollowupSpec": {
       "$ref": "#/definitions/FollowupSpec"
@@ -10123,6 +9406,12 @@
     "InterruptReplyPayload": {
       "$ref": "#/definitions/InterruptReplyPayload"
     },
+    "IssueAgentConversation": {
+      "$ref": "#/definitions/IssueAgentConversation"
+    },
+    "IssueAgentConversationPage": {
+      "$ref": "#/definitions/IssueAgentConversationPage"
+    },
     "IssueAssignmentPayload": {
       "$ref": "#/definitions/IssueAssignmentPayload"
     },
@@ -10134,6 +9423,15 @@
     },
     "IssueControlPayload": {
       "$ref": "#/definitions/IssueControlPayload"
+    },
+    "IssueConversationItem": {
+      "$ref": "#/definitions/IssueConversationItem"
+    },
+    "IssueConversationPage": {
+      "$ref": "#/definitions/IssueConversationPage"
+    },
+    "IssueConversationQueuePage": {
+      "$ref": "#/definitions/IssueConversationQueuePage"
     },
     "IssueDeadline": {
       "$ref": "#/definitions/IssueDeadline"
@@ -10153,11 +9451,20 @@
     "IssueFollowupPayload": {
       "$ref": "#/definitions/IssueFollowupPayload"
     },
+    "IssueMessageAssociations": {
+      "$ref": "#/definitions/IssueMessageAssociations"
+    },
     "IssuePage": {
       "$ref": "#/definitions/IssuePage"
     },
     "IssueRefreshDeliveryPayload": {
       "$ref": "#/definitions/IssueRefreshDeliveryPayload"
+    },
+    "IssueTranscriptBlock": {
+      "$ref": "#/definitions/IssueTranscriptBlock"
+    },
+    "IssueTranscriptPage": {
+      "$ref": "#/definitions/IssueTranscriptPage"
     },
     "IssueView": {
       "$ref": "#/definitions/IssueView"
@@ -10165,14 +9472,8 @@
     "LedgerEvent": {
       "$ref": "#/definitions/LedgerEvent"
     },
-    "LinkWorkItemTaskPayload": {
-      "$ref": "#/definitions/LinkWorkItemTaskPayload"
-    },
     "ManualSource": {
       "$ref": "#/definitions/ManualSource"
-    },
-    "MessageAssociations": {
-      "$ref": "#/definitions/MessageAssociations"
     },
     "NativeEntry": {
       "$ref": "#/definitions/NativeEntry"
@@ -10182,9 +9483,6 @@
     },
     "PlannerEntry": {
       "$ref": "#/definitions/PlannerEntry"
-    },
-    "PrepareWorkItemContextPayload": {
-      "$ref": "#/definitions/PrepareWorkItemContextPayload"
     },
     "PresentAttentionPayload": {
       "$ref": "#/definitions/PresentAttentionPayload"
@@ -10204,14 +9502,8 @@
     "RateTaskPayload": {
       "$ref": "#/definitions/RateTaskPayload"
     },
-    "RefreshDeliveryPayload": {
-      "$ref": "#/definitions/RefreshDeliveryPayload"
-    },
     "RegisterRepositoryPayload": {
       "$ref": "#/definitions/RegisterRepositoryPayload"
-    },
-    "ReopenWorkItemPayload": {
-      "$ref": "#/definitions/ReopenWorkItemPayload"
     },
     "ReparentIssuePayload": {
       "$ref": "#/definitions/ReparentIssuePayload"
@@ -10273,8 +9565,8 @@
     "SetIssueDependenciesPayload": {
       "$ref": "#/definitions/SetIssueDependenciesPayload"
     },
-    "SetMessageAssociationsPayload": {
-      "$ref": "#/definitions/SetMessageAssociationsPayload"
+    "SetIssueMessageAssociationsPayload": {
+      "$ref": "#/definitions/SetIssueMessageAssociationsPayload"
     },
     "Snapshot": {
       "$ref": "#/definitions/Snapshot"
@@ -10303,17 +9595,8 @@
     "ToolSpec": {
       "$ref": "#/definitions/ToolSpec"
     },
-    "TranscriptBlock": {
-      "$ref": "#/definitions/TranscriptBlock"
-    },
-    "TranscriptPage": {
-      "$ref": "#/definitions/TranscriptPage"
-    },
     "UpdateAttentionPayload": {
       "$ref": "#/definitions/UpdateAttentionPayload"
-    },
-    "UpdateFollowupPayload": {
-      "$ref": "#/definitions/UpdateFollowupPayload"
     },
     "UpdateIssuePayload": {
       "$ref": "#/definitions/UpdateIssuePayload"
@@ -10324,9 +9607,6 @@
     "UpdateWorkItemChoicePayload": {
       "$ref": "#/definitions/UpdateWorkItemChoicePayload"
     },
-    "UpdateWorkItemPayload": {
-      "$ref": "#/definitions/UpdateWorkItemPayload"
-    },
     "WithdrawMessagePayload": {
       "$ref": "#/definitions/WithdrawMessagePayload"
     },
@@ -10335,18 +9615,6 @@
     },
     "WorkItemChoice": {
       "$ref": "#/definitions/WorkItemChoice"
-    },
-    "WorkItemChoicePage": {
-      "$ref": "#/definitions/WorkItemChoicePage"
-    },
-    "WorkItemContext": {
-      "$ref": "#/definitions/WorkItemContext"
-    },
-    "WorkItemPage": {
-      "$ref": "#/definitions/WorkItemPage"
-    },
-    "WorkItemView": {
-      "$ref": "#/definitions/WorkItemView"
     }
   },
   "title": "TendAPI",

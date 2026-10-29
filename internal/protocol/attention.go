@@ -3,26 +3,31 @@ package protocol
 // Attention is a request for a person's attention, never an assignment or lease.
 // Decision answers stay in their original decision/choice, not in this record.
 type Attention struct {
-	QuestionVersion    int64     `json:"question_version,omitempty"`
-	QuestionOptions    []string  `json:"question_options,omitempty"`
-	AttentionID        string    `json:"attention_id"`
-	IssueID            string    `json:"issue_id,omitempty"`
-	TaskID             string    `json:"task_id,omitempty"`
-	Kind               string    `json:"kind"`
-	Title              string    `json:"title"`
-	Revision           int64     `json:"revision"`
-	Status             string    `json:"status"`
-	DecisionID         string    `json:"decision_id,omitempty"`
-	ChoiceID           string    `json:"choice_id,omitempty"`
-	SourceMessageID    string    `json:"source_message_id,omitempty"`
-	RaisedBy           Principal `json:"raised_by"`
-	BlocksClose        bool      `json:"blocks_close,omitempty"`
-	Resolution         string    `json:"resolution,omitempty"`
-	ResolutionSourceID string    `json:"resolution_source_id,omitempty"`
-	ReadAt             int64     `json:"read_at,omitempty"`
-	ArchivedAt         int64     `json:"archived_at,omitempty"`
-	CreatedAt          int64     `json:"created_at"`
-	UpdatedAt          int64     `json:"updated_at"`
+	LatestActionAt         *int64    `json:"latest_action_at,omitempty"`
+	LatestActionTimezone   string    `json:"latest_action_timezone,omitempty"`
+	LatestActionReminders  bool      `json:"latest_action_reminders"`
+	LatestActionNearRuleID string    `json:"latest_action_near_rule_id,omitempty"`
+	LatestActionDueRuleID  string    `json:"latest_action_due_rule_id,omitempty"`
+	QuestionVersion        int64     `json:"question_version,omitempty"`
+	QuestionOptions        []string  `json:"question_options,omitempty"`
+	AttentionID            string    `json:"attention_id"`
+	IssueID                string    `json:"issue_id,omitempty"`
+	TaskID                 string    `json:"task_id,omitempty"`
+	Kind                   string    `json:"kind"`
+	Title                  string    `json:"title"`
+	Revision               int64     `json:"revision"`
+	Status                 string    `json:"status"`
+	DecisionID             string    `json:"decision_id,omitempty"`
+	ChoiceID               string    `json:"choice_id,omitempty"`
+	SourceMessageID        string    `json:"source_message_id,omitempty"`
+	RaisedBy               Principal `json:"raised_by"`
+	BlocksClose            bool      `json:"blocks_close,omitempty"`
+	Resolution             string    `json:"resolution,omitempty"`
+	ResolutionSourceID     string    `json:"resolution_source_id,omitempty"`
+	ReadAt                 int64     `json:"read_at,omitempty"`
+	ArchivedAt             int64     `json:"archived_at,omitempty"`
+	CreatedAt              int64     `json:"created_at"`
+	UpdatedAt              int64     `json:"updated_at"`
 }
 type AttentionView struct {
 	Attention
@@ -35,21 +40,29 @@ type AttentionPage struct {
 	Next  string          `json:"next,omitempty"`
 }
 type CreateAttentionPayload struct {
-	IssueID         string   `json:"issue_id,omitempty"`
-	TaskID          string   `json:"task_id,omitempty"`
-	Kind            string   `json:"kind"`
-	Title           string   `json:"title"`
-	Options         []string `json:"options,omitempty"`
-	DecisionID      string   `json:"decision_id,omitempty"`
-	ChoiceID        string   `json:"choice_id,omitempty"`
-	SourceMessageID string   `json:"source_message_id,omitempty"`
-	BlocksClose     bool     `json:"blocks_close,omitempty"`
+	// Omission leaves the action time unknown; zero also means unknown.
+	LatestActionAt        *int64   `json:"latest_action_at,omitempty"`
+	LatestActionTimezone  string   `json:"latest_action_timezone,omitempty"`
+	LatestActionReminders *bool    `json:"latest_action_reminders,omitempty"`
+	IssueID               string   `json:"issue_id,omitempty"`
+	TaskID                string   `json:"task_id,omitempty"`
+	Kind                  string   `json:"kind"`
+	Title                 string   `json:"title"`
+	Options               []string `json:"options,omitempty"`
+	DecisionID            string   `json:"decision_id,omitempty"`
+	ChoiceID              string   `json:"choice_id,omitempty"`
+	SourceMessageID       string   `json:"source_message_id,omitempty"`
+	BlocksClose           bool     `json:"blocks_close,omitempty"`
 }
 type UpdateAttentionPayload struct {
-	DecisionVersion int64    `json:"decision_version,omitempty"`
-	Options         []string `json:"options,omitempty"`
-	Title           string   `json:"title"`
-	BlocksClose     bool     `json:"blocks_close,omitempty"`
+	// Omission preserves the existing time on update; zero explicitly clears it.
+	LatestActionAt        *int64   `json:"latest_action_at,omitempty"`
+	LatestActionTimezone  string   `json:"latest_action_timezone,omitempty"`
+	LatestActionReminders *bool    `json:"latest_action_reminders,omitempty"`
+	DecisionVersion       int64    `json:"decision_version,omitempty"`
+	Options               []string `json:"options,omitempty"`
+	Title                 string   `json:"title"`
+	BlocksClose           bool     `json:"blocks_close,omitempty"`
 }
 type RespondAttentionPayload struct {
 	Version         int64  `json:"version"`

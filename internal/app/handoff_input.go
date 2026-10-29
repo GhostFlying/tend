@@ -137,7 +137,7 @@ func (a *App) HandoffSummaryInput(ctx context.Context, instance string, pageByte
 				if native && assoc.ContentRevision <= 1 && !assoc.OwnerLocked && !associationChanged && !withdrawn && out.PreviousSummary == nil {
 					continue
 				}
-				it := protocol.ConversationItem{Seq: row.Seq, MessageID: id, Kind: row.Kind, Author: row.Author, Body: row.Body, ReplyTo: row.ReplyTo, CreatedAt: time.UnixMilli(row.CreatedAt).UTC(), State: protocol.MessageState(row.State), AssistantState: protocol.AssistantState(row.AssistantState), AssistantRevision: row.AssistantRevision, Associations: &assoc}
+				it := protocol.ConversationItem{Associations: &assoc, ConversationContent: protocol.ConversationContent{Seq: row.Seq, MessageID: id, Kind: row.Kind, Author: row.Author, Body: row.Body, ReplyTo: row.ReplyTo, CreatedAt: time.UnixMilli(row.CreatedAt).UTC(), State: protocol.MessageState(row.State), AssistantState: protocol.AssistantState(row.AssistantState), AssistantRevision: row.AssistantRevision}}
 				it.Images, err = store.ConversationImages(ctx, q, id)
 				if err != nil {
 					return err

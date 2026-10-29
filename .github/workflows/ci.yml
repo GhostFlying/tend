@@ -43,6 +43,10 @@ jobs:
         run: pnpm --dir web test:followups
       - name: agent conversation routing and layout
         run: pnpm --dir web test:agents
+      - name: Issue source, notifications and first-run regression
+        env:
+          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-issue-surfaces
+        run: pnpm --dir web test:issue-surfaces-layout
       - name: token usage and rollout regression
         run: pnpm --dir web test:usage
       - name: cross-compile

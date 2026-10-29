@@ -54,7 +54,7 @@ func TestFileReadRejectsUnboundedOrInvalidInputs(t *testing.T) {
 
 func TestFilesReadFinalizedWindowsAndBinaryMetadata(t *testing.T) {
 	e := newEnv(t)
-	taskID, _ := createdTask(t, e.call("tasks_create", createArgs{Title: "files", Spec: spec, CommitSeq: 1}, ""))
+	taskID, _ := createdTask(t, e.historicalToolFixture("tasks_create", createArgs{Title: "files", Spec: spec, CommitSeq: 1}, ""))
 	content := []byte(strings.Repeat("甲", 30000))
 	file := protocol.ArtifactFile{FileID: "file_text", Name: "调查.txt", Size: int64(len(content)), SHA256: fmt.Sprintf("%x", sha256.Sum256(content))}
 	binaryFile := protocol.ArtifactFile{FileID: "file_binary", Name: "bytes.bin", Size: 4, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte{0, 1, 2, 255}))}
@@ -121,7 +121,7 @@ func TestReportTaskToolsAndContextWithoutRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	reportSpec := domain.Spec{Goal: "investigate resource reuse", Acceptance: []string{"report names findings and uncertainties"}, Deliverables: []string{domain.DeliveryReport}, Workspace: domain.Workspace{Mode: domain.WorkspaceTemporary}}
-	result := e.call("tasks_create", createArgs{Title: "investigation", Spec: reportSpec, CommitSeq: 1}, "")
+	result := e.historicalToolFixture("tasks_create", createArgs{Title: "investigation", Spec: reportSpec, CommitSeq: 1}, "")
 	if !result.OK {
 		t.Fatalf("report create: %+v", result.Error)
 	}

@@ -62,7 +62,7 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 			if err != nil {
 				return err
 			}
-			if previous.Plan.Intent != inherited.Intent || !slices.Equal(previous.Plan.Background, inherited.Background) {
+			if previous.Plan.Intent != inherited.Intent || previous.Plan.Scope != inherited.Scope || !slices.Equal(previous.Plan.CompletionCriteria, inherited.CompletionCriteria) || !slices.Equal(previous.Plan.Background, inherited.Background) {
 				c.ContextPending = true
 			}
 		}

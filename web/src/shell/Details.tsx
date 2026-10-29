@@ -1,3 +1,6 @@
+import { RunConversation } from "../tasks/RunConversation.tsx";
+import { useDurableOp } from "../app/useDurableOp.ts";
+import type { ControlMode } from "../api/generated/api.ts";
 import { RunRollout } from "../rollout/RunRollout.tsx";
 // A task's ledger facts and revision-checked owner controls (D70).
 import { useState, type ReactNode } from "react";
@@ -5,13 +8,11 @@ import type { TaskDetail, ArtifactView, AcceptanceView } from "../api/generated/
 import { useServices } from "../app/services.tsx";
 import { DecisionCard } from "../decisions/DecisionCard.tsx";
 import { currentWork } from "../tasks/facts.ts";
-import { WorkItemRef } from "../workitems/WorkItemRef.tsx";
 import { TaskExecution } from "../tasks/Execution.tsx";
 import { WorkspaceFacts } from "../tasks/WorkspaceFacts.tsx";
 import { ArtifactDelivery } from "../tasks/ArtifactDelivery.tsx";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { useStore } from "../state/store.ts";
-import { cancelTask, setControl } from "../tasks/actions.ts";
 import {
   blockLabels,
   controlLabels,
@@ -59,7 +60,7 @@ export function Details() {
 }
 
 function TaskContent({ task: t }: { task: TaskDetail }) {
-  const { followUp, openTask } = useServices();
+  const { followUp, openTask, openIssue } = useServices();
   const current = currentWork(t);
   const [tab, setTab] = useState(t.lifecycle === "completed" ? "delivery" : "execution");
   const spec = t.spec && typeof t.spec === "object" ? (t.spec as Record<string, unknown>) : null;
@@ -80,20 +81,33 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
           { key: "delivery", label: "交付与验收" },
           { key: "inputs", label: "目标与输入" },
           { key: "execution", label: "执行与日志" },
+          { key: "supplement", label: "补充" },
           { key: "workspace", label: "工作区" },
           { key: "history", label: "历史" },
         ]}
         value={tab}
         onChange={setTab}
       />
+      {tab === "supplement" && <RunConversation task={t} controls={<TaskControls task={t} />} />}
       <div hidden={tab !== "execution"}>
         <TaskExecution task={t} />
       </div>
-      {!!t.work_item_ids?.length && (
-        <Section title="所属工作项">
-          {t.work_item_ids.map((id) => (
-            <WorkItemRef key={id} id={id} />
+      {!!t.issue_ids?.length && (
+        <Section title="所属Issue">
+          {t.issue_ids.map((id) => (
+            <button key={id} className={controls.chipBtn} onClick={() => openIssue(id)}>
+              {id === t.primary_issue_id ? t.primary_issue_title || id : id}
+            </button>
           ))}
+        </Section>
+      )}
+      {!!t.work_item_ids?.some((id) => !t.issue_ids?.includes(id)) && (
+        <Section title="历史关联">
+          {t.work_item_ids
+            .filter((id) => !t.issue_ids?.includes(id))
+            .map((id) => (
+              <code key={id}>{id} </code>
+            ))}
         </Section>
       )}
       {t.block_reason !== "none" && (
@@ -119,7 +133,7 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
           more={<span>待你选择</span>}
         />
       ))}
-      <TaskControls task={t} />
+      {tab !== "supplement" && <TaskControls task={t} />}
       {t.lifecycle === "completed" && (
         <div className={styles.followUp}>
           <button type="button" className={controls.chipBtn} onClick={() => followUp(t)}>
@@ -135,6 +149,7 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
           </Section>
         )}
       </div>
+
       <div hidden={tab !== "execution"}>
         {!!t.relations?.length && (
           <Section title="任务关系">
@@ -183,6 +198,7 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
       <div hidden={tab !== "workspace"}>
         <WorkspaceFacts task={t} />
       </div>
+
       <div hidden={tab !== "execution"}>
         <Section title="本版执行进展">
           {!t.runs?.some((r) => r.spec_version === t.spec_version) && (
@@ -289,13 +305,26 @@ function TaskContent({ task: t }: { task: TaskDetail }) {
 
 function TaskControls({ task: t }: { task: TaskDetail }) {
   const s = useServices();
-  const [busy, setBusy] = useState(false);
+  const operation = useDurableOp(s.client, `task-control:${t.task_id}`);
+  const busy = operation.busy || operation.pending;
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [result, setResult] = useState<string | null>(null);
-  const execute = async (action: () => ReturnType<typeof cancelTask>) => {
-    setBusy(true);
+  const execute = async (action: ControlMode | "cancel" | "reconcile") => {
     try {
-      const outcome = await action();
+      const outcome = await operation.execute(
+        action === "reconcile"
+          ? undefined
+          : {
+              operation: action === "cancel" ? "tasks.cancel" : "control.set_mode",
+              target: { type: "task", id: t.task_id },
+              expected_control_revision: t.control_revision,
+              payload: action === "cancel" ? {} : { mode: action },
+            },
+      );
+      if (outcome.kind === "done" || outcome.kind === "stale") {
+        void s.live.refreshDetail();
+        void s.live.refreshSnapshot();
+      }
       setResult(
         outcome.kind === "done"
           ? "操作已执行"
@@ -306,19 +335,31 @@ function TaskControls({ task: t }: { task: TaskDetail }) {
               : `操作未执行：${outcome.message}`,
       );
     } finally {
-      setBusy(false);
       setConfirmCancel(false);
     }
   };
   return (
     <>
-      {!isFinished(t) && (
+      {operation.storageError && <p role="alert">{operation.storageError}</p>}
+      {operation.pending && (
+        <div className={styles.problem}>
+          原管理操作待核实。
+          <button
+            className={controls.chipBtn}
+            disabled={operation.busy}
+            onClick={() => void execute("reconcile")}
+          >
+            核实原管理操作
+          </button>
+        </div>
+      )}
+      {!isFinished(t) && !operation.pending && (
         <div className={styles.actions}>
           {t.control_mode === "managed" && (
             <button
               disabled={busy}
               className={controls.chipBtn}
-              onClick={() => void execute(() => setControl(s, t, "paused"))}
+              onClick={() => void execute("paused")}
             >
               暂停
             </button>
@@ -327,7 +368,7 @@ function TaskControls({ task: t }: { task: TaskDetail }) {
             <button
               disabled={busy}
               className={controls.chipBtn}
-              onClick={() => void execute(() => setControl(s, t, "managed"))}
+              onClick={() => void execute("managed")}
             >
               {t.control_mode === "human_control" ? "交还给 tend" : "恢复"}
             </button>
@@ -336,7 +377,7 @@ function TaskControls({ task: t }: { task: TaskDetail }) {
             <button
               disabled={busy}
               className={controls.chipBtn}
-              onClick={() => void execute(() => setControl(s, t, "human_control"))}
+              onClick={() => void execute("human_control")}
             >
               接管
             </button>
@@ -354,7 +395,7 @@ function TaskControls({ task: t }: { task: TaskDetail }) {
               <button
                 disabled={busy}
                 className={controls.chipBtn}
-                onClick={() => void execute(() => cancelTask(s, t))}
+                onClick={() => void execute("cancel")}
               >
                 确认取消
               </button>
@@ -369,7 +410,7 @@ function TaskControls({ task: t }: { task: TaskDetail }) {
           )}
         </div>
       )}
-      {result && (
+      {result && !operation.pending && (
         <p role="status" className={styles.caption}>
           {result}
         </p>

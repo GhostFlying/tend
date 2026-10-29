@@ -63,7 +63,7 @@
   padding: 7px 12px;
   border-radius: 8px;
   background: var(--accent);
-  color: white;
+  color: var(--bg);
 }
 .save:disabled {
   opacity: 0.45;

@@ -6,6 +6,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 	"strings"
 	"testing"
+	"time"
 )
 
 func attentionForTest(t *testing.T, h *harness, p protocol.CreateAttentionPayload) protocol.Attention {
@@ -277,11 +278,12 @@ func TestFault_AttentionQuestionAndHistoryRollBackTogether(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	env := h.env("attentions.create", protocol.Target{Type: "attention"}, protocol.CreateAttentionPayload{Kind: "decision", Title: "A transactional question", Options: []string{"yes"}}, nil)
+	due := h.clock.Now().Add(30 * time.Hour).UnixMilli()
+	env := h.env("attentions.create", protocol.Target{Type: "attention"}, protocol.CreateAttentionPayload{Kind: "decision", Title: "A transactional question", Options: []string{"yes"}, LatestActionAt: &due}, nil)
 	if _, err := h.app.Execute(t.Context(), owner, env, AttentionCommand{Action: "create"}); err == nil {
 		t.Fatal("injected failure ignored")
 	}
-	if h.count("attentions") != 0 || h.count("decisions") != 0 || h.count("attention_revisions") != 0 {
+	if h.count("attentions") != 0 || h.count("decisions") != 0 || h.count("attention_revisions") != 0 || h.count("followup_rules") != 0 || h.count("followup_revisions") != 0 || h.count("followup_targets") != 0 {
 		t.Fatal("partial original question escaped rollback")
 	}
 }

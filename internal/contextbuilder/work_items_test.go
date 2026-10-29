@@ -71,3 +71,24 @@ func TestDeliveryFailureAppearsInContextAttention(t *testing.T) {
 		t.Fatalf("missing failure attention: %+v", p)
 	}
 }
+
+func TestCanonicalIssueContextUsesActualDefinitionAndTools(t *testing.T) {
+	e := newEnv(t)
+	var issue protocol.Issue
+	raw := e.exec(owner, "issues.create", protocol.Target{Type: "issue"}, nil, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Current responsibility", Intent: "Investigate a vague goal", Scope: "Read-only report", CompletionCriteria: []string{"Explain uncertainty"}}}, app.CanonicalOwnerIssueCommand{Action: "create"})
+	if err := json.Unmarshal(raw, &issue); err != nil {
+		t.Fatal(err)
+	}
+	full := e.prepare(0)
+	if full == nil || !strings.Contains(full.Text, "Open Issues and responsibility") || !strings.Contains(full.Text, "scope: Read-only report") || !strings.Contains(full.Text, "Explain uncertainty") || !strings.Contains(full.Text, "issues_context_read") || strings.Contains(full.Text, "work_items_list") {
+		t.Fatalf("canonical snapshot used legacy projection: %+v", full)
+	}
+	if err := e.b.Confirm(t.Context(), full.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.exec(owner, "issues.pause", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Pause new dispatch"}, app.CanonicalOwnerIssueCommand{Action: "pause"})
+	delta := e.prepare(0)
+	if delta == nil || !strings.Contains(delta.Text, "state paused") || !strings.Contains(delta.Text, issue.IssueID) || strings.Contains(delta.Text, "work_items_read") {
+		t.Fatalf("canonical delta lost actual state: %+v", delta)
+	}
+}

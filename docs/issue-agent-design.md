@@ -88,7 +88,7 @@ Deadline 保留来源、时区和修订，区分外部期限、用户承诺与�
 
 复用现有 outbox、followup occurrence 和 background batch，不引入第二定时器或巡逻 Agent。Wakeup 固定 source event、目标 conversation、issue、assignment epoch 及原因，事务去重；只合并未领取输入，保留全部来源。重启恢复原 delivery，unknown 不重放。没有 active run 的纯 manager、规划 attention 和 followup 等待不占 worker slot；活动 worker 等待回答、human_control 或 unknown 仍遵循原 run 的租约、workspace 和资源占用/对账语义，不能一律释放。无事实变化、不需用户动作时静默，不周期发送“仍在等待”。
 
-P5 提供 owner API/CLI 与具名工具，复用原 decision/version/worker 回答、持久批次和既有期限检查；稳定 Attention ID 的业务修订保留历史，information 不新增逐条确认义务，读取/归档不结算。用户动作顺序、Issue 规划顺序与实际 task rating 分开表达。owner 当前认证命令即有效行动确认，main 转录沿真实 owner 来源；候选独立复核已通过；本批正式纳入，本轮完整检查、规定 review 与发布尚未完成。关联 Attention 的行动不形成第二终态；manager 不覆盖既有外部期限或用户承诺，main 修改/撤销用户承诺沿真实未撤回 owner 来源，停机不补发过时的未发送 near 提醒。具体范围见 [Attention 与个人规划计划](plans/attention-planner.md)。
+P5 提供 owner API/CLI 与具名工具，复用原 decision/version/worker 回答、持久批次和既有期限检查；稳定 Attention ID 的业务修订保留历史，information 不新增逐条确认义务，读取/归档不结算。用户动作顺序、Issue 规划顺序与实际 task rating 分开表达。owner 当前认证命令即有效行动确认，main 转录沿真实 owner 来源；规定 review 五项修正独立复核、正式完整检查和交叉编译已通过；PR #168 CI 全通过并 rebase 合并，生产部署尚未完成。关联 Attention 的行动不形成第二终态；manager 不覆盖既有外部期限或用户承诺，main 修改/撤销用户承诺沿真实未撤回 owner 来源，停机不补发过时的未发送 near 提醒。具体范围见 [Attention 与个人规划计划](plans/attention-planner.md)。
 
 ## 6. 原生入口与接管
 

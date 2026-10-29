@@ -18,14 +18,15 @@
     "gen": "node scripts/genapi.ts",
     "icons": "node scripts/icons.ts",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build",
-    "test:work-items-layout": "pnpm build && node scripts/work-items-layout.ts",
     "test:layout": "pnpm build && node scripts/mobile-layout.ts",
     "test:decision-layout": "pnpm build && node scripts/decision-layout-investigation.ts",
     "test:repos-layout": "node scripts/repo-layout.ts",
+    "test:usage": "pnpm build && node scripts/usage-rollout-layout.ts",
+    "test:agents": "pnpm build && node scripts/agent-conversations-layout.ts",
+    "test:work-items-layout": "pnpm build && node scripts/work-items-layout.ts",
     "test:delivery-refresh": "node scripts/delivery-refresh-layout.ts",
     "test:followups": "pnpm build && node scripts/followups-layout.ts",
-    "test:usage": "pnpm build && node scripts/usage-rollout-layout.ts",
-    "test:agents": "pnpm build && node scripts/agent-conversations-layout.ts"
+    "test:issue-surfaces-layout": "pnpm build && node scripts/issue-surfaces-layout.ts"
   },
   "dependencies": {
     "markdown-it": "^15.0.3",

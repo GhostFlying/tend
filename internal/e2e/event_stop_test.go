@@ -19,7 +19,7 @@ func TestEndToEnd_WebStopsBackgroundEventTurn(t *testing.T) {
 		}
 		return "completed"
 	}
-	srv.startMainThread(agent, agent.Turn)
+	srv.startHistoricalMainThread(agent, agent.Turn)
 	web := srv.webLogin(srv.startWeb().URL)
 	stream := web.stream("")
 	n := newNode(t, srv, passing)

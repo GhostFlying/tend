@@ -32,7 +32,7 @@ func TestEndToEnd_RunMessageHostedToolsAndRunHTTPContract(t *testing.T) {
 		}
 		return "completed"
 	}
-	srv.startMainThread(controller)
+	srv.startHistoricalMainThread(controller)
 
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, protocol.OpRunnerHello, protocol.Target{Type: "runner"}, protocol.HelloPayload{Runtime: &protocol.RunnerRuntime{InstanceID: "message-runner", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunMessages}}}, app.Hello{})
 	task := srv.createTask()

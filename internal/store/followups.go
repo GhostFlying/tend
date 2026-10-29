@@ -77,7 +77,7 @@ func (t *Tx) SaveFollowup(ctx context.Context, r protocol.FollowupRule, expected
 		due = r.ExpiresAt
 	}
 	if expected == 0 {
-		_, err = t.Exec(ctx, `INSERT INTO followup_rules(rule_id,work_item_id,revision,status,next_due,body_json,updated_at) VALUES(?,?,?,?,?,?,?)`, r.RuleID, r.WorkItemID, r.Revision, r.Status, due, string(raw), r.UpdatedAt)
+		_, err = t.Exec(ctx, `INSERT INTO followup_rules(rule_id,work_item_id,revision,status,next_due,body_json,updated_at) VALUES(?,NULLIF(?,''),?,?,?,?,?)`, r.RuleID, r.WorkItemID, r.Revision, r.Status, due, string(raw), r.UpdatedAt)
 	} else {
 		res, e := t.Exec(ctx, `UPDATE followup_rules SET revision=?,status=?,next_due=?,body_json=?,updated_at=? WHERE rule_id=? AND revision=?`, r.Revision, r.Status, due, string(raw), r.UpdatedAt, r.RuleID, expected)
 		err = e
@@ -116,7 +116,7 @@ func FollowupIDs(ctx context.Context, q Querier, query string, args ...any) ([]s
 	return ids, rows.Err()
 }
 
-const occurrenceSelect = `SELECT f.occurrence_id,f.rule_id,f.revision,f.work_item_id,f.message_id,f.reason,
+const occurrenceSelect = `SELECT f.occurrence_id,f.rule_id,f.revision,COALESCE(f.work_item_id,''),f.message_id,f.reason,
  CASE WHEN f.status='cancelled' THEN 'cancelled' ELSE COALESCE(
   (SELECT CASE WHEN o.status IN ('unknown','failed','cancelled') THEN o.status END FROM outbox o WHERE o.destination='main_thread' AND json_extract(o.payload_json,'$.message_id')=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),f.message_id) ORDER BY o.seq DESC LIMIT 1),
   (SELECT CASE t.status WHEN 'started' THEN 'processing' WHEN 'starting' THEN 'starting' WHEN 'rejected' THEN NULL ELSE t.status END FROM main_turns t WHERE t.message_id=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),f.message_id) ORDER BY t.created_at DESC LIMIT 1),
@@ -220,7 +220,7 @@ func FollowupOverview(ctx context.Context, q Querier, item string) (protocol.Fol
 	return s, err
 }
 func (t *Tx) InsertFollowupOccurrence(ctx context.Context, o protocol.FollowupOccurrence, key string) error {
-	_, err := t.Exec(ctx, `INSERT INTO followup_occurrences(occurrence_id,rule_id,revision,work_item_id,message_id,status,reason,evidence,created_at,occurrence_key) VALUES(?,?,?,?,?,?,?,?,?,?)`, o.OccurrenceID, o.RuleID, o.Revision, o.WorkItemID, o.MessageID, o.Status, o.Reason, o.Evidence, o.CreatedAt, key)
+	_, err := t.Exec(ctx, `INSERT INTO followup_occurrences(occurrence_id,rule_id,revision,work_item_id,message_id,status,reason,evidence,created_at,occurrence_key) VALUES(?,?,?,NULLIF(?,''),?,?,?,?,?,?)`, o.OccurrenceID, o.RuleID, o.Revision, o.WorkItemID, o.MessageID, o.Status, o.Reason, o.Evidence, o.CreatedAt, key)
 	if err != nil {
 		return fmt.Errorf("store: followup occurrence: %w", err)
 	}

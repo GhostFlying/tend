@@ -195,7 +195,6 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			return nil
 		}
 	}
-
 	selected, named, err := m.app.HostedRuntimeSelection(ctx, m.cfg.ConversationID)
 	if err != nil {
 		return err

@@ -44,6 +44,7 @@ Owner commands:
   next-action list|put                    personal action / Issue planning order
   issue deadline list|show|put|cancel     sourced time and bounded reminders
   issue list|show|create|update|<control>  canonical issues; JSON input/output
+  issue assign|finish-assignment        transfer concrete responsibility with epoch/CAS
   issue create-task|update-task          owner task contracts, independent workers
   issue request|replay                   inspect/replay an original request
   task <task_id> [--json]          one task in full
@@ -63,7 +64,7 @@ Owner commands:
   conversation handoff [--prepare-only | --status] [--json]
   attachment download <file_id> --out <path>  save an original attachment
   category list|show|put           global Agent classifications
-  agents show --host <id>          registered public runner catalog
+  agents show --host <id>|hosted  public runner or hosted agent catalog
   conversation list|show|send|consult|promote  direct owner conversations
   source inject|show              preserve external originals and attribution
   run message|messages|native-entry  exact run supplements and owner facts

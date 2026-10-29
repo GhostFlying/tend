@@ -67,7 +67,7 @@ func newEnv(t *testing.T, h *testkit.Harness, opts ...func(*Config)) *env {
 	originalTurn := h.Turn
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		if in.Repair {
-			return completeFixtureReview(t, th, turn)
+			return completeHistoricalFixtureReview(t, e, th, turn)
 		}
 		if originalTurn != nil {
 			return originalTurn(th, turn, in)
@@ -181,14 +181,15 @@ func TestInputNamesTheChosenOption(t *testing.T) {
 	}
 }
 
-func TestMessageBecomesTask(t *testing.T) {
+func TestMainRejectsRetiredDirectExecutionAndRetainsReply(t *testing.T) {
 	h := testkit.NewHarness()
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		res := th.CallTool(context.Background(), turn, "call_1", "tasks_create", map[string]any{"title": "fix the build", "spec": spec, "commit_seq": 1})
-		if !res.Success {
+		if res.Success || !strings.Contains(res.Text, "there is no tool") {
+			t.Errorf("retired direct execution remained available: %s", res.Text)
 			return "failed"
 		}
-		th.Say(turn, "item_1", "Created a task to fix the build.")
+		th.Say(turn, "item_1", "Execution must be delegated to an Issue manager.")
 		return "completed"
 	}
 	e := newEnv(t, h)
@@ -197,11 +198,11 @@ func TestMessageBecomesTask(t *testing.T) {
 	eventually(t, "the turn completes", func() bool {
 		return e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id NOT IN (SELECT request_id FROM logical_turn_executions WHERE repair=1) AND status = 'completed'`) == 1
 	})
-	if n := e.count(`SELECT COUNT(*) FROM tasks`); n != 1 {
-		t.Errorf("tasks = %d, want 1", n)
+	if n := e.count(`SELECT COUNT(*) FROM tasks`); n != 0 {
+		t.Errorf("tasks = %d, want 0", n)
 	}
-	if n := e.count(`SELECT COUNT(*) FROM conversation_bindings WHERE message_id = ? AND object_type = 'task'`, msg); n != 1 {
-		t.Errorf("message bound to %d tasks, want 1", n)
+	if n := e.count(`SELECT COUNT(*) FROM conversation_bindings WHERE message_id = ? AND object_type = 'task'`, msg); n != 0 {
+		t.Errorf("message bound to %d tasks, want 0", n)
 	}
 	if n := e.count(`SELECT COUNT(*) FROM conversation_messages WHERE author = 'main_agent' AND reply_to = ?`, msg); n != 1 {
 		t.Errorf("agent replies = %d, want 1", n)
@@ -664,13 +665,13 @@ func TestReplayedToolCallKeepsItsMessage(t *testing.T) {
 	var first string
 	var replay harness.ToolResult
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
-		args := map[string]any{"title": "fix", "spec": spec, "commit_seq": 1}
+		args := map[string]any{"question": "Which scope?", "options": []string{"keep", "stop"}}
 		if first == "" {
 			first = turn
-			th.CallTool(context.Background(), turn, "call_1", "tasks_create", args)
+			th.CallTool(context.Background(), turn, "call_1", "decisions_open", args)
 		} else {
 			// The harness repeats the first turn's call during this one.
-			replay = th.CallTool(context.Background(), first, "call_1", "tasks_create", args)
+			replay = th.CallTool(context.Background(), first, "call_1", "decisions_open", args)
 		}
 		return "completed"
 	}
@@ -686,8 +687,8 @@ func TestReplayedToolCallKeepsItsMessage(t *testing.T) {
 	if !replay.Success {
 		t.Errorf("replayed call = %s, want the original result", replay.Text)
 	}
-	if n := e.count(`SELECT COUNT(*) FROM tasks`); n != 1 {
-		t.Errorf("tasks = %d, want 1", n)
+	if n := e.count(`SELECT COUNT(*) FROM decisions`); n != 1 {
+		t.Errorf("decisions = %d, want 1", n)
 	}
 }
 
@@ -750,7 +751,8 @@ func TestBackgroundThreadConfigUsesAutoMode(t *testing.T) {
 }
 
 // Existing transport tests count original business executions separately from
-// D112 review continuations; the latter exercise the actual restricted tools.
+// D112 review continuations; the latter exercise metadata read/commit tools.
+// Old ledger baselines are explicit historical App fixture setup, not tools.
 func businessStarts(h *testkit.Harness) []harness.TurnInput {
 	var out []harness.TurnInput
 	for _, in := range h.Starts() {
@@ -760,7 +762,7 @@ func businessStarts(h *testkit.Harness) []harness.TurnInput {
 	}
 	return out
 }
-func completeFixtureReview(t *testing.T, th *testkit.FakeThread, turn string) string {
+func completeHistoricalFixtureReview(t *testing.T, e *env, th *testkit.FakeThread, turn string) string {
 	t.Helper()
 	call := 0
 	invoke := func(name string, args any, out any) bool {
@@ -798,11 +800,23 @@ func completeFixtureReview(t *testing.T, th *testkit.FakeThread, turn string) st
 	if !invoke("conversation_turn_read", struct{}{}, &state) {
 		return "failed"
 	}
+	// These library transport fixtures retain pre-cutover ledger contexts. The
+	// retired planning tool is not registered: only this explicit historical
+	// setup uses App to establish their old baseline before actual read/commit.
 	for _, c := range state.Contexts {
-		if !invoke("work_item_context_prepare", map[string]any{"work_item_id": c.WorkItemID, "expected_control_revision": c.Revision, "coverage": "Reviewed transport fixture messages; no additional semantic facts", "gaps": "None in this fixture"}, nil) {
+		delivery, found, err := e.app.TurnDelivery(t.Context(), th.ID(), turn)
+		if err != nil || !found {
+			t.Errorf("historical context delivery: %v %v", found, err)
+			return "failed"
+		}
+		payload, _ := json.Marshal(protocol.PrepareWorkItemContextPayload{Coverage: "Reviewed transport fixture messages; no additional semantic facts", Gaps: "None in this fixture"})
+		operation, err := e.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "historical-fixture", Thread: th.ID()}, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), ParentRequestID: delivery.RequestID, Operation: "work_item_context.prepare", Target: protocol.Target{Type: "work_item", ID: c.WorkItemID}, ExpectedControlRevision: &c.Revision, Payload: payload}, app.WithExecutionRequest(app.ContextCommand{Action: "prepare"}, delivery.RequestID))
+		if err != nil || operation.Status != protocol.OpSucceeded {
+			t.Errorf("historical context setup: %+v %v", operation, err)
 			return "failed"
 		}
 	}
+
 	if !invoke("conversation_turn_read", struct{}{}, &state) {
 		return "failed"
 	}
