@@ -48,7 +48,7 @@
   display: block;
   quotes: none;
   font-size: var(--text-body);
-  line-height: 22px;
+  line-height: var(--leading-body-lg);
   margin: 6px 0 10px;
   color: var(--label);
   overflow-wrap: anywhere;
