@@ -209,7 +209,7 @@
 .replyClamp {
   max-height: 208px;
   overflow: hidden;
-  mask-image: linear-gradient(to bottom, black 85%, transparent);
+  mask-image: linear-gradient(to bottom, var(--mask-opaque) 85%, transparent);
 }
 .processing {
   color: var(--label-3);

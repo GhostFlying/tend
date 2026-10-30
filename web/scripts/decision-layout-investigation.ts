@@ -623,9 +623,26 @@ async function reachable(locator: Locator) {
 
 async function setFontScale(page: Page, scale: number) {
   if (scale === 1) return;
-  await page.addStyleTag({
-    content: `:root { --text-xs: ${11 * scale}px; --text-s: ${12 * scale}px; --text-m: ${13 * scale}px; --text-base: ${14 * scale}px; --text-l: ${15 * scale}px; --text-xl: ${17 * scale}px; --leading-base: ${22 * scale}px; --leading-l: ${24 * scale}px; }`,
-  });
+  const declarations = await page.evaluate((factor) => {
+    const style = getComputedStyle(document.documentElement);
+    // Computed styles expose custom values but do not always enumerate their names.
+    const names = new Set(
+      Array.from(document.styleSheets).flatMap((sheet) =>
+        Array.from(sheet.cssRules).flatMap((rule) =>
+          rule instanceof CSSStyleRule ? Array.from(rule.style) : [],
+        ),
+      ),
+    );
+    return Array.from(names)
+      .filter((name) => name.startsWith("--text-") || name.startsWith("--leading-"))
+      .map((name) => {
+        const value = style.getPropertyValue(name).trim();
+        if (!/^\d+(?:\.\d+)?px$/.test(value)) throw new Error(`Invalid type token: ${name}`);
+        return `${name}: ${Number.parseFloat(value) * factor}px;`;
+      })
+      .join(" ");
+  }, scale);
+  await page.addStyleTag({ content: `:root { ${declarations} }` });
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => done(undefined))));
 }
 
@@ -681,7 +698,14 @@ async function checkLayoutMatrix() {
       const { context, page, errors } = await openPage(viewport.width, viewport.height);
       try {
         await cardFor(page).waitFor();
+        const baseFontSize = await page.evaluate(() =>
+          Number.parseFloat(getComputedStyle(document.body).fontSize),
+        );
         await setFontScale(page, fontScale);
+        const bodyFontSize = await page.evaluate(() =>
+          Number.parseFloat(getComputedStyle(document.body).fontSize),
+        );
+        assert.equal(bodyFontSize, baseFontSize * fontScale, "body text must follow font scaling");
         const card = cardFor(page);
         const options = layoutOptions.map((label) =>
           card.getByRole("button", { name: label, exact: true }),
@@ -716,6 +740,7 @@ async function checkLayoutMatrix() {
         assert.equal(errors.length, 0, errors.join("\n"));
         geometry.push({
           case: name,
+          bodyFontSize,
           viewport: viewportSize,
           card: await rect(card),
           options: measures,
@@ -1358,6 +1383,26 @@ async function checkDecisionStates() {
     await page.keyboard.press("Enter");
     await card.getByRole("button", { name: "正在发送…" }).waitFor();
     assert(await textarea.isDisabled());
+    // The first frame after rejection may precede React's enabled-state commit.
+    await page.evaluate(() => {
+      const requestFrame = window.requestAnimationFrame.bind(window);
+      const cancelFrame = window.cancelAnimationFrame.bind(window);
+      let earlyFrame = false;
+      let cancelled = false;
+      window.requestAnimationFrame = (callback) => {
+        if (earlyFrame || !document.body.textContent?.includes("fixture rejected answer"))
+          return requestFrame(callback);
+        earlyFrame = true;
+        queueMicrotask(() => {
+          if (!cancelled) callback(performance.now());
+        });
+        return -1;
+      };
+      window.cancelAnimationFrame = (id) => {
+        if (id === -1) cancelled = true;
+        else cancelFrame(id);
+      };
+    });
     for (const option of originalOptions)
       assert(await card.getByRole("button", { name: option, exact: true }).isDisabled());
     await card
@@ -1380,7 +1425,7 @@ async function checkDecisionStates() {
     });
     assert.equal(await textarea.inputValue(), "保留这条失败后可重试的说明");
     assert(await submit.isEnabled());
-    // Rejection renders before the next animation frame restores retry focus.
+    // Retry focus follows the committed state that re-enables the submit button.
     await page.waitForFunction(
       (element) => element === document.activeElement,
       await submit.elementHandle(),
