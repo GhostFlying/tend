@@ -701,11 +701,24 @@ export function ReadError({ label, retry }: { label: string; retry(): void }) {
 }
 function Expandable({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
+  const [clipped, setClipped] = useState(false);
+  const paragraph = useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(() => {
+    const node = paragraph.current;
+    if (!node || open) return;
+    const measure = () => setClipped(node.scrollHeight > node.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [text, open]);
   return (
     <>
-      <p className={open ? undefined : styles.clamp}>{text}</p>
-      {text.length > 100 && (
-        <button className={styles.textLink} onClick={() => setOpen(!open)}>
+      <p ref={paragraph} className={open ? undefined : styles.clamp}>
+        {text}
+      </p>
+      {(open || clipped) && (
+        <button className={styles.textLink} aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? "收起" : "展开全文"}
         </button>
       )}
