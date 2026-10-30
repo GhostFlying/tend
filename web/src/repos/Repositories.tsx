@@ -3,19 +3,25 @@ import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Repositories.module.css";
+import { ResourceRow } from "../shell/ResourceRow.tsx";
 
 export function RepositoryEntry({ onOpen }: { onOpen(): void }) {
   const { live } = useServices();
   const state = useStore(live.repos.state);
   const count = state.view ? (state.view.repos ?? []).length : undefined;
   return (
-    <button type="button" className={styles.entry} onClick={onOpen} aria-haspopup="dialog">
-      <span>已注册仓库</span>
-      <span className={styles.entryCount}>
-        {count === undefined ? (state.error ? "读取失败" : "待读取") : `${count} 个`}
-        {count !== undefined && state.stale && " · 上次记录"} ›
-      </span>
-    </button>
+    <ResourceRow
+      onOpen={onOpen}
+      dialog
+      meta={
+        <>
+          {count === undefined ? (state.error ? "读取失败" : "待读取") : `${count} 个`}
+          {count !== undefined && state.stale && " · 上次记录"}
+        </>
+      }
+    >
+      已注册仓库
+    </ResourceRow>
   );
 }
 

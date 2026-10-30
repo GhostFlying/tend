@@ -366,6 +366,7 @@ export function Shell({
         >
           <aside className={styles.sidebar}>
             <Sidebar
+              records={recordsOpen && boardOpen}
               view={view}
               connection={connection}
               onChat={() => {
@@ -399,6 +400,7 @@ export function Shell({
                   onSelect={openIssue}
                   onChat={showChat}
                   onRecords={showRecords}
+                  onRepos={showRepos}
                 />
               </div>
             )}

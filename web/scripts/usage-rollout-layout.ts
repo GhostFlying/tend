@@ -173,17 +173,35 @@ const server = createServer(async (req, res) => {
   if (path === "/api/v1/conversation/settings" || path === "/api/v1/conversation/handoff")
     return json({ enabled: false });
   if (path === "/api/v1/token-usage") {
-    const t = unknown
+    const subject = url.searchParams.get("subject");
+    if (subject) assert.equal(subject, `run:${runID}`);
+    const t = subject
       ? {
           ...totals,
           requests: 1,
-          input_known: 0,
-          output_known: 0,
-          total_known: 0,
-          cache_read_known: 0,
-          cache_write_known: 0,
+          input: 40,
+          input_known: 1,
+          output: 2,
+          output_known: 1,
+          total: 42,
+          total_known: 1,
+          cache_read: 10,
+          cache_read_known: 1,
+          cache_write: 0,
+          cache_write_known: 1,
+          final: 1,
         }
-      : { ...totals, total: correction ? 13000 : 14000, output: correction ? 1000 : 2000 };
+      : unknown
+        ? {
+            ...totals,
+            requests: 1,
+            input_known: 0,
+            output_known: 0,
+            total_known: 0,
+            cache_read_known: 0,
+            cache_write_known: 0,
+          }
+        : { ...totals, total: correction ? 13000 : 14000, output: correction ? 1000 : 2000 };
     const view: TokenUsageView = {
       trend: [],
       revision: correction ? 2 : 1,
@@ -305,30 +323,17 @@ try {
         .filter({ hasText: /^资源与记录$/ })
         .click();
     }
-    await page.getByRole("button", { name: "Token 用量 ›", exact: true }).click();
+    await page.getByRole("button", { name: "Token 用量", exact: true }).click();
     const panel = page.getByRole("region", { name: "Token 用量", exact: true });
     await panel.getByText("14,000", { exact: true }).waitFor();
-    const buttons = await panel
-      .getByRole("navigation", { name: "用量时间范围" })
-      .getByRole("button")
-      .allTextContents();
-    assert.equal(buttons.at(-1), "总共");
-    const filterBounds = await panel
-      .getByRole("navigation", { name: "用量时间范围" })
-      .boundingBox();
-    const totalBounds = await panel
-      .getByRole("button", { name: "总共", exact: true })
-      .boundingBox();
-    assert(filterBounds && totalBounds);
-    assert(
-      Math.abs(totalBounds.x + totalBounds.width - filterBounds.x - filterBounds.width) < 2,
-      "total filter is not at the far right",
+    assert.equal(
+      await panel.getByRole("combobox", { name: "范围", exact: true }).inputValue(),
+      "total",
     );
 
     const line = await panel.locator('[class*="line"]').first().innerText();
     assert(line.indexOf("输入 token") < line.indexOf("缓存读取"));
     assert(line.indexOf("缓存写入") < line.indexOf("输出 token"));
-    await panel.getByRole("button", { name: "总共", exact: true }).click();
     await panel.getByText("14,000", { exact: true }).waitFor();
     correction = true;
     await panel.getByRole("button", { name: "刷新", exact: true }).click();
@@ -339,10 +344,10 @@ try {
     });
     unknown = true;
     await panel.getByRole("button", { name: "刷新", exact: true }).click();
-    await panel.locator('[class*="hero"]').getByText("未提供", { exact: true }).waitFor();
+    await panel.locator('[class*="hero"]').getByText("—", { exact: true }).waitFor();
     assert(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
     await page.screenshot({ path: join(output, `usage-${viewport.width}.png`), fullPage: true });
-    await page.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await page.getByRole("button", { name: "关闭 Token 用量", exact: true }).click();
     runsAvailable = false;
     await page.goto(`http://127.0.0.1:${address.port}/?task=${taskID}`);
     const card = page.getByRole("region", { name: "执行过程与用量" });
@@ -358,6 +363,20 @@ try {
     await card.screenshot({ path: join(output, `rollout-card-${viewport.width}.png`) });
     await card.getByRole("button", { name: "展开执行步骤" }).click();
     assert.equal(await card.locator("article").count(), 6);
+    await card.getByRole("button", { name: "本次用量", exact: true }).click();
+    const runUsage = card.getByRole("region", { name: "本次执行 token 用量" });
+    await runUsage.locator('[class*="hero"]').getByText("42", { exact: true }).waitFor();
+    assert.equal(await runUsage.getByRole("combobox", { name: "范围", exact: true }).count(), 0);
+    assert(
+      reads.some(
+        (path) =>
+          path.includes("token-usage?") &&
+          new URL(path, "http://localhost").searchParams.get("subject") === `run:${runID}`,
+      ),
+    );
+    assert(!/14,000/.test(await runUsage.innerText()));
+    await runUsage.screenshot({ path: join(output, `single-run-usage-${viewport.width}.png`) });
+    await card.getByRole("button", { name: "本次用量", exact: true }).click();
     await card.locator("article").last().locator("summary").first().click();
     await card.screenshot({ path: join(output, `rollout-expanded-${viewport.width}.png`) });
     const position = await card.evaluate(
@@ -368,6 +387,15 @@ try {
       .evaluate((el) => (el as HTMLButtonElement).click());
     const rollout = page.getByRole("dialog", { name: "完整执行过程", exact: true });
     const reader = rollout.getByLabel("执行过程正文", { exact: true });
+    await rollout.getByText("实时跟随", { exact: true }).waitFor();
+    await rollout.getByRole("button", { name: "本次用量", exact: true }).click();
+    const readerUsage = rollout.getByRole("region", { name: "本次执行 token 用量" });
+    await readerUsage.locator('[class*="hero"]').getByText("42", { exact: true }).waitFor();
+    await readerUsage.screenshot({ path: join(output, `reader-usage-${viewport.width}.png`) });
+    await rollout.getByRole("button", { name: "本次用量", exact: true }).click();
+    // Capturing the panel scrolls into history; explicitly resume the reader afterward.
+    if (await rollout.getByRole("button", { name: "恢复跟随", exact: true }).count())
+      await rollout.getByRole("button", { name: "恢复跟随", exact: true }).click();
     await rollout.getByText("隔离记录 150", { exact: true }).waitFor();
     await rollout.getByText("实时跟随", { exact: true }).waitFor();
     assert.equal(await rollout.locator("article").count(), 99);
