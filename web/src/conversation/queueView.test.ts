@@ -207,3 +207,58 @@ test("a delayed continuation cannot replace a refreshed completed block", async 
   expect(q.state.get().blocks[0]?.more).toBe(false);
   q.stop();
 });
+
+test("queue readers reopen with a live signal after leaving and returning", async () => {
+  let total = 1;
+  const q = new ConversationQueue({
+    get: async <T>(path: string, signal?: AbortSignal) => {
+      signal?.throwIfAborted();
+      return (
+        path.includes("/transcript")
+          ? { blocks: [], more: false, event_seq: total }
+          : { items: [], total, more: false, event_seq: total }
+      ) as T;
+    },
+  });
+  q.start();
+  await q.refresh();
+  expect(q.state.get().pages.owner?.total).toBe(1);
+  q.stop();
+  total = 2;
+  q.start();
+  await q.refresh();
+  expect(q.state.get().pages.owner?.total).toBe(2);
+  expect(q.state.get().error).toBeUndefined();
+  q.stop();
+});
+
+test("a stop during a queue request does not poison the resumed reader", async () => {
+  let first = true;
+  const q = new ConversationQueue({
+    get: async <T>(path: string, signal?: AbortSignal) => {
+      signal?.throwIfAborted();
+      if (first) {
+        first = false;
+        return await new Promise<T>((_resolve, reject) =>
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Stopped", "AbortError")),
+            { once: true },
+          ),
+        );
+      }
+      return (
+        path.includes("/transcript")
+          ? { blocks: [], more: false, event_seq: 2 }
+          : { items: [], total: 2, more: false, event_seq: 2 }
+      ) as T;
+    },
+  });
+  q.start();
+  q.stop();
+  q.start();
+  await q.refresh();
+  expect(q.state.get().pages.owner?.total).toBe(2);
+  expect(q.state.get().error).toBeUndefined();
+  q.stop();
+});

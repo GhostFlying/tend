@@ -1,6 +1,7 @@
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Synthetic owner API only; browser coverage never writes to a deployed ledger.
+import { openIssueAux } from "./issue-detail-helpers.ts";
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
@@ -81,6 +82,8 @@ const server = createServer(async (req, res) => {
       queue: [],
       projects: [],
     });
+  if (path.endsWith("/activity") || path.endsWith("/results"))
+    return json(res, { items: [], more: false, event_seq: 0 });
   if (path === "/api/v1/issues")
     return json(res, {
       items: u.searchParams.get("parent_id")
@@ -260,13 +263,13 @@ try {
         .getByRole("button", { name: item.plan.title, exact: true })
         .click();
       await p
-        .getByRole("dialog", { name: "Issue详情", exact: true })
+        .getByRole("region", { name: "Issue详情", exact: true })
         .getByRole("heading", { name: item.plan.title, exact: true })
         .waitFor();
-      await p.getByRole("button", { name: "跟进与交付", exact: true }).click();
+      await openIssueAux(p, "跟进与交付");
     };
     await open(page);
-    await page.getByRole("button", { name: "跟进与交付", exact: true }).click();
+    await openIssueAux(page, "跟进与交付");
     const section = page.getByRole("region", { name: "跟进安排" });
     await section.getByRole("button", { name: "新增安排" }).click();
     const form = page.getByRole("form", { name: "新增跟进安排" });
@@ -308,7 +311,7 @@ try {
     await section.getByRole("button", { name: "核对结果" }).waitFor();
     const unknown = writes.at(-1)!;
     await open(page);
-    await page.getByRole("button", { name: "跟进与交付", exact: true }).click();
+    await openIssueAux(page, "跟进与交付");
     await page.getByRole("button", { name: "核对结果" }).waitFor();
     assert.equal(writes.at(-1)!.request_id, unknown.request_id);
     drop = false;
@@ -343,7 +346,7 @@ try {
     await ordinary.getByText("已取消", { exact: true }).waitFor();
     assert.equal(writes.at(-1)?.reason, "保留已发生历史，停止后续安排");
     assert.equal(rules[1]!.status, "active");
-    const panel = page.getByRole("dialog", { name: "Issue详情", exact: true });
+    const panel = page.getByRole("dialog", { name: "跟进与外部交付", exact: true });
     await panel.getByRole("heading", { name: "跟进安排" }).scrollIntoViewIfNeeded();
     assert(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
     await page.screenshot({ path: join(output, `followups-${width}.png`) });

@@ -26,7 +26,8 @@
     "test:work-items-layout": "pnpm build && node scripts/work-items-layout.ts",
     "test:delivery-refresh": "node scripts/delivery-refresh-layout.ts",
     "test:followups": "pnpm build && node scripts/followups-layout.ts",
-    "test:issue-surfaces-layout": "pnpm build && node scripts/issue-surfaces-layout.ts"
+    "test:issue-surfaces-layout": "pnpm build && node scripts/issue-surfaces-layout.ts",
+    "test:issue-detail-layout": "pnpm build && node scripts/issue-detail-layout.ts"
   },
   "dependencies": {
     "markdown-it": "^15.0.3",

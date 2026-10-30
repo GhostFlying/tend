@@ -44,9 +44,12 @@ type IssueSourceReview struct {
 }
 
 type IssueView struct {
-	Manager    *IssueManagerView `json:"manager,omitempty"`
-	Attentions *AttentionPage    `json:"attentions,omitempty"`
-	Deadlines  []IssueDeadline   `json:"deadlines,omitempty"`
+	Manager      *IssueManagerView         `json:"manager,omitempty"`
+	Progress     *IssueProgress            `json:"progress,omitempty"`
+	Conversation *IssueConversationBinding `json:"conversation,omitempty"`
+	Ancestors    []IssueAncestor           `json:"ancestors,omitempty"`
+	Attentions   *AttentionPage            `json:"attentions,omitempty"`
+	Deadlines    []IssueDeadline           `json:"deadlines,omitempty"`
 	Issue
 	Historical      bool                       `json:"historical,omitempty"`
 	ContextRevision int64                      `json:"context_revision,omitempty"`

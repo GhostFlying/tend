@@ -139,8 +139,24 @@ export class LiveData {
     return this.lookupStore;
   }
 
+  private readonly reloadListeners = new Set<() => void>();
+  subscribeReload(listener: () => void): () => void {
+    this.reloadListeners.add(listener);
+    return () => this.reloadListeners.delete(listener);
+  }
+
+  /** Resume a retained conversation reader when its surface becomes visible. */
+  resume(): void {
+    this.stopped = false;
+    this.queueView.start();
+    this.settings.start();
+    this.handoff.start();
+    void this.reload();
+  }
+
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
+    for (const listener of this.reloadListeners) listener();
     void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
     void this.repos.refresh();
     void this.settings.refresh();
@@ -220,8 +236,15 @@ export class LiveData {
     return { ...item, choices: item.choices.map((choice) => this.rememberChoice(choice)) };
   }
 
+  private readonly eventListeners = new Set<(event: LedgerEvent) => void>();
+  subscribeEvents(listener: (event: LedgerEvent) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
+    for (const listener of this.eventListeners) listener(event);
     if (["category", "host", "hosted_configuration"].includes(event.object_type))
       this.agents.refresh();
     // Global responsibility views must not inherit the selected chat filter.

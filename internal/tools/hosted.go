@@ -71,6 +71,7 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"issues_update_progress", "Maintain this Issue current progress and next step after findings, blockers or verified results. This assessment never changes task contracts or proves completion.", "issue", protocol.UpdateIssueProgressPayload{}, app.UpdateIssueProgress{}, false},
 	{"issues_followups_create", "Arrange a bounded check of this Issue's existing authorized work; it creates no worker, new goal or execution authority. Deadline-owned rules use the deadline API.", "issue", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "create"}, false},
 	{"issues_followups_update", "Revise this Issue's generic followup through its original rule revision; preserve unknown and previously claimed checks.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "update"}, false},
 	{"issues_followups_pause", "Pause this Issue's generic rule without erasing started checks.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "pause"}, false},

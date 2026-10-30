@@ -3353,6 +3353,84 @@
       "title": "InterruptReplyPayload",
       "type": "object"
     },
+    "IssueActivityEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "block": {
+          "$ref": "#/definitions/IssueTranscriptBlock"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "position",
+        "kind",
+        "created_at",
+        "author"
+      ],
+      "title": "IssueActivityEntry",
+      "type": "object"
+    },
+    "IssueActivityPage": {
+      "additionalProperties": false,
+      "properties": {
+        "event_seq": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueActivityEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_before": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "more",
+        "event_seq"
+      ],
+      "title": "IssueActivityPage",
+      "type": "object"
+    },
     "IssueAgentConversation": {
       "additionalProperties": false,
       "properties": {
@@ -3436,6 +3514,27 @@
         "items"
       ],
       "title": "IssueAgentConversationPage",
+      "type": "object"
+    },
+    "IssueAncestor": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/IssueState"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "title",
+        "state"
+      ],
+      "title": "IssueAncestor",
       "type": "object"
     },
     "IssueAssignee": {
@@ -3828,6 +3927,25 @@
         "expected_assignment_epoch"
       ],
       "title": "IssueControlPayload",
+      "type": "object"
+    },
+    "IssueConversationBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "can_send": {
+          "type": "boolean"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "can_send"
+      ],
+      "title": "IssueConversationBinding",
       "type": "object"
     },
     "IssueConversationItem": {
@@ -4960,6 +5078,35 @@
       "title": "IssuePlan",
       "type": "object"
     },
+    "IssueProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_revision": {
+          "type": "integer"
+        },
+        "next_step": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        },
+        "updated_by": {
+          "$ref": "#/definitions/IssueAssignee"
+        }
+      },
+      "required": [
+        "summary",
+        "next_step",
+        "issue_revision",
+        "updated_at",
+        "updated_by"
+      ],
+      "title": "IssueProgress",
+      "type": "object"
+    },
     "IssueRefreshDeliveryPayload": {
       "additionalProperties": false,
       "properties": {
@@ -4975,6 +5122,87 @@
         "delivery_id"
       ],
       "title": "IssueRefreshDeliveryPayload",
+      "type": "object"
+    },
+    "IssueResult": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptances": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AcceptanceView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifact": {
+          "$ref": "#/definitions/ArtifactView"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact",
+        "task_id",
+        "acceptances",
+        "title",
+        "run_id",
+        "spec_version",
+        "generation",
+        "created_at"
+      ],
+      "title": "IssueResult",
+      "type": "object"
+    },
+    "IssueResultPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueResult"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "IssueResultPage",
       "type": "object"
     },
     "IssueSourceDisposition": {
@@ -5327,6 +5555,12 @@
     "IssueView": {
       "additionalProperties": false,
       "properties": {
+        "ancestors": {
+          "items": {
+            "$ref": "#/definitions/IssueAncestor"
+          },
+          "type": "array"
+        },
         "assignee": {
           "$ref": "#/definitions/IssueAssignee"
         },
@@ -5344,6 +5578,9 @@
         },
         "context_revision": {
           "type": "integer"
+        },
+        "conversation": {
+          "$ref": "#/definitions/IssueConversationBinding"
         },
         "created_at": {
           "type": "integer"
@@ -5393,6 +5630,9 @@
         },
         "plan": {
           "$ref": "#/definitions/IssuePlan"
+        },
+        "progress": {
+          "$ref": "#/definitions/IssueProgress"
         },
         "revision": {
           "type": "integer"
@@ -9024,6 +9264,27 @@
       "title": "UpdateIssuePayload",
       "type": "object"
     },
+    "UpdateIssueProgressPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "next_step": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "summary",
+        "next_step"
+      ],
+      "title": "UpdateIssueProgressPayload",
+      "type": "object"
+    },
     "UpdateIssueTaskPayload": {
       "additionalProperties": false,
       "properties": {
@@ -9709,6 +9970,9 @@
     "InterruptReplyPayload": {
       "$ref": "#/definitions/InterruptReplyPayload"
     },
+    "IssueActivityPage": {
+      "$ref": "#/definitions/IssueActivityPage"
+    },
     "IssueAgentConversation": {
       "$ref": "#/definitions/IssueAgentConversation"
     },
@@ -9771,6 +10035,9 @@
     },
     "IssueRefreshDeliveryPayload": {
       "$ref": "#/definitions/IssueRefreshDeliveryPayload"
+    },
+    "IssueResultPage": {
+      "$ref": "#/definitions/IssueResultPage"
     },
     "IssueTranscriptBlock": {
       "$ref": "#/definitions/IssueTranscriptBlock"
@@ -9924,6 +10191,9 @@
     },
     "UpdateIssuePayload": {
       "$ref": "#/definitions/UpdateIssuePayload"
+    },
+    "UpdateIssueProgressPayload": {
+      "$ref": "#/definitions/UpdateIssueProgressPayload"
     },
     "UpdateIssueTaskPayload": {
       "$ref": "#/definitions/UpdateIssueTaskPayload"

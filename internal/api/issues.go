@@ -58,3 +58,19 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 		return views.CanonicalIssue(r.Context(), q, r.PathValue("id"), revision)
 	})
 }
+
+func (s *Server) issueActivity(w http.ResponseWriter, r *http.Request) {
+	before, err := intParam(r.URL.Query().Get("before"))
+	if err != nil || before < 0 {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "invalid activity cursor"))
+		return
+	}
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		return views.IssueActivity(r.Context(), q, r.PathValue("id"), before)
+	})
+}
+func (s *Server) issueResults(w http.ResponseWriter, r *http.Request) {
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		return views.IssueResults(r.Context(), q, r.PathValue("id"), r.URL.Query().Get("after"))
+	})
+}

@@ -1,305 +1,834 @@
-import { IssuePlanRead } from "./PlanRead.tsx";
-import type { IssueView } from "../api/generated/api.ts";
-import { MessageImages } from "../conversation/Images.tsx";
-import { IssueTaskPeek } from "./TaskPeek.tsx";
-import { IssueFollowupsDelivery } from "./FollowupsDelivery.tsx";
-import { AssigneeName } from "./AssigneeName.tsx";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { Connection } from "../api/client.ts";
+import type { IssueAgentConversation, IssueView, IssueActivityPage } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
-import { DetailTabs } from "../shell/DetailOverlay.tsx";
+import { DetailOverlay } from "../shell/DetailOverlay.tsx";
+import { AttentionDetails } from "../attention/Inbox.tsx";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { MessageAttachments } from "../conversation/Attachments.tsx";
-import { IssueHierarchy, issueStateLabel } from "./Hierarchy.tsx";
-import { CreateIssueTask } from "./CreateTask.tsx";
+import { MessageImages } from "../conversation/Images.tsx";
+import { ConversationSessionProvider } from "../conversation/session.tsx";
+import { Note } from "../shell/Chat.tsx";
+import { Composer } from "../conversation/Composer.tsx";
+import { PendingQueue } from "../conversation/PendingQueue.tsx";
+import { Issues } from "./data.ts";
+import { WorkItemRead } from "../workitems/live.ts";
+import { AssigneeName } from "./AssigneeName.tsx";
+import { issueStateLabel } from "./Hierarchy.tsx";
+import { IssuePlanRead } from "./PlanRead.tsx";
 import { IssueDefinition } from "./Definition.tsx";
 import { IssueHandoff } from "./Handoff.tsx";
-import { lifecycleLabels, controlLabels } from "../tasks/status.ts";
-import styles from "./Issues.module.css";
+import { ManagerStatus } from "./ManagerStatus.tsx";
+import { IssueHistory } from "./History.tsx";
+import { IssueFollowupsDelivery, externalDeliveryStatus } from "./FollowupsDelivery.tsx";
+import { CreateIssueTask } from "./CreateTask.tsx";
+import { IssueActivity } from "./Activity.tsx";
+import { ProgressEditor, IssueControlEditor } from "./Progress.tsx";
+import { IssueResultsList, resultStatus } from "./Results.tsx";
+import { taskLook } from "../tasks/status.ts";
+import styles from "./DetailPage.module.css";
 
-type Tab = "overview" | "hierarchy" | "sources" | "followups" | "history";
+type Panel =
+  | "definition"
+  | "child"
+  | "task"
+  | "handoff"
+  | "sources"
+  | "followups"
+  | "history"
+  | "progress"
+  | "results"
+  | "reopen"
+  | "pause"
+  | "resume";
+export class IssueReadingState {
+  top = 0;
+  children = false;
+  childCursors = [""];
+  childCursor(): string | undefined {
+    return this.childCursors.at(-1) || undefined;
+  }
+  saveChildCursors(cursors: string[]): void {
+    this.childCursors = cursors;
+  }
+  activity: IssueActivityPage | null = null;
+  activityExpanded = false;
+  private following = false;
+  followLatest(): void {
+    this.following = true;
+  }
+  pauseFollowing(): void {
+    this.following = false;
+  }
+  followsLatest(): boolean {
+    return this.following;
+  }
+  saveActivity(page: IssueActivityPage | null): void {
+    if (page) this.activity = page;
+  }
+  expandActivity(): void {
+    this.activityExpanded = true;
+  }
+  saveTop(top: number): void {
+    this.top = top;
+  }
+  expandChildren(): void {
+    this.children = true;
+  }
+}
+export class IssueReadingStates {
+  private states = new Map<string, IssueReadingState>();
+  get(id: string): IssueReadingState {
+    let reading = this.states.get(id);
+    if (!reading) {
+      reading = new IssueReadingState();
+      this.states.set(id, reading);
+    }
+    return reading;
+  }
+}
+
 export function IssueDetails({
   id,
+  connection,
+  reading,
+  onBack,
   onSelect,
   onTask,
-  onInbox,
 }: {
   id: string;
+  connection: Connection;
+  reading: IssueReadingState;
+  onBack(): void;
   onSelect(id: string): void;
   onTask(id: string): void;
-  onInbox(id?: string): void;
 }) {
-  const { live } = useServices();
-  const state = useStore(live.issues.detail.state);
-  const [tab, setTab] = useState<Tab>("hierarchy");
-  const [handoff, setHandoff] = useState(false);
-  const [creatingTask, setCreatingTask] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [child, setChild] = useState(false);
+  const { client, live } = useServices();
+  const reads = useMemo(() => new Issues(client), [client]);
+  const state = useStore(reads.detail.state);
+  const results = useStore(reads.results.state);
+  const deliveries = useStore(reads.deliveries.state);
+  const activityState = useStore(reads.activity.state);
+  const childRead = useMemo(
+    () => reads.children(id, reading.childCursor(), true),
+    [reads, id, reading],
+  );
+  const childState = useStore(childRead.state);
+  const restored = useRef(false);
+  const initialTop = useRef(reading.top);
+  const [panel, setPanel] = useState<Panel | null>(null);
+  const [attention, setAttention] = useState("");
+  const [side, setSide] = useState(false);
+  const scroll = useRef<HTMLDivElement>(null);
+  const conversationRead = useMemo(
+    () => new WorkItemRead<IssueAgentConversation>(client),
+    [client],
+  );
+  const conversationState = useStore(conversationRead.state);
   useEffect(() => {
-    void live.issues.open(id);
-  }, [live, id]);
-  const context = live.issues.context;
-  const sources = useStore(context.state);
-  useEffect(() => {
-    if (tab === "sources" || tab === "hierarchy") void live.issues.openContext(id);
-    return () => context.close();
-  }, [context, live, id, tab, state.value?.context_revision]);
+    void reads.open(id);
+    reads.children(id, reading.childCursor(), true);
+    void reads.openResults(id);
+    void reads.openDeliveries(id);
+    const stop = live.subscribeEvents((event) => {
+      if (event.object_type === "message") {
+        const bound = reads.detail.state.get().value?.conversation?.conversation_id;
+        if (!event.item || event.item.conversation_id === bound) void reads.activity.refresh();
+      } else reads.refresh();
+    });
+    const reset = live.snapshot.subscribe(() => reads.refresh());
+    return () => {
+      stop();
+      reset();
+      reads.stop();
+    };
+  }, [reads, live, id, reading]);
   const issue = state.value;
-  if (!issue)
-    return (
-      <div className={styles.body}>
-        <p role="status">{state.error ? "Issue读取失败，尚未取得最新记录。" : "正在读取…"}</p>
-        <button onClick={() => void live.issues.detail.refresh()}>重新读取</button>
-      </div>
-    );
-  if (editing || child)
-    return (
-      <IssueDefinition
-        {...(editing ? { issue } : { parent: issue })}
-        onBack={() => {
-          setEditing(false);
-          setChild(false);
-        }}
-        onSaved={(newID) => {
-          setEditing(false);
-          setChild(false);
-          if (newID) onSelect(newID);
-        }}
-      />
-    );
-  if (creatingTask)
-    return <CreateIssueTask issue={issue} onBack={() => setCreatingTask(false)} onTask={onTask} />;
-  if (handoff) return <IssueHandoff issue={issue} onBack={() => setHandoff(false)} />;
-  return (
-    <section className={styles.root} aria-label="Issue详情">
-      <header className={styles.header}>
-        <div>
-          <p className={styles.muted}>Issue · {issueStateLabel[issue.state]}</p>
-          <h1>{issue.plan.title}</h1>
-          <p>
-            负责人：
-            <AssigneeName assignee={issue.assignee} />{" "}
-            {issue.assignee.kind === "agent" && (
+  const conversationID = issue?.conversation?.conversation_id;
+  const conversation =
+    conversationState.value?.conversation_id === conversationID ? conversationState.value : null;
+  const conversationError = conversationState.error ? "负责人对话暂时无法读取" : "";
+  useEffect(() => {
+    if (conversationID)
+      void conversationRead.open(
+        `/api/v1/agent-conversations/${encodeURIComponent(conversationID)}?projection=issues`,
+      );
+    return () => conversationRead.close();
+  }, [conversationRead, conversationID]);
+  const loaded =
+    !!issue &&
+    !!(activityState.value || activityState.error) &&
+    !!(childState.value || childState.error) &&
+    !!(results.value || results.error);
+  useLayoutEffect(() => {
+    if (loaded && scroll.current && !restored.current) {
+      scroll.current.scrollTo({ top: initialTop.current });
+      restored.current = true;
+    }
+  }, [loaded, reading]);
+  const editable =
+    !!issue && ["active", "paused"].includes(issue.state) && issue.assignment_state === "active";
+  const close = () => {
+    setPanel(null);
+    void reads.open(id);
+  };
+  const saved = (newID?: string) => {
+    close();
+    if (newID && newID !== id) onSelect(newID);
+    else void reads.open(id);
+  };
+  const jump = () => {
+    reading.followLatest();
+    scroll.current
+      ?.querySelector("[data-activity-end]")
+      ?.scrollIntoView({ block: "end", behavior: "smooth" });
+  };
+  const actionable =
+    issue?.attentions?.items?.filter((a) => a.status === "open" && a.kind !== "information") ?? [];
+  const execution = executionSummary(issue);
+  const recentDeliveries = [
+    ...(results.value?.items ?? []).map((result) => ({
+      id: `artifact:${result.artifact.artifact_id}`,
+      title: result.title,
+      status: resultStatus(result),
+      at: result.created_at,
+      panel: "results" as const,
+    })),
+    ...(deliveries.value?.items ?? []).map((item) => ({
+      id: `external:${item.delivery.delivery_id}`,
+      title: `${item.delivery.repository} · #${item.delivery.number}`,
+      status: externalDeliveryStatus(item),
+      at: item.observation.checked_at ?? item.observation.attempted_at ?? 0,
+      panel: "followups" as const,
+    })),
+  ]
+    .sort((a, b) => b.at - a.at)
+    .slice(0, 3);
+  const sideContent = issue && (
+    <>
+      {issue.manager && (
+        <ManagerStatus
+          manager={issue.manager}
+          onTask={(task) => {
+            setSide(false);
+            onTask(task);
+          }}
+        />
+      )}
+      <section>
+        <h2>属性</h2>
+        <dl>
+          <dt>负责人</dt>
+          <dd>
+            <AssigneeName assignee={issue.assignee} />
+          </dd>
+          <dt>状态</dt>
+          <dd>{issueStateLabel[issue.state]}</dd>
+          <dt>项目</dt>
+          <dd>{issue.plan.project || "未分组"}</dd>
+        </dl>
+      </section>
+      {!!issue.ancestors?.length && (
+        <section>
+          <h2>上级 Issue</h2>
+          <button
+            className={styles.textLink}
+            onClick={() => onSelect(issue.ancestors!.at(-1)!.issue_id)}
+          >
+            {issue.ancestors.at(-1)!.title} →
+          </button>
+        </section>
+      )}
+      <section>
+        <h2>交付物</h2>
+        {results.error && (
+          <ReadError label="交付读取失败" retry={() => void reads.results.refresh()} />
+        )}
+        {deliveries.error && (
+          <ReadError label="外部交付读取失败" retry={() => void reads.deliveries.refresh()} />
+        )}
+        {recentDeliveries.map((item) => (
+          <button
+            key={item.id}
+            className={styles.resultLink}
+            onClick={() => {
+              setSide(false);
+              setPanel(item.panel);
+            }}
+          >
+            <span>{item.title}</span>
+            <small>{item.status}</small>
+          </button>
+        ))}
+        {results.value && deliveries.value && !recentDeliveries.length && (
+          <p className={styles.muted}>暂无已登记交付</p>
+        )}
+        {!!deliveries.value?.items?.length && (
+          <button
+            className={styles.textLink}
+            onClick={() => {
+              setSide(false);
+              setPanel("followups");
+            }}
+          >
+            外部交付 · {deliveries.value.items.length} 项 →
+          </button>
+        )}
+        <button
+          className={styles.textLink}
+          onClick={() => {
+            setSide(false);
+            setPanel("results");
+          }}
+        >
+          查看全部交付 →
+        </button>
+      </section>
+      <section>
+        <h2>执行记录</h2>
+        {[...(issue.tasks ?? [])]
+          .sort((a, b) => taskPriority(a) - taskPriority(b))
+          .slice(0, 3)
+          .map((task) => (
+            <button
+              className={styles.resultLink}
+              key={task.task_id}
+              onClick={() => {
+                setSide(false);
+                onTask(task.task_id);
+              }}
+            >
+              <span>{task.title}</span>
+              <small>
+                {task.execution?.role === "accept"
+                  ? "独立验收 · "
+                  : task.execution?.role === "implement"
+                    ? "实施 · "
+                    : ""}
+                {taskLook(task).label}
+              </small>
+            </button>
+          ))}
+        {!issue.tasks?.length && <p className={styles.muted}>暂无任务</p>}
+        {!!issue.tasks?.length && (
+          <details>
+            <summary>全部执行（{issue.tasks.length}）</summary>
+            {issue.tasks.map((task) => (
               <button
-                className={styles.button}
+                className={styles.resultLink}
+                key={task.task_id}
                 onClick={() => {
-                  window.dispatchEvent(
-                    new CustomEvent("tend:open-agent", { detail: `work-item:${id}` }),
-                  );
+                  setSide(false);
+                  onTask(task.task_id);
                 }}
               >
-                与负责人对话
+                {task.title} · {taskLook(task).label}
               </button>
-            )}
-          </p>
-        </div>
-        <span className={styles.spacer} />
-        <button
-          className={styles.button}
-          disabled={!["active", "paused"].includes(issue.state)}
-          onClick={() => setEditing(true)}
-        >
-          编辑定义
+            ))}
+          </details>
+        )}
+      </section>
+      <button
+        className={styles.sideEntry}
+        onClick={() => {
+          setSide(false);
+          setPanel("sources");
+        }}
+      >
+        背景与原始输入 <span>›</span>
+      </button>
+      <button
+        className={styles.sideEntry}
+        onClick={() => {
+          setSide(false);
+          setPanel("followups");
+        }}
+      >
+        跟进与外部交付 <span>›</span>
+      </button>
+      <button
+        className={styles.sideEntry}
+        onClick={() => {
+          setSide(false);
+          setPanel("history");
+        }}
+      >
+        变更历史 <span>›</span>
+      </button>
+    </>
+  );
+  return (
+    <section className={styles.page} aria-label="Issue详情">
+      <header className={styles.toolbar}>
+        <button onClick={onBack} aria-label="返回Issue列表或上一项">
+          ← 返回
         </button>
-        <button className={styles.button} onClick={() => setHandoff(true)}>
-          交接负责人
-        </button>
-      </header>
-      <DetailTabs<Tab>
-        tabs={[
-          { key: "overview", label: "概览" },
-          { key: "hierarchy", label: "层级与任务" },
-          { key: "sources", label: "背景与输入" },
-          { key: "followups", label: "跟进与交付" },
-          { key: "history", label: "历史" },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
-      <div className={styles.body}>
-        {state.error && <p className={styles.warning}>当前显示上次读取，暂时无法取得最新状态。</p>}
-        <div className={styles.goal}>目标：{issue.plan.intent}</div>
-        {issue.manager && (
-          <p className={styles.muted}>
-            管理任务：
-            <button className={styles.button} onClick={() => onTask(issue.manager!.task_id)}>
-              {issue.manager.category_id}
+        <nav aria-label="Issue路径">
+          <span>Issues</span>
+          {issue?.ancestors?.map((parent) => (
+            <button key={parent.issue_id} onClick={() => onSelect(parent.issue_id)}>
+              / {parent.title}
             </button>
-            {issue.manager.host_id ? ` · ${issue.manager.host_id}` : " · 等待 runner 领取"}
-            {issue.manager.agent ? ` / ${issue.manager.agent.local_id}` : ""}
-            {` · ${issue.manager.state === "running" ? "协调中" : lifecycleLabels[issue.manager.state]}`}
-            {issue.manager.control_mode && issue.manager.control_mode !== "managed"
-              ? ` · ${controlLabels[issue.manager.control_mode]}`
-              : ""}
-            {issue.manager.reconciliation_pending ? " · 待对账" : ""}
-            {issue.manager.recovery
-              ? issue.manager.recovery.status === "waiting"
-                ? " · 恢复退避"
-                : ["starting", "running"].includes(issue.manager.recovery.status)
-                  ? " · 正在续接"
-                  : " · 恢复需要处理"
-              : ""}
-            {issue.manager.queue_reason ? ` · ${issue.manager.queue_reason.message}` : ""}
-          </p>
-        )}
-        {issue.manager?.execution && (
-          <p className={styles.muted}>
-            Agent 配置 v{issue.manager.execution.agent_revision} · runtime{" "}
-            {issue.manager.execution.runtime.runtime_id} v{issue.manager.execution.runtime.revision}{" "}
-            · 库存 v{issue.manager.execution.inventory_revision}
-          </p>
-        )}
-        {issue.manager?.native_thread_id && (
-          <p className={styles.muted} style={{ overflowWrap: "anywhere" }}>
-            原生会话：{issue.manager.native_thread_id}
-          </p>
-        )}
-        {(issue.attentions?.items ?? [])
-          .filter((a) => a.status === "open")
-          .map((a) => (
-            <div className={styles.warning} key={a.attention_id}>
-              {a.kind === "decision" ? "需要你决定" : "需要你处理"}：{a.title}{" "}
-              <button onClick={() => onInbox(a.attention_id)}>查看待处理</button>
-            </div>
           ))}
-        {tab === "hierarchy" && (
-          <>
-            <h3>Issue层级</h3>
-            <button
-              className={styles.button}
-              disabled={!["active", "paused"].includes(issue.state)}
-              onClick={() => setChild(true)}
-            >
-              新增子Issue
-            </button>
-            <IssueHierarchy items={[]} current={issue} onSelect={onSelect} />
-            <h3>任务与执行</h3>
-            <button
-              className={styles.button}
-              disabled={
-                !["active", "paused"].includes(issue.state) || issue.assignment_state !== "active"
-              }
-              onClick={() => setCreatingTask(true)}
-            >
-              创建任务
-            </button>
-            <div className={styles.tasks}>
-              {(issue.tasks ?? []).map((task, i) => (
-                <IssueTaskPeek key={task.task_id} task={task} initial={i === 0} onTask={onTask} />
-              ))}
-              {!issue.tasks?.length && <p className={styles.muted}>暂无任务。</p>}
+          <span>/ {issue?.plan.title ?? "正在读取"}</span>
+        </nav>
+        <span className={styles.spacer} />
+        <button className={styles.sideToggle} onClick={() => setSide(true)}>
+          详情
+        </button>
+        {issue && (
+          <details className={styles.menu}>
+            <summary aria-label="更多Issue操作">•••</summary>
+            <div onClick={(event) => event.currentTarget.parentElement?.removeAttribute("open")}>
+              <button disabled={!editable} onClick={() => setPanel("progress")}>
+                编辑当前进展
+              </button>
+              <button disabled={!editable} onClick={() => setPanel("definition")}>
+                编辑定义
+              </button>
+              <button disabled={!editable} onClick={() => setPanel("child")}>
+                新增子Issue
+              </button>
+              <button
+                disabled={!editable || issue.assignment_state !== "active"}
+                onClick={() => setPanel("task")}
+              >
+                创建任务
+              </button>
+              <button onClick={() => setPanel("handoff")}>交接负责人</button>
+              {issue.state === "active" && (
+                <button onClick={() => setPanel("pause")}>暂停Issue</button>
+              )}
+              {issue.state === "paused" && (
+                <button onClick={() => setPanel("resume")}>恢复Issue</button>
+              )}
+              {["closed", "cancelled"].includes(issue.state) && (
+                <button onClick={() => setPanel("reopen")}>重新打开Issue</button>
+              )}
             </div>
-          </>
+          </details>
         )}
-        {tab === "followups" && <IssueFollowupsDelivery issue={issue} />}
-        {tab === "hierarchy" &&
-          sources.value?.sources?.some(
-            (item) => item.attachments?.length || item.images?.length,
-          ) && (
-            <section>
-              <h3>相关来源</h3>
-              {sources.value.sources
-                .filter((item) => item.attachments?.length || item.images?.length)
-                .slice(0, 3)
-                .map((item) => (
-                  <div key={item.message_id}>
-                    {item.attachments?.length ? (
-                      <MessageAttachments attachments={item.attachments} />
-                    ) : (
-                      !!item.images?.length && <MessageImages images={item.images} />
-                    )}
-                  </div>
-                ))}
-            </section>
+      </header>
+      {!issue ? (
+        <div className={styles.loading} role="status">
+          {state.error ? (
+            <ReadError label="Issue读取失败" retry={() => void reads.open(id)} />
+          ) : (
+            "正在读取Issue…"
           )}
-        {tab === "overview" && (
-          <>
-            <IssuePlanRead issue={issue} />
-            <p className={styles.muted}>关闭前核对完成条件、子项责任与相关任务验收。</p>
-          </>
-        )}
-        {tab === "sources" && (
-          <>
-            {sources.error ? (
-              <p className={styles.warning}>
-                背景与输入读取失败。<button onClick={() => void context.refresh()}>重新读取</button>
-              </p>
-            ) : !sources.value ? (
-              <p>正在读取…</p>
-            ) : (
-              <>
-                {sources.value.sources?.length === 0 && (
-                  <p className={styles.muted}>暂无已记录来源。</p>
+        </div>
+      ) : (
+        <div className={styles.columns}>
+          <div className={styles.main}>
+            <div
+              ref={scroll}
+              data-issue-scroll
+              className={styles.scroll}
+              onScroll={() => {
+                if (scroll.current && restored.current) reading.saveTop(scroll.current.scrollTop);
+              }}
+            >
+              <div className={styles.lane}>
+                {state.error && (
+                  <ReadError
+                    label="当前显示上次读取，尚未取得最新状态"
+                    retry={() => void reads.open(id)}
+                  />
                 )}
-                {(sources.value.sources ?? []).map((item) => (
-                  <article key={item.message_id}>
-                    <p className={styles.muted}>
-                      {item.author} · {item.created_at}
-                    </p>
-                    <Markdown text={item.body ?? ""} />
-                    {item.attachments?.length ? (
-                      <MessageAttachments attachments={item.attachments} />
-                    ) : (
-                      !!item.images?.length && <MessageImages images={item.images} />
+                <h1>{issue.plan.title}</h1>
+                <p className={styles.metadata}>
+                  <span className={styles.dot} />
+                  {issueStateLabel[issue.state]}
+                  <span>·</span>
+                  <AssigneeName assignee={issue.assignee} />
+                  负责<span>·</span>
+                  <time>{new Date(issue.updated_at).toLocaleString("zh-CN")}</time>
+                </p>
+                <p className={styles.intent}>{issue.plan.intent}</p>
+                {actionable[0] && (
+                  <section className={styles.attention}>
+                    <div>
+                      <small>
+                        {actionable[0].kind === "decision" ? "需要你决定" : "需要你处理"}
+                      </small>
+                      <h2>{actionable[0].title}</h2>
+                      {actionable.length > 1 && (
+                        <details>
+                          <summary>另有 {actionable.length - 1} 项</summary>
+                          {actionable.slice(1).map((item) => (
+                            <button
+                              className={styles.textLink}
+                              key={item.attention_id}
+                              onClick={() => setAttention(item.attention_id)}
+                            >
+                              {item.title}
+                            </button>
+                          ))}
+                        </details>
+                      )}
+                    </div>
+                    <button
+                      className={styles.primary}
+                      onClick={() => setAttention(actionable[0]!.attention_id)}
+                    >
+                      {actionable[0].kind === "decision" ? "查看并决定" : "查看并处理"}
+                    </button>
+                  </section>
+                )}
+                <section className={styles.progress}>
+                  <div className={styles.sectionHead}>
+                    <h2>当前进展</h2>
+                    <button
+                      className={styles.textLink}
+                      disabled={!editable}
+                      onClick={() => setPanel("progress")}
+                    >
+                      编辑
+                    </button>
+                  </div>
+                  {issue.progress?.summary ? (
+                    <Expandable text={issue.progress.summary} />
+                  ) : (
+                    <p className={styles.muted}>负责人尚未更新进展</p>
+                  )}
+                  {issue.progress?.next_step && <p>下一步：{issue.progress.next_step}</p>}
+                  <p className={styles.muted}>
+                    {execution}
+                    {issue.progress && (
+                      <>
+                        {" "}
+                        · 进展更新于 {new Date(issue.progress.updated_at).toLocaleString("zh-CN")}
+                      </>
                     )}
-                  </article>
-                ))}
-                {sources.value.more && (
-                  <button
-                    className={styles.button}
-                    onClick={() => void live.issues.openContext(id, sources.value?.next)}
-                  >
-                    更早来源
+                  </p>
+                  {issue.assignment_state !== "active" && (
+                    <p role="status">正在交接负责人，当前执行事实仍予保留。</p>
+                  )}
+                </section>
+                <details className={styles.definition}>
+                  <summary>目标与完成条件</summary>
+                  <IssuePlanRead issue={issue} />
+                </details>
+                <ChildIssues
+                  issue={issue}
+                  reads={reads}
+                  reading={reading}
+                  onSelect={onSelect}
+                  onCreate={() => setPanel("child")}
+                  editable={editable}
+                />
+                <div className={styles.sectionHead}>
+                  <h2>讨论与进展</h2>
+                  <button className={styles.textLink} onClick={jump}>
+                    到最新 ↓
                   </button>
+                </div>
+                {conversation ? (
+                  <ConversationSessionProvider conversation={conversation} connection={connection}>
+                    <IssueActivity
+                      issue={issue}
+                      reads={reads}
+                      reading={reading}
+                      results={results.value?.items ?? []}
+                      onIssue={onSelect}
+                      onTask={onTask}
+                      scroll={scroll}
+                    />
+                  </ConversationSessionProvider>
+                ) : (
+                  <IssueActivity
+                    issue={issue}
+                    reads={reads}
+                    reading={reading}
+                    results={results.value?.items ?? []}
+                    onIssue={onSelect}
+                    onTask={onTask}
+                    scroll={scroll}
+                  />
                 )}
+              </div>
+            </div>
+            <div className={styles.composer}>
+              <Note />{" "}
+              <div className={styles.recipient}>
+                发给 <AssigneeName assignee={issue.assignee} /> · 本 Issue 负责人
+              </div>
+              {conversation ? (
+                <ConversationSessionProvider conversation={conversation} connection={connection}>
+                  <PendingQueue connection={connection} />
+                  <Composer
+                    connection={connection}
+                    disabled={!issue.conversation?.can_send}
+                    presentation="issue"
+                  />
+                </ConversationSessionProvider>
+              ) : (
+                <p className={styles.muted}>{conversationError || conversationReason(issue)}</p>
+              )}
+              {conversation && !issue.conversation?.can_send && (
+                <p className={styles.muted}>{conversationReason(issue)}</p>
+              )}
+              {!issue.conversation?.can_send && (
+                <button
+                  className={styles.textLink}
+                  onClick={() =>
+                    setPanel(["closed", "cancelled"].includes(issue.state) ? "reopen" : "handoff")
+                  }
+                >
+                  {["closed", "cancelled"].includes(issue.state) ? "重新打开Issue" : "交接负责人"} →
+                </button>
+              )}
+            </div>
+          </div>
+          <aside className={styles.sidebar} aria-label="Issue辅助信息">
+            {sideContent}
+          </aside>
+        </div>
+      )}
+      {side && (
+        <DetailOverlay task={false} label="Issue辅助信息" onClose={() => setSide(false)}>
+          <aside className={styles.drawer}>{sideContent}</aside>
+        </DetailOverlay>
+      )}
+      {attention && (
+        <DetailOverlay task={false} label="Issue待处理事项" onClose={() => setAttention("")}>
+          <AttentionDetails id={attention} onIssue={onSelect} onBack={() => setAttention("")} />
+        </DetailOverlay>
+      )}
+      {issue && panel && (
+        <DetailOverlay task={false} label={panelLabels[panel]} onClose={close}>
+          <div className={styles.panel}>
+            {panel === "definition" && (
+              <IssueDefinition issue={issue} onBack={close} onSaved={saved} />
+            )}
+            {panel === "child" && <IssueDefinition parent={issue} onBack={close} onSaved={saved} />}
+            {panel === "task" && (
+              <CreateIssueTask
+                issue={issue}
+                onBack={close}
+                onTask={(task) => {
+                  close();
+                  onTask(task);
+                }}
+              />
+            )}
+            {panel === "handoff" && (
+              <IssueHandoff issue={issue} onBack={close} onChanged={() => void reads.open(id)} />
+            )}
+            {panel === "progress" && <ProgressEditor issue={issue} onSaved={() => saved()} />}
+            {(panel === "reopen" || panel === "pause" || panel === "resume") && (
+              <IssueControlEditor issue={issue} action={panel} onSaved={() => saved()} />
+            )}
+            {panel === "history" && <IssueHistory issue={issue} />}
+            {panel === "followups" && <IssueFollowupsDelivery issue={issue} />}
+            {panel === "sources" && <IssueSources id={id} reads={reads} />}
+            {panel === "results" && (
+              <>
+                <IssueResultsList id={id} onTask={onTask} />
+                <button className={styles.textLink} onClick={() => setPanel("followups")}>
+                  外部交付与观察 →
+                </button>
               </>
             )}
-          </>
-        )}
-        {tab === "history" && <IssueHistory key={id} issue={issue} />}
-      </div>
+          </div>
+        </DetailOverlay>
+      )}
     </section>
   );
 }
-function IssueHistory({ issue }: { issue: IssueView }) {
-  const { live } = useServices();
-  const read = live.issues.history;
-  const state = useStore(read.state);
-  const [selection, setSelection] = useState(String(issue.revision));
-  const revision = Number(selection);
-  const valid = Number.isInteger(revision) && revision >= 1 && revision <= issue.revision;
-  useEffect(() => {
-    if (valid) void live.issues.openHistory(issue.issue_id, revision);
-    return () => read.close();
-  }, [live, read, issue.issue_id, revision, valid]);
-  const value = state.value;
-  const matching = value?.issue_id === issue.issue_id && value.revision === revision;
+
+const panelLabels: Record<Panel, string> = {
+  definition: "编辑Issue定义",
+  child: "新增子Issue",
+  task: "创建任务",
+  handoff: "交接负责人",
+  sources: "背景与原始输入",
+  followups: "跟进与外部交付",
+  history: "变更历史",
+  progress: "编辑当前进展",
+  results: "全部执行交付",
+  reopen: "重新打开Issue",
+  pause: "暂停Issue",
+  resume: "恢复Issue",
+};
+function conversationReason(issue: IssueView): string {
+  return (
+    (
+      {
+        owner: "当前由你负责；可交接给 Agent 后继续负责人对话。",
+        handoff: "负责人交接中，草稿保留，暂不发送新消息。",
+        ended: "Issue已结束，对话记录仍可阅读。",
+        unavailable: "负责人对话尚未建立。",
+        manager_pending: "负责人任务正在等待领取；领取后可在此继续讨论。",
+      } as Record<string, string>
+    )[issue.conversation?.reason ?? "unavailable"] || "正在读取负责人对话…"
+  );
+}
+function executionSummary(issue: IssueView | null): string {
+  const counts = new Map<string, number>();
+  for (const task of issue?.tasks ?? []) {
+    const state = task.execution?.state;
+    if (!state || ["idle", "completed", "cancelled"].includes(state)) continue;
+    const label =
+      (
+        {
+          unknown: "结果待核实",
+          queued: "等待执行",
+          starting: "正在启动",
+          recovering: "恢复中",
+          accepting: "独立验收中",
+          waiting_owner: "等待你处理",
+          paused: "已暂停执行",
+        } as Record<string, string>
+      )[state] ?? (task.execution?.role === "accept" ? "独立验收中" : "实施中");
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts].map(([label, count]) => `${count} 项${label}`).join(" · ") || "暂无活动执行";
+}
+function taskPriority(task: NonNullable<IssueView["tasks"]>[number]): number {
+  return ["completed", "cancelled"].includes(task.lifecycle) ? 1 : 0;
+}
+export function ReadError({ label, retry }: { label: string; retry(): void }) {
+  return (
+    <p role="status" className={styles.error}>
+      {label}。<button onClick={retry}>重新读取</button>
+    </p>
+  );
+}
+function Expandable({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
   return (
     <>
-      <h3>定义历史</h3>
-      <label>
-        版本
-        <input
-          type="number"
-          min={1}
-          max={issue.revision}
-          value={selection}
-          onChange={(event) => setSelection(event.target.value)}
-        />
-      </label>
-      {matching ? (
-        <article>
-          <h3>{value.plan.title}</h3>
-          <p>版本 {value.revision}</p>
-          <IssuePlanRead issue={value} showIntent />
+      <p className={open ? undefined : styles.clamp}>{text}</p>
+      {text.length > 100 && (
+        <button className={styles.textLink} onClick={() => setOpen(!open)}>
+          {open ? "收起" : "展开全文"}
+        </button>
+      )}
+    </>
+  );
+}
+function ChildIssues({
+  issue,
+  reads,
+  reading,
+  onSelect,
+  onCreate,
+  editable,
+}: {
+  issue: IssueView;
+  reads: Issues;
+  reading: IssueReadingState;
+  onSelect(id: string): void;
+  onCreate(): void;
+  editable: boolean;
+}) {
+  const read = useMemo(
+    () => reads.children(issue.issue_id, reading.childCursor(), true),
+    [reads, issue.issue_id, reading],
+  );
+  const state = useStore(read.state);
+  const [expanded, setExpanded] = useState(reading.children);
+  const [cursors, setCursors] = useState(reading.childCursors);
+  if (!state.value)
+    return state.error ? (
+      <ReadError label="子Issue读取失败" retry={() => void read.refresh()} />
+    ) : null;
+  if (!state.value.items?.length && cursors.length === 1)
+    return state.error ? (
+      <ReadError label="子Issue读取失败" retry={() => void read.refresh()} />
+    ) : null;
+  return (
+    <section className={styles.children}>
+      {state.error && (
+        <ReadError label="子Issue尚未取得最新状态" retry={() => void read.refresh()} />
+      )}
+      <div className={styles.sectionHead}>
+        <h2>子 Issue</h2>
+        <button className={styles.textLink} disabled={!editable} onClick={onCreate}>
+          ＋ 新建
+        </button>
+      </div>
+      <div>
+        {(state.value.items ?? []).slice(0, expanded ? undefined : 5).map((child) => (
+          <button
+            className={styles.child}
+            key={child.issue_id}
+            onClick={() => onSelect(child.issue_id)}
+          >
+            <span>{child.title}</span>
+            <span className={styles.muted}>
+              <AssigneeName assignee={child.assignee} />
+            </span>
+            <small>{issueStateLabel[child.state]}</small>
+          </button>
+        ))}
+      </div>
+      {(state.value.items?.length ?? 0) > 5 && !expanded && (
+        <button
+          className={styles.textLink}
+          onClick={() => {
+            setExpanded(true);
+            reading.expandChildren();
+          }}
+        >
+          查看全部子 Issue
+        </button>
+      )}
+      {expanded && cursors.length > 1 && (
+        <button
+          onClick={() => {
+            const previous = cursors.slice(0, -1);
+            setCursors(previous);
+            reading.saveChildCursors(previous);
+            reads.children(issue.issue_id, previous.at(-1), true);
+          }}
+        >
+          上一页子 Issue
+        </button>
+      )}
+      {expanded && state.value.more && (
+        <button
+          onClick={() => {
+            const next = [...cursors, state.value!.next!];
+            setCursors(next);
+            reading.saveChildCursors(next);
+            reads.children(issue.issue_id, state.value?.next, true);
+          }}
+        >
+          下一页子 Issue
+        </button>
+      )}
+    </section>
+  );
+}
+function IssueSources({ id, reads }: { id: string; reads: Issues }) {
+  const state = useStore(reads.context.state);
+  useEffect(() => {
+    void reads.openContext(id);
+  }, [reads, id]);
+  return (
+    <>
+      <h2>背景与原始输入</h2>
+      {state.error && <ReadError label="来源读取失败" retry={() => void reads.context.refresh()} />}
+      {!state.value && !state.error && <p>正在读取…</p>}
+      {state.value?.sources?.map((item) => (
+        <article className={styles.source} key={item.message_id}>
+          <p className={styles.muted}>
+            {item.author} · {new Date(item.created_at).toLocaleString("zh-CN")}
+          </p>
+          <Markdown text={item.body ?? ""} />
+          {item.attachments?.length ? (
+            <MessageAttachments attachments={item.attachments} />
+          ) : (
+            !!item.images?.length && <MessageImages images={item.images} />
+          )}
         </article>
-      ) : state.error ? (
-        <p role="status">
-          历史读取失败。<button onClick={() => void read.refresh()}>重新读取</button>
-        </p>
-      ) : (
-        <p className={styles.muted}>{valid ? "正在读取定义历史…" : "选择有效版本查看。"}</p>
+      ))}
+      {state.value && !state.value.sources?.length && <p>暂无已记录来源。</p>}
+      {state.value?.more && (
+        <button onClick={() => void reads.openContext(id, state.value?.next)}>更早来源</button>
       )}
     </>
   );

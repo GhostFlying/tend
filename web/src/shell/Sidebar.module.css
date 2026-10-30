@@ -144,3 +144,22 @@
   padding-top: 4px;
   border-top: 1px solid var(--border-soft);
 }
+
+.primaryNav {
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+}
+.primaryNav button {
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 6px;
+}
+.primaryNav button:hover {
+  background: var(--hover);
+}
+@media (max-width: 760px) {
+  .primaryNav {
+    display: none;
+  }
+}

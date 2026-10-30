@@ -124,6 +124,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/issues", s.issues)
 	mux.HandleFunc("GET /api/v1/issue-notification-settings", s.issueNotificationSettings)
 	mux.HandleFunc("GET /api/v1/issues/{id}", s.issue)
+	mux.HandleFunc("GET /api/v1/issues/{id}/activity", s.issueActivity)
+	mux.HandleFunc("GET /api/v1/issues/{id}/results", s.issueResults)
 	mux.HandleFunc("GET /api/v1/issues/{id}/context", s.issueContext)
 	mux.HandleFunc("GET /api/v1/issues/{id}/followups", s.issueFollowups)
 	mux.HandleFunc("GET /api/v1/issues/{id}/followups/{rule}/history", s.issueFollowupHistory)

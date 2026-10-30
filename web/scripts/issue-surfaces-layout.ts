@@ -1,6 +1,7 @@
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Approved Issue/Inbox flows against isolated API fixtures, never a live service.
+import { issueSidebar, openIssueAux, closeIssue } from "./issue-detail-helpers.ts";
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
@@ -506,6 +507,8 @@ const server = createServer(async (req, res) => {
   if (p.endsWith("/deliveries")) return json({ issue_id: issue.issue_id, items: [] });
   if (p.includes("/followups/") && p.endsWith("/history"))
     return json({ occurrences: [], revisions: [], more: false });
+  if (p.endsWith("/activity")) return json({ items: [], more: false, event_seq: seq });
+  if (p.endsWith("/results")) return json({ items: [], more: false });
   if (p.startsWith("/api/v1/issues/"))
     return json(
       p.endsWith("/context")
@@ -526,7 +529,13 @@ const server = createServer(async (req, res) => {
           }
         : p.endsWith("issue-imported")
           ? importedIssue
-          : issue,
+          : {
+              ...issue,
+              conversation: {
+                conversation_id: "work-item:issue-root",
+                can_send: issue.assignment_state === "active",
+              },
+            },
     );
   if (p === "/api/v1/next-actions")
     return json({
@@ -1277,11 +1286,11 @@ try {
     ]);
     await ownerBubble.getByRole("button", { name: "发布流程整理", exact: true }).click();
     assert.equal(new URL(page.url()).searchParams.get("issue"), "issue-root");
-    await page.getByText(/等待 runner 领取/).waitFor();
-    await page.getByRole("button", { name: "issue-manager", exact: true }).waitFor();
+    const pendingSide = await issueSidebar(page);
+    await pendingSide.getByText(/等待 runner 领取/).waitFor();
+    await pendingSide.getByRole("button", { name: "issue-manager", exact: true }).waitFor();
     await page.screenshot({ path: join(output, `manager-queued-${viewport.width}.png`) });
-    const pendingManagerDialog = page.getByRole("dialog", { name: "Issue详情", exact: true });
-    await pendingManagerDialog.getByRole("button", { name: "交接负责人", exact: true }).click();
+    const pendingManagerDialog = await openIssueAux(page, "交接负责人");
     await pendingManagerDialog
       .getByRole("combobox", { name: "交接给", exact: true })
       .selectOption("owner");
@@ -1292,7 +1301,11 @@ try {
       await pendingManagerDialog.getByRole("button", { name: "发起交接", exact: true }).isEnabled(),
     );
     await pendingManagerDialog.getByRole("button", { name: "返回Issue", exact: true }).click();
-    await page.getByRole("button", { name: "issue-manager", exact: true }).click();
+    await (
+      await issueSidebar(page)
+    )
+      .getByRole("button", { name: "issue-manager", exact: true })
+      .click();
     const managerDialog = page.getByRole("dialog", { name: "任务详情", exact: true });
     await managerDialog.getByText(/Issue 协调责任/).waitFor();
     await managerDialog.getByText("责任要求", { exact: true }).waitFor();
@@ -1306,14 +1319,12 @@ try {
     );
     await page.screenshot({ path: join(output, `manager-task-${viewport.width}.png`) });
     await managerDialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await closeIssue(page);
     await ownerBubble.getByRole("button", { name: "发布流程整理", exact: true }).click();
     // Subsequent owner-handoff scenarios use an already claimed manager.
     issue.manager!.host_id = "hosted";
     issue.manager!.state = "waiting";
-    await page
-      .getByRole("dialog", { name: "Issue详情", exact: true })
-      .getByRole("button", { name: "关闭详情", exact: true })
-      .click();
+    await closeIssue(page);
     writes.length = 0;
     if (mobile)
       await page
@@ -1326,21 +1337,17 @@ try {
     await page.getByRole("button", { name: "展开 补齐回滚文档", exact: true }).click();
     await page.getByRole("button", { name: "补齐失败示例", exact: true }).waitFor();
     await page.getByRole("button", { name: "发布流程整理", exact: true }).first().click();
-    const detail = page.getByRole("dialog", { name: "Issue详情", exact: true });
+    const detail = page;
     await detail.getByRole("heading", { name: "发布流程整理", exact: true }).waitFor();
     await page.screenshot({ path: join(output, `issue-${viewport.width}.png`) });
     const writesBeforeChat = writes.length;
-    await detail.getByRole("button", { name: "与负责人对话", exact: true }).click();
-    await page.getByRole("heading", { name: "发布流程整理", exact: true }).waitFor();
     await page
-      .getByText("讨论目标、规划与委派任务", { exact: true })
-      .waitFor({ state: mobile ? "attached" : "visible" });
+      .getByRole("region", { name: "Issue详情", exact: true })
+      .getByRole("textbox", { name: "消息", exact: true })
+      .waitFor();
     assert.equal(writes.length, writesBeforeChat);
     await page.screenshot({ path: join(output, `issue-conversation-${viewport.width}.png`) });
-    await page.getByRole("button", { name: "Issue ↗", exact: true }).click();
-    await detail.getByRole("button", { name: "编辑定义", exact: true }).waitFor();
-
-    await detail.getByRole("button", { name: "编辑定义", exact: true }).click();
+    await openIssueAux(page, "编辑定义");
     await detail
       .getByRole("textbox", { name: "范围", exact: true })
       .fill("只整理发布与回滚文档，不改运行中的任务约定。");
@@ -1356,7 +1363,13 @@ try {
     await detail.getByRole("textbox", { name: "标题", exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(output, `definition-${viewport.width}.png`) });
     await detail.getByRole("button", { name: "保存定义", exact: true }).click();
-    await detail.getByRole("button", { name: "编辑定义", exact: true }).waitFor();
+    await page
+      .getByRole("dialog", { name: "编辑Issue定义", exact: true })
+      .waitFor({ state: "hidden" });
+    await page
+      .getByRole("region", { name: "Issue详情", exact: true })
+      .getByRole("heading", { name: "发布流程整理", exact: true })
+      .waitFor();
     const update = writes.find((w) => w.operation === "issues.update")!;
     assert.equal(
       (update.payload as { plan: IssuePlan }).plan.scope,
@@ -1368,7 +1381,7 @@ try {
     ]);
     assert.deepEqual((update.payload as { plan: IssuePlan }).plan.stages, []);
     assert.equal(update.expected_control_revision, issue.revision - 1);
-    await detail.getByRole("button", { name: "跟进与交付", exact: true }).click();
+    await openIssueAux(page, "跟进与交付");
     await detail.getByText("此安排由时间约定管理。", { exact: true }).waitFor();
     assert.equal(await detail.getByRole("button", { name: "现在检查", exact: true }).count(), 1);
     const followupResponse = page.waitForResponse(
@@ -1386,8 +1399,7 @@ try {
       issue.assignment_epoch,
     );
     await page.screenshot({ path: join(output, `issue-followups-${viewport.width}.png`) });
-    await detail.getByRole("button", { name: "层级与任务", exact: true }).click();
-    await detail.getByRole("button", { name: "创建任务", exact: true }).click();
+    await openIssueAux(page, "创建任务");
     await detail.getByRole("textbox", { name: "标题", exact: true }).fill("补齐回滚入口");
     await detail.getByRole("textbox", { name: "目标", exact: true }).fill("记录可核对的回滚步骤。");
     await detail
@@ -1398,7 +1410,13 @@ try {
     await page.screenshot({ path: join(output, `task-requirements-${viewport.width}.png`) });
     await detail.getByRole("button", { name: "创建任务", exact: true }).click();
     await detail.getByRole("heading", { name: "任务已创建", exact: true }).waitFor();
-    assert.equal(await detail.getByRole("textbox").count(), 0);
+    assert.equal(
+      await page
+        .getByRole("dialog", { name: "创建任务", exact: true })
+        .getByRole("textbox")
+        .count(),
+      0,
+    );
     const taskWrite = writes.find((w) => w.operation === "issues.create_task")!;
     assert.deepEqual(
       (taskWrite.payload as { spec: { agent_selection: unknown } }).spec.agent_selection,
@@ -1408,7 +1426,12 @@ try {
     writes.length = 0;
     await detail.getByRole("button", { name: "返回Issue", exact: true }).click();
     taskQueued = true;
-    await detail.getByRole("button", { name: "查看任务详情", exact: true }).first().click();
+    await (
+      await issueSidebar(page)
+    )
+      .getByRole("button", { name: new RegExp(activeTask.title) })
+      .first()
+      .click();
     const taskDialog = page.getByRole("dialog", { name: "任务详情", exact: true });
     await taskDialog.getByRole("button", { name: "补充", exact: true }).click();
     await taskDialog.getByText("尚无执行记录。", { exact: true }).waitFor();
@@ -1493,6 +1516,7 @@ try {
     assert.equal(writes.filter((w) => w.operation === "control.set_mode").length, 2);
     writes.length = 0;
     await taskDialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await closeIssue(page);
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -1552,6 +1576,7 @@ try {
         .click();
     if (await page.getByRole("button", { name: "主 Agent", exact: true }).first().isVisible())
       await page.getByRole("button", { name: "主 Agent", exact: true }).first().click();
+    await page.evaluate(() => window.dispatchEvent(new Event("tend:main-agent")));
     await page.getByRole("button", { name: "来源", exact: true }).click();
     let source = page.getByRole("dialog", { name: "补充来源", exact: true });
     await source
@@ -1675,7 +1700,7 @@ try {
     );
 
     await page
-      .getByRole("dialog", { name: "Issue详情", exact: true })
+      .getByRole("region", { name: "Issue详情", exact: true })
       .getByRole("heading", { name: "从历史证据推进新发布", exact: true })
       .waitFor();
     await page.screenshot({ path: join(output, `archive-created-issue-${viewport.width}.png`) });
@@ -1697,10 +1722,7 @@ try {
     );
     assert(!JSON.stringify(newIssueWrite.payload).includes('"source_message_id":"old-report"'));
     assert.equal(writes.filter((w) => w.operation.startsWith("archive")).length, 0);
-    await page
-      .getByRole("dialog", { name: "Issue详情", exact: true })
-      .getByRole("button", { name: "关闭详情", exact: true })
-      .click();
+    await closeIssue(page);
     await page.evaluate(() => window.dispatchEvent(new Event("tend:main-agent")));
     await page.getByRole("heading", { name: "主 Agent", exact: true }).waitFor();
     await page.getByRole("button", { name: "来源", exact: true }).click();
@@ -1782,8 +1804,7 @@ try {
         .click();
     else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
     await page.getByRole("button", { name: "发布流程整理", exact: true }).first().click();
-    const handoffDialog = page.getByRole("dialog", { name: "Issue详情", exact: true });
-    await handoffDialog.getByRole("button", { name: "交接负责人", exact: true }).click();
+    const handoffDialog = await openIssueAux(page, "交接负责人");
     const customCategory = handoffDialog
       .getByRole("combobox", { name: "交接给", exact: true })
       .getByRole("option", { name: /custom-coordinator/ });
@@ -1810,7 +1831,7 @@ try {
     });
     await page.screenshot({ path: join(output, `handoff-unknown-${viewport.width}.png`) });
     await handoffDialog.getByRole("button", { name: "返回Issue", exact: true }).click();
-    await handoffDialog.getByRole("button", { name: "交接负责人", exact: true }).click();
+    await openIssueAux(page, "交接负责人");
     await handoffDialog.getByRole("button", { name: "核实原交接请求", exact: true }).waitFor();
     assert.equal(
       await handoffDialog.getByRole("textbox", { name: "交接说明", exact: true }).inputValue(),
@@ -1821,7 +1842,7 @@ try {
     await handoffDialog.getByRole("button", { name: "继续交接", exact: true }).waitFor();
     assert.equal(writes.filter((w) => w.operation === "issues.assign").length, 1);
     await page.reload();
-    await handoffDialog.getByRole("button", { name: "交接负责人", exact: true }).click();
+    await openIssueAux(page, "交接负责人");
     assert.equal(
       await handoffDialog.getByRole("combobox", { name: "交接给", exact: true }).inputValue(),
       "owner",
@@ -1832,10 +1853,10 @@ try {
     await page.screenshot({ path: join(output, `handoff-pending-reload-${viewport.width}.png`) });
     await handoffDialog.getByRole("button", { name: "继续交接", exact: true }).click();
     await handoffDialog.getByRole("button", { name: "返回Issue", exact: true }).click();
-    await handoffDialog.getByText("你", { exact: true }).waitFor();
+    await (await issueSidebar(page)).getByText("你", { exact: true }).waitFor();
     assert.equal(writes.filter((w) => w.operation === "issues.finish_assignment").length, 1);
 
-    await handoffDialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await closeIssue(page);
     action = {
       ...baseAttention,
       attention_id: "attention-action-file",

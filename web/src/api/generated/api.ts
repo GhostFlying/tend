@@ -85,6 +85,11 @@ export type DecisionEffect = "implement" | "accept" | "cancel" | "start_over";
 export type AgentKind = "claude" | "codex" | "traex";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueState".
+ */
+export type IssueState = "active" | "paused" | "cancelling" | "cancelled" | "closed";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueAssigneeKind".
  */
 export type IssueAssigneeKind = "owner" | "agent";
@@ -129,11 +134,6 @@ export type IssueFollowOnStatus = "open" | "resolved" | "transferred";
  * via the `definition` "IssueStageStatus".
  */
 export type IssueStageStatus = "planned" | "active" | "done" | "cancelled" | "retired";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueState".
- */
-export type IssueState = "active" | "paused" | "cancelling" | "cancelled" | "closed";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueWorkStatus".
@@ -280,6 +280,7 @@ export interface TendAPI {
   HostedAgentInventory?: HostedAgentInventory;
   InjectSourcePayload?: InjectSourcePayload;
   InterruptReplyPayload?: InterruptReplyPayload;
+  IssueActivityPage?: IssueActivityPage;
   IssueAgentConversation?: IssueAgentConversation;
   IssueAgentConversationPage?: IssueAgentConversationPage;
   IssueAssignmentPayload?: IssueAssignmentPayload;
@@ -301,6 +302,7 @@ export interface TendAPI {
   IssueNotificationSettings?: IssueNotificationSettings;
   IssuePage?: IssuePage;
   IssueRefreshDeliveryPayload?: IssueRefreshDeliveryPayload;
+  IssueResultPage?: IssueResultPage;
   IssueTranscriptBlock?: IssueTranscriptBlock;
   IssueTranscriptPage?: IssueTranscriptPage;
   IssueView?: IssueView;
@@ -352,6 +354,7 @@ export interface TendAPI {
   ToolSpec?: ToolSpec;
   UpdateAttentionPayload?: UpdateAttentionPayload;
   UpdateIssuePayload?: UpdateIssuePayload;
+  UpdateIssueProgressPayload?: UpdateIssueProgressPayload;
   UpdateIssueTaskPayload?: UpdateIssueTaskPayload;
   UpdateWorkItemChoicePayload?: UpdateWorkItemChoicePayload;
   WithdrawMessagePayload?: WithdrawMessagePayload;
@@ -585,12 +588,14 @@ export interface Principal {
  * via the `definition` "IssueView".
  */
 export interface IssueView {
+  ancestors?: IssueAncestor[];
   assignee: IssueAssignee;
   assignment_epoch: number;
   assignment_state: string;
   attentions?: AttentionPage;
   closure?: IssueClosure;
   context_revision?: number;
+  conversation?: IssueConversationBinding;
   created_at: number;
   deadlines?: IssueDeadline[];
   depends_on: string[] | null;
@@ -602,12 +607,22 @@ export interface IssueView {
   pending_handoff_id?: string;
   pending_reviews?: WorkItemCompletionReview[];
   plan: IssuePlan;
+  progress?: IssueProgress;
   revision: number;
   source_reviews?: IssueSourceReview[];
   state: IssueState;
   tasks?: IssueTaskSummary[];
   updated_at: number;
   work_status?: IssueWorkStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueAncestor".
+ */
+export interface IssueAncestor {
+  issue_id: string;
+  state: IssueState;
+  title: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -724,6 +739,15 @@ export interface UpgradeBinding {
   process_instance_id: string;
   release_id: string;
   upgrade_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueConversationBinding".
+ */
+export interface IssueConversationBinding {
+  can_send: boolean;
+  conversation_id?: string;
+  reason?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -894,6 +918,17 @@ export interface IssueStage {
   status: IssueStageStatus;
   task_ids?: string[];
   title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueProgress".
+ */
+export interface IssueProgress {
+  issue_revision: number;
+  next_step: string;
+  summary: string;
+  updated_at: number;
+  updated_by: IssueAssignee;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1961,118 +1996,41 @@ export interface InterruptReplyPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueAgentConversation".
+ * via the `definition` "IssueActivityPage".
  */
-export interface IssueAgentConversation {
-  agent_ref?: string;
-  conversation_id: string;
-  effort: string;
-  issue_id?: string;
-  kind: string;
-  last_message_at: number;
-  last_message_seq: number;
-  model: string;
-  preview: string;
-  revision: number;
-  status: string;
-  title: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueAgentConversationPage".
- */
-export interface IssueAgentConversationPage {
-  items: IssueAgentConversation[] | null;
-  next?: string;
-  runtime_available: boolean;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueAssignmentPayload".
- */
-export interface IssueAssignmentPayload {
-  assignee: IssueAssignee;
-  expected_assignment_epoch: number;
-  reason: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueBlocker".
- */
-export interface IssueBlocker {
-  code: string;
-  object_id: string;
-  request_id?: string;
-  revision?: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueContextReview".
- */
-export interface IssueContextReview {
-  confirmed_fact_ids?: string[];
-  context_revision: number;
-  expected_assignment_epoch: number;
-  retired_fact_ids?: string[];
-  sources: LogicalTurnReview[] | null;
-  summary: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "LogicalTurnReview".
- */
-export interface LogicalTurnReview {
-  association_revision: number;
-  content_revision: number;
-  message_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueContextView".
- */
-export interface IssueContextView {
-  coordination_state: string;
-  coverage: string;
-  dispatch_blockers: ContextBlocker[] | null;
-  dispatch_ready: boolean;
-  facts: IssueContextFact[] | null;
-  gaps: string;
-  issue_id: string;
+export interface IssueActivityPage {
+  event_seq: number;
+  items: IssueActivityEntry[] | null;
   more: boolean;
-  next?: number;
-  prepared: boolean;
-  revision: number;
-  sources: IssueConversationItem[] | null;
-  sync_status: string;
-  watermark: number;
+  next_before?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "ContextBlocker".
+ * via the `definition` "IssueActivityEntry".
  */
-export interface ContextBlocker {
-  code: string;
-  control_revision?: number;
-  message: string;
-  object_id: string;
-  revision: number;
-  spec_version?: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueContextFact".
- */
-export interface IssueContextFact {
-  attribution: string;
-  body: string;
-  fact_id: string;
+export interface IssueActivityEntry {
+  artifact_id?: string;
+  author: string;
+  block?: IssueTranscriptBlock;
+  created_at: number;
+  id: string;
   issue_id?: string;
   kind: string;
-  needs_review: boolean;
-  project?: string;
-  scope: string;
-  source_message_id: string;
-  supersedes?: string;
+  position: number;
+  task_id?: string;
+  title?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueTranscriptBlock".
+ */
+export interface IssueTranscriptBlock {
+  items: IssueConversationItem[] | null;
+  more: boolean;
+  next_seq?: number;
+  notice_only?: boolean;
+  position: number;
+  trigger: IssueConversationItem;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2211,6 +2169,121 @@ export interface ToolUseView {
   status: ToolStatus;
   turn_id: string;
   updated_at: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueAgentConversation".
+ */
+export interface IssueAgentConversation {
+  agent_ref?: string;
+  conversation_id: string;
+  effort: string;
+  issue_id?: string;
+  kind: string;
+  last_message_at: number;
+  last_message_seq: number;
+  model: string;
+  preview: string;
+  revision: number;
+  status: string;
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueAgentConversationPage".
+ */
+export interface IssueAgentConversationPage {
+  items: IssueAgentConversation[] | null;
+  next?: string;
+  runtime_available: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueAssignmentPayload".
+ */
+export interface IssueAssignmentPayload {
+  assignee: IssueAssignee;
+  expected_assignment_epoch: number;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueBlocker".
+ */
+export interface IssueBlocker {
+  code: string;
+  object_id: string;
+  request_id?: string;
+  revision?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextReview".
+ */
+export interface IssueContextReview {
+  confirmed_fact_ids?: string[];
+  context_revision: number;
+  expected_assignment_epoch: number;
+  retired_fact_ids?: string[];
+  sources: LogicalTurnReview[] | null;
+  summary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LogicalTurnReview".
+ */
+export interface LogicalTurnReview {
+  association_revision: number;
+  content_revision: number;
+  message_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextView".
+ */
+export interface IssueContextView {
+  coordination_state: string;
+  coverage: string;
+  dispatch_blockers: ContextBlocker[] | null;
+  dispatch_ready: boolean;
+  facts: IssueContextFact[] | null;
+  gaps: string;
+  issue_id: string;
+  more: boolean;
+  next?: number;
+  prepared: boolean;
+  revision: number;
+  sources: IssueConversationItem[] | null;
+  sync_status: string;
+  watermark: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ContextBlocker".
+ */
+export interface ContextBlocker {
+  code: string;
+  control_revision?: number;
+  message: string;
+  object_id: string;
+  revision: number;
+  spec_version?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextFact".
+ */
+export interface IssueContextFact {
+  attribution: string;
+  body: string;
+  fact_id: string;
+  issue_id?: string;
+  kind: string;
+  needs_review: boolean;
+  project?: string;
+  scope: string;
+  source_message_id: string;
+  supersedes?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2477,15 +2550,26 @@ export interface IssueRefreshDeliveryPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueTranscriptBlock".
+ * via the `definition` "IssueResultPage".
  */
-export interface IssueTranscriptBlock {
-  items: IssueConversationItem[] | null;
+export interface IssueResultPage {
+  items: IssueResult[] | null;
   more: boolean;
-  next_seq?: number;
-  notice_only?: boolean;
-  position: number;
-  trigger: IssueConversationItem;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueResult".
+ */
+export interface IssueResult {
+  acceptances: AcceptanceView[] | null;
+  artifact: ArtifactView;
+  created_at: number;
+  generation: number;
+  run_id: string;
+  spec_version: number;
+  task_id: string;
+  title: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3429,6 +3513,15 @@ export interface IssueTaskDisposition {
   reason: string;
   spec_version: number;
   task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdateIssueProgressPayload".
+ */
+export interface UpdateIssueProgressPayload {
+  expected_assignment_epoch: number;
+  next_step: string;
+  summary: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

@@ -521,7 +521,7 @@ function Artifacts({
     </>
   );
 }
-function ArtifactRef({ value }: { value: unknown }) {
+export function ArtifactRef({ value }: { value: unknown }) {
   if (value && typeof value === "object") {
     const object = value as Record<string, unknown>;
     if (Array.isArray(object.mounts)) {

@@ -1,6 +1,7 @@
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Unknown writes reconcile only against later facts for the same delivery.
+import { openIssueAux, openIssueDefinition, closeIssue } from "./issue-detail-helpers.ts";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -9,7 +10,7 @@ if (output) await mkdir(output, { recursive: true });
 import type { ServerResponse } from "node:http";
 import { createServer } from "vite";
 import react from "@vitejs/plugin-react";
-import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import type { Envelope, IssueView, IssueDeliveryObservation } from "../src/api/generated/api.ts";
 
 const id = "wi_01M5M3ME31875GDA8F7P5XTD74";
@@ -99,6 +100,8 @@ const server = await createServer({
             return;
           }
           if (path === `/api/v1/issues/${id}`) return json(res, item);
+          if (path.endsWith("/activity") || path.endsWith("/results"))
+            return json(res, { items: [], more: false, event_seq: 0 });
           if (path === "/api/v1/issues")
             return json(res, {
               items: [{ ...item, title: item.plan.title, project: item.plan.project }],
@@ -197,8 +200,8 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
   await page.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
-  const panel = page.getByRole("dialog", { name: "Issue详情" });
-  await panel.getByRole("button", { name: "跟进与交付", exact: true }).click();
+  const panel = page;
+  await openIssueAux(page, "跟进与交付");
   const button = panel.getByRole("button", { name: "重新观察交付", exact: true });
   await button.click();
   const unknown = panel.getByText("刷新请求尚未确认，等待账本事件或连接恢复；不会自动重发。", {
@@ -213,12 +216,12 @@ try {
   }
 
   // A fresh read and unrelated facts must leave the original uncertainty intact.
-  await panel.getByRole("button", { name: "概览", exact: true }).click();
+  await openIssueDefinition(page);
   item.plan.intent = "Unrelated plan update";
   publish();
-  await panel.getByRole("button", { name: "概览", exact: true }).click();
-  await panel.getByText(`目标：${item.plan.intent}`, { exact: true }).waitFor();
-  await panel.getByRole("button", { name: "跟进与交付", exact: true }).click();
+  await openIssueDefinition(page);
+  await panel.getByText(item.plan.intent, { exact: true }).waitFor();
+  await openIssueAux(page, "跟进与交付");
   assert(await button.isDisabled());
   await unknown.waitFor();
   observations.push({
@@ -230,9 +233,9 @@ try {
   });
   item.plan.intent = "Another delivery changed";
   publish();
-  await panel.getByRole("button", { name: "概览", exact: true }).click();
-  await panel.getByText(`目标：${item.plan.intent}`, { exact: true }).waitFor();
-  await panel.getByRole("button", { name: "跟进与交付", exact: true }).click();
+  await openIssueDefinition(page);
+  await panel.getByText(item.plan.intent, { exact: true }).waitFor();
+  await openIssueAux(page, "跟进与交付");
   assert(await button.isDisabled());
 
   // Reserving a query is not a completed observation.
@@ -289,9 +292,9 @@ try {
     const terminalPage: Page = await terminalContext.newPage();
     terminalPage.setDefaultTimeout(10000);
     await terminalPage.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
-    const details: Locator = terminalPage.getByRole("dialog", { name: "Issue详情" });
-    await details.getByRole("button", { name: "跟进与交付", exact: true }).click();
-    const refresh: Locator = details.getByRole("button", { name: "重新观察交付", exact: true });
+    const details = terminalPage;
+    await openIssueAux(terminalPage, "跟进与交付");
+    const refresh = details.getByRole("button", { name: "重新观察交付", exact: true });
     const before: number = requests.size;
     await refresh.click();
     await details.getByRole("button", { name: "核对刷新请求", exact: true }).waitFor();
@@ -311,7 +314,7 @@ try {
     // Closing the dialog must not discard the original operation.
     await details.getByRole("button", { name: "关闭详情" }).click();
     await terminalPage.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
-    await details.getByRole("button", { name: "跟进与交付", exact: true }).click();
+    await openIssueAux(terminalPage, "跟进与交付");
     if (output)
       await details
         .getByRole("button", { name: "核对刷新请求", exact: true })
@@ -363,9 +366,15 @@ try {
     .getByRole("button", { name: "Linked task", exact: true })
     .click();
   await taskDrawer.getByRole("button", { name: "Refresh reconciliation", exact: true }).click();
-  const issueDrawer = mobilePage.getByRole("dialog", { name: "Issue详情", exact: true });
+  const issueDrawer = mobilePage.getByRole("region", { name: "Issue详情", exact: true });
   await issueDrawer.getByRole("heading", { name: item.plan.title, exact: true }).waitFor();
-  await issueDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await closeIssue(mobilePage);
+  if (await taskDrawer.isVisible()) {
+    await taskDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await taskDrawer.waitFor({ state: "hidden" });
+  }
+  // Closing a task returns to its Issue; leave that page to recover main's draft.
+  if (await issueDrawer.isVisible()) await closeIssue(mobilePage);
   await composer.click({ trial: true });
   assert.equal(await composer.inputValue(), "Existing unsent constraint");
   await mobilePage

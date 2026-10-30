@@ -49,6 +49,10 @@ jobs:
         env:
           TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-issue-surfaces
         run: pnpm --dir web test:issue-surfaces-layout
+      - name: Issue detail conversation regression
+        env:
+          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-issue-detail
+        run: pnpm --dir web test:issue-detail-layout
       - name: token usage and rollout regression
         run: pnpm --dir web test:usage
       - name: cross-compile

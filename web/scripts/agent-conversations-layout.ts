@@ -1,6 +1,7 @@
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Synthetic conversations exercise UI routing; no native harness or deployed API.
+import { closeIssue } from "./issue-detail-helpers.ts";
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
@@ -29,6 +30,7 @@ const associations = {
 };
 const conversations = names.map((title, i) => ({
   conversation_id: `work-item:work-${i}`,
+  kind: "issue",
   issue_id: `work-${i}`,
   title,
   revision: 1,
@@ -185,6 +187,8 @@ const server = createServer(async (req, res) => {
     );
   if (p.endsWith("/associations")) return json(res, associations);
   if (p === "/api/v1/inbox" || p === "/api/v1/next-actions") return json(res, { items: [] });
+  if (p.endsWith("/activity") || p.endsWith("/results") || p.endsWith("/deliveries"))
+    return json(res, { items: [], more: false, event_seq: 1 });
   if (p === "/api/v1/issues")
     return json(res, {
       items: names.map((title, i) => ({
@@ -203,7 +207,12 @@ const server = createServer(async (req, res) => {
     if (index >= 0)
       return json(res, {
         issue_id: `work-${index}`,
-        plan: { title: names[index], project: "", intent: "" },
+        plan: { title: names[index], project: "", intent: "", stages: [] },
+        conversation: { conversation_id: conversations[index]!.conversation_id, can_send: true },
+        created_at: 1,
+        updated_at: 1,
+        depends_on: [],
+        tasks: [],
         state: "active",
         revision: 1,
         assignment_epoch: 1,
@@ -490,16 +499,55 @@ try {
     await page.getByRole("button", { name: "会话 ▾" }).click();
     await page.getByRole("dialog", { name: "会话" }).waitFor();
     await page.screenshot({ path: join(output, `drawer-${width}.png`), fullPage: true });
+    let releaseSelection!: () => void;
+    let selectionArrived!: () => void;
+    const selectionHeld = new Promise<void>((resolve) => {
+      releaseSelection = resolve;
+    });
+    const selectionRequested = new Promise<void>((resolve) => {
+      selectionArrived = resolve;
+    });
+    const selectionRoute = `**/api/v1/agent-conversations/${encodeURIComponent(conversations[0]!.conversation_id)}?*`;
+    await page.route(selectionRoute, async (route) => {
+      selectionArrived();
+      await selectionHeld;
+      await route.fulfill({ json: conversations[0] });
+    });
     await page
       .getByRole("dialog", { name: "会话" })
       .getByRole("button")
       .filter({ hasText: names[0]! })
       .click();
-    const backgroundInput = page.getByPlaceholder(new RegExp(names[0]!));
+    await selectionRequested;
+    const refreshedShell = page.waitForResponse((response) =>
+      response.url().endsWith("/api/v1/snapshot"),
+    );
+    for (const stream of streams)
+      stream.write(
+        `id: 2\nevent: ledger\ndata: ${JSON.stringify({ event_seq: 2, kind: "issue.updated", object_type: "issue", object_id: "work-0", created_at: new Date().toISOString() })}\n\n`,
+      );
+    await refreshedShell;
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    releaseSelection();
+
+    const backgroundInput = page
+      .getByRole("region", { name: "Issue详情", exact: true })
+      .getByRole("textbox", { name: "消息", exact: true });
     await backgroundInput.waitFor();
-    assert((await backgroundInput.getAttribute("placeholder"))?.includes(names[0]!));
+    await page.unroute(selectionRoute);
+    assert.equal(new URL(page.url()).searchParams.get("issue"), "work-0");
+    assert.equal(await page.getByRole("dialog", { name: "会话", exact: true }).count(), 0);
     assert.equal(await backgroundInput.inputValue(), "");
     await backgroundInput.fill("后台独立草稿");
+    await page
+      .locator("summary")
+      .filter({ hasText: /^会话设置$/ })
+      .click();
     await page.getByRole("button", { name: "上下文用量 42%" }).click();
     await page.getByRole("dialog", { name: "上下文用量", exact: true }).waitFor();
     const box = await page.getByRole("dialog", { name: "上下文用量", exact: true }).boundingBox();
@@ -509,10 +557,7 @@ try {
       .getByRole("dialog", { name: "上下文用量", exact: true })
       .getByRole("button", { name: "关闭", exact: true })
       .click();
-    await page
-      .getByRole("navigation", { name: "Agent 切换" })
-      .getByRole("button", { name: "主 Agent", exact: true })
-      .click();
+    await closeIssue(page);
     assert.equal(
       await page.getByRole("textbox", { name: "消息", exact: true }).inputValue(),
       "主会话草稿保留",
@@ -525,7 +570,7 @@ try {
     associations.items = associations.items.slice(0, 2);
     for (const stream of streams)
       stream.write(
-        `id: 2\nevent: ledger\ndata: ${JSON.stringify({ event_seq: 2, kind: "conversation.associations_changed", object_type: "message", object_id: owner.message_id, created_at: new Date().toISOString() })}\n\n`,
+        `id: 3\nevent: ledger\ndata: ${JSON.stringify({ event_seq: 3, kind: "conversation.associations_changed", object_type: "message", object_id: owner.message_id, created_at: new Date().toISOString() })}\n\n`,
       );
     await page.waitForFunction(
       () =>

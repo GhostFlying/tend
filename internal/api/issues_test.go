@@ -193,6 +193,47 @@ func TestIssueOwnerHTTPNoStageWorkerAcceptanceReviewAndContractRecovery(t *testi
 	if len(view.PendingReviews) != 1 || view.Tasks[0].Lifecycle != protocol.TaskCompleted {
 		t.Fatalf("review=%+v", view)
 	}
+	// The Issue index must keep exact artifact/spec acceptance, never task-wide success.
+	var indexed protocol.IssueResultPage
+	if status := e.do("GET", "/api/v1/issues/"+issue.IssueID+"/results", token, nil, &indexed); status != http.StatusOK || len(indexed.Items) != 1 || indexed.Items[0].SpecVersion != 2 || len(indexed.Items[0].Acceptances) != 1 || indexed.Items[0].Acceptances[0].ArtifactID != indexed.Items[0].Artifact.ArtifactID || indexed.Items[0].Acceptances[0].Verdict != protocol.VerdictPassed {
+		t.Fatal(status, indexed)
+	}
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		for _, kind := range []string{"run.unknown", "run.heartbeat"} {
+			if _, err := tx.InsertEvent(t.Context(), store.EventRow{EventID: "test_" + kind, Source: "runner", ObjectType: "run", ObjectID: indexed.Items[0].RunID, Kind: kind, BodyJSON: "{}", CreatedAt: e.clock.Now().UnixMilli()}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var activity protocol.IssueActivityPage
+	if status := e.do("GET", "/api/v1/issues/"+issue.IssueID+"/activity", token, nil, &activity); status != http.StatusOK {
+		t.Fatal(status)
+	}
+	found := false
+	unknown := false
+	for _, entry := range activity.Items {
+		if entry.Kind == "run.heartbeat" {
+			t.Fatal("heartbeat leaked into business activity", entry)
+		}
+		if entry.Kind == "run.unknown" {
+			unknown = entry.TaskID == indexed.Items[0].TaskID && entry.Title != ""
+		}
+		if entry.ArtifactID == indexed.Items[0].Artifact.ArtifactID {
+			found = true
+			if entry.TaskID != task.TaskID {
+				t.Fatal(entry)
+			}
+		}
+	}
+	if !unknown {
+		t.Fatal("unknown execution fact omitted", activity)
+	}
+	if !found {
+		t.Fatal("accepted result missing from activity", activity)
+	}
 	review := e.envelope("issues.review_completions", protocol.Target{Type: "issue", ID: issue.IssueID}, &view.Revision, protocol.ReviewIssueCompletionsPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: view.AssignmentEpoch}, Reviews: []protocol.CompletionReviewAcknowledgement{{EventID: view.PendingReviews[0].EventID, Reason: "Owner checked accepted delivery"}}})
 	issue = issueHTTP(t, e, token, review)
 	if issue.Revision != view.Revision+1 {

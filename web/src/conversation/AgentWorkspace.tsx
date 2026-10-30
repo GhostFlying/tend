@@ -1,6 +1,6 @@
 import { NewConsultation } from "./NewConsultation.tsx";
 import { Close } from "../shell/icons.tsx";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type {
   IssueAgentConversation as AgentConversation,
@@ -11,10 +11,10 @@ import type {
 import type { ReadState } from "../workitems/live.ts";
 import { ServicesContext, useServices } from "../app/services.tsx";
 import { notify } from "../app/notice.ts";
-import { LiveData } from "../live/data.ts";
-import { SendQueue } from "../queue/sendQueue.ts";
+import { ConversationSessionProvider, ConversationSessionsContext } from "./session.tsx";
+
 import { openOutbox } from "../queue/outbox.ts";
-import { ComposerDraft } from "./draft.ts";
+
 import { Chat } from "../shell/Chat.tsx";
 import styles from "./Agents.module.css";
 
@@ -32,6 +32,7 @@ export function AgentWorkspace({
   onIssue(id: string): void;
 }) {
   const services = useServices();
+  const sessions = useContext(ConversationSessionsContext);
   const [selected, setSelected] = useState("main");
   const selection = useRef({ revision: 0 });
   const listRevision = useRef(0);
@@ -80,6 +81,11 @@ export function AgentWorkspace({
         )
         .then((c) => {
           if (request !== selection.current.revision) return;
+          if (c.issue_id) {
+            setOpen(false);
+            onIssue(c.issue_id);
+            return;
+          }
           setVisited((v) =>
             v.some((x) => x.conversation_id === id)
               ? v.map((x) => (x.conversation_id === id ? c : x))
@@ -92,7 +98,7 @@ export function AgentWorkspace({
           if (request === selection.current.revision) notify(String(e), "warn");
         });
     },
-    [services.client],
+    [services.client, onIssue],
   );
   useEffect(() => {
     const requests = selection.current;
@@ -126,8 +132,7 @@ export function AgentWorkspace({
             const c = await services.client.get<AgentConversation>(
               `/api/v1/agent-conversations/${encodeURIComponent(id)}?projection=issues`,
             );
-            if (active)
-              setVisited((old) => (old.some((x) => x.conversation_id === id) ? old : [...old, c]));
+            if (active) void sessions?.get(c.conversation_id).start();
           } catch (e) {
             if (active) notify(`后台待发送消息仍保留，尚未恢复：${String(e)}`, "warn");
           }
@@ -139,7 +144,7 @@ export function AgentWorkspace({
     return () => {
       active = false;
     };
-  }, [services.client, connection.status]);
+  }, [services.client, connection.status, sessions]);
   const shared = {
     ...services,
     selectConversation: select,
@@ -309,59 +314,12 @@ function BackgroundConversation({
   connection: Connection;
   visible: boolean;
 }) {
-  const parent = useServices();
-  const id = c.conversation_id;
-  const live = useMemo(() => new LiveData(parent.client, id), [parent.client, id]);
-  const draft = useMemo(() => new ComposerDraft(id), [id]);
-  const [queue, setQueue] = useState<SendQueue | null>(null);
-  const cleanup = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(cleanup.current);
-    let active = true;
-    void openOutbox()
-      .then((outbox) => SendQueue.open({ outbox, sender: parent.client, conversationID: id }))
-      .then((q) => {
-        if (active) {
-          setQueue(q);
-          void q.resume();
-        }
-      })
-      .catch((e) => notify(String(e), "warn"));
-    return () => {
-      active = false;
-      cleanup.current = setTimeout(() => {
-        void live.stop();
-        void draft.close();
-      }, 0);
-    };
-  }, [id, live, parent.client, draft]);
-  useEffect(() => {
-    if (connection.status !== "online") return;
-    void queue?.resume();
-    if (!visible) return;
-    void live.reload();
-    const timer = setInterval(() => void live.reload(), 3000);
-    return () => clearInterval(timer);
-  }, [live, visible, connection.status, queue]);
+  if (c.issue_id) return null;
   return (
-    <ServicesContext
-      value={{
-        ...parent,
-        live,
-        draft,
-        queue,
-        conversation: {
-          id,
-          title: c.title,
-          workItemID: c.issue_id ?? "",
-          kind: c.kind,
-          ...(c.agent_ref ? { agentRef: c.agent_ref } : {}),
-        },
-      }}
-    >
+    <ConversationSessionProvider conversation={c} connection={connection} visible={visible}>
       <section className={styles.session} hidden={!visible}>
         <Chat connection={connection} visible={visible} />
       </section>
-    </ServicesContext>
+    </ConversationSessionProvider>
   );
 }

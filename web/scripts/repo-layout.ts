@@ -3,6 +3,7 @@ import { issueBoardFixture } from "./issue-fixture.ts";
 import { issuePage, issueView } from "./issue-fixture.ts";
 // Real Chromium regression against the actual app and a generic owner API fixture.
 // Output is optional and must live outside the repository.
+import { closeIssue } from "./issue-detail-helpers.ts";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -142,6 +143,8 @@ const server = await createServer({
               fail ? 500 : 200,
             );
           }
+          if (path.endsWith("/activity") || path.endsWith("/results"))
+            return json(res, { items: [], more: false, event_seq: 0 });
           if (path === "/api/v1/issues")
             return json(
               res,
@@ -495,11 +498,11 @@ try {
       .getByRole("button", { name: "所属Issue：Mobile work item ›", exact: true })
       .first()
       .click();
-    const parentDetail = page.getByRole("dialog", { name: "Issue详情", exact: true });
+    const parentDetail = page.getByRole("region", { name: "Issue详情", exact: true });
     await parentDetail
       .getByRole("heading", { name: "Sample ongoing Issue", exact: true })
       .waitFor();
-    await parentDetail.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await closeIssue(page);
     const ended = executions.getByRole("tab", { name: "已结束", exact: true });
     await ended.focus();
     await page.keyboard.press("Enter");

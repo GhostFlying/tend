@@ -8,7 +8,9 @@ import type {
   IssueState,
   IssueView,
   IssueNotificationSettings,
+  IssueResultPage,
 } from "../api/generated/api.ts";
+import { IssueActivityRead } from "./activity.ts";
 import type { Reader } from "../live/data.ts";
 import { WorkItemRead } from "../workitems/live.ts";
 import { IssueBoardData } from "./boardData.ts";
@@ -35,6 +37,8 @@ export function issuePagePath(filter: IssueFilter = {}): string {
 export class Issues {
   readonly notificationSettings: WorkItemRead<IssueNotificationSettings>;
   readonly board: IssueBoardData;
+  readonly activity: IssueActivityRead;
+  readonly results: WorkItemRead<IssueResultPage>;
   readonly list: WorkItemRead<IssuePage>;
   readonly detail: WorkItemRead<IssueView>;
   readonly history: WorkItemRead<IssueView>;
@@ -47,6 +51,8 @@ export class Issues {
   constructor(private readonly api: Reader) {
     this.notificationSettings = new WorkItemRead(api);
     this.board = new IssueBoardData(api);
+    this.activity = new IssueActivityRead(api);
+    this.results = new WorkItemRead(api);
     this.list = new WorkItemRead(api);
     this.detail = new WorkItemRead(api);
     this.history = new WorkItemRead(api);
@@ -73,6 +79,12 @@ export class Issues {
 
   open(id: string): Promise<void> {
     return this.detail.open(`/api/v1/issues/${encodeURIComponent(id)}`);
+  }
+
+  openResults(id: string, after = ""): Promise<void> {
+    return this.results.open(
+      `/api/v1/issues/${encodeURIComponent(id)}/results${after ? `?after=${encodeURIComponent(after)}` : ""}`,
+    );
   }
 
   openHistory(id: string, revision: number): Promise<void> {
@@ -116,6 +128,8 @@ export class Issues {
   private reads() {
     return [
       this.notificationSettings,
+      this.activity,
+      this.results,
       this.list,
       this.detail,
       this.history,
@@ -137,6 +151,6 @@ export class Issues {
   stop(): void {
     this.board.close();
     for (const read of this.reads()) read.close();
-    this.childReads.clear();
+    // Reopening must preserve handles retained by subscribed React surfaces.
   }
 }

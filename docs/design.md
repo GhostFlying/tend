@@ -131,6 +131,7 @@
 | D125 | Attention 的 decision/action/information 与 assignment 分离，chat/Inbox/detail 共用身份，读取或归档不回答。手动来源注入先行，无飞书连接器；next action 与 deadline 保留来源，默认到期前 24 小时/到期提醒 main。Task/child 结果、owner 答复与期限明确路由到责任 manager/parent/main，复用 outbox/followup/batch，无变化静默，不增加定时器或巡逻 Agent。P5 接通稳定 Attention/原 decision 回答、当前责任人接续及 owner 人工动作确认；information 不增 ack 义务，不引入 future-dispatch/通用替换链。Deadline 复用单一 followup sweep/occurrence，具名 main 的窄 task rating 独立于用户动作与 Issue 规划顺序。owner 当前命令即有效确认，main 转录保留真实未撤回来源；期限修改同时受原有性质约束，停机不补发过时 near，关联 Attention 的行动只沿原对象收尾。见 docs/issue-agent-design.md、docs/plans/attention-planner.md。 | P5 正式五项 finding 修正独立复核、完整检查和交叉编译通过；PR #168 CI 全通过，rebase 合入 c54ee29b。最终 information UI 与关闭引用接点另片核验，生产未部署 |
 | D126 | 旧账本一致性只读离线归档加新空业务账本，取代 D113 及 mandatory-message-context 部署计划中删除历史、不保留归档/恢复材料的安排。历史迁移不改写，archive reader 不走正常 store.Open 或服务循环；manifest 与原件独立校验，unknown 阻止切换。仅显式导入静态设置，新 deployment identity、runner journal/凭据隔离；已有新副作用后回退先对账。UI 先 Image Gen 设计、独立 xhigh review、用户确认再编码；分批 PR 不中途部署，完整后受控发布与真实 E2E。见 docs/issue-agent-design.md、docs/plans/issue-agent-refactor.md、docs/plans/offline-ledger-archive.md、docs/plans/archive-owner-api.md。 | P8 旧固定完整检查和交叉编译通过；正式 CLI 两项实际准入 finding 已修复并通过真实 red/green、定向 race/vet。最终修正组合检查/CI、线上归档切换及生产部署待完成 |
 | D128 | Issue manager 改为真实的 issue_manager task，由 main/owner 按 category 发布，runner 首次领取时原子更新具体负责人。每轮共用 claim/租约/槽位/journal，等待释放槽位；责任按 Issue 收尾/交接结束，不独立验收管理任务。Codex/Traex app-server 承载，main/consultation 保留 host。协议 2/1、配置格式 2、保留账本受控迁移，unknown 先对账。修订 D122 的本机 manager 执行位置及 D123 的 manager 库存/领取方式。详见 docs/plans/runner-issue-managers.md。 | 实施中，未发布 |
+| D129 | Issue 完整详情页统一负责人对话、当前进展、子项与交付，原执行及验收会话保持独立；摘要按 Issue revision 留存，活动／结果只读投影沿原账本。见 docs/plans/issue-detail-conversation.md。 | 已实现 |
 | D130 | App 业务测试每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移及历史库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
@@ -396,3 +397,6 @@ D63/D66 named TraeX 选择沿既有 Orca Trae TUI 路径传递精确 model/effor
 状态与审计即时入账，给当前 Issue Agent 的通知按最后一次实际变更防抖，默认三分钟；系统设置可选立即或一至三十分钟。窗口持久化，拖回起始状态不通知，Agent 自身更新不自唤醒；沿原具名管理会话/background/outbox，保留冻结输入与 unknown 回执对账。追加迁移不回写历史、不触发迁移通知、不改变 runner wire。布局依据已批准稿，样式复用当前 token 与 shell。见 [实施计划](plans/issue-kanban.md)。
 
 可撤销的状态通知使用独立合并组，不吞掉首次接手等原有唤醒；负责人变成人时不转送个人规划会话，仍保留取消与当前负责人准入语义。项目筛选保留可输入方式，使已有 Issue 所属的停用项目仍可访问。
+## D129：Issue 详情与负责人对话统一
+
+Issue 默认作为应用内完整详情页，保留全局导航与原 query 链接。主栏突出 owner 待处理、本项负责人维护的进展／下一步、直接子项、讨论和交付结果；任务执行、来源、跟进及历史按需查看。负责人会话为固定入口，worker 实施和独立验收会话仍独立；服务端返回实际逻辑会话身份，GET 不创建会话。摘要独立保存不可变 revision，CAS／assignment epoch／request 去重与事件原子提交；历史投影不混入当前事实。活动和交付索引只读取原账本，保留作者及 artifact／spec／验收身份，不推断责任完成。计划见 [Issue 详情统一](plans/issue-detail-conversation.md)。
