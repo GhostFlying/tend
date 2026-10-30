@@ -575,6 +575,11 @@ try {
     assert.equal(await history.getByText("当前完成条件V2", { exact: true }).count(), 0);
     await page.screenshot({ path: join(output, `history-full-${width}.png`) });
     await closeIssue(page);
+    await title.waitFor({ state: "visible" });
+    await page.waitForFunction(
+      (element) => element === document.activeElement,
+      await title.elementHandle(),
+    );
     assert(await title.evaluate((el) => el === document.activeElement));
     await filter.fill("docs");
     await board.getByLabel("显示已结束").check();
