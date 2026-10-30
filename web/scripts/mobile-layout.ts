@@ -1,3 +1,4 @@
+import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 import { issuePage, issueView } from "./issue-fixture.ts";
 // Exercise the built app with an isolated owner API, never a deployed server.
@@ -33,7 +34,9 @@ const initialHosts = () => [host("Example Alpha"), host("Example Beta", false, t
 let snapshot: Snapshot = {
   event_seq: 1,
   tasks: [],
-  projects: [],
+  projects: [
+    { project: "unrelated", title: "unrelated", weight: 1, queued: 0, open_runs: 0, open_tasks: 0 },
+  ],
   hosts: initialHosts(),
   queue: [],
   decisions: [],
@@ -66,7 +69,7 @@ const server = createServer(async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const json = (data: unknown) => {
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify(data));
+    res.end(JSON.stringify(issueBoardFixture(res.req.url, data)));
   };
   if (path.startsWith("/api/")) reads.push(url.pathname + url.search);
   if (path === "/api/v1/session")
@@ -106,6 +109,8 @@ const server = createServer(async (req, res) => {
   if (path.endsWith("/context")) return json({ sources: [], context_revision: 1 });
   if (path === "/api/v1/inbox" || path === "/api/v1/next") return json({ items: [] });
   if (path === "/api/v1/snapshot") return json(snapshot);
+  if (path === "/api/v1/issue-notification-settings")
+    return json({ revision: 0, delay_minutes: 3 });
   if (path === "/api/v1/conversation/settings") return json({ enabled: false });
   if (path === "/api/v1/conversation/handoff") return json(handoff);
   if (path === "/api/v1/conversation") return json({ items: [], more: false });
@@ -243,11 +248,11 @@ try {
       await records.click();
       assert.equal(await page.getByLabel("按项目筛选", { exact: true }).inputValue(), "");
       await overview.getByRole("button", { name: "查看全部Issue" }).click();
-      await page.getByRole("heading", { name: "Issue", exact: true }).waitFor();
+      await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
     }
     if (mobile) await tabs.getByRole("button", { name: "Issue", exact: true }).click();
     else await page.getByRole("button", { name: "Issue · 白板 ›" }).click();
-    await page.getByRole("heading", { name: "Issue" }).waitFor();
+    await page.getByRole("heading", { name: "所有 Issue" }).waitFor();
     assert.equal(
       await page.locator("header").getByRole("button", { name: "设置", exact: true }).count(),
       0,
@@ -259,7 +264,7 @@ try {
       await page.screenshot({
         path: join(output, `board-${viewport.width}x${viewport.height}.png`),
       });
-      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
       await resource.locator(":scope > summary").click();
       await resource
         .locator("summary")
@@ -334,7 +339,7 @@ try {
     await page.getByLabel("按项目筛选Issue").fill("unrelated");
     await filtered;
     if (mobile) {
-      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
     }
     assert.equal(await rows.count(), 2);
     if (mobile) await page.getByRole("button", { name: "返回Issue", exact: true }).click();

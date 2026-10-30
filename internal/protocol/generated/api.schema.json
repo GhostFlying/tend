@@ -3518,6 +3518,64 @@
       "title": "IssueBackgroundBatch",
       "type": "object"
     },
+    "IssueBlocker": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code",
+        "object_id"
+      ],
+      "title": "IssueBlocker",
+      "type": "object"
+    },
+    "IssueBoardCard": {
+      "additionalProperties": false,
+      "properties": {
+        "attention_count": {
+          "type": "integer"
+        },
+        "execution": {
+          "$ref": "#/definitions/ExecutionCounts"
+        },
+        "notification_due_at": {
+          "type": "integer"
+        },
+        "stage_title": {
+          "type": "string"
+        },
+        "stages_done": {
+          "type": "integer"
+        },
+        "stages_total": {
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/IssueWorkStatus"
+        }
+      },
+      "required": [
+        "status",
+        "stages_total",
+        "stages_done",
+        "execution",
+        "attention_count"
+      ],
+      "title": "IssueBoardCard",
+      "type": "object"
+    },
     "IssueClosure": {
       "additionalProperties": false,
       "properties": {
@@ -4692,9 +4750,41 @@
       "title": "IssueMessageAssociations",
       "type": "object"
     },
+    "IssueNotificationSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "delay_minutes": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision",
+        "delay_minutes"
+      ],
+      "title": "IssueNotificationSettings",
+      "type": "object"
+    },
     "IssuePage": {
       "additionalProperties": false,
       "properties": {
+        "assignees": {
+          "items": {
+            "$ref": "#/definitions/IssueAssignee"
+          },
+          "type": "array"
+        },
+        "counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "facts_seq": {
+          "type": "integer"
+        },
         "items": {
           "anyOf": [
             {
@@ -4954,6 +5044,9 @@
         "assignment_state": {
           "type": "string"
         },
+        "board": {
+          "$ref": "#/definitions/IssueBoardCard"
+        },
         "issue_id": {
           "type": "string"
         },
@@ -4977,6 +5070,9 @@
         },
         "title": {
           "type": "string"
+        },
+        "work_status": {
+          "$ref": "#/definitions/IssueWorkStatus"
         }
       },
       "required": [
@@ -5232,6 +5328,9 @@
         },
         "updated_at": {
           "type": "integer"
+        },
+        "work_status": {
+          "$ref": "#/definitions/IssueWorkStatus"
         }
       },
       "required": [
@@ -5248,6 +5347,18 @@
       ],
       "title": "IssueView",
       "type": "object"
+    },
+    "IssueWorkStatus": {
+      "enum": [
+        "backlog",
+        "todo",
+        "in_progress",
+        "in_review",
+        "done",
+        "cancelled"
+      ],
+      "title": "IssueWorkStatus",
+      "type": "string"
     },
     "LedgerEvent": {
       "additionalProperties": false,
@@ -7488,6 +7599,36 @@
       "title": "SetIssueMessageAssociationsPayload",
       "type": "object"
     },
+    "SetIssueNotificationSettingsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "delay_minutes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "delay_minutes"
+      ],
+      "title": "SetIssueNotificationSettingsPayload",
+      "type": "object"
+    },
+    "SetIssueStatusPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/IssueWorkStatus"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "status"
+      ],
+      "title": "SetIssueStatusPayload",
+      "type": "object"
+    },
     "SharedFact": {
       "additionalProperties": false,
       "properties": {
@@ -9415,6 +9556,9 @@
     "IssueAssignmentPayload": {
       "$ref": "#/definitions/IssueAssignmentPayload"
     },
+    "IssueBlocker": {
+      "$ref": "#/definitions/IssueBlocker"
+    },
     "IssueContextReview": {
       "$ref": "#/definitions/IssueContextReview"
     },
@@ -9453,6 +9597,9 @@
     },
     "IssueMessageAssociations": {
       "$ref": "#/definitions/IssueMessageAssociations"
+    },
+    "IssueNotificationSettings": {
+      "$ref": "#/definitions/IssueNotificationSettings"
     },
     "IssuePage": {
       "$ref": "#/definitions/IssuePage"
@@ -9567,6 +9714,12 @@
     },
     "SetIssueMessageAssociationsPayload": {
       "$ref": "#/definitions/SetIssueMessageAssociationsPayload"
+    },
+    "SetIssueNotificationSettingsPayload": {
+      "$ref": "#/definitions/SetIssueNotificationSettingsPayload"
+    },
+    "SetIssueStatusPayload": {
+      "$ref": "#/definitions/SetIssueStatusPayload"
     },
     "Snapshot": {
       "$ref": "#/definitions/Snapshot"

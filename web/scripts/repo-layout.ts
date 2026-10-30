@@ -1,3 +1,4 @@
+import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 import { issuePage, issueView } from "./issue-fixture.ts";
 // Real Chromium regression against the actual app and a generic owner API fixture.
@@ -52,7 +53,16 @@ const snapshot: Snapshot = {
   tasks: [],
   decisions: [],
   hosts,
-  projects: [],
+  projects: [
+    {
+      project: "selected-project",
+      title: "Selected project",
+      weight: 1,
+      queued: 0,
+      open_runs: 0,
+      open_tasks: 0,
+    },
+  ],
   queue: [],
 };
 function task(lifecycle: TaskSummary["lifecycle"], title: string, project: string): TaskSummary {
@@ -80,7 +90,7 @@ const held: ServerResponse[] = [];
 const streams = new Set<ServerResponse>();
 function json(res: ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-  res.end(JSON.stringify(body));
+  res.end(JSON.stringify(issueBoardFixture(res.req.url, body)));
 }
 const server = await createServer({
   configFile: false,
@@ -286,7 +296,7 @@ try {
         .click();
     if (mobile) {
       await page.getByLabel("按项目筛选Issue").fill("selected-project");
-      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })
@@ -444,10 +454,10 @@ try {
           .getByRole("button", { name: "Sample ongoing Issue", exact: true }),
         page,
       );
-      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
     } else {
       await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
-      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
     }
     // Historical tasks that predate work items must remain reachable and paginated.
     await page.getByRole("heading", { name: "任务执行", exact: true }).waitFor();
@@ -528,7 +538,7 @@ try {
     await page.getByRole("button", { name: "返回Issue", exact: true }).click();
     await page.getByRole("region", { name: "Issue白板", exact: true }).waitFor();
     if (mobile) {
-      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })
@@ -606,7 +616,7 @@ try {
         .getByRole("navigation", { name: "视图" })
         .getByRole("button", { name: "Issue", exact: true })
         .click();
-      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })

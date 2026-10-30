@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		IssueBlocker{}, SetIssueStatusPayload{}, IssueNotificationSettings{}, SetIssueNotificationSettingsPayload{},
 		InjectSourcePayload{}, CreateConsultationPayload{}, PromoteConsultationPayload{}, ManualSource{}, NativeEntry{}, SendRunMessagePayload{}, RunMessagePage{},
 		ArchiveControlRequest{}, ArchiveHostControlRequest{}, ArchiveOnlineStatus{},
 		ArchiveCatalog{}, ArchiveSummary{}, ArchiveRecord{}, ArchiveRecordsPage{}, ArchiveOriginal{}, ArchiveOriginalPage{}, ArchiveResource{}, ArchiveResourcePage{},
@@ -21,6 +22,7 @@ func APITypes() []any {
 // APIEnums lists the values of every string enum in the owner API.
 func APIEnums() []any {
 	return []any{
+		IssueWorkStatusValues(),
 		[]ArchiveState{ArchiveReady, ArchiveUnsupported, ArchiveUnavailable},
 		[]IssueState{IssueActive, IssuePaused, IssueCancelling, IssueCancelled, IssueClosed},
 		[]IssueAssigneeKind{IssueAssigneeOwner, IssueAssigneeAgent},

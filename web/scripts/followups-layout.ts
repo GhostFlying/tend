@@ -1,3 +1,4 @@
+import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Synthetic owner API only; browser coverage never writes to a deployed ledger.
 import assert from "node:assert/strict";
@@ -45,7 +46,7 @@ const streams = new Set<ServerResponse>();
 const receipts = new Map<string, unknown>();
 function json(res: ServerResponse, value: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-  res.end(JSON.stringify(value));
+  res.end(JSON.stringify(issueBoardFixture(res.req.url, value)));
 }
 function publish() {
   seq++;

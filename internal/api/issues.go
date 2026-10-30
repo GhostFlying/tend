@@ -13,6 +13,10 @@ import (
 func (s *Server) issues(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	filter := views.CanonicalIssueFilter{Project: query.Get("project"), State: protocol.IssueState(query.Get("state")), IncludeClosed: query.Get("include_closed") == "true", After: query.Get("after"), Limit: 50}
+	filter.Board = query.Get("board") == "true"
+	filter.BoardStatus = protocol.IssueWorkStatus(query.Get("board_status"))
+	filter.AssigneeKind = protocol.IssueAssigneeKind(query.Get("assignee_kind"))
+	filter.AssigneeRef = query.Get("assignee_ref")
 	if filter.State != "" && !slices.Contains([]protocol.IssueState{protocol.IssueActive, protocol.IssuePaused, protocol.IssueCancelling, protocol.IssueCancelled, protocol.IssueClosed}, filter.State) {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "state must name an issue state"))
 		return
@@ -31,6 +35,12 @@ func (s *Server) issues(w http.ResponseWriter, r *http.Request) {
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
 		return views.CanonicalIssues(r.Context(), q, filter)
+	})
+}
+
+func (s *Server) issueNotificationSettings(w http.ResponseWriter, r *http.Request) {
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		return store.GetIssueNotificationSettings(r.Context(), q)
 	})
 }
 

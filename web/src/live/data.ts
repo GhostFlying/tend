@@ -234,6 +234,7 @@ export class LiveData {
         "attention",
         "deadline",
         "planner_entry",
+        "issue_settings",
         "followup",
         "decision",
         "work_item_choice",

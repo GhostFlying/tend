@@ -63,6 +63,10 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 }
 
 type CanonicalIssueFilter struct {
+	Board         bool
+	BoardStatus   protocol.IssueWorkStatus
+	AssigneeKind  protocol.IssueAssigneeKind
+	AssigneeRef   string
 	ReadRoot      string
 	Project       string
 	ParentID      *string
@@ -83,6 +87,9 @@ func CanonicalIssues(ctx context.Context, q store.Querier, f CanonicalIssueFilte
 	}
 	if f.State != "" && !slices.Contains([]protocol.IssueState{protocol.IssueActive, protocol.IssuePaused, protocol.IssueCancelling, protocol.IssueCancelled, protocol.IssueClosed}, f.State) {
 		return out, protocol.Errorf(protocol.CodeInvalidRequest, "invalid Issue state")
+	}
+	if f.Board {
+		return canonicalIssueBoard(ctx, q, f)
 	}
 
 	query := `SELECT c.issue_id FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id WHERE c.issue_id>?`

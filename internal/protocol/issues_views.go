@@ -2,6 +2,7 @@ package protocol
 
 // IssueSummary describes canonical responsibility, never a legacy facade row.
 type IssueSummary struct {
+	Board *IssueBoardCard `json:"board,omitempty"`
 	IssueControl
 	Revision int64  `json:"revision"`
 	Title    string `json:"title"`
@@ -9,9 +10,12 @@ type IssueSummary struct {
 }
 
 type IssuePage struct {
-	Items []IssueSummary `json:"items"`
-	Next  string         `json:"next,omitempty"`
-	More  bool           `json:"more"`
+	Counts    map[IssueWorkStatus]int `json:"counts,omitempty"`
+	Assignees []IssueAssignee         `json:"assignees,omitempty"`
+	FactsSeq  int64                   `json:"facts_seq,omitempty"`
+	Items     []IssueSummary          `json:"items"`
+	Next      string                  `json:"next,omitempty"`
+	More      bool                    `json:"more"`
 }
 
 // IssueTaskSummary keeps the new Issue surface independent of work_item fields.

@@ -31,7 +31,7 @@ export type OpOutcome =
       currentIssue?: IssueView;
       currentAttention?: AttentionView;
     }
-  | { kind: "refused"; message: string; code?: Code }
+  | { kind: "refused"; message: string; code?: Code; details?: unknown }
   /** tend may or may not have carried it out. */
   | { kind: "unknown"; message: string };
 
@@ -76,7 +76,7 @@ export async function runOp(
 export function settleOp(
   status: OpStatus,
   result: unknown,
-  error: { code: Code; message: string } | undefined,
+  error: { code: Code; message: string; details?: unknown } | undefined,
 ): OpOutcome {
   switch (status) {
     case "succeeded":
@@ -90,6 +90,7 @@ export function settleOp(
         kind: "refused",
         message: error?.message ?? "tend 拒绝了这个操作",
         ...(error ? { code: error.code } : {}),
+        ...(error?.details ? { details: error.details } : {}),
       };
     case "unknown":
       return { kind: "unknown", message: error?.message ?? "tend 无法确认结果" };

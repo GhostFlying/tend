@@ -1,3 +1,4 @@
+import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Approved Issue/Inbox flows against isolated API fixtures, never a live service.
 import assert from "node:assert/strict";
@@ -186,7 +187,7 @@ const server = createServer(async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const json = (data: unknown, status = 200) => {
     res.writeHead(status, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(data));
+    res.end(JSON.stringify(issueBoardFixture(res.req.url, data)));
   };
   if (p === "/api/v1/session")
     return json({
@@ -1119,7 +1120,7 @@ try {
     const emptyRead = page.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/v1/hosted-agents",
     );
-    await page.getByRole("button", { name: "新建Issue", exact: true }).click();
+    await page.getByRole("button", { name: "＋ 新建 Issue", exact: true }).click();
     await emptyRead;
     const createForm = page.getByRole("region", { name: "新建Issue", exact: true });
     const managerSelect = createForm.getByRole("combobox", { name: "负责人", exact: true });
@@ -1144,7 +1145,7 @@ try {
         .getByRole("button", { name: "Issue", exact: true })
         .click();
     else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
-    await page.getByRole("button", { name: "新建Issue", exact: true }).click();
+    await page.getByRole("button", { name: "＋ 新建 Issue", exact: true }).click();
     await managerSelect.locator('option[value="hosted/qingzhu"]').waitFor({ state: "attached" });
     await managerSelect.selectOption("hosted/qingzhu");
     assert.equal(await managerSelect.inputValue(), "hosted/qingzhu");
@@ -1239,6 +1240,7 @@ try {
         .getByRole("button", { name: "Issue", exact: true })
         .click();
     else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+    await page.getByRole("tab", { name: "层级", exact: true }).click();
     await page.getByRole("button", { name: "展开 发布流程整理", exact: true }).click();
     await page.getByRole("button", { name: "展开 补齐回滚文档", exact: true }).click();
     await page.getByRole("button", { name: "补齐失败示例", exact: true }).waitFor();

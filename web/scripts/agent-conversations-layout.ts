@@ -1,3 +1,4 @@
+import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Synthetic conversations exercise UI routing; no native harness or deployed API.
 import assert from "node:assert/strict";
@@ -88,7 +89,7 @@ let dropLookupReply = false;
 let lostRequestID = "";
 function json(res: ServerResponse, value: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(value));
+  res.end(JSON.stringify(issueBoardFixture(res.req.url, value)));
 }
 const server = createServer(async (req, res) => {
   const u = new URL(req.url!, "http://fixture.invalid"),

@@ -26,14 +26,15 @@ type IssueAssignee struct {
 
 // IssueControl has no independent revision: work_items.revision owns the aggregate.
 type IssueControl struct {
-	IssueID          string         `json:"issue_id"`
-	ParentIssueID    string         `json:"parent_issue_id,omitempty"`
-	State            IssueState     `json:"state"`
-	Assignee         IssueAssignee  `json:"assignee"`
-	AssignmentEpoch  int64          `json:"assignment_epoch"`
-	AssignmentState  string         `json:"assignment_state"`
-	PendingAssignee  *IssueAssignee `json:"pending_assignee,omitempty"`
-	PendingHandoffID string         `json:"pending_handoff_id,omitempty"`
+	WorkStatus       IssueWorkStatus `json:"work_status,omitempty"`
+	IssueID          string          `json:"issue_id"`
+	ParentIssueID    string          `json:"parent_issue_id,omitempty"`
+	State            IssueState      `json:"state"`
+	Assignee         IssueAssignee   `json:"assignee"`
+	AssignmentEpoch  int64           `json:"assignment_epoch"`
+	AssignmentState  string          `json:"assignment_state"`
+	PendingAssignee  *IssueAssignee  `json:"pending_assignee,omitempty"`
+	PendingHandoffID string          `json:"pending_handoff_id,omitempty"`
 }
 
 type IssueDependency struct {
