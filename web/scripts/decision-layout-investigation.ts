@@ -1380,6 +1380,12 @@ async function checkDecisionStates() {
     });
     assert.equal(await textarea.inputValue(), "保留这条失败后可重试的说明");
     assert(await submit.isEnabled());
+    // Rejection renders before the next animation frame restores retry focus.
+    await page.waitForFunction(
+      (element) => element === document.activeElement,
+      await submit.elementHandle(),
+      { timeout: 3000 },
+    );
     assert(await submit.evaluate((element) => element === document.activeElement));
     assert.equal(errors.length, 0, errors.join("\n"));
     console.log(`PASS delayed failure ${browserName}`);

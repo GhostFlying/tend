@@ -103,7 +103,11 @@ function HostDetails({
       ref={panel}
       className={styles.panel}
       aria-label="主机详情"
-      onCancel={onClose}
+      onCancel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
       onClick={(event) => event.target === event.currentTarget && onClose()}
     >
       <div className={styles.header}>
