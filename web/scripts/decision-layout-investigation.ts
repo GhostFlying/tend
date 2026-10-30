@@ -701,7 +701,18 @@ async function checkLayoutMatrix() {
         const baseFontSize = await page.evaluate(() =>
           Number.parseFloat(getComputedStyle(document.body).fontSize),
         );
+        const baseQuestionLeading = await cardFor(page)
+          .locator("q")
+          .evaluate((element) => Number.parseFloat(getComputedStyle(element).lineHeight));
         await setFontScale(page, fontScale);
+        const questionLeading = await cardFor(page)
+          .locator("q")
+          .evaluate((element) => Number.parseFloat(getComputedStyle(element).lineHeight));
+        assert.equal(
+          questionLeading,
+          baseQuestionLeading * fontScale,
+          "question leading must follow font scaling",
+        );
         const bodyFontSize = await page.evaluate(() =>
           Number.parseFloat(getComputedStyle(document.body).fontSize),
         );
@@ -741,6 +752,7 @@ async function checkLayoutMatrix() {
         geometry.push({
           case: name,
           bodyFontSize,
+          questionLeading,
           viewport: viewportSize,
           card: await rect(card),
           options: measures,
