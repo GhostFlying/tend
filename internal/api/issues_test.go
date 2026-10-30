@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -233,6 +234,50 @@ func TestIssueOwnerHTTPNoStageWorkerAcceptanceReviewAndContractRecovery(t *testi
 	}
 	if !found {
 		t.Fatal("accepted result missing from activity", activity)
+	}
+	// Recovery terminal and unknown facts must not claim an ongoing recovery.
+	recoveryTitles := map[string]string{
+		"worker.root_background_pending":   "执行后台工作尚未结束",
+		"worker.root_observation_resolved": "执行状态已核实",
+		"worker.root_observation_unknown":  "执行状态未知，待核实",
+		"worker.turn_failed":               "执行回合失败",
+		"worker.recovery_pending":          "执行等待恢复",
+		"worker.recovery_started":          "执行正在恢复",
+		"worker.recovery_completed":        "执行恢复已完成",
+		"worker.recovery_failed":           "执行恢复失败",
+		"worker.recovery_handed_back":      "执行控制已交还",
+		"worker.startup_failed":            "执行启动失败",
+		"worker.startup_retry_pending":     "执行等待重试启动",
+		"worker.startup_started":           "执行正在启动",
+		"unknown_future_phase":             "更新了执行恢复状态",
+	}
+	expectedRecovery := map[string]string{}
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		for kind, title := range recoveryTitles {
+			body, _ := json.Marshal(map[string]string{"kind": kind})
+			seq, err := tx.InsertEvent(t.Context(), store.EventRow{EventID: "test_" + kind, Source: "runner", ObjectType: "run", ObjectID: indexed.Items[0].RunID, Kind: "run.recovery", BodyJSON: string(body), CreatedAt: e.clock.Now().UnixMilli()})
+			if err != nil {
+				return err
+			}
+			expectedRecovery[fmt.Sprintf("event:%d", seq)] = title
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status := e.do("GET", "/api/v1/issues/"+issue.IssueID+"/activity", token, nil, &activity); status != http.StatusOK {
+		t.Fatal(status)
+	}
+	for _, entry := range activity.Items {
+		if title, ok := expectedRecovery[entry.ID]; ok {
+			if entry.Kind != "run.recovery" || entry.TaskID != task.TaskID || entry.Title != title {
+				t.Fatal("incorrect observed recovery fact", entry, title)
+			}
+			delete(expectedRecovery, entry.ID)
+		}
+	}
+	if len(expectedRecovery) != 0 {
+		t.Fatal("missing recovery facts", expectedRecovery)
 	}
 	review := e.envelope("issues.review_completions", protocol.Target{Type: "issue", ID: issue.IssueID}, &view.Revision, protocol.ReviewIssueCompletionsPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: view.AssignmentEpoch}, Reviews: []protocol.CompletionReviewAcknowledgement{{EventID: view.PendingReviews[0].EventID, Reason: "Owner checked accepted delivery"}}})
 	issue = issueHTTP(t, e, token, review)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -209,5 +210,55 @@ func TestIssueProgressPreservesBoardAndChildActivityResults(t *testing.T) {
 	}
 	if len(results) != 2 || results[0] != child.Plan.Title+" · 关闭了 Issue" || results[1] != child.Plan.Title+" · 取消了 Issue" {
 		t.Fatal("child results were omitted or rewritten by later state", results)
+	}
+}
+
+func TestIssueChildActivityRetainsHistoricalParent(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	a := createOwnerIssueHTTP(t, e, token, "")
+	child := createOwnerIssueHTTP(t, e, token, a.IssueID)
+	target := protocol.Target{Type: "issue", ID: child.IssueID}
+	move := func(status protocol.IssueWorkStatus) {
+		child = issueHTTP(t, e, token, e.envelope("issues.set_status", target, &child.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Status: status}))
+	}
+	read := func(id string) []protocol.IssueActivityEntry {
+		var page protocol.IssueActivityPage
+		if code := e.do("GET", "/api/v1/issues/"+id+"/activity", token, nil, &page); code != http.StatusOK {
+			t.Fatal(code)
+		}
+		var out []protocol.IssueActivityEntry
+		for _, item := range page.Items {
+			if item.IssueID == child.IssueID {
+				out = append(out, item)
+			}
+		}
+		return out
+	}
+	move(protocol.IssueDone)
+	move(protocol.IssueTodo)
+	b := createOwnerIssueHTTP(t, e, token, "")
+	beforeA, beforeB := read(a.IssueID), read(b.IssueID)
+	if len(beforeA) != 1 || len(beforeB) != 0 {
+		t.Fatal(beforeA, beforeB)
+	}
+	plan := child.Plan
+	plan.Title = "Renamed continuing work"
+	child = issueHTTP(t, e, token, e.envelope("issues.update", target, &child.Revision, protocol.UpdateIssuePayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Plan: plan}))
+	child = issueHTTP(t, e, token, e.envelope("issues.reparent", target, &child.Revision, protocol.ReparentIssuePayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Reason: "Move continuing responsibility"}, ParentIssueID: b.IssueID, ExpectedParentRevision: &b.Revision}))
+	afterA, afterB := read(a.IssueID), read(b.IssueID)
+	t.Logf("before reparent: old parent=%+v; new parent=%+v", beforeA, beforeB)
+	t.Logf("after reparent: old parent=%+v; new parent=%+v", afterA, afterB)
+	if !reflect.DeepEqual(afterA, beforeA) || !reflect.DeepEqual(afterB, beforeB) {
+		t.Fatal("reparent or rename rewrote a historical completion event")
+	}
+	move(protocol.IssueDone)
+	if !reflect.DeepEqual(read(a.IssueID), beforeA) {
+		t.Fatal("new closure rewrote old parent history")
+	}
+	current := read(b.IssueID)
+	if len(current) != 1 || current[0].Title != plan.Title+" · 关闭了 Issue" || current[0].ID == beforeA[0].ID || current[0].Position <= beforeA[0].Position {
+		t.Fatal(current)
 	}
 }
