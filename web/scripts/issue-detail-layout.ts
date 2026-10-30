@@ -807,6 +807,57 @@ try {
       `PASS ${width}: full-page, exact recipient, parent/child drafts, progress, decision, sidebar, handoff, dark theme`,
     );
   }
+  const savedSummary = issue.progress!.summary;
+  for (const width of [1440, 390]) {
+    const text = "第一行\n第二行\n第三行\n第四行\n第五行";
+    assert(text.length < 100);
+    issue.progress!.summary = text;
+    const context = await browser.newContext({ viewport: { width, height: 1000 } });
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+    const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const summary = detail.getByText(text, { exact: true });
+    const expand = detail.getByRole("button", { name: "展开全文", exact: true });
+    await expand.waitFor();
+    assert(await summary.evaluate((node) => node.scrollHeight > node.clientHeight + 1));
+    await expand.click();
+    const collapse = detail.getByRole("button", { name: "收起", exact: true });
+    await collapse.waitFor();
+    assert(await summary.evaluate((node) => node.scrollHeight <= node.clientHeight + 1));
+    await collapse.click();
+    await expand.waitFor();
+    assert(await summary.evaluate((node) => node.scrollHeight > node.clientHeight + 1));
+    await context.close();
+    console.log(`PASS ${width}: short multiline progress can expand and collapse`);
+  }
+  {
+    const text = "调查结论已确认，下一步等待负责人安排。".repeat(4);
+    assert(text.length < 100);
+    issue.progress!.summary = text;
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+    const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const summary = detail.getByText(text, { exact: true });
+    await summary.waitFor();
+    const expand = detail.getByRole("button", { name: "展开全文", exact: true });
+    assert(await summary.evaluate((node) => node.scrollHeight <= node.clientHeight + 1));
+    assert.equal(await expand.count(), 0);
+    await page.setViewportSize({ width: 320, height: 1000 });
+    await expand.waitFor();
+    assert(await summary.evaluate((node) => node.scrollHeight > node.clientHeight + 1));
+    await expand.click();
+    const collapse = detail.getByRole("button", { name: "收起", exact: true });
+    await collapse.waitFor();
+    assert(await summary.evaluate((node) => node.scrollHeight <= node.clientHeight + 1));
+    await collapse.click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await expand.waitFor({ state: "hidden" });
+    assert(await summary.evaluate((node) => node.scrollHeight <= node.clientHeight + 1));
+    await context.close();
+    console.log("PASS 1440/320: progress expansion follows actual wrapping after resize");
+  }
+  issue.progress!.summary = savedSummary;
   issue.assignee = { kind: "owner", ref: "owner" };
   issue.state = "active";
   issue.conversation = { can_send: false, reason: "owner" };
