@@ -93,6 +93,7 @@ var hostedMutations = []hostedMutation{
 	{"issues_assign", "Fence a concrete Issue assignee before reconciling and enabling its replacement. Does not stop independent workers.", "issue", protocol.IssueAssignmentPayload{}, app.HostedIssueAssignment{}, true},
 	{"issues_finish_assignment", "Enable a fenced assignee only after the previous manager's actual operations are reconciled.", "issue", protocol.FinishIssueAssignmentPayload{}, app.HostedIssueAssignment{Finish: true}, true},
 	{"issues_update", "Revise only this Issue definition; task specifications stay frozen until explicitly refreshed.", "issue", protocol.UpdateIssuePayload{}, app.CanonicalOwnerIssueCommand{Action: "update"}, false},
+	{"issues_set_status", "Update this Issue's nonterminal work intent independently of worker execution. Use evidence-bearing close/cancel tools for endpoints. Does not wake itself.", "issue", protocol.SetIssueStatusPayload{}, app.CanonicalOwnerIssueCommand{Action: "set_status"}, false},
 	{"issues_pause", "Stop new dispatch for this Issue; active worker contracts continue.", "issue", protocol.IssueControlPayload{}, app.CanonicalOwnerIssueCommand{Action: "pause"}, false},
 	{"issues_resume", "Resume this Issue's new dispatch under its current assignment.", "issue", protocol.IssueControlPayload{}, app.CanonicalOwnerIssueCommand{Action: "resume"}, false},
 	{"issues_cancel", "Record cancellation intent before settling outstanding tasks and obligations.", "issue", protocol.IssueControlPayload{}, app.CanonicalOwnerIssueCommand{Action: "cancel"}, false},

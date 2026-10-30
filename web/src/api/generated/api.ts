@@ -125,6 +125,12 @@ export type IssueStageStatus = "planned" | "active" | "done" | "cancelled" | "re
 export type IssueState = "active" | "paused" | "cancelling" | "cancelled" | "closed";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueWorkStatus".
+ */
+export type IssueWorkStatus =
+  "backlog" | "todo" | "in_progress" | "in_review" | "done" | "cancelled";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "Code".
  */
 export type Code =
@@ -271,6 +277,7 @@ export interface TendAPI {
   IssueAgentConversation?: IssueAgentConversation;
   IssueAgentConversationPage?: IssueAgentConversationPage;
   IssueAssignmentPayload?: IssueAssignmentPayload;
+  IssueBlocker?: IssueBlocker;
   IssueContextReview?: IssueContextReview;
   IssueContextView?: IssueContextView;
   IssueControlPayload?: IssueControlPayload;
@@ -284,6 +291,7 @@ export interface TendAPI {
   IssueFollowupPage?: IssueFollowupPage;
   IssueFollowupPayload?: IssueFollowupPayload;
   IssueMessageAssociations?: IssueMessageAssociations;
+  IssueNotificationSettings?: IssueNotificationSettings;
   IssuePage?: IssuePage;
   IssueRefreshDeliveryPayload?: IssueRefreshDeliveryPayload;
   IssueTranscriptBlock?: IssueTranscriptBlock;
@@ -322,6 +330,8 @@ export interface TendAPI {
   SetConversationSettingsPayload?: SetConversationSettingsPayload;
   SetIssueDependenciesPayload?: SetIssueDependenciesPayload;
   SetIssueMessageAssociationsPayload?: SetIssueMessageAssociationsPayload;
+  SetIssueNotificationSettingsPayload?: SetIssueNotificationSettingsPayload;
+  SetIssueStatusPayload?: SetIssueStatusPayload;
   Snapshot?: Snapshot;
   StreamStart?: StreamStart;
   SubmitMessagePayload?: SubmitMessagePayload;
@@ -574,6 +584,7 @@ export interface IssueView {
   state: IssueState;
   tasks?: IssueTaskSummary[];
   updated_at: number;
+  work_status?: IssueWorkStatus;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1920,6 +1931,16 @@ export interface IssueAssignmentPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueBlocker".
+ */
+export interface IssueBlocker {
+  code: string;
+  object_id: string;
+  request_id?: string;
+  revision?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueContextReview".
  */
 export interface IssueContextReview {
@@ -2339,9 +2360,22 @@ export interface IssueFollowupPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueNotificationSettings".
+ */
+export interface IssueNotificationSettings {
+  delay_minutes: number;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssuePage".
  */
 export interface IssuePage {
+  assignees?: IssueAssignee[];
+  counts?: {
+    [k: string]: number | undefined;
+  };
+  facts_seq?: number;
   items: IssueSummary[] | null;
   more: boolean;
   next?: string;
@@ -2354,6 +2388,7 @@ export interface IssueSummary {
   assignee: IssueAssignee;
   assignment_epoch: number;
   assignment_state: string;
+  board?: IssueBoardCard;
   issue_id: string;
   parent_issue_id?: string;
   pending_assignee?: IssueAssignee;
@@ -2362,6 +2397,20 @@ export interface IssueSummary {
   revision: number;
   state: IssueState;
   title: string;
+  work_status?: IssueWorkStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueBoardCard".
+ */
+export interface IssueBoardCard {
+  attention_count: number;
+  execution: ExecutionCounts;
+  notification_due_at?: number;
+  stage_title?: string;
+  stages_done: number;
+  stages_total: number;
+  status: IssueWorkStatus;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2888,6 +2937,21 @@ export interface SetIssueMessageAssociationsPayload {
   content_revision: number;
   disposition: string;
   issue_ids: string[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SetIssueNotificationSettingsPayload".
+ */
+export interface SetIssueNotificationSettingsPayload {
+  delay_minutes: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SetIssueStatusPayload".
+ */
+export interface SetIssueStatusPayload {
+  expected_assignment_epoch: number;
+  status: IssueWorkStatus;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

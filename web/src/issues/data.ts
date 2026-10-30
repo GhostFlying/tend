@@ -7,9 +7,11 @@ import type {
   IssuePage,
   IssueState,
   IssueView,
+  IssueNotificationSettings,
 } from "../api/generated/api.ts";
 import type { Reader } from "../live/data.ts";
 import { WorkItemRead } from "../workitems/live.ts";
+import { IssueBoardData } from "./boardData.ts";
 
 export interface IssueFilter {
   project?: string;
@@ -31,6 +33,8 @@ export function issuePagePath(filter: IssueFilter = {}): string {
 }
 
 export class Issues {
+  readonly notificationSettings: WorkItemRead<IssueNotificationSettings>;
+  readonly board: IssueBoardData;
   readonly list: WorkItemRead<IssuePage>;
   readonly detail: WorkItemRead<IssueView>;
   readonly history: WorkItemRead<IssueView>;
@@ -41,6 +45,8 @@ export class Issues {
   private readonly childReads = new Map<string, WorkItemRead<IssuePage>>();
 
   constructor(private readonly api: Reader) {
+    this.notificationSettings = new WorkItemRead(api);
+    this.board = new IssueBoardData(api);
     this.list = new WorkItemRead(api);
     this.detail = new WorkItemRead(api);
     this.history = new WorkItemRead(api);
@@ -109,6 +115,7 @@ export class Issues {
 
   private reads() {
     return [
+      this.notificationSettings,
       this.list,
       this.detail,
       this.history,
@@ -121,12 +128,14 @@ export class Issues {
   }
 
   refresh(): void {
+    this.board.refresh();
     for (const read of this.reads()) {
       void read.refresh();
     }
   }
 
   stop(): void {
+    this.board.close();
     for (const read of this.reads()) read.close();
     this.childReads.clear();
   }

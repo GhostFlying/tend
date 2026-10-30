@@ -1,3 +1,4 @@
+import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Unknown writes reconcile only against later facts for the same delivery.
 import assert from "node:assert/strict";
@@ -70,7 +71,7 @@ const submissions: Envelope[] = [];
 const accepted = new Map<string, Envelope>();
 const json = (res: ServerResponse, value: unknown, status = 200) => {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-  res.end(JSON.stringify(value));
+  res.end(JSON.stringify(issueBoardFixture(res.req.url, value)));
 };
 const server = await createServer({
   configFile: false,

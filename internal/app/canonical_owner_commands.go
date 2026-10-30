@@ -45,7 +45,7 @@ type canonicalOwnerIssueUpdate struct {
 
 func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	switch c.Action {
-	case "create", "update", "pause", "resume", "cancel", "finish_cancel", "close", "reopen", "reparent", "dependencies", "assign", "review_sources", "review_completions":
+	case "create", "update", "set_status", "pause", "resume", "cancel", "finish_cancel", "close", "reopen", "reparent", "dependencies", "assign", "review_sources", "review_completions":
 	default:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported canonical operation")
 	}
@@ -74,6 +74,9 @@ func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *stor
 	}
 	if c.Action == "update" {
 		return updateCanonicalOwnerIssue(ctx, x, tx, current)
+	}
+	if c.Action == "set_status" {
+		return setCanonicalIssueStatus(ctx, x, tx, current)
 	}
 	return applyCanonicalOwnerLifecycle(ctx, x, tx, c.Action, current)
 }
@@ -259,6 +262,14 @@ func validateCanonicalOwnerPlan(x *Exec, plan protocol.IssuePlan, previous *prot
 }
 
 func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, next protocol.Issue, expected int64, source canonicalOwnerIssueSource, reason any, kind string) (Outcome, error) {
+	var previous protocol.Issue
+	if expected > 0 {
+		var err error
+		previous, err = store.GetCanonicalIssue(ctx, tx.Q(), next.IssueID)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
 	projection := protocol.WorkItem{IssuePlan: next.Plan}
 	freezeIssueCurrentEvidence(&projection, x.Env.RequestID)
 	next.Plan = projection.IssuePlan
@@ -275,10 +286,12 @@ func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, ne
 	if err := tx.EnsureCompletionReviews(ctx, next.IssueID); err != nil {
 		return Outcome{}, err
 	}
-	// No BindMessage(work_item), native conversation or legacy background notice:
-	// the source is retained in the immutable revision and current owner request.
-	// P1b3/P4 add exact canonical sourced context and coordination effects.
-	return Outcome{Result: next, Events: []Event{{ObjectType: "issue", ObjectID: next.IssueID, ObjectVersion: next.Revision, Kind: kind, Body: map[string]any{"revision": next.Revision, "state": next.State}}}}, nil
+	if expected > 0 && previous.BoardStatus() != next.BoardStatus() {
+		if err := recordIssueStatusChange(ctx, x, tx, previous, next); err != nil {
+			return Outcome{}, err
+		}
+	}
+	return Outcome{Result: next, Notify: previous.BoardStatus() != next.BoardStatus(), Events: []Event{{ObjectType: "issue", ObjectID: next.IssueID, ObjectVersion: next.Revision, Kind: kind, Body: map[string]any{"revision": next.Revision, "state": next.State}}}}, nil
 }
 
 // validateCanonicalSourceReference reads material explicitly cited by an already

@@ -22,6 +22,9 @@ type IssueLifecycleFacts struct {
 
 // ValidateIssueControl validates persisted shape; authentication and registry resolution belong to app.
 func ValidateIssueControl(c protocol.IssueControl) error {
+	if c.WorkStatus != "" && !slices.Contains([]protocol.IssueWorkStatus{protocol.IssueBacklog, protocol.IssueTodo, protocol.IssueInProgress, protocol.IssueInReview}, c.WorkStatus) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid issue work status")
+	}
 	if !protocol.ValidID(protocol.PrefixWorkItem, c.IssueID) || (c.ParentIssueID != "" && !protocol.ValidID(protocol.PrefixWorkItem, c.ParentIssueID)) || c.ParentIssueID == c.IssueID || c.AssignmentEpoch < 1 {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid issue control identity")
 	}

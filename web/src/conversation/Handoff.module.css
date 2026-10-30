@@ -93,6 +93,16 @@
 .panel::backdrop {
   background: rgb(0 0 0 / 30%);
 }
+
+.issueNotifications {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-soft);
+}
+.unit {
+  flex: none;
+  white-space: nowrap;
+}
 .header {
   display: flex;
   align-items: center;

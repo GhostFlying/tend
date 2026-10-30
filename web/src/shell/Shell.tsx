@@ -307,6 +307,7 @@ export function Shell({
           {boardVisited && (
             <div className={styles.content} hidden={!boardOpen || recordsOpen}>
               <IssueBoard
+                onInbox={openInbox}
                 active={boardOpen && !recordsOpen}
                 onSelect={(id) => navigateDetail(id, null)}
                 onChat={showChat}

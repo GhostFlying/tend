@@ -345,6 +345,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	var wg sync.WaitGroup
+	wg.Go(func() { a.RunIssueStatusNotifications(runCtx, log) })
 	if localSocket != "" {
 		wg.Go(func() {
 			var err error

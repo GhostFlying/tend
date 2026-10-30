@@ -299,7 +299,7 @@ try {
         .getByRole("navigation", { name: "视图" })
         .getByRole("button", { name: "Issue" })
         .click();
-      await page.getByRole("button", { name: "任务执行记录 →", exact: true }).click();
+      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })

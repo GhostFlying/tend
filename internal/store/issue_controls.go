@@ -29,7 +29,7 @@ func RejectCanonicalLegacyIssueWrite(ctx context.Context, q Querier, id string) 
 func GetCanonicalIssue(ctx context.Context, q Querier, id string) (protocol.Issue, error) {
 	var current protocol.Issue
 	var parent, pendingKind, pendingRef, handoff sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT issue_id,parent_issue_id,state,assignee_kind,assignee_ref,assignment_epoch,assignment_state,pending_assignee_kind,pending_assignee_ref,pending_handoff_id FROM issue_controls WHERE issue_id=?`, id).Scan(&current.IssueID, &parent, &current.State, &current.Assignee.Kind, &current.Assignee.Ref, &current.AssignmentEpoch, &current.AssignmentState, &pendingKind, &pendingRef, &handoff)
+	err := q.QueryRowContext(ctx, `SELECT issue_id,parent_issue_id,state,assignee_kind,assignee_ref,assignment_epoch,assignment_state,pending_assignee_kind,pending_assignee_ref,pending_handoff_id,work_status FROM issue_controls WHERE issue_id=?`, id).Scan(&current.IssueID, &parent, &current.State, &current.Assignee.Kind, &current.Assignee.Ref, &current.AssignmentEpoch, &current.AssignmentState, &pendingKind, &pendingRef, &handoff, &current.WorkStatus)
 	if err != nil {
 		return current, notFound(err, "canonical issue "+id)
 	}
@@ -178,6 +178,13 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 	_, err = t.Exec(ctx, `INSERT INTO issue_controls(issue_id,parent_issue_id,state,assignee_kind,assignee_ref,assignment_epoch,assignment_state,pending_assignee_kind,pending_assignee_ref,pending_handoff_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(issue_id) DO UPDATE SET parent_issue_id=excluded.parent_issue_id,state=excluded.state,assignee_kind=excluded.assignee_kind,assignee_ref=excluded.assignee_ref,assignment_epoch=excluded.assignment_epoch,assignment_state=excluded.assignment_state,pending_assignee_kind=excluded.pending_assignee_kind,pending_assignee_ref=excluded.pending_assignee_ref,pending_handoff_id=excluded.pending_handoff_id,updated_at=excluded.updated_at`, next.IssueID, nullString(next.ParentIssueID), next.State, next.Assignee.Kind, next.Assignee.Ref, next.AssignmentEpoch, next.AssignmentState, pendingKind, pendingRef, nullString(next.PendingHandoffID), next.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("store: save issue controls: %w", err)
+	}
+	// A new empty progress uses the column default. This also keeps historical
+	// fixture creation independent of fields added by later migrations.
+	if next.WorkStatus != "" || expected > 0 {
+		if _, err := t.Exec(ctx, `UPDATE issue_controls SET work_status=? WHERE issue_id=?`, next.WorkStatus, next.IssueID); err != nil {
+			return fmt.Errorf("store: save issue work status: %w", err)
+		}
 	}
 	if _, err := t.Exec(ctx, `DELETE FROM issue_dependencies WHERE issue_id=?`, next.IssueID); err != nil {
 		return fmt.Errorf("store: replace issue dependencies: %w", err)

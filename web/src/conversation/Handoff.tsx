@@ -4,6 +4,7 @@ import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Handoff.module.css";
+import { IssueNotificationSettings } from "../issues/NotificationSettings.tsx";
 
 export function Handoff({
   connection,
@@ -207,6 +208,7 @@ export function Handoff({
           </div>
         )}
       </section>
+      <IssueNotificationSettings connection={connection} />
     </dialog>
   );
 }
