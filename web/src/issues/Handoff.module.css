@@ -1,12 +1,12 @@
 .root {
-  padding: 24px 28px;
+  padding: var(--space-6) 28px;
   overflow: auto;
   flex: 1;
   min-height: 0;
 }
 .root h2 {
-  font-size: 22px;
-  margin: 0 0 8px;
+  font-size: var(--text-title-lg);
+  margin: 0 0 var(--space-2);
 }
 .columns {
   display: grid;
@@ -16,33 +16,33 @@
 }
 .columns > div > label {
   display: grid;
-  gap: 12px;
-  margin: 0 0 24px;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-6);
 }
 .columns select {
   font: inherit;
   width: 100%;
-  padding: 11px 12px;
+  padding: 11px var(--space-3);
   color: var(--label);
   background: var(--input);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-s);
 }
 .columns h3 {
-  font-size: 15px;
-  margin: 8px 0 0;
+  font-size: var(--text-body-lg);
+  margin: var(--space-2) 0 0;
 }
 .columns ul {
   line-height: 2;
-  padding-left: 20px;
+  padding-left: var(--space-5);
 }
 @media (max-width: 760px) {
   .root {
-    padding: 20px 16px;
+    padding: var(--space-5) var(--space-4);
   }
   .columns {
     grid-template-columns: 1fr;
     gap: 10px;
-    margin: 24px 0;
+    margin: var(--space-6) 0;
   }
 }

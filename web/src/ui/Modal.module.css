@@ -1,0 +1,48 @@
+.modal {
+  color: var(--label);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-2);
+}
+.modal::backdrop {
+  background: var(--backdrop);
+}
+.dialog {
+  width: min(560px, calc(100vw - var(--space-7)));
+  max-height: calc(100dvh - var(--space-7));
+  border-radius: var(--radius-xl);
+  z-index: var(--z-dialog);
+}
+.sheet {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  width: min(480px, 100vw);
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: var(--radius-xl) 0 0 var(--radius-xl);
+  z-index: var(--z-sheet);
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.header h2 {
+  margin: 0;
+  font-size: var(--text-title);
+  line-height: var(--leading-title);
+}
+@media (max-width: 760px) {
+  .sheet {
+    inset: auto 0 0;
+    width: 100vw;
+    height: auto;
+    max-height: calc(100dvh - var(--space-4));
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+}

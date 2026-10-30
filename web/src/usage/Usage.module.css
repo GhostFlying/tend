@@ -1,5 +1,5 @@
 .panel {
-  padding: 24px 20px;
+  padding: var(--space-6) var(--space-5);
   max-width: 1080px;
   margin: auto;
   min-width: 0;
@@ -7,40 +7,40 @@
   font-variant-numeric: tabular-nums;
 }
 .panel header {
-  margin-bottom: 20px;
+  margin-bottom: var(--space-5);
 }
 .panel h2 {
-  margin: 0 0 4px;
-  font-size: var(--text-xl);
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-title);
 }
 .panel h3 {
   margin: 0;
-  font-size: var(--text-l);
+  font-size: var(--text-body-lg);
   font-weight: 600;
 }
 .panel h4 {
-  margin: 0 0 4px;
-  font-size: var(--text-m);
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-label);
   color: var(--label-2);
   font-weight: 500;
 }
 .panel p {
-  font-size: var(--text-m);
+  font-size: var(--text-label);
   line-height: 1.6;
-  margin: 8px 0;
+  margin: var(--space-2) 0;
 }
 .panel small,
 .caption,
 .range {
   color: var(--label-3);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .panel button,
 .panel select {
   min-height: 36px;
   max-width: 100%;
   font: inherit;
-  font-size: var(--text-m);
+  font-size: var(--text-label);
   color: var(--label);
   background: var(--input);
   border: 1px solid var(--border);
@@ -59,8 +59,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: end;
-  gap: 12px;
-  padding: 12px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   background: var(--bg-l1);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-m);
@@ -70,8 +70,8 @@
   flex: 1 1 180px;
   min-width: 0;
   flex-direction: column;
-  gap: 4px;
-  font-size: var(--text-s);
+  gap: var(--space-1);
+  font-size: var(--text-caption);
   color: var(--label-2);
 }
 .period {
@@ -80,16 +80,16 @@
   gap: 6px;
 }
 .panel .range {
-  margin: 10px 0 16px;
-  font-size: var(--text-s);
+  margin: 10px 0 var(--space-4);
+  font-size: var(--text-caption);
 }
 .summaries {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--space-4);
 }
 .primary {
-  padding: 16px;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
   min-width: 0;
@@ -101,32 +101,32 @@
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0 8px;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-2);
 }
 .hero strong {
-  font-size: 32px;
+  font-size: var(--text-display);
   line-height: 1.2;
   letter-spacing: -0.5px;
   font-weight: 600;
 }
 .hero > span,
 .unknownValue > span {
-  font-size: var(--text-m);
+  font-size: var(--text-label);
   color: var(--label-2);
 }
 .hero .badge {
   padding: 0 6px;
   border-radius: var(--radius-s);
   background: var(--bg-l2);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .line {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 24px;
-  margin-top: 12px;
-  font-size: var(--text-base);
+  gap: var(--space-2) var(--space-6);
+  margin-top: var(--space-3);
+  font-size: var(--text-body);
 }
 .line small {
   display: block;
@@ -135,7 +135,7 @@
   background: var(--bg-l1);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-m);
-  padding: 16px;
+  padding: var(--space-4);
   min-width: 0;
 }
 .unknownValue {
@@ -143,49 +143,49 @@
   align-items: baseline;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 .unknownValue strong {
-  font-size: 24px;
+  font-size: var(--text-display-sm);
   line-height: 1.3;
   font-weight: 600;
 }
 .unknown p,
 .unknown summary {
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--label-2);
 }
 .unknown button {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 .panel .emptyTitle {
-  font-size: var(--text-l);
-  margin-top: 16px;
+  font-size: var(--text-body-lg);
+  margin-top: var(--space-4);
 }
 .block {
-  margin-top: 24px;
+  margin-top: var(--space-6);
 }
 .sectionHead {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-bottom: 8px;
+  gap: 6px var(--space-3);
+  margin-bottom: var(--space-2);
 }
 .groups {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 24px;
-  margin-top: 12px;
+  gap: var(--space-6);
+  margin-top: var(--space-3);
 }
 .row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 4px 12px;
+  gap: var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--border-soft);
-  padding: 8px 0;
-  font-size: var(--text-m);
+  padding: var(--space-2) 0;
+  font-size: var(--text-label);
 }
 .row small,
 .row > details {
@@ -205,11 +205,11 @@
 .bucket {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
-  padding: 8px 0;
+  padding: var(--space-2) 0;
   border-bottom: 1px solid var(--border-soft);
-  font-size: var(--text-m);
+  font-size: var(--text-label);
 }
 .bucket meter {
   width: 100%;
@@ -239,10 +239,10 @@
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) auto;
   align-items: baseline;
-  gap: 6px 16px;
+  gap: 6px var(--space-4);
   min-height: 48px;
-  padding: 12px 8px;
-  font-size: var(--text-m);
+  padding: var(--space-3) var(--space-2);
+  font-size: var(--text-label);
 }
 .record summary:hover {
   background: var(--hover);
@@ -251,7 +251,7 @@
   content: "展开 ›";
   color: var(--label-3);
   grid-column: 4;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .record[open] summary::after {
   content: "收起 ‹";
@@ -259,36 +259,36 @@
 .recordTime,
 .settlement {
   color: var(--label-3);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .settlement {
   text-align: right;
 }
 .recordBody {
-  padding: 0 8px 12px;
+  padding: 0 var(--space-2) var(--space-3);
 }
 .pagination {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 .coverage {
-  margin-top: 24px;
+  margin-top: var(--space-6);
   border-top: 1px solid var(--border-soft);
-  padding-top: 8px;
+  padding-top: var(--space-2);
 }
 .coverage summary,
 .unknown summary {
-  padding: 8px;
+  padding: var(--space-2);
 }
 .coverage summary {
-  font-size: var(--text-m);
+  font-size: var(--text-label);
   color: var(--label-2);
 }
 .notice {
-  margin-top: 12px;
-  padding: 12px;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
   background: var(--bg-l1);
@@ -302,10 +302,10 @@
 }
 @media (max-width: 760px) {
   .panel {
-    padding: 16px;
+    padding: var(--space-4);
   }
   .panel header {
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
   }
   .panel button,
   .panel select,
@@ -313,8 +313,8 @@
     min-height: 44px;
   }
   .filters {
-    gap: 8px;
-    padding: 8px;
+    gap: var(--space-2);
+    padding: var(--space-2);
   }
   .filters label {
     flex-basis: calc(50% - 8px);
@@ -325,20 +325,20 @@
   .summaries,
   .groups {
     grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
+    gap: var(--space-3);
   }
   .primary,
   .unknown {
-    padding: 12px;
+    padding: var(--space-3);
   }
   .row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
   .hero strong {
-    font-size: 28px;
+    font-size: var(--text-display-m);
   }
   .unknownValue strong {
-    font-size: 24px;
+    font-size: var(--text-display-sm);
   }
   .bucket {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -348,7 +348,7 @@
   }
   .record summary {
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 4px 8px;
+    gap: var(--space-1) var(--space-2);
   }
   .recordModel {
     grid-row: 1;

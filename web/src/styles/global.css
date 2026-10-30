@@ -14,7 +14,7 @@ body,
 }
 
 body {
-  font: var(--text-base) / var(--leading-base) var(--font);
+  font: var(--text-body) / var(--leading-title-sm) var(--font);
   color: var(--label);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;

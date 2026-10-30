@@ -1,0 +1,28 @@
+.menu {
+  position: fixed;
+  position-area: bottom span-right;
+  position-try-fallbacks: flip-block, flip-inline;
+  margin: var(--space-1) 0;
+  min-width: 160px;
+  padding: var(--space-1);
+  color: var(--label);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-dropdown);
+}
+.menu:popover-open {
+  display: grid;
+}
+.menu button {
+  text-align: left;
+  min-height: var(--control-m);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-m);
+  font-size: var(--text-label);
+}
+.menu button:hover,
+.menu button:focus-visible {
+  background: var(--hover);
+}

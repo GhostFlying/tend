@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import controls from "./controls.module.css";
+import { Button } from "../ui/Button.tsx";
 import styles from "./DetailOverlay.module.css";
 
 /** One modal owns both ledger detail views; hidden panes retain reading state. */
@@ -47,16 +47,16 @@ export function DetailOverlay({
       }}
     >
       <div className={styles.toolbar}>
-        <button className={controls.link} onClick={onBack ?? onClose}>
+        <Button variant="link" onClick={onBack ?? onClose}>
           {onBack ? `← ${backLabel}` : "← 返回"}
-        </button>
+        </Button>
         <div className={styles.actions}>
-          <button className={controls.chipBtn} aria-pressed={full} onClick={() => setFull(!full)}>
+          <Button variant="secondary" size="s" aria-pressed={full} onClick={() => setFull(!full)}>
             {full ? "退出全屏" : "全屏阅读"}
-          </button>
-          <button className={controls.iconBtn} aria-label={closeLabel} onClick={onClose}>
+          </Button>
+          <Button variant="ghost" icon aria-label={closeLabel} onClick={onClose}>
             ×
-          </button>
+          </Button>
         </div>
       </div>
       {children}

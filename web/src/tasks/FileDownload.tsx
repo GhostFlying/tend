@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useServices } from "../app/services.tsx";
 import type { DownloadURLResponse } from "../api/generated/api.ts";
-import controls from "../shell/controls.module.css";
+import { Button } from "../ui/Button.tsx";
 
 export function FileDownload({
   fileId,
@@ -56,15 +56,15 @@ export function FileDownload({
   };
   return (
     <>
-      <button
+      <Button
         type="button"
-        className={controls.link}
+        variant="link"
         disabled={busy}
         aria-label={`下载 ${name}`}
         onClick={() => void download()}
       >
         {busy ? "正在下载…" : "下载"}
-      </button>
+      </Button>
       {message && <span role="status">{message}</span>}
     </>
   );
