@@ -49,7 +49,9 @@ export function IssueActivity({
   const canonical = useStore(live.conversation);
   const state = useStore(reads.activity.state);
   const pending = useStore(
-    conversation?.id === issue.conversation?.conversation_id ? (queue?.list ?? noOutbox) : noOutbox,
+    issue.conversation?.conversation_id && conversation?.id === issue.conversation.conversation_id
+      ? (queue?.list ?? noOutbox)
+      : noOutbox,
   );
   const [all, setAll] = useState(reading.activityExpanded);
   const [error, setError] = useState("");
@@ -166,6 +168,7 @@ export function IssueActivity({
       if (!all) {
         setAll(true);
         reading.expandActivity();
+        if (visible.length === rows.length) await reads.activity.earlier();
       } else await reads.activity.earlier();
       if (node && anchor) requestAnimationFrame(() => restoreAnchor(node, anchor));
     } catch {
