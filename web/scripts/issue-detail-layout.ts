@@ -32,6 +32,7 @@ const progressRequests = new Map<string, Envelope>();
 const issue: IssueView = {
   issue_id: "wi_01ARZ3NDEKTSV4RRFFQ69G5FAV",
   state: "active",
+  work_status: "in_review",
   assignee: { kind: "agent", ref: "hosted/qingzhu" },
   assignment_epoch: 1,
   assignment_state: "active",
@@ -646,6 +647,7 @@ try {
     await deliveries.getByText("发布与回滚清单", { exact: true }).waitFor();
     await deliveries.getByRole("button", { name: "关闭详情", exact: true }).click();
     const side = await issueSidebar(page);
+    await side.getByText("待检查", { exact: true }).waitFor();
     await side.getByText("外部观察 · 已合并", { exact: true }).waitFor();
     await side.getByRole("button", { name: /发布与回滚清单/ }).waitFor();
     if (width < 1280) await side.getByRole("button", { name: "关闭详情", exact: true }).click();

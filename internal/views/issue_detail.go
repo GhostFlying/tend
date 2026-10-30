@@ -149,7 +149,8 @@ var issueActivityTitles = map[string]string{
 	"issue.created": "创建了 Issue", "issue.updated": "更新了目标与定义", "issue.progress_updated": "更新了当前进展",
 	"issue.manager_claimed": "负责人已接手", "issue.manager_fenced": "开始交接负责人", "issue.manager_migration_cancelled": "撤回了负责人委派", "task.manager_requested": "发布了负责人任务",
 	"issue.assigned": "完成了负责人交接", "issue.assignment_fenced": "开始交接负责人", "issue.paused": "暂停了 Issue", "issue.resumed": "恢复了 Issue",
-	"issue.closed": "关闭了 Issue", "issue.cancelled": "取消了 Issue", "issue.cancelling": "正在取消 Issue", "issue.reopened": "重新打开了 Issue", "issue.reparented": "调整了上级 Issue",
+	"issue.status_changed": "更新了工作状态",
+	"issue.closed":         "关闭了 Issue", "issue.cancelled": "取消了 Issue", "issue.cancelling": "正在取消 Issue", "issue.reopened": "重新打开了 Issue", "issue.reparented": "调整了上级 Issue",
 	"run.unknown": "执行结果未知，待核实", "run.lost": "执行连接已丢失，待核实", "run.recovery": "执行正在恢复", "run.failed": "执行失败", "run.reconciled": "执行结果已对账", "task.cancelled": "取消了任务", "task.taken_over": "任务已由用户接管",
 	"attention.changed": "更新了待处理事项",
 }
@@ -200,7 +201,8 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  OR (e.object_type='run' AND e.object_id IN (SELECT run_id FROM runs WHERE task_id IN (SELECT task_id FROM primary_tasks)))
  OR (e.object_type='artifact' AND e.object_id IN (SELECT artifact_id FROM artifacts WHERE task_id IN (SELECT task_id FROM primary_tasks)))
  OR (e.object_type='attention' AND e.object_id IN (SELECT attention_id FROM attentions WHERE issue_id=?))
- OR (e.object_type='issue' AND e.object_id IN (SELECT issue_id FROM issue_controls WHERE parent_issue_id=?) AND e.kind IN ('issue.closed','issue.cancelled','issue.assigned','issue.manager_claimed','issue.manager_migration_cancelled'))
+ OR (e.object_type='issue' AND e.object_id IN (SELECT issue_id FROM issue_controls WHERE parent_issue_id=?) AND
+ (e.kind IN ('issue.closed','issue.cancelled','issue.assigned','issue.manager_claimed','issue.manager_migration_cancelled') OR (e.kind='issue.status_changed' AND json_extract(e.body_json,'$.state') IN ('closed','cancelled'))))
  ))
  SELECT position,kind,object_id,created_at FROM entries WHERE position<=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT 21`, id, id, conversation, string(rawKinds), id, id, id, out.EventSeq, before, before)
 	if err != nil {
@@ -253,6 +255,27 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 				entry.Author = frozen
 			}
 		} else {
+			var body string
+			if err := q.QueryRowContext(ctx, `SELECT body_json FROM events WHERE event_seq=?`, r.seq).Scan(&body); err != nil {
+				return out, err
+			}
+			var facts struct {
+				Status     string `json:"status"`
+				State      string `json:"state"`
+				ArtifactID string `json:"artifact_id"`
+				TaskID     string `json:"task_id"`
+			}
+			if err := json.Unmarshal([]byte(body), &facts); err != nil {
+				return out, err
+			}
+			if r.kind == "issue.status_changed" {
+				switch facts.State {
+				case "closed":
+					entry.Title = "关闭了 Issue"
+				case "cancelled":
+					entry.Title = "取消了 Issue"
+				}
+			}
 			if r.id == issue.IssueID {
 				entry.IssueID = id
 			} else {
@@ -264,18 +287,6 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 				} else if !errors.Is(e, sql.ErrNoRows) {
 					return out, e
 				}
-			}
-			var body string
-			if err := q.QueryRowContext(ctx, `SELECT body_json FROM events WHERE event_seq=?`, r.seq).Scan(&body); err != nil {
-				return out, err
-			}
-			var facts struct {
-				Status     string `json:"status"`
-				ArtifactID string `json:"artifact_id"`
-				TaskID     string `json:"task_id"`
-			}
-			if err := json.Unmarshal([]byte(body), &facts); err != nil {
-				return out, err
 			}
 			if r.kind == "attention.changed" {
 				var snapshot string
