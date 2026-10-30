@@ -297,6 +297,32 @@ try {
         .getByRole("navigation", { name: "视图" })
         .getByRole("button", { name: "Issue", exact: true })
         .click();
+    else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+    const resourcesEntry = page.getByRole("button", { name: "资源与记录", exact: true });
+    await resourcesEntry.click();
+    const resources = page.getByRole("dialog", { name: "资源与记录", exact: true });
+    await resources
+      .locator("summary")
+      .filter({ hasText: /^执行主机状态$/ })
+      .click();
+    const hostEntry = resources.getByRole("button", { name: "主机详情：host-a", exact: true });
+    await hostEntry.click();
+    const hostDetails = page.getByRole("dialog", { name: "主机详情", exact: true });
+    await hostDetails.getByRole("heading", { name: "host-a", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await hostDetails.waitFor({ state: "detached" });
+    assert(await resources.isVisible(), "host Escape must preserve the enclosing resources");
+    assert(
+      await hostEntry.evaluate((element) => document.activeElement === element),
+      "host Escape must return focus to the invoking host button",
+    );
+    if (output) await page.screenshot({ path: join(output, `host-escape-${viewport.width}.png`) });
+    await page.keyboard.press("Escape");
+    await resources.waitFor({ state: "detached" });
+    assert(
+      await resourcesEntry.evaluate((element) => document.activeElement === element),
+      "resource Escape must return focus to its entry",
+    );
     if (mobile) {
       await page.getByLabel("按项目筛选Issue").fill("selected-project");
       await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
