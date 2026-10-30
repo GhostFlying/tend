@@ -67,7 +67,7 @@
   min-height: 0;
   width: 100%;
   border: 1px solid var(--border-soft);
-  background: white;
+  background: var(--preview-paper);
 }
 @media (max-width: 760px) {
   .actions button {

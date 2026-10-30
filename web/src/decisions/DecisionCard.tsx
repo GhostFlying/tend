@@ -2,7 +2,7 @@ import { DecisionContext } from "./DecisionContext.tsx";
 // A question for the owner, with its options as buttons (D71, D89). Options
 // tend carries out itself are marked "tend 执行". Worker questions return
 // directly to their run; other questions go through the main-agent chat.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import type { DecisionView, TaskSummary } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { noOutbox } from "../queue/sendQueue.ts";
@@ -28,7 +28,18 @@ export function DecisionCard({
   const outbox = useStore(s.queue?.list ?? noOutbox);
   const [busy, setBusy] = useState(false);
   const [reply, setReply] = useState("");
-  const retryFocus = useRef<HTMLButtonElement | null>(null);
+  const [retryFocus, setRetryFocus] = useState<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    // A frame may run before React commits busy=false; restore only after the DOM is ready.
+    if (
+      !busy &&
+      retryFocus?.isConnected &&
+      !retryFocus.disabled &&
+      (document.activeElement === document.body || document.activeElement === retryFocus)
+    ) {
+      retryFocus.focus();
+    }
+  }, [busy, retryFocus]);
   const byMessage = messageAnswer(d, conversation.items, outbox);
   const failed = byMessage?.state === "failed";
 
@@ -45,7 +56,7 @@ export function DecisionCard({
     const retryTarget =
       trigger ??
       (document.activeElement instanceof HTMLButtonElement ? document.activeElement : null);
-    retryFocus.current = retryTarget;
+    setRetryFocus(null);
     setBusy(true);
     let accepted = false;
     try {
@@ -55,18 +66,7 @@ export function DecisionCard({
       }
     } finally {
       setBusy(false);
-      if (!accepted) {
-        requestAnimationFrame(() => {
-          const target = retryFocus.current;
-          if (
-            target === retryTarget &&
-            target?.isConnected &&
-            (document.activeElement === document.body || document.activeElement === target)
-          ) {
-            target.focus();
-          }
-        });
-      }
+      if (!accepted) setRetryFocus(retryTarget);
     }
   };
   const pending = byMessage?.state === "pending";

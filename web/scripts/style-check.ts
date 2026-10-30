@@ -2,8 +2,60 @@ import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, relative } from "node:path";
 
+const namedColors = new Set(
+  `aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond
+  blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue
+  cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey
+  darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon
+  darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet
+  deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen
+  fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew
+  hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon
+  lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey
+  lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey
+  lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine
+  mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen
+  mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite
+  navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen
+  paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple
+  rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell
+  sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan
+  teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen`.split(/\s+/),
+);
+
+function mask(text: string): string {
+  return text.replace(/[^\n]/g, " ");
+}
+
+/** Mask non-declaration content without changing source offsets or line numbers. */
+function declarationContent(source: string): string {
+  const unquoted = source.replace(
+    /\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g,
+    mask,
+  );
+  let content = "";
+  let cursor = 0;
+  for (const url of unquoted.matchAll(/\burl\s*\(/gi)) {
+    if (url.index < cursor) continue;
+    let end = url.index + url[0].length;
+    let depth = 1;
+    while (end < unquoted.length && depth > 0) {
+      if (unquoted[end] === "\\") {
+        end += 2;
+        continue;
+      }
+      if (unquoted[end] === "(") depth++;
+      if (unquoted[end] === ")") depth--;
+      end++;
+    }
+    content += unquoted.slice(cursor, url.index) + mask(unquoted.slice(url.index, end));
+    cursor = end;
+  }
+  return content + unquoted.slice(cursor);
+}
+
 export function styleViolations(source: string): { line: number; message: string }[] {
-  const content = source.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
+  const content = declarationContent(source);
   const violations: { line: number; message: string }[] = [];
   const report = (offset: number, message: string) =>
     violations.push({ line: content.slice(0, offset).split("\n").length, message });
@@ -20,8 +72,18 @@ export function styleViolations(source: string): { line: number; message: string
       [...value.matchAll(/\b(\d*\.?\d+)px\b/gi)].some((entry) => Number(entry[1]) !== 0)
     )
       report(offset, "use a radius token");
-    for (const color of value.matchAll(/#[\da-f]{3,8}\b|rgba?\([^)]*\)/gi))
-      report(offset + color.index, "define colors in styles/tokens.css");
+    if (property === "font" || property === "font-family") continue;
+    const colors = value.replace(/--[\w-]+/g, mask);
+    for (const color of colors.matchAll(
+      /#[\da-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\s*\(|\b[a-z][\w-]*\b/gi,
+    )) {
+      if (
+        color[0].startsWith("#") ||
+        color[0].includes("(") ||
+        namedColors.has(color[0].toLowerCase())
+      )
+        report(offset + color.index, "define colors in styles/tokens.css");
+    }
   }
   return violations;
 }
