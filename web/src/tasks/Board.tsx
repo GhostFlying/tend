@@ -1,5 +1,4 @@
-import { UsageEntry } from "../usage/Usage.tsx";
-import { RepositoryEntry } from "../repos/Repositories.tsx";
+import { ResourceNavigation } from "../shell/Resources.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 import { useEffect, useId, useState } from "react";
 import type { Connection } from "../api/client.ts";
@@ -125,6 +124,7 @@ export function BoardResources({
     <details className={styles.mobileRecent}>
       <summary>资源与记录</summary>
       <div className={styles.resourceContent}>
+        <ResourceNavigation onRepos={onRepos} records onRecords={() => {}} />
         <details>
           <summary>
             执行主机
@@ -136,8 +136,6 @@ export function BoardResources({
             <Hosts connection={connection} />
           </div>
         </details>
-        <RepositoryEntry onOpen={onRepos} />
-        <UsageEntry />
         <details>
           <summary>最近完成的任务</summary>
           <div className={styles.mobileList}>

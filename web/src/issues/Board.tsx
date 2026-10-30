@@ -29,6 +29,7 @@ import {
   workStatus,
 } from "./boardModel.ts";
 import { useBoardActions } from "./useBoardActions.ts";
+import { ResourcesEntry } from "../shell/Resources.tsx";
 import styles from "./Board.module.css";
 
 export function IssueBoard({
@@ -36,12 +37,14 @@ export function IssueBoard({
   onChat,
   onRecords,
   onInbox,
+  onRepos,
   active,
 }: {
   onSelect(id: string): void;
   onChat(): void;
   onRecords(): void;
   onInbox?(id?: string): void;
+  onRepos(): void;
   active: boolean;
 }) {
   const { live, client, openTask } = useServices();
@@ -138,6 +141,7 @@ export function IssueBoard({
         <button className={styles.primary} onClick={() => setCreating(true)} disabled={!online}>
           ＋ 新建 Issue
         </button>
+        <ResourcesEntry connection={connection} onRecords={onRecords} onRepos={onRepos} />
       </header>
       <div className={styles.toolbar}>
         <div className={styles.views} role="tablist" aria-label="Issue视图">

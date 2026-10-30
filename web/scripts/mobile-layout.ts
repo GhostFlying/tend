@@ -238,7 +238,7 @@ try {
       const details = page.getByRole("dialog", { name: "任务详情", exact: true });
       await details.getByText("启动设计稿 Web 预览", { exact: true }).first().waitFor();
       await details.getByRole("button", { name: "关闭详情", exact: true }).click();
-      const records = sidebar.getByRole("button", { name: "全部任务执行 ›", exact: true });
+      const records = sidebar.getByRole("button", { name: "全部任务执行", exact: true });
       await records.scrollIntoViewIfNeeded();
       await unobscured(records);
       await records.focus();
@@ -280,7 +280,7 @@ try {
     const rows = list.getByRole("button", { name: /^主机详情：/ });
     await rows.nth(1).waitFor();
     assert.equal(await rows.count(), 2);
-    if (!mobile) await rows.nth(1).scrollIntoViewIfNeeded();
+    await rows.nth(1).scrollIntoViewIfNeeded();
     if (viewport.height >= 760) {
       await unobscured(rows.nth(0));
       await unobscured(rows.nth(1));
