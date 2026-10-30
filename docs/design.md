@@ -383,3 +383,6 @@ D63/D67 原生根 turn 观测修正：Orca pane 的聚合 prompt/done 不是受�
 D63/D67 的原生投影保留已知 live child 的执行边界；调用返回与根结束不替代 child settled。宿主输入分类、launch/runtime 身份与能力探测分别使用原证据，受管发送回执对账不因新 turn 尚未可见而丢失旧根身份，也不将旧根完成套用于新轮。
 
 旧 Orca 缺少 child inventory 时，D67 从已定位的原生 durable execution receipt 保留原 child/process 的未完成事实；同身份明确终态才允许 settled，根 turn 切换或工具响应返回均不清空该事实。
+
+
+D63/D66 named TraeX 选择沿既有 Orca Trae TUI 路径传递精确 model/effort。支持性由实际 CLI 与所连执行 host 的独立 capability 正证据决定；旧版本、缺失或错误均保持不可用，不省略参数或切换 provider。配置目录与模型配额/真实调用可用性分别核验。见 docs/plans/orca-traex-launch-preferences.md。
