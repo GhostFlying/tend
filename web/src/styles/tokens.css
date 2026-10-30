@@ -12,6 +12,8 @@
   --sidebar: #f9fafb;
   --bubble: #f0f2f5;
   --input: #ffffff;
+  --preview-paper: #ffffff;
+  --mask-opaque: #000000;
   --hover: rgba(38, 49, 72, 0.06);
 
   /* text */
@@ -134,6 +136,8 @@ body[data-dark] {
   --sidebar: rgb(27, 27, 28);
   --bubble: rgb(44, 44, 47);
   --input: rgb(36, 36, 38);
+  --preview-paper: #ffffff;
+  --mask-opaque: #000000;
   --hover: rgba(255, 255, 255, 0.06);
 
   --label: rgb(236, 237, 240);
