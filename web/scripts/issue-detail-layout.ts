@@ -22,6 +22,7 @@ const now = Date.now();
 let seq = 10;
 let activityDelay = 0;
 let pagedChildren = false;
+let pagedActivity = false;
 const streams = new Set<ServerResponse>();
 const writes: Envelope[] = [];
 const requests: string[] = [];
@@ -249,6 +250,38 @@ const server = createServer(async (req, res) => {
     const current = p.includes(child.issue_id) ? child : issue;
     if (p.endsWith("/activity")) {
       if (activityDelay) await new Promise((resolve) => setTimeout(resolve, activityDelay));
+      if (pagedActivity)
+        return json(
+          u.searchParams.has("before")
+            ? {
+                event_seq: seq,
+                more: false,
+                items: [
+                  {
+                    id: "earlier-fact",
+                    position: 5,
+                    kind: "issue.updated",
+                    title: "更早的进展记录",
+                    author: "system",
+                    created_at: now - 1000,
+                  },
+                ],
+              }
+            : {
+                ...activity,
+                event_seq: seq,
+                more: true,
+                next_before: 11,
+                items: Array.from({ length: 20 }, (_, index) => ({
+                  id: `recent-fact-${index}`,
+                  position: 11 + index,
+                  kind: "issue.updated",
+                  title: `最近进展 ${index}`,
+                  author: "system",
+                  created_at: now,
+                })),
+              },
+        );
       return json(activity);
     }
     if (p.endsWith("/results"))
@@ -870,6 +903,68 @@ try {
   assert.equal(issue.progress!.summary, "其他更新已被保存");
   await recoveryContext.close();
   console.log("PASS 390: restored progress text and next step survive a rejected original receipt");
+  const isolationContext = await browser.newContext({ viewport: { width: 390, height: 1000 } });
+  const isolation = await isolationContext.newPage();
+  await isolation.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+  const isolatedIssue = isolation.getByRole("region", { name: "Issue详情", exact: true });
+  await isolatedIssue.getByRole("heading", { name: issue.plan.title, exact: true }).waitFor();
+  await isolation.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const r = indexedDB.open("tend:deployment:issue-detail-fixture");
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    const tx = db.transaction("outbox", "readwrite");
+    tx.objectStore("outbox").put({
+      requestId: "main-failed",
+      order: 1,
+      envelope: {
+        request_id: "main-failed",
+        operation: "conversation.submit_message",
+        target: { type: "conversation" },
+        payload: { conversation_id: "main", body: "只属于主对话的待发内容" },
+      },
+      body: "只属于主对话的待发内容",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      state: "failed",
+      error: "等待在主对话中处理",
+    });
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  });
+  await isolation.reload();
+  await isolatedIssue
+    .getByText("当前由你负责；可交接给 Agent 后继续负责人对话。", { exact: true })
+    .waitFor();
+  assert.equal(await isolatedIssue.getByText("只属于主对话的待发内容", { exact: true }).count(), 0);
+  await isolatedIssue.getByRole("button", { name: "返回Issue列表或上一项", exact: true }).click();
+  await isolation
+    .getByRole("navigation", { name: "视图", exact: true })
+    .getByRole("button", { name: "对话", exact: true })
+    .click();
+  await isolation.getByText("只属于主对话的待发内容", { exact: true }).waitFor();
+  assert(
+    !writes.some(
+      (envelope) =>
+        envelope.operation === "conversation.submit_message" &&
+        (envelope.payload as { body?: string }).body === "只属于主对话的待发内容",
+    ),
+  );
+  pagedActivity = true;
+  await isolation.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+  await isolatedIssue.getByRole("button", { name: "查看更早记录", exact: true }).click();
+  const earlierFact = isolatedIssue.locator('[data-scroll-id="earlier-fact"]');
+  await earlierFact.waitFor();
+  assert((await earlierFact.innerText()).includes("更早的进展记录"));
+
+  await isolationContext.close();
+  console.log(
+    "PASS 390: missing binding never leaks main's outbox; one click reads the earlier activity page",
+  );
 } finally {
   await browser.close();
   for (const s of streams) s.end();
