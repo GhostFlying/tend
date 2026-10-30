@@ -163,6 +163,28 @@ func namedHostedSelection(ctx context.Context, q store.Querier, prepared *hosted
 	if err != nil {
 		return hostedconfig.Selection{}, false, err
 	}
+	if selected, named, err := runnerReceiptSelection(ctx, q, issue.IssueID); err != nil || named {
+		return selected, named, err
+	}
+	if m, e := store.CurrentIssueManagerTask(ctx, q, issue.IssueID); e == nil {
+		return runnerManagerSelection(ctx, q, m)
+	} else if !errors.Is(e, store.ErrNotFound) {
+		return hostedconfig.Selection{}, false, e
+	}
+	var migrated bool
+	if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE issue_id=?)`, issue.IssueID).Scan(&migrated); err != nil {
+		return hostedconfig.Selection{}, false, err
+	}
+	if migrated {
+		return hostedconfig.Selection{}, false, protocol.Errorf(protocol.CodeInvalidTransition, "runner manager responsibility is not currently runnable")
+	}
+	var retired bool
+	if err = q.QueryRowContext(ctx, `SELECT finalized FROM manager_runner_cutover WHERE singleton=1`).Scan(&retired); err != nil {
+		return hostedconfig.Selection{}, false, err
+	}
+	if retired {
+		return hostedconfig.Selection{}, false, protocol.Errorf(protocol.CodeInvalidTransition, "hosted manager startup is retired")
+	}
 	if prepared == nil {
 		return hostedconfig.Selection{}, false, protocol.Errorf(protocol.CodeInvalidTransition, "canonical Issue coordination requires its named configuration")
 	}
@@ -215,6 +237,9 @@ func (a *App) HostedSelectionForAdmission(ctx context.Context, request, conversa
 }
 func (a *App) hostedSelectionForAdmission(ctx context.Context, q store.Querier, request, conversation string) (hostedconfig.Selection, bool, error) {
 	if selected, frozen, err := a.hostedFrozenSelection(ctx, q, request); err != nil || frozen {
+		if err == nil && selected.RunnerManaged {
+			err = rebindRunnerRuntime(ctx, q, &selected)
+		}
 		return selected, frozen, err
 	}
 	return namedHostedSelection(ctx, q, a.hostedConfiguration, conversation)
@@ -289,12 +314,14 @@ func (a *App) freezeHostedExecution(ctx context.Context, tx *store.Tx, m store.M
 	if !named || !reflect.DeepEqual(expected, opened) {
 		return protocol.Errorf(protocol.CodeStaleRevision, "named selection changed before native admission")
 	}
-	config, err := store.GetHostedConfiguration(ctx, tx.Q(), selected.ConfigurationRevision)
-	if err != nil {
-		return err
-	}
-	if config.PrivateHash != selected.ConfigurationHash {
-		return protocol.Errorf(protocol.CodeConflictPayload, "named selection does not match its accepted local snapshot")
+	if selected.RunnerRunID == "" {
+		config, err := store.GetHostedConfiguration(ctx, tx.Q(), selected.ConfigurationRevision)
+		if err != nil {
+			return err
+		}
+		if config.PrivateHash != selected.ConfigurationHash {
+			return protocol.Errorf(protocol.CodeConflictPayload, "named selection does not match its accepted local snapshot")
+		}
 	}
 	if selected.Purpose == agentconfig.Main {
 		uncertain, err := hostedMainReceiptPending(ctx, tx.Q())
@@ -344,6 +371,13 @@ func (a *App) HostedRuntimeSelection(ctx context.Context, conversation string) (
 		if len(ids) > 0 {
 			row, err := store.GetHostedExecution(ctx, tx.Q(), ids[0])
 			selected, named = row.Selection, true
+			if err == nil && !selected.RunnerManaged && row.IssueID != "" {
+				issue, readErr := store.GetCanonicalIssue(ctx, tx.Q(), row.IssueID)
+				if readErr != nil {
+					return readErr
+				}
+				selected.ReceiptOnly = issue.AssignmentEpoch != row.AssignmentEpoch
+			}
 			return err
 		}
 		destination := MainThreadDestination
@@ -361,6 +395,9 @@ func (a *App) HostedRuntimeSelection(ctx context.Context, conversation string) (
 		selected, named, err = namedHostedSelection(ctx, tx.Q(), a.hostedConfiguration, conversation)
 		return err
 	})
+	if err == nil && selected.RunnerManaged {
+		err = a.store.Read(ctx, func(tx *store.ReadTx) error { return rebindRunnerRuntime(ctx, tx.Q(), &selected) })
+	}
 	return selected, named, err
 }
 

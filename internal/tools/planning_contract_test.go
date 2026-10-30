@@ -18,7 +18,7 @@ func newPlanningEnv(t *testing.T) *env {
 	t.Helper()
 	e := newEnv(t)
 	ids := testkit.NewIDGen(testkit.NewClock(), 17)
-	payload, err := json.Marshal(protocol.HelloPayload{WorkspaceProtocol: 1})
+	payload, err := json.Marshal(protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}})
 	if err != nil {
 		t.Fatal(err)
 	}

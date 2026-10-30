@@ -69,6 +69,7 @@ type RunVerdict struct {
 // that the runner did not report; they never started, so the runner takes
 // them over as if it had just claimed them.
 type HelloResult struct {
+	ProtocolMax        int64          `json:"protocol_max,omitempty"`
 	AgentExecution     bool           `json:"agent_execution,omitempty"`
 	AgentInventory     bool           `json:"agent_inventory,omitempty"`
 	RepositoryBindings bool           `json:"repository_bindings,omitempty"`
@@ -81,9 +82,10 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
-	Execution           *RunExecutionPin  `json:"execution,omitempty"`
-	AcceptanceExecution *ExecutionProfile `json:"acceptance_execution,omitempty"`
-	QuestionContext     bool              `json:"question_context,omitempty"`
+	Manager             *IssueManagerAssignment `json:"manager,omitempty"`
+	Execution           *RunExecutionPin        `json:"execution,omitempty"`
+	AcceptanceExecution *ExecutionProfile       `json:"acceptance_execution,omitempty"`
+	QuestionContext     bool                    `json:"question_context,omitempty"`
 	// RunMessages enables the additive, run-scoped supplement delivery protocol.
 	RunMessages bool `json:"run_messages,omitempty"`
 	// WorkerQuestions is negotiated before exposing ask_owner to the worker.
@@ -110,7 +112,7 @@ type Assignment struct {
 	// Spec is the immutable task spec version the run works on.
 	Relations []TaskRelationView  `json:"relations,omitempty"`
 	Spec      json.RawMessage     `json:"spec"`
-	Workspace AssignmentWorkspace `json:"workspace"`
+	Workspace AssignmentWorkspace `json:"workspace,omitzero"`
 	// Artifact is the artifact reference an acceptance run judges.
 	Artifact json.RawMessage `json:"artifact,omitempty"`
 	// Feedback is what the last acceptance of the same spec version asked

@@ -2,16 +2,17 @@ package protocol
 
 // CurrentRunnerProtocol is the current server/runner communication generation.
 // Version zero denotes runners predating explicit negotiation.
-const CurrentRunnerProtocol int64 = 1
+const CurrentRunnerProtocol int64 = 2
 const PreviousRunnerProtocol int64 = CurrentRunnerProtocol - 1
 
 const (
-	RunnerNormal                 = "normal"
-	RunnerMaintenance            = "maintenance"
-	RunnerReady                  = "ready"
-	CapabilityRepositoryBindings = "runner-repositories-v1"
-	CapabilityRunnerHeartbeat    = "runner-heartbeat-v1"
-	CapabilityRunnerMaintenance  = "runner-maintenance-v1"
+	RunnerNormal                  = "normal"
+	RunnerMaintenance             = "maintenance"
+	RunnerReady                   = "ready"
+	CapabilityRepositoryBindings  = "runner-repositories-v1"
+	CapabilityProtocolNegotiation = "runner-protocol-negotiation-v1"
+	CapabilityRunnerHeartbeat     = "runner-heartbeat-v1"
+	CapabilityRunnerMaintenance   = "runner-maintenance-v1"
 )
 
 // RunnerBuild identifies the immutable executable and process for supervision.

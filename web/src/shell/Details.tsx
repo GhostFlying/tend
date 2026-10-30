@@ -60,6 +60,58 @@ export function Details() {
 }
 
 function TaskContent({ task: t }: { task: TaskDetail }) {
+  return t.kind === "issue_manager" ? (
+    <ManagerTaskContent task={t} />
+  ) : (
+    <ExecutionTaskContent task={t} />
+  );
+}
+
+function ManagerTaskContent({ task }: { task: TaskDetail }) {
+  const { openIssue } = useServices();
+  const contract =
+    task.spec && typeof task.spec === "object" ? (task.spec as Record<string, unknown>) : {};
+  return (
+    <>
+      <div className={styles.summary}>
+        <strong>
+          Issue 协调责任 ·{" "}
+          {task.lifecycle === "running" ? "协调中" : lifecycleLabels[task.lifecycle]}
+        </strong>
+        <span>{task.manager?.category_id ?? "issue-manager"}</span>
+      </div>
+      <p>每轮协调结束后释放执行槽，等待新输入。责任随 Issue 收尾或交接结束。</p>
+      <TaskExecution task={task} />
+      <TaskControls task={task} />
+      {task.manager && (
+        <Section title="管理范围与会话">
+          <button className={controls.chipBtn} onClick={() => openIssue(task.manager!.issue_id)}>
+            打开 Issue 与聊天
+          </button>
+          {task.manager.conversation_id && <p>会话：{task.manager.conversation_id}</p>}
+        </Section>
+      )}
+      {typeof contract.reason === "string" && (
+        <Section title="责任要求">
+          <Markdown text={contract.reason} />
+        </Section>
+      )}
+      <Section title="协调回合">
+        {!task.runs?.length && <p>等待 runner 领取。</p>}
+        {task.runs?.map((run) => (
+          <div key={run.run_id} className={styles.progress}>
+            <b>协调 · 第 {run.generation} 轮</b>
+            <span>{statusLabels[run.observed] ?? run.observed}</span>
+            <small>{run.host}</small>
+          </div>
+        ))}
+      </Section>
+      <LogSection task={task} />
+    </>
+  );
+}
+
+function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
   const { followUp, openTask, openIssue } = useServices();
   const current = currentWork(t);
   const [tab, setTab] = useState(t.lifecycle === "completed" ? "delivery" : "execution");

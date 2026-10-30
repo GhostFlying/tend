@@ -1,6 +1,6 @@
 # Issue、Agent 与个人规划架构
 
-状态：P0、P1 基础控制与 P2 配置库存子批已经 CI 和 rebase 合并，P1 owner API/CLI 的 PR #165 正在 CI。P3 完整本地检查、交叉编译与独立 review 通过，等待前件交付。P4 第三轮完整检查结束，两条交接回归失败；正式 review 的重挂与成果读取问题已在 r8 修正并独立复审通过，两条测试准备顺序已在 r9 修正并独立复核通过，第四轮正式验证待执行。P5、P6、P8 候选及依赖组合完成定向检查和独立预审，正式全检/CI 尚未完成；只读 Agent 目录候选独立复审通过。前端非可视数据逻辑候选完成定向检查，未确认页面仍不编码。本轮尚未部署或完成真实模型验收。以下台账区分设计、候选检查、合并与验收，历史失败记录保留。
+状态：D128 的 runner Issue manager 迁移正在实施，尚未发布或部署；本轮保留现有账本，不执行第 7 节的空账本切换。下列既有批次状态保留为历史交付记录。P0、P1 基础控制与 P2 配置库存子批已经 CI 和 rebase 合并，P1 owner API/CLI 的 PR #165 正在 CI。P3 完整本地检查、交叉编译与独立 review 通过，等待前件交付。P4 第三轮完整检查结束，两条交接回归失败；正式 review 的重挂与成果读取问题已在 r8 修正并独立复审通过，两条测试准备顺序已在 r9 修正并独立复核通过，第四轮正式验证待执行。P5、P6、P8 候选及依赖组合完成定向检查和独立预审，正式全检/CI 尚未完成；只读 Agent 目录候选独立复审通过。前端非可视数据逻辑候选完成定向检查，未确认页面仍不编码。本轮尚未部署或完成真实模型验收。以下台账区分设计、候选检查、合并与验收，历史失败记录保留。
 
 主 Agent 可依据真实 owner 原文，转录既有 decision/version 的既定选项；仍经原 AskedRevision 与领域规则应用已有效果。这是个人助理传递用户决定，不是主 Agent 自由规划 canonical task、修改其冻结合同或接管 owner 权限；不为 owner 普通回答添加语义证明链。
 
@@ -21,12 +21,12 @@ Issue 和 sub-issue 使用同一实体及 API，以可空的 `parent_issue_id` �
 | Issue | 身份、父项、项目、标题、意图与定义、计划、来源事实、revision、状态、优先级、期限、下一步、责任人及 assignment epoch、授权来源、关闭证据 |
 | Issue revision | 不可变定义/计划快照、理由、真实来源、请求及协调 effect 身份 |
 | Assignment | 具体 Agent 实例引用或 owner、epoch、交接来源、前任/后任、状态和生效点 |
-| Task | 唯一 primary issue、冻结 spec、可选 stage 关联、交付要求、实现及正式验收选择、workspace 合同 |
+| Task | 唯一 primary issue、类型和冻结合同；execution 有交付、独立验收及 workspace；issue_manager 有 category、授权来源及责任期，无代码工作区或管理任务自身验收 |
 | Run | 正式角色、动作/代次、租约、实际 runtime/Agent 配置快照、原生执行身份、结果与不确定状态 |
 
 每个 task 恰有一个 primary issue；其他 issue 只能显式引用结果，不能成为第二执行归属或隐式共享 workspace。Task spec、artifact、acceptance 与可编辑 issue 计划分离；定义修改不能覆写已启动 run 的合同或历史证据。跨 issue 使用提交、文件或报告引用，保留工作区独占和同责任归属约束。
 
-Issue 支持 create/update、pause/resume、cancel、close/reopen、reparent 和 assign。关闭要求完成条件和责任终点有证据，且没有未处理子项、活动 task/run、未答 attention、未决控制操作或 unknown。父项不能通过关闭、取消、重挂载或删除 stage 遗失子项与承诺。Pause 只阻止新派发，已启动的冻结合同继续；要停止活动执行必须另有明确 task 控制。Cancel 先登记意图并明确处理子项及执行，沿正式 task 控制协调；无法证明停止时展示 pending/unknown，不能伪造已结束。Reopen 恢复 issue 责任，不复活终态 task/run。
+Issue 支持 create/update、pause/resume、cancel、close/reopen、reparent 和 assign。关闭要求完成条件和责任终点有证据，且没有未处理子项、未完成交付 task/run、未答 attention、未决控制操作或 unknown。当前 manager 的正常协调回合不阻塞自身关闭，其结束回执仍须核清；manager unknown 会阻塞责任收尾。父项不能通过关闭、取消、重挂载或删除 stage 遗失子项与承诺。Pause 只阻止新派发，已启动的冻结合同继续；要停止活动执行必须另有明确 task 控制。Cancel 先登记意图并明确处理子项及执行，沿正式 task 控制协调；无法证明停止时展示 pending/unknown，不能伪造已结束。Reopen 恢复 issue 责任，不复活终态 task/run。
 
 Reparent 必须没有活动责任 turn 或执行，再在一个事务中检查树环、依赖和项目/授权范围；活动执行、授权冲突或 unknown 均阻止生效并报告具体原因。它不能扩张授权，不能把原 workspace 改成另一责任的共享目录。计划引用变化不替代明确 task disposition。
 
@@ -42,13 +42,13 @@ Reparent 必须没有活动责任 turn 或执行，再在一个事务中检查�
 
 ## 3. 命名 Agent、类别与 runtime 库存
 
-Category 是全局能力分类，不是正式角色。每个 runner/runtime 可登记多个本机 Agent definition，每个 definition 可属于多个 category。Hosted main、issue manager 和独立 consultation runtime 同样进入库存，不将可选项局限于 worker runner。
+Category 是全局能力分类，不是正式角色。每个 runner/runtime 可登记多个本机 Agent definition，每个 definition 可属于多个 category。Main 与独立 consultation 保留 hosted 库存；Issue manager 使用 runner 本机 app-server definition 的 issue_manager purpose，复用全局 category。发布只指定 category，不选择本机 hosted identity 或 runner。首次领取的具体 agent/runner 成为本责任期归属，等待时释放槽位，后续恢复原会话。Codex、Traex 分别声明 CLI，Orca 不承载 manager。
 
 Definition 的稳定身份是执行环境 ID 加本机 local Agent ID，runtime 是可版本化绑定引用。Definition 包含类别、私有角色指令、model、effort、支持能力、配置版本及来源。配置来自用户本机 CLI/Agent 设置；只上传允许的非密钥元数据、来源类型、版本和规范化内容 hash，不上传 token、私钥、完整环境或认证文件。路径等机器细节留本机，公共文档与提交不记录真实部署信息。
 
 库存表达已加载、当前可用能力，不只登记候选配置。Runtime 健康、CLI 可用、能力协商和身份验证分别记录；目录中出现一个 Agent 不证明它能在某 host 执行。退役或更新阻止后续新选择，不改写已有 run。
 
-选择条件为 category 加可选 HARD runner/runtime 约束；每个正式 role 可附 model/effort 要求，仅筛选实际 definition 配置，不覆盖它。省略字段不增加门槛，空 effort 不要求本机也为空。旧 acceptance_execution 仍按完整 profile 精确匹配；与新 acceptance 要求矛盾的 owner 输入直接 invalid_request。workspace host 也是硬约束。首次选择执行 host 必须证明该 host 可完成本 task 的实现和正式验收，两个角色使用同一 workspace host，模型或 Agent definition 可不同。正式验收沿用同一 task workspace 身份及冻结的基点/产物合同，验收自己的 scratch 和原生会话仍独立，不能换成另一份未证明等价的工作状态。缺少任一能力则明确排队，不能先实现再迁移验收工作区、忽略硬约束或回退默认 Agent。
+普通 execution 任务的选择条件为 category 加可选 HARD runner/runtime 约束；每个正式 role 可附 model/effort 要求，仅筛选实际 definition 配置，不覆盖它。省略字段不增加门槛，空 effort 不要求本机也为空。旧 acceptance_execution 仍按完整 profile 精确匹配；与新 acceptance 要求矛盾的 owner 输入直接 invalid_request。workspace host 也是硬约束。首次选择执行 host 必须证明该 host 可完成本 task 的实现和正式验收，两个角色使用同一 workspace host，模型或 Agent definition 可不同。正式验收沿用同一 task workspace 身份及冻结的基点/产物合同，验收自己的 scratch 和原生会话仍独立，不能换成另一份未证明等价的工作状态。缺少任一能力则明确排队，不能先实现再迁移验收工作区、忽略硬约束或回退默认 Agent。
 
 首次资格依据当前 task/spec 的 named 分配事实，不以复用 workspace、legacy run 或旧 spec 分配代替。Owner start-over 放弃 workspace 后即使 spec 不变，也在新 host/backend 重新检查双方能力；不新增资格标志。首次检查只证明双方可选，当前 run 才冻结自己的身份，正式验收到真正分配时再选择其配置。
 
@@ -56,7 +56,7 @@ Definition 的稳定身份是执行环境 ID 加本机 local Agent ID，runtime 
 
 复用现有 TraeX 和 Orca harness，不增加 provider。命名执行显式启用，单主机多个 runtime 共用全局槽位与唯一 workspace 协调器、backend/provider 身份和锁；unknown 仍占资源。RuntimeBinding.ExecutableRef 是实际启动命令，Installation.LocalReference 只作冻结来源元数据，不是第二启动覆盖值。model/effort/私有 instructions 从原 snapshot 经实际适配器注入，不上传指令或路径；独立验收不继承实现会话与 implementation-only context。
 
-P3 wire 保持 1/0：新 capability 与条件 ack 才发送执行观察或新回复字段，旧无选择请求及默认不变。Server migration 57 保存 backend/run pin，本机 journal 12 阻止旧 11 reader 忽略 pin 后按 legacy worker 恢复；升级旧 run 不回填 pin，旧缺 instructions 快照保持原 hash。发布产物仍需声明真实存储兼容范围；代码纳入不代表已发布。新增通信字段先评估 breaking：仅当能力协商能保持旧有效请求、默认语义和 wire 形状时采用增量；否则提升协议，完整执行 N/N−1 和适配退役约束。
+当前 D128 通信为 2/1，manager 仅协议 2 加 runner-issue-manager-v1；协议 1 仅普通 execution，协议 0 拒绝。配置格式 2 显式声明 manager purpose/CLI；格式 1 历史快照及其 hash 保留。以下为 P3 原始交付记录：P3 wire 保持 1/0：新 capability 与条件 ack 才发送执行观察或新回复字段，旧无选择请求及默认不变。Server migration 57 保存 backend/run pin，本机 journal 12 阻止旧 11 reader 忽略 pin 后按 legacy worker 恢复；升级旧 run 不回填 pin，旧缺 instructions 快照保持原 hash。发布产物仍需声明真实存储兼容范围；代码纳入不代表已发布。新增通信字段先评估 breaking：仅当能力协商能保持旧有效请求、默认语义和 wire 形状时采用增量；否则提升协议，完整执行 N/N−1 和适配退役约束。
 
 ## 4. 所有直接聊天
 
@@ -96,7 +96,7 @@ Orca workspace/terminal 入口继续支持，复用 provider/session/terminal �
 
 Cove 本次只定义兼容的入口身份、controller 观察、能力、未知状态及 handback 合同，不实现完整 adapter、不声称可用。入口 URL 可打开不证明控制权、run 身份或 workspace 合同正确。
 
-## 7. 旧账本归档与全新业务账本
+## 7. 旧账本归档与全新业务账本（D126 独立方案，本轮不执行）
 
 本设计取代 `docs/plans/mandatory-message-context.md` 中当时采用的删除旧数据、不保留归档/恢复材料的部署安排；历史计划不改写。不把历史 work_item 自动转换为 issue。保留原始 migration 和不可变证据，产出旧账本只读离线档案，新业务账本为空。
 
@@ -126,3 +126,8 @@ P3 正式 r2 规定 CLI review 正常退出且无 findings；r3 仅补原 tools 
 P2a [PR #160](https://github.com/GhostFlying/tend/pull/160) 的 CI `40781168826` 全通过，rebase 合并至 `b66a94838fc045f317be1cc819d1090d0d486588`。P1b2a [PR #161](https://github.com/GhostFlying/tend/pull/161) 的 CI `40790535737` 全通过，包含浏览器回归和 Windows/macOS 交叉编译，rebase 合并至 `c806b859a8a39cf0c72165b9d135f26667f126e1`。既有历史 base/head 和过程记录保持，不以本地候选通过替代其他批次 CI。
 
 P4 正式纳入补记：固定候选 r4 patch SHA-256 `3ac992986f6ba8dc380072e8418c3b5fc4d572fa893b63df7717fdc40db292d4`，59 文件；三项修正已独立复审通过。正式前件为 `c69c66b2be9b49aa1fbe824d9ea6283bec5dc880`；本次保留 P3 完整检查、上游 CI/合并记录及其 tools schema 修正，仅合并最新状态文档，不改变已预审的运行代码。正式组合检查与规定 CLI review 待完成。
+
+
+## Runner 承载 Issue manager（D128）
+
+Issue manager 不再预先绑定 server 本机具名定义。主 Agent 或 owner 发布真实 manager task 并指定 category，runner 首次领取时在同一事务冻结具体执行身份、建立会话归属及更新 Issue assignee/epoch。任务持续负责 Issue，回合完成释放槽位，等待输入不保有活动租约；失联不自动重选。交接先围栏并核清旧执行，正常 worker 不受影响。管理任务按责任收尾，不加入执行任务的独立验收、交付进度或自身关闭阻塞。main/consultation 保留 host；首期仅 Codex/Traex app-server。保留账本迁移及分批验收见 docs/plans/runner-issue-managers.md。

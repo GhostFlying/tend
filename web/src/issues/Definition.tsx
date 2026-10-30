@@ -35,7 +35,10 @@ export function IssueDefinition({
   const { client, live } = useServices();
   const [baseline, setBaseline] = useState(issue);
   const [restored, setRestored] = useState<Readonly<Envelope> | null>(null);
-  const hosted = useStore(live.agents.hosted.state);
+  const categories = useStore(live.agents.categories.state);
+  const activeCategories = (categories.value?.items ?? []).filter(
+    (category) => category.state === "active",
+  );
   const connection = useStore(client.connection);
   const [title, setTitle] = useState(baseline?.plan.title ?? "");
   const [project, setProject] = useState(
@@ -60,6 +63,14 @@ export function IssueDefinition({
   );
   const original = operation.original?.payload as
     UpdateIssuePayload | CreateIssuePayload | undefined;
+  const originalCreate = !issue ? (original as CreateIssuePayload | undefined) : undefined;
+  const shownAssignee = originalCreate?.manager
+    ? `category:${originalCreate.manager.category_id ?? "issue-manager"}`
+    : originalCreate?.assignee
+      ? originalCreate.assignee.kind === "owner"
+        ? "owner"
+        : originalCreate.assignee.ref
+      : assignee;
   const shown = original?.plan;
   const restoredPayload = restored?.payload as UpdateIssuePayload | undefined;
   const editPlan = restoredPayload?.plan ?? baseline?.plan;
@@ -85,7 +96,7 @@ export function IssueDefinition({
     );
   }
   useEffect(() => {
-    if (!issue) void live.agents.openHosted();
+    if (!issue) void live.agents.openCategories();
   }, [live, issue]);
   const save = async (reconcile = false) => {
     const old = editPlan;
@@ -150,13 +161,20 @@ export function IssueDefinition({
                         expected_source_revision: sourceRevision,
                       }
                     : {}),
-                  assignee:
-                    assignee === "owner"
-                      ? {
+                  ...(assignee.startsWith("category:")
+                    ? {
+                        manager: {
+                          category_id: assignee.slice("category:".length),
+                          expected_assignment_epoch: 1,
+                          reason: "按类别委派 Issue 持续协调责任",
+                        },
+                      }
+                    : {
+                        assignee: {
                           kind: "owner",
                           ref: connection.status === "online" ? connection.login : "",
-                        }
-                      : { kind: "agent", ref: assignee },
+                        },
+                      }),
                 }),
       );
       setResult(out);
@@ -307,33 +325,43 @@ export function IssueDefinition({
             />
           </label>
           {!issue && (
-            <label>
-              负责人
-              <select
-                disabled={blocked}
-                value={
-                  original && "assignee" in original
-                    ? original.assignee?.kind === "owner"
-                      ? "owner"
-                      : (original.assignee?.ref ?? assignee)
-                    : assignee
-                }
-                onChange={(e) => setAssignee(e.target.value)}
-              >
-                <option value="owner">你</option>
-                {hosted.value?.projection.agents
-                  ?.filter((a) => a.purposes?.includes("issue_manager"))
-                  .map((a) => {
-                    const ref = `${a.identity.execution_environment_id}/${a.identity.local_id}`;
-                    return (
-                      <option key={ref} value={ref} disabled={!a.enabled}>
-                        {a.display_name}
-                        {a.enabled ? "" : "（配置未启用）"}
-                      </option>
-                    );
-                  })}
-              </select>
-            </label>
+            <>
+              <label>
+                负责人
+                <select
+                  disabled={blocked}
+                  value={shownAssignee}
+                  onChange={(e) => setAssignee(e.target.value)}
+                >
+                  <option value="owner">你</option>
+                  {shownAssignee !== "owner" &&
+                    !activeCategories.some(
+                      (category) => `category:${category.category_id}` === shownAssignee,
+                    ) && <option value={shownAssignee}>原请求选择：{shownAssignee}</option>}
+                  {activeCategories.map((category) => (
+                    <option key={category.category_id} value={`category:${category.category_id}`}>
+                      {category.title} · {category.category_id}（runner 领取）
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {categories.value?.more && (
+                <button
+                  type="button"
+                  onClick={() => void live.agents.openCategories("active", categories.value?.next)}
+                >
+                  下一页类别
+                </button>
+              )}
+              {categories.error && (
+                <p role="status">
+                  类别读取失败，保留已读取结果。
+                  <button type="button" onClick={() => void live.agents.categories.refresh()}>
+                    重新读取
+                  </button>
+                </p>
+              )}
+            </>
           )}
           {issue && (
             <div className={layout.field}>

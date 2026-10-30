@@ -17,6 +17,7 @@ type BackgroundPool struct {
 	New    func(string) (*Manager, error)
 	mu     sync.Mutex
 	active map[string]*Manager
+	remote map[string]bool
 }
 
 func (p *BackgroundPool) Run(ctx context.Context) {
@@ -26,6 +27,7 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 	}
 	p.mu.Lock()
 	p.active = map[string]*Manager{}
+	p.remote = map[string]bool{}
 	p.mu.Unlock()
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -35,8 +37,18 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 		ids, err := p.App.PendingAgentConversations(ctx)
 		if err == nil {
 			for _, id := range ids {
+				claimed, err := p.App.AgentConversationClaimed(ctx, id)
+				if err != nil || !claimed {
+					continue
+				}
+				selected, named, err := p.App.HostedRuntimeSelection(ctx, id)
+				if err != nil {
+					continue
+				}
+				remote := named && selected.RunnerManaged
 				p.mu.Lock()
-				if len(p.active) >= limit || p.active[id] != nil {
+				local := len(p.active) - len(p.remote)
+				if (!remote && local >= limit) || p.active[id] != nil {
 					p.mu.Unlock()
 					continue
 				}
@@ -59,8 +71,14 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 					continue
 				}
 				p.active[id] = m
+				if remote {
+					p.remote[id] = true
+				}
 				p.mu.Unlock()
-				wg.Go(func() { defer func() { p.mu.Lock(); delete(p.active, id); p.mu.Unlock() }(); p.drain(ctx, id, m) })
+				wg.Go(func() {
+					defer func() { p.mu.Lock(); delete(p.active, id); delete(p.remote, id); p.mu.Unlock() }()
+					p.drain(ctx, id, m)
+				})
 			}
 		}
 		select {
@@ -113,6 +131,11 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 			}
 		}
 	}
+	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly {
+		// Reconcile original delivery receipts above, but never start fresh
+		// business input on the fenced executor.
+		return
+	}
 	for run.Err() == nil {
 		if paused, err := p.App.UpgradePausesMain(run); err != nil || paused {
 			return
@@ -143,6 +166,9 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 			result.RetryAfter = max(result.RetryAfter, time.Second*5)
 		}
 		if err = p.App.FinishDelivery(run, d, result); err != nil {
+			return
+		}
+		if selected := m.namedSelection(); selected != nil && selected.RunnerRunID != "" {
 			return
 		}
 	}

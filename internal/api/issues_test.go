@@ -8,6 +8,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 func createOwnerIssueHTTP(t *testing.T, e *env, token, parent string) protocol.Issue {
@@ -108,7 +109,18 @@ func issueWorkerCommand(t *testing.T, e *env, p protocol.Principal, target proto
 }
 func issueClaimWorker(t *testing.T, e *env) protocol.Assignment {
 	t.Helper()
-	out := issueWorkerCommand(t, e, protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"}, protocol.Target{Type: "host", ID: "host-a"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Worker: protocol.WorkerAppServer}, app.Claim{})
+	runtime := &protocol.RunnerRuntime{InstanceID: "fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+	_ = e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		old, err := store.GetHostRuntime(t.Context(), tx.Q(), "host-a")
+		if err == nil {
+			*runtime = old.Runtime
+			runtime.Sequence++
+		}
+		return nil
+	})
+	issueWorkerCommand(t, e, protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"}, protocol.Target{Type: "host", ID: "host-a"}, protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}, app.Hello{})
+	runtime.Sequence++
+	out := issueWorkerCommand(t, e, protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"}, protocol.Target{Type: "host", ID: "host-a"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1, Worker: protocol.WorkerAppServer}, app.Claim{})
 	var result struct {
 		Assignment *protocol.Assignment `json:"assignment"`
 	}

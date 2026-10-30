@@ -437,6 +437,12 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 		Now:                time.Now,
 		Thread:             mainthread.ThreadConfig(cwd, cfg.Model),
 		OpenNamed: func(ctx context.Context, selected hostedconfig.Selection) (harness.Session, error) {
+			if selected.RunnerManaged {
+				if selected.RunnerRunID == "" {
+					return nil, errors.New("manager awaits its runner claim")
+				}
+				return mainthread.RunnerSession(ctx, a, selected.RunnerRunID), nil
+			}
 			bin, err := hostedExecutable(selected.Runtime.ExecutableRef)
 			if err != nil {
 				return nil, err

@@ -160,6 +160,9 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 		if err != nil {
 			return card, err
 		}
+		if task.Kind == protocol.TaskKindIssueManager {
+			continue
+		}
 		tasks = append(tasks, task)
 	}
 	summaries, err := facts.summaries(ctx, q, tasks)

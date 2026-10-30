@@ -24,6 +24,7 @@ const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta
 const now = Date.now();
 const assignee = { kind: "agent", ref: "hosted/qingzhu" } as const;
 const issue: IssueView = {
+  manager: { task_id: "task-manager", category_id: "issue-manager", state: "queued" },
   issue_id: "issue-root",
   state: "active",
   assignee,
@@ -359,6 +360,20 @@ const server = createServer(async (req, res) => {
     return json({
       items: [
         {
+          category_id: "issue-manager",
+          title: "Issue manager",
+          description: "Coordination",
+          revision: 1,
+          state: "active",
+        },
+        {
+          category_id: "custom-coordinator",
+          title: "Custom coordinator",
+          description: "Custom coordination",
+          revision: 1,
+          state: "active",
+        },
+        {
           category_id: "implementer",
           title: "实施",
           description: "实施任务",
@@ -377,6 +392,23 @@ const server = createServer(async (req, res) => {
     });
   if (p === "/api/v1/repos") return json({ repos: [{ repo: "sample", retired: false }] });
   if (p === "/api/v1/tasks") return json({ tasks: [] });
+  if (p === "/api/v1/tasks/task-manager")
+    return json({
+      ...activeTask,
+      task_id: "task-manager",
+      title: "Issue manager responsibility",
+      kind: "issue_manager",
+      lifecycle: "queued",
+      runs: [],
+      execution: { state: "queued" },
+      spec: { reason: "Retain issue coordination until handoff or closure" },
+      manager: {
+        issue_id: "issue-root",
+        category_id: "issue-manager",
+        conversation_id: "issue:issue-root",
+        assignment_epoch: 1,
+      },
+    });
   if (p === `/api/v1/tasks/${activeTask.task_id}`)
     return json(
       taskQueued
@@ -803,6 +835,7 @@ const server = createServer(async (req, res) => {
         source_message_id?: string;
         expected_source_revision?: number;
         assignee?: { kind: string; ref: string };
+        manager?: { category_id: string; expected_assignment_epoch: number };
       };
       // Mirror actual owner API validation instead of accepting impossible input.
       if (payload.source_message_id && payload.expected_source_revision !== sourceContentRevision)
@@ -816,13 +849,24 @@ const server = createServer(async (req, res) => {
             },
           },
         });
-      assert(payload.assignee?.kind === "owner" || payload.assignee?.ref === "hosted/qingzhu");
+      assert(
+        payload.assignee?.kind === "owner" || payload.manager?.category_id === "custom-coordinator",
+      );
+      assert(!(payload.assignee && payload.manager));
+      if (payload.manager) assert.equal(payload.manager.expected_assignment_epoch, 1);
       importedIssue = {
         ...issue,
         issue_id: "issue-imported",
         plan: payload.plan,
         tasks: [],
         assignee: payload.assignee ?? { kind: "owner", ref: "owner" },
+        manager: payload.manager
+          ? {
+              task_id: "task-imported-manager",
+              category_id: payload.manager.category_id,
+              state: "queued",
+            }
+          : undefined,
       } as IssueView;
       issueCreateRequest = envelope.request_id;
       sourceReceipts.set(envelope.request_id, {
@@ -1075,6 +1119,7 @@ try {
     consultationID = "";
     rejectSource = false;
     issue.assignee = assignee;
+    issue.manager = { task_id: "task-manager", category_id: "issue-manager", state: "queued" };
     delete issue.pending_handoff_id;
     delete issue.pending_assignee;
     issue.assignment_state = "active";
@@ -1118,13 +1163,14 @@ try {
         .click();
     else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
     const emptyRead = page.waitForResponse(
-      (response) => new URL(response.url()).pathname === "/api/v1/hosted-agents",
+      (response) => new URL(response.url()).pathname === "/api/v1/categories",
     );
     await page.getByRole("button", { name: "＋ 新建 Issue", exact: true }).click();
     await emptyRead;
     const createForm = page.getByRole("region", { name: "新建Issue", exact: true });
     const managerSelect = createForm.getByRole("combobox", { name: "负责人", exact: true });
-    assert.deepEqual(await managerSelect.locator("option").allTextContents(), ["你"]);
+    assert.equal(await managerSelect.locator('option[value="category:issue-manager"]').count(), 1);
+    assert.equal(await managerSelect.locator('option[value="hosted/qingzhu"]').count(), 0);
     assert.equal(await managerSelect.inputValue(), "owner");
     await page.screenshot({ path: join(output, `create-owner-only-${viewport.width}.png`) });
     await createForm.getByRole("button", { name: "返回", exact: true }).click();
@@ -1146,9 +1192,11 @@ try {
         .click();
     else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
     await page.getByRole("button", { name: "＋ 新建 Issue", exact: true }).click();
-    await managerSelect.locator('option[value="hosted/qingzhu"]').waitFor({ state: "attached" });
-    await managerSelect.selectOption("hosted/qingzhu");
-    assert.equal(await managerSelect.inputValue(), "hosted/qingzhu");
+    await managerSelect
+      .locator('option[value="category:custom-coordinator"]')
+      .waitFor({ state: "attached" });
+    await managerSelect.selectOption("category:custom-coordinator");
+    assert.equal(await managerSelect.inputValue(), "category:custom-coordinator");
     await createForm.getByRole("button", { name: "返回", exact: true }).click();
     await page.getByRole("button", { name: "返回对话", exact: true }).click();
     if (catalogOnly) {
@@ -1229,6 +1277,39 @@ try {
     ]);
     await ownerBubble.getByRole("button", { name: "发布流程整理", exact: true }).click();
     assert.equal(new URL(page.url()).searchParams.get("issue"), "issue-root");
+    await page.getByText(/等待 runner 领取/).waitFor();
+    await page.getByRole("button", { name: "issue-manager", exact: true }).waitFor();
+    await page.screenshot({ path: join(output, `manager-queued-${viewport.width}.png`) });
+    const pendingManagerDialog = page.getByRole("dialog", { name: "Issue详情", exact: true });
+    await pendingManagerDialog.getByRole("button", { name: "交接负责人", exact: true }).click();
+    await pendingManagerDialog
+      .getByRole("combobox", { name: "交接给", exact: true })
+      .selectOption("owner");
+    await pendingManagerDialog
+      .getByRole("textbox", { name: "交接说明", exact: true })
+      .fill("撤回尚未领取的 manager 责任");
+    assert(
+      await pendingManagerDialog.getByRole("button", { name: "发起交接", exact: true }).isEnabled(),
+    );
+    await pendingManagerDialog.getByRole("button", { name: "返回Issue", exact: true }).click();
+    await page.getByRole("button", { name: "issue-manager", exact: true }).click();
+    const managerDialog = page.getByRole("dialog", { name: "任务详情", exact: true });
+    await managerDialog.getByText(/Issue 协调责任/).waitFor();
+    await managerDialog.getByText("责任要求", { exact: true }).waitFor();
+    assert.equal(
+      await managerDialog.getByRole("button", { name: "交付与验收", exact: true }).count(),
+      0,
+    );
+    assert.equal(
+      await managerDialog.getByRole("button", { name: "工作区", exact: true }).count(),
+      0,
+    );
+    await page.screenshot({ path: join(output, `manager-task-${viewport.width}.png`) });
+    await managerDialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await ownerBubble.getByRole("button", { name: "发布流程整理", exact: true }).click();
+    // Subsequent owner-handoff scenarios use an already claimed manager.
+    issue.manager!.host_id = "hosted";
+    issue.manager!.state = "waiting";
     await page
       .getByRole("dialog", { name: "Issue详情", exact: true })
       .getByRole("button", { name: "关闭详情", exact: true })
@@ -1562,7 +1643,7 @@ try {
       .fill("当前任务独立验收通过");
     await archives
       .getByRole("combobox", { name: "负责人", exact: true })
-      .selectOption("hosted/qingzhu");
+      .selectOption("category:custom-coordinator");
     await page.screenshot({ path: join(output, `archive-new-issue-${viewport.width}.png`) });
     await archives.getByRole("button", { name: "创建Issue", exact: true }).click();
     await archives.getByRole("button", { name: "核实原保存请求", exact: true }).waitFor();
@@ -1578,11 +1659,12 @@ try {
     await archives
       .getByRole("button", { name: "继续使用已保存材料新建Issue", exact: true })
       .click();
-    await archives.getByRole("button", { name: "保存所选材料并继续", exact: true }).click();
+    // The persisted source can hydrate before this click after a physical reload.
+    await archives.getByRole("button", { name: /^(保存所选材料并继续|核实原来源并继续)$/ }).click();
     await archives.getByRole("button", { name: "核实原保存请求", exact: true }).waitFor();
     assert.equal(
       await archives.getByRole("combobox", { name: "负责人", exact: true }).inputValue(),
-      "hosted/qingzhu",
+      "category:custom-coordinator",
     );
     issueCreateReady = true;
     await archives.getByRole("button", { name: "核实原保存请求", exact: true }).click();
@@ -1608,10 +1690,11 @@ try {
       (newIssueWrite.payload as { expected_source_revision: number }).expected_source_revision,
       7,
     );
-    assert.deepEqual((newIssueWrite.payload as { assignee: unknown }).assignee, {
-      kind: "agent",
-      ref: "hosted/qingzhu",
-    });
+    assert.equal((newIssueWrite.payload as { assignee?: unknown }).assignee, undefined);
+    assert.equal(
+      (newIssueWrite.payload as { manager: { category_id: string } }).manager.category_id,
+      "custom-coordinator",
+    );
     assert(!JSON.stringify(newIssueWrite.payload).includes('"source_message_id":"old-report"'));
     assert.equal(writes.filter((w) => w.operation.startsWith("archive")).length, 0);
     await page
@@ -1701,6 +1784,17 @@ try {
     await page.getByRole("button", { name: "发布流程整理", exact: true }).first().click();
     const handoffDialog = page.getByRole("dialog", { name: "Issue详情", exact: true });
     await handoffDialog.getByRole("button", { name: "交接负责人", exact: true }).click();
+    const customCategory = handoffDialog
+      .getByRole("combobox", { name: "交接给", exact: true })
+      .getByRole("option", { name: /custom-coordinator/ });
+    await customCategory.waitFor({ state: "attached" });
+    await handoffDialog
+      .getByRole("combobox", { name: "交接给", exact: true })
+      .selectOption("category:custom-coordinator");
+    assert.equal(
+      await handoffDialog.getByRole("combobox", { name: "交接给", exact: true }).inputValue(),
+      "category:custom-coordinator",
+    );
     await handoffDialog
       .getByRole("combobox", { name: "交接给", exact: true })
       .selectOption("owner");

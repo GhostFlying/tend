@@ -187,7 +187,7 @@ func TestFault_HeartbeatLostRunnerAlive(t *testing.T) {
 	if r := h.run(as.RunID); r.ObservedState != protocol.RunUnknown {
 		t.Errorf("run = %s, want unknown", r.ObservedState)
 	}
-	hb, err := h.app.Heartbeat(context.Background(), runner("linux-1"), []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}})
+	hb, err := h.heartbeat(context.Background(), runner("linux-1"), []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}})
 	if err != nil || len(hb.Runs) != 1 || hb.Runs[0].Renewed {
 		t.Fatalf("heartbeat on a lapsed lease = %+v, %v; want not renewed", hb, err)
 	}
@@ -234,7 +234,7 @@ func TestHelloResumesLapsedRun(t *testing.T) {
 	if r, l := h.run(as.RunID), h.lease(as.RunID); r.ObservedState != protocol.RunRunning || l.Status != store.LeaseActive {
 		t.Errorf("after reconcile: run %s, lease %s", r.ObservedState, l.Status)
 	}
-	hb, err := h.app.Heartbeat(context.Background(), runner("linux-1"), []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}})
+	hb, err := h.heartbeat(context.Background(), runner("linux-1"), []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}})
 	if err != nil || !hb.Runs[0].Renewed {
 		t.Errorf("heartbeat after reconcile = %+v, %v", hb, err)
 	}
@@ -450,7 +450,7 @@ func TestHeartbeatDesiredState(t *testing.T) {
 	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
 	as, _, _ := h.claim("linux-1")
 	beat := func() protocol.LeaseState {
-		hb, err := h.app.Heartbeat(context.Background(), runner("linux-1"), []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}})
+		hb, err := h.heartbeat(context.Background(), runner("linux-1"), []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -467,7 +467,7 @@ func TestHeartbeatDesiredState(t *testing.T) {
 	if s := beat(); s.Desired != protocol.DesiredStopped {
 		t.Errorf("cancelled task: %+v", s)
 	}
-	if _, err := h.app.Heartbeat(context.Background(), runner("mac-1"), nil); protocol.CodeOf(err) != protocol.CodeForbidden {
+	if _, err := h.heartbeat(context.Background(), runner("mac-1"), nil); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Errorf("heartbeat from an unknown host: %v", err)
 	}
 }
@@ -630,4 +630,19 @@ func TestClaimOrdersByScore(t *testing.T) {
 	if want := []string{urgent, weighty}; !slices.Equal(got, want) {
 		t.Errorf("claimed %v, want %v", got, want)
 	}
+}
+
+// heartbeat keeps normal lifecycle fixtures on a supported wire generation.
+func (h *harness) heartbeat(ctx context.Context, p protocol.Principal, runs []protocol.LeaseRef) (protocol.HeartbeatResult, error) {
+	var runtime *protocol.RunnerRuntime
+	_ = h.store.Read(ctx, func(tx *store.ReadTx) error {
+		old, err := store.GetHostRuntime(ctx, tx.Q(), p.Subject)
+		if err == nil {
+			rt := old.Runtime
+			rt.Sequence++
+			runtime = &rt
+		}
+		return nil
+	})
+	return h.app.RuntimeHeartbeat(ctx, p, protocol.HeartbeatPayload{Runtime: runtime, Runs: runs})
 }

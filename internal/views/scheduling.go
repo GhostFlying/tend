@@ -39,6 +39,9 @@ func SchedulingCandidates(rows []store.CandidateRow) ([]scheduler.Candidate, err
 func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []scheduler.Candidate) error {
 	for i := range candidates {
 		c := &candidates[i]
+		if c.Manager != nil {
+			continue
+		}
 		scope, err := store.ResolveTaskIssueScope(ctx, q, c.TaskID)
 		if err != nil {
 			return err

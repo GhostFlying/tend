@@ -147,7 +147,7 @@ func (s *Server) authenticate(r *http.Request) (protocol.Principal, error) {
 	return s.authenticateCredential(r, nil)
 }
 
-func (s *Server) authenticateCredential(r *http.Request, delivery *protocol.RunMessageDelivery) (protocol.Principal, error) {
+func (s *Server) authenticateCredential(r *http.Request, delivery *protocol.RunMessageDelivery, managerReceipt ...bool) (protocol.Principal, error) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || token == "" {
 		return protocol.Principal{}, errUnauthenticated
@@ -165,6 +165,9 @@ func (s *Server) authenticateCredential(r *http.Request, delivery *protocol.RunM
 	switch runID, hostHeader := r.Header.Get(HeaderRun), r.Header.Get(HeaderHost); {
 	case runID != "" && hostHeader == "":
 		leaseID, host, role, err := s.app.RunCredential(ctx, runID)
+		if len(managerReceipt) == 1 && managerReceipt[0] {
+			leaseID, host, role, err = s.app.ManagerReceiptCredential(ctx, runID)
+		}
 		if delivery != nil {
 			leaseID, host, role, err = s.app.RunMessageReceiptCredential(ctx, runID, *delivery)
 		}
@@ -234,6 +237,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		if env.Operation == protocol.OpRunsReportMessage && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) && json.Unmarshal(env.Payload, &receipt) == nil {
 			p, authErr = s.authenticateCredential(r, &receipt.RunMessageDelivery)
 		}
+		if authErr != nil && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) && (env.Operation == protocol.OpManagerNativeReply || env.Operation == protocol.OpManagerNativeEvent || env.Operation == protocol.OpManagerNativeStopped) {
+			p, authErr = s.authenticateCredential(r, nil, true)
+		}
 		if authErr != nil {
 			s.writeError(w, r, &env, authErr)
 			return
@@ -249,6 +255,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 // runCommands are the operations a run performs through the ledger.
 var runCommands = map[string]app.Command{
+	protocol.OpManagerNativeClaim:   app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim},
+	protocol.OpManagerNativeReply:   app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply},
+	protocol.OpManagerNativeEvent:   app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent},
+	protocol.OpManagerNativeStopped: app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped},
 	protocol.OpDeliveriesPoll:       app.PollDeliveries{},
 	protocol.OpDeliveriesReport:     app.ReportDelivery{},
 	protocol.OpRunsAskOwner:         app.AskOwner{},
@@ -267,6 +277,13 @@ var runCommands = map[string]app.Command{
 }
 
 func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protocol.Envelope) (protocol.Operation, error) {
+	if p.Kind == protocol.PrincipalRun && p.Role == protocol.RoleIssueManager {
+		switch env.Operation {
+		case protocol.OpManagerNativeClaim, protocol.OpManagerNativeReply, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped:
+		default:
+			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "manager cannot act as an implementation or acceptance run")
+		}
+	}
 	switch env.Operation {
 	case protocol.OpRunnerInventoryRegister:
 		return s.app.Execute(ctx, p, env, app.RegisterAgentInventory{})

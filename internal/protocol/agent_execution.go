@@ -35,6 +35,7 @@ func (s TaskAgentSelection) Validate() error {
 
 // RunExecutionPin fixes one role's selected request without private configuration.
 type RunExecutionPin struct {
+	Purpose           string                `json:"purpose,omitempty"`
 	Identity          AgentIdentity         `json:"identity"`
 	AgentRevision     uint64                `json:"agent_revision"`
 	Runtime           AgentRuntimeReference `json:"runtime"`
@@ -43,11 +44,14 @@ type RunExecutionPin struct {
 	PublicSHA256      string                `json:"public_sha256"`
 	Profile           ExecutionProfile      `json:"profile"`
 	Worker            WorkerKind            `json:"worker"`
-	BackendID         string                `json:"backend_id"`
+	BackendID         string                `json:"backend_id,omitempty"`
 }
 
 func (p RunExecutionPin) Validate(host string) error {
-	if p.Identity.ExecutionEnvironmentID != host || !AgentInventoryID(p.Identity.LocalID) || p.AgentRevision == 0 || !AgentInventoryID(p.Runtime.RuntimeID) || p.Runtime.Revision == 0 || p.InventoryRevision < 1 || !AgentInventoryID(p.SnapshotID) || !strings.HasPrefix(p.PublicSHA256, "sha256:") || !p.Worker.Valid() || (p.BackendID != "git" && p.BackendID != "orca") {
+	if p.Purpose != "" && p.Purpose != "issue_manager" || p.Purpose == "issue_manager" && (p.BackendID != "" || p.Worker != WorkerAppServer) {
+		return Errorf(CodeInvalidRequest, "invalid execution purpose")
+	}
+	if p.Identity.ExecutionEnvironmentID != host || !AgentInventoryID(p.Identity.LocalID) || p.AgentRevision == 0 || !AgentInventoryID(p.Runtime.RuntimeID) || p.Runtime.Revision == 0 || p.InventoryRevision < 1 || !AgentInventoryID(p.SnapshotID) || !strings.HasPrefix(p.PublicSHA256, "sha256:") || !p.Worker.Valid() || (p.BackendID != "git" && p.BackendID != "orca" && !(p.Purpose == "issue_manager" && p.BackendID == "" && p.Worker == WorkerAppServer)) {
 		return Errorf(CodeInvalidRequest, "invalid named execution pin")
 	}
 	return p.Profile.Validate()

@@ -19,6 +19,7 @@ export interface TaskLook {
 export const lifecycleLabels: Record<TaskLifecycle, string> = {
   draft: "草稿",
   queued: "排队中",
+  waiting: "等待输入",
   running: "实现中",
   awaiting_acceptance: "验收中",
   changes_required: "待返工",

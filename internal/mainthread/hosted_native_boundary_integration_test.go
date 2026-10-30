@@ -4,6 +4,8 @@ package mainthread
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -31,17 +33,35 @@ func TestIntegrationHostedNativeBoundary(t *testing.T) {
 	if os.Getenv("TEND_PROBE_NATIVE_EXECUTION") != "1" {
 		t.Skip("requires explicit local CLI opt-in")
 	}
-	bin, err := exec.LookPath("traex")
+	cli := os.Getenv("TEND_MANAGER_CLI")
+	if cli == "" {
+		cli = "traex"
+	}
+	bin, err := exec.LookPath(cli)
 	if err != nil {
-		t.Skip("traex not installed")
+		t.Skip(cli + " not installed")
 	}
 	for _, native := range []string{"exec_command", "apply_patch", "spawn_agent", "send_input", "resume_agent", "wait_agent", "close_agent"} {
 		t.Run(native, func(t *testing.T) {
 			home, cwd := t.TempDir(), t.TempDir()
+			tool, arguments := "repos_list", "{}"
+			original := []byte("ORIGINAL_ATTACHMENT_MARKER\x00\n")
+			digest := sha256.Sum256(original)
+			if native == "exec_command" {
+				tool, arguments = "attachments_read", `{"file_id":"file_fixture"}`
+				if err := os.WriteFile(filepath.Join(cwd, "original.bin"), original, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			var mu sync.Mutex
 			requests, dynamic := 0, 0
 			var outputs []string
 			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/compact") {
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": "compact-fixture", "object": "response.compaction", "output": []any{map[string]any{"type": "compaction", "encrypted_content": "isolated-compaction-fixture"}}, "usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}})
+					return
+				}
 				var body map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Error(err)
@@ -75,7 +95,7 @@ func TestIntegrationHostedNativeBoundary(t *testing.T) {
 						send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "call_id": "native-call", "name": native, "arguments": args}})
 					}
 				case 1:
-					send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "call_id": "ledger-read", "name": "repos_list", "arguments": "{}"}})
+					send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "call_id": "ledger-read", "name": tool, "arguments": arguments}})
 				default:
 					send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "message", "id": "ready", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "READY"}}}})
 				}
@@ -83,7 +103,12 @@ func TestIntegrationHostedNativeBoundary(t *testing.T) {
 			}))
 			defer backend.Close()
 			config := fmt.Sprintf("permission_mode=\"bypass_permissions\"\nmodel_provider=\"local_probe\"\n[model_providers.local_probe]\nname=\"Local deterministic fixture\"\nbase_url=%q\nwire_api=\"responses\"\nrequires_openai_auth=false\n", backend.URL+"/v1")
-			if err := os.WriteFile(filepath.Join(home, "traecli.toml"), []byte(config), 0600); err != nil {
+			configName := "traecli.toml"
+			if cli == "codex" {
+				configName = "config.toml"
+				config = strings.Replace(config, "permission_mode=\"bypass_permissions\"\n", "sandbox_mode=\"danger-full-access\"\napproval_policy=\"never\"\n", 1)
+			}
+			if err := os.WriteFile(filepath.Join(home, configName), []byte(config), 0600); err != nil {
 				t.Fatal(err)
 			}
 			cfg := ThreadConfig(cwd, "probe-model")
@@ -91,14 +116,23 @@ func TestIntegrationHostedNativeBoundary(t *testing.T) {
 			cfg.Config["harness_mode"] = "codex"
 			cfg.Config["model_harness"] = map[string]string{cfg.Model: "codex"}
 			cfg.Config["model_tool_modes"] = map[string]string{cfg.Model: "direct"}
-			cfg.Tools = []harness.ToolSpec{{Name: "repos_list", Description: "Read selected ledger repositories", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}}
+			cfg.Tools = []harness.ToolSpec{{Name: tool, Description: "Read selected issue evidence", InputSchema: json.RawMessage(`{"type":"object","properties":{"file_id":{"type":"string"}},"additionalProperties":false}`)}}
 			cfg.OnToolCall = func(_ context.Context, call harness.ToolCall) harness.ToolResult {
-				if call.Tool != "repos_list" {
+				if call.Tool != tool {
 					t.Errorf("unexpected dynamic tool %s", call.Tool)
 				}
 				mu.Lock()
 				dynamic++
 				mu.Unlock()
+				if tool == "attachments_read" {
+					body, err := os.ReadFile(filepath.Join(cwd, "original.bin"))
+					if err != nil || string(body) != string(original) {
+						t.Error("original attachment bytes differ", err)
+						return harness.ToolResult{}
+					}
+					data, _ := json.Marshal(map[string]any{"fixture": "TEND_DYNAMIC_OK", "file_id": "file_fixture", "sha256": hex.EncodeToString(digest[:]), "text": string(body)})
+					return harness.ToolResult{Success: true, Text: string(data)}
+				}
 				return harness.ToolResult{Success: true, Text: `{"fixture":"TEND_DYNAMIC_OK"}`}
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -109,7 +143,7 @@ func TestIntegrationHostedNativeBoundary(t *testing.T) {
 				requests, dynamic = 0, 0
 				outputs = nil
 				mu.Unlock()
-				session, err := traex.Start(ctx, traex.Options{Bin: bin, Dir: cwd, Env: []string{"TRAE_HOME=" + home, "TEND_ADDON=off"}, HostedCoordination: true})
+				session, err := traex.Start(ctx, traex.Options{Bin: bin, Dir: cwd, Env: []string{"TRAE_HOME=" + home, "CODEX_HOME=" + home, "TEND_ADDON=off"}, HostedCoordination: true})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -154,9 +188,10 @@ func TestIntegrationHostedNativeBoundary(t *testing.T) {
 					if count != 3 || calls != 1 || !strings.Contains(joined, "TEND_DYNAMIC_OK") || strings.Contains(joined, `\"agent_id\"`) {
 						t.Fatalf("native execution or dynamic boundary failed: requests=%d dynamic=%d", count, calls)
 					}
+					unsupported := strings.Contains(joined, "unsupported call: "+native) || strings.Contains(joined, "unsupported custom tool call: "+native)
 					switch native {
 					case "spawn_agent", "send_input", "resume_agent", "wait_agent", "close_agent":
-						if !strings.Contains(joined, "Tool call blocked by PreToolUse hook:") {
+						if !unsupported && !strings.Contains(joined, "Tool call blocked by PreToolUse hook:") {
 							t.Fatal("native delegation was not blocked")
 						}
 					case "exec_command":
@@ -164,16 +199,38 @@ func TestIntegrationHostedNativeBoundary(t *testing.T) {
 							t.Fatal("command was not rejected")
 						}
 					case "apply_patch":
-						if !strings.Contains(joined, "read-only sandbox") {
+						if !unsupported && !strings.Contains(joined, "read-only sandbox") {
 							t.Fatal("patch was not rejected")
 						}
 					}
 					if _, err := os.Stat(filepath.Join(cwd, "native-change.txt")); !os.IsNotExist(err) {
 						t.Fatalf("native path wrote a file: %v", err)
 					}
+					if native == "exec_command" {
+						if !strings.Contains(joined, "ORIGINAL_ATTACHMENT_MARKER") || !strings.Contains(joined, hex.EncodeToString(digest[:])) {
+							t.Fatal("native provider input lost original attachment tool evidence")
+						}
+						if err := thread.(harness.ContextManager).Compact(ctx); err != nil {
+							t.Fatal("compact request failed", err)
+						}
+						for {
+							select {
+							case <-ctx.Done():
+								t.Fatal("compact completion missing", ctx.Err())
+							case event, ok := <-thread.Events():
+								if !ok {
+									t.Fatal("thread closed before compact completion")
+								}
+								if event.Kind == harness.EventItemCompleted && event.ItemType == harness.ItemContextCompaction {
+									t.Log("native compact completed", phase)
+									return
+								}
+							}
+						}
+					}
 				}()
 			}
-			actual, err := os.ReadFile(filepath.Join(home, "traecli.toml"))
+			actual, err := os.ReadFile(filepath.Join(home, configName))
 			if err != nil || string(actual) != config {
 				t.Fatal("hosted adapter rewrote owner configuration", err)
 			}

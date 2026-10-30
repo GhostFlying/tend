@@ -33,7 +33,7 @@ export type QueueWaitCode =
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RunRole".
  */
-export type RunRole = "implement" | "accept";
+export type RunRole = "implement" | "accept" | "issue_manager";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ExecutionState".
@@ -52,12 +52,18 @@ export type ExecutionState =
   | "cancelled";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskKind".
+ */
+export type TaskKind = "execution" | "issue_manager";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "TaskLifecycle".
  */
 export type TaskLifecycle =
   | "draft"
   | "queued"
   | "running"
+  | "waiting"
   | "awaiting_acceptance"
   | "changes_required"
   | "completed"
@@ -92,6 +98,11 @@ export type IssueEvidenceKind = "acceptance" | "delivery" | "owner_decision" | "
  * via the `definition` "IssueClosureKind".
  */
 export type IssueClosureKind = "completed" | "declined" | "handed_off" | "superseded";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkerKind".
+ */
+export type WorkerKind = "appserver" | "orca";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "SharedFactKind".
@@ -152,11 +163,6 @@ export type Code =
 export type OpStatus = "succeeded" | "failed" | "accepted" | "unknown";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkerKind".
- */
-export type WorkerKind = "appserver" | "orca";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ArchiveState".
  */
 export type ArchiveState = "ready" | "unsupported" | "unavailable";
@@ -169,7 +175,7 @@ export type Verdict = "passed" | "changes_required" | "blocked" | "inconclusive"
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ActionKind".
  */
-export type ActionKind = "implement" | "accept" | "deliver";
+export type ActionKind = "implement" | "accept" | "deliver" | "coordinate";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "TaskRelationKind".
@@ -290,6 +296,7 @@ export interface TendAPI {
   IssueFollowupHistory?: IssueFollowupHistory;
   IssueFollowupPage?: IssueFollowupPage;
   IssueFollowupPayload?: IssueFollowupPayload;
+  IssueManagerView?: IssueManagerView;
   IssueMessageAssociations?: IssueMessageAssociations;
   IssueNotificationSettings?: IssueNotificationSettings;
   IssuePage?: IssuePage;
@@ -298,6 +305,7 @@ export interface TendAPI {
   IssueTranscriptPage?: IssueTranscriptPage;
   IssueView?: IssueView;
   LedgerEvent?: LedgerEvent;
+  ManagerMigrationPayload?: ManagerMigrationPayload;
   ManualSource?: ManualSource;
   NativeEntry?: NativeEntry;
   NextActionPage?: NextActionPage;
@@ -312,6 +320,7 @@ export interface TendAPI {
   ReparentIssuePayload?: ReparentIssuePayload;
   RepoRegistry?: RepoRegistry;
   RepositoryRegistration?: RepositoryRegistration;
+  RequestIssueManagerPayload?: RequestIssueManagerPayload;
   RequestView?: RequestView;
   RespondAttentionPayload?: RespondAttentionPayload;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
@@ -371,7 +380,9 @@ export interface TaskSummary {
   control_revision: number;
   ended_at?: number;
   execution?: TaskExecutionView;
+  kind?: TaskKind;
   lifecycle: TaskLifecycle;
+  manager?: IssueManagerAssignment;
   next_implement_generation: number;
   primary_issue_id?: string;
   primary_issue_title?: string;
@@ -428,6 +439,17 @@ export interface ExecutionStartup {
   elapsed_ms?: number;
   phase: string;
   prompt_write_state?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueManagerAssignment".
+ */
+export interface IssueManagerAssignment {
+  assignment_epoch: number;
+  category_id: string;
+  conversation_id: string;
+  issue_id: string;
+  receipt_only?: boolean;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -574,6 +596,7 @@ export interface IssueView {
   depends_on: string[] | null;
   historical?: boolean;
   issue_id: string;
+  manager?: IssueManagerView;
   parent_issue_id?: string;
   pending_assignee?: IssueAssignee;
   pending_handoff_id?: string;
@@ -727,6 +750,76 @@ export interface IssueDeadline {
   timezone: string;
   title: string;
   updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueManagerView".
+ */
+export interface IssueManagerView {
+  agent?: AgentIdentity;
+  category_id: string;
+  control_mode?: ControlMode;
+  conversation_id?: string;
+  execution?: RunExecutionPin;
+  host_id?: string;
+  native_thread_id?: string;
+  queue_reason?: QueueWaitReason;
+  reconciliation_pending?: boolean;
+  recovery?: AgentRecoveryView;
+  run_id?: string;
+  state: TaskLifecycle;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentIdentity".
+ */
+export interface AgentIdentity {
+  execution_environment_id: string;
+  local_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunExecutionPin".
+ */
+export interface RunExecutionPin {
+  agent_revision: number;
+  backend_id?: string;
+  identity: AgentIdentity;
+  inventory_revision: number;
+  profile: ExecutionProfile;
+  public_sha256: string;
+  purpose?: string;
+  runtime: AgentRuntimeReference;
+  snapshot_id: string;
+  worker: WorkerKind;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutionProfile".
+ */
+export interface ExecutionProfile {
+  effort?: string;
+  model: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentRuntimeReference".
+ */
+export interface AgentRuntimeReference {
+  revision: number;
+  runtime_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentRecoveryView".
+ */
+export interface AgentRecoveryView {
+  attempts: number;
+  deadline: number;
+  next_attempt_at?: number;
+  reason?: string;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -915,45 +1008,6 @@ export interface AgentExecutor {
   available: boolean;
   pin: RunExecutionPin;
   reason?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunExecutionPin".
- */
-export interface RunExecutionPin {
-  agent_revision: number;
-  backend_id: string;
-  identity: AgentIdentity;
-  inventory_revision: number;
-  profile: ExecutionProfile;
-  public_sha256: string;
-  runtime: AgentRuntimeReference;
-  snapshot_id: string;
-  worker: WorkerKind;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "AgentIdentity".
- */
-export interface AgentIdentity {
-  execution_environment_id: string;
-  local_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "ExecutionProfile".
- */
-export interface ExecutionProfile {
-  effort?: string;
-  model: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "AgentRuntimeReference".
- */
-export interface AgentRuntimeReference {
-  revision: number;
-  runtime_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1588,8 +1642,20 @@ export interface CreateIssuePayload {
   depends_on?: string[];
   expected_parent_revision?: number;
   expected_source_revision?: number;
+  manager?: RequestIssueManagerPayload;
   parent_issue_id?: string;
   plan: IssuePlan;
+  source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RequestIssueManagerPayload".
+ */
+export interface RequestIssueManagerPayload {
+  category_id?: string;
+  expected_assignment_epoch: number;
+  reason: string;
+  replace?: boolean;
   source_message_id?: string;
 }
 /**
@@ -2117,17 +2183,6 @@ export interface ConversationImage {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "AgentRecoveryView".
- */
-export interface AgentRecoveryView {
-  attempts: number;
-  deadline: number;
-  next_attempt_at?: number;
-  reason?: string;
-  status: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ConversationReturnLink".
  */
 export interface ConversationReturnLink {
@@ -2512,6 +2567,16 @@ export interface MessageWorkItem {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ManagerMigrationPayload".
+ */
+export interface ManagerMigrationPayload {
+  category_id?: string;
+  expected_assignment_epoch: number;
+  phase: string;
+  reason?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ManualSource".
  */
 export interface ManualSource {
@@ -2614,6 +2679,7 @@ export interface PromoteConsultationPayload {
   expected_assignment_epoch?: number;
   expected_issue_revision?: number;
   expected_source_revision?: number;
+  manager?: RequestIssueManagerPayload;
   plan?: IssuePlan;
   source_message_id?: string;
   sources?: IssueSourceReference[];
@@ -3103,7 +3169,9 @@ export interface TaskDetail {
   ended_at?: number;
   execution?: TaskExecutionView;
   issue_ids?: string[];
+  kind?: TaskKind;
   lifecycle: TaskLifecycle;
+  manager?: IssueManagerAssignment;
   next_implement_generation: number;
   primary_issue_id?: string;
   primary_issue_title?: string;

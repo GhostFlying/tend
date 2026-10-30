@@ -258,6 +258,9 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if row.Kind == protocol.TaskKindIssueManager {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manager responsibility changes require an issue manager handoff")
+	}
 	task := toDomain(row, current.Budget())
 	if expected != row.ControlRevision {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "control revision is %d, request expected %d", row.ControlRevision, expected)
@@ -589,6 +592,9 @@ func (CreateAction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	row, spec, err := loadTask(ctx, tx.Q(), x.Env.Target.ID)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if row.Kind == protocol.TaskKindIssueManager {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manager tasks cannot create delivery or acceptance actions")
 	}
 	task := toDomain(row, spec.Budget())
 	var d domain.Decision

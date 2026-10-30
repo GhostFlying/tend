@@ -15,12 +15,14 @@ func appendCanonicalTaskFacts(ctx context.Context, q store.Querier, root string,
 	rows, err := q.QueryContext(ctx, `WITH RECURSIVE scope(id) AS (
  SELECT issue_id FROM issue_controls WHERE issue_id=?
  UNION ALL SELECT c.issue_id FROM issue_controls c JOIN scope p ON c.parent_issue_id=p.id)
- SELECT t.task_id,t.lifecycle,t.control_revision,
+ SELECT t.task_id,t.kind,t.lifecycle,t.control_revision,
  EXISTS(SELECT 1 FROM runs r WHERE r.task_id=t.task_id AND r.observed_state IN ('starting','running','waiting','interrupted','unknown')),
  EXISTS(SELECT 1 FROM runs r JOIN leases l ON l.run_id=r.run_id WHERE r.task_id=t.task_id AND l.status<>'released'),
  EXISTS(SELECT 1 FROM workspaces w WHERE w.occupied_by=t.task_id),
  EXISTS(SELECT 1 FROM decisions d WHERE d.task_id=t.task_id AND d.status='open'),
- EXISTS(SELECT 1 FROM run_messages m WHERE m.task_id=t.task_id AND m.status IN ('dispatching','unknown'))
+	 EXISTS(SELECT 1 FROM run_messages m WHERE m.task_id=t.task_id AND m.status IN ('dispatching','unknown')),
+	 EXISTS(SELECT 1 FROM runs r WHERE r.task_id=t.task_id AND r.observed_state='unknown') OR
+	 EXISTS(SELECT 1 FROM issue_manager_tasks im JOIN hosted_executions e ON e.issue_id=im.issue_id AND e.assignment_epoch=im.assignment_epoch JOIN main_turns mt ON mt.request_id=e.execution_id WHERE im.task_id=t.task_id AND (mt.status='unknown' OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=mt.request_id)))
  FROM task_work_item_owners o JOIN scope s ON s.id=o.work_item_id JOIN tasks t ON t.task_id=o.task_id ORDER BY t.task_id`, root)
 	if err != nil {
 		return err
@@ -28,18 +30,19 @@ func appendCanonicalTaskFacts(ctx context.Context, q store.Querier, root string,
 	defer rows.Close()
 	for rows.Next() {
 		var id string
+		var kind protocol.TaskKind
 		var life protocol.TaskLifecycle
 		var revision int64
-		var execution, lease, workspace, decision, unknown bool
-		if err := rows.Scan(&id, &life, &revision, &execution, &lease, &workspace, &decision, &unknown); err != nil {
+		var execution, lease, workspace, decision, unknown, managerUnknown bool
+		if err := rows.Scan(&id, &kind, &life, &revision, &execution, &lease, &workspace, &decision, &unknown, &managerUnknown); err != nil {
 			return err
 		}
 		blocker := protocol.IssueBlocker{ObjectID: id, Revision: revision}
-		if !life.Terminal() {
+		if kind != protocol.TaskKindIssueManager && !life.Terminal() {
 			blocker.Code = "task_responsibility"
 			f.NonTerminalTasks = append(f.NonTerminalTasks, blocker)
 		}
-		if execution || lease {
+		if kind != protocol.TaskKindIssueManager && (execution || lease) {
 			blocker.Code = "task_execution"
 			f.Executions = append(f.Executions, blocker)
 		}
@@ -53,6 +56,10 @@ func appendCanonicalTaskFacts(ctx context.Context, q store.Querier, root string,
 		}
 		if unknown {
 			blocker.Code = "task_message_unknown"
+			f.UnknownOperations = append(f.UnknownOperations, blocker)
+		}
+		if kind == protocol.TaskKindIssueManager && managerUnknown {
+			blocker.Code = "manager_execution_unknown"
 			f.UnknownOperations = append(f.UnknownOperations, blocker)
 		}
 	}
@@ -83,7 +90,7 @@ func cancelCanonicalPrimaryTasks(ctx context.Context, x *Exec, tx *store.Tx, roo
 		if err != nil {
 			return nil, err
 		}
-		if row.Lifecycle.Terminal() {
+		if row.Lifecycle.Terminal() || row.Kind == protocol.TaskKindIssueManager {
 			continue
 		}
 		decision, err := domain.Cancel(toDomain(row, spec.Budget()), row.ControlRevision)

@@ -94,7 +94,7 @@ func TestFault_StaleRunAfterSpecChange(t *testing.T) {
 	changed.Constraints = []string{"keep the API"}
 	h.exec(owner, h.env("tasks.update_intent", taskTarget(res.TaskID), updateIntentPayload{Spec: &changed}, rev(res.ControlRevision)), UpdateIntent{})
 
-	hb, err := h.app.Heartbeat(t.Context(), runner("linux-1"), []protocol.LeaseRef{{RunID: old.RunID, LeaseID: old.LeaseID}})
+	hb, err := h.heartbeat(t.Context(), runner("linux-1"), []protocol.LeaseRef{{RunID: old.RunID, LeaseID: old.LeaseID}})
 	if err != nil || hb.Runs[0].Desired != protocol.DesiredStopped {
 		t.Fatalf("heartbeat for the outdated run = %+v, %v; want stopped", hb, err)
 	}

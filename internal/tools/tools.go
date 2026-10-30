@@ -143,6 +143,9 @@ func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
 			return result
 		}
 	}
+	if c.Principal.Kind == protocol.PrincipalRun && c.Principal.Role == protocol.RoleIssueManager && !c.hostedRead {
+		return hostedAnswer(nil, protocol.Errorf(protocol.CodeForbidden, "manager tools require a persisted coordination execution"))
+	}
 	if c.ParentRequestID != "" {
 		repair, err := s.app.IsRepairExecution(ctx, c.executionRequest())
 		if err != nil {

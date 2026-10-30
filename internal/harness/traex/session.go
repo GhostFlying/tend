@@ -85,6 +85,9 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 	cmd.Env = appServerEnv(os.Environ(), opts.Env)
 	cmd.Stderr = opts.Stderr
 	procx.Contain(cmd)
+	if opts.HostedCoordination {
+		procx.DieWithParent(cmd)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		kill()

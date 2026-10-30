@@ -24,7 +24,7 @@ type HostedCoordinationCommand struct {
 
 func (c HostedCoordinationCommand) Operation() string { return c.Command.Operation() }
 func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
-	if err := allowKinds(x.Principal, protocol.PrincipalMainAgent, protocol.PrincipalBackgroundAgent); err != nil {
+	if err := allowKinds(x.Principal, protocol.PrincipalMainAgent, protocol.PrincipalBackgroundAgent, protocol.PrincipalRun); err != nil {
 		return err
 	}
 	if c.EffectSeq < 1 {
@@ -34,11 +34,18 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 	if err != nil {
 		return errNotFound(err, "coordination execution does not exist")
 	}
+	if execution.Selection.RunnerManaged {
+		if err := authorizeRunnerCoordination(ctx, q, x.Principal, execution, true, x.Now.UnixMilli()); err != nil {
+			return err
+		}
+	} else if x.Principal.Kind == protocol.PrincipalRun {
+		return protocol.Errorf(protocol.CodeForbidden, "run cannot impersonate a hosted coordinator")
+	}
 	turn, err := store.GetMainTurn(ctx, q, c.ExecutionID)
 	if err != nil {
 		return err
 	}
-	if turn.ThreadID != x.Principal.Thread || (x.Principal.Kind == protocol.PrincipalBackgroundAgent && execution.ConversationID != x.Principal.ConversationID) {
+	if turn.ThreadID != x.Principal.Thread || ((x.Principal.Kind == protocol.PrincipalBackgroundAgent || x.Principal.Kind == protocol.PrincipalRun) && execution.ConversationID != x.Principal.ConversationID) {
 		return protocol.Errorf(protocol.CodeForbidden, "tool caller does not own this native execution")
 	}
 	if execution.Selection.Purpose == agentconfig.Consultation {
@@ -47,11 +54,11 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		}
 	}
 	if execution.Selection.Purpose == agentconfig.Main {
-		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{"conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put"}, c.Operation()) {
+		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put"}, c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "the personal planner must delegate issue work, not execute its task planning")
 		}
 	} else if execution.Selection.Purpose != agentconfig.Consultation {
-		if x.Principal.Kind != protocol.PrincipalBackgroundAgent || execution.IssueID == "" {
+		if (x.Principal.Kind != protocol.PrincipalBackgroundAgent && x.Principal.Kind != protocol.PrincipalRun) || execution.IssueID == "" {
 			return protocol.Errorf(protocol.CodeForbidden, "issue coordination needs its registered conversation")
 		}
 		current, err := store.GetCanonicalIssue(ctx, q, execution.IssueID)
@@ -60,6 +67,9 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		}
 		if current.AssignmentState != "active" || current.AssignmentEpoch != execution.AssignmentEpoch || current.Assignee.Kind != protocol.IssueAssigneeAgent || current.Assignee.Ref != hostedconfig.IdentityRef(execution.Selection.Identity) {
 			return protocol.Errorf(protocol.CodeForbidden, "assignment no longer permits this coordination execution")
+		}
+		if current.State == protocol.IssueCancelling && !cancellationSettlementOperation(c.Operation()) {
+			return protocol.Errorf(protocol.CodeForbidden, "cancelling responsibility permits settlement only")
 		}
 		switch c.Operation() {
 		case "issues.deadlines_put":
@@ -162,6 +172,14 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 	}
 	return nil
 }
+
+func cancellationSettlementOperation(operation string) bool {
+	switch operation {
+	case "issues.cancel", "issues.finish_cancel", "issues.review_sources", "issues.review_completions", "issues.review_context", "issues.context_fact", "issues.followups_cancel", "tasks.cancel", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "conversation.commit_turn":
+		return true
+	}
+	return false
+}
 func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	execution, err := store.GetHostedExecution(ctx, tx.Q(), c.ExecutionID)
 	if err != nil {
@@ -186,17 +204,32 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Outcome{}, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO hosted_coordination_effects(execution_id,effect_seq,request_id) VALUES(?,?,?)`, stable, c.EffectSeq, x.Env.RequestID); err != nil {
+	effectTable := "local_hosted_coordination_effects"
+	if execution.Selection.ConfigurationRevision == 0 {
+		effectTable = "runner_coordination_effects"
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO `+effectTable+`(execution_id,effect_seq,request_id) VALUES(?,?,?)`, stable, c.EffectSeq, x.Env.RequestID); err != nil {
 		return Outcome{}, err
 	}
-	if execution.Selection.Purpose == agentconfig.Main && c.Operation() == "issues.create" {
-		source := hostedPayloadSource(x.Env.Payload)
-		var admitted bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN logical_turn_messages m USING(logical_turn_id) WHERE e.request_id=? AND m.message_id=?) OR EXISTS(SELECT 1 FROM main_steers s JOIN main_turns t ON t.thread_id=s.thread_id AND t.turn_id=s.turn_id WHERE t.request_id=? AND s.message_id=? AND s.native_item_id<>'')`, execution.ID, source, execution.ID, source).Scan(&admitted); err != nil {
+	delegationSources := []string{hostedPayloadSource(x.Env.Payload)}
+	if c.Operation() == "issues.create" {
+		var create protocol.CreateIssuePayload
+		if err := decodePayload(x.Env, &create); err != nil {
 			return Outcome{}, err
 		}
-		if !admitted {
-			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "delegate only admitted source material from the current planner turn")
+		if create.Manager != nil && create.Manager.SourceMessageID != "" {
+			delegationSources = append(delegationSources, create.Manager.SourceMessageID)
+		}
+	}
+	if execution.Selection.Purpose == agentconfig.Main && (c.Operation() == "issues.create" || c.Operation() == protocol.OpIssueRequestManager) {
+		for _, source := range delegationSources {
+			var admitted bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN logical_turn_messages m USING(logical_turn_id) WHERE e.request_id=? AND m.message_id=?) OR EXISTS(SELECT 1 FROM main_steers s JOIN main_turns t ON t.thread_id=s.thread_id AND t.turn_id=s.turn_id WHERE t.request_id=? AND s.message_id=? AND s.native_item_id<>'')`, execution.ID, source, execution.ID, source).Scan(&admitted); err != nil {
+				return Outcome{}, err
+			}
+			if !admitted {
+				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "delegate only admitted source material from the current planner turn")
+			}
 		}
 	}
 	if execution.IssueID != "" {
@@ -211,11 +244,13 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 				return Outcome{}, err
 			}
 		}
-		if err := requireHostedSourceAdmitted(ctx, tx.Q(), hostedPayloadSource(x.Env.Payload)); err != nil {
-			return Outcome{}, err
-		}
-		if err := hostedSourceInIssueScope(ctx, tx.Q(), execution.IssueID, hostedPayloadSource(x.Env.Payload)); err != nil {
-			return Outcome{}, err
+		for _, source := range delegationSources {
+			if err := requireHostedSourceAdmitted(ctx, tx.Q(), source); err != nil {
+				return Outcome{}, err
+			}
+			if err := hostedSourceInIssueScope(ctx, tx.Q(), execution.IssueID, source); err != nil {
+				return Outcome{}, err
+			}
 		}
 	}
 	adapted := *x

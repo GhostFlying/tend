@@ -74,7 +74,11 @@ func (t *Tx) InsertHostedExecution(ctx context.Context, row HostedExecution) err
 	if row.IssueID != "" {
 		issue, epoch = row.IssueID, row.AssignmentEpoch
 	}
-	_, err = t.Exec(ctx, `INSERT INTO hosted_executions(execution_id,conversation_id,issue_id,assignment_epoch,role,configuration_revision,agent_ref,private_snapshot,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, row.ID, row.ConversationID, issue, epoch, string(row.Selection.Purpose), row.Selection.ConfigurationRevision, hostedconfig.IdentityRef(row.Selection.Identity), string(raw), row.CreatedAt)
+	table := "local_hosted_executions"
+	if row.Selection.ConfigurationRevision == 0 {
+		table = "runner_coordination_executions"
+	}
+	_, err = t.Exec(ctx, `INSERT INTO `+table+`(execution_id,conversation_id,issue_id,assignment_epoch,role,configuration_revision,agent_ref,private_snapshot,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, row.ID, row.ConversationID, issue, epoch, string(row.Selection.Purpose), row.Selection.ConfigurationRevision, hostedconfig.IdentityRef(row.Selection.Identity), string(raw), row.CreatedAt)
 	return err
 }
 

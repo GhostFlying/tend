@@ -61,6 +61,14 @@ func (a *App) OpenRunFile(ctx context.Context, p protocol.Principal, id string) 
 	if p.Kind != protocol.PrincipalRun {
 		return protocol.ArtifactFile{}, nil, protocol.Errorf(protocol.CodeForbidden, "run identity is required")
 	}
+	if p.Role == protocol.RoleIssueManager {
+		file, err := a.ManagerFile(ctx, p, id)
+		if err != nil {
+			return protocol.ArtifactFile{}, nil, err
+		}
+		body, err := a.store.FileStore().Open(file.SHA256)
+		return file, body, err
+	}
 	var input *protocol.TaskInput
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		rc, err := loadRun(ctx, tx.Q(), p.Subject)

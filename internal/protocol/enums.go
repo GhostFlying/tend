@@ -10,6 +10,7 @@ const (
 	TaskDraft              TaskLifecycle = "draft"
 	TaskQueued             TaskLifecycle = "queued"
 	TaskRunning            TaskLifecycle = "running"
+	TaskWaiting            TaskLifecycle = "waiting"
 	TaskAwaitingAcceptance TaskLifecycle = "awaiting_acceptance"
 	TaskChangesRequired    TaskLifecycle = "changes_required"
 	TaskCompleted          TaskLifecycle = "completed"
@@ -18,7 +19,7 @@ const (
 
 // Valid reports whether l is a known lifecycle stage.
 func (l TaskLifecycle) Valid() bool {
-	return slices.Contains([]TaskLifecycle{TaskDraft, TaskQueued, TaskRunning, TaskAwaitingAcceptance, TaskChangesRequired, TaskCompleted, TaskCancelled}, l)
+	return slices.Contains([]TaskLifecycle{TaskDraft, TaskQueued, TaskRunning, TaskWaiting, TaskAwaitingAcceptance, TaskChangesRequired, TaskCompleted, TaskCancelled}, l)
 }
 
 // Terminal reports whether no further transition is possible.
@@ -167,26 +168,28 @@ type RunRole string
 
 // Run roles.
 const (
-	RoleImplement RunRole = "implement"
-	RoleAccept    RunRole = "accept"
+	RoleImplement    RunRole = "implement"
+	RoleIssueManager RunRole = "issue_manager"
+	RoleAccept       RunRole = "accept"
 )
 
 // Valid reports whether r is a known role.
-func (r RunRole) Valid() bool { return r == RoleImplement || r == RoleAccept }
+func (r RunRole) Valid() bool { return r == RoleImplement || r == RoleAccept || r == RoleIssueManager }
 
 // ActionKind is the kind of work a plan action commits to.
 type ActionKind string
 
 // Action kinds.
 const (
-	ActionImplement ActionKind = "implement"
-	ActionAccept    ActionKind = "accept"
-	ActionDeliver   ActionKind = "deliver"
+	ActionImplement  ActionKind = "implement"
+	ActionCoordinate ActionKind = "coordinate"
+	ActionAccept     ActionKind = "accept"
+	ActionDeliver    ActionKind = "deliver"
 )
 
 // Valid reports whether k is a known action kind.
 func (k ActionKind) Valid() bool {
-	return k == ActionImplement || k == ActionAccept || k == ActionDeliver
+	return k == ActionCoordinate || k == ActionImplement || k == ActionAccept || k == ActionDeliver
 }
 
 // DecisionEffect is what tend does itself when an option of a decision it

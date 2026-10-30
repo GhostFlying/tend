@@ -112,7 +112,7 @@ func IssueTaskIDs(ctx context.Context, q Querier, issueID string) ([]string, err
 		return nil, err
 	}
 	if canonical {
-		return FollowupIDs(ctx, q, `SELECT task_id FROM task_work_item_owners WHERE work_item_id=? ORDER BY task_id`, issueID)
+		return FollowupIDs(ctx, q, `SELECT o.task_id FROM task_work_item_owners o JOIN tasks t USING(task_id) WHERE o.work_item_id=? AND t.kind='execution' ORDER BY o.task_id`, issueID)
 	}
 	item, err := GetIssue(ctx, q, issueID)
 	if err != nil {

@@ -6,6 +6,7 @@ type CreateConsultationPayload struct {
 	Title    string `json:"title"`
 }
 type PromoteConsultationPayload struct {
+	Manager *RequestIssueManagerPayload `json:"manager,omitempty"`
 	IssueSourceReference
 	Sources                 []IssueSourceReference `json:"sources,omitempty"`
 	Plan                    IssuePlan              `json:"plan,omitzero"`

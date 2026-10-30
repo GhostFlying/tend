@@ -95,6 +95,13 @@ func checkWorker(ctx context.Context, x *Exec, q store.Querier) error {
 // work that no longer matches the task stops, a task under human control
 // holds its runs, and a paused task pauses them.
 func desiredFor(run store.RunRow, action store.ActionRow, task store.TaskRow) protocol.RunDesired {
+	var receipt struct {
+		ReceiptOnly bool `json:"receipt_only"`
+	}
+	_ = json.Unmarshal([]byte(action.TriggerJSON), &receipt)
+	if run.Role == protocol.RoleIssueManager && receipt.ReceiptOnly && run.ObservedState != protocol.RunFinished && run.ObservedState != protocol.RunFailed && action.Status == protocol.ActionDispatched {
+		return protocol.DesiredRun
+	}
 	switch {
 	case run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed,
 		task.Lifecycle.Terminal(),
@@ -110,6 +117,9 @@ func desiredFor(run store.RunRow, action store.ActionRow, task store.TaskRow) pr
 }
 
 func roleOf(kind protocol.ActionKind) protocol.RunRole {
+	if kind == protocol.ActionCoordinate {
+		return protocol.RoleIssueManager
+	}
 	if kind == protocol.ActionAccept {
 		return protocol.RoleAccept
 	}
@@ -118,6 +128,9 @@ func roleOf(kind protocol.ActionKind) protocol.RunRole {
 
 // buildAssignment describes a run to the runner that will execute it.
 func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lease store.LeaseRow, ttl time.Duration) (protocol.Assignment, error) {
+	if run.Role == protocol.RoleIssueManager {
+		return buildManagerAssignment(ctx, q, run, lease, ttl)
+	}
 	action, err := store.GetAction(ctx, q, run.ActionID)
 	if err != nil {
 		return protocol.Assignment{}, err
@@ -282,6 +295,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := refreshManagerTasks(ctx, x, tx); err != nil {
+		return Outcome{}, err
+	}
 	rows, err := store.ListClaimCandidates(ctx, q)
 	if err != nil {
 		return Outcome{}, err
@@ -290,6 +306,11 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	managerCandidates, err := issueManagerCandidates(ctx, q)
+	if err != nil {
+		return Outcome{}, err
+	}
+	candidates = append(candidates, managerCandidates...)
 	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
 		return Outcome{}, err
 	}
@@ -301,7 +322,8 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		}
 	}
 	schedulingHost := scheduler.Host{
-		ID: host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
+		IssueManagers: p.Runtime != nil && p.Runtime.Protocol >= protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),
+		ID:            host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
 		AcceptanceExecution: runtimeSupportsAcceptanceExecution(p.Runtime), TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
 		Executors: executors,
@@ -344,6 +366,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	}
 	if err := tx.SetActionStatus(ctx, pick.ActionID, protocol.ActionDispatched, now); err != nil {
 		return Outcome{}, err
+	}
+	if pick.Kind == protocol.ActionCoordinate {
+		return claimIssueManager(ctx, x, tx, pick, run, lease, execution)
 	}
 	if pick.Kind == protocol.ActionImplement && pick.WorkspaceHost == "" {
 		task, err := store.GetTask(ctx, q, pick.TaskID)
@@ -448,9 +473,12 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			return Outcome{}, err
 		}
 		res.Control = &c
+		if slices.Contains(p.Runtime.Capabilities, protocol.CapabilityProtocolNegotiation) {
+			res.ProtocolMax = protocol.CurrentRunnerProtocol
+		}
 		res.RepositoryBindings = slices.Contains(p.Runtime.Capabilities, protocol.CapabilityRepositoryBindings)
 		res.AgentExecution = runtimeSupportsAgentExecution(p.Runtime)
-		res.AgentInventory = p.Runtime.Protocol == protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityAgentInventory)
+		res.AgentInventory = protocol.RunnerProtocolSupported(p.Runtime.Protocol) && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityAgentInventory)
 	}
 	var events []Event
 	if changed {

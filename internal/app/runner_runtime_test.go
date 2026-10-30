@@ -12,7 +12,7 @@ import (
 )
 
 func testRuntime(instance string) *protocol.RunnerRuntime {
-	return &protocol.RunnerRuntime{InstanceID: instance, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
+	return &protocol.RunnerRuntime{InstanceID: instance, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
 }
 func (h *harness) versionedHello(host string, r *protocol.RunnerRuntime) protocol.Operation {
 	// A fake process allocates its durable generation when first registered.
@@ -87,7 +87,7 @@ func TestMaintenanceBlocksNewClaimsButAllowsReceiptReplay(t *testing.T) {
 	h.createTask(owner, createTaskPayload{Title: "existing", Spec: testSpec})
 	env := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Worker: h.worker("linux-1"), WorkspaceProtocol: 1, Runtime: r}, nil)
 	first, ok := h.claimWith("linux-1", env)
-	if !ok || first.Protocol != 1 {
+	if !ok || first.Protocol != protocol.CurrentRunnerProtocol {
 		t.Fatalf("assignment: %+v %v", first, ok)
 	}
 	op := h.exec(owner, h.env("hosts.maintenance", protocol.Target{Type: "host", ID: "linux-1"}, map[string]any{"mode": protocol.RunnerMaintenance}, rev(0)), HostMaintenance{})
@@ -117,8 +117,8 @@ func TestMaintenanceBlocksNewClaimsButAllowsReceiptReplay(t *testing.T) {
 func TestUnsupportedRuntimeRejectedBeforeAllocation(t *testing.T) {
 	h := newHarness(t)
 	r := testRuntime("future")
-	r.Protocol = 2
-	r.ProtocolMax = 2
+	r.Protocol = protocol.CurrentRunnerProtocol + 1
+	r.ProtocolMax = protocol.CurrentRunnerProtocol + 1
 	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeInvalidRequest {
 		t.Fatalf("future: %+v", op)
 	}

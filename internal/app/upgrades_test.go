@@ -37,7 +37,7 @@ func upgradeHarness(t *testing.T) (*harness, StartUpgrade) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return h, StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: 10}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
+	return h, StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: 10}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
 }
 func startTestUpgrade(h *harness, id string, c StartUpgrade) protocol.Operation {
 	h.t.Helper()
@@ -145,13 +145,19 @@ func TestUpgradePreflightRejectsUnsafeFleet(t *testing.T) {
 			case "offline":
 				h.clock.Advance(61 * time.Second)
 			case "incompatible":
-				c.Manifest.Protocol = release.Range{Min: 1, Max: 2}
-				r := testRuntime("protocol-zero")
-				r.Protocol = 0
-				r.ProtocolMax = 0
-				r.Capabilities = append(r.Capabilities, capabilityUpdater)
-				if op := h.versionedHello("linux-2", r); op.Status != protocol.OpSucceeded {
-					t.Fatal(op)
+				// This persisted observation predates the communication upgrade;
+				// the current hello endpoint correctly rejects protocol zero.
+				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+					row, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-2")
+					if err != nil {
+						return err
+					}
+					row.Runtime.Protocol = 0
+					row.Runtime.ProtocolMin = 0
+					row.Runtime.ProtocolMax = 0
+					return tx.PutHostRuntime(t.Context(), "linux-2", row)
+				}); err != nil {
+					t.Fatal(err)
 				}
 			case "missing-updater":
 				r := testRuntime("no-updater")

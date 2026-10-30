@@ -23,7 +23,7 @@ import (
 func completedCancelAssignment(t *testing.T, j *journal.Journal, kind ...protocol.WorkerKind) (protocol.Assignment, json.RawMessage) {
 	t.Helper()
 	ctx := context.Background()
-	as := protocol.Assignment{RunID: "run_cancel_completed", TaskID: "task_cancel_completed", Role: protocol.RoleImplement, Desired: protocol.DesiredRun, Spec: json.RawMessage(`{"deliverables":["report"]}`)}
+	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "run_cancel_completed", TaskID: "task_cancel_completed", Role: protocol.RoleImplement, Desired: protocol.DesiredRun, Spec: json.RawMessage(`{"deliverables":["report"]}`)}
 	origin := protocol.WorkerAppServer
 	if len(kind) > 0 {
 		origin = kind[0]

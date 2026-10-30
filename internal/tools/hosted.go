@@ -78,7 +78,7 @@ var hostedMutations = []hostedMutation{
 	{"issues_followups_cancel", "Cancel this Issue's generic rule while retaining original receipts and history.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "cancel"}, false},
 	{"issues_followups_trigger", "Request one bounded check of this Issue's generic rule; no new task or authority is implied.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "trigger"}, false},
 	{"issues_refresh_delivery", "Request a new provider observation for this Issue's linked delivery using the existing runner observer. Never merge, close or deploy.", "issue", protocol.IssueRefreshDeliveryPayload{}, app.IssueRefreshDelivery{}, false},
-	{"consultation_promote", "Delegate an explicit owner execution request from this consultation to a concrete Issue manager using only selected persisted source versions. Ordinary Q&A creates no task. Never execute native work.", "conversation", protocol.PromoteConsultationPayload{}, app.PromoteConsultation{}, false},
+	{"consultation_promote", "Delegate an explicit owner execution request from this consultation by category to a runner Issue manager using only selected persisted source versions. Ordinary Q&A creates no task. Never execute native work.", "conversation", protocol.PromoteConsultationPayload{}, app.PromoteConsultation{}, false},
 	{"runs_send_message", "Send supplemental evidence to this Issue primary task exact active run. It cannot revise its frozen contract or answer worker decisions; unknown is not resent.", "run", protocol.SendRunMessagePayload{}, app.SendRunMessage{}, false},
 	{"issues_deadline_put", "Record a sourced deadline or estimate, with known/unknown time and default 24h/due reminders; never silently change a user commitment.", "deadline", protocol.PutIssueDeadlinePayload{}, app.IssueDeadlineCommand{}, true},
 	{"issues_deadline_cancel", "Cancel a deadline with an explicit reason, preserving already claimed/unknown reminder facts.", "deadline", protocol.CancelIssueDeadlinePayload{}, app.IssueDeadlineCommand{Cancel: true}, true},
@@ -89,7 +89,8 @@ var hostedMutations = []hostedMutation{
 	{"attentions_confirm", "Relay an actual owner's confirmation of a human action; agent narration is insufficient.", "attention", protocol.ConfirmAttentionPayload{}, app.AttentionCommand{Action: "confirm", FromMessage: true}, true},
 	{"attentions_withdraw", "Withdraw an ordinary open action/information with a reason; decisions retain their original business path.", "attention", hostedEmptyPayload{}, app.AttentionCommand{Action: "withdraw"}, true},
 	{"conversation_associate_issues", "Classify this exact message into canonical Issues or explicitly leave it unassigned. Preserve owner corrections; this acknowledges routing only and never clears Issue source-review duties or authorizes execution.", "message", protocol.SetIssueMessageAssociationsPayload{}, app.SetIssueMessageAssociations{}, true},
-	{"issues_create", "Delegate a vague goal to a concrete registered Issue manager. Managers create only child Issues within their own scope.", "issue", protocol.CreateIssuePayload{}, app.CanonicalOwnerIssueCommand{Action: "create"}, true},
+	{"issues_create", "Delegate a vague goal by setting manager.category_id. A runner selects the actual Issue manager on claim. Managers create only child Issues within their own scope.", "issue", protocol.CreateIssuePayload{}, app.CanonicalOwnerIssueCommand{Action: "create"}, true},
+	{"issues_request_manager", "Publish a continuing Issue manager task by category. A matching runner claims it and becomes the assignee; no runner is selected at publication.", "issue", protocol.RequestIssueManagerPayload{}, app.RequestIssueManager{}, true},
 	{"issues_assign", "Fence a concrete Issue assignee before reconciling and enabling its replacement. Does not stop independent workers.", "issue", protocol.IssueAssignmentPayload{}, app.HostedIssueAssignment{}, true},
 	{"issues_finish_assignment", "Enable a fenced assignee only after the previous manager's actual operations are reconciled.", "issue", protocol.FinishIssueAssignmentPayload{}, app.HostedIssueAssignment{Finish: true}, true},
 	{"issues_update", "Revise only this Issue definition; task specifications stay frozen until explicitly refreshed.", "issue", protocol.UpdateIssuePayload{}, app.CanonicalOwnerIssueCommand{Action: "update"}, false},
@@ -157,6 +158,7 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	out = append(out, harness.ToolSpec{Name: "issues_read", Description: "Read an Issue and its primary execution/completion facts; managers are limited to their Issue and descendants.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedReadArgs{})))})
 	out = append(out, harness.ToolSpec{Name: "agents_hosted_list", Description: "Read accepted hosted identities, roles and configuration revision. Private instructions and local credentials are not exposed.", InputSchema: exportSchema(json.RawMessage(argumentSchema(turnReadArgs{})))})
 	if purpose == agentconfig.IssueManager {
+		out = append(out, harness.ToolSpec{Name: "download_file", Description: "Download an Issue attachment or evidence file by file_id to the runner private directory, verifying original size and SHA256. Returns only the runner-local path.", InputSchema: json.RawMessage(`{"type":"object","properties":{"file_id":{"type":"string"}},"required":["file_id"],"additionalProperties":false}`)})
 		out = append(out, harness.ToolSpec{Name: "issues_turn_read", Description: "Read this manager turn's exact source versions and context share.", InputSchema: exportSchema(json.RawMessage(argumentSchema(turnReadArgs{})))})
 	}
 	for _, spec := range Specs() {
@@ -209,6 +211,13 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		return harness.ToolResult{}, false
 	}
 	fail := func(err error) (harness.ToolResult, bool) { return hostedAnswer(nil, err), true }
+	if execution.Selection.RunnerManaged {
+		if err := s.app.AuthorizeRunnerCoordination(ctx, c.Principal, execution); err != nil {
+			return fail(err)
+		}
+	} else if c.Principal.Kind == protocol.PrincipalRun {
+		return fail(protocol.Errorf(protocol.CodeForbidden, "run has no hosted coordinator authority"))
+	}
 	var native store.MainTurn
 	err = s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var e error
@@ -283,6 +292,16 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return fail(result.Error)
 		}
 		return hostedAnswer(map[string]any{"request_id": result.RequestID, "status": result.Status, "outcome": result.Result}, nil), true
+	}
+	if c.Tool == "download_file" && execution.Selection.RunnerManaged {
+		var args struct {
+			FileID string `json:"file_id"`
+		}
+		if err := decode(c.Arguments, &args); err != nil {
+			return fail(err)
+		}
+		file, err := s.app.ManagerFile(ctx, c.Principal, args.FileID)
+		return hostedAnswer(file, err), true
 	}
 	if c.Tool == "attentions_list" || c.Tool == "planner_read" || c.Tool == "deadlines_list" {
 		if execution.Selection.Purpose == agentconfig.Consultation {

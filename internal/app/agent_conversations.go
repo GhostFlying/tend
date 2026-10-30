@@ -117,7 +117,8 @@ func (a *App) AgentContext(ctx context.Context, id string, request string) (stri
 	return text, err
 }
 
-// PendingAgentConversations lists only destinations needing service, including recovery.
+// PendingAgentConversations includes recovery and open runner attachments: after
+// the last delivery commits, restart must still rediscover native teardown.
 func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 	var ids []string
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
@@ -129,6 +130,8 @@ func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 		receipts, err := store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT r.conversation_id FROM agent_recoveries r JOIN main_turns t ON t.request_id=r.active_request_id OR t.message_id=r.successor_message_id JOIN native_turn_receipts_pending p ON p.request_id=t.request_id WHERE r.conversation_id<>'main' AND (COALESCE(t.turn_id,'')<>'' OR NOT EXISTS(SELECT 1 FROM agent_recovery_attempts e WHERE e.request_id=t.request_id)) AND r.next_reconcile_at<=?
  UNION SELECT DISTINCT h.conversation_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id JOIN native_turn_receipts_pending p ON p.request_id=t.request_id
  WHERE h.conversation_id<>'main' AND p.next_reconcile_at<=? AND NOT EXISTS(SELECT 1 FROM agent_recoveries r WHERE r.active_request_id=t.request_id OR r.successor_message_id=t.message_id)
+ UNION SELECT DISTINCT m.conversation_id FROM issue_manager_tasks m JOIN runs r USING(task_id) JOIN leases l USING(run_id)
+ WHERE r.role='issue_manager' AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND l.status='active'
  ORDER BY 1`, a.now().UnixMilli(), a.now().UnixMilli())
 		if err != nil {
 			return err

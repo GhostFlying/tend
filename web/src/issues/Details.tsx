@@ -14,6 +14,7 @@ import { IssueHierarchy, issueStateLabel } from "./Hierarchy.tsx";
 import { CreateIssueTask } from "./CreateTask.tsx";
 import { IssueDefinition } from "./Definition.tsx";
 import { IssueHandoff } from "./Handoff.tsx";
+import { lifecycleLabels, controlLabels } from "../tasks/status.ts";
 import styles from "./Issues.module.css";
 
 type Tab = "overview" | "hierarchy" | "sources" | "followups" | "history";
@@ -119,6 +120,41 @@ export function IssueDetails({
       <div className={styles.body}>
         {state.error && <p className={styles.warning}>当前显示上次读取，暂时无法取得最新状态。</p>}
         <div className={styles.goal}>目标：{issue.plan.intent}</div>
+        {issue.manager && (
+          <p className={styles.muted}>
+            管理任务：
+            <button className={styles.button} onClick={() => onTask(issue.manager!.task_id)}>
+              {issue.manager.category_id}
+            </button>
+            {issue.manager.host_id ? ` · ${issue.manager.host_id}` : " · 等待 runner 领取"}
+            {issue.manager.agent ? ` / ${issue.manager.agent.local_id}` : ""}
+            {` · ${issue.manager.state === "running" ? "协调中" : lifecycleLabels[issue.manager.state]}`}
+            {issue.manager.control_mode && issue.manager.control_mode !== "managed"
+              ? ` · ${controlLabels[issue.manager.control_mode]}`
+              : ""}
+            {issue.manager.reconciliation_pending ? " · 待对账" : ""}
+            {issue.manager.recovery
+              ? issue.manager.recovery.status === "waiting"
+                ? " · 恢复退避"
+                : ["starting", "running"].includes(issue.manager.recovery.status)
+                  ? " · 正在续接"
+                  : " · 恢复需要处理"
+              : ""}
+            {issue.manager.queue_reason ? ` · ${issue.manager.queue_reason.message}` : ""}
+          </p>
+        )}
+        {issue.manager?.execution && (
+          <p className={styles.muted}>
+            Agent 配置 v{issue.manager.execution.agent_revision} · runtime{" "}
+            {issue.manager.execution.runtime.runtime_id} v{issue.manager.execution.runtime.revision}{" "}
+            · 库存 v{issue.manager.execution.inventory_revision}
+          </p>
+        )}
+        {issue.manager?.native_thread_id && (
+          <p className={styles.muted} style={{ overflowWrap: "anywhere" }}>
+            原生会话：{issue.manager.native_thread_id}
+          </p>
+        )}
         {(issue.attentions?.items ?? [])
           .filter((a) => a.status === "open")
           .map((a) => (

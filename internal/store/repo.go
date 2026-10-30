@@ -72,6 +72,7 @@ func (t *Tx) InsertRequest(ctx context.Context, r RequestRecord) error {
 
 // TaskRow is the stored task projection.
 type TaskRow struct {
+	Kind                protocol.TaskKind
 	TaskID              string
 	Title               string
 	Project             string
@@ -98,11 +99,11 @@ type TaskRow struct {
 func GetTask(ctx context.Context, q Querier, taskID string) (TaskRow, error) {
 	r := TaskRow{TaskID: taskID}
 	var artifact, workspace sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT title, project, lifecycle, control_mode, control_revision, spec_version, rating,
+	err := q.QueryRowContext(ctx, `SELECT kind, title, project, lifecycle, control_mode, control_revision, spec_version, rating,
 		block_reason, implement_generation, current_artifact_id, workspace_name,
 		EXISTS (SELECT 1 FROM task_workspace_bindings w WHERE w.task_id = tasks.task_id), created_at, updated_at, `+taskCompletedAtSQL+`
 		FROM tasks WHERE task_id = ?`, taskID).
-		Scan(&r.Title, &r.Project, &r.Lifecycle, &r.ControlMode, &r.ControlRevision, &r.SpecVersion, &r.Rating, &r.BlockReason,
+		Scan(&r.Kind, &r.Title, &r.Project, &r.Lifecycle, &r.ControlMode, &r.ControlRevision, &r.SpecVersion, &r.Rating, &r.BlockReason,
 			&r.ImplementGeneration, &artifact, &workspace, &r.WorkspaceAssigned, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt)
 	if err != nil {
 		return TaskRow{}, notFound(err, "task "+taskID)
@@ -113,10 +114,13 @@ func GetTask(ctx context.Context, q Querier, taskID string) (TaskRow, error) {
 
 // InsertTask stores a new task.
 func (t *Tx) InsertTask(ctx context.Context, r TaskRow) error {
-	_, err := t.Exec(ctx, `INSERT INTO tasks (task_id, title, project, lifecycle, control_mode, control_revision, spec_version,
+	if r.Kind == "" {
+		r.Kind = protocol.TaskKindExecution
+	}
+	_, err := t.Exec(ctx, `INSERT INTO tasks (kind, task_id, title, project, lifecycle, control_mode, control_revision, spec_version,
 		priority, rating, block_reason, implement_generation, current_artifact_id, workspace_name, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
-		r.TaskID, r.Title, r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision, r.SpecVersion, r.Rating, r.BlockReason,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+		r.Kind, r.TaskID, r.Title, r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision, r.SpecVersion, r.Rating, r.BlockReason,
 		r.ImplementGeneration, nullString(r.CurrentArtifactID), nullString(r.WorkspaceName), r.CreatedAt, r.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("store: insert task: %w", err)

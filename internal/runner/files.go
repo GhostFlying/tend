@@ -171,6 +171,14 @@ func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Pre
 	if err != nil {
 		return "", err
 	}
+	return r.downloadRetainedFile(ctx, as, filepath.Join(p.ScratchDir, category), file)
+}
+
+func (r *Runner) downloadRetainedFile(ctx context.Context, as protocol.Assignment, dir string, file protocol.ArtifactFile) (string, error) {
+	if (file.FileID == "" || file.FileID == "." || file.FileID == ".." || filepath.Base(file.FileID) != file.FileID) || file.Size < 0 {
+		return "", errors.New("invalid file metadata")
+	}
+	id := file.FileID
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.c.base+"/runner/v1/files/"+url.PathEscape(id), nil)
 	if err != nil {
 		return "", err
@@ -185,7 +193,6 @@ func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Pre
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download status %d", resp.StatusCode)
 	}
-	dir := filepath.Join(p.ScratchDir, category)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

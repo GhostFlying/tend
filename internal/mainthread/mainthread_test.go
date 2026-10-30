@@ -104,6 +104,23 @@ func (e *env) stop() {
 func (e *env) exec(p protocol.Principal, op string, target protocol.Target, payload any, cmd app.Command) json.RawMessage {
 	e.t.Helper()
 	b, _ := json.Marshal(payload)
+	if op == protocol.OpRunnerHello || op == protocol.OpRunnerClaim {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(b, &fields)
+		if len(fields["runtime"]) == 0 || string(fields["runtime"]) == "null" {
+			runtime := protocol.RunnerRuntime{InstanceID: "fixture-" + p.Subject, Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+			_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
+				old, err := store.GetHostRuntime(context.Background(), tx.Q(), p.Subject)
+				if err == nil {
+					runtime = old.Runtime
+					runtime.Sequence++
+				}
+				return nil
+			})
+			fields["runtime"], _ = json.Marshal(runtime)
+			b, _ = json.Marshal(fields)
+		}
+	}
 	envl := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: b}
 	res, err := e.app.Execute(context.Background(), p, envl, cmd)
 	if err != nil || res.Status == protocol.OpFailed {
@@ -806,12 +823,18 @@ func completeHistoricalFixtureReview(t *testing.T, e *env, th *testkit.FakeThrea
 	for _, c := range state.Contexts {
 		delivery, found, err := e.app.TurnDelivery(t.Context(), th.ID(), turn)
 		if err != nil || !found {
+			if t.Context().Err() != nil {
+				return "failed"
+			}
 			t.Errorf("historical context delivery: %v %v", found, err)
 			return "failed"
 		}
 		payload, _ := json.Marshal(protocol.PrepareWorkItemContextPayload{Coverage: "Reviewed transport fixture messages; no additional semantic facts", Gaps: "None in this fixture"})
 		operation, err := e.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "historical-fixture", Thread: th.ID()}, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), ParentRequestID: delivery.RequestID, Operation: "work_item_context.prepare", Target: protocol.Target{Type: "work_item", ID: c.WorkItemID}, ExpectedControlRevision: &c.Revision, Payload: payload}, app.WithExecutionRequest(app.ContextCommand{Action: "prepare"}, delivery.RequestID))
 		if err != nil || operation.Status != protocol.OpSucceeded {
+			if t.Context().Err() != nil {
+				return "failed"
+			}
 			t.Errorf("historical context setup: %+v %v", operation, err)
 			return "failed"
 		}

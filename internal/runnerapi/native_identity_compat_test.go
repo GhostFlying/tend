@@ -19,7 +19,7 @@ func TestNativeIdentityOpaqueEventsRemainCompatible(t *testing.T) {
 			e.createTask()
 			var claim protocol.ClaimPayload
 			if wire > 0 {
-				runtime := &protocol.RunnerRuntime{InstanceID: "identity-compat", Generation: 1, Sequence: 1, Protocol: wire, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+				runtime := &protocol.RunnerRuntime{InstanceID: "identity-compat", Generation: 1, Sequence: 1, Protocol: wire, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: wire, Mode: protocol.RunnerNormal}
 				e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "", protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: runtime}))
 				runtime.Sequence++
 				claim = protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: runtime}

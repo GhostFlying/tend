@@ -31,7 +31,7 @@ func TestFinalRequestStopRetryKeepsExecutorAndHeartbeat(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer j.Close()
-			as := protocol.Assignment{RunID: "run_retry", TaskID: "task_retry", LeaseID: "lease_retry", Desired: protocol.DesiredRun}
+			as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "run_retry", TaskID: "task_retry", LeaseID: "lease_retry", Desired: protocol.DesiredRun}
 			if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
 				t.Fatal(err)
 			}
@@ -141,7 +141,7 @@ func TestFinalRequestConfirmedStopSkipsExternalReverification(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer j.Close()
-	as := protocol.Assignment{RunID: "run_confirmed", Desired: protocol.DesiredRun}
+	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "run_confirmed", Desired: protocol.DesiredRun}
 	if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestRecoveredFinalRequestPreservesIntentThroughOwnerHandback(t *testing.T) 
 				t.Fatal(err)
 			}
 			defer j.Close()
-			as := protocol.Assignment{RunID: "run_legacy", Desired: protocol.DesiredRun}
+			as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "run_legacy", Desired: protocol.DesiredRun}
 			if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
 				t.Fatal(err)
 			}
@@ -270,7 +270,7 @@ func TestCurrentWorkerFailureFinalizesWithoutOwnerHandback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer j.Close()
-	as := protocol.Assignment{RunID: "run_failed", Desired: protocol.DesiredRun}
+	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "run_failed", Desired: protocol.DesiredRun}
 	if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestFailedUnknownLaunchFinalizationResolvesAndJournalsExactTerminal(t *test
 		t.Fatal(err)
 	}
 	defer j.Close()
-	as := protocol.Assignment{RunID: "run_unknown_launch", Desired: protocol.DesiredRun}
+	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "run_unknown_launch", Desired: protocol.DesiredRun}
 	if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerOrca); err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func TestStoppedRunRetriesItsJournaledReleaseUntilProcessProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer j.Close()
-	as := protocol.Assignment{RunID: "run_stopped", Desired: protocol.DesiredStopped}
+	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "run_stopped", Desired: protocol.DesiredStopped}
 	if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
 		t.Fatal(err)
 	}

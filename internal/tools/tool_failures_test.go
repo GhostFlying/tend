@@ -60,3 +60,13 @@ func TestToolFailuresOwnerConversationScopeAndRunIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestManagerCannotFallThroughToUnscopedToolsWithoutExecution(t *testing.T) {
+	e := newEnv(t)
+	for _, execution := range []string{"", "missing-execution"} {
+		result := e.svc.Handle(t.Context(), Call{Principal: protocol.Principal{Kind: protocol.PrincipalRun, Subject: "manager-run", Role: protocol.RoleIssueManager}, ExecutionRequestID: execution, Tool: "repos_list", Arguments: json.RawMessage(`{}`)})
+		if result.Success || !strings.Contains(result.Text, `"code":"forbidden"`) {
+			t.Fatal("manager read global facts without a persisted scope", result.Text)
+		}
+	}
+}

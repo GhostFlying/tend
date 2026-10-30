@@ -135,7 +135,7 @@ func (r *Runner) RegisterAgentInventory(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if local.Revision == 0 || local.Projection == nil {
+	if local.Revision == 0 || local.Projection == nil || (local.Projection.FormatVersion == 2 && runtime.Protocol < 2) {
 		return nil
 	}
 	if local.Revision > math.MaxInt64 {
