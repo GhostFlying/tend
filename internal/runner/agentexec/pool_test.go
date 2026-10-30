@@ -12,6 +12,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/agentcontrol"
 	"github.com/GhostFlying/tend/internal/runner/agentexec"
@@ -181,5 +182,49 @@ func TestTransientProbeFailureRequestsExistingReconcilerRetry(t *testing.T) {
 	}
 	if o := observed(t, p); !o.Available || probes.Load() != 2 {
 		t.Fatal(o, probes.Load())
+	}
+}
+
+func TestOrcaTraeReadinessRequiresCapabilityAndCanReprobe(t *testing.T) {
+	f := newSource(t)
+	f.config.Runtimes[0].Kind = agentconfig.OrcaWorker
+	f.config.Runtimes[0].CLI = "traex"
+	f.config.Agents[0].Model = "gpt-6.1-sol"
+	f.config.Agents[0].Effort = "xhigh"
+	f.reload(t)
+	supported := false
+	builds := 0
+	p, err := agentexec.New(agentexec.Options{Source: f.control, BackendID: "orca", Workspaces: gitws.New(gitws.Config{Home: t.TempDir()}), Probe: func(context.Context, agentexec.BuildInput) error {
+		if !supported {
+			return orca.ErrTraeModelSelectionUnsupported
+		}
+		return nil
+	}, Build: func(input agentexec.BuildInput) (harness.Workers, error) {
+		if input.Runtime.CLI != "traex" || input.Agent.Model != "gpt-6.1-sol" || input.Agent.Effort != "xhigh" {
+			t.Fatal(input)
+		}
+		builds++
+		return &testkit.Workers{}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Refresh(t.Context()); !errors.Is(err, orca.ErrTraeModelSelectionUnsupported) {
+		t.Fatal(err)
+	}
+	if got := observed(t, p); got.Available || got.Reason != "orca_trae_model_selection_not_supported" || builds != 0 {
+		t.Fatal(got, builds)
+	}
+	supported = true
+	if err := p.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	first := observed(t, p)
+	if !first.Available || builds != 1 {
+		t.Fatal(first, builds)
+	}
+	resolved, err := p.Resolve(t.Context(), first.Pin)
+	if err != nil || resolved.Profile.Model != "gpt-6.1-sol" || resolved.Profile.Effort != "xhigh" {
+		t.Fatal(resolved, err)
 	}
 }

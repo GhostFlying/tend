@@ -96,8 +96,6 @@ func (p *Pool) load(ctx context.Context, id string) (map[string]*entry, error) {
 			e.reason = "hosted_runtime_not_supported"
 		case r.Kind == agentconfig.OrcaWorker && p.options.BackendID != "orca":
 			e.reason = "workspace_backend_not_supported"
-		case r.Kind == agentconfig.OrcaWorker && r.CLI == "traex" && a.Model != "":
-			e.reason = "orca_trae_model_selection_not_supported"
 		default:
 			e.reason = "adapter_not_loaded"
 		}
@@ -164,7 +162,7 @@ func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runne
 		return runner.ResolvedExecution{}, err
 	}
 	e := entries[pin.Identity.LocalID]
-	if e != nil && (e.reason == "adapter_not_loaded" || e.reason == "adapter_unavailable") {
+	if e != nil && (canProbe(e.reason)) {
 		p.initialize(ctx, e)
 	}
 	// A native refusal removes future availability, but original sessions still
@@ -201,7 +199,14 @@ func (p *Pool) probe(ctx context.Context, input BuildInput) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if input.Runtime.Kind == agentconfig.OrcaWorker {
-		return (&orca.Client{Bin: input.Runtime.ExecutableRef}).CheckWorkspaceProtocol(ctx)
+		client := &orca.Client{Bin: input.Runtime.ExecutableRef}
+		if err := client.CheckWorkspaceProtocol(ctx); err != nil {
+			return err
+		}
+		if input.Runtime.CLI == "traex" {
+			return client.CheckTraeModelSelection(ctx)
+		}
+		return nil
 	}
 	session, err := traex.Start(ctx, traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log})
 	if err != nil {
@@ -226,6 +231,9 @@ func (p *Pool) build(input BuildInput) (harness.Workers, error) {
 func (p *Pool) initialize(ctx context.Context, e *entry) error {
 	if err := p.options.Probe(ctx, e.input); err != nil {
 		e.reason = "adapter_unavailable"
+		if errors.Is(err, orca.ErrTraeModelSelectionUnsupported) {
+			e.reason = "orca_trae_model_selection_not_supported"
+		}
 		return err
 	}
 	workers, err := p.options.Build(e.input)
@@ -255,9 +263,13 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	}
 	var retry error
 	for _, e := range entries {
-		if e.reason == "adapter_not_loaded" || e.reason == "adapter_unavailable" {
+		if canProbe(e.reason) {
 			retry = errors.Join(retry, p.initialize(ctx, e))
 		}
 	}
 	return retry
+}
+
+func canProbe(reason string) bool {
+	return reason == "adapter_not_loaded" || reason == "adapter_unavailable" || reason == "orca_trae_model_selection_not_supported"
 }
