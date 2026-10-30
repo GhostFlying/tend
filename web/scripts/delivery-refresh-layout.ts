@@ -241,7 +241,10 @@ try {
   // Reserving a query is not a completed observation.
   observations[0] = { ...observations[0]!, generation: 2, refresh_pending: true };
   publish();
-  await panel.getByText(/观察请求待回报/).waitFor();
+  await page
+    .getByRole("dialog", { name: "跟进与外部交付", exact: true })
+    .getByText(/观察请求待回报/)
+    .waitFor();
   assert(await button.isDisabled());
   assert.equal(requests.size, 1);
 

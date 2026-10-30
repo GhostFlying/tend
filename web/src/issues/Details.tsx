@@ -16,6 +16,7 @@ import { Issues } from "./data.ts";
 import { WorkItemRead } from "../workitems/live.ts";
 import { AssigneeName } from "./AssigneeName.tsx";
 import { issueStateLabel } from "./Hierarchy.tsx";
+import { workStatus, workStatusLabel } from "./boardModel.ts";
 import { IssuePlanRead } from "./PlanRead.tsx";
 import { IssueDefinition } from "./Definition.tsx";
 import { IssueHandoff } from "./Handoff.tsx";
@@ -225,6 +226,8 @@ export function IssueDetails({
           </dd>
           <dt>状态</dt>
           <dd>{issueStateLabel[issue.state]}</dd>
+          <dt>看板状态</dt>
+          <dd>{workStatusLabel(workStatus(issue))}</dd>
           <dt>项目</dt>
           <dd>{issue.plan.project || "未分组"}</dd>
         </dl>

@@ -9,7 +9,9 @@ export const boardColumns: readonly { id: IssueWorkStatus; label: string }[] = [
   { id: "cancelled", label: "已取消" },
 ];
 
-export const workStatus = (item: IssueSummary): IssueWorkStatus =>
+export const workStatus = (
+  item: Pick<IssueSummary, "board" | "state" | "work_status">,
+): IssueWorkStatus =>
   item.board?.status ??
   (item.state === "closed"
     ? "done"

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -152,5 +153,61 @@ func TestIssueActivityRetainsAttentionLifecycleFacts(t *testing.T) {
 	}
 	if len(titles) != 4 || titles[2] != "通知：Original notice" || titles[3] != "通知：Revised notice" || titles[0] != "新增或更新了待处理事项：Provide acceptance device" || titles[1] != "待处理事项已解决：Provide acceptance device" {
 		t.Fatal(activity)
+	}
+}
+
+func TestIssueProgressPreservesBoardAndChildActivityResults(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	parent := createOwnerIssueHTTP(t, e, token, "")
+	child := createOwnerIssueHTTP(t, e, token, parent.IssueID)
+	move := func(status protocol.IssueWorkStatus) {
+		t.Helper()
+		child = issueHTTP(t, e, token, e.envelope("issues.set_status", protocol.Target{Type: "issue", ID: child.IssueID}, &child.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Status: status}))
+	}
+	read := func(id string) protocol.IssueActivityPage {
+		t.Helper()
+		var page protocol.IssueActivityPage
+		if status := e.do("GET", "/api/v1/issues/"+id+"/activity", token, nil, &page); status != http.StatusOK {
+			t.Fatal(status)
+		}
+		return page
+	}
+	move(protocol.IssueInReview)
+	due := e.count(`SELECT due_at FROM issue_status_notifications WHERE issue_id=?`, child.IssueID)
+	e.clock.Advance(time.Minute)
+	_, out := e.op(token, e.envelope("issues.update_progress", protocol.Target{Type: "issue", ID: child.IssueID}, &child.Revision, protocol.UpdateIssueProgressPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Summary: "Ready for review", NextStep: "Check the evidence"}))
+	if out.Operation == nil || out.Operation.Status != protocol.OpSucceeded {
+		t.Fatal(out)
+	}
+	view := issueDetailHTTP(t, e, token, child.IssueID)
+	if view.State != child.State || view.WorkStatus != protocol.IssueInReview || e.count(`SELECT due_at FROM issue_status_notifications WHERE issue_id=?`, child.IssueID) != due {
+		t.Fatal("summary changed board responsibility or notification window", view)
+	}
+	child = view.Issue
+	for _, entry := range read(parent.IssueID).Items {
+		if entry.IssueID == child.IssueID {
+			t.Fatal("child nonterminal status leaked into parent history", entry)
+		}
+	}
+	found := false
+	for _, entry := range read(child.IssueID).Items {
+		found = found || entry.Kind == "issue.status_changed"
+	}
+	if !found {
+		t.Fatal("own board event missing")
+	}
+	move(protocol.IssueDone)
+	move(protocol.IssueTodo)
+	move(protocol.IssueWorkCancelled)
+	var results []string
+	for _, entry := range read(parent.IssueID).Items {
+		if entry.IssueID == child.IssueID {
+			results = append(results, entry.Title)
+		}
+	}
+	if len(results) != 2 || results[0] != child.Plan.Title+" · 关闭了 Issue" || results[1] != child.Plan.Title+" · 取消了 Issue" {
+		t.Fatal("child results were omitted or rewritten by later state", results)
 	}
 }
