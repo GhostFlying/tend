@@ -5,6 +5,7 @@ PNPM ?= pnpm
 STATICCHECK_VERSION ?= v0.8.2
 PKGS := ./...
 TEST_TIMEOUT ?= 60m
+APP_TEST_SHARDS ?= 1
 WEB := web
 
 .PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check
@@ -26,7 +27,11 @@ staticcheck:
 	GOTOOLCHAIN=$$($(GO) env GOVERSION) $(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(PKGS)
 
 test:
+ifeq ($(APP_TEST_SHARDS),1)
 	$(GO) test -race -timeout $(TEST_TIMEOUT) $(PKGS)
+else
+	$(GO) run ./internal/testkit/racecheck -shards $(APP_TEST_SHARDS) -timeout $(TEST_TIMEOUT) $(PKGS)
+endif
 
 ## it: integration tests that need a real harness or tailnet
 it:

@@ -26,6 +26,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: make check
+        env:
+          APP_TEST_SHARDS: 4
         run: make check
       - name: mobile layout regression
         run: |
