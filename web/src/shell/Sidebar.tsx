@@ -1,8 +1,6 @@
-import { UsageEntry } from "../usage/Usage.tsx";
-import { RepositoryEntry } from "../repos/Repositories.tsx";
+import { ResourceNavigation, ResourceHosts } from "./Resources.tsx";
 // Work items are the primary navigation; execution records have a separate view.
 import type { Connection } from "../api/client.ts";
-import { useServices } from "../app/services.tsx";
 import type { AttentionPage } from "../api/generated/api.ts";
 import type { ReadState } from "../workitems/live.ts";
 import { NextSummary } from "../attention/NextSummary.tsx";
@@ -13,12 +11,12 @@ import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import { RecentTasks } from "../tasks/Board.tsx";
 import { IssueOverview } from "../issues/Overview.tsx";
 import controls from "./controls.module.css";
-import { Hosts } from "../hosts/Hosts.tsx";
 import styles from "./Sidebar.module.css";
 import type { View } from "./TabBar.tsx";
 
 export function Sidebar({
   view,
+  records,
   connection,
   onChat,
   onBoard,
@@ -30,6 +28,7 @@ export function Sidebar({
   onIssue,
 }: {
   view: View;
+  records: boolean;
   connection: Connection;
   onChat(): void;
   onBoard(): void;
@@ -40,7 +39,6 @@ export function Sidebar({
   onInbox(id?: string): void;
   onIssue(id: string): void;
 }) {
-  const { live } = useServices();
   const choice = useStore(theme);
   return (
     <div className={styles.root} data-view={view}>
@@ -77,19 +75,9 @@ export function Sidebar({
           <div className={styles.recent}>
             <RecentTasks limit={3} detailed />
           </div>
-          <button
-            type="button"
-            className={styles.recordsLink}
-            onClick={() => {
-              live.tasks.setProject("");
-              onRecords();
-            }}
-          >
-            全部任务执行 ›
-          </button>
-          <RepositoryEntry onOpen={onRepos} />
-          <UsageEntry />
-          <Hosts connection={connection} />
+          <div className={styles.sectionTitle}>资源与记录</div>
+          <ResourceNavigation onRecords={onRecords} onRepos={onRepos} records={records} />
+          <ResourceHosts connection={connection} />
         </section>
       </div>
       <div className={styles.foot}>

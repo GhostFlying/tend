@@ -126,19 +126,6 @@
   text-align: left;
 }
 
-.recordsLink {
-  display: block;
-  min-height: 44px;
-  padding: 8px;
-  color: var(--label-2);
-  font-size: var(--text-s);
-  text-align: left;
-}
-
-.recordsLink:hover {
-  text-decoration: underline;
-}
-
 .recent {
   margin-top: 12px;
   padding-top: 4px;

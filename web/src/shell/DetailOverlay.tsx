@@ -9,11 +9,13 @@ export function DetailOverlay({
   onClose,
   onBack,
   label,
+  closeLabel = "关闭详情",
   backLabel = "返回工作项",
 }: {
   children: ReactNode;
   task: boolean;
   label?: string | undefined;
+  closeLabel?: string;
   backLabel?: string;
   onClose(): void;
   onBack?: (() => void) | undefined;
@@ -37,6 +39,7 @@ export function DetailOverlay({
       aria-label={label ?? (task ? "任务详情" : "工作项详情")}
       onCancel={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
       }}
       onClick={(event) => {
@@ -51,7 +54,7 @@ export function DetailOverlay({
           <button className={controls.chipBtn} aria-pressed={full} onClick={() => setFull(!full)}>
             {full ? "退出全屏" : "全屏阅读"}
           </button>
-          <button className={controls.iconBtn} aria-label="关闭详情" onClick={onClose}>
+          <button className={controls.iconBtn} aria-label={closeLabel} onClick={onClose}>
             ×
           </button>
         </div>
