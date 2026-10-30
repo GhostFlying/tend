@@ -133,6 +133,7 @@
 | D128 | Issue manager 改为真实的 issue_manager task，由 main/owner 按 category 发布，runner 首次领取时原子更新具体负责人。每轮共用 claim/租约/槽位/journal，等待释放槽位；责任按 Issue 收尾/交接结束，不独立验收管理任务。Codex/Traex app-server 承载，main/consultation 保留 host。协议 2/1、配置格式 2、保留账本受控迁移，unknown 先对账。修订 D122 的本机 manager 执行位置及 D123 的 manager 库存/领取方式。详见 docs/plans/runner-issue-managers.md。 | 实施中，未发布 |
 | D129 | Issue 完整详情页统一负责人对话、当前进展、子项与交付，原执行及验收会话保持独立；摘要按 Issue revision 留存，活动／结果只读投影沿原账本。见 docs/plans/issue-detail-conversation.md。 | 已实现 |
 | D130 | App 业务测试每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移及历史库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md。 | 已实现 |
+| D131 | Web 界面改版（修订 D70 的单对话加覆盖层布局与 D121 UI r5 的侧栏摘要）：路由驱动的页面与可分享路径，旧 query 链接改写；侧栏只做分组导航，手机四标签；角色化 token 与共享基础组件，由检查脚本约束；界面使用用户术语，不默认显示内部标识；路由级拆包与全页面巡检。不引入路由或 UI 依赖，History API 与原生 dialog/popover 已满足需求。业务合同、owner API 与 runner wire 不变。见 docs/plans/web-ui-overhaul.md。 | 实施中 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -400,3 +401,9 @@ D63/D66 named TraeX 选择沿既有 Orca Trae TUI 路径传递精确 model/effor
 ## D129：Issue 详情与负责人对话统一
 
 Issue 默认作为应用内完整详情页，保留全局导航与原 query 链接。主栏突出 owner 待处理、本项负责人维护的进展／下一步、直接子项、讨论和交付结果；任务执行、来源、跟进及历史按需查看。负责人会话为固定入口，worker 实施和独立验收会话仍独立；服务端返回实际逻辑会话身份，GET 不创建会话。摘要独立保存不可变 revision，CAS／assignment epoch／request 去重与事件原子提交；历史投影不混入当前事实。活动和交付索引只读取原账本，保留作者及 artifact／spec／验收身份，不推断责任完成。计划见 [Issue 详情统一](plans/issue-detail-conversation.md)。
+
+## D131：Web 界面改版
+
+页面由路径决定：主对话、收件箱、Issue 看板与详情、任务执行与详情、资源、设置、归档各有路径，浏览器前进后退与刷新保持所在页面；旧 `?issue=`/`?task=` 链接改写为对应路径。只有短暂表单与确认使用 Sheet/Dialog，不再叠加页面级弹窗。主对话常驻挂载，换页不重建流与草稿。
+
+侧栏只放分组导航（对话、工作、资源、设置），待处理由收件箱计数与主对话待处理区承担；侧栏宽度在各页面一致。样式只使用 token 定义的字号、间距、圆角、层级与颜色，控件来自共享基础组件。界面文案遵循中英混排加空格与统一术语，内部标识、哈希与工具名默认收起。计划见 [Web UI 整体改版](plans/web-ui-overhaul.md)。
