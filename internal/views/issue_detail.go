@@ -151,7 +151,7 @@ var issueActivityTitles = map[string]string{
 	"issue.assigned": "完成了负责人交接", "issue.assignment_fenced": "开始交接负责人", "issue.paused": "暂停了 Issue", "issue.resumed": "恢复了 Issue",
 	"issue.status_changed": "更新了工作状态",
 	"issue.closed":         "关闭了 Issue", "issue.cancelled": "取消了 Issue", "issue.cancelling": "正在取消 Issue", "issue.reopened": "重新打开了 Issue", "issue.reparented": "调整了上级 Issue",
-	"run.unknown": "执行结果未知，待核实", "run.lost": "执行连接已丢失，待核实", "run.recovery": "执行正在恢复", "run.failed": "执行失败", "run.reconciled": "执行结果已对账", "task.cancelled": "取消了任务", "task.taken_over": "任务已由用户接管",
+	"run.unknown": "执行结果未知，待核实", "run.lost": "执行连接已丢失，待核实", "run.recovery": "更新了执行恢复状态", "run.failed": "执行失败", "run.reconciled": "执行结果已对账", "task.cancelled": "取消了任务", "task.taken_over": "任务已由用户接管",
 	"attention.changed": "更新了待处理事项",
 }
 
@@ -201,7 +201,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  OR (e.object_type='run' AND e.object_id IN (SELECT run_id FROM runs WHERE task_id IN (SELECT task_id FROM primary_tasks)))
  OR (e.object_type='artifact' AND e.object_id IN (SELECT artifact_id FROM artifacts WHERE task_id IN (SELECT task_id FROM primary_tasks)))
  OR (e.object_type='attention' AND e.object_id IN (SELECT attention_id FROM attentions WHERE issue_id=?))
- OR (e.object_type='issue' AND e.object_id IN (SELECT issue_id FROM issue_controls WHERE parent_issue_id=?) AND
+ OR (e.object_type='issue' AND EXISTS (SELECT 1 FROM issue_control_revisions c WHERE c.issue_id=e.object_id AND c.revision=e.object_version AND json_extract(c.snapshot_json,'$.control.parent_issue_id')=?) AND
  (e.kind IN ('issue.closed','issue.cancelled','issue.assigned','issue.manager_claimed','issue.manager_migration_cancelled') OR (e.kind='issue.status_changed' AND json_extract(e.body_json,'$.state') IN ('closed','cancelled'))))
  ))
  SELECT position,kind,object_id,created_at FROM entries WHERE position<=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT 21`, id, id, conversation, string(rawKinds), id, id, id, out.EventSeq, before, before)
@@ -260,6 +260,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 				return out, err
 			}
 			var facts struct {
+				Kind       string `json:"kind"`
 				Status     string `json:"status"`
 				State      string `json:"state"`
 				ArtifactID string `json:"artifact_id"`
@@ -267,6 +268,9 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 			}
 			if err := json.Unmarshal([]byte(body), &facts); err != nil {
 				return out, err
+			}
+			if r.kind == "run.recovery" {
+				entry.Title = recoveryActivityTitle(facts.Kind)
 			}
 			if r.kind == "issue.status_changed" {
 				switch facts.State {
@@ -280,7 +284,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 				entry.IssueID = id
 			} else {
 				var childTitle string
-				e := q.QueryRowContext(ctx, `SELECT json_extract(w.body_json,'$.title') FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id WHERE c.issue_id=? AND c.parent_issue_id=?`, r.id, id).Scan(&childTitle)
+				e := q.QueryRowContext(ctx, `SELECT json_extract(w.body_json,'$.title') FROM events e JOIN issue_control_revisions c ON c.issue_id=e.object_id AND c.revision=e.object_version JOIN work_item_revisions w ON w.work_item_id=c.issue_id AND w.revision=c.revision WHERE e.event_seq=? AND e.object_type='issue' AND json_extract(c.snapshot_json,'$.control.parent_issue_id')=?`, r.seq, id).Scan(&childTitle)
 				if e == nil {
 					entry.IssueID = r.id
 					entry.Title = childTitle + " · " + entry.Title
@@ -330,4 +334,36 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 	}
 	slices.Reverse(out.Items)
 	return out, nil
+}
+
+// Recovery facts describe the observed phase, not an inferred run outcome.
+func recoveryActivityTitle(kind string) string {
+	switch kind {
+	case "worker.root_background_pending":
+		return "执行后台工作尚未结束"
+	case "worker.root_observation_resolved":
+		return "执行状态已核实"
+	case "worker.root_observation_unknown":
+		return "执行状态未知，待核实"
+	case "worker.turn_failed":
+		return "执行回合失败"
+	case "worker.recovery_pending":
+		return "执行等待恢复"
+	case "worker.recovery_started":
+		return "执行正在恢复"
+	case "worker.recovery_completed":
+		return "执行恢复已完成"
+	case "worker.recovery_failed":
+		return "执行恢复失败"
+	case "worker.recovery_handed_back":
+		return "执行控制已交还"
+	case "worker.startup_failed":
+		return "执行启动失败"
+	case "worker.startup_retry_pending":
+		return "执行等待重试启动"
+	case "worker.startup_started":
+		return "执行正在启动"
+	default:
+		return issueActivityTitles["run.recovery"]
+	}
 }
