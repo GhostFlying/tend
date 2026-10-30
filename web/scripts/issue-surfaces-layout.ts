@@ -148,6 +148,7 @@ let lostID = "";
 let releaseReceipt = false;
 let seq = 1;
 const sourceReceipts = new Map<string, unknown>();
+let uploadGate = Promise.resolve();
 let uploadCount = 0,
   sourceCount = 0;
 let sourceRequest = "",
@@ -768,6 +769,7 @@ const server = createServer(async (req, res) => {
     let bytes = Buffer.alloc(0);
     for await (const chunk of req) bytes = Buffer.concat([bytes, chunk]);
     assert.equal(bytes.toString(), "original file bytes");
+    await uploadGate;
     uploadCount++;
     sourceReceipts.set(id, {
       request_id: id,
@@ -1588,8 +1590,21 @@ try {
       mimeType: "text/plain",
       buffer: Buffer.from("original file bytes"),
     });
+    let releaseUpload!: () => void;
+    uploadGate = new Promise<void>((done) => {
+      releaseUpload = done;
+    });
     await source.getByRole("button", { name: "保存来源", exact: true }).click();
-    await source.getByRole("button", { name: "核实原来源提交", exact: true }).waitFor();
+    const sourceReceipt = source.getByRole("button", { name: "核实原来源提交", exact: true });
+    await sourceReceipt.waitFor();
+    // The label changes when enqueued, before the upload and its receipt settle.
+    assert(await sourceReceipt.isDisabled());
+    assert.equal(uploadCount, 0);
+    releaseUpload();
+    await source
+      .locator("button:enabled")
+      .filter({ hasText: /^核实原来源提交$/ })
+      .waitFor();
     assert.equal(uploadCount, 1);
     assert.equal(sourceCount, 0);
     await page.reload();
