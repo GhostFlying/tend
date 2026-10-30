@@ -223,9 +223,16 @@ func TestEndToEnd_AgentInventoryAcceptedReloadAndOwnerCategory(t *testing.T) {
 	if f.current().SnapshotID != second.SnapshotID || f.current().ServerRevision != 2 {
 		t.Fatal("reload did not publish current snapshot", f.current())
 	}
-	status, err := f.runner.AgentRegistrationStatus(t.Context())
-	if err != nil || status.State != "registered_staged" || status.Server.Projection.Agents[0].Availability.Available {
-		t.Fatalf("registration claimed runtime availability %+v %v", status, err)
+	// The server commit precedes runner receipt reconciliation, and another
+	// hello can briefly reset negotiation. Assert the same settled observation.
+	var status protocol.LocalAgentRegistration
+	eventually(t, "runner observes accepted reload", func() bool {
+		var readErr error
+		status, readErr = f.runner.AgentRegistrationStatus(t.Context())
+		return readErr == nil && status.PendingRequestID == "" && status.Server != nil && status.Server.Current != nil && status.Server.Current.LocalRevision == 2 && status.Server.Current.SnapshotID == second.SnapshotID
+	})
+	if status.State != "registered_staged" || status.Server.Projection == nil || len(status.Server.Projection.Agents) != 1 || status.Server.Projection.Agents[0].Availability.Available {
+		t.Fatalf("registration claimed runtime availability %+v", status)
 	}
 	for _, env := range f.network.sent() {
 		if bytes.Contains(env.Payload, []byte("PRIVATE_")) {
