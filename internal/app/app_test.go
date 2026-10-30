@@ -29,7 +29,7 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	clock := testkit.NewClock()
-	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
+	s, err := openAppFixture(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
