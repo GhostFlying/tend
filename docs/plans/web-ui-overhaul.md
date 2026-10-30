@@ -1,0 +1,87 @@
+# Web UI 整体改版
+
+Refs: D132（修订 D70、D121 UI r5、D127 的展示部分）。业务合同、owner API、runner wire 与存储均不变。
+
+## 背景
+
+线上与最新 main 的走查发现的问题按根因归为五类，编号供各片与验收引用：
+
+- **U1 导航与信息架构**：没有路由，收件箱、设置、任务详情、归档、目录、仓库、用量都是叠加弹窗；任务详情会盖在 Issue 全页之上，返回逻辑叠两层；URL 只有 `?issue=&task=`，其它页面无法分享、刷新或用浏览器后退。侧栏混放导航、待处理摘要、持续跟进、最近任务、仓库卡片、用量和主机，入口重复（任务有三个入口），侧栏宽度随页面变化（288px / 220px）。窗口事件（`tend:open-archive` 等）在组件间传递导航意图。
+- **U2 控件与样式体系**：同一行里混用灰底按钮、带框 chip、纯文字链接、原生 select、复选框和黑色主按钮；主题切换出现两处。约 110 处写死的 px 字号、12 种圆角、随手写的 z-index；`tokens.css` 没有角色化字号、间距、层级与控件高度；没有共享的 Button/Select/Field/Tabs/Badge/Sheet 等基础组件。
+- **U3 内部术语与文案**：聊天里直接显示原始工具名和 JSON 参数，系统卡片显示 release id，任务显示 `spec 1`、`p2`、完整 commit hash，负责人显示 `manager`；Inbox 条目全粗体、状态写成“未读 · 已解决”、右栏常空；中英混排空格不一致（“Issue层级”与“Token 用量”并存），`主 Agent`/`主 agent` 并存，残留“工作项”。
+- **U4 页面级问题**：看板在 1440 宽下裁掉右列，空列撑满高度，徽标被截断；手机看板头部折行、列标签溢出。Issue 详情同时显示“状态”和“看板状态”，交付物主栏与侧栏重复，结束提示排在输入框下方。设置页按钮贴标题、短输入占满整行、保存按钮状态不清。执行记录默认“当前”为空时与侧栏最近完成矛盾。
+- **U5 手机与工程**：手机聊天头部拥挤，弹窗页下仍显示底部标签栏；`Shell.tsx` 集中了全部导航状态与历史栈逻辑；单个 745 KB 入口 chunk；没有覆盖全部页面的截图巡检。
+
+## 目标与非目标
+
+目标：路由驱动的页面与可分享链接；侧栏只做分组导航；统一的 token 与基础组件并由检查脚本约束；面向用户的术语；各页面的布局缺陷修复；手机端一致；路由级拆包；全页面巡检纳入 CI。
+
+非目标：不改 owner API、生成类型、runner 协议、存储与迁移；不改变请求去重、unknown 对账、草稿、发送队列与 revision 校验的行为；不引入 UI 框架、CSS 框架或路由库（D132 说明理由：现有需求可用 History API 与原生 dialog/popover 实现，约束 12）；不做多语言。
+
+## 设计
+
+### 路由
+
+自写的轻量路由（History API，`web/src/app/router.ts`），路径即页面：
+
+| 路径 | 页面 |
+| --- | --- |
+| `/` | 主对话 |
+| `/chat/{conversation}` | 其它会话（Issue 负责人、独立咨询） |
+| `/inbox`、`/inbox/{attention}` | 收件箱列表与详情 |
+| `/issues` | Issue 看板／层级，筛选写入 query（`view`、`project`、`assignee`、`closed`） |
+| `/issues/{issue}` | Issue 详情 |
+| `/tasks`、`/tasks/{task}` | 任务执行记录与任务详情（从 Issue 进入时面包屑带上所属 Issue） |
+| `/repos`、`/usage`、`/hosts` | 资源页 |
+| `/settings`、`/settings/agents`、`/archive`、`/upgrades/{id}` | 设置、Agent 与类别、历史归档、升级详情 |
+
+- 旧链接 `?issue=X` → `/issues/X`，`?task=Y`（可带 issue）→ `/tasks/Y`，以 replace 方式改写，不新增历史项；`work_item` 仍按 D121/D123 丢弃。
+- 服务端已对无扩展名路径返回 `index.html`，service worker 对 navigate 请求返回页面，无需改服务端。
+- 主对话保持常驻挂载（流、滚动位置与草稿不因换页重建），其余页面按需挂载。
+- 返回：上一历史项属于本应用时 `history.back()`，否则跳到父路由。换页后焦点移到页面标题，后退恢复列表滚动位置与原触发元素焦点。
+- 组件间导航一律调用 `navigate`，移除 `tend:open-archive`、`tend:open-catalog`、`tend:open-agent`、`tend:main-agent` 窗口事件。
+- 只有短暂表单与确认（补充来源、定义编辑、交接、创建任务等）仍用 Sheet/Dialog；不再有页面级叠加弹窗。
+
+### 布局与导航
+
+- 桌面（≥1024px）：固定宽度侧栏（`--sidebar-width`，所有页面相同）+ 内容区。761–1023px：侧栏收为图标栏。≤760px：底部标签栏。
+- 侧栏只放导航，按组排列：**对话**（主对话、收件箱及计数）、**工作**（Issues、任务执行）、**资源**（仓库、Token 用量、主机及汇总状态点），底部为设置。去掉“需要你处理”摘要卡（由收件箱计数与主对话里的待处理区承担，满足 UI r5“入口常驻”的意图）、“持续跟进”、最近任务、仓库卡片与主题按钮。
+- 手机标签栏：对话 / Issues / 收件箱（计数）/ 更多；“更多”页列出任务执行、资源与设置。进入详情页和 Sheet 时隐藏标签栏。
+- 主题只在设置页切换。聊天头部只保留标题、会话切换与一个“更多”菜单（补充来源、执行记录），“跳到最新”改为浮动按钮。
+
+### 设计系统
+
+- `tokens.css` 增加角色化字号（`--text-micro` 11/15、`caption` 12/16、`label` 13/18、`body` 14/20、`body-lg` 15/22、`title-sm` 16/22、`title` 18/24、`title-lg` 22/28）、间距（`--space-1`…`--space-8`：4、8、12、16、20、24、32、40）、圆角收敛为 xs 4 / s 6 / m 8 / l 12 / xl 16 / bubble / pill、层级（`--z-sticky`、`--z-dropdown`、`--z-sheet`、`--z-dialog`、`--z-toast`）与控件高度（28 / 32 / 40，手机触控 44）。
+- `web/src/ui/` 提供基础组件：Button（primary / secondary / ghost / danger / link，s / m / l，图标按钮）、Field + Input / Textarea / Select（原生 select 加统一样式）、Checkbox、SegmentedControl、Tabs、Badge / StatusChip、Card / Section、EmptyState、Sheet / Dialog（原生 dialog；桌面右侧抽屉、手机底部面板）、Menu（popover API）。
+- `scripts/style-check.ts` 并入 `pnpm check`：`*.module.css` 中禁止数值 z-index、px 字号、px 圆角（0 与 50% 除外）和裸颜色值，仅 `tokens.css` 可定义原值。
+
+### 文案与术语
+
+- 中英混排：英文词、数字与中文之间加一个半角空格（参考 multica 文案约定），专有名词保留英文：Issue、Agent、Token。
+- 术语映射：manager → “负责人 Agent”（有目录名时用目录名），worker → “执行 Agent”，owner → “你”，`spec N` → “第 N 版要求”，`p0–p3` → “优先级 P0–P3”，run → “执行”。
+- 标识与哈希默认不显示：需要时放在“详细信息”里，可复制；commit 显示前 7 位，完整值在 title。
+- 工具调用：`conversation/toolLabels.ts` 把工具名映射为动作描述（如 `issues_read` → “查看 Issue”），未登记的工具名去下划线显示；连续完成的工具调用合并为一行“使用了 N 个工具”，展开后逐项显示，输入输出仍可展开查看原文。
+- 用户与 Agent 产出的正文是内容，不改写。vitest 检查 `src` 中的 UI 字符串（JSX 文本与字符串字面量）符合混排规则，允许名单集中登记。
+
+## 实施分片
+
+每片一个独立提交（大片可拆为重构 + 行为两个提交），顺序执行，后片基于前片。每片：实现 → 本地门禁 → 独立 review → 修正 → 验收。
+
+- **S0 基线**：把未合并的 Token 用量改动（资源导航与用量页）带入本分支并解决与 main 的冲突，保留原作者与提交说明；查明 `test:issue-surfaces-layout` 在本机稳定失败而 CI 通过的原因，修复脚本或代码使其在本机与 CI 都通过。
+- **S1 设计系统**：token、`web/src/ui/` 基础组件、style-check，并把全部 CSS 迁移到 token（只做等价或就近映射，不改布局）；`shell/controls.module.css` 的用法迁到组件。
+- **S2 路由与外壳**：router、路由表、旧链接改写、`Shell.tsx` 拆为 AppLayout + 路由页 + 导航服务；页面级弹窗改为页面；任务详情成为页面；去掉窗口事件；调整既有布局脚本的导航步骤与选择器，业务断言不删减。
+- **S3 导航**：分组侧栏、图标栏断点、手机四标签与“更多”页、聊天头部精简、主题移到设置。
+- **S4 页面修复**：看板（列宽与空列、已取消列默认折叠为窄条、工具栏用基础组件、手机筛选 Sheet）、收件箱（列表摘要、单一状态、桌面默认选中首项）、Issue 详情（状态合并、交付去重、结束提示与重开入口在输入区位置、缩略图尺寸）、设置页（分组、字段宽度、保存状态）、任务执行记录（默认标签与空态说明、计数）、用量页对齐新组件。
+- **S5 文案与术语**：混排规则与检查、术语映射、工具调用合并与标签、标识/哈希/release 展示。
+- **S6 手机、性能与巡检**：手机细节（聊天头部、输入框、标签栏隐藏）、`React.lazy` 路由拆包（入口 chunk 无体积警告）、`scripts/ui-tour.ts`（fixture 覆盖全部路由，1440×900、1024×768、390×844，深浅主题；断言无页面横向溢出、按钮文字不被截断、侧栏宽度一致、标签栏仅在手机且不压住内容、每页一个 h1），加入 package script 与 CI。
+
+## 验收
+
+- `pnpm --dir web check`、全部 `test:*` 布局脚本、新 `test:ui-tour`、`go test ./internal/webui/...` 通过；最终完整 `make check`。
+- 截图对照：每片提供改动前后同 fixture 截图；最终在 1440 / 1024 / 390 与深浅主题下复核 U1–U5 每一项。
+- 行为不回退：发送队列、草稿、unknown 核实、Attention 回答、Issue 状态修改、来源提交、任务控制与焦点返回在既有脚本中保持覆盖。
+- 临时截图与日志保存在仓库之外或已忽略目录。
+
+## 进度
+
+（各片完成后在此追加。）
