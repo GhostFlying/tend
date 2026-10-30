@@ -1,6 +1,12 @@
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Render the built app against synthetic ledger projections, never a deployed API.
+import {
+  issueSidebar,
+  openIssueAux,
+  openIssueDefinition,
+  closeIssue,
+} from "./issue-detail-helpers.ts";
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -296,6 +302,8 @@ const server = createServer(async (req, res) => {
   }
   if (path === "/api/v1/work-item-choices/choice-example") return json(res, planChoice);
   if (path === "/api/v1/snapshot") return json(res, snapshot());
+  if (path.endsWith("/activity") || path.endsWith("/results"))
+    return json(res, { items: [], more: false, event_seq: 0 });
   if (path === "/api/v1/issues") {
     if (fail)
       return json(res, { error: { code: "internal", message: "Synthetic read failure" } }, 500);
@@ -528,10 +536,14 @@ try {
     await board.getByText("已取消", { exact: true }).waitFor();
     await page.screenshot({ path: join(output, `closed-child-${width}.png`) });
     await title.click();
-    const detail = page.getByRole("dialog", { name: "Issue详情", exact: true });
+    const detail = page;
     await detail.getByRole("heading", { name: items[0]!.plan.title, exact: true }).waitFor();
-    await detail.getByText("独立验收", { exact: true }).waitFor();
-    await detail.getByRole("button", { name: "查看任务详情", exact: true }).click();
+    const side = await issueSidebar(page);
+    await side.getByRole("heading", { name: "执行记录", exact: true }).waitFor();
+    await side
+      .getByRole("button", { name: new RegExp(task.title) })
+      .first()
+      .click();
     const taskDetail = page.getByRole("dialog", { name: "任务详情", exact: true });
     await taskDetail
       .getByText(task.title, { exact: true })
@@ -539,12 +551,12 @@ try {
       .first()
       .waitFor();
     await taskDetail.getByRole("button", { name: /返回Issue/ }).click();
-    await detail.getByRole("button", { name: "概览", exact: true }).click();
+    await openIssueDefinition(page);
     await detail.getByText("后续仍需明确安排。", { exact: true }).waitFor();
-    await detail.getByRole("button", { name: "历史", exact: true }).click();
-    const version = detail.getByLabel("版本", { exact: true });
+    const history = await openIssueAux(page, "历史");
+    const version = history.getByLabel("版本", { exact: true });
     await version.fill("1");
-    await detail.getByText("历史问题转交V1", { exact: true }).waitFor();
+    await history.getByText("历史问题转交V1", { exact: true }).waitFor();
     for (const summary of await detail
       .locator("summary")
       .filter({ hasText: /^留存依据/ })
@@ -559,22 +571,22 @@ try {
       "历史收尾V1",
       "历史用户依据V1",
     ])
-      await detail.getByText(value, { exact: true }).waitFor();
-    assert.equal(await detail.getByText("当前完成条件V2", { exact: true }).count(), 0);
+      await history.getByText(value, { exact: true }).waitFor();
+    assert.equal(await history.getByText("当前完成条件V2", { exact: true }).count(), 0);
     await page.screenshot({ path: join(output, `history-full-${width}.png`) });
-    await detail.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await closeIssue(page);
     assert(await title.evaluate((el) => el === document.activeElement));
     await filter.fill("docs");
     await board.getByLabel("显示已结束").check();
     await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).click();
-    await detail.getByRole("button", { name: "概览", exact: true }).click();
+    await openIssueDefinition(page);
     await detail.getByText("当前收尾依据V2", { exact: true }).waitFor();
     await detail
       .locator("summary")
       .filter({ hasText: /^留存依据/ })
       .click();
     await detail.getByText("留存用户决定", { exact: true }).waitFor();
-    await detail.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await closeIssue(page);
     await filter.fill("tend");
     await board.getByRole("button", { name: "下一页", exact: true }).click();
     await board.getByRole("button", { name: "持续跟进目标 10", exact: true }).waitFor();

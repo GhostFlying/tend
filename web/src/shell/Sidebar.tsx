@@ -20,6 +20,7 @@ import type { View } from "./TabBar.tsx";
 export function Sidebar({
   view,
   connection,
+  onChat,
   onBoard,
   onRecords,
   onSettings,
@@ -30,6 +31,7 @@ export function Sidebar({
 }: {
   view: View;
   connection: Connection;
+  onChat(): void;
   onBoard(): void;
   onRecords(): void;
   onSettings(): void;
@@ -51,6 +53,10 @@ export function Sidebar({
           <ConnectionBadge connection={connection} />
         </span>
       </div>
+      <nav className={styles.primaryNav} aria-label="主导航">
+        <button onClick={onChat}>主对话</button>
+        <button onClick={() => onInbox()}>收件箱</button>
+      </nav>
       <h2 className={styles.mobileTitle}>{view === "decisions" ? "待处理" : "Issue"}</h2>
       <div className={styles.mobileNotice}>
         <Note />

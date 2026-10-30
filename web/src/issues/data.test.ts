@@ -102,3 +102,22 @@ test("logical-chat readers scope only conversation GETs and exact-run views rema
   await Promise.all([messages, native]);
   chats.stop();
 });
+
+test("an effect restart reopens the child reader already held by the page subscription", async () => {
+  let reads = 0;
+  const issues = new Issues({
+    get: async <T>() => {
+      reads++;
+      return { items: [], more: false } as T;
+    },
+  });
+  const subscribed = issues.children("parent", undefined, true);
+  await subscribed.refresh();
+  issues.stop();
+  const before = reads;
+  issues.children("parent", undefined, true);
+  await subscribed.refresh();
+  expect(subscribed.state.get().value).toEqual({ items: [], more: false });
+  expect(reads).toBeGreaterThan(before);
+  issues.stop();
+});

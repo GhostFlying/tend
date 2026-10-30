@@ -136,3 +136,17 @@
     max-height: 48px;
   }
 }
+
+.composer[data-presentation="issue"] {
+  border-radius: 10px;
+  box-shadow: none;
+}
+.options {
+  position: relative;
+  color: var(--label-3);
+  font-size: var(--text-s);
+}
+.options summary {
+  cursor: pointer;
+  list-style: none;
+}

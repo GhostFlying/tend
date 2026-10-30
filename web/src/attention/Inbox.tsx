@@ -139,7 +139,7 @@ export function Inbox({
   );
 }
 
-function AttentionDetails({
+export function AttentionDetails({
   id,
   onIssue,
   onBack,

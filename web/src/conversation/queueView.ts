@@ -58,12 +58,15 @@ export class ConversationQueue {
     });
   }
   start(): void {
+    if (this.active) return;
+    if (this.controller.signal.aborted) this.controller = new AbortController();
     this.active = true;
     void this.refresh();
   }
   stop(): void {
     this.active = false;
     this.controller.abort();
+    this.parents.clear();
     clearTimeout(this.timer);
   }
   changed(event: LedgerEvent): void {
@@ -99,15 +102,16 @@ export class ConversationQueue {
         pending.set(item.message_id, item);
       return;
     }
+    const controller = this.controller;
     const items = new Map([[item.message_id, item]]);
     this.parents.set(id, items);
     void this.api
       .get<TranscriptBlock>(
         `/api/v1/conversation/blocks/${encodeURIComponent(id)}`,
-        this.controller.signal,
+        controller.signal,
       )
       .then((block) => {
-        if (!this.active) return;
+        if (!this.active || controller.signal.aborted) return;
         const state = this.state.get();
         const current = state.blocks.find((b) => b.position === block.position);
         const merged = mergeOutput(
@@ -123,9 +127,12 @@ export class ConversationQueue {
         });
       })
       .catch((error) => {
-        if (this.active) this.publish({ ...this.state.get(), error: String(error) });
+        if (this.active && !controller.signal.aborted)
+          this.publish({ ...this.state.get(), error: String(error) });
       })
-      .finally(() => this.parents.delete(id));
+      .finally(() => {
+        if (this.parents.get(id) === items) this.parents.delete(id);
+      });
   }
   refresh(): Promise<void> {
     if (!this.active) return Promise.resolve();
@@ -137,18 +144,19 @@ export class ConversationQueue {
     this.running = (async () => {
       do {
         this.dirty = false;
+        const controller = this.controller;
         try {
           const pages: Partial<Record<Category, ConversationQueuePage>> = {};
           for (const category of ["owner", "background", "withdrawn"] as const) {
             let page = await this.api.get<ConversationQueuePage>(
               `/api/v1/conversation/queue?category=${category}`,
-              this.controller.signal,
+              controller.signal,
             );
             const wanted = this.state.get().pages[category]?.items?.length ?? 0;
             while (page.next && (page.items ?? []).length < wanted) {
               const next = await this.api.get<ConversationQueuePage>(
                 `/api/v1/conversation/queue?category=${category}&after=${page.next}`,
-                this.controller.signal,
+                controller.signal,
               );
               page = { ...next, items: [...(page.items ?? []), ...(next.items ?? [])] };
             }
@@ -156,9 +164,9 @@ export class ConversationQueue {
           }
           const transcript = await this.api.get<TranscriptPage>(
             "/api/v1/conversation/transcript",
-            this.controller.signal,
+            controller.signal,
           );
-          if (!this.active) return;
+          if (!this.active || controller.signal.aborted) continue;
           const fetched = [...(transcript.blocks ?? [])];
           const previous = this.state.get();
           // Reconnect can skip more than one page. Fill the gap before joining
@@ -174,7 +182,7 @@ export class ConversationQueue {
             const before = bridge.next_before;
             bridge = await this.api.get<TranscriptPage>(
               `/api/v1/conversation/transcript?before=${before}`,
-              this.controller.signal,
+              controller.signal,
             );
             if (bridge.next_before && bridge.next_before >= before)
               throw new Error("对话分页尚未前进，请重新读取");
@@ -189,7 +197,7 @@ export class ConversationQueue {
               fetched.push(
                 await this.api.get<TranscriptBlock>(
                   `/api/v1/conversation/blocks/${encodeURIComponent(old.trigger.message_id)}`,
-                  this.controller.signal,
+                  controller.signal,
                 ),
               );
             }
@@ -200,13 +208,13 @@ export class ConversationQueue {
             while (!block.notice_only && block.more && (block.items?.length ?? 0) < wanted) {
               const next = await this.api.get<TranscriptBlock>(
                 `/api/v1/conversation/blocks/${encodeURIComponent(block.trigger.message_id)}?after=${block.next_seq ?? 0}`,
-                this.controller.signal,
+                controller.signal,
               );
               block = { ...next, items: mergeOutput(block.items ?? [], next.items ?? []) };
             }
             fetched[i] = block;
           }
-          if (!this.active) return;
+          if (!this.active || controller.signal.aborted) continue;
           const watermark = Math.min(
             transcript.event_seq,
             ...Object.values(pages).map((p) => p.event_seq),
@@ -243,7 +251,7 @@ export class ConversationQueue {
             error: undefined,
           });
         } catch (error) {
-          if (!this.active) return;
+          if (!this.active || controller.signal.aborted) continue;
           if (error instanceof ApiError && error.status === 404) {
             this.publish({ ...this.state.get(), supported: false, error: undefined });
           } else {

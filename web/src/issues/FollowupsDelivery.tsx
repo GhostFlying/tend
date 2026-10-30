@@ -30,6 +30,9 @@ const labels: Record<string, string> = {
   merged: "已合并",
   closed: "已关闭",
 };
+export function externalDeliveryStatus(item: IssueDeliveryView): string {
+  return `外部观察 · ${labels[item.observation.state] || item.observation.state || "尚未观察"}${item.observation.refresh_pending ? " · 观察请求待回报" : ""}`;
+}
 export function IssueFollowupsDelivery({ issue }: { issue: IssueView }) {
   const { live } = useServices();
   const deliveries = useStore(live.issues.deliveries.state);

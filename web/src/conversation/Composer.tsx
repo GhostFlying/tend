@@ -21,7 +21,15 @@ import { Close } from "../shell/icons.tsx";
 /** A touch screen, where Enter starts a new line and the button sends. */
 const touch = window.matchMedia("(pointer: coarse)").matches;
 
-export function Composer({ connection }: { connection: Connection }) {
+export function Composer({
+  connection,
+  disabled = false,
+  presentation = "chat",
+}: {
+  connection: Connection;
+  disabled?: boolean;
+  presentation?: "chat" | "issue";
+}) {
   const { client, live, queue, conversation: recipient, draft: composerDraft } = useServices();
   const conversation = useStore(live.conversation);
   const queueState = useStore(live.queueView.state);
@@ -99,6 +107,7 @@ export function Composer({ connection }: { connection: Connection }) {
   const send = async () => {
     if (
       queue === null ||
+      disabled ||
       blocked ||
       saving.current ||
       (!body && !files.length && !attachments.length)
@@ -189,6 +198,7 @@ export function Composer({ connection }: { connection: Connection }) {
   return (
     <div
       className={styles.composer}
+      data-presentation={presentation}
       data-dragging={dragging || undefined}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
@@ -257,7 +267,11 @@ export function Composer({ connection }: { connection: Connection }) {
           event.preventDefault();
           addFiles(files);
         }}
-        placeholder={`发给 ${recipient?.title ?? "主 Agent"}…${touch ? "" : "（Enter 发送，Shift+Enter 换行）"}`}
+        placeholder={
+          presentation === "issue"
+            ? "补充要求，或继续讨论这个 Issue…"
+            : `发给 ${recipient?.title ?? "主 Agent"}…${touch ? "" : "（Enter 发送，Shift+Enter 换行）"}`
+        }
         aria-label="消息"
         disabled={blocked}
         readOnly={persisting}
@@ -298,8 +312,18 @@ export function Composer({ connection }: { connection: Connection }) {
         <span className={styles.hint} role="status">
           {dragging ? "松开以添加附件" : hint}
         </span>
-        <Settings connection={connection} />
-        <ContextUsage connection={connection} />
+        {presentation === "chat" ? (
+          <>
+            <Settings connection={connection} />
+            <ContextUsage connection={connection} />
+          </>
+        ) : (
+          <details className={styles.options}>
+            <summary>会话设置</summary>
+            <Settings connection={connection} />
+            <ContextUsage connection={connection} />
+          </details>
+        )}
         {busy && !showStop && (
           <button
             type="button"
@@ -327,7 +351,9 @@ export function Composer({ connection }: { connection: Connection }) {
             type="button"
             className={styles.send}
             onClick={() => void send()}
-            disabled={blocked || persisting || (!body && !files.length && !attachments.length)}
+            disabled={
+              disabled || blocked || persisting || (!body && !files.length && !attachments.length)
+            }
             title={busy || queued ? "加入队列" : "发送"}
             aria-label={busy || queued ? "加入队列" : "发送"}
           >

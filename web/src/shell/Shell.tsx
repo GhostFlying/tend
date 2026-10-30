@@ -9,7 +9,8 @@ import { useMainAttention } from "../attention/useMainAttention.ts";
 import { AgentCatalogView } from "../agents/Catalog.tsx";
 import { Inbox } from "../attention/Inbox.tsx";
 import { IssueBoard } from "../issues/Board.tsx";
-import { IssueDetails } from "../issues/Details.tsx";
+import { IssueDetails, IssueReadingStates } from "../issues/Details.tsx";
+import { ConversationSessions, ConversationSessionsContext } from "../conversation/session.tsx";
 import type { LiveData } from "../live/data.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
 import { useStore } from "../state/store.ts";
@@ -36,6 +37,39 @@ export function Shell({
   queue: SendQueue | null;
 }) {
   const [issueSelected, setIssueSelected] = useState<string | null>(null);
+  const detailOpener = useRef<HTMLElement | null>(null);
+  const wasIssue = useRef(false);
+  useEffect(() => {
+    if (wasIssue.current && !issueSelected)
+      requestAnimationFrame(
+        () =>
+          detailOpener.current?.isConnected && detailOpener.current.focus({ preventScroll: true }),
+      );
+    wasIssue.current = !!issueSelected;
+  }, [issueSelected]);
+  const [readingStates] = useState(() => new IssueReadingStates());
+  const sessions = useMemo(() => new ConversationSessions(client), [client]);
+  const sessionCleanup = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    clearTimeout(sessionCleanup.current);
+    const stop = sessions.connect(live);
+    return () => {
+      stop();
+      sessionCleanup.current = setTimeout(() => {
+        void sessions.close();
+      }, 0);
+    };
+  }, [sessions, live]);
+  const leaveIssue = () => {
+    setIssueSelected(null);
+    setTaskSelected(null);
+    live.close();
+    const url = new URL(window.location.href);
+    url.searchParams.delete("issue");
+    url.searchParams.delete("task");
+    window.history.replaceState({ ...window.history.state, tendDetailDepth: 0 }, "", url);
+  };
+
   const [inboxOpen, setInboxOpen] = useState(false);
   const [inboxSelected, setInboxSelected] = useState<string | undefined>(undefined);
   const nextActions = useStore(live.attention.next.state);
@@ -115,18 +149,21 @@ export function Shell({
   const [recordsVisited, setRecordsVisited] = useState(false);
   const [boardVisited, setBoardVisited] = useState(false);
   const showRecords = () => {
+    leaveIssue();
     setRecordsOpen(true);
     setRecordsVisited(true);
     setBoardOpen(true);
     setView("tasks");
   };
   const showBoard = () => {
+    leaveIssue();
     setRecordsOpen(false);
     setBoardOpen(true);
     setBoardVisited(true);
     setView("tasks");
   };
   const showChat = () => {
+    leaveIssue();
     setBoardOpen(false);
     setView("chat");
   };
@@ -143,6 +180,8 @@ export function Shell({
   );
   const navigateDetail = useCallback(
     (item: string | null, task: string | null) => {
+      if (item && !issueSelected && document.activeElement instanceof HTMLElement)
+        detailOpener.current = document.activeElement;
       const url = new URL(window.location.href);
       if (url.searchParams.get("issue") === item && url.searchParams.get("task") === task) return;
       url.searchParams.delete("work_item");
@@ -150,10 +189,23 @@ export function Shell({
       else url.searchParams.delete("issue");
       if (task) url.searchParams.set("task", task);
       else url.searchParams.delete("task");
+      const depth =
+        window.history.state?.tendDetailSession === detailSession
+          ? (window.history.state.tendDetailDepth ?? 0)
+          : 0;
+      const previous = new URL(window.location.href);
+      const issueDepth = !task
+        ? depth + 1
+        : previous.searchParams.get("issue") === item
+          ? previous.searchParams.get("task")
+            ? (window.history.state?.tendIssueDepth ?? null)
+            : depth
+          : null;
       window.history.pushState(
         {
           ...window.history.state,
           tendDetailSession: detailSession,
+          tendIssueDepth: issueDepth,
           tendDetailDepth:
             (window.history.state?.tendDetailSession === detailSession
               ? window.history.state.tendDetailDepth
@@ -164,8 +216,10 @@ export function Shell({
       );
       applyDetail(item, task);
     },
-    [applyDetail, detailSession],
+    [applyDetail, detailSession, issueSelected],
   );
+
+  const openIssue = useCallback((id: string) => navigateDetail(id, null), [navigateDetail]);
 
   useEffect(() => {
     const open = () => {
@@ -181,7 +235,11 @@ export function Shell({
       setView("chat");
     };
     window.addEventListener("tend:open-agent", open);
-    return () => window.removeEventListener("tend:open-agent", open);
+    window.addEventListener("tend:main-agent", open);
+    return () => {
+      window.removeEventListener("tend:open-agent", open);
+      window.removeEventListener("tend:main-agent", open);
+    };
   }, [live]);
 
   const services = useMemo<Services>(
@@ -247,7 +305,12 @@ export function Shell({
     };
     // A reload starts a new UI session; do not traverse another document's stack.
     window.history.replaceState(
-      { ...window.history.state, tendDetailSession: detailSession, tendDetailDepth: 0 },
+      {
+        ...window.history.state,
+        tendDetailSession: detailSession,
+        tendDetailDepth: 0,
+        tendIssueDepth: new URLSearchParams(window.location.search).has("task") ? null : 0,
+      },
       "",
     );
     read();
@@ -273,179 +336,212 @@ export function Shell({
     applyDetail(null, null);
   };
 
+  const backFromTask = () => {
+    if (!issueSelected) {
+      closeDetails();
+      return;
+    }
+    const state = window.history.state;
+    const depth = state?.tendDetailSession === detailSession ? (state.tendDetailDepth ?? 0) : 0;
+    const issueDepth = state?.tendIssueDepth;
+    if (typeof issueDepth === "number" && issueDepth >= 0 && issueDepth < depth) {
+      window.history.go(issueDepth - depth);
+    } else {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("task");
+      window.history.replaceState({ ...state, tendIssueDepth: depth }, "", url);
+      applyDetail(issueSelected, null);
+    }
+  };
+
   return (
     <ServicesContext value={services}>
-      <div
-        className={styles.app}
-        data-view={view}
-        data-board={boardOpen ? "open" : "closed"}
-        data-details={taskSelected ? "open" : "closed"}
-      >
-        <aside className={styles.sidebar}>
-          <Sidebar
-            view={view}
-            connection={connection}
-            onBoard={showBoard}
-            onRecords={showRecords}
-            onSettings={showSettings}
-            onRepos={showRepos}
-            mainAttention={mainAttention}
-            onInbox={openInbox}
-            onIssue={(id) => navigateDetail(id, null)}
-          />
-        </aside>
-        <main className={styles.chat}>
-          <div className={styles.content} hidden={boardOpen}>
-            <Chat
-              connection={connection}
-              visible={!boardOpen}
-              mainAttention={mainAttention}
-              onAttention={openInbox}
-              onIssue={(id) => navigateDetail(id, null)}
-            />
-          </div>
-          {boardVisited && (
-            <div className={styles.content} hidden={!boardOpen || recordsOpen}>
-              <IssueBoard
-                onInbox={openInbox}
-                active={boardOpen && !recordsOpen}
-                onSelect={(id) => navigateDetail(id, null)}
-                onChat={showChat}
-                onRecords={showRecords}
-              />
-            </div>
-          )}
-          {recordsVisited && (
-            <div className={styles.content} hidden={!boardOpen || !recordsOpen}>
-              <TaskBoard
-                active={boardOpen && recordsOpen}
-                connection={connection}
-                onChat={showBoard}
-                backLabel="返回Issue"
-                onRepos={showRepos}
-              />
-            </div>
-          )}
-        </main>
-        <TabBar
-          pendingMore={!!mainAttention.value?.more}
-          view={view}
-          onChange={(next) => {
-            if (next === "tasks") showBoard();
-            else {
-              if (next === "decisions") openInbox();
-              setBoardOpen(false);
-              setView(next);
-            }
-          }}
-          pending={
-            (mainAttention.value?.items ?? []).filter(
-              (item) => item.status === "open" && item.kind !== "information",
-            ).length +
-            (nextActions.value?.items ?? []).filter(
-              (item) =>
-                item.kind === "user_action" &&
-                ["open", "blocked"].includes(item.status) &&
-                (!item.attention_id ||
-                  !(mainAttention.value?.items ?? []).some(
-                    (a) => a.attention_id === item.attention_id,
-                  )),
-            ).length
-          }
-        />
-      </div>
-      {(issueSelected || taskSelected) && (
-        <DetailOverlay
-          task={!!taskSelected}
-          backLabel="返回Issue"
-          label={issueSelected && !taskSelected ? "Issue详情" : undefined}
-          onClose={closeDetails}
-          onBack={
-            taskSelected && issueSelected ? () => navigateDetail(issueSelected, null) : undefined
-          }
+      <ConversationSessionsContext value={sessions}>
+        <div
+          className={styles.app}
+          data-view={view}
+          data-board={boardOpen ? "open" : "closed"}
+          data-details={taskSelected ? "open" : "closed"}
+          data-issue={issueSelected ? "open" : "closed"}
         >
-          {issueSelected && (
-            <DetailPane active={!taskSelected}>
+          <aside className={styles.sidebar}>
+            <Sidebar
+              view={view}
+              connection={connection}
+              onChat={() => {
+                window.dispatchEvent(new Event("tend:main-agent"));
+                showChat();
+              }}
+              onBoard={showBoard}
+              onRecords={showRecords}
+              onSettings={showSettings}
+              onRepos={showRepos}
+              mainAttention={mainAttention}
+              onInbox={openInbox}
+              onIssue={openIssue}
+            />
+          </aside>
+          <main className={styles.chat}>
+            <div className={styles.content} hidden={boardOpen || !!issueSelected}>
+              <Chat
+                connection={connection}
+                visible={!boardOpen && !issueSelected}
+                mainAttention={mainAttention}
+                onAttention={openInbox}
+                onIssue={openIssue}
+              />
+            </div>
+            {boardVisited && (
+              <div className={styles.content} hidden={!boardOpen || recordsOpen || !!issueSelected}>
+                <IssueBoard
+                  onInbox={openInbox}
+                  active={boardOpen && !recordsOpen && !issueSelected}
+                  onSelect={openIssue}
+                  onChat={showChat}
+                  onRecords={showRecords}
+                />
+              </div>
+            )}
+            {recordsVisited && (
+              <div
+                className={styles.content}
+                hidden={!boardOpen || !recordsOpen || !!issueSelected}
+              >
+                <TaskBoard
+                  active={boardOpen && recordsOpen && !issueSelected}
+                  connection={connection}
+                  onChat={showBoard}
+                  backLabel="返回Issue"
+                  onRepos={showRepos}
+                />
+              </div>
+            )}
+            {issueSelected && (
               <IssueDetails
                 key={issueSelected}
                 id={issueSelected}
-                onSelect={(id) => navigateDetail(id, null)}
+                connection={connection}
+                reading={readingStates.get(issueSelected)}
+                onBack={() => {
+                  const depth =
+                    window.history.state?.tendDetailSession === detailSession
+                      ? (window.history.state?.tendDetailDepth ?? 0)
+                      : 0;
+                  if (depth > 0) window.history.back();
+                  else showBoard();
+                }}
+                onSelect={openIssue}
                 onTask={(id) => navigateDetail(issueSelected, id)}
-                onInbox={openInbox}
               />
-            </DetailPane>
-          )}
-          {taskSelected && (
+            )}
+          </main>
+          <TabBar
+            pendingMore={!!mainAttention.value?.more}
+            view={view}
+            onChange={(next) => {
+              if (next === "tasks") showBoard();
+              else {
+                if (next === "decisions") openInbox();
+                setBoardOpen(false);
+                setView(next);
+              }
+            }}
+            pending={
+              (mainAttention.value?.items ?? []).filter(
+                (item) => item.status === "open" && item.kind !== "information",
+              ).length +
+              (nextActions.value?.items ?? []).filter(
+                (item) =>
+                  item.kind === "user_action" &&
+                  ["open", "blocked"].includes(item.status) &&
+                  (!item.attention_id ||
+                    !(mainAttention.value?.items ?? []).some(
+                      (a) => a.attention_id === item.attention_id,
+                    )),
+              ).length
+            }
+          />
+        </div>
+        {taskSelected && (
+          <DetailOverlay
+            task
+            backLabel="返回Issue"
+            label="任务详情"
+            onClose={() => (issueSelected ? backFromTask() : closeDetails())}
+            onBack={issueSelected ? backFromTask : undefined}
+          >
             <DetailPane key={taskSelected} active>
               <Details />
             </DetailPane>
-          )}
-        </DetailOverlay>
-      )}
-      {inboxOpen && (
-        <DetailOverlay
-          task={false}
-          label="待处理"
-          onClose={() => {
-            setInboxOpen(false);
-          }}
-        >
-          <Inbox
-            initial={inboxSelected}
-            onIssue={(id) => {
-              setInboxOpen(false);
-              navigateDetail(id, null);
-            }}
+          </DetailOverlay>
+        )}
+        {inboxOpen && (
+          <DetailOverlay
+            task={false}
+            label="待处理"
             onClose={() => {
               setInboxOpen(false);
             }}
-          />
-        </DetailOverlay>
-      )}
-      {upgradeId && (
-        <UpgradeDetails
-          id={upgradeId}
-          connection={connection}
-          onClose={() => {
-            setUpgradeId(null);
-            queueMicrotask(() => upgradeFocus.current?.isConnected && upgradeFocus.current.focus());
-          }}
-        />
-      )}
-      {reposOpen && <Repositories connection={connection} onClose={closeRepos} />}
-      {settingsOpen && (
-        <Handoff
-          connection={connection}
-          onClose={closeSettings}
-          onCatalog={() => {
-            setSettingsOpen(false);
-            setCatalogFromSettings(true);
-            setCatalogOpen(true);
-          }}
-        />
-      )}
-      {archiveOpen && (
-        <DetailOverlay task={false} label="历史归档" onClose={() => setArchiveOpen(false)}>
-          <ArchiveBrowser
-            onIssue={(id) => {
-              setArchiveOpen(false);
-              navigateDetail(id, null);
+          >
+            <Inbox
+              initial={inboxSelected}
+              onIssue={(id) => {
+                setInboxOpen(false);
+                navigateDetail(id, null);
+              }}
+              onClose={() => {
+                setInboxOpen(false);
+              }}
+            />
+          </DetailOverlay>
+        )}
+        {upgradeId && (
+          <UpgradeDetails
+            id={upgradeId}
+            connection={connection}
+            onClose={() => {
+              setUpgradeId(null);
+              queueMicrotask(
+                () => upgradeFocus.current?.isConnected && upgradeFocus.current.focus(),
+              );
             }}
           />
-        </DetailOverlay>
-      )}
-      {catalogOpen && (
-        <DetailOverlay
-          task={false}
-          label="Agent与类别"
-          onClose={() => {
-            setCatalogOpen(false);
-            if (catalogFromSettings) showSettings();
-          }}
-        >
-          <AgentCatalogView />
-        </DetailOverlay>
-      )}
+        )}
+        {reposOpen && <Repositories connection={connection} onClose={closeRepos} />}
+        {settingsOpen && (
+          <Handoff
+            connection={connection}
+            onClose={closeSettings}
+            onCatalog={() => {
+              setSettingsOpen(false);
+              setCatalogFromSettings(true);
+              setCatalogOpen(true);
+            }}
+          />
+        )}
+        {archiveOpen && (
+          <DetailOverlay task={false} label="历史归档" onClose={() => setArchiveOpen(false)}>
+            <ArchiveBrowser
+              onIssue={(id) => {
+                setArchiveOpen(false);
+                navigateDetail(id, null);
+              }}
+            />
+          </DetailOverlay>
+        )}
+        {catalogOpen && (
+          <DetailOverlay
+            task={false}
+            label="Agent与类别"
+            onClose={() => {
+              setCatalogOpen(false);
+              if (catalogFromSettings) showSettings();
+            }}
+          >
+            <AgentCatalogView />
+          </DetailOverlay>
+        )}
+      </ConversationSessionsContext>
     </ServicesContext>
   );
 }

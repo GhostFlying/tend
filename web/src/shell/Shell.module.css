@@ -59,3 +59,22 @@
 .content[hidden] {
   display: none;
 }
+
+.app[data-issue="open"] {
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+@media (max-width: 760px) {
+  .app[data-issue="open"] {
+    grid-template-columns: 100%;
+    padding-bottom: 0;
+  }
+  .app[data-issue="open"] .sidebar {
+    display: none;
+  }
+  .app[data-issue="open"] > nav {
+    display: none;
+  }
+  .app[data-issue="open"] .chat {
+    visibility: visible;
+  }
+}

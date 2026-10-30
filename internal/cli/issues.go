@@ -18,7 +18,7 @@ var issueOperations = map[string]string{
 	"refresh-delivery": "issues.refresh_delivery", "followups-create": "issues.followups_create", "followups-update": "issues.followups_update", "followups-pause": "issues.followups_pause", "followups-resume": "issues.followups_resume", "followups-cancel": "issues.followups_cancel", "followups-trigger": "issues.followups_trigger",
 
 	"migrate-manager": "issues.manager_migration", "request-manager": "issues.request_manager", "assign": "issues.assign", "finish-assignment": "issues.finish_assignment",
-	"create": "issues.create", "update": "issues.update", "pause": "issues.pause", "resume": "issues.resume", "cancel": "issues.cancel", "finish-cancel": "issues.finish_cancel", "close": "issues.close", "reopen": "issues.reopen", "reparent": "issues.reparent", "dependencies": "issues.dependencies", "review-sources": "issues.review_sources", "review-completions": "issues.review_completions", "create-task": "issues.create_task", "update-task": "issues.update_task",
+	"update-progress": "issues.update_progress", "create": "issues.create", "update": "issues.update", "pause": "issues.pause", "resume": "issues.resume", "cancel": "issues.cancel", "finish-cancel": "issues.finish_cancel", "close": "issues.close", "reopen": "issues.reopen", "reparent": "issues.reparent", "dependencies": "issues.dependencies", "review-sources": "issues.review_sources", "review-completions": "issues.review_completions", "create-task": "issues.create_task", "update-task": "issues.update_task",
 }
 
 func runIssue(ctx context.Context, e *Env, args []string) error {

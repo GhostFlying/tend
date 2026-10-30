@@ -36,18 +36,24 @@ export function Divider({ at }: { at: number }) {
   return <div className={styles.divider}>{dayLabel(at)}</div>;
 }
 
-export function OwnerMessage({ item }: { item: ConversationItem }) {
+export function OwnerMessage({
+  item,
+  presentation = "chat",
+}: {
+  item: ConversationItem;
+  presentation?: "chat" | "issue";
+}) {
   const state = item.state ?? "queued";
   const notice = steerNotice(item.steer);
   return (
-    <div className={styles.user} data-scroll-id={item.message_id}>
+    <div className={styles.user} data-layout={presentation} data-scroll-id={item.message_id}>
       {item.attachments?.length ? (
         <MessageAttachments attachments={item.attachments} />
       ) : (
         !!item.images?.length && <MessageImages images={item.images} />
       )}
       {item.body && <div className={styles.bubble}>{item.body}</div>}
-      <MessageTags item={item} />
+      {presentation === "chat" && <MessageTags item={item} />}
       {item.recovery && (
         <div className={styles.state} role="status">
           {recoveryNotice(item.recovery)}

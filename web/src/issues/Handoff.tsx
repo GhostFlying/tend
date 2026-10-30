@@ -16,7 +16,15 @@ import styles from "./Issues.module.css";
 import form from "../attention/Inbox.module.css";
 import layout from "./Handoff.module.css";
 
-export function IssueHandoff({ issue, onBack }: { issue: IssueView; onBack(): void }) {
+export function IssueHandoff({
+  issue,
+  onBack,
+  onChanged,
+}: {
+  issue: IssueView;
+  onBack(): void;
+  onChanged?(): void;
+}) {
   const { live, client } = useServices();
   const connection = useStore(client.connection);
   const categories = useStore(live.agents.categories.state);
@@ -78,7 +86,10 @@ export function IssueHandoff({ issue, onBack }: { issue: IssueView; onBack(): vo
             ),
       );
       setOutcome(result);
-      if (result.kind === "done" || result.kind === "stale") void live.issues.detail.refresh();
+      if (result.kind === "done" || result.kind === "stale") {
+        void live.issues.detail.refresh();
+        onChanged?.();
+      }
     } catch {
       setOutcome({ kind: "unknown", message: "交接结果尚未确认，请核实原请求。" });
     }

@@ -15,6 +15,7 @@ import type {
   ReviewIssueSourcesPayload,
   SetIssueDependenciesPayload,
   UpdateIssuePayload,
+  UpdateIssueProgressPayload,
   UpdateIssueTaskPayload,
 } from "../api/generated/api.ts";
 import type { OwnerCommand } from "../app/ownerCommand.ts";
@@ -23,6 +24,7 @@ interface IssuePayloads {
   manager_migration: ManagerMigrationPayload;
   request_manager: RequestIssueManagerPayload;
   update: UpdateIssuePayload;
+  update_progress: UpdateIssueProgressPayload;
   pause: IssueControlPayload;
   resume: IssueControlPayload;
   cancel: IssueControlPayload;

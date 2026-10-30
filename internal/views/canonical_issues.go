@@ -17,7 +17,10 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 	if revision > 0 {
 		out.Issue, err = store.GetCanonicalIssueRevision(ctx, q, id, revision)
 		out.Historical = true
-		return out, err
+		if err != nil {
+			return out, err
+		}
+		return out, issueDetailMetadata(ctx, q, &out)
 	}
 	out.Issue, err = store.GetCanonicalIssue(ctx, q, id)
 	if err != nil {
@@ -103,7 +106,10 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 	}
 	out.Attentions = &page
 	out.Deadlines, err = Deadlines(ctx, q, id)
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	return out, issueDetailMetadata(ctx, q, &out)
 }
 
 type CanonicalIssueFilter struct {

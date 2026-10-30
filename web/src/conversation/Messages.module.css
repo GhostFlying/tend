@@ -89,3 +89,18 @@
   font-size: var(--text-s);
   color: var(--label-3);
 }
+
+.user[data-layout="issue"] {
+  align-self: stretch;
+  align-items: flex-start;
+  max-width: none;
+}
+.user[data-layout="issue"] .bubble {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: var(--text-base);
+}
+.user[data-layout="issue"] .state {
+  justify-content: flex-start;
+}
