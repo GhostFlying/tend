@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,6 +21,40 @@ import (
 	"github.com/GhostFlying/tend/internal/runner/gitws"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
+
+func TestManagerReadinessRetriesWithoutDisablingHealthyWorker(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix fake CLI")
+	}
+	f := newSource(t)
+	dir := t.TempDir()
+	command, calls := filepath.Join(dir, "native-cli"), filepath.Join(dir, "calls")
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
+	if err := os.WriteFile(command, []byte("#!/bin/sh\nprintf 'probe\\n' >> "+quote(calls)+"\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	f.config.FormatVersion = 2
+	f.config.Runtimes[0].CLI = "codex"
+	f.config.Runtimes[0].ExecutableRef = command
+	f.config.Runtimes[0].DeclaredPurposes = []agentconfig.Purpose{agentconfig.WorkerRun, agentconfig.IssueManager}
+	f.config.Agents[0].Purposes = []agentconfig.Purpose{agentconfig.WorkerRun, agentconfig.IssueManager}
+	f.reload(t)
+	var genericProbes atomic.Int64
+	p := newPool(t, f, func(context.Context, agentexec.BuildInput) error { genericProbes.Add(1); return nil })
+	for range 2 {
+		if err := p.Refresh(t.Context()); err == nil {
+			t.Fatal("manager readiness failure did not schedule the reconciler retry")
+		}
+		observations, err := p.Observe(t.Context())
+		if err != nil || len(observations) != 2 || !observations[0].Available || observations[1].Available {
+			t.Fatal("manager failure disabled a healthy worker", observations, err)
+		}
+	}
+	data, err := os.ReadFile(calls)
+	if err != nil || strings.Count(string(data), "probe\n") != 2 || genericProbes.Load() != 1 {
+		t.Fatal("manager readiness was cached or healthy worker was rebuilt", string(data), genericProbes.Load(), err)
+	}
+}
 
 type sourceFixture struct {
 	control  *agentcontrol.Control

@@ -82,7 +82,7 @@ func TestJournalElevenUpgradePreservesLegacyAssignmentWithoutPin(t *testing.T) {
 	if err = j.db.QueryRowContext(t.Context(), `SELECT assignment_json FROM runs WHERE run_id='run_legacy'`).Scan(&raw); err != nil || raw != original {
 		t.Fatal("legacy payload rewritten", raw, err)
 	}
-	if err = j.db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&version); err != nil || version != 12 {
+	if err = j.db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&version); err != nil || version != CurrentVersion {
 		t.Fatal(version, err)
 	}
 	// The old shape remains ordinary JSON; storage version, not an invented

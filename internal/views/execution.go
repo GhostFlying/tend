@@ -50,6 +50,13 @@ func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows
 	var err error
 	for _, row := range rows {
 		summary := Summary(row)
+		if row.Kind == protocol.TaskKindIssueManager {
+			m, e := store.GetIssueManagerTask(ctx, q, row.TaskID)
+			if e != nil {
+				return nil, e
+			}
+			summary.Manager = &protocol.IssueManagerAssignment{IssueID: m.IssueID, CategoryID: m.CategoryID, ConversationID: m.ConversationID, AssignmentEpoch: m.AssignmentEpoch}
+		}
 		if row.Lifecycle.Terminal() {
 			if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at),0) FROM events WHERE object_type='task' AND object_id=? AND kind=?`, row.TaskID, "task."+string(row.Lifecycle)).Scan(&summary.EndedAt); err != nil {
 				return nil, fmt.Errorf("views: read task terminal time: %w", err)
@@ -85,6 +92,11 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 	if err != nil {
 		return facts, err
 	}
+	managers, err := IssueManagerCandidates(ctx, q)
+	if err != nil {
+		return facts, err
+	}
+	candidates = append(candidates, managers...)
 	if err := ApplyIssueDependencies(ctx, q, candidates); err != nil {
 		return facts, err
 	}
@@ -116,7 +128,12 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 		if hasRuntime {
 			available = available && runtime.Online && runtime.Runtime.Mode == protocol.RunnerNormal && runtime.Runtime.AppliedControlRevision == control.Revision
 		}
+		executors, err := HostExecutors(ctx, q, h.HostID, 0)
+		if err != nil {
+			return facts, err
+		}
 		facts.hosts = append(facts.hosts, executionHost{Host: scheduler.Host{
+			Executors: executors, IssueManagers: runtime.Runtime.Protocol >= 2 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueManager),
 			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots, Busy: busy,
 			Worker: h.Worker.Capabilities(), WorkspaceProtocol: h.WorkspaceProtocol,
 			TaskInputs:          slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityTaskInputs),
@@ -255,6 +272,8 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 	v.Role = protocol.RoleImplement
 	if c.Kind == protocol.ActionAccept {
 		v.Role = protocol.RoleAccept
+	} else if c.Kind == protocol.ActionCoordinate {
+		v.Role = protocol.RoleIssueManager
 	}
 	v.QueueReason = f.waitReason(c)
 	if v.QueueReason.Code == protocol.QueueWorkspaceBusy {

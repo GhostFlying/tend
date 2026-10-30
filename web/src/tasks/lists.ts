@@ -8,7 +8,7 @@ export const taskTabs = [
   {
     id: "current",
     title: "当前",
-    lifecycle: ["draft", "queued", "running", "awaiting_acceptance", "changes_required"],
+    lifecycle: ["draft", "queued", "running", "waiting", "awaiting_acceptance", "changes_required"],
   },
   { id: "ended", title: "已结束", lifecycle: ["completed", "cancelled"] },
   {
@@ -18,6 +18,7 @@ export const taskTabs = [
       "draft",
       "queued",
       "running",
+      "waiting",
       "awaiting_acceptance",
       "changes_required",
       "completed",

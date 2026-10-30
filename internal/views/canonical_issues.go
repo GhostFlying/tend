@@ -2,6 +2,7 @@ package views
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -21,6 +22,49 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 	out.Issue, err = store.GetCanonicalIssue(ctx, q, id)
 	if err != nil {
 		return out, err
+	}
+	manager, e := store.CurrentIssueManagerTask(ctx, q, id)
+	if errors.Is(e, store.ErrNotFound) {
+		manager, e = store.LatestIssueManagerTask(ctx, q, id)
+	}
+	if e == nil {
+		task, e := store.GetTask(ctx, q, manager.TaskID)
+		if e != nil {
+			return out, e
+		}
+		out.Manager = &protocol.IssueManagerView{ControlMode: task.ControlMode, ConversationID: manager.ConversationID, TaskID: manager.TaskID, CategoryID: manager.CategoryID, State: task.Lifecycle, HostID: manager.HostID, Execution: manager.Pin}
+		if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state='unknown') OR EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? AND (t.status='unknown' OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id) OR (t.status IN ('starting','started') AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.run_id=json_extract(e.private_snapshot,'$.runner_run_id') AND r.observed_state IN ('starting','running','waiting','interrupted','unknown')))))`, manager.TaskID, id, manager.AssignmentEpoch).Scan(&out.Manager.ReconciliationPending); err != nil {
+			return out, err
+		}
+		recoveries, err := store.FollowupIDs(ctx, q, `SELECT r.root_request_id FROM agent_recoveries r JOIN runner_coordination_executions e ON e.execution_id=r.root_request_id WHERE e.issue_id=? AND e.assignment_epoch=? AND r.status IN ('waiting','starting','running','unknown','blocked','exhausted') ORDER BY r.updated_at DESC LIMIT 1`, id, manager.AssignmentEpoch)
+		if err != nil {
+			return out, err
+		}
+		if len(recoveries) > 0 {
+			recovery, err := store.RecoveryForRequest(ctx, q, recoveries[0])
+			if err != nil {
+				return out, err
+			}
+			out.Manager.Recovery = &recovery.AgentRecoveryView
+		}
+		if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT t.thread_id FROM runner_coordination_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? ORDER BY e.created_at DESC,e.rowid DESC LIMIT 1),''),COALESCE((SELECT run_id FROM runs WHERE task_id=? AND observed_state IN ('starting','running','waiting','interrupted','unknown') ORDER BY created_at DESC LIMIT 1),'')`, id, manager.AssignmentEpoch, manager.TaskID).Scan(&out.Manager.NativeThreadID, &out.Manager.RunID); err != nil {
+			return out, err
+		}
+		if manager.Pin != nil {
+			identity := manager.Pin.Identity
+			out.Manager.Agent = &identity
+		}
+		if task.Lifecycle == protocol.TaskQueued {
+			facts, e := readExecutionFacts(ctx, q)
+			if e != nil {
+				return out, e
+			}
+			if candidate, ok := facts.candidates[task.TaskID]; ok {
+				out.Manager.QueueReason = facts.waitReason(candidate)
+			}
+		}
+	} else if !errors.Is(e, store.ErrNotFound) {
+		return out, e
 	}
 	current, err := Issue(ctx, q, id)
 	if err != nil {

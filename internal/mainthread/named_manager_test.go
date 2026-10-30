@@ -575,7 +575,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		if err != nil {
 			t.Fatal(err)
 		}
-		runtime := &protocol.RunnerRuntime{InstanceID: "catalog-process", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityRunnerHeartbeat}}
+		runtime := &protocol.RunnerRuntime{InstanceID: "catalog-process", Generation: 2, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityRunnerHeartbeat}}
 		principal := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "worker-host"}
 		execute(principal, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "worker-host"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: runtime}, app.Hello{})
 		execute(principal, protocol.OpRunnerInventoryRegister, protocol.Target{Type: "host", ID: "worker-host"}, protocol.RegisterAgentInventoryPayload{Runtime: runtime, LocalRevision: 1, SnapshotID: "catalog-snapshot", PublicSHA256: hash, Projection: definition.Public()}, app.RegisterAgentInventory{})

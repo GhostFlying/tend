@@ -12,6 +12,7 @@ import (
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // HostedIssueAssignment fences coordination responsibility, not worker runs.
@@ -53,6 +54,11 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 		}
 		if strings.TrimSpace(p.Reason) == "" || current.PendingHandoffID != p.HandoffID || current.PendingAssignee == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "the current handoff and explicit reason are required")
+		}
+		if current.PendingAssignee.Kind == protocol.IssueAssigneeAgent {
+			if err := rejectMigratedHostedAssignment(ctx, tx.Q(), current.IssueID); err != nil {
+				return Outcome{}, err
+			}
 		}
 		blockers, err := hostedHandoffBlockers(ctx, tx.Q(), current.IssueID, current.AssignmentEpoch)
 		if err != nil {
@@ -107,6 +113,11 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	if strings.TrimSpace(p.Reason) == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "assignment reason is required")
 	}
+	if p.Assignee.Kind == protocol.IssueAssigneeAgent {
+		if err := rejectMigratedHostedAssignment(ctx, tx.Q(), current.IssueID); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if err := resolveHostedAssignee(ctx, tx.Q(), x, p.Assignee); err != nil {
 		return Outcome{}, err
 	}
@@ -142,6 +153,17 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	next.UpdatedAt = x.Now.UnixMilli()
 	return saveCanonicalOwnerDefinition(ctx, x, tx, next, current.Revision, canonicalOwnerIssueSource{}, p, "issue.assignment_fenced")
 }
+
+func rejectMigratedHostedAssignment(ctx context.Context, q store.Querier, issue string) error {
+	var migrated bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE issue_id=?)`, issue).Scan(&migrated); err != nil {
+		return err
+	}
+	if migrated {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "migrated manager responsibilities require a category handoff")
+	}
+	return nil
+}
 func resolveHostedAssignee(ctx context.Context, q store.Querier, x *Exec, target protocol.IssueAssignee) error {
 	if target.Kind == protocol.IssueAssigneeOwner {
 		owner := x.Principal.Subject
@@ -171,6 +193,13 @@ func resolveHostedAssignee(ctx context.Context, q store.Querier, x *Exec, target
 		}
 		return nil
 	}
+	var retired bool
+	if err := q.QueryRowContext(ctx, `SELECT finalized FROM manager_runner_cutover WHERE singleton=1`).Scan(&retired); err != nil {
+		return err
+	}
+	if retired {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "hosted manager assignment is retired; publish a category task")
+	}
 	if target.Kind != protocol.IssueAssigneeAgent || x.hostedConfiguration == nil {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "agent assignment requires registered hosted definitions")
 	}
@@ -188,30 +217,8 @@ func resolveHostedAssignee(ctx context.Context, q store.Querier, x *Exec, target
 	}
 	return nil
 }
-func hostedHandoffBlockers(ctx context.Context, q store.Querier, issue string, nextEpoch int64) ([]protocol.IssueBlocker, error) {
-	ids, err := store.FollowupIDs(ctx, q, `SELECT h.execution_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id WHERE h.issue_id=? AND h.assignment_epoch<? AND (t.status IN ('starting','started','unknown') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=h.execution_id) OR EXISTS(SELECT 1 FROM agent_recoveries r WHERE r.root_request_id=h.execution_id AND r.status IN ('starting','running','unknown'))) ORDER BY h.execution_id`, issue, nextEpoch)
-	if err != nil {
-		return nil, err
-	}
-	blockers := []protocol.IssueBlocker{}
-	for _, id := range ids {
-		blockers = append(blockers, protocol.IssueBlocker{Code: "old_manager_execution", ObjectID: id})
-	}
-	deliveries, err := store.FollowupIDs(ctx, q, `SELECT DISTINCT o.request_id FROM outbox o JOIN logical_turn_executions e ON e.request_id=o.request_id JOIN logical_turn_executions original ON original.logical_turn_id=e.logical_turn_id JOIN hosted_executions h ON h.execution_id=original.request_id WHERE h.issue_id=? AND h.assignment_epoch<? AND o.operation IN ('conversation.repair_turn','conversation.recover_agent','main_thread.handle_message','main_thread.handle_event') AND o.status IN ('sending','unknown') UNION SELECT o.request_id FROM agent_conversations c JOIN outbox o ON o.destination='background_thread:'||c.conversation_id WHERE c.work_item_id=? AND o.operation IN ('main_thread.handle_message','main_thread.handle_event') AND o.status IN ('sending','unknown') ORDER BY 1`, issue, nextEpoch, issue)
-	if err != nil {
-		return nil, err
-	}
-	for _, id := range deliveries {
-		blockers = append(blockers, protocol.IssueBlocker{Code: "old_manager_delivery", ObjectID: id})
-	}
-	requests, err := store.FollowupIDs(ctx, q, `SELECT DISTINCT e.request_id FROM hosted_coordination_effects e JOIN hosted_executions h ON h.execution_id=e.execution_id WHERE h.issue_id=? AND h.assignment_epoch<? AND (EXISTS(SELECT 1 FROM request_records r WHERE r.request_id=e.request_id AND r.status IN ('accepted','unknown'))) ORDER BY e.request_id`, issue, nextEpoch)
-	if err != nil {
-		return nil, err
-	}
-	for _, id := range requests {
-		blockers = append(blockers, protocol.IssueBlocker{Code: "old_manager_control", ObjectID: id})
-	}
-	return blockers, nil
+func hostedHandoffBlockers(ctx context.Context, q store.Querier, issue string, epoch int64) ([]protocol.IssueBlocker, error) {
+	return views.ManagerHandoffBlockers(ctx, q, issue, epoch)
 }
 
 // settleFencedHostedCoordination retires only old manager continuation after

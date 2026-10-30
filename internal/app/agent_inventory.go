@@ -44,7 +44,7 @@ func authorizeInventory(ctx context.Context, q store.Querier, p protocol.Princip
 	if _, err := requireActiveHost(ctx, x, q); err != nil {
 		return err
 	}
-	if r == nil || r.Protocol != protocol.CurrentRunnerProtocol || !slices.Contains(r.Capabilities, protocol.CapabilityAgentInventory) {
+	if r == nil || !protocol.RunnerProtocolSupported(r.Protocol) || !slices.Contains(r.Capabilities, protocol.CapabilityAgentInventory) {
 		return protocol.Errorf(protocol.CodeForbidden, "agent inventory capability is required")
 	}
 	if err := checkRuntime(ctx, q, p.Subject, r, false); err != nil {
@@ -78,6 +78,9 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	var p protocol.RegisterAgentInventoryPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
+	}
+	if p.Projection.FormatVersion == 2 && (p.Runtime == nil || p.Runtime.Protocol < 2) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "format-2 inventory requires runner protocol 2")
 	}
 	if p.Projection.ExecutionEnvironmentID != x.Principal.Subject || p.LocalRevision < 1 || !protocol.AgentInventoryID(p.SnapshotID) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid inventory identity or version")

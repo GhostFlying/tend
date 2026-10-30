@@ -4,6 +4,7 @@ import (
 	"maps"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/coordination"
 )
 
 // ThreadConfig selects Tend coordination tools and read-only presentation.
@@ -22,35 +23,7 @@ func ThreadConfig(cwd, model string) harness.ThreadConfig {
 // hosted dispatcher delegates them through Tend. Images and bounded material
 // presentation remain useful for understanding the owner. Keys are dotted
 // harness configuration paths, also applied on resume or handoff.
-var Isolation = map[string]any{
-	"features.shell_tool":                           false,
-	"features.js_repl":                              false,
-	"features.multi_agent":                          false,
-	"features.multi_agent_v2":                       false,
-	"web_search":                                    "disabled",
-	"sandbox_workspace_write.writable_roots":        []string{},
-	"features.apply_patch_freeform":                 false,
-	"features.code_mode_host":                       false,
-	"features.browser_use":                          false,
-	"features.browser_use_external":                 false,
-	"features.in_app_browser":                       false,
-	"features.computer_use":                         false,
-	"features.image_generation":                     false,
-	"features.plugins":                              false,
-	"features.apps":                                 false,
-	"features.memories":                             false,
-	"features.goals":                                false,
-	"features.skill_search":                         false,
-	"features.tool_suggest":                         false,
-	"features.workspace_dependencies":               false,
-	"features.workspace_undo":                       false,
-	"skills.bundled.enabled":                        false,
-	"skills.include_instructions":                   false,
-	"tools.update_plan.enabled":                     false,
-	"tools.experimental_request_user_input.enabled": false,
-	"features.code_mode":                            false,
-	"features.code_mode_only":                       false,
-}
+var Isolation = coordination.Isolation()
 
 // backgroundThreadConfig implements D111's temporary native auto-mode policy.
 // Tend's background tool scope is enforced separately by the tool service.

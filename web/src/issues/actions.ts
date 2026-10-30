@@ -1,4 +1,6 @@
 import type {
+  ManagerMigrationPayload,
+  RequestIssueManagerPayload,
   CreateIssuePayload,
   CreateIssueTaskPayload,
   FinishIssueAssignmentPayload,
@@ -18,6 +20,8 @@ import type {
 import type { OwnerCommand } from "../app/ownerCommand.ts";
 
 interface IssuePayloads {
+  manager_migration: ManagerMigrationPayload;
+  request_manager: RequestIssueManagerPayload;
   update: UpdateIssuePayload;
   pause: IssueControlPayload;
   resume: IssueControlPayload;
@@ -36,6 +40,37 @@ interface IssuePayloads {
 }
 
 type IssueSnapshot = Pick<IssueView, "issue_id" | "revision" | "assignment_epoch">;
+
+export function issueHandoffCommand(
+  issue: IssueSnapshot & Pick<IssueView, "assignee" | "manager" | "pending_handoff_id">,
+  target: string,
+  reason: string,
+  owner: string,
+): OwnerCommand {
+  if (issue.pending_handoff_id)
+    return issueCommand(issue, "finish_assignment", {
+      handoff_id: issue.pending_handoff_id,
+      reason,
+    });
+  const pendingManager =
+    !!issue.manager && !issue.manager.host_id && issue.manager.state === "queued";
+  if (target.startsWith("category:")) {
+    const category_id = target.slice("category:".length);
+    return issue.assignee.kind === "agent" && !issue.manager
+      ? issueCommand(issue, "manager_migration", { phase: "switch", category_id, reason })
+      : issueCommand(issue, "request_manager", {
+          category_id,
+          replace: pendingManager || issue.assignee.kind === "agent",
+          reason,
+        });
+  }
+  if (target === "owner" && pendingManager)
+    return issueCommand(issue, "manager_migration", { phase: "cancel", reason });
+  return issueCommand(issue, "assign", {
+    assignee: target === "owner" ? { kind: "owner", ref: owner } : { kind: "agent", ref: target },
+    reason,
+  });
+}
 
 export function createIssueCommand(payload: CreateIssuePayload): OwnerCommand {
   return { operation: "issues.create", target: { type: "issue" }, payload };

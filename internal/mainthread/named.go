@@ -28,6 +28,8 @@ func (m *Manager) bindingInstance() string {
 	if selected == nil {
 		return m.cfg.Instance
 	}
+	selected.RunnerRunID = ""
+	selected.ReceiptOnly = false
 	selected.AppliedModel, selected.AppliedProvider, selected.AppliedEffort = "", "", ""
 	raw, _ := json.Marshal(selected)
 	digest := sha256.Sum256(raw)
@@ -58,6 +60,8 @@ func resolveNamedModel(models []harness.Model, selected hostedconfig.Selection) 
 }
 
 func sameNamedBinding(a, b hostedconfig.Selection) bool {
+	a.RunnerRunID, b.RunnerRunID = "", ""
+	a.ReceiptOnly, b.ReceiptOnly = false, false
 	a.AppliedModel, a.AppliedProvider, a.AppliedEffort = "", "", ""
 	b.AppliedModel, b.AppliedProvider, b.AppliedEffort = "", "", ""
 	left, _ := json.Marshal(a)

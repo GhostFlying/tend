@@ -201,6 +201,7 @@ function AgentDetails({
       <p>本地ID：{agent.identity.local_id}</p>
       <p>环境：{agent.identity.execution_environment_id}</p>
       <p>类别：{agent.categories?.join("、")}</p>
+      <p>用途：{agent.purposes?.join("、")}</p>
       <p>配置：{agent.enabled ? "启用" : "未启用"}</p>
       <p>定义版本：{agent.revision}</p>
       {observed && (

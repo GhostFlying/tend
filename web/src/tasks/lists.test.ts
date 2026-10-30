@@ -162,7 +162,7 @@ test("execution tabs include all nonterminal and terminal tasks without mixing t
   lists.open();
   expect(api.calls).toHaveLength(1);
   expect(new URL(api.calls[0]!.path, "http://test").searchParams.get("lifecycle")).toBe(
-    "draft,queued,running,awaiting_acceptance,changes_required",
+    "draft,queued,running,waiting,awaiting_acceptance,changes_required",
   );
   lists.open(1);
   expect(api.calls[0]!.signal?.aborted).toBe(true);
@@ -181,11 +181,27 @@ test("execution tabs include all nonterminal and terminal tasks without mixing t
   lists.open(2);
   expect(
     new URL(api.calls[3]!.path, "http://test").searchParams.get("lifecycle")?.split(","),
-  ).toHaveLength(7);
+  ).toHaveLength(8);
   api.calls[3]!.resolve({
     tasks: [task("live", "other"), { ...task("done", "other"), lifecycle: "completed" }],
   });
   await flush();
   expect(lists.feeds[2]!.state.get().items).toHaveLength(2);
+  await lists.stop();
+});
+
+test("a manager remains discoverable when its running round releases into waiting", async () => {
+  const api = new Api();
+  const lists = new TaskLists(api);
+  lists.open();
+  const manager = { ...task("manager"), kind: "issue_manager" as const };
+  api.calls[0]!.resolve({ tasks: [manager] });
+  await flush();
+  const refresh = lists.feeds[0]!.refresh();
+  api.calls[1]!.resolve({ tasks: [{ ...manager, lifecycle: "waiting" }] });
+  await refresh;
+  expect(lists.feeds[0]!.state.get().items).toMatchObject([
+    { task_id: "manager", lifecycle: "waiting" },
+  ]);
   await lists.stop();
 });

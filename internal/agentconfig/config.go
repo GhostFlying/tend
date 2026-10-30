@@ -113,7 +113,7 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 	if source.Kind == LocalFile && strings.TrimSpace(source.Reference) == "" {
 		return nil, invalid("required", "$source.reference")
 	}
-	if cfg.FormatVersion != 1 {
+	if cfg.FormatVersion != 1 && cfg.FormatVersion != 2 {
 		return nil, invalid("unsupported_format", "$.format_version")
 	}
 	runtimes := make(map[string]RuntimeBinding, len(cfg.Runtimes))
@@ -137,14 +137,17 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 				return nil, invalid("unsupported_cli", path+".cli")
 			}
 		case AppServerWorker, HostedManager:
-			if r.CLI != "" {
+			if r.CLI != "" && !(cfg.FormatVersion == 2 && r.Kind == AppServerWorker && (r.CLI == "codex" || r.CLI == "traex")) {
 				return nil, invalid("unsupported_cli", path+".cli")
 			}
 		default:
 			return nil, invalid("unsupported_runtime", path+".kind")
 		}
-		if err := validatePurposes(r.DeclaredPurposes, r.Kind, path+".declared_purposes"); err != nil {
+		if err := validatePurposes(r.DeclaredPurposes, r.Kind, path+".declared_purposes", cfg.FormatVersion); err != nil {
 			return nil, err
+		}
+		if cfg.FormatVersion == 2 && r.Kind == AppServerWorker && slices.Contains(r.DeclaredPurposes, IssueManager) && r.CLI == "" {
+			return nil, invalid("required", path+".cli")
 		}
 		runtimes[r.ID] = r
 	}
@@ -185,7 +188,7 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 			}
 			categories[c] = true
 		}
-		if err := validatePurposes(a.Purposes, r.Kind, path+".purposes"); err != nil {
+		if err := validatePurposes(a.Purposes, r.Kind, path+".purposes", cfg.FormatVersion); err != nil {
 			return nil, err
 		}
 		for j, p := range a.Purposes {
@@ -212,7 +215,7 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 	return &Definitions{environmentID: environmentID, config: cloneConfig(cfg), source: source}, nil
 }
 
-func validatePurposes(purposes []Purpose, kind RuntimeKind, path string) error {
+func validatePurposes(purposes []Purpose, kind RuntimeKind, path string, format uint64) error {
 	if len(purposes) == 0 {
 		return invalid("required", path)
 	}
@@ -227,7 +230,7 @@ func validatePurposes(purposes []Purpose, kind RuntimeKind, path string) error {
 			if p != Main && p != IssueManager && p != Consultation {
 				return invalid("unsupported_purpose", field)
 			}
-		} else if p != WorkerRun {
+		} else if p != WorkerRun && !(format == 2 && kind == AppServerWorker && p == IssueManager) {
 			return invalid("unsupported_purpose", field)
 		}
 	}

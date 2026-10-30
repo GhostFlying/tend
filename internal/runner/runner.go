@@ -159,10 +159,11 @@ type active struct {
 
 // Runner pulls and executes runs for one host.
 type Runner struct {
-	cfg           Config
-	c             *client
-	reconcile     chan struct{}
-	workspaceWake chan struct{}
+	runnerProtocol int64
+	cfg            Config
+	c              *client
+	reconcile      chan struct{}
+	workspaceWake  chan struct{}
 
 	mu      sync.Mutex
 	ttl     time.Duration
@@ -224,6 +225,7 @@ func New(cfg Config) *Runner {
 	}
 	return &Runner{
 		cfg:                  cfg,
+		runnerProtocol:       protocol.PreviousRunnerProtocol,
 		bootstrapMaintenance: cfg.InitialMaintenance,
 		c: &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now,
 			timeout: cfg.RequestTimeout},
@@ -481,11 +483,8 @@ func (r *Runner) claimOnce(ctx context.Context, env *protocol.Envelope, sentAt t
 
 // hello reconciles every run the journal holds with tend.
 func (r *Runner) hello(ctx context.Context) error {
-	r.controlMu.Lock()
-	r.repositoryBindingsSupported = false
-	r.agentInventorySupported = false
-	r.agentExecutionSupported = false
-	r.controlMu.Unlock()
+	// Keep the last confirmed capability receipt while reconciling. A pending
+	// hello is not evidence that the server withdrew its previous support.
 	runs, err := r.cfg.Journal.Runs(ctx)
 	if err != nil {
 		return err
@@ -493,6 +492,11 @@ func (r *Runner) hello(ctx context.Context) error {
 	held := make([]protocol.HeldRun, 0, len(runs))
 	byID := map[string]journal.Run{}
 	for _, run := range runs {
+		if run.Assignment.Manager != nil {
+			r.controlMu.Lock()
+			r.runnerProtocol = protocol.CurrentRunnerProtocol
+			r.controlMu.Unlock()
+		}
 		held = append(held, protocol.HeldRun{RunID: run.Assignment.RunID, LeaseID: run.Assignment.LeaseID, Observed: r.observed(run)})
 		byID[run.Assignment.RunID] = run
 	}
@@ -514,6 +518,11 @@ func (r *Runner) hello(ctx context.Context) error {
 		return fmt.Errorf("runner: decode hello: %w", err)
 	}
 	r.controlMu.Lock()
+	if res.ProtocolMax >= protocol.CurrentRunnerProtocol && r.runnerProtocol < protocol.CurrentRunnerProtocol {
+		r.runnerProtocol = protocol.CurrentRunnerProtocol
+		r.controlMu.Unlock()
+		return r.hello(ctx)
+	}
 	r.repositoryBindingsSupported = res.RepositoryBindings
 	r.agentInventorySupported = res.AgentInventory && r.cfg.AgentInventory != nil
 	r.agentExecutionSupported = res.AgentExecution && r.cfg.Executions != nil
@@ -573,6 +582,14 @@ func (r *Runner) observed(run journal.Run) protocol.RunObserved {
 // dropOrRelease ends a held run without an executor: it is released if
 // tend may still accept its credential, and forgotten otherwise.
 func (r *Runner) dropOrRelease(ctx context.Context, run journal.Run, reason string) error {
+	if run.Assignment.Role == protocol.RoleIssueManager {
+		// Manager runs have no worker release contract. Their executor must
+		// record process exit and flush native receipts before releasing a slot.
+		as := run.Assignment
+		as.Desired = protocol.DesiredStopped
+		r.start(ctx, as, r.cfg.Now())
+		return nil
+	}
 	if err := r.finish(ctx, run.Assignment, journal.PhaseReleasing, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: reason}); err != nil {
 		return err
 	}

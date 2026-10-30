@@ -96,7 +96,7 @@ type ThreadConfig struct {
 	Config map[string]any
 	// Tools are implemented by tend; OnToolCall answers their calls.
 	Tools      []ToolSpec
-	OnToolCall ToolHandler
+	OnToolCall ToolHandler `json:"-"`
 }
 
 // ToolSpec describes a tool tend implements for the model.
@@ -169,6 +169,8 @@ type EventKind string
 
 // EventTurnError is a native error fact; the terminal status still settles the turn.
 const EventTurnError EventKind = "turn_error"
+const EventCoordinatorDisconnected EventKind = "coordinator_disconnected"
+const EventCoordinatorHistoryEnd EventKind = "coordinator_history_end"
 
 // Event kinds.
 const (
@@ -190,12 +192,19 @@ const (
 )
 
 // Event is something that happened in a thread.
+// EventAcknowledger commits application of transported events after their
+// business records and streamed replies are durable.
+type EventAcknowledger interface {
+	AcknowledgeEvent(context.Context, Event) error
+}
+
 type Event struct {
-	RequestUsage *protocol.TokenUsageSample
-	Failure      *protocol.AgentFailure
-	ContextUsage *protocol.AgentContextUsage
-	Kind         EventKind
-	TurnID       string
+	CoordinatorSequence int64 `json:"-"`
+	RequestUsage        *protocol.TokenUsageSample
+	Failure             *protocol.AgentFailure
+	ContextUsage        *protocol.AgentContextUsage
+	Kind                EventKind
+	TurnID              string
 	// ItemID and ItemType describe the item of item events.
 	ItemID   string
 	ItemType string

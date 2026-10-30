@@ -273,6 +273,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		}
 		if applyErr == nil {
 			applyErr = a.persistOutcome(ctx, x, tx, out, &rec)
+			if applyErr == nil {
+				applyErr = refreshManagerTasks(ctx, x, tx)
+			}
 		}
 		if applyErr != nil {
 			pe, ok := errors.AsType[*protocol.Error](applyErr)
@@ -376,6 +379,23 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 				}
 			}
 		}
+		if e.Kind == "workspace.released" {
+			if task, ok := e.Body["task_id"].(string); ok {
+				primary, err := store.GetTaskIssueOwner(ctx, tx.Q(), task)
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
+					return err
+				}
+				if err == nil {
+					if _, err := store.CurrentIssueManagerTask(ctx, tx.Q(), primary); err == nil {
+						if err = appendBackgroundSource(ctx, x, tx, "work_item:"+primary, primary, "", eventID, e.Kind, nil); err != nil {
+							return err
+						}
+					} else if !errors.Is(err, store.ErrNotFound) {
+						return err
+					}
+				}
+			}
+		}
 		if e.Kind == "task.completed" {
 			if err := recordCompletionNotice(ctx, x, tx, e.ObjectID, eventID); err != nil {
 				return err
@@ -383,6 +403,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		}
 		if e.Kind == "issue.closed" || e.Kind == "issue.cancelled" {
 			if err := recordCanonicalParentResult(ctx, x, tx, e, eventID); err != nil {
+				return err
+			}
+		}
+		if e.Kind == "issue.cancelling" && x.coordinationExecution == nil {
+			if err := recordManagerCancellationIntent(ctx, x, tx, e.ObjectID, eventID); err != nil {
 				return err
 			}
 		}

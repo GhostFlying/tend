@@ -58,7 +58,9 @@ func TestHostedFencedSendingDeliveryRestoresReadOnlyRuntime(t *testing.T) {
 			}
 			h.app = New(h.store, h.ids, h.clock.Now, WithHostedConfiguration(h.app.hostedConfiguration))
 			restored, named, err := h.app.HostedRuntimeSelection(t.Context(), conversation)
-			if err != nil || !named || !reflect.DeepEqual(restored, frozen.Selection) {
+			expected := frozen.Selection
+			expected.ReceiptOnly = true
+			if err != nil || !named || !reflect.DeepEqual(restored, expected) {
 				t.Fatal("cannot reopen original runtime for reconciliation", restored, named, err)
 			}
 			if _, _, err = h.app.HostedSelectionForAdmission(t.Context(), d.RequestID, conversation); protocol.CodeOf(err) != protocol.CodeForbidden {

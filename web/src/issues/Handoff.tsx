@@ -4,12 +4,14 @@ import type {
   IssueView,
   IssueAssignmentPayload,
   FinishIssueAssignmentPayload,
+  RequestIssueManagerPayload,
+  ManagerMigrationPayload,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useDurableOp } from "../app/useDurableOp.ts";
 import type { OpOutcome } from "../app/ops.ts";
 import { useStore } from "../state/store.ts";
-import { issueCommand } from "./actions.ts";
+import { issueHandoffCommand } from "./actions.ts";
 import styles from "./Issues.module.css";
 import form from "../attention/Inbox.module.css";
 import layout from "./Handoff.module.css";
@@ -17,9 +19,18 @@ import layout from "./Handoff.module.css";
 export function IssueHandoff({ issue, onBack }: { issue: IssueView; onBack(): void }) {
   const { live, client } = useServices();
   const connection = useStore(client.connection);
-  const catalog = useStore(live.agents.hosted.state);
-  const firstTarget = issue.pending_assignee ?? issue.assignee;
-  const [target, setTarget] = useState(firstTarget.kind === "owner" ? "owner" : firstTarget.ref);
+  const categories = useStore(live.agents.categories.state);
+  const activeCategories = (categories.value?.items ?? []).filter(
+    (category) => category.state === "active",
+  );
+  const [selected, setTarget] = useState<string>();
+  const preferred = issue.manager?.category_id ?? "issue-manager";
+  const initial =
+    activeCategories.find((category) => category.category_id === preferred) ?? activeCategories[0];
+  const target = selected ?? (initial ? `category:${initial.category_id}` : "owner");
+  useEffect(() => {
+    void live.agents.openCategories();
+  }, [live]);
   const [reason, setReason] = useState("");
   const [outcome, setOutcome] = useState<OpOutcome | null>(null);
   const operation = useDurableOp(client, `issue-handoff:${issue.issue_id}`);
@@ -31,22 +42,25 @@ export function IssueHandoff({ issue, onBack }: { issue: IssueView; onBack(): vo
     original?.operation === "issues.assign"
       ? (original.payload as IssueAssignmentPayload).assignee
       : undefined;
-  const shownTarget = originalAssignee
-    ? originalAssignee.kind === "owner"
+  const categoryTarget =
+    original?.operation === "issues.manager_migration" &&
+    (original.payload as ManagerMigrationPayload).phase === "cancel"
       ? "owner"
-      : originalAssignee.ref
-    : issue.pending_assignee
-      ? issue.pending_assignee.kind === "owner"
+      : original?.operation === "issues.request_manager" ||
+          original?.operation === "issues.manager_migration"
+        ? `category:${(original.payload as RequestIssueManagerPayload | ManagerMigrationPayload).category_id ?? "issue-manager"}`
+        : undefined;
+  const shownTarget =
+    categoryTarget ??
+    (originalAssignee
+      ? originalAssignee.kind === "owner"
         ? "owner"
-        : issue.pending_assignee.ref
-      : target;
-  useEffect(() => {
-    void live.agents.openHosted();
-  }, [live]);
-  const candidates =
-    catalog.value?.projection.agents?.filter((agent) =>
-      agent.purposes?.includes("issue_manager"),
-    ) ?? [];
+        : originalAssignee.ref
+      : issue.pending_assignee
+        ? issue.pending_assignee.kind === "owner"
+          ? "owner"
+          : issue.pending_assignee.ref
+        : target);
   const run = async (reconcile = false) => {
     if (reconcile) {
       setReason(shownReason ?? "");
@@ -56,18 +70,12 @@ export function IssueHandoff({ issue, onBack }: { issue: IssueView; onBack(): vo
       const result = await operation.execute(
         reconcile
           ? undefined
-          : issue.pending_handoff_id
-            ? issueCommand(issue, "finish_assignment", {
-                handoff_id: issue.pending_handoff_id,
-                reason,
-              })
-            : issueCommand(issue, "assign", {
-                assignee:
-                  target === "owner"
-                    ? { kind: "owner", ref: connection.status === "online" ? connection.login : "" }
-                    : { kind: "agent", ref: target },
-                reason,
-              }),
+          : issueHandoffCommand(
+              issue,
+              target,
+              reason,
+              connection.status === "online" ? connection.login : "",
+            ),
       );
       setOutcome(result);
       if (result.kind === "done" || result.kind === "stale") void live.issues.detail.refresh();
@@ -99,26 +107,37 @@ export function IssueHandoff({ issue, onBack }: { issue: IssueView; onBack(): vo
               onChange={(e) => setTarget(e.target.value)}
             >
               <option value="owner">你（用户）</option>
-              {candidates.map((agent) => {
-                const ref = `${agent.identity.execution_environment_id}/${agent.identity.local_id}`;
-                return (
-                  <option key={ref} value={ref} disabled={!agent.enabled}>
-                    {agent.display_name}（Agent）{!agent.enabled ? " · 配置未启用，暂不可用" : ""}
+              {shownTarget !== "owner" &&
+                !activeCategories.some(
+                  (category) => `category:${category.category_id}` === shownTarget,
+                ) && (
+                  <option value={shownTarget}>
+                    {shownTarget.startsWith("category:")
+                      ? `已选类别：${shownTarget.slice("category:".length)}`
+                      : `待核实负责人：${shownTarget}`}
                   </option>
-                );
-              })}
-              {issue.assignee.kind === "agent" &&
-                !candidates.some(
-                  (agent) =>
-                    `${agent.identity.execution_environment_id}/${agent.identity.local_id}` ===
-                    issue.assignee.ref,
-                ) && <option value={issue.assignee.ref}>{issue.assignee.ref}（当前负责人）</option>}
+                )}
+              {activeCategories.map((category) => (
+                <option key={category.category_id} value={`category:${category.category_id}`}>
+                  {category.title} · {category.category_id}（runner 领取）
+                </option>
+              ))}
             </select>
           </label>
-          {catalog.error && (
-            <p className={styles.warning}>
-              登记目录暂时无法读取。
-              <button onClick={() => void live.agents.openHosted()}>重新读取</button>
+          {categories.value?.more && (
+            <button
+              type="button"
+              onClick={() => void live.agents.openCategories("active", categories.value?.next)}
+            >
+              下一页类别
+            </button>
+          )}
+          {categories.error && (
+            <p role="status">
+              类别读取失败，保留已读取结果。
+              <button type="button" onClick={() => void live.agents.categories.refresh()}>
+                重新读取
+              </button>
             </p>
           )}
           <label>
@@ -168,6 +187,7 @@ export function IssueHandoff({ issue, onBack }: { issue: IssueView; onBack(): vo
               operation.busy ||
               !reason.trim() ||
               (!issue.pending_handoff_id &&
+                !(issue.manager?.state === "queued" && !issue.manager.host_id) &&
                 target === (issue.assignee.kind === "owner" ? "owner" : issue.assignee.ref))
             }
             onClick={() => void run()}

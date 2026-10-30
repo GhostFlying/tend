@@ -465,7 +465,7 @@ try {
     await executions.getByText("正在启动", { exact: true }).waitFor();
     await executions.getByText("排队中 · 待验收", { exact: true }).waitFor();
     await executions.getByText("主机 host-a", { exact: true }).waitFor();
-    assert.equal(await executions.locator("article").count(), 5);
+    assert.equal(await executions.locator("article").count(), 6);
     const firstRow = await executions.locator("article").first().boundingBox();
     assert(firstRow && firstRow.height <= (mobile ? 160 : 110), "execution entries stay compact");
     const taskTabs = executions.getByRole("tablist", { name: "任务范围" });
@@ -522,7 +522,7 @@ try {
     }
     await executions.getByRole("tab", { name: "全部", exact: true }).click();
     await executions.getByText("正在启动", { exact: true }).waitFor();
-    assert.equal(await executions.locator("article").count(), 7);
+    assert.equal(await executions.locator("article").count(), 8);
     await executions.getByRole("tab", { name: "全部", exact: true }).focus();
     await page.keyboard.press("Home");
     assert.equal(

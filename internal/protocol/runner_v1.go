@@ -2,10 +2,9 @@ package protocol
 
 import "fmt"
 
-// tend:compat legacy-runner-v0 protocol=0 remove=2
-// LegacyRunnerProtocol identifies the unversioned bootstrap transport. It does
-// not migrate or discard historical assignments when its adapter is retired.
-const LegacyRunnerProtocol int64 = 0
+// tend:compat runner-v1 protocol=1 remove=3
+// Protocol 1 retains the original workspace execution wire contract.
+// It cannot carry manager assignments or format-2 inventory.
 
 // RunnerProtocolSupported is deliberately a two-generation communication gate.
 func RunnerProtocolSupported(version int64) bool {
@@ -29,7 +28,7 @@ func NegotiatedRunnerProtocol(minimum, maximum int64) (int64, error) {
 // RuntimeRunnerProtocol adapts unversioned bootstrap runners at one boundary.
 func RuntimeRunnerProtocol(runtime *RunnerRuntime) (int64, error) {
 	if runtime == nil {
-		return LegacyRunnerProtocol, nil
+		return 0, fmt.Errorf("unversioned runner protocol is retired")
 	}
 	return NegotiatedRunnerProtocol(runtime.ProtocolMin, runtime.ProtocolMax)
 }

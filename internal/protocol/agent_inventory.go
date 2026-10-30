@@ -126,7 +126,7 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 	bad := func() ([]byte, string, error) {
 		return nil, "", Errorf(CodeInvalidRequest, "invalid agent inventory projection")
 	}
-	if p.FormatVersion != 1 || !AgentInventoryID(p.ExecutionEnvironmentID) || (p.SourceKind != AgentSourceInline && p.SourceKind != AgentSourceLocalFile) {
+	if (p.FormatVersion != 1 && p.FormatVersion != 2) || !AgentInventoryID(p.ExecutionEnvironmentID) || (p.SourceKind != AgentSourceInline && p.SourceKind != AgentSourceLocalFile) {
 		return bad()
 	}
 	p.Runtimes = append([]AgentInventoryRuntime{}, p.Runtimes...)
@@ -142,10 +142,13 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 		if r.Kind != "appserver-worker" && r.Kind != "orca-worker" && r.Kind != "hosted-manager" {
 			return bad()
 		}
-		if (r.Kind == "orca-worker" && r.CLI != "codex" && r.CLI != "traex") || (r.Kind != "orca-worker" && r.CLI != "") {
+		if (r.Kind == "orca-worker" && r.CLI != "codex" && r.CLI != "traex") || (r.Kind != "orca-worker" && r.CLI != "" && !(p.FormatVersion == 2 && r.Kind == "appserver-worker" && (r.CLI == "codex" || r.CLI == "traex"))) {
 			return bad()
 		}
-		if !inventoryPurposes(r.DeclaredPurposes, r.Kind) || r.Availability.Reason != inventoryUnavailable(r, true) {
+		if p.FormatVersion == 2 && r.Kind == "appserver-worker" && slices.Contains(r.DeclaredPurposes, "issue_manager") && r.CLI == "" {
+			return nil, "", Errorf(CodeInvalidRequest, "manager runtime requires its CLI identity")
+		}
+		if !inventoryPurposes(r.DeclaredPurposes, r.Kind, p.FormatVersion) || r.Availability.Reason != inventoryUnavailable(r, true) {
 			return bad()
 		}
 		r.DeclaredPurposes = slices.Clone(r.DeclaredPurposes)
@@ -160,7 +163,7 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 			return bad()
 		}
 		seen[a.Identity.LocalID] = true
-		if !inventoryPurposes(a.Purposes, r.Kind) || len(a.Categories) == 0 || !uniqueInventoryStrings(a.Categories) || !slices.Contains([]string{"", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}, a.RequestedEffort) {
+		if !inventoryPurposes(a.Purposes, r.Kind, p.FormatVersion) || len(a.Categories) == 0 || !uniqueInventoryStrings(a.Categories) || !slices.Contains([]string{"", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}, a.RequestedEffort) {
 			return bad()
 		}
 		for _, purpose := range a.Purposes {
@@ -211,7 +214,7 @@ func uniqueInventoryStrings(values []string) bool {
 	return true
 }
 
-func inventoryPurposes(values []string, kind string) bool {
+func inventoryPurposes(values []string, kind string, format uint64) bool {
 	if len(values) == 0 || !uniqueInventoryStrings(values) {
 		return false
 	}
@@ -220,7 +223,7 @@ func inventoryPurposes(values []string, kind string) bool {
 			if v != "main" && v != "issue_manager" && v != "consultation" {
 				return false
 			}
-		} else if v != "worker_run" {
+		} else if v != "worker_run" && !(format == 2 && kind == "appserver-worker" && v == "issue_manager") {
 			return false
 		}
 	}

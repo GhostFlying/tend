@@ -86,6 +86,43 @@ func (h *harness) env(op string, target protocol.Target, payload any, revision *
 		}
 		raw = b
 	}
+	// Ordinary fixtures use a supported versioned runner. Retirement tests
+	// construct their unsupported wire payload explicitly.
+	if op == protocol.OpRunnerHello || op == protocol.OpRunnerClaim || op == protocol.OpRunnerHeartbeat {
+		var fields map[string]json.RawMessage
+		if len(raw) == 0 {
+			fields = map[string]json.RawMessage{}
+		} else if err := json.Unmarshal(raw, &fields); err != nil {
+			h.t.Fatal(err)
+		}
+		if fields["runtime"] == nil || string(fields["runtime"]) == "null" {
+			if op != protocol.OpRunnerHello {
+				missing := false
+				_ = h.store.Read(context.Background(), func(tx *store.ReadTx) error {
+					_, e := store.GetHostRuntime(context.Background(), tx.Q(), target.ID)
+					_, hostErr := store.GetHost(context.Background(), tx.Q(), target.ID)
+					missing = errors.Is(e, store.ErrNotFound) && hostErr == nil
+					return nil
+				})
+				if missing {
+					h.hello(target.ID)
+				}
+			}
+			current := protocol.RunnerRuntime{InstanceID: "fixture-" + target.ID, Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+			if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
+				old, e := store.GetHostRuntime(context.Background(), tx.Q(), target.ID)
+				if e == nil {
+					current = old.Runtime
+					current.Sequence++
+				}
+				return nil
+			}); err != nil {
+				h.t.Fatal(err)
+			}
+			fields["runtime"], _ = json.Marshal(current)
+			raw, _ = json.Marshal(fields)
+		}
+	}
 	return &protocol.Envelope{RequestID: h.ids.New(protocol.PrefixRequest), Operation: op, Target: target, ExpectedControlRevision: revision, Payload: raw}
 }
 

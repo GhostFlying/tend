@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 	"strings"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -29,6 +31,7 @@ type canonicalOwnerIssueSource struct {
 	ExpectedSourceRevision *int64 `json:"expected_source_revision,omitempty"`
 }
 type canonicalOwnerIssueCreate struct {
+	Manager *protocol.RequestIssueManagerPayload `json:"manager,omitempty"`
 	canonicalOwnerIssueSource
 	Plan                   protocol.IssuePlan      `json:"plan"`
 	Assignee               *protocol.IssueAssignee `json:"assignee,omitempty"`
@@ -89,7 +92,27 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if p.Manager == nil && p.Assignee == nil && x.coordinationExecution != nil && (x.coordinationExecution.Selection.RunnerManaged || x.coordinationExecution.Selection.Purpose == agentconfig.Main) {
+		p.Manager = &protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, Reason: "Delegate a child responsibility by category"}
+	}
 	owner := protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: x.Principal.Subject}
+	if p.Manager != nil && p.Assignee != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "category delegation and concrete assignment are mutually exclusive")
+	}
+	if p.Manager != nil && x.coordinationExecution != nil {
+		var ownerJSON string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT principal_json FROM request_records WHERE domain='owner' ORDER BY created_at DESC,rowid DESC LIMIT 1`).Scan(&ownerJSON); err != nil {
+			return Outcome{}, err
+		}
+		var actual protocol.Principal
+		if err := json.Unmarshal([]byte(ownerJSON), &actual); err != nil {
+			return Outcome{}, err
+		}
+		if actual.Kind != protocol.PrincipalOwner {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "owner identity is unavailable")
+		}
+		p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: actual.Subject}
+	}
 	if x.coordinationExecution != nil {
 		if p.Assignee == nil && x.coordinationExecution.IssueID != "" {
 			p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: hostedconfig.IdentityRef(x.coordinationExecution.Selection.Identity)}
@@ -145,6 +168,28 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 				return Outcome{}, err
 			}
 		}
+	}
+	if p.Manager != nil {
+		manager := *p.Manager
+		manager.ExpectedAssignmentEpoch = next.AssignmentEpoch
+		if manager.SourceMessageID == "" {
+			manager.SourceMessageID = p.SourceMessageID
+		}
+		raw, err := json.Marshal(manager)
+		if err != nil {
+			return Outcome{}, err
+		}
+		nested := *x
+		nestedEnv := *x.Env
+		nested.Env = &nestedEnv
+		nested.Env.Target = protocol.Target{Type: "issue", ID: next.IssueID}
+		nested.Env.ExpectedControlRevision = &next.Revision
+		nested.Env.Payload = raw
+		requested, err := (RequestIssueManager{}).Apply(ctx, &nested, tx)
+		if err != nil {
+			return Outcome{}, err
+		}
+		out.Events = append(out.Events, requested.Events...)
 	}
 	if next.Assignee.Kind == protocol.IssueAssigneeAgent {
 		if _, err := ensureCanonicalManagerConversation(ctx, tx, next, now); err != nil {

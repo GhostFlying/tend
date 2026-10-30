@@ -76,7 +76,7 @@ func TestReleaseBundleVerifiedBeforeIdempotentUpdaterSubmission(t *testing.T) {
 	artifact := []byte("runner binary fixture")
 	sum := sha256.Sum256(artifact)
 	artifactSHA := hex.EncodeToString(sum[:])
-	manifest := release.Manifest{Format: 1, ReleaseID: "release", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "bin/runner", Size: int64(len(artifact)), SHA256: artifactSHA}}}
+	manifest := release.Manifest{Format: 1, ReleaseID: "release", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "bin/runner", Size: int64(len(artifact)), SHA256: artifactSHA}}}
 	raw, _ := json.Marshal(manifest)
 	manifestHash := sha256.Sum256(raw)
 	manifestSHA := hex.EncodeToString(manifestHash[:])
@@ -151,7 +151,7 @@ func TestReleaseBundleRejectsPreviousJournalOnlyBeforeArtifacts(t *testing.T) {
 	body := []byte("candidate")
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
-	manifest := release.Manifest{Format: 1, ReleaseID: "previous-only", Protocol: release.Range{Min: 0, Max: 1}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion - 1, Max: journal.CurrentVersion - 1}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: int64(len(body)), SHA256: digest}}}
+	manifest := release.Manifest{Format: 1, ReleaseID: "previous-only", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion - 1, Max: journal.CurrentVersion - 1}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: int64(len(body)), SHA256: digest}}}
 	raw, _ := json.Marshal(manifest)
 	hash := sha256.Sum256(raw)
 	var artifacts atomic.Int32

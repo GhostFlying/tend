@@ -39,6 +39,9 @@ func failed(reason string, err error) error { return &stepError{reason: reason, 
 // execute drives a journaled run from its current phase to done. ctx is the
 // runner's lifetime; runCtx ends when the run is fenced or stopped.
 func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) error {
+	if a.as.Role == protocol.RoleIssueManager {
+		return r.executeManager(ctx, runCtx, a)
+	}
 	for {
 		run, err := r.cfg.Journal.Run(ctx, runID)
 		if errors.Is(err, journal.ErrNotFound) {

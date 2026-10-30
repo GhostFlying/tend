@@ -9,7 +9,7 @@ import (
 
 func (h *harness) desired(as protocol.Assignment) protocol.RunDesired {
 	h.t.Helper()
-	hb, err := h.app.Heartbeat(context.Background(), runner("linux-1"), []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}})
+	hb, err := h.heartbeat(context.Background(), runner("linux-1"), []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}})
 	if err != nil || len(hb.Runs) != 1 {
 		h.t.Fatalf("heartbeat = %+v, %v", hb, err)
 	}

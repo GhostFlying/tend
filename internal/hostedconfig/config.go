@@ -96,6 +96,9 @@ func Prepare(c Configuration) (*Prepared, error) {
 // Selection is a private execution snapshot, not a public inventory type.
 // Definition uses the sole P2/P3 model instead of copying its fields.
 type Selection struct {
+	ReceiptOnly           bool                        `json:"receipt_only,omitempty"`
+	RunnerManaged         bool                        `json:"runner_managed,omitempty"`
+	RunnerRunID           string                      `json:"runner_run_id,omitempty"`
 	IssueID               string                      `json:"issue_id,omitempty"`
 	AssignmentEpoch       int64                       `json:"assignment_epoch,omitempty"`
 	AppliedModel          string                      `json:"applied_model,omitempty"`

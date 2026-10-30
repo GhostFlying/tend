@@ -10,6 +10,8 @@ import (
 
 // TaskSummary is a task as listed.
 type TaskSummary struct {
+	Kind    TaskKind                `json:"kind,omitempty"`
+	Manager *IssueManagerAssignment `json:"manager,omitempty"`
 	// Only an actual canonical primary responsibility is a current Issue link.
 	// The original work_item fields remain for the coordinated caller cutover.
 	PrimaryIssueID       string             `json:"primary_issue_id,omitempty"`

@@ -491,7 +491,7 @@ func TestFault_ClaimReceiptLost_Runner(t *testing.T) {
 		task := srv.createTask()
 		// The runner journaled a claim and crashed before the answer.
 		env := &protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: protocol.OpRunnerClaim,
-			Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: json.RawMessage(`{"worker":"orca"}`)}
+			Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: n.crashedClaimPayload(protocol.WorkerOrca)}
 		j := n.journal()
 		if err := j.PutRequest(context.Background(), journal.Request{Envelope: *env}); err != nil {
 			t.Fatal(err)
@@ -526,7 +526,7 @@ func TestFault_ClaimReceiptLost_Runner(t *testing.T) {
 		n := newNode(t, srv, passing)
 		task := srv.createTask()
 		srv.claimDirectly(&protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: protocol.OpRunnerClaim,
-			Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: json.RawMessage(`{"worker":"orca"}`)})
+			Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: n.crashedClaimPayload(protocol.WorkerOrca)})
 
 		n.start()
 		eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
@@ -1166,4 +1166,24 @@ func (n *network) disconnect(t *testing.T) {
 		defer n.mu.Unlock()
 		return n.inflightRPC == 0
 	})
+}
+
+// crashedClaimPayload represents an actual previously registered process, with
+// its generation durable before the lost claim receipt.
+func (n *node) crashedClaimPayload(worker protocol.WorkerKind) json.RawMessage {
+	n.t.Helper()
+	j := n.journal()
+	generation, err := j.NextProcessGeneration(n.t.Context())
+	j.Close()
+	if err != nil {
+		n.t.Fatal(err)
+	}
+	rt := &protocol.RunnerRuntime{InstanceID: "crashed-fixture", Generation: generation, Sequence: 1, Protocol: protocol.PreviousRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.PreviousRunnerProtocol, Mode: protocol.RunnerNormal}
+	n.srv.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{Worker: worker, Runtime: rt}, app.Hello{})
+	rt.Sequence++
+	raw, err := json.Marshal(protocol.ClaimPayload{Worker: worker, Runtime: rt})
+	if err != nil {
+		n.t.Fatal(err)
+	}
+	return raw
 }

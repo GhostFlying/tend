@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"unicode/utf8"
@@ -73,6 +74,9 @@ func (PromoteConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if x.coordinationExecution != nil && p.Manager != nil && p.Manager.SourceMessageID != "" && p.Manager.SourceMessageID != p.SourceMessageID {
+		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "consultation delegation must retain its selected authorization source")
+	}
 	intent, err := store.GetMessage(ctx, tx.Q(), p.SourceMessageID)
 	if err != nil {
 		return Outcome{}, err
@@ -125,13 +129,21 @@ func (PromoteConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	var out Outcome
 	var issue protocol.Issue
 	if p.ExistingIssueID == "" {
-		if p.Assignee.Kind != protocol.IssueAssigneeAgent {
+		if p.Manager == nil && p.Assignee == (protocol.IssueAssignee{}) {
+			p.Manager = &protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, Reason: "Delegate the selected consultation request"}
+		}
+		if p.Manager == nil && p.Assignee.Kind != protocol.IssueAssigneeAgent {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delegate to a concrete registered Issue manager")
 		}
-		if err := resolveHostedAssignee(ctx, tx.Q(), x, p.Assignee); err != nil {
-			return Outcome{}, err
+		if p.Manager == nil {
+			if err := resolveHostedAssignee(ctx, tx.Q(), x, p.Assignee); err != nil {
+				return Outcome{}, err
+			}
 		}
-		payload := protocol.CreateIssuePayload{IssueSourceReference: p.IssueSourceReference, Plan: p.Plan, Assignee: &p.Assignee}
+		payload := protocol.CreateIssuePayload{IssueSourceReference: p.IssueSourceReference, Plan: p.Plan, Manager: p.Manager}
+		if p.Manager == nil {
+			payload.Assignee = &p.Assignee
+		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			return Outcome{}, err
@@ -168,7 +180,11 @@ func (PromoteConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if issue.State != protocol.IssueActive || issue.AssignmentState != "active" || issue.Assignee.Kind != protocol.IssueAssigneeAgent {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "target Issue needs an active registered manager")
 		}
-		if err := resolveHostedAssignee(ctx, tx.Q(), x, issue.Assignee); err != nil {
+		if _, err := store.CurrentIssueManagerTask(ctx, tx.Q(), issue.IssueID); errors.Is(err, store.ErrNotFound) {
+			if err := resolveHostedAssignee(ctx, tx.Q(), x, issue.Assignee); err != nil {
+				return Outcome{}, err
+			}
+		} else if err != nil {
 			return Outcome{}, err
 		}
 		out.Result = issue

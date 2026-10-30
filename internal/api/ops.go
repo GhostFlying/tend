@@ -25,7 +25,7 @@ var ownerCommands = commandMap(
 	app.CanonicalOwnerIssueCommand{Action: "close"}, app.CanonicalOwnerIssueCommand{Action: "reopen"},
 	app.CanonicalOwnerIssueCommand{Action: "reparent"}, app.CanonicalOwnerIssueCommand{Action: "dependencies"},
 	app.CanonicalOwnerIssueCommand{Action: "review_sources"}, app.CanonicalOwnerIssueCommand{Action: "review_completions"},
-	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.HostedIssueAssignment{}, app.HostedIssueAssignment{Finish: true}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetIssueMessageAssociations{},
+	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.RequestIssueManager{}, app.ManagerMigration{}, app.HostedIssueAssignment{}, app.HostedIssueAssignment{Finish: true}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetIssueMessageAssociations{},
 	app.WithdrawMessage{},
 	app.UpdateWorkItemChoice{Action: "respond"},
 	app.HostMaintenance{},
@@ -86,7 +86,12 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not available to owners", env.Operation))
 		return
 	}
-	op, err := s.app.Execute(r.Context(), p, &env, cmd)
+	var op protocol.Operation
+	if env.Operation == app.OpManagerMigration {
+		op, err = s.app.MigrateManager(r.Context(), p, &env)
+	} else {
+		op, err = s.app.Execute(r.Context(), p, &env, cmd)
+	}
 	if err != nil {
 		s.writeError(w, r, err, "request_id", env.RequestID, "operation", env.Operation)
 		return

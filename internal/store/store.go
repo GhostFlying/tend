@@ -31,6 +31,7 @@ var migrationFS embed.FS
 // connection with BEGIN IMMEDIATE avoids lock upgrade deadlocks and makes
 // concurrent writers queue in order.
 type Store struct {
+	path  string
 	files *blobstore.Store
 	write *sql.DB
 	read  *sql.DB
@@ -56,7 +57,7 @@ func Open(ctx context.Context, dbPath string, now func() time.Time) (*Store, err
 		read.Close()
 		return nil, err
 	}
-	s := &Store{write: write, read: read, now: now, files: files}
+	s := &Store{path: dbPath, write: write, read: read, now: now, files: files}
 	if err := s.migrate(ctx, 0); err != nil {
 		s.Close()
 		return nil, err

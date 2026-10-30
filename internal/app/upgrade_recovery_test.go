@@ -226,7 +226,7 @@ func TestUpgradeManifestCannotInventInstalledVersion(t *testing.T) {
 			h, c := upgradeHarness(t)
 			switch kind {
 			case "protocol":
-				c.Manifest.Protocol = release.Range{Min: 1, Max: 2}
+				c.Manifest.Protocol = release.Range{Min: protocol.CurrentRunnerProtocol, Max: protocol.CurrentRunnerProtocol + 1}
 			case "server-schema":
 				c.Manifest.Storage.ServerSchema.Max++
 			case "runner-journal":

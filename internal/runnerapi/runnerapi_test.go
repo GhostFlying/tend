@@ -160,6 +160,37 @@ func (e *env) envelope(op, targetID string, payload any) *protocol.Envelope {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	if op == protocol.OpRunnerHello || op == protocol.OpRunnerClaim || op == protocol.OpRunnerHeartbeat {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(b, &fields); err != nil {
+			e.t.Fatal(err)
+		}
+		if fields["runtime"] == nil || string(fields["runtime"]) == "null" {
+			if op == protocol.OpRunnerClaim {
+				missing := false
+				_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
+					_, err := store.GetHostRuntime(context.Background(), tx.Q(), "linux-1")
+					missing = err != nil
+					return nil
+				})
+				if missing {
+					e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "linux-1", protocol.HelloPayload{WorkspaceProtocol: 1}))
+				}
+			}
+			runtime := protocol.RunnerRuntime{InstanceID: "fixture-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+			_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
+				old, err := store.GetHostRuntime(context.Background(), tx.Q(), "linux-1")
+				if err == nil {
+					runtime = old.Runtime
+					runtime.Sequence++
+				}
+				return nil
+			})
+			fields["runtime"], _ = json.Marshal(runtime)
+			b, _ = json.Marshal(fields)
+		}
+	}
+
 	return &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: protocol.Target{Type: "run", ID: targetID}, Payload: b}
 }
 

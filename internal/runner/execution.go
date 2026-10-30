@@ -22,6 +22,16 @@ type ResolvedExecution struct {
 	Profile      *protocol.ExecutionProfile
 }
 
+// ManagerExecution opens the exact accepted local app-server configuration.
+type ManagerExecution struct {
+	Open         func(context.Context, string) (harness.Session, error)
+	Instructions string
+	Profile      protocol.ExecutionProfile
+}
+type ManagerExecutionResolver interface {
+	ResolveManager(context.Context, protocol.RunExecutionPin) (ManagerExecution, error)
+}
+
 func assignmentWorker(as protocol.Assignment, legacy protocol.WorkerKind) protocol.WorkerKind {
 	if as.Execution != nil {
 		return as.Execution.Worker

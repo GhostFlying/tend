@@ -10,7 +10,7 @@ import (
 // Public constructs a fresh detached projection. No private source reference, executable
 // reference, raw config/instructions, or private digest is copied into it.
 func (d *Definitions) Public() protocol.AgentInventoryProjection {
-	p := protocol.AgentInventoryProjection{FormatVersion: 1, ExecutionEnvironmentID: d.environmentID, SourceKind: protocol.AgentSourceKind(d.source.Kind),
+	p := protocol.AgentInventoryProjection{FormatVersion: d.config.FormatVersion, ExecutionEnvironmentID: d.environmentID, SourceKind: protocol.AgentSourceKind(d.source.Kind),
 		Runtimes: make([]protocol.AgentInventoryRuntime, 0, len(d.config.Runtimes)), Agents: make([]protocol.AgentInventoryDefinition, 0, len(d.config.Agents))}
 	runtimes := make(map[string]RuntimeBinding, len(d.config.Runtimes))
 	for _, r := range d.config.Runtimes {

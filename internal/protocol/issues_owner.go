@@ -8,6 +8,7 @@ type IssueSourceReference struct {
 }
 
 type CreateIssuePayload struct {
+	Manager *RequestIssueManagerPayload `json:"manager,omitempty"`
 	IssueSourceReference
 	Plan                   IssuePlan      `json:"plan"`
 	Assignee               *IssueAssignee `json:"assignee,omitempty"`

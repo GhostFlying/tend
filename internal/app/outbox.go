@@ -259,6 +259,9 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 				return err
 			}
 		}
+		if err := refreshManagerTasks(ctx, &Exec{Env: &protocol.Envelope{RequestID: d.RequestID}, Now: now, IDs: a.ids}, tx); err != nil {
+			return err
+		}
 		if kind == "" {
 			return nil
 		}

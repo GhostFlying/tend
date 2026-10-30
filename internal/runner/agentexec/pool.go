@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"os/exec"
+	"slices"
 	"sync"
 	"time"
 
@@ -42,9 +43,10 @@ type Options struct {
 }
 
 type entry struct {
-	input   BuildInput
-	workers harness.Workers
-	reason  string
+	input        BuildInput
+	workers      harness.Workers
+	reason       string
+	managerReady bool
 }
 type Pool struct {
 	options   Options
@@ -131,7 +133,18 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 			worker = protocol.WorkerOrca
 		}
 		pin := protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: int64(status.Revision), SnapshotID: status.SnapshotID, PublicSHA256: status.PublicSHA256, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: worker, BackendID: p.options.BackendID}
-		out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.reason == "" && e.workers != nil, Reason: e.reason})
+		if slices.Contains(e.input.Agent.Purposes, agentconfig.WorkerRun) {
+			out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.reason == "" && e.workers != nil, Reason: e.reason})
+		}
+		if slices.Contains(e.input.Agent.Purposes, agentconfig.IssueManager) && e.input.Runtime.Kind == agentconfig.AppServerWorker {
+			pin.Purpose = "issue_manager"
+			pin.BackendID = ""
+			reason := ""
+			if !e.managerReady {
+				reason = "manager_isolation_not_verified"
+			}
+			out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.managerReady, Reason: reason})
+		}
 	}
 	return out, nil
 }
@@ -243,6 +256,10 @@ func (p *Pool) initialize(ctx context.Context, e *entry) error {
 	}
 	e.workers = workers
 	e.reason = ""
+	e.managerReady = p.probeManager(ctx, e)
+	if managerPurpose(e) && !e.managerReady {
+		return errors.New("manager native isolation is not verified")
+	}
 	return nil
 }
 
@@ -265,6 +282,11 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	for _, e := range entries {
 		if canProbe(e.reason) {
 			retry = errors.Join(retry, p.initialize(ctx, e))
+		} else if e.reason == "" && managerPurpose(e) && !e.managerReady {
+			e.managerReady = p.probeManager(ctx, e)
+			if !e.managerReady {
+				retry = errors.Join(retry, errors.New("manager native isolation is not verified"))
+			}
 		}
 	}
 	return retry

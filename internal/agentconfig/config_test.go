@@ -106,7 +106,7 @@ func TestTypedValidationRejectsUnsupportedDefinitions(t *testing.T) {
 		name, code, path string
 		change           func(*Config)
 	}{
-		{"version", "unsupported_format", "$.format_version", func(c *Config) { c.FormatVersion = 2 }},
+		{"version", "unsupported_format", "$.format_version", func(c *Config) { c.FormatVersion = 3 }},
 		{"duplicate-runtime", "duplicate_id", "$.runtimes[3].runtime_id", func(c *Config) { c.Runtimes = append(c.Runtimes, c.Runtimes[0]) }},
 		{"duplicate-agent-different-runtime", "duplicate_id", "$.agents[3].local_id", func(c *Config) {
 			a := c.Agents[0]

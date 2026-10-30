@@ -14,13 +14,14 @@ import (
 
 // Host is the claiming host as configured, with its current load.
 type Host struct {
-	Executors []Executor
-	ID        string
-	OS        string
-	Active    bool
-	Labels    []string
-	Repos     []string
-	Slots     int64
+	IssueManagers bool
+	Executors     []Executor
+	ID            string
+	OS            string
+	Active        bool
+	Labels        []string
+	Repos         []string
+	Slots         int64
 	// Busy counts the host's runs that have not finished.
 	WorkspaceProtocol int64
 	Busy              int64
@@ -33,6 +34,9 @@ type Host struct {
 
 // Candidate is a pending action together with the facts the rules need.
 type Candidate struct {
+	ManagerAuthorizationInvalid bool
+	Manager                     *protocol.IssueManagerSpec
+	ManagerPin                  *protocol.RunExecutionPin
 	// NamedExecutionAssigned is derived from existing run pins for this spec.
 	NamedExecutionAssigned bool
 	// WorkspaceLegacyBindings prevents changing the backend contract of queued legacy peers.
@@ -113,6 +117,18 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 	if reason := HeldReason(c); reason != nil {
 		return reason
 	}
+	if c.Manager != nil {
+		if !h.IssueManagers {
+			return waitReason(protocol.QueueHostRequirements, "runner does not support issue managers")
+		}
+		if c.WorkspaceOccupied {
+			return waitReason(protocol.QueueWorkspaceBusy, "manager execution requires reconciliation")
+		}
+		if _, reason := SelectExecution(h, c); reason != "" {
+			return waitReason(protocol.QueueHostRequirements, reason)
+		}
+		return nil
+	}
 	switch {
 	case c.Requirements.HostID != "" && c.Requirements.HostID != h.ID:
 		return waitReason(protocol.QueueHostRequirements, "task requires another host")
@@ -153,9 +169,11 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 // when only the hosts decide.
 func HeldReason(c Candidate) *protocol.QueueWaitReason {
 	switch {
+	case c.ManagerAuthorizationInvalid:
+		return waitReason(protocol.QueueTaskBlocked, "manager publication source changed or was withdrawn; explicit reauthorization is required")
 	case c.Status != protocol.ActionPending:
 		return waitReason(protocol.QueueTaskBlocked, "action is not pending")
-	case c.Kind != protocol.ActionImplement && c.Kind != protocol.ActionAccept:
+	case c.Kind != protocol.ActionImplement && c.Kind != protocol.ActionAccept && c.Kind != protocol.ActionCoordinate:
 		return waitReason(protocol.QueueTaskBlocked, "action is not runnable")
 	case c.TargetSpecVersion != c.SpecVersion:
 		return waitReason(protocol.QueueTaskBlocked, "action targets an older spec version")
