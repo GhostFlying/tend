@@ -1,7 +1,7 @@
 .source {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
-  margin: 12px 0;
+  border-radius: var(--radius-m);
+  padding: var(--space-4);
+  margin: var(--space-3) 0;
   background: var(--bg-l1);
 }

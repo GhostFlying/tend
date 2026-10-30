@@ -1,7 +1,7 @@
 // Display actual resource identity separately from the requested workspace spec.
 import type { TaskDetail } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
-import controls from "../shell/controls.module.css";
+import { Button } from "../ui/Button.tsx";
 import styles from "./Deliverables.module.css";
 
 const modeLabels: Record<string, string> = {
@@ -45,9 +45,9 @@ export function WorkspaceFacts({ task }: { task: TaskDetail }) {
       {source && (
         <p>
           复用来源{" "}
-          <button type="button" className={controls.link} onClick={() => openTask(source)}>
+          <Button type="button" variant="link" onClick={() => openTask(source)}>
             {source}
-          </button>
+          </Button>
         </p>
       )}
       {resource ? (
@@ -87,13 +87,13 @@ export function WorkspaceFacts({ task }: { task: TaskDetail }) {
                 {resource.occupied_by === task.task_id ? (
                   "当前任务"
                 ) : (
-                  <button
+                  <Button
                     type="button"
-                    className={controls.link}
+                    variant="link"
                     onClick={() => openTask(resource.occupied_by!)}
                   >
                     {resource.occupied_by}
-                  </button>
+                  </Button>
                 )}
               </dd>
             </>

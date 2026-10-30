@@ -4,7 +4,7 @@ import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
 import styles from "./WorkItems.module.css";
-import controls from "../shell/controls.module.css";
+import { Button } from "../ui/Button.tsx";
 
 const labels: Record<string, string> = {
   answered: "已回答",
@@ -50,28 +50,29 @@ export function ChoiceCard({
       {reading.error && (
         <p role="status" className={styles.notice}>
           选择状态更新失败，正在重试。暂不能回答旧选择。
-          <button
+          <Button
             type="button"
-            className={controls.link}
+            variant="link"
             disabled={reading.loading || connection.status !== "online"}
             onClick={() => void live.choiceChanged(choice.choice_id)}
           >
             刷新选择状态
-          </button>
+          </Button>
         </p>
       )}
       {choice.recommendation && <p className={styles.meta}>建议：{choice.recommendation}</p>}
       <div className={styles.actions}>
         {(choice.options ?? []).map((option) => (
-          <button
+          <Button
             type="button"
             key={option}
-            className={controls.chipBtn}
+            variant="secondary"
+            size="s"
             disabled={disabled}
             onClick={() => void response.answer(choice, option)}
           >
             {option}
-          </button>
+          </Button>
         ))}
       </div>
       <details className={styles.choiceOther}>
@@ -91,28 +92,28 @@ export function ChoiceCard({
               rows={2}
             />
           </label>
-          <button type="submit" className={controls.chipBtn} disabled={disabled || !text.trim()}>
+          <Button type="submit" variant="secondary" size="s" disabled={disabled || !text.trim()}>
             发送回答
-          </button>
+          </Button>
         </form>
       </details>
       {state.unknown && (
         <div className={styles.actions}>
-          <button
-            className={controls.link}
+          <Button
+            variant="link"
             disabled={state.pending || connection.status !== "online"}
             onClick={() => void response.check()}
           >
             核对回答
-          </button>
+          </Button>
           {state.unknown.missing && (
-            <button
-              className={controls.link}
+            <Button
+              variant="link"
               disabled={state.pending || connection.status !== "online"}
               onClick={() => void response.retry()}
             >
               重试原回答
-            </button>
+            </Button>
           )}
         </div>
       )}

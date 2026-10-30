@@ -17,7 +17,7 @@
     "test": "vitest run",
     "gen": "node scripts/genapi.ts",
     "icons": "node scripts/icons.ts",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm style:check && pnpm test && pnpm build",
     "test:layout": "pnpm build && node scripts/mobile-layout.ts",
     "test:decision-layout": "pnpm build && node scripts/decision-layout-investigation.ts",
     "test:repos-layout": "node scripts/repo-layout.ts",
@@ -27,7 +27,8 @@
     "test:delivery-refresh": "node scripts/delivery-refresh-layout.ts",
     "test:followups": "pnpm build && node scripts/followups-layout.ts",
     "test:issue-surfaces-layout": "pnpm build && node scripts/issue-surfaces-layout.ts",
-    "test:issue-detail-layout": "pnpm build && node scripts/issue-detail-layout.ts"
+    "test:issue-detail-layout": "pnpm build && node scripts/issue-detail-layout.ts",
+    "style:check": "node scripts/style-check.ts"
   },
   "dependencies": {
     "markdown-it": "^15.0.3",

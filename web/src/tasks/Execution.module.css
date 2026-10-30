@@ -4,7 +4,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px 8px;
+  gap: 5px var(--space-2);
   min-width: 0;
   max-width: 100%;
 }
@@ -19,7 +19,7 @@
   align-items: center;
   padding: 2px 7px;
   border-radius: var(--radius-s);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   font-weight: 500;
   line-height: 1.5;
   color: var(--label-2);
@@ -41,7 +41,7 @@
 .reason,
 .empty {
   color: var(--label-3);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }

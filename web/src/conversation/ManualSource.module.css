@@ -9,21 +9,21 @@
 .files {
   padding: 18px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   background: var(--bg-l1);
   align-self: start;
-  margin-top: 20px;
+  margin-top: var(--space-5);
 }
 .files h2 {
-  margin: 0 0 12px;
-  font-size: var(--text-m);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-label);
 }
 .files > div {
-  margin: 12px 0;
+  margin: var(--space-3) 0;
 }
 .filePicker {
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-s);
   padding: 9px 14px;
   display: inline-flex;
   cursor: pointer;
@@ -42,14 +42,14 @@
 .metadata {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--space-4);
 }
 @media (max-width: 760px) {
   .columns {
     display: block;
   }
   .files {
-    margin-top: 12px;
+    margin-top: var(--space-3);
   }
   .metadata {
     display: block;
@@ -58,13 +58,13 @@
 
 .target {
   border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 12px 16px;
-  margin: 16px 0;
+  border-radius: var(--radius-s);
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-4) 0;
   background: var(--bg-l1);
 }
 .target p {
   margin: 6px 0;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   overflow-wrap: anywhere;
 }

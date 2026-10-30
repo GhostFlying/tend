@@ -70,7 +70,10 @@ function IssueNode({
   return (
     <>
       <div className={styles.treeRow} role="treeitem" aria-expanded={open} aria-level={depth + 1}>
-        <div className={styles.treeTitle} style={{ paddingLeft: depth * 16 }}>
+        <div
+          className={styles.treeTitle}
+          style={{ paddingLeft: `calc(${depth} * var(--space-4))` }}
+        >
           <button
             className={styles.chevron}
             aria-label={`${open ? "折叠" : "展开"} ${item.title}`}

@@ -1,0 +1,27 @@
+.group {
+  display: flex;
+  gap: var(--space-1);
+}
+.group button {
+  min-height: var(--control-m);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-m);
+  color: var(--label-2);
+  font-size: var(--text-label);
+}
+.group button:hover {
+  background: var(--hover);
+}
+.group button[aria-selected="true"],
+.group button[aria-checked="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.tabs {
+  border-bottom: 1px solid var(--border);
+}
+.segmented {
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+}

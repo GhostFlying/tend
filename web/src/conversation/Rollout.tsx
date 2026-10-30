@@ -91,7 +91,9 @@ function Record({ record: r, path }: { record: AgentRolloutRecord; path: string 
         {new Date(r.created_at).toLocaleTimeString()} · {r.kind}
       </summary>
       <p>Turn：{r.turn_id || "—"}</p>
-      <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 11 }}>
+      <pre
+        style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: "var(--text-micro)" }}
+      >
         {window.text}
       </pre>
       {error && <p role="alert">{error}</p>}

@@ -36,15 +36,27 @@
   --err: #d93c3c;
   --idle: rgba(15, 17, 21, 0.28);
 
+  /* semantic foregrounds and overlays */
+  --on-accent: #fff;
+  --on-state: #fff;
+  --danger: #b93b3b;
+  --backdrop-soft: rgba(0, 0, 0, 0.18);
+  --backdrop: rgb(0 0 0 / 30%);
+  --backdrop-strong: rgb(0 0 0 / 35%);
+  --backdrop-dialog: rgb(0 0 0 / 40%);
+  --backdrop-image: rgb(0 0 0 / 65%);
+  --err-soft: rgba(217, 60, 60, 0.08);
+  --ok-soft: rgba(34, 160, 107, 0.08);
+
   /* elevation */
   --shadow-2: 0 2px 6px rgba(15, 17, 21, 0.04), 0 8px 24px rgba(15, 17, 21, 0.08);
 
   /* shape */
-  --radius-xs: 5px;
+  --radius-xs: 4px;
   --radius-s: 6px;
   --radius-m: 8px;
   --radius-l: 12px;
-  --radius-xl: 20px;
+  --radius-xl: 16px;
   --radius-bubble: 22px;
   --radius-pill: 999px;
 
@@ -53,14 +65,52 @@
     -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
   --mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
-  --text-xs: 11px;
-  --text-s: 12px;
-  --text-m: 13px;
-  --text-base: 14px;
-  --text-l: 15px;
-  --text-xl: 17px;
-  --leading-base: 22px;
-  --leading-l: 24px;
+  --text-micro: 11px;
+  --leading-micro: 15px;
+  --text-caption: 12px;
+  --leading-caption: 16px;
+  --text-label: 13px;
+  --leading-label: 18px;
+  --text-body: 14px;
+  --leading-body: 20px;
+  --text-body-lg: 15px;
+  --leading-body-lg: 22px;
+  --text-title-sm: 16px;
+  --leading-title-sm: 22px;
+  --text-title: 18px;
+  --leading-title: 24px;
+  /* Preserve existing display sizes while migrating pages without reflow. */
+  --text-subheading: 20px;
+  --leading-subheading: 26px;
+  --text-title-lg: 22px;
+  --leading-title-lg: 28px;
+  --text-display-sm: 24px;
+  --leading-display-sm: 30px;
+  --text-display-m: 28px;
+  --leading-display-m: 34px;
+  --text-display: 32px;
+  --leading-display: 40px;
+
+  /* spacing, layers and controls */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --z-sticky: 1;
+  --z-raised: 2;
+  --z-floating: 5;
+  --z-dropdown: 20;
+  --z-sheet: 45;
+  --z-dialog: 80;
+  --z-toast: 100;
+  --control-s: 28px;
+  --control-m: 32px;
+  --control-l: 40px;
+  --control-touch: 44px;
 
   /* motion */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -100,6 +150,17 @@ body[data-dark] {
   --warn-soft: rgba(229, 160, 0, 0.16);
   --warn-text: #f2c14e;
   --idle: rgba(236, 237, 240, 0.28);
+
+  --on-accent: #151517;
+  --on-state: #fff;
+  --danger: #b93b3b;
+  --backdrop-soft: rgba(0, 0, 0, 0.18);
+  --backdrop: rgb(0 0 0 / 30%);
+  --backdrop-strong: rgb(0 0 0 / 35%);
+  --backdrop-dialog: rgb(0 0 0 / 40%);
+  --backdrop-image: rgb(0 0 0 / 65%);
+  --err-soft: rgba(217, 60, 60, 0.16);
+  --ok-soft: rgba(34, 160, 107, 0.16);
 
   --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);
 
