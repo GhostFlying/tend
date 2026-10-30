@@ -956,7 +956,9 @@ func TestFault_TakeoverReplyLostThenHandedBack(t *testing.T) {
 }
 
 func TestTakeoverWhilePausedIsHandedBack(t *testing.T) {
-	srv := newServer(t, 400*time.Millisecond)
+	// Ownership transfer must not depend on lease expiry during instrumented IO.
+	clock := testkit.NewClock()
+	srv := newServer(t, 400*time.Millisecond, clock.Now)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
 			return testkit.WorkerScript{Gate: make(chan struct{})}
@@ -965,12 +967,19 @@ func TestTakeoverWhilePausedIsHandedBack(t *testing.T) {
 	})
 	n.start()
 	task := srv.createTask()
+	n.diagnoseFailure(task)
 	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
 	srv.setMode(task, protocol.ControlPaused)
 	eventually(t, "the paused worker is stopped", func() bool { return len(n.workers.Stopped()) == 1 })
 	// No worker runs when the owner takes over and later hands back.
 	srv.setMode(task, protocol.ControlHumanControl)
-	time.Sleep(300 * time.Millisecond)
+	j := n.journal()
+	defer j.Close()
+	runID := n.workers.Started()[0].RunID
+	eventually(t, "the runner journals the owner's hold", func() bool {
+		run, err := j.Run(t.Context(), runID)
+		return err == nil && run.Held
+	})
 	srv.setMode(task, protocol.ControlManaged)
 	eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
 	if started := n.workers.Started(); !started[1].HandBack {
