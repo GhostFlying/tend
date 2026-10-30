@@ -3,7 +3,7 @@ import type { Connection } from "../api/client.ts";
 import type { HostView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
-import controls from "../shell/controls.module.css";
+import { EmptyState } from "../ui/Surfaces.tsx";
 import { hostMaintaining, hostMaintenanceLabel, hostOnline } from "./status.ts";
 import styles from "./Hosts.module.css";
 
@@ -76,9 +76,7 @@ export function Hosts({
           </span>
         </button>
       ))}
-      {snapshot && !snapshot.hosts?.length && (
-        <p className={controls.empty}>暂无已登记的执行主机。</p>
-      )}
+      {snapshot && !snapshot.hosts?.length && <EmptyState>暂无已登记的执行主机。</EmptyState>}
       {host && <HostDetails host={host} waiting={waiting} onClose={close} />}
     </section>
   );

@@ -7,7 +7,8 @@ import { TaskExecution } from "./Execution.tsx";
 import { executionLook } from "./execution.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
-import controls from "../shell/controls.module.css";
+import { Button } from "../ui/Button.tsx";
+import { EmptyState } from "../ui/Surfaces.tsx";
 import list from "../shell/list.module.css";
 import { Hosts } from "../hosts/Hosts.tsx";
 import { hostMaintaining } from "../hosts/status.ts";
@@ -44,12 +45,12 @@ export function RecentTasks({
         {detailed && <span>最近 {Math.min(limit, state.items.length)} 条</span>}
       </div>
       {state.error && (
-        <p className={controls.empty}>
+        <EmptyState>
           读取失败{" "}
-          <button className={controls.link} onClick={() => void feed.refresh()}>
+          <Button variant="link" onClick={() => void feed.refresh()}>
             重试最近完成
-          </button>
-        </p>
+          </Button>
+        </EmptyState>
       )}
       {state.items.slice(0, limit).map((task) => (
         <button
@@ -96,7 +97,7 @@ export function RecentTasks({
         </button>
       ))}
       {!state.items.length && !state.error && (
-        <p className={controls.empty}>{state.loading ? "正在读取…" : "暂无已完成任务。"}</p>
+        <EmptyState>{state.loading ? "正在读取…" : "暂无已完成任务。"}</EmptyState>
       )}
     </section>
   );
@@ -172,10 +173,10 @@ export function TaskBoard({
   return (
     <>
       <header className={styles.head}>
-        <button type="button" className={controls.chipBtn} onClick={onChat}>
+        <Button type="button" variant="secondary" size="s" onClick={onChat}>
           <Back width={14} height={14} />
           {backLabel}
-        </button>
+        </Button>
         <h1>任务执行</h1>
         <label className={styles.filter}>
           项目
@@ -195,13 +196,13 @@ export function TaskBoard({
           ))}
         </datalist>
         {project && (
-          <button type="button" className={controls.link} onClick={() => live.tasks.setProject("")}>
+          <Button type="button" variant="link" onClick={() => live.tasks.setProject("")}>
             全部项目
-          </button>
+          </Button>
         )}
-        <button type="button" className={controls.chipBtn} onClick={() => live.tasks.refresh()}>
+        <Button type="button" variant="secondary" size="s" onClick={() => live.tasks.refresh()}>
           刷新任务
-        </button>
+        </Button>
       </header>
       <UpgradeBanner connection={connection} />
       <BoardResources connection={connection} onRepos={onRepos} />
@@ -263,9 +264,9 @@ function TaskRows({ feed }: { feed: TaskFeed }) {
       {state.error && (
         <div role="alert" className={styles.note}>
           {state.error}
-          <button className={controls.link} onClick={() => void feed.refresh()}>
+          <Button variant="link" onClick={() => void feed.refresh()}>
             重试任务列表
-          </button>
+          </Button>
         </div>
       )}
       <div className={styles.cards} aria-busy={state.loading}>

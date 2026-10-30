@@ -21,7 +21,8 @@ import {
   ratingLabels,
   taskLook,
 } from "../tasks/status.ts";
-import controls from "./controls.module.css";
+import { Button } from "../ui/Button.tsx";
+import { EmptyState } from "../ui/Surfaces.tsx";
 import styles from "./Details.module.css";
 import { DetailTabs } from "./DetailOverlay.tsx";
 import { TaskInputs } from "../workitems/Materials.tsx";
@@ -43,15 +44,15 @@ export function Details() {
         {state?.error && (
           <div role="alert">
             读取失败：{state.error}{" "}
-            <button className={controls.link} onClick={() => void live.refreshDetail()}>
+            <Button variant="link" onClick={() => void live.refreshDetail()}>
               重试
-            </button>
+            </Button>
           </div>
         )}
         {!task && !state?.error && (
-          <p className={controls.empty}>
+          <EmptyState>
             {state ? "正在读取任务…" : "点任务行或回复里的任务标签，在这里查看任务。"}
-          </p>
+          </EmptyState>
         )}
         {task && <TaskContent key={task.task_id} task={task} />}
       </div>
@@ -85,9 +86,9 @@ function ManagerTaskContent({ task }: { task: TaskDetail }) {
       <TaskControls task={task} />
       {task.manager && (
         <Section title="管理范围与会话">
-          <button className={controls.chipBtn} onClick={() => openIssue(task.manager!.issue_id)}>
+          <Button variant="secondary" size="s" onClick={() => openIssue(task.manager!.issue_id)}>
             打开 Issue 与聊天
-          </button>
+          </Button>
           {task.manager.conversation_id && <p>会话：{task.manager.conversation_id}</p>}
         </Section>
       )}
@@ -147,9 +148,9 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
       {!!t.issue_ids?.length && (
         <Section title="所属Issue">
           {t.issue_ids.map((id) => (
-            <button key={id} className={controls.chipBtn} onClick={() => openIssue(id)}>
+            <Button key={id} variant="secondary" size="s" onClick={() => openIssue(id)}>
               {id === t.primary_issue_id ? t.primary_issue_title || id : id}
-            </button>
+            </Button>
           ))}
         </Section>
       )}
@@ -188,9 +189,9 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
       {tab !== "supplement" && <TaskControls task={t} />}
       {t.lifecycle === "completed" && (
         <div className={styles.followUp}>
-          <button type="button" className={controls.chipBtn} onClick={() => followUp(t)}>
+          <Button type="button" variant="secondary" size="s" onClick={() => followUp(t)}>
             跟进 / 修改
-          </button>
+          </Button>
           <span>回到聊天补充意向，确认后手动发送</span>
         </div>
       )}
@@ -254,7 +255,7 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
       <div hidden={tab !== "execution"}>
         <Section title="本版执行进展">
           {!t.runs?.some((r) => r.spec_version === t.spec_version) && (
-            <p className={controls.empty}>暂无本版执行记录。</p>
+            <EmptyState>暂无本版执行记录。</EmptyState>
           )}
           {t.runs
             ?.filter((r) => r.spec_version === t.spec_version)
@@ -396,68 +397,76 @@ function TaskControls({ task: t }: { task: TaskDetail }) {
       {operation.pending && (
         <div className={styles.problem}>
           原管理操作待核实。
-          <button
-            className={controls.chipBtn}
+          <Button
+            variant="secondary"
+            size="s"
             disabled={operation.busy}
             onClick={() => void execute("reconcile")}
           >
             核实原管理操作
-          </button>
+          </Button>
         </div>
       )}
       {!isFinished(t) && !operation.pending && (
         <div className={styles.actions}>
           {t.control_mode === "managed" && (
-            <button
+            <Button
               disabled={busy}
-              className={controls.chipBtn}
+              variant="secondary"
+              size="s"
               onClick={() => void execute("paused")}
             >
               暂停
-            </button>
+            </Button>
           )}
           {t.control_mode !== "managed" && (
-            <button
+            <Button
               disabled={busy}
-              className={controls.chipBtn}
+              variant="secondary"
+              size="s"
               onClick={() => void execute("managed")}
             >
               {t.control_mode === "human_control" ? "交还给 tend" : "恢复"}
-            </button>
+            </Button>
           )}
           {t.control_mode !== "human_control" && (
-            <button
+            <Button
               disabled={busy}
-              className={controls.chipBtn}
+              variant="secondary"
+              size="s"
               onClick={() => void execute("human_control")}
             >
               接管
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             disabled={busy}
-            className={`${controls.chipBtn} ${styles.danger}`}
+            variant="secondary"
+            size="s"
+            className={styles.danger}
             onClick={() => setConfirmCancel(true)}
           >
             取消任务
-          </button>
+          </Button>
           {confirmCancel && (
             <div className={styles.confirm}>
               <span>确认取消『{t.title}』？</span>
-              <button
+              <Button
                 disabled={busy}
-                className={controls.chipBtn}
+                variant="secondary"
+                size="s"
                 onClick={() => void execute("cancel")}
               >
                 确认取消
-              </button>
-              <button
+              </Button>
+              <Button
                 disabled={busy}
-                className={controls.chipBtn}
+                variant="secondary"
+                size="s"
                 onClick={() => setConfirmCancel(false)}
               >
                 继续任务
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -486,7 +495,7 @@ function Artifacts({
 }) {
   return (
     <>
-      {!artifacts.length && <p className={controls.empty}>暂无可关联到本版的产物。</p>}
+      {!artifacts.length && <EmptyState>暂无可关联到本版的产物。</EmptyState>}
       {artifacts.map((artifact) => (
         <div className={styles.artifact} key={artifact.artifact_id}>
           <ArtifactDelivery value={artifact.ref} />

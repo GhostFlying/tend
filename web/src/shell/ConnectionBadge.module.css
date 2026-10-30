@@ -2,7 +2,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--label-3);
   white-space: nowrap;
 }

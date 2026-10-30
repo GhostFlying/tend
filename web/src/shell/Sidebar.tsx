@@ -10,7 +10,7 @@ import { Note } from "./Chat.tsx";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import { RecentTasks } from "../tasks/Board.tsx";
 import { IssueOverview } from "../issues/Overview.tsx";
-import controls from "./controls.module.css";
+import { Button } from "../ui/Button.tsx";
 import styles from "./Sidebar.module.css";
 import type { View } from "./TabBar.tsx";
 
@@ -64,13 +64,15 @@ export function Sidebar({
           <NextSummary onOpen={onInbox} onIssue={onIssue} summary={mainAttention} />
         </div>
         <section className={styles.tasks} aria-label="Issue与资源">
-          <button
+          <Button
             type="button"
-            className={`${controls.chipBtn} ${styles.allTasks}`}
+            variant="secondary"
+            size="s"
+            className={styles.allTasks}
             onClick={onBoard}
           >
             Issue · 白板 ›
-          </button>
+          </Button>
           <IssueOverview onSelect={onIssue} onAll={onBoard} active={view === "chat"} />
           <div className={styles.recent}>
             <RecentTasks limit={3} detailed />

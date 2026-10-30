@@ -19,7 +19,7 @@ import { theme, themeLabels, toggleTheme } from "../theme/theme.ts";
 import { useStore } from "../state/store.ts";
 import styles from "./Chat.module.css";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
-import controls from "./controls.module.css";
+import { Button } from "../ui/Button.tsx";
 import { ArrowDown } from "./icons.tsx";
 
 export function Chat({
@@ -66,30 +66,32 @@ export function Chat({
             )}
           </nav>
         }
-        <button className={controls.chipBtn} onClick={() => setSourceOpen(true)}>
+        <Button variant="secondary" size="s" onClick={() => setSourceOpen(true)}>
           来源
-        </button>
+        </Button>
         <Rollout />
-        <button
+        <Button
           type="button"
-          className={controls.chipBtn}
+          variant="secondary"
+          size="s"
           onClick={toggleTheme}
           aria-label={`切换主题：${themeLabels[choice]}`}
         >
           {themeLabels[choice]}
-        </button>
+        </Button>
         <span className={styles.mobileOnly}>
           <ConnectionBadge connection={connection} compact />
         </span>
-        <button
+        <Button
           type="button"
-          className={controls.iconBtn}
+          variant="ghost"
+          icon
           onClick={toLatest}
           title="跳到最新"
           aria-label="跳到最新"
         >
           <ArrowDown />
-        </button>
+        </Button>
       </header>
       {conversation?.kind === "consultation" && (
         <div className={styles.roleNote}>
@@ -137,9 +139,9 @@ export function Note() {
   return (
     <div className={styles.note} data-tone={n.tone} role="status">
       <span>{n.text}</span>
-      <button type="button" className={controls.link} onClick={dismissNotice}>
+      <Button type="button" variant="link" onClick={dismissNotice}>
         知道了
-      </button>
+      </Button>
     </div>
   );
 }

@@ -3,13 +3,13 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin: 8px 16px;
-  padding: 9px 12px;
+  margin: var(--space-2) var(--space-4);
+  padding: 9px var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   text-align: left;
   background: var(--bg);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   flex: none;
   min-width: 0;
 }
@@ -30,32 +30,32 @@
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100dvh - 64px);
   overflow: auto;
-  padding: 16px;
+  padding: var(--space-4);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-l);
   background: var(--bg);
   color: var(--label);
   box-shadow: var(--shadow-2);
-  font-size: 13px;
+  font-size: var(--text-label);
 }
 .panel::backdrop {
-  background: rgb(0 0 0 / 30%);
+  background: var(--backdrop);
 }
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .header h2 {
-  font-size: 18px;
+  font-size: var(--text-title);
   margin: 0;
 }
 .header button {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
-  font-size: 22px;
+  border-radius: var(--radius-m);
+  font-size: var(--text-title-lg);
 }
 .header button:hover {
   background: var(--hover);
@@ -65,7 +65,7 @@
   overflow-wrap: anywhere;
 }
 .panel h3 {
-  font-size: 16px;
+  font-size: var(--text-title-sm);
 }
 .status {
   font-weight: 600;
@@ -77,29 +77,29 @@
 .reason {
   background: var(--warn-soft);
   color: var(--warn-text);
-  padding: 8px;
-  border-radius: 8px;
+  padding: var(--space-2);
+  border-radius: var(--radius-m);
   overflow-wrap: anywhere;
 }
 .hosts {
   list-style: none;
   padding: 0;
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .hosts li {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: var(--radius-m);
+  padding: var(--space-3);
 }
 .hosts h4 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-body);
 }
 .hosts dl {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 12px;
+  gap: var(--space-2) var(--space-3);
 }
 .hosts dt {
   color: var(--label-3);

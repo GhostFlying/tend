@@ -1,26 +1,26 @@
 .materials {
   display: grid;
-  gap: 24px;
+  gap: var(--space-6);
   min-width: 0;
 }
 .materials h3 {
-  font-size: var(--text-m);
-  margin: 0 0 16px;
+  font-size: var(--text-label);
+  margin: 0 0 var(--space-4);
 }
 .gallery {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: 20px;
+  gap: var(--space-5);
 }
 .select {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .select select {
   max-width: 100%;
   min-width: 0;
-  padding: 8px;
+  padding: var(--space-2);
   color: var(--label);
   background: var(--bg);
   border: 1px solid var(--border);
@@ -31,20 +31,20 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .caption {
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--caption);
   overflow-wrap: anywhere;
 }
 .delivery {
-  margin: 20px 0;
+  margin: var(--space-5) 0;
 }
 .review {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 24px;
+  gap: var(--space-6);
 }
 .decisions {
   border-left: 1px solid var(--border-soft);
@@ -58,6 +58,6 @@
   .decisions {
     border-left: 0;
     border-top: 1px solid var(--border-soft);
-    padding: 16px 0 0;
+    padding: var(--space-4) 0 0;
   }
 }

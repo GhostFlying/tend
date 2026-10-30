@@ -19,13 +19,13 @@
   background: var(--bg);
   color: var(--label);
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-2);
-  z-index: 80;
-  padding: 24px;
+  z-index: var(--z-dialog);
+  padding: var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 .drawer header {
   display: flex;
@@ -35,18 +35,18 @@
 }
 .drawer h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-subheading);
 }
 .drawer p {
   color: var(--label-3);
-  font-size: 13px;
+  font-size: var(--text-label);
   line-height: 1.6;
 }
 .drawer input,
 .drawer select {
-  padding: 10px 12px;
+  padding: 10px var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   background: var(--bg-l1);
   color: var(--label);
   font: inherit;
@@ -61,8 +61,8 @@
   grid-template-columns: 1fr auto;
   text-align: left;
   width: 100%;
-  gap: 8px;
-  padding: 16px 4px;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-1);
   border-bottom: 1px solid var(--border-soft);
 }
 .sessionRow:hover {
@@ -76,11 +76,11 @@
 }
 .sessionRow span {
   color: var(--label-3);
-  font-size: 13px;
+  font-size: var(--text-label);
 }
 .sessionRow time,
 .sessionRow small {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--label-3);
 }
 .sessionRow small[data-status="running"] {
@@ -90,9 +90,9 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  margin-top: 8px;
+  margin-top: var(--space-2);
   align-items: center;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--label-2);
 }
 .tag {
@@ -101,10 +101,10 @@
   gap: 6px;
   max-width: 180px;
   white-space: nowrap;
-  padding: 3px 8px;
+  padding: 3px var(--space-2);
   background: var(--bg);
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-m);
 }
 .tag span {
   overflow: hidden;
@@ -120,7 +120,7 @@
   display: inline-flex;
   align-items: center;
   color: var(--accent);
-  gap: 4px;
+  gap: var(--space-1);
   padding: 3px 6px;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -140,15 +140,15 @@
   width: min(430px, calc(100vw - 24px));
   max-height: 80dvh;
   overflow: auto;
-  padding: 24px;
+  padding: var(--space-6);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: var(--bg);
   color: var(--label);
   box-shadow: var(--shadow-2);
 }
 .editor::backdrop {
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--backdrop-soft);
 }
 .editor label {
   display: flex;
@@ -161,18 +161,18 @@
   padding: 10px;
   background: var(--bg-l1);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   color: var(--label);
 }
 .editor footer {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   justify-content: flex-end;
-  margin-top: 20px;
+  margin-top: var(--space-5);
 }
 .editor footer button {
-  padding: 8px 14px;
-  border-radius: 7px;
+  padding: var(--space-2) 14px;
+  border-radius: var(--radius-s);
   background: var(--bg-l2);
 }
 .editor footer button:last-child {
@@ -203,13 +203,13 @@
   bottom: 40px;
   right: 0;
   width: min(340px, calc(100vw - 30px));
-  padding: 20px;
+  padding: var(--space-5);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-l);
   background: var(--bg);
   box-shadow: var(--shadow-2);
-  z-index: 45;
-  font-size: 13px;
+  z-index: var(--z-sheet);
+  font-size: var(--text-label);
 }
 .popover h3 {
   margin-top: 0;
@@ -220,9 +220,9 @@
   line-height: 1.7;
 }
 .popover button {
-  padding: 8px;
+  padding: var(--space-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-s);
 }
 @media (max-width: 760px) {
   .drawer {
@@ -231,7 +231,7 @@
     max-width: none;
     height: 100dvh;
     border-radius: 0;
-    padding-top: calc(20px + env(safe-area-inset-top));
+    padding-top: calc(var(--space-5) + env(safe-area-inset-top));
   }
   .tags .menu {
     opacity: 1;

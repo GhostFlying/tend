@@ -16,7 +16,7 @@
   flex-direction: column;
 }
 .dialog::backdrop {
-  background: rgb(0 0 0 / 30%);
+  background: var(--backdrop);
 }
 .dialog[data-full="true"] {
   width: 100%;
@@ -29,7 +29,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
   padding: 10px 22px;
   border-bottom: 1px solid var(--border-soft);
   flex: none;
@@ -37,7 +37,7 @@
 .actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .pane {
   flex: 1;
@@ -52,7 +52,7 @@
   display: flex;
   flex-wrap: nowrap;
   overflow-x: auto;
-  gap: 4px 20px;
+  gap: var(--space-1) var(--space-5);
   padding: 0 22px;
   border-bottom: 1px solid var(--border-soft);
 }
@@ -64,7 +64,7 @@
   background: none;
   border: 0;
   border-bottom: 2px solid transparent;
-  padding: 12px 0;
+  padding: var(--space-3) 0;
   cursor: pointer;
 }
 .tabs button[aria-pressed="true"] {
@@ -80,7 +80,7 @@
     border-radius: 0;
   }
   .toolbar {
-    padding: calc(6px + env(safe-area-inset-top)) 16px 6px;
+    padding: calc(6px + env(safe-area-inset-top)) var(--space-4) 6px;
   }
   .toolbar button,
   .tabs button {
@@ -90,7 +90,7 @@
     min-width: 44px;
   }
   .tabs {
-    padding: 0 16px;
-    gap: 0 16px;
+    padding: 0 var(--space-4);
+    gap: 0 var(--space-4);
   }
 }

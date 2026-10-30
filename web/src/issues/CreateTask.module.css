@@ -4,33 +4,33 @@
 .roles {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24px;
+  gap: var(--space-6);
 }
 .roles fieldset {
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 18px;
+  border-radius: var(--radius-m);
+  padding: var(--space-3) 18px;
 }
 .roles legend {
   padding: 0 7px;
   font-weight: 600;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .workspace {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-  margin: 24px 0 0;
+  gap: var(--space-5);
+  margin: var(--space-6) 0 0;
 }
 .workspace > label {
   margin: 0;
 }
 .receipt {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   padding: 18px;
-  margin: 24px 0;
+  margin: var(--space-6) 0;
 }
 .receipt > h3 {
   margin-top: 0;
@@ -38,13 +38,13 @@
 .receipt .roles {
   border-top: 1px solid var(--border-soft);
   border-bottom: 1px solid var(--border-soft);
-  padding: 8px 0;
+  padding: var(--space-2) 0;
 }
 @media (max-width: 760px) {
   .roles,
   .workspace {
     grid-template-columns: 1fr;
-    gap: 16px;
+    gap: var(--space-4);
   }
   .roles fieldset {
     padding: 10px 14px;
@@ -54,7 +54,7 @@
 .intro {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 24px;
+  gap: 14px var(--space-6);
   margin: 18px 0;
 }
 .intro > label {
@@ -68,11 +68,11 @@
   min-height: 80px;
 }
 .roles label {
-  margin: 12px 0;
+  margin: var(--space-3) 0;
 }
 .root h2 {
-  font-size: 18px;
-  margin: 22px 0 16px;
+  font-size: var(--text-title);
+  margin: 22px 0 var(--space-4);
 }
 @media (max-width: 760px) {
   .intro {
@@ -88,20 +88,20 @@
   padding: 0;
 }
 .root:has(> .content) > h1 {
-  margin: 20px 24px 8px;
+  margin: var(--space-5) var(--space-6) var(--space-2);
 }
 .root:has(> .content) > p {
-  margin: 0 24px 8px;
+  margin: 0 var(--space-6) var(--space-2);
 }
 .content {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 0 24px 18px;
+  padding: 0 var(--space-6) 18px;
 }
 .content .intro {
-  margin: 12px 0;
-  gap: 12px 20px;
+  margin: var(--space-3) 0;
+  gap: var(--space-3) var(--space-5);
 }
 .content .intro > label {
   grid-column: auto;
@@ -139,7 +139,7 @@
 }
 .content .roles input,
 .content .roles select {
-  padding: 8px 10px;
+  padding: var(--space-2) 10px;
 }
 .content .workspace {
   margin-top: 18px;
@@ -148,19 +148,19 @@
 .footer {
   flex: none;
   margin: 0;
-  padding: 12px 24px;
+  padding: var(--space-3) var(--space-6);
   border-top: 1px solid var(--border);
   background: var(--bg);
 }
 @media (max-width: 760px) {
   .root:has(> .content) > h1 {
-    margin: 18px 16px 8px;
+    margin: 18px var(--space-4) var(--space-2);
   }
   .root:has(> .content) > p {
-    margin-inline: 16px;
+    margin-inline: var(--space-4);
   }
   .content {
-    padding: 0 16px 16px;
+    padding: 0 var(--space-4) var(--space-4);
   }
   .content .intro > label:nth-child(n) {
     grid-row: auto;
@@ -170,6 +170,6 @@
     grid-template-columns: 1fr;
   }
   .footer {
-    padding: 10px 16px;
+    padding: 10px var(--space-4);
   }
 }

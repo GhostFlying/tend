@@ -17,30 +17,30 @@
   flex-direction: column;
 }
 .panel::backdrop {
-  background: rgb(0 0 0 / 35%);
+  background: var(--backdrop-strong);
 }
 .header {
   display: flex;
   flex: none;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px;
+  gap: var(--space-3);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--border-soft);
 }
 .header h2 {
   margin: 0 0 5px;
-  font-size: var(--text-xl);
+  font-size: var(--text-title);
 }
 .header span {
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--label-3);
 }
 .close {
   flex: none;
   width: 44px;
   height: 44px;
-  font-size: 24px;
+  font-size: var(--text-display-sm);
   border-radius: var(--radius-m);
 }
 .close:hover {
@@ -49,7 +49,7 @@
 .body {
   min-height: 0;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--space-4);
   overscroll-behavior: contain;
 }
 .body[data-embedded="true"] {
@@ -60,22 +60,22 @@
 .note {
   margin: 0 0 10px;
   color: var(--label-3);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   line-height: 1.6;
 }
 .readStatus {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
-  margin: 12px 0;
-  font-size: var(--text-s);
+  margin: var(--space-3) 0;
+  font-size: var(--text-caption);
   color: var(--label-2);
 }
 .readStatus button {
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   min-height: 44px;
 }
 .readStatus button:disabled {
@@ -89,7 +89,7 @@
 }
 .list {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .repo {
   border: 1px solid var(--border);
@@ -111,25 +111,25 @@
 .repoHead h3 {
   min-width: 0;
   margin: 0;
-  font-size: var(--text-base);
+  font-size: var(--text-body);
   font-weight: 600;
   line-height: 1.6;
 }
 .badge {
   flex: none;
-  padding: 3px 8px;
+  padding: 3px var(--space-2);
   border-radius: var(--radius-s);
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .repo[data-retired] .badge {
   background: var(--warn-soft);
   color: var(--warn-text);
 }
 .hostTitle {
-  margin: 0 0 8px;
-  font-size: var(--text-s);
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-caption);
   color: var(--label-3);
 }
 .hosts {
@@ -139,18 +139,18 @@
 }
 .hosts li {
   max-width: 100%;
-  padding: 4px 8px;
+  padding: var(--space-1) var(--space-2);
   background: var(--bg-l1);
   border-radius: var(--radius-s);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .noHosts {
   margin: 0;
   color: var(--warn-text);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   line-height: 1.6;
 }
 .empty {
-  padding: 16px 0;
+  padding: var(--space-4) 0;
   color: var(--label-3);
 }

@@ -14,7 +14,7 @@ import type {
 } from "../api/generated/api.ts";
 import type { OutgoingMessage } from "../queue/outbox.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
-import controls from "../shell/controls.module.css";
+import { Button } from "../ui/Button.tsx";
 import { Markdown } from "./Markdown.tsx";
 import styles from "./Messages.module.css";
 import {
@@ -90,15 +90,15 @@ export function OutgoingRow({
           <>
             {" "}
             ·{" "}
-            <button
+            <Button
               type="button"
-              className={controls.link}
+              variant="link"
               onClick={() =>
                 void queue?.discard(requestId).catch((error) => notify(String(error), "warn"))
               }
             >
               取消发送
-            </button>
+            </Button>
           </>
         )}
         {message.state === "sent" && `已送达 · ${clock(message.createdAt)}`}
@@ -108,36 +108,28 @@ export function OutgoingRow({
               ? "附件上传结果待核对"
               : "发送结果未知"}{" "}
             ·{" "}
-            <button
-              type="button"
-              className={controls.link}
-              onClick={() => void queue?.reconcile(requestId)}
-            >
+            <Button type="button" variant="link" onClick={() => void queue?.reconcile(requestId)}>
               查看
-            </button>{" "}
+            </Button>{" "}
             ·{" "}
-            <button
-              type="button"
-              className={controls.link}
-              onClick={() => void queue?.resend(requestId)}
-            >
+            <Button type="button" variant="link" onClick={() => void queue?.resend(requestId)}>
               重发
-            </button>{" "}
+            </Button>{" "}
             ·{" "}
           </>
         )}
         {message.state === "failed" && (
           <>
             发送失败{message.error ? `：${message.error}` : ""} ·{" "}
-            <button
+            <Button
               type="button"
-              className={controls.link}
+              variant="link"
               onClick={() =>
                 void queue?.discard(requestId).catch((error) => notify(String(error), "warn"))
               }
             >
               删除
-            </button>
+            </Button>
           </>
         )}
       </div>
