@@ -142,11 +142,15 @@ export function IssueActivity({
     }
     previousPending.current = outgoing.length;
   }, [rows, outgoing.length, scroll, reading]);
-  const latestContent = JSON.stringify(rows.at(-1));
+  const latestContent = JSON.stringify(rows);
+  const previousContent = useRef("");
   useLayoutEffect(() => {
     const node = scroll.current;
-    if (node && (following.current || reading.followsLatest()))
-      node.scrollTo({ top: node.scrollHeight });
+    if (node && previousContent.current && previousContent.current !== latestContent) {
+      if (following.current || reading.followsLatest()) node.scrollTo({ top: node.scrollHeight });
+      else requestAnimationFrame(() => setNewItems(true));
+    }
+    previousContent.current = latestContent;
   }, [latestContent, scroll, reading]);
   const earlier = async () => {
     const node = scroll.current;
