@@ -91,7 +91,7 @@ func TestFault_WorkspaceHostRetired(t *testing.T) {
 		t.Errorf("block = %s", got)
 	}
 	decs := h.openDecisions(task)
-	if len(decs) != 1 || !strings.Contains(decs[0].Question, "linux-1, which was retired") || !strings.Contains(decs[0].OptionsJSON, domain.StartOverOption) {
+	if len(decs) != 1 || !strings.Contains(decs[0].Question, "linux-1 已停用") || !strings.Contains(decs[0].OptionsJSON, domain.StartOverOption) {
 		t.Fatalf("decisions = %+v", decs)
 	}
 	if got := h.checkWorkspaces(); len(got) != 0 {
@@ -215,7 +215,7 @@ func TestFault_WorkspaceHostReturns(t *testing.T) {
 	if got := h.checkWorkspaces(); !slices.Equal(got, []string{task}) {
 		t.Fatalf("check blocked %v, want %s", got, task)
 	}
-	if decs := h.openDecisions(task); len(decs) != 1 || !strings.Contains(decs[0].Question, "has not been heard from since") {
+	if decs := h.openDecisions(task); len(decs) != 1 || !strings.Contains(decs[0].Question, "起未连接") {
 		t.Fatalf("decisions = %+v", decs)
 	}
 

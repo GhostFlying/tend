@@ -1,6 +1,5 @@
 // How decisions read in the Web (D71). tend opens its decisions with fixed
-// English questions and options (internal/domain); those are shown in
-// Chinese. A decision the main agent opened is shown as it wrote it. The
+// Chinese questions and stable English option IDs (internal/domain). A decision the main agent opened is shown as it wrote it. The
 // answer the Web sends for an option tend does not carry out is a
 // readable Chinese message that names the task and the option.
 import type { DecisionEffect, DecisionView } from "../api/generated/api.ts";
@@ -10,18 +9,18 @@ const fixedOptions: Record<string, string> = {
   "retry the implementation": "重新实现",
   "raise the budget": "提高预算",
   "retry acceptance": "重新验收",
-  "revise the spec": "修改 spec",
+  "revise the spec": "修改要求",
   "fix the acceptance environment": "修好验收环境",
   "cancel the task": "取消任务",
-  "wait for the host": "等待这台 host",
-  "start over on another host": "换一台从头再来",
+  "wait for the host": "等待主机恢复",
+  "start over on another host": "换主机重新开始",
 };
 
 export const effectLabels: Record<DecisionEffect, string> = {
   implement: "重新实现",
   accept: "重新验收",
   cancel: "取消任务",
-  start_over: "换一台从头再来",
+  start_over: "换主机重新开始",
 };
 
 const proceed = "这个任务接下来怎么办？";

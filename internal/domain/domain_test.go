@@ -561,3 +561,19 @@ func TestTakenOverOnlyByCurrentRuns(t *testing.T) {
 		t.Errorf("already held: %+v", d)
 	}
 }
+
+func TestRunFailedOwnerCopyPreservesReasonAndOptionIDs(t *testing.T) {
+	task := taskIn(protocol.TaskRunning)
+	run := RunFact{RunID: "run-example", Role: protocol.RoleImplement, SpecVersion: task.SpecVersion, Generation: task.ImplementGeneration}
+	d := RunFailed(task, run, "worker_failed")
+	if got := d.OpenDecisions[0].Question; got != "实现失败（执行 Agent 异常退出）。这个任务接下来怎么办？" {
+		t.Fatalf("question = %q", got)
+	}
+	if d.Events[0].Body["reason"] != "worker_failed" {
+		t.Fatal("reason code changed")
+	}
+	q := d.OpenDecisions[0]
+	if len(q.Options) != 3 || q.Options[0] != "retry the implementation" || q.Options[1] != "revise the spec" || q.Options[2] != "cancel the task" || q.Effects[q.Options[0]] != protocol.EffectImplement {
+		t.Fatalf("option identities changed: %+v", q)
+	}
+}
