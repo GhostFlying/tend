@@ -133,25 +133,57 @@ export function groupToolItems(items: readonly IssueConversationItem[]): IssueCo
   return groups;
 }
 
-/** Keep mounted groups while inserting backfilled replies in transcript order. */
+export interface ToolGroup {
+  key: string;
+  ids: string[];
+  grouped: boolean;
+}
+
+export function toolGroups(items: readonly IssueConversationItem[]): ToolGroup[] {
+  return groupToolItems(items).map((rows) => ({
+    key: `${rows.length > 1 ? "group" : "item"}:${rows[0]!.message_id}`,
+    ids: rows.map((row) => row.message_id),
+    grouped: rows.length > 1,
+  }));
+}
+
+/** Preserve the reading segment, never placing replies or choices inside tool groups. */
 export function retainToolGroups(
-  groups: readonly (readonly string[])[],
+  groups: readonly ToolGroup[],
   items: readonly IssueConversationItem[],
-): string[][] {
-  const positions = new Map(items.map((item, index) => [item.message_id, index]));
-  const groupEnds = new Map<string, number>();
-  for (const group of groups) {
-    const present = group.filter((id) => positions.has(id));
-    const end = positions.get(present.at(-1) ?? "");
-    if (end !== undefined) {
-      for (const id of present) groupEnds.set(id, end);
+  anchors: ReadonlyMap<string, string> = new Map(),
+): ToolGroup[] {
+  const owners = new Map(groups.flatMap((group) => group.ids.map((id) => [id, group] as const)));
+  const segments: { owner: ToolGroup | undefined; ids: string[]; tool: boolean }[] = [];
+  for (const item of items) {
+    const owner = owners.get(item.message_id);
+    const tool = !!item.tool && !item.choices?.length;
+    const previous = segments.at(-1);
+    if (tool && owner?.grouped && previous?.tool && previous.owner === owner) {
+      previous.ids.push(item.message_id);
+    } else {
+      segments.push({ owner, ids: [item.message_id], tool });
     }
   }
-  const ordered: string[][] = [];
-  for (let index = 0; index < items.length;) {
-    const end = groupEnds.get(items[index]!.message_id) ?? index;
-    ordered.push(items.slice(index, end + 1).map((item) => item.message_id));
-    index = end + 1;
+  const preserved = new Map<ToolGroup, (typeof segments)[number]>();
+  for (const segment of segments) {
+    if (!segment.owner) continue;
+    if (
+      !preserved.has(segment.owner) ||
+      segment.ids.includes(anchors.get(segment.owner.key) ?? "")
+    ) {
+      preserved.set(segment.owner, segment);
+    }
   }
-  return ordered;
+  return segments.map((segment) => {
+    const keep = segment.owner && preserved.get(segment.owner) === segment;
+    return {
+      key: keep ? segment.owner!.key : `segment:${segment.ids[0]}`,
+      ids: segment.ids,
+      grouped:
+        segment.tool &&
+        (segment.ids.length > 1 ||
+          !!(keep && segment.owner!.grouped && anchors.has(segment.owner!.key))),
+    };
+  });
 }
