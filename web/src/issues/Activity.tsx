@@ -60,10 +60,26 @@ export function IssueActivity({
   const [newItems, setNewItems] = useState(false);
   const following = useRef(reading.followsLatest());
   const readingAnchor = useRef<ScrollAnchor | null>(null);
+  const scrollportSize = useRef({ width: 0, height: 0 });
+  const dataFrame = useRef(0);
   useEffect(() => {
     const node = scroll.current;
     if (!node) return;
+    scrollportSize.current = { width: node.clientWidth, height: node.clientHeight };
+    const resized = () => {
+      if (
+        node.clientWidth === scrollportSize.current.width &&
+        node.clientHeight === scrollportSize.current.height
+      )
+        return false;
+      scrollportSize.current = { width: node.clientWidth, height: node.clientHeight };
+      if (following.current || reading.followsLatest()) node.scrollTop = node.scrollHeight;
+      else if (readingAnchor.current) restoreAnchor(node, readingAnchor.current);
+      readingAnchor.current = captureAnchor(node);
+      return true;
+    };
     const moved = () => {
+      if (resized()) return;
       following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
       if (following.current) reading.followLatest();
       else reading.pauseFollowing();
@@ -76,6 +92,7 @@ export function IssueActivity({
         !event.target.closest("summary, button[aria-expanded]")
       )
         return;
+      cancelAnimationFrame(dataFrame.current);
       following.current = false;
       reading.pauseFollowing();
       cancelAnimationFrame(frame);
@@ -83,10 +100,14 @@ export function IssueActivity({
         frame = requestAnimationFrame(moved);
       });
     };
+    const observer = new ResizeObserver(resized);
+    observer.observe(node);
     node.addEventListener("scroll", moved);
     node.addEventListener("click", disclosure, true);
     return () => {
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(dataFrame.current);
+      observer.disconnect();
       node.removeEventListener("scroll", moved);
       node.removeEventListener("click", disclosure, true);
     };
@@ -163,20 +184,32 @@ export function IssueActivity({
     }
     previousPending.current = outgoing.length;
   }, [rows, outgoing.length, scroll, reading]);
-  const latestContent = JSON.stringify(rows);
+  const activityContent = JSON.stringify(rows);
+  const latestContent = JSON.stringify([issue, rows]);
   const previousContent = useRef("");
+  const previousActivity = useRef(activityContent);
   useLayoutEffect(() => {
     const node = scroll.current;
     if (node && previousContent.current && previousContent.current !== latestContent) {
       if (following.current || reading.followsLatest()) node.scrollTo({ top: node.scrollHeight });
       else {
-        if (readingAnchor.current) restoreAnchor(node, readingAnchor.current);
-        requestAnimationFrame(() => setNewItems(true));
+        const anchor = readingAnchor.current;
+        if (anchor) {
+          restoreAnchor(node, anchor);
+          cancelAnimationFrame(dataFrame.current);
+          dataFrame.current = requestAnimationFrame(() => {
+            restoreAnchor(node, anchor);
+            readingAnchor.current = captureAnchor(node);
+          });
+        }
+        if (previousActivity.current !== activityContent)
+          requestAnimationFrame(() => setNewItems(true));
       }
     }
     if (node) readingAnchor.current = captureAnchor(node);
     previousContent.current = latestContent;
-  }, [latestContent, scroll, reading]);
+    previousActivity.current = activityContent;
+  }, [latestContent, activityContent, scroll, reading]);
   const earlier = async () => {
     const node = scroll.current;
     const anchor = node ? captureAnchor(node) : null;
