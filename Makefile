@@ -60,3 +60,13 @@ web-check: web-deps
 .PHONY: protocol-check
 protocol-check:
 	$(GO) run ./internal/protocol/compatcheck/cmd
+
+.PHONY: sandbox
+## sandbox: build Web and run an isolated scripted service (never a release)
+SANDBOX_DATA ?=
+SANDBOX_ARGS ?=
+sandbox: web
+	@data="$(SANDBOX_DATA)"; temporary=; \
+	if [ -z "$$data" ]; then data=$$(mktemp -d); temporary=1; fi; \
+	trap 'if [ -n "$$temporary" ]; then rm -rf "$$data"; fi' EXIT; \
+	$(GO) run ./cmd/tend-sandbox -data "$$data" $(SANDBOX_ARGS)

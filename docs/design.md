@@ -136,7 +136,7 @@
 | D131 | 通信模型独立于原生 Agent 会话：Web IM/CLI 使用正式发布、来源端点、投递与阅读回执；legacy conversation/rollout 保留诊断。Agent 仅选回复输入，Tend 固定渠道地址；主动通知默认 Web 与已绑定 Telegram。Telegram 单 owner 私聊，先持久化后确认更新，unknown 不重发；消费证据即时推送，渠道 MarkRead 为可选能力。PR/CI 仅预留领域更新与按需唤醒接点，协议仍为 2/1。见 docs/plans/messaging-web-telegram.md。 | 已实现 |
 | D132 | Web 界面改版（修订 D70 的单对话加覆盖层布局与 D121 UI r5 的侧栏摘要）：路由驱动的页面与可分享路径，旧 query 链接改写；侧栏只做分组导航，手机四标签；角色化 token 与共享基础组件，由检查脚本约束；界面使用用户术语，不默认显示内部标识；路由级拆包与全页面巡检。不引入路由或 UI 依赖，History API 与原生 dialog/popover 已满足需求。业务合同、owner API 与 runner wire 不变。见 docs/plans/web-ui-overhaul.md。 | 已实现 |
 
-| D133 | 交互式 Web 沙盒：独立 tend-sandbox 复用服务端组装与真实 owner API、账本、调度、工具及 runner 协议，仅替换托管 Agent 会话与 runner 的执行／工作区边界。只接受带沙盒标记的数据目录，不进入发布包、不连接真实模型或生产数据。前端回归逐步迁移到沙盒。见 docs/plans/web-sandbox.md。 | 实施中 |
+| D133 | 交互式 Web 沙盒：独立 tend-sandbox 复用服务端组装与真实 owner API、账本、调度、工具及 runner 协议，仅替换托管 Agent 会话与 runner 的执行／工作区边界。只接受带沙盒标记的数据目录，不进入发布包、不连接真实模型或生产数据。前端回归逐步迁移到沙盒。见 docs/plans/web-sandbox.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

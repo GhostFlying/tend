@@ -2,6 +2,8 @@
 
 Refs: D133、D132。Plan: S7。
 
+状态：已实现。
+
 ## 边界与提交
 
 1. 文档提交：本计划、D133 与总计划登记。
@@ -14,16 +16,18 @@ Refs: D133、D132。Plan: S7。
 
 | 输入 | 动作 |
 | --- | --- |
-| 包含“新建”或“创建” | 主会话通过 issues_create 创建 Issue；负责人会话创建其子 Issue |
-| 包含“派发”或“执行” | 主会话先创建 Issue 并通知负责人；负责人通过 issues_create_task 冻结任务要求并派发 |
+| 包含“新建”或“创建” | 主会话通过 issues_create 指派给登记的沙盒负责人；负责人只按直接发到该 Issue 会话的消息创建子 Issue；继承的新建来源不再次执行 |
+| 包含“派发”或“执行” | 主会话先创建 Issue 并共享原消息给负责人；负责人通过 issues_create_task 冻结任务要求并派发 |
 | 包含“问我” | attentions_create 创建可回答的 decision |
 | 其它 | 短中文回答，分几个 delta 延迟输出；负责人可通过 issues_read 读取上下文 |
 
-每个工具调用均以本次 turn/call 身份去重并记录真实工具事件；每轮读取、分类并提交当前消息版本及上下文 review，以满足托管逻辑 turn 合同。任务默认数秒输出进度、交付 Markdown 文件并由独立 acceptance 脚本通过；包含“失败”的任务产生失败，包含“问我”的任务通过 AskOwner 等待 UI 回答，之后继续。取消关闭所有会话和执行 goroutine。
+主会话使用当前合同仍支持的具体 hosted manager 指派，不伪造 runner manager 原生通信；执行任务仍由真实 runner 领取。demo 使用 report/files 组合交付，不保留已退役的 report delivery 字段。失败样本显示真实 failed run 与 waiting 任务，不添加不存在的 failed 任务生命周期。
+
+每个工具调用均以本次 turn/call 身份去重并记录真实工具事件；每轮读取、分类并提交当前消息版本及上下文 review，以满足托管逻辑 turn 合同。任务默认数秒输出进度、交付 Markdown 文件并由独立 acceptance 脚本通过；包含“失败”的任务产生失败，包含“问我”的任务通过 AskOwner 等待 UI 回答，之后继续。取消关闭所有会话和执行 goroutine。干净退出后持久化脚本原生身份与实际 receipt，重启恢复原会话，避免复用新进程的 turn ID；不为未知历史伪造完成。
 
 ## demo
 
-真实 app 命令配置多个项目／仓库、在线脚本主机与离线主机、Agent／类别目录；建立每个看板列（含已取消）及关闭状态的 Issues、长标题、父子层级、进展与交付／会话；建立完成、失败和运行中的任务；包含 decision、action、information 收件箱条目、主对话工具历史与 Token 用量。播种使用稳定 request_id，重复启动不重复创建；失败的播种可重试原请求，完成标记仅在完整播种后写入。真实运行任务终态自然推进，不通过 SQL 伪造状态。
+真实 app 命令配置多个项目／仓库、在线脚本主机与离线主机、Agent／类别目录；建立每个看板列（含已取消）及关闭状态的 Issues、长标题、父子层级、进展与交付／会话；建立完成、失败和运行中的任务；包含 decision、action、information 收件箱条目、主对话工具历史与 Token 用量。播种使用稳定 request_id，重复启动不重复创建；进程先启动真实 runner 并等候能力登记，再通过 app 命令播种组合交付任务；失败的播种可重试原请求，完成标记仅在完整播种后写入。真实运行任务终态自然推进，不通过 SQL 伪造状态。
 
 ## 开发入口
 
@@ -36,3 +40,7 @@ HMR：先运行沙盒，再以 `TEND_DEV_SERVER=http://localhost:8790 pnpm --dir
 默认 Go 测试使用临时目录与回环 listener，不调用外网或模型：登录与 owner API 读取每个看板列／三类 attention，主会话派发走真实工具和 runner 达到终态，owner API 回答决定并验证解决；再次播种验证幂等；错误目录与 reset 验证保护；取消等待所有后台循环退出，目标少于 30 秒。
 
 运行全部 Web 门禁与完整 make check。桌面／手机浏览器 smoke 验证派发、终态与收件箱回答，截图和日志置于仓库外，验收后停止沙盒。
+
+## 本地实施记录
+
+已实现共享组装、空目录／标记与运行锁保护、脚本工具与可取消流、回环 runner、真实文件上传、六列看板与三类 attention demo。Go 交互测试同时覆盖普通决定与 worker 问题的回答／恢复。已有 JSON fixture 脚本未改动；迁移到真实沙盒留给后续 UI 巡检。

@@ -16,6 +16,10 @@ import (
 // new session each time, sharing the threads the harness persisted, as an
 // app-server's thread store does.
 type Harness struct {
+	// ThreadPrefix optionally isolates native identities between independent fake histories.
+	ThreadPrefix string
+	// RolloutPath optionally exposes this fake history location to hosted maintenance.
+	RolloutPath string
 	// Turn plays a turn. It runs on its own goroutine after the turn
 	// started event; the turn completes when it returns, with the status
 	// it returns, unless it returns "" because it completed the turn
@@ -34,6 +38,7 @@ type Harness struct {
 	Models   []harness.Model
 	Defaults harness.ModelSelection
 
+	work           sync.WaitGroup
 	mu             sync.Mutex
 	persist        map[string]bool
 	sessions       []*FakeSession
@@ -141,7 +146,8 @@ func (s *FakeSession) Close() error {
 
 func (s *FakeSession) thread(id string, cfg harness.ThreadConfig) *FakeThread {
 	t := &FakeThread{id: id, Config: cfg, s: s, wake: make(chan struct{}, 1), events: make(chan harness.Event)}
-	go t.pump()
+	s.h.work.Add(1)
+	go func() { defer s.h.work.Done(); t.pump() }()
 	s.mu.Lock()
 	s.threads[id] = t
 	s.mu.Unlock()
@@ -152,7 +158,7 @@ func (s *FakeSession) thread(id string, cfg harness.ThreadConfig) *FakeThread {
 func (s *FakeSession) StartThread(_ context.Context, cfg harness.ThreadConfig) (harness.Thread, error) {
 	s.h.mu.Lock()
 	s.h.nextID++
-	id := fmt.Sprintf("th_%d", s.h.nextID)
+	id := fmt.Sprintf("%sth_%d", s.h.ThreadPrefix, s.h.nextID)
 	s.h.persist[id] = true
 	s.h.mu.Unlock()
 	return s.thread(id, cfg), nil
@@ -241,7 +247,9 @@ func (t *FakeThread) StartTurn(_ context.Context, in harness.TurnInput) (string,
 		h.BeforeAnswer(t, id)
 		time.Sleep(50 * time.Millisecond) // let the consumer see them first
 	}
+	h.work.Add(1)
 	go func() {
+		defer h.work.Done()
 		if h.BeforeAnswer == nil {
 			t.Emit(harness.Event{Kind: harness.EventTurnStarted, TurnID: id})
 		}
@@ -389,3 +397,49 @@ func (t *FakeThread) FindTurn(_ context.Context, identity, knownTurn string) (ha
 	result.Raw, _ = json.Marshal(result.Messages)
 	return result, found, nil
 }
+
+// Wait joins all event pumps and scripted turns after sessions have closed.
+// Turn callbacks must cooperate with their own lifetime context.
+func (h *Harness) Wait() { h.work.Wait() }
+
+// fakeHistory is the deterministic native receipt store, not Tend's ledger.
+type fakeHistory struct {
+	Version        int                            `json:"version"`
+	ThreadPrefix   string                         `json:"thread_prefix"`
+	Threads        map[string]bool                `json:"threads"`
+	Receipts       map[string]harness.TurnReceipt `json:"receipts"`
+	Identities     map[string]string              `json:"identities"`
+	ReceiptThreads map[string]string              `json:"receipt_threads"`
+	NextID         int                            `json:"next_id"`
+	NextTurn       int                            `json:"next_turn"`
+}
+
+// ExportHistory snapshots native identities and actual receipts after Wait.
+func (h *Harness) ExportHistory() ([]byte, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return json.Marshal(fakeHistory{Version: 1, ThreadPrefix: h.ThreadPrefix, Threads: h.persist, Receipts: h.receipts, Identities: h.identities, ReceiptThreads: h.receiptThreads, NextID: h.nextID, NextTurn: h.nextTurn})
+}
+
+// RestoreHistory restores a previously exported fake history before any Open.
+// It does not synthesize completion receipts for unknown or absent turns.
+func (h *Harness) RestoreHistory(raw []byte) error {
+	var history fakeHistory
+	if err := json.Unmarshal(raw, &history); err != nil {
+		return err
+	}
+	if history.Version != 1 || history.Threads == nil || history.Receipts == nil || history.Identities == nil || history.ReceiptThreads == nil || history.NextID < 0 || history.NextTurn < 0 {
+		return errors.New("fake harness: invalid native history")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.sessions) != 0 {
+		return errors.New("fake harness: history must be restored before opening")
+	}
+	h.ThreadPrefix, h.persist, h.receipts, h.identities, h.receiptThreads = history.ThreadPrefix, history.Threads, history.Receipts, history.Identities, history.ReceiptThreads
+	h.nextID, h.nextTurn = history.NextID, history.NextTurn
+	return nil
+}
+
+// RolloutPath implements harness.ThreadLocation for a configured fake history.
+func (t *FakeThread) RolloutPath() string { return t.s.h.RolloutPath }
