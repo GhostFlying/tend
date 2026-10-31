@@ -40,6 +40,8 @@ type Options struct {
 	Data     string
 	Reset    bool
 	Scenario string
+	// FastPacing keeps scripted activity near-zero for automated tests.
+	FastPacing bool
 	// Listener allows loopback tests to reserve a port without a bind race.
 	Listener net.Listener
 	// Ready runs after seeding, before serving, for test synchronization.
@@ -101,7 +103,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 	var assembled *serverkit.Runtime
 	h.Turn = func(th *testkit.FakeThread, turn string, input harness.TurnInput) string {
 		return sessions.play(th, turn, input, func(ctx context.Context, th *testkit.FakeThread, turn string, input harness.TurnInput) string {
-			return scriptedTurn(ctx, assembled, th, turn, input, log, options.replyDelta, sessions.scripts)
+			return scriptedTurn(ctx, assembled, th, turn, input, log, options.replyDelta, sessions.scripts, pacing(options.FastPacing))
 		})
 	}
 	named := hostedConfiguration()
@@ -134,7 +136,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			instance := runtime.IDs.New(protocol.Prefix("rni"))
 			r := runner.New(runner.Config{InstanceID: instance, ServerURL: "http://" + runnerListener.Addr().String(), HostID: hostID, HostToken: hostToken, Version: "sandbox",
 				Journal: j, HTTPClient: &http.Client{Transport: clientTransport}, Worker: protocol.WorkerAppServer,
-				Workers: &scriptedWorkers{}, Workspaces: workspaces{root: filepath.Join(root, "workspaces")},
+				Workers: &scriptedWorkers{pacing: pacing(options.FastPacing)}, Workspaces: workspaces{root: filepath.Join(root, "workspaces")},
 				Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: log,
 				RetryDelay: 50 * time.Millisecond, EventFlush: 50 * time.Millisecond, HeartbeatInterval: time.Second,
 			})

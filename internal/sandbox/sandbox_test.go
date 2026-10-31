@@ -91,7 +91,7 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	done := make(chan error, 1)
 	var interrupting atomic.Bool
 	go func() {
-		done <- Run(ctx, Options{Data: root, Listener: listener, replyDelta: func(ctx context.Context, _ harness.TurnInput) {
+		done <- Run(ctx, Options{FastPacing: true, Data: root, Listener: listener, replyDelta: func(ctx context.Context, _ harness.TurnInput) {
 			if interrupting.Load() {
 				<-ctx.Done()
 			}
@@ -567,7 +567,7 @@ func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
 		transport := &http.Transport{}
 		t.Cleanup(transport.CloseIdleConnections)
 		go func() {
-			done <- Run(runCtx, Options{Data: root, Listener: listener, runnerTransport: heartbeatObserver{transport, &heartbeatReplies}, Ready: func(r *serverkit.Runtime, d Demo) { ready <- started{r, d} }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
+			done <- Run(runCtx, Options{FastPacing: true, Data: root, Listener: listener, runnerTransport: heartbeatObserver{transport, &heartbeatReplies}, Ready: func(r *serverkit.Runtime, d Demo) { ready <- started{r, d} }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
 		}()
 		var once sync.Once
 		stop := func() {
@@ -726,4 +726,73 @@ func (o heartbeatObserver) RoundTrip(request *http.Request) (*http.Response, err
 		o.successful.Add(1)
 	}
 	return response, nil
+}
+
+func TestSandboxPacingProfiles(t *testing.T) {
+	live := pacing(false)
+	turn := live.thinking + 2*live.tool + live.reply
+	if turn < 6*time.Second || turn > 12*time.Second {
+		t.Fatalf("turn pacing outside observable range: %v", turn)
+	}
+	if run := 4 * live.workerStep; run < 15*time.Second || run > 25*time.Second {
+		t.Fatalf("run pacing outside observable range: %v", run)
+	}
+	fast := pacing(true)
+	if fast.thinking+2*fast.tool+fast.reply+4*fast.workerStep > time.Second {
+		t.Fatal("fast scripts should not materially delay tests")
+	}
+}
+
+func TestSandboxWorkerLiveSequence(t *testing.T) {
+	workers := &scriptedWorkers{pacing: pacing(true)}
+	worker, err := workers.Start(t.Context(), harness.WorkerSpec{RunID: "run-sequence", Role: protocol.RoleAccept})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds, types, items []string
+	for event := range worker.Events() {
+		var body struct {
+			Item string `json:"item_id"`
+			Data struct {
+				Type   string `json:"type"`
+				Status string `json:"status"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(event.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		kinds = append(kinds, event.Kind)
+		types = append(types, body.Data.Type)
+		items = append(items, body.Item)
+	}
+	if _, err := worker.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"reasoning", "mcpToolCall", "commandExecution", "agentMessage"}
+	if len(kinds) != 2*len(want)+2 || kinds[0] != "turn.started" || kinds[len(kinds)-1] != "turn.completed" {
+		t.Fatalf("expected paired lifecycle events, got %v", kinds)
+	}
+	kinds, types, items = kinds[1:len(kinds)-1], types[1:len(types)-1], items[1:len(items)-1]
+	for n, kind := range want {
+		if kinds[2*n] != "item.started" || kinds[2*n+1] != "item.completed" || types[2*n] != kind || types[2*n+1] != kind || items[2*n] != items[2*n+1] {
+			t.Fatalf("invalid stage %d: %v %v %v", n, kinds, types, items)
+		}
+	}
+}
+
+func TestSandboxWorkerPacingCancellation(t *testing.T) {
+	workers := &scriptedWorkers{pacing: scriptPacing{workerStep: time.Hour}}
+	worker, err := workers.Start(t.Context(), harness.WorkerSpec{RunID: "run-cancel", Role: protocol.RoleAccept})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-worker.Events()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := workers.Release(ctx, "run-cancel", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.Wait(); err != context.Canceled {
+		t.Fatalf("expected canceled worker, got %v", err)
+	}
 }
