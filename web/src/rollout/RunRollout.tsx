@@ -1,3 +1,4 @@
+import { runLabel } from "../tasks/runLabel.ts";
 import {
   useCallback,
   useEffect,
@@ -34,15 +35,14 @@ export function RunRollout({ runs }: { runs: readonly RunView[] }) {
           >
             {runs.map((item) => (
               <option key={item.run_id} value={item.run_id}>
-                {item.role === "accept" ? "验收" : "实施"} · 第 {item.generation} 代
-                {item.spec_version ? ` · 版本 ${item.spec_version}` : ""}
+                {runLabel(runs, item)}
               </option>
             ))}
           </select>
         )}
       </div>
       {run ? (
-        <RunWindow key={run.run_id} run={run} />
+        <RunWindow key={run.run_id} run={run} label={runLabel(runs, run)} />
       ) : (
         <p className={styles.empty}>尚未开始执行。</p>
       )}
@@ -57,7 +57,7 @@ interface ReadingPosition {
   disclosures: Record<string, string[]>;
   scrolls: Record<string, { top: number; left: number }[]>;
 }
-function RunWindow({ run }: { run: RunView }) {
+function RunWindow({ run, label }: { run: RunView; label: string }) {
   const window = useRunWindow(run.run_id);
   const steps = useMemo(() => buildSteps(window.page?.logs ?? []), [window.page]);
   const [expanded, setExpanded] = useState(false);
@@ -140,6 +140,7 @@ function RunWindow({ run }: { run: RunView }) {
       {full && (
         <Reader
           run={run}
+          label={label}
           window={window}
           steps={steps}
           target={target}
@@ -284,6 +285,7 @@ function StepDiagnostics({
 /** A second modal keeps the underlying card, its disclosures and its scrollport mounted. */
 function Reader({
   run,
+  label,
   window: state,
   steps,
   target,
@@ -292,6 +294,7 @@ function Reader({
   onClose,
 }: {
   run: RunView;
+  label: string;
   window: WindowState;
   steps: Step[];
   target: string;
@@ -444,9 +447,7 @@ function Reader({
         </button>
         <div className={styles.readerTitle}>
           <strong>执行过程</strong>
-          <span>
-            {run.role === "accept" ? "验收" : "实施"} · 第 {run.generation} 代
-          </span>
+          <span>{label}</span>
         </div>
         <span className={styles.readerState}>
           <StateMark active={active} failed={observed === "failed"} />

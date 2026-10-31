@@ -92,3 +92,14 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.group > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.group > summary::-webkit-details-marker {
+  display: none;
+}
+.group[open] > summary .chevron {
+  transform: rotate(90deg);
+}

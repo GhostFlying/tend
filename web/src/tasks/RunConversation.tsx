@@ -1,3 +1,4 @@
+import { runLabel } from "./runLabel.ts";
 import { useEffect, useState, type ReactNode } from "react";
 import type { RunView, TaskDetail, SendRunMessagePayload } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
@@ -20,7 +21,7 @@ export function RunConversation({ task, controls }: { task: TaskDetail; controls
         <select value={selected} onChange={(e) => setSelected(e.target.value)}>
           {task.runs?.map((r) => (
             <option key={r.run_id} value={r.run_id}>
-              {r.role === "implement" ? "实施" : "独立验收"} · 第 {r.generation} 轮
+              {runLabel(task.runs ?? [], r)}
             </option>
           ))}
         </select>
