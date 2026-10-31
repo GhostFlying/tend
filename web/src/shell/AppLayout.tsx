@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useStableDisclosures } from "../ui/disclosures.ts";
 import styles from "./Shell.module.css";
 
 export function AppLayout({
@@ -12,6 +13,7 @@ export function AppLayout({
   tabs: ReactNode;
   detail: boolean;
 }) {
+  useStableDisclosures();
   return (
     <div className={styles.app} data-detail={detail}>
       <aside className={styles.sidebar}>{sidebar}</aside>
