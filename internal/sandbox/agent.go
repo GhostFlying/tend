@@ -23,11 +23,19 @@ type toolCaller struct {
 	effect       int64
 	log          *slog.Logger
 	coordination chan struct{}
+	pacing       scriptPacing
 	locked       bool
 }
 
 func (c *toolCaller) invoke(name string, args, out any) bool {
 	if c.ctx.Err() != nil {
+		return false
+	}
+	c.call++
+	id := fmt.Sprintf("%s_call_%d", c.turn, c.call)
+	raw, _ := json.Marshal(args)
+	c.thread.UseTool(c.turn, id, harness.ToolUse{Name: name, Input: string(raw), Status: protocol.ToolRunning})
+	if c.call <= 2 && !delay(c.ctx, c.pacing.tool) {
 		return false
 	}
 	if !c.locked {
@@ -38,10 +46,6 @@ func (c *toolCaller) invoke(name string, args, out any) bool {
 		}
 		defer func() { c.coordination <- struct{}{} }()
 	}
-	c.call++
-	id := fmt.Sprintf("%s_call_%d", c.turn, c.call)
-	raw, _ := json.Marshal(args)
-	c.thread.UseTool(c.turn, id, harness.ToolUse{Name: name, Input: string(raw), Status: protocol.ToolRunning})
 	result := c.thread.CallTool(c.ctx, c.turn, id, name, args)
 	if c.ctx.Err() != nil {
 		return false
@@ -80,8 +84,11 @@ func (c *toolCaller) mutate(name, target string, revision *int64, payload, out a
 	return out == nil || json.Unmarshal(result.Outcome, out) == nil
 }
 
-func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.FakeThread, turn string, input harness.TurnInput, log *slog.Logger, onReplyDelta func(context.Context, harness.TurnInput), coordination chan struct{}) string {
-	c := toolCaller{ctx: ctx, thread: th, turn: turn, log: log, coordination: coordination}
+func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.FakeThread, turn string, input harness.TurnInput, log *slog.Logger, onReplyDelta func(context.Context, harness.TurnInput), coordination chan struct{}, pace scriptPacing) string {
+	c := toolCaller{ctx: ctx, thread: th, turn: turn, log: log, coordination: coordination, pacing: pace}
+	if !delay(ctx, pace.thinking) {
+		return "interrupted"
+	}
 	manager := false
 	for _, tool := range th.Config.Tools {
 		if tool.Name == "issues_turn_read" {
@@ -198,7 +205,7 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 		}
 	}
 	if respond && !input.Repair {
-		if !streamReply(ctx, th, turn, response, func() {
+		if !streamReply(ctx, th, turn, response, pace.reply, func() {
 			if onReplyDelta != nil {
 				onReplyDelta(ctx, input)
 			}
@@ -296,11 +303,12 @@ func (c *toolCaller) reviewIssue(issue protocol.IssueView) bool {
 	return c.mutate("issues_context_review", issue.IssueID, nil, review, nil)
 }
 
-func streamReply(ctx context.Context, th *testkit.FakeThread, turn, response string, firstDelta func()) bool {
+func streamReply(ctx context.Context, th *testkit.FakeThread, turn, response string, duration time.Duration, firstDelta func()) bool {
 	runes := []rune(response)
+	interval := duration / time.Duration(max(1, (len(runes)+11)/12))
 	for start := 0; start < len(runes); start += 12 {
 		end := min(start+12, len(runes))
-		if !delay(ctx, 120*time.Millisecond) {
+		if !delay(ctx, interval) {
 			return false
 		}
 		th.Emit(harness.Event{Kind: harness.EventAgentMessageDelta, TurnID: turn, ItemID: turn + "_reply", ItemType: harness.ItemAgentMessage, Text: string(runes[start:end])})
@@ -360,4 +368,19 @@ func waitCompletedReply(ctx context.Context, runtime *serverkit.Runtime, thread,
 			return false
 		}
 	}
+}
+
+// Script pacing is local to each sandbox instance, never production execution.
+type scriptPacing struct {
+	thinking   time.Duration
+	tool       time.Duration
+	reply      time.Duration
+	workerStep time.Duration
+}
+
+func pacing(fast bool) scriptPacing {
+	if fast {
+		return scriptPacing{thinking: time.Millisecond, tool: time.Millisecond, reply: 120 * time.Millisecond, workerStep: time.Millisecond}
+	}
+	return scriptPacing{thinking: 2 * time.Second, tool: 2 * time.Second, reply: 2 * time.Second, workerStep: 5 * time.Second}
 }

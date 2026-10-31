@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -17,6 +16,7 @@ import (
 )
 
 type scriptedWorkers struct {
+	pacing scriptPacing
 	mu     sync.Mutex
 	active map[string]*scriptedWorker
 }
@@ -61,16 +61,48 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 		}
 		_ = json.Unmarshal(spec.Spec, &contract)
 		fail := strings.Contains(contract.Goal, "失败")
-		steps := []string{"准备沙盒执行环境", "检查示例输入与界面要求", "生成报告并核对交付"}
-		for n, step := range steps {
-			if !delay(ctx, 400*time.Millisecond) {
-				w.err = ctx.Err()
-				return
-			}
-			raw, _ := json.Marshal(map[string]string{"text": step})
+		lifecycle := func(kind, status string) bool {
+			raw, _ := json.Marshal(map[string]any{"kind": kind, "thread_id": "sandbox-" + spec.RunID, "turn_id": spec.RunID, "data": map[string]string{"status": status}})
 			select {
-			case w.events <- harness.WorkerEvent{NativeID: fmt.Sprintf("sandbox-progress-%d", n), Kind: "item.completed", Body: raw}:
+			case w.events <- harness.WorkerEvent{NativeID: "sandbox-" + kind, Kind: kind, Body: raw}:
+				return true
 			case <-ctx.Done():
+				w.err = ctx.Err()
+				return false
+			}
+		}
+		if !lifecycle("turn.started", "running") {
+			return
+		}
+		steps := []map[string]any{
+			{"type": "reasoning", "text": "准备沙盒执行环境"},
+			{"type": "mcpToolCall", "tool": "files_read", "arguments": map[string]string{"path": "示例输入"}, "result": "已核对示例输入与界面要求"},
+			{"type": "commandExecution", "command": "sandbox-check", "aggregatedOutput": "已生成报告并核对交付；仅模拟命令，没有启动外部进程", "exitCode": 0},
+			{"type": "agentMessage", "text": "示例检查已结束，正在保存交付报告。"},
+		}
+		for n, step := range steps {
+			id := fmt.Sprintf("sandbox-progress-%d", n)
+			emit := func(kind, status string) bool {
+				data := make(map[string]any, len(step)+1)
+				for key, value := range step {
+					data[key] = value
+				}
+				data["status"] = status
+				if status == "inProgress" {
+					delete(data, "result")
+					delete(data, "aggregatedOutput")
+					delete(data, "exitCode")
+				}
+				raw, _ := json.Marshal(map[string]any{"kind": kind, "thread_id": "sandbox-" + spec.RunID, "turn_id": spec.RunID, "item_id": id, "data": data})
+				select {
+				case w.events <- harness.WorkerEvent{NativeID: id + "-" + status, Kind: kind, Body: raw}:
+					return true
+				case <-ctx.Done():
+					w.err = ctx.Err()
+					return false
+				}
+			}
+			if !emit("item.started", "inProgress") || !delay(ctx, workers.pacing.workerStep) || !emit("item.completed", "completed") {
 				w.err = ctx.Err()
 				return
 			}
@@ -86,10 +118,14 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 			}
 		}
 		if fail {
+			_ = lifecycle("turn.completed", "failed")
 			w.err = errors.New("scripted sandbox failure: no production operation was attempted")
 			return
 		}
 		if spec.Role == protocol.RoleAccept {
+			if !lifecycle("turn.completed", "completed") {
+				return
+			}
 			w.result = harness.WorkerResult{Summary: "独立脚本检查了示例报告。", Verdict: &protocol.VerdictPayload{Verdict: protocol.VerdictPassed, Evidence: json.RawMessage(`{"sandbox":"report checked independently"}`)}}
 			return
 		}
@@ -102,6 +138,9 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 		uploaded, err := spec.UploadFile(ctx, file, "sandbox-report.md")
 		if err != nil {
 			w.err = err
+			return
+		}
+		if !lifecycle("turn.completed", "completed") {
 			return
 		}
 		w.result = harness.WorkerResult{Summary: "已交付示例报告，等待独立验收。", Result: &protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: report, Evidence: []string{"沙盒脚本输出"}}, Files: []protocol.ArtifactFile{uploaded}}}
