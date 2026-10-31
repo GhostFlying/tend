@@ -460,7 +460,8 @@ export function IssueDetails({
                     {issue.progress && (
                       <>
                         {" "}
-                        · 进展更新于 {new Date(issue.progress.updated_at).toLocaleString("zh-CN")}
+                        · 由 <AssigneeName assignee={issue.progress.updated_by} /> 更新 ·{" "}
+                        {new Date(issue.progress.updated_at).toLocaleString("zh-CN")}
                       </>
                     )}
                   </p>

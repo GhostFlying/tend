@@ -233,7 +233,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 		out.NextBefore = refs[len(refs)-1].seq
 	}
 	for _, r := range refs {
-		entry := protocol.IssueActivityEntry{ID: fmt.Sprintf("event:%d", r.seq), Position: r.seq, Kind: r.kind, CreatedAt: r.at, Author: "system", Title: issueActivityTitles[r.kind]}
+		entry := protocol.IssueActivityEntry{ID: fmt.Sprintf("event:%d", r.seq), Position: r.seq, Kind: r.kind, CreatedAt: r.at, Author: "tend", Title: issueActivityTitles[r.kind]}
 		if r.kind == "conversation" {
 			block, err := TranscriptBlock(ctx, q, r.id, 0, 50)
 			if err != nil {
@@ -255,8 +255,12 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 				entry.Author = frozen
 			}
 		} else {
-			var body string
-			if err := q.QueryRowContext(ctx, `SELECT body_json FROM events WHERE event_seq=?`, r.seq).Scan(&body); err != nil {
+			var body, actor string
+			if err := q.QueryRowContext(ctx, `SELECT body_json,COALESCE(actor_json,'') FROM events WHERE event_seq=?`, r.seq).Scan(&body, &actor); err != nil {
+				return out, err
+			}
+			entry.Author, err = issueActivityAuthor(ctx, q, actor, r.at)
+			if err != nil {
 				return out, err
 			}
 			var facts struct {
@@ -366,4 +370,42 @@ func recoveryActivityTitle(kind string) string {
 	default:
 		return issueActivityTitles["run.recovery"]
 	}
+}
+
+// Attribution comes from the immutable request principal, not the current Issue
+// assignee. Frozen selections keep old activity correct after a handoff.
+func issueActivityAuthor(ctx context.Context, q store.Querier, raw string, at int64) (string, error) {
+	var actor protocol.Principal
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &actor); err != nil {
+			return "", err
+		}
+	}
+	switch actor.Kind {
+	case protocol.PrincipalOwner:
+		return "你", nil
+	case protocol.PrincipalMainAgent:
+		return "主 Agent", nil
+	case protocol.PrincipalBackgroundAgent:
+		return activityDisplayName(ctx, q, "负责人 Agent", `SELECT COALESCE(json_extract(h.private_snapshot,'$.definition.display_name'),'') FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id JOIN agent_conversations c ON c.conversation_id=h.conversation_id WHERE h.conversation_id=? AND c.work_item_id IS NOT NULL AND (?='' OR t.thread_id=?) AND h.created_at<=? ORDER BY h.created_at DESC,h.execution_id DESC LIMIT 1`, actor.ConversationID, actor.Thread, actor.Thread, at)
+	case protocol.PrincipalRun:
+		return activityDisplayName(ctx, q, "执行 Agent", `SELECT COALESCE(json_extract(a.value,'$.display_name'),'') FROM run_agent_executions e JOIN agent_inventory_versions v ON v.host_id=json_extract(e.pin_json,'$.identity.execution_environment_id') AND v.server_revision=json_extract(e.pin_json,'$.inventory_revision'),json_each(v.projection_json,'$.agents') a WHERE e.run_id=? AND json_extract(a.value,'$.identity.local_id')=json_extract(e.pin_json,'$.identity.local_id') LIMIT 1`, actor.Subject)
+	case protocol.PrincipalRunner:
+		// Hosts have no display-name field in the current catalog projection.
+		return "执行主机", nil
+	default:
+		return "tend", nil
+	}
+}
+
+func activityDisplayName(ctx context.Context, q store.Querier, fallback, query string, args ...any) (string, error) {
+	var name string
+	err := q.QueryRowContext(ctx, query, args...).Scan(&name)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if name == "" {
+		name = fallback
+	}
+	return name, nil
 }

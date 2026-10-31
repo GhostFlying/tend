@@ -231,15 +231,16 @@
   flex: 1;
 }
 .milestone time {
-  display: block;
   color: var(--label-3);
   font-size: var(--text-micro);
 }
 .milestoneDot {
-  background: var(--idle);
+  display: grid;
+  place-items: center;
+  background: var(--bg-l2);
   border-radius: 50%;
-  height: 6px;
-  width: 6px;
+  height: 24px;
+  width: 24px;
   flex: none;
 }
 .delivery {

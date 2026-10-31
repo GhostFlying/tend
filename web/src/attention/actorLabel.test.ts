@@ -8,3 +8,8 @@ test("protocol run principals distinguish worker questions from manager question
   expect(actorLabel({ kind: "run", role: "accept" })).toBe("执行 Agent");
   expect(actorLabel({ kind: "run", role: "issue_manager" })).toBe("负责人 Agent");
 });
+
+test("keeps host and system attribution distinct from managers", () => {
+  expect(actorLabel({ kind: "runner", subject: "host" })).toBe("执行主机");
+  expect(actorLabel({ kind: "system" })).toBe("tend");
+});
