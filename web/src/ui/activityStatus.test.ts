@@ -81,3 +81,27 @@ describe("live activity status", () => {
     expect(activitySummary(conversationStatus([], "replied"), NaN)).toContain("用时未知");
   });
 });
+
+it("does not fabricate run time from child lifecycles in a newest window", () => {
+  const child = (seq: number, kind: string): RunLogView => ({
+    seq,
+    kind: "native.child",
+    created_at: `2026-01-01T00:00:0${seq}Z`,
+    body: { kind, thread_id: "child", turn_id: "child-turn" },
+  });
+  const children = [child(2, "turn_started"), child(3, "turn_completed")];
+  const status = runActivityStatus(children, "finished");
+  expect(status.startedAt).toBe(null);
+  expect(status.endedAt).toBe(null);
+  expect(activitySummary(status, NaN)).toContain("用时未知");
+  const root: RunLogView = {
+    seq: 1,
+    kind: "native.turn_started",
+    created_at: "2026-01-01T00:00:01Z",
+    body: {},
+  };
+  const rooted = runActivityStatus([root, ...children], "finished");
+  expect(rooted.startedAt).toBe(Date.parse(root.created_at));
+  expect(rooted.endedAt).toBe(null);
+  expect(activitySummary(rooted, NaN)).toContain("用时未知");
+});

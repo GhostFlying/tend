@@ -829,6 +829,17 @@ try {
       const n = document.querySelector("[data-issue-scroll]")!;
       return n.scrollHeight > previousHeight && n.scrollHeight - n.scrollTop - n.clientHeight < 20;
     }, previousHeight);
+    // Resize only the scrollport: existing latest intent must stay at bottom.
+    await page.setViewportSize({ width: width > 760 ? 390 : 1440, height: 844 });
+    await page.waitForFunction(() => {
+      const node = document.querySelector("[data-issue-scroll]")!;
+      return node.scrollHeight - node.scrollTop - node.clientHeight < 2;
+    });
+    await page.setViewportSize({ width, height: 1000 });
+    await page.waitForFunction(() => {
+      const node = document.querySelector("[data-issue-scroll]")!;
+      return node.scrollHeight - node.scrollTop - node.clientHeight < 2;
+    });
     const laterEntry = detail.locator('[data-scroll-id="result:artifact-one"]');
     await laterEntry.scrollIntoViewIfNeeded();
     await scroller.evaluate((node) => {
@@ -849,6 +860,24 @@ try {
         2,
       "streamed reply above paused Issue reading displaced the later entry",
     );
+    const originalProgress = issue.progress!.summary;
+    issue.progress!.summary = "单独到达的当前进展更新。\n\n".repeat(60);
+    issue.revision++;
+    publish();
+    await detail
+      .getByText(/单独到达的当前进展更新/)
+      .first()
+      .waitFor({ state: "attached" });
+    await page.waitForTimeout(100);
+    assert(
+      Math.abs((await laterEntry.evaluate((node) => node.getBoundingClientRect().top)) - entryY) <=
+        2,
+      "independent Issue progress detail update displaced paused activity reading",
+    );
+    issue.progress!.summary = originalProgress;
+    issue.revision++;
+    publish();
+    await page.waitForTimeout(100);
     reply.body = originalBody;
     reply.assistant_revision!++;
     publish();
