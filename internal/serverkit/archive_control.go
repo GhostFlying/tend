@@ -1,4 +1,4 @@
-package main
+package serverkit
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/GhostFlying/tend/internal/cfgfile"
 )
 
-func archiveControlSocket(configured string, upgrade *upgradeConfig, dataDir string) (string, error) {
+func archiveControlSocket(configured string, upgrade *UpgradeConfig, dataDir string) (string, error) {
 	if runtime.GOOS == "windows" {
 		if configured != "" {
 			return "", errors.New("local archive control requires a Unix socket host")

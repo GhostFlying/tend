@@ -1,4 +1,4 @@
-package main
+package serverkit
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 // deploymentObservation binds local updater proof to this actual executable,
 // not the newest batch (which can update only runners or fail before install).
-func deploymentObservation(cfg *upgradeConfig, ids protocol.IDGen) (app.Option, error) {
+func deploymentObservation(cfg *UpgradeConfig, ids protocol.IDGen) (app.Option, error) {
 	hash, err := executableSHA256()
 	if err != nil {
 		return nil, err

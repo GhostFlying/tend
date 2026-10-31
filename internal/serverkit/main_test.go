@@ -1,9 +1,14 @@
-package main
+package serverkit
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -44,7 +49,7 @@ func TestServerRoutesRunnerFilesAndRPC(t *testing.T) {
 }
 
 func TestExampleConfigLoads(t *testing.T) {
-	var c config
+	var c Config
 	if err := cfgfile.Load("../../docs/examples/tend-server.hujson", &c); err != nil {
 		t.Fatal(err)
 	}
@@ -57,19 +62,19 @@ func TestExampleConfigLoads(t *testing.T) {
 func TestBackgroundAutoModeWorkingDirectories(t *testing.T) {
 	root := t.TempDir()
 	custom := t.TempDir()
-	main, err := mainAgentWorkingDirectory(mainAgentConfig{Cwd: custom}, root)
+	main, err := mainAgentWorkingDirectory(MainAgentConfig{Cwd: custom}, root)
 	if err != nil || main != custom {
 		t.Fatalf("main cwd=%q err=%v", main, err)
 	}
-	a, err := mainAgentWorkingDirectory(mainAgentConfig{Cwd: custom, ConversationID: "work-item:a"}, root)
+	a, err := mainAgentWorkingDirectory(MainAgentConfig{Cwd: custom, ConversationID: "work-item:a"}, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := mainAgentWorkingDirectory(mainAgentConfig{ConversationID: "work-item:a"}, root)
+	again, err := mainAgentWorkingDirectory(MainAgentConfig{ConversationID: "work-item:a"}, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := mainAgentWorkingDirectory(mainAgentConfig{ConversationID: "work-item:b"}, root)
+	b, err := mainAgentWorkingDirectory(MainAgentConfig{ConversationID: "work-item:b"}, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +108,7 @@ func TestServerRejectsUnnamedHostedConfigurationBeforeLedgerOpen(t *testing.T) {
 			if err := os.WriteFile(path, raw, 0600); err != nil {
 				t.Fatal(err)
 			}
-			err = run(t.Context(), path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			err = RunFile(t.Context(), path, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			if err == nil {
 				t.Fatal("missing secret unexpectedly admitted startup")
 			}
@@ -118,5 +123,29 @@ func TestServerRejectsUnnamedHostedConfigurationBeforeLedgerOpen(t *testing.T) {
 				t.Fatal("configuration rejection opened/created business data", err)
 			}
 		})
+	}
+}
+
+func TestInjectedAssemblyRunsHooksAndReturnsBackgroundFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured, initialized := false, false
+	sentinel := errors.New("injected background failure")
+	err = Run(t.Context(), Config{DataDir: t.TempDir()}, []byte("isolated-test-secret"), Dependencies{
+		Listeners: []net.Listener{listener},
+		Configure: func(context.Context, *app.App, protocol.IDGen) error { configured = true; return nil },
+		Initialize: func(ctx context.Context, runtime *Runtime) error {
+			initialized = runtime.App != nil && runtime.Store != nil && runtime.Tools != nil && runtime.IDs != nil
+			return nil
+		},
+		Background: func(context.Context, *Runtime) error { return sentinel },
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if !configured || !initialized || !errors.Is(err, sentinel) {
+		t.Fatalf("hooks=%v/%v error=%v", configured, initialized, err)
+	}
+	if _, err := listener.Accept(); err == nil {
+		t.Fatal("listener was not closed")
 	}
 }

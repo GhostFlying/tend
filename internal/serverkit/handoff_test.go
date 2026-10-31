@@ -1,4 +1,4 @@
-package main
+package serverkit
 
 import (
 	"encoding/json"
@@ -17,7 +17,7 @@ func TestSummaryIdleConfigDefaultsAndBounds(t *testing.T) {
 		{`{"summary_idle_minutes":10081}`, 0, true},
 	} {
 		t.Run(tc.body, func(t *testing.T) {
-			var c mainAgentConfig
+			var c MainAgentConfig
 			if err := json.Unmarshal([]byte(tc.body), &c); err != nil {
 				t.Fatal(err)
 			}
