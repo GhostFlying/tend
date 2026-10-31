@@ -294,6 +294,7 @@
 }
 .back,
 .close {
+  flex: none;
   border: 0;
   background: transparent;
   color: var(--label-2) !important;
@@ -312,11 +313,20 @@
   flex: 1;
   font-size: var(--text-body);
 }
+.readerTitle > strong,
+.readerTitle > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .readerTitle > span {
   color: var(--label-3);
   font-size: var(--text-caption);
 }
 .readerState {
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
   display: inline-flex;
   gap: var(--space-1);
   align-items: center;
@@ -490,6 +500,7 @@
     font-size: var(--text-micro);
   }
   .readerState {
+    max-width: 30%;
     font-size: var(--text-micro);
   }
   .readerTools {

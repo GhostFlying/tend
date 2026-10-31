@@ -704,6 +704,25 @@ try {
             }
           }
         }
+        if (viewport.width === 320) {
+          const lines = await page
+            .locator('[class*="line"][data-active]:visible')
+            .evaluateAll((nodes) =>
+              nodes.map((node) => {
+                const el = node as HTMLElement;
+                return {
+                  width: el.getBoundingClientRect().width,
+                  height: el.getBoundingClientRect().height,
+                  parentWidth: el.parentElement!.getBoundingClientRect().width,
+                };
+              }),
+            );
+          for (const line of lines)
+            assert(
+              line.height <= 28 && line.width <= line.parentWidth + 1,
+              `${path}: squeezed or overflowing status line ${JSON.stringify(line)}`,
+            );
+        }
         assert.deepEqual(errors, [], `${path}: console errors; API ${unexpected.join(", ")}`);
         const geometry = await page.evaluate(() => {
           const visible = (e: HTMLElement) =>
