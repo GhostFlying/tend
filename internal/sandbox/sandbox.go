@@ -51,6 +51,10 @@ type Options struct {
 	replyDelta func(context.Context, harness.TurnInput)
 	// runnerTransport observes real loopback requests in lifecycle tests.
 	runnerTransport http.RoundTripper
+	// Test-only seed boundaries keep broad lifecycle tests lightweight.
+	turnInput func(harness.TurnInput) harness.TurnInput
+	skipStory bool
+	storyOnly bool
 }
 
 // Run owns all serving and runner goroutines until context cancellation.
@@ -105,6 +109,9 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 	var seeding atomic.Bool
 	seeding.Store(true)
 	h.Turn = func(th *testkit.FakeThread, turn string, input harness.TurnInput) string {
+		if options.turnInput != nil {
+			input = options.turnInput(input)
+		}
 		return sessions.play(th, turn, input, func(ctx context.Context, th *testkit.FakeThread, turn string, input harness.TurnInput) string {
 			return scriptedTurn(ctx, assembled, th, turn, input, log, options.replyDelta, sessions.scripts, pacing(options.FastPacing || seeding.Load()))
 		})
@@ -200,7 +207,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 				case <-time.After(25 * time.Millisecond):
 				}
 			}
-			demo, err := SeedDemo(ctx, runtime, root)
+			demo, err := seedDemo(ctx, runtime, root, options.skipStory, options.storyOnly)
 			if err != nil {
 				return err
 			}
