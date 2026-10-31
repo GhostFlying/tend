@@ -15,10 +15,13 @@ import (
 
 // Demo is the stable seed receipt, not a replacement for live owner views.
 type Demo struct {
-	Issues   []string `json:"issues"`
-	Tasks    []string `json:"tasks"`
-	Decision string   `json:"decision"`
-	Parent   string   `json:"parent"`
+	Issues        []string `json:"issues"`
+	Tasks         []string `json:"tasks"`
+	Decision      string   `json:"decision"`
+	Story         string   `json:"story,omitempty"`
+	StoryTask     string   `json:"story_task,omitempty"`
+	StoryDecision string   `json:"story_decision,omitempty"`
+	Parent        string   `json:"parent"`
 }
 
 type seeder struct{ app *app.App }
@@ -71,11 +74,24 @@ func SeedDemo(ctx context.Context, runtime *serverkit.Runtime, root string) (Dem
 		if err = json.Unmarshal(raw, &demo); err != nil {
 			return demo, fmt.Errorf("read sandbox receipt: %w", err)
 		}
+		if demo.Story == "" {
+			if err := seedStory(ctx, runtime, &demo); err != nil {
+				return demo, err
+			}
+			if err := writeDemoReceipt(receipt, demo); err != nil {
+				return demo, err
+			}
+		}
 		return demo, nil
 	} else if !os.IsNotExist(err) {
 		return demo, err
 	}
 	s := seeder{app: runtime.App}
+	// Build the conversation story before broad board/task seeds enqueue
+	// unrelated notifications; its turns retain their ordinary app ordering.
+	if err := seedStory(ctx, runtime, &demo); err != nil {
+		return demo, err
+	}
 	names := []string{"收集下一轮体验优化建议", "完善手机端导航与长标题换行：在连续对话、Issue 看板、执行记录和收件箱之间切换时，保持未发送草稿、原始消息来源、输入焦点与浏览器返回位置，并确认较长中文内容不会被截断", "正在验证真实消息发送与可重试请求", "评审交付说明与独立验收证据", "已完成示例：检查关闭记录与归档展示", "已取消示例：优先级调整后停止的探索"}
 	for n, status := range protocol.IssueWorkStatusValues() {
 		var issue protocol.Issue
@@ -157,16 +173,20 @@ func SeedDemo(ctx context.Context, runtime *serverkit.Runtime, root string) (Dem
 	if err := runtime.App.RecordTokenUsage(ctx, "main", protocol.TokenUsageSample{Source: "sandbox-seed", RequestID: seedRequest("usage"), ThreadID: "sandbox-demo-history", Revision: 1, Settlement: "final", Model: model, Input: &input, Output: &output}); err != nil {
 		return demo, err
 	}
+	return demo, writeDemoReceipt(receipt, demo)
+}
+
+func writeDemoReceipt(receipt string, demo Demo) error {
 	raw, err := json.MarshalIndent(demo, "", "  ")
 	if err != nil {
-		return demo, err
+		return err
 	}
 	temporary := receipt + ".tmp"
 	if err := os.WriteFile(temporary, raw, 0600); err != nil {
-		return demo, err
+		return err
 	}
 	if err := os.Rename(temporary, receipt); err != nil {
-		return demo, err
+		return err
 	}
-	return demo, nil
+	return nil
 }

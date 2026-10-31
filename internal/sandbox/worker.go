@@ -16,9 +16,11 @@ import (
 )
 
 type scriptedWorkers struct {
-	pacing scriptPacing
-	mu     sync.Mutex
-	active map[string]*scriptedWorker
+	pacing     scriptPacing
+	fastSeed   func() bool
+	generation func(context.Context, string) (int64, error)
+	mu         sync.Mutex
+	active     map[string]*scriptedWorker
 }
 type scriptedWorker struct {
 	events chan harness.WorkerEvent
@@ -61,6 +63,14 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 		}
 		_ = json.Unmarshal(spec.Spec, &contract)
 		fail := strings.Contains(contract.Goal, "失败")
+		if strings.Contains(contract.Goal, "首次失败") {
+			generation, err := workers.generation(ctx, spec.RunID)
+			if err != nil {
+				w.err = err
+				return
+			}
+			fail = spec.Role == protocol.RoleImplement && generation == 1
+		}
 		lifecycle := func(kind, status string) bool {
 			raw, _ := json.Marshal(map[string]any{"kind": kind, "thread_id": "sandbox-" + spec.RunID, "turn_id": spec.RunID, "data": map[string]string{"status": status}})
 			select {
@@ -73,6 +83,10 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 		}
 		if !lifecycle("turn.started", "running") {
 			return
+		}
+		pace := workers.pacing
+		if workers.fastSeed != nil && workers.fastSeed() {
+			pace = pacing(true)
 		}
 		steps := []map[string]any{
 			{"type": "reasoning", "text": "准备沙盒执行环境"},
@@ -102,7 +116,7 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 					return false
 				}
 			}
-			if !emit("item.started", "inProgress") || !delay(ctx, workers.pacing.workerStep) || !emit("item.completed", "completed") {
+			if !emit("item.started", "inProgress") || !delay(ctx, pace.workerStep) || !emit("item.completed", "completed") {
 				w.err = ctx.Err()
 				return
 			}
