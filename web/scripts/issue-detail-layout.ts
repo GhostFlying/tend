@@ -1,10 +1,10 @@
+import { fixtureRoot } from "./navigation.ts";
 /// <reference lib="dom" />
 // D129: isolated complete-page and exact-recipient interaction regression.
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { openIssueAux, issueSidebar } from "./issue-detail-helpers.ts";
 import type {
@@ -17,7 +17,7 @@ import type {
 const output = process.env.TEND_LAYOUT_OUTPUT;
 assert(output, "Set TEND_LAYOUT_OUTPUT");
 await mkdir(output, { recursive: true });
-const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const root = fixtureRoot();
 const now = Date.now();
 let seq = 10;
 let activityDelay = 0;

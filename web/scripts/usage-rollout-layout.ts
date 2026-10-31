@@ -1,14 +1,14 @@
+import { fixtureRoot } from "./navigation.ts";
 /// <reference lib="dom" />
 // Render the built product against isolated API fixtures; reject every write.
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { chromium } from "playwright";
 import type { TokenUsageTotals, TokenUsageView, RunLogView } from "../src/api/generated/api.ts";
-const root = resolve(fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url)));
+const root = fixtureRoot();
 const output = process.env.TEND_USAGE_OUTPUT ?? join(tmpdir(), "tend-usage-rollout-layout");
 await mkdir(output, { recursive: true });
 const totals: TokenUsageTotals = {
