@@ -1,7 +1,8 @@
+import { LiveStatus } from "../ui/LiveStatus.tsx";
+import { runActivityStatus } from "../ui/activityStatus.ts";
 import { runLabel } from "../tasks/runLabel.ts";
 import {
   useCallback,
-  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -14,9 +15,14 @@ import { useOverlayState } from "../ui/focus.ts";
 import type { RunView } from "../api/generated/api.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { UsagePanel } from "../usage/Usage.tsx";
-import { buildSteps, statusLabel, type Step } from "./model.ts";
+import { buildSteps, type Step } from "./model.ts";
 import { useRunWindow } from "./useRunWindow.ts";
 import styles from "./RunRollout.module.css";
+
+export function RunStatusLine({ id, observed }: { id: string; observed: string }) {
+  const window = useRunWindow(id);
+  return <LiveStatus status={runActivityStatus(window.page?.logs ?? [], observed)} />;
+}
 
 export function RunRollout({ runs }: { runs: readonly RunView[] }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -70,8 +76,12 @@ function RunWindow({ run, label }: { run: RunView; label: string }) {
   const [savedPosition, setSavedPosition] = useState<ReadingPosition | null>(null);
   const observed = run.observed;
   const active = observed === "running" || observed === "starting";
-  const current =
-    (active && steps.findLast((step) => step.kind === "tool" && step.pending)) || steps.at(-1);
+  const status = runActivityStatus(window.page?.logs ?? [], observed);
+  const wasActive = useRef(active);
+  useLayoutEffect(() => {
+    if (wasActive.current && !active) setExpanded(false);
+    wasActive.current = active;
+  }, [active]);
   const close = useCallback(() => setFull(false), [setFull]);
   const open = (step?: Step) => {
     if (step) window.setLive(false);
@@ -88,14 +98,10 @@ function RunWindow({ run, label }: { run: RunView; label: string }) {
         aria-controls={expanded ? regionID : undefined}
         onClick={() => setExpanded(!expanded)}
       >
-        <StateMark active={active} failed={observed === "failed"} />
         <span className={styles.activityText}>
-          <span className={styles.state}>{statusLabel(observed)}</span>
-          <span className={styles.summary}>
-            {current?.summary ?? (window.error ? "暂时无法读取过程" : "等待执行记录")}
-          </span>
+          <LiveStatus status={status} />
+          {active && <span className={styles.summary}>{status.steps} 个步骤</span>}
         </span>
-        <StepTime step={current} />
         <span className={styles.chevron} data-open={expanded} aria-hidden>
           ›
         </span>
@@ -305,6 +311,8 @@ function Reader({
   const dialog = useRef<HTMLDialogElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const flow = useRef<HTMLOListElement>(null);
+  const contentKey = JSON.stringify(steps);
+  const previousContent = useRef("");
   const initial = useRef(true);
   const closing = useRef(false);
   const anchor = useRef<{ key: string; top: number; page: WindowState["page"] } | null>(null);
@@ -401,8 +409,9 @@ function Reader({
         el.scrollTop +=
           row.getBoundingClientRect().top - el.getBoundingClientRect().top - saved.top;
       anchor.current = null;
-    } else if (state.live) el.scrollTop = el.scrollHeight;
-  }, [steps, target, state.live, state.page, position, restored]);
+    } else if (state.live && previousContent.current !== contentKey) el.scrollTop = el.scrollHeight;
+    previousContent.current = contentKey;
+  }, [contentKey, target, state.live, state.page, position, restored]);
   const earlier = () => {
     const el = scroller.current;
     if (el) {
@@ -442,8 +451,7 @@ function Reader({
           <span>{label}</span>
         </div>
         <span className={styles.readerState}>
-          <StateMark active={active} failed={observed === "failed"} />
-          {statusLabel(observed)}
+          <LiveStatus status={runActivityStatus(state.page?.logs ?? [], observed)} />
         </span>
         <button className={styles.close} aria-label="关闭完整过程" onClick={close}>
           ×
@@ -531,12 +539,6 @@ function Reader({
               </li>
             ))}
           </ol>
-          {active && (
-            <p className={styles.working}>
-              <StateMark active />
-              正在执行…
-            </p>
-          )}
           {state.page?.more_after && (
             <button className={styles.pageButton} disabled={state.loading} onClick={state.later}>
               加载较新记录
