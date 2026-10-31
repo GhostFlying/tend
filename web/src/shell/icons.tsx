@@ -109,3 +109,10 @@ export const ChevronDown = (p: IconProps) => (
     <path d="m6 9 6 6 6-6" />
   </svg>
 );
+
+export const Run = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} strokeWidth={1.8} {...p}>
+    <circle cx="12" cy="12" r="8" />
+    <path d="m10 8 6 4-6 4z" strokeLinejoin="round" />
+  </svg>
+);

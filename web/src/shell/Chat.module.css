@@ -21,6 +21,7 @@
 
 .spacer {
   flex: 1;
+  min-width: 0;
 }
 
 .mobileOnly {
@@ -144,25 +145,38 @@
 }
 
 .head h1 {
-  max-width: 220px;
+  max-width: 420px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 0 1 auto;
+}
+.head h1:focus {
+  outline: none;
 }
 .switcher {
-  max-width: 200px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
   min-width: 0;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: var(--label);
+  font-size: inherit;
+  font-weight: inherit;
 }
 .switcher span {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .switcher svg {
+  display: block;
   width: 16px;
   height: 16px;
-  flex: none;
+  flex: 0 0 16px;
 }
 .issueLink {
   font-size: var(--text-caption);
@@ -176,24 +190,13 @@
     flex-wrap: nowrap;
   }
   .head h1 {
-    flex: 1;
     max-width: none;
     font-size: var(--text-body);
-  }
-  .switcher {
-    max-width: 130px;
-    flex-shrink: 1;
   }
   .head > button,
   .issueLink,
   .mobileOnly {
     flex-shrink: 0;
-  }
-  .head > .switcher {
-    flex-shrink: 1;
-  }
-  .spacer {
-    display: none;
   }
 }
 

@@ -15,6 +15,7 @@ export function TabBar({ summary }: { summary: AttentionPage | undefined }) {
           to={path}
           className={styles.tab}
           aria-label={label}
+          aria-description={path === "/inbox" ? pending.description : undefined}
           aria-current={navActive(route, path) ? "page" : undefined}
         >
           <Icon />
