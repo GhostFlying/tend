@@ -1,3 +1,4 @@
+import { navigate, editIssueFilters } from "./navigation.ts";
 import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
@@ -241,7 +242,10 @@ try {
           new URL(response.url()).pathname === "/api/v1/tasks" &&
           new URL(response.url()).searchParams.get("lifecycle") === "completed,cancelled",
       );
-      await page.getByRole("tab", { name: "已结束", exact: true }).click();
+      const endedTab = page.getByRole("tab", { name: /^已结束(?: · \d+\+?)?$/ });
+      if ((await endedTab.getAttribute("aria-selected")) === "true")
+        await page.getByRole("button", { name: "刷新任务", exact: true }).click();
+      else await endedTab.click();
       const results = page.getByRole("region", { name: "任务执行列表", exact: true });
       await results.getByRole("button", { name: "启动设计稿 Web 预览", exact: true }).waitFor();
       assert.equal(await results.locator("article").count(), 5);
@@ -278,7 +282,7 @@ try {
       await page.screenshot({
         path: join(output, `board-${viewport.width}x${viewport.height}.png`),
       });
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
       await resource.locator(":scope > summary").click();
       await resource
         .locator("summary")
@@ -346,17 +350,17 @@ try {
     assert.equal(await detail.getByRole("heading", { level: 3 }).textContent(), "Example Solo");
     assert.match((await detail.textContent())!, /维护/);
     await detail.getByRole("button", { name: "关闭主机详情" }).click();
-    if (mobile) await page.getByRole("button", { name: "返回Issue", exact: true }).click();
+    if (mobile) await page.goBack();
     else await page.getByRole("link", { name: "Issues", exact: true }).click();
     const board = page.getByRole("region", { name: "Issue白板" });
     assert((await board.boundingBox())!.height > 80);
     const filtered = page.waitForResponse((response) =>
       response.url().includes("project=unrelated"),
     );
-    await page.getByLabel("按项目筛选Issue").fill("unrelated");
+    await editIssueFilters(page, () => page.getByLabel("按项目筛选Issue").fill("unrelated"));
     await filtered;
     if (mobile) {
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
       await resource.locator(":scope > summary").click();
       await resource
         .locator("summary")
@@ -365,15 +369,12 @@ try {
     }
     if (!mobile) await page.getByRole("link", { name: "主机", exact: true }).click();
     assert.equal(await rows.count(), 2);
-    if (mobile) await page.getByRole("button", { name: "返回Issue", exact: true }).click();
+    if (mobile) await page.goBack();
     assert(reads.some((path) => path.includes("project=unrelated")));
     assert(!reads.some((path) => path.startsWith("/api/v1/snapshot?")));
     if (mobile) {
       await tabs.getByRole("link", { name: "收件箱", exact: true }).click();
-      await page
-        .getByRole("region", { name: "待处理事项" })
-        .getByRole("button", { name: /← 返回/ })
-        .click();
+      await page.goBack();
     }
     if (mobile) await tabs.getByRole("link", { name: "更多", exact: true }).click();
     const settings = page.getByRole("link", { name: "设置", exact: true });
@@ -387,7 +388,7 @@ try {
     await page.screenshot({
       path: join(output, `settings-${viewport.width}x${viewport.height}.png`),
     });
-    await panel.getByRole("button", { name: "← 返回", exact: true }).click();
+    await page.goBack();
     assert(await settings.evaluate((el) => el === document.activeElement));
     if (mobile) await tabs.getByRole("link", { name: "对话", exact: true }).click();
     else await page.getByRole("link", { name: "主对话", exact: true }).click();

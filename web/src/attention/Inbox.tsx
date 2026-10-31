@@ -1,4 +1,6 @@
-import { navigate } from "../app/router.ts";
+import { WorkItemRead } from "../workitems/live.ts";
+import { Button, Tabs, Badge, EmptyState, Textarea } from "../ui/index.ts";
+import { navigate, Link } from "../app/router.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { AttentionActionTime } from "./ActionTime.tsx";
 import { AttentionOriginalMessage } from "./OriginalMessage.tsx";
@@ -10,9 +12,10 @@ import {
   OutgoingAttachments,
   MessageAttachments,
 } from "../conversation/Attachments.tsx";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AttentionView,
+  IssueConversationItem,
   ConfirmAttentionPayload,
   RespondAttentionPayload,
 } from "../api/generated/api.ts";
@@ -35,6 +38,17 @@ export function Inbox({
   const { live } = useServices();
   const [kind, setKind] = useState("");
   const selected = initial ?? "";
+  const autoSelect = useRef(!initial);
+  const deferred = useRef(false);
+  const previousSelection = useRef(selected);
+  useEffect(() => {
+    if (previousSelection.current && !selected) {
+      autoSelect.current = !deferred.current;
+      deferred.current = false;
+    }
+    previousSelection.current = selected;
+  }, [selected]);
+  const [now, setNow] = useState(() => Date.now());
   const setSelected = (id: string) => navigate(id ? { page: "attention", id } : { page: "inbox" });
   const state = useStore(live.attention.inbox.state);
   const next = useStore(live.attention.next.state);
@@ -44,59 +58,112 @@ export function Inbox({
     return () => live.attention.inbox.close();
   }, [live, kind]);
   const items = state.value?.items ?? [];
+  const firstID = items[0]?.attention_id;
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 761px)");
+    const selectFirst = () => {
+      if (
+        media.matches &&
+        !selected &&
+        firstID &&
+        autoSelect.current &&
+        !state.loading &&
+        live.attention.inbox.state.get().value === state.value
+      ) {
+        autoSelect.current = false;
+        navigate({ page: "attention", id: firstID }, { replace: true });
+      }
+    };
+    selectFirst();
+    media.addEventListener("change", selectFirst);
+    return () => media.removeEventListener("change", selectFirst);
+  }, [firstID, selected, state.loading, state.value, live]);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   return (
     <section className={styles.root} data-selected={!!selected} aria-label="待处理事项">
-      <PageHeader title="待处理" onBack={onClose} />
+      <PageHeader
+        title="待处理"
+        {...(selected
+          ? {
+              onBack: () => {
+                deferred.current = true;
+                onClose();
+              },
+            }
+          : {})}
+      />
       <p className={`${styles.muted} ${styles.context}`}>需要你决定或亲自推进的事项。</p>
-      <nav className={styles.tabs} aria-label="事项类型">
-        {[
-          ["", "全部"],
-          ["decision", "待决策"],
-          ["action", "待行动"],
-          ["information", "通知"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            aria-pressed={kind === key}
-            onClick={() => {
-              setKind(key!);
-              setSelected("");
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
+      <Tabs
+        className={styles.tabs ?? ""}
+        label="事项类型"
+        value={kind}
+        items={[
+          { value: "", label: "全部" },
+          { value: "decision", label: "待决策" },
+          { value: "action", label: "待行动" },
+          { value: "information", label: "通知" },
+        ]}
+        onChange={(key) => {
+          autoSelect.current = true;
+          setKind(key);
+          setSelected("");
+        }}
+      />
       <div className={styles.split} data-selected={!!selected}>
         <aside className={styles.list}>
           {state.error && (
             <p role="status" className={styles.warning}>
               读取失败，已有事项仍保留。
-              <button onClick={() => live.attention.refresh()}>重新读取</button>
+              <Button onClick={() => live.attention.refresh()}>重新读取</Button>
             </p>
           )}
           {!state.value && !state.error && <p>正在读取…</p>}
-          {state.value && items.length === 0 && <p className={styles.muted}>暂无此类事项。</p>}
-          {items.map((item) => (
-            <button
-              className={styles.row}
-              key={item.attention_id}
-              aria-current={item.attention_id === selected}
-              onClick={() => setSelected(item.attention_id)}
-            >
-              <strong>{item.title}</strong>
-              <span className={styles.muted}>
-                {item.read_at ? "已读" : "未读"} ·{" "}
-                {item.status === "open"
-                  ? "未解决"
-                  : item.status === "resolved"
-                    ? "已解决"
-                    : item.status === "withdrawn"
-                      ? "已撤回"
-                      : item.status}
-              </span>
-            </button>
-          ))}
+          {state.value && items.length === 0 && (
+            <EmptyState>暂无此类事项。新的决定、行动与通知会显示在这里。</EmptyState>
+          )}
+          {items.map((item) => {
+            return (
+              <article
+                className={styles.row}
+                key={item.attention_id}
+                data-selected={item.attention_id === selected}
+              >
+                <Button
+                  variant="ghost"
+                  className={styles.rowOpen}
+                  aria-current={item.attention_id === selected}
+                  onClick={() => {
+                    autoSelect.current = false;
+                    setSelected(item.attention_id);
+                  }}
+                >
+                  <span className={styles.rowTitle} data-unread={!item.read_at}>
+                    {!item.read_at && <span className={styles.unread} aria-label="未读" />}
+                    <span title={item.title}>{item.title}</span>
+                  </span>
+                  <InboxSummary item={item} />
+                </Button>
+                <div className={styles.rowMeta}>
+                  <Badge>{kindLabel(item.kind)}</Badge>
+                  <span>{statusLabel(item.status)}</span>
+                  <time
+                    dateTime={new Date(item.created_at).toISOString()}
+                    title={new Date(item.created_at).toLocaleString("zh-CN")}
+                  >
+                    {relativeTime(item.created_at, now)}
+                  </time>
+                  {item.issue_id && (
+                    <Link to={{ page: "issue", id: item.issue_id }} title={item.issue_id}>
+                      所属 Issue →
+                    </Link>
+                  )}
+                </div>
+              </article>
+            );
+          })}
           {(next.value?.items ?? []).some((item) => item.status === "blocked") && (
             <div className={styles.risks}>
               <p className={styles.muted}>近期风险</p>
@@ -108,8 +175,8 @@ export function Inbox({
             </div>
           )}
           {state.value?.more && (
-            <button
-              className={styles.button}
+            <Button
+              variant="secondary"
               onClick={() =>
                 void live.attention.openInbox({
                   ...(kind ? { kind } : {}),
@@ -118,7 +185,7 @@ export function Inbox({
               }
             >
               下一页
-            </button>
+            </Button>
           )}
         </aside>
         <div className={styles.detail}>
@@ -128,10 +195,14 @@ export function Inbox({
               id={selected}
               showBack={false}
               onIssue={onIssue}
-              onBack={() => navigate({ page: "inbox" })}
+              onBack={() => {
+                autoSelect.current = false;
+                deferred.current = true;
+                navigate({ page: "inbox" });
+              }}
             />
           ) : (
-            <p className={styles.muted}>选择一个事项查看。</p>
+            <EmptyState>选择一个事项查看。</EmptyState>
           )}
         </div>
       </div>
@@ -156,9 +227,9 @@ export function AttentionDetails({
   return (
     <>
       {showBack && (
-        <button className={styles.mobileBack} onClick={onBack}>
+        <Button className={styles.mobileBack} onClick={onBack}>
           ← 待处理
-        </button>
+        </Button>
       )}
       {a ? (
         <AttentionForm
@@ -170,7 +241,7 @@ export function AttentionDetails({
       ) : (
         <p role="status">
           {state.error ? "暂时无法读取此事项。" : "正在读取…"}
-          <button onClick={() => live.attention.refresh()}>重新读取</button>
+          <Button onClick={() => live.attention.refresh()}>重新读取</Button>
         </p>
       )}
     </>
@@ -276,16 +347,9 @@ function AttentionForm({
   return (
     <>
       <h2>{a.title}</h2>
-      {a.issue_id && <button onClick={() => onIssue(a.issue_id!)}>查看所属Issue →</button>}
+      {a.issue_id && <Button onClick={() => onIssue(a.issue_id!)}>查看所属Issue →</Button>}
       <p className={styles.muted}>
-        {a.read_at ? "已读" : "未读"} ·{" "}
-        {a.status === "open"
-          ? "未解决"
-          : a.status === "resolved"
-            ? "已解决"
-            : a.status === "withdrawn"
-              ? "已撤回"
-              : a.status}
+        <Badge>{kindLabel(a.kind)}</Badge> · {statusLabel(a.status)}
       </p>
       <p className={styles.muted}>
         提出者：{a.raised_by.kind === "owner" ? "你" : a.raised_by.subject || a.raised_by.kind} ·
@@ -317,7 +381,7 @@ function AttentionForm({
           </div>
           <label>
             补充说明（可选）
-            <textarea
+            <Textarea
               className={styles.textarea}
               value={shownText}
               disabled={blocked}
@@ -329,7 +393,7 @@ function AttentionForm({
       {a.kind === "action" && (
         <label>
           <h3>处理结果</h3>
-          <textarea
+          <Textarea
             className={styles.textarea}
             value={shownText}
             disabled={blocked || !!source.current}
@@ -355,12 +419,12 @@ function AttentionForm({
           {source.content.files.map((file, i) => (
             <div key={i}>
               <LocalAttachment blob={file} name={file.name} />
-              <button
+              <Button
                 disabled={blocked || !!source.current}
                 onClick={() => source.draft.removeFile(i)}
               >
                 移除
-              </button>
+              </Button>
             </div>
           ))}
           {!!source.content.attachments.length && (
@@ -372,7 +436,7 @@ function AttentionForm({
           {source.current?.state === "failed" && (
             <p className={styles.warning}>
               {source.current.error || "原件来源保存被拒绝。"}
-              <button onClick={() => void source.editRefused()}>取回后修改</button>
+              <Button onClick={() => void source.editRefused()}>取回后修改</Button>
             </p>
           )}
           {source.current?.state === "unknown" && (
@@ -399,45 +463,99 @@ function AttentionForm({
       {operation.pending && (
         <div className={styles.warning}>
           提交结果待确认，请勿重复提交。
-          <button
-            className={styles.primary}
-            disabled={operation.busy}
-            onClick={() => void run("reconcile")}
-          >
+          <Button variant="primary" disabled={operation.busy} onClick={() => void run("reconcile")}>
             核实原提交结果
-          </button>
+          </Button>
         </div>
       )}
       <div className={styles.actions}>
         {a.kind === "decision" && (
-          <button
-            className={styles.primary}
+          <Button
+            variant="primary"
             disabled={blocked || (!choice && !text.trim())}
             onClick={() => void run("respond")}
           >
             提交决定
-          </button>
+          </Button>
         )}
         {a.kind === "action" && (
-          <button
-            className={styles.primary}
+          <Button
+            variant="primary"
             disabled={blocked || !shownText.trim() || !source.content.loaded}
             onClick={() => void run("confirm")}
           >
             提交处理结果
-          </button>
+          </Button>
         )}
-        <button className={styles.button} onClick={onBack}>
+        <Button variant="secondary" onClick={onBack}>
           稍后处理
-        </button>
-        <button disabled={operation.busy || operation.pending} onClick={() => void run("read")}>
+        </Button>
+        <Button disabled={operation.busy || operation.pending} onClick={() => void run("read")}>
           {a.read_at ? "标记未读" : "标记已读"}
-        </button>
-        <button disabled={operation.busy || operation.pending} onClick={() => void run("archive")}>
+        </Button>
+        <Button disabled={operation.busy || operation.pending} onClick={() => void run("archive")}>
           {a.archived_at ? "展开" : "收起"}
-        </button>
+        </Button>
       </div>
       <p className={styles.muted}>已读和收起不会解决此项；稍后处理仅返回列表。</p>
     </>
   );
+}
+
+function kindLabel(kind: string): string {
+  return (
+    ({ decision: "待决策", action: "待行动", information: "通知" } as Record<string, string>)[
+      kind
+    ] ?? kind
+  );
+}
+function statusLabel(status: string): string {
+  return (
+    (
+      { open: "待处理", resolved: "已处理", withdrawn: "已撤回", blocked: "受阻" } as Record<
+        string,
+        string
+      >
+    )[status] ?? status
+  );
+}
+export function inboxSummary(item: AttentionView): string {
+  return (
+    (
+      item.choice?.question ||
+      item.decision?.question ||
+      item.choice?.reason ||
+      item.resolution ||
+      ""
+    )
+      .split(/\r?\n/)
+      .find((line) => line.trim()) ?? ""
+  );
+}
+function InboxSummary({ item }: { item: AttentionView }) {
+  const { client } = useServices();
+  const read = useMemo(() => new WorkItemRead<IssueConversationItem>(client), [client]);
+  const state = useStore(read.state);
+  const summary = inboxSummary(item);
+  useEffect(() => {
+    if (!summary && item.source_message_id)
+      void read.open(`/api/v1/messages/${encodeURIComponent(item.source_message_id)}`);
+    return () => read.close();
+  }, [read, summary, item.source_message_id]);
+  const text =
+    summary ||
+    state.value?.body?.split(/\r?\n/).find((line) => line.trim()) ||
+    (state.error ? "原始说明暂时无法读取" : state.loading ? "正在读取原始说明…" : "无文字说明");
+  return (
+    <span className={styles.summary} title={text}>
+      {text}
+    </span>
+  );
+}
+export function relativeTime(at: number, now: number): string {
+  const minutes = Math.max(0, Math.floor((now - at) / 60_000));
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)} 小时前`;
+  return `${Math.floor(minutes / 1440)} 天前`;
 }

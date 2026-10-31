@@ -1,3 +1,4 @@
+import { Button, Badge, EmptyState } from "../ui/index.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect } from "react";
 import type { Connection } from "../api/client.ts";
@@ -25,13 +26,13 @@ export function RepositoryEntry({ onOpen }: { onOpen(): void }) {
   );
 }
 
-export function Repositories({ connection, onClose }: { connection: Connection; onClose(): void }) {
+export function Repositories({ connection }: { connection: Connection }) {
   const { live } = useServices();
   const state = useStore(live.repos.state);
   const repos = state.view ? (state.view.repos ?? []) : null;
   return (
     <section className={styles.panel} aria-label="已注册仓库">
-      <PageHeader title="已注册仓库" onBack={onClose} />
+      <PageHeader title="已注册仓库" />
       <p>{repos ? `全部 ${repos.length} 个 · 含已归档仓库` : "全部登记"}</p>
       <RepositoryRegistry connection={connection} />
     </section>
@@ -80,9 +81,9 @@ export function RepositoryRegistry({
                 : "已读取登记。"}
           {repos && state.stale && " 以下为上次成功读取的记录。"}
         </span>
-        <button type="button" disabled={!online} onClick={() => void registry.refresh()}>
+        <Button type="button" disabled={!online} onClick={() => void registry.refresh()}>
           {state.error ? "重试读取仓库" : "刷新仓库"}
-        </button>
+        </Button>
       </div>
       {repos && repos.length > 0 && (
         <ul className={styles.list} aria-label="仓库登记列表" aria-busy={state.loading}>
@@ -90,7 +91,7 @@ export function RepositoryRegistry({
             <li key={repo.repo} className={styles.repo} data-retired={repo.retired || undefined}>
               <div className={styles.repoHead}>
                 <h3>{repo.repo}</h3>
-                <span className={styles.badge}>{repo.retired ? "已归档" : "启用"}</span>
+                <Badge>{repo.retired ? "已归档" : "启用"}</Badge>
               </div>
               {repo.retired && (
                 <p className={styles.note}>停止新任务挂载，已有任务仍可由配置主机服务。</p>
@@ -110,11 +111,13 @@ export function RepositoryRegistry({
         </ul>
       )}
       {repos?.length === 0 && (
-        <p className={styles.empty}>
+        <EmptyState className={styles.empty}>
           {state.stale ? "上次读取时没有已注册仓库。" : "账本中暂无已注册仓库。"}
-        </p>
+        </EmptyState>
       )}
-      {!repos && !state.loading && <p className={styles.empty}>尚未取得仓库登记，数量未知。</p>}
+      {!repos && !state.loading && (
+        <EmptyState className={styles.empty}>尚未取得仓库登记，数量未知。</EmptyState>
+      )}
     </div>
   );
 }

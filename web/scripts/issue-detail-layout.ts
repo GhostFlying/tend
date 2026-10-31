@@ -649,9 +649,16 @@ try {
     await deliveries.getByRole("button", { name: /^关闭/ }).first().click();
     const side = await issueSidebar(page);
     await side.getByText("待检查", { exact: true }).waitFor();
-    await side.getByText("外部观察 · 已合并", { exact: true }).waitFor();
-    await side.getByRole("button", { name: /发布与回滚清单/ }).waitFor();
+    assert.equal(
+      await side.getByRole("button", { name: /发布与回滚清单/ }).count(),
+      0,
+      "sidebar does not repeat deliverables",
+    );
+    await side.getByRole("button", { name: /^查看全部交付 ·/ }).waitFor();
     if (width < 1280) await side.getByRole("button", { name: /^关闭/ }).first().click();
+    const summary = detail.getByRole("region", { name: "交付物", exact: true });
+    await summary.getByText("外部观察 · 已合并", { exact: true }).waitFor();
+    await summary.getByRole("button", { name: /发布与回滚清单/ }).waitFor();
     await detail.locator('[data-artifact="artifact-one"]').waitFor();
     const resultCard = detail.locator('[data-artifact="artifact-one"]');
     await resultCard.getByRole("button", { name: "打开完整交付 →", exact: true }).click();
@@ -778,7 +785,7 @@ try {
     issue.conversation!.reason = "ended";
     publish();
     await detail.getByRole("button", { name: "重新打开Issue →", exact: true }).waitFor();
-    await detail.getByText("Issue已结束，对话记录仍可阅读。", { exact: true }).waitFor();
+    await detail.getByText("Issue 已结束，对话记录仍可阅读。", { exact: true }).waitFor();
     issue.state = "paused";
     issue.assignee = { kind: "agent", ref: "hosted/qingzhu" };
     issue.conversation = { conversation_id: "issue:canonical-root", can_send: true };

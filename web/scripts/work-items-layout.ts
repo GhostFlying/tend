@@ -1,3 +1,4 @@
+import { navigate, editIssueFilters } from "./navigation.ts";
 import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
@@ -472,8 +473,10 @@ try {
       else await page.getByRole("link", { name: "Issues", exact: true }).click();
     };
     await openBoard();
-    await page.getByRole("tab", { name: "层级", exact: true }).click();
-    await page.getByLabel("显示已结束").uncheck();
+    await editIssueFilters(page, () =>
+      page.getByRole("radio", { name: "层级", exact: true }).click(),
+    );
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").uncheck());
     const board = page.getByRole("region", { name: "Issue白板", exact: true });
     const title = board.getByRole("button", { name: items[0]!.plan.title, exact: true });
     await title.waitFor();
@@ -483,17 +486,19 @@ try {
     await reachable(board.getByRole("button", { name: items[4]!.plan.title, exact: true }));
     assert(await board.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
     await page.screenshot({ path: join(output, `tree-last-${width}.png`) });
-    const filter = board.getByLabel("按项目筛选Issue");
-    await filter.click();
-    await filter.pressSequentially("docs");
-    assert(
-      await filter.evaluate((el) => el === document.activeElement),
-      "query changes keep the filter focused",
-    );
+    const filter = page.getByLabel("按项目筛选Issue");
+    await editIssueFilters(page, async () => {
+      await filter.click();
+      await filter.pressSequentially("docs");
+      assert(
+        await filter.evaluate((el) => el === document.activeElement),
+        "query changes keep the filter focused",
+      );
+    });
     assert.equal(new URL(page.url()).searchParams.get("project"), "docs");
     await board.getByRole("button", { name: "持续跟进目标 3", exact: true }).waitFor();
     assert.equal(await board.getByRole("treeitem").count(), 1);
-    await board.getByLabel("显示已结束").check();
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").check());
     await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).waitFor();
     assert(
       reads.some(
@@ -503,7 +508,7 @@ try {
     );
     // Project filtering keeps the fixed root scope; children remain in the hierarchy.
     items[7]!.plan.project = "child-project";
-    await filter.fill("child-project");
+    await editIssueFilters(page, () => filter.fill("child-project"));
     await board.getByText("暂无 Issue。", { exact: true }).waitFor();
     const query = reads
       .map((path) => new URL(path, "https://fixture.invalid"))
@@ -513,10 +518,12 @@ try {
       );
     assert.equal(query?.searchParams.get("parent_id"), "");
     await page.screenshot({ path: join(output, `cross-project-child-${width}.png`) });
-    await board.getByRole("button", { name: "任务执行记录", exact: true }).click();
-    await page.getByRole("button", { name: "返回Issue", exact: true }).click();
-    assert.equal(await filter.inputValue(), "child-project");
-    await filter.fill("");
+    await navigate(page, "/tasks");
+    await page.goBack();
+    await editIssueFilters(page, async () => {
+      assert.equal(await filter.inputValue(), "child-project");
+    });
+    await editIssueFilters(page, () => filter.fill(""));
     await title.waitFor();
     await board.getByRole("button", { name: `展开 ${items[0]!.plan.title}`, exact: true }).click();
     await board.getByRole("button", { name: items[7]!.plan.title, exact: true }).waitFor();
@@ -534,9 +541,9 @@ try {
         await page.screenshot({ path: join(output, "child-diagnostic.png") });
         throw error;
       });
-    await board.getByLabel("显示已结束").uncheck();
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").uncheck());
     await board.getByText("已取消", { exact: true }).waitFor({ state: "hidden" });
-    await board.getByLabel("显示已结束").check();
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").check());
     await title.waitFor();
     await board.getByRole("button", { name: `展开 ${items[0]!.plan.title}`, exact: true }).click();
     await board.getByText("已取消", { exact: true }).waitFor();
@@ -587,8 +594,8 @@ try {
       await title.elementHandle(),
     );
     assert(await title.evaluate((el) => el === document.activeElement));
-    await filter.fill("docs");
-    await board.getByLabel("显示已结束").check();
+    await editIssueFilters(page, () => filter.fill("docs"));
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").check());
     await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).click();
     await openIssueDefinition(page);
     await detail.getByText("当前收尾依据V2", { exact: true }).waitFor();
@@ -598,7 +605,7 @@ try {
       .click();
     await detail.getByText("留存用户决定", { exact: true }).waitFor();
     await closeIssue(page);
-    await filter.fill("tend");
+    await editIssueFilters(page, () => filter.fill("tend"));
     await board.getByRole("button", { name: "下一页", exact: true }).click();
     await board.getByRole("button", { name: "持续跟进目标 10", exact: true }).waitFor();
     await board.getByText("已取消", { exact: true }).waitFor();
@@ -609,7 +616,7 @@ try {
       );
     assert.equal(pageQuery?.searchParams.get("project"), "tend");
     assert.equal(pageQuery?.searchParams.get("include_closed"), "true");
-    await filter.fill("docs");
+    await editIssueFilters(page, () => filter.fill("docs"));
     await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).waitFor();
     // Refresh through the original lifecycle; a failed read retains last facts.
     fail = true;
@@ -625,14 +632,14 @@ try {
     await board.getByText("暂时无法读取", { exact: false }).waitFor({ state: "hidden" });
     await context.setOffline(true);
     for (const stream of streams) stream.end();
-    await board.getByText("等待连接恢复 · 当前显示最后读取的Issue", { exact: true }).waitFor();
+    await board.getByText("等待连接恢复 · 当前显示最后读取的 Issue", { exact: true }).waitFor();
     assert.equal(
       await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).count(),
       1,
     );
     await context.setOffline(false);
     await page.evaluate(() => window.dispatchEvent(new Event("online")));
-    await page.getByRole("button", { name: "返回对话", exact: true }).click();
+    await navigate(page, "/");
     // Preserve the actual historical Choice question/version/answer effect, not an Attention surrogate.
     const choice = page.getByRole("region", { name: "下一步安排" });
     await choice.getByRole("heading", { name: planChoice.question }).waitFor();
@@ -643,7 +650,9 @@ try {
     assert.equal(planChoice.answer, "先让我看看效果，再安排上线");
     assert.equal(writes.at(-1)?.operation, "work_item_choices.respond");
     await openBoard();
-    await page.getByRole("tab", { name: "层级", exact: true }).click();
+    await editIssueFilters(page, () =>
+      page.getByRole("radio", { name: "层级", exact: true }).click(),
+    );
     items = [];
     publish();
     await board.getByText("暂无 Issue。", { exact: true }).waitFor();

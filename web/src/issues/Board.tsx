@@ -20,7 +20,7 @@ import type {
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
-import { Close, Back } from "../shell/icons.tsx";
+import { Close } from "../shell/icons.tsx";
 import { IssueDefinition } from "./Definition.tsx";
 import { IssueHierarchy } from "./Hierarchy.tsx";
 import { AssigneeName } from "./AssigneeName.tsx";
@@ -32,22 +32,25 @@ import {
   workStatus,
 } from "./boardModel.ts";
 import { useBoardActions } from "./useBoardActions.ts";
-import { ResourcesEntry } from "../shell/Resources.tsx";
+import {
+  Button,
+  Input,
+  Select,
+  Checkbox,
+  SegmentedControl,
+  Tabs,
+  Badge,
+  EmptyState,
+} from "../ui/index.ts";
 import styles from "./Board.module.css";
 
 export function IssueBoard({
   onSelect,
-  onChat,
-  onRecords,
   onInbox,
-  onRepos,
   active,
 }: {
   onSelect(id: string): void;
-  onChat(): void;
-  onRecords(): void;
   onInbox?(id?: string): void;
-  onRepos(): void;
   active: boolean;
 }) {
   const { live, client, openTask } = useServices();
@@ -71,10 +74,31 @@ export function IssueBoard({
   const setClosed = (closed: boolean) => changeFilter({ closed });
   const projectList = useId();
   const [creating, setCreating] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [cancelledExpanded, setCancelledExpanded] = useState(() => {
+    try {
+      return localStorage.getItem("tend.board.cancelled-expanded") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const mobileTabs = useRef<HTMLDivElement>(null);
   const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
   const [menu, setMenu] = useState<IssueSummary | null>(null);
   const [over, setOver] = useState<IssueWorkStatus | null>(null);
   const dragged = useRef<IssueSummary | null>(null);
+  useEffect(() => {
+    try {
+      localStorage.setItem("tend.board.cancelled-expanded", String(cancelledExpanded));
+    } catch {
+      /* Keep the session preference when storage is unavailable. */
+    }
+  }, [cancelledExpanded]);
+  useLayoutEffect(() => {
+    mobileTabs.current
+      ?.querySelector('[aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [mobileColumn]);
   const actions = useBoardActions();
   const { feedback, setFeedback } = actions;
   const online = connection.status === "online";
@@ -139,83 +163,95 @@ export function IssueBoard({
       onSelect(blocker.object_id);
     else if (blockedItem) onSelect(blockedItem.issue_id);
   };
+  const filterControls = (
+    <>
+      <SegmentedControl
+        label="Issue视图"
+        value={view}
+        onChange={setView}
+        items={[
+          { value: "board", label: "看板" },
+          { value: "tree", label: "层级" },
+        ]}
+      />
+      <Input
+        className={styles.projectFilter}
+        aria-label="按项目筛选Issue"
+        list={projectList}
+        placeholder="全部项目"
+        value={project}
+        onChange={(e) => setProject(e.target.value)}
+      />
+      <datalist id={projectList}>
+        {(snapshot?.projects ?? []).map((item) => (
+          <option key={item.project} value={item.project}>
+            {item.title}
+          </option>
+        ))}
+      </datalist>
+      {view === "board" && (
+        <Select
+          className={styles.assigneeFilter}
+          aria-label="按负责人筛选Issue"
+          value={assigneeKey}
+          onChange={(e) => setAssigneeKey(e.target.value)}
+        >
+          <option value="">全部负责人</option>
+          {(summary.assignees ?? []).map((a) => (
+            <option key={JSON.stringify(a)} value={JSON.stringify(a)}>
+              {name(a)}
+            </option>
+          ))}
+        </Select>
+      )}
+      <Checkbox label="包含已关闭" checked={closed} onChange={(e) => setClosed(e.target.checked)} />
+      <Button
+        variant="ghost"
+        icon
+        aria-label="刷新"
+        title="刷新"
+        onClick={() => (view === "board" ? board.refresh() : void live.issues.list.refresh())}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          aria-hidden="true"
+        >
+          <path d="M20 7a8 8 0 1 0 1 7M20 3v5h-5" />
+        </svg>
+      </Button>
+    </>
+  );
   return (
     <section className={styles.root} aria-label="Issue白板">
-      <PageHeader
-        className={styles.header}
-        title="所有 Issue"
-        leading={
-          <button className={styles.back} onClick={onChat} aria-label="返回对话">
-            <Back />
-          </button>
-        }
-      >
-        {view === "board" && total !== undefined && <span className={styles.total}>{total}</span>}
-        <button className={styles.records} onClick={onRecords}>
-          任务执行记录
-        </button>
-        <button className={styles.primary} onClick={() => setCreating(true)} disabled={!online}>
-          ＋ 新建 Issue
-        </button>
-        <ResourcesEntry connection={connection} onRecords={onRecords} onRepos={onRepos} />
-      </PageHeader>
-      <div className={styles.toolbar}>
-        <div className={styles.views} role="tablist" aria-label="Issue视图">
-          <button role="tab" aria-selected={view === "board"} onClick={() => setView("board")}>
-            看板
-          </button>
-          <button role="tab" aria-selected={view === "tree"} onClick={() => setView("tree")}>
-            层级
-          </button>
-        </div>
-        <label className={styles.filter}>
-          <span className={styles.srOnly}>项目</span>
-          <input
-            aria-label="按项目筛选Issue"
-            list={projectList}
-            placeholder="全部项目"
-            value={project}
-            onChange={(e) => {
-              setProject(e.target.value);
-            }}
-          />
-          <datalist id={projectList}>
-            {(snapshot?.projects ?? []).map((item) => (
-              <option key={item.project} value={item.project}>
-                {item.title}
-              </option>
-            ))}
-          </datalist>
-        </label>
-        {view === "board" && (
-          <label className={styles.filter}>
-            <span className={styles.srOnly}>负责人</span>
-            <select
-              aria-label="按负责人筛选Issue"
-              value={assigneeKey}
-              onChange={(e) => setAssigneeKey(e.target.value)}
-            >
-              <option value="">全部负责人</option>
-              {(summary.assignees ?? []).map((a) => (
-                <option key={JSON.stringify(a)} value={JSON.stringify(a)}>
-                  {name(a)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <span className={styles.scope}>仅顶层 Issue</span>
-        <label className={styles.closed}>
-          <input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} />
-          显示已结束
-        </label>
-        <button
-          className={styles.refresh}
-          onClick={() => (view === "board" ? board.refresh() : void live.issues.list.refresh())}
+      <PageHeader className={styles.header} title="所有 Issue">
+        {view === "board" && total !== undefined && <Badge>{total}</Badge>}
+        <Button
+          className={styles.create}
+          variant="primary"
+          onClick={() => setCreating(true)}
+          disabled={!online}
         >
-          刷新
-        </button>
+          新建 Issue
+        </Button>
+      </PageHeader>
+      <div className={styles.toolbar}>{!filterOpen && filterControls}</div>
+      <div className={styles.mobileFilter}>
+        <span>{view === "board" ? "看板" : "层级"} · 仅顶层 Issue</span>
+        <Button size="s" onClick={() => setFilterOpen(true)}>
+          筛选
+        </Button>
       </div>
+      {filterOpen && (
+        <Sheet open title="筛选 Issue" onClose={() => setFilterOpen(false)}>
+          <div className={styles.filterSheet}>{filterControls}</div>
+          <Button variant="primary" onClick={() => setFilterOpen(false)}>
+            完成
+          </Button>
+        </Sheet>
+      )}
       {!online && (
         <p className={styles.notice} role="status">
           等待连接恢复 · 当前显示最后读取的 Issue
@@ -226,28 +262,26 @@ export function IssueBoard({
           {actions.error}
         </p>
       )}
-      {!online && (
-        <p className={styles.notice} role="status">
-          等待连接恢复 · 当前显示最后读取的Issue
-        </p>
-      )}
       {view === "board" ? (
         <>
-          <div className={styles.mobileTabs} role="tablist" aria-label="工作状态">
-            {boardColumns.map(({ id, label }) => (
-              <button
-                role="tab"
-                key={id}
-                aria-selected={mobileColumn === id}
-                onClick={() => setMobileColumn(id)}
-              >
-                <span className={styles.dot} data-status={id} />
-                {label}
-                <small>{counts?.[id] ?? "…"}</small>
-              </button>
-            ))}
+          <div ref={mobileTabs} className={styles.mobileTabs}>
+            <Tabs<IssueWorkStatus>
+              label="工作状态"
+              value={mobileColumn}
+              onChange={setMobileColumn}
+              items={boardColumns.map(({ id, label }) => ({
+                value: id,
+                label: (
+                  <>
+                    <span className={styles.dot} data-status={id} />
+                    {label}
+                    <small>{counts?.[id] ?? "…"}</small>
+                  </>
+                ),
+              }))}
+            />
           </div>
-          <div className={styles.columns}>
+          <div className={styles.columns} data-cancelled-expanded={cancelledExpanded}>
             {boardColumns.map(({ id, label }) => (
               <BoardColumn
                 key={id}
@@ -257,6 +291,10 @@ export function IssueBoard({
                 mobile={mobileColumn === id}
                 over={over === id}
                 closed={closed}
+                collapsed={id === "cancelled" && !cancelledExpanded}
+                onToggle={
+                  id === "cancelled" ? () => setCancelledExpanded(!cancelledExpanded) : undefined
+                }
                 onDragOver={(event) => {
                   if (dragged.current && online) {
                     event.preventDefault();
@@ -306,7 +344,7 @@ export function IssueBoard({
           {tree.error && (
             <p className={styles.notice}>
               暂时无法读取，已有内容仍保留。
-              <button onClick={() => void live.issues.list.refresh()}>重新读取</button>
+              <Button onClick={() => void live.issues.list.refresh()}>重新读取</Button>
             </p>
           )}
           {tree.value ? (
@@ -318,7 +356,7 @@ export function IssueBoard({
               />
               {!tree.value.items?.length && <p className={styles.empty}>暂无 Issue。</p>}
               {tree.value.more && (
-                <button
+                <Button
                   className={styles.button}
                   onClick={() =>
                     void live.issues.openList({
@@ -330,7 +368,7 @@ export function IssueBoard({
                   }
                 >
                   下一页
-                </button>
+                </Button>
               )}
             </>
           ) : (
@@ -343,7 +381,7 @@ export function IssueBoard({
           <p className={styles.dialogSubtitle}>{menu.title}</p>
           <div className={styles.statusOptions}>
             {boardColumns.map(({ id, label }) => (
-              <button
+              <Button
                 key={id}
                 disabled={!online || !!actions.states[menu.issue_id]}
                 aria-current={workStatus(menu) === id}
@@ -355,7 +393,7 @@ export function IssueBoard({
                 <span className={styles.dot} data-status={id} />
                 {label}
                 <span className={styles.check}>{workStatus(menu) === id ? "✓" : ""}</span>
-              </button>
+              </Button>
             ))}
           </div>
           <p className={styles.dialogNote}>
@@ -369,10 +407,10 @@ export function IssueBoard({
           <p className={styles.notice}>还有 {blockers.length} 项需要处理，本次移动未保存。</p>
           <div className={styles.blockers}>
             {blockers.map((b, i) => (
-              <button key={`${b.code}:${b.object_id}:${i}`} onClick={() => openBlocker(b)}>
+              <Button key={`${b.code}:${b.object_id}:${i}`} onClick={() => openBlocker(b)}>
                 {blockerLabels[b.code] ?? "相关事项尚未核对"}
                 <span>查看 ›</span>
-              </button>
+              </Button>
             ))}
           </div>
         </BoardDialog>
@@ -391,11 +429,11 @@ export function IssueBoard({
                 : actions.feedback.outcome.message}
           </span>
           {actions.feedback.outcome.kind === "unknown" && (
-            <button onClick={() => void actions.move(actions.feedback!.item)}>核对结果</button>
+            <Button onClick={() => void actions.move(actions.feedback!.item)}>核对结果</Button>
           )}
-          <button aria-label="关闭提示" onClick={() => actions.setFeedback(null)}>
+          <Button aria-label="关闭提示" onClick={() => actions.setFeedback(null)}>
             <Close />
-          </button>
+          </Button>
         </div>
       )}
       {creating && (
@@ -420,6 +458,8 @@ function BoardColumn({
   mobile,
   over,
   closed,
+  collapsed,
+  onToggle,
   children,
   ...drag
 }: {
@@ -429,6 +469,8 @@ function BoardColumn({
   mobile: boolean;
   over: boolean;
   closed: boolean;
+  collapsed: boolean;
+  onToggle?: (() => void) | undefined;
   children(item: IssueSummary): ReactNode;
   onDragOver: DragEventHandler;
   onDrop: DragEventHandler;
@@ -441,35 +483,53 @@ function BoardColumn({
     <section
       className={styles.column}
       data-mobile={mobile}
+      data-collapsed={collapsed}
       data-over={over}
       aria-label={`${label}列`}
       {...drag}
     >
       <h2>
         <span className={styles.dot} data-status={status} />
-        {label}
-        <span>{count ?? "…"}</span>
+        {onToggle ? (
+          <Button
+            variant="ghost"
+            size="s"
+            className={styles.columnToggle}
+            aria-expanded={!collapsed}
+            onClick={onToggle}
+          >
+            {label}
+            <span>{count ?? "…"}</span>
+          </Button>
+        ) : (
+          <>
+            {label}
+            <span>{count ?? "…"}</span>
+          </>
+        )}
       </h2>
       <div className={styles.cardList}>
         {state.error && (
           <p className={styles.readError} role="status">
             读取失败，保留上次记录。
-            <button onClick={() => void column.read.refresh()}>重新读取</button>
+            <Button onClick={() => void column.read.refresh()}>重新读取</Button>
           </p>
         )}
         {(state.value?.items ?? []).map(children)}
         {!state.value && !state.error && <p className={styles.empty}>正在读取…</p>}
         {state.value && !state.value.items?.length && (
-          <p className={styles.empty}>{hiddenClosed ? "勾选“显示已结束”后查看" : "暂无 Issue"}</p>
+          <EmptyState className={styles.empty}>
+            {hiddenClosed ? "勾选“包含已关闭”后查看" : "暂无 Issue"}
+          </EmptyState>
         )}
         {state.value?.more && (
-          <button
+          <Button
             className={styles.more}
             disabled={state.loading}
             onClick={() => void column.more()}
           >
             {state.loading ? "正在读取…" : "加载更多"}
-          </button>
+          </Button>
         )}
       </div>
     </section>
@@ -506,18 +566,19 @@ const BoardCard = memo(function BoardCard({
       aria-busy={state === "saving"}
     >
       <div className={styles.cardHead}>
-        <span>{item.project || "未分组"}</span>
-        <button
+        <span title={item.project}>{item.project || "未分组"}</span>
+        <Button
+          variant="ghost"
           aria-label={`修改工作状态：${item.title}`}
           disabled={disabled}
           onClick={() => onMenu(item)}
         >
           ···
-        </button>
+        </Button>
       </div>
-      <button className={styles.cardTitle} onClick={() => onSelect(item.issue_id)}>
+      <Button variant="ghost" className={styles.cardTitle} onClick={() => onSelect(item.issue_id)}>
         {item.title}
-      </button>
+      </Button>
       <p className={styles.stage}>
         {b?.stages_total
           ? `${b.stage_title || "阶段计划"} · ${b.stages_done}/${b.stages_total} 已完成`
@@ -537,26 +598,26 @@ const BoardCard = memo(function BoardCard({
           </span>
           <AssigneeName assignee={item.assignee} />
         </span>
-        <span
+        <Badge
           className={styles.execution}
-          data-warning={!!b?.execution.unknown || !!b?.execution.waiting_owner}
+          tone={b?.execution.unknown || b?.execution.waiting_owner ? "warn" : "neutral"}
         >
           {executionLabel(b?.execution)}
-        </span>
+        </Badge>
       </div>
       {(item.state === "paused" || item.state === "cancelling" || !!b?.attention_count) && (
         <div className={styles.flags}>
-          {item.state === "paused" && <span>暂停新执行</span>}
-          {item.state === "cancelling" && <span>取消收尾中</span>}
-          {!!b?.attention_count && <span>{b.attention_count} 项待处理</span>}
+          {item.state === "paused" && <Badge tone="warn">暂停新执行</Badge>}
+          {item.state === "cancelling" && <Badge tone="warn">取消收尾中</Badge>}
+          {!!b?.attention_count && <Badge tone="warn">{b.attention_count} 项待处理</Badge>}
         </div>
       )}
       {state === "saving" ? (
         <p className={styles.pending}>正在保存状态…</p>
       ) : state === "unknown" ? (
-        <button className={styles.reconcile} onClick={onReconcile}>
+        <Button className={styles.reconcile} onClick={onReconcile}>
           结果待确认 · 核对原操作
-        </button>
+        </Button>
       ) : (
         !!b?.notification_due_at && <NotificationClock due={b.notification_due_at} />
       )}
@@ -606,9 +667,9 @@ function BoardDialog({
     >
       <div className={styles.dialogHead}>
         <h2>{title}</h2>
-        <button onClick={onClose} aria-label="关闭">
+        <Button onClick={onClose} aria-label="关闭">
           <Close />
-        </button>
+        </Button>
       </div>
       {children}
     </dialog>

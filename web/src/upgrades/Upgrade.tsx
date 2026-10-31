@@ -1,3 +1,4 @@
+import { Button } from "../ui/index.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import type { UpgradeView } from "../api/generated/api.ts";
 import { useEffect, useState } from "react";
@@ -12,7 +13,7 @@ export function UpgradeBanner({ connection }: { connection: Connection }) {
   const upgrade = useStore(live.snapshot)?.upgrade;
   if (!upgrade || upgrade.status === "completed" || upgrade.status === "cancelled") return null;
   return (
-    <button
+    <Button
       type="button"
       className={styles.banner}
       data-attention={upgrade.status === "attention" || undefined}
@@ -24,7 +25,7 @@ export function UpgradeBanner({ connection }: { connection: Connection }) {
       <span className={styles.hint}>
         {connection.status === "online" ? "查看详情 ›" : "等待连接恢复 · 最后观察"}
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -76,9 +77,9 @@ export function UpgradeDetails({
       {readError && !matching && (
         <p className={styles.reason}>
           读取发布详情失败。{" "}
-          <button type="button" onClick={() => setRetry((n) => n + 1)}>
+          <Button type="button" onClick={() => setRetry((n) => n + 1)}>
             重试读取
-          </button>
+          </Button>
         </p>
       )}
       {!upgrade ? (
