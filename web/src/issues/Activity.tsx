@@ -132,8 +132,31 @@ export function IssueActivity({
     const first = blocks.at(-3)!.position;
     return rows.filter((row) => row.position >= first);
   }, [rows, all]);
+  const pagination = useRef<{
+    trigger: string;
+    top: number;
+    ids: Set<string>;
+    ready: boolean;
+  } | null>(null);
+  const beginContinuation = useCallback(
+    (trigger: string, control: HTMLButtonElement, ids: string[]) => {
+      cancelAnimationFrame(dataFrame.current);
+      following.current = false;
+      reading.pauseFollowing();
+      pagination.current = {
+        trigger,
+        top: control.getBoundingClientRect().top,
+        ids: new Set(ids),
+        ready: false,
+      };
+      setNewItems(false);
+    },
+    [reading],
+  );
   const [continuations, setContinuations] = useState<Record<string, IssueTranscriptBlock>>({});
-  const rememberContinuation = useCallback((block: IssueTranscriptBlock) => {
+  const rememberContinuation = useCallback((block: IssueTranscriptBlock, explicit: boolean) => {
+    if (explicit && pagination.current?.trigger === block.trigger.message_id)
+      pagination.current.ready = true;
     setContinuations((previous) => ({ ...previous, [block.trigger.message_id]: block }));
   }, []);
   const transcript = useMemo(
@@ -190,7 +213,22 @@ export function IssueActivity({
   const previousActivity = useRef(activityContent);
   useLayoutEffect(() => {
     const node = scroll.current;
-    if (node && previousContent.current && previousContent.current !== latestContent) {
+    if (node && pagination.current?.ready) {
+      const boundary = pagination.current;
+      const block = continuations[boundary.trigger];
+      const first = block?.items?.find((item) => !boundary.ids.has(item.message_id));
+      const item = [...node.querySelectorAll<HTMLElement>("[data-scroll-id]")].find(
+        (item) => item.dataset.scrollId === first?.message_id,
+      );
+      if (item)
+        node.scrollTo({ top: node.scrollTop + item.getBoundingClientRect().top - boundary.top });
+      pagination.current = null;
+    } else if (
+      node &&
+      !pagination.current &&
+      previousContent.current &&
+      previousContent.current !== latestContent
+    ) {
       if (following.current || reading.followsLatest()) node.scrollTo({ top: node.scrollHeight });
       else {
         const anchor = readingAnchor.current;
@@ -209,7 +247,7 @@ export function IssueActivity({
     if (node) readingAnchor.current = captureAnchor(node);
     previousContent.current = latestContent;
     previousActivity.current = activityContent;
-  }, [latestContent, activityContent, scroll, reading]);
+  }, [latestContent, activityContent, scroll, reading, continuations]);
   const earlier = async () => {
     const node = scroll.current;
     const anchor = node ? captureAnchor(node) : null;
@@ -260,6 +298,7 @@ export function IssueActivity({
             entry={entry}
             rows={transcript.filter((row) => row.key.startsWith(`${entry.block!.position}:`))}
             onContinuation={rememberContinuation}
+            onPagination={beginContinuation}
           />
         ) : (
           <Milestone
@@ -287,14 +326,17 @@ function ActivityBlock({
   entry,
   rows,
   onContinuation,
+  onPagination,
 }: {
   entry: IssueActivityEntry;
   rows: TranscriptEntry[];
-  onContinuation(block: IssueTranscriptBlock): void;
+  onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
+  onPagination(trigger: string, control: HTMLButtonElement, ids: string[]): void;
 }) {
   const { client } = useServices();
   const continuation = useMemo(() => new IssueTurnRead(client), [client]);
   const extra = useStore(continuation.state);
+  const explicit = useRef(false);
   const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
   const block = entry.block!;
   useEffect(() => {
@@ -302,14 +344,25 @@ function ActivityBlock({
   }, [opened, block, continuation]);
   useEffect(() => () => continuation.close(), [continuation]);
   useEffect(() => {
-    if (extra.value) onContinuation(extra.value);
+    if (extra.value) {
+      onContinuation(extra.value, explicit.current);
+      explicit.current = false;
+    }
   }, [extra.value, onContinuation]);
   const items = rows.flatMap((row) =>
     row.kind === "agent" ? row.items : row.kind === "system" ? [row.item] : [],
   );
   const [expanded, setExpanded] = useEntryState(`activity-expanded:${entry.id}`, false);
   const long = items.some((item) => (item.body?.length ?? 0) > 400);
-  const more = () => {
+  const more = (control?: HTMLButtonElement) => {
+    if (control) {
+      explicit.current = true;
+      onPagination(
+        block.trigger.message_id,
+        control,
+        items.map((item) => item.message_id),
+      );
+    }
     if (!opened) setOpened(true);
     else if (extra.error) void continuation.refresh();
     else void continuation.more();
@@ -358,7 +411,7 @@ function ActivityBlock({
             return <SystemMessage key={row.key} item={row.item} />;
           case "block-more":
             return (
-              <button key={row.key} onClick={() => void more()}>
+              <button key={row.key} onClick={(event) => void more(event.currentTarget)}>
                 继续读取本轮消息
               </button>
             );
