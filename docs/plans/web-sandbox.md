@@ -52,3 +52,9 @@ R1：沙盒包装每个 FakeThread，为每轮脚本建立独立可取消 contex
 R2：make sandbox 仅将自动生成的临时目录解析为物理路径；显式传入的符号链接目录仍被拒绝。
 
 V1：沙盒工具调用与 metadata 的读取／CAS 临界区可取消地串行执行，避免假主 Agent 与假负责人同时改动同一 review 上下文；流式输出、原生事件持久化与真实 runner 仍独立并发推进。先等完整回答被真实账本接收，再读取、分类并提交精确消息版本；保留已有关联，并验证主会话派发的来源／回答关联与所有工具结果。V2 的 worker_failed 决定说明来自正式领域代码，保持不变。V3：三个种子的 Attention 使用不同的真实原始说明来源；不添加协议 body 字段或直接写数据库。
+
+## S7 保留数据重启修正
+
+恢复沿用不修改的真实 runner 与原 journal：按真实流程重放未确认的 claim，再通过 hello 报告 journal 中的运行与停止证据，接受服务端的 reconcile 决定。重放 claim 的长轮询期间，新 incarnation 注册前的心跳拒绝是暂态，不改生产 runner 的心跳顺序。沙盒以每次启动独立的 runner instance 校验 readiness，不把历史 workspace capability 当作本次进程的登记证明；恢复等待覆盖 claim 的真实长轮询周期，并传播 runner 的提前退出错误。注册与 ready 分别记录明确日志。保留未知执行状态，不清空 journal、不伪造成功或重播业务请求。
+
+增加真实 owner API 的跨两次启动测试：完成派发、留下等待回答的 run、停止并保留数据，再无 reset 启动；检查新 hello／实际心跳响应与原始 Issue／任务／收件箱，回答原问题后让正常对账结果生效，再派发新任务并达到终态。只运行 Go 的正常与 race 门禁及保留数据的手工重启验证，不重复 Web 门禁。
