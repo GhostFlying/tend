@@ -19,5 +19,7 @@ export function inboxCount(summary?: AttentionPage, next?: NextActionPage) {
 export function useInboxCount(summary?: AttentionPage) {
   const { live } = useServices();
   const next = useStore(live.attention.next.state);
-  return { count: inboxCount(summary, next.value ?? undefined), more: !!summary?.more };
+  const count = inboxCount(summary, next.value ?? undefined);
+  const more = !!summary?.more;
+  return { count, more, description: `${count}${more ? "+" : ""} 项待处理` };
 }

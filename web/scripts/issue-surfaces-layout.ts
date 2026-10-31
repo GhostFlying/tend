@@ -155,6 +155,8 @@ let uploadCount = 0,
 let sourceRequest = "",
   sourceReceiptReady = false;
 let consultationID = "";
+let consultationTitle = "发布方式咨询";
+let inboxMore = false;
 let replyBody = "我会统筹目标与下一步。当前需要你确认发布范围；相关任务按约定实施与独立验收。";
 let replyRevision = 1;
 let importedIssue: IssueView | undefined;
@@ -316,7 +318,7 @@ const server = createServer(async (req, res) => {
         ? [
             {
               conversation_id: consultationID,
-              title: "发布方式咨询",
+              title: consultationTitle,
               kind: "consultation",
               status: "idle",
               model: "gpt-6.1-sol",
@@ -348,7 +350,7 @@ const server = createServer(async (req, res) => {
   if (p.startsWith("/api/v1/agent-conversations/"))
     return json({
       conversation_id: consultationID,
-      title: "发布方式咨询",
+      title: consultationTitle,
       kind: "consultation",
       agent_ref: "hosted/qingzhu",
       status: "idle",
@@ -582,7 +584,7 @@ const server = createServer(async (req, res) => {
     const status = u.searchParams.get("status");
     if (kind) rows = rows.filter((row) => row.kind === kind);
     if (status) rows = rows.filter((row) => row.status === status);
-    return json({ items: rows, more: false });
+    return json({ items: rows, more: inboxMore });
   }
   if (p.startsWith("/api/v1/attentions/"))
     return json(
@@ -918,7 +920,11 @@ const server = createServer(async (req, res) => {
         operation: {
           request_id: envelope.request_id,
           status: "succeeded",
-          result: { conversation_id: consultationID, title: "发布方式咨询", kind: "consultation" },
+          result: {
+            conversation_id: consultationID,
+            title: consultationTitle,
+            kind: "consultation",
+          },
         },
       });
     }
@@ -1073,6 +1079,7 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
 async function checkNavigation() {
+  assert(output);
   assert(address && typeof address !== "string");
   for (const viewport of [
     { width: 1440, height: 900 },
@@ -1122,6 +1129,34 @@ async function checkNavigation() {
       ).trim(),
       "2",
     );
+    const inboxLink = nav.getByRole("link", { name: "收件箱", exact: true });
+    assert.equal(await inboxLink.getAttribute("aria-description"), "2 项待处理");
+    inboxMore = true;
+    publish();
+    await page.waitForFunction(() =>
+      Array.from(document.querySelectorAll('nav a[href="/inbox"]')).every(
+        (link) => link.getAttribute("aria-description") === "2+ 项待处理",
+      ),
+    );
+    assert.equal(await inboxLink.getAttribute("aria-description"), "2+ 项待处理");
+    await page.screenshot({ path: join(output, `inbox-more-${viewport.width}.png`) });
+    inboxMore = false;
+    publish();
+    await page.waitForFunction(() =>
+      Array.from(document.querySelectorAll('nav a[href="/inbox"]')).every(
+        (link) => link.getAttribute("aria-description") === "2 项待处理",
+      ),
+    );
+    if (!mobile) {
+      assert.notEqual(
+        await sidebar.getByRole("link", { name: "Issues", exact: true }).locator("svg").innerHTML(),
+        await sidebar
+          .getByRole("link", { name: "任务执行", exact: true })
+          .locator("svg")
+          .innerHTML(),
+      );
+      await sidebar.getByRole("status", { name: "已连接", exact: true }).waitFor();
+    }
     for (const path of [
       "/",
       "/issues",
@@ -1187,6 +1222,28 @@ async function checkNavigation() {
     await navigate(page, "/");
     const head = page.locator("main header:visible").first();
     if (mobile) assert((await head.boundingBox())!.height <= 60, "phone chat header stays one row");
+    assert.equal(
+      await head
+        .locator("h1")
+        .getByRole("button", { name: /^切换会话：/ })
+        .count(),
+      1,
+    );
+    assert.equal(
+      await head.getByText("主 Agent", { exact: true }).count(),
+      1,
+      "conversation title is not duplicated",
+    );
+    if (mobile) {
+      const status = head.getByRole("status", { name: "已连接", exact: true });
+      await status.waitFor();
+      const name = (await head.locator("h1").boundingBox())!;
+      const dot = (await status.boundingBox())!;
+      assert(
+        dot.x >= name.x + name.width && dot.x - name.x - name.width <= 8,
+        "connection dot sits beside title",
+      );
+    }
     assert.equal(await head.getByRole("button", { name: "跳到最新", exact: true }).count(), 0);
     await head.getByRole("button", { name: "更多", exact: true }).click();
     const menu = page.getByRole("menu", { name: "更多", exact: true });
@@ -1199,6 +1256,57 @@ async function checkNavigation() {
       await head.getByRole("button", { name: "更多", exact: true }).getAttribute("aria-expanded"),
       "false",
     );
+
+    if (viewport.width === 390) {
+      for (const [index, title] of [
+        "发布流程和回滚文档整体设计咨询",
+        "发布流程和回滚文档整体设计咨询：验收证据与后续执行策略的完整说明",
+      ].entries()) {
+        consultationID = `consultation:header-${index}`;
+        consultationTitle = title;
+        await navigate(page, `/chat/${encodeURIComponent(consultationID)}`);
+        const trigger = head.getByRole("button", { name: `切换会话：${title}`, exact: true });
+        await trigger.waitFor();
+        const geometry = await trigger.evaluate((button) => {
+          const label = button.querySelector("span")!;
+          const chevron = button.querySelector("svg")!;
+          const more = button.closest("header")!.querySelector('[aria-label="更多"]')!;
+          const b = button.getBoundingClientRect(),
+            l = label.getBoundingClientRect(),
+            c = chevron.getBoundingClientRect(),
+            m = more.getBoundingClientRect();
+          return {
+            display: getComputedStyle(button).display,
+            minWidth: getComputedStyle(label).minWidth,
+            ellipsis: getComputedStyle(label).textOverflow,
+            clipped: label.scrollWidth > label.clientWidth,
+            buttonRight: b.right,
+            moreLeft: m.left,
+            chevronRight: c.right,
+            centreDelta: Math.abs((l.top + l.bottom - c.top - c.bottom) / 2),
+            overflow: document.documentElement.scrollWidth > innerWidth,
+          };
+        });
+        assert.equal(geometry.display, "inline-flex");
+        assert.equal(geometry.minWidth, "0px");
+        assert.equal(geometry.ellipsis, "ellipsis");
+        if (index === 1) assert(geometry.clipped, "very long title is ellipsized");
+        assert(geometry.buttonRight <= geometry.moreLeft, "title does not overlap More");
+        assert(
+          geometry.chevronRight <= geometry.buttonRight && geometry.centreDelta <= 2,
+          "chevron stays in the same centred row",
+        );
+        assert.equal(geometry.overflow, false, "long consultation cannot overflow phone width");
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          await page.screenshot({
+            path: join(output, `consultation-${index === 1 ? "long-" : ""}390-${colorScheme}.png`),
+          });
+        }
+      }
+      consultationID = "";
+      consultationTitle = "发布方式咨询";
+    }
     await context.close();
     console.log(`PASS grouped navigation ${viewport.width}`);
   }

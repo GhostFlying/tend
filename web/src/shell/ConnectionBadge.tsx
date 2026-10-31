@@ -32,7 +32,7 @@ export function ConnectionBadge({
 }) {
   const { tone, label } = look[connection.status];
   return (
-    <span className={styles.badge} title={describe(connection)} role="status">
+    <span className={styles.badge} title={describe(connection)} role="status" aria-label={label}>
       <StatusDot tone={tone} />
       {compact ? <span className={styles.hidden}>{label}</span> : label}
     </span>
