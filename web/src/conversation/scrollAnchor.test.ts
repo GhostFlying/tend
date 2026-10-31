@@ -71,3 +71,15 @@ describe("reading anchor", () => {
     expect(top("owner-55")).toBe(before);
   });
 });
+
+test("a tall earlier row does not eclipse the later visible reading anchor", () => {
+  const { root, rows, top } = viewport();
+  rows[0]!.height = 1500;
+  const before = top("owner-55");
+  const anchor = captureAnchor(root);
+  rows[0]!.height += 1020;
+  rows[1]!.top += 1020;
+  rows[2]!.top += 1020;
+  restoreAnchor(root, anchor);
+  expect(top("owner-55")).toBe(before);
+});

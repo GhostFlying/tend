@@ -1,5 +1,6 @@
 import { LiveStatus } from "../ui/LiveStatus.tsx";
 import { runActivityStatus } from "../ui/activityStatus.ts";
+import { captureAnchor, restoreAnchor, type ScrollAnchor } from "../conversation/scrollAnchor.ts";
 import { runLabel } from "../tasks/runLabel.ts";
 import {
   useCallback,
@@ -346,6 +347,7 @@ function Reader({
   const flow = useRef<HTMLOListElement>(null);
   const contentKey = JSON.stringify(steps);
   const previousContent = useRef("");
+  const readingAnchor = useRef<ScrollAnchor | null>(null);
   const explicitLatest = useRef<{ page: WindowState["page"] } | null>(null);
   const disclosureFrame = useRef(0);
   useEffect(() => () => cancelAnimationFrame(disclosureFrame.current), []);
@@ -450,6 +452,9 @@ function Reader({
           row.getBoundingClientRect().top - el.getBoundingClientRect().top - saved.top;
       anchor.current = null;
     } else if (state.live && previousContent.current !== contentKey) el.scrollTop = el.scrollHeight;
+    else if (!state.live && previousContent.current !== contentKey && readingAnchor.current)
+      restoreAnchor(el, readingAnchor.current);
+    readingAnchor.current = captureAnchor(el);
     previousContent.current = contentKey;
   }, [contentKey, target, state.live, state.page, position, restored]);
   const resume = (latest = false) => {
@@ -564,6 +569,7 @@ function Reader({
           disclosureFrame.current = requestAnimationFrame(() => {
             disclosureFrame.current = requestAnimationFrame(() => {
               const el = scroller.current;
+              if (el) readingAnchor.current = captureAnchor(el);
               if (following && el && el.scrollHeight - el.scrollTop - el.clientHeight < 48)
                 state.setLive(true);
             });
@@ -571,6 +577,7 @@ function Reader({
         }}
         onScroll={(event) => {
           const el = event.currentTarget;
+          readingAnchor.current = captureAnchor(el);
           if (state.live && el.scrollHeight - el.scrollTop - el.clientHeight > 48)
             state.setLive(false);
         }}
@@ -594,7 +601,12 @@ function Reader({
           )}
           <ol ref={flow} className={styles.steps}>
             {steps.map((step) => (
-              <li key={step.key} data-step-key={step.key} data-target={step.key === target}>
+              <li
+                key={step.key}
+                data-step-key={step.key}
+                data-scroll-id={step.key}
+                data-target={step.key === target}
+              >
                 <StepView
                   step={step}
                   active={active}

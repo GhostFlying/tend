@@ -247,7 +247,13 @@ const server = createServer(async (req, res) => {
     const selected = before
       ? logs.filter((r) => r.seq < before).slice(-100)
       : after
-        ? logs.filter((r) => r.seq > after).slice(0, 100)
+        ? [
+            ...logs.filter((r) => r.seq > after),
+            ...(typeof logs[99]?.body === "object" &&
+            JSON.stringify(logs[99]?.body).includes("较早执行回复")
+              ? [logs[99]!]
+              : []),
+          ].slice(0, 100)
         : logs.slice(-100);
     const first = selected[0]?.seq ?? before;
     const last = selected.at(-1)?.seq ?? after;
@@ -499,6 +505,35 @@ try {
     });
     await reader.evaluate((el) => {
       el.scrollTop += 150;
+    });
+    const anchorRow = reader
+      .locator("[data-step-key]")
+      .filter({ has: page.getByText("隔离记录 140", { exact: true }) });
+    await anchorRow.scrollIntoViewIfNeeded();
+    await reader.evaluate((node) => {
+      node.scrollTop -= 100;
+    });
+    await page.waitForTimeout(100);
+    const anchorY = await anchorRow.evaluate((node) => node.getBoundingClientRect().top);
+    const olderLog = logs[99]!;
+    const oldBody = olderLog.body;
+    olderLog.body = { type: "agentMessage", text: "较早执行回复继续生成。\n\n".repeat(60) };
+    await rollout.getByText("更多", { exact: true }).click();
+    await rollout.getByRole("button", { name: "重新连接", exact: true }).click();
+    await rollout
+      .getByText(/较早执行回复继续生成/)
+      .first()
+      .waitFor({ state: "attached" });
+    assert(
+      Math.abs((await anchorRow.evaluate((node) => node.getBoundingClientRect().top)) - anchorY) <=
+        2,
+      "earlier run output displaced paused reader anchor",
+    );
+    olderLog.body = oldBody;
+    await rollout.getByText("更多", { exact: true }).click();
+    await expandedTool.scrollIntoViewIfNeeded();
+    await reader.evaluate((node) => {
+      node.scrollTop += 150;
     });
     const expandedTop = (await expandedTool.boundingBox())!.y;
     const outputTop = await toolOutput.evaluate((el) => el.scrollTop);
