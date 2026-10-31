@@ -155,3 +155,11 @@
   max-height: 16dvh;
   overflow-y: auto;
 }
+
+@media (max-width: 760px) {
+  .attach,
+  .send {
+    width: var(--control-touch);
+    height: var(--control-touch);
+  }
+}

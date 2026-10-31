@@ -73,3 +73,12 @@
 .primary:disabled:hover {
   background: var(--accent);
 }
+
+@media (max-width: 760px) {
+  .button:not(.link) {
+    min-height: var(--control-touch);
+  }
+  .icon {
+    min-width: var(--control-touch);
+  }
+}

@@ -54,3 +54,7 @@
   padding: 0 var(--space-1);
   font-weight: 700;
 }
+
+.tab {
+  min-height: var(--control-touch);
+}

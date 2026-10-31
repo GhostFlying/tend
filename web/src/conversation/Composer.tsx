@@ -176,7 +176,7 @@ export function Composer({
     }
   };
 
-  let hint = "";
+  let hint = touch ? "" : "Enter 发送 · Shift+Enter 换行";
   if (queue === null) {
     hint = "这个浏览器不能保存待发送的消息，暂时不能发送";
   } else if (busy && stopping) {
@@ -267,11 +267,8 @@ export function Composer({
           event.preventDefault();
           addFiles(files);
         }}
-        placeholder={
-          presentation === "issue"
-            ? "补充要求，或继续讨论这个 Issue…"
-            : `发给 ${recipient?.title ?? "主 Agent"}…${touch ? "" : "（Enter 发送，Shift+Enter 换行）"}`
-        }
+        placeholder={presentation === "issue" ? "补充要求或继续讨论…" : "输入消息…"}
+        aria-description={`发给 ${recipient?.title ?? "主 Agent"}`}
         aria-label="消息"
         disabled={blocked}
         readOnly={persisting}
@@ -309,7 +306,7 @@ export function Composer({
             <path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.5-8.5" />
           </svg>
         </button>
-        <span className={styles.hint} role="status">
+        <span className={styles.hint} role="status" title={hint}>
           {dragging ? "松开以添加附件" : hint}
         </span>
         {presentation === "chat" ? (
