@@ -19,6 +19,7 @@ import type {
 } from "../src/api/generated/api.ts";
 const catalogOnly = process.argv.includes("--catalog-only");
 let hostedUnconfigured = false;
+let holdTaskFeed = false;
 const output = process.env.TEND_LAYOUT_OUTPUT;
 assert(output, "Set an isolated screenshot output directory");
 await mkdir(output, { recursive: true });
@@ -394,7 +395,10 @@ const server = createServer(async (req, res) => {
       more: false,
     });
   if (p === "/api/v1/repos") return json({ repos: [{ repo: "sample", retired: false }] });
-  if (p === "/api/v1/tasks") return json({ tasks: [] });
+  if (p === "/api/v1/tasks") {
+    if (holdTaskFeed && u.searchParams.get("limit") !== "5") return;
+    return json({ tasks: [] });
+  }
   if (p === "/api/v1/tasks/task-manager")
     return json({
       ...activeTask,
@@ -1249,6 +1253,21 @@ try {
       /2/,
     );
     await page.screenshot({ path: join(output, `main-${viewport.width}.png`) });
+    await page
+      .getByRole("complementary", { name: "当前待处理", exact: true })
+      .getByRole("button", { name: "查看并处理", exact: true })
+      .click();
+    await page.getByRole("button", { name: "稍后处理", exact: true }).click();
+    await page.waitForURL((url) => url.pathname === "/inbox");
+    assert.equal(new URL(page.url()).pathname, "/inbox");
+    await page
+      .getByRole("region", { name: "待处理事项", exact: true })
+      .getByRole("button", { name: /发布进度已更新/ })
+      .click();
+    await page.getByRole("button", { name: "稍后处理", exact: true }).click();
+    await page.waitForURL((url) => url.pathname === "/inbox");
+    assert.equal(new URL(page.url()).pathname, "/inbox", "defer always opens the list");
+    await navigate(page, "/");
     replyBody = "实际流式回复：先核对证据，再安排下一步。";
     replyRevision++;
     for (const stream of streams)
@@ -1983,6 +2002,13 @@ try {
           throw error;
         });
       assert.equal(await routeSmoke.getByRole("heading", { level: 1 }).count(), 1);
+      if (name === "inbox") {
+        const description = routeSmoke.getByText("需要你决定或亲自推进的事项。", { exact: true });
+        const padding = await description.evaluate(
+          (element) => getComputedStyle(element).paddingLeft,
+        );
+        assert.equal(padding, "16px");
+      }
       if (name === "main") await routeSmoke.locator('[data-scroll-id="owner-plan"]').waitFor();
       await routeSmoke.screenshot({ path: join(output, `s2-${name}-${viewport.width}.png`) });
       await routeSmoke.reload();
@@ -1995,6 +2021,19 @@ try {
         "pages do not require Escape to leave",
       );
     }
+    holdTaskFeed = true;
+    const feedRequest = routeSmoke.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return url.pathname === "/api/v1/tasks" && url.searchParams.get("limit") !== "5";
+    });
+    await navigate(routeSmoke, "/tasks");
+    const requestedFeed = await feedRequest;
+    const cancelledFeed = routeSmoke.waitForEvent("requestfailed", {
+      predicate: (request) => request === requestedFeed,
+    });
+    await navigate(routeSmoke, "/");
+    await cancelledFeed;
+    holdTaskFeed = false;
     await routeSmoke.goto(`${fixtureOrigin}/?issue=${issue.issue_id}`);
     await routeSmoke
       .getByRole("heading", { name: issue.plan.title, exact: true, level: 1 })

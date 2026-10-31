@@ -492,6 +492,39 @@ try {
     assert.deepEqual(consoleErrors, [], "composer interactions must not emit console errors");
     await page.getByText(owner.body!, { exact: true }).waitFor();
     await page.getByRole("textbox", { name: "消息", exact: true }).fill("主会话草稿保留");
+    const mainInput = page.getByRole("textbox", { name: "消息", exact: true });
+    await mainInput.evaluate((element) => {
+      element.setAttribute("data-retained-composer", "main");
+    });
+    const transcript = page.getByRole("region", { name: "对话记录", exact: true });
+    const mainTop = await transcript.evaluate((element) => element.scrollTop);
+    for (const [opener, dialogName] of [
+      ["来源", "补充来源"],
+      ["会话 ▾", "会话"],
+      ["查看处理记录", "持久处理记录"],
+      ["上下文用量 42%", "上下文用量"],
+    ]) {
+      await navigate(page, "/issues");
+      await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
+      await navigate(page, "/");
+      await mainInput.waitFor();
+      await page.getByRole("button", { name: opener!, exact: true }).click();
+      await page.getByRole("dialog", { name: dialogName!, exact: true }).waitFor();
+      await page.goBack();
+      await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
+      assert.equal(await page.locator("dialog[open]").count(), 0);
+      assert.equal(await page.getByRole("dialog").count(), 0);
+      const filter = page.getByLabel("按项目筛选Issue");
+      await filter.click();
+      assert(await filter.evaluate((element) => element === document.activeElement));
+      if (width === 390) await page.getByRole("navigation", { name: "视图" }).waitFor();
+      await page.screenshot({ path: join(output, `overlay-back-${dialogName}-${width}.png`) });
+      await navigate(page, "/");
+      assert.equal(await mainInput.getAttribute("data-retained-composer"), "main");
+      assert.equal(await mainInput.inputValue(), "主会话草稿保留");
+      assert.equal(await transcript.evaluate((element) => element.scrollTop), mainTop);
+      assert.equal(await page.getByRole("dialog").count(), 0, "closed overlays do not reopen");
+    }
     await page
       .getByRole("textbox", { name: "消息", exact: true })
       .locator("..")

@@ -17,6 +17,9 @@
   color: var(--label-3);
   font-size: var(--text-caption);
 }
+.context {
+  padding: 0 var(--space-4);
+}
 .tabs {
   display: flex;
   gap: var(--space-6);

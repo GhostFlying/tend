@@ -1,3 +1,4 @@
+import { useOverlayState } from "../ui/focus.ts";
 // The composer's compact model seat: a two-level menu shared across devices.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
@@ -15,7 +16,7 @@ export function Settings({ connection }: { connection: Connection }) {
   const { client, live } = useServices();
   const settings = live.settings;
   const state = useStore(settings.state);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOverlayState(false);
   const [pane, setPane] = useState<Pane>("root");
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -45,7 +46,7 @@ export function Settings({ connection }: { connection: Connection }) {
     };
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
-  }, [open]);
+  }, [open, setOpen]);
   useLayoutEffect(() => {
     if (!open || position.visibility === "hidden") return;
     const current = menu.current;

@@ -25,6 +25,7 @@ export function AgentCatalogView() {
   useEffect(() => {
     void live.agents.openCategories("all");
     void live.agents.openHosted();
+    return () => live.agents.categories.close();
   }, [live]);
   if (edit)
     return (

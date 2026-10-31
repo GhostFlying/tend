@@ -326,6 +326,7 @@ try {
     await page.getByRole("button", { name: "Token 用量", exact: true }).click();
     const panel = page.getByRole("region", { name: "Token 用量", exact: true });
     await panel.getByText("14,000", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Token 用量", exact: true }).count(), 1);
     assert.equal(
       await panel.getByRole("combobox", { name: "范围", exact: true }).inputValue(),
       "total",

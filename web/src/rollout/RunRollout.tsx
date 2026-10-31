@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { useOverlayState } from "../ui/focus.ts";
 import type { RunView } from "../api/generated/api.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { UsagePanel } from "../usage/Usage.tsx";
@@ -61,7 +62,7 @@ function RunWindow({ run }: { run: RunView }) {
   const steps = useMemo(() => buildSteps(window.page?.logs ?? []), [window.page]);
   const [expanded, setExpanded] = useState(false);
   const [visible, setVisible] = useState(6);
-  const [full, setFull] = useState(false);
+  const [full, setFull] = useOverlayState(false);
   const [target, setTarget] = useState("");
   const [usage, setUsage] = useState(false);
   const regionID = useId();
@@ -71,7 +72,7 @@ function RunWindow({ run }: { run: RunView }) {
   const active = observed === "running" || observed === "starting";
   const current =
     (active && steps.findLast((step) => step.kind === "tool" && step.pending)) || steps.at(-1);
-  const close = useCallback(() => setFull(false), []);
+  const close = useCallback(() => setFull(false), [setFull]);
   const open = (step?: Step) => {
     if (step) window.setLive(false);
     setSavedPosition(readingPosition.current);

@@ -1,7 +1,7 @@
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/Surfaces.tsx";
-import { rememberOpener } from "../ui/focus.ts";
+import { rememberOpener, useOverlayState } from "../ui/focus.ts";
 import { navigate, useRoute } from "../app/router.ts";
 import { NewConsultation } from "./NewConsultation.tsx";
 import { Close } from "../shell/icons.tsx";
@@ -45,8 +45,8 @@ export function AgentWorkspace({
   const listRevision = useRef(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [visited, setVisited] = useState<AgentConversation[]>([]);
-  const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [open, setOpen] = useOverlayState(false, visible);
+  const [creating, setCreating] = useOverlayState(false, visible);
   const drawerOpener = useRef<Element | null>(null);
   const drawer = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -78,11 +78,14 @@ export function AgentWorkspace({
       clearTimeout(timer);
     };
   }, [services.client, search, status, open]);
-  const select = useCallback((id: string) => {
-    selection.current.revision++;
-    setOpen(false);
-    navigate(id === "main" ? { page: "chat" } : { page: "conversation", id });
-  }, []);
+  const select = useCallback(
+    (id: string) => {
+      selection.current.revision++;
+      setOpen(false);
+      navigate(id === "main" ? { page: "chat" } : { page: "conversation", id });
+    },
+    [setOpen],
+  );
   useEffect(() => {
     const requests = selection.current;
     const request = ++requests.revision;

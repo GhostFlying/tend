@@ -22,6 +22,7 @@ import styles from "./Chat.module.css";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ArrowDown } from "./icons.tsx";
+import { OverlayVisibility, useOverlayState } from "../ui/focus.ts";
 
 export function Chat({
   connection,
@@ -39,11 +40,11 @@ export function Chat({
   const choice = useStore(theme);
   const { conversation, openAgentDrawer, selectConversation, openIssue } = useServices();
   const [jump, setJump] = useState(0);
-  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useOverlayState(false, visible);
   const toLatest = () => setJump((n) => n + 1);
 
   return (
-    <>
+    <OverlayVisibility value={visible}>
       <PageHeader className={styles.head} title={conversation?.title ?? "主 Agent"}>
         <span className={styles.sub}>
           {conversation?.kind === "consultation"
@@ -127,7 +128,7 @@ export function Chat({
           </div>
         </div>
       </div>
-    </>
+    </OverlayVisibility>
   );
 }
 
