@@ -9,7 +9,14 @@ export function captureAnchor(root: HTMLElement): ScrollAnchor {
   const top = root.getBoundingClientRect().top;
   const bottom = top + root.clientHeight;
   const items: ScrollAnchor["items"] = [];
-  for (const item of root.querySelectorAll<HTMLElement>(selector)) {
+  const nodes = [...root.querySelectorAll<HTMLElement>(selector)];
+  // Prefer a row beginning in view over a tall earlier row spanning the viewport.
+  // Growth within that earlier row must not displace the later row being read.
+  nodes.sort(
+    (a, b) =>
+      Number(a.getBoundingClientRect().top < top) - Number(b.getBoundingClientRect().top < top),
+  );
+  for (const item of nodes) {
     const bounds = item.getBoundingClientRect();
     if (bounds.bottom > top && bounds.top < bottom) {
       items.push({ id: item.dataset.scrollId!, offset: bounds.top - top });

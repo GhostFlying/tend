@@ -21,7 +21,7 @@ import { LiveStatus } from "../ui/LiveStatus.tsx";
 import { conversationStatus } from "../ui/activityStatus.ts";
 import { AgentTurn, OwnerMessage, OutgoingRow, SystemMessage } from "../conversation/Messages.tsx";
 import { buildTranscriptEntries, type TranscriptEntry } from "../conversation/transcriptBlocks.ts";
-import { captureAnchor, restoreAnchor } from "../conversation/scrollAnchor.ts";
+import { captureAnchor, restoreAnchor, type ScrollAnchor } from "../conversation/scrollAnchor.ts";
 import { IssueTurnRead } from "./turn.ts";
 import { IssueResultCard, HistoricalResultCard } from "./Results.tsx";
 import type { IssueReadingState } from "./reading.ts";
@@ -59,6 +59,7 @@ export function IssueActivity({
   const [error, setError] = useState("");
   const [newItems, setNewItems] = useState(false);
   const following = useRef(reading.followsLatest());
+  const readingAnchor = useRef<ScrollAnchor | null>(null);
   useEffect(() => {
     const node = scroll.current;
     if (!node) return;
@@ -66,6 +67,7 @@ export function IssueActivity({
       following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
       if (following.current) reading.followLatest();
       else reading.pauseFollowing();
+      readingAnchor.current = captureAnchor(node);
     };
     let frame = 0;
     const disclosure = (event: MouseEvent) => {
@@ -167,8 +169,12 @@ export function IssueActivity({
     const node = scroll.current;
     if (node && previousContent.current && previousContent.current !== latestContent) {
       if (following.current || reading.followsLatest()) node.scrollTo({ top: node.scrollHeight });
-      else requestAnimationFrame(() => setNewItems(true));
+      else {
+        if (readingAnchor.current) restoreAnchor(node, readingAnchor.current);
+        requestAnimationFrame(() => setNewItems(true));
+      }
     }
+    if (node) readingAnchor.current = captureAnchor(node);
     previousContent.current = latestContent;
   }, [latestContent, scroll, reading]);
   const earlier = async () => {
