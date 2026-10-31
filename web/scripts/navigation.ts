@@ -17,6 +17,7 @@ export async function navigate(page: Page, path: string) {
 }
 
 export async function editIssueFilters(page: Page, edit: () => Promise<void>) {
+  await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
   const trigger = page.getByRole("button", { name: "筛选", exact: true });
   const sheet = await trigger.isVisible();
   if (sheet) await trigger.click();

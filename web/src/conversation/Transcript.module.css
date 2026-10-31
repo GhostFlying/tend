@@ -96,6 +96,9 @@
 }
 
 @media (max-width: 760px) {
+  .wrap {
+    min-height: calc(var(--control-touch) + 2 * var(--space-2) + env(safe-area-inset-bottom));
+  }
   .jump {
     min-height: var(--control-touch);
     bottom: calc(var(--space-2) + env(safe-area-inset-bottom));

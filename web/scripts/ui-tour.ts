@@ -598,6 +598,26 @@ try {
           const controls = Array.from(
             document.querySelectorAll<HTMLElement>('button, a, [role="tab"]'),
           ).filter(visible);
+          const touch = Number.parseFloat(
+            getComputedStyle(document.documentElement).getPropertyValue("--control-touch"),
+          );
+          const undersized =
+            innerWidth > 760
+              ? []
+              : controls
+                  .filter(
+                    (e) =>
+                      e.getAttribute("role") === "tab" ||
+                      e.matches(
+                        'nav[aria-label="视图"] a, nav[aria-label="更多导航"] a, h1 button, button[aria-label="发送"], button[aria-label="更多"]',
+                      ) ||
+                      Array.from(e.classList).some((c) => c.includes("primary")),
+                  )
+                  .filter((e) => {
+                    const box = e.getBoundingClientRect();
+                    return box.height < touch - 1 || box.width < touch - 1;
+                  })
+                  .map((e) => e.getAttribute("aria-label") ?? e.textContent?.trim());
           const clipped = controls
             .filter(
               (e) =>
@@ -616,6 +636,7 @@ try {
             headings: Array.from(document.querySelectorAll<HTMLElement>("h1")).filter(visible)
               .length,
             clipped,
+            undersized,
             sidebar: sidebar?.getBoundingClientRect().width,
             tabs: !!tabs && visible(tabs),
             tabTop: tabs?.getBoundingClientRect().top,
@@ -639,6 +660,7 @@ try {
         );
         assert.equal(geometry.headings, 1, `${name}: exactly one visible h1`);
         assert.deepEqual(geometry.clipped, [], `${name}: clipped control text`);
+        assert.deepEqual(geometry.undersized, [], `${name}: undersized mobile action`);
         if (viewport.width >= 1024) {
           sidebarWidth ??= geometry.sidebar;
           assert.equal(geometry.sidebar, sidebarWidth, `${name}: sidebar width changed`);

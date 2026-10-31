@@ -35,3 +35,9 @@
   background: transparent;
   border-bottom-color: var(--accent);
 }
+
+@media (max-width: 760px) {
+  .group button {
+    min-height: var(--control-touch);
+  }
+}

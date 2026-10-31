@@ -906,8 +906,13 @@ async function checkLowHeightAndSharedButtons() {
       .getByRole("button", { name: "交还给 tend" });
     await reachable(handback);
     const handbackBox = await rect(handback);
-    assert(handbackBox.height >= 36 && handbackBox.height < 44);
-    assert(submitBox.height >= 36 && submitBox.height < 44);
+    const touch = await page.evaluate(() =>
+      Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--control-touch"),
+      ),
+    );
+    assert(Math.abs(handbackBox.height - touch) <= 1);
+    assert(Math.abs(submitBox.height - touch) <= 1);
     await page.screenshot({ path: join(output, `${browserName}-safe-area-390x568.png`) });
     assert.equal(errors.length, 0, errors.join("\n"));
     console.log(`PASS reachability ${browserName}-safe-area-390x568`);
