@@ -348,6 +348,7 @@ function Reader({
   const contentKey = JSON.stringify(steps);
   const previousContent = useRef("");
   const readingAnchor = useRef<ScrollAnchor | null>(null);
+  const scrollportSize = useRef({ width: 0, height: 0 });
   const explicitLatest = useRef<{ page: WindowState["page"] } | null>(null);
   const disclosureFrame = useRef(0);
   useEffect(() => () => cancelAnimationFrame(disclosureFrame.current), []);
@@ -357,6 +358,28 @@ function Reader({
   const [usage, setUsage] = useState(false);
   const observed = run.observed;
   const active = observed === "running" || observed === "starting";
+  const resized = useCallback(
+    (el: HTMLElement) => {
+      if (
+        el.clientWidth === scrollportSize.current.width &&
+        el.clientHeight === scrollportSize.current.height
+      )
+        return false;
+      scrollportSize.current = { width: el.clientWidth, height: el.clientHeight };
+      if (state.live) el.scrollTop = el.scrollHeight;
+      else if (readingAnchor.current) restoreAnchor(el, readingAnchor.current);
+      readingAnchor.current = captureAnchor(el);
+      return true;
+    },
+    [state.live],
+  );
+  useEffect(() => {
+    const node = scroller.current;
+    if (!node) return;
+    const observer = new ResizeObserver(() => resized(node));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [resized]);
   const close = () => {
     if (closing.current) return;
     closing.current = true;
@@ -577,6 +600,7 @@ function Reader({
         }}
         onScroll={(event) => {
           const el = event.currentTarget;
+          if (resized(el)) return;
           readingAnchor.current = captureAnchor(el);
           if (state.live && el.scrollHeight - el.scrollTop - el.clientHeight > 48)
             state.setLive(false);
