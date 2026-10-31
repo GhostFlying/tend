@@ -4,7 +4,7 @@ import type { ApiClient, Connection } from "../api/client.ts";
 import { ServicesContext, type Services } from "../app/services.tsx";
 import { navigate, useRoute } from "../app/router.ts";
 import { useMainAttention } from "../attention/useMainAttention.ts";
-import { IssueReadingStates } from "../issues/Details.tsx";
+import { IssueReadingStates } from "../issues/reading.ts";
 import { ConversationSessions, ConversationSessionsContext } from "../conversation/session.tsx";
 import type { LiveData } from "../live/data.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";

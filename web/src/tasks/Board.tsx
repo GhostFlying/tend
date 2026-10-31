@@ -2,7 +2,7 @@ import { Input, Tabs } from "../ui/index.ts";
 import { navigate, useEntryState } from "../app/router.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { ResourceNavigation } from "../shell/Resources.tsx";
-import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
+import { UpgradeBanner } from "../upgrades/Banner.tsx";
 import { useEffect, useId, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type { TaskSummary } from "../api/generated/api.ts";
