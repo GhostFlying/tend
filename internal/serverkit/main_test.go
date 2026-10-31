@@ -1,0 +1,239 @@
+package serverkit
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/protocol"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/GhostFlying/tend/internal/cfgfile"
+)
+
+func TestServerRoutesRunnerFilesAndRPC(t *testing.T) {
+	runners := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Route", "runner")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	owner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Route", "owner")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := serverHandler(runners, owner)
+	for _, tc := range []struct {
+		method, path, route string
+	}{
+		{http.MethodPost, "/runner/v1/rpc", "runner"},
+		{http.MethodPost, "/runner/v1/files?request_id=req_test&name=evidence.txt", "runner"},
+		{http.MethodGet, "/runner/v1/files/file_test", "runner"},
+		{http.MethodGet, "/api/v1/files/file_test", "owner"},
+	} {
+		t.Run(tc.method+tc.path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(tc.method, tc.path, nil))
+			if recorder.Code != http.StatusNoContent || recorder.Header().Get("X-Route") != tc.route {
+				t.Fatalf("route = %d %q, want %q", recorder.Code, recorder.Header().Get("X-Route"), tc.route)
+			}
+		})
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	var c Config
+	if err := cfgfile.Load("../../docs/examples/tend-server.hujson", &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Tailnet == nil || c.MainAgent != nil || len(c.Hosts) != 1 || c.Queue.WaitPerHour == nil || *c.Queue.WaitPerHour != 0.1 ||
+		c.HostLostAfter == nil || time.Duration(*c.HostLostAfter) != 24*time.Hour {
+		t.Errorf("example config = %+v", c)
+	}
+}
+
+func TestBackgroundAutoModeWorkingDirectories(t *testing.T) {
+	root := t.TempDir()
+	custom := t.TempDir()
+	main, err := mainAgentWorkingDirectory(MainAgentConfig{Cwd: custom}, root)
+	if err != nil || main != custom {
+		t.Fatalf("main cwd=%q err=%v", main, err)
+	}
+	a, err := mainAgentWorkingDirectory(MainAgentConfig{Cwd: custom, ConversationID: "work-item:a"}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := mainAgentWorkingDirectory(MainAgentConfig{ConversationID: "work-item:a"}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := mainAgentWorkingDirectory(MainAgentConfig{ConversationID: "work-item:b"}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != again || a == b || a == main {
+		t.Fatalf("background cwd identity not stable and independent: %q %q %q %q", a, again, b, main)
+	}
+}
+
+func TestServerRejectsUnnamedHostedConfigurationBeforeLedgerOpen(t *testing.T) {
+	t.Setenv("TEND_SERVER_SECRET", "")
+	for _, tc := range []struct {
+		name               string
+		main               any
+		wantNamedRejection bool
+	}{
+		{"unnamed", map[string]any{}, true},
+		{"named", map[string]any{"named": map[string]any{}}, false},
+		{"owner-only", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := filepath.Join(t.TempDir(), "not-created")
+			cfg := map[string]any{"data_dir": data}
+			if tc.main != nil {
+				cfg["main_agent"] = tc.main
+			}
+			raw, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "server.json")
+			if err := os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			err = RunFile(t.Context(), path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err == nil {
+				t.Fatal("missing secret unexpectedly admitted startup")
+			}
+			if tc.wantNamedRejection {
+				if !strings.Contains(err.Error(), "main_agent requires an explicit named configuration") {
+					t.Fatal(err)
+				}
+			} else if !strings.Contains(err.Error(), "TEND_SERVER_SECRET") {
+				t.Fatal("legal named/owner-only mode rejected by legacy guard", err)
+			}
+			if _, err := os.Stat(data); !os.IsNotExist(err) {
+				t.Fatal("configuration rejection opened/created business data", err)
+			}
+		})
+	}
+}
+
+func TestInjectedAssemblyRunsHooksAndReturnsBackgroundFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured, initialized := false, false
+	sentinel := errors.New("injected background failure")
+	err = Run(t.Context(), Config{DataDir: t.TempDir()}, []byte("isolated-test-secret"), Dependencies{
+		Listeners: []net.Listener{listener},
+		OpenTelegram: func(*app.App, string, *slog.Logger) (TelegramClient, error) {
+			t.Fatal("disabled Telegram must not open a transport")
+			return nil, nil
+		},
+		Configure: func(context.Context, *app.App, protocol.IDGen) error { configured = true; return nil },
+		Initialize: func(ctx context.Context, runtime *Runtime) error {
+			initialized = runtime.App != nil && runtime.Store != nil && runtime.Tools != nil && runtime.IDs != nil
+			return nil
+		},
+		Background: func(context.Context, *Runtime) error { return sentinel },
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if !configured || !initialized || !errors.Is(err, sentinel) {
+		t.Fatalf("hooks=%v/%v error=%v", configured, initialized, err)
+	}
+	if _, err := listener.Accept(); err == nil {
+		t.Fatal("listener was not closed")
+	}
+}
+
+type assemblyTelegram struct {
+	prepareErr error
+	prepared   bool
+	bounded    bool
+	started    chan struct{}
+	stopped    chan struct{}
+}
+
+func (c *assemblyTelegram) Prepare(ctx context.Context) error {
+	c.prepared = true
+	_, c.bounded = ctx.Deadline()
+	return c.prepareErr
+}
+
+func (c *assemblyTelegram) Run(ctx context.Context) {
+	close(c.started)
+	<-ctx.Done()
+	close(c.stopped)
+}
+
+func (*assemblyTelegram) Deliver(context.Context, app.Delivery) app.DeliveryResult {
+	return app.DeliveryResult{Outcome: app.Failed}
+}
+
+func (*assemblyTelegram) Reconcile(context.Context, app.Delivery) app.DeliveryResult {
+	return app.DeliveryResult{Outcome: app.Unknown}
+}
+
+func TestInjectedTelegramPreparationAndLifecycle(t *testing.T) {
+	t.Setenv("TEND_TEST_TELEGRAM_TOKEN", "isolated-token")
+	for _, preparationFails := range []bool{false, true} {
+		t.Run(fmt.Sprint(preparationFails), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			sentinel := errors.New("injected transport stop")
+			client := &assemblyTelegram{started: make(chan struct{}), stopped: make(chan struct{})}
+			if preparationFails {
+				client.prepareErr = sentinel
+			}
+			initialized := false
+			err = Run(ctx, Config{DataDir: t.TempDir(), Telegram: &TelegramConfig{TokenEnv: "TEND_TEST_TELEGRAM_TOKEN"}}, []byte("isolated-test-secret"), Dependencies{
+				Listeners: []net.Listener{listener},
+				OpenTelegram: func(a *app.App, token string, log *slog.Logger) (TelegramClient, error) {
+					if a == nil || token != "isolated-token" || log == nil {
+						t.Fatal("transport factory did not receive the assembled app and resolved credentials")
+					}
+					return client, nil
+				},
+				Initialize: func(context.Context, *Runtime) error {
+					initialized = true
+					if !client.prepared {
+						t.Fatal("runtime initialized before transport preparation")
+					}
+					return nil
+				},
+				Background: func(ctx context.Context, _ *Runtime) error {
+					select {
+					case <-client.started:
+						return sentinel
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				},
+			}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if !errors.Is(err, sentinel) || !client.prepared || !client.bounded || initialized == preparationFails {
+				t.Fatalf("error=%v prepared=%v bounded=%v initialized=%v", err, client.prepared, client.bounded, initialized)
+			}
+			if !preparationFails {
+				select {
+				case <-client.stopped:
+				default:
+					t.Fatal("service returned before transport shutdown")
+				}
+			}
+		})
+	}
+}

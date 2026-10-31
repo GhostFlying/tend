@@ -17,10 +17,13 @@ tend/
   .local/                  机器相关的笔记与配置，已 ignore，不提交
   cmd/
     tend-server/           服务端入口：只做配置解析与组装
+    tend-sandbox/          独立 Web 开发沙盒入口（D133），不进入发布包
     tend-runner/           runner 入口：只做配置解析与组装
     tend-updater/          固定更新器入口与本机控制命令（D84）
     tend/                  tend CLI 入口：只做组装
   internal/
+    serverkit/             服务端共享组装与显式外部边界注入（D133）
+    sandbox/               沙盒专用脚本与 demo；正式服务端不依赖
     protocol/              线上协议：请求信封、错误码、payload_hash、领域枚举；导出 JSON Schema
     domain/                纯领域逻辑：状态机、完成条件派生、动作代次规则；不做 IO
     store/                 SQLite、嵌入式迁移、仓储、事务辅助
@@ -62,8 +65,8 @@ tend/
 依赖只能自上而下，禁止循环：
 
 ```
-cmd → mainthread → app, tools, contextbuilder, harness
-cmd → api / tools / runnerapi / dispatch / contextbuilder
+cmd/tend-server、cmd/tend-sandbox → serverkit → mainthread → app, tools, contextbuilder, harness
+serverkit → api / tools / runnerapi / dispatch / contextbuilder / messaging / messaging/telegram
     → app → scheduler → domain → protocol
           → domain
           → store → protocol
@@ -73,8 +76,10 @@ updater → protocol, release（不 import app/store/runner）
 app, store → release（只使用不可变 manifest 数据类型）
 app, store → blobstore（仅标准库；原文件不可变暂存与读取）
 cmd/tend → cli → protocol（cli 只用标准库，不 import 服务端的任何包）
+sandbox → serverkit, runner, testkit（仅沙盒入口使用）
+messaging, messaging/telegram → app, protocol
 harness/traex, harness/orca, harness/bridge → harness, protocol
-cmd/tend-server → webui（webui 只用标准库，不 import 其他包）
+serverkit → webui（webui 只用标准库，不 import 其他包）
 ```
 
 - `domain` 不依赖 `store`、网络、时钟或随机数：所有输入通过参数传入，输出是决定（新状态、事件、待创建动作），方便穷举测试。

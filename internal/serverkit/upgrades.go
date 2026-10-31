@@ -1,4 +1,4 @@
-package main
+package serverkit
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"github.com/GhostFlying/tend/internal/upgradectl"
 )
 
-type upgradeConfig struct {
+type UpgradeConfig struct {
 	Instance      string           `json:"instance"`
 	ControlSocket string           `json:"control_socket"`
 	UpdaterSocket string           `json:"updater_socket"`
@@ -29,7 +29,7 @@ type upgradeConfig struct {
 	GrantDuration cfgfile.Duration `json:"grant_duration"`
 }
 
-func prepareUpgradeConfig(cfg *upgradeConfig, dataDir string) error {
+func prepareUpgradeConfig(cfg *UpgradeConfig, dataDir string) error {
 	if cfg == nil {
 		return nil
 	}
@@ -79,7 +79,7 @@ func executableSHA256() (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
-func prepareUpgradeController(cfg *upgradeConfig, a *app.App, front *mainthread.Manager, background *mainthread.BackgroundPool, ids protocol.IDGen, log *slog.Logger) (*upgradectl.Controller, error) {
+func prepareUpgradeController(cfg *UpgradeConfig, a *app.App, front *mainthread.Manager, background *mainthread.BackgroundPool, ids protocol.IDGen, log *slog.Logger) (*upgradectl.Controller, error) {
 	if cfg == nil {
 		return nil, nil
 	}

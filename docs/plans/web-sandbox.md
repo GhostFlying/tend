@@ -5,7 +5,7 @@ Refs: D133、D132。Plan: S7。
 ## 边界与提交
 
 1. 文档提交：本计划、D133 与总计划登记。
-2. 重构提交：将正式服务端组装与相应配置／测试移到 `internal/serverkit`，入口仍解析同一配置。通过 Dependencies 显式注入网络身份、托管会话 opener、时钟／ID 及初始化／后台生命周期；默认使用原真实边界。更新 AGENTS.md 依赖方向。
+2. 重构提交：将正式服务端组装与相应配置／测试移到 `internal/serverkit`，入口仍解析同一配置。通过 Dependencies 显式注入网络身份、托管会话 opener、时钟／ID 及初始化／后台生命周期；默认使用原真实边界。Telegram 传输 opener 同样显式注入，正式配置与准备／投递／轮询行为沿 D131 保留；沙盒不提供 Telegram 配置或凭据，通用阅读回执 dispatcher 及通知 fanout 仍走共享组装。更新 AGENTS.md 依赖方向。
 3. 功能提交：`cmd/tend-sandbox` 解析参数，`internal/sandbox` 承载专用脚本与 demo，不被正式服务端依赖。复用 testkit 会话，通过真实 tools 回调执行操作；真实 runner 使用脚本 Workers 与限定在数据目录内的 Workspaces。
 
 不修改 owner API、runner wire、迁移、生成类型或发布集合，不新增依赖。沙盒数据与进程生命周期独立于生产；禁止未标记非空目录、标记内容错误或符号链接目录，重置仅删除已验证沙盒目录中的内容。

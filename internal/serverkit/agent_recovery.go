@@ -1,4 +1,4 @@
-package main
+package serverkit
 
 import (
 	"fmt"
@@ -7,14 +7,14 @@ import (
 )
 
 // Omitted fields retain the hosted defaults; zero max_attempts disables recovery.
-type agentRecoveryConfig struct {
+type AgentRecoveryConfig struct {
 	BaseDelaySeconds  *int64 `json:"base_delay_seconds"`
 	MaxDelaySeconds   *int64 `json:"max_delay_seconds"`
 	MaxElapsedSeconds *int64 `json:"max_elapsed_seconds"`
 	MaxAttempts       *int64 `json:"max_attempts"`
 }
 
-func (c agentRecoveryConfig) policy() (domain.AgentRecoveryPolicy, error) {
+func (c AgentRecoveryConfig) policy() (domain.AgentRecoveryPolicy, error) {
 	p := domain.DefaultAgentRecoveryPolicy()
 	for _, v := range []struct {
 		value  *int64
