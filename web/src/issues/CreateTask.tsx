@@ -97,7 +97,7 @@ export function CreateIssueTask({
   if (created)
     return (
       <section className={styles.root}>
-        <h1>任务已创建</h1>
+        <h2>任务已创建</h2>
         <h2>{submitted?.title ?? title}</h2>
         <p>目标：{submitted?.spec.goal ?? goal}</p>
         <section className={layout.receipt}>
@@ -144,7 +144,7 @@ export function CreateIssueTask({
     );
   return (
     <section className={`${styles.root} ${styles.form} ${layout.root}`} aria-label="创建任务">
-      <h1>创建任务</h1>
+      <h2>创建任务</h2>
       <p>{issue.plan.title}</p>
       <div className={layout.content}>
         <div className={layout.intro}>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useServices } from "../app/services.tsx";
 import type { TokenUsageTotals, TokenUsageView } from "../api/generated/api.ts";
-import { DetailOverlay, DetailPane } from "../shell/DetailOverlay.tsx";
+import { navigate } from "../app/router.ts";
 import { ResourceRow } from "../shell/ResourceRow.tsx";
 import styles from "./Usage.module.css";
 
@@ -86,26 +86,7 @@ export function UsageSummary({
 }
 
 export function UsageEntry() {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <ResourceRow dialog onOpen={() => setOpen(true)}>
-        Token 用量
-      </ResourceRow>
-      {open && (
-        <DetailOverlay
-          task={false}
-          label="Token 用量"
-          closeLabel="关闭 Token 用量"
-          onClose={() => setOpen(false)}
-        >
-          <DetailPane active>
-            <UsagePanel />
-          </DetailPane>
-        </DetailOverlay>
-      )}
-    </>
-  );
+  return <ResourceRow onOpen={() => navigate({ page: "usage" })}>Token 用量</ResourceRow>;
 }
 
 export function UsagePanel({ subject = "" }: { subject?: string }) {

@@ -1,3 +1,4 @@
+import { useEntryState } from "../app/router.ts";
 import {
   useCallback,
   useEffect,
@@ -246,7 +247,7 @@ function ActivityBlock({
   const { client } = useServices();
   const continuation = useMemo(() => new IssueTurnRead(client), [client]);
   const extra = useStore(continuation.state);
-  const [opened, setOpened] = useState(false);
+  const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
   const block = entry.block!;
   useEffect(() => {
     if (opened) void continuation.open(block.trigger.message_id);
@@ -259,7 +260,7 @@ function ActivityBlock({
     row.kind === "agent" ? row.items : row.kind === "system" ? [row.item] : [],
   );
   const tools = items.filter((item) => item.tool);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useEntryState(`activity-expanded:${entry.id}`, false);
   const long = items.some((item) => (item.body?.length ?? 0) > 400);
   const more = () => {
     if (!opened) setOpened(true);

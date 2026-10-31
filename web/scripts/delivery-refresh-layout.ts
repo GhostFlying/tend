@@ -315,7 +315,10 @@ try {
     assert(await refresh.isDisabled());
     assert.equal(requests.size, before + 1);
     // Closing the dialog must not discard the original operation.
-    await details.getByRole("button", { name: "关闭详情" }).click();
+    await details
+      .getByRole("dialog", { name: "跟进与外部交付", exact: true })
+      .getByRole("button", { name: /^关闭/ })
+      .click();
     await terminalPage.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
     await openIssueAux(terminalPage, "跟进与交付");
     if (output)
@@ -353,9 +356,13 @@ try {
   const mobilePage = await mobileContext.newPage();
   mobilePage.setDefaultTimeout(10000);
   await mobilePage.goto(`http://127.0.0.1:${address.port}/?task=${taskId}`);
-  const taskDrawer = mobilePage.getByRole("dialog", { name: "任务详情", exact: true });
+  const taskDrawer = mobilePage.getByRole("region", { name: "任务详情", exact: true });
   await taskDrawer.getByText("Linked task", { exact: true }).first().waitFor();
-  await taskDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await taskDrawer.getByRole("button", { name: /← 返回/ }).click();
+  await mobilePage
+    .getByRole("navigation", { name: "视图" })
+    .getByRole("button", { name: "对话", exact: true })
+    .click();
   const composer = mobilePage.getByRole("textbox", { name: "消息", exact: true });
   await composer.fill("Existing unsent constraint");
   await mobilePage.locator('input[type="file"]').setInputFiles({
@@ -364,16 +371,13 @@ try {
     buffer: Buffer.from("fixture evidence"),
   });
   const before = requests.size;
-  await mobilePage
-    .locator("main")
-    .getByRole("button", { name: "Linked task", exact: true })
-    .click();
+  await mobilePage.locator("main").getByRole("link", { name: "Linked task", exact: true }).click();
   await taskDrawer.getByRole("button", { name: "Refresh reconciliation", exact: true }).click();
   const issueDrawer = mobilePage.getByRole("region", { name: "Issue详情", exact: true });
   await issueDrawer.getByRole("heading", { name: item.plan.title, exact: true }).waitFor();
   await closeIssue(mobilePage);
   if (await taskDrawer.isVisible()) {
-    await taskDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await taskDrawer.getByRole("button", { name: /← 返回/ }).click();
     await taskDrawer.waitFor({ state: "hidden" });
   }
   // Closing a task returns to its Issue; leave that page to recover main's draft.

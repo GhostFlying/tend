@@ -1,14 +1,11 @@
 .panel {
-  position: fixed;
-  margin: auto;
-  width: min(420px, calc(100vw - 32px));
-  max-height: calc(100dvh - 64px);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
+  padding: var(--space-4);
   background: var(--bg);
-  box-shadow: var(--shadow-2);
   color: var(--label);
   font-size: var(--text-label);
 }

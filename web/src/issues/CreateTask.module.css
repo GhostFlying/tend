@@ -87,7 +87,7 @@
   overflow: hidden;
   padding: 0;
 }
-.root:has(> .content) > h1 {
+.root:has(> .content) > h2 {
   margin: var(--space-5) var(--space-6) var(--space-2);
 }
 .root:has(> .content) > p {
@@ -153,7 +153,44 @@
   background: var(--bg);
 }
 @media (max-width: 760px) {
-  .root:has(> .content) > h1 {
+  .root:has(> .content) > h2 {
+    margin: 18px var(--space-4) var(--space-2);
+  }
+  .root:has(> .content) > p {
+    margin-inline: var(--space-4);
+  }
+  .content {
+    padding: 0 var(--space-4) var(--space-4);
+  }
+  .content .intro > label:nth-child(n) {
+    grid-row: auto;
+    grid-column: auto;
+  }
+  .content .roles fieldset {
+    grid-template-columns: 1fr;
+  }
+  .footer {
+    padding: 10px var(--space-4);
+  }
+}
+
+@container (max-width: 760px) {
+  .roles,
+  .workspace {
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+  .roles fieldset {
+    padding: 10px 14px;
+  }
+}
+@container (max-width: 760px) {
+  .intro {
+    grid-template-columns: 1fr;
+  }
+}
+@container (max-width: 760px) {
+  .root:has(> .content) > h2 {
     margin: 18px var(--space-4) var(--space-2);
   }
   .root:has(> .content) > p {

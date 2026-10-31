@@ -209,7 +209,7 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/api/"))
     return json(res, { error: { code: "not_found", message: "Not in fixture" } }, 404);
   try {
-    const file = resolve(root, `.${path}${path.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, path.split("/").at(-1)?.includes(".") ? `.${path}` : "index.html");
     assert(file.startsWith(root));
     res.setHeader(
       "Content-Type",

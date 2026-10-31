@@ -45,7 +45,7 @@ export function NewConsultation({
   const disabled = operation.busy || operation.pending;
   return (
     <section className={`${styles.root} ${styles.form}`} aria-label="新建咨询">
-      <h1>新建咨询</h1>
+      <h2>新建咨询</h2>
       <p className={styles.muted}>
         选择已登记的托管Agent。普通问答不创建Issue或任务；你明确要求执行时，咨询Agent可将实际来源委派为Issue。
       </p>
