@@ -11,12 +11,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/serverkit"
+	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
@@ -75,7 +77,8 @@ func waitFor(t *testing.T, ctx context.Context, label string, check func() bool)
 }
 
 func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	// Race-instrumented SQLite can be slow under shared-host load.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -85,8 +88,13 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	ready := make(chan Demo, 1)
 	runtime := make(chan *serverkit.Runtime, 1)
 	done := make(chan error, 1)
+	var interrupting atomic.Bool
 	go func() {
-		done <- Run(ctx, Options{Data: root, Listener: listener, Ready: func(r *serverkit.Runtime, demo Demo) { runtime <- r; ready <- demo }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
+		done <- Run(ctx, Options{Data: root, Listener: listener, replyDelta: func(ctx context.Context, _ harness.TurnInput) {
+			if interrupting.Load() {
+				<-ctx.Done()
+			}
+		}, Ready: func(r *serverkit.Runtime, demo Demo) { runtime <- r; ready <- demo }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
 	}()
 	defer func() {
 		cancel()
@@ -132,6 +140,25 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		if !kinds[kind] {
 			t.Fatalf("missing inbox kind %s", kind)
 		}
+	}
+	seedBodies := map[string]bool{}
+	for _, attention := range inbox.Items {
+		if attention.IssueID != "" || attention.TaskID != "" {
+			continue
+		}
+		var body string
+		if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, `SELECT body FROM conversation_messages WHERE message_id=?`, attention.SourceMessageID).Scan(&body)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if body == attention.Title || len(body) < 40 || seedBodies[body] {
+			t.Fatalf("seed attention lacks a distinct explanatory source: %+v %q", attention, body)
+		}
+		seedBodies[body] = true
+	}
+	if len(seedBodies) != 3 {
+		t.Fatalf("seed attention descriptions: got %d, want 3", len(seedBodies))
 	}
 	replay, err := SeedDemo(ctx, r, root)
 	if err != nil || fmt.Sprint(replay) != fmt.Sprint(demo) {
@@ -183,6 +210,51 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		c.call(http.MethodGet, "/api/v1/tasks/"+dispatched, nil, &task)
 		return task.Lifecycle == protocol.TaskCompleted
 	})
+	var dispatchSource string
+	var dispatchSeq int64
+	if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(ctx, `SELECT message_id,seq FROM conversation_messages WHERE conversation_id='main' AND author='owner' AND body=?`, "派发 一个示例任务").Scan(&dispatchSource, &dispatchSeq)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, ctx, "dispatch source and completed reply are classified and committed", func() bool {
+		var page protocol.ConversationPage
+		c.call(http.MethodGet, fmt.Sprintf("/api/v1/conversation?after=%d&limit=200", dispatchSeq-1), nil, &page)
+		sourceDone, replyDone, committed := false, false, false
+		for _, item := range page.Items {
+			if item.MessageID != dispatchSource && item.ReplyTo != dispatchSource {
+				continue
+			}
+			if item.Tool != nil {
+				if item.Tool.Status == protocol.ToolFailed || bytes.Contains([]byte(item.Tool.Output), []byte(`"ok":false`)) {
+					t.Fatalf("dispatch tool failed: %+v", item.Tool)
+				}
+				if item.Tool.Name == "conversation_turn_commit" && item.Tool.Status == protocol.ToolCompleted {
+					committed = true
+				}
+				continue
+			}
+			var associations protocol.MessageAssociations
+			err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+				var err error
+				associations, err = store.MessageAssociations(ctx, tx.Q(), item.MessageID)
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			linked := associations.Disposition == "linked" && len(associations.Items) == 1 && associations.Items[0].WorkItemID == dispatchedIssue
+			reviewed := associations.FactsReviewed && associations.Processing != nil && associations.Processing.Status == "completed"
+			if item.MessageID == dispatchSource {
+				// Owner metadata may point at an active manager turn sharing this
+				// source. The completed assistant below witnesses the main commit.
+				sourceDone = linked && associations.FactsReviewed && item.State == protocol.MessageReplied
+			} else if item.Author == "main_agent" {
+				replyDone = linked && reviewed && item.AssistantState == protocol.AssistantCompleted
+			}
+		}
+		return sourceDone && replyDone && committed
+	})
 	c.call(http.MethodGet, "/api/v1/issues?include_closed=true&limit=100", nil, &after)
 	if len(after.Items) != len(allBefore.Items)+2 {
 		t.Fatalf("creation source recursively produced Issues: before=%d after=%d", len(allBefore.Items), len(after.Items))
@@ -210,6 +282,81 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		c.call(http.MethodGet, "/api/v1/tasks/"+demo.Tasks[2], nil, &task)
 		return task.Lifecycle == protocol.TaskCompleted
 	})
+	// Read only new items so historical association projection cannot consume
+	// the short streaming window before the interruption request is sent.
+	var interruptAfter int64
+	if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM conversation_messages`).Scan(&interruptAfter)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	interruptPath := fmt.Sprintf("/api/v1/conversation?after=%d&limit=200", interruptAfter)
+	// Interrupt through the real owner API while the sandbox script is streaming.
+	interrupting.Store(true)
+	c.operation("test-interrupt-send", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{Body: "请介绍沙盒的交互能力"})
+	var interruptedSource, interruptedReply string
+	for interruptedReply == "" {
+		var page protocol.ConversationPage
+		c.call(http.MethodGet, interruptPath, nil, &page)
+		for _, item := range page.Items {
+			if item.Author == "owner" && item.Body == "请介绍沙盒的交互能力" {
+				interruptedSource = item.MessageID
+			}
+			if interruptedSource != "" && item.ReplyTo == interruptedSource && item.AssistantState == protocol.AssistantStreaming {
+				interruptedReply = item.MessageID
+			}
+		}
+		if interruptedReply == "" && !delay(ctx, 10*time.Millisecond) {
+			t.Fatal("did not observe streaming before interruption")
+		}
+	}
+	c.operation("test-interrupt", "conversation.interrupt_reply", protocol.Target{Type: "message", ID: interruptedSource}, nil, protocol.InterruptReplyPayload{MessageID: interruptedSource})
+	var stopped protocol.ConversationPage
+	waitFor(t, ctx, "owner and assistant interruption are persisted", func() bool {
+		c.call(http.MethodGet, interruptPath, nil, &stopped)
+		ownerStopped, replyStopped := false, false
+		for _, item := range stopped.Items {
+			ownerStopped = ownerStopped || item.MessageID == interruptedSource && item.State == protocol.MessageInterrupted
+			replyStopped = replyStopped || item.MessageID == interruptedReply && item.AssistantState == protocol.AssistantInterrupted
+		}
+		return ownerStopped && replyStopped
+	})
+	turnItems := func(page protocol.ConversationPage) string {
+		var items []protocol.ConversationContent
+		for _, item := range page.Items {
+			if item.ReplyTo == interruptedSource {
+				if item.AssistantState == protocol.AssistantCompleted {
+					t.Fatal("interrupted reply later completed")
+				}
+				items = append(items, item.ConversationContent)
+			}
+		}
+		raw, err := json.Marshal(items)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	beforeStop := turnItems(stopped)
+	if !delay(ctx, 700*time.Millisecond) {
+		t.Fatal(ctx.Err())
+	}
+	var later protocol.ConversationPage
+	c.call(http.MethodGet, interruptPath, nil, &later)
+	if turnItems(later) != beforeStop {
+		t.Fatal("script emitted text or tool callbacks after interrupted completion")
+	}
+	interrupting.Store(false)
+	c.operation("test-after-interrupt", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{Body: "中断后继续对话"})
+	waitFor(t, ctx, "conversation continues after interruption", func() bool {
+		c.call(http.MethodGet, interruptPath, nil, &later)
+		for _, item := range later.Items {
+			if item.Author == "owner" && item.Body == "中断后继续对话" && item.State == protocol.MessageReplied {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 type testLog struct{ t *testing.T }
@@ -221,6 +368,13 @@ func TestDataProtectionAndReset(t *testing.T) {
 		t.Fatal("missing data admitted")
 	}
 	root := t.TempDir()
+	linked := filepath.Join(t.TempDir(), "linked-data")
+	if err := os.Symlink(root, linked); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, _, err := prepareData(linked, false); err == nil {
+		t.Fatal("explicit symlinked data directory admitted")
+	}
 	original := filepath.Join(root, "production.db")
 	if err := os.WriteFile(original, []byte("preserve"), 0600); err != nil {
 		t.Fatal(err)
@@ -315,4 +469,79 @@ func TestScriptHistoryRetainsNativeReceiptAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored.Wait()
+}
+
+func TestScriptInterruptionJoinsBeforeCompletion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	h := testkit.NewHarness()
+	sessions := &scriptedSessions{harness: h, ctx: ctx}
+	started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	h.Turn = func(th *testkit.FakeThread, turn string, input harness.TurnInput) string {
+		return sessions.play(th, turn, input, func(ctx context.Context, _ *testkit.FakeThread, _ string, _ harness.TurnInput) string {
+			close(started)
+			<-ctx.Done()
+			close(canceled)
+			<-release
+			return "completed"
+		})
+	}
+	session, err := sessions.open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cancel()
+		close(release)
+		_ = session.Close()
+		h.Wait()
+	}()
+	thread, err := session.StartThread(ctx, harness.ThreadConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := thread.StartTurn(ctx, harness.TurnInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	interrupted := make(chan error, 1)
+	go func() { interrupted <- thread.Interrupt(ctx, turn) }()
+	select {
+	case <-canceled:
+	case <-ctx.Done():
+		t.Fatal("interrupt did not cancel the script")
+	}
+	select {
+	case err := <-interrupted:
+		t.Fatalf("interrupt returned before script exited: %v", err)
+	default:
+	}
+	// Let the script exit without closing the channel twice in cleanup.
+	release <- struct{}{}
+	select {
+	case err := <-interrupted:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("interrupt did not join the script")
+	}
+	for {
+		select {
+		case event := <-thread.Events():
+			if event.Kind == harness.EventTurnCompleted {
+				if event.TurnStatus != "interrupted" {
+					t.Fatalf("script completed after cancellation: %+v", event)
+				}
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("missing interrupted completion")
+		}
+	}
 }

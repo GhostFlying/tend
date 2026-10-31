@@ -44,6 +44,8 @@ type Options struct {
 	Listener net.Listener
 	// Ready runs after seeding, before serving, for test synchronization.
 	Ready func(*serverkit.Runtime, Demo)
+	// replyDelta is a sandbox-test synchronization point after the first delta.
+	replyDelta func(context.Context, harness.TurnInput)
 }
 
 // Run owns all serving and runner goroutines until context cancellation.
@@ -93,8 +95,12 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 	h.RolloutPath = historyPath
 	h.Models = []harness.Model{{ID: model, Name: model, Label: "沙盒脚本", Default: true}}
 	h.Defaults = harness.ModelSelection{Model: model}
+	sessions := &scriptedSessions{harness: h, ctx: runCtx}
+	var assembled *serverkit.Runtime
 	h.Turn = func(th *testkit.FakeThread, turn string, input harness.TurnInput) string {
-		return scriptedTurn(runCtx, th, turn, input, log)
+		return sessions.play(th, turn, input, func(ctx context.Context, th *testkit.FakeThread, turn string, input harness.TurnInput) string {
+			return scriptedTurn(ctx, assembled, th, turn, input, log, options.replyDelta, sessions.scripts)
+		})
 	}
 	named := hostedConfiguration()
 	cfg := serverkit.Config{DataDir: root, LocalOwner: localOwner, Owners: []string{localOwner},
@@ -104,10 +110,13 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 		Hosts:     []app.HostConfig{{HostID: hostID, OS: "linux", Arch: "amd64", Repos: []string{"sandbox-web", "sandbox-service", "sandbox-docs"}, Slots: 4, TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:local"}, Worker: protocol.WorkerAppServer}, {HostID: "sandbox-offline", OS: "darwin", Arch: "arm64", Repos: []string{"sandbox-web"}, Slots: 2, TokenHash: runnerapi.HashToken("sandbox-offline-token"), Nodes: []string{"sandbox-offline"}}},
 	}
 	deps := serverkit.Dependencies{
-		Listeners:   []net.Listener{listener, runnerListener},
-		WhoIs:       netx.Static{Identity: &netx.Identity{Node: "local", User: localOwner, Tags: []string{"tag:local"}}},
-		OpenSession: func(ctx context.Context, spec serverkit.SessionSpec) (harness.Session, error) { return h.Open(ctx) },
-		Configure:   seedCategories,
+		Listeners: []net.Listener{listener, runnerListener},
+		WhoIs:     netx.Static{Identity: &netx.Identity{Node: "local", User: localOwner, Tags: []string{"tag:local"}}},
+		OpenSession: func(ctx context.Context, spec serverkit.SessionSpec) (harness.Session, error) {
+			return sessions.open(ctx)
+		},
+		Configure:  seedCategories,
+		Initialize: func(_ context.Context, runtime *serverkit.Runtime) error { assembled = runtime; return nil },
 		Background: func(ctx context.Context, runtime *serverkit.Runtime) error {
 			j, err := journal.Open(ctx, filepath.Join(root, "runner", "journal.db"), time.Now)
 			if err != nil {

@@ -10,24 +10,42 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/serverkit"
+	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 type toolCaller struct {
-	ctx    context.Context
-	thread *testkit.FakeThread
-	turn   string
-	call   int
-	effect int64
-	log    *slog.Logger
+	ctx          context.Context
+	thread       *testkit.FakeThread
+	turn         string
+	call         int
+	effect       int64
+	log          *slog.Logger
+	coordination chan struct{}
+	locked       bool
 }
 
 func (c *toolCaller) invoke(name string, args, out any) bool {
+	if c.ctx.Err() != nil {
+		return false
+	}
+	if !c.locked {
+		select {
+		case <-c.coordination:
+		case <-c.ctx.Done():
+			return false
+		}
+		defer func() { c.coordination <- struct{}{} }()
+	}
 	c.call++
 	id := fmt.Sprintf("%s_call_%d", c.turn, c.call)
 	raw, _ := json.Marshal(args)
 	c.thread.UseTool(c.turn, id, harness.ToolUse{Name: name, Input: string(raw), Status: protocol.ToolRunning})
 	result := c.thread.CallTool(c.ctx, c.turn, id, name, args)
+	if c.ctx.Err() != nil {
+		return false
+	}
 	status := protocol.ToolCompleted
 	if !result.Success {
 		status = protocol.ToolFailed
@@ -62,8 +80,8 @@ func (c *toolCaller) mutate(name, target string, revision *int64, payload, out a
 	return out == nil || json.Unmarshal(result.Outcome, out) == nil
 }
 
-func scriptedTurn(ctx context.Context, th *testkit.FakeThread, turn string, input harness.TurnInput, log *slog.Logger) string {
-	c := toolCaller{ctx: ctx, thread: th, turn: turn, log: log}
+func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.FakeThread, turn string, input harness.TurnInput, log *slog.Logger, onReplyDelta func(context.Context, harness.TurnInput), coordination chan struct{}) string {
+	c := toolCaller{ctx: ctx, thread: th, turn: turn, log: log, coordination: coordination}
 	manager := false
 	for _, tool := range th.Config.Tools {
 		if tool.Name == "issues_turn_read" {
@@ -91,7 +109,7 @@ func scriptedTurn(ctx context.Context, th *testkit.FakeThread, turn string, inpu
 	// Repair turns review metadata only; they never repeat business operations.
 	respond := false
 	createdIssue := ""
-	response := "已收到。这是交互沙盒，所有消息与操作保存在独立账本中。可以试试“创建”“派发”或“问我”。"
+	response := "已收到。这是交互沙盒，所有消息与操作保存在独立账本中。可以试试“创建”“派发”或“问我”。也可以点击停止回复，随后继续对话。"
 	if !input.Repair {
 		text := input.Text
 		source := input.UserMessageID
@@ -180,13 +198,29 @@ func scriptedTurn(ctx context.Context, th *testkit.FakeThread, turn string, inpu
 		}
 	}
 	if respond && !input.Repair {
-		if !streamReply(ctx, th, turn, response) {
+		if !streamReply(ctx, th, turn, response, func() {
+			if onReplyDelta != nil {
+				onReplyDelta(ctx, input)
+			}
+		}) {
 			return "interrupted"
 		}
-		// Event persistence is asynchronous; the real coordinator performs its
-		// metadata-only repair if a later final frame requires another review.
-
+		// The final frame changes content/classification versions asynchronously.
+		// Wait on the real ledger, without creating polling tool items, before CAS.
+		if !waitCompletedReply(ctx, runtime, th.ID(), turn, turn+"_reply") {
+			return "interrupted"
+		}
 	}
+	// Keep the metadata read/CAS sequence isolated from other scripted tools.
+	// Streaming and business planning remain concurrent; native event consumers
+	// must be free to persist the completed frame before this section begins.
+	select {
+	case <-coordination:
+	case <-ctx.Done():
+		return "interrupted"
+	}
+	c.locked = true
+	defer func() { coordination <- struct{}{} }()
 	if manager {
 		if !c.reviewCurrentIssue(&issue) {
 			return "failed"
@@ -202,9 +236,16 @@ func scriptedTurn(ctx context.Context, th *testkit.FakeThread, turn string, inpu
 			}
 			disposition := "unassigned"
 			ids := []string{}
-			if createdIssue != "" {
-				disposition = "linked"
+			for _, item := range message.Items {
+				if item.WorkItemID != "" {
+					ids = append(ids, item.WorkItemID)
+				}
+			}
+			if createdIssue != "" && len(ids) == 0 {
 				ids = append(ids, createdIssue)
+			}
+			if len(ids) > 0 {
+				disposition = "linked"
 			}
 			if !c.mutate("conversation_associate_issues", message.MessageID, &message.Revision, protocol.SetIssueMessageAssociationsPayload{ContentRevision: message.ContentRevision, Disposition: disposition, IssueIDs: ids}, nil) {
 				return "failed"
@@ -255,14 +296,20 @@ func (c *toolCaller) reviewIssue(issue protocol.IssueView) bool {
 	return c.mutate("issues_context_review", issue.IssueID, nil, review, nil)
 }
 
-func streamReply(ctx context.Context, th *testkit.FakeThread, turn, response string) bool {
+func streamReply(ctx context.Context, th *testkit.FakeThread, turn, response string, firstDelta func()) bool {
 	runes := []rune(response)
 	for start := 0; start < len(runes); start += 12 {
 		end := min(start+12, len(runes))
-		if !delay(ctx, 60*time.Millisecond) {
+		if !delay(ctx, 120*time.Millisecond) {
 			return false
 		}
 		th.Emit(harness.Event{Kind: harness.EventAgentMessageDelta, TurnID: turn, ItemID: turn + "_reply", ItemType: harness.ItemAgentMessage, Text: string(runes[start:end])})
+		if start == 0 && firstDelta != nil {
+			firstDelta()
+		}
+	}
+	if ctx.Err() != nil {
+		return false
 	}
 	th.Say(turn, turn+"_reply", response)
 	return true
@@ -292,5 +339,25 @@ func delay(ctx context.Context, duration time.Duration) bool {
 		return false
 	case <-timer.C:
 		return true
+	}
+}
+
+// waitCompletedReply is a read-only transport barrier, not another business tool
+// or a synthetic receipt. It observes the exact native item accepted by App.
+func waitCompletedReply(ctx context.Context, runtime *serverkit.Runtime, thread, turn, item string) bool {
+	for {
+		complete := false
+		err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_agent_messages WHERE thread_id=? AND turn_id=? AND item_id=? AND status='completed')`, thread, turn, item).Scan(&complete)
+		})
+		if err != nil {
+			return false
+		}
+		if complete {
+			return true
+		}
+		if !delay(ctx, 20*time.Millisecond) {
+			return false
+		}
 	}
 }

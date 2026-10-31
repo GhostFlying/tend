@@ -126,15 +126,30 @@ func SeedDemo(ctx context.Context, runtime *serverkit.Runtime, root string) (Dem
 			return demo, err
 		}
 	}
-	for _, item := range []protocol.CreateAttentionPayload{{Kind: "decision", Title: "界面验收先看手机还是桌面？", Options: []string{"手机优先", "桌面优先"}}, {Kind: "action", Title: "请确认示例交付物的阅读体验"}, {Kind: "information", Title: "沙盒不会连接真实模型或生产仓库"}} {
+
+	for _, entry := range []struct {
+		payload protocol.CreateAttentionPayload
+		body    string
+	}{
+		{protocol.CreateAttentionPayload{Kind: "decision", Title: "界面验收先看手机还是桌面？", Options: []string{"手机优先", "桌面优先"}}, "手机上的长标题和收件箱布局已准备好。请决定本轮先检查手机触控与返回焦点，还是桌面看板的列宽；另一端留到下一轮。"},
+		{protocol.CreateAttentionPayload{Kind: "action", Title: "请确认示例交付物的阅读体验"}, "请打开示例报告，检查段落、代码块和下载入口是否清晰。若阅读体验没有问题，请在这里确认；发现问题时请写明页面与具体位置。"},
+		{protocol.CreateAttentionPayload{Kind: "information", Title: "沙盒不会连接真实模型或生产仓库"}, "当前任务由进程内脚本执行，报告与附件只写入独立沙盒目录。你可以放心尝试派发、回答决定和重置；这条说明无需回复，也不会阻止 Issue 关闭。"},
+	} {
+		item := entry.payload
+		var source protocol.ManualSource
+		if err := s.execute(ctx, "attention-source-"+item.Kind, protocol.Target{Type: "message"}, nil, protocol.InjectSourcePayload{Text: entry.body, Metadata: protocol.ManualSourceMetadata{Author: "沙盒体验走查"}}, app.InjectSource{}, &source); err != nil {
+			return demo, err
+		}
+		item.SourceMessageID = source.MessageID
 		var attention protocol.Attention
-		if err := s.execute(ctx, "attention-"+item.Kind, protocol.Target{Type: "attention"}, nil, item, app.AttentionCommand{Action: "create"}, &attention); err != nil {
+		if err := s.execute(ctx, "attention-described-"+item.Kind, protocol.Target{Type: "attention"}, nil, item, app.AttentionCommand{Action: "create"}, &attention); err != nil {
 			return demo, err
 		}
 		if item.Kind == "decision" {
 			demo.Decision = attention.AttentionID
 		}
 	}
+
 	if err := s.execute(ctx, "welcome", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{Body: "你好，请介绍一下这个交互沙盒。"}, app.SubmitMessage{}, nil); err != nil {
 		return demo, err
 	}
