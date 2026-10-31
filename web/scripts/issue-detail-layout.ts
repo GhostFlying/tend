@@ -1208,6 +1208,8 @@ try {
   for (const width of [1440, 390]) {
     const base = activity.items![0]!.block!;
     const originalMore = base.more;
+    const baseBody = base.items![0]!.body;
+    base.items![0]!.body = "读取前已展开的长回复。\n\n".repeat(80);
     base.more = true;
     const reply = {
       ...base.items![0]!,
@@ -1225,12 +1227,29 @@ try {
     try {
       await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
       const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
-      await detail.getByRole("button", { name: "继续读取本轮消息", exact: true }).click();
+      await detail.getByRole("button", { name: "展开全文", exact: true }).first().click();
+      const load = detail.getByRole("button", { name: "继续读取本轮消息", exact: true });
+      await load.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(100);
+      const boundaryY = await load.evaluate((node) => node.getBoundingClientRect().top);
+      await load.click();
       await detail
         .getByText(/续页流式回复/)
         .first()
         .waitFor({ state: "attached" });
-      await detail.getByRole("button", { name: "展开全文", exact: true }).first().click();
+      const firstFetched = detail.locator('[data-scroll-id="continuation-reply"]');
+      await page.waitForTimeout(100);
+      assert(
+        Math.abs(
+          (await firstFetched.evaluate((node) => node.getBoundingClientRect().top)) - boundaryY,
+        ) <= 2,
+        "explicit continuation read skipped the fetched page boundary",
+      );
+      assert.equal(
+        await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+        0,
+        "explicit continuation read showed a misleading new-progress prompt",
+      );
       const scroller = detail.locator("[data-issue-scroll]");
       await scroller.evaluate((node) => {
         node.scrollTop = node.scrollHeight;
@@ -1273,6 +1292,7 @@ try {
     } finally {
       await context.close();
       base.more = originalMore;
+      base.items![0]!.body = baseBody!;
       continuationBlock = null;
     }
   }
