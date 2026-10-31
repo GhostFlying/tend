@@ -78,7 +78,7 @@ test("flat content keys never change when grouping forms, splits or backfills", 
   ];
   for (const items of stages) {
     const states = settleToolGroups(toolGroups(items), new Map(), new Set());
-    const rows = flatTurnRows(items, states, new Set());
+    const rows = flatTurnRows(items, states);
     expect(rows.filter((row) => row.kind === "item").map((row) => row.key)).toEqual(
       items.map((row) => `item:${row.message_id}`),
     );
@@ -92,16 +92,15 @@ test("expanded and focused tool rows remain visible as their run forms", () => {
   const initial = [item(1, "completed"), item(2, "running")];
   const previous = settleToolGroups(toolGroups(initial), new Map(), new Set());
   const completed = [item(1, "completed"), item(2, "completed")];
-  const expanded = new Set(["1"]);
   expect(
-    flatTurnRows(completed, previous, expanded)
+    flatTurnRows(completed, previous)
       .filter((row) => row.kind === "item")
       .every((row) => !row.hidden),
   ).toBe(true);
   const focused = settleToolGroups(toolGroups(completed), previous, new Set(), "2");
   expect(focused.get("1")?.open).toBe(true);
   expect(
-    flatTurnRows(completed, focused, new Set())
+    flatTurnRows(completed, focused)
       .filter((row) => row.kind === "item")
       .every((row) => !row.hidden),
   ).toBe(true);
@@ -127,7 +126,7 @@ test("backfills split closed groups without hiding replies or choices and carry 
     item(7, "completed"),
   ];
   const states = settleToolGroups(toolGroups(full), previous, new Set());
-  const rows = flatTurnRows(full, states, new Set());
+  const rows = flatTurnRows(full, states);
   expect(rows.filter((row) => row.kind === "item").map((row) => row.item.message_id)).toEqual(
     full.map((row) => row.message_id),
   );
@@ -146,8 +145,21 @@ test("successive pagination backfills preserve flat item order and unique keys",
   ];
   for (const seqs of stages) {
     const items = seqs.map((seq) => item(seq, "completed"));
-    const rows = flatTurnRows(items, new Map(), new Set(["61"]));
+    const rows = flatTurnRows(items, new Map());
     expect(rows.filter((row) => row.kind === "item").map((row) => row.item.seq)).toEqual(seqs);
     expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
   }
+});
+
+test("explicit collapse wins over expanded or focused member state", () => {
+  const items = [item(1, "completed"), item(2, "completed")];
+  const expanded = new Set(["1"]);
+  const opened = settleToolGroups(toolGroups(items), new Map(), expanded, "1");
+  expect(opened.get("1")?.open).toBe(true);
+  const collapsed = new Map(opened).set("1", { ids: ["1", "2"], open: false });
+  const settled = settleToolGroups(toolGroups(items), collapsed, expanded, "1");
+  expect(settled.get("1")?.open).toBe(false);
+  const rows = flatTurnRows(items, settled);
+  expect(rows[0]).toMatchObject({ kind: "group", open: false });
+  expect(rows.filter((row) => row.kind === "item").every((row) => row.hidden)).toBe(true);
 });
