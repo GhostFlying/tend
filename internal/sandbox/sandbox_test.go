@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -544,4 +545,185 @@ func TestScriptInterruptionJoinsBeforeCompletion(t *testing.T) {
 			t.Fatal("missing interrupted completion")
 		}
 	}
+}
+
+func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
+	defer cancel()
+	root := t.TempDir()
+	var heartbeatReplies atomic.Int64
+	type started struct {
+		runtime *serverkit.Runtime
+		demo    Demo
+	}
+	start := func() (*serverkit.Runtime, Demo, *webClient, func()) {
+		t.Helper()
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		runCtx, stopRun := context.WithCancel(ctx)
+		ready, done := make(chan started, 1), make(chan error, 1)
+		transport := &http.Transport{}
+		t.Cleanup(transport.CloseIdleConnections)
+		go func() {
+			done <- Run(runCtx, Options{Data: root, Listener: listener, runnerTransport: heartbeatObserver{transport, &heartbeatReplies}, Ready: func(r *serverkit.Runtime, d Demo) { ready <- started{r, d} }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
+		}()
+		var once sync.Once
+		stop := func() {
+			once.Do(func() {
+				stopRun()
+				select {
+				case err := <-done:
+					if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+						t.Error(err)
+					}
+				case <-time.After(10 * time.Second):
+					t.Error("restarted sandbox did not stop")
+				}
+			})
+		}
+		t.Cleanup(stop)
+		var current started
+		select {
+		case current = <-ready:
+		case err := <-done:
+			done <- err
+			t.Fatalf("sandbox startup: %v", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		client := &webClient{t: t, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
+		t.Cleanup(client.http.CloseIdleConnections)
+		client.call(http.MethodPost, "/api/v1/session", protocol.SessionRequest{ClientID: "sandbox-restart-test", Scope: protocol.ScopeOwner}, &client.session)
+		return current.runtime, current.demo, client, stop
+	}
+	dispatch := func(c *webClient, key, title string) string {
+		t.Helper()
+		c.operation(key, "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{Body: title})
+		var taskID string
+		waitFor(t, ctx, "restart dispatch reaches a completed task", func() bool {
+			var page protocol.IssuePage
+			c.call(http.MethodGet, "/api/v1/issues?include_closed=true&limit=100", nil, &page)
+			for _, item := range page.Items {
+				if item.Title != title {
+					continue
+				}
+				var issue protocol.IssueView
+				c.call(http.MethodGet, "/api/v1/issues/"+item.IssueID, nil, &issue)
+				if len(issue.Tasks) > 0 {
+					taskID = issue.Tasks[0].TaskID
+					var task protocol.TaskDetail
+					c.call(http.MethodGet, "/api/v1/tasks/"+taskID, nil, &task)
+					return task.Lifecycle == protocol.TaskCompleted
+				}
+			}
+			return false
+		})
+		return taskID
+	}
+	first, demo, client, stop := start()
+	completed := dispatch(client, "restart-before", "派发 重启前的示例任务")
+	var before protocol.IssuePage
+	client.call(http.MethodGet, "/api/v1/issues?include_closed=true&limit=100", nil, &before)
+	var pending protocol.AttentionView
+	waitFor(t, ctx, "a real worker question remains in flight at shutdown", func() bool {
+		var inbox protocol.AttentionPage
+		client.call(http.MethodGet, "/api/v1/inbox", nil, &inbox)
+		for _, item := range inbox.Items {
+			if item.TaskID == demo.Tasks[2] && item.Kind == "decision" && item.Decision != nil {
+				pending = item
+				return true
+			}
+		}
+		return false
+	})
+	var previous store.HostRuntimeRow
+	if err := first.Store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		previous, err = store.GetHostRuntime(ctx, tx.Q(), hostID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	heartbeatReplies.Store(0)
+	second, retained, client, stopAgain := start()
+	defer stopAgain()
+	if fmt.Sprint(retained) != fmt.Sprint(demo) {
+		t.Fatal("restart duplicated or replaced demo identities")
+	}
+	var current store.HostRuntimeRow
+	if err := second.Store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		current, err = store.GetHostRuntime(ctx, tx.Q(), hostID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if current.Runtime.InstanceID == previous.Runtime.InstanceID || current.Runtime.Generation <= previous.Runtime.Generation {
+		t.Fatal("readiness accepted the previous runner incarnation")
+	}
+	waitFor(t, ctx, "the restarted runner has a successful real heartbeat", func() bool {
+		return heartbeatReplies.Load() > 0
+	})
+	var after protocol.IssuePage
+	client.call(http.MethodGet, "/api/v1/issues?include_closed=true&limit=100", nil, &after)
+	if len(before.Items) != len(after.Items) {
+		t.Fatal("restart changed the persisted Issue set")
+	}
+	var task protocol.TaskDetail
+	client.call(http.MethodGet, "/api/v1/tasks/"+completed, nil, &task)
+	if task.Lifecycle != protocol.TaskCompleted {
+		t.Fatal("completed task did not survive restart")
+	}
+	client.call(http.MethodGet, "/api/v1/tasks/"+demo.Tasks[2], nil, &task)
+	if task.Lifecycle == protocol.TaskCompleted {
+		t.Fatal("restart fabricated success for the unanswered in-flight run")
+	}
+	client.call(http.MethodGet, "/api/v1/attentions/"+pending.AttentionID, nil, &pending)
+	if pending.Status == "open" {
+		client.operation("restart-answer", "attentions.respond", protocol.Target{Type: "attention", ID: pending.AttentionID}, &pending.Revision, protocol.RespondAttentionPayload{Version: pending.Decision.Version, Option: "手机"})
+	}
+	dispatch(client, "restart-after", "派发 重启后的示例任务")
+}
+
+// heartbeatObserver records the real runner's acknowledged response; it never
+// creates requests or substitutes a server result.
+type heartbeatObserver struct {
+	transport  http.RoundTripper
+	successful *atomic.Int64
+}
+
+func (o heartbeatObserver) RoundTrip(request *http.Request) (*http.Response, error) {
+	var env protocol.Envelope
+	if request.GetBody != nil {
+		body, err := request.GetBody()
+		if err != nil {
+			return nil, err
+		}
+		err = json.NewDecoder(body).Decode(&env)
+		_ = body.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	response, err := o.transport.RoundTrip(request)
+	if err != nil || env.Operation != protocol.OpRunnerHeartbeat {
+		return response, err
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	response.Body = io.NopCloser(bytes.NewReader(body))
+	var result struct {
+		Operation *protocol.Operation `json:"operation"`
+		Error     *protocol.Error     `json:"error"`
+	}
+	if json.Unmarshal(body, &result) == nil && result.Error == nil && result.Operation != nil && result.Operation.Status == protocol.OpSucceeded {
+		o.successful.Add(1)
+	}
+	return response, nil
 }
