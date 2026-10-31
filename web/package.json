@@ -30,7 +30,8 @@
     "test:issue-detail-layout": "node scripts/layout-fixture.ts scripts/issue-detail-layout.ts",
     "style:check": "node scripts/style-check.ts",
     "test:navigation-layout": "node scripts/layout-fixture.ts scripts/issue-surfaces-layout.ts --navigation-only",
-    "test:copy-layout": "node scripts/layout-fixture.ts scripts/issue-surfaces-layout.ts --s5-copy-only"
+    "test:copy-layout": "node scripts/layout-fixture.ts scripts/issue-surfaces-layout.ts --s5-copy-only",
+    "test:ui-tour": "node scripts/layout-fixture.ts scripts/ui-tour.ts"
   },
   "dependencies": {
     "markdown-it": "^15.0.3",
