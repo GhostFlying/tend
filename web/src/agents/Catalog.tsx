@@ -1,3 +1,4 @@
+import { Button, Input, Select, Textarea, EmptyState } from "../ui/index.ts";
 import { runtimeLabel } from "./runtimeLabel.ts";
 import { putCategoryCommand } from "./actions.ts";
 import { useEffect, useMemo, useState } from "react";
@@ -25,6 +26,7 @@ export function AgentCatalogView() {
   useEffect(() => {
     void live.agents.openCategories("all");
     void live.agents.openHosted();
+    return () => live.agents.categories.close();
   }, [live]);
   if (edit)
     return (
@@ -35,27 +37,26 @@ export function AgentCatalogView() {
       />
     );
   return (
-    <section className={styles.root} aria-label="Agent与类别">
-      <h1>Agent与类别</h1>
-      <p className={styles.subtitle}>管理全局类别，查看各环境Agent登记。</p>
+    <section className={styles.root}>
+      <p className={styles.subtitle}>管理全局类别，查看各环境 Agent 登记。</p>
       <div className={styles.categories}>
         {(categories.value?.items ?? []).map((category) => (
-          <button key={category.category_id} onClick={() => setEdit(category)}>
+          <Button key={category.category_id} onClick={() => setEdit(category)}>
             {category.title} · {category.category_id}
             {category.state !== "active" ? "（已停用）" : ""}
-          </button>
+          </Button>
         ))}
-        <button onClick={() => setEdit("new")}>新增类别</button>
+        <Button onClick={() => setEdit("new")}>新增类别</Button>
         {categories.value?.more && (
-          <button onClick={() => void live.agents.openCategories("all", categories.value?.next)}>
+          <Button onClick={() => void live.agents.openCategories("all", categories.value?.next)}>
             下一页类别
-          </button>
+          </Button>
         )}
       </div>
       {(categories.error || hosted.error) && (
         <p role="status" className={styles.warning}>
           部分登记暂时无法读取，显示上次结果。
-          <button onClick={() => live.agents.refresh()}>重新读取</button>
+          <Button onClick={() => live.agents.refresh()}>重新读取</Button>
         </p>
       )}
       <div className={styles.table}>
@@ -63,14 +64,14 @@ export function AgentCatalogView() {
           <span>Agent</span>
           <span>类别</span>
           <span>运行时</span>
-          <span>模型与effort</span>
+          <span>模型与 effort</span>
           <span>登记</span>
           <span>最近上报</span>
           <span>主机</span>
         </div>
         <div className={styles.group}>托管环境</div>
         {hosted.value?.state === "unconfigured" ? (
-          <p className={styles.muted}>尚未配置托管Agent</p>
+          <EmptyState>尚未配置托管 Agent</EmptyState>
         ) : hosted.value ? (
           <AgentRows projection={hosted.value.projection} />
         ) : (
@@ -79,9 +80,7 @@ export function AgentCatalogView() {
         {(snapshot?.hosts ?? []).map((host) => (
           <RunnerGroup key={host.host_id} id={host.host_id} />
         ))}
-        {snapshot && snapshot.hosts?.length === 0 && (
-          <p className={styles.muted}>暂无已登记执行主机。</p>
-        )}
+        {snapshot && snapshot.hosts?.length === 0 && <EmptyState>暂无已登记执行主机。</EmptyState>}
       </div>
       <p className={styles.muted}>
         定义保存在对应环境，这里展示已登记摘要。类别用于选择，不改变任务角色权限。
@@ -105,13 +104,14 @@ function RunnerGroup({ id }: { id: string }) {
   }, [expanded, id, reader, live]);
   return (
     <>
-      <button
+      <Button
+        variant="ghost"
         className={styles.group}
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
       >
         {id}
-      </button>
+      </Button>
       {expanded &&
         (state.value?.projection ? (
           <AgentRows
@@ -125,7 +125,7 @@ function RunnerGroup({ id }: { id: string }) {
             {state.error
               ? "暂时无法读取登记。"
               : state.value
-                ? "此主机尚未登记Agent。"
+                ? "此主机尚未登记 Agent。"
                 : "正在读取…"}
           </p>
         ))}
@@ -158,7 +158,8 @@ function AgentRows({
         const key = `${agent.identity.execution_environment_id}/${agent.identity.local_id}`;
         return (
           <div key={key}>
-            <button
+            <Button
+              variant="ghost"
               className={styles.row}
               aria-expanded={selected === key}
               onClick={() => setSelected(selected === key ? "" : key)}
@@ -178,7 +179,7 @@ function AgentRows({
                 {observed ? (observed.available ? "最近上报可用" : "最近上报不可用") : "未观测"}
               </span>
               <span>{online === undefined ? "—" : online ? "在线" : "离线"}</span>
-            </button>
+            </Button>
             {selected === key && <AgentDetails agent={agent} observed={observed} at={at} />}
           </div>
         );
@@ -198,7 +199,7 @@ function AgentDetails({
   return (
     <div className={styles.details}>
       <p>显示名：{agent.display_name}</p>
-      <p>本地ID：{agent.identity.local_id}</p>
+      <p>本地 ID：{agent.identity.local_id}</p>
       <p>环境：{agent.identity.execution_environment_id}</p>
       <p>类别：{agent.categories?.join("、")}</p>
       <p>用途：{agent.purposes?.join("、")}</p>
@@ -245,10 +246,10 @@ function CategoryEditor({
   };
   return (
     <section className={`${styles.root} ${styles.form}`}>
-      <h1>{category ? "编辑类别" : "新增类别"}</h1>
+      <h2>{category ? "编辑类别" : "新增类别"}</h2>
       <label>
-        类别ID
-        <input
+        类别 ID
+        <Input
           value={original?.target.id ?? id}
           disabled={!!category || operation.busy || operation.pending || result?.kind === "done"}
           onChange={(e) => setID(e.target.value)}
@@ -256,7 +257,7 @@ function CategoryEditor({
       </label>
       <label>
         名称
-        <input
+        <Input
           value={payload?.title ?? title}
           disabled={operation.busy || operation.pending || result?.kind === "done"}
           onChange={(e) => setTitle(e.target.value)}
@@ -264,7 +265,7 @@ function CategoryEditor({
       </label>
       <label>
         类别说明
-        <textarea
+        <Textarea
           value={payload?.description ?? description}
           disabled={operation.busy || operation.pending || result?.kind === "done"}
           onChange={(e) => setDescription(e.target.value)}
@@ -272,39 +273,39 @@ function CategoryEditor({
       </label>
       <label>
         状态
-        <select
+        <Select
           value={payload?.state ?? state}
           disabled={operation.busy || operation.pending || result?.kind === "done"}
           onChange={(e) => setState(e.target.value)}
         >
           <option value="active">启用</option>
           <option value="retired">停用</option>
-        </select>
+        </Select>
       </label>
       <p className={styles.muted}>类别用于选择，不改变任务角色权限。</p>
       {operation.storageError && <p role="alert">{operation.storageError}</p>}
       {result && <p role="status">{result.kind === "done" ? "类别已保存。" : result.message}</p>}
       <div className={styles.actions}>
         {operation.pending ? (
-          <button
+          <Button
             className={styles.primary}
             disabled={operation.busy}
             onClick={() => void save(true)}
           >
             核实原保存请求
-          </button>
+          </Button>
         ) : (
-          <button
+          <Button
             className={styles.primary}
             disabled={operation.busy || result?.kind === "done" || !id.trim() || !title.trim()}
             onClick={() => void save()}
           >
             保存类别
-          </button>
+          </Button>
         )}
-        <button className={styles.button} onClick={onBack}>
-          返回Agent目录
-        </button>
+        <Button className={styles.button} onClick={onBack}>
+          返回 Agent 目录
+        </Button>
       </div>
     </section>
   );

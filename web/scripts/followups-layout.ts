@@ -1,3 +1,4 @@
+import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Synthetic owner API only; browser coverage never writes to a deployed ledger.
@@ -7,7 +8,6 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
 import type {
   Envelope,
@@ -15,7 +15,7 @@ import type {
   FollowupSpec,
   IssueView,
 } from "../src/api/generated/api.ts";
-const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const root = fixtureRoot();
 const output = process.env.TEND_LAYOUT_OUTPUT ?? join(tmpdir(), "tend-followups-layout");
 await mkdir(output, { recursive: true });
 const item: IssueView = {
@@ -209,7 +209,7 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/api/"))
     return json(res, { error: { code: "not_found", message: "Not in fixture" } }, 404);
   try {
-    const file = resolve(root, `.${path}${path.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, path.split("/").at(-1)?.includes(".") ? `.${path}` : "index.html");
     assert(file.startsWith(root));
     res.setHeader(
       "Content-Type",
@@ -255,15 +255,15 @@ try {
       if (width < 760)
         await p
           .getByRole("navigation", { name: "视图" })
-          .getByRole("button", { name: "Issue", exact: true })
+          .getByRole("link", { name: "Issues", exact: true })
           .click();
-      else await p.getByRole("button", { name: "Issue · 白板 ›" }).click();
+      else await p.getByRole("link", { name: "Issues", exact: true }).click();
       await p
-        .getByRole("region", { name: "Issue白板", exact: true })
+        .getByRole("region", { name: "Issue 白板", exact: true })
         .getByRole("button", { name: item.plan.title, exact: true })
         .click();
       await p
-        .getByRole("region", { name: "Issue详情", exact: true })
+        .getByRole("region", { name: "Issue 详情", exact: true })
         .getByRole("heading", { name: item.plan.title, exact: true })
         .waitFor();
       await openIssueAux(p, "跟进与交付");

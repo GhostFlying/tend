@@ -1,3 +1,4 @@
+import { Button, Input, Checkbox, Section } from "../ui/index.ts";
 import { useEffect, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type { SetIssueNotificationSettingsPayload } from "../api/generated/api.ts";
@@ -81,14 +82,13 @@ export function IssueNotificationSettings({ connection }: { connection: Connecti
                 ? outcome.message
                 : "");
   return (
-    <section className={styles.issueNotifications} aria-label="Issue通知设置">
-      <h2 className={styles.sectionHeading}>Issue 通知</h2>
+    <Section title="Issue 通知" className={styles.section} aria-label="Issue 通知设置">
       <p className={styles.note}>合并连续的状态调整，减少对负责人的打扰。</p>
       <label className={styles.label} htmlFor="issue-notification-delay">
         状态变更通知延迟
       </label>
       <div className={styles.row}>
-        <input
+        <Input
           id="issue-notification-delay"
           type="number"
           min={1}
@@ -104,18 +104,16 @@ export function IssueNotificationSettings({ connection }: { connection: Connecti
         <span className={styles.unit}>分钟</span>
       </div>
       <p className={styles.note}>默认 3 分钟；可设为 1–30 分钟，适用于所有 Issue。</p>
-      <label className={styles.toggle}>
-        <input
-          type="checkbox"
-          checked={immediate}
-          disabled={disabled}
-          onChange={(e) => {
-            if (e.target.checked && valid && minutes > 0) setTimed(value);
-            change(e.target.checked ? "0" : timed);
-          }}
-        />
-        立即通知
-      </label>
+      <Checkbox
+        className={styles.toggle}
+        label="立即通知"
+        checked={immediate}
+        disabled={disabled}
+        onChange={(e) => {
+          if (e.target.checked && valid && minutes > 0) setTimed(value);
+          change(e.target.checked ? "0" : timed);
+        }}
+      />
       <p className={styles.note}>
         状态即时保存；停止调整后，只通知最后选定的状态。期间再次调整，将重新计时。
       </p>
@@ -133,27 +131,40 @@ export function IssueNotificationSettings({ connection }: { connection: Connecti
           {message}
         </p>
       )}
+      {!message && (
+        <p className={styles.note} role="status">
+          {!valid
+            ? "请输入 1–30 的整数，或选择立即通知。"
+            : connection.status !== "online"
+              ? "离线时不能修改设置。"
+              : !state.value
+                ? "正在读取设置…"
+                : minutes === state.value.delay_minutes
+                  ? "未修改通知设置。"
+                  : "有未保存的修改。"}
+        </p>
+      )}
       {operation.pending ? (
-        <button
-          className={styles.save}
+        <Button
+          variant="primary"
           disabled={operation.busy || connection.status !== "online"}
           onClick={() => void save(true)}
         >
           核对设置结果
-        </button>
+        </Button>
       ) : state.error ? (
-        <button className={styles.prepare} onClick={() => void read.refresh()}>
+        <Button variant="secondary" onClick={() => void read.refresh()}>
           重新读取
-        </button>
+        </Button>
       ) : (
-        <button
-          className={styles.save}
+        <Button
+          variant="primary"
           disabled={disabled || !valid || minutes === state.value?.delay_minutes}
           onClick={() => void save()}
         >
           保存通知设置
-        </button>
+        </Button>
       )}
-    </section>
+    </Section>
   );
 }

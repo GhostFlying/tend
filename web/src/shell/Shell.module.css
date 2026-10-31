@@ -1,11 +1,8 @@
-/* Details use a shared modal and never squeeze the board or conversation. */
 .app {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   height: 100%;
-  transition: grid-template-columns var(--dur) var(--ease);
 }
-
 .sidebar {
   background: var(--sidebar);
   border-right: 1px solid var(--border-soft);
@@ -13,7 +10,6 @@
   flex-direction: column;
   min-height: 0;
 }
-
 .chat {
   display: flex;
   flex-direction: column;
@@ -21,35 +17,8 @@
   min-height: 0;
   position: relative;
 }
-
-/* Phones: one column, the tab bar picks it; the details are a full-screen
-   sheet over everything. */
-@media (max-width: 760px) {
-  .app {
-    grid-template-columns: 100%;
-    grid-template-rows: 100%;
-    padding-bottom: calc(var(--tabbar-height) + env(safe-area-inset-bottom));
-  }
-
-  .sidebar,
-  .chat {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .sidebar {
-    border-right: 0;
-    background: var(--bg);
-  }
-
-  .app[data-view="chat"] .sidebar,
-  .app[data-board="open"] .sidebar,
-  .app[data-view="decisions"] .chat {
-    visibility: hidden;
-  }
-}
-
-.content {
+.content,
+.page {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -59,22 +28,41 @@
 .content[hidden] {
   display: none;
 }
-
-.app[data-issue="open"] {
-  grid-template-columns: 220px minmax(0, 1fr);
+.page {
+  overflow: auto;
+}
+@media (min-width: 761px) and (max-width: 1023px) {
+  .app {
+    --sidebar-width: 64px;
+  }
 }
 @media (max-width: 760px) {
-  .app[data-issue="open"] {
+  .app {
     grid-template-columns: 100%;
+    grid-template-rows: 100%;
+    padding-bottom: calc(var(--tabbar-height) + env(safe-area-inset-bottom));
+  }
+  .sidebar {
+    display: none;
+  }
+  .app[data-detail="true"] {
     padding-bottom: 0;
   }
-  .app[data-issue="open"] .sidebar {
+  .app:has(dialog[open]) > nav {
     display: none;
   }
-  .app[data-issue="open"] > nav {
-    display: none;
+  .app:has(dialog[open]) {
+    padding-bottom: 0;
   }
-  .app[data-issue="open"] .chat {
-    visibility: visible;
-  }
+}
+
+.skeleton {
+  margin: var(--space-5);
+  height: 120px;
+  border-radius: var(--radius-m);
+  background: var(--bg-l2);
+}
+
+.routeError {
+  padding: var(--space-5);
 }

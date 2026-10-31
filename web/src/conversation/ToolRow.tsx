@@ -1,3 +1,5 @@
+import { useServices } from "../app/services.tsx";
+import { useStore } from "../state/store.ts";
 // A tool the main agent used: one line with the name and a summary, as
 // dsh's DisclosureRow; expanded, the input and the output.
 import { useState } from "react";
@@ -5,6 +7,7 @@ import type { ToolStatus, ToolUseView } from "../api/generated/api.ts";
 import { Chevron } from "../shell/icons.tsx";
 import { StatusDot, type Tone } from "../shell/StatusDot.tsx";
 import { readable, toolSummary } from "./model.ts";
+import { toolLabel } from "./toolLabels.ts";
 import styles from "./ToolRow.module.css";
 
 const statusLook: Record<ToolStatus, { tone: Tone; label: string } | null> = {
@@ -14,8 +17,25 @@ const statusLook: Record<ToolStatus, { tone: Tone; label: string } | null> = {
   interrupted: { tone: "warn", label: "中断" },
 };
 
-export function ToolRow({ tool }: { tool: ToolUseView }) {
+export function ToolRow({
+  tool,
+  onOpenChange,
+}: {
+  tool: ToolUseView;
+  onOpenChange?(open: boolean): void;
+}) {
   const [open, setOpen] = useState(false);
+  const { live } = useServices();
+  const snapshot = useStore(live.snapshot);
+  const lookups = useStore(live.lookups);
+  const issues = useStore(live.issues.list.state);
+  const detail = useStore(live.issues.detail.state);
+  const summary = toolSummary(tool.input, (kind, id) =>
+    kind === "task"
+      ? (snapshot?.tasks?.find((task) => task.task_id === id)?.title ?? lookups.get(id)?.title)
+      : ((detail.value?.issue_id === id ? detail.value.plan.title : undefined) ??
+        issues.value?.items?.find((issue) => issue.issue_id === id)?.title),
+  );
   const status = statusLook[tool.status];
   const input = readable(tool.input);
   const output = readable(tool.output);
@@ -24,12 +44,15 @@ export function ToolRow({ tool }: { tool: ToolUseView }) {
       <button
         type="button"
         className={styles.row}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          onOpenChange?.(!open);
+        }}
         aria-expanded={open}
       >
         <Chevron className={styles.chevron} />
-        <span className={styles.name}>{tool.name}</span>
-        <span className={styles.sum}>{toolSummary(tool.input)}</span>
+        <span className={styles.name}>{toolLabel(tool.name)}</span>
+        {summary && <span className={styles.sum}>{summary}</span>}
         {status && (
           <span className={styles.status} data-status={tool.status}>
             <StatusDot tone={status.tone} />

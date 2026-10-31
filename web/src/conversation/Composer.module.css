@@ -3,7 +3,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-bubble);
   box-shadow: var(--shadow-2);
-  padding: 12px 12px 10px 16px;
+  padding: var(--space-3) var(--space-3) 10px var(--space-4);
 }
 
 .composer[data-dragging] {
@@ -76,7 +76,7 @@
   resize: none;
   background: transparent;
   color: var(--label);
-  font: var(--text-l) / var(--leading-l) var(--font);
+  font: var(--text-body-lg) / var(--leading-title) var(--font);
   min-height: 48px;
   max-height: 40vh;
   field-sizing: content;
@@ -89,12 +89,12 @@
 .bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .hint {
   flex: 1 1 0;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--caption);
   min-width: 0;
   overflow: hidden;
@@ -114,7 +114,7 @@
 }
 
 .send.stop {
-  border-radius: 10px;
+  border-radius: var(--radius-m);
   background: var(--label);
   color: var(--bg);
 }
@@ -127,7 +127,7 @@
 @media (max-width: 760px) {
   .composer textarea {
     /* 16px keeps iOS from zooming into the field */
-    font-size: 16px;
+    font-size: var(--text-title-sm);
   }
 }
 
@@ -138,15 +138,42 @@
 }
 
 .composer[data-presentation="issue"] {
-  border-radius: 10px;
+  border-radius: var(--radius-m);
   box-shadow: none;
 }
 .options {
   position: relative;
   color: var(--label-3);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .options summary {
   cursor: pointer;
   list-style: none;
+}
+
+.composer[data-presentation="issue"] textarea {
+  max-height: 16dvh;
+  overflow-y: auto;
+}
+
+@media (max-width: 760px) {
+  .attach,
+  .send {
+    width: var(--control-touch);
+    height: var(--control-touch);
+  }
+}
+
+.optionsPanel {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+
+  z-index: var(--z-dropdown);
 }

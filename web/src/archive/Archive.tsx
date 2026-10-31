@@ -1,3 +1,5 @@
+import { Button, Checkbox, Select, EmptyState } from "../ui/index.ts";
+import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useMemo, useState } from "react";
 import type {
   ArchiveOriginal,
@@ -21,7 +23,7 @@ import form from "../agents/Catalog.module.css";
 type OriginalKind = "attachment" | "image" | "deliverable";
 type HistoricalRecord = { kind: string; id: string; data: Record<string, unknown | undefined> };
 const labels: Record<string, string> = {
-  work_item: "历史Issue",
+  work_item: "历史 Issue",
   issue_control: "责任记录",
   task: "任务",
   run: "执行",
@@ -30,7 +32,7 @@ const labels: Record<string, string> = {
   decision: "决策",
   message: "消息",
   agent_conversation: "会话",
-  run_execution: "执行Agent",
+  run_execution: "执行 Agent",
 };
 const ids: Record<string, string> = {
   work_item: "work_item_id",
@@ -60,14 +62,13 @@ export function ArchiveBrowser({ onIssue }: { onIssue(id: string): void }) {
     catalog.value?.items?.[0];
   return (
     <section className={styles.root} aria-label="历史归档">
-      <header className={styles.head}>
-        <h1>历史归档</h1>
-        <p>封存的历史记录与原件，只读查看。所选材料可作为新Issue的来源，旧档案保持不变。</p>
-      </header>
+      <PageHeader className={styles.head} title="历史归档">
+        <p>封存的历史记录与原件，只读查看。所选材料可作为新 Issue 的来源，旧档案保持不变。</p>
+      </PageHeader>
       <div className={styles.archiveSelect}>
         <label>
           封存账本
-          <select
+          <Select
             aria-label="选择归档"
             value={entry?.archive_id ?? ""}
             onChange={(e) => setSelected(e.target.value)}
@@ -90,15 +91,15 @@ export function ArchiveBrowser({ onIssue }: { onIssue(id: string): void }) {
                   ))}
               </optgroup>
             )}
-          </select>
+          </Select>
         </label>
         {catalog.error && (
           <p role="status">
-            归档目录读取失败。<button onClick={() => void archive.openCatalog()}>重新读取</button>
+            归档目录读取失败。<Button onClick={() => void archive.openCatalog()}>重新读取</Button>
           </p>
         )}
         {!catalog.value && !catalog.error && <p>正在读取归档…</p>}
-        {catalog.value?.items?.length === 0 && <p>尚未配置历史归档。</p>}
+        {catalog.value?.items?.length === 0 && <EmptyState>尚未配置历史归档。</EmptyState>}
       </div>
       {entry ? (
         <ArchiveContents key={entry.archive_id} archive={archive} entry={entry} onIssue={onIssue} />
@@ -205,9 +206,9 @@ function ArchiveContents({
           <h3>材料提交记录</h3>
           {transfers.map((record) => (
             <p key={record.requestId}>
-              <button className={form.button} onClick={() => setResume(record)}>
-                {record.state === "sent" ? "继续使用已保存材料新建Issue" : "核实未完成的材料提交"}
-              </button>{" "}
+              <Button className={form.button} onClick={() => setResume(record)}>
+                {record.state === "sent" ? "继续使用已保存材料新建 Issue" : "核实未完成的材料提交"}
+              </Button>{" "}
               <small className={form.muted}>
                 {new Date(record.createdAt).toLocaleString("zh-CN")}
               </small>
@@ -219,7 +220,7 @@ function ArchiveContents({
         <aside className={styles.list} aria-label="历史记录导航">
           <label>
             记录类型
-            <select
+            <Select
               aria-label="记录类型"
               value={actualKind ?? ""}
               onChange={(e) => {
@@ -233,12 +234,12 @@ function ArchiveContents({
                   {labels[k] ?? k}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           {records.error ? (
             <p>
               历史目录读取失败。
-              <button onClick={() => void archive.records.refresh()}>重新读取</button>
+              <Button onClick={() => void archive.records.refresh()}>重新读取</Button>
             </p>
           ) : !records.value ? (
             <p>正在读取…</p>
@@ -247,7 +248,7 @@ function ArchiveContents({
               {(records.value.items ?? []).map((row, i) => {
                 const id = String(row[ids[actualKind ?? ""] ?? ""] ?? "");
                 return (
-                  <button
+                  <Button
                     key={id || i}
                     aria-pressed={
                       (selectedRecord ||
@@ -261,12 +262,12 @@ function ArchiveContents({
                   >
                     {recordTitle(row) || id || "历史记录"}
                     <small>{labels[actualKind ?? ""] ?? actualKind}</small>
-                  </button>
+                  </Button>
                 );
               })}
               {!records.value.items?.length && <p>此类历史记录为空。</p>}
               {records.value.next_after && (
-                <button
+                <Button
                   onClick={() =>
                     void archive.openRecords(
                       entry.archive_id,
@@ -276,7 +277,7 @@ function ArchiveContents({
                   }
                 >
                   下一页记录
-                </button>
+                </Button>
               )}
             </>
           )}
@@ -289,7 +290,7 @@ function ArchiveContents({
               ["originals", "原文件与报告"],
               ["resources", "原生历史与缺口"],
             ].map(([value, label]) => (
-              <button
+              <Button
                 key={value}
                 aria-pressed={tab === value}
                 onClick={() => {
@@ -301,7 +302,7 @@ function ArchiveContents({
                 }}
               >
                 {label}
-              </button>
+              </Button>
             ))}
           </nav>
           {(tab === "records" || tab === "sources") && (
@@ -309,7 +310,7 @@ function ArchiveContents({
               {records.error ? (
                 <p className={form.warning}>
                   历史记录读取失败。
-                  <button onClick={() => void archive.records.refresh()}>重新读取</button>
+                  <Button onClick={() => void archive.records.refresh()}>重新读取</Button>
                 </p>
               ) : !records.value ? (
                 <p>正在读取…</p>
@@ -331,22 +332,19 @@ function ArchiveContents({
                       );
                       return (
                         <article className={styles.record} key={id || i}>
-                          <label>
-                            <input
-                              type="checkbox"
-                              aria-label={`选择记录 ${recordTitle(row) || id}`}
-                              disabled={!id}
-                              checked={selected}
-                              onChange={(e) =>
-                                setChosenRecords((old) =>
-                                  e.target.checked
-                                    ? [...old, { kind: actualKind!, id, data: row }]
-                                    : old.filter((r) => r.kind !== actualKind || r.id !== id),
-                                )
-                              }
-                            />
-                            <h3>{recordTitle(row) || id || "历史记录"}</h3>
-                          </label>
+                          <Checkbox
+                            label={<h3>{recordTitle(row) || id || "历史记录"}</h3>}
+                            aria-label={`选择记录 ${recordTitle(row) || id}`}
+                            disabled={!id}
+                            checked={selected}
+                            onChange={(e) =>
+                              setChosenRecords((old) =>
+                                e.target.checked
+                                  ? [...old, { kind: actualKind!, id, data: row }]
+                                  : old.filter((r) => r.kind !== actualKind || r.id !== id),
+                              )
+                            }
+                          />
                           {typeof row.body === "string" && <Markdown text={row.body} />}
                           <details>
                             <summary>查看原始记录</summary>
@@ -357,7 +355,7 @@ function ArchiveContents({
                     })}
                   {!records.value.items?.length && <p>此类历史记录为空。</p>}
                   {records.value.next_after && (
-                    <button
+                    <Button
                       className={form.button}
                       onClick={() =>
                         void archive.openRecords(
@@ -368,7 +366,7 @@ function ArchiveContents({
                       }
                     >
                       下一页记录
-                    </button>
+                    </Button>
                   )}
                 </>
               )}
@@ -379,19 +377,19 @@ function ArchiveContents({
               <p className={form.muted}>全部原件 · 当前封存账本收录的文件与报告。</p>
               <label>
                 原件类型
-                <select
+                <Select
                   value={originalKind}
                   onChange={(e) => setOriginalKind(e.target.value as OriginalKind)}
                 >
                   <option value="deliverable">交付文件与报告</option>
                   <option value="attachment">会话附件</option>
                   <option value="image">历史图片</option>
-                </select>
+                </Select>
               </label>
               {originals.error ? (
                 <p className={form.warning}>
                   原件目录读取失败。
-                  <button onClick={() => void archive.originals.refresh()}>重新读取</button>
+                  <Button onClick={() => void archive.originals.refresh()}>重新读取</Button>
                 </p>
               ) : !originals.value ? (
                 <p>正在读取…</p>
@@ -399,23 +397,20 @@ function ArchiveContents({
                 <>
                   {(originals.value.items ?? []).map((file) => (
                     <article className={styles.record} key={file.id}>
-                      <label>
-                        <input
-                          type="checkbox"
-                          aria-label={`选择原件 ${file.name}`}
-                          checked={chosenOriginals.some(
-                            (f) => f.id === file.id && f.kind === file.kind,
-                          )}
-                          onChange={(e) =>
-                            setChosenOriginals((old) =>
-                              e.target.checked
-                                ? [...old, file]
-                                : old.filter((f) => f.id !== file.id || f.kind !== file.kind),
-                            )
-                          }
-                        />
-                        <h3>{file.name}</h3>
-                      </label>
+                      <Checkbox
+                        label={<h3>{file.name}</h3>}
+                        aria-label={`选择原件 ${file.name}`}
+                        checked={chosenOriginals.some(
+                          (f) => f.id === file.id && f.kind === file.kind,
+                        )}
+                        onChange={(e) =>
+                          setChosenOriginals((old) =>
+                            e.target.checked
+                              ? [...old, file]
+                              : old.filter((f) => f.id !== file.id || f.kind !== file.kind),
+                          )
+                        }
+                      />
                       <p className={form.muted}>{fileSize(file.size)} · 原件</p>
                       <ArchiveOriginalView
                         archive={archive}
@@ -426,7 +421,7 @@ function ArchiveContents({
                   ))}
                   {!originals.value.items?.length && <p>该类原件未收录。</p>}
                   {originals.value.next_after && (
-                    <button
+                    <Button
                       className={form.button}
                       onClick={() =>
                         void archive.openOriginals(
@@ -437,7 +432,7 @@ function ArchiveContents({
                       }
                     >
                       下一页原件
-                    </button>
+                    </Button>
                   )}
                 </>
               )}
@@ -448,7 +443,7 @@ function ArchiveContents({
               {resources.error ? (
                 <p className={form.warning}>
                   资源索引读取失败。
-                  <button onClick={() => void archive.resources.refresh()}>重新读取</button>
+                  <Button onClick={() => void archive.resources.refresh()}>重新读取</Button>
                 </p>
               ) : !resources.value ? (
                 <p>正在读取…</p>
@@ -485,28 +480,28 @@ function ArchiveContents({
                     </article>
                   ))}
                   {!resources.value.items?.length && (
-                    <p>未收录原生历史或runner journal资源索引，不代表当时没有执行。</p>
+                    <p>未收录原生历史或 runner journal 资源索引，不代表当时没有执行。</p>
                   )}
                   {resources.value.next_after && (
-                    <button
+                    <Button
                       className={form.button}
                       onClick={() =>
                         void archive.openResources(entry.archive_id, resources.value?.next_after)
                       }
                     >
                       下一页资源
-                    </button>
+                    </Button>
                   )}
                 </>
               )}
             </>
           )}
           <div className={form.actions}>
-            <button className={form.primary} disabled={!count} onClick={() => setImporting(true)}>
-              从所选材料新建Issue{count ? `（${count}）` : ""}
-            </button>
+            <Button className={form.primary} disabled={!count} onClick={() => setImporting(true)}>
+              从所选材料新建 Issue{count ? `（${count}）` : ""}
+            </Button>
             {count > 0 && (
-              <button
+              <Button
                 className={form.button}
                 onClick={() => {
                   setChosenRecords([]);
@@ -514,7 +509,7 @@ function ArchiveContents({
                 }}
               >
                 取消选择
-              </button>
+              </Button>
             )}
           </div>
           <p className={form.muted}>原归档保持不变；不会恢复旧任务、旧执行身份或凭据。</p>
@@ -591,7 +586,7 @@ function ArchiveOriginalView({
       {error && <p>图片预览暂不可用，可重新获取原件。</p>}
       {(file.media_type?.startsWith("text/") || /\.(md|txt|log|json|csv)$/i.test(file.name)) && (
         <>
-          <button
+          <Button
             className={form.button}
             onClick={() => {
               setTextError(false);
@@ -600,20 +595,20 @@ function ArchiveOriginalView({
             aria-expanded={showText}
           >
             {showText ? "收起原文" : "查看原文"}
-          </button>
+          </Button>
           {showText && (
             <section aria-label={`${file.name} 原文`}>
               {textError ? (
                 <p>
                   原文读取失败。
-                  <button
+                  <Button
                     onClick={() => {
                       setShowText(false);
                       setText(undefined);
                     }}
                   >
                     关闭后重试
-                  </button>
+                  </Button>
                 </p>
               ) : text !== undefined ? (
                 <pre>{text}</pre>
@@ -703,7 +698,7 @@ function ArchiveImport({
         setError(
           result?.state === "failed"
             ? (result.error ?? "来源保存被拒绝。")
-            : "来源保存结果待核实，未创建新Issue。",
+            : "来源保存结果待核实，未创建新 Issue。",
         );
     } catch {
       setError("材料准备或来源保存未完成，旧档案保持不变。请重试核对。");
@@ -722,8 +717,8 @@ function ArchiveImport({
       />
     );
   return (
-    <section className={form.form} aria-label="归档材料新建Issue">
-      <h2>从所选材料新建Issue</h2>
+    <section className={form.form} aria-label="归档材料新建 Issue">
+      <h2>从所选材料新建 Issue</h2>
       <p>来源归档：{archiveID} · 只读</p>
       {resume ? (
         <>
@@ -733,7 +728,7 @@ function ArchiveImport({
         </>
       ) : (
         <p>
-          已选择{records.length}份记录、{originals.length}份原件。
+          已选择 {records.length} 份记录、{originals.length} 份原件。
         </p>
       )}
       <ul>
@@ -745,7 +740,7 @@ function ArchiveImport({
         ))}
       </ul>
       <p className={form.muted}>
-        所选材料会保存为当前部署的新来源，再填写新Issue的目标与负责人。归档不会恢复可写。
+        所选材料会保存为当前部署的新来源，再填写新 Issue 的目标与负责人。归档不会恢复可写。
       </p>
       {(error || source.error) && (
         <p className={form.warning} role="status">
@@ -753,16 +748,16 @@ function ArchiveImport({
         </p>
       )}
       {source.current?.state === "failed" && (
-        <button
+        <Button
           className={form.button}
           disabled={busy || source.busy}
           onClick={() => void source.editRefused()}
         >
           取回材料后重新提交
-        </button>
+        </Button>
       )}
       <div className={form.actions}>
-        <button
+        <Button
           className={form.primary}
           disabled={
             busy || source.current?.state === "failed" || !source.queue || !source.content.loaded
@@ -770,10 +765,10 @@ function ArchiveImport({
           onClick={() => void prepare()}
         >
           {busy ? "正在保存所选材料…" : source.current ? "核实原来源并继续" : "保存所选材料并继续"}
-        </button>
-        <button className={form.button} onClick={onBack}>
+        </Button>
+        <Button className={form.button} onClick={onBack}>
           返回归档
-        </button>
+        </Button>
       </div>
     </section>
   );

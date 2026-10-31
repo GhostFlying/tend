@@ -1,0 +1,45 @@
+.tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: var(--space-1) var(--space-5);
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.tabs button {
+  flex: none;
+  white-space: nowrap;
+  color: var(--label-3);
+  font: inherit;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: var(--space-3) 0;
+  cursor: pointer;
+}
+.tabs button[aria-pressed="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+@media (max-width: 760px) {
+  .tabs {
+    padding: 0 var(--space-4);
+    gap: 0 var(--space-4);
+  }
+  .tabs button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 760px) {
+  .tabs {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      var(--mask-opaque) var(--space-4),
+      var(--mask-opaque) calc(100% - var(--space-5)),
+      transparent
+    );
+    padding-right: var(--space-6);
+  }
+}

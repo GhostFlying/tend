@@ -1,59 +1,41 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { Button, Badge, EmptyState } from "../ui/index.ts";
+import { PageHeader } from "../shell/PageHeader.tsx";
+import { useEffect } from "react";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Repositories.module.css";
+import { ResourceRow } from "../shell/ResourceRow.tsx";
 
 export function RepositoryEntry({ onOpen }: { onOpen(): void }) {
   const { live } = useServices();
   const state = useStore(live.repos.state);
   const count = state.view ? (state.view.repos ?? []).length : undefined;
   return (
-    <button type="button" className={styles.entry} onClick={onOpen} aria-haspopup="dialog">
-      <span>已注册仓库</span>
-      <span className={styles.entryCount}>
-        {count === undefined ? (state.error ? "读取失败" : "待读取") : `${count} 个`}
-        {count !== undefined && state.stale && " · 上次记录"} ›
-      </span>
-    </button>
+    <ResourceRow
+      onOpen={onOpen}
+      meta={
+        <>
+          {count === undefined ? (state.error ? "读取失败" : "待读取") : `${count} 个`}
+          {count !== undefined && state.stale && " · 上次记录"}
+        </>
+      }
+    >
+      已注册仓库
+    </ResourceRow>
   );
 }
 
-export function Repositories({ connection, onClose }: { connection: Connection; onClose(): void }) {
+export function Repositories({ connection }: { connection: Connection }) {
   const { live } = useServices();
   const state = useStore(live.repos.state);
-  const panel = useRef<HTMLDialogElement>(null);
-  useLayoutEffect(() => {
-    panel.current?.showModal();
-  }, []);
   const repos = state.view ? (state.view.repos ?? []) : null;
   return (
-    <dialog
-      ref={panel}
-      className={styles.panel}
-      aria-label="已注册仓库"
-      onCancel={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <header className={styles.header}>
-        <div>
-          <h2>已注册仓库</h2>
-          <span>{repos ? `全部 ${repos.length} 个 · 含已归档仓库` : "全部登记"}</span>
-        </div>
-        <button
-          type="button"
-          className={styles.close}
-          onClick={onClose}
-          aria-label="关闭已注册仓库"
-          autoFocus
-        >
-          ×
-        </button>
-      </header>
+    <section className={styles.panel} aria-label="已注册仓库">
+      <PageHeader title="已注册仓库" />
+      <p>{repos ? `全部 ${repos.length} 个 · 含已归档仓库` : "全部登记"}</p>
       <RepositoryRegistry connection={connection} />
-    </dialog>
+    </section>
   );
 }
 
@@ -99,9 +81,9 @@ export function RepositoryRegistry({
                 : "已读取登记。"}
           {repos && state.stale && " 以下为上次成功读取的记录。"}
         </span>
-        <button type="button" disabled={!online} onClick={() => void registry.refresh()}>
+        <Button type="button" disabled={!online} onClick={() => void registry.refresh()}>
           {state.error ? "重试读取仓库" : "刷新仓库"}
-        </button>
+        </Button>
       </div>
       {repos && repos.length > 0 && (
         <ul className={styles.list} aria-label="仓库登记列表" aria-busy={state.loading}>
@@ -109,7 +91,7 @@ export function RepositoryRegistry({
             <li key={repo.repo} className={styles.repo} data-retired={repo.retired || undefined}>
               <div className={styles.repoHead}>
                 <h3>{repo.repo}</h3>
-                <span className={styles.badge}>{repo.retired ? "已归档" : "启用"}</span>
+                <Badge>{repo.retired ? "已归档" : "启用"}</Badge>
               </div>
               {repo.retired && (
                 <p className={styles.note}>停止新任务挂载，已有任务仍可由配置主机服务。</p>
@@ -129,11 +111,13 @@ export function RepositoryRegistry({
         </ul>
       )}
       {repos?.length === 0 && (
-        <p className={styles.empty}>
+        <EmptyState className={styles.empty}>
           {state.stale ? "上次读取时没有已注册仓库。" : "账本中暂无已注册仓库。"}
-        </p>
+        </EmptyState>
       )}
-      {!repos && !state.loading && <p className={styles.empty}>尚未取得仓库登记，数量未知。</p>}
+      {!repos && !state.loading && (
+        <EmptyState className={styles.empty}>尚未取得仓库登记，数量未知。</EmptyState>
+      )}
     </div>
   );
 }

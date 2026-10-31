@@ -2,7 +2,7 @@
   min-height: 100%;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--space-6);
   background: var(--bg-l1);
 }
 
@@ -11,43 +11,43 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .card h1 {
-  font-size: var(--text-xl);
-  margin: 12px 0 4px;
+  font-size: var(--text-title);
+  margin: var(--space-3) 0 var(--space-1);
 }
 
 .card p {
-  margin: 4px 0;
+  margin: var(--space-1) 0;
   color: var(--label-2);
 }
 
 .card code {
-  font-size: var(--text-m);
+  font-size: var(--text-label);
   background: var(--bg-l2);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
 }
 
 .card button {
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 
 .logo {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: var(--radius-m);
   background: var(--label);
   color: var(--bg);
   display: grid;
   place-items: center;
   font-weight: 700;
-  font-size: 17px;
+  font-size: var(--text-title-sm);
 }
 
 .reason {
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--caption);
 }

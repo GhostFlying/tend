@@ -1,6 +1,6 @@
 .divider {
   align-self: center;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--caption);
 }
 
@@ -11,25 +11,25 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .bubble {
   background: var(--bubble);
   border-radius: var(--radius-bubble);
-  padding: 10px 16px;
-  font-size: var(--text-l);
-  line-height: var(--leading-l);
+  padding: 10px var(--space-4);
+  font-size: var(--text-body-lg);
+  line-height: var(--leading-title);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .state {
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--caption);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -41,16 +41,16 @@
 
 /* the main agent's turn: tool rows and replies, no bubble */
 .agent {
-  font-size: var(--text-l);
+  font-size: var(--text-body-lg);
   line-height: 26px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .foot {
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   line-height: 18px;
   color: var(--caption);
 }
@@ -58,12 +58,12 @@
 @media (max-width: 760px) {
   .bubble,
   .agent {
-    font-size: 16px;
+    font-size: var(--text-title-sm);
   }
 }
 
 .assistantState {
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--caption);
   line-height: 20px;
 }
@@ -76,7 +76,7 @@
   border: 1px solid var(--border);
   border-left: 3px solid var(--ok);
   border-radius: var(--radius-l);
-  padding: 12px 16px;
+  padding: var(--space-3) var(--space-4);
   background: var(--bg-l1);
   min-width: 0;
 }
@@ -84,9 +84,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-  font-size: var(--text-s);
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-caption);
   color: var(--label-3);
 }
 
@@ -99,8 +99,18 @@
   background: none;
   padding: 0;
   border-radius: 0;
-  font-size: var(--text-base);
+  font-size: var(--text-body);
 }
 .user[data-layout="issue"] .state {
   justify-content: flex-start;
+}
+
+.systemDetails {
+  margin-bottom: var(--space-2);
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+.systemLink {
+  color: var(--label-3);
+  font-size: var(--text-caption);
 }

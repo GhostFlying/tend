@@ -66,13 +66,18 @@ export class Issues {
     return this.list.open(issuePagePath(filter));
   }
 
-  children(id: string, after?: string, includeClosed = false): WorkItemRead<IssuePage> {
+  childReader(id: string, includeClosed = false): WorkItemRead<IssuePage> {
     const key = `${id}:${includeClosed}`;
     let read = this.childReads.get(key);
     if (!read) {
       read = new WorkItemRead(this.api);
       this.childReads.set(key, read);
     }
+    return read;
+  }
+
+  children(id: string, after?: string, includeClosed = false): WorkItemRead<IssuePage> {
+    const read = this.childReader(id, includeClosed);
     void read.open(issuePagePath({ parentID: id, includeClosed, ...(after ? { after } : {}) }));
     return read;
   }

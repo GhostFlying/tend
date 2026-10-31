@@ -1,5 +1,6 @@
+import { useEntryState } from "../app/router.ts";
 import { AssigneeName } from "./AssigneeName.tsx";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import type { IssueSummary, IssueState, IssueView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
@@ -25,7 +26,7 @@ export function IssueHierarchy({
   includeClosed?: boolean;
 }) {
   return (
-    <div className={styles.tree} role="tree" aria-label="Issue层级">
+    <div className={styles.tree} role="tree" aria-label="Issue 层级">
       <div className={styles.treeHead}>
         <span>Issue</span>
         <span>负责人</span>
@@ -66,11 +67,14 @@ function IssueNode({
   defaultOpen?: boolean;
   includeClosed: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useEntryState(`tree:${includeClosed}:${item.issue_id}`, defaultOpen);
   return (
     <>
       <div className={styles.treeRow} role="treeitem" aria-expanded={open} aria-level={depth + 1}>
-        <div className={styles.treeTitle} style={{ paddingLeft: depth * 16 }}>
+        <div
+          className={styles.treeTitle}
+          style={{ paddingLeft: `calc(${depth} * var(--space-4))` }}
+        >
           <button
             className={styles.chevron}
             aria-label={`${open ? "折叠" : "展开"} ${item.title}`}
@@ -85,7 +89,7 @@ function IssueNode({
           <div className={styles.treeName}>
             <button onClick={() => onSelect(item.issue_id)}>{item.title}</button>
             {depth === 0 && item.parent_issue_id && (
-              <small className={styles.muted}>上级Issue：{item.parent_issue_id}</small>
+              <small className={styles.muted}>存在上级 Issue</small>
             )}
           </div>
         </div>
@@ -121,10 +125,10 @@ function Children({
   includeClosed: boolean;
 }) {
   const { live } = useServices();
-  const read = useMemo(
-    () => live.issues.children(id, undefined, includeClosed),
-    [live, id, includeClosed],
-  );
+  const read = useMemo(() => live.issues.childReader(id, includeClosed), [live, id, includeClosed]);
+  useEffect(() => {
+    live.issues.children(id, undefined, includeClosed);
+  }, [live, id, includeClosed]);
   const state = useStore(read.state);
   return (
     <div role="group">

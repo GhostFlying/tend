@@ -1,3 +1,5 @@
+import { CommitHash } from "../i18n/identifiers.tsx";
+import { CopyIdentifier } from "../i18n/identifiers.tsx";
 import { useEffect, useMemo } from "react";
 import type { Envelope, IssueView, IssueDeliveryView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
@@ -178,19 +180,29 @@ function DeliveryRow({ issue, item }: { issue: IssueView; item: IssueDeliveryVie
       )}
       {observation.checked_at && (
         <p className={styles.muted}>
-          观察于{new Date(observation.checked_at).toLocaleString("zh-CN")}
+          观察于 {new Date(observation.checked_at).toLocaleString("zh-CN")}
         </p>
       )}
-      {observation.head_sha && <p className={styles.muted}>Head：{observation.head_sha}</p>}
-      {observation.merge_sha && <p className={styles.muted}>Merge：{observation.merge_sha}</p>}
+      {observation.head_sha && (
+        <p className={styles.muted}>
+          Head：
+          <CommitHash value={observation.head_sha} />
+        </p>
+      )}
+      {observation.merge_sha && (
+        <p className={styles.muted}>
+          Merge：
+          <CommitHash value={observation.merge_sha} />
+        </p>
+      )}
       {observation.merged_at && (
         <p>
-          合入于{observation.merged_at} · {observation.merged_by?.login || "未记录操作者"}
+          合入于 {observation.merged_at} · {observation.merged_by?.login || "未记录操作者"}
         </p>
       )}
       {observation.closed_at && (
         <p>
-          关闭于{observation.closed_at} · {observation.closed_by?.login || "未记录操作者"}
+          关闭于 {observation.closed_at} · {observation.closed_by?.login || "未记录操作者"}
         </p>
       )}
       {observation.error_kind && (
@@ -214,7 +226,10 @@ function DeliveryRow({ issue, item }: { issue: IssueView; item: IssueDeliveryVie
               ? "交付事实已更新，可查看最新观察；原刷新请求的结果仍未确认。"
               : "刷新请求尚未确认，等待账本事件或连接恢复；不会自动重发。"}
           </p>
-          <small>原请求：{record.envelope.request_id}</small>
+          <details>
+            <summary>详细信息</summary>
+            <CopyIdentifier value={record.envelope.request_id} />
+          </details>
           <button
             disabled={busy}
             onClick={() => void reconcile(record.scope, record.envelope, false)}

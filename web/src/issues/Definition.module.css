@@ -6,12 +6,12 @@
   display: flex;
   flex-direction: column;
 }
-.root > h1 {
-  margin: 24px 28px 8px;
-  font-size: 23px;
+.root > h2 {
+  margin: var(--space-6) 28px var(--space-2);
+  font-size: var(--text-title-lg);
 }
 .root > p {
-  margin: 0 28px 20px;
+  margin: 0 28px var(--space-5);
 }
 .columns {
   min-height: 0;
@@ -30,7 +30,7 @@
   grid-template-columns: 130px minmax(0, 1fr);
   align-items: start;
   gap: 18px;
-  margin: 24px 0;
+  margin: var(--space-6) 0;
 }
 .fields > label > input,
 .fields > label > textarea,
@@ -39,8 +39,8 @@
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 10px 12px;
+  border-radius: var(--radius-s);
+  padding: 10px var(--space-3);
   background: var(--input);
   color: var(--label);
   font: inherit;
@@ -53,25 +53,25 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .criterion button {
   min-width: 32px;
   min-height: 40px;
 }
 .add {
-  padding: 8px 0;
+  padding: var(--space-2) 0;
   text-align: left;
 }
 .changes {
   border-left: 1px solid var(--border);
   background: var(--bg-l1);
   padding: 28px 22px;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .changes h2 {
-  font-size: 17px;
-  margin: 0 0 24px;
+  font-size: var(--text-title-sm);
+  margin: 0 0 var(--space-6);
 }
 .changes ul {
   padding-left: 18px;
@@ -79,7 +79,7 @@
 }
 .changes > p {
   border-top: 1px solid var(--border-soft);
-  padding-top: 16px;
+  padding-top: var(--space-4);
 }
 .footer {
   flex: none;
@@ -87,14 +87,14 @@
   bottom: 0;
   background: var(--bg);
   border-top: 1px solid var(--border);
-  padding: 12px 24px;
+  padding: var(--space-3) var(--space-6);
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: var(--space-6);
 }
 .footer > p {
   flex: 1;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--label-3);
 }
 .footer > div {
@@ -102,67 +102,107 @@
   flex: none;
 }
 .source {
-  padding: 12px;
+  padding: var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 7px;
-  font-size: var(--text-s);
+  border-radius: var(--radius-s);
+  font-size: var(--text-caption);
 }
 @media (max-width: 760px) {
   .columns {
     display: block;
   }
   .fields {
-    padding: 0 16px 16px;
+    padding: 0 var(--space-4) var(--space-4);
   }
   .fields > label,
   .field {
     grid-template-columns: 1fr;
-    gap: 8px;
+    gap: var(--space-2);
     margin: 18px 0;
   }
-  .root > h1 {
-    margin: 20px 16px 8px;
+  .root > h2 {
+    margin: var(--space-5) var(--space-4) var(--space-2);
   }
   .root > p {
-    margin: 0 16px 14px;
+    margin: 0 var(--space-4) 14px;
   }
   .changes {
     border-left: 0;
     border-top: 1px solid var(--border);
-    padding: 18px 16px;
+    padding: 18px var(--space-4);
   }
   .changes h2 {
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
   }
   .footer {
     display: block;
-    padding: 10px 16px;
+    padding: 10px var(--space-4);
   }
   .footer > p {
     margin: 0 0 10px;
   }
   .footer > div {
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
   }
 }
 
 .conflict {
   flex: none;
   border-block: 1px solid var(--border);
-  padding: 10px 24px;
-  font-size: var(--text-s);
+  padding: 10px var(--space-6);
+  font-size: var(--text-caption);
   background: var(--bg-l1);
 }
 .conflict p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 .changes li {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 .changes li p {
-  margin: 4px 0;
+  margin: var(--space-1) 0;
   line-height: 1.6;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+@container (max-width: 760px) {
+  .columns {
+    display: block;
+  }
+  .fields {
+    padding: 0 var(--space-4) var(--space-4);
+  }
+  .fields > label,
+  .field {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+    margin: 18px 0;
+  }
+  .root > h2 {
+    margin: var(--space-5) var(--space-4) var(--space-2);
+  }
+  .root > p {
+    margin: 0 var(--space-4) 14px;
+  }
+  .changes {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 18px var(--space-4);
+  }
+  .changes h2 {
+    margin-bottom: var(--space-3);
+  }
+  .footer {
+    display: block;
+    padding: 10px var(--space-4);
+  }
+  .footer > p {
+    margin: 0 0 10px;
+  }
+  .footer > div {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
 }

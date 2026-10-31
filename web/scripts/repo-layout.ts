@@ -1,3 +1,5 @@
+import { editIssueFilters, navigate } from "./navigation.ts";
+import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 import { issuePage, issueView } from "./issue-fixture.ts";
@@ -86,6 +88,9 @@ let fail = false;
 let pause = false;
 let reads = 0;
 let partial = false;
+let holdIssueBoard = false;
+let issueReadArrived: (() => void) | undefined;
+const heldIssues: (() => void)[] = [];
 const partialBodies: ServerResponse[] = [];
 const held: ServerResponse[] = [];
 const streams = new Set<ServerResponse>();
@@ -95,6 +100,7 @@ function json(res: ServerResponse, body: unknown, status = 200) {
 }
 const server = await createServer({
   configFile: false,
+  cacheDir: fixtureRoot("cache"),
   server: {
     host: "127.0.0.1",
     port: 0,
@@ -145,13 +151,21 @@ const server = await createServer({
           }
           if (path.endsWith("/activity") || path.endsWith("/results"))
             return json(res, { items: [], more: false, event_seq: 0 });
-          if (path === "/api/v1/issues")
-            return json(
-              res,
-              issuePage(url.searchParams.get("project") || "sample-project", [
-                task("completed", "Completed sample 1", "sample-project"),
-              ]),
-            );
+          if (path === "/api/v1/issues") {
+            const send = () =>
+              json(
+                res,
+                issuePage(url.searchParams.get("project") || "sample-project", [
+                  task("completed", "Completed sample 1", "sample-project"),
+                ]),
+              );
+            if (holdIssueBoard) {
+              heldIssues.push(send);
+              issueReadArrived?.();
+              return;
+            }
+            return send();
+          }
           if (path === "/api/v1/issues/wi_01M5M3ME31875GDA8F7P5XTD74")
             return json(res, issueView());
           if (path.startsWith("/api/v1/tasks/")) {
@@ -260,7 +274,7 @@ async function usable(locator: Locator, page: Page) {
 }
 async function closed(page: Page, entry: Locator) {
   await page
-    .getByRole("dialog", { name: /^(已注册仓库|资源与记录)$/, exact: true })
+    .getByRole("region", { name: "已注册仓库", exact: true })
     .waitFor({ state: "detached" });
   assert(
     await entry.evaluate((element) => globalThis.document.activeElement === element),
@@ -295,32 +309,71 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "Issue", exact: true })
+        .getByRole("link", { name: "Issues", exact: true })
         .click();
+    else await page.getByRole("link", { name: "Issues", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "资源与记录", exact: true }).count(), 0);
+    const resourcesEntry = page.getByRole("button", { name: "新建 Issue", exact: true });
+    await resourcesEntry.focus();
+    await navigate(page, "/hosts");
+    const hostsPage = page.getByRole("region", { name: "执行主机", exact: true });
+    const hostEntry = hostsPage.getByRole("button", { name: "主机详情：host-a", exact: true });
+    await hostEntry.click();
+    const hostDetails = page.getByRole("dialog", { name: "主机详情", exact: true });
+    await hostDetails.getByRole("heading", { name: "host-a", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await hostDetails.waitFor({ state: "detached" });
+    assert(await hostsPage.isVisible(), "host Escape must preserve the hosts page");
+    assert(
+      await hostEntry.evaluate((element) => document.activeElement === element),
+      "host Escape must return focus to the invoking host button",
+    );
+    if (output) await page.screenshot({ path: join(output, `host-escape-${viewport.width}.png`) });
+    // The heading mounts before board counts add a header child. Hold that read
+    // to exercise the router's asynchronous opener restoration, not just its heading.
+    holdIssueBoard = true;
+    const boardArrived = new Promise<void>((resolve) => {
+      issueReadArrived = resolve;
+    });
+    await page.goBack();
+    await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
+    await boardArrived;
+    assert.equal(
+      await resourcesEntry.evaluate((element) => document.activeElement === element),
+      false,
+    );
+    holdIssueBoard = false;
+    issueReadArrived = undefined;
+    for (const send of heldIssues.splice(0)) send();
+    await page.waitForFunction(() => document.activeElement?.textContent === "新建 Issue");
+    assert(
+      await resourcesEntry.evaluate((element) => document.activeElement === element),
+      "resource back must return focus to its entry",
+    );
     if (mobile) {
-      await page.getByLabel("按项目筛选Issue").fill("selected-project");
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await editIssueFilters(page, () =>
+        page.getByLabel("按项目筛选 Issue").fill("selected-project"),
+      );
+      await navigate(page, "/tasks");
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })
         .click();
     }
-    const entry = page
-      .locator(mobile ? "main" : "aside")
-      .locator('button[aria-haspopup="dialog"]')
-      .filter({ hasText: "已注册仓库", visible: true });
+    const entry = mobile
+      ? page.locator("main").getByRole("button", { name: /^已注册仓库/ })
+      : page.locator("aside").getByRole("link", { name: "仓库", exact: true });
     await usable(entry, page);
     const before = reads;
-    const panel = page.getByRole("dialog", {
+    const panel = page.getByRole("region", {
       name: "已注册仓库",
       exact: true,
     });
     const openRegistry = async () => {
       await entry.click();
     };
-    const closeRegistry = panel.getByRole("button", {
-      name: "关闭已注册仓库",
-    });
+    const closeRegistry = { click: () => page.goBack() };
+    const registryRefresh = panel.getByRole("button", { name: "刷新仓库", exact: true });
     await openRegistry();
     await panel.getByText("已读取登记。", { exact: true }).waitFor();
     assert(reads > before, "reopening reads the independent API");
@@ -413,22 +466,26 @@ try {
     await panel.getByRole("button", { name: "刷新仓库" }).click();
     await panel.getByText("已读取登记。", { exact: true }).waitFor();
     await ordered(panel, registrationOrder);
-    await usable(closeRegistry, page);
-    await closeRegistry.focus();
+    await usable(registryRefresh, page);
+    await panel.getByRole("heading", { name: "已注册仓库", exact: true, level: 1 }).focus();
     await page.keyboard.press("Tab");
     assert(
       await panel.evaluate((element) => element.contains(globalThis.document.activeElement)),
-      "modal traps focus",
+      "page controls remain keyboard reachable",
     );
     await closeRegistry.click();
     await closed(page, entry);
     await openRegistry();
     await panel.waitFor();
     await page.keyboard.press("Escape");
+    assert(await panel.isVisible(), "Escape does not leave a page");
+    await closeRegistry.click();
     await closed(page, entry);
     await openRegistry();
     await panel.waitFor();
     await page.mouse.click(1, 1);
+    assert(await panel.isVisible(), "page content stays mounted after outside clicks");
+    await closeRegistry.click();
     await closed(page, entry);
 
     if (mobile) {
@@ -450,17 +507,17 @@ try {
       await page.getByRole("dialog", { name: "主机详情", exact: true }).waitFor();
       await page.getByRole("button", { name: "关闭主机详情" }).click();
       await resources.locator(":scope > summary").click();
-      await page.getByRole("button", { name: "返回Issue", exact: true }).click();
+      await page.goBack();
       await usable(
         page
-          .getByRole("region", { name: "Issue白板" })
+          .getByRole("region", { name: "Issue 白板" })
           .getByRole("button", { name: "Sample ongoing Issue", exact: true }),
         page,
       );
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
     } else {
-      await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await page.getByRole("link", { name: "Issues", exact: true }).click();
+      await navigate(page, "/tasks");
     }
     // Historical tasks that predate work items must remain reachable and paginated.
     await page.getByRole("heading", { name: "任务执行", exact: true }).waitFor();
@@ -495,15 +552,15 @@ try {
         path: join(output, `tasks-current-${viewport.width}x${viewport.height}.png`),
       });
     await executions
-      .getByRole("button", { name: "所属Issue：Mobile work item ›", exact: true })
+      .getByRole("button", { name: "所属 Issue：Mobile work item ›", exact: true })
       .first()
       .click();
-    const parentDetail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const parentDetail = page.getByRole("region", { name: "Issue 详情", exact: true });
     await parentDetail
       .getByRole("heading", { name: "Sample ongoing Issue", exact: true })
       .waitFor();
     await closeIssue(page);
-    const ended = executions.getByRole("tab", { name: "已结束", exact: true });
+    const ended = executions.getByRole("tab", { name: /^已结束(?: · \d+\+?)?$/ });
     await ended.focus();
     await page.keyboard.press("Enter");
     await executions.getByRole("button", { name: "查看结果与验收 ›", exact: true }).waitFor();
@@ -519,18 +576,18 @@ try {
         name: new RegExp(`Unlinked historical ${lifecycle} page 2`),
       });
       await oldTask.click();
-      const details = page.getByRole("dialog", { name: "任务详情", exact: true });
+      const details = page.getByRole("region", { name: "任务详情", exact: true });
       await details.getByText(`Unlinked historical ${lifecycle} page 2`, { exact: true }).waitFor();
-      await details.getByRole("button", { name: "关闭详情", exact: true }).click();
+      await details.getByRole("button", { name: /← 返回/ }).click();
     }
-    await executions.getByRole("tab", { name: "全部", exact: true }).click();
+    await executions.getByRole("tab", { name: /^全部(?: · \d+\+?)?$/ }).click();
     await executions.getByText("正在启动", { exact: true }).waitFor();
     assert.equal(await executions.locator("article").count(), 8);
-    await executions.getByRole("tab", { name: "全部", exact: true }).focus();
+    await executions.getByRole("tab", { name: /^全部(?: · \d+\+?)?$/ }).focus();
     await page.keyboard.press("Home");
     assert.equal(
       await executions
-        .getByRole("tab", { name: "当前", exact: true })
+        .getByRole("tab", { name: /^当前(?: · \d+\+?)?$/ })
         .getAttribute("aria-selected"),
       "true",
     );
@@ -538,10 +595,10 @@ try {
       await executions.evaluate((el) => el.scrollWidth <= el.clientWidth),
       "task list does not overflow horizontally",
     );
-    await page.getByRole("button", { name: "返回Issue", exact: true }).click();
-    await page.getByRole("region", { name: "Issue白板", exact: true }).waitFor();
+    await page.goBack();
+    await page.getByRole("region", { name: "Issue 白板", exact: true }).waitFor();
     if (mobile) {
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })
@@ -617,9 +674,9 @@ try {
       await page.reload();
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "Issue", exact: true })
+        .getByRole("link", { name: "Issues", exact: true })
         .click();
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })
@@ -628,6 +685,31 @@ try {
       await panel.getByText("全部 30 个 · 含已归档仓库", { exact: true }).waitFor();
       await ordered(panel, registrationOrder);
     }
+    const currentOnly = "**/api/v1/tasks?*";
+    await page.route(currentOnly, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("lifecycle")?.startsWith("draft"))
+        await route.fulfill({ json: { tasks: [] } });
+      else await route.continue();
+    });
+    await navigate(page, "/");
+    await navigate(page, "/tasks");
+    await executions.getByRole("tab", { name: /^已结束(?: · \d+\+?)?$/ }).waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector('[role="tab"][aria-selected="true"]')
+        ?.textContent?.startsWith("已结束"),
+    );
+    await executions
+      .getByRole("button", { name: "查看结果与验收 ›", exact: true })
+      .first()
+      .waitFor();
+    assert.equal(
+      await executions.getByRole("tab", { name: /^当前 · 0$/ }).count(),
+      1,
+      "known empty current count",
+    );
+    await page.unroute(currentOnly);
     assert.deepEqual(errors, [], "no browser runtime errors");
     console.log(
       `PASS ${viewport.width}x${viewport.height}: archive labels, stable mixed/archived/active/empty order, refresh, registry, scrolling, focus, resources, navigation`,

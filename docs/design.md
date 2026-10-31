@@ -133,6 +133,9 @@
 | D128 | Issue manager 改为真实的 issue_manager task，由 main/owner 按 category 发布，runner 首次领取时原子更新具体负责人。每轮共用 claim/租约/槽位/journal，等待释放槽位；责任按 Issue 收尾/交接结束，不独立验收管理任务。Codex/Traex app-server 承载，main/consultation 保留 host。协议 2/1、配置格式 2、保留账本受控迁移，unknown 先对账。修订 D122 的本机 manager 执行位置及 D123 的 manager 库存/领取方式。详见 docs/plans/runner-issue-managers.md。 | 实施中，未发布 |
 | D129 | Issue 完整详情页统一负责人对话、当前进展、子项与交付，原执行及验收会话保持独立；摘要按 Issue revision 留存，活动／结果只读投影沿原账本。见 docs/plans/issue-detail-conversation.md。 | 已实现 |
 | D130 | App 业务测试每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移及历史库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md。 | 已实现 |
+| D131 | Web 界面改版（修订 D70 的单对话加覆盖层布局与 D121 UI r5 的侧栏摘要）：路由驱动的页面与可分享路径，旧 query 链接改写；侧栏只做分组导航，手机四标签；角色化 token 与共享基础组件，由检查脚本约束；界面使用用户术语，不默认显示内部标识；路由级拆包与全页面巡检。不引入路由或 UI 依赖，History API 与原生 dialog/popover 已满足需求。业务合同、owner API 与 runner wire 不变。见 docs/plans/web-ui-overhaul.md。 | 已实现 |
+
+| D132 | 交互式 Web 沙盒：独立 tend-sandbox 复用服务端组装与真实 owner API、账本、调度、工具及 runner 协议，仅替换托管 Agent 会话与 runner 的执行／工作区边界。只接受带沙盒标记的数据目录，不进入发布包、不连接真实模型或生产数据。前端回归逐步迁移到沙盒。见 docs/plans/web-sandbox.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -400,3 +403,31 @@ D63/D66 named TraeX 选择沿既有 Orca Trae TUI 路径传递精确 model/effor
 ## D129：Issue 详情与负责人对话统一
 
 Issue 默认作为应用内完整详情页，保留全局导航与原 query 链接。主栏突出 owner 待处理、本项负责人维护的进展／下一步、直接子项、讨论和交付结果；任务执行、来源、跟进及历史按需查看。负责人会话为固定入口，worker 实施和独立验收会话仍独立；服务端返回实际逻辑会话身份，GET 不创建会话。摘要独立保存不可变 revision，CAS／assignment epoch／request 去重与事件原子提交；历史投影不混入当前事实。活动和交付索引只读取原账本，保留作者及 artifact／spec／验收身份，不推断责任完成。计划见 [Issue 详情统一](plans/issue-detail-conversation.md)。
+
+## Token 用量与资源入口（D70、D117）
+
+资源与记录共用整行导航：全部任务执行、已注册仓库、Token 用量；主机状态另行分隔。Issue 页直接提供资源 dialog，执行记录页保留资源入口，原生 dialog 负责返回、全屏和入口焦点。
+
+全局用量默认全部已采集历史，主摘要直接使用当前响应 totals；时间未知摘要在全部历史下是其中子集，在所选时段下是未计入时段的历史数据，始终受同一模型与 subject 筛选。未知时间不进入趋势，缺失总量不由输入输出合成，缓存不重复加总。摘要、统一筛选、时间分布、分类、明细与覆盖说明依次呈现；分类以已知总量和请求覆盖数为主，各组保留输入、输出及缓存的折叠详情；同筛选更新失败显示带截止时间的上次读数，新筛选失败不借用旧读数。模型名称只为选单累积，不混合数值快照。实施与验证见 `docs/plans/token-usage-integration.md`。
+
+## D131：Web 界面改版
+
+页面由路径决定：主对话、收件箱、Issue 看板与详情、任务执行与详情、资源、设置、归档各有路径，浏览器前进后退与刷新保持所在页面；旧 `?issue=`/`?task=` 链接改写为对应路径。只有短暂表单与确认使用 Sheet/Dialog，不再叠加页面级弹窗。主对话常驻挂载，换页不重建流与草稿。
+
+S2 使用每个 History entry 的本次页面会话身份判断返回：可确认前项属于本次应用会话时浏览器后退，否则替换为父级路径；刷新不采用旧页面会话的返回栈。历史项保存可见页面的滚动、展开状态与触发元素，换页聚焦标题，后退恢复仍可识别的触发元素。Issue 筛选写入 query，原页修改筛选不抢走输入焦点。沿 D129 保持负责人会话唯一展示面：Issue 负责人会话路径读取实际归属后替换到 Issue 详情，独立咨询使用 `/chat/{conversation}`。
+
+侧栏只放分组导航（对话、工作、资源、设置），待处理由收件箱计数与主对话待处理区承担；侧栏宽度在各页面一致。样式只使用 token 定义的字号、间距、圆角、层级与颜色，控件来自共享基础组件。界面文案遵循中英混排加空格与统一术语，内部标识、哈希与工具名默认收起。计划见 [Web UI 整体改版](plans/web-ui-overhaul.md)。
+
+S6 中非聊天路由使用 lazy 与 Suspense 骨架，第三方模块独立共享；构建生成的离线 shell 清单仍包含全部路由资源。手机主操作与标签采用触控尺寸，输入区和浮动跳转避让安全区，详情及短暂弹层隐藏标签栏。全路由深浅主题巡检与导航回归纳入 CI。系统决定的问题与原因说明使用中文；内建选项字符串同时是回答标识和 Effects 键，保留其字节，由 Web 完整映射为中文显示。
+
+S8 将进行中的主对话、Issue 负责人轮次与任务执行统一为单行阶段和用时，步骤在一个默认收起的披露中保留；手动展开不随新步骤增长而重置，结束后收起并显示摘要。阶段仅使用现有事件与工具映射；缺少原生开始／结束时间的历史窗口显示用时未知，不据页面加载时间推造执行时间。阶段播报与计时 tick 分离，减少动态效果偏好生效。自动跟随只响应末尾数据变化，用户披露保持控制点位置，分页继续恢复原锚点。
+
+## D132：交互式 Web 沙盒
+
+`tend-sandbox` 是开发与前端验收入口，不是服务端运行模式，也不进入发布包。`internal/serverkit` 集中组装真实 SQLite、app/domain、views、owner API、runnerapi、scheduler、dispatch、contextbuilder、tools、mainthread 与嵌入 Web。显式注入 listener／WhoIs、时钟／ID 与托管会话 opener；正式服务端保留原配置和真实边界。
+
+沙盒只替换托管 Agent 会话和 runner 的 Workers／Workspaces：脚本通过真实工具回调写账本，进程内 runner 经回环 HTTP 领取并执行任务。数据目录必须为空或具有内容匹配的沙盒标记；重置只能作用于已验证目录，不读取生产配置、凭据或 tailnet 状态，不启动真实模型、git 或 updater。demo 通过带 request_id 的 app 命令播种，持久请求身份使重复启动不重复创建对象。所有后台循环随 context 取消并等待退出。
+
+沙盒脚本默认分阶段停留：托管轮次约 8 秒，任务执行约 20 秒；显式快速节奏供自动化测试使用，所有延迟继续通过可取消的沙盒 helper。只影响脚本边界，不改变正式调度、协议或业务行为（S8）。
+
+Web 开发可使用同源嵌入页面或 `TEND_DEV_SERVER` 的 Vite 代理。既有 JSON fixture 回归保持不变，后续逐步以沙盒承载 UI 巡检与交互验收。实施与脚本规则见 [Web 交互沙盒](plans/web-sandbox.md)。

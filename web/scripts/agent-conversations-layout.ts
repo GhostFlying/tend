@@ -1,3 +1,4 @@
+import { navigate, fixtureRoot, editIssueFilters } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Synthetic conversations exercise UI routing; no native harness or deployed API.
@@ -7,10 +8,9 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import type { IssueConversationItem, Envelope } from "../src/api/generated/api.ts";
-const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const root = fixtureRoot();
 const output = process.env.TEND_LAYOUT_OUTPUT ?? join(tmpdir(), "tend-agent-layout");
 await mkdir(output, { recursive: true });
 const names = ["后台 Agent 与上下文管理", "消息关联标签与历史来源追溯", "跨会话输入与附件隔离验证"];
@@ -332,7 +332,7 @@ const server = createServer(async (req, res) => {
   if (p.startsWith("/api/"))
     return json(res, { error: { code: "not_found", message: "Not in fixture" } }, 404);
   try {
-    const file = resolve(root, `.${p}${p.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, p.split("/").at(-1)?.includes(".") ? `.${p}` : "index.html");
     assert(file.startsWith(root));
     res.setHeader(
       "Content-Type",
@@ -491,12 +491,52 @@ try {
     assert.deepEqual(consoleErrors, [], "composer interactions must not emit console errors");
     await page.getByText(owner.body!, { exact: true }).waitFor();
     await page.getByRole("textbox", { name: "消息", exact: true }).fill("主会话草稿保留");
+    const mainInput = page.getByRole("textbox", { name: "消息", exact: true });
+    await mainInput.evaluate((element) => {
+      element.setAttribute("data-retained-composer", "main");
+    });
+    const transcript = page.getByRole("region", { name: "对话记录", exact: true });
+    const mainTop = await transcript.evaluate((element) => element.scrollTop);
+    for (const [opener, dialogName] of [
+      ["来源", "补充来源"],
+      ["切换会话：主 Agent", "会话"],
+      ["查看处理记录", "持久处理记录"],
+      ["上下文用量 42%", "上下文用量"],
+    ]) {
+      await navigate(page, "/issues");
+      await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
+      await navigate(page, "/");
+      await mainInput.waitFor();
+      if (opener === "来源" || opener === "查看处理记录") {
+        await page.getByRole("button", { name: "更多", exact: true }).click();
+        await page
+          .getByRole("menuitem", { name: opener === "来源" ? "补充来源" : "执行记录", exact: true })
+          .click();
+      } else await page.getByRole("button", { name: opener!, exact: true }).click();
+      await page.getByRole("dialog", { name: dialogName!, exact: true }).waitFor();
+      await page.goBack();
+      await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
+      assert.equal(await page.locator("dialog[open]").count(), 0);
+      assert.equal(await page.getByRole("dialog").count(), 0);
+      const filter = page.getByLabel("按项目筛选 Issue");
+      await editIssueFilters(page, async () => {
+        await filter.click();
+        assert(await filter.evaluate((element) => element === document.activeElement));
+      });
+      if (width === 390) await page.getByRole("navigation", { name: "视图" }).waitFor();
+      await page.screenshot({ path: join(output, `overlay-back-${dialogName}-${width}.png`) });
+      await navigate(page, "/");
+      assert.equal(await mainInput.getAttribute("data-retained-composer"), "main");
+      assert.equal(await mainInput.inputValue(), "主会话草稿保留");
+      assert.equal(await transcript.evaluate((element) => element.scrollTop), mainTop);
+      assert.equal(await page.getByRole("dialog").count(), 0, "closed overlays do not reopen");
+    }
     await page
       .getByRole("textbox", { name: "消息", exact: true })
       .locator("..")
       .screenshot({ path: join(output, `composer-after-${width}.png`) });
     await page.screenshot({ path: join(output, `tags-${width}.png`), fullPage: true });
-    await page.getByRole("button", { name: "会话 ▾" }).click();
+    await page.getByRole("button", { name: /^切换会话：/ }).click();
     await page.getByRole("dialog", { name: "会话" }).waitFor();
     await page.screenshot({ path: join(output, `drawer-${width}.png`), fullPage: true });
     let releaseSelection!: () => void;
@@ -519,6 +559,8 @@ try {
       .filter({ hasText: names[0]! })
       .click();
     await selectionRequested;
+    await page.getByRole("heading", { name: "会话", exact: true, level: 1 }).waitFor();
+    assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
     const refreshedShell = page.waitForResponse((response) =>
       response.url().endsWith("/api/v1/snapshot"),
     );
@@ -536,11 +578,14 @@ try {
     releaseSelection();
 
     const backgroundInput = page
-      .getByRole("region", { name: "Issue详情", exact: true })
+      .getByRole("region", { name: "Issue 详情", exact: true })
       .getByRole("textbox", { name: "消息", exact: true });
     await backgroundInput.waitFor();
     await page.unroute(selectionRoute);
-    assert.equal(new URL(page.url()).searchParams.get("issue"), "work-0");
+    assert.equal(
+      decodeURIComponent(new URL(page.url()).pathname.slice("/issues/".length)),
+      "work-0",
+    );
     assert.equal(await page.getByRole("dialog", { name: "会话", exact: true }).count(), 0);
     assert.equal(await backgroundInput.inputValue(), "");
     await backgroundInput.fill("后台独立草稿");
@@ -562,8 +607,8 @@ try {
       await page.getByRole("textbox", { name: "消息", exact: true }).inputValue(),
       "主会话草稿保留",
     );
-    await page.getByRole("button", { name: "修改Issue关联", exact: true }).first().click();
-    const editor = page.getByRole("dialog", { name: "修改Issue关联", exact: true });
+    await page.getByRole("button", { name: "修改 Issue 关联", exact: true }).first().click();
+    const editor = page.getByRole("dialog", { name: "修改 Issue 关联", exact: true });
     await editor.getByRole("checkbox").first().waitFor();
     const openedRevision = associations.revision;
     associations.revision++;
@@ -590,7 +635,7 @@ try {
     await editor.waitFor({ state: "hidden" });
     assert(writes.some((e) => e.operation === "conversation.set_issue_associations"));
     // The server commits but both the response and initial receipt lookup are lost.
-    await page.getByRole("button", { name: "修改Issue关联", exact: true }).first().click();
+    await page.getByRole("button", { name: "修改 Issue 关联", exact: true }).first().click();
     await editor.getByRole("checkbox").first().check();
     dropAssociationReply = true;
     dropLookupReply = true;
@@ -599,7 +644,7 @@ try {
     const beforeRecovery = writes.length;
     await page.reload();
     dropLookupReply = false;
-    await page.getByRole("button", { name: "修改Issue关联", exact: true }).first().click();
+    await page.getByRole("button", { name: "修改 Issue 关联", exact: true }).first().click();
     await editor.getByRole("button", { name: "核对原请求" }).click();
     await editor.waitFor({ state: "hidden" });
     assert.equal(writes.length, beforeRecovery, "reload recovery must not create a second write");
@@ -618,12 +663,9 @@ try {
       await held;
       await r.fulfill({ json: conversations[1] });
     });
-    await page.evaluate(
-      (id) => window.dispatchEvent(new CustomEvent("tend:open-agent", { detail: id })),
-      conversations[1]!.conversation_id,
-    );
+    await navigate(page, `/chat/${encodeURIComponent(conversations[1]!.conversation_id)}`);
     await arrived;
-    await page.evaluate(() => window.dispatchEvent(new Event("tend:main-agent")));
+    await navigate(page, "/");
     const answered = page.waitForResponse((r) =>
       r.url().includes(encodeURIComponent(conversations[1]!.conversation_id)),
     );
@@ -632,7 +674,8 @@ try {
     await page.getByRole("heading", { name: "主 Agent", exact: true }).waitFor();
     await page.unroute(route);
 
-    await page.getByRole("button", { name: "查看处理记录" }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "执行记录", exact: true }).click();
     await page.getByRole("dialog", { name: "持久处理记录" }).waitFor();
     await page
       .getByRole("dialog", { name: "持久处理记录" })
@@ -669,7 +712,7 @@ try {
     reply.associations = { ...associations, disposition: "unassigned", items: [] };
     await page.reload();
     await page.getByText("关联处理中", { exact: true }).waitFor();
-    await page.getByText("无Issue", { exact: true }).waitFor();
+    await page.getByText("无 Issue", { exact: true }).waitFor();
     await page.getByRole("button", { name: "继续处理", exact: true }).waitFor();
     await page.screenshot({
       path: join(output, `classification-recovery-${width}.png`),

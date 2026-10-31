@@ -8,10 +8,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useServices } from "../app/services.tsx";
 import { noOutbox } from "../queue/sendQueue.ts";
 import { ArrowDown } from "../shell/icons.tsx";
-import { StatusDot } from "../shell/StatusDot.tsx";
+import { LiveStatus } from "../ui/LiveStatus.tsx";
+import { conversationStatus } from "../ui/activityStatus.ts";
 import { useStore } from "../state/store.ts";
 import { AgentTurn, Divider, OutgoingRow, OwnerMessage, SystemMessage } from "./Messages.tsx";
-import { buildEntries, duration, processing } from "./model.ts";
+import { buildEntries, processing } from "./model.ts";
 import styles from "./Transcript.module.css";
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "./scrollAnchor.ts";
 
@@ -24,8 +25,7 @@ const emptyNote =
   "这里是和主 Agent 的对话。发出的消息先存在这台设备上，tend 收到后才算发出；" +
   "断网或关掉页面也不会丢。";
 
-/** jump counts requests to jump to the latest, such as the header's button. */
-export function Transcript({ jump, visible }: { jump: number; visible: boolean }) {
+export function Transcript({ visible }: { visible: boolean }) {
   const { live, queue } = useServices();
   const scroller = useRef<HTMLDivElement>(null);
   const raw = useStore(live.conversation);
@@ -59,13 +59,13 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
             .find((e) => e.status === "processing")?.item
         : processing(conversation.items);
 
-  const lastJump = useRef(jump);
   const [atBottom, setAtBottom] = useState(true);
   const following = useRef(true);
+  const scrollportSize = useRef({ width: 0, height: 0 });
   const wasVisible = useRef(visible);
+  const contentKey = JSON.stringify(entries);
+  const previousContent = useRef("");
   const readingAnchor = useRef<ScrollAnchor | null>(null);
-  const preserveContentResize = useRef(false);
-  const preserveContentResizeTimer = useRef<number | undefined>(undefined);
   /** Where the reader was when the page before was asked for. */
   const anchor = useRef<ScrollAnchor | null>(null);
 
@@ -81,6 +81,15 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
   const onScroll = () => {
     const el = scroller.current;
     if (!visible || !el || el.clientHeight === 0) return;
+    if (
+      el.clientWidth !== scrollportSize.current.width ||
+      el.clientHeight !== scrollportSize.current.height
+    ) {
+      scrollportSize.current = { width: el.clientWidth, height: el.clientHeight };
+      if (following.current) el.scrollTop = el.scrollHeight;
+      readingAnchor.current = captureAnchor(el);
+      return;
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < nearBottomPx;
     if (near) anchor.current = null;
     else if (anchor.current) anchor.current = captureAnchor(el);
@@ -98,7 +107,8 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
       wasVisible.current = false;
       return;
     }
-    if (!wasVisible.current && !following.current && readingAnchor.current)
+    const entered = !wasVisible.current;
+    if (entered && !following.current && readingAnchor.current)
       restoreAnchor(el, readingAnchor.current);
     wasVisible.current = true;
     const a = anchor.current;
@@ -106,11 +116,18 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
       // Appended live output must not count as prepended page height.
       restoreAnchor(el, a);
       if (!conversation.loadingEarlier) anchor.current = null;
-    } else if (following.current) {
+    } else if (following.current && (previousContent.current !== contentKey || entered)) {
       el.scrollTop = el.scrollHeight;
+    } else if (
+      !following.current &&
+      previousContent.current !== contentKey &&
+      readingAnchor.current
+    ) {
+      restoreAnchor(el, readingAnchor.current);
     }
+    previousContent.current = contentKey;
     readingAnchor.current = captureAnchor(el);
-  });
+  }, [contentKey, visible, conversation.loadingEarlier]);
 
   useEffect(() => {
     // A first page too short to scroll cannot be scrolled up to load more.
@@ -129,41 +146,55 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
   useEffect(() => {
     const el = scroller.current;
     if (!visible || !el) return;
-    const update = (entries: ResizeObserverEntry[] = []) => {
+    const update = () => {
+      scrollportSize.current = { width: el.clientWidth, height: el.clientHeight };
       if (el.clientHeight === 0) {
         setAtBottom(true);
         return;
       }
-      const contentResized = entries.some((entry) => entry.target !== el);
-      // Focus can remain inside the transcript while the viewport changes.
-      // Only a captured control activation proves that existing content grew
-      // at the reader's request; focus alone must not stop following output.
-      const userExpandedContent = contentResized && preserveContentResize.current;
-      if (contentResized && preserveContentResize.current) {
-        preserveContentResize.current = false;
-        window.clearTimeout(preserveContentResizeTimer.current);
-        preserveContentResizeTimer.current = undefined;
-      }
-      if (following.current && !userExpandedContent) {
+      if (following.current) {
         el.scrollTop = el.scrollHeight;
         setAtBottom(true);
-      } else {
-        const near = el.scrollHeight - el.scrollTop - el.clientHeight < nearBottomPx;
-        if (near) anchor.current = null;
-        following.current = near;
-        setAtBottom(near);
       }
       readingAnchor.current = captureAnchor(el);
     };
+    let disclosureFrame = 0;
+    const disclosure = (event: MouseEvent) => {
+      if (
+        !(event.target instanceof Element) ||
+        !event.target.closest("summary, button[aria-expanded]")
+      )
+        return;
+      const viewportWidth = innerWidth;
+      const viewportHeight = innerHeight;
+      const width = el.clientWidth;
+      const height = el.clientHeight;
+      cancelAnimationFrame(disclosureFrame);
+      disclosureFrame = requestAnimationFrame(() => {
+        // A viewport resize is not a request to stop following new output.
+        if (
+          el.clientWidth !== width ||
+          el.clientHeight !== height ||
+          innerWidth !== viewportWidth ||
+          innerHeight !== viewportHeight
+        ) {
+          update();
+          return;
+        }
+        const near = el.scrollHeight - el.scrollTop - el.clientHeight < nearBottomPx;
+        following.current = near;
+        setAtBottom(near);
+        readingAnchor.current = captureAnchor(el);
+      });
+    };
+    el.addEventListener("click", disclosure, true);
     const observer = new ResizeObserver(update);
     observer.observe(el);
-    if (el.firstElementChild) observer.observe(el.firstElementChild);
     update();
     return () => {
       observer.disconnect();
-      window.clearTimeout(preserveContentResizeTimer.current);
-      preserveContentResize.current = false;
-      preserveContentResizeTimer.current = undefined;
+      cancelAnimationFrame(disclosureFrame);
+      el.removeEventListener("click", disclosure, true);
     };
   }, [visible]);
 
@@ -177,30 +208,12 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
     }
   }, []);
 
-  useEffect(() => {
-    const el = scroller.current;
-    if (visible && jump !== lastJump.current && el) {
-      lastJump.current = jump;
-      toLatest();
-    }
-  }, [jump, visible, toLatest]);
-
   return (
     <div className={styles.wrap}>
       <div
         className={styles.transcript}
         ref={scroller}
         onScroll={onScroll}
-        onClickCapture={() => {
-          // A control inside an existing message can grow that message. Keep
-          // the control in view instead of treating the resize as new output.
-          preserveContentResize.current = true;
-          window.clearTimeout(preserveContentResizeTimer.current);
-          preserveContentResizeTimer.current = window.setTimeout(() => {
-            preserveContentResize.current = false;
-            preserveContentResizeTimer.current = undefined;
-          }, 500);
-        }}
         role="region"
         aria-label="对话记录"
       >
@@ -225,7 +238,16 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
               case "outgoing":
                 return <OutgoingRow key={e.key} message={e.message} queue={queue} />;
               case "agent":
-                return <AgentTurn key={e.key} entry={e} />;
+                return (
+                  <AgentTurn
+                    key={e.key}
+                    entry={
+                      conversation.processingSince.has(e.replyTo)
+                        ? { ...e, startedAt: conversation.processingSince.get(e.replyTo)! }
+                        : e
+                    }
+                  />
+                );
               case "block-more":
                 return (
                   <button
@@ -241,13 +263,16 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
                 );
             }
           })}
-          {busy && (
-            <Working
-              since={
-                conversation.processingSince.get(busy.message_id) ?? Date.parse(busy.created_at)
-              }
-            />
-          )}
+          {busy &&
+            !entries.some(
+              (entry) => entry.kind === "agent" && entry.replyTo === busy.message_id,
+            ) && (
+              <Working
+                since={
+                  conversation.processingSince.get(busy.message_id) ?? Date.parse(busy.created_at)
+                }
+              />
+            )}
         </div>
       </div>
       {!atBottom && (
@@ -260,18 +285,6 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
   );
 }
 
-/** "正在处理" with the time since the turn started. */
 function Working({ since }: { since: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(t);
-  }, []);
-  return (
-    <div className={styles.working} role="status">
-      <StatusDot tone="run" />
-      <span className={styles.shimmer}>正在处理…</span>
-      <span className={styles.elapsed}>· {duration(now - since)}</span>
-    </div>
-  );
+  return <LiveStatus status={conversationStatus([], "processing", since)} />;
 }

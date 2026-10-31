@@ -44,11 +44,11 @@ export const blockLabels: Record<BlockReason, string> = {
 };
 
 export const ratingLabels: Record<Rating, string> = {
-  "": "未评级",
-  p0: "p0 紧急",
-  p1: "p1",
-  p2: "p2",
-  p3: "p3",
+  "": "",
+  p0: "优先级 P0（紧急）",
+  p1: "优先级 P1",
+  p2: "优先级 P2",
+  p3: "优先级 P3",
 };
 
 type State = Pick<TaskSummary, "lifecycle" | "control_mode" | "block_reason" | "execution">;

@@ -1,165 +1,142 @@
+.railConnection {
+  display: none;
+}
 .root {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
 }
-
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px 16px 10px;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
 }
-
 .brand b {
-  font-size: 16px;
-  letter-spacing: 0.2px;
+  font-size: var(--text-title-sm);
 }
-
 .logo {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-m);
   background: var(--label);
   color: var(--bg);
   display: grid;
   place-items: center;
   font-weight: 700;
-  font-size: var(--text-base);
 }
-
 .conn {
   margin-left: auto;
+  font-size: var(--text-caption);
 }
-
-.mobileTitle {
-  display: none;
-}
-
 .scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 4px 10px 12px;
+  padding: 0 var(--space-3);
 }
-
-.sectionTitle {
+.group {
+  margin-bottom: var(--space-5);
+}
+.group h2 {
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--label-3);
+  padding: 0 var(--space-3);
+  margin: 0 0 var(--space-2);
+}
+.item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: var(--text-s);
-  color: var(--label-3);
-  padding: 14px 8px 6px;
-}
-
-.foot {
-  flex: none;
-  border-top: 1px solid var(--border-soft);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.hosts {
-  font-size: var(--text-s);
-  color: var(--caption);
-}
-
-.footActions {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-@media (max-width: 760px) {
-  .brand {
-    display: none;
-  }
-
-  .mobileTitle {
-    display: flex;
-    align-items: center;
-    height: var(--head-height);
-    margin: 0;
-    padding: 0 16px;
-    padding-top: env(safe-area-inset-top);
-    font-size: var(--text-xl);
-    font-weight: 600;
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  .root[data-view="decisions"] .tasks,
-  .root[data-view="tasks"] .decisions {
-    display: none;
-  }
-}
-
-.themeButton {
-  min-height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
+  gap: var(--space-3);
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-m);
-  font-size: var(--text-s);
   color: var(--label-2);
+  text-decoration: none;
+  font-size: var(--text-label);
+  position: relative;
 }
-@media (max-width: 760px) {
-  .themeButton {
-    min-height: 44px;
-  }
+.item > svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
 }
-
-.mobileNotice {
-  display: none;
-}
-@media (max-width: 760px) {
-  .mobileNotice {
-    display: block;
-    padding: 0 12px;
-  }
-}
-
-.allTasks {
-  width: 100%;
-  margin: 10px 0 4px;
-  text-align: left;
-}
-
-.recordsLink {
-  display: block;
-  min-height: 44px;
-  padding: 8px;
-  color: var(--label-2);
-  font-size: var(--text-s);
-  text-align: left;
-}
-
-.recordsLink:hover {
-  text-decoration: underline;
-}
-
-.recent {
-  margin-top: 12px;
-  padding-top: 4px;
-  border-top: 1px solid var(--border-soft);
-}
-
-.primaryNav {
-  display: grid;
-  gap: 4px;
-  padding: 8px 12px;
-}
-.primaryNav button {
-  text-align: left;
-  padding: 9px 10px;
-  border-radius: 6px;
-}
-.primaryNav button:hover {
+.item:hover {
   background: var(--hover);
 }
-@media (max-width: 760px) {
-  .primaryNav {
+.item[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--label);
+  font-weight: 600;
+}
+.label {
+  flex: 1;
+}
+.badge {
+  min-width: 20px;
+  padding: 0 var(--space-1);
+  text-align: center;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-micro);
+  background: var(--warn-soft);
+  color: var(--label);
+}
+.hostStatus {
+  display: flex;
+}
+.foot {
+  border-top: 1px solid var(--border-soft);
+  padding: var(--space-3);
+}
+@media (min-width: 761px) and (max-width: 1023px) {
+  .brand {
+    flex-direction: column;
+    padding: var(--space-4) 0;
+  }
+  .brand b {
     display: none;
+  }
+  .conn {
+    margin: 0;
+  }
+  .fullConnection {
+    display: none;
+  }
+  .railConnection {
+    display: inline-flex;
+  }
+  .scroll {
+    padding: 0 var(--space-2);
+  }
+  .group {
+    margin-bottom: var(--space-4);
+  }
+  .group h2,
+  .label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .item {
+    justify-content: center;
+    padding: var(--space-2);
+  }
+  .badge {
+    position: absolute;
+    right: 0;
+    top: 0;
+    min-width: 16px;
+  }
+  .hostStatus {
+    position: absolute;
+    right: 3px;
+    bottom: 5px;
+  }
+  .foot {
+    padding: var(--space-3) var(--space-2);
   }
 }

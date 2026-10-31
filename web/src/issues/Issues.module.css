@@ -9,33 +9,33 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  padding: 22px 24px;
+  gap: var(--space-3);
+  padding: 22px var(--space-6);
   border-bottom: 1px solid var(--border-soft);
 }
 .header h1,
 .header h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--text-title-lg);
 }
 .spacer {
   flex: 1;
 }
 .body {
-  padding: 22px 24px;
+  padding: 22px var(--space-6);
 }
 .body h3 {
-  margin: 24px 0 12px;
-  font-size: 17px;
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--text-title-sm);
 }
 .muted {
   color: var(--label-3);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .button {
   border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 8px 14px;
+  border-radius: var(--radius-s);
+  padding: var(--space-2) 14px;
   min-height: 40px;
 }
 .primary {
@@ -45,7 +45,7 @@
 }
 .tree {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   overflow: hidden;
 }
 .treeHead,
@@ -54,13 +54,13 @@
   grid-template-columns: minmax(0, 1fr) 130px 100px;
   align-items: center;
   min-height: 45px;
-  gap: 12px;
-  padding: 8px 16px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
 }
 .treeHead {
   background: var(--bg-l1);
   color: var(--label-3);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .treeRow {
   border-top: 1px solid var(--border-soft);
@@ -68,7 +68,7 @@
 .treeTitle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
 }
 .treeName {
@@ -89,8 +89,8 @@
   flex: none;
 }
 .goal {
-  padding: 12px 16px;
-  border-radius: 8px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-m);
   background: var(--bg-l2);
   white-space: pre-wrap;
 }
@@ -98,9 +98,9 @@
   border: 1px solid var(--warn-line);
   background: var(--warn-soft);
   color: var(--warn-text);
-  padding: 12px;
-  border-radius: 8px;
-  margin: 16px 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-m);
+  margin: var(--space-4) 0;
 }
 .tasks {
   display: grid;
@@ -110,34 +110,26 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: var(--radius-m);
+  padding: var(--space-4);
   text-align: left;
 }
 .task span {
   margin-left: auto;
 }
-.overview {
-  display: grid;
-  gap: 6px;
-}
-.overview button {
-  padding: 8px;
-  text-align: left;
-}
 @media (max-width: 760px) {
   .header,
   .body {
-    padding: 16px;
+    padding: var(--space-4);
   }
   .treeHead,
   .treeRow {
     grid-template-columns: minmax(0, 1fr) 60px 66px;
-    padding: 8px;
+    padding: var(--space-2);
     gap: 6px;
-    font-size: var(--text-s);
+    font-size: var(--text-caption);
   }
   .treeTitle {
     gap: 2px;
@@ -147,16 +139,11 @@
   }
 }
 
-.overview strong,
-.overview small {
-  display: block;
-}
-
 .taskPeek {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 16px;
-  margin: 12px 0;
+  border-radius: var(--radius-m);
+  padding: 14px var(--space-4);
+  margin: var(--space-3) 0;
 }
 .taskPeek summary {
   cursor: pointer;
@@ -164,16 +151,16 @@
 .phase {
   display: grid;
   grid-template-columns: 100px minmax(0, 1fr) 120px auto;
-  gap: 12px;
-  padding: 12px 0;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
   border-top: 1px solid var(--border-soft);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   overflow-wrap: anywhere;
 }
 @media (max-width: 760px) {
   .phase {
     grid-template-columns: 80px minmax(0, 1fr);
-    gap: 8px;
+    gap: var(--space-2);
   }
   .phase button {
     text-align: left;
@@ -183,10 +170,16 @@
 .check {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: var(--text-s);
+  gap: var(--space-2);
+  font-size: var(--text-caption);
 }
 
 .check input {
   accent-color: var(--label);
+}
+
+@media (max-width: 760px) {
+  .primary {
+    min-height: var(--control-touch);
+  }
 }

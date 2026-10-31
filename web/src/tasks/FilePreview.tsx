@@ -1,3 +1,4 @@
+import { useOverlayState } from "../ui/focus.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DownloadURLResponse } from "../api/generated/api.ts";
@@ -6,7 +7,7 @@ import { useServices } from "../app/services.tsx";
 import { ImageTile } from "../conversation/Images.tsx";
 import { FileDownload } from "./FileDownload.tsx";
 import { isImage, type PreviewFile } from "./files.ts";
-import controls from "../shell/controls.module.css";
+import { Button } from "../ui/Button.tsx";
 import styles from "./FilePreview.module.css";
 
 type Scope = "files" | "conversation/attachments";
@@ -25,7 +26,7 @@ export function FilePreview({
   const [source, setSource] = useState("");
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [html, setHtml] = useState(false);
+  const [html, setHtml] = useOverlayState(false);
   const image = isImage(file);
   const path = `/api/v1/${scope}/${encodeURIComponent(file.file_id)}/download-url?inline=1`;
   useEffect(() => {
@@ -68,8 +69,8 @@ export function FilePreview({
         ) : (
           <span className={styles.placeholder}>
             {failed ? (
-              <button
-                className={controls.link}
+              <Button
+                variant="link"
                 onClick={() => {
                   setFailed(false);
                   setSource("");
@@ -77,7 +78,7 @@ export function FilePreview({
                 }}
               >
                 图片读取失败，重试
-              </button>
+              </Button>
             ) : (
               "正在读取图片…"
             )}
@@ -87,9 +88,9 @@ export function FilePreview({
       {!compact && <span className={styles.caption}>{file.size.toLocaleString()} 字节</span>}
       <span className={styles.actions}>
         {scope === "files" && /\.html?$/i.test(file.name) && (
-          <button className={controls.link} onClick={() => setHtml(true)}>
+          <Button variant="link" onClick={() => setHtml(true)}>
             预览设计稿
-          </button>
+          </Button>
         )}
         <FileDownload fileId={file.file_id} name={file.name} scope={scope} />
       </span>
@@ -139,8 +140,8 @@ function HTMLPreview({ name, path, onClose }: { name: string; path: string; onCl
     >
       <header>
         <span>{name}</span>
-        <button
-          className={controls.link}
+        <Button
+          variant="link"
           onClick={() => {
             setSource("");
             setError(false);
@@ -148,10 +149,10 @@ function HTMLPreview({ name, path, onClose }: { name: string; path: string; onCl
           }}
         >
           重新加载
-        </button>
-        <button className={controls.chipBtn} onClick={onClose}>
+        </Button>
+        <Button variant="secondary" size="s" onClick={onClose}>
           关闭预览
-        </button>
+        </Button>
       </header>
       <p className={styles.caption}>静态预览 · 脚本和外部资源已停用，完整原件可下载。</p>
       {error ? (
@@ -212,15 +213,15 @@ export function FileReference({ id }: { id: string }) {
     <p>
       <code>{id}</code> ·{" "}
       {error ? (
-        <button
-          className={controls.link}
+        <Button
+          variant="link"
           onClick={() => {
             setError(false);
             setAttempt((n) => n + 1);
           }}
         >
           文件读取失败，重试
-        </button>
+        </Button>
       ) : (
         "正在读取原件…"
       )}

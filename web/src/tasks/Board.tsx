@@ -1,6 +1,8 @@
-import { UsageEntry } from "../usage/Usage.tsx";
-import { RepositoryEntry } from "../repos/Repositories.tsx";
-import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
+import { Input, Tabs } from "../ui/index.ts";
+import { navigate, useEntryState } from "../app/router.ts";
+import { PageHeader } from "../shell/PageHeader.tsx";
+import { ResourceNavigation } from "../shell/Resources.tsx";
+import { UpgradeBanner } from "../upgrades/Banner.tsx";
 import { useEffect, useId, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type { TaskSummary } from "../api/generated/api.ts";
@@ -8,11 +10,11 @@ import { TaskExecution } from "./Execution.tsx";
 import { executionLook } from "./execution.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
-import controls from "../shell/controls.module.css";
+import { Button } from "../ui/Button.tsx";
+import { Badge, EmptyState } from "../ui/Surfaces.tsx";
 import list from "../shell/list.module.css";
 import { Hosts } from "../hosts/Hosts.tsx";
 import { hostMaintaining } from "../hosts/status.ts";
-import { Back } from "../shell/icons.tsx";
 import { taskTabs, type TaskFeed } from "./lists.ts";
 import { controlLabels, ratingLabels, taskLook, isFinished } from "./status.ts";
 import styles from "./Board.module.css";
@@ -45,12 +47,12 @@ export function RecentTasks({
         {detailed && <span>最近 {Math.min(limit, state.items.length)} 条</span>}
       </div>
       {state.error && (
-        <p className={controls.empty}>
+        <EmptyState>
           读取失败{" "}
-          <button className={controls.link} onClick={() => void feed.refresh()}>
+          <Button variant="link" onClick={() => void feed.refresh()}>
             重试最近完成
-          </button>
-        </p>
+          </Button>
+        </EmptyState>
       )}
       {state.items.slice(0, limit).map((task) => (
         <button
@@ -97,7 +99,7 @@ export function RecentTasks({
         </button>
       ))}
       {!state.items.length && !state.error && (
-        <p className={controls.empty}>{state.loading ? "正在读取…" : "暂无已完成任务。"}</p>
+        <EmptyState>{state.loading ? "正在读取…" : "暂无已完成任务。"}</EmptyState>
       )}
     </section>
   );
@@ -125,6 +127,7 @@ export function BoardResources({
     <details className={styles.mobileRecent}>
       <summary>资源与记录</summary>
       <div className={styles.resourceContent}>
+        <ResourceNavigation onRepos={onRepos} records onRecords={() => {}} />
         <details>
           <summary>
             执行主机
@@ -136,8 +139,6 @@ export function BoardResources({
             <Hosts connection={connection} />
           </div>
         </details>
-        <RepositoryEntry onOpen={onRepos} />
-        <UsageEntry />
         <details>
           <summary>最近完成的任务</summary>
           <div className={styles.mobileList}>
@@ -149,39 +150,40 @@ export function BoardResources({
   );
 }
 
-export function TaskBoard({
-  active,
-  connection,
-  onChat,
-  onRepos,
-  backLabel = "返回聊天",
-}: {
-  active: boolean;
-  connection: Connection;
-  onChat(): void;
-  backLabel?: string;
-  onRepos(): void;
-}) {
+export function TaskBoard({ active, connection }: { active: boolean; connection: Connection }) {
   const { live } = useServices();
   const snapshot = useStore(live.snapshot);
   const project = useStore(live.tasks.project);
   const id = useId();
-  const [tab, setTab] = useState(0);
+  const [chosenTab, setTab] = useEntryState("task-tab", -1);
+  const tab = chosenTab < 0 ? 0 : chosenTab;
+  const current = useStore(live.tasks.feeds[0]!.state);
+  const ended = useStore(live.tasks.feeds[1]!.state);
+  const all = useStore(live.tasks.feeds[2]!.state);
+  const counts = [current, ended, all].map((feed) =>
+    feed.pages ? `${feed.items.length}${feed.next ? "+" : ""}` : undefined,
+  );
   useEffect(() => {
     if (active) live.tasks.open(tab);
     else live.tasks.close();
+    return () => live.tasks.close();
   }, [live, active, tab]);
+  useEffect(() => {
+    if (
+      chosenTab < 0 &&
+      current.pages > 0 &&
+      !current.loading &&
+      !current.error &&
+      live.tasks.feeds[0]!.state.get() === current
+    )
+      setTab(current.items.length ? 0 : 1);
+  }, [chosenTab, current, setTab, live]);
   return (
     <>
-      <header className={styles.head}>
-        <button type="button" className={controls.chipBtn} onClick={onChat}>
-          <Back width={14} height={14} />
-          {backLabel}
-        </button>
-        <h1>任务执行</h1>
+      <PageHeader className={styles.head} title="任务执行">
         <label className={styles.filter}>
           项目
-          <input
+          <Input
             aria-label="按项目筛选"
             list={id}
             value={project}
@@ -197,64 +199,47 @@ export function TaskBoard({
           ))}
         </datalist>
         {project && (
-          <button type="button" className={controls.link} onClick={() => live.tasks.setProject("")}>
+          <Button type="button" variant="link" onClick={() => live.tasks.setProject("")}>
             全部项目
-          </button>
+          </Button>
         )}
-        <button type="button" className={controls.chipBtn} onClick={() => live.tasks.refresh()}>
+        <Button type="button" variant="secondary" size="s" onClick={() => live.tasks.refresh()}>
           刷新任务
-        </button>
-      </header>
+        </Button>
+      </PageHeader>
       <UpgradeBanner connection={connection} />
-      <BoardResources connection={connection} onRepos={onRepos} />
+      <BoardResources connection={connection} onRepos={() => navigate({ page: "repos" })} />
       <section className={styles.board} aria-label="任务执行列表">
-        <p className={styles.note}>按任务查看执行与历史；Issue计划在Issue白板中跟进。</p>
-        <div className={styles.tabs} role="tablist" aria-label="任务范围">
-          {taskTabs.map((entry, index) => (
-            <button
-              key={entry.id}
-              id={`${id}-${entry.id}`}
-              type="button"
-              role="tab"
-              aria-selected={tab === index}
-              aria-controls={`${id}-tasks`}
-              tabIndex={tab === index ? 0 : -1}
-              onClick={() => setTab(index)}
-              onKeyDown={(event) => {
-                const next =
-                  event.key === "ArrowRight"
-                    ? (index + 1) % taskTabs.length
-                    : event.key === "ArrowLeft"
-                      ? (index + taskTabs.length - 1) % taskTabs.length
-                      : event.key === "Home"
-                        ? 0
-                        : event.key === "End"
-                          ? taskTabs.length - 1
-                          : undefined;
-                if (next === undefined) return;
-                event.preventDefault();
-                setTab(next);
-                document.getElementById(`${id}-${taskTabs[next]!.id}`)?.focus();
-              }}
-            >
-              {entry.title}
-            </button>
-          ))}
-        </div>
+        <p className={styles.note}>按任务查看执行与历史；Issue 计划在 Issue 白板中跟进。</p>
+        <Tabs
+          className={styles.tabs ?? ""}
+          label="任务范围"
+          value={String(tab)}
+          onChange={(value) => setTab(Number(value))}
+          items={taskTabs.map((entry, index) => ({
+            value: String(index),
+            label: (
+              <>
+                {entry.title}
+                {counts[index] !== undefined && ` · ${counts[index]}`}
+              </>
+            ),
+          }))}
+        />
         <div
           className={styles.taskPanel}
           id={`${id}-tasks`}
           role="tabpanel"
-          aria-labelledby={`${id}-${taskTabs[tab]!.id}`}
+          aria-label={taskTabs[tab]!.title}
           tabIndex={0}
         >
-          <TaskRows feed={live.tasks.feeds[tab]!} />
+          <TaskRows feed={live.tasks.feeds[tab]!} tab={tab} onTab={setTab} />
         </div>
       </section>
     </>
   );
 }
-function TaskRows({ feed }: { feed: TaskFeed }) {
+function TaskRows({ feed, tab, onTab }: { feed: TaskFeed; tab: number; onTab(tab: number): void }) {
   const state = useStore(feed.state);
   return (
     <>
@@ -265,9 +250,9 @@ function TaskRows({ feed }: { feed: TaskFeed }) {
       {state.error && (
         <div role="alert" className={styles.note}>
           {state.error}
-          <button className={controls.link} onClick={() => void feed.refresh()}>
+          <Button variant="link" onClick={() => void feed.refresh()}>
             重试任务列表
-          </button>
+          </Button>
         </div>
       )}
       <div className={styles.cards} aria-busy={state.loading}>
@@ -275,7 +260,16 @@ function TaskRows({ feed }: { feed: TaskFeed }) {
           <TaskCard key={task.task_id} task={task} />
         ))}
         {!state.items.length && !state.loading && !state.error && (
-          <p className={styles.note}>暂无任务</p>
+          <EmptyState>
+            {tab === 0
+              ? "当前没有正在推进的任务。"
+              : tab === 1
+                ? "暂无已结束任务；完成和取消的执行会显示在这里。"
+                : "暂无任务记录。"}
+            <Button variant="link" onClick={() => onTab(tab === 1 ? 0 : 1)}>
+              {tab === 1 ? "查看当前任务" : "查看已结束任务"}
+            </Button>
+          </EmptyState>
         )}
         {state.next && (
           <button
@@ -293,16 +287,16 @@ function TaskRows({ feed }: { feed: TaskFeed }) {
 }
 function parentLabel(task: TaskSummary): string {
   return task.primary_issue_id
-    ? `所属Issue：${task.primary_issue_title ?? task.primary_issue_id}`
+    ? `所属 Issue：${task.primary_issue_title ?? "所属 Issue"}`
     : task.primary_work_item_id
-      ? `历史关联：${task.primary_work_item_title ?? task.primary_work_item_id}`
-      : "未关联Issue";
+      ? `历史关联：${task.primary_work_item_title ?? "历史关联"}`
+      : "未关联 Issue";
 }
 function TaskCard({ task }: { task: TaskSummary }) {
   const { openTask, openIssue } = useServices();
   const look = task.execution ? executionLook(task.execution) : taskLook(task);
   return (
-    <article className={styles.card}>
+    <article className={`${list.row} ${styles.card}`} data-expanded="true">
       <div className={styles.cardBody}>
         <div className={styles.taskHeading}>
           <button
@@ -313,16 +307,15 @@ function TaskCard({ task }: { task: TaskSummary }) {
           >
             <strong>{task.title}</strong>
           </button>
-          <span className={styles.state} data-tone={look.tone}>
-            {look.label}
-          </span>
+          <Badge tone={look.tone === "idle" ? "neutral" : look.tone}>{look.label}</Badge>
           {task.control_mode !== "managed" && (
             <span className={styles.meta}>{controlLabels[task.control_mode]}</span>
           )}
         </div>
         <div className={styles.taskMeta}>
           <span className={styles.meta}>
-            {task.project || "未分组"} · {ratingLabels[task.rating]} · spec {task.spec_version}
+            {task.project || "未分组"}
+            {task.rating && ` · ${ratingLabels[task.rating]}`} · 第 {task.spec_version} 版要求
           </span>
           {task.primary_issue_id ? (
             <button className={styles.parentLink} onClick={() => openIssue(task.primary_issue_id!)}>

@@ -14,6 +14,8 @@ export default defineConfig({
     rollupOptions: {
       input: { index: path("index.html"), sw: path("src/sw/sw.ts") },
       output: {
+        // Keep React and Markdown shared across the chat and lazy route pages.
+        manualChunks: (id) => (id.includes("node_modules") ? "vendor" : undefined),
         // The worker keeps a fixed name: the browser checks it for updates.
         entryFileNames: (chunk) => (chunk.name === "sw" ? "sw.js" : "assets/[name]-[hash].js"),
       },

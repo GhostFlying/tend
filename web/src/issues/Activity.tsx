@@ -1,3 +1,4 @@
+import { useEntryState } from "../app/router.ts";
 import {
   useCallback,
   useEffect,
@@ -16,13 +17,14 @@ import type {
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { noOutbox } from "../queue/sendQueue.ts";
+import { LiveStatus } from "../ui/LiveStatus.tsx";
+import { conversationStatus } from "../ui/activityStatus.ts";
 import { AgentTurn, OwnerMessage, OutgoingRow, SystemMessage } from "../conversation/Messages.tsx";
 import { buildTranscriptEntries, type TranscriptEntry } from "../conversation/transcriptBlocks.ts";
-import { ToolRow } from "../conversation/ToolRow.tsx";
-import { captureAnchor, restoreAnchor } from "../conversation/scrollAnchor.ts";
+import { captureAnchor, restoreAnchor, type ScrollAnchor } from "../conversation/scrollAnchor.ts";
 import { IssueTurnRead } from "./turn.ts";
 import { IssueResultCard, HistoricalResultCard } from "./Results.tsx";
-import type { IssueReadingState } from "./Details.tsx";
+import type { IssueReadingState } from "./reading.ts";
 import type { Issues } from "./data.ts";
 import styles from "./DetailPage.module.css";
 
@@ -56,39 +58,79 @@ export function IssueActivity({
   const [all, setAll] = useState(reading.activityExpanded);
   const [error, setError] = useState("");
   const [newItems, setNewItems] = useState(false);
+  const following = useRef(reading.followsLatest());
+  const readingAnchor = useRef<ScrollAnchor | null>(null);
+  const scrollportSize = useRef({ width: 0, height: 0 });
+  const dataFrame = useRef(0);
+  const expectedScroll = useRef<number | null>(null);
+  const correctScroll = useCallback((node: HTMLElement, correct: () => void) => {
+    const before = node.scrollTop;
+    correct();
+    if (node.scrollTop !== before) expectedScroll.current = node.scrollTop;
+  }, []);
+  const pagination = useRef<{
+    trigger: string;
+    top: number;
+    ids: Set<string>;
+    ready: boolean;
+  } | null>(null);
   useEffect(() => {
     const node = scroll.current;
     if (!node) return;
-    let following = false;
-    let anchor = captureAnchor(node);
+    scrollportSize.current = { width: node.clientWidth, height: node.clientHeight };
+    const resized = () => {
+      if (
+        node.clientWidth === scrollportSize.current.width &&
+        node.clientHeight === scrollportSize.current.height
+      )
+        return false;
+      scrollportSize.current = { width: node.clientWidth, height: node.clientHeight };
+      if (following.current || reading.followsLatest())
+        correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
+      else if (readingAnchor.current)
+        correctScroll(node, () => restoreAnchor(node, readingAnchor.current!));
+      readingAnchor.current = captureAnchor(node);
+      return true;
+    };
     const moved = () => {
-      following =
-        node.scrollTop > 0 && node.scrollHeight - node.scrollTop - node.clientHeight < 100;
-      if (following) reading.followLatest();
+      if (resized()) return;
+      const programmatic =
+        expectedScroll.current !== null && Math.abs(node.scrollTop - expectedScroll.current) < 1;
+      expectedScroll.current = null;
+      if (!programmatic && pagination.current && !pagination.current.ready)
+        pagination.current = null;
+      following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
+      if (following.current) reading.followLatest();
       else reading.pauseFollowing();
-      anchor = captureAnchor(node);
+      readingAnchor.current = captureAnchor(node);
     };
-    const control = (event: Event) => {
-      if (event.target instanceof Element && event.target.closest("button, summary, a")) {
-        following = false;
-        reading.pauseFollowing();
-        anchor = captureAnchor(node);
-      }
+    let frame = 0;
+    const disclosure = (event: MouseEvent) => {
+      if (
+        !(event.target instanceof Element) ||
+        !event.target.closest("summary, button[aria-expanded]")
+      )
+        return;
+      cancelAnimationFrame(dataFrame.current);
+      following.current = false;
+      reading.pauseFollowing();
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(moved);
+      });
     };
-    const observer = new ResizeObserver(() => {
-      if (following || reading.followsLatest()) node.scrollTo({ top: node.scrollHeight });
-      else restoreAnchor(node, anchor);
-      anchor = captureAnchor(node);
-    });
+    const observer = new ResizeObserver(resized);
+    observer.observe(node);
     node.addEventListener("scroll", moved);
-    node.addEventListener("click", control, true);
-    if (node.firstElementChild) observer.observe(node.firstElementChild);
+    node.addEventListener("click", disclosure, true);
     return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(dataFrame.current);
       observer.disconnect();
       node.removeEventListener("scroll", moved);
-      node.removeEventListener("click", control, true);
+      node.removeEventListener("click", disclosure, true);
     };
-  }, [scroll, reading]);
+  }, [scroll, reading, correctScroll]);
   const last = useRef(0);
   const previousPending = useRef(0);
   useEffect(() => {
@@ -98,6 +140,7 @@ export function IssueActivity({
     return () => {
       remember();
       stop();
+      pagination.current = null;
       reads.activity.close();
     };
   }, [reads, issue.issue_id, reading]);
@@ -109,8 +152,28 @@ export function IssueActivity({
     const first = blocks.at(-3)!.position;
     return rows.filter((row) => row.position >= first);
   }, [rows, all]);
+  const beginContinuation = useCallback(
+    (trigger: string, control: HTMLButtonElement, ids: string[]) => {
+      cancelAnimationFrame(dataFrame.current);
+      following.current = false;
+      reading.pauseFollowing();
+      pagination.current = {
+        trigger,
+        top: control.getBoundingClientRect().top,
+        ids: new Set(ids),
+        ready: false,
+      };
+      setNewItems(false);
+    },
+    [reading],
+  );
+  const cancelContinuation = useCallback((trigger: string) => {
+    if (pagination.current?.trigger === trigger) pagination.current = null;
+  }, []);
   const [continuations, setContinuations] = useState<Record<string, IssueTranscriptBlock>>({});
-  const rememberContinuation = useCallback((block: IssueTranscriptBlock) => {
+  const rememberContinuation = useCallback((block: IssueTranscriptBlock, explicit: boolean) => {
+    if (explicit && pagination.current?.trigger === block.trigger.message_id)
+      pagination.current.ready = true;
     setContinuations((previous) => ({ ...previous, [block.trigger.message_id]: block }));
   }, []);
   const transcript = useMemo(
@@ -149,18 +212,74 @@ export function IssueActivity({
     const end = scroll.current;
     const position = rows.at(-1)?.position ?? 0;
     if (position > last.current && last.current && end) {
-      const near = end.scrollHeight - end.scrollTop - end.clientHeight < 100;
-      if (near) end.scrollTo({ top: end.scrollHeight });
+      const near = following.current || reading.followsLatest();
+      if (near) correctScroll(end, () => end.scrollTo({ top: end.scrollHeight }));
       else requestAnimationFrame(() => setNewItems(true));
     }
     last.current = position;
     if (outgoing.length > previousPending.current && end) {
+      pagination.current = null;
       reading.followLatest();
-      end.scrollTo({ top: end.scrollHeight });
+      correctScroll(end, () => end.scrollTo({ top: end.scrollHeight }));
       requestAnimationFrame(() => setNewItems(false));
     }
     previousPending.current = outgoing.length;
-  }, [rows, outgoing.length, scroll, reading]);
+  }, [rows, outgoing.length, scroll, reading, correctScroll]);
+  const activityContent = JSON.stringify([rows, transcript]);
+  const latestContent = JSON.stringify([issue, rows, transcript]);
+  const previousContent = useRef("");
+  const previousActivity = useRef(activityContent);
+  useLayoutEffect(() => {
+    const node = scroll.current;
+    if (node && pagination.current?.ready) {
+      const boundary = pagination.current;
+      const block = continuations[boundary.trigger];
+      pagination.current = null;
+      cancelAnimationFrame(dataFrame.current);
+      dataFrame.current = requestAnimationFrame(() => {
+        const nodes = [...node.querySelectorAll<HTMLElement>("[data-scroll-id]")];
+        for (const message of block?.items ?? []) {
+          if (boundary.ids.has(message.message_id)) continue;
+          const row = nodes.find((item) => item.dataset.scrollId === message.message_id);
+          const group = [...node.querySelectorAll<HTMLElement>("button[aria-controls]")].find(
+            (control) =>
+              control
+                .getAttribute("aria-controls")
+                ?.split(" ")
+                .includes(row?.id ?? ""),
+          );
+          const item = row?.checkVisibility() ? row : group?.checkVisibility() ? group : null;
+          if (!item) continue;
+          correctScroll(node, () =>
+            node.scrollTo({
+              top: node.scrollTop + item.getBoundingClientRect().top - boundary.top,
+            }),
+          );
+          break;
+        }
+        readingAnchor.current = captureAnchor(node);
+      });
+    } else if (node && previousContent.current && previousContent.current !== latestContent) {
+      if (following.current || reading.followsLatest())
+        correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
+      else {
+        const anchor = readingAnchor.current;
+        if (anchor) {
+          correctScroll(node, () => restoreAnchor(node, anchor));
+          cancelAnimationFrame(dataFrame.current);
+          dataFrame.current = requestAnimationFrame(() => {
+            correctScroll(node, () => restoreAnchor(node, anchor));
+            readingAnchor.current = captureAnchor(node);
+          });
+        }
+        if (previousActivity.current !== activityContent)
+          requestAnimationFrame(() => setNewItems(true));
+      }
+    }
+    if (node) readingAnchor.current = captureAnchor(node);
+    previousContent.current = latestContent;
+    previousActivity.current = activityContent;
+  }, [latestContent, activityContent, scroll, reading, continuations, correctScroll]);
   const earlier = async () => {
     const node = scroll.current;
     const anchor = node ? captureAnchor(node) : null;
@@ -170,7 +289,8 @@ export function IssueActivity({
         reading.expandActivity();
         if (visible.length === rows.length) await reads.activity.earlier();
       } else await reads.activity.earlier();
-      if (node && anchor) requestAnimationFrame(() => restoreAnchor(node, anchor));
+      if (node && anchor)
+        requestAnimationFrame(() => correctScroll(node, () => restoreAnchor(node, anchor)));
     } catch {
       setError("更早记录读取失败，请重试。");
     }
@@ -211,6 +331,8 @@ export function IssueActivity({
             entry={entry}
             rows={transcript.filter((row) => row.key.startsWith(`${entry.block!.position}:`))}
             onContinuation={rememberContinuation}
+            onPagination={beginContinuation}
+            onPaginationCancel={cancelContinuation}
           />
         ) : (
           <Milestone
@@ -238,30 +360,55 @@ function ActivityBlock({
   entry,
   rows,
   onContinuation,
+  onPagination,
+  onPaginationCancel,
 }: {
   entry: IssueActivityEntry;
   rows: TranscriptEntry[];
-  onContinuation(block: IssueTranscriptBlock): void;
+  onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
+  onPagination(trigger: string, control: HTMLButtonElement, ids: string[]): void;
+  onPaginationCancel(trigger: string): void;
 }) {
   const { client } = useServices();
   const continuation = useMemo(() => new IssueTurnRead(client), [client]);
   const extra = useStore(continuation.state);
-  const [opened, setOpened] = useState(false);
+  const explicit = useRef(false);
+  const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
   const block = entry.block!;
   useEffect(() => {
     if (opened) void continuation.open(block.trigger.message_id);
   }, [opened, block, continuation]);
-  useEffect(() => () => continuation.close(), [continuation]);
+  useEffect(
+    () => () => {
+      continuation.close();
+      onPaginationCancel(block.trigger.message_id);
+    },
+    [continuation, onPaginationCancel, block.trigger.message_id],
+  );
   useEffect(() => {
-    if (extra.value) onContinuation(extra.value);
-  }, [extra.value, onContinuation]);
+    if (extra.error) {
+      explicit.current = false;
+      onPaginationCancel(block.trigger.message_id);
+    }
+    if (extra.value && !extra.error) {
+      onContinuation(extra.value, explicit.current);
+      explicit.current = false;
+    }
+  }, [extra.value, extra.error, onContinuation, onPaginationCancel, block.trigger.message_id]);
   const items = rows.flatMap((row) =>
     row.kind === "agent" ? row.items : row.kind === "system" ? [row.item] : [],
   );
-  const tools = items.filter((item) => item.tool);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useEntryState(`activity-expanded:${entry.id}`, false);
   const long = items.some((item) => (item.body?.length ?? 0) > 400);
-  const more = () => {
+  const more = (control?: HTMLButtonElement) => {
+    if (control) {
+      explicit.current = true;
+      onPagination(
+        block.trigger.message_id,
+        control,
+        items.map((item) => item.message_id),
+      );
+    }
     if (!opened) setOpened(true);
     else if (extra.error) void continuation.refresh();
     else void continuation.more();
@@ -291,11 +438,16 @@ function ActivityBlock({
                 <div className={styles.author}>
                   {entry.author} <small>负责人</small>
                 </div>
-                <div className={!expanded && long ? styles.replyClamp : undefined}>
-                  <AgentTurn entry={{ ...row, items: row.items.filter((item) => !item.tool) }} />
-                </div>
+                <AgentTurn
+                  entry={row}
+                  proseClassName={!expanded && long ? styles.replyClamp : undefined}
+                />
                 {long && (
-                  <button className={styles.textLink} onClick={() => setExpanded(!expanded)}>
+                  <button
+                    className={styles.textLink}
+                    aria-expanded={expanded}
+                    onClick={() => setExpanded(!expanded)}
+                  >
                     {expanded ? "收起" : "展开全文"}
                   </button>
                 )}
@@ -305,7 +457,7 @@ function ActivityBlock({
             return <SystemMessage key={row.key} item={row.item} />;
           case "block-more":
             return (
-              <button key={row.key} onClick={() => void more()}>
+              <button key={row.key} onClick={(event) => void more(event.currentTarget)}>
                 继续读取本轮消息
               </button>
             );
@@ -313,6 +465,11 @@ function ActivityBlock({
             return null;
         }
       })}
+      {block.trigger.state === "processing" && !rows.some((row) => row.kind === "agent") && (
+        <LiveStatus
+          status={conversationStatus([], "processing", Date.parse(block.trigger.created_at))}
+        />
+      )}
       {items.some(
         (item) =>
           item.assistant_state && !["completed", "streaming"].includes(item.assistant_state),
@@ -320,18 +477,6 @@ function ActivityBlock({
         <p role="status" className={styles.muted}>
           本轮回复已中断、失败或结果未知；已生成内容和原请求仍保留。
         </p>
-      )}
-      {!!tools.length && (
-        <details className={styles.processing}>
-          <summary>
-            处理记录 · {tools.length}
-            {tools.some((item) => item.tool?.status === "failed") ? " · 有失败记录" : ""}
-            {tools.some((item) => item.tool?.status === "interrupted") ? " · 有中断记录" : ""}
-          </summary>
-          {tools.map((item) => (
-            <ToolRow key={item.message_id} tool={item.tool!} />
-          ))}
-        </details>
       )}
       {extra.error && (
         <p role="status">

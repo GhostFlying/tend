@@ -1,5 +1,5 @@
 // What a device that tend does not take as the owner's sees (D49, D56).
-import controls from "./controls.module.css";
+import { Button } from "../ui/Button.tsx";
 import styles from "./NotOwner.module.css";
 
 export function NotOwner({ reason, onRetry }: { reason: string; onRetry: () => void }) {
@@ -16,9 +16,9 @@ export function NotOwner({ reason, onRetry }: { reason: string; onRetry: () => v
         </p>
         <p>换一台 owner 的设备打开，或者请 owner 修改服务端配置后重试。</p>
         <p className={styles.reason}>tend 的回答：{reason}</p>
-        <button type="button" className={controls.chipBtn} onClick={onRetry}>
+        <Button type="button" variant="secondary" size="s" onClick={onRetry}>
           重试
-        </button>
+        </Button>
       </div>
     </main>
   );

@@ -11,7 +11,7 @@ export function ManagerStatus({
 }) {
   const phase =
     !manager.host_id && !["completed", "cancelled"].includes(manager.state)
-      ? "等待 runner 领取"
+      ? "等待执行主机领取"
       : manager.state === "waiting"
         ? "等待新进展"
         : manager.state === "running"
@@ -23,7 +23,7 @@ export function ManagerStatus({
     <section aria-label="负责人运行状态">
       <h2>负责人运行</h2>
       <button className={styles.textLink} onClick={() => onTask(manager.task_id)}>
-        {manager.category_id}
+        负责人 Agent
       </button>
       <p>{phase}</p>
       {manager.control_mode && manager.control_mode !== "managed" && (

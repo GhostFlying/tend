@@ -1,0 +1,84 @@
+.button {
+  border-radius: var(--radius-m);
+  color: var(--label-2);
+  font-size: var(--text-caption);
+  height: var(--control-m);
+  padding: 0 10px;
+}
+.button:hover {
+  background: var(--hover);
+}
+.s {
+  height: var(--control-s);
+}
+.m {
+  height: var(--control-m);
+}
+.l {
+  height: var(--control-l);
+  font-size: var(--text-body);
+  padding: 0 var(--space-4);
+}
+.primary {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+.primary:hover:not(:disabled) {
+  background: var(--accent);
+  opacity: 0.9;
+}
+.secondary {
+  border: 1px solid var(--border);
+}
+.ghost {
+  border: 0;
+}
+.danger {
+  color: var(--danger);
+  border: 1px solid var(--border);
+}
+.link {
+  color: var(--accent);
+  font-size: inherit;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+}
+.link:hover {
+  background: none;
+  text-decoration: underline;
+}
+.icon {
+  width: var(--control-m);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  flex: none;
+  font-size: inherit;
+}
+.icon.s {
+  width: var(--control-s);
+}
+.icon.l {
+  width: var(--control-l);
+}
+.icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.primary:disabled {
+  opacity: 0.3;
+}
+.primary:disabled:hover {
+  background: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .button:not(.link) {
+    min-height: var(--control-touch);
+  }
+  .icon {
+    min-width: var(--control-touch);
+  }
+}

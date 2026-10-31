@@ -1,6 +1,9 @@
 package domain
 
-import "github.com/GhostFlying/tend/internal/protocol"
+import (
+	"github.com/GhostFlying/tend/internal/protocol"
+	"strings"
+)
 
 // Options of the decision about an unavailable workspace: tend answers
 // WaitForHostOption itself once the host is back. StartOverOption is
@@ -28,13 +31,18 @@ func WorkspaceUnavailable(t Task, hostID, why string) Decision {
 }
 
 func workspaceQuestion(t Task, hostID, why string) DecisionDraft {
-	d := workspaceDecision("The task's workspace is on host " + hostID + ", which " + why +
-		". Its work can only go on there. How should this task proceed?")
+	description := "当前不可用"
+	if why == "was retired" {
+		description = "已停用"
+	} else if since, ok := strings.CutPrefix(why, "has not been heard from since "); ok {
+		description = "从 " + since + " 起未连接"
+	}
+	d := workspaceDecision("任务工作区所在主机 " + hostID + " " + description + "，工作只能在该主机继续。这个任务接下来怎么办？")
 	if t.WorkspaceReused {
-		d.Question += " This task reuses a fixed workspace and cannot start over on another host. Wait for its host, or cancel and create a new task with workspace.mode=new or temporary."
+		d.Question += " 此任务复用固定工作区，不能换主机重新开始。请等待主机恢复，或取消后使用新建或临时工作区（workspace.mode=new 或 temporary）创建任务。"
 	}
 	if t.RequiredHostID != "" {
-		d.Question += " This task requires host " + t.RequiredHostID + " and cannot start over on another host. Wait for that host, or cancel and create a new task with a suitable requirements.host_id and an independent workspace."
+		d.Question += " 此任务指定主机 " + t.RequiredHostID + "，不能换主机重新开始。请等待主机恢复，或取消后指定合适主机（requirements.host_id）并使用独立工作区创建任务。"
 	}
 	if t.WorkspaceReused || t.RequiredHostID != "" {
 		d.Options = []string{optionWaitForHost, optionCancel}

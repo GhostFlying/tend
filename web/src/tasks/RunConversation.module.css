@@ -5,7 +5,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-3);
   margin: 18px 0;
 }
 .root select {
@@ -13,62 +13,62 @@
   background: var(--input);
   color: var(--label);
   border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 8px 12px;
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
   max-width: 100%;
 }
 .root dl {
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr);
-  gap: 10px 20px;
-  margin: 20px 0;
-  padding: 16px;
+  gap: 10px var(--space-5);
+  margin: var(--space-5) 0;
+  padding: var(--space-4);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   background: var(--bg-l1);
 }
 .root dt {
   color: var(--label-3);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 .root dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
 .root h3 {
-  font-size: 17px;
+  font-size: var(--text-title-sm);
   margin-top: 26px;
 }
 .root article {
   border-top: 1px solid var(--border-soft);
-  padding: 12px 0;
+  padding: var(--space-3) 0;
 }
 
 .native,
 .control,
 .supplement {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   padding: 14px 18px;
-  margin: 12px 0;
+  margin: var(--space-3) 0;
 }
 .root .native h3,
 .root .control h3,
 .root .supplement h3 {
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
 }
 .summary {
-  font-size: var(--text-s);
-  margin: 8px 0;
+  font-size: var(--text-caption);
+  margin: var(--space-2) 0;
 }
 .root dl {
   grid-template-columns: 60px minmax(0, 1fr) 60px minmax(0, 1fr);
-  margin: 12px 0 0;
-  padding: 12px;
-  gap: 8px 14px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  gap: var(--space-2) 14px;
 }
 .root .control > p {
-  margin: 8px 0 0;
+  margin: var(--space-2) 0 0;
 }
 .root .supplement textarea {
   min-height: 90px;
@@ -80,14 +80,14 @@
   .native,
   .control,
   .supplement {
-    padding: 12px;
+    padding: var(--space-3);
   }
   .root dl {
     grid-template-columns: 55px minmax(0, 1fr);
-    gap: 6px 12px;
+    gap: 6px var(--space-3);
   }
   .root > label {
-    margin: 8px 0 12px;
+    margin: var(--space-2) 0 var(--space-3);
   }
   .root > label select {
     width: 100%;
@@ -98,7 +98,7 @@
 .identity {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
   margin: 10px 0 14px;
 }
 .execution > div,
@@ -108,25 +108,25 @@
 .execution span,
 .identity span {
   display: block;
-  font-size: var(--text-xs);
+  font-size: var(--text-micro);
   color: var(--label-3);
   margin-bottom: 6px;
 }
 .execution strong,
 .identity strong {
   font-weight: 500;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   overflow-wrap: anywhere;
 }
 .identity {
-  padding: 12px;
+  padding: var(--space-3);
   background: var(--bg-l1);
   border: 1px solid var(--border);
-  border-radius: 7px;
-  margin: 12px 0;
+  border-radius: var(--radius-s);
+  margin: var(--space-3) 0;
 }
 .root h3 {
-  margin-top: 16px;
+  margin-top: var(--space-4);
 }
 .root > label {
   margin: 0 0 10px;
@@ -135,7 +135,7 @@
 .control,
 .supplement {
   margin: 10px 0;
-  padding: 12px 16px;
+  padding: var(--space-3) var(--space-4);
 }
 @media (max-width: 760px) {
   .execution,
@@ -146,6 +146,6 @@
   .native,
   .control,
   .supplement {
-    padding: 12px;
+    padding: var(--space-3);
   }
 }

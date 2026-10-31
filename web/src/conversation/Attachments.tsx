@@ -106,31 +106,35 @@ function StoredAttachment({ file }: { file: ConversationAttachment }) {
   }, [client, visible, image, file.file_id, attempt]);
   return (
     <div ref={element} className={styles.card}>
-      {source && !failed && (
-        <ImageTile
-          name={file.name}
-          source={source}
-          previewPath={`/api/v1/conversation/attachments/${encodeURIComponent(file.file_id)}/download-url?inline=1`}
-          onError={() => setFailed(true)}
-        />
+      {image && (
+        <div className={styles.thumbnail}>
+          {source && !failed && (
+            <ImageTile
+              name={file.name}
+              source={source}
+              previewPath={`/api/v1/conversation/attachments/${encodeURIComponent(file.file_id)}/download-url?inline=1`}
+              onError={() => setFailed(true)}
+            />
+          )}
+          {failed && (
+            <button
+              type="button"
+              className={styles.retry}
+              onClick={() => {
+                setFailed(false);
+                setSource("");
+                setAttempt((n) => n + 1);
+              }}
+            >
+              预览不可用，重试
+            </button>
+          )}
+        </div>
       )}
       <span className={styles.name} title={file.name}>
         {file.name}
       </span>
       <span className={styles.meta}>{fileSize(file.size)}</span>
-      {failed && (
-        <button
-          type="button"
-          className={styles.retry}
-          onClick={() => {
-            setFailed(false);
-            setSource("");
-            setAttempt((n) => n + 1);
-          }}
-        >
-          预览不可用，重试
-        </button>
-      )}
       <FileDownload fileId={file.file_id} name={file.name} scope="conversation/attachments" />
     </div>
   );

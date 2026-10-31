@@ -1,0 +1,54 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+}
+.neutral {
+  background: var(--bg-l2);
+  color: var(--label-2);
+}
+.ok {
+  background: var(--ok-soft);
+  color: var(--label);
+}
+.warn {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+.err {
+  background: var(--err-soft);
+  color: var(--danger);
+}
+.run {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.card {
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--bg);
+}
+.section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.section h2 {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: var(--leading-title-sm);
+}
+.empty {
+  margin: 0;
+  padding: 10px var(--space-2);
+  font-size: var(--text-label);
+  line-height: var(--leading-body);
+  color: var(--caption);
+}

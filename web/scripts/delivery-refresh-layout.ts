@@ -1,3 +1,4 @@
+import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Unknown writes reconcile only against later facts for the same delivery.
@@ -76,6 +77,7 @@ const json = (res: ServerResponse, value: unknown, status = 200) => {
 };
 const server = await createServer({
   configFile: false,
+  cacheDir: fixtureRoot("cache"),
   server: { host: "127.0.0.1", port: 0, watch: { ignored: ["**/*"] } },
   plugins: [
     react(),
@@ -197,6 +199,16 @@ try {
   assert(address && typeof address !== "string");
   browser = await chromium.launch();
   const context = await browser.newContext({ serviceWorkers: "block" });
+  const reactWarnings: string[] = [];
+  context.on("page", (opened) =>
+    opened.on("console", (message) => {
+      if (
+        ["warning", "error"].includes(message.type()) &&
+        /Cannot update a component|React.*warning/i.test(message.text())
+      )
+        reactWarnings.push(message.text());
+    }),
+  );
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
   await page.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
@@ -315,7 +327,10 @@ try {
     assert(await refresh.isDisabled());
     assert.equal(requests.size, before + 1);
     // Closing the dialog must not discard the original operation.
-    await details.getByRole("button", { name: "关闭详情" }).click();
+    await details
+      .getByRole("dialog", { name: "跟进与外部交付", exact: true })
+      .getByRole("button", { name: /^关闭/ })
+      .click();
     await terminalPage.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
     await openIssueAux(terminalPage, "跟进与交付");
     if (output)
@@ -353,9 +368,13 @@ try {
   const mobilePage = await mobileContext.newPage();
   mobilePage.setDefaultTimeout(10000);
   await mobilePage.goto(`http://127.0.0.1:${address.port}/?task=${taskId}`);
-  const taskDrawer = mobilePage.getByRole("dialog", { name: "任务详情", exact: true });
+  const taskDrawer = mobilePage.getByRole("region", { name: "任务详情", exact: true });
   await taskDrawer.getByText("Linked task", { exact: true }).first().waitFor();
-  await taskDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await taskDrawer.getByRole("button", { name: /← 返回/ }).click();
+  await mobilePage
+    .getByRole("navigation", { name: "视图" })
+    .getByRole("link", { name: "对话", exact: true })
+    .click();
   const composer = mobilePage.getByRole("textbox", { name: "消息", exact: true });
   await composer.fill("Existing unsent constraint");
   await mobilePage.locator('input[type="file"]').setInputFiles({
@@ -364,16 +383,13 @@ try {
     buffer: Buffer.from("fixture evidence"),
   });
   const before = requests.size;
-  await mobilePage
-    .locator("main")
-    .getByRole("button", { name: "Linked task", exact: true })
-    .click();
+  await mobilePage.locator("main").getByRole("link", { name: "Linked task", exact: true }).click();
   await taskDrawer.getByRole("button", { name: "Refresh reconciliation", exact: true }).click();
-  const issueDrawer = mobilePage.getByRole("region", { name: "Issue详情", exact: true });
+  const issueDrawer = mobilePage.getByRole("region", { name: "Issue 详情", exact: true });
   await issueDrawer.getByRole("heading", { name: item.plan.title, exact: true }).waitFor();
   await closeIssue(mobilePage);
   if (await taskDrawer.isVisible()) {
-    await taskDrawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await taskDrawer.getByRole("button", { name: /← 返回/ }).click();
     await taskDrawer.waitFor({ state: "hidden" });
   }
   // Closing a task returns to its Issue; leave that page to recover main's draft.
@@ -386,6 +402,7 @@ try {
     .waitFor();
   assert.equal(requests.size, before, "reading and closing never sends the local draft");
   await mobileContext.close();
+  assert.deepEqual(reactWarnings, [], "no React render-phase update warnings");
   console.log(
     "PASS unknown refresh: unrelated facts remain blocked; completed observation restores explicit refresh; no automatic writes; terminal lost-before-server reconnect and same-ID recovery; mobile canonical task-to-Issue reading preserves a reachable draft and attachment",
   );

@@ -3,7 +3,7 @@
 // cards to answer and hand back right there.
 import type { Snapshot, TaskSummary } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
-import controls from "../shell/controls.module.css";
+import { EmptyState } from "../ui/Surfaces.tsx";
 import { StatusDot } from "../shell/StatusDot.tsx";
 import list from "../shell/list.module.css";
 import { useStore } from "../state/store.ts";
@@ -37,9 +37,7 @@ export function Attention() {
         <span>需要你处理</span>
         {count > 0 && <span className={list.count}>{count}</span>}
       </div>
-      {count === 0 && (
-        <p className={controls.empty}>{snapshot ? "没有需要你处理的事。" : "正在读取…"}</p>
-      )}
+      {count === 0 && <EmptyState>{snapshot ? "没有需要你处理的事。" : "正在读取…"}</EmptyState>}
       <div className={styles.rows}>
         {decisions.map((d) => {
           const task = taskOf(snapshot, d.task_id);

@@ -79,3 +79,40 @@ export const ExternalLink = (p: IconProps) => (
     <path d="M8 16L19 5M11 5h8v8" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+export const Repository = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <path d="M4 5h6l2 2h8v12H4z" />
+  </svg>
+);
+export const Usage = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <path d="M4 20V4M4 20h16M8 16v-5M13 16V7M18 16v-8" />
+  </svg>
+);
+export const Host = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <rect x="4" y="4" width="16" height="6" rx="2" />
+    <rect x="4" y="14" width="16" height="6" rx="2" />
+    <path d="M8 7h.01M8 17h.01" />
+  </svg>
+);
+export const More = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <circle cx="5" cy="12" r="1" />
+    <circle cx="12" cy="12" r="1" />
+    <circle cx="19" cy="12" r="1" />
+  </svg>
+);
+export const ChevronDown = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} {...p}>
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+);
+
+export const Run = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" {...line} strokeWidth={1.8} {...p}>
+    <circle cx="12" cy="12" r="8" />
+    <path d="m10 8 6 4-6 4z" strokeLinejoin="round" />
+  </svg>
+);

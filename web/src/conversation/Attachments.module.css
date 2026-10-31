@@ -2,7 +2,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-2);
   max-width: 100%;
 }
 .card {
@@ -19,16 +19,21 @@
   text-align: left;
 }
 .name {
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   overflow-wrap: anywhere;
 }
 .meta {
   color: var(--label-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-micro);
   overflow-wrap: anywhere;
 }
 .retry {
   color: var(--accent);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   text-align: left;
+}
+
+.thumbnail {
+  height: 135px;
+  flex: none;
 }

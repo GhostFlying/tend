@@ -1,26 +1,30 @@
+import { fixtureRoot } from "./navigation.ts";
 /// <reference lib="dom" />
 // D129: isolated complete-page and exact-recipient interaction regression.
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { openIssueAux, issueSidebar } from "./issue-detail-helpers.ts";
 import type {
   Envelope,
   IssueView,
   IssueActivityPage,
+  IssueTranscriptBlock,
   IssueResultPage,
   AttentionView,
 } from "../src/api/generated/api.ts";
 const output = process.env.TEND_LAYOUT_OUTPUT;
 assert(output, "Set TEND_LAYOUT_OUTPUT");
 await mkdir(output, { recursive: true });
-const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const root = fixtureRoot();
 const now = Date.now();
 let seq = 10;
 let activityDelay = 0;
+let continuationBlock: IssueTranscriptBlock | null = null;
+let continuationFailure = false;
+let continuationDelay = 0;
 let pagedChildren = false;
 let pagedActivity = false;
 const streams = new Set<ServerResponse>();
@@ -189,6 +193,21 @@ const server = createServer(async (req, res) => {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(value));
   };
+  if (p === "/api/v1/conversation/blocks/owner-one" && continuationBlock) {
+    if (continuationDelay) await new Promise((resolve) => setTimeout(resolve, continuationDelay));
+    if (continuationFailure)
+      return json({ error: { code: "unavailable", message: "Continuation failed" } }, 503);
+    return json(
+      u.searchParams.has("after")
+        ? continuationBlock
+        : {
+            ...continuationBlock,
+            items: activity.items![0]!.block!.items,
+            more: true,
+            next_seq: 51,
+          },
+    );
+  }
   if (p === "/api/v1/session")
     return json({
       token: "fixture",
@@ -468,7 +487,7 @@ const server = createServer(async (req, res) => {
   }
   if (p.startsWith("/api/")) return json({ items: [], more: false });
   try {
-    const file = resolve(root, `.${p}${p.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, p.split("/").at(-1)?.includes(".") ? `.${p}` : "index.html");
     assert(file.startsWith(root));
     res.setHeader(
       "Content-Type",
@@ -504,8 +523,9 @@ try {
       if (m.type() === "error") errors.push(m.text());
     });
     await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-    const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
     await detail.getByRole("heading", { name: "发布流程整理", exact: true }).waitFor();
+    assert.equal(decodeURIComponent(new URL(page.url()).pathname), `/issues/${issue.issue_id}`);
     await detail
       .getByText("发布步骤与回滚文档已完成，灰度验证等待范围确认。", { exact: true })
       .waitFor();
@@ -546,7 +566,7 @@ try {
       .waitFor();
     assert.equal(await detail.getByText("旧的已完成消息", { exact: true }).count(), 0);
 
-    assert.equal(await page.getByRole("dialog", { name: "Issue详情" }).count(), 0);
+    assert.equal(await page.getByRole("dialog", { name: "Issue 详情" }).count(), 0);
     await detail.getByText(/暂无活动执行/).waitFor();
     assert.equal(
       await detail.getByText("native-manager-not-for-the-landing-page", { exact: true }).count(),
@@ -571,10 +591,13 @@ try {
       "issue:canonical-child",
     );
     await page.screenshot({ path: join(output, `detail-child-${width}.png`) });
-    await detail
-      .getByRole("navigation", { name: "Issue路径" })
-      .getByRole("button", { name: /发布流程整理/ })
-      .click();
+    if (width <= 760)
+      await detail.getByRole("button", { name: "返回 Issue 列表或上一项", exact: true }).click();
+    else
+      await detail
+        .getByRole("navigation", { name: "Issue 路径" })
+        .getByRole("button", { name: /发布流程整理/ })
+        .click();
     await detail.getByRole("heading", { name: "发布流程整理", exact: true }).waitFor();
     assert.equal(
       await detail.getByRole("textbox", { name: "消息", exact: true }).inputValue(),
@@ -624,19 +647,19 @@ try {
     await detail.getByText("另一次负责人更新已经确认。", { exact: true }).waitFor();
     await progress.getByRole("button", { name: "保存进展", exact: true }).click();
     await progress
-      .getByText("Issue已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
+      .getByText("Issue 已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
       .waitFor();
     assert.equal(
       writes.findLast((w) => w.operation === "issues.update_progress")!.expected_control_revision,
       baselineRevision,
     );
     assert.equal(issue.progress!.summary, "另一次负责人更新已经确认。");
-    await progress.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await progress.getByRole("button", { name: /^关闭/ }).first().click();
     if (width < 1280) {
       await detail.getByRole("button", { name: "详情", exact: true }).click();
-      const drawer = page.getByRole("dialog", { name: "Issue辅助信息", exact: true });
+      const drawer = page.getByRole("dialog", { name: "Issue 辅助信息", exact: true });
       await drawer.getByRole("heading", { name: "交付物", exact: true }).waitFor();
-      await drawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+      await drawer.getByRole("button", { name: /^关闭/ }).first().click();
     }
     await openIssueAux(page, "全部执行交付");
     const deliveries = page.getByRole("dialog", { name: "全部执行交付", exact: true });
@@ -645,40 +668,161 @@ try {
     await deliveries.getByText("较早的交付", { exact: true }).waitFor();
     await deliveries.getByRole("button", { name: "上一页交付", exact: true }).click();
     await deliveries.getByText("发布与回滚清单", { exact: true }).waitFor();
-    await deliveries.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await deliveries.getByRole("button", { name: /^关闭/ }).first().click();
     const side = await issueSidebar(page);
     await side.getByText("待检查", { exact: true }).waitFor();
-    await side.getByText("外部观察 · 已合并", { exact: true }).waitFor();
-    await side.getByRole("button", { name: /发布与回滚清单/ }).waitFor();
-    if (width < 1280) await side.getByRole("button", { name: "关闭详情", exact: true }).click();
+    assert.equal(
+      await side.getByRole("button", { name: /发布与回滚清单/ }).count(),
+      0,
+      "sidebar does not repeat deliverables",
+    );
+    await side.getByRole("button", { name: /^查看全部交付 ·/ }).waitFor();
+    if (width < 1280) await side.getByRole("button", { name: /^关闭/ }).first().click();
+    const summary = detail.getByRole("region", { name: "交付物", exact: true });
+    await summary.getByText("外部观察 · 已合并", { exact: true }).waitFor();
+    await summary.getByRole("button", { name: /发布与回滚清单/ }).waitFor();
     await detail.locator('[data-artifact="artifact-one"]').waitFor();
     const resultCard = detail.locator('[data-artifact="artifact-one"]');
     await resultCard.getByRole("button", { name: "打开完整交付 →", exact: true }).click();
-    await resultCard.getByText("b".repeat(40), { exact: true }).waitFor();
-    await resultCard.getByText("c".repeat(40), { exact: true }).waitFor();
+    for (const letter of ["b", "c"]) {
+      const commit = resultCard.getByText(letter.repeat(7), { exact: true });
+      await commit.waitFor();
+      assert.equal(await commit.getAttribute("title"), letter.repeat(40));
+    }
     const taskLink = resultCard.getByRole("button", { name: "查看任务与验收 →", exact: true });
     await taskLink.scrollIntoViewIfNeeded();
     const taskReadingTop = await detail
       .locator("[data-issue-scroll]")
       .evaluate((node) => node.scrollTop);
     await taskLink.click();
-    const taskDialog = page.getByRole("dialog", { name: "任务详情", exact: true });
+    const taskDialog = page.getByRole("region", { name: "任务详情", exact: true });
     await taskDialog.getByText("执行任务 A", { exact: true }).waitFor();
     await taskDialog.getByRole("button", { name: /关联任务 B/ }).click();
     await taskDialog.getByText("关联任务 B", { exact: true }).waitFor();
-    await taskDialog.getByRole("button", { name: "← 返回Issue", exact: true }).click();
+    await page.goBack();
+    assert.equal(new URL(page.url()).pathname, `/issues/${issue.issue_id}`);
     await taskDialog.waitFor({ state: "hidden" });
-    assert.equal(new URL(page.url()).searchParams.get("task"), null);
+    assert.equal(new URL(page.url()).pathname.startsWith("/tasks/"), false);
     assert.equal(
       await detail.getByRole("textbox", { name: "消息", exact: true }).inputValue(),
       "父项保留的草稿",
     );
+    await page.waitForFunction((expected) => {
+      const node = document.querySelector("[data-issue-scroll]");
+      return node !== null && Math.abs(node.scrollTop - expected) < 4;
+    }, taskReadingTop);
     assert(
       Math.abs(
         (await detail.locator("[data-issue-scroll]").evaluate((node) => node.scrollTop)) -
           taskReadingTop,
       ) < 4,
     );
+    await page.waitForFunction(() => document.activeElement?.textContent === "查看任务与验收 →");
+    assert(await taskLink.evaluate((element) => element === document.activeElement));
+
+    // Long prose must not clip the trace, and tool expansion must pause bottom following.
+    const traceBlock = activity.items![0]!.block!;
+    const traceReply = traceBlock.items![0]!;
+    const savedBody = traceReply.body;
+    traceReply.body = "长回复正文仅自身被截断。\n\n".repeat(80);
+    traceReply.assistant_revision!++;
+    const toolID = `tool-disclosure-${width}`;
+    traceBlock.items!.push({
+      message_id: toolID,
+      seq: 3,
+      kind: "message",
+      author: "main_agent",
+      reply_to: "owner-one",
+      created_at: new Date(now).toISOString(),
+      tool: {
+        name: "files_read",
+        status: "running",
+        turn_id: "turn-disclosure",
+        updated_at: new Date(now).toISOString(),
+        input: "示例文件",
+        output: "工具输出不受回复截断影响。\n".repeat(80),
+      },
+    });
+    publish();
+    const traceTurn = detail.locator('[data-scroll-id="conversation-one"]');
+    const traceToggle = traceTurn.locator("details[data-trace] > summary");
+    await traceToggle.waitFor();
+    assert.equal(
+      await traceToggle.locator('xpath=ancestor::*[contains(@class,"replyClamp")]').count(),
+      0,
+      "long prose clamp contains the trace disclosure",
+    );
+    assert.equal(
+      await traceTurn
+        .locator('[role="status"]')
+        .first()
+        .locator('xpath=ancestor::*[contains(@class,"replyClamp")]')
+        .count(),
+      0,
+      "long prose clamp contains live status",
+    );
+    await traceToggle.evaluate((node) => (node as HTMLElement).click());
+    const toolToggle = traceTurn.locator(`[data-scroll-id="${toolID}"] button[aria-expanded]`);
+    await toolToggle.waitFor();
+    await toolToggle.scrollIntoViewIfNeeded();
+    const issueScroll = detail.locator("[data-issue-scroll]");
+    await issueScroll.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
+    await page.waitForTimeout(100);
+    const controlY = await toolToggle.evaluate((node) => node.getBoundingClientRect().top);
+    await toolToggle.evaluate((node) => (node as HTMLElement).click());
+    await page.waitForTimeout(100);
+    assert(
+      Math.abs(
+        (await toolToggle.evaluate((node) => node.getBoundingClientRect().top)) - controlY,
+      ) <= 2,
+      "Issue tool expansion moved its control",
+    );
+    const toolOutput = traceTurn.getByText("工具输出不受回复截断影响。\n".repeat(80), {
+      exact: true,
+    });
+    assert.equal(
+      await toolOutput.locator('xpath=ancestor::*[contains(@class,"replyClamp")]').count(),
+      0,
+      "long prose clamp clips tool output",
+    );
+    assert(
+      await toolOutput.evaluate((node) => node.getBoundingClientRect().height > 100),
+      "fixture tool output must extend beyond the reply preview",
+    );
+    const readingTop = await issueScroll.evaluate((node) => node.scrollTop);
+    traceReply.body += "新的流式正文，不应抢走工具阅读位置。\n\n".repeat(40);
+    traceReply.assistant_revision!++;
+    publish();
+    await traceTurn
+      .getByText(/新的流式正文/)
+      .first()
+      .waitFor({ state: "attached" });
+    await page.waitForTimeout(150);
+    assert(
+      Math.abs((await issueScroll.evaluate((node) => node.scrollTop)) - readingTop) <= 2,
+      "streamed Issue update resumed following over expanded tool output",
+    );
+    assert(
+      Math.abs(
+        (await toolToggle.evaluate((node) => node.getBoundingClientRect().top)) - controlY,
+      ) <= 2,
+      "streamed Issue update moved the tool reading control",
+    );
+    await toolToggle.evaluate((node) => (node as HTMLElement).click());
+    await page.waitForTimeout(100);
+    assert(
+      Math.abs(
+        (await toolToggle.evaluate((node) => node.getBoundingClientRect().top)) - controlY,
+      ) <= 2,
+      "Issue tool collapse moved its control",
+    );
+    traceBlock.items!.pop();
+    traceReply.body = savedBody!;
+    traceReply.assistant_revision!++;
+    publish();
+    await traceToggle.waitFor({ state: "detached" });
 
     // A stable activity ID can grow while streaming without changing ledger order.
     const reply = activity.items![0]!.block!.items![0]!;
@@ -704,13 +848,63 @@ try {
       const n = document.querySelector("[data-issue-scroll]")!;
       return n.scrollHeight > previousHeight && n.scrollHeight - n.scrollTop - n.clientHeight < 20;
     }, previousHeight);
+    // Resize only the scrollport: existing latest intent must stay at bottom.
+    await page.setViewportSize({ width: width > 760 ? 390 : 1440, height: 844 });
+    await page.waitForFunction(() => {
+      const node = document.querySelector("[data-issue-scroll]")!;
+      return node.scrollHeight - node.scrollTop - node.clientHeight < 2;
+    });
+    await page.setViewportSize({ width, height: 1000 });
+    await page.waitForFunction(() => {
+      const node = document.querySelector("[data-issue-scroll]")!;
+      return node.scrollHeight - node.scrollTop - node.clientHeight < 2;
+    });
+    const laterEntry = detail.locator('[data-scroll-id="result:artifact-one"]');
+    await laterEntry.scrollIntoViewIfNeeded();
+    await scroller.evaluate((node) => {
+      node.scrollTop -= 120;
+    });
+    await page.waitForTimeout(100);
+    const entryY = await laterEntry.evaluate((node) => node.getBoundingClientRect().top);
+    reply.body += "在较早回复继续生成内容。\n\n".repeat(60);
+    reply.assistant_revision!++;
+    publish();
+    await turn
+      .getByText(/在较早回复继续生成内容/)
+      .first()
+      .waitFor({ state: "attached" });
+    await page.waitForTimeout(100);
+    assert(
+      Math.abs((await laterEntry.evaluate((node) => node.getBoundingClientRect().top)) - entryY) <=
+        2,
+      "streamed reply above paused Issue reading displaced the later entry",
+    );
+    const originalProgress = issue.progress!.summary;
+    issue.progress!.summary = "单独到达的当前进展更新。\n\n".repeat(60);
+    issue.revision++;
+    publish();
+    await detail
+      .getByText(/单独到达的当前进展更新/)
+      .first()
+      .waitFor({ state: "attached" });
+    await page.waitForTimeout(100);
+    assert(
+      Math.abs((await laterEntry.evaluate((node) => node.getBoundingClientRect().top)) - entryY) <=
+        2,
+      "independent Issue progress detail update displaced paused activity reading",
+    );
+    issue.progress!.summary = originalProgress;
+    issue.revision++;
+    publish();
+    await page.waitForTimeout(100);
     reply.body = originalBody;
     reply.assistant_revision!++;
     publish();
     await detail.getByRole("button", { name: "查看并决定", exact: true }).click();
     await page
-      .getByRole("dialog", { name: "Issue待处理事项", exact: true })
-      .getByRole("button", { name: "关闭详情", exact: true })
+      .getByRole("dialog", { name: "Issue 待处理事项", exact: true })
+      .getByRole("button", { name: /^关闭/ })
+      .first()
       .click();
     const originalActivity = activity.items!;
     const sharedReply = {
@@ -768,8 +962,8 @@ try {
     issue.state = "closed";
     issue.conversation!.reason = "ended";
     publish();
-    await detail.getByRole("button", { name: "重新打开Issue →", exact: true }).waitFor();
-    await detail.getByText("Issue已结束，对话记录仍可阅读。", { exact: true }).waitFor();
+    await detail.getByRole("button", { name: "重新打开 Issue →", exact: true }).waitFor();
+    await detail.getByText("Issue 已结束，对话记录仍可阅读。", { exact: true }).waitFor();
     issue.state = "paused";
     issue.assignee = { kind: "agent", ref: "hosted/qingzhu" };
     issue.conversation = { conversation_id: "issue:canonical-root", can_send: true };
@@ -815,7 +1009,7 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-    const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
     const summary = detail.getByText(text, { exact: true });
     const expand = detail.getByRole("button", { name: "展开全文", exact: true });
     await expand.waitFor();
@@ -837,7 +1031,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-    const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
     const summary = detail.getByText(text, { exact: true });
     await summary.waitFor();
     const expand = detail.getByRole("button", { name: "展开全文", exact: true });
@@ -885,15 +1079,12 @@ try {
   const context = await browser.newContext({ viewport: { width: 390, height: 1000 } });
   const page = await context.newPage();
   await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-  const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+  const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
   await detail.getByRole("button", { name: "查看全部子 Issue", exact: true }).click();
   await detail.getByRole("button", { name: "下一页子 Issue", exact: true }).click();
   await detail.getByRole("button", { name: /整理发布步骤/ }).click();
   await detail.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
-  await detail
-    .getByRole("navigation", { name: "Issue路径" })
-    .getByRole("button", { name: /发布流程整理/ })
-    .click();
+  await detail.getByRole("button", { name: "返回 Issue 列表或上一项", exact: true }).click();
   await detail.getByRole("button", { name: "上一页子 Issue", exact: true }).waitFor();
   assert.equal(await detail.getByRole("button", { name: /其它子项 0/ }).count(), 0);
   await detail.getByRole("button", { name: /整理发布步骤/ }).waitFor();
@@ -903,7 +1094,7 @@ try {
   const recoveryContext = await browser.newContext({ viewport: { width: 390, height: 1000 } });
   const recovery = await recoveryContext.newPage();
   await recovery.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-  const recoveryDetail = recovery.getByRole("region", { name: "Issue详情", exact: true });
+  const recoveryDetail = recovery.getByRole("region", { name: "Issue 详情", exact: true });
   await recoveryDetail.getByRole("button", { name: "编辑", exact: true }).click();
   const editor = recovery.getByRole("dialog", { name: "编辑当前进展", exact: true });
   await editor.getByRole("textbox", { name: "当前进展", exact: true }).fill("原请求中的进展");
@@ -911,7 +1102,7 @@ try {
   const beforeWrites = writes.length;
   await editor.getByRole("button", { name: "保存进展", exact: true }).click();
   await editor.getByRole("button", { name: "核对原更新请求", exact: true }).waitFor();
-  await editor.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await editor.getByRole("button", { name: /^关闭/ }).first().click();
   issue.revision++;
   issue.progress!.summary = "其他更新已被保存";
   issue.progress!.next_step = "其他人的下一步";
@@ -926,7 +1117,7 @@ try {
   progressRefusalReady = true;
   await editor.getByRole("button", { name: "核对原更新请求", exact: true }).click();
   await editor
-    .getByText("Issue已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
+    .getByText("Issue 已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
     .waitFor();
   assert.equal(
     await editor.getByRole("textbox", { name: "当前进展", exact: true }).inputValue(),
@@ -959,7 +1150,7 @@ try {
   const isolationContext = await browser.newContext({ viewport: { width: 390, height: 1000 } });
   const isolation = await isolationContext.newPage();
   await isolation.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-  const isolatedIssue = isolation.getByRole("region", { name: "Issue详情", exact: true });
+  const isolatedIssue = isolation.getByRole("region", { name: "Issue 详情", exact: true });
   await isolatedIssue.getByRole("heading", { name: issue.plan.title, exact: true }).waitFor();
   await isolation.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -994,10 +1185,10 @@ try {
     .getByText("当前由你负责；可交接给 Agent 后继续负责人对话。", { exact: true })
     .waitFor();
   assert.equal(await isolatedIssue.getByText("只属于主对话的待发内容", { exact: true }).count(), 0);
-  await isolatedIssue.getByRole("button", { name: "返回Issue列表或上一项", exact: true }).click();
+  await isolatedIssue.getByRole("button", { name: "返回 Issue 列表或上一项", exact: true }).click();
   await isolation
     .getByRole("navigation", { name: "视图", exact: true })
-    .getByRole("button", { name: "对话", exact: true })
+    .getByRole("link", { name: "对话", exact: true })
     .click();
   await isolation.getByText("只属于主对话的待发内容", { exact: true }).waitFor();
   assert(
@@ -1018,6 +1209,283 @@ try {
   console.log(
     "PASS 390: missing binding never leaks main's outbox; one click reads the earlier activity page",
   );
+  pagedActivity = false;
+  activityDelay = 0;
+  for (const width of [1440, 390]) {
+    const base = activity.items![0]!.block!;
+    const originalMore = base.more;
+    const baseBody = base.items![0]!.body;
+    base.items![0]!.body = "读取前已展开的长回复。\n\n".repeat(80);
+    base.more = true;
+    const reply = {
+      ...base.items![0]!,
+      message_id: "continuation-reply",
+      seq: 3,
+      body: "续页流式回复。\n\n".repeat(80),
+      assistant_state: "streaming" as const,
+    };
+    continuationBlock = { ...base, items: [reply], more: false };
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+      const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+      await detail.getByRole("button", { name: "展开全文", exact: true }).first().click();
+      const load = detail.getByRole("button", { name: "继续读取本轮消息", exact: true });
+      await load.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(100);
+      const boundaryY = await load.evaluate((node) => node.getBoundingClientRect().top);
+      await load.click();
+      await detail
+        .getByText(/续页流式回复/)
+        .first()
+        .waitFor({ state: "attached" });
+      const firstFetched = detail.locator('[data-scroll-id="continuation-reply"]');
+      await page.waitForTimeout(100);
+      assert(
+        Math.abs(
+          (await firstFetched.evaluate((node) => node.getBoundingClientRect().top)) - boundaryY,
+        ) <= 2,
+        "explicit continuation read skipped the fetched page boundary",
+      );
+      assert.equal(
+        await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+        0,
+        "explicit continuation read showed a misleading new-progress prompt",
+      );
+      const scroller = detail.locator("[data-issue-scroll]");
+      await scroller.evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+      });
+      await page.waitForTimeout(100);
+      const height = await scroller.evaluate((node) => node.scrollHeight);
+      reply.body += "续页新增正文，基础活动行保持不变。\n\n".repeat(60);
+      publish();
+      await detail
+        .getByText(/续页新增正文/)
+        .first()
+        .waitFor({ state: "attached" });
+      await page.waitForFunction((height) => {
+        const node = document.querySelector("[data-issue-scroll]")!;
+        return (
+          node.scrollHeight > height && node.scrollHeight - node.scrollTop - node.clientHeight < 2
+        );
+      }, height);
+      const later = detail.locator('[data-scroll-id="result:artifact-one"]');
+      await later.scrollIntoViewIfNeeded();
+      await scroller.evaluate((node) => {
+        node.scrollTop -= 120;
+      });
+      await page.waitForTimeout(100);
+      const y = await later.evaluate((node) => node.getBoundingClientRect().top);
+      reply.body += "续页再次增长，保持暂停阅读。\n\n".repeat(60);
+      publish();
+      await detail
+        .getByText(/续页再次增长/)
+        .first()
+        .waitFor({ state: "attached" });
+      await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).waitFor();
+      assert(
+        Math.abs((await later.evaluate((node) => node.getBoundingClientRect().top)) - y) <= 2,
+        "continuation-only growth displaced paused reading",
+      );
+      console.log(
+        `PASS ${width}: continuation-only streaming follows latest and preserves paused anchor with prompt`,
+      );
+    } finally {
+      await context.close();
+      base.more = originalMore;
+      base.items![0]!.body = baseBody!;
+      continuationBlock = null;
+    }
+  }
+
+  for (const width of [1440, 390]) {
+    for (const scenario of ["failure", "scroll", "group", "progress", "send"] as const) {
+      const base = activity.items![0]!.block!;
+      const original = { items: base.items, more: base.more };
+      const older = { ...base.items![0]!, body: "基础长回复内容。\n\n".repeat(100), seq: 2 };
+      const tools = Array.from({ length: scenario === "group" ? 49 : 0 }, (_, index) => ({
+        ...older,
+        message_id: `existing-tool-${index}`,
+        seq: index + 3,
+        body: "",
+        tool: {
+          name: "files_read",
+          status: "completed" as const,
+          turn_id: "group-turn",
+          updated_at: older.created_at,
+          input: "{}",
+          output: "已完成",
+        },
+      }));
+      base.items = [older, ...tools];
+      base.more = true;
+      const newTool = { ...tools[0]!, message_id: "new-group-tool", seq: 52 };
+      const reply = {
+        ...older,
+        message_id: `scenario-reply-${scenario}`,
+        seq: 53,
+        body: "新续页正文。\n\n".repeat(100),
+      };
+      continuationBlock = {
+        ...base,
+        items: scenario === "group" ? [newTool, reply] : [reply],
+        more: false,
+      };
+      continuationFailure = scenario === "failure";
+      continuationDelay = ["scroll", "progress"].includes(scenario) ? 700 : 0;
+      const context = await browser.newContext({
+        viewport: { width, height: 844 },
+        serviceWorkers: "block",
+      });
+      const page = await context.newPage();
+      let release = () => {};
+      let arrived = Promise.resolve();
+      if (scenario === "send") {
+        issue.conversation = { conversation_id: "issue:canonical-root", can_send: true };
+        let notify = () => {};
+        arrived = new Promise<void>((resolve) => {
+          notify = resolve;
+        });
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        await page.route("**/conversation/blocks/owner-one?projection=issues", async (route) => {
+          notify();
+          await held;
+          await route.continue();
+        });
+      }
+      try {
+        await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+        const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+        await detail.getByRole("button", { name: "展开全文", exact: true }).first().click();
+        if (scenario === "group") await detail.locator("details[data-trace] > summary").click();
+        const load = detail.getByRole("button", { name: "继续读取本轮消息", exact: true });
+        await load.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(100);
+        const y = await load.evaluate((node) => node.getBoundingClientRect().top);
+        await load.click();
+        const scroller = detail.locator("[data-issue-scroll]");
+        const later = detail.locator('[data-scroll-id="result:artifact-one"]');
+        if (scenario === "failure") {
+          await detail.getByText("本轮后续记录读取失败", { exact: false }).waitFor();
+          await later.scrollIntoViewIfNeeded();
+          await scroller.evaluate((node) => {
+            node.scrollTop -= 100;
+          });
+          await page.waitForTimeout(100);
+          const saved = await later.evaluate((node) => node.getBoundingClientRect().top);
+          older.body += "失败后基础消息继续生成。\n\n".repeat(80);
+          older.assistant_revision!++;
+          publish();
+          await detail
+            .getByText(/失败后基础消息继续生成/)
+            .first()
+            .waitFor({ state: "attached" });
+          await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).waitFor();
+          assert(
+            Math.abs((await later.evaluate((node) => node.getBoundingClientRect().top)) - saved) <=
+              2,
+            "failed pagination suppressed unrelated paused-anchor updates",
+          );
+        } else if (scenario === "scroll") {
+          await scroller.evaluate((node) => {
+            node.scrollTop -= 500;
+          });
+          await page.waitForTimeout(100);
+          const saved = await scroller.evaluate((node) => node.scrollTop);
+          await detail
+            .getByText(/新续页正文/)
+            .first()
+            .waitFor({ state: "attached" });
+          await page.waitForTimeout(100);
+          assert(
+            Math.abs((await scroller.evaluate((node) => node.scrollTop)) - saved) <= 2,
+            "pagination undid scrolling performed during the request",
+          );
+        } else if (scenario === "send") {
+          await arrived;
+          const text = `续页等待期间发送的新消息 ${width}`;
+          await detail.getByRole("textbox", { name: "消息", exact: true }).fill(text);
+          await detail.getByRole("button", { name: "发送", exact: true }).click();
+          await scroller.getByText(text, { exact: true }).waitFor();
+          release();
+          await detail
+            .getByText(/新续页正文/)
+            .first()
+            .waitFor({ state: "attached" });
+          await page.waitForTimeout(100);
+          assert(
+            await scroller.evaluate(
+              (node) => node.scrollHeight - node.scrollTop - node.clientHeight < 2,
+            ),
+            "continuation response displaced latest after sending",
+          );
+          const sent = await scroller.getByText(text, { exact: true }).boundingBox();
+          const viewport = await scroller.boundingBox();
+          assert(
+            sent &&
+              viewport &&
+              sent.y >= viewport.y &&
+              sent.y + sent.height <= viewport.y + viewport.height,
+            "newly sent message no longer visible at latest",
+          );
+          assert.equal(
+            await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+            0,
+          );
+        } else if (scenario === "progress") {
+          const progress = issue.progress!.summary;
+          issue.progress!.summary = "等待续页时上方进展更新。\n\n".repeat(60);
+          issue.revision++;
+          publish();
+          await detail
+            .getByText(/等待续页时上方进展更新/)
+            .first()
+            .waitFor({ state: "attached" });
+          const first = detail.locator('[data-scroll-id="scenario-reply-progress"]');
+          await first.waitFor();
+          await page.waitForTimeout(100);
+          assert(
+            Math.abs((await first.evaluate((node) => node.getBoundingClientRect().top)) - y) <= 2,
+            "programmatic progress anchor restoration cancelled pending continuation boundary",
+          );
+          assert.equal(
+            await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+            0,
+          );
+          issue.progress!.summary = progress;
+          issue.revision++;
+        } else {
+          const group = detail.getByRole("button", { name: "使用了 50 个工具", exact: true });
+          await group.waitFor();
+          await page.waitForTimeout(100);
+          assert(
+            Math.abs((await group.evaluate((node) => node.getBoundingClientRect().top)) - y) <= 2,
+            "pagination anchored a hidden grouped member instead of its visible disclosure",
+          );
+          assert.equal(
+            await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+            0,
+          );
+        }
+        console.log(`PASS continuation ${scenario} ${width}`);
+      } finally {
+        await context.close();
+        release();
+        base.items = original.items;
+        base.more = original.more;
+        continuationBlock = null;
+        continuationFailure = false;
+        continuationDelay = 0;
+      }
+    }
+  }
 } finally {
   await browser.close();
   for (const s of streams) s.end();

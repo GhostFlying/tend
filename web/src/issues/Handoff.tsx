@@ -130,7 +130,7 @@ export function IssueHandoff({
                 )}
               {activeCategories.map((category) => (
                 <option key={category.category_id} value={`category:${category.category_id}`}>
-                  {category.title} · {category.category_id}（runner 领取）
+                  {category.title} · {category.category_id}（执行主机领取）
                 </option>
               ))}
             </select>
@@ -165,7 +165,7 @@ export function IssueHandoff({
           <strong>随交接保留</strong>
           <ul>
             <li>目标、范围、约束与完成条件</li>
-            <li>子Issue及各自负责人</li>
+            <li>子 Issue 及各自负责人</li>
             <li>来源、讨论与未解决事项</li>
             <li>已有任务、执行记录、工作区与交付</li>
           </ul>
@@ -207,7 +207,7 @@ export function IssueHandoff({
           </button>
         )}
         <button className={styles.button} onClick={onBack}>
-          返回Issue
+          返回 Issue
         </button>
       </div>
     </section>

@@ -6,12 +6,13 @@
 .row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
-  height: 26px;
-  padding: 0 4px;
+  min-height: var(--control-s);
+  flex-wrap: wrap;
+  padding: 0 var(--space-1);
   border-radius: var(--radius-s);
-  font-size: var(--text-m);
+  font-size: var(--text-label);
   color: var(--label-3);
   text-align: left;
 }
@@ -33,10 +34,10 @@
 }
 
 .name {
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--text-caption);
   color: var(--label-2);
-  flex: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .sum {
@@ -52,7 +53,7 @@
   align-items: center;
   gap: 6px;
   flex: none;
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
 }
 
 .status[data-status="failed"] {
@@ -64,13 +65,13 @@
 }
 
 .body {
-  margin: 4px 0 2px 22px;
-  padding: 10px 12px;
+  margin: var(--space-1) 0 2px 22px;
+  padding: 10px var(--space-3);
   background: var(--bg-l1);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-l);
   font-family: var(--mono);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   line-height: 19px;
   color: var(--label-2);
   max-height: 360px;
@@ -84,10 +85,14 @@
 }
 
 .label:not(:first-child) {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.groupToggle[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
 }

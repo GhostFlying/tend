@@ -1,3 +1,4 @@
+import { useEntryState } from "../app/router.ts";
 import { useEffect, useMemo, useState, useRef } from "react";
 import type { ArtifactDetail, IssueResult, IssueResultPage } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
@@ -31,11 +32,16 @@ export function IssueResultCard({
   const { client } = useServices();
   const read = useMemo(() => new WorkItemRead<ArtifactDetail>(client), [client]);
   const state = useStore(read.state);
-  useEffect(() => () => read.close(), [read]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useEntryState(`artifact:${result.artifact.artifact_id}`, false);
+  useEffect(() => {
+    if (expanded)
+      void read.open(`/api/v1/artifacts/${encodeURIComponent(result.artifact.artifact_id)}`);
+    return () => read.close();
+  }, [read, expanded, result.artifact.artifact_id]);
   const open = () => {
     setExpanded(true);
-    void read.open(`/api/v1/artifacts/${encodeURIComponent(result.artifact.artifact_id)}`);
+    if (expanded)
+      void read.open(`/api/v1/artifacts/${encodeURIComponent(result.artifact.artifact_id)}`);
   };
   return (
     <article className={styles.delivery} data-artifact={result.artifact.artifact_id}>

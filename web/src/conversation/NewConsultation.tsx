@@ -45,18 +45,19 @@ export function NewConsultation({
   const disabled = operation.busy || operation.pending;
   return (
     <section className={`${styles.root} ${styles.form}`} aria-label="新建咨询">
-      <h1>新建咨询</h1>
+      <h2>新建咨询</h2>
       <p className={styles.muted}>
-        选择已登记的托管Agent。普通问答不创建Issue或任务；你明确要求执行时，咨询Agent可将实际来源委派为Issue。
+        选择已登记的托管 Agent。普通问答不创建 Issue 或任务；你明确要求执行时，咨询 Agent
+        可将实际来源委派为 Issue。
       </p>
       <label>
-        咨询Agent
+        咨询 Agent
         <select
           disabled={disabled}
           value={original?.agent_ref ?? agent}
           onChange={(e) => setAgent(e.target.value)}
         >
-          <option value="">选择托管Agent</option>
+          <option value="">选择托管 Agent</option>
           {candidates.map((a) => {
             const ref = `${a.identity.execution_environment_id}/${a.identity.local_id}`;
             return (
@@ -75,7 +76,7 @@ export function NewConsultation({
         </p>
       )}
       {hosted.value && !candidates.length && (
-        <p>没有登记可用于咨询的托管Agent。执行专用Agent不会作为咨询候选。</p>
+        <p>没有登记可用于咨询的托管 Agent。执行专用 Agent 不会作为咨询候选。</p>
       )}
       <label>
         标题

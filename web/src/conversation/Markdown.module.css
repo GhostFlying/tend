@@ -1,7 +1,7 @@
 .md {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -36,16 +36,16 @@
 .md h1,
 .md h2,
 .md h3 {
-  font-size: 16px;
+  font-size: var(--text-title-sm);
   line-height: 24px;
   font-weight: 600;
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 .md h4,
 .md h5,
 .md h6 {
-  font-size: var(--text-l);
+  font-size: var(--text-body-lg);
   font-weight: 600;
 }
 
@@ -60,14 +60,14 @@
 
 .md code {
   font-family: var(--mono);
-  font-size: var(--text-m);
+  font-size: var(--text-label);
   background: var(--bg-l2);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
 }
 
 .md blockquote {
-  padding-left: 12px;
+  padding-left: var(--space-3);
   border-left: 3px solid var(--border);
   color: var(--label-2);
 }
@@ -76,12 +76,12 @@
   width: 100%;
   border: 0;
   border-top: 1px solid var(--border);
-  margin: 4px 0;
+  margin: var(--space-1) 0;
 }
 
 .md table {
   border-collapse: collapse;
-  font-size: var(--text-base);
+  font-size: var(--text-body);
   line-height: 20px;
   display: block;
   overflow-x: auto;
@@ -91,7 +91,7 @@
 .md th,
 .md td {
   border: 1px solid var(--border);
-  padding: 4px 10px;
+  padding: var(--space-1) 10px;
   text-align: left;
 }
 
@@ -110,9 +110,9 @@
 
 .code pre {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px var(--space-3);
   overflow-x: auto;
-  font-size: 12.5px;
+  font-size: var(--text-caption);
   line-height: 19px;
 }
 
@@ -128,9 +128,9 @@
   top: 6px;
   right: 6px;
   height: 24px;
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-s);
-  font-size: var(--text-s);
+  font-size: var(--text-caption);
   color: var(--label-3);
   background: var(--bg);
   border: 1px solid var(--border);

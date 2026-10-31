@@ -55,6 +55,14 @@ jobs:
         run: pnpm --dir web test:issue-detail-layout
       - name: token usage and rollout regression
         run: pnpm --dir web test:usage
+      - name: navigation layout regression
+        env:
+          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-navigation
+        run: pnpm --dir web test:navigation-layout
+      - name: all-route UI tour
+        env:
+          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-ui-tour
+        run: pnpm --dir web test:ui-tour
       - name: cross-compile
         run: |
           GOOS=windows GOARCH=amd64 go build ./...

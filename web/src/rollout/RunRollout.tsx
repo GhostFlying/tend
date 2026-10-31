@@ -1,3 +1,7 @@
+import { LiveStatus } from "../ui/LiveStatus.tsx";
+import { runActivityStatus } from "../ui/activityStatus.ts";
+import { captureAnchor, restoreAnchor, type ScrollAnchor } from "../conversation/scrollAnchor.ts";
+import { runLabel } from "../tasks/runLabel.ts";
 import {
   useCallback,
   useEffect,
@@ -9,12 +13,41 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import type { RunView } from "../api/generated/api.ts";
+import { useOverlayState } from "../ui/focus.ts";
+import { useServices } from "../app/services.tsx";
+import { useStore } from "../state/store.ts";
+import { WorkItemRead } from "../workitems/live.ts";
+import type { TaskDetail, RunView } from "../api/generated/api.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { UsagePanel } from "../usage/Usage.tsx";
-import { buildSteps, statusLabel, type Step } from "./model.ts";
+import { buildSteps, type Step } from "./model.ts";
 import { useRunWindow } from "./useRunWindow.ts";
 import styles from "./RunRollout.module.css";
+
+export function TaskRunStatus({ id }: { id: string }) {
+  const { client, live } = useServices();
+  const read = useMemo(() => new WorkItemRead<TaskDetail>(client), [client]);
+  const state = useStore(read.state);
+  useEffect(() => {
+    void read.open(`/api/v1/tasks/${encodeURIComponent(id)}`);
+    const stop = live.snapshot.subscribe(() => void read.refresh());
+    return () => {
+      stop();
+      read.close();
+    };
+  }, [id, read, live]);
+  const runs = state.value?.runs;
+  return runs?.length ? <RunRollout runs={runs} /> : null;
+}
+
+export function RunStatusLine({ id, observed }: { id: string; observed: string }) {
+  return <RunStatusWindow key={id} id={id} observed={observed} />;
+}
+
+function RunStatusWindow({ id, observed }: { id: string; observed: string }) {
+  const window = useRunWindow(id);
+  return <LiveStatus status={runActivityStatus(window.page?.logs ?? [], observed)} />;
+}
 
 export function RunRollout({ runs }: { runs: readonly RunView[] }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -33,15 +66,14 @@ export function RunRollout({ runs }: { runs: readonly RunView[] }) {
           >
             {runs.map((item) => (
               <option key={item.run_id} value={item.run_id}>
-                {item.role === "accept" ? "验收" : "实施"} · 第 {item.generation} 代
-                {item.spec_version ? ` · 版本 ${item.spec_version}` : ""}
+                {runLabel(runs, item)}
               </option>
             ))}
           </select>
         )}
       </div>
       {run ? (
-        <RunWindow key={run.run_id} run={run} />
+        <RunWindow key={run.run_id} run={run} label={runLabel(runs, run)} />
       ) : (
         <p className={styles.empty}>尚未开始执行。</p>
       )}
@@ -56,22 +88,32 @@ interface ReadingPosition {
   disclosures: Record<string, string[]>;
   scrolls: Record<string, { top: number; left: number }[]>;
 }
-function RunWindow({ run }: { run: RunView }) {
+function RunWindow({ run, label }: { run: RunView; label: string }) {
   const window = useRunWindow(run.run_id);
   const steps = useMemo(() => buildSteps(window.page?.logs ?? []), [window.page]);
   const [expanded, setExpanded] = useState(false);
   const [visible, setVisible] = useState(6);
-  const [full, setFull] = useState(false);
+  const [full, setFull] = useOverlayState(false);
   const [target, setTarget] = useState("");
   const [usage, setUsage] = useState(false);
   const regionID = useId();
+  const toggle = useRef<HTMLButtonElement>(null);
+  const fallbackFocus = useCallback(() => toggle.current, []);
   const readingPosition = useRef<ReadingPosition | null>(null);
   const [savedPosition, setSavedPosition] = useState<ReadingPosition | null>(null);
   const observed = run.observed;
   const active = observed === "running" || observed === "starting";
-  const current =
-    (active && steps.findLast((step) => step.kind === "tool" && step.pending)) || steps.at(-1);
-  const close = useCallback(() => setFull(false), []);
+  const status = runActivityStatus(window.page?.logs ?? [], observed);
+  const wasActive = useRef(active);
+  useLayoutEffect(() => {
+    if (wasActive.current && !active) {
+      if (document.getElementById(regionID)?.contains(document.activeElement))
+        toggle.current?.focus({ preventScroll: true });
+      setExpanded(false);
+    }
+    wasActive.current = active;
+  }, [active, regionID]);
+  const close = useCallback(() => setFull(false), [setFull]);
   const open = (step?: Step) => {
     if (step) window.setLive(false);
     setSavedPosition(readingPosition.current);
@@ -81,20 +123,17 @@ function RunWindow({ run }: { run: RunView }) {
   return (
     <>
       <button
+        ref={toggle}
         className={styles.activity}
         aria-label="展开执行步骤"
         aria-expanded={expanded}
         aria-controls={expanded ? regionID : undefined}
         onClick={() => setExpanded(!expanded)}
       >
-        <StateMark active={active} failed={observed === "failed"} />
         <span className={styles.activityText}>
-          <span className={styles.state}>{statusLabel(observed)}</span>
-          <span className={styles.summary}>
-            {current?.summary ?? (window.error ? "暂时无法读取过程" : "等待执行记录")}
-          </span>
+          <LiveStatus status={status} />
+          {active && <span className={styles.summary}>{status.steps} 个步骤</span>}
         </span>
-        <StepTime step={current} />
         <span className={styles.chevron} data-open={expanded} aria-hidden>
           ›
         </span>
@@ -139,11 +178,13 @@ function RunWindow({ run }: { run: RunView }) {
       {full && (
         <Reader
           run={run}
+          label={label}
           window={window}
           steps={steps}
           target={target}
           position={readingPosition}
           restored={savedPosition}
+          fallbackFocus={fallbackFocus}
           onClose={close}
         />
       )}
@@ -283,30 +324,63 @@ function StepDiagnostics({
 /** A second modal keeps the underlying card, its disclosures and its scrollport mounted. */
 function Reader({
   run,
+  label,
   window: state,
   steps,
   target,
   position,
   restored,
+  fallbackFocus,
   onClose,
 }: {
   run: RunView;
+  label: string;
   window: WindowState;
   steps: Step[];
   target: string;
   position: RefObject<ReadingPosition | null>;
   restored: ReadingPosition | null;
+  fallbackFocus(): HTMLButtonElement | null;
   onClose(): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const flow = useRef<HTMLOListElement>(null);
+  const contentKey = JSON.stringify(steps);
+  const previousContent = useRef("");
+  const readingAnchor = useRef<ScrollAnchor | null>(null);
+  const scrollportSize = useRef({ width: 0, height: 0 });
+  const explicitLatest = useRef<{ page: WindowState["page"] } | null>(null);
+  const disclosureFrame = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(disclosureFrame.current), []);
   const initial = useRef(true);
   const closing = useRef(false);
   const anchor = useRef<{ key: string; top: number; page: WindowState["page"] } | null>(null);
   const [usage, setUsage] = useState(false);
   const observed = run.observed;
   const active = observed === "running" || observed === "starting";
+  const resized = useCallback(
+    (el: HTMLElement) => {
+      if (
+        el.clientWidth === scrollportSize.current.width &&
+        el.clientHeight === scrollportSize.current.height
+      )
+        return false;
+      scrollportSize.current = { width: el.clientWidth, height: el.clientHeight };
+      if (state.live) el.scrollTop = el.scrollHeight;
+      else if (readingAnchor.current) restoreAnchor(el, readingAnchor.current);
+      readingAnchor.current = captureAnchor(el);
+      return true;
+    },
+    [state.live],
+  );
+  useEffect(() => {
+    const node = scroller.current;
+    if (!node) return;
+    const observer = new ResizeObserver(() => resized(node));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [resized]);
   const close = () => {
     if (closing.current) return;
     closing.current = true;
@@ -359,8 +433,9 @@ function Reader({
       panel?.close();
       if (opener instanceof HTMLElement && opener.isConnected)
         opener.focus({ preventScroll: true });
+      else fallbackFocus()?.focus({ preventScroll: true });
     };
-  }, [onClose, position, run.run_id]);
+  }, [onClose, position, run.run_id, fallbackFocus]);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -388,6 +463,9 @@ function Reader({
           row.getBoundingClientRect().top - el.getBoundingClientRect().top - (saved?.top ?? 16);
       else el.scrollTop = el.scrollHeight;
       initial.current = false;
+    } else if (explicitLatest.current && state.page !== explicitLatest.current.page) {
+      el.scrollTop = el.scrollHeight;
+      explicitLatest.current = null;
     } else if (anchor.current && state.page !== anchor.current.page) {
       const saved = anchor.current;
       const row = [...el.querySelectorAll<HTMLElement>("[data-step-key]")].find(
@@ -397,16 +475,20 @@ function Reader({
         el.scrollTop +=
           row.getBoundingClientRect().top - el.getBoundingClientRect().top - saved.top;
       anchor.current = null;
-    } else if (state.live) el.scrollTop = el.scrollHeight;
-  }, [steps, target, state.live, state.page, position, restored]);
-  useEffect(() => {
-    const observer = new ResizeObserver(() => {
-      if (state.live && scroller.current)
-        scroller.current.scrollTop = scroller.current.scrollHeight;
-    });
-    if (flow.current) observer.observe(flow.current);
-    return () => observer.disconnect();
-  }, [state.live]);
+    } else if (state.live && previousContent.current !== contentKey) el.scrollTop = el.scrollHeight;
+    else if (!state.live && previousContent.current !== contentKey && readingAnchor.current)
+      restoreAnchor(el, readingAnchor.current);
+    readingAnchor.current = captureAnchor(el);
+    previousContent.current = contentKey;
+  }, [contentKey, target, state.live, state.page, position, restored]);
+  const resume = (latest = false) => {
+    anchor.current = null;
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+    if (latest) {
+      explicitLatest.current = { page: state.page };
+      state.latest();
+    } else state.setLive(true);
+  };
   const earlier = () => {
     const el = scroller.current;
     if (el) {
@@ -443,13 +525,10 @@ function Reader({
         </button>
         <div className={styles.readerTitle}>
           <strong>执行过程</strong>
-          <span>
-            {run.role === "accept" ? "验收" : "实施"} · 第 {run.generation} 代
-          </span>
+          <span>{label}</span>
         </div>
         <span className={styles.readerState}>
-          <StateMark active={active} failed={observed === "failed"} />
-          {statusLabel(observed)}
+          <LiveStatus status={runActivityStatus(state.page?.logs ?? [], observed)} />
         </span>
         <button className={styles.close} aria-label="关闭完整过程" onClick={close}>
           ×
@@ -460,7 +539,10 @@ function Reader({
           <i data-live={state.live} />
           {state.live ? "实时跟随" : "历史阅读"}
         </span>
-        <button aria-pressed={!state.live} onClick={() => state.setLive(!state.live)}>
+        <button
+          aria-pressed={!state.live}
+          onClick={() => (state.live ? state.setLive(false) : resume())}
+        >
           {state.live ? "暂停跟随" : "恢复跟随"}
         </button>
         <button aria-expanded={usage} onClick={() => setUsage(!usage)}>
@@ -499,8 +581,28 @@ function Reader({
         className={styles.reading}
         tabIndex={0}
         aria-label="执行过程正文"
+        onClickCapture={(event) => {
+          if (
+            !(event.target instanceof Element) ||
+            !event.target.closest("summary, button[aria-expanded]")
+          )
+            return;
+          const following = state.live;
+          state.setLive(false);
+          cancelAnimationFrame(disclosureFrame.current);
+          disclosureFrame.current = requestAnimationFrame(() => {
+            disclosureFrame.current = requestAnimationFrame(() => {
+              const el = scroller.current;
+              if (el) readingAnchor.current = captureAnchor(el);
+              if (following && el && el.scrollHeight - el.scrollTop - el.clientHeight < 48)
+                state.setLive(true);
+            });
+          });
+        }}
         onScroll={(event) => {
           const el = event.currentTarget;
+          if (resized(el)) return;
+          readingAnchor.current = captureAnchor(el);
           if (state.live && el.scrollHeight - el.scrollTop - el.clientHeight > 48)
             state.setLive(false);
         }}
@@ -524,7 +626,12 @@ function Reader({
           )}
           <ol ref={flow} className={styles.steps}>
             {steps.map((step) => (
-              <li key={step.key} data-step-key={step.key} data-target={step.key === target}>
+              <li
+                key={step.key}
+                data-step-key={step.key}
+                data-scroll-id={step.key}
+                data-target={step.key === target}
+              >
                 <StepView
                   step={step}
                   active={active}
@@ -537,12 +644,6 @@ function Reader({
               </li>
             ))}
           </ol>
-          {active && (
-            <p className={styles.working}>
-              <StateMark active />
-              正在执行…
-            </p>
-          )}
           {state.page?.more_after && (
             <button className={styles.pageButton} disabled={state.loading} onClick={state.later}>
               加载较新记录
@@ -551,7 +652,7 @@ function Reader({
         </div>
       </div>
       {!state.live && (
-        <button className={styles.toLatest} onClick={state.latest}>
+        <button className={styles.toLatest} onClick={() => resume(true)}>
           ↓ 回到最新
         </button>
       )}

@@ -1,3 +1,5 @@
+import { navigate, editIssueFilters } from "./navigation.ts";
+import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Render the built app against synthetic ledger projections, never a deployed API.
@@ -12,7 +14,6 @@ import { createServer, type ServerResponse } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium, type Locator } from "playwright";
 import type {
   Envelope,
@@ -24,7 +25,7 @@ import type {
   WorkItemChoice,
 } from "../src/api/generated/api.ts";
 
-const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const root = fixtureRoot();
 const output = process.env.TEND_LAYOUT_OUTPUT ?? join(tmpdir(), "tend-work-items-layout");
 await mkdir(output, { recursive: true });
 const id = "wi_01M5M3ME31875GDA8F7P5XTD74";
@@ -388,7 +389,7 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/api/"))
     return json(res, { error: { code: "not_found", message: "Not in synthetic data" } }, 404);
   try {
-    const file = resolve(root, `.${path}${path.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, path.split("/").at(-1)?.includes(".") ? `.${path}` : "index.html");
     assert(file.startsWith(root));
     res.setHeader(
       "Content-Type",
@@ -467,14 +468,16 @@ try {
       if (width <= 760)
         await page
           .getByRole("navigation", { name: "视图" })
-          .getByRole("button", { name: "Issue", exact: true })
+          .getByRole("link", { name: "Issues", exact: true })
           .click();
-      else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+      else await page.getByRole("link", { name: "Issues", exact: true }).click();
     };
     await openBoard();
-    await page.getByRole("tab", { name: "层级", exact: true }).click();
-    await page.getByLabel("显示已结束").uncheck();
-    const board = page.getByRole("region", { name: "Issue白板", exact: true });
+    await editIssueFilters(page, () =>
+      page.getByRole("radio", { name: "层级", exact: true }).click(),
+    );
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").uncheck());
+    const board = page.getByRole("region", { name: "Issue 白板", exact: true });
     const title = board.getByRole("button", { name: items[0]!.plan.title, exact: true });
     await title.waitFor();
     assert.equal(await board.getByRole("treeitem").count(), 3);
@@ -483,11 +486,19 @@ try {
     await reachable(board.getByRole("button", { name: items[4]!.plan.title, exact: true }));
     assert(await board.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
     await page.screenshot({ path: join(output, `tree-last-${width}.png`) });
-    const filter = board.getByLabel("按项目筛选Issue");
-    await filter.fill("docs");
+    const filter = page.getByLabel("按项目筛选 Issue");
+    await editIssueFilters(page, async () => {
+      await filter.click();
+      await filter.pressSequentially("docs");
+      assert(
+        await filter.evaluate((el) => el === document.activeElement),
+        "query changes keep the filter focused",
+      );
+    });
+    assert.equal(new URL(page.url()).searchParams.get("project"), "docs");
     await board.getByRole("button", { name: "持续跟进目标 3", exact: true }).waitFor();
     assert.equal(await board.getByRole("treeitem").count(), 1);
-    await board.getByLabel("显示已结束").check();
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").check());
     await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).waitFor();
     assert(
       reads.some(
@@ -497,7 +508,7 @@ try {
     );
     // Project filtering keeps the fixed root scope; children remain in the hierarchy.
     items[7]!.plan.project = "child-project";
-    await filter.fill("child-project");
+    await editIssueFilters(page, () => filter.fill("child-project"));
     await board.getByText("暂无 Issue。", { exact: true }).waitFor();
     const query = reads
       .map((path) => new URL(path, "https://fixture.invalid"))
@@ -507,10 +518,12 @@ try {
       );
     assert.equal(query?.searchParams.get("parent_id"), "");
     await page.screenshot({ path: join(output, `cross-project-child-${width}.png`) });
-    await board.getByRole("button", { name: "任务执行记录", exact: true }).click();
-    await page.getByRole("button", { name: "返回Issue", exact: true }).click();
-    assert.equal(await filter.inputValue(), "child-project");
-    await filter.fill("");
+    await navigate(page, "/tasks");
+    await page.goBack();
+    await editIssueFilters(page, async () => {
+      assert.equal(await filter.inputValue(), "child-project");
+    });
+    await editIssueFilters(page, () => filter.fill(""));
     await title.waitFor();
     await board.getByRole("button", { name: `展开 ${items[0]!.plan.title}`, exact: true }).click();
     await board.getByRole("button", { name: items[7]!.plan.title, exact: true }).waitFor();
@@ -528,9 +541,9 @@ try {
         await page.screenshot({ path: join(output, "child-diagnostic.png") });
         throw error;
       });
-    await board.getByLabel("显示已结束").uncheck();
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").uncheck());
     await board.getByText("已取消", { exact: true }).waitFor({ state: "hidden" });
-    await board.getByLabel("显示已结束").check();
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").check());
     await title.waitFor();
     await board.getByRole("button", { name: `展开 ${items[0]!.plan.title}`, exact: true }).click();
     await board.getByText("已取消", { exact: true }).waitFor();
@@ -544,13 +557,13 @@ try {
       .getByRole("button", { name: new RegExp(task.title) })
       .first()
       .click();
-    const taskDetail = page.getByRole("dialog", { name: "任务详情", exact: true });
+    const taskDetail = page.getByRole("region", { name: "任务详情", exact: true });
     await taskDetail
       .getByText(task.title, { exact: true })
       .filter({ visible: true })
       .first()
       .waitFor();
-    await taskDetail.getByRole("button", { name: /返回Issue/ }).click();
+    await taskDetail.getByRole("button", { name: /返回 Issue/ }).click();
     await openIssueDefinition(page);
     await detail.getByText("后续仍需明确安排。", { exact: true }).waitFor();
     const history = await openIssueAux(page, "历史");
@@ -581,8 +594,8 @@ try {
       await title.elementHandle(),
     );
     assert(await title.evaluate((el) => el === document.activeElement));
-    await filter.fill("docs");
-    await board.getByLabel("显示已结束").check();
+    await editIssueFilters(page, () => filter.fill("docs"));
+    await editIssueFilters(page, () => page.getByLabel("包含已关闭").check());
     await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).click();
     await openIssueDefinition(page);
     await detail.getByText("当前收尾依据V2", { exact: true }).waitFor();
@@ -592,7 +605,7 @@ try {
       .click();
     await detail.getByText("留存用户决定", { exact: true }).waitFor();
     await closeIssue(page);
-    await filter.fill("tend");
+    await editIssueFilters(page, () => filter.fill("tend"));
     await board.getByRole("button", { name: "下一页", exact: true }).click();
     await board.getByRole("button", { name: "持续跟进目标 10", exact: true }).waitFor();
     await board.getByText("已取消", { exact: true }).waitFor();
@@ -603,7 +616,7 @@ try {
       );
     assert.equal(pageQuery?.searchParams.get("project"), "tend");
     assert.equal(pageQuery?.searchParams.get("include_closed"), "true");
-    await filter.fill("docs");
+    await editIssueFilters(page, () => filter.fill("docs"));
     await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).waitFor();
     // Refresh through the original lifecycle; a failed read retains last facts.
     fail = true;
@@ -619,14 +632,14 @@ try {
     await board.getByText("暂时无法读取", { exact: false }).waitFor({ state: "hidden" });
     await context.setOffline(true);
     for (const stream of streams) stream.end();
-    await board.getByText("等待连接恢复 · 当前显示最后读取的Issue", { exact: true }).waitFor();
+    await board.getByText("等待连接恢复 · 当前显示最后读取的 Issue", { exact: true }).waitFor();
     assert.equal(
       await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).count(),
       1,
     );
     await context.setOffline(false);
     await page.evaluate(() => window.dispatchEvent(new Event("online")));
-    await page.getByRole("button", { name: "返回对话", exact: true }).click();
+    await navigate(page, "/");
     // Preserve the actual historical Choice question/version/answer effect, not an Attention surrogate.
     const choice = page.getByRole("region", { name: "下一步安排" });
     await choice.getByRole("heading", { name: planChoice.question }).waitFor();
@@ -637,6 +650,9 @@ try {
     assert.equal(planChoice.answer, "先让我看看效果，再安排上线");
     assert.equal(writes.at(-1)?.operation, "work_item_choices.respond");
     await openBoard();
+    await editIssueFilters(page, () =>
+      page.getByRole("radio", { name: "层级", exact: true }).click(),
+    );
     items = [];
     publish();
     await board.getByText("暂无 Issue。", { exact: true }).waitFor();

@@ -1,3 +1,4 @@
+import { fixtureRoot } from "./navigation.ts";
 /// <reference lib="dom" />
 // Exercise the built application with an isolated owner API. The fixture only
 // accepts the decision write under test and never contacts a deployed server.
@@ -6,7 +7,6 @@ import { createServer, type ServerResponse } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium, webkit, type BrowserType, type Locator, type Page } from "playwright";
 import type {
   ConversationItem,
@@ -17,7 +17,7 @@ import type {
   TaskSummary,
 } from "../src/api/generated/api.ts";
 
-const appRoot = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const appRoot = fixtureRoot();
 const output = process.env.TEND_DECISION_OUTPUT ?? join(tmpdir(), "tend-decision-layout");
 await mkdir(output, { recursive: true });
 
@@ -484,7 +484,10 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/api/"))
     return sendJSON(res, { error: { code: "not_found", message: "not in fixture" } }, 404);
   try {
-    const file = resolve(appRoot, `.${path}${path.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(
+      appRoot,
+      path.split("/").at(-1)?.includes(".") ? `.${path}` : "index.html",
+    );
     assert(file.startsWith(appRoot));
     res.setHeader(
       "Content-Type",
@@ -602,30 +605,85 @@ function overlaps(a: Rect, b: Rect) {
 
 async function reachable(locator: Locator) {
   await locator.scrollIntoViewIfNeeded();
+  const reachableNow = await locator.evaluate((element) => {
+    const r = element.getBoundingClientRect();
+    const x = Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2));
+    const y = Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2));
+    const hit = document.elementFromPoint(x, y);
+    return (
+      r.width > 0 &&
+      r.height > 0 &&
+      r.bottom > 0 &&
+      r.top < innerHeight &&
+      !!hit &&
+      element.contains(hit)
+    );
+  });
+  if (!reachableNow) {
+    await locator.page().screenshot({ path: join(output, "reachability-failure.png") });
+    await writeFile(
+      join(output, "reachability-failure.json"),
+      JSON.stringify(
+        await locator.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            Math.min(innerWidth - 1, Math.max(0, rect.left + rect.width / 2)),
+            Math.min(innerHeight - 1, Math.max(0, rect.top + rect.height / 2)),
+          );
+          return {
+            rect: rect.toJSON(),
+            hit: hit?.outerHTML,
+            active: document.activeElement?.outerHTML,
+            ancestors: Array.from(
+              (function* () {
+                let node: Element | null = element;
+                while (node) {
+                  yield node;
+                  node = node.parentElement;
+                }
+              })(),
+            ).map((node) => ({
+              tag: node.tagName,
+              className: node.className,
+              top: node.scrollTop,
+              height: node.clientHeight,
+              total: node.scrollHeight,
+            })),
+          };
+        }),
+        null,
+        2,
+      ),
+    );
+  }
   assert(
-    await locator.evaluate((element) => {
-      const r = element.getBoundingClientRect();
-      const x = Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2));
-      const y = Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2));
-      const hit = document.elementFromPoint(x, y);
-      return (
-        r.width > 0 &&
-        r.height > 0 &&
-        r.bottom > 0 &&
-        r.top < innerHeight &&
-        !!hit &&
-        element.contains(hit)
-      );
-    }),
+    reachableNow,
     `control is not reachable: ${(await locator.getAttribute("aria-label")) ?? (await locator.textContent())}`,
   );
 }
 
 async function setFontScale(page: Page, scale: number) {
   if (scale === 1) return;
-  await page.addStyleTag({
-    content: `:root { --text-xs: ${11 * scale}px; --text-s: ${12 * scale}px; --text-m: ${13 * scale}px; --text-base: ${14 * scale}px; --text-l: ${15 * scale}px; --text-xl: ${17 * scale}px; --leading-base: ${22 * scale}px; --leading-l: ${24 * scale}px; }`,
-  });
+  const declarations = await page.evaluate((factor) => {
+    const style = getComputedStyle(document.documentElement);
+    // Computed styles expose custom values but do not always enumerate their names.
+    const names = new Set(
+      Array.from(document.styleSheets).flatMap((sheet) =>
+        Array.from(sheet.cssRules).flatMap((rule) =>
+          rule instanceof CSSStyleRule ? Array.from(rule.style) : [],
+        ),
+      ),
+    );
+    return Array.from(names)
+      .filter((name) => name.startsWith("--text-") || name.startsWith("--leading-"))
+      .map((name) => {
+        const value = style.getPropertyValue(name).trim();
+        if (!/^\d+(?:\.\d+)?px$/.test(value)) throw new Error(`Invalid type token: ${name}`);
+        return `${name}: ${Number.parseFloat(value) * factor}px;`;
+      })
+      .join(" ");
+  }, scale);
+  await page.addStyleTag({ content: `:root { ${declarations} }` });
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => done(undefined))));
 }
 
@@ -678,10 +736,31 @@ async function checkLayoutMatrix() {
   ]) {
     for (const fontScale of [1, 1.5, 2]) {
       reset(layoutOptions);
-      const { context, page, errors } = await openPage(viewport.width, viewport.height);
+      const { context, page, errors, consoleErrors } = await openPage(
+        viewport.width,
+        viewport.height,
+      );
       try {
         await cardFor(page).waitFor();
+        const baseFontSize = await page.evaluate(() =>
+          Number.parseFloat(getComputedStyle(document.body).fontSize),
+        );
+        const baseQuestionLeading = await cardFor(page)
+          .locator("q")
+          .evaluate((element) => Number.parseFloat(getComputedStyle(element).lineHeight));
         await setFontScale(page, fontScale);
+        const questionLeading = await cardFor(page)
+          .locator("q")
+          .evaluate((element) => Number.parseFloat(getComputedStyle(element).lineHeight));
+        assert.equal(
+          questionLeading,
+          baseQuestionLeading * fontScale,
+          "question leading must follow font scaling",
+        );
+        const bodyFontSize = await page.evaluate(() =>
+          Number.parseFloat(getComputedStyle(document.body).fontSize),
+        );
+        assert.equal(bodyFontSize, baseFontSize * fontScale, "body text must follow font scaling");
         const card = cardFor(page);
         const options = layoutOptions.map((label) =>
           card.getByRole("button", { name: label, exact: true }),
@@ -716,11 +795,26 @@ async function checkLayoutMatrix() {
         assert.equal(errors.length, 0, errors.join("\n"));
         geometry.push({
           case: name,
+          bodyFontSize,
+          questionLeading,
           viewport: viewportSize,
           card: await rect(card),
           options: measures,
         });
         console.log(`PASS layout ${name}`);
+      } catch (error) {
+        await writeFile(
+          join(output, `${browserName}-layout-failure.json`),
+          JSON.stringify({
+            viewport,
+            fontScale,
+            errors,
+            consoleErrors,
+            body: await page.locator("body").innerText(),
+          }),
+        );
+        await page.screenshot({ path: join(output, `${browserName}-layout-failure.png`) });
+        throw error;
       } finally {
         await context.close();
       }
@@ -736,8 +830,8 @@ async function checkNormalInboxAndTaskAnswer() {
     try {
       const pending = page.getByRole("complementary", { name: "当前待处理" });
       await pending.getByText(question, { exact: true }).waitFor();
-      await pending.getByRole("button", { name: "查看并处理", exact: true }).click();
-      const inbox = page.getByRole("dialog", { name: "待处理", exact: true });
+      await pending.getByRole("link", { name: "查看并处理", exact: true }).click();
+      const inbox = page.getByRole("region", { name: "待处理事项", exact: true });
       await inbox.getByRole("radio").first().waitFor();
       assert.equal(await inbox.getByRole("radio").count(), originalOptions.length);
       await inbox.getByRole("radio").first().check();
@@ -746,9 +840,11 @@ async function checkNormalInboxAndTaskAnswer() {
         0,
         "reading/selecting the real pending question is not a submitted answer",
       );
-      await inbox.getByRole("button", { name: "关闭详情", exact: true }).click();
+      await inbox
+        .getByRole("button", { name: width <= 760 ? "← 返回" : "稍后处理", exact: true })
+        .click();
       await page.goto(`http://127.0.0.1:${fixturePort}/?task=${task.task_id}`);
-      const detail = page.getByRole("dialog", { name: "任务详情", exact: true });
+      const detail = page.getByRole("region", { name: "任务详情", exact: true });
       await detail.getByRole("button", { name: originalOptions[0]!, exact: true }).waitFor();
       await detail.getByLabel("补充说明或其他回答").fill("来自原任务详情的回答");
       await detail.getByRole("button", { name: originalOptions[0]!, exact: true }).click();
@@ -806,12 +902,17 @@ async function checkLowHeightAndSharedButtons() {
     // Task control remains in the actual task detail, not the Attention Inbox.
     await page.goto(`http://127.0.0.1:${fixturePort}/?task=${heldTask.task_id}`);
     const handback = page
-      .getByRole("dialog", { name: "任务详情" })
+      .getByRole("region", { name: "任务详情" })
       .getByRole("button", { name: "交还给 tend" });
     await reachable(handback);
     const handbackBox = await rect(handback);
-    assert(handbackBox.height >= 36 && handbackBox.height < 44);
-    assert(submitBox.height >= 36 && submitBox.height < 44);
+    const touch = await page.evaluate(() =>
+      Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--control-touch"),
+      ),
+    );
+    assert(Math.abs(handbackBox.height - touch) <= 1);
+    assert(Math.abs(submitBox.height - touch) <= 1);
     await page.screenshot({ path: join(output, `${browserName}-safe-area-390x568.png`) });
     assert.equal(errors.length, 0, errors.join("\n"));
     console.log(`PASS reachability ${browserName}-safe-area-390x568`);
@@ -841,6 +942,21 @@ async function checkJumpRecovery() {
   const { context, page, errors } = await openPage(390, 844);
   try {
     await page.getByText("历史消息 14", { exact: false }).waitFor();
+    const banner = page.getByRole("button", { name: "查看发布进度", exact: true });
+    await banner.waitFor();
+    assert(
+      await banner.evaluate((button) => {
+        const bounds = button.getBoundingClientRect();
+        const next = button.nextElementSibling!.getBoundingClientRect();
+        return (
+          Array.from(button.children).every((child) => {
+            const box = child.getBoundingClientRect();
+            return box.top >= bounds.top && box.bottom <= bounds.bottom;
+          }) && bounds.bottom <= next.top
+        );
+      }),
+      "390px upgrade banner contains wrapped text and avoids the next control",
+    );
     assert.equal(
       await page
         .getByRole("region", { name: "对话记录" })
@@ -868,9 +984,12 @@ async function checkJumpRecovery() {
     await state.jump.click();
     await state.jump.waitFor({ state: "hidden" });
     state = await showJump(page);
-    await page.locator("main header").getByRole("button", { name: "跳到最新" }).click();
+    await state.jump.click();
     await state.jump.waitFor({ state: "hidden" });
-    await page.locator("main header").getByRole("button", { name: "跳到最新" }).click();
+    assert.equal(
+      await page.locator("main header").getByRole("button", { name: "跳到最新" }).count(),
+      0,
+    );
     assert.equal(errors.length, 0, errors.join("\n"));
     await page.screenshot({ path: join(output, `${browserName}-jump-recovered.png`) });
     console.log(`PASS jump recovery ${browserName}`);
@@ -886,7 +1005,12 @@ async function checkTranscriptExpansionWithoutFocus() {
   const { context, page, errors } = await openPage(390, 844);
   try {
     const transcript = page.getByRole("region", { name: "对话记录" });
-    const tool = transcript.getByRole("button", { name: /review_tool/ });
+    await transcript
+      .locator("summary")
+      .filter({ hasText: /^\d+ 个步骤$/ })
+      .last()
+      .click();
+    const tool = transcript.getByRole("button", { name: /review tool/ });
     await tool.waitFor();
     const before = await rect(tool);
     await tool.evaluate((button) => {
@@ -928,7 +1052,12 @@ async function checkFocusedTranscriptResizeFollowing() {
   const { context, page, errors } = await openPage(430, 932);
   try {
     const transcript = page.getByRole("region", { name: "对话记录" });
-    const tool = transcript.getByRole("button", { name: /review_tool/ });
+    await transcript
+      .locator("summary")
+      .filter({ hasText: /^\d+ 个步骤$/ })
+      .last()
+      .click();
+    const tool = transcript.getByRole("button", { name: /review tool/ });
     await tool.waitFor();
     await tool.focus();
     await transcript.evaluate((element) => {
@@ -973,6 +1102,137 @@ async function checkFocusedTranscriptResizeFollowing() {
     console.log(`PASS focused transcript viewport resize ${browserName}`);
   } finally {
     await context.close();
+  }
+}
+
+async function checkPausedTranscriptAnchor() {
+  for (const width of [1440, 390]) {
+    reset();
+    decisionVisible = false;
+    upgradeVisible = false;
+    const { context, page } = await openPage(width, 844);
+    const older = history[3]!;
+    const original = older.body;
+    try {
+      const transcript = page.getByRole("region", { name: "对话记录" });
+      const later = transcript.locator('[data-scroll-id="msg_fixture_owner_8"]');
+      await later.scrollIntoViewIfNeeded();
+      await transcript.evaluate((node) => {
+        node.scrollTop -= 60;
+      });
+      await page.waitForTimeout(100);
+      const y = await later.evaluate((node) => node.getBoundingClientRect().top);
+      older.body += "较早回复继续生成。\n\n".repeat(60);
+      publish("conversation.message");
+      await transcript
+        .getByText(/较早回复继续生成/)
+        .first()
+        .waitFor({ state: "attached" });
+      await page.waitForTimeout(100);
+      assert(
+        Math.abs((await later.evaluate((node) => node.getBoundingClientRect().top)) - y) <= 2,
+        "earlier streaming content displaced paused chat reading",
+      );
+      console.log(`PASS paused transcript anchor ${width}`);
+    } finally {
+      older.body = original!;
+      await context.close();
+    }
+  }
+}
+
+async function checkDelayedStoredThumbnail() {
+  for (const width of [1440, 390]) {
+    for (const fail of [false, true]) {
+      reset();
+      decisionVisible = false;
+      upgradeVisible = false;
+      appendedHistory.push(
+        {
+          author: "owner",
+          kind: "message",
+          message_id: "image-owner",
+          seq: 101,
+          body: "已保存的图片附件",
+          state: "replied",
+          created_at: "2026-10-27T01:00:00Z",
+          attachments: [
+            {
+              file_id: "stored-image",
+              sha256: "0".repeat(64),
+              name: "stored-image.png",
+              size: 100,
+              media_type: "image/png",
+            },
+          ],
+        },
+        {
+          author: "main_agent",
+          kind: "message",
+          message_id: "image-reply",
+          seq: 102,
+          reply_to: "image-owner",
+          body: "图片消息之后的末尾回复",
+          created_at: "2026-10-27T01:00:01Z",
+        },
+      );
+      const context = await browser.newContext({
+        viewport: { width, height: 844 },
+        serviceWorkers: "block",
+      });
+      const page = await context.newPage();
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let requested!: () => void;
+      const arrived = new Promise<void>((resolve) => {
+        requested = resolve;
+      });
+      await page.route(
+        "**/conversation/attachments/stored-image/download-url?inline=1",
+        async (route) => {
+          requested();
+          await pending;
+          await route.fulfill({
+            status: fail ? 503 : 200,
+            json: {
+              url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jHhoAAAAASUVORK5CYII=",
+            },
+          });
+        },
+      );
+      try {
+        await page.goto(`http://127.0.0.1:${fixturePort}/`);
+        await arrived;
+        const transcript = page.getByRole("region", { name: "对话记录" });
+        await page.waitForTimeout(100);
+        const before = await transcript.evaluate((el) => ({
+          height: el.scrollHeight,
+          gap: el.scrollHeight - el.scrollTop - el.clientHeight,
+        }));
+        assert(before.gap < 2, "initial latest image message must start at bottom");
+        release();
+        await page
+          .getByRole("button", { name: fail ? "预览不可用，重试" : "查看图片 stored-image.png" })
+          .waitFor();
+        await page.waitForTimeout(100);
+        const after = await transcript.evaluate((el) => ({
+          height: el.scrollHeight,
+          gap: el.scrollHeight - el.scrollTop - el.clientHeight,
+        }));
+        assert.equal(after.height, before.height, "stored thumbnail inserted unreserved height");
+        assert(after.gap < 2, "delayed stored thumbnail left latest reply below viewport");
+        assert.equal(
+          await transcript.locator("..").getByRole("button", { name: "跳到最新" }).count(),
+          0,
+        );
+        console.log(`PASS delayed stored image thumbnail ${width} failure=${fail}`);
+      } finally {
+        release();
+        await context.close();
+      }
+    }
   }
 }
 
@@ -1114,21 +1374,21 @@ async function checkComposerOverlays() {
       if (width === 390) {
         await page
           .getByRole("navigation", { name: "视图", exact: true })
-          .getByRole("button", { name: "Issue", exact: true })
+          .getByRole("link", { name: "Issues", exact: true })
           .click();
       } else {
-        await page.getByRole("button", { name: /Issue.*白板/ }).click();
+        await page.getByRole("link", { name: "Issues", exact: true }).click();
       }
       await popover.waitFor({ state: "hidden" });
       if (width === 390) {
         const navigation = page.getByRole("navigation", { name: "视图", exact: true });
-        await navigation.getByRole("button", { name: "对话", exact: true }).click();
+        await navigation.getByRole("link", { name: "对话", exact: true }).click();
         await usage.waitFor();
         assert.equal(await usage.getAttribute("aria-expanded"), "false");
         await popover.waitFor({ state: "hidden" });
         await usage.click();
         await popover.waitFor();
-        await navigation.getByRole("button", { name: "待处理", exact: true }).click();
+        await navigation.getByRole("link", { name: "收件箱", exact: true }).click();
         await popover.waitFor({ state: "hidden" });
       }
       console.log(`PASS composer overlays ${browserName}-${width}`);
@@ -1276,11 +1536,14 @@ async function checkAttachmentDraftDock() {
         Array.from({ length: 30 }, () => "附件和长草稿不应挤掉决定控件。").join("\n"),
       );
       const files = page.getByRole("list", { name: "待发送附件" });
-      await page
-        .locator("main header")
-        .getByRole("button", { name: "跳到最新", exact: true })
-        .click();
-      const transcript = page.getByRole("region", { name: "对话记录" });
+      const { jump, transcript } = await showJump(page);
+      await jump.click();
+      await page.waitForFunction(() => {
+        const element = document.querySelector('[aria-label="对话记录"]');
+        return (
+          element !== null && element.scrollHeight - element.scrollTop - element.clientHeight < 2
+        );
+      });
       assert(
         await transcript.evaluate((element) => {
           const r = element.getBoundingClientRect();
@@ -1294,7 +1557,7 @@ async function checkAttachmentDraftDock() {
             element.scrollHeight - element.scrollTop - element.clientHeight < 2
           );
         }),
-        "header jump did not reveal the latest transcript after focusing a tall draft",
+        "floating jump did not reveal the latest transcript after focusing a tall draft",
       );
       assert.equal(await files.getByRole("listitem").count(), 16);
       const dock = page.locator('[class*="seatScroll_"]');
@@ -1358,6 +1621,26 @@ async function checkDecisionStates() {
     await page.keyboard.press("Enter");
     await card.getByRole("button", { name: "正在发送…" }).waitFor();
     assert(await textarea.isDisabled());
+    // The first frame after rejection may precede React's enabled-state commit.
+    await page.evaluate(() => {
+      const requestFrame = window.requestAnimationFrame.bind(window);
+      const cancelFrame = window.cancelAnimationFrame.bind(window);
+      let earlyFrame = false;
+      let cancelled = false;
+      window.requestAnimationFrame = (callback) => {
+        if (earlyFrame || !document.body.textContent?.includes("fixture rejected answer"))
+          return requestFrame(callback);
+        earlyFrame = true;
+        queueMicrotask(() => {
+          if (!cancelled) callback(performance.now());
+        });
+        return -1;
+      };
+      window.cancelAnimationFrame = (id) => {
+        if (id === -1) cancelled = true;
+        else cancelFrame(id);
+      };
+    });
     for (const option of originalOptions)
       assert(await card.getByRole("button", { name: option, exact: true }).isDisabled());
     await card
@@ -1380,6 +1663,12 @@ async function checkDecisionStates() {
     });
     assert.equal(await textarea.inputValue(), "保留这条失败后可重试的说明");
     assert(await submit.isEnabled());
+    // Retry focus follows the committed state that re-enables the submit button.
+    await page.waitForFunction(
+      (element) => element === document.activeElement,
+      await submit.elementHandle(),
+      { timeout: 3000 },
+    );
     assert(await submit.evaluate((element) => element === document.activeElement));
     assert.equal(errors.length, 0, errors.join("\n"));
     console.log(`PASS delayed failure ${browserName}`);
@@ -1573,7 +1862,10 @@ try {
     await checkLowHeightAndSharedButtons();
     await checkJumpRecovery();
     await checkTranscriptExpansionWithoutFocus();
-    await checkFocusedTranscriptResizeFollowing();
+    for (let iteration = 0; iteration < 5; iteration++)
+      await checkFocusedTranscriptResizeFollowing();
+    await checkDelayedStoredThumbnail();
+    await checkPausedTranscriptAnchor();
     await checkComposerOverlays();
     await checkUsageKeyboard();
     await checkInitialSettingsKeyboard();

@@ -121,3 +121,21 @@ test("an effect restart reopens the child reader already held by the page subscr
   expect(reads).toBeGreaterThan(before);
   issues.stop();
 });
+
+test("child reader lookup does not start IO or notify existing subscribers", async () => {
+  const api = new ReaderFixture();
+  const issues = new Issues(api);
+  const reader = issues.childReader("parent", true);
+  let notifications = 0;
+  const unsubscribe = reader.state.subscribe(() => notifications++);
+  expect(issues.childReader("parent", true)).toBe(reader);
+  expect(api.calls).toHaveLength(0);
+  expect(notifications).toBe(0);
+  issues.children("parent", "cursor", true);
+  expect(api.calls).toHaveLength(1);
+  api.calls[0]!.answer({ items: [], more: false });
+  await settle();
+  expect(reader.state.get().value).toEqual({ items: [], more: false });
+  unsubscribe();
+  issues.stop();
+});

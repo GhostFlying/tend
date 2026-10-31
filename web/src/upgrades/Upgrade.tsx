@@ -1,31 +1,13 @@
+import { CopyIdentifier } from "../i18n/identifiers.tsx";
+import { Button } from "../ui/index.ts";
+import { PageHeader } from "../shell/PageHeader.tsx";
 import type { UpgradeView } from "../api/generated/api.ts";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { batchPhases, batchStatuses, hostPhases } from "./status.ts";
 import styles from "./Upgrade.module.css";
-
-export function UpgradeBanner({ connection }: { connection: Connection }) {
-  const { live, openUpgrade } = useServices();
-  const upgrade = useStore(live.snapshot)?.upgrade;
-  if (!upgrade || upgrade.status === "completed" || upgrade.status === "cancelled") return null;
-  return (
-    <button
-      type="button"
-      className={styles.banner}
-      data-attention={upgrade.status === "attention" || undefined}
-      aria-label="查看发布进度"
-      onClick={() => openUpgrade(upgrade.upgrade_id)}
-    >
-      <strong>{batchStatuses[upgrade.status] ?? "发布状态"}</strong>
-      <span>{upgrade.release_id}</span>
-      <span className={styles.hint}>
-        {connection.status === "online" ? "查看详情 ›" : "等待连接恢复 · 最后观察"}
-      </span>
-    </button>
-  );
-}
 
 export function UpgradeDetails({
   id,
@@ -64,24 +46,9 @@ export function UpgradeDetails({
       });
     return () => controller.abort();
   }, [id, matching, client, connection.status, retry]);
-  const panel = useRef<HTMLDialogElement>(null);
-  useLayoutEffect(() => {
-    panel.current?.showModal();
-  }, []);
   return (
-    <dialog
-      ref={panel}
-      className={styles.panel}
-      aria-label="发布详情"
-      onCancel={onClose}
-      onClick={(event) => event.currentTarget === event.target && onClose()}
-    >
-      <div className={styles.header}>
-        <h2>发布详情</h2>
-        <button type="button" aria-label="关闭发布详情" onClick={onClose}>
-          ×
-        </button>
-      </div>
+    <section className={styles.panel} aria-label="发布详情">
+      <PageHeader title="发布详情" onBack={onClose} />
       {connection.status !== "online" && (
         <p className={styles.note} role="status">
           等待连接恢复，显示最后观察状态。
@@ -90,9 +57,9 @@ export function UpgradeDetails({
       {readError && !matching && (
         <p className={styles.reason}>
           读取发布详情失败。{" "}
-          <button type="button" onClick={() => setRetry((n) => n + 1)}>
+          <Button type="button" onClick={() => setRetry((n) => n + 1)}>
             重试读取
-          </button>
+          </Button>
         </p>
       )}
       {!upgrade ? (
@@ -101,7 +68,17 @@ export function UpgradeDetails({
         </p>
       ) : (
         <>
-          <h3>{upgrade.release_id}</h3>
+          <details>
+            <summary>详细信息</summary>
+            <p>
+              发布标识：
+              <CopyIdentifier value={upgrade.release_id} />
+            </p>
+            <p>
+              更新标识：
+              <CopyIdentifier value={upgrade.upgrade_id} />
+            </p>
+          </details>
           <p className={styles.status} data-attention={upgrade.status === "attention" || undefined}>
             {batchStatuses[upgrade.status] ?? upgrade.status}
           </p>
@@ -123,7 +100,7 @@ export function UpgradeDetails({
                   </dd>
                   <dt>通信协议</dt>
                   <dd>{host.protocol_version}</dd>
-                  <dt>剩余 run</dt>
+                  <dt>剩余执行</dt>
                   <dd>{host.remaining_runs ?? 0}</dd>
                   {!!host.total_bytes && (
                     <>
@@ -142,6 +119,6 @@ export function UpgradeDetails({
           <p className={styles.note}>重试或取消发布请使用 CLI。此面板仅查看进度。</p>
         </>
       )}
-    </dialog>
+    </section>
   );
 }
