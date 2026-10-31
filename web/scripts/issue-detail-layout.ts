@@ -26,6 +26,7 @@ let holdEarlier: Promise<void> | null = null;
 let earlierStarted = () => {};
 let continuationBlock: IssueTranscriptBlock | null = null;
 let continuationFailure = false;
+let conversationFailure = false;
 let continuationDelay = 0;
 let thirdPage = false;
 let pagedRevision = 0;
@@ -373,6 +374,8 @@ const server = createServer(async (req, res) => {
     });
   }
   if (p.startsWith("/api/v1/agent-conversations/")) {
+    if (conversationFailure)
+      return json({ error: { code: "unavailable", message: "Conversation unavailable" } }, 503);
     const id = decodeURIComponent(p.split("/").at(-1)!);
     return json({
       conversation_id: id,
@@ -527,6 +530,18 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
 try {
+  for (const width of [1440, 390]) {
+    conversationFailure = true;
+    const context = await browser.newContext({ viewport: { width, height: 900 } });
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+    await page.getByText("负责人对话暂时无法读取", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("textbox", { name: "消息", exact: true }).count(), 0);
+    assert(await page.getByText(/发给 .*本 Issue 负责人/).isVisible());
+    await context.close();
+    conversationFailure = false;
+    console.log(`PASS ${width}: sendable conversation read failure remains visible`);
+  }
   for (const width of [1440, 1280, 1024, 430, 390, 320]) {
     issue.progress!.summary = "发布步骤与回滚文档已完成，灰度验证等待范围确认。";
     issue.state = "active";

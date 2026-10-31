@@ -577,6 +577,10 @@ export function IssueDetails({
                       />
                     )}
                   </ConversationSessionProvider>
+                ) : !ended && issue.conversation?.can_send ? (
+                  <p className={styles.muted} role="status">
+                    {conversationError || "正在读取负责人对话…"}
+                  </p>
                 ) : null}
                 {!ended && !issue.conversation?.can_send && (
                   <div className={styles.conversationReason}>
