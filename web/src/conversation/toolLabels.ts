@@ -166,12 +166,12 @@ export function settleToolGroups(
     groups.map((group) => {
       const state = previous.get(group.first);
       const open =
-        group.ids.some((id) => expanded.has(id) || id === focused) ||
-        (state && sameMembers(state.ids, group.ids)
+        state && sameMembers(state.ids, group.ids)
           ? state.open
-          : [...previous.values()].some(
+          : group.ids.some((id) => expanded.has(id) || id === focused) ||
+            [...previous.values()].some(
               (old) => old.open && old.ids.some((id) => group.ids.includes(id)),
-            ));
+            );
       return [group.first, { ids: group.ids, open }];
     }),
   );
@@ -184,7 +184,6 @@ export type FlatTurnRow =
 export function flatTurnRows(
   items: readonly IssueConversationItem[],
   states: ReadonlyMap<string, ToolGroupState>,
-  expanded: ReadonlySet<string>,
 ): FlatTurnRow[] {
   const groups = toolGroups(items);
   const starts = new Map(groups.map((group) => [group.first, group]));
@@ -193,11 +192,7 @@ export function flatTurnRows(
   for (const group of groups) {
     const state = states.get(group.first);
     // Changed runs stay visible until the layout effect can inspect retained focus.
-    const visible =
-      group.ids.some((id) => expanded.has(id)) ||
-      !state ||
-      !sameMembers(state.ids, group.ids) ||
-      state.open;
+    const visible = !state || !sameMembers(state.ids, group.ids) || state.open;
     open.set(group.first, visible);
     if (!visible) for (const id of group.ids) hidden.add(id);
   }

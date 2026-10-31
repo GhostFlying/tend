@@ -1229,6 +1229,13 @@ async function captureS5() {
       .locator('[data-scroll-id="copy-tool-0"]')
       .evaluate((element) => element.scrollIntoView({ block: "start" }));
     await shot("chat-expanded");
+    await groupButton.click();
+    await firstButton.waitFor({ state: "hidden" });
+    await page.locator('[data-scroll-id="copy-tool-1"]').waitFor({ state: "hidden" });
+    assert.equal(await groupButton.getAttribute("aria-expanded"), "false");
+    assert(await groupButton.evaluate((element) => document.activeElement === element));
+    await groupButton.click();
+    await firstTool.getByText("原始工具输出保持不变", { exact: true }).waitFor();
     await navigate(page, "/tasks/" + activeTask.task_id);
     await page.getByText("任务阶段 · 实现中", { exact: true }).waitFor();
     await page.getByText("sample · 优先级 P1 · 第 2 版要求", { exact: true }).waitFor();

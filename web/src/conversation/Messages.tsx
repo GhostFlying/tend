@@ -167,7 +167,7 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
   }, [entry.items, states, expanded]);
   return (
     <div ref={root} className={styles.agent}>
-      {flatTurnRows(entry.items, states, expanded).map((row) =>
+      {flatTurnRows(entry.items, states).map((row) =>
         row.kind === "group" ? (
           <button
             key={row.key}
@@ -175,11 +175,12 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
             className={`${toolStyles.row} ${toolStyles.groupToggle}`}
             aria-expanded={row.open}
             aria-controls={row.group.ids.map((id) => `${prefix}-item-${id}`).join(" ")}
-            onClick={() =>
+            onClick={(event) => {
+              event.currentTarget.focus();
               setStates((previous) =>
                 new Map(previous).set(row.group.first, { ids: row.group.ids, open: !row.open }),
-              )
-            }
+              );
+            }}
           >
             <Chevron className={toolStyles.chevron} />
             <span className={toolStyles.name}>使用了 {row.group.ids.length} 个工具</span>
