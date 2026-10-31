@@ -1713,6 +1713,43 @@ try {
       /2/,
     );
     await page.screenshot({ path: join(output, `main-${viewport.width}.png`) });
+    if (mobile) {
+      await navigate(page, "/inbox");
+      const list = page.getByRole("region", { name: "待处理事项", exact: true });
+      const opener = list.getByRole("button", { name: /发布进度已更新/ });
+      await opener.click();
+      await page.waitForURL((url) => url.pathname === `/inbox/${information.attention_id}`);
+      await list.getByRole("button", { name: "← 返回", exact: true }).click();
+      await page.waitForURL((url) => url.pathname === "/inbox");
+      await page.waitForFunction(() => {
+        const active = document.activeElement;
+        return active?.tagName === "BUTTON" && active.textContent?.includes("发布进度已更新");
+      });
+      assert(
+        await opener.evaluate((button) => button === document.activeElement),
+        "phone Inbox back restores the originating row focus",
+      );
+      await page.goBack();
+      await page.waitForURL((url) => url.pathname === "/");
+      assert.equal(new URL(page.url()).pathname, "/", "next back leaves Inbox, not reopens detail");
+    } else {
+      await navigate(page, "/inbox");
+      const list = page.getByRole("region", { name: "待处理事项", exact: true });
+      await list.getByRole("button", { name: "查看所属 Issue →", exact: true }).click();
+      await page.waitForURL((url) => url.pathname === `/issues/${issue.issue_id}`);
+      await page
+        .getByRole("region", { name: "Issue详情", exact: true })
+        .getByRole("navigation", { name: "Issue路径", exact: true })
+        .getByRole("button", { name: "Issues", exact: true })
+        .click();
+      await page.waitForURL((url) => url.pathname === "/issues");
+      assert.equal(
+        new URL(page.url()).pathname,
+        "/issues",
+        "root crumb goes to Issue list, not Inbox",
+      );
+      await navigate(page, "/");
+    }
     await page
       .getByRole("complementary", { name: "当前待处理", exact: true })
       .getByRole("link", { name: "查看并处理", exact: true })
