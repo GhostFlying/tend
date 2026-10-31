@@ -824,7 +824,9 @@ func TestHealthyRunnerKeepsShortLease(t *testing.T) {
 }
 
 func TestPauseStopsWorkerAndResumes(t *testing.T) {
-	srv := newServer(t, 400*time.Millisecond)
+	// This checks owner controls, not lease expiry under scheduler load.
+	clock := testkit.NewClock()
+	srv := newServer(t, 400*time.Millisecond, clock.Now)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		if spec.Role == protocol.RoleImplement && spec.Attempt == 1 {
 			return testkit.WorkerScript{Gate: make(chan struct{})}
@@ -833,6 +835,7 @@ func TestPauseStopsWorkerAndResumes(t *testing.T) {
 	})
 	n.start()
 	task := srv.createTask()
+	n.diagnoseFailure(task)
 	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
 
 	srv.setMode(task, protocol.ControlPaused)
