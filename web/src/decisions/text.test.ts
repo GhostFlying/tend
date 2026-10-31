@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import type { DecisionView } from "../api/generated/api.ts";
 import { answerMessage, effectOf, optionLabel, optionsOf, question } from "./text.ts";
@@ -26,15 +27,15 @@ describe("tend's fixed options", () => {
   test("are shown in Chinese", () => {
     expect(optionsOf(tends).map((o) => optionLabel(tends, o))).toEqual([
       "重新实现",
-      "修改 spec",
+      "修改要求",
       "取消任务",
     ]);
     const others: [string, string][] = [
       ["raise the budget", "提高预算"],
       ["retry acceptance", "重新验收"],
       ["fix the acceptance environment", "修好验收环境"],
-      ["wait for the host", "等待这台 host"],
-      ["start over on another host", "换一台从头再来"],
+      ["wait for the host", "等待主机恢复"],
+      ["start over on another host", "换主机重新开始"],
     ];
     for (const [option, label] of others) {
       expect(optionLabel(tends, option)).toBe(label);
@@ -81,7 +82,7 @@ describe("questions", () => {
 describe("answerMessage", () => {
   test("names the task and the option as shown", () => {
     expect(answerMessage(tends, "CLI 输出加版本号", "revise the spec")).toBe(
-      "关于『CLI 输出加版本号』：修改 spec",
+      "关于『CLI 输出加版本号』：修改要求",
     );
     expect(answerMessage(agents, "CLI 输出加版本号", "先改 CLI")).toBe(
       "关于『CLI 输出加版本号』：先改 CLI",
@@ -100,4 +101,15 @@ describe("answerMessage", () => {
 test("options that are not a list of strings are ignored", () => {
   expect(optionsOf({ options: null })).toEqual([]);
   expect(optionsOf({ options: ["a", 2, "b"] })).toEqual(["a", "b"]);
+});
+
+test("every server-generated option ID has a Chinese presentation label", () => {
+  const source = readFileSync(new URL("../../../internal/domain/task.go", import.meta.url), "utf8");
+  const options = [...source.matchAll(/option\w+\s*=\s*"([^"]+)"/g)].map((match) => match[1]!);
+  expect(options.length).toBeGreaterThanOrEqual(8);
+  for (const option of options) {
+    const label = optionLabel(tends, option);
+    expect(label, option).not.toBe(option);
+    expect(label, option).toMatch(/[\u4e00-\u9fff]/u);
+  }
 });

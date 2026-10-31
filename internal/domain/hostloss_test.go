@@ -13,7 +13,7 @@ func TestWorkspaceUnavailable(t *testing.T) {
 	if d.Task.Block != protocol.BlockWorkspaceUnavailable || len(d.OpenDecisions) != 1 || len(d.Events) != 1 {
 		t.Fatalf("WorkspaceUnavailable = %+v", d)
 	}
-	if q := d.OpenDecisions[0].Question; !strings.Contains(q, "linux-1, which was retired") {
+	if q := d.OpenDecisions[0].Question; !strings.Contains(q, "linux-1 已停用") {
 		t.Errorf("question = %q", q)
 	}
 	if got := d.OpenDecisions[0].Effects[StartOverOption]; got != protocol.EffectStartOver {
@@ -136,7 +136,7 @@ func TestRequiredHostCannotBeAbandonedByStartOver(t *testing.T) {
 	if _, err := StartOver(blocked.Task, blocked.Task.ControlRevision); protocol.CodeOf(err) != protocol.CodeInvalidTransition || !strings.Contains(err.Error(), "requirements.host_id") {
 		t.Fatal(err)
 	}
-	if !strings.Contains(blocked.OpenDecisions[0].Question, "cancel and create a new task") {
+	if !strings.Contains(blocked.OpenDecisions[0].Question, "取消后") {
 		t.Fatal("missing supported recovery path")
 	}
 }

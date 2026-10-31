@@ -122,13 +122,13 @@ func AcceptanceSubmitted(t Task, a AcceptanceFact) (Decision, error) {
 		} else {
 			t.Block = protocol.BlockBudgetExhausted
 			d.OpenDecisions = append(d.OpenDecisions, budgetDecision(
-				"The implement attempt budget is exhausted and acceptance still requires changes. How should this task proceed?"))
+				"实现次数已用完，验收仍要求修改。这个任务接下来怎么办？"))
 		}
 	case protocol.VerdictBlocked, protocol.VerdictInconclusive:
 		// An unusable acceptance environment is neither a defect in the
 		// artifact nor a pass.
 		t.Block = protocol.BlockAcceptanceEnvUnavailable
-		d.OpenDecisions = append(d.OpenDecisions, acceptanceDecision("Acceptance could not reach a verdict. How should this task proceed?"))
+		d.OpenDecisions = append(d.OpenDecisions, acceptanceDecision("验收未能得出结论。这个任务接下来怎么办？"))
 	}
 	d.Task = t
 	return d, nil
@@ -180,7 +180,7 @@ func RunFailed(t Task, r RunFact, reason string) Decision {
 		return Decision{
 			Task:          t,
 			Events:        []EventDraft{{Kind: "run.failed", Body: body}},
-			OpenDecisions: []DecisionDraft{failedImplementDecision("The implementation run failed (" + reason + "). How should this task proceed?")},
+			OpenDecisions: []DecisionDraft{failedImplementDecision("实现失败（" + failureReasonLabel(reason) + "）。这个任务接下来怎么办？")},
 		}
 	case r.Role == protocol.RoleAccept && t.Lifecycle == protocol.TaskAwaitingAcceptance &&
 		r.SpecVersion == t.SpecVersion && r.ArtifactID == t.CurrentArtifactID:
@@ -188,8 +188,44 @@ func RunFailed(t Task, r RunFact, reason string) Decision {
 		return Decision{
 			Task:          t,
 			Events:        []EventDraft{{Kind: "run.failed", Body: body}},
-			OpenDecisions: []DecisionDraft{acceptanceDecision("The acceptance run failed (" + reason + "). How should this task proceed?")},
+			OpenDecisions: []DecisionDraft{acceptanceDecision("验收失败（" + failureReasonLabel(reason) + "）。这个任务接下来怎么办？")},
 		}
 	}
 	return Decision{Task: t, Events: []EventDraft{staleEvent("run.failed", body)}}
+}
+
+// failureReasonLabel describes runner facts without rewriting their reason codes.
+func failureReasonLabel(reason string) string {
+	switch reason {
+	case "worker_failed":
+		return "执行 Agent 异常退出"
+	case "worker_start_failed":
+		return "执行 Agent 启动失败"
+	case "runner_error":
+		return "执行主机发生错误"
+	case "no_changes":
+		return "未产生修改"
+	case "no_artifact":
+		return "未提交交付物"
+	case "cancelled":
+		return "执行已取消"
+	case "interrupted":
+		return "执行已中断"
+	case "workspace_report_rejected":
+		return "工作区信息未被接受"
+	case "start_rejected":
+		return "启动请求未被接受"
+	case "owner_question_recovery_failed":
+		return "待处理问题恢复失败"
+	case "invalid_worker_result":
+		return "执行结果不符合要求"
+	case "missing_report":
+		return "未提交执行报告"
+	case "missing_files":
+		return "未提交要求的文件"
+	case "worker_ended":
+		return "执行 Agent 已结束"
+	default:
+		return "执行未正常完成，请查看执行记录"
+	}
 }
