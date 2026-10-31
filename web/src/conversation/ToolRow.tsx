@@ -17,7 +17,13 @@ const statusLook: Record<ToolStatus, { tone: Tone; label: string } | null> = {
   interrupted: { tone: "warn", label: "中断" },
 };
 
-export function ToolRow({ tool }: { tool: ToolUseView }) {
+export function ToolRow({
+  tool,
+  onOpenChange,
+}: {
+  tool: ToolUseView;
+  onOpenChange?(open: boolean): void;
+}) {
   const [open, setOpen] = useState(false);
   const { live } = useServices();
   const snapshot = useStore(live.snapshot);
@@ -38,7 +44,10 @@ export function ToolRow({ tool }: { tool: ToolUseView }) {
       <button
         type="button"
         className={styles.row}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          onOpenChange?.(!open);
+        }}
         aria-expanded={open}
       >
         <Chevron className={styles.chevron} />

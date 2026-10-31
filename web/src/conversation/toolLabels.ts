@@ -134,56 +134,89 @@ export function groupToolItems(items: readonly IssueConversationItem[]): IssueCo
 }
 
 export interface ToolGroup {
-  key: string;
+  first: string;
   ids: string[];
-  grouped: boolean;
+}
+export interface ToolGroupState {
+  ids: string[];
+  open: boolean;
 }
 
 export function toolGroups(items: readonly IssueConversationItem[]): ToolGroup[] {
-  return groupToolItems(items).map((rows) => ({
-    key: `${rows.length > 1 ? "group" : "item"}:${rows[0]!.message_id}`,
-    ids: rows.map((row) => row.message_id),
-    grouped: rows.length > 1,
-  }));
+  return groupToolItems(items)
+    .filter((rows) => rows.length > 1)
+    .map((rows) => ({
+      first: rows[0]!.message_id,
+      ids: rows.map((row) => row.message_id),
+    }));
 }
 
-/** Preserve the reading segment, never placing replies or choices inside tool groups. */
-export function retainToolGroups(
+function sameMembers(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+/** Reconcile visibility only; content nodes never change identity or parent. */
+export function settleToolGroups(
   groups: readonly ToolGroup[],
+  previous: ReadonlyMap<string, ToolGroupState>,
+  expanded: ReadonlySet<string>,
+  focused?: string,
+): Map<string, ToolGroupState> {
+  return new Map(
+    groups.map((group) => {
+      const state = previous.get(group.first);
+      const open =
+        group.ids.some((id) => expanded.has(id) || id === focused) ||
+        (state && sameMembers(state.ids, group.ids)
+          ? state.open
+          : [...previous.values()].some(
+              (old) => old.open && old.ids.some((id) => group.ids.includes(id)),
+            ));
+      return [group.first, { ids: group.ids, open }];
+    }),
+  );
+}
+
+export type FlatTurnRow =
+  | { kind: "group"; key: string; group: ToolGroup; open: boolean }
+  | { kind: "item"; key: string; item: IssueConversationItem; hidden: boolean };
+
+export function flatTurnRows(
   items: readonly IssueConversationItem[],
-  anchors: ReadonlyMap<string, string> = new Map(),
-): ToolGroup[] {
-  const owners = new Map(groups.flatMap((group) => group.ids.map((id) => [id, group] as const)));
-  const segments: { owner: ToolGroup | undefined; ids: string[]; tool: boolean }[] = [];
+  states: ReadonlyMap<string, ToolGroupState>,
+  expanded: ReadonlySet<string>,
+): FlatTurnRow[] {
+  const groups = toolGroups(items);
+  const starts = new Map(groups.map((group) => [group.first, group]));
+  const hidden = new Set<string>();
+  const open = new Map<string, boolean>();
+  for (const group of groups) {
+    const state = states.get(group.first);
+    // Changed runs stay visible until the layout effect can inspect retained focus.
+    const visible =
+      group.ids.some((id) => expanded.has(id)) ||
+      !state ||
+      !sameMembers(state.ids, group.ids) ||
+      state.open;
+    open.set(group.first, visible);
+    if (!visible) for (const id of group.ids) hidden.add(id);
+  }
+  const rows: FlatTurnRow[] = [];
   for (const item of items) {
-    const owner = owners.get(item.message_id);
-    const tool = !!item.tool && !item.choices?.length;
-    const previous = segments.at(-1);
-    if (tool && owner?.grouped && previous?.tool && previous.owner === owner) {
-      previous.ids.push(item.message_id);
-    } else {
-      segments.push({ owner, ids: [item.message_id], tool });
-    }
+    const group = starts.get(item.message_id);
+    if (group)
+      rows.push({
+        kind: "group",
+        key: `group:${group.first}`,
+        group,
+        open: open.get(group.first)!,
+      });
+    rows.push({
+      kind: "item",
+      key: `item:${item.message_id}`,
+      item,
+      hidden: hidden.has(item.message_id),
+    });
   }
-  const preserved = new Map<ToolGroup, (typeof segments)[number]>();
-  for (const segment of segments) {
-    if (!segment.owner) continue;
-    if (
-      !preserved.has(segment.owner) ||
-      segment.ids.includes(anchors.get(segment.owner.key) ?? "")
-    ) {
-      preserved.set(segment.owner, segment);
-    }
-  }
-  return segments.map((segment) => {
-    const keep = segment.owner && preserved.get(segment.owner) === segment;
-    return {
-      key: keep ? segment.owner!.key : `segment:${segment.ids[0]}`,
-      ids: segment.ids,
-      grouped:
-        segment.tool &&
-        (segment.ids.length > 1 ||
-          !!(keep && segment.owner!.grouped && anchors.has(segment.owner!.key))),
-    };
-  });
+  return rows;
 }
