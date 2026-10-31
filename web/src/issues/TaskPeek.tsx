@@ -1,3 +1,4 @@
+import { RunStatusLine } from "../rollout/RunRollout.tsx";
 import { runLabel } from "../tasks/runLabel.ts";
 import { useEffect, useMemo, useState } from "react";
 import type { IssueTaskSummary, TaskDetail } from "../api/generated/api.ts";
@@ -79,6 +80,9 @@ export function IssueTaskPeek({
                           ? "等待实施交付"
                           : "等待安排"}
                     </span>
+                    {run && ["running", "starting"].includes(run.observed) && (
+                      <RunStatusLine id={run.run_id} observed={run.observed} />
+                    )}
                     {run && <button onClick={() => onTask(task.task_id)}>查看执行记录 →</button>}
                   </div>
                 );

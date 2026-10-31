@@ -17,18 +17,13 @@ import type { SendQueue } from "../queue/sendQueue.ts";
 import { Button } from "../ui/Button.tsx";
 import { Markdown } from "./Markdown.tsx";
 import styles from "./Messages.module.css";
-import {
-  clock,
-  dayLabel,
-  duration,
-  messageStateLabels,
-  systemMessageBody,
-  type Entry,
-} from "./model.ts";
+import { clock, dayLabel, messageStateLabels, systemMessageBody, type Entry } from "./model.ts";
 import { toolGroups, settleToolGroups, flatTurnRows } from "./toolLabels.ts";
-import { CopyIdentifier } from "../i18n/identifiers.tsx";
 import { Chevron } from "../shell/icons.tsx";
 import toolStyles from "./ToolRow.module.css";
+import { LiveStatus } from "../ui/LiveStatus.tsx";
+import { conversationStatus } from "../ui/activityStatus.ts";
+import { CopyIdentifier } from "../i18n/identifiers.tsx";
 import { ToolRow } from "./ToolRow.tsx";
 import { MessageImages, OutgoingImages } from "./Images.tsx";
 import { MessageAttachments, OutgoingAttachments } from "./Attachments.tsx";
@@ -143,6 +138,21 @@ export function OutgoingRow({
 
 export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> }) {
   const root = useRef<HTMLDivElement>(null);
+  const status = conversationStatus(
+    entry.items,
+    entry.state,
+    entry.startedAt ?? null,
+    entry.done?.tookMs !== undefined && entry.startedAt !== undefined
+      ? entry.startedAt + entry.done.tookMs
+      : null,
+  );
+  const tools = entry.items.filter((item) => item.tool);
+  const [traceOpen, setTraceOpen] = useState(false);
+  const wasActive = useRef(status.active);
+  useLayoutEffect(() => {
+    if (wasActive.current && !status.active) setTraceOpen(false);
+    wasActive.current = status.active;
+  }, [status.active]);
   const prefix = useId();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [states, setStates] = useState(() =>
@@ -167,40 +177,57 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
   }, [entry.items, states, expanded]);
   return (
     <div ref={root} className={styles.agent}>
-      {flatTurnRows(entry.items, states).map((row) =>
-        row.kind === "group" ? (
-          <button
-            key={row.key}
-            type="button"
-            className={`${toolStyles.row} ${toolStyles.groupToggle}`}
-            aria-expanded={row.open}
-            aria-controls={row.group.ids.map((id) => `${prefix}-item-${id}`).join(" ")}
-            onClick={(event) => {
-              event.currentTarget.focus();
-              setStates((previous) =>
-                new Map(previous).set(row.group.first, { ids: row.group.ids, open: !row.open }),
-              );
-            }}
-          >
-            <Chevron className={toolStyles.chevron} />
-            <span className={toolStyles.name}>使用了 {row.group.ids.length} 个工具</span>
-          </button>
-        ) : (
+      <LiveStatus status={status} />
+      {!!tools.length && (
+        <details open={traceOpen} onToggle={(event) => setTraceOpen(event.currentTarget.open)}>
+          <summary>{tools.length} 个步骤</summary>
+          {flatTurnRows(entry.items, states)
+            .filter((row) => row.kind === "group" || row.item.tool)
+            .map((row) =>
+              row.kind === "group" ? (
+                <button
+                  key={row.key}
+                  type="button"
+                  className={`${toolStyles.row} ${toolStyles.groupToggle}`}
+                  aria-expanded={row.open}
+                  aria-controls={row.group.ids.map((id) => `${prefix}-item-${id}`).join(" ")}
+                  onClick={(event) => {
+                    event.currentTarget.focus();
+                    setStates((previous) =>
+                      new Map(previous).set(row.group.first, {
+                        ids: row.group.ids,
+                        open: !row.open,
+                      }),
+                    );
+                  }}
+                >
+                  <Chevron className={toolStyles.chevron} />
+                  <span className={toolStyles.name}>使用了 {row.group.ids.length} 个工具</span>
+                </button>
+              ) : (
+                <AgentItem
+                  key={row.key}
+                  item={row.item}
+                  hidden={row.hidden}
+                  id={`${prefix}-item-${row.item.message_id}`}
+                  onToolOpenChange={onToolOpenChange}
+                />
+              ),
+            )}
+        </details>
+      )}
+      {entry.items
+        .filter((item) => !item.tool)
+        .map((item) => (
           <AgentItem
-            key={row.key}
-            item={row.item}
-            hidden={row.hidden}
-            id={`${prefix}-item-${row.item.message_id}`}
-            onToolOpenChange={onToolOpenChange}
+            key={item.message_id}
+            item={item}
+            hidden={false}
+            id={`${prefix}-item-${item.message_id}`}
+            onToolOpenChange={() => {}}
           />
-        ),
-      )}
-      {entry.done && (
-        <div className={styles.foot}>
-          {clock(entry.done.at)}
-          {entry.done.tookMs !== undefined && ` · 用了 ${duration(entry.done.tookMs)}`}
-        </div>
-      )}
+        ))}
+      {entry.done && <div className={styles.foot}>{clock(entry.done.at)}</div>}
     </div>
   );
 }
@@ -254,7 +281,7 @@ const AgentItem = memo(function AgentItem({
         <>
           <Markdown text={item.body ?? ""} />
           <MessageTags item={item} />
-          {status && status !== "completed" && (
+          {status && status !== "completed" && status !== "streaming" && (
             <div className={styles.assistantState} data-state={status} role="status">
               {assistantLabels[status]}
             </div>
