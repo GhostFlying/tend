@@ -1,3 +1,6 @@
+import { PageHeader } from "../shell/PageHeader.tsx";
+import { Sheet } from "../ui/Modal.tsx";
+import { navigate, useRoute, type IssueFilters } from "../app/router.ts";
 import {
   memo,
   useEffect,
@@ -54,11 +57,19 @@ export function IssueBoard({
   const board = live.issues.board;
   const summary = useStore(board.summary);
   const tree = useStore(live.issues.list.state);
-  const [view, setView] = useState<"board" | "tree">("board");
-  const [project, setProject] = useState("");
+  const route = useRoute();
+  const filters = route.page === "issues" ? route : { page: "issues" as const };
+  const view = filters.view ?? "board";
+  const project = filters.project ?? "";
+  const assigneeKey = filters.assignee ?? "";
+  const closed = filters.closed ?? true;
+  const changeFilter = (patch: IssueFilters) =>
+    navigate({ ...filters, ...patch }, { replace: true });
+  const setView = (view: "board" | "tree") => changeFilter({ view });
+  const setProject = (project: string) => changeFilter({ project, assignee: "" });
+  const setAssigneeKey = (assignee: string) => changeFilter({ assignee });
+  const setClosed = (closed: boolean) => changeFilter({ closed });
   const projectList = useId();
-  const [assigneeKey, setAssigneeKey] = useState("");
-  const [closed, setClosed] = useState(true);
   const [creating, setCreating] = useState(false);
   const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
   const [menu, setMenu] = useState<IssueSummary | null>(null);
@@ -68,7 +79,18 @@ export function IssueBoard({
   const { feedback, setFeedback } = actions;
   const online = connection.status === "online";
   const filter = useMemo(() => {
-    const assignee = assigneeKey ? (JSON.parse(assigneeKey) as IssueAssignee) : undefined;
+    let assignee: IssueAssignee | undefined;
+    try {
+      const candidate = JSON.parse(assigneeKey || "null") as IssueAssignee | null;
+      if (
+        candidate &&
+        ["owner", "agent"].includes(candidate.kind) &&
+        typeof candidate.ref === "string"
+      )
+        assignee = candidate;
+    } catch {
+      /* Invalid shared filters fall back to all assignees. */
+    }
     return {
       ...(project ? { project } : {}),
       ...(assignee ? { assignee } : {}),
@@ -117,23 +139,17 @@ export function IssueBoard({
       onSelect(blocker.object_id);
     else if (blockedItem) onSelect(blockedItem.issue_id);
   };
-  if (creating)
-    return (
-      <IssueDefinition
-        onBack={() => setCreating(false)}
-        onSaved={(id) => {
-          setCreating(false);
-          if (id) onSelect(id);
-        }}
-      />
-    );
   return (
     <section className={styles.root} aria-label="Issue白板">
-      <header className={styles.header}>
-        <button className={styles.back} onClick={onChat} aria-label="返回对话">
-          <Back />
-        </button>
-        <h1>所有 Issue</h1>
+      <PageHeader
+        className={styles.header}
+        title="所有 Issue"
+        leading={
+          <button className={styles.back} onClick={onChat} aria-label="返回对话">
+            <Back />
+          </button>
+        }
+      >
         {view === "board" && total !== undefined && <span className={styles.total}>{total}</span>}
         <button className={styles.records} onClick={onRecords}>
           任务执行记录
@@ -142,7 +158,7 @@ export function IssueBoard({
           ＋ 新建 Issue
         </button>
         <ResourcesEntry connection={connection} onRecords={onRecords} onRepos={onRepos} />
-      </header>
+      </PageHeader>
       <div className={styles.toolbar}>
         <div className={styles.views} role="tablist" aria-label="Issue视图">
           <button role="tab" aria-selected={view === "board"} onClick={() => setView("board")}>
@@ -161,7 +177,6 @@ export function IssueBoard({
             value={project}
             onChange={(e) => {
               setProject(e.target.value);
-              setAssigneeKey("");
             }}
           />
           <datalist id={projectList}>
@@ -382,6 +397,17 @@ export function IssueBoard({
             <Close />
           </button>
         </div>
+      )}
+      {creating && (
+        <Sheet open title="新建Issue" onClose={() => setCreating(false)}>
+          <IssueDefinition
+            onBack={() => setCreating(false)}
+            onSaved={(id) => {
+              setCreating(false);
+              if (id) onSelect(id);
+            }}
+          />
+        </Sheet>
       )}
     </section>
   );

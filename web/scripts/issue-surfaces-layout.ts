@@ -1,3 +1,4 @@
+import { navigate } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Approved Issue/Inbox flows against isolated API fixtures, never a live service.
@@ -1052,7 +1053,7 @@ const server = createServer(async (req, res) => {
   if (p.startsWith("/api/"))
     return json({ error: { code: "not_found", message: "Not in fixture" } }, 404);
   try {
-    const file = resolve(root, `.${p}${p.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, p.split("/").at(-1)?.includes(".") ? `.${p}` : "index.html");
     assert(file.startsWith(root));
     res.setHeader(
       "Content-Type",
@@ -1162,11 +1163,11 @@ try {
       .getByRole("dialog", { name: "会话", exact: true })
       .getByRole("button", { name: "Agent与类别", exact: true })
       .click();
-    const emptyCatalog = page.getByRole("dialog", { name: "Agent与类别", exact: true });
+    const emptyCatalog = page.getByRole("region", { name: "Agent与类别", exact: true });
     await emptyCatalog.getByText("尚未配置托管Agent", { exact: true }).waitFor();
     assert.equal(await emptyCatalog.getByText(/部分登记暂时无法读取/).count(), 0);
     await page.screenshot({ path: join(output, `catalog-unconfigured-${viewport.width}.png`) });
-    await emptyCatalog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await emptyCatalog.getByRole("button", { name: "← 返回", exact: true }).click();
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -1195,7 +1196,7 @@ try {
     await emptyCatalog.getByRole("button", { name: /青竹 planner/ }).waitFor();
     assert.equal(await emptyCatalog.getByText("尚未配置托管Agent", { exact: true }).count(), 0);
     await page.screenshot({ path: join(output, `catalog-configured-${viewport.width}.png`) });
-    await emptyCatalog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await emptyCatalog.getByRole("button", { name: "← 返回", exact: true }).click();
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -1287,7 +1288,10 @@ try {
       "issue-child",
     ]);
     await ownerBubble.getByRole("button", { name: "发布流程整理", exact: true }).click();
-    assert.equal(new URL(page.url()).searchParams.get("issue"), "issue-root");
+    assert.equal(
+      decodeURIComponent(new URL(page.url()).pathname.slice("/issues/".length)),
+      "issue-root",
+    );
     const pendingSide = await issueSidebar(page);
     await pendingSide.getByText(/等待 runner 领取/).waitFor();
     await pendingSide.getByRole("button", { name: "issue-manager", exact: true }).waitFor();
@@ -1308,7 +1312,7 @@ try {
     )
       .getByRole("button", { name: "issue-manager", exact: true })
       .click();
-    const managerDialog = page.getByRole("dialog", { name: "任务详情", exact: true });
+    const managerDialog = page.getByRole("region", { name: "任务详情", exact: true });
     await managerDialog.getByText(/Issue 协调责任/).waitFor();
     await managerDialog.getByText("责任要求", { exact: true }).waitFor();
     assert.equal(
@@ -1320,7 +1324,7 @@ try {
       0,
     );
     await page.screenshot({ path: join(output, `manager-task-${viewport.width}.png`) });
-    await managerDialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await managerDialog.getByRole("button", { name: /← 返回/ }).click();
     await closeIssue(page);
     await ownerBubble.getByRole("button", { name: "发布流程整理", exact: true }).click();
     // Subsequent owner-handoff scenarios use an already claimed manager.
@@ -1434,7 +1438,7 @@ try {
       .getByRole("button", { name: new RegExp(activeTask.title) })
       .first()
       .click();
-    const taskDialog = page.getByRole("dialog", { name: "任务详情", exact: true });
+    const taskDialog = page.getByRole("region", { name: "任务详情", exact: true });
     await taskDialog.getByRole("button", { name: "补充", exact: true }).click();
     await taskDialog.getByText("尚无执行记录。", { exact: true }).waitFor();
     taskQueued = false;
@@ -1517,7 +1521,7 @@ try {
     await taskDialog.getByRole("button", { name: "接管", exact: true }).waitFor();
     assert.equal(writes.filter((w) => w.operation === "control.set_mode").length, 2);
     writes.length = 0;
-    await taskDialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await taskDialog.getByRole("button", { name: /← 返回/ }).click();
     await closeIssue(page);
     if (mobile)
       await page
@@ -1529,7 +1533,7 @@ try {
         await page.getByRole("button", { name: "返回对话", exact: true }).click();
       await page.getByRole("button", { name: /确认灰度发布范围 待决策/ }).click();
     }
-    const inbox = page.getByRole("dialog", { name: "待处理", exact: true });
+    const inbox = page.getByRole("region", { name: "待处理事项", exact: true });
     await inbox.getByRole("button", { name: "通知", exact: true }).click();
     await inbox.getByRole("button", { name: /发布进度已更新/ }).waitFor();
     await page.screenshot({ path: join(output, `information-filter-${viewport.width}.png`) });
@@ -1544,7 +1548,7 @@ try {
     assert.equal(writes.length, 1);
     const requestID = writes[0]!.request_id;
     await page.screenshot({ path: join(output, `inbox-unknown-${viewport.width}.png`) });
-    await inbox.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await inbox.getByRole("button", { name: "← 返回", exact: true }).click();
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -1570,7 +1574,7 @@ try {
       .waitFor();
     assert.equal(writes.length, 1);
     assert.equal(writes[0]!.request_id, requestID);
-    await inbox.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await inbox.getByRole("button", { name: "← 返回", exact: true }).click();
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -1578,7 +1582,7 @@ try {
         .click();
     if (await page.getByRole("button", { name: "主 Agent", exact: true }).first().isVisible())
       await page.getByRole("button", { name: "主 Agent", exact: true }).first().click();
-    await page.evaluate(() => window.dispatchEvent(new Event("tend:main-agent")));
+    await navigate(page, "/");
     await page.getByRole("button", { name: "来源", exact: true }).click();
     let source = page.getByRole("dialog", { name: "补充来源", exact: true });
     await source
@@ -1646,7 +1650,7 @@ try {
     await page.screenshot({ path: join(output, `consultation-${viewport.width}.png`) });
     await page.getByRole("button", { name: "会话 ▾", exact: true }).last().click();
     await drawer.getByRole("button", { name: "历史归档", exact: true }).click();
-    const archives = page.getByRole("dialog", { name: "历史归档", exact: true });
+    const archives = page.getByRole("region", { name: "历史归档", exact: true });
     await archives.getByText("历史发布验证", { exact: true }).first().waitFor();
     await archives.getByRole("button", { name: "原生历史与缺口", exact: true }).click();
     await archives.getByText("未收录 · 未收录原生会话目录", { exact: true }).waitFor();
@@ -1665,12 +1669,8 @@ try {
     assert.equal(writes.filter((w) => w.operation === "issues.create").length, 0);
     await page.screenshot({ path: join(output, `archive-source-unknown-${viewport.width}.png`) });
     await page.reload();
-    await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
-    await page.getByRole("button", { name: "会话 ▾", exact: true }).click();
-    await page
-      .getByRole("dialog", { name: "会话", exact: true })
-      .getByRole("button", { name: "历史归档", exact: true })
-      .click();
+    await page.getByRole("heading", { name: "历史归档", exact: true }).waitFor();
+    assert.equal(new URL(page.url()).pathname, "/archive");
     await archives.getByRole("button", { name: "核实未完成的材料提交", exact: true }).click();
     await archives.getByRole("button", { name: "核实原来源并继续", exact: true }).click();
     await archives.getByRole("heading", { name: "新建Issue", exact: true }).waitFor();
@@ -1690,12 +1690,8 @@ try {
     const originalCreate = writes.find((w) => w.operation === "issues.create")!;
     sourceContentRevision = 8;
     await page.reload();
-    await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
-    await page.getByRole("button", { name: "会话 ▾", exact: true }).click();
-    await page
-      .getByRole("dialog", { name: "会话", exact: true })
-      .getByRole("button", { name: "历史归档", exact: true })
-      .click();
+    await page.getByRole("heading", { name: "历史归档", exact: true }).waitFor();
+    assert.equal(new URL(page.url()).pathname, "/archive");
     await archives
       .getByRole("button", { name: "继续使用已保存材料新建Issue", exact: true })
       .click();
@@ -1738,7 +1734,7 @@ try {
     assert(!JSON.stringify(newIssueWrite.payload).includes('"source_message_id":"old-report"'));
     assert.equal(writes.filter((w) => w.operation.startsWith("archive")).length, 0);
     await closeIssue(page);
-    await page.evaluate(() => window.dispatchEvent(new Event("tend:main-agent")));
+    await navigate(page, "/");
     await page.getByRole("heading", { name: "主 Agent", exact: true }).waitFor();
     await page.getByRole("button", { name: "来源", exact: true }).click();
     let rejected = page.getByRole("dialog", { name: "补充来源", exact: true });
@@ -1757,7 +1753,7 @@ try {
     const rejectedRequest = writes
       .filter((w) => w.operation === "conversation.inject_source")
       .at(-1)!.request_id;
-    await rejected.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await rejected.getByRole("button", { name: /^关闭/ }).first().click();
     await page.getByRole("button", { name: "来源", exact: true }).click();
     rejected = page.getByRole("dialog", { name: "补充来源", exact: true });
     await rejected.getByRole("button", { name: "取回原输入后修改", exact: true }).waitFor();
@@ -1767,7 +1763,7 @@ try {
     );
     await rejected.getByRole("button", { name: "取回原输入后修改", exact: true }).click();
     await rejected.getByRole("button", { name: "保存来源", exact: true }).waitFor();
-    await rejected.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await rejected.getByRole("button", { name: /^关闭/ }).first().click();
     await page.getByRole("button", { name: "来源", exact: true }).click();
     rejected = page.getByRole("dialog", { name: "补充来源", exact: true });
     await page.waitForFunction(() => {
@@ -1791,8 +1787,8 @@ try {
       rejectedRequest,
     );
     await rejected.getByRole("button", { name: "返回会话", exact: true }).click();
-    await page.evaluate(() => window.dispatchEvent(new CustomEvent("tend:open-catalog")));
-    const catalogDialog = page.getByRole("dialog", { name: "Agent与类别", exact: true });
+    await navigate(page, "/settings/agents");
+    const catalogDialog = page.getByRole("region", { name: "Agent与类别", exact: true });
     await catalogDialog
       .getByRole("button", { name: /松风 implementer/ })
       .first()
@@ -1811,7 +1807,7 @@ try {
     const categoryWrite = writes.find((w) => w.operation === "categories.put")!;
     assert.equal(categoryWrite.target.id, "implementer");
     assert.equal(categoryWrite.expected_control_revision, 1);
-    await catalogDialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await catalogDialog.getByRole("button", { name: "← 返回", exact: true }).click();
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -1890,7 +1886,7 @@ try {
         await page.getByRole("button", { name: "返回对话", exact: true }).click();
       await page.getByRole("button", { name: /确认灰度发布范围 待决策/ }).click();
     }
-    const finalInbox = page.getByRole("dialog", { name: "待处理", exact: true });
+    const finalInbox = page.getByRole("region", { name: "待处理事项", exact: true });
     await finalInbox.getByRole("button", { name: "待行动", exact: true }).click();
     await finalInbox.getByRole("button", { name: /补充验收原件/ }).click();
     await finalInbox
@@ -1917,7 +1913,7 @@ try {
     await finalInbox.getByText("标注作者：未知 · 原始时间：未知", { exact: true }).waitFor();
     await finalInbox.getByText(`来源记录：${sourceID}`, { exact: false }).waitFor();
     await page.screenshot({ path: join(output, `inbox-action-original-${viewport.width}.png`) });
-    if (mobile) await finalInbox.getByRole("button", { name: "← 待处理", exact: true }).click();
+    if (mobile) await finalInbox.getByRole("button", { name: "← 返回", exact: true }).click();
     await finalInbox.getByRole("button", { name: "待决策", exact: true }).click();
     await finalInbox.getByRole("button", { name: /确认灰度发布范围/ }).click();
     await finalInbox.getByRole("radio", { name: "小范围灰度", exact: true }).check();
@@ -1933,22 +1929,86 @@ try {
     const answer = writes.filter((w) => w.operation === "attentions.respond").at(-1)!;
     assert.equal((answer.payload as { version: number }).version, 3);
     assert.equal(answer.target.id, decision.attention_id);
-    if (mobile) await finalInbox.getByRole("button", { name: "← 待处理", exact: true }).click();
+    if (mobile) await finalInbox.getByRole("button", { name: "← 返回", exact: true }).click();
     await finalInbox.getByRole("button", { name: "通知", exact: true }).click();
     await finalInbox.getByRole("button", { name: /发布进度已更新/ }).click();
     await finalInbox.getByRole("button", { name: "收起", exact: true }).click();
-    if (mobile) await finalInbox.getByRole("button", { name: "← 待处理", exact: true }).click();
+    if (mobile) await finalInbox.getByRole("button", { name: "← 返回", exact: true }).click();
     await finalInbox.getByText("暂无此类事项。", { exact: true }).waitFor();
     assert.equal(information.status, "open", "archiving information must not resolve it");
     await page.screenshot({ path: join(output, `inbox-empty-${viewport.width}.png`) });
-    await finalInbox.getByRole("button", { name: "关闭详情", exact: true }).click();
-    await page.evaluate(() => window.dispatchEvent(new CustomEvent("tend:open-archive")));
-    const archiveState = page.getByRole("dialog", { name: "历史归档", exact: true });
+    await finalInbox.getByRole("button", { name: "← 返回", exact: true }).click();
+    await navigate(page, "/archive");
+    const archiveState = page.getByRole("region", { name: "历史归档", exact: true });
     await archiveState
       .getByRole("combobox", { name: "选择归档", exact: true })
       .selectOption("earlier-archive");
     await archiveState.getByText("当前格式暂不支持浏览，原档案仍保留。", { exact: true }).waitFor();
     await page.screenshot({ path: join(output, `archive-unsupported-${viewport.width}.png`) });
+    const routeSmoke = await context.newPage();
+    await routeSmoke.setViewportSize({
+      width: viewport.width,
+      height: viewport.width === 1440 ? 900 : 844,
+    });
+    const fixtureOrigin = new URL(page.url()).origin;
+    routeSmoke.on("pageerror", (error) => errors.push(error.message));
+    routeSmoke.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    for (const [path, heading, name] of [
+      ["/", "主 Agent", "main"],
+      ["/issues", "所有 Issue", "issues"],
+      ["/inbox", "待处理", "inbox"],
+      ["/settings", "设置", "settings"],
+      [`/issues/${encodeURIComponent(issue.issue_id)}`, issue.plan.title, "issue"],
+      [`/tasks/${encodeURIComponent(activeTask.task_id)}`, "任务详情", "task"],
+    ]) {
+      await routeSmoke.goto(`${fixtureOrigin}${path}`);
+      await routeSmoke
+        .getByRole("heading", { name: heading!, exact: true, level: 1 })
+        .waitFor()
+        .catch(async (error: unknown) => {
+          await writeFile(
+            join(output, `route-failure-${viewport.width}.json`),
+            JSON.stringify({
+              path,
+              errors,
+              consoleErrors,
+              body: await routeSmoke.locator("body").innerText(),
+            }),
+          );
+          await routeSmoke.screenshot({
+            path: join(output, `route-failure-${viewport.width}.png`),
+          });
+          throw error;
+        });
+      assert.equal(await routeSmoke.getByRole("heading", { level: 1 }).count(), 1);
+      if (name === "main") await routeSmoke.locator('[data-scroll-id="owner-plan"]').waitFor();
+      await routeSmoke.screenshot({ path: join(output, `s2-${name}-${viewport.width}.png`) });
+      await routeSmoke.reload();
+      await routeSmoke.getByRole("heading", { name: heading!, exact: true, level: 1 }).waitFor();
+      assert.equal(new URL(routeSmoke.url()).pathname, path);
+      await routeSmoke.keyboard.press("Escape");
+      assert.equal(
+        new URL(routeSmoke.url()).pathname,
+        path,
+        "pages do not require Escape to leave",
+      );
+    }
+    await routeSmoke.goto(`${fixtureOrigin}/?issue=${issue.issue_id}`);
+    await routeSmoke
+      .getByRole("heading", { name: issue.plan.title, exact: true, level: 1 })
+      .waitFor();
+    assert.equal(new URL(routeSmoke.url()).pathname, `/issues/${issue.issue_id}`);
+    await routeSmoke.goto(`${fixtureOrigin}/?issue=${issue.issue_id}&task=${activeTask.task_id}`);
+    await routeSmoke.getByRole("heading", { name: "任务详情", exact: true, level: 1 }).waitFor();
+    assert.equal(new URL(routeSmoke.url()).pathname, `/tasks/${activeTask.task_id}`);
+    assert.equal(new URL(routeSmoke.url()).searchParams.get("from"), issue.issue_id);
+    await routeSmoke.goto(`${fixtureOrigin}/inbox/${action.attention_id}`);
+    await routeSmoke.getByRole("heading", { name: "待处理", exact: true, level: 1 }).waitFor();
+    await routeSmoke.getByRole("button", { name: "← 返回", exact: true }).click();
+    await routeSmoke.waitForURL(`${fixtureOrigin}/inbox`);
+    await routeSmoke.close();
     assert(
       httpErrors.every(
         (error) =>

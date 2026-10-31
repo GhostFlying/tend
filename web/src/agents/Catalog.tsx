@@ -35,8 +35,7 @@ export function AgentCatalogView() {
       />
     );
   return (
-    <section className={styles.root} aria-label="Agent与类别">
-      <h1>Agent与类别</h1>
+    <section className={styles.root}>
       <p className={styles.subtitle}>管理全局类别，查看各环境Agent登记。</p>
       <div className={styles.categories}>
         {(categories.value?.items ?? []).map((category) => (
@@ -245,7 +244,7 @@ function CategoryEditor({
   };
   return (
     <section className={`${styles.root} ${styles.form}`}>
-      <h1>{category ? "编辑类别" : "新增类别"}</h1>
+      <h2>{category ? "编辑类别" : "新增类别"}</h2>
       <label>
         类别ID
         <input

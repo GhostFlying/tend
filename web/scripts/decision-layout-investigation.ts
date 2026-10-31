@@ -484,7 +484,10 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/api/"))
     return sendJSON(res, { error: { code: "not_found", message: "not in fixture" } }, 404);
   try {
-    const file = resolve(appRoot, `.${path}${path.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(
+      appRoot,
+      path.split("/").at(-1)?.includes(".") ? `.${path}` : "index.html",
+    );
     assert(file.startsWith(appRoot));
     res.setHeader(
       "Content-Type",
@@ -695,7 +698,10 @@ async function checkLayoutMatrix() {
   ]) {
     for (const fontScale of [1, 1.5, 2]) {
       reset(layoutOptions);
-      const { context, page, errors } = await openPage(viewport.width, viewport.height);
+      const { context, page, errors, consoleErrors } = await openPage(
+        viewport.width,
+        viewport.height,
+      );
       try {
         await cardFor(page).waitFor();
         const baseFontSize = await page.evaluate(() =>
@@ -758,6 +764,19 @@ async function checkLayoutMatrix() {
           options: measures,
         });
         console.log(`PASS layout ${name}`);
+      } catch (error) {
+        await writeFile(
+          join(output, `${browserName}-layout-failure.json`),
+          JSON.stringify({
+            viewport,
+            fontScale,
+            errors,
+            consoleErrors,
+            body: await page.locator("body").innerText(),
+          }),
+        );
+        await page.screenshot({ path: join(output, `${browserName}-layout-failure.png`) });
+        throw error;
       } finally {
         await context.close();
       }
@@ -774,7 +793,7 @@ async function checkNormalInboxAndTaskAnswer() {
       const pending = page.getByRole("complementary", { name: "当前待处理" });
       await pending.getByText(question, { exact: true }).waitFor();
       await pending.getByRole("button", { name: "查看并处理", exact: true }).click();
-      const inbox = page.getByRole("dialog", { name: "待处理", exact: true });
+      const inbox = page.getByRole("region", { name: "待处理事项", exact: true });
       await inbox.getByRole("radio").first().waitFor();
       assert.equal(await inbox.getByRole("radio").count(), originalOptions.length);
       await inbox.getByRole("radio").first().check();
@@ -783,9 +802,9 @@ async function checkNormalInboxAndTaskAnswer() {
         0,
         "reading/selecting the real pending question is not a submitted answer",
       );
-      await inbox.getByRole("button", { name: "关闭详情", exact: true }).click();
+      await inbox.getByRole("button", { name: "← 返回", exact: true }).click();
       await page.goto(`http://127.0.0.1:${fixturePort}/?task=${task.task_id}`);
-      const detail = page.getByRole("dialog", { name: "任务详情", exact: true });
+      const detail = page.getByRole("region", { name: "任务详情", exact: true });
       await detail.getByRole("button", { name: originalOptions[0]!, exact: true }).waitFor();
       await detail.getByLabel("补充说明或其他回答").fill("来自原任务详情的回答");
       await detail.getByRole("button", { name: originalOptions[0]!, exact: true }).click();
@@ -843,7 +862,7 @@ async function checkLowHeightAndSharedButtons() {
     // Task control remains in the actual task detail, not the Attention Inbox.
     await page.goto(`http://127.0.0.1:${fixturePort}/?task=${heldTask.task_id}`);
     const handback = page
-      .getByRole("dialog", { name: "任务详情" })
+      .getByRole("region", { name: "任务详情" })
       .getByRole("button", { name: "交还给 tend" });
     await reachable(handback);
     const handbackBox = await rect(handback);

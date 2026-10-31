@@ -277,7 +277,7 @@ const server = createServer(async (req, res) => {
     return json({ error: { code: "not_found", message: "Fixture route absent" } });
   }
   try {
-    const file = resolve(root, `.${path}${path.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, path.split("/").at(-1)?.includes(".") ? `.${path}` : "index.html");
     assert(file.startsWith(root + "/"));
     res.setHeader(
       "Content-Type",
@@ -338,6 +338,14 @@ try {
     correction = true;
     await panel.getByRole("button", { name: "刷新", exact: true }).click();
     await panel.getByText("13,000", { exact: true }).waitFor();
+    if (viewport.width === 390 || viewport.width === 1440) {
+      await page.setViewportSize({
+        width: viewport.width,
+        height: viewport.width === 1440 ? 900 : 844,
+      });
+      await page.screenshot({ path: join(output, `s2-usage-${viewport.width}.png`) });
+      await page.setViewportSize(viewport);
+    }
     await page.screenshot({
       path: join(output, `usage-known-${viewport.width}.png`),
       fullPage: true,
@@ -347,7 +355,7 @@ try {
     await panel.locator('[class*="hero"]').getByText("—", { exact: true }).waitFor();
     assert(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
     await page.screenshot({ path: join(output, `usage-${viewport.width}.png`), fullPage: true });
-    await page.getByRole("button", { name: "关闭 Token 用量", exact: true }).click();
+    await page.getByRole("button", { name: "← 返回", exact: true }).click();
     runsAvailable = false;
     await page.goto(`http://127.0.0.1:${address.port}/?task=${taskID}`);
     const card = page.getByRole("region", { name: "执行过程与用量" });
@@ -379,9 +387,7 @@ try {
     await card.getByRole("button", { name: "本次用量", exact: true }).click();
     await card.locator("article").last().locator("summary").first().click();
     await card.screenshot({ path: join(output, `rollout-expanded-${viewport.width}.png`) });
-    const position = await card.evaluate(
-      (el) => el.closest("dialog")?.querySelector('[class*="pane"]')?.scrollTop ?? 0,
-    );
+    const position = await card.evaluate((el) => el.closest("[data-task-scroll]")?.scrollTop ?? 0);
     await card
       .getByRole("button", { name: /查看完整过程/ })
       .evaluate((el) => (el as HTMLButtonElement).click());
@@ -441,9 +447,7 @@ try {
     );
     assert(
       Math.abs(
-        (await card.evaluate(
-          (el) => el.closest("dialog")?.querySelector('[class*="pane"]')?.scrollTop ?? 0,
-        )) - position,
+        (await card.evaluate((el) => el.closest("[data-task-scroll]")?.scrollTop ?? 0)) - position,
       ) < 3,
       "return moved the card",
     );

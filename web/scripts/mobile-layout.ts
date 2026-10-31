@@ -1,3 +1,4 @@
+import { navigate } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 import { issuePage, issueView } from "./issue-fixture.ts";
@@ -155,7 +156,7 @@ const server = createServer(async (req, res) => {
     return json({ error: { code: "not_found", message: "Not in test data" } });
   }
   try {
-    const file = resolve(root, `.${path}${path.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, path.split("/").at(-1)?.includes(".") ? `.${path}` : "index.html");
     assert(file.startsWith(root));
     const type = path.endsWith(".js")
       ? "text/javascript"
@@ -235,9 +236,9 @@ try {
       assert(reads.some((path) => path.includes("sort=completed_at")));
       await page.screenshot({ path: join(output, `sidebar-${viewport.width}.png`) });
       await results.getByRole("button").first().click();
-      const details = page.getByRole("dialog", { name: "任务详情", exact: true });
+      const details = page.getByRole("region", { name: "任务详情", exact: true });
       await details.getByText("启动设计稿 Web 预览", { exact: true }).first().waitFor();
-      await details.getByRole("button", { name: "关闭详情", exact: true }).click();
+      await details.getByRole("button", { name: /← 返回/ }).click();
       const records = sidebar.getByRole("button", { name: "全部任务执行", exact: true });
       await records.scrollIntoViewIfNeeded();
       await unobscured(records);
@@ -340,6 +341,11 @@ try {
     await filtered;
     if (mobile) {
       await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await resource.locator(":scope > summary").click();
+      await resource
+        .locator("summary")
+        .filter({ hasText: /^执行主机/ })
+        .click();
     }
     assert.equal(await rows.count(), 2);
     if (mobile) await page.getByRole("button", { name: "返回Issue", exact: true }).click();
@@ -348,14 +354,23 @@ try {
     if (mobile) {
       await tabs.getByRole("button", { name: "待处理", exact: true }).click();
       await page
-        .getByRole("dialog", { name: "待处理" })
-        .getByRole("button", { name: "关闭详情" })
+        .getByRole("region", { name: "待处理事项" })
+        .getByRole("button", { name: /← 返回/ })
         .click();
     }
-    const settings = page.getByRole("button", { name: "设置", exact: true });
+    if (mobile) await navigate(page, "/issues");
+    const settings = page.getByRole("button", {
+      name: mobile ? "资源与记录" : "设置",
+      exact: true,
+    });
     await unobscured(settings);
     await settings.click();
-    const panel = page.getByRole("dialog", { name: "设置", exact: true });
+    if (mobile)
+      await page
+        .getByRole("dialog", { name: "资源与记录", exact: true })
+        .getByRole("button", { name: "设置", exact: true })
+        .click();
+    const panel = page.getByRole("region", { name: "设置", exact: true });
     await panel.getByLabel("空闲分钟").fill("60");
     await panel.getByRole("button", { name: "保存", exact: true }).click();
     await panel.getByText("空闲 60 分钟后自动准备。", { exact: false }).waitFor();
@@ -363,7 +378,7 @@ try {
     await page.screenshot({
       path: join(output, `settings-${viewport.width}x${viewport.height}.png`),
     });
-    await panel.getByRole("button", { name: "关闭设置" }).click();
+    await panel.getByRole("button", { name: "← 返回", exact: true }).click();
     assert(await settings.evaluate((el) => el === document.activeElement));
     if (mobile) await tabs.getByRole("button", { name: "对话", exact: true }).click();
     else await page.getByRole("button", { name: "返回对话" }).click();

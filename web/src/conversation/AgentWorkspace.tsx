@@ -1,3 +1,8 @@
+import { PageHeader } from "../shell/PageHeader.tsx";
+import { Button } from "../ui/Button.tsx";
+import { EmptyState } from "../ui/Surfaces.tsx";
+import { rememberOpener } from "../ui/focus.ts";
+import { navigate, useRoute } from "../app/router.ts";
 import { NewConsultation } from "./NewConsultation.tsx";
 import { Close } from "../shell/icons.tsx";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
@@ -33,16 +38,22 @@ export function AgentWorkspace({
 }) {
   const services = useServices();
   const sessions = useContext(ConversationSessionsContext);
-  const [selected, setSelected] = useState("main");
+  const route = useRoute();
+  const selected = route.page === "conversation" ? route.id : "main";
   const selection = useRef({ revision: 0 });
+  const [unavailable, setUnavailable] = useState("");
   const listRevision = useRef(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [visited, setVisited] = useState<AgentConversation[]>([]);
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const drawerOpener = useRef<Element | null>(null);
   const drawer = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (open) drawer.current?.showModal();
+    if (open && drawer.current) {
+      rememberOpener(drawer.current, drawerOpener.current);
+      drawer.current.showModal();
+    }
   }, [open]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -67,51 +78,42 @@ export function AgentWorkspace({
       clearTimeout(timer);
     };
   }, [services.client, search, status, open]);
-  const select = useCallback(
-    (id: string) => {
-      const request = ++selection.current.revision;
-      if (id === "main") {
-        setSelected(id);
-        setOpen(false);
-        return;
-      }
+  const select = useCallback((id: string) => {
+    selection.current.revision++;
+    setOpen(false);
+    navigate(id === "main" ? { page: "chat" } : { page: "conversation", id });
+  }, []);
+  useEffect(() => {
+    const requests = selection.current;
+    const request = ++requests.revision;
+    if (selected !== "main") {
       void services.client
         .get<AgentConversation>(
-          `/api/v1/agent-conversations/${encodeURIComponent(id)}?projection=issues`,
+          `/api/v1/agent-conversations/${encodeURIComponent(selected)}?projection=issues`,
         )
         .then((c) => {
-          if (request !== selection.current.revision) return;
+          if (request !== requests.revision) return;
           if (c.issue_id) {
-            setOpen(false);
-            onIssue(c.issue_id);
+            navigate({ page: "issue", id: c.issue_id }, { replace: true });
             return;
           }
           setVisited((v) =>
-            v.some((x) => x.conversation_id === id)
-              ? v.map((x) => (x.conversation_id === id ? c : x))
+            v.some((x) => x.conversation_id === selected)
+              ? v.map((x) => (x.conversation_id === selected ? c : x))
               : [...v, c],
           );
-          setSelected(id);
-          setOpen(false);
         })
-        .catch((e) => {
-          if (request === selection.current.revision) notify(String(e), "warn");
+        .catch((error) => {
+          if (request === requests.revision) {
+            setUnavailable(selected);
+            notify(String(error), "warn");
+          }
         });
-    },
-    [services.client, onIssue],
-  );
-  useEffect(() => {
-    const requests = selection.current;
-    const listener = (event: Event) => select((event as CustomEvent<string>).detail);
-    const main = () => select("main");
-    window.addEventListener("tend:open-agent", listener);
-    window.addEventListener("tend:main-agent", main);
+    }
     return () => {
       requests.revision++;
-      window.removeEventListener("tend:open-agent", listener);
-      window.removeEventListener("tend:main-agent", main);
     };
-  }, [select]);
+  }, [services.client, selected]);
   useEffect(() => {
     if (connection.status !== "online") return;
     let active = true;
@@ -148,7 +150,10 @@ export function AgentWorkspace({
   const shared = {
     ...services,
     selectConversation: select,
-    openAgentDrawer: () => setOpen(true),
+    openAgentDrawer: () => {
+      drawerOpener.current = document.activeElement;
+      setOpen(true);
+    },
   };
   const more = async () => {
     if (!page?.next || loadingMore) return;
@@ -168,6 +173,17 @@ export function AgentWorkspace({
   };
   return (
     <>
+      {selected !== "main" && !visited.some((c) => c.conversation_id === selected) && (
+        <section className={styles.session}>
+          <PageHeader title="会话" />
+          <EmptyState>
+            {unavailable === selected ? "暂时无法读取此会话，请返回后重试。" : "正在读取会话…"}
+            <Button variant="link" onClick={() => select("main")}>
+              返回主对话
+            </Button>
+          </EmptyState>
+        </section>
+      )}
       <ServicesContext value={{ ...shared, conversation: { id: "main", title: "主 Agent" } }}>
         <section className={styles.session} hidden={selected !== "main"}>
           <Chat
@@ -217,7 +233,7 @@ export function AgentWorkspace({
               <button
                 onClick={() => {
                   setOpen(false);
-                  window.dispatchEvent(new Event("tend:open-catalog"));
+                  navigate({ page: "agents" });
                 }}
               >
                 Agent与类别
@@ -225,7 +241,7 @@ export function AgentWorkspace({
               <button
                 onClick={() => {
                   setOpen(false);
-                  window.dispatchEvent(new Event("tend:open-archive"));
+                  navigate({ page: "archive" });
                 }}
               >
                 历史归档

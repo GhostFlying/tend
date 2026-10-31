@@ -1,3 +1,4 @@
+import { Link, legacyURL, parse } from "../app/router.ts";
 // The main agent's replies as Markdown. markdown-it parses with HTML off,
 // and the tokens become React elements from a fixed set of tags, so no
 // markup in a reply reaches the page as HTML. Task IDs in text become task
@@ -140,6 +141,16 @@ function element(token: Token, children: ReactNode[], key: number): ReactNode {
   if (token.tag === "a") {
     const href = token.attrGet("href");
     if (href) {
+      if (typeof window !== "undefined" && URL.canParse(String(href), window.location.href)) {
+        const url = new URL(String(href), window.location.href);
+        const target = legacyURL(url) ?? url.pathname + url.search + url.hash;
+        if (url.origin === window.location.origin && parse(target).page !== "missing")
+          return (
+            <Link key={key} to={target}>
+              {children}
+            </Link>
+          );
+      }
       props.href = href;
       props.target = "_blank";
       props.rel = "noopener noreferrer";

@@ -35,7 +35,7 @@ export function ManualSource({ onBack }: { onBack(): void }) {
       className={`${styles.root} ${styles.form} ${sourceStyles.root}`}
       aria-label="手动补充来源"
     >
-      <h1>补充来源</h1>
+      <h2>补充来源</h2>
       <p className={styles.muted}>保留原文、原文件和来源信息；这不会冒充你的执行指令。</p>
       <section className={sourceStyles.target} aria-label="注入目标">
         <strong>{source.current?.state === "sent" ? "已送达" : "注入目标"}</strong>

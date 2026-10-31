@@ -8,7 +8,7 @@ export async function openIssueAux(page: Page, label: string): Promise<Locator> 
   const previous = page.getByRole("dialog");
   if (await previous.count()) {
     const last = previous.last();
-    await last.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await last.getByRole("button", { name: /^关闭/ }).first().click();
     await last.waitFor({ state: "hidden" });
   }
   const region = page.getByRole("region", { name: "Issue详情", exact: true });
@@ -30,10 +30,10 @@ export async function openIssueAux(page: Page, label: string): Promise<Locator> 
   });
 }
 export async function issueSidebar(page: Page): Promise<Locator> {
-  await page
-    .getByRole("region", { name: "Issue详情", exact: true })
-    .getByRole("heading", { level: 1 })
-    .waitFor();
+  const region = page.getByRole("region", { name: "Issue详情", exact: true });
+  // A loading/error page also has a heading; wait for the Issue projection before
+  // choosing the desktop sidebar or the phone's auxiliary Sheet entry.
+  await region.locator("[data-issue-scroll]").waitFor();
   const side = page.getByRole("complementary", { name: "Issue辅助信息", exact: true });
   if (await side.isVisible()) return side;
   const drawer = page.getByRole("dialog", { name: "Issue辅助信息", exact: true });
@@ -47,7 +47,7 @@ export async function issueSidebar(page: Page): Promise<Locator> {
 }
 export async function closeIssue(page: Page): Promise<void> {
   for (const dialog of await page.getByRole("dialog").all()) {
-    const close = dialog.getByRole("button", { name: "关闭详情", exact: true });
+    const close = dialog.getByRole("button", { name: /^关闭/ }).first();
     if (await close.isVisible()) await close.click();
   }
   await page
@@ -58,7 +58,7 @@ export async function closeIssue(page: Page): Promise<void> {
 export async function openIssueDefinition(page: Page): Promise<void> {
   const dialogs = page.getByRole("dialog");
   if (await dialogs.count())
-    await dialogs.last().getByRole("button", { name: "关闭详情", exact: true }).click();
+    await dialogs.last().getByRole("button", { name: /^关闭/ }).first().click();
   const summary = page
     .getByRole("region", { name: "Issue详情", exact: true })
     .locator("summary")

@@ -1,5 +1,6 @@
+import { useEntryState } from "../app/router.ts";
 import { AssigneeName } from "./AssigneeName.tsx";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { IssueSummary, IssueState, IssueView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
@@ -66,7 +67,7 @@ function IssueNode({
   defaultOpen?: boolean;
   includeClosed: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useEntryState(`tree:${includeClosed}:${item.issue_id}`, defaultOpen);
   return (
     <>
       <div className={styles.treeRow} role="treeitem" aria-expanded={open} aria-level={depth + 1}>

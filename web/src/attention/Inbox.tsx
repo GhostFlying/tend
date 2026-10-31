@@ -1,3 +1,5 @@
+import { back, navigate } from "../app/router.ts";
+import { PageHeader } from "../shell/PageHeader.tsx";
 import { AttentionActionTime } from "./ActionTime.tsx";
 import { AttentionOriginalMessage } from "./OriginalMessage.tsx";
 import { SourceDetails } from "../conversation/SourceDetails.tsx";
@@ -32,7 +34,8 @@ export function Inbox({
 }) {
   const { live } = useServices();
   const [kind, setKind] = useState("");
-  const [selected, setSelected] = useState(initial ?? "");
+  const selected = initial ?? "";
+  const setSelected = (id: string) => navigate(id ? { page: "attention", id } : { page: "inbox" });
   const state = useStore(live.attention.inbox.state);
   const next = useStore(live.attention.next.state);
   useEffect(() => {
@@ -42,10 +45,8 @@ export function Inbox({
   const items = state.value?.items ?? [];
   return (
     <section className={styles.root} data-selected={!!selected} aria-label="待处理事项">
-      <div className={styles.heading}>
-        <h1>待处理</h1>
-        <span className={styles.muted}>需要你决定或亲自推进的事项。</span>
-      </div>
+      <PageHeader title="待处理" onBack={onClose} />
+      <p className={styles.muted}>需要你决定或亲自推进的事项。</p>
       <nav className={styles.tabs} aria-label="事项类型">
         {[
           ["", "全部"],
@@ -124,17 +125,15 @@ export function Inbox({
             <AttentionDetails
               key={selected}
               id={selected}
+              showBack={false}
               onIssue={onIssue}
-              onBack={() => setSelected("")}
+              onBack={() => back({ page: "inbox" })}
             />
           ) : (
             <p className={styles.muted}>选择一个事项查看。</p>
           )}
         </div>
       </div>
-      <button className={styles.mobileBack} onClick={onClose}>
-        返回对话
-      </button>
     </section>
   );
 }
@@ -143,19 +142,23 @@ export function AttentionDetails({
   id,
   onIssue,
   onBack,
+  showBack = true,
 }: {
   id: string;
   onIssue(id: string): void;
   onBack(): void;
+  showBack?: boolean;
 }) {
   const { live } = useServices();
   const state = useStore(live.attention.attention(id).state);
   const a = state.value;
   return (
     <>
-      <button className={styles.mobileBack} onClick={onBack}>
-        ← 待处理
-      </button>
+      {showBack && (
+        <button className={styles.mobileBack} onClick={onBack}>
+          ← 待处理
+        </button>
+      )}
       {a ? (
         <AttentionForm
           key={`${a.attention_id}:${a.revision}`}

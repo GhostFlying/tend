@@ -24,7 +24,7 @@ import {
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/Surfaces.tsx";
 import styles from "./Details.module.css";
-import { DetailTabs } from "./DetailOverlay.tsx";
+import { DetailTabs } from "./DetailTabs.tsx";
 import { TaskInputs } from "../workitems/Materials.tsx";
 import { Note } from "./Chat.tsx";
 import { StatusDot } from "./StatusDot.tsx";

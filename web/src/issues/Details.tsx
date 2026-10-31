@@ -1,9 +1,10 @@
+import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type { IssueAgentConversation, IssueView, IssueActivityPage } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
-import { DetailOverlay } from "../shell/DetailOverlay.tsx";
+import { Sheet } from "../ui/Modal.tsx";
 import { AttentionDetails } from "../attention/Inbox.tsx";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { MessageAttachments } from "../conversation/Attachments.tsx";
@@ -415,6 +416,7 @@ export function IssueDetails({
       </header>
       {!issue ? (
         <div className={styles.loading} role="status">
+          <PageHeader title="Issue详情" />
           {state.error ? (
             <ReadError label="Issue读取失败" retry={() => void reads.open(id)} />
           ) : (
@@ -439,7 +441,7 @@ export function IssueDetails({
                     retry={() => void reads.open(id)}
                   />
                 )}
-                <h1>{issue.plan.title}</h1>
+                <PageHeader className={styles.titleHeader} title={issue.plan.title} />
                 <p className={styles.metadata}>
                   <span className={styles.dot} />
                   {issueStateLabel[issue.state]}
@@ -590,17 +592,17 @@ export function IssueDetails({
         </div>
       )}
       {side && (
-        <DetailOverlay task={false} label="Issue辅助信息" onClose={() => setSide(false)}>
+        <Sheet open title="Issue辅助信息" onClose={() => setSide(false)}>
           <aside className={styles.drawer}>{sideContent}</aside>
-        </DetailOverlay>
+        </Sheet>
       )}
       {attention && (
-        <DetailOverlay task={false} label="Issue待处理事项" onClose={() => setAttention("")}>
+        <Sheet open title="Issue待处理事项" onClose={() => setAttention("")}>
           <AttentionDetails id={attention} onIssue={onSelect} onBack={() => setAttention("")} />
-        </DetailOverlay>
+        </Sheet>
       )}
       {issue && panel && (
-        <DetailOverlay task={false} label={panelLabels[panel]} onClose={close}>
+        <Sheet open title={panelLabels[panel]} onClose={close}>
           <div className={styles.panel}>
             {panel === "definition" && (
               <IssueDefinition issue={issue} onBack={close} onSaved={saved} />
@@ -635,7 +637,7 @@ export function IssueDetails({
               </>
             )}
           </div>
-        </DetailOverlay>
+        </Sheet>
       )}
     </section>
   );

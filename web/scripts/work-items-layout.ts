@@ -388,7 +388,7 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/api/"))
     return json(res, { error: { code: "not_found", message: "Not in synthetic data" } }, 404);
   try {
-    const file = resolve(root, `.${path}${path.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, path.split("/").at(-1)?.includes(".") ? `.${path}` : "index.html");
     assert(file.startsWith(root));
     res.setHeader(
       "Content-Type",
@@ -484,7 +484,13 @@ try {
     assert(await board.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
     await page.screenshot({ path: join(output, `tree-last-${width}.png`) });
     const filter = board.getByLabel("按项目筛选Issue");
-    await filter.fill("docs");
+    await filter.click();
+    await filter.pressSequentially("docs");
+    assert(
+      await filter.evaluate((el) => el === document.activeElement),
+      "query changes keep the filter focused",
+    );
+    assert.equal(new URL(page.url()).searchParams.get("project"), "docs");
     await board.getByRole("button", { name: "持续跟进目标 3", exact: true }).waitFor();
     assert.equal(await board.getByRole("treeitem").count(), 1);
     await board.getByLabel("显示已结束").check();
@@ -544,7 +550,7 @@ try {
       .getByRole("button", { name: new RegExp(task.title) })
       .first()
       .click();
-    const taskDetail = page.getByRole("dialog", { name: "任务详情", exact: true });
+    const taskDetail = page.getByRole("region", { name: "任务详情", exact: true });
     await taskDetail
       .getByText(task.title, { exact: true })
       .filter({ visible: true })
@@ -637,6 +643,7 @@ try {
     assert.equal(planChoice.answer, "先让我看看效果，再安排上线");
     assert.equal(writes.at(-1)?.operation, "work_item_choices.respond");
     await openBoard();
+    await page.getByRole("tab", { name: "层级", exact: true }).click();
     items = [];
     publish();
     await board.getByText("暂无 Issue。", { exact: true }).waitFor();

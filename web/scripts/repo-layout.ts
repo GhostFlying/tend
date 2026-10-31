@@ -260,7 +260,7 @@ async function usable(locator: Locator, page: Page) {
 }
 async function closed(page: Page, entry: Locator) {
   await page
-    .getByRole("dialog", { name: /^(已注册仓库|资源与记录)$/, exact: true })
+    .getByRole("region", { name: "已注册仓库", exact: true })
     .waitFor({ state: "detached" });
   assert(
     await entry.evaluate((element) => globalThis.document.activeElement === element),
@@ -301,27 +301,25 @@ try {
     const resourcesEntry = page.getByRole("button", { name: "资源与记录", exact: true });
     await resourcesEntry.click();
     const resources = page.getByRole("dialog", { name: "资源与记录", exact: true });
-    await resources
-      .locator("summary")
-      .filter({ hasText: /^执行主机状态$/ })
-      .click();
-    const hostEntry = resources.getByRole("button", { name: "主机详情：host-a", exact: true });
+    await resources.getByRole("button", { name: "执行主机状态", exact: true }).click();
+    const hostsPage = page.getByRole("region", { name: "执行主机", exact: true });
+    const hostEntry = hostsPage.getByRole("button", { name: "主机详情：host-a", exact: true });
     await hostEntry.click();
     const hostDetails = page.getByRole("dialog", { name: "主机详情", exact: true });
     await hostDetails.getByRole("heading", { name: "host-a", exact: true }).waitFor();
     await page.keyboard.press("Escape");
     await hostDetails.waitFor({ state: "detached" });
-    assert(await resources.isVisible(), "host Escape must preserve the enclosing resources");
+    assert(await hostsPage.isVisible(), "host Escape must preserve the hosts page");
     assert(
       await hostEntry.evaluate((element) => document.activeElement === element),
       "host Escape must return focus to the invoking host button",
     );
     if (output) await page.screenshot({ path: join(output, `host-escape-${viewport.width}.png`) });
-    await page.keyboard.press("Escape");
-    await resources.waitFor({ state: "detached" });
+    await page.goBack();
+    await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
     assert(
       await resourcesEntry.evaluate((element) => document.activeElement === element),
-      "resource Escape must return focus to its entry",
+      "resource back must return focus to its entry",
     );
     if (mobile) {
       await page.getByLabel("按项目筛选Issue").fill("selected-project");
@@ -333,11 +331,11 @@ try {
     }
     const entry = page
       .locator(mobile ? "main" : "aside")
-      .locator('button[aria-haspopup="dialog"]')
+      .locator("button")
       .filter({ hasText: "已注册仓库", visible: true });
     await usable(entry, page);
     const before = reads;
-    const panel = page.getByRole("dialog", {
+    const panel = page.getByRole("region", {
       name: "已注册仓库",
       exact: true,
     });
@@ -345,7 +343,7 @@ try {
       await entry.click();
     };
     const closeRegistry = panel.getByRole("button", {
-      name: "关闭已注册仓库",
+      name: "← 返回",
     });
     await openRegistry();
     await panel.getByText("已读取登记。", { exact: true }).waitFor();
@@ -444,17 +442,21 @@ try {
     await page.keyboard.press("Tab");
     assert(
       await panel.evaluate((element) => element.contains(globalThis.document.activeElement)),
-      "modal traps focus",
+      "page controls remain keyboard reachable",
     );
     await closeRegistry.click();
     await closed(page, entry);
     await openRegistry();
     await panel.waitFor();
     await page.keyboard.press("Escape");
+    assert(await panel.isVisible(), "Escape does not leave a page");
+    await closeRegistry.click();
     await closed(page, entry);
     await openRegistry();
     await panel.waitFor();
     await page.mouse.click(1, 1);
+    assert(await panel.isVisible(), "page content stays mounted after outside clicks");
+    await closeRegistry.click();
     await closed(page, entry);
 
     if (mobile) {
@@ -545,9 +547,9 @@ try {
         name: new RegExp(`Unlinked historical ${lifecycle} page 2`),
       });
       await oldTask.click();
-      const details = page.getByRole("dialog", { name: "任务详情", exact: true });
+      const details = page.getByRole("region", { name: "任务详情", exact: true });
       await details.getByText(`Unlinked historical ${lifecycle} page 2`, { exact: true }).waitFor();
-      await details.getByRole("button", { name: "关闭详情", exact: true }).click();
+      await details.getByRole("button", { name: /← 返回/ }).click();
     }
     await executions.getByRole("tab", { name: "全部", exact: true }).click();
     await executions.getByText("正在启动", { exact: true }).waitFor();

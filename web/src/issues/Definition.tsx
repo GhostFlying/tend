@@ -232,7 +232,7 @@ export function IssueDefinition({
   };
   return (
     <section className={layout.root} aria-label={issue ? "编辑Issue定义" : "新建Issue"}>
-      <h1>{issue ? "编辑Issue定义" : parent ? "新增子Issue" : "新建Issue"}</h1>
+      <h2>{issue ? "编辑Issue定义" : parent ? "新增子Issue" : "新建Issue"}</h2>
       <p className={styles.muted}>
         {baseline?.plan.title ??
           (parent ? `上级Issue：${parent.plan.title}` : "定义目标与完成条件，由负责人持续推进。")}
