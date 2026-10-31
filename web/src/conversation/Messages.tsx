@@ -25,7 +25,7 @@ import {
   systemMessageBody,
   type Entry,
 } from "./model.ts";
-import { groupToolItems } from "./toolLabels.ts";
+import { groupToolItems, retainToolGroups } from "./toolLabels.ts";
 import { CopyIdentifier } from "../i18n/identifiers.tsx";
 import { Chevron } from "../shell/icons.tsx";
 import toolStyles from "./ToolRow.module.css";
@@ -149,14 +149,8 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
   const [, interaction] = useState(0);
   useLayoutEffect(() => {
     const reading = root.current?.querySelector("[data-open], details[open], :focus");
-    const known = new Set(groups.flat());
     const next = reading
-      ? [
-          ...groups,
-          ...entry.items
-            .filter((item) => !known.has(item.message_id))
-            .map((item) => [item.message_id]),
-        ]
+      ? retainToolGroups(groups, entry.items)
       : groupToolItems(entry.items).map((items) => items.map((item) => item.message_id));
     if (JSON.stringify(next) !== JSON.stringify(groups)) setGroups(next);
   });
@@ -176,7 +170,9 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
             <details key={items[0]!.message_id} className={toolStyles.group}>
               <summary className={toolStyles.row}>
                 <Chevron className={toolStyles.chevron} />
-                <span className={toolStyles.name}>使用了 {items.length} 个工具</span>
+                <span className={toolStyles.name}>
+                  使用了 {items.filter((item) => item.tool).length} 个工具
+                </span>
               </summary>
               {items.map((it) => (
                 <AgentItem key={it.message_id} item={it} />

@@ -132,3 +132,26 @@ export function groupToolItems(items: readonly IssueConversationItem[]): IssueCo
   }
   return groups;
 }
+
+/** Keep mounted groups while inserting backfilled replies in transcript order. */
+export function retainToolGroups(
+  groups: readonly (readonly string[])[],
+  items: readonly IssueConversationItem[],
+): string[][] {
+  const positions = new Map(items.map((item, index) => [item.message_id, index]));
+  const groupEnds = new Map<string, number>();
+  for (const group of groups) {
+    const present = group.filter((id) => positions.has(id));
+    const end = positions.get(present.at(-1) ?? "");
+    if (end !== undefined) {
+      for (const id of present) groupEnds.set(id, end);
+    }
+  }
+  const ordered: string[][] = [];
+  for (let index = 0; index < items.length;) {
+    const end = groupEnds.get(items[index]!.message_id) ?? index;
+    ordered.push(items.slice(index, end + 1).map((item) => item.message_id));
+    index = end + 1;
+  }
+  return ordered;
+}
