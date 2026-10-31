@@ -391,7 +391,7 @@ export function IssueDetails({
                 if (scroll.current && restored.current) reading.saveTop(scroll.current.scrollTop);
               }}
             >
-              <div className={styles.lane}>
+              <div className={styles.lane} data-issue-lane>
                 {state.error && (
                   <ReadError
                     label="当前显示上次读取，尚未取得最新状态"
@@ -543,50 +543,54 @@ export function IssueDetails({
               </div>
             </div>
             <div className={styles.composer}>
-              {ended && (
-                <div className={styles.ended} role="status">
-                  <p>
-                    {issue.state === "cancelled"
-                      ? "Issue 已取消，对话记录仍可阅读。"
-                      : "Issue 已结束，对话记录仍可阅读。"}
-                  </p>
-                  <Button variant="link" onClick={() => setPanel("reopen")}>
-                    重新打开 Issue →
-                  </Button>
-                </div>
-              )}
-              {!ended && (
-                <>
-                  <Note />
-                  <div className={styles.recipient}>
-                    发给 <AssigneeName assignee={issue.assignee} /> · 本 Issue 负责人
+              <div className={styles.composerLane} data-issue-footer>
+                {ended && (
+                  <div className={styles.ended} role="status">
+                    <p>
+                      {issue.state === "cancelled"
+                        ? "Issue 已取消，对话记录仍可阅读。"
+                        : "Issue 已结束，对话记录仍可阅读。"}
+                    </p>
+                    <Button variant="link" onClick={() => setPanel("reopen")}>
+                      重新打开 Issue →
+                    </Button>
                   </div>
-                </>
-              )}
-              {conversation ? (
-                <ConversationSessionProvider conversation={conversation} connection={connection}>
-                  <PendingQueue connection={connection} />
-                  {!ended && (
-                    <Composer
-                      connection={connection}
-                      disabled={!issue.conversation?.can_send}
-                      presentation="issue"
-                    />
-                  )}
-                </ConversationSessionProvider>
-              ) : (
-                !ended && (
-                  <p className={styles.muted}>{conversationError || conversationReason(issue)}</p>
-                )
-              )}
-              {!ended && conversation && !issue.conversation?.can_send && (
-                <p className={styles.muted}>{conversationReason(issue)}</p>
-              )}
-              {!ended && !issue.conversation?.can_send && (
-                <Button variant="link" onClick={() => setPanel("handoff")}>
-                  交接负责人 →
-                </Button>
-              )}
+                )}
+                {!ended && (
+                  <>
+                    <Note />
+                    {issue.conversation?.can_send && (
+                      <div className={styles.recipient}>
+                        发给 <AssigneeName assignee={issue.assignee} /> · 本 Issue 负责人
+                      </div>
+                    )}
+                  </>
+                )}
+                {conversation ? (
+                  <ConversationSessionProvider conversation={conversation} connection={connection}>
+                    <PendingQueue connection={connection} />
+                    {!ended && issue.conversation?.reason !== "owner" && (
+                      <Composer
+                        connection={connection}
+                        disabled={!issue.conversation?.can_send}
+                        presentation="issue"
+                      />
+                    )}
+                  </ConversationSessionProvider>
+                ) : null}
+                {!ended && !issue.conversation?.can_send && (
+                  <div className={styles.conversationReason}>
+                    <p className={styles.muted}>
+                      {issue.conversation?.reason === "owner"
+                        ? "这个 Issue 由你负责，没有负责人 Agent 对话。"
+                        : conversationError || conversationReason(issue)}
+                    </p>
+                    <Button variant="secondary" onClick={() => setPanel("handoff")}>
+                      {issue.conversation?.reason === "owner" ? "交给 Agent 负责" : "交接负责人 →"}
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <aside className={styles.sidebar} aria-label="Issue 辅助信息">
