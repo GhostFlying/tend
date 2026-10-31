@@ -67,6 +67,6 @@ SANDBOX_DATA ?=
 SANDBOX_ARGS ?=
 sandbox: web
 	@data="$(SANDBOX_DATA)"; temporary=; \
-	if [ -z "$$data" ]; then data=$$(mktemp -d); temporary=1; fi; \
+	if [ -z "$$data" ]; then data=$$(mktemp -d); data=$$(cd "$$data" && pwd -P); temporary=1; fi; \
 	trap 'if [ -n "$$temporary" ]; then rm -rf "$$data"; fi' EXIT; \
 	$(GO) run ./cmd/tend-sandbox -data "$$data" $(SANDBOX_ARGS)
