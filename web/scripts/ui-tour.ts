@@ -732,6 +732,91 @@ try {
     }
   }
   assert.deepEqual(unexpected, [], "fixture must implement every requested API");
+  // A stale route chunk must not unmount the chat, navigation or its draft.
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    const context = await browser.newContext({ viewport, serviceWorkers: "block" });
+    const page = await context.newPage();
+    const uncaught: string[] = [];
+    page.on("pageerror", (error) => uncaught.push(error.message));
+    const chunk = /\/assets\/More-[^/]+\.js$/;
+    let rejected = 0;
+    await context.route(chunk, async (request) => {
+      rejected++;
+      await request.fulfill({
+        status: 404,
+        contentType: "application/javascript",
+        headers: { "Cache-Control": "no-store" },
+        body: "// stale route chunk",
+      });
+    });
+    try {
+      await page.goto(origin);
+      const composer = page.getByRole("textbox", { name: "消息", exact: true });
+      await composer.fill("路由加载失败仍保留这份草稿");
+      const originalComposer = await composer.elementHandle();
+      const originalSidebar = await page.locator("aside").first().elementHandle();
+      assert(originalComposer && originalSidebar);
+      await navigate(page, "/more");
+      await page.getByRole("heading", { name: "页面已更新", exact: true }).waitFor();
+      await page
+        .getByRole("alert")
+        .getByText("页面已更新，需要重新加载。", { exact: true })
+        .waitFor();
+      assert.equal(rejected, 1, "a fresh route import receives the injected chunk 404");
+      assert(
+        await originalComposer.evaluate((element) => element.isConnected),
+        "chat DOM survives route rejection",
+      );
+      assert(
+        await originalSidebar.evaluate((element) => element.isConnected),
+        "sidebar DOM survives route rejection",
+      );
+      assert.equal(await page.locator('nav[aria-label="视图"]').isVisible(), viewport.width <= 760);
+      if (viewport.width > 760) assert(await page.locator("aside").first().isVisible());
+      await page.screenshot({ path: join(output, `${viewport.width}-lazy-chunk-failure.png`) });
+      await navigate(page, "/repos");
+      await page.getByRole("heading", { name: "已注册仓库", exact: true }).waitFor();
+      assert.equal(
+        await page.getByRole("heading", { name: "页面已更新", exact: true }).count(),
+        0,
+        "changing routes resets the boundary",
+      );
+      await navigate(page, "/");
+      await composer.waitFor();
+      assert(
+        await originalComposer.evaluate(
+          (element) => element === document.querySelector('textarea[aria-label="消息"]'),
+        ),
+        "returning to chat reuses the original composer",
+      );
+      assert.equal(await composer.inputValue(), "路由加载失败仍保留这份草稿");
+      await navigate(page, "/more");
+      await page.getByRole("heading", { name: "页面已更新", exact: true }).waitFor();
+      await context.unroute(chunk);
+      await Promise.all([
+        page.waitForEvent("load"),
+        page.getByRole("button", { name: "重新加载", exact: true }).click(),
+      ]);
+      if (viewport.width <= 760)
+        await page.getByRole("navigation", { name: "更多导航", exact: true }).waitFor();
+      else await page.getByRole("heading", { name: "主 Agent", exact: true }).waitFor();
+      assert.equal(
+        await page.getByRole("heading", { name: "页面已更新", exact: true }).count(),
+        0,
+        "manual reload fetches the available route chunk",
+      );
+      assert.deepEqual(uncaught, [], "route rejection is caught rather than tearing down the root");
+    } finally {
+      await context.close();
+    }
+  }
+  assert.deepEqual(unexpected, [], "fault recovery only uses fixture APIs");
+  console.log(
+    "PASS rejected lazy chunks: route fallback, retained shell/chat/draft, navigation reset and manual reload",
+  );
   // Prove every emitted lazy chunk is in this build's offline shell cache.
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
