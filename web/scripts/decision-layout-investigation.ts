@@ -792,7 +792,7 @@ async function checkNormalInboxAndTaskAnswer() {
     try {
       const pending = page.getByRole("complementary", { name: "当前待处理" });
       await pending.getByText(question, { exact: true }).waitFor();
-      await pending.getByRole("button", { name: "查看并处理", exact: true }).click();
+      await pending.getByRole("link", { name: "查看并处理", exact: true }).click();
       const inbox = page.getByRole("region", { name: "待处理事项", exact: true });
       await inbox.getByRole("radio").first().waitFor();
       assert.equal(await inbox.getByRole("radio").count(), originalOptions.length);
@@ -924,9 +924,12 @@ async function checkJumpRecovery() {
     await state.jump.click();
     await state.jump.waitFor({ state: "hidden" });
     state = await showJump(page);
-    await page.locator("main header").getByRole("button", { name: "跳到最新" }).click();
+    await state.jump.click();
     await state.jump.waitFor({ state: "hidden" });
-    await page.locator("main header").getByRole("button", { name: "跳到最新" }).click();
+    assert.equal(
+      await page.locator("main header").getByRole("button", { name: "跳到最新" }).count(),
+      0,
+    );
     assert.equal(errors.length, 0, errors.join("\n"));
     await page.screenshot({ path: join(output, `${browserName}-jump-recovered.png`) });
     console.log(`PASS jump recovery ${browserName}`);
@@ -1170,21 +1173,21 @@ async function checkComposerOverlays() {
       if (width === 390) {
         await page
           .getByRole("navigation", { name: "视图", exact: true })
-          .getByRole("button", { name: "Issue", exact: true })
+          .getByRole("link", { name: "Issues", exact: true })
           .click();
       } else {
-        await page.getByRole("button", { name: /Issue.*白板/ }).click();
+        await page.getByRole("link", { name: "Issues", exact: true }).click();
       }
       await popover.waitFor({ state: "hidden" });
       if (width === 390) {
         const navigation = page.getByRole("navigation", { name: "视图", exact: true });
-        await navigation.getByRole("button", { name: "对话", exact: true }).click();
+        await navigation.getByRole("link", { name: "对话", exact: true }).click();
         await usage.waitFor();
         assert.equal(await usage.getAttribute("aria-expanded"), "false");
         await popover.waitFor({ state: "hidden" });
         await usage.click();
         await popover.waitFor();
-        await navigation.getByRole("button", { name: "待处理", exact: true }).click();
+        await navigation.getByRole("link", { name: "收件箱", exact: true }).click();
         await popover.waitFor({ state: "hidden" });
       }
       console.log(`PASS composer overlays ${browserName}-${width}`);
@@ -1332,11 +1335,14 @@ async function checkAttachmentDraftDock() {
         Array.from({ length: 30 }, () => "附件和长草稿不应挤掉决定控件。").join("\n"),
       );
       const files = page.getByRole("list", { name: "待发送附件" });
-      await page
-        .locator("main header")
-        .getByRole("button", { name: "跳到最新", exact: true })
-        .click();
-      const transcript = page.getByRole("region", { name: "对话记录" });
+      const { jump, transcript } = await showJump(page);
+      await jump.click();
+      await page.waitForFunction(() => {
+        const element = document.querySelector('[aria-label="对话记录"]');
+        return (
+          element !== null && element.scrollHeight - element.scrollTop - element.clientHeight < 2
+        );
+      });
       assert(
         await transcript.evaluate((element) => {
           const r = element.getBoundingClientRect();
@@ -1350,7 +1356,7 @@ async function checkAttachmentDraftDock() {
             element.scrollHeight - element.scrollTop - element.clientHeight < 2
           );
         }),
-        "header jump did not reveal the latest transcript after focusing a tall draft",
+        "floating jump did not reveal the latest transcript after focusing a tall draft",
       );
       assert.equal(await files.getByRole("listitem").count(), 16);
       const dock = page.locator('[class*="seatScroll_"]');

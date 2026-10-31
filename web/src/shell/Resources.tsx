@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
-import { Hosts } from "../hosts/Hosts.tsx";
 import { RepositoryEntry } from "../repos/Repositories.tsx";
 import { UsageEntry } from "../usage/Usage.tsx";
 import { Sheet } from "../ui/Modal.tsx";
@@ -33,14 +32,6 @@ export function ResourceNavigation({
       <RepositoryEntry onOpen={onRepos} />
       <UsageEntry />
     </nav>
-  );
-}
-
-export function ResourceHosts({ connection }: { connection: Connection }) {
-  return (
-    <div className={styles.hosts}>
-      <Hosts connection={connection} />
-    </div>
   );
 }
 

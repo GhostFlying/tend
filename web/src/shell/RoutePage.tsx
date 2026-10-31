@@ -14,6 +14,7 @@ import { Repositories } from "../repos/Repositories.tsx";
 import { UsagePanel } from "../usage/Usage.tsx";
 import { Hosts } from "../hosts/Hosts.tsx";
 import { Details } from "./Details.tsx";
+import { MorePage } from "./More.tsx";
 import { PageHeader } from "./PageHeader.tsx";
 import styles from "./Shell.module.css";
 
@@ -99,6 +100,9 @@ export function RoutePage({
           onClose={() => back({ page: route.page === "attention" ? "inbox" : "chat" })}
         />
       );
+      break;
+    case "more":
+      content = <MorePage />;
       break;
     case "settings":
       content = (

@@ -145,35 +145,6 @@
 .mobileBack {
   display: none;
 }
-.summary {
-  display: grid;
-  gap: var(--space-1);
-}
-.summary button {
-  padding: 9px var(--space-2);
-  text-align: left;
-  border-radius: var(--radius-s);
-}
-.summary button:hover {
-  background: var(--hover);
-}
-.summary .summaryTitle {
-  justify-self: start;
-  padding: 0;
-}
-.summaryTitle:focus-visible {
-  outline: 2px solid var(--label);
-  outline-offset: 3px;
-}
-.summary strong {
-  display: block;
-  font-size: var(--text-label);
-  font-weight: 600;
-}
-.summary small {
-  display: block;
-  color: var(--label-3);
-}
 @media (max-width: 760px) {
   .heading,
   .detail {
@@ -218,25 +189,6 @@
   .root[data-selected="true"] > .mobileBack {
     display: none;
   }
-}
-
-.riskSummary {
-  border-top: 1px solid var(--border-soft);
-  padding: var(--space-2) 0;
-  color: var(--warn-text);
-}
-.riskSummary > small {
-  display: block;
-  padding: 0 var(--space-2);
-}
-
-.summary .issueLink {
-  font-size: var(--text-micro);
-  color: var(--label-3);
-  padding-top: 0;
-  padding-bottom: 10px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .original {

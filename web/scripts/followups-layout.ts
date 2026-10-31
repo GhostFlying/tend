@@ -255,9 +255,9 @@ try {
       if (width < 760)
         await p
           .getByRole("navigation", { name: "视图" })
-          .getByRole("button", { name: "Issue", exact: true })
+          .getByRole("link", { name: "Issues", exact: true })
           .click();
-      else await p.getByRole("button", { name: "Issue · 白板 ›" }).click();
+      else await p.getByRole("link", { name: "Issues", exact: true }).click();
       await p
         .getByRole("region", { name: "Issue白板", exact: true })
         .getByRole("button", { name: item.plan.title, exact: true })

@@ -143,64 +143,57 @@
   }
 }
 
-.agentNav {
-  display: flex;
-  gap: var(--space-1);
-  border-radius: var(--radius-m);
-  background: var(--bg-l2);
-  padding: 3px;
-  font-size: var(--text-caption);
-}
-.agentNav button {
-  padding: 5px 9px;
-  border-radius: var(--radius-s);
-  white-space: nowrap;
-}
-.agentNav button[aria-pressed="true"] {
-  background: var(--bg);
-  box-shadow: 0 1px 3px var(--border);
-}
 .head h1 {
   max-width: 220px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.switcher {
+  max-width: 200px;
+  min-width: 0;
+}
+.switcher span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.switcher svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.issueLink {
+  font-size: var(--text-caption);
+  color: var(--label-2);
+  text-decoration: none;
+  padding: var(--space-2);
+}
 @media (max-width: 760px) {
+  .head {
+    gap: var(--space-1);
+    flex-wrap: nowrap;
+  }
   .head h1 {
-    max-width: 105px;
+    flex: 1;
+    max-width: none;
     font-size: var(--text-body);
   }
-  .agentNav button {
-    padding: var(--space-1) 6px;
+  .switcher {
+    max-width: 130px;
+    flex-shrink: 1;
   }
-  .head {
-    gap: 6px;
-  }
-}
-
-@media (max-width: 760px) {
-  .head {
-    flex-wrap: wrap;
-    height: auto;
-    gap: var(--space-2);
-  }
-  .head > h1 {
-    flex: 1;
-    min-width: 80px;
-  }
-  .head button {
-    white-space: nowrap;
+  .head > button,
+  .issueLink,
+  .mobileOnly {
     flex-shrink: 0;
   }
-  .head .spacer {
-    display: none;
+  .head > .switcher {
+    flex-shrink: 1;
   }
-  .head .agentNav {
-    order: 2;
-    flex-basis: 100%;
-    width: 100%;
-    justify-content: flex-start;
+  .spacer {
+    display: none;
   }
 }
 

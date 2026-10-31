@@ -87,6 +87,9 @@ let fail = false;
 let pause = false;
 let reads = 0;
 let partial = false;
+let holdIssueBoard = false;
+let issueReadArrived: (() => void) | undefined;
+const heldIssues: (() => void)[] = [];
 const partialBodies: ServerResponse[] = [];
 const held: ServerResponse[] = [];
 const streams = new Set<ServerResponse>();
@@ -147,13 +150,21 @@ const server = await createServer({
           }
           if (path.endsWith("/activity") || path.endsWith("/results"))
             return json(res, { items: [], more: false, event_seq: 0 });
-          if (path === "/api/v1/issues")
-            return json(
-              res,
-              issuePage(url.searchParams.get("project") || "sample-project", [
-                task("completed", "Completed sample 1", "sample-project"),
-              ]),
-            );
+          if (path === "/api/v1/issues") {
+            const send = () =>
+              json(
+                res,
+                issuePage(url.searchParams.get("project") || "sample-project", [
+                  task("completed", "Completed sample 1", "sample-project"),
+                ]),
+              );
+            if (holdIssueBoard) {
+              heldIssues.push(send);
+              issueReadArrived?.();
+              return;
+            }
+            return send();
+          }
           if (path === "/api/v1/issues/wi_01M5M3ME31875GDA8F7P5XTD74")
             return json(res, issueView());
           if (path.startsWith("/api/v1/tasks/")) {
@@ -297,9 +308,9 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "Issue", exact: true })
+        .getByRole("link", { name: "Issues", exact: true })
         .click();
-    else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+    else await page.getByRole("link", { name: "Issues", exact: true }).click();
     const resourcesEntry = page.getByRole("button", { name: "资源与记录", exact: true });
     await resourcesEntry.click();
     const resources = page.getByRole("dialog", { name: "资源与记录", exact: true });
@@ -317,8 +328,23 @@ try {
       "host Escape must return focus to the invoking host button",
     );
     if (output) await page.screenshot({ path: join(output, `host-escape-${viewport.width}.png`) });
+    // The heading mounts before board counts add a header child. Hold that read
+    // to exercise the router's asynchronous opener restoration, not just its heading.
+    holdIssueBoard = true;
+    const boardArrived = new Promise<void>((resolve) => {
+      issueReadArrived = resolve;
+    });
     await page.goBack();
     await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
+    await boardArrived;
+    assert.equal(
+      await resourcesEntry.evaluate((element) => document.activeElement === element),
+      false,
+    );
+    holdIssueBoard = false;
+    issueReadArrived = undefined;
+    for (const send of heldIssues.splice(0)) send();
+    await page.waitForFunction(() => document.activeElement?.textContent === "资源与记录");
     assert(
       await resourcesEntry.evaluate((element) => document.activeElement === element),
       "resource back must return focus to its entry",
@@ -331,10 +357,9 @@ try {
         .filter({ hasText: /^资源与记录$/ })
         .click();
     }
-    const entry = page
-      .locator(mobile ? "main" : "aside")
-      .locator("button")
-      .filter({ hasText: "已注册仓库", visible: true });
+    const entry = mobile
+      ? page.locator("main").getByRole("button", { name: /^已注册仓库/ })
+      : page.locator("aside").getByRole("link", { name: "仓库", exact: true });
     await usable(entry, page);
     const before = reads;
     const panel = page.getByRole("region", {
@@ -489,7 +514,7 @@ try {
       );
       await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
     } else {
-      await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+      await page.getByRole("link", { name: "Issues", exact: true }).click();
       await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
     }
     // Historical tasks that predate work items must remain reachable and paginated.
@@ -647,7 +672,7 @@ try {
       await page.reload();
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "Issue", exact: true })
+        .getByRole("link", { name: "Issues", exact: true })
         .click();
       await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
       await page
