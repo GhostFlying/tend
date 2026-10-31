@@ -41,3 +41,18 @@ it("inbox summaries preserve original content and relative times are explicit", 
   expect(relativeTime(0, 60_000 * 120)).toBe("2 小时前");
   expect(relativeTime(0, 60_000 * 2880)).toBe("2 天前");
 });
+
+it("reads the source summary instead of repeating a decision title", () => {
+  expect(
+    inboxSummary({ title: "确认范围", decision: { question: " 确认范围 " } } as AttentionView),
+  ).toBe("");
+  expect(
+    inboxSummary({ title: "确认范围", choice: { question: "确认范围" } } as AttentionView),
+  ).toBe("");
+  expect(
+    inboxSummary({
+      title: "确认范围",
+      decision: { question: "请选择需要发布的模块\n补充说明" },
+    } as AttentionView),
+  ).toBe("请选择需要发布的模块");
+});

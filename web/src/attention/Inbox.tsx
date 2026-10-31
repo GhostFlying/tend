@@ -509,14 +509,10 @@ function statusLabel(status: string): string {
   );
 }
 export function inboxSummary(item: AttentionView): string {
+  const question = item.choice?.question || item.decision?.question || "";
+  if (question.trim() && question.trim() === item.title?.trim()) return "";
   return (
-    (
-      item.choice?.question ||
-      item.decision?.question ||
-      item.choice?.reason ||
-      item.resolution ||
-      ""
-    )
+    (question || item.choice?.reason || item.resolution || "")
       .split(/\r?\n/)
       .find((line) => line.trim()) ?? ""
   );
