@@ -1,3 +1,4 @@
+import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Render the built app against synthetic ledger projections, never a deployed API.
@@ -12,7 +13,6 @@ import { createServer, type ServerResponse } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium, type Locator } from "playwright";
 import type {
   Envelope,
@@ -24,7 +24,7 @@ import type {
   WorkItemChoice,
 } from "../src/api/generated/api.ts";
 
-const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const root = fixtureRoot();
 const output = process.env.TEND_LAYOUT_OUTPUT ?? join(tmpdir(), "tend-work-items-layout");
 await mkdir(output, { recursive: true });
 const id = "wi_01M5M3ME31875GDA8F7P5XTD74";

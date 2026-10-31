@@ -1,3 +1,4 @@
+import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 import { issuePage, issueView } from "./issue-fixture.ts";
@@ -95,6 +96,7 @@ function json(res: ServerResponse, body: unknown, status = 200) {
 }
 const server = await createServer({
   configFile: false,
+  cacheDir: fixtureRoot("cache"),
   server: {
     host: "127.0.0.1",
     port: 0,

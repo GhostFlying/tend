@@ -1,3 +1,4 @@
+import { fixtureRoot } from "./navigation.ts";
 /// <reference lib="dom" />
 // Exercise the built application with an isolated owner API. The fixture only
 // accepts the decision write under test and never contacts a deployed server.
@@ -6,7 +7,6 @@ import { createServer, type ServerResponse } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium, webkit, type BrowserType, type Locator, type Page } from "playwright";
 import type {
   ConversationItem,
@@ -17,7 +17,7 @@ import type {
   TaskSummary,
 } from "../src/api/generated/api.ts";
 
-const appRoot = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const appRoot = fixtureRoot();
 const output = process.env.TEND_DECISION_OUTPUT ?? join(tmpdir(), "tend-decision-layout");
 await mkdir(output, { recursive: true });
 

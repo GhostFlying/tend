@@ -1,4 +1,4 @@
-import { navigate } from "./navigation.ts";
+import { navigate, fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Approved Issue/Inbox flows against isolated API fixtures, never a live service.
@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import type {
   AttentionView,
@@ -23,7 +22,7 @@ let holdTaskFeed = false;
 const output = process.env.TEND_LAYOUT_OUTPUT;
 assert(output, "Set an isolated screenshot output directory");
 await mkdir(output, { recursive: true });
-const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const root = fixtureRoot();
 const now = Date.now();
 const assignee = { kind: "agent", ref: "hosted/qingzhu" } as const;
 const issue: IssueView = {

@@ -1,3 +1,4 @@
+import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Synthetic owner API only; browser coverage never writes to a deployed ledger.
@@ -7,7 +8,6 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
 import type {
   Envelope,
@@ -15,7 +15,7 @@ import type {
   FollowupSpec,
   IssueView,
 } from "../src/api/generated/api.ts";
-const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const root = fixtureRoot();
 const output = process.env.TEND_LAYOUT_OUTPUT ?? join(tmpdir(), "tend-followups-layout");
 await mkdir(output, { recursive: true });
 const item: IssueView = {
