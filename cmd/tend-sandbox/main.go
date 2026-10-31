@@ -24,6 +24,7 @@ func main() {
 	flag.StringVar(&options.Data, "data", "", "required empty or sandbox-marked data directory")
 	flag.BoolVar(&options.Reset, "reset", false, "wipe and reseed a verified sandbox directory")
 	flag.StringVar(&options.Scenario, "scenario", "demo", "sandbox scenario")
+	flag.BoolVar(&options.FastPacing, "fast-pacing", false, "near-zero script delays for automated tests")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
