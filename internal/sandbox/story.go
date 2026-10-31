@@ -2,6 +2,8 @@ package sandbox
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,14 +23,35 @@ func seedStory(ctx context.Context, runtime *serverkit.Runtime, demo *Demo) erro
 	// These newly created decisions start at revision/version one; replay must
 	// reuse their original envelope even after the answer advances the view.
 	initial := int64(1)
-	if err := s.storyMessage(ctx, runtime, "story-create", "", storyTitle); err != nil {
-		return err
+	// A metadata-only repair can settle an interrupted source without doing
+	// its business step. Check the durable result before advancing and issue
+	// deterministic recovery sources only when the result is still missing.
+	for attempt := 0; attempt < 4; attempt++ {
+		exists := false
+		if err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id WHERE json_extract(w.body_json,'$.title')=?)`, storyTitle).Scan(&exists)
+		}); err != nil {
+			return err
+		}
+		if exists {
+			break
+		}
+		key := "story-create"
+		if attempt > 0 {
+			key = fmt.Sprintf("story-create-recovery-%d", attempt)
+		}
+		if err := s.storyMessage(ctx, runtime, key, "", storyTitle); err != nil {
+			return err
+		}
 	}
 	var issue protocol.IssueView
 	if err := storyWait(ctx, "manager assignment", func() (bool, error) {
 		err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
 			var id string
 			if err := tx.Q().QueryRowContext(ctx, `SELECT issue_id FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id WHERE json_extract(w.body_json,'$.title')=?`, storyTitle).Scan(&id); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil
+				}
 				return err
 			}
 			var err error

@@ -68,13 +68,17 @@ func seedCategories(ctx context.Context, a *app.App, _ protocol.IDGen) error {
 // SeedDemo only uses real app commands, each with a stable request identity.
 // Replaying a partial seed reuses exact payloads and original returned revisions.
 func SeedDemo(ctx context.Context, runtime *serverkit.Runtime, root string) (Demo, error) {
+	return seedDemo(ctx, runtime, root, false, false)
+}
+
+func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skipStory, storyOnly bool) (Demo, error) {
 	receipt := filepath.Join(root, "demo.json")
 	var demo Demo
 	if raw, err := os.ReadFile(receipt); err == nil {
 		if err = json.Unmarshal(raw, &demo); err != nil {
 			return demo, fmt.Errorf("read sandbox receipt: %w", err)
 		}
-		if demo.Story == "" {
+		if demo.Story == "" && !skipStory {
 			if err := seedStory(ctx, runtime, &demo); err != nil {
 				return demo, err
 			}
@@ -89,15 +93,20 @@ func SeedDemo(ctx context.Context, runtime *serverkit.Runtime, root string) (Dem
 	s := seeder{app: runtime.App}
 	// Build the conversation story before broad board/task seeds enqueue
 	// unrelated notifications; its turns retain their ordinary app ordering.
-	if err := seedStory(ctx, runtime, &demo); err != nil {
-		return demo, err
+	if !skipStory {
+		if err := seedStory(ctx, runtime, &demo); err != nil {
+			return demo, err
+		}
+	}
+	if storyOnly {
+		return demo, writeDemoReceipt(receipt, demo)
 	}
 	names := []string{"收集下一轮体验优化建议", "完善手机端导航与长标题换行：在连续对话、Issue 看板、执行记录和收件箱之间切换时，保持未发送草稿、原始消息来源、输入焦点与浏览器返回位置，并确认较长中文内容不会被截断", "正在验证真实消息发送与可重试请求", "评审交付说明与独立验收证据", "已完成示例：检查关闭记录与归档展示", "已取消示例：优先级调整后停止的探索"}
 	for n, status := range protocol.IssueWorkStatusValues() {
 		var issue protocol.Issue
 		key := fmt.Sprintf("board-%d", n)
 		p := protocol.CreateIssuePayload{Plan: plan(names[n], "demo-web")}
-		if n != 2 {
+		if !skipStory && n != 2 {
 			p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "sandbox-hosted/manager"}
 		}
 		if err := s.execute(ctx, key, protocol.Target{Type: "issue"}, nil, p, app.CanonicalOwnerIssueCommand{Action: "create"}, &issue); err != nil {

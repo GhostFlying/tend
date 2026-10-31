@@ -92,7 +92,7 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	done := make(chan error, 1)
 	var interrupting atomic.Bool
 	go func() {
-		done <- Run(ctx, Options{FastPacing: true, Data: root, Listener: listener, replyDelta: func(ctx context.Context, _ harness.TurnInput) {
+		done <- Run(ctx, Options{FastPacing: true, skipStory: true, Data: root, Listener: listener, replyDelta: func(ctx context.Context, _ harness.TurnInput) {
 			if interrupting.Load() {
 				<-ctx.Done()
 			}
@@ -119,86 +119,11 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		t.Fatal("sandbox seed timed out")
 	}
 	r := <-runtime
-	if demo.Story == "" || demo.StoryTask == "" || demo.StoryDecision == "" {
-		t.Fatal("missing multi-round story receipt", demo)
-	}
-	if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
-		issue, err := views.CanonicalIssue(ctx, tx.Q(), demo.Story, 0)
-		if err != nil {
-			return err
-		}
-		if issue.Plan.Title != storyTitle || issue.WorkStatus != protocol.IssueInReview || issue.Progress == nil || issue.Progress.UpdatedBy.Kind != protocol.IssueAssigneeAgent {
-			t.Fatal("story did not reach manager-attributed review", issue)
-		}
-		before := int64(0)
-		blocks, attributed, continuation := 0, false, false
-		for {
-			page, err := views.IssueActivity(ctx, tx.Q(), demo.Story, before)
-			if err != nil {
-				return err
-			}
-			for _, entry := range page.Items {
-				if entry.Block != nil {
-					blocks++
-					continuation = continuation || entry.Block.More
-				}
-				if entry.Kind == "issue.progress_updated" && entry.Author == "沙盒负责人 Agent" {
-					attributed = true
-				}
-				if entry.Block == nil && entry.Author == "" {
-					t.Fatal("unattributed story event", entry)
-				}
-			}
-			if !page.More {
-				break
-			}
-			before = page.NextBefore
-		}
-		if blocks < 8 || !attributed || !continuation || before == 0 {
-			t.Fatalf("story activity: blocks=%d attributed=%v continuation=%v older=%d", blocks, attributed, continuation, before)
-		}
-		task, err := views.Task(ctx, tx.Q(), demo.StoryTask)
-		if err != nil {
-			return err
-		}
-		failed, succeeded, accepted := false, false, false
-		for _, run := range task.Runs {
-			failed = failed || run.Observed == protocol.RunFailed
-			succeeded = succeeded || run.Role == protocol.RoleImplement && run.Generation > 1 && run.Observed == protocol.RunFinished
-		}
-		for _, acceptance := range task.Acceptances {
-			accepted = accepted || acceptance.Verdict == protocol.VerdictPassed
-		}
-		if !failed || !succeeded || !accepted || len(task.Artifacts) == 0 || len(task.Acceptances) == 0 {
-			t.Fatal("missing real failure, retry, report or independent acceptance", task)
-		}
-		attention, err := views.Attention(ctx, tx.Q(), demo.StoryDecision)
-		if err != nil {
-			return err
-		}
-		if attention.Decision == nil || !bytes.Contains(attention.Decision.Answer, []byte("手机布局")) || attention.Decision.Status != "answered" {
-			t.Fatal("story decision was not answered", attention)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
 	c := webClient{t: t, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
 	defer c.http.CloseIdleConnections()
 	c.call(http.MethodPost, "/api/v1/session", protocol.SessionRequest{ClientID: "sandbox-web-test", Scope: protocol.ScopeOwner}, &c.session)
 	if c.session.Token == "" {
 		t.Fatal("missing session token")
-	}
-	// Existing completion receipts are upgraded through the same stable story
-	// commands, without resetting retained demo data or duplicating history.
-	legacy := demo
-	legacy.Story, legacy.StoryTask, legacy.StoryDecision = "", "", ""
-	if err := writeDemoReceipt(filepath.Join(root, "demo.json"), legacy); err != nil {
-		t.Fatal(err)
-	}
-	upgraded, err := SeedDemo(ctx, r, root)
-	if err != nil || fmt.Sprint(upgraded) != fmt.Sprint(demo) {
-		t.Fatalf("legacy receipt upgrade: %+v %v", upgraded, err)
 	}
 	var board protocol.IssuePage
 	c.call(http.MethodGet, "/api/v1/issues?board=true&include_closed=true&limit=100", nil, &board)
@@ -212,8 +137,8 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 			t.Fatal("unexpected board assignee", view.Assignee)
 		}
 	}
-	if ownerAssigned != 1 {
-		t.Fatalf("owner board examples=%d, want 1", ownerAssigned)
+	if ownerAssigned != len(demo.Issues) {
+		t.Fatalf("legacy board owner examples=%d, want %d", ownerAssigned, len(demo.Issues))
 	}
 	for _, column := range protocol.IssueWorkStatusValues() {
 		if board.Counts[column] == 0 {
@@ -253,7 +178,7 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "demo.json")); err != nil {
 		t.Fatal(err)
 	}
-	replay, err := SeedDemo(ctx, r, root)
+	replay, err := seedDemo(ctx, r, root, true, false)
 	if err != nil || fmt.Sprint(replay) != fmt.Sprint(demo) {
 		t.Fatalf("seed replay: %+v %v", replay, err)
 	}
@@ -659,7 +584,7 @@ func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
 		transport := &http.Transport{}
 		t.Cleanup(transport.CloseIdleConnections)
 		go func() {
-			done <- Run(runCtx, Options{FastPacing: true, Data: root, Listener: listener, runnerTransport: heartbeatObserver{transport, &heartbeatReplies}, Ready: func(r *serverkit.Runtime, d Demo) { ready <- started{r, d} }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
+			done <- Run(runCtx, Options{FastPacing: true, skipStory: true, Data: root, Listener: listener, runnerTransport: heartbeatObserver{transport, &heartbeatReplies}, Ready: func(r *serverkit.Runtime, d Demo) { ready <- started{r, d} }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
 		}()
 		var once sync.Once
 		stop := func() {
@@ -886,5 +811,148 @@ func TestSandboxWorkerPacingCancellation(t *testing.T) {
 	}
 	if _, err := worker.Wait(); err != context.Canceled {
 		t.Fatalf("expected canceled worker, got %v", err)
+	}
+}
+
+func TestSandboxStory(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	ready := make(chan struct {
+		runtime *serverkit.Runtime
+		demo    Demo
+	}, 1)
+	done := make(chan error, 1)
+	var first sync.Once
+	go func() {
+		done <- Run(ctx, Options{FastPacing: true, storyOnly: true, turnInput: func(input harness.TurnInput) harness.TurnInput {
+			first.Do(func() { input.Repair = true })
+			return input
+		}, Data: root, Listener: listener, Ready: func(r *serverkit.Runtime, d Demo) {
+			ready <- struct {
+				runtime *serverkit.Runtime
+				demo    Demo
+			}{r, d}
+		}}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
+	}()
+	defer func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && err != context.Canceled {
+				t.Error(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("story did not stop")
+		}
+	}()
+	var r *serverkit.Runtime
+	var demo Demo
+	select {
+	case value := <-ready:
+		r, demo = value.runtime, value.demo
+	case err := <-done:
+		done <- err
+		t.Fatalf("story startup: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	// The initial source was settled by a metadata-only repair. A recovery
+	// source must create the business object before seed advancement.
+	var recoveries int
+	if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM request_records WHERE request_id=?`, seedRequest("story-create-recovery-1")).Scan(&recoveries)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if recoveries != 1 {
+		t.Fatalf("missing stable recovery request: %d", recoveries)
+	}
+	if demo.Story == "" || demo.StoryTask == "" || demo.StoryDecision == "" {
+		t.Fatal("missing multi-round story receipt", demo)
+	}
+	if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+		issue, err := views.CanonicalIssue(ctx, tx.Q(), demo.Story, 0)
+		if err != nil {
+			return err
+		}
+		if issue.Plan.Title != storyTitle || issue.WorkStatus != protocol.IssueInReview || issue.Progress == nil || issue.Progress.UpdatedBy.Kind != protocol.IssueAssigneeAgent {
+			t.Fatal("story did not reach manager-attributed review", issue)
+		}
+		before := int64(0)
+		blocks, attributed, continuation := 0, false, false
+		for {
+			page, err := views.IssueActivity(ctx, tx.Q(), demo.Story, before)
+			if err != nil {
+				return err
+			}
+			for _, entry := range page.Items {
+				if entry.Block != nil {
+					blocks++
+					continuation = continuation || entry.Block.More
+				}
+				if entry.Kind == "issue.progress_updated" && entry.Author == "沙盒负责人 Agent" {
+					attributed = true
+				}
+				if entry.Block == nil && entry.Author == "" {
+					t.Fatal("unattributed story event", entry)
+				}
+			}
+			if !page.More {
+				break
+			}
+			before = page.NextBefore
+		}
+		if blocks < 8 || !attributed || !continuation || before == 0 {
+			t.Fatalf("story activity: blocks=%d attributed=%v continuation=%v older=%d", blocks, attributed, continuation, before)
+		}
+		task, err := views.Task(ctx, tx.Q(), demo.StoryTask)
+		if err != nil {
+			return err
+		}
+		failed, succeeded, accepted := false, false, false
+		for _, run := range task.Runs {
+			failed = failed || run.Observed == protocol.RunFailed
+			succeeded = succeeded || run.Role == protocol.RoleImplement && run.Generation > 1 && run.Observed == protocol.RunFinished
+		}
+		for _, acceptance := range task.Acceptances {
+			accepted = accepted || acceptance.Verdict == protocol.VerdictPassed
+		}
+		if !failed || !succeeded || !accepted || len(task.Artifacts) == 0 || len(task.Acceptances) == 0 {
+			t.Fatal("missing real failure, retry, report or independent acceptance", task)
+		}
+		attention, err := views.Attention(ctx, tx.Q(), demo.StoryDecision)
+		if err != nil {
+			return err
+		}
+		if attention.Decision == nil || !bytes.Contains(attention.Decision.Answer, []byte("手机布局")) || attention.Decision.Status != "answered" {
+			t.Fatal("story decision was not answered", attention)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Existing completion receipts are upgraded through the same stable story
+	// commands, without resetting retained demo data or duplicating history.
+	legacy := demo
+	legacy.Story, legacy.StoryTask, legacy.StoryDecision = "", "", ""
+	if err := writeDemoReceipt(filepath.Join(root, "demo.json"), legacy); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := SeedDemo(ctx, r, root)
+	if err != nil || fmt.Sprint(upgraded) != fmt.Sprint(demo) {
+		t.Fatalf("legacy receipt upgrade: %+v %v", upgraded, err)
+	}
+
+	if err := os.Remove(filepath.Join(root, "demo.json")); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := seedDemo(ctx, r, root, false, true)
+	if err != nil || fmt.Sprint(replay) != fmt.Sprint(demo) {
+		t.Fatalf("story replay: %+v %v", replay, err)
 	}
 }
