@@ -133,7 +133,7 @@
 | D128 | Issue manager 改为真实的 issue_manager task，由 main/owner 按 category 发布，runner 首次领取时原子更新具体负责人。每轮共用 claim/租约/槽位/journal，等待释放槽位；责任按 Issue 收尾/交接结束，不独立验收管理任务。Codex/Traex app-server 承载，main/consultation 保留 host。协议 2/1、配置格式 2、保留账本受控迁移，unknown 先对账。修订 D122 的本机 manager 执行位置及 D123 的 manager 库存/领取方式。详见 docs/plans/runner-issue-managers.md。 | 实施中，未发布 |
 | D129 | Issue 完整详情页统一负责人对话、当前进展、子项与交付，原执行及验收会话保持独立；摘要按 Issue revision 留存，活动／结果只读投影沿原账本。见 docs/plans/issue-detail-conversation.md。 | 已实现 |
 | D130 | App 业务测试每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移及历史库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md。 | 已实现 |
-| D131 | Web 界面改版（修订 D70 的单对话加覆盖层布局与 D121 UI r5 的侧栏摘要）：路由驱动的页面与可分享路径，旧 query 链接改写；侧栏只做分组导航，手机四标签；角色化 token 与共享基础组件，由检查脚本约束；界面使用用户术语，不默认显示内部标识；路由级拆包与全页面巡检。不引入路由或 UI 依赖，History API 与原生 dialog/popover 已满足需求。业务合同、owner API 与 runner wire 不变。见 docs/plans/web-ui-overhaul.md。 | 实施中 |
+| D131 | Web 界面改版（修订 D70 的单对话加覆盖层布局与 D121 UI r5 的侧栏摘要）：路由驱动的页面与可分享路径，旧 query 链接改写；侧栏只做分组导航，手机四标签；角色化 token 与共享基础组件，由检查脚本约束；界面使用用户术语，不默认显示内部标识；路由级拆包与全页面巡检。不引入路由或 UI 依赖，History API 与原生 dialog/popover 已满足需求。业务合同、owner API 与 runner wire 不变。见 docs/plans/web-ui-overhaul.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -415,3 +415,5 @@ Issue 默认作为应用内完整详情页，保留全局导航与原 query 链�
 S2 使用每个 History entry 的本次页面会话身份判断返回：可确认前项属于本次应用会话时浏览器后退，否则替换为父级路径；刷新不采用旧页面会话的返回栈。历史项保存可见页面的滚动、展开状态与触发元素，换页聚焦标题，后退恢复仍可识别的触发元素。Issue 筛选写入 query，原页修改筛选不抢走输入焦点。沿 D129 保持负责人会话唯一展示面：Issue 负责人会话路径读取实际归属后替换到 Issue 详情，独立咨询使用 `/chat/{conversation}`。
 
 侧栏只放分组导航（对话、工作、资源、设置），待处理由收件箱计数与主对话待处理区承担；侧栏宽度在各页面一致。样式只使用 token 定义的字号、间距、圆角、层级与颜色，控件来自共享基础组件。界面文案遵循中英混排加空格与统一术语，内部标识、哈希与工具名默认收起。计划见 [Web UI 整体改版](plans/web-ui-overhaul.md)。
+
+S6 中非聊天路由使用 lazy 与 Suspense 骨架，第三方模块独立共享；构建生成的离线 shell 清单仍包含全部路由资源。手机主操作与标签采用触控尺寸，输入区和浮动跳转避让安全区，详情及短暂弹层隐藏标签栏。全路由深浅主题巡检与导航回归纳入 CI。系统决定的问题与原因说明使用中文；内建选项字符串同时是回答标识和 Effects 键，保留其字节，由 Web 完整映射为中文显示。
