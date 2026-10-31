@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -101,9 +102,11 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 	h.Defaults = harness.ModelSelection{Model: model}
 	sessions := &scriptedSessions{harness: h, ctx: runCtx}
 	var assembled *serverkit.Runtime
+	var seeding atomic.Bool
+	seeding.Store(true)
 	h.Turn = func(th *testkit.FakeThread, turn string, input harness.TurnInput) string {
 		return sessions.play(th, turn, input, func(ctx context.Context, th *testkit.FakeThread, turn string, input harness.TurnInput) string {
-			return scriptedTurn(ctx, assembled, th, turn, input, log, options.replyDelta, sessions.scripts, pacing(options.FastPacing))
+			return scriptedTurn(ctx, assembled, th, turn, input, log, options.replyDelta, sessions.scripts, pacing(options.FastPacing || seeding.Load()))
 		})
 	}
 	named := hostedConfiguration()
@@ -136,7 +139,13 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			instance := runtime.IDs.New(protocol.Prefix("rni"))
 			r := runner.New(runner.Config{InstanceID: instance, ServerURL: "http://" + runnerListener.Addr().String(), HostID: hostID, HostToken: hostToken, Version: "sandbox",
 				Journal: j, HTTPClient: &http.Client{Transport: clientTransport}, Worker: protocol.WorkerAppServer,
-				Workers: &scriptedWorkers{pacing: pacing(options.FastPacing)}, Workspaces: workspaces{root: filepath.Join(root, "workspaces")},
+				Workers: &scriptedWorkers{pacing: pacing(options.FastPacing), fastSeed: seeding.Load, generation: func(ctx context.Context, id string) (int64, error) {
+					var generation int64
+					err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
+						return tx.Q().QueryRowContext(ctx, `SELECT generation FROM runs WHERE run_id=?`, id).Scan(&generation)
+					})
+					return generation, err
+				}}, Workspaces: workspaces{root: filepath.Join(root, "workspaces")},
 				Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: log,
 				RetryDelay: 50 * time.Millisecond, EventFlush: 50 * time.Millisecond, HeartbeatInterval: time.Second,
 			})
@@ -195,6 +204,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			if err != nil {
 				return err
 			}
+			seeding.Store(false)
 			log.Info("sandbox ready", "addr", listener.Addr().String(), "scenario", options.Scenario, "runner_instance", instance)
 			if options.Ready != nil {
 				options.Ready(runtime, demo)

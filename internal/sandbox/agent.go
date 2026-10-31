@@ -168,7 +168,27 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			}
 			create = direct
 		}
-		dispatch := strings.Contains(text, "派发") || strings.Contains(text, "执行")
+		if manager && respond {
+			next := "继续澄清范围与验收条件"
+			if strings.Contains(text, "总结") {
+				next = "等待你复核本轮交付"
+			}
+			if !c.mutate("issues_update_progress", issue.IssueID, &issue.Revision, protocol.UpdateIssueProgressPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Summary: "已核对最新要求：" + shortTitle(text), NextStep: next}, nil) {
+				return "failed"
+			}
+			issue.Revision++
+			status := protocol.IssueInProgress
+			if strings.Contains(text, "总结") {
+				status = protocol.IssueInReview
+			}
+			if issue.WorkStatus != status {
+				if !c.mutate("issues_set_status", issue.IssueID, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}, nil) {
+					return "failed"
+				}
+				issue.Revision++
+			}
+		}
+		dispatch := strings.Contains(text, "派发") || strings.HasPrefix(strings.TrimSpace(text), "执行")
 		ask := strings.Contains(text, "问我")
 		switch {
 		case create || dispatch && !manager:
@@ -189,7 +209,11 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 				response = "已派发示例目标，负责人将创建执行任务；脚本主机会输出进展并交付结果。"
 			}
 		case dispatch && manager:
-			if !c.mutate("issues_create_task", issue.IssueID, &issue.Revision, taskPayload(text, issue.AssignmentEpoch), nil) {
+			payload := taskPayload(text, issue.AssignmentEpoch)
+			if strings.Contains(text, "首次失败") {
+				payload.Spec.Observation = &protocol.ObservationScope{WorkItemIDs: []string{issue.IssueID}}
+			}
+			if !c.mutate("issues_create_task", issue.IssueID, &issue.Revision, payload, nil) {
 				return "failed"
 			}
 			response = "任务已派发，执行 Agent 正在准备示例交付物。"
@@ -198,6 +222,33 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 				return "failed"
 			}
 			response = "已在收件箱提出一个决定，请选择手机或桌面布局。"
+		case manager && strings.Contains(text, "范围澄清"):
+			response = "范围已缩小到手机布局，桌面留到下一轮。请再确认：返回列表后应保留哪些输入，以及触控入口有哪些验收要求？"
+		case manager && strings.Contains(text, "未发送草稿"):
+			response = "已把未发送草稿与返回焦点记入进展。还需要明确长标题、触控入口和决定说明的阅读标准，之后再派发检查。"
+		case manager && strings.Contains(text, "验收条件补充"):
+			response = "验收条件已确认：长标题可读，入口不挤压标题，决定说明完整。下一步逐项核对上下文，再请你选择本轮的布局优先级。"
+		case manager && strings.Contains(text, "决定已确认"):
+			response = "已收到你的真实决定：手机优先，桌面以后再看。现有草稿与返回焦点要求仍保留，可以派发同一范围的检查任务。"
+		case manager && strings.Contains(text, "异常退出"):
+			response = "第一轮异常退出属于执行事实，不代表验收通过。失败记录会保留；请在原任务的决定中明确重试，随后由独立验收检查报告。"
+		case manager && strings.Contains(text, "详细走查"):
+			for n := 0; n < 3; n++ {
+				if !c.invoke("issues_read", struct{}{}, nil) {
+					return "failed"
+				}
+			}
+			// Separate native message items make a real multi-page transcript while
+			// a bounded number of reads avoids quadratic seed/tool bookkeeping.
+			for n := 0; n < 40; n++ {
+				if ctx.Err() != nil {
+					return "interrupted"
+				}
+				th.Say(turn, fmt.Sprintf("%s_check_%d", turn, n), fmt.Sprintf("检查记录 %d：已核对手机长标题、触控入口、草稿与返回焦点的验收标准；这只是沙盒检查过程，不代表外部仓库已经修改。", n+1))
+			}
+			response = "已逐项读取本轮上下文。\n\n" + strings.Repeat("### 手机体验检查\n\n保留长标题、未发送草稿及返回焦点；检查决定说明和可下载报告。这里只展示沙盒脚本的走查过程，没有实际修改外部仓库。\n\n", 20)
+		case manager && strings.Contains(text, "总结"):
+			response = "本轮手机布局检查已完成：首次失败保留在执行历史中，按你的决定重试后交付报告，并通过独立验收。当前进展与交付均可复核，已移到待评审。"
 		default:
 			if manager {
 				response = "已查看 Issue 的最新来源与执行进展，继续等待你的下一条消息。"
@@ -351,12 +402,13 @@ func delay(ctx context.Context, duration time.Duration) bool {
 }
 
 // waitCompletedReply is a read-only transport barrier, not another business tool
-// or a synthetic receipt. It observes the exact native item accepted by App.
+// or a synthetic receipt. It observes the exact native item accepted by App,
+// including retained background output that is published only after settlement.
 func waitCompletedReply(ctx context.Context, runtime *serverkit.Runtime, thread, turn, item string) bool {
 	for {
 		complete := false
 		err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
-			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_agent_messages WHERE thread_id=? AND turn_id=? AND item_id=? AND status='completed')`, thread, turn, item).Scan(&complete)
+			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_agent_messages WHERE thread_id=? AND turn_id=? AND item_id=? AND status='completed' UNION ALL SELECT 1 FROM background_replies WHERE thread_id=? AND turn_id=? AND item_id=? AND status='completed')`, thread, turn, item, thread, turn, item).Scan(&complete)
 		})
 		if err != nil {
 			return false
@@ -364,7 +416,7 @@ func waitCompletedReply(ctx context.Context, runtime *serverkit.Runtime, thread,
 		if complete {
 			return true
 		}
-		if !delay(ctx, 20*time.Millisecond) {
+		if !delay(ctx, 100*time.Millisecond) {
 			return false
 		}
 	}

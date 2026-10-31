@@ -21,6 +21,7 @@ import (
 	"github.com/GhostFlying/tend/internal/serverkit"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 type webClient struct {
@@ -118,11 +119,86 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		t.Fatal("sandbox seed timed out")
 	}
 	r := <-runtime
+	if demo.Story == "" || demo.StoryTask == "" || demo.StoryDecision == "" {
+		t.Fatal("missing multi-round story receipt", demo)
+	}
+	if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+		issue, err := views.CanonicalIssue(ctx, tx.Q(), demo.Story, 0)
+		if err != nil {
+			return err
+		}
+		if issue.Plan.Title != storyTitle || issue.WorkStatus != protocol.IssueInReview || issue.Progress == nil || issue.Progress.UpdatedBy.Kind != protocol.IssueAssigneeAgent {
+			t.Fatal("story did not reach manager-attributed review", issue)
+		}
+		before := int64(0)
+		blocks, attributed, continuation := 0, false, false
+		for {
+			page, err := views.IssueActivity(ctx, tx.Q(), demo.Story, before)
+			if err != nil {
+				return err
+			}
+			for _, entry := range page.Items {
+				if entry.Block != nil {
+					blocks++
+					continuation = continuation || entry.Block.More
+				}
+				if entry.Kind == "issue.progress_updated" && entry.Author == "沙盒负责人 Agent" {
+					attributed = true
+				}
+				if entry.Block == nil && entry.Author == "" {
+					t.Fatal("unattributed story event", entry)
+				}
+			}
+			if !page.More {
+				break
+			}
+			before = page.NextBefore
+		}
+		if blocks < 8 || !attributed || !continuation || before == 0 {
+			t.Fatalf("story activity: blocks=%d attributed=%v continuation=%v older=%d", blocks, attributed, continuation, before)
+		}
+		task, err := views.Task(ctx, tx.Q(), demo.StoryTask)
+		if err != nil {
+			return err
+		}
+		failed, succeeded, accepted := false, false, false
+		for _, run := range task.Runs {
+			failed = failed || run.Observed == protocol.RunFailed
+			succeeded = succeeded || run.Role == protocol.RoleImplement && run.Generation > 1 && run.Observed == protocol.RunFinished
+		}
+		for _, acceptance := range task.Acceptances {
+			accepted = accepted || acceptance.Verdict == protocol.VerdictPassed
+		}
+		if !failed || !succeeded || !accepted || len(task.Artifacts) == 0 || len(task.Acceptances) == 0 {
+			t.Fatal("missing real failure, retry, report or independent acceptance", task)
+		}
+		attention, err := views.Attention(ctx, tx.Q(), demo.StoryDecision)
+		if err != nil {
+			return err
+		}
+		if attention.Decision == nil || !bytes.Contains(attention.Decision.Answer, []byte("手机布局")) || attention.Decision.Status != "answered" {
+			t.Fatal("story decision was not answered", attention)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	c := webClient{t: t, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
 	defer c.http.CloseIdleConnections()
 	c.call(http.MethodPost, "/api/v1/session", protocol.SessionRequest{ClientID: "sandbox-web-test", Scope: protocol.ScopeOwner}, &c.session)
 	if c.session.Token == "" {
 		t.Fatal("missing session token")
+	}
+	// Existing completion receipts are upgraded through the same stable story
+	// commands, without resetting retained demo data or duplicating history.
+	legacy := demo
+	legacy.Story, legacy.StoryTask, legacy.StoryDecision = "", "", ""
+	if err := writeDemoReceipt(filepath.Join(root, "demo.json"), legacy); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := SeedDemo(ctx, r, root)
+	if err != nil || fmt.Sprint(upgraded) != fmt.Sprint(demo) {
+		t.Fatalf("legacy receipt upgrade: %+v %v", upgraded, err)
 	}
 	var board protocol.IssuePage
 	c.call(http.MethodGet, "/api/v1/issues?board=true&include_closed=true&limit=100", nil, &board)
@@ -160,6 +236,9 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	}
 	if len(seedBodies) != 3 {
 		t.Fatalf("seed attention descriptions: got %d, want 3", len(seedBodies))
+	}
+	if err := os.Remove(filepath.Join(root, "demo.json")); err != nil {
+		t.Fatal(err)
 	}
 	replay, err := SeedDemo(ctx, r, root)
 	if err != nil || fmt.Sprint(replay) != fmt.Sprint(demo) {
