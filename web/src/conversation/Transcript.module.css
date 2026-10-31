@@ -94,3 +94,10 @@
     padding: var(--space-4) 14px var(--space-2);
   }
 }
+
+@media (max-width: 760px) {
+  .jump {
+    min-height: var(--control-touch);
+    bottom: calc(var(--space-2) + env(safe-area-inset-bottom));
+  }
+}
