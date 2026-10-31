@@ -16,6 +16,7 @@ import type {
   IssuePlan,
   TaskDetail,
 } from "../src/api/generated/api.ts";
+const copyOnly = process.argv.includes("--s5-copy-only");
 const catalogOnly = process.argv.includes("--catalog-only");
 let hostedUnconfigured = false;
 let holdTaskFeed = false;
@@ -206,7 +207,8 @@ const server = createServer(async (req, res) => {
   if (p === "/api/v1/snapshot")
     return json({
       event_seq: seq,
-      tasks: [],
+      tasks: copyOnly ? [activeTask] : [],
+      ...(copyOnly ? { upgrade: copyUpgrade } : {}),
       hosts: [
         {
           host_id: "runner-a",
@@ -304,6 +306,25 @@ const server = createServer(async (req, res) => {
   if (p === "/api/v1/conversation/transcript")
     return json({
       blocks: [
+        ...(copyOnly
+          ? [
+              {
+                position: 0,
+                trigger: {
+                  message_id: "copy-system",
+                  seq: 0,
+                  kind: "message",
+                  author: "system",
+                  body: `Release ${copyUpgrade.release_id} completed`,
+                  created_at: new Date(now).toISOString(),
+                  notice_type: "upgrade_completed",
+                  upgrade_id: copyUpgrade.upgrade_id,
+                },
+                items: [],
+                more: false,
+              },
+            ]
+          : []),
         {
           position: 1,
           trigger: {
@@ -317,9 +338,10 @@ const server = createServer(async (req, res) => {
             associations: messageAssociations,
           },
           items: [
+            ...(copyOnly ? copyTools : []),
             {
               message_id: "reply-plan",
-              seq: 2,
+              seq: copyOnly ? 6 : 2,
               kind: "message",
               author: "main_agent",
               body: replyBody,
@@ -336,6 +358,7 @@ const server = createServer(async (req, res) => {
       event_seq: seq,
       more: false,
     });
+  if (p === `/api/v1/upgrades/${copyUpgrade.upgrade_id}`) return json({ upgrade: copyUpgrade });
   if (p === "/api/v1/conversation/queue")
     return json({ items: [], enabled: true, event_seq: seq, total: 0 });
   if (p.endsWith("/usage"))
@@ -1113,6 +1136,99 @@ await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
+const copyUpgrade = {
+  upgrade_id: "upgrade-fixture-identity",
+  release_id: "release-fixture-20261031-abcdef1234567890",
+  status: "running",
+  phase: "runners",
+  updated_at: now,
+  hosts: [],
+};
+const copyTools = ["issues_read", "tasks_read", "background_sources", "repos_list"].map(
+  (name, index) => ({
+    message_id: `copy-tool-${index}`,
+    seq: index + 2,
+    kind: "message",
+    author: "main_agent",
+    reply_to: "owner-plan",
+    created_at: new Date(now).toISOString(),
+    tool: {
+      turn_id: "copy-turn",
+      name,
+      status: index < 2 ? "completed" : index === 2 ? "running" : "failed",
+      updated_at: new Date(now).toISOString(),
+      input: JSON.stringify({ task_id: activeTask.task_id }),
+      output: index < 2 ? "原始工具输出保持不变" : "",
+    },
+  }),
+);
+
+async function captureS5() {
+  assert(output);
+  assert(address && typeof address !== "string");
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    const context = await browser.newContext({
+      viewport,
+      colorScheme: "light",
+      serviceWorkers: "block",
+      permissions: ["clipboard-read", "clipboard-write"],
+    });
+    const page = await context.newPage();
+    const shot = async (name: string) => {
+      await page.mouse.move(0, 0);
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await page.screenshot({ path: join(output, `s5-${name}-${viewport.width}.png`) });
+    };
+    await page.goto(`http://127.0.0.1:${address.port}/`);
+    await page.getByText("使用了 2 个工具", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /读取背景来源/ }).count(), 1);
+    assert.equal(await page.getByRole("button", { name: /查看仓库/ }).count(), 1);
+    assert.equal(await page.getByText(activeTask.task_id, { exact: true }).count(), 0);
+    await shot("chat-grouped");
+    await page
+      .locator('[data-scroll-id="0:copy-system"]')
+      .evaluate((element) => element.scrollIntoView({ block: "start" }));
+    await shot("upgrade-system-card");
+    await page.getByText("使用了 2 个工具", { exact: true }).click();
+    await page.getByRole("button", { name: /查看 Issue/ }).click();
+    await page.getByText("原始工具输出保持不变", { exact: true }).waitFor();
+    await page
+      .locator('[data-scroll-id="copy-tool-0"]')
+      .evaluate((element) => element.scrollIntoView({ block: "start" }));
+    await shot("chat-expanded");
+    await navigate(page, "/tasks/" + activeTask.task_id);
+    await page.getByText("任务阶段 · 实现中", { exact: true }).waitFor();
+    await page.getByText("sample · 优先级 P1 · 第 2 版要求", { exact: true }).waitFor();
+    await shot("task");
+    await navigate(page, "/issues/issue-root");
+    await page.getByRole("heading", { name: "发布流程整理", level: 1 }).waitFor();
+    await shot("issue");
+    await navigate(page, "/inbox");
+    await page.getByRole("heading", { name: "待处理", level: 1 }).waitFor();
+    await shot("inbox");
+    await navigate(page, "/upgrades/" + copyUpgrade.upgrade_id);
+    await page.getByRole("heading", { name: "发布详情", level: 1 }).waitFor();
+    await page.getByText("发布标识：", { exact: false }).waitFor({ state: "hidden" });
+    assert.equal(await page.getByText(copyUpgrade.release_id, { exact: true }).isVisible(), false);
+    await shot("upgrade");
+    await page
+      .getByRole("region", { name: "发布详情", exact: true })
+      .getByText("详细信息", { exact: true })
+      .click();
+    const details = page
+      .locator("details")
+      .filter({ has: page.getByText("发布标识：", { exact: false }) });
+    await details.getByRole("button", { name: "复制", exact: true }).first().click();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), copyUpgrade.release_id);
+    await shot("upgrade-expanded");
+    await context.close();
+    console.log(`PASS S5 copy ${viewport.width}`);
+  }
+}
+
 async function captureS4() {
   assert(output);
   assert(address && typeof address !== "string");
@@ -1162,7 +1278,7 @@ async function captureS4() {
           assert.equal(
             await page
               .locator("main")
-              .getByRole("button", { name: /^(← 返回|返回对话|返回Issue)$/ })
+              .getByRole("button", { name: /^(← 返回|返回对话|返回 Issue)$/ })
               .filter({ visible: true })
               .count(),
             0,
@@ -1256,7 +1372,7 @@ async function captureS4() {
           );
           if (viewport.width <= 760)
             await page
-              .getByRole("dialog", { name: "Issue辅助信息", exact: true })
+              .getByRole("dialog", { name: "Issue 辅助信息", exact: true })
               .getByRole("button", { name: /^关闭/ })
               .first()
               .click();
@@ -1385,7 +1501,7 @@ async function checkNavigation() {
         await page.waitForURL((url) => url.pathname === `/inbox/${information.attention_id}`);
       if (path === "/issues/issue-root") {
         await issueSidebar(page);
-        const auxiliary = page.getByRole("dialog", { name: "Issue辅助信息", exact: true });
+        const auxiliary = page.getByRole("dialog", { name: "Issue 辅助信息", exact: true });
         if (await auxiliary.isVisible())
           await auxiliary.getByRole("button", { name: /^关闭/ }).first().click();
       }
@@ -1523,10 +1639,11 @@ async function checkNavigation() {
 
 try {
   const tourOnly = process.argv.includes("--s4-tour-only");
-  if (tourOnly || !process.argv.includes("--navigation-only")) await captureS4();
+  if (copyOnly) await captureS5();
+  else if (tourOnly || !process.argv.includes("--navigation-only")) await captureS4();
   const navigationOnly = process.argv.includes("--navigation-only");
   if (navigationOnly) await checkNavigation();
-  for (const viewport of navigationOnly || tourOnly
+  for (const viewport of navigationOnly || tourOnly || copyOnly
     ? []
     : [
         { width: 1440, height: 1000 },
@@ -1622,7 +1739,7 @@ try {
       .getByRole("button", { name: "Agent 与类别", exact: true })
       .click();
     const emptyCatalog = page.getByRole("region", { name: "Agent 与类别", exact: true });
-    await emptyCatalog.getByText("尚未配置托管Agent", { exact: true }).waitFor();
+    await emptyCatalog.getByText("尚未配置托管 Agent", { exact: true }).waitFor();
     assert.equal(await emptyCatalog.getByText(/部分登记暂时无法读取/).count(), 0);
     await page.screenshot({ path: join(output, `catalog-unconfigured-${viewport.width}.png`) });
     await emptyCatalog.getByRole("button", { name: "← 返回", exact: true }).click();
@@ -1637,7 +1754,7 @@ try {
     );
     await page.getByRole("button", { name: "新建 Issue", exact: true }).click();
     await emptyRead;
-    const createForm = page.getByRole("region", { name: "新建Issue", exact: true });
+    const createForm = page.getByRole("region", { name: "新建 Issue", exact: true });
     const managerSelect = createForm.getByRole("combobox", { name: "负责人", exact: true });
     assert.equal(await managerSelect.locator('option[value="category:issue-manager"]').count(), 1);
     assert.equal(await managerSelect.locator('option[value="hosted/qingzhu"]').count(), 0);
@@ -1652,7 +1769,7 @@ try {
       .getByRole("button", { name: "Agent 与类别", exact: true })
       .click();
     await emptyCatalog.getByRole("button", { name: /青竹 planner/ }).waitFor();
-    assert.equal(await emptyCatalog.getByText("尚未配置托管Agent", { exact: true }).count(), 0);
+    assert.equal(await emptyCatalog.getByText("尚未配置托管 Agent", { exact: true }).count(), 0);
     await page.screenshot({ path: join(output, `catalog-configured-${viewport.width}.png`) });
     await emptyCatalog.getByRole("button", { name: "← 返回", exact: true }).click();
     if (mobile)
@@ -1738,8 +1855,8 @@ try {
       await list.getByRole("button", { name: "查看所属 Issue →", exact: true }).click();
       await page.waitForURL((url) => url.pathname === `/issues/${issue.issue_id}`);
       await page
-        .getByRole("region", { name: "Issue详情", exact: true })
-        .getByRole("navigation", { name: "Issue路径", exact: true })
+        .getByRole("region", { name: "Issue 详情", exact: true })
+        .getByRole("navigation", { name: "Issue 路径", exact: true })
         .getByRole("button", { name: "Issues", exact: true })
         .click();
       await page.waitForURL((url) => url.pathname === "/issues");
@@ -1811,8 +1928,8 @@ try {
       .getByRole("button", { name: "发布流程整理", exact: true })
       .waitFor();
     const ownerBubble = page.locator('[data-scroll-id="owner-plan"]');
-    await ownerBubble.getByRole("button", { name: "修改Issue关联", exact: true }).click();
-    const associationEditor = page.getByRole("dialog", { name: "修改Issue关联", exact: true });
+    await ownerBubble.getByRole("button", { name: "修改 Issue 关联", exact: true }).click();
+    const associationEditor = page.getByRole("dialog", { name: "修改 Issue 关联", exact: true });
     await associationEditor.getByRole("checkbox", { name: "补齐回滚文档", exact: true }).check();
     await associationEditor.getByRole("button", { name: "保存关联", exact: true }).click();
     await ownerBubble.getByRole("button", { name: "补齐回滚文档", exact: true }).waitFor();
@@ -1830,8 +1947,8 @@ try {
       "issue-root",
     );
     const pendingSide = await issueSidebar(page);
-    await pendingSide.getByText(/等待 runner 领取/).waitFor();
-    await pendingSide.getByRole("button", { name: "issue-manager", exact: true }).waitFor();
+    await pendingSide.getByText(/等待执行主机领取/).waitFor();
+    await pendingSide.getByRole("button", { name: "负责人 Agent", exact: true }).waitFor();
     await page.screenshot({ path: join(output, `manager-queued-${viewport.width}.png`) });
     const pendingManagerDialog = await openIssueAux(page, "交接负责人");
     await pendingManagerDialog
@@ -1843,11 +1960,11 @@ try {
     assert(
       await pendingManagerDialog.getByRole("button", { name: "发起交接", exact: true }).isEnabled(),
     );
-    await pendingManagerDialog.getByRole("button", { name: "返回Issue", exact: true }).click();
+    await pendingManagerDialog.getByRole("button", { name: "返回 Issue", exact: true }).click();
     await (
       await issueSidebar(page)
     )
-      .getByRole("button", { name: "issue-manager", exact: true })
+      .getByRole("button", { name: "负责人 Agent", exact: true })
       .click();
     const managerDialog = page.getByRole("region", { name: "任务详情", exact: true });
     await managerDialog.getByText(/Issue 协调责任/).waitFor();
@@ -1887,7 +2004,7 @@ try {
     await page.screenshot({ path: join(output, `issue-${viewport.width}.png`) });
     const writesBeforeChat = writes.length;
     await page
-      .getByRole("region", { name: "Issue详情", exact: true })
+      .getByRole("region", { name: "Issue 详情", exact: true })
       .getByRole("textbox", { name: "消息", exact: true })
       .waitFor();
     assert.equal(writes.length, writesBeforeChat);
@@ -1909,10 +2026,10 @@ try {
     await page.screenshot({ path: join(output, `definition-${viewport.width}.png`) });
     await detail.getByRole("button", { name: "保存定义", exact: true }).click();
     await page
-      .getByRole("dialog", { name: "编辑Issue定义", exact: true })
+      .getByRole("dialog", { name: "编辑 Issue 定义", exact: true })
       .waitFor({ state: "hidden" });
     await page
-      .getByRole("region", { name: "Issue详情", exact: true })
+      .getByRole("region", { name: "Issue 详情", exact: true })
       .getByRole("heading", { name: "发布流程整理", exact: true })
       .waitFor();
     const update = writes.find((w) => w.operation === "issues.update")!;
@@ -1969,7 +2086,7 @@ try {
     );
     await page.screenshot({ path: join(output, `task-receipt-${viewport.width}.png`) });
     writes.length = 0;
-    await detail.getByRole("button", { name: "返回Issue", exact: true }).click();
+    await detail.getByRole("button", { name: "返回 Issue", exact: true }).click();
     taskQueued = true;
     await (
       await issueSidebar(page)
@@ -2007,7 +2124,7 @@ try {
     );
 
     assert(
-      await taskDialog.getByRole("button", { name: "发送给当前run", exact: true }).isDisabled(),
+      await taskDialog.getByRole("button", { name: "发送给当前执行", exact: true }).isDisabled(),
     );
     await taskDialog
       .getByRole("combobox", { name: "执行记录", exact: true })
@@ -2020,7 +2137,7 @@ try {
     await taskDialog
       .getByRole("textbox", { name: "补充给当前运行", exact: true })
       .fill("请保留原有回滚说明。");
-    await taskDialog.getByRole("button", { name: "发送给当前run", exact: true }).click();
+    await taskDialog.getByRole("button", { name: "发送给当前执行", exact: true }).click();
     await taskDialog.getByRole("button", { name: "核实原消息状态", exact: true }).waitFor();
     await page.screenshot({ path: join(output, `run-supplement-unknown-${viewport.width}.png`) });
     await taskDialog.getByRole("button", { name: "执行与日志", exact: true }).click();
@@ -2187,7 +2304,7 @@ try {
     await page.getByRole("button", { name: /^切换会话：/ }).click();
     const drawer = page.getByRole("dialog", { name: "会话", exact: true });
     await drawer.getByRole("button", { name: "新建咨询", exact: true }).click();
-    await drawer.getByRole("combobox", { name: /咨询Agent/ }).selectOption("hosted/qingzhu");
+    await drawer.getByRole("combobox", { name: /咨询 Agent/ }).selectOption("hosted/qingzhu");
     await drawer.getByLabel("标题", { exact: true }).fill("发布方式咨询");
     await drawer.getByRole("button", { name: "开始咨询", exact: true }).click();
     await page.getByRole("heading", { name: "发布方式咨询", exact: true }).waitFor();
@@ -2212,7 +2329,7 @@ try {
       .getByText("original file bytes", { exact: true })
       .waitFor();
     await page.screenshot({ path: join(output, `archive-originals-${viewport.width}.png`) });
-    await archives.getByRole("button", { name: "从所选材料新建Issue（1）", exact: true }).click();
+    await archives.getByRole("button", { name: "从所选材料新建 Issue（1）", exact: true }).click();
     await archives.getByRole("button", { name: "保存所选材料并继续", exact: true }).click();
     await archives.getByRole("button", { name: "核实原来源并继续", exact: true }).waitFor();
     assert.equal(writes.filter((w) => w.operation === "issues.create").length, 0);
@@ -2222,7 +2339,7 @@ try {
     assert.equal(new URL(page.url()).pathname, "/archive");
     await archives.getByRole("button", { name: "核实未完成的材料提交", exact: true }).click();
     await archives.getByRole("button", { name: "核实原来源并继续", exact: true }).click();
-    await archives.getByRole("heading", { name: "新建Issue", exact: true }).waitFor();
+    await archives.getByRole("heading", { name: "新建 Issue", exact: true }).waitFor();
     await archives.getByRole("textbox", { name: "标题", exact: true }).fill("从历史证据推进新发布");
     await archives
       .getByRole("textbox", { name: "目标", exact: true })
@@ -2234,7 +2351,7 @@ try {
       .getByRole("combobox", { name: "负责人", exact: true })
       .selectOption("category:custom-coordinator");
     await page.screenshot({ path: join(output, `archive-new-issue-${viewport.width}.png`) });
-    await archives.getByRole("button", { name: "创建Issue", exact: true }).click();
+    await archives.getByRole("button", { name: "创建 Issue", exact: true }).click();
     await archives.getByRole("button", { name: "核实原保存请求", exact: true }).waitFor();
     const originalCreate = writes.find((w) => w.operation === "issues.create")!;
     sourceContentRevision = 8;
@@ -2242,7 +2359,7 @@ try {
     await page.getByRole("heading", { name: "历史归档", exact: true }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/archive");
     await archives
-      .getByRole("button", { name: "继续使用已保存材料新建Issue", exact: true })
+      .getByRole("button", { name: "继续使用已保存材料新建 Issue", exact: true })
       .click();
     // The persisted source can hydrate before this click after a physical reload.
     await archives.getByRole("button", { name: /^(保存所选材料并继续|核实原来源并继续)$/ }).click();
@@ -2260,7 +2377,7 @@ try {
     );
 
     await page
-      .getByRole("region", { name: "Issue详情", exact: true })
+      .getByRole("region", { name: "Issue 详情", exact: true })
       .getByRole("heading", { name: "从历史证据推进新发布", exact: true })
       .waitFor();
     await page.screenshot({ path: join(output, `archive-created-issue-${viewport.width}.png`) });
@@ -2345,7 +2462,7 @@ try {
       .getByRole("button", { name: /松风 implementer/ })
       .first()
       .click();
-    await catalogDialog.getByText("本地ID：songfeng", { exact: true }).waitFor();
+    await catalogDialog.getByText("本地 ID：songfeng", { exact: true }).waitFor();
     await catalogDialog.getByText("未观测", { exact: true }).waitFor();
     assert.equal(await catalogDialog.getByText("最近上报可用", { exact: true }).count(), 2);
     assert.equal(await catalogDialog.getByText("离线", { exact: true }).count(), 1);
@@ -2393,7 +2510,7 @@ try {
       ref: "owner",
     });
     await page.screenshot({ path: join(output, `handoff-unknown-${viewport.width}.png`) });
-    await handoffDialog.getByRole("button", { name: "返回Issue", exact: true }).click();
+    await handoffDialog.getByRole("button", { name: "返回 Issue", exact: true }).click();
     await openIssueAux(page, "交接负责人");
     await handoffDialog.getByRole("button", { name: "核实原交接请求", exact: true }).waitFor();
     assert.equal(
@@ -2415,7 +2532,7 @@ try {
       .fill("已核对旧操作，继续交给我负责。");
     await page.screenshot({ path: join(output, `handoff-pending-reload-${viewport.width}.png`) });
     await handoffDialog.getByRole("button", { name: "继续交接", exact: true }).click();
-    await handoffDialog.getByRole("button", { name: "返回Issue", exact: true }).click();
+    await handoffDialog.getByRole("button", { name: "返回 Issue", exact: true }).click();
     await (await issueSidebar(page)).getByText("你", { exact: true }).waitFor();
     assert.equal(writes.filter((w) => w.operation === "issues.finish_assignment").length, 1);
 

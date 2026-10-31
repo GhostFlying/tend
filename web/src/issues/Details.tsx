@@ -356,17 +356,17 @@ export function IssueDetails({
     </>
   );
   return (
-    <section className={styles.page} aria-label="Issue详情">
+    <section className={styles.page} aria-label="Issue 详情">
       <header className={styles.toolbar}>
         <Button
           variant="ghost"
           className={styles.back}
           onClick={onBack}
-          aria-label="返回Issue列表或上一项"
+          aria-label="返回 Issue 列表或上一项"
         >
           ← 返回
         </Button>
-        <nav aria-label="Issue路径">
+        <nav aria-label="Issue 路径">
           <Button variant="link" onClick={() => navigate({ page: "issues" })}>
             Issues
           </Button>
@@ -383,7 +383,7 @@ export function IssueDetails({
         </Button>
         {issue && (
           <details className={styles.menu}>
-            <summary aria-label="更多Issue操作">•••</summary>
+            <summary aria-label="更多 Issue 操作">•••</summary>
             <div onClick={(event) => event.currentTarget.parentElement?.removeAttribute("open")}>
               <Button disabled={!editable} onClick={() => setPanel("progress")}>
                 编辑当前进展
@@ -392,7 +392,7 @@ export function IssueDetails({
                 编辑定义
               </Button>
               <Button disabled={!editable} onClick={() => setPanel("child")}>
-                新增子Issue
+                新增子 Issue
               </Button>
               <Button
                 disabled={!editable || issue.assignment_state !== "active"}
@@ -402,13 +402,13 @@ export function IssueDetails({
               </Button>
               <Button onClick={() => setPanel("handoff")}>交接负责人</Button>
               {issue.state === "active" && (
-                <Button onClick={() => setPanel("pause")}>暂停Issue</Button>
+                <Button onClick={() => setPanel("pause")}>暂停 Issue</Button>
               )}
               {issue.state === "paused" && (
-                <Button onClick={() => setPanel("resume")}>恢复Issue</Button>
+                <Button onClick={() => setPanel("resume")}>恢复 Issue</Button>
               )}
               {["closed", "cancelled"].includes(issue.state) && (
-                <Button onClick={() => setPanel("reopen")}>重新打开Issue</Button>
+                <Button onClick={() => setPanel("reopen")}>重新打开 Issue</Button>
               )}
             </div>
           </details>
@@ -416,11 +416,11 @@ export function IssueDetails({
       </header>
       {!issue ? (
         <div className={styles.loading} role="status">
-          <PageHeader title="Issue详情" />
+          <PageHeader title="Issue 详情" />
           {state.error ? (
-            <ReadError label="Issue读取失败" retry={() => void reads.open(id)} />
+            <ReadError label="Issue 读取失败" retry={() => void reads.open(id)} />
           ) : (
-            "正在读取Issue…"
+            "正在读取 Issue…"
           )}
         </div>
       ) : (
@@ -593,7 +593,7 @@ export function IssueDetails({
                       : "Issue 已结束，对话记录仍可阅读。"}
                   </p>
                   <Button variant="link" onClick={() => setPanel("reopen")}>
-                    重新打开Issue →
+                    重新打开 Issue →
                   </Button>
                 </div>
               )}
@@ -631,18 +631,18 @@ export function IssueDetails({
               )}
             </div>
           </div>
-          <aside className={styles.sidebar} aria-label="Issue辅助信息">
+          <aside className={styles.sidebar} aria-label="Issue 辅助信息">
             {sideContent}
           </aside>
         </div>
       )}
       {side && (
-        <Sheet open title="Issue辅助信息" onClose={() => setSide(false)}>
+        <Sheet open title="Issue 辅助信息" onClose={() => setSide(false)}>
           <aside className={styles.drawer}>{sideContent}</aside>
         </Sheet>
       )}
       {attention && (
-        <Sheet open title="Issue待处理事项" onClose={() => setAttention("")}>
+        <Sheet open title="Issue 待处理事项" onClose={() => setAttention("")}>
           <AttentionDetails id={attention} onIssue={onSelect} onBack={() => setAttention("")} />
         </Sheet>
       )}
@@ -689,8 +689,8 @@ export function IssueDetails({
 }
 
 const panelLabels: Record<Panel, string> = {
-  definition: "编辑Issue定义",
-  child: "新增子Issue",
+  definition: "编辑 Issue 定义",
+  child: "新增子 Issue",
   task: "创建任务",
   handoff: "交接负责人",
   sources: "背景与原始输入",
@@ -698,9 +698,9 @@ const panelLabels: Record<Panel, string> = {
   history: "变更历史",
   progress: "编辑当前进展",
   results: "全部执行交付",
-  reopen: "重新打开Issue",
-  pause: "暂停Issue",
-  resume: "恢复Issue",
+  reopen: "重新打开 Issue",
+  pause: "暂停 Issue",
+  resume: "恢复 Issue",
 };
 function conversationReason(issue: IssueView): string {
   return (
@@ -708,7 +708,7 @@ function conversationReason(issue: IssueView): string {
       {
         owner: "当前由你负责；可交接给 Agent 后继续负责人对话。",
         handoff: "负责人交接中，草稿保留，暂不发送新消息。",
-        ended: "Issue已结束，对话记录仍可阅读。",
+        ended: "Issue 已结束，对话记录仍可阅读。",
         unavailable: "负责人对话尚未建立。",
         manager_pending: "负责人任务正在等待领取；领取后可在此继续讨论。",
       } as Record<string, string>
@@ -796,16 +796,16 @@ function ChildIssues({
   const [cursors, setCursors] = useState(reading.childCursors);
   if (!state.value)
     return state.error ? (
-      <ReadError label="子Issue读取失败" retry={() => void read.refresh()} />
+      <ReadError label="子 Issue 读取失败" retry={() => void read.refresh()} />
     ) : null;
   if (!state.value.items?.length && cursors.length === 1)
     return state.error ? (
-      <ReadError label="子Issue读取失败" retry={() => void read.refresh()} />
+      <ReadError label="子 Issue 读取失败" retry={() => void read.refresh()} />
     ) : null;
   return (
     <section className={styles.children}>
       {state.error && (
-        <ReadError label="子Issue尚未取得最新状态" retry={() => void read.refresh()} />
+        <ReadError label="子 Issue 尚未取得最新状态" retry={() => void read.refresh()} />
       )}
       <div className={styles.sectionHead}>
         <h2>子 Issue</h2>

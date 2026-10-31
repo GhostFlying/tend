@@ -117,12 +117,20 @@ describe("buildEntries", () => {
 });
 
 describe("toolSummary", () => {
-  test("names what the call is about", () => {
-    expect(toolSummary('{"title":"修 Windows 构建","project":"tend","commit_seq":1}')).toBe(
-      "修 Windows 构建 · tend",
-    );
-    expect(toolSummary("go test ./...\nmore")).toBe("go test ./...");
+  test("uses resolved titles without exposing input or identifiers", () => {
+    expect(toolSummary('{"title":"修Windows构建","task_id":"task_raw"}')).toBe("");
+    expect(toolSummary("go test ./...\nmore")).toBe("");
     expect(toolSummary(undefined)).toBe("");
+    expect(
+      toolSummary('{"task_id":"task_raw"}', (kind, id) =>
+        kind === "task" && id === "task_raw" ? "修Windows构建" : undefined,
+      ),
+    ).toBe("修Windows构建");
+    expect(
+      toolSummary('{"issue_id":"issue_raw"}', (kind) =>
+        kind === "issue" ? "原始Issue标题" : undefined,
+      ),
+    ).toBe("原始Issue标题");
   });
 });
 

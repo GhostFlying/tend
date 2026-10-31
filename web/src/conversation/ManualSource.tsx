@@ -42,8 +42,8 @@ export function ManualSource({ onBack }: { onBack(): void }) {
         <p>
           会话：{targetMatches ? target?.title || "主 Agent" : targetID} · {targetID}
         </p>
-        {targetMatches && target?.agentRef && <p>接收Agent：{target.agentRef}</p>}
-        {targetMatches && target?.workItemID && <p>所属Issue：{target.workItemID}</p>}
+        {targetMatches && target?.agentRef && <p>接收 Agent：{target.agentRef}</p>}
+        {targetMatches && target?.workItemID && <p>所属 Issue：{target.workItemID}</p>}
       </section>
       <div className={sourceStyles.columns}>
         <div>
@@ -153,9 +153,9 @@ export function ManualSource({ onBack }: { onBack(): void }) {
           <p>
             送达会话：{targetMatches ? target?.title || "主 Agent" : targetID} · {targetID}
           </p>
-          {targetMatches && target?.agentRef && <p>接收Agent：{target.agentRef}</p>}
-          {targetMatches && target?.workItemID && <p>所属Issue：{target.workItemID}</p>}
-          <p className={styles.muted}>来源记录：{source.current.messageId || "记录ID尚未取得"}</p>
+          {targetMatches && target?.agentRef && <p>接收 Agent：{target.agentRef}</p>}
+          {targetMatches && target?.workItemID && <p>所属 Issue：{target.workItemID}</p>}
+          <p className={styles.muted}>来源记录：{source.current.messageId || "记录 ID 尚未取得"}</p>
           <button className={styles.primary} onClick={onBack}>
             返回会话
           </button>

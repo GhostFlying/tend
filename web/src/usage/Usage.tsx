@@ -31,7 +31,7 @@ export function TokenLine({ totals: t }: { totals: TokenUsageTotals }) {
   return (
     <div className={styles.line}>
       <span>
-        输入 token <b>{field(t.input, t.input_known, t.requests)}</b>
+        输入 Token <b>{field(t.input, t.input_known, t.requests)}</b>
         <small>
           缓存读取 {field(t.cache_read, t.cache_read_known, t.requests)}
           {t.cache_write_known > 0 &&
@@ -39,7 +39,7 @@ export function TokenLine({ totals: t }: { totals: TokenUsageTotals }) {
         </small>
       </span>
       <span>
-        输出 token <b>{field(t.output, t.output_known, t.requests)}</b>
+        输出 Token <b>{field(t.output, t.output_known, t.requests)}</b>
       </span>
     </div>
   );
@@ -61,7 +61,7 @@ export function UsageSummary({
         <>
           <div className={styles.hero}>
             <strong>{t.total_known ? number.format(t.total) : "—"}</strong>
-            {t.total_known > 0 && <span>token</span>}
+            {t.total_known > 0 && <span>Token</span>}
             {t.total_known > 0 && t.total_known < t.requests && (
               <span className={styles.badge}>部分</span>
             )}
@@ -176,7 +176,7 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
     ...(data?.trend ?? []).filter((b) => b.total_known > 0).map((b) => b.total),
   );
   return (
-    <section className={styles.panel} aria-label={subject ? "本次执行 token 用量" : "Token 用量"}>
+    <section className={styles.panel} aria-label={subject ? "本次执行 Token 用量" : "Token 用量"}>
       <header>
         {subject && <h2>本次执行用量</h2>}
         <small>{subject ? "本次执行 · " : ""}已采集的请求消费 · Asia/Shanghai</small>
@@ -262,7 +262,7 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
                   <strong>
                     {data.unattributed.total_known ? number.format(data.unattributed.total) : "—"}
                   </strong>
-                  {data.unattributed.total_known > 0 && <span>token</span>}
+                  {data.unattributed.total_known > 0 && <span>Token</span>}
                 </div>
                 <p>
                   {data.unattributed.total_known}/{data.unattributed.requests} 个请求提供总量
@@ -296,7 +296,7 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
             {!data.trend?.length ? (
               <p className={styles.caption}>本范围没有提供发生时间的请求，趋势暂不可用。</p>
             ) : !data.trend.some((b) => b.total_known > 0) ? (
-              <p className={styles.caption}>这些请求未提供总量，暂不能绘制 token 趋势。</p>
+              <p className={styles.caption}>这些请求未提供总量，暂不能绘制 Token 趋势。</p>
             ) : (
               <div className={styles.trend}>
                 {data.trend.map((bucket) => (
@@ -309,12 +309,12 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
                         min={0}
                         max={trendMax}
                         value={bucket.total}
-                        aria-label={`${field(bucket.total, bucket.total_known, bucket.requests)} token`}
+                        aria-label={`${field(bucket.total, bucket.total_known, bucket.requests)} Token`}
                       />
                     ) : (
                       <span>总量未提供</span>
                     )}
-                    <span>{field(bucket.total, bucket.total_known, bucket.requests)} token</span>
+                    <span>{field(bucket.total, bucket.total_known, bucket.requests)} Token</span>
                   </div>
                 ))}
               </div>
@@ -332,7 +332,7 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
                         <Button className={styles.groupName} onClick={() => changeModel(m.name)}>
                           {m.name}
                         </Button>
-                        <span>{field(m.total, m.total_known, m.requests)} token</span>
+                        <span>{field(m.total, m.total_known, m.requests)} Token</span>
                         <small>
                           {m.total_known}/{m.requests} 个请求提供总量
                         </small>
@@ -350,7 +350,7 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
                     {data.roles!.map((r) => (
                       <div className={styles.row} key={r.name}>
                         <span>{roles[r.name] ?? r.name}</span>
-                        <span>{field(r.total, r.total_known, r.requests)} token</span>
+                        <span>{field(r.total, r.total_known, r.requests)} Token</span>
                         <small>
                           {r.total_known}/{r.requests} 个请求提供总量
                         </small>
@@ -381,7 +381,7 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
                   </span>
                   <span className={styles.recordModel}>{r.model || "实际模型未提供"}</span>
                   <strong>
-                    {r.total === null ? "总量未提供" : `${number.format(r.total)} token`}
+                    {r.total === null ? "总量未提供" : `${number.format(r.total)} Token`}
                   </strong>
                   <span className={styles.settlement}>
                     {r.settlement === "final" ? "请求已结算" : "实时读数"}
@@ -395,8 +395,8 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
                     原生请求 {r.request_id} · thread {r.thread_id} · turn {r.turn_id}
                   </p>
                   <p>
-                    输入 token {r.input ?? "未提供"}（缓存读取 {r.cache_read ?? "未提供"}
-                    {r.cache_write !== null && `，缓存写入 ${r.cache_write}`}），输出 token{" "}
+                    输入 Token {r.input ?? "未提供"}（缓存读取 {r.cache_read ?? "未提供"}
+                    {r.cache_write !== null && `，缓存写入 ${r.cache_write}`}），输出 Token{" "}
                     {r.output ?? "未提供"}
                   </p>
                   <small>

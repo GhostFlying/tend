@@ -62,10 +62,10 @@ function WaitingTask({ id, occupied }: { id: string; occupied: boolean }) {
     <button
       type="button"
       className={styles.reference}
-      aria-label={`查看${label}：${task?.title ?? id}`}
+      aria-label={`查看${label}：${task?.title ?? "查看任务"}`}
       onClick={() => openTask(id)}
     >
-      {label}：{task?.title ?? id} ›
+      {label}：{task?.title ?? "查看任务"} ›
     </button>
   );
 }

@@ -1,3 +1,4 @@
+import { CopyIdentifier } from "../i18n/identifiers.tsx";
 import { Button } from "../ui/index.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import type { UpgradeView } from "../api/generated/api.ts";
@@ -21,7 +22,7 @@ export function UpgradeBanner({ connection }: { connection: Connection }) {
       onClick={() => openUpgrade(upgrade.upgrade_id)}
     >
       <strong>{batchStatuses[upgrade.status] ?? "发布状态"}</strong>
-      <span>{upgrade.release_id}</span>
+      <span>正在更新到新版本</span>
       <span className={styles.hint}>
         {connection.status === "online" ? "查看详情 ›" : "等待连接恢复 · 最后观察"}
       </span>
@@ -88,7 +89,17 @@ export function UpgradeDetails({
         </p>
       ) : (
         <>
-          <h3>{upgrade.release_id}</h3>
+          <details>
+            <summary>详细信息</summary>
+            <p>
+              发布标识：
+              <CopyIdentifier value={upgrade.release_id} />
+            </p>
+            <p>
+              更新标识：
+              <CopyIdentifier value={upgrade.upgrade_id} />
+            </p>
+          </details>
           <p className={styles.status} data-attention={upgrade.status === "attention" || undefined}>
             {batchStatuses[upgrade.status] ?? upgrade.status}
           </p>
@@ -110,7 +121,7 @@ export function UpgradeDetails({
                   </dd>
                   <dt>通信协议</dt>
                   <dd>{host.protocol_version}</dd>
-                  <dt>剩余 run</dt>
+                  <dt>剩余执行</dt>
                   <dd>{host.remaining_runs ?? 0}</dd>
                   {!!host.total_bytes && (
                     <>

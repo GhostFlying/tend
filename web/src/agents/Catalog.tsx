@@ -38,7 +38,7 @@ export function AgentCatalogView() {
     );
   return (
     <section className={styles.root}>
-      <p className={styles.subtitle}>管理全局类别，查看各环境Agent登记。</p>
+      <p className={styles.subtitle}>管理全局类别，查看各环境 Agent 登记。</p>
       <div className={styles.categories}>
         {(categories.value?.items ?? []).map((category) => (
           <Button key={category.category_id} onClick={() => setEdit(category)}>
@@ -64,14 +64,14 @@ export function AgentCatalogView() {
           <span>Agent</span>
           <span>类别</span>
           <span>运行时</span>
-          <span>模型与effort</span>
+          <span>模型与 effort</span>
           <span>登记</span>
           <span>最近上报</span>
           <span>主机</span>
         </div>
         <div className={styles.group}>托管环境</div>
         {hosted.value?.state === "unconfigured" ? (
-          <EmptyState>尚未配置托管Agent</EmptyState>
+          <EmptyState>尚未配置托管 Agent</EmptyState>
         ) : hosted.value ? (
           <AgentRows projection={hosted.value.projection} />
         ) : (
@@ -125,7 +125,7 @@ function RunnerGroup({ id }: { id: string }) {
             {state.error
               ? "暂时无法读取登记。"
               : state.value
-                ? "此主机尚未登记Agent。"
+                ? "此主机尚未登记 Agent。"
                 : "正在读取…"}
           </p>
         ))}
@@ -199,7 +199,7 @@ function AgentDetails({
   return (
     <div className={styles.details}>
       <p>显示名：{agent.display_name}</p>
-      <p>本地ID：{agent.identity.local_id}</p>
+      <p>本地 ID：{agent.identity.local_id}</p>
       <p>环境：{agent.identity.execution_environment_id}</p>
       <p>类别：{agent.categories?.join("、")}</p>
       <p>用途：{agent.purposes?.join("、")}</p>
@@ -248,7 +248,7 @@ function CategoryEditor({
     <section className={`${styles.root} ${styles.form}`}>
       <h2>{category ? "编辑类别" : "新增类别"}</h2>
       <label>
-        类别ID
+        类别 ID
         <Input
           value={original?.target.id ?? id}
           disabled={!!category || operation.busy || operation.pending || result?.kind === "done"}
@@ -304,7 +304,7 @@ function CategoryEditor({
           </Button>
         )}
         <Button className={styles.button} onClick={onBack}>
-          返回Agent目录
+          返回 Agent 目录
         </Button>
       </div>
     </section>

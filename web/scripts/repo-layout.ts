@@ -352,7 +352,7 @@ try {
     );
     if (mobile) {
       await editIssueFilters(page, () =>
-        page.getByLabel("按项目筛选Issue").fill("selected-project"),
+        page.getByLabel("按项目筛选 Issue").fill("selected-project"),
       );
       await navigate(page, "/tasks");
       await page
@@ -510,7 +510,7 @@ try {
       await page.goBack();
       await usable(
         page
-          .getByRole("region", { name: "Issue白板" })
+          .getByRole("region", { name: "Issue 白板" })
           .getByRole("button", { name: "Sample ongoing Issue", exact: true }),
         page,
       );
@@ -552,10 +552,10 @@ try {
         path: join(output, `tasks-current-${viewport.width}x${viewport.height}.png`),
       });
     await executions
-      .getByRole("button", { name: "所属Issue：Mobile work item ›", exact: true })
+      .getByRole("button", { name: "所属 Issue：Mobile work item ›", exact: true })
       .first()
       .click();
-    const parentDetail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const parentDetail = page.getByRole("region", { name: "Issue 详情", exact: true });
     await parentDetail
       .getByRole("heading", { name: "Sample ongoing Issue", exact: true })
       .waitFor();
@@ -596,7 +596,7 @@ try {
       "task list does not overflow horizontally",
     );
     await page.goBack();
-    await page.getByRole("region", { name: "Issue白板", exact: true }).waitFor();
+    await page.getByRole("region", { name: "Issue 白板", exact: true }).waitFor();
     if (mobile) {
       await navigate(page, "/tasks");
       await page

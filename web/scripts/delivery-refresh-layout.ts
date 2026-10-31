@@ -385,7 +385,7 @@ try {
   const before = requests.size;
   await mobilePage.locator("main").getByRole("link", { name: "Linked task", exact: true }).click();
   await taskDrawer.getByRole("button", { name: "Refresh reconciliation", exact: true }).click();
-  const issueDrawer = mobilePage.getByRole("region", { name: "Issue详情", exact: true });
+  const issueDrawer = mobilePage.getByRole("region", { name: "Issue 详情", exact: true });
   await issueDrawer.getByRole("heading", { name: item.plan.title, exact: true }).waitFor();
   await closeIssue(mobilePage);
   if (await taskDrawer.isVisible()) {

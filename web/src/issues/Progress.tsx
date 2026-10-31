@@ -39,7 +39,7 @@ export function ProgressEditor({ issue, onSaved }: { issue: IssueView; onSaved()
       else
         setError(
           result.kind === "stale"
-            ? "Issue已变化，请关闭后重新打开进展编辑；当前输入仍保留。"
+            ? "Issue 已变化，请关闭后重新打开进展编辑；当前输入仍保留。"
             : result.message,
         );
     } catch {
@@ -100,7 +100,7 @@ export function IssueControlEditor({
   const original = operation.original?.payload as IssueControlPayload | undefined;
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
-  const labels = { pause: "暂停Issue", resume: "恢复Issue", reopen: "重新打开Issue" };
+  const labels = { pause: "暂停 Issue", resume: "恢复 Issue", reopen: "重新打开 Issue" };
   const submit = async () => {
     if (operation.original) {
       const envelope = operation.original;

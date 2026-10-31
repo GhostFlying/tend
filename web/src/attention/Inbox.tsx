@@ -340,8 +340,15 @@ function AttentionForm({
         <Badge>{kindLabel(a.kind)}</Badge> <span>·</span> <span>{statusLabel(a.status)}</span>
       </p>
       <p className={styles.muted}>
-        提出者：{a.raised_by.kind === "owner" ? "你" : a.raised_by.subject || a.raised_by.kind} ·
-        提出于{new Date(a.created_at).toLocaleString("zh-CN")}
+        提出者：
+        {a.raised_by.kind === "owner"
+          ? "你"
+          : a.raised_by.kind === "main_agent"
+            ? "主 Agent"
+            : a.raised_by.kind === "worker"
+              ? "执行 Agent"
+              : "负责人 Agent"}{" "}
+        · 提出于 {new Date(a.created_at).toLocaleString("zh-CN")}
       </p>
       <p className={styles.muted}>
         <AttentionActionTime item={a} />

@@ -251,7 +251,7 @@ try {
       assert.equal(await results.locator("article").count(), 5);
       assert.equal(
         await results
-          .getByRole("button", { name: "所属Issue：移动端工作项页重新设计 ›", exact: true })
+          .getByRole("button", { name: "所属 Issue：移动端工作项页重新设计 ›", exact: true })
           .count(),
         5,
       );
@@ -352,12 +352,12 @@ try {
     await detail.getByRole("button", { name: "关闭主机详情" }).click();
     if (mobile) await page.goBack();
     else await page.getByRole("link", { name: "Issues", exact: true }).click();
-    const board = page.getByRole("region", { name: "Issue白板" });
+    const board = page.getByRole("region", { name: "Issue 白板" });
     assert((await board.boundingBox())!.height > 80);
     const filtered = page.waitForResponse((response) =>
       response.url().includes("project=unrelated"),
     );
-    await editIssueFilters(page, () => page.getByLabel("按项目筛选Issue").fill("unrelated"));
+    await editIssueFilters(page, () => page.getByLabel("按项目筛选 Issue").fill("unrelated"));
     await filtered;
     if (mobile) {
       await navigate(page, "/tasks");
