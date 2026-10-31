@@ -1,3 +1,4 @@
+import { Link } from "../app/router.ts";
 import { useEffect, useMemo } from "react";
 import type { IssueView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
@@ -7,7 +8,7 @@ import styles from "../conversation/TaskRef.module.css";
 
 /** Text contains only a candidate identity; the current Issue API confirms it. */
 export function IssueRef({ id }: { id: string }) {
-  const { client, live, openIssue } = useServices();
+  const { client, live } = useServices();
   const read = useMemo(() => new WorkItemRead<IssueView>(client), [client]);
   const state = useStore(read.state);
   useEffect(() => {
@@ -21,8 +22,8 @@ export function IssueRef({ id }: { id: string }) {
   const issue = state.value;
   if (!issue || issue.issue_id !== id) return <>{id}</>;
   return (
-    <button className={styles.chip} onClick={() => openIssue(issue.issue_id)} title={id}>
+    <Link className={styles.chip} to={{ page: "issue", id: issue.issue_id }} title={id}>
       <span className={styles.title}>{issue.plan.title}</span>
-    </button>
+    </Link>
   );
 }

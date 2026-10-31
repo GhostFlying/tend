@@ -1,3 +1,4 @@
+import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useMemo, useState } from "react";
 import type {
   ArchiveOriginal,
@@ -60,10 +61,9 @@ export function ArchiveBrowser({ onIssue }: { onIssue(id: string): void }) {
     catalog.value?.items?.[0];
   return (
     <section className={styles.root} aria-label="历史归档">
-      <header className={styles.head}>
-        <h1>历史归档</h1>
+      <PageHeader className={styles.head} title="历史归档">
         <p>封存的历史记录与原件，只读查看。所选材料可作为新Issue的来源，旧档案保持不变。</p>
-      </header>
+      </PageHeader>
       <div className={styles.archiveSelect}>
         <label>
           封存账本

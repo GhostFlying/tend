@@ -1,3 +1,4 @@
+import { rememberOpener } from "./focus.ts";
 import { useId, useLayoutEffect, useRef, type DialogHTMLAttributes } from "react";
 import { Button } from "./Button.tsx";
 import styles from "./Modal.module.css";
@@ -39,6 +40,7 @@ function Modal({
     if (!open) return;
     const panel = dialog.current!;
     const opener = document.activeElement;
+    rememberOpener(panel, opener);
     closing.current = false;
     if (!panel.open) panel.showModal();
     return () => {

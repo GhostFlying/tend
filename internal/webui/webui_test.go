@@ -91,7 +91,7 @@ func TestRevalidatesWithETag(t *testing.T) {
 
 func TestAppRoutesGetIndex(t *testing.T) {
 	h := New(built())
-	for _, p := range []string{"/tasks", "/tasks/task_01ABC", "/assets/", "/decisions/"} {
+	for _, p := range []string{"/issues", "/issues/issue-example", "/inbox", "/inbox/attention-example", "/settings", "/settings/agents", "/chat/consultation-example", "/repos", "/usage", "/hosts", "/archive", "/upgrades/upgrade-example", "/tasks", "/tasks/task_01ABC", "/assets/", "/decisions/"} {
 		res := get(t, h, "GET", p)
 		if res.StatusCode != http.StatusOK || body(t, res) != indexHTML {
 			t.Errorf("GET %s = %d, want index.html", p, res.StatusCode)

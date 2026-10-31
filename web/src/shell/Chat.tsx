@@ -1,8 +1,9 @@
+import { PageHeader } from "./PageHeader.tsx";
 import { MainPending } from "../attention/MainPending.tsx";
 import type { AttentionPage } from "../api/generated/api.ts";
 import type { ReadState } from "../workitems/live.ts";
 import { ManualSource } from "../conversation/ManualSource.tsx";
-import { DetailOverlay } from "./DetailOverlay.tsx";
+import { Sheet } from "../ui/Modal.tsx";
 import { Rollout } from "../conversation/Rollout.tsx";
 import { PendingQueue } from "../conversation/PendingQueue.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
@@ -43,8 +44,7 @@ export function Chat({
 
   return (
     <>
-      <header className={styles.head}>
-        <h1>{conversation?.title ?? "主 Agent"}</h1>
+      <PageHeader className={styles.head} title={conversation?.title ?? "主 Agent"}>
         <span className={styles.sub}>
           {conversation?.kind === "consultation"
             ? "独立咨询 · 普通问答不创建任务"
@@ -92,7 +92,7 @@ export function Chat({
         >
           <ArrowDown />
         </Button>
-      </header>
+      </PageHeader>
       {conversation?.kind === "consultation" && (
         <div className={styles.roleNote}>
           独立咨询 · 普通问答不创建任务
@@ -106,9 +106,9 @@ export function Chat({
         </div>
       )}
       {sourceOpen && (
-        <DetailOverlay task={false} label="补充来源" onClose={() => setSourceOpen(false)}>
+        <Sheet open title="补充来源" onClose={() => setSourceOpen(false)}>
           <ManualSource onBack={() => setSourceOpen(false)} />
-        </DetailOverlay>
+        </Sheet>
       )}
       <UpgradeBanner connection={connection} />
       <div className={styles.body}>

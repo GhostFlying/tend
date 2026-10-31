@@ -1,5 +1,6 @@
+import { PageHeader } from "../shell/PageHeader.tsx";
 // Independent owner preferences for idle preparation; model settings stay separate.
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
@@ -21,7 +22,6 @@ export function Handoff({
 
   const [draft, setDraft] = useState<string | null>(null);
 
-  const panel = useRef<HTMLDialogElement>(null);
   const id = useId();
   useEffect(() => {
     handoff.start();
@@ -32,9 +32,6 @@ export function Handoff({
       void handoff.reconcile(client);
     }
   }, [connection.status, handoff, client]);
-  useLayoutEffect(() => {
-    panel.current?.showModal();
-  }, []);
   const view = state.view;
 
   const online = connection.status === "online";
@@ -80,21 +77,8 @@ export function Handoff({
                         ? "预备摘要已过期"
                         : "尚无预备摘要";
   return (
-    <dialog
-      ref={panel}
-      className={styles.panel}
-      aria-label="设置"
-      onCancel={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className={styles.header}>
-        <h2>设置</h2>
-        <button type="button" onClick={onClose} aria-label="关闭设置">
-          ×
-        </button>
-      </div>
+    <section className={styles.panel} aria-label="设置">
+      <PageHeader title="设置" onBack={onClose} />
       {onCatalog && (
         <button type="button" className={styles.save} onClick={onCatalog}>
           Agent与类别
@@ -209,6 +193,6 @@ export function Handoff({
         )}
       </section>
       <IssueNotificationSettings connection={connection} />
-    </dialog>
+    </section>
   );
 }

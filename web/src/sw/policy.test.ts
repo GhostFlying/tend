@@ -14,7 +14,21 @@ test("the API always goes to the network", () => {
 
 test("navigations get the page, the network first", () => {
   expect(route(get("/", "navigate"), origin, shell)).toBe("page");
-  expect(route(get("/tasks/task_01", "navigate"), origin, shell)).toBe("page");
+  for (const path of [
+    "/tasks/task_01",
+    "/issues/example",
+    "/inbox",
+    "/inbox/example",
+    "/settings",
+    "/settings/agents",
+    "/chat/example",
+    "/repos",
+    "/usage",
+    "/hosts",
+    "/archive",
+    "/upgrades/example",
+  ])
+    expect(route(get(path, "navigate"), origin, shell)).toBe("page");
 });
 
 test("only the shell's files come from the cache", () => {

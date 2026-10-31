@@ -1,5 +1,6 @@
+import { PageHeader } from "../shell/PageHeader.tsx";
 import type { UpgradeView } from "../api/generated/api.ts";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
@@ -64,24 +65,9 @@ export function UpgradeDetails({
       });
     return () => controller.abort();
   }, [id, matching, client, connection.status, retry]);
-  const panel = useRef<HTMLDialogElement>(null);
-  useLayoutEffect(() => {
-    panel.current?.showModal();
-  }, []);
   return (
-    <dialog
-      ref={panel}
-      className={styles.panel}
-      aria-label="发布详情"
-      onCancel={onClose}
-      onClick={(event) => event.currentTarget === event.target && onClose()}
-    >
-      <div className={styles.header}>
-        <h2>发布详情</h2>
-        <button type="button" aria-label="关闭发布详情" onClick={onClose}>
-          ×
-        </button>
-      </div>
+    <section className={styles.panel} aria-label="发布详情">
+      <PageHeader title="发布详情" onBack={onClose} />
       {connection.status !== "online" && (
         <p className={styles.note} role="status">
           等待连接恢复，显示最后观察状态。
@@ -142,6 +128,6 @@ export function UpgradeDetails({
           <p className={styles.note}>重试或取消发布请使用 CLI。此面板仅查看进度。</p>
         </>
       )}
-    </dialog>
+    </section>
   );
 }

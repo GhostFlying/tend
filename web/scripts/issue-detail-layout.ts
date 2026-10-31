@@ -468,7 +468,7 @@ const server = createServer(async (req, res) => {
   }
   if (p.startsWith("/api/")) return json({ items: [], more: false });
   try {
-    const file = resolve(root, `.${p}${p.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, p.split("/").at(-1)?.includes(".") ? `.${p}` : "index.html");
     assert(file.startsWith(root));
     res.setHeader(
       "Content-Type",
@@ -506,6 +506,7 @@ try {
     await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
     const detail = page.getByRole("region", { name: "Issue详情", exact: true });
     await detail.getByRole("heading", { name: "发布流程整理", exact: true }).waitFor();
+    assert.equal(decodeURIComponent(new URL(page.url()).pathname), `/issues/${issue.issue_id}`);
     await detail
       .getByText("发布步骤与回滚文档已完成，灰度验证等待范围确认。", { exact: true })
       .waitFor();
@@ -631,12 +632,12 @@ try {
       baselineRevision,
     );
     assert.equal(issue.progress!.summary, "另一次负责人更新已经确认。");
-    await progress.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await progress.getByRole("button", { name: /^关闭/ }).first().click();
     if (width < 1280) {
       await detail.getByRole("button", { name: "详情", exact: true }).click();
       const drawer = page.getByRole("dialog", { name: "Issue辅助信息", exact: true });
       await drawer.getByRole("heading", { name: "交付物", exact: true }).waitFor();
-      await drawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+      await drawer.getByRole("button", { name: /^关闭/ }).first().click();
     }
     await openIssueAux(page, "全部执行交付");
     const deliveries = page.getByRole("dialog", { name: "全部执行交付", exact: true });
@@ -645,12 +646,12 @@ try {
     await deliveries.getByText("较早的交付", { exact: true }).waitFor();
     await deliveries.getByRole("button", { name: "上一页交付", exact: true }).click();
     await deliveries.getByText("发布与回滚清单", { exact: true }).waitFor();
-    await deliveries.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await deliveries.getByRole("button", { name: /^关闭/ }).first().click();
     const side = await issueSidebar(page);
     await side.getByText("待检查", { exact: true }).waitFor();
     await side.getByText("外部观察 · 已合并", { exact: true }).waitFor();
     await side.getByRole("button", { name: /发布与回滚清单/ }).waitFor();
-    if (width < 1280) await side.getByRole("button", { name: "关闭详情", exact: true }).click();
+    if (width < 1280) await side.getByRole("button", { name: /^关闭/ }).first().click();
     await detail.locator('[data-artifact="artifact-one"]').waitFor();
     const resultCard = detail.locator('[data-artifact="artifact-one"]');
     await resultCard.getByRole("button", { name: "打开完整交付 →", exact: true }).click();
@@ -662,23 +663,30 @@ try {
       .locator("[data-issue-scroll]")
       .evaluate((node) => node.scrollTop);
     await taskLink.click();
-    const taskDialog = page.getByRole("dialog", { name: "任务详情", exact: true });
+    const taskDialog = page.getByRole("region", { name: "任务详情", exact: true });
     await taskDialog.getByText("执行任务 A", { exact: true }).waitFor();
     await taskDialog.getByRole("button", { name: /关联任务 B/ }).click();
     await taskDialog.getByText("关联任务 B", { exact: true }).waitFor();
-    await taskDialog.getByRole("button", { name: "← 返回Issue", exact: true }).click();
+    await page.goBack();
+    assert.equal(new URL(page.url()).pathname, `/issues/${issue.issue_id}`);
     await taskDialog.waitFor({ state: "hidden" });
-    assert.equal(new URL(page.url()).searchParams.get("task"), null);
+    assert.equal(new URL(page.url()).pathname.startsWith("/tasks/"), false);
     assert.equal(
       await detail.getByRole("textbox", { name: "消息", exact: true }).inputValue(),
       "父项保留的草稿",
     );
+    await page.waitForFunction((expected) => {
+      const node = document.querySelector("[data-issue-scroll]");
+      return node !== null && Math.abs(node.scrollTop - expected) < 4;
+    }, taskReadingTop);
     assert(
       Math.abs(
         (await detail.locator("[data-issue-scroll]").evaluate((node) => node.scrollTop)) -
           taskReadingTop,
       ) < 4,
     );
+    await page.waitForFunction(() => document.activeElement?.textContent === "查看任务与验收 →");
+    assert(await taskLink.evaluate((element) => element === document.activeElement));
 
     // A stable activity ID can grow while streaming without changing ledger order.
     const reply = activity.items![0]!.block!.items![0]!;
@@ -710,7 +718,8 @@ try {
     await detail.getByRole("button", { name: "查看并决定", exact: true }).click();
     await page
       .getByRole("dialog", { name: "Issue待处理事项", exact: true })
-      .getByRole("button", { name: "关闭详情", exact: true })
+      .getByRole("button", { name: /^关闭/ })
+      .first()
       .click();
     const originalActivity = activity.items!;
     const sharedReply = {
@@ -911,7 +920,7 @@ try {
   const beforeWrites = writes.length;
   await editor.getByRole("button", { name: "保存进展", exact: true }).click();
   await editor.getByRole("button", { name: "核对原更新请求", exact: true }).waitFor();
-  await editor.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await editor.getByRole("button", { name: /^关闭/ }).first().click();
   issue.revision++;
   issue.progress!.summary = "其他更新已被保存";
   issue.progress!.next_step = "其他人的下一步";

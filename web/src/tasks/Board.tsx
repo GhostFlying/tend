@@ -1,3 +1,5 @@
+import { useEntryState } from "../app/router.ts";
+import { PageHeader } from "../shell/PageHeader.tsx";
 import { ResourceNavigation } from "../shell/Resources.tsx";
 import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 import { useEffect, useId, useState } from "react";
@@ -165,19 +167,23 @@ export function TaskBoard({
   const snapshot = useStore(live.snapshot);
   const project = useStore(live.tasks.project);
   const id = useId();
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useEntryState("task-tab", 0);
   useEffect(() => {
     if (active) live.tasks.open(tab);
     else live.tasks.close();
   }, [live, active, tab]);
   return (
     <>
-      <header className={styles.head}>
-        <Button type="button" variant="secondary" size="s" onClick={onChat}>
-          <Back width={14} height={14} />
-          {backLabel}
-        </Button>
-        <h1>任务执行</h1>
+      <PageHeader
+        className={styles.head}
+        title="任务执行"
+        leading={
+          <Button type="button" variant="secondary" size="s" onClick={onChat}>
+            <Back width={14} height={14} />
+            {backLabel}
+          </Button>
+        }
+      >
         <label className={styles.filter}>
           项目
           <input
@@ -203,7 +209,7 @@ export function TaskBoard({
         <Button type="button" variant="secondary" size="s" onClick={() => live.tasks.refresh()}>
           刷新任务
         </Button>
-      </header>
+      </PageHeader>
       <UpgradeBanner connection={connection} />
       <BoardResources connection={connection} onRepos={onRepos} />
       <section className={styles.board} aria-label="任务执行列表">

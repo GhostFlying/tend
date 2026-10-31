@@ -472,3 +472,7 @@
     padding: var(--space-4);
   }
 }
+
+.titleHeader {
+  display: contents;
+}

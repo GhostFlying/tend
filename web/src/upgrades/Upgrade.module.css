@@ -26,16 +26,14 @@
   margin-left: auto;
 }
 .panel {
-  margin: auto;
-  width: min(560px, calc(100vw - 32px));
-  max-height: calc(100dvh - 64px);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
   background: var(--bg);
   color: var(--label);
-  box-shadow: var(--shadow-2);
   font-size: var(--text-label);
 }
 .panel::backdrop {

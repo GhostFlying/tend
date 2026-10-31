@@ -1,3 +1,4 @@
+import { Link, useRoute } from "../app/router.ts";
 // A task ID in a reply, shown as a chip with the task's current title and
 // status (D72). It opens the task's details. An ID tend does not know
 // stays plain text.
@@ -26,7 +27,7 @@ export function useTaskSummary(taskId: string): TaskSummary | null | undefined {
 }
 
 export function TaskRef({ taskId }: { taskId: string }) {
-  const { openTask, openIssue } = useServices();
+  const route = useRoute();
   const task = useTaskSummary(taskId);
   if (!task) {
     return <>{taskId}</>;
@@ -34,25 +35,24 @@ export function TaskRef({ taskId }: { taskId: string }) {
   const look = taskLook(task);
   return (
     <>
-      <button
-        type="button"
+      <Link
         className={styles.chip}
-        onClick={() => openTask(taskId)}
+        to={{ page: "task", id: taskId, ...(route.page === "issue" ? { from: route.id } : {}) }}
         title={`${look.label} · ${taskId}`}
       >
         <StatusDot tone={look.tone} />
         <span className={styles.title}>{task.title}</span>
-      </button>
+      </Link>
       {task.primary_issue_id && (
-        <button
+        <Link
           className={styles.chip}
-          onClick={() => openIssue(task.primary_issue_id!)}
+          to={{ page: "issue", id: task.primary_issue_id }}
           title={task.primary_issue_id}
         >
           <span className={styles.title}>
             所属Issue：{task.primary_issue_title || task.primary_issue_id}
           </span>
-        </button>
+        </Link>
       )}
     </>
   );

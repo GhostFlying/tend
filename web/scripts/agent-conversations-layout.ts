@@ -1,3 +1,4 @@
+import { navigate } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Synthetic conversations exercise UI routing; no native harness or deployed API.
@@ -332,7 +333,7 @@ const server = createServer(async (req, res) => {
   if (p.startsWith("/api/"))
     return json(res, { error: { code: "not_found", message: "Not in fixture" } }, 404);
   try {
-    const file = resolve(root, `.${p}${p.endsWith("/") ? "index.html" : ""}`);
+    const file = resolve(root, p.split("/").at(-1)?.includes(".") ? `.${p}` : "index.html");
     assert(file.startsWith(root));
     res.setHeader(
       "Content-Type",
@@ -519,6 +520,8 @@ try {
       .filter({ hasText: names[0]! })
       .click();
     await selectionRequested;
+    await page.getByRole("heading", { name: "会话", exact: true, level: 1 }).waitFor();
+    assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
     const refreshedShell = page.waitForResponse((response) =>
       response.url().endsWith("/api/v1/snapshot"),
     );
@@ -540,7 +543,10 @@ try {
       .getByRole("textbox", { name: "消息", exact: true });
     await backgroundInput.waitFor();
     await page.unroute(selectionRoute);
-    assert.equal(new URL(page.url()).searchParams.get("issue"), "work-0");
+    assert.equal(
+      decodeURIComponent(new URL(page.url()).pathname.slice("/issues/".length)),
+      "work-0",
+    );
     assert.equal(await page.getByRole("dialog", { name: "会话", exact: true }).count(), 0);
     assert.equal(await backgroundInput.inputValue(), "");
     await backgroundInput.fill("后台独立草稿");
@@ -618,12 +624,9 @@ try {
       await held;
       await r.fulfill({ json: conversations[1] });
     });
-    await page.evaluate(
-      (id) => window.dispatchEvent(new CustomEvent("tend:open-agent", { detail: id })),
-      conversations[1]!.conversation_id,
-    );
+    await navigate(page, `/chat/${encodeURIComponent(conversations[1]!.conversation_id)}`);
     await arrived;
-    await page.evaluate(() => window.dispatchEvent(new Event("tend:main-agent")));
+    await navigate(page, "/");
     const answered = page.waitForResponse((r) =>
       r.url().includes(encodeURIComponent(conversations[1]!.conversation_id)),
     );

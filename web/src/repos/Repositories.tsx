@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { PageHeader } from "../shell/PageHeader.tsx";
+import { useEffect } from "react";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
@@ -12,7 +13,6 @@ export function RepositoryEntry({ onOpen }: { onOpen(): void }) {
   return (
     <ResourceRow
       onOpen={onOpen}
-      dialog
       meta={
         <>
           {count === undefined ? (state.error ? "读取失败" : "待读取") : `${count} 个`}
@@ -28,38 +28,13 @@ export function RepositoryEntry({ onOpen }: { onOpen(): void }) {
 export function Repositories({ connection, onClose }: { connection: Connection; onClose(): void }) {
   const { live } = useServices();
   const state = useStore(live.repos.state);
-  const panel = useRef<HTMLDialogElement>(null);
-  useLayoutEffect(() => {
-    panel.current?.showModal();
-  }, []);
   const repos = state.view ? (state.view.repos ?? []) : null;
   return (
-    <dialog
-      ref={panel}
-      className={styles.panel}
-      aria-label="已注册仓库"
-      onCancel={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <header className={styles.header}>
-        <div>
-          <h2>已注册仓库</h2>
-          <span>{repos ? `全部 ${repos.length} 个 · 含已归档仓库` : "全部登记"}</span>
-        </div>
-        <button
-          type="button"
-          className={styles.close}
-          onClick={onClose}
-          aria-label="关闭已注册仓库"
-          autoFocus
-        >
-          ×
-        </button>
-      </header>
+    <section className={styles.panel} aria-label="已注册仓库">
+      <PageHeader title="已注册仓库" onBack={onClose} />
+      <p>{repos ? `全部 ${repos.length} 个 · 含已归档仓库` : "全部登记"}</p>
       <RepositoryRegistry connection={connection} />
-    </dialog>
+    </section>
   );
 }
 

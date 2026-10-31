@@ -1,29 +1,20 @@
-// Keep the board and conversation mounted behind a shared ledger detail modal.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { splitTaskIds } from "../conversation/model.ts";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ComposerDraft } from "../conversation/draft.ts";
 import type { ApiClient, Connection } from "../api/client.ts";
 import { ServicesContext, type Services } from "../app/services.tsx";
-import { ArchiveBrowser } from "../archive/Archive.tsx";
+import { navigate, useRoute } from "../app/router.ts";
 import { useMainAttention } from "../attention/useMainAttention.ts";
-import { AgentCatalogView } from "../agents/Catalog.tsx";
-import { Inbox } from "../attention/Inbox.tsx";
-import { IssueBoard } from "../issues/Board.tsx";
-import { IssueDetails, IssueReadingStates } from "../issues/Details.tsx";
+import { IssueReadingStates } from "../issues/Details.tsx";
 import { ConversationSessions, ConversationSessionsContext } from "../conversation/session.tsx";
 import type { LiveData } from "../live/data.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
 import { useStore } from "../state/store.ts";
-import { Handoff } from "../conversation/Handoff.tsx";
-import { UpgradeDetails } from "../upgrades/Upgrade.tsx";
-import { AgentWorkspace as Chat } from "../conversation/AgentWorkspace.tsx";
-import { Details } from "./Details.tsx";
-import { DetailOverlay, DetailPane } from "./DetailOverlay.tsx";
-import styles from "./Shell.module.css";
-import { TaskBoard } from "../tasks/Board.tsx";
-import { Repositories } from "../repos/Repositories.tsx";
+import { AgentWorkspace } from "../conversation/AgentWorkspace.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { TabBar, type View } from "./TabBar.tsx";
+import { AppLayout } from "./AppLayout.tsx";
+import { RoutePage } from "./RoutePage.tsx";
+import styles from "./Shell.module.css";
 
 export function Shell({
   client,
@@ -36,18 +27,8 @@ export function Shell({
   connection: Connection;
   queue: SendQueue | null;
 }) {
-  const [issueSelected, setIssueSelected] = useState<string | null>(null);
-  const detailOpener = useRef<HTMLElement | null>(null);
-  const wasIssue = useRef(false);
-  useEffect(() => {
-    if (wasIssue.current && !issueSelected)
-      requestAnimationFrame(
-        () =>
-          detailOpener.current?.isConnected && detailOpener.current.focus({ preventScroll: true }),
-      );
-    wasIssue.current = !!issueSelected;
-  }, [issueSelected]);
-  const [readingStates] = useState(() => new IssueReadingStates());
+  const route = useRoute();
+  const [reading] = useState(() => new IssueReadingStates());
   const sessions = useMemo(() => new ConversationSessions(client), [client]);
   const sessionCleanup = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
@@ -55,48 +36,21 @@ export function Shell({
     const stop = sessions.connect(live);
     return () => {
       stop();
-      sessionCleanup.current = setTimeout(() => {
-        void sessions.close();
-      }, 0);
+      sessionCleanup.current = setTimeout(() => void sessions.close(), 0);
     };
   }, [sessions, live]);
-  const leaveIssue = () => {
-    setIssueSelected(null);
-    setTaskSelected(null);
-    live.close();
-    const url = new URL(window.location.href);
-    url.searchParams.delete("issue");
-    url.searchParams.delete("task");
-    window.history.replaceState({ ...window.history.state, tendDetailDepth: 0 }, "", url);
-  };
-
-  const [inboxOpen, setInboxOpen] = useState(false);
-  const [inboxSelected, setInboxSelected] = useState<string | undefined>(undefined);
+  const [draft] = useState(() => new ComposerDraft());
+  useEffect(
+    () => () => {
+      void draft.close();
+    },
+    [draft],
+  );
   const nextActions = useStore(live.attention.next.state);
   const mainAttention = useMainAttention(client, live);
   useEffect(() => {
     void live.agents.openHosted();
   }, [live]);
-  const openInbox = (id?: string) => {
-    setInboxSelected(id);
-    setInboxOpen(true);
-  };
-  const [taskSelected, setTaskSelected] = useState<string | null>(null);
-  const [detailSession] = useState(() => `${performance.timeOrigin}:${performance.now()}`);
-  const closingDetails = useRef(false);
-  const [upgradeId, setUpgradeId] = useState<string | null>(null);
-  const upgradeFocus = useRef<HTMLElement | null>(null);
-  const [reposOpen, setReposOpen] = useState(false);
-  const reposFocus = useRef<HTMLElement | null>(null);
-  const showRepos = () => {
-    reposFocus.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setReposOpen(true);
-  };
-  const closeRepos = () => {
-    setReposOpen(false);
-    queueMicrotask(() => reposFocus.current?.isConnected && reposFocus.current.focus());
-  };
   useEffect(() => {
     live.repos.setConnected(connection.status === "online");
   }, [live, connection.status]);
@@ -107,141 +61,11 @@ export function Shell({
     document.addEventListener("visibilitychange", refresh);
     return () => document.removeEventListener("visibilitychange", refresh);
   }, [live]);
-  const [archiveOpen, setArchiveOpen] = useState(false);
+  const taskId = route.page === "task" ? route.id : null;
   useEffect(() => {
-    const open = () => setArchiveOpen(true);
-    window.addEventListener("tend:open-archive", open);
-    return () => window.removeEventListener("tend:open-archive", open);
-  }, []);
-  const [catalogOpen, setCatalogOpen] = useState(false);
-  const [catalogFromSettings, setCatalogFromSettings] = useState(false);
-  useEffect(() => {
-    const open = () => {
-      setCatalogFromSettings(false);
-      setCatalogOpen(true);
-    };
-    window.addEventListener("tend:open-catalog", open);
-    return () => window.removeEventListener("tend:open-catalog", open);
-  }, []);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsFocus = useRef<HTMLElement | null>(null);
-  const showSettings = () => {
-    settingsFocus.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setSettingsOpen(true);
-  };
-  const closeSettings = () => {
-    setSettingsOpen(false);
-    queueMicrotask(() => settingsFocus.current?.focus());
-  };
-  const [draft] = useState(() => new ComposerDraft());
-  useEffect(
-    () => () => {
-      void draft.close();
-    },
-    [draft],
-  );
-
-  const [view, setView] = useState<View>("chat");
-
-  const [boardOpen, setBoardOpen] = useState(false);
-  const [recordsOpen, setRecordsOpen] = useState(false);
-  const [recordsVisited, setRecordsVisited] = useState(false);
-  const [boardVisited, setBoardVisited] = useState(false);
-  const showRecords = () => {
-    leaveIssue();
-    setRecordsOpen(true);
-    setRecordsVisited(true);
-    setBoardOpen(true);
-    setView("tasks");
-  };
-  const showBoard = () => {
-    leaveIssue();
-    setRecordsOpen(false);
-    setBoardOpen(true);
-    setBoardVisited(true);
-    setView("tasks");
-  };
-  const showChat = () => {
-    leaveIssue();
-    setBoardOpen(false);
-    setView("chat");
-  };
-
-  const applyDetail = useCallback(
-    (item: string | null, task: string | null) => {
-      setIssueSelected(item);
-      if (item) void live.issues.open(item);
-      setTaskSelected(task);
-      if (task) void live.open(task);
-      else live.close();
-    },
-    [live],
-  );
-  const navigateDetail = useCallback(
-    (item: string | null, task: string | null) => {
-      if (item && !issueSelected && document.activeElement instanceof HTMLElement)
-        detailOpener.current = document.activeElement;
-      const url = new URL(window.location.href);
-      if (url.searchParams.get("issue") === item && url.searchParams.get("task") === task) return;
-      url.searchParams.delete("work_item");
-      if (item) url.searchParams.set("issue", item);
-      else url.searchParams.delete("issue");
-      if (task) url.searchParams.set("task", task);
-      else url.searchParams.delete("task");
-      const depth =
-        window.history.state?.tendDetailSession === detailSession
-          ? (window.history.state.tendDetailDepth ?? 0)
-          : 0;
-      const previous = new URL(window.location.href);
-      const issueDepth = !task
-        ? depth + 1
-        : previous.searchParams.get("issue") === item
-          ? previous.searchParams.get("task")
-            ? (window.history.state?.tendIssueDepth ?? null)
-            : depth
-          : null;
-      window.history.pushState(
-        {
-          ...window.history.state,
-          tendDetailSession: detailSession,
-          tendIssueDepth: issueDepth,
-          tendDetailDepth:
-            (window.history.state?.tendDetailSession === detailSession
-              ? window.history.state.tendDetailDepth
-              : 0) + 1,
-        },
-        "",
-        url,
-      );
-      applyDetail(item, task);
-    },
-    [applyDetail, detailSession, issueSelected],
-  );
-
-  const openIssue = useCallback((id: string) => navigateDetail(id, null), [navigateDetail]);
-
-  useEffect(() => {
-    const open = () => {
-      setIssueSelected(null);
-      setBoardOpen(false);
-      live.close();
-      setTaskSelected(null);
-      const url = new URL(window.location.href);
-      url.searchParams.delete("task");
-      url.searchParams.delete("work_item");
-      url.searchParams.delete("issue");
-      window.history.replaceState({ ...window.history.state, tendDetailDepth: 0 }, "", url);
-      setView("chat");
-    };
-    window.addEventListener("tend:open-agent", open);
-    window.addEventListener("tend:main-agent", open);
-    return () => {
-      window.removeEventListener("tend:open-agent", open);
-      window.removeEventListener("tend:main-agent", open);
-    };
-  }, [live]);
-
+    if (taskId) void live.open(taskId);
+    else live.close();
+  }, [live, taskId]);
   const services = useMemo<Services>(
     () => ({
       client,
@@ -249,300 +73,93 @@ export function Shell({
       queue,
       draft,
       followUp(task) {
-        window.dispatchEvent(new Event("tend:main-agent"));
-        live.close();
-        setTaskSelected(null);
-        const url = new URL(window.location.href);
-        url.searchParams.delete("task");
-        url.searchParams.delete("work_item");
-        url.searchParams.delete("issue");
-        window.history.replaceState({ ...window.history.state, tendDetailDepth: 0 }, "", url);
-        setBoardOpen(false);
-        setView("chat");
         draft.followUp(task);
+        navigate({ page: "chat" });
       },
       openUpgrade(id) {
-        upgradeFocus.current =
-          document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        setUpgradeId(id);
+        navigate({ page: "upgrade", id });
       },
       openIssue(id) {
-        navigateDetail(id, null);
+        navigate({ page: "issue", id });
       },
-      openTask(taskId) {
-        const task =
-          live.snapshot.get()?.tasks?.find((item) => item.task_id === taskId) ??
-          live.lookups.get().get(taskId);
-        const currentIssue = issueSelected ?? task?.primary_issue_id;
-        navigateDetail(currentIssue ?? null, taskId);
+      openTask(id) {
+        const from =
+          route.page === "issue" ? route.id : route.page === "task" ? route.from : undefined;
+        navigate(
+          { page: "task", id, ...(from ? { from } : {}) },
+          { replace: route.page === "task" },
+        );
       },
     }),
-    [client, live, queue, draft, navigateDetail, issueSelected],
+    [client, live, queue, draft, route],
   );
-
-  useEffect(() => {
-    const read = () => {
-      if (closingDetails.current) {
-        closingDetails.current = false;
-        const url = new URL(window.location.href);
-        url.searchParams.delete("work_item");
-        url.searchParams.delete("issue");
-        url.searchParams.delete("task");
-        window.history.replaceState(
-          { ...window.history.state, tendDetailSession: detailSession, tendDetailDepth: 0 },
-          "",
-          url,
-        );
-      }
-      const params = new URLSearchParams(window.location.search);
-      const canonical = params.get("issue");
-      const task = params.get("task");
-      const validTask =
-        task && splitTaskIds(task).length === 1 && typeof splitTaskIds(task)[0] !== "string"
-          ? task
-          : null;
-      applyDetail(canonical, validTask);
-    };
-    // A reload starts a new UI session; do not traverse another document's stack.
-    window.history.replaceState(
-      {
-        ...window.history.state,
-        tendDetailSession: detailSession,
-        tendDetailDepth: 0,
-        tendIssueDepth: new URLSearchParams(window.location.search).has("task") ? null : 0,
-      },
-      "",
-    );
-    read();
-    window.addEventListener("popstate", read);
-    return () => window.removeEventListener("popstate", read);
-  }, [applyDetail, detailSession]);
-  const closeDetails = () => {
-    if (closingDetails.current) return;
-    const depth =
-      window.history.state?.tendDetailSession === detailSession
-        ? window.history.state.tendDetailDepth
-        : 0;
-    if (depth > 0) {
-      closingDetails.current = true;
-      window.history.go(-depth);
-      return;
-    }
-    const url = new URL(window.location.href);
-    url.searchParams.delete("work_item");
-    url.searchParams.delete("issue");
-    url.searchParams.delete("task");
-    window.history.replaceState(window.history.state, "", url);
-    applyDetail(null, null);
-  };
-
-  const backFromTask = () => {
-    if (!issueSelected) {
-      closeDetails();
-      return;
-    }
-    const state = window.history.state;
-    const depth = state?.tendDetailSession === detailSession ? (state.tendDetailDepth ?? 0) : 0;
-    const issueDepth = state?.tendIssueDepth;
-    if (typeof issueDepth === "number" && issueDepth >= 0 && issueDepth < depth) {
-      window.history.go(issueDepth - depth);
-    } else {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("task");
-      window.history.replaceState({ ...state, tendIssueDepth: depth }, "", url);
-      applyDetail(issueSelected, null);
-    }
-  };
-
+  const chat = route.page === "chat" || route.page === "conversation";
+  const view: View = chat
+    ? "chat"
+    : route.page === "inbox" || route.page === "attention"
+      ? "decisions"
+      : "tasks";
+  const detail = ["issue", "task", "attention", "upgrade"].includes(route.page);
+  const openInbox = (id?: string) => navigate(id ? { page: "attention", id } : { page: "inbox" });
+  const showChat = () => navigate({ page: "chat" });
+  const showBoard = () => navigate({ page: "issues" });
+  const showRecords = () => navigate({ page: "tasks" });
+  const showRepos = () => navigate({ page: "repos" });
   return (
     <ServicesContext value={services}>
       <ConversationSessionsContext value={sessions}>
-        <div
-          className={styles.app}
-          data-view={view}
-          data-board={boardOpen ? "open" : "closed"}
-          data-details={taskSelected ? "open" : "closed"}
-          data-issue={issueSelected ? "open" : "closed"}
-        >
-          <aside className={styles.sidebar}>
+        <AppLayout
+          detail={detail}
+          sidebar={
             <Sidebar
-              records={recordsOpen && boardOpen}
+              records={route.page === "tasks"}
               view={view}
               connection={connection}
-              onChat={() => {
-                window.dispatchEvent(new Event("tend:main-agent"));
-                showChat();
-              }}
+              onChat={showChat}
               onBoard={showBoard}
               onRecords={showRecords}
-              onSettings={showSettings}
+              onSettings={() => navigate({ page: "settings" })}
               onRepos={showRepos}
               mainAttention={mainAttention}
               onInbox={openInbox}
-              onIssue={openIssue}
+              onIssue={services.openIssue}
             />
-          </aside>
-          <main className={styles.chat}>
-            <div className={styles.content} hidden={boardOpen || !!issueSelected}>
-              <Chat
-                connection={connection}
-                visible={!boardOpen && !issueSelected}
-                mainAttention={mainAttention}
-                onAttention={openInbox}
-                onIssue={openIssue}
-              />
-            </div>
-            {boardVisited && (
-              <div className={styles.content} hidden={!boardOpen || recordsOpen || !!issueSelected}>
-                <IssueBoard
-                  onInbox={openInbox}
-                  active={boardOpen && !recordsOpen && !issueSelected}
-                  onSelect={openIssue}
-                  onChat={showChat}
-                  onRecords={showRecords}
-                  onRepos={showRepos}
-                />
-              </div>
-            )}
-            {recordsVisited && (
-              <div
-                className={styles.content}
-                hidden={!boardOpen || !recordsOpen || !!issueSelected}
-              >
-                <TaskBoard
-                  active={boardOpen && recordsOpen && !issueSelected}
-                  connection={connection}
-                  onChat={showBoard}
-                  backLabel="返回Issue"
-                  onRepos={showRepos}
-                />
-              </div>
-            )}
-            {issueSelected && (
-              <IssueDetails
-                key={issueSelected}
-                id={issueSelected}
-                connection={connection}
-                reading={readingStates.get(issueSelected)}
-                onBack={() => {
-                  const depth =
-                    window.history.state?.tendDetailSession === detailSession
-                      ? (window.history.state?.tendDetailDepth ?? 0)
-                      : 0;
-                  if (depth > 0) window.history.back();
-                  else showBoard();
-                }}
-                onSelect={openIssue}
-                onTask={(id) => navigateDetail(issueSelected, id)}
-              />
-            )}
-          </main>
-          <TabBar
-            pendingMore={!!mainAttention.value?.more}
-            view={view}
-            onChange={(next) => {
-              if (next === "tasks") showBoard();
-              else {
-                if (next === "decisions") openInbox();
-                setBoardOpen(false);
-                setView(next);
+          }
+          tabs={
+            <TabBar
+              pendingMore={!!mainAttention.value?.more}
+              view={view}
+              onChange={(next) =>
+                next === "chat" ? showChat() : next === "tasks" ? showBoard() : openInbox()
               }
-            }}
-            pending={
-              (mainAttention.value?.items ?? []).filter(
-                (item) => item.status === "open" && item.kind !== "information",
-              ).length +
-              (nextActions.value?.items ?? []).filter(
-                (item) =>
-                  item.kind === "user_action" &&
-                  ["open", "blocked"].includes(item.status) &&
-                  (!item.attention_id ||
-                    !(mainAttention.value?.items ?? []).some(
-                      (a) => a.attention_id === item.attention_id,
-                    )),
-              ).length
-            }
-          />
-        </div>
-        {taskSelected && (
-          <DetailOverlay
-            task
-            backLabel="返回Issue"
-            label="任务详情"
-            onClose={() => (issueSelected ? backFromTask() : closeDetails())}
-            onBack={issueSelected ? backFromTask : undefined}
-          >
-            <DetailPane key={taskSelected} active>
-              <Details />
-            </DetailPane>
-          </DetailOverlay>
-        )}
-        {inboxOpen && (
-          <DetailOverlay
-            task={false}
-            label="待处理"
-            onClose={() => {
-              setInboxOpen(false);
-            }}
-          >
-            <Inbox
-              initial={inboxSelected}
-              onIssue={(id) => {
-                setInboxOpen(false);
-                navigateDetail(id, null);
-              }}
-              onClose={() => {
-                setInboxOpen(false);
-              }}
+              pending={
+                (mainAttention.value?.items ?? []).filter(
+                  (item) => item.status === "open" && item.kind !== "information",
+                ).length +
+                (nextActions.value?.items ?? []).filter(
+                  (item) =>
+                    item.kind === "user_action" &&
+                    ["open", "blocked"].includes(item.status) &&
+                    (!item.attention_id ||
+                      !(mainAttention.value?.items ?? []).some(
+                        (a) => a.attention_id === item.attention_id,
+                      )),
+                ).length
+              }
             />
-          </DetailOverlay>
-        )}
-        {upgradeId && (
-          <UpgradeDetails
-            id={upgradeId}
-            connection={connection}
-            onClose={() => {
-              setUpgradeId(null);
-              queueMicrotask(
-                () => upgradeFocus.current?.isConnected && upgradeFocus.current.focus(),
-              );
-            }}
-          />
-        )}
-        {reposOpen && <Repositories connection={connection} onClose={closeRepos} />}
-        {settingsOpen && (
-          <Handoff
-            connection={connection}
-            onClose={closeSettings}
-            onCatalog={() => {
-              setSettingsOpen(false);
-              setCatalogFromSettings(true);
-              setCatalogOpen(true);
-            }}
-          />
-        )}
-        {archiveOpen && (
-          <DetailOverlay task={false} label="历史归档" onClose={() => setArchiveOpen(false)}>
-            <ArchiveBrowser
-              onIssue={(id) => {
-                setArchiveOpen(false);
-                navigateDetail(id, null);
-              }}
+          }
+        >
+          <div className={styles.content} hidden={!chat}>
+            <AgentWorkspace
+              connection={connection}
+              visible={chat}
+              mainAttention={mainAttention}
+              onAttention={openInbox}
+              onIssue={services.openIssue}
             />
-          </DetailOverlay>
-        )}
-        {catalogOpen && (
-          <DetailOverlay
-            task={false}
-            label="Agent与类别"
-            onClose={() => {
-              setCatalogOpen(false);
-              if (catalogFromSettings) showSettings();
-            }}
-          >
-            <AgentCatalogView />
-          </DetailOverlay>
-        )}
+          </div>
+          <RoutePage route={route} connection={connection} reading={reading} />
+        </AppLayout>
       </ConversationSessionsContext>
     </ServicesContext>
   );
