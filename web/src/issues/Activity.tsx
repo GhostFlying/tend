@@ -62,6 +62,12 @@ export function IssueActivity({
   const readingAnchor = useRef<ScrollAnchor | null>(null);
   const scrollportSize = useRef({ width: 0, height: 0 });
   const dataFrame = useRef(0);
+  const pagination = useRef<{
+    trigger: string;
+    top: number;
+    ids: Set<string>;
+    ready: boolean;
+  } | null>(null);
   useEffect(() => {
     const node = scroll.current;
     if (!node) return;
@@ -79,6 +85,7 @@ export function IssueActivity({
       return true;
     };
     const moved = () => {
+      if (pagination.current && !pagination.current.ready) pagination.current = null;
       if (resized()) return;
       following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
       if (following.current) reading.followLatest();
@@ -121,6 +128,7 @@ export function IssueActivity({
     return () => {
       remember();
       stop();
+      pagination.current = null;
       reads.activity.close();
     };
   }, [reads, issue.issue_id, reading]);
@@ -132,12 +140,6 @@ export function IssueActivity({
     const first = blocks.at(-3)!.position;
     return rows.filter((row) => row.position >= first);
   }, [rows, all]);
-  const pagination = useRef<{
-    trigger: string;
-    top: number;
-    ids: Set<string>;
-    ready: boolean;
-  } | null>(null);
   const beginContinuation = useCallback(
     (trigger: string, control: HTMLButtonElement, ids: string[]) => {
       cancelAnimationFrame(dataFrame.current);
@@ -153,6 +155,9 @@ export function IssueActivity({
     },
     [reading],
   );
+  const cancelContinuation = useCallback((trigger: string) => {
+    if (pagination.current?.trigger === trigger) pagination.current = null;
+  }, []);
   const [continuations, setContinuations] = useState<Record<string, IssueTranscriptBlock>>({});
   const rememberContinuation = useCallback((block: IssueTranscriptBlock, explicit: boolean) => {
     if (explicit && pagination.current?.trigger === block.trigger.message_id)
@@ -216,19 +221,28 @@ export function IssueActivity({
     if (node && pagination.current?.ready) {
       const boundary = pagination.current;
       const block = continuations[boundary.trigger];
-      const first = block?.items?.find((item) => !boundary.ids.has(item.message_id));
-      const item = [...node.querySelectorAll<HTMLElement>("[data-scroll-id]")].find(
-        (item) => item.dataset.scrollId === first?.message_id,
-      );
-      if (item)
-        node.scrollTo({ top: node.scrollTop + item.getBoundingClientRect().top - boundary.top });
       pagination.current = null;
-    } else if (
-      node &&
-      !pagination.current &&
-      previousContent.current &&
-      previousContent.current !== latestContent
-    ) {
+      cancelAnimationFrame(dataFrame.current);
+      dataFrame.current = requestAnimationFrame(() => {
+        const nodes = [...node.querySelectorAll<HTMLElement>("[data-scroll-id]")];
+        for (const message of block?.items ?? []) {
+          if (boundary.ids.has(message.message_id)) continue;
+          const row = nodes.find((item) => item.dataset.scrollId === message.message_id);
+          const group = [...node.querySelectorAll<HTMLElement>("button[aria-controls]")].find(
+            (control) =>
+              control
+                .getAttribute("aria-controls")
+                ?.split(" ")
+                .includes(row?.id ?? ""),
+          );
+          const item = row?.checkVisibility() ? row : group?.checkVisibility() ? group : null;
+          if (!item) continue;
+          node.scrollTo({ top: node.scrollTop + item.getBoundingClientRect().top - boundary.top });
+          break;
+        }
+        readingAnchor.current = captureAnchor(node);
+      });
+    } else if (node && previousContent.current && previousContent.current !== latestContent) {
       if (following.current || reading.followsLatest()) node.scrollTo({ top: node.scrollHeight });
       else {
         const anchor = readingAnchor.current;
@@ -299,6 +313,7 @@ export function IssueActivity({
             rows={transcript.filter((row) => row.key.startsWith(`${entry.block!.position}:`))}
             onContinuation={rememberContinuation}
             onPagination={beginContinuation}
+            onPaginationCancel={cancelContinuation}
           />
         ) : (
           <Milestone
@@ -327,11 +342,13 @@ function ActivityBlock({
   rows,
   onContinuation,
   onPagination,
+  onPaginationCancel,
 }: {
   entry: IssueActivityEntry;
   rows: TranscriptEntry[];
   onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
   onPagination(trigger: string, control: HTMLButtonElement, ids: string[]): void;
+  onPaginationCancel(trigger: string): void;
 }) {
   const { client } = useServices();
   const continuation = useMemo(() => new IssueTurnRead(client), [client]);
@@ -342,13 +359,23 @@ function ActivityBlock({
   useEffect(() => {
     if (opened) void continuation.open(block.trigger.message_id);
   }, [opened, block, continuation]);
-  useEffect(() => () => continuation.close(), [continuation]);
+  useEffect(
+    () => () => {
+      continuation.close();
+      onPaginationCancel(block.trigger.message_id);
+    },
+    [continuation, onPaginationCancel, block.trigger.message_id],
+  );
   useEffect(() => {
-    if (extra.value) {
+    if (extra.error) {
+      explicit.current = false;
+      onPaginationCancel(block.trigger.message_id);
+    }
+    if (extra.value && !extra.error) {
       onContinuation(extra.value, explicit.current);
       explicit.current = false;
     }
-  }, [extra.value, onContinuation]);
+  }, [extra.value, extra.error, onContinuation, onPaginationCancel, block.trigger.message_id]);
   const items = rows.flatMap((row) =>
     row.kind === "agent" ? row.items : row.kind === "system" ? [row.item] : [],
   );
