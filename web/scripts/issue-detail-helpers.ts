@@ -53,11 +53,7 @@ export async function closeIssue(page: Page): Promise<void> {
   const issue = page.getByRole("region", { name: "Issue详情", exact: true });
   const back = issue.getByRole("button", { name: "返回Issue列表或上一项", exact: true });
   if (await back.isVisible()) await back.click();
-  else
-    await issue
-      .getByRole("navigation", { name: "Issue路径", exact: true })
-      .getByRole("button", { name: "Issues", exact: true })
-      .click();
+  else await page.goBack();
 }
 export async function openIssueDefinition(page: Page): Promise<void> {
   const dialogs = page.getByRole("dialog");

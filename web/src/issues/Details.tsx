@@ -1,4 +1,5 @@
 import { Button, Badge, Section, EmptyState } from "../ui/index.ts";
+import { navigate } from "../app/router.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
@@ -366,7 +367,7 @@ export function IssueDetails({
           ← 返回
         </Button>
         <nav aria-label="Issue路径">
-          <Button variant="link" onClick={onBack}>
+          <Button variant="link" onClick={() => navigate({ page: "issues" })}>
             Issues
           </Button>
           {issue?.ancestors?.map((parent) => (
