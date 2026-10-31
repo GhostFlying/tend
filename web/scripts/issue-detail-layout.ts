@@ -1304,7 +1304,7 @@ try {
   }
 
   for (const width of [1440, 390]) {
-    for (const scenario of ["failure", "scroll", "group", "progress"] as const) {
+    for (const scenario of ["failure", "scroll", "group", "progress", "send"] as const) {
       const base = activity.items![0]!.block!;
       const original = { items: base.items, more: base.more };
       const older = { ...base.items![0]!, body: "基础长回复内容。\n\n".repeat(100), seq: 2 };
@@ -1343,6 +1343,23 @@ try {
         serviceWorkers: "block",
       });
       const page = await context.newPage();
+      let release = () => {};
+      let arrived = Promise.resolve();
+      if (scenario === "send") {
+        issue.conversation = { conversation_id: "issue:canonical-root", can_send: true };
+        let notify = () => {};
+        arrived = new Promise<void>((resolve) => {
+          notify = resolve;
+        });
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        await page.route("**/conversation/blocks/owner-one?projection=issues", async (route) => {
+          notify();
+          await held;
+          await route.continue();
+        });
+      }
       try {
         await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
         const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
@@ -1391,6 +1408,37 @@ try {
             Math.abs((await scroller.evaluate((node) => node.scrollTop)) - saved) <= 2,
             "pagination undid scrolling performed during the request",
           );
+        } else if (scenario === "send") {
+          await arrived;
+          const text = `续页等待期间发送的新消息 ${width}`;
+          await detail.getByRole("textbox", { name: "消息", exact: true }).fill(text);
+          await detail.getByRole("button", { name: "发送", exact: true }).click();
+          await scroller.getByText(text, { exact: true }).waitFor();
+          release();
+          await detail
+            .getByText(/新续页正文/)
+            .first()
+            .waitFor({ state: "attached" });
+          await page.waitForTimeout(100);
+          assert(
+            await scroller.evaluate(
+              (node) => node.scrollHeight - node.scrollTop - node.clientHeight < 2,
+            ),
+            "continuation response displaced latest after sending",
+          );
+          const sent = await scroller.getByText(text, { exact: true }).boundingBox();
+          const viewport = await scroller.boundingBox();
+          assert(
+            sent &&
+              viewport &&
+              sent.y >= viewport.y &&
+              sent.y + sent.height <= viewport.y + viewport.height,
+            "newly sent message no longer visible at latest",
+          );
+          assert.equal(
+            await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+            0,
+          );
         } else if (scenario === "progress") {
           const progress = issue.progress!.summary;
           issue.progress!.summary = "等待续页时上方进展更新。\n\n".repeat(60);
@@ -1429,6 +1477,7 @@ try {
         console.log(`PASS continuation ${scenario} ${width}`);
       } finally {
         await context.close();
+        release();
         base.items = original.items;
         base.more = original.more;
         continuationBlock = null;
