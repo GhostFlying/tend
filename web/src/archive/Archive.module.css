@@ -213,3 +213,9 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+@media (max-width: 760px) {
+  .tabs button {
+    min-height: var(--control-touch);
+  }
+}

@@ -1576,6 +1576,7 @@ async function checkNavigation() {
       }
       if (path === "/more" && mobile) {
         const more = page.getByRole("navigation", { name: "更多导航", exact: true });
+        await more.waitFor();
         assert.equal(await more.getByRole("link").count(), 5);
         await more.getByRole("link", { name: "设置", exact: true }).click();
         await page.getByRole("radiogroup", { name: "主题", exact: true }).waitFor();
