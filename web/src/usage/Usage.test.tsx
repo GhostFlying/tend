@@ -23,9 +23,9 @@ test("cache details stay inside input, in the owner-approved order", () => {
     final: 1,
   };
   const html = renderToStaticMarkup(<TokenLine totals={totals} />);
-  expect(html.indexOf("输入 token")).toBeLessThan(html.indexOf("缓存读取"));
+  expect(html.indexOf("输入 Token")).toBeLessThan(html.indexOf("缓存读取"));
   expect(html.indexOf("缓存读取")).toBeLessThan(html.indexOf("缓存写入"));
-  expect(html.indexOf("缓存写入")).toBeLessThan(html.indexOf("输出 token"));
+  expect(html.indexOf("缓存写入")).toBeLessThan(html.indexOf("输出 Token"));
   expect(
     renderToStaticMarkup(<TokenLine totals={{ ...totals, cache_write_known: 0 }} />),
   ).not.toContain("缓存写入");

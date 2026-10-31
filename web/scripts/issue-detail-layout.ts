@@ -504,7 +504,7 @@ try {
       if (m.type() === "error") errors.push(m.text());
     });
     await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-    const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
     await detail.getByRole("heading", { name: "发布流程整理", exact: true }).waitFor();
     assert.equal(decodeURIComponent(new URL(page.url()).pathname), `/issues/${issue.issue_id}`);
     await detail
@@ -547,7 +547,7 @@ try {
       .waitFor();
     assert.equal(await detail.getByText("旧的已完成消息", { exact: true }).count(), 0);
 
-    assert.equal(await page.getByRole("dialog", { name: "Issue详情" }).count(), 0);
+    assert.equal(await page.getByRole("dialog", { name: "Issue 详情" }).count(), 0);
     await detail.getByText(/暂无活动执行/).waitFor();
     assert.equal(
       await detail.getByText("native-manager-not-for-the-landing-page", { exact: true }).count(),
@@ -573,10 +573,10 @@ try {
     );
     await page.screenshot({ path: join(output, `detail-child-${width}.png`) });
     if (width <= 760)
-      await detail.getByRole("button", { name: "返回Issue列表或上一项", exact: true }).click();
+      await detail.getByRole("button", { name: "返回 Issue 列表或上一项", exact: true }).click();
     else
       await detail
-        .getByRole("navigation", { name: "Issue路径" })
+        .getByRole("navigation", { name: "Issue 路径" })
         .getByRole("button", { name: /发布流程整理/ })
         .click();
     await detail.getByRole("heading", { name: "发布流程整理", exact: true }).waitFor();
@@ -628,7 +628,7 @@ try {
     await detail.getByText("另一次负责人更新已经确认。", { exact: true }).waitFor();
     await progress.getByRole("button", { name: "保存进展", exact: true }).click();
     await progress
-      .getByText("Issue已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
+      .getByText("Issue 已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
       .waitFor();
     assert.equal(
       writes.findLast((w) => w.operation === "issues.update_progress")!.expected_control_revision,
@@ -638,7 +638,7 @@ try {
     await progress.getByRole("button", { name: /^关闭/ }).first().click();
     if (width < 1280) {
       await detail.getByRole("button", { name: "详情", exact: true }).click();
-      const drawer = page.getByRole("dialog", { name: "Issue辅助信息", exact: true });
+      const drawer = page.getByRole("dialog", { name: "Issue 辅助信息", exact: true });
       await drawer.getByRole("heading", { name: "交付物", exact: true }).waitFor();
       await drawer.getByRole("button", { name: /^关闭/ }).first().click();
     }
@@ -665,8 +665,11 @@ try {
     await detail.locator('[data-artifact="artifact-one"]').waitFor();
     const resultCard = detail.locator('[data-artifact="artifact-one"]');
     await resultCard.getByRole("button", { name: "打开完整交付 →", exact: true }).click();
-    await resultCard.getByText("b".repeat(40), { exact: true }).waitFor();
-    await resultCard.getByText("c".repeat(40), { exact: true }).waitFor();
+    for (const letter of ["b", "c"]) {
+      const commit = resultCard.getByText(letter.repeat(7), { exact: true });
+      await commit.waitFor();
+      assert.equal(await commit.getAttribute("title"), letter.repeat(40));
+    }
     const taskLink = resultCard.getByRole("button", { name: "查看任务与验收 →", exact: true });
     await taskLink.scrollIntoViewIfNeeded();
     const taskReadingTop = await detail
@@ -727,7 +730,7 @@ try {
     publish();
     await detail.getByRole("button", { name: "查看并决定", exact: true }).click();
     await page
-      .getByRole("dialog", { name: "Issue待处理事项", exact: true })
+      .getByRole("dialog", { name: "Issue 待处理事项", exact: true })
       .getByRole("button", { name: /^关闭/ })
       .first()
       .click();
@@ -787,7 +790,7 @@ try {
     issue.state = "closed";
     issue.conversation!.reason = "ended";
     publish();
-    await detail.getByRole("button", { name: "重新打开Issue →", exact: true }).waitFor();
+    await detail.getByRole("button", { name: "重新打开 Issue →", exact: true }).waitFor();
     await detail.getByText("Issue 已结束，对话记录仍可阅读。", { exact: true }).waitFor();
     issue.state = "paused";
     issue.assignee = { kind: "agent", ref: "hosted/qingzhu" };
@@ -834,7 +837,7 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-    const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
     const summary = detail.getByText(text, { exact: true });
     const expand = detail.getByRole("button", { name: "展开全文", exact: true });
     await expand.waitFor();
@@ -856,7 +859,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-    const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+    const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
     const summary = detail.getByText(text, { exact: true });
     await summary.waitFor();
     const expand = detail.getByRole("button", { name: "展开全文", exact: true });
@@ -904,12 +907,12 @@ try {
   const context = await browser.newContext({ viewport: { width: 390, height: 1000 } });
   const page = await context.newPage();
   await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-  const detail = page.getByRole("region", { name: "Issue详情", exact: true });
+  const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
   await detail.getByRole("button", { name: "查看全部子 Issue", exact: true }).click();
   await detail.getByRole("button", { name: "下一页子 Issue", exact: true }).click();
   await detail.getByRole("button", { name: /整理发布步骤/ }).click();
   await detail.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
-  await detail.getByRole("button", { name: "返回Issue列表或上一项", exact: true }).click();
+  await detail.getByRole("button", { name: "返回 Issue 列表或上一项", exact: true }).click();
   await detail.getByRole("button", { name: "上一页子 Issue", exact: true }).waitFor();
   assert.equal(await detail.getByRole("button", { name: /其它子项 0/ }).count(), 0);
   await detail.getByRole("button", { name: /整理发布步骤/ }).waitFor();
@@ -919,7 +922,7 @@ try {
   const recoveryContext = await browser.newContext({ viewport: { width: 390, height: 1000 } });
   const recovery = await recoveryContext.newPage();
   await recovery.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-  const recoveryDetail = recovery.getByRole("region", { name: "Issue详情", exact: true });
+  const recoveryDetail = recovery.getByRole("region", { name: "Issue 详情", exact: true });
   await recoveryDetail.getByRole("button", { name: "编辑", exact: true }).click();
   const editor = recovery.getByRole("dialog", { name: "编辑当前进展", exact: true });
   await editor.getByRole("textbox", { name: "当前进展", exact: true }).fill("原请求中的进展");
@@ -942,7 +945,7 @@ try {
   progressRefusalReady = true;
   await editor.getByRole("button", { name: "核对原更新请求", exact: true }).click();
   await editor
-    .getByText("Issue已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
+    .getByText("Issue 已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
     .waitFor();
   assert.equal(
     await editor.getByRole("textbox", { name: "当前进展", exact: true }).inputValue(),
@@ -975,7 +978,7 @@ try {
   const isolationContext = await browser.newContext({ viewport: { width: 390, height: 1000 } });
   const isolation = await isolationContext.newPage();
   await isolation.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-  const isolatedIssue = isolation.getByRole("region", { name: "Issue详情", exact: true });
+  const isolatedIssue = isolation.getByRole("region", { name: "Issue 详情", exact: true });
   await isolatedIssue.getByRole("heading", { name: issue.plan.title, exact: true }).waitFor();
   await isolation.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -1010,7 +1013,7 @@ try {
     .getByText("当前由你负责；可交接给 Agent 后继续负责人对话。", { exact: true })
     .waitFor();
   assert.equal(await isolatedIssue.getByText("只属于主对话的待发内容", { exact: true }).count(), 0);
-  await isolatedIssue.getByRole("button", { name: "返回Issue列表或上一项", exact: true }).click();
+  await isolatedIssue.getByRole("button", { name: "返回 Issue 列表或上一项", exact: true }).click();
   await isolation
     .getByRole("navigation", { name: "视图", exact: true })
     .getByRole("link", { name: "对话", exact: true })

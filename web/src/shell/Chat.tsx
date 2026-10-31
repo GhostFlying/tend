@@ -89,13 +89,13 @@ export function Chat({
       {conversation?.kind === "consultation" && (
         <div className={styles.roleNote}>
           独立咨询 · 普通问答不创建任务
-          {conversation.agentRef && <span>咨询Agent：{conversation.agentRef}</span>}
+          {conversation.agentRef && <span>咨询 Agent：{conversation.agentRef}</span>}
         </div>
       )}
       {conversation?.workItemID && (
         <div className={styles.roleNote}>
-          Issue负责人 · 澄清目标、规划与委派
-          {conversation.agentRef && <span>负责人Agent：{conversation.agentRef}</span>}
+          Issue 负责人 · 澄清目标、规划与委派
+          {conversation.agentRef && <span>负责人 Agent：{conversation.agentRef}</span>}
         </div>
       )}
       {sourceOpen && (

@@ -20,7 +20,7 @@ export function RunConversation({ task, controls }: { task: TaskDetail; controls
         <select value={selected} onChange={(e) => setSelected(e.target.value)}>
           {task.runs?.map((r) => (
             <option key={r.run_id} value={r.run_id}>
-              {r.role === "implement" ? "实施" : "独立验收"} · {r.run_id}
+              {r.role === "implement" ? "实施" : "独立验收"} · 第 {r.generation} 轮
             </option>
           ))}
         </select>
@@ -88,7 +88,7 @@ function RunPanel({
   return (
     <>
       <section className={layout.native}>
-        <h3>{n?.provider === "orca" ? "Orca会话" : "原生会话信息"}</h3>
+        <h3>{n?.provider === "orca" ? "Orca 会话" : "原生会话信息"}</h3>
         {native.error ? (
           <p className={styles.warning}>
             会话信息暂时无法读取。
@@ -104,7 +104,7 @@ function RunPanel({
                 </strong>
               </div>
               <div>
-                <span>执行Agent</span>
+                <span>执行 Agent</span>
                 <strong>{n.execution?.identity.local_id || "未记录"}</strong>
               </div>
               <div>
@@ -180,7 +180,7 @@ function RunPanel({
       <section className={layout.control}>
         <h3>管理操作</h3>
         {controls}
-        <p className={styles.muted}>接管后暂停Agent自动执行；交还后再恢复管理。</p>
+        <p className={styles.muted}>接管后暂停 Agent 自动执行；交还后再恢复管理。</p>
       </section>
       <section className={layout.supplement}>
         <h3>补充给当前运行</h3>
@@ -192,7 +192,7 @@ function RunPanel({
           disabled={operation.busy || operation.pending || !active}
         />
         <p className={styles.muted}>
-          补充不修改任务约定，不会转发给其它run。接收回执不表示模型已采用。
+          补充不修改任务约定，不会转发给其它执行。接收回执不表示模型已采用。
         </p>
         {!active && !operation.pending && (
           <p className={styles.muted}>
@@ -223,7 +223,7 @@ function RunPanel({
               disabled={operation.busy || !active || !text.trim()}
               onClick={() => void send()}
             >
-              发送给当前run
+              发送给当前执行
             </button>
           )}
         </div>

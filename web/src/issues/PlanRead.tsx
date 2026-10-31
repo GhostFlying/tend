@@ -1,3 +1,4 @@
+import { CommitHash } from "../i18n/identifiers.tsx";
 import type { IssueEvidence, IssueView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { Markdown } from "../conversation/Markdown.tsx";
@@ -112,7 +113,7 @@ export function IssuePlanRead({
       <h3>默认工作区来源任务</h3>
       {plan.default_workspace_task_id ? (
         <button className={styles.button} onClick={() => openTask(plan.default_workspace_task_id!)}>
-          {plan.default_workspace_task_id}
+          查看来源任务
         </button>
       ) : (
         <p className={styles.muted}>该版本未记录来源任务。</p>
@@ -145,8 +146,18 @@ export function IssueEvidenceRead({
               {item.observation.checked_at && (
                 <p>{new Date(item.observation.checked_at).toLocaleString("zh-CN")}</p>
               )}
-              {item.observation.head_sha && <p>Head：{item.observation.head_sha}</p>}
-              {item.observation.merge_sha && <p>Merge：{item.observation.merge_sha}</p>}
+              {item.observation.head_sha && (
+                <p>
+                  Head：
+                  <CommitHash value={item.observation.head_sha} />
+                </p>
+              )}
+              {item.observation.merge_sha && (
+                <p>
+                  Merge：
+                  <CommitHash value={item.observation.merge_sha} />
+                </p>
+              )}
               {item.observation.error_kind && <p>观察错误：{item.observation.error_kind}</p>}
               <details>
                 <summary>观察原始记录</summary>

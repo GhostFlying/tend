@@ -336,8 +336,8 @@ try {
     );
 
     const line = await panel.locator('[class*="line"]').first().innerText();
-    assert(line.indexOf("输入 token") < line.indexOf("缓存读取"));
-    assert(line.indexOf("缓存写入") < line.indexOf("输出 token"));
+    assert(line.indexOf("输入 Token") < line.indexOf("缓存读取"));
+    assert(line.indexOf("缓存写入") < line.indexOf("输出 Token"));
     await panel.getByText("14,000", { exact: true }).waitFor();
     correction = true;
     await panel.getByRole("button", { name: "刷新", exact: true }).click();
@@ -376,7 +376,7 @@ try {
     await card.getByRole("button", { name: "展开执行步骤" }).click();
     assert.equal(await card.locator("article").count(), 6);
     await card.getByRole("button", { name: "本次用量", exact: true }).click();
-    const runUsage = card.getByRole("region", { name: "本次执行 token 用量" });
+    const runUsage = card.getByRole("region", { name: "本次执行 Token 用量" });
     await runUsage.locator('[class*="hero"]').getByText("42", { exact: true }).waitFor();
     assert.equal(await runUsage.getByRole("combobox", { name: "范围", exact: true }).count(), 0);
     assert(
@@ -399,7 +399,7 @@ try {
     const reader = rollout.getByLabel("执行过程正文", { exact: true });
     await rollout.getByText("实时跟随", { exact: true }).waitFor();
     await rollout.getByRole("button", { name: "本次用量", exact: true }).click();
-    const readerUsage = rollout.getByRole("region", { name: "本次执行 token 用量" });
+    const readerUsage = rollout.getByRole("region", { name: "本次执行 Token 用量" });
     await readerUsage.locator('[class*="hero"]').getByText("42", { exact: true }).waitFor();
     await readerUsage.screenshot({ path: join(output, `reader-usage-${viewport.width}.png`) });
     await rollout.getByRole("button", { name: "本次用量", exact: true }).click();

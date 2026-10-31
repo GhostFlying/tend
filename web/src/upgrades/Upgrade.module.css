@@ -60,6 +60,10 @@
 .header button:hover {
   background: var(--hover);
 }
+.panel code {
+  overflow-wrap: anywhere;
+}
+
 .panel h3,
 .panel h4 {
   overflow-wrap: anywhere;

@@ -126,18 +126,18 @@ export function CreateIssueTask({
           <p>
             工作区：
             {submitted?.spec.workspace?.mode === "reuse"
-              ? `复用任务 ${submitted.spec.workspace.source_task_id}`
+              ? "复用来源任务"
               : `新建 · ${submitted?.spec.workspace?.mounts?.map((m) => m.repo).join("、") || "未记录"}`}
           </p>
           <p>执行主机：{submitted?.spec.requirements?.host_id || "自动选择"}</p>
-          <p className={styles.muted}>实际分配的工作区、主机与Agent见任务详情。</p>
+          <p className={styles.muted}>实际分配的工作区、主机与 Agent 见任务详情。</p>
         </section>
         <div className={styles.actions}>
           <button className={styles.primary} onClick={() => onTask(created)}>
             查看任务
           </button>
           <button className={styles.button} onClick={onBack}>
-            返回Issue
+            返回 Issue
           </button>
         </div>
       </section>
@@ -232,7 +232,7 @@ export function CreateIssueTask({
             >
               <option value="new">新建工作区</option>
               {issue.plan.default_workspace_task_id && (
-                <option value="default">复用Issue默认工作区</option>
+                <option value="default">复用 Issue 默认工作区</option>
               )}
             </select>
           </label>
@@ -284,7 +284,7 @@ export function CreateIssueTask({
         </div>
         <p className={styles.muted}>
           {reuse ? "复用工作区固定主机。" : "选择具体主机后仅在该主机运行。"}{" "}
-          实施与独立验收安排在同一主机和工作区，分别使用独立run；要求仅筛选Agent，不修改本机配置。
+          实施与独立验收安排在同一主机和工作区，分别使用独立 run；要求仅筛选 Agent，不修改本机配置。
         </p>
         {reuse && workspace.value && !fixedHost && (
           <p className={styles.warning}>
@@ -330,7 +330,7 @@ export function CreateIssueTask({
           </button>
         )}
         <button className={styles.button} onClick={onBack}>
-          返回Issue
+          返回 Issue
         </button>
       </div>
     </section>
@@ -353,7 +353,7 @@ function RoleRequirements({
 }) {
   return (
     <fieldset disabled={blocked}>
-      <legend>{label}（执行此角色任务的Agent）</legend>
+      <legend>{label}（执行此角色任务的 Agent）</legend>
       <label>
         类别
         <select
@@ -398,7 +398,7 @@ function RoleRequirements({
         />
       </label>
       <label>
-        effort要求（可选）
+        effort 要求（可选）
         <input
           value={value.effort ?? ""}
           placeholder="不限"

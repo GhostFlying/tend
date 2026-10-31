@@ -1,3 +1,4 @@
+import { CopyIdentifier } from "../i18n/identifiers.tsx";
 import { Button, Badge } from "../ui/index.ts";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
@@ -145,14 +146,19 @@ function HostDetails({
         </dd>
         {host.maintenance?.remaining_runs !== undefined && (
           <>
-            <dt>剩余 run</dt>
+            <dt>剩余执行</dt>
             <dd>{host.maintenance.remaining_runs}</dd>
           </>
         )}
         {host.maintenance?.release_id && (
           <>
             <dt>发布</dt>
-            <dd>{host.maintenance.release_id}</dd>
+            <dd>
+              <details>
+                <summary>详细信息</summary>
+                <CopyIdentifier value={host.maintenance.release_id} />
+              </details>
+            </dd>
           </>
         )}
       </dl>

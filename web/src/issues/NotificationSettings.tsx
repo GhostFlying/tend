@@ -82,7 +82,7 @@ export function IssueNotificationSettings({ connection }: { connection: Connecti
                 ? outcome.message
                 : "");
   return (
-    <Section title="Issue 通知" className={styles.section} aria-label="Issue通知设置">
+    <Section title="Issue 通知" className={styles.section} aria-label="Issue 通知设置">
       <p className={styles.note}>合并连续的状态调整，减少对负责人的打扰。</p>
       <label className={styles.label} htmlFor="issue-notification-delay">
         状态变更通知延迟

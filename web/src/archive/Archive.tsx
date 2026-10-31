@@ -23,7 +23,7 @@ import form from "../agents/Catalog.module.css";
 type OriginalKind = "attachment" | "image" | "deliverable";
 type HistoricalRecord = { kind: string; id: string; data: Record<string, unknown | undefined> };
 const labels: Record<string, string> = {
-  work_item: "历史Issue",
+  work_item: "历史 Issue",
   issue_control: "责任记录",
   task: "任务",
   run: "执行",
@@ -32,7 +32,7 @@ const labels: Record<string, string> = {
   decision: "决策",
   message: "消息",
   agent_conversation: "会话",
-  run_execution: "执行Agent",
+  run_execution: "执行 Agent",
 };
 const ids: Record<string, string> = {
   work_item: "work_item_id",
@@ -63,7 +63,7 @@ export function ArchiveBrowser({ onIssue }: { onIssue(id: string): void }) {
   return (
     <section className={styles.root} aria-label="历史归档">
       <PageHeader className={styles.head} title="历史归档">
-        <p>封存的历史记录与原件，只读查看。所选材料可作为新Issue的来源，旧档案保持不变。</p>
+        <p>封存的历史记录与原件，只读查看。所选材料可作为新 Issue 的来源，旧档案保持不变。</p>
       </PageHeader>
       <div className={styles.archiveSelect}>
         <label>
@@ -207,7 +207,7 @@ function ArchiveContents({
           {transfers.map((record) => (
             <p key={record.requestId}>
               <Button className={form.button} onClick={() => setResume(record)}>
-                {record.state === "sent" ? "继续使用已保存材料新建Issue" : "核实未完成的材料提交"}
+                {record.state === "sent" ? "继续使用已保存材料新建 Issue" : "核实未完成的材料提交"}
               </Button>{" "}
               <small className={form.muted}>
                 {new Date(record.createdAt).toLocaleString("zh-CN")}
@@ -480,7 +480,7 @@ function ArchiveContents({
                     </article>
                   ))}
                   {!resources.value.items?.length && (
-                    <p>未收录原生历史或runner journal资源索引，不代表当时没有执行。</p>
+                    <p>未收录原生历史或 runner journal 资源索引，不代表当时没有执行。</p>
                   )}
                   {resources.value.next_after && (
                     <Button
@@ -498,7 +498,7 @@ function ArchiveContents({
           )}
           <div className={form.actions}>
             <Button className={form.primary} disabled={!count} onClick={() => setImporting(true)}>
-              从所选材料新建Issue{count ? `（${count}）` : ""}
+              从所选材料新建 Issue{count ? `（${count}）` : ""}
             </Button>
             {count > 0 && (
               <Button
@@ -698,7 +698,7 @@ function ArchiveImport({
         setError(
           result?.state === "failed"
             ? (result.error ?? "来源保存被拒绝。")
-            : "来源保存结果待核实，未创建新Issue。",
+            : "来源保存结果待核实，未创建新 Issue。",
         );
     } catch {
       setError("材料准备或来源保存未完成，旧档案保持不变。请重试核对。");
@@ -717,8 +717,8 @@ function ArchiveImport({
       />
     );
   return (
-    <section className={form.form} aria-label="归档材料新建Issue">
-      <h2>从所选材料新建Issue</h2>
+    <section className={form.form} aria-label="归档材料新建 Issue">
+      <h2>从所选材料新建 Issue</h2>
       <p>来源归档：{archiveID} · 只读</p>
       {resume ? (
         <>
@@ -728,7 +728,7 @@ function ArchiveImport({
         </>
       ) : (
         <p>
-          已选择{records.length}份记录、{originals.length}份原件。
+          已选择 {records.length} 份记录、{originals.length} 份原件。
         </p>
       )}
       <ul>
@@ -740,7 +740,7 @@ function ArchiveImport({
         ))}
       </ul>
       <p className={form.muted}>
-        所选材料会保存为当前部署的新来源，再填写新Issue的目标与负责人。归档不会恢复可写。
+        所选材料会保存为当前部署的新来源，再填写新 Issue 的目标与负责人。归档不会恢复可写。
       </p>
       {(error || source.error) && (
         <p className={form.warning} role="status">

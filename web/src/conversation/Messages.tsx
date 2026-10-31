@@ -25,6 +25,8 @@ import {
   systemMessageBody,
   type Entry,
 } from "./model.ts";
+import { groupToolItems } from "./toolLabels.ts";
+import { CopyIdentifier } from "../i18n/identifiers.tsx";
 import { ToolRow } from "./ToolRow.tsx";
 import { MessageImages, OutgoingImages } from "./Images.tsx";
 import { MessageAttachments, OutgoingAttachments } from "./Attachments.tsx";
@@ -140,9 +142,18 @@ export function OutgoingRow({
 export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> }) {
   return (
     <div className={styles.agent}>
-      {entry.items.map((it) => (
-        <AgentItem key={it.message_id} item={it} />
-      ))}
+      {groupToolItems(entry.items).map((items) =>
+        items.length > 1 ? (
+          <details key={items[0]!.message_id}>
+            <summary>使用了 {items.length} 个工具</summary>
+            {items.map((it) => (
+              <AgentItem key={it.message_id} item={it} />
+            ))}
+          </details>
+        ) : (
+          <AgentItem key={items[0]!.message_id} item={items[0]!} />
+        ),
+      )}
       {entry.done && (
         <div className={styles.foot}>
           {clock(entry.done.at)}
@@ -210,7 +221,18 @@ export function SystemMessage({ item, scrollID }: { item: ConversationItem; scro
       <div className={styles.systemHead}>
         {title} <time dateTime={item.created_at}>{clock(Date.parse(item.created_at))}</time>
       </div>
-      <Markdown text={systemMessageBody(item)} />
+      {item.notice_type?.startsWith("upgrade_") ? (
+        <>
+          <p>{item.notice_type === "upgrade_completed" ? "已更新到新版本" : title}</p>
+          <details>
+            <summary>详细信息</summary>
+            <Markdown text={systemMessageBody(item)} />
+            {item.upgrade_id && <CopyIdentifier value={item.upgrade_id} />}
+          </details>
+        </>
+      ) : (
+        <Markdown text={systemMessageBody(item)} />
+      )}
       {item.recovery && (
         <div className={styles.state} role="status">
           {recoveryNotice(item.recovery)}

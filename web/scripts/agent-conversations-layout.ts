@@ -518,7 +518,7 @@ try {
       await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
       assert.equal(await page.locator("dialog[open]").count(), 0);
       assert.equal(await page.getByRole("dialog").count(), 0);
-      const filter = page.getByLabel("按项目筛选Issue");
+      const filter = page.getByLabel("按项目筛选 Issue");
       await editIssueFilters(page, async () => {
         await filter.click();
         assert(await filter.evaluate((element) => element === document.activeElement));
@@ -578,7 +578,7 @@ try {
     releaseSelection();
 
     const backgroundInput = page
-      .getByRole("region", { name: "Issue详情", exact: true })
+      .getByRole("region", { name: "Issue 详情", exact: true })
       .getByRole("textbox", { name: "消息", exact: true });
     await backgroundInput.waitFor();
     await page.unroute(selectionRoute);
@@ -607,8 +607,8 @@ try {
       await page.getByRole("textbox", { name: "消息", exact: true }).inputValue(),
       "主会话草稿保留",
     );
-    await page.getByRole("button", { name: "修改Issue关联", exact: true }).first().click();
-    const editor = page.getByRole("dialog", { name: "修改Issue关联", exact: true });
+    await page.getByRole("button", { name: "修改 Issue 关联", exact: true }).first().click();
+    const editor = page.getByRole("dialog", { name: "修改 Issue 关联", exact: true });
     await editor.getByRole("checkbox").first().waitFor();
     const openedRevision = associations.revision;
     associations.revision++;
@@ -635,7 +635,7 @@ try {
     await editor.waitFor({ state: "hidden" });
     assert(writes.some((e) => e.operation === "conversation.set_issue_associations"));
     // The server commits but both the response and initial receipt lookup are lost.
-    await page.getByRole("button", { name: "修改Issue关联", exact: true }).first().click();
+    await page.getByRole("button", { name: "修改 Issue 关联", exact: true }).first().click();
     await editor.getByRole("checkbox").first().check();
     dropAssociationReply = true;
     dropLookupReply = true;
@@ -644,7 +644,7 @@ try {
     const beforeRecovery = writes.length;
     await page.reload();
     dropLookupReply = false;
-    await page.getByRole("button", { name: "修改Issue关联", exact: true }).first().click();
+    await page.getByRole("button", { name: "修改 Issue 关联", exact: true }).first().click();
     await editor.getByRole("button", { name: "核对原请求" }).click();
     await editor.waitFor({ state: "hidden" });
     assert.equal(writes.length, beforeRecovery, "reload recovery must not create a second write");
@@ -712,7 +712,7 @@ try {
     reply.associations = { ...associations, disposition: "unassigned", items: [] };
     await page.reload();
     await page.getByText("关联处理中", { exact: true }).waitFor();
-    await page.getByText("无Issue", { exact: true }).waitFor();
+    await page.getByText("无 Issue", { exact: true }).waitFor();
     await page.getByRole("button", { name: "继续处理", exact: true }).waitFor();
     await page.screenshot({
       path: join(output, `classification-recovery-${width}.png`),

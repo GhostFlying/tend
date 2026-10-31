@@ -11,9 +11,9 @@ export async function openIssueAux(page: Page, label: string): Promise<Locator> 
     await last.getByRole("button", { name: /^关闭/ }).first().click();
     await last.waitFor({ state: "hidden" });
   }
-  const region = page.getByRole("region", { name: "Issue详情", exact: true });
+  const region = page.getByRole("region", { name: "Issue 详情", exact: true });
   if (["编辑定义", "交接负责人", "创建任务"].includes(name)) {
-    const more = region.getByLabel("更多Issue操作");
+    const more = region.getByLabel("更多 Issue 操作");
     if ((await more.locator("..").getAttribute("open")) === null) await more.click();
     await region.getByRole("button", { name, exact: true }).click();
   } else {
@@ -25,21 +25,21 @@ export async function openIssueAux(page: Page, label: string): Promise<Locator> 
       .click();
   }
   return page.getByRole("dialog", {
-    name: ({ 编辑定义: "编辑Issue定义" } as Record<string, string>)[name] ?? name,
+    name: ({ 编辑定义: "编辑 Issue 定义" } as Record<string, string>)[name] ?? name,
     exact: true,
   });
 }
 export async function issueSidebar(page: Page): Promise<Locator> {
-  const region = page.getByRole("region", { name: "Issue详情", exact: true });
+  const region = page.getByRole("region", { name: "Issue 详情", exact: true });
   // A loading/error page also has a heading; wait for the Issue projection before
   // choosing the desktop sidebar or the phone's auxiliary Sheet entry.
   await region.locator("[data-issue-scroll]").waitFor();
-  const side = page.getByRole("complementary", { name: "Issue辅助信息", exact: true });
+  const side = page.getByRole("complementary", { name: "Issue 辅助信息", exact: true });
   if (await side.isVisible()) return side;
-  const drawer = page.getByRole("dialog", { name: "Issue辅助信息", exact: true });
+  const drawer = page.getByRole("dialog", { name: "Issue 辅助信息", exact: true });
   if (!(await drawer.isVisible()))
     await page
-      .getByRole("region", { name: "Issue详情", exact: true })
+      .getByRole("region", { name: "Issue 详情", exact: true })
       .getByRole("button", { name: "详情", exact: true })
       .click();
   await drawer.waitFor({ state: "visible" });
@@ -50,8 +50,8 @@ export async function closeIssue(page: Page): Promise<void> {
     const close = dialog.getByRole("button", { name: /^关闭/ }).first();
     if (await close.isVisible()) await close.click();
   }
-  const issue = page.getByRole("region", { name: "Issue详情", exact: true });
-  const back = issue.getByRole("button", { name: "返回Issue列表或上一项", exact: true });
+  const issue = page.getByRole("region", { name: "Issue 详情", exact: true });
+  const back = issue.getByRole("button", { name: "返回 Issue 列表或上一项", exact: true });
   if (await back.isVisible()) await back.click();
   else await page.goBack();
 }
@@ -60,7 +60,7 @@ export async function openIssueDefinition(page: Page): Promise<void> {
   if (await dialogs.count())
     await dialogs.last().getByRole("button", { name: /^关闭/ }).first().click();
   const summary = page
-    .getByRole("region", { name: "Issue详情", exact: true })
+    .getByRole("region", { name: "Issue 详情", exact: true })
     .locator("summary")
     .filter({ hasText: /^目标与完成条件$/ });
   if ((await summary.locator("..").getAttribute("open")) === null) await summary.click();

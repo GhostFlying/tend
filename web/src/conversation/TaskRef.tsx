@@ -50,7 +50,7 @@ export function TaskRef({ taskId }: { taskId: string }) {
           title={task.primary_issue_id}
         >
           <span className={styles.title}>
-            所属Issue：{task.primary_issue_title || task.primary_issue_id}
+            所属 Issue：{task.primary_issue_title || "所属 Issue"}
           </span>
         </Link>
       )}

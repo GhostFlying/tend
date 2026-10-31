@@ -44,10 +44,10 @@ export function MainPending({ summary }: { summary: ReadState<AttentionPage> }) 
         </small>
         {item.issue_id && (
           <Link className={styles.issue} to={{ page: "issue", id: item.issue_id }}>
-            所属Issue：
+            所属 Issue：
             {(issue.value?.issue_id === item.issue_id ? issue.value.plan.title : undefined) ||
               issues.value?.items?.find((i) => i.issue_id === item.issue_id)?.title ||
-              item.issue_id}
+              "所属 Issue"}
           </Link>
         )}
       </div>

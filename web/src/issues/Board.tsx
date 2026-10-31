@@ -154,7 +154,7 @@ export function IssueBoard({
       : (catalog.value?.projection.agents?.find(
           (agent) =>
             `${agent.identity.execution_environment_id}/${agent.identity.local_id}` === a.ref,
-        )?.display_name ?? a.ref);
+        )?.display_name ?? "负责人 Agent");
   const openBlocker = (blocker: IssueBlocker) => {
     actions.setFeedback(null);
     if (blocker.code === "attention" && onInbox) onInbox(blocker.object_id);
@@ -166,7 +166,7 @@ export function IssueBoard({
   const filterControls = (
     <>
       <SegmentedControl
-        label="Issue视图"
+        label="Issue 视图"
         value={view}
         onChange={setView}
         items={[
@@ -176,7 +176,7 @@ export function IssueBoard({
       />
       <Input
         className={styles.projectFilter}
-        aria-label="按项目筛选Issue"
+        aria-label="按项目筛选 Issue"
         list={projectList}
         placeholder="全部项目"
         value={project}
@@ -192,7 +192,7 @@ export function IssueBoard({
       {view === "board" && (
         <Select
           className={styles.assigneeFilter}
-          aria-label="按负责人筛选Issue"
+          aria-label="按负责人筛选 Issue"
           value={assigneeKey}
           onChange={(e) => setAssigneeKey(e.target.value)}
         >
@@ -225,7 +225,7 @@ export function IssueBoard({
     </>
   );
   return (
-    <section className={styles.root} aria-label="Issue白板">
+    <section className={styles.root} aria-label="Issue 白板">
       <PageHeader className={styles.header} title="所有 Issue">
         {view === "board" && total !== undefined && <Badge>{total}</Badge>}
         <Button
@@ -437,7 +437,7 @@ export function IssueBoard({
         </div>
       )}
       {creating && (
-        <Sheet open title="新建Issue" onClose={() => setCreating(false)}>
+        <Sheet open title="新建 Issue" onClose={() => setCreating(false)}>
           <IssueDefinition
             onBack={() => setCreating(false)}
             onSaved={(id) => {
@@ -594,7 +594,7 @@ const BoardCard = memo(function BoardCard({
       <div className={styles.cardFooter}>
         <span className={styles.assignee}>
           <span className={styles.avatar} aria-hidden>
-            {item.assignee.kind === "owner" ? "你" : "A"}
+            <AssigneeName assignee={item.assignee} initial />
           </span>
           <AssigneeName assignee={item.assignee} />
         </span>

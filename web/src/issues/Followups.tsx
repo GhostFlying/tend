@@ -97,7 +97,7 @@ export function IssueFollowups({
         </button>
       </div>
       <p className={styles.muted}>
-        到期后由Issue负责人核对；安排触发或检查结束，不代表Issue已经完成。
+        到期后由 Issue 负责人核对；安排触发或检查结束，不代表 Issue 已经完成。
       </p>
       {state.error && <p role="alert">无法读取跟进能力：{state.error}。当前不能新增或调整安排。</p>}
       {operation.storageError && <p role="alert">{operation.storageError}</p>}
@@ -199,7 +199,7 @@ export function IssueFollowups({
                     <summary>证据与来源</summary>
                     <pre>{entry.evidence || "没有附加证据"}</pre>
                     <p>
-                      规则修订{entry.revision} · {entry.occurrence_id}
+                      规则修订 {entry.revision} · {entry.occurrence_id}
                     </p>
                     {entries.map((row) => (
                       <div key={row.occurrence_id}>
@@ -222,7 +222,7 @@ export function IssueFollowups({
                 <summary>规则变更记录</summary>
                 {matchingHistory.revisions?.map((rule) => (
                   <p key={rule.revision}>
-                    修订{rule.revision} · {labels[rule.status]} · {rule.reason} ·{" "}
+                    修订 {rule.revision} · {labels[rule.status]} · {rule.reason} ·{" "}
                     {followupDate(rule.updated_at, rule.timezone)}
                   </p>
                 ))}
@@ -426,10 +426,10 @@ function conditionText(rule: FollowupSpec) {
   return c.kind === "tasks_completed"
     ? `固定 ${c.task_ids?.length ?? 0} 个任务全部完成`
     : c.kind === "delivery_state"
-      ? `交付 ${c.delivery_id} ${c.delivery_state === "merged" ? "合入" : "关闭"}`
+      ? `关联交付${c.delivery_state === "merged" ? "合入" : "关闭"}`
       : c.kind === "decision_answered"
-        ? `待决 ${c.decision_id} 已回答`
-        : `选择 ${c.choice_id} 已回答`;
+        ? "关联决策已回答"
+        : "关联选择已回答";
 }
 function foldChecks(entries: IssueFollowupOccurrence[]) {
   const out: { entry: IssueFollowupOccurrence; entries: IssueFollowupOccurrence[] }[] = [];
