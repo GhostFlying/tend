@@ -1,4 +1,4 @@
-import type { IssueActivityPage, IssueTranscriptBlock } from "../api/generated/api.ts";
+import type { IssueActivityPage } from "../api/generated/api.ts";
 
 export class IssueReadingState {
   top = 0;
@@ -12,10 +12,6 @@ export class IssueReadingState {
   }
   activity: IssueActivityPage | null = null;
   activityExpanded = false;
-  continuations: Record<string, IssueTranscriptBlock> = {};
-  saveContinuation(block: IssueTranscriptBlock): void {
-    this.continuations = { ...this.continuations, [block.trigger.message_id]: block };
-  }
   private following = false;
   followLatest(): void {
     this.following = true;
