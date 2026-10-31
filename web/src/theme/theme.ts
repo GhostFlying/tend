@@ -8,9 +8,6 @@ export type ThemeChoice = "system" | "light" | "dark";
 const key = "tend.theme";
 const query = "(prefers-color-scheme: dark)";
 
-/** The order the toggle steps through. */
-const next: Record<ThemeChoice, ThemeChoice> = { system: "light", light: "dark", dark: "system" };
-
 export const themeLabels: Record<ThemeChoice, string> = {
   system: "跟随系统",
   light: "浅色",
@@ -39,9 +36,8 @@ apply();
 
 export const theme: Readable<ThemeChoice> = choice;
 
-/** Steps to the next choice: system, light, dark. */
-export function toggleTheme(): void {
-  const c = next[choice.get()];
+/** Persist and apply an explicit preference from the settings page. */
+export function setTheme(c: ThemeChoice): void {
   try {
     if (c === "system") {
       localStorage.removeItem(key);

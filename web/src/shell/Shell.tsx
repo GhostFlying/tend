@@ -8,10 +8,9 @@ import { IssueReadingStates } from "../issues/Details.tsx";
 import { ConversationSessions, ConversationSessionsContext } from "../conversation/session.tsx";
 import type { LiveData } from "../live/data.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
-import { useStore } from "../state/store.ts";
 import { AgentWorkspace } from "../conversation/AgentWorkspace.tsx";
 import { Sidebar } from "./Sidebar.tsx";
-import { TabBar, type View } from "./TabBar.tsx";
+import { TabBar } from "./TabBar.tsx";
 import { AppLayout } from "./AppLayout.tsx";
 import { RoutePage } from "./RoutePage.tsx";
 import styles from "./Shell.module.css";
@@ -46,7 +45,6 @@ export function Shell({
     },
     [draft],
   );
-  const nextActions = useStore(live.attention.next.state);
   const mainAttention = useMainAttention(client, live);
   useEffect(() => {
     void live.agents.openHosted();
@@ -94,60 +92,15 @@ export function Shell({
     [client, live, queue, draft, route],
   );
   const chat = route.page === "chat" || route.page === "conversation";
-  const view: View = chat
-    ? "chat"
-    : route.page === "inbox" || route.page === "attention"
-      ? "decisions"
-      : "tasks";
   const detail = ["issue", "task", "attention", "upgrade"].includes(route.page);
   const openInbox = (id?: string) => navigate(id ? { page: "attention", id } : { page: "inbox" });
-  const showChat = () => navigate({ page: "chat" });
-  const showBoard = () => navigate({ page: "issues" });
-  const showRecords = () => navigate({ page: "tasks" });
-  const showRepos = () => navigate({ page: "repos" });
   return (
     <ServicesContext value={services}>
       <ConversationSessionsContext value={sessions}>
         <AppLayout
           detail={detail}
-          sidebar={
-            <Sidebar
-              records={route.page === "tasks"}
-              view={view}
-              connection={connection}
-              onChat={showChat}
-              onBoard={showBoard}
-              onRecords={showRecords}
-              onSettings={() => navigate({ page: "settings" })}
-              onRepos={showRepos}
-              mainAttention={mainAttention}
-              onInbox={openInbox}
-              onIssue={services.openIssue}
-            />
-          }
-          tabs={
-            <TabBar
-              pendingMore={!!mainAttention.value?.more}
-              view={view}
-              onChange={(next) =>
-                next === "chat" ? showChat() : next === "tasks" ? showBoard() : openInbox()
-              }
-              pending={
-                (mainAttention.value?.items ?? []).filter(
-                  (item) => item.status === "open" && item.kind !== "information",
-                ).length +
-                (nextActions.value?.items ?? []).filter(
-                  (item) =>
-                    item.kind === "user_action" &&
-                    ["open", "blocked"].includes(item.status) &&
-                    (!item.attention_id ||
-                      !(mainAttention.value?.items ?? []).some(
-                        (a) => a.attention_id === item.attention_id,
-                      )),
-                ).length
-              }
-            />
-          }
+          sidebar={<Sidebar connection={connection} summary={mainAttention.value ?? undefined} />}
+          tabs={<TabBar summary={mainAttention.value ?? undefined} />}
         >
           <div className={styles.content} hidden={!chat}>
             <AgentWorkspace

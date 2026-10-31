@@ -315,7 +315,7 @@ try {
     if (viewport.width <= 760) {
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "Issue" })
+        .getByRole("link", { name: "Issues", exact: true })
         .click();
       await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
       await page
@@ -323,7 +323,9 @@ try {
         .filter({ hasText: /^资源与记录$/ })
         .click();
     }
-    await page.getByRole("button", { name: "Token 用量", exact: true }).click();
+    if (viewport.width <= 760)
+      await page.getByRole("button", { name: "Token 用量", exact: true }).click();
+    else await page.getByRole("link", { name: "Token 用量", exact: true }).click();
     const panel = page.getByRole("region", { name: "Token 用量", exact: true });
     await panel.getByText("14,000", { exact: true }).waitFor();
     assert.equal(await page.getByRole("heading", { name: "Token 用量", exact: true }).count(), 1);

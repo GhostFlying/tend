@@ -499,7 +499,7 @@ try {
     const mainTop = await transcript.evaluate((element) => element.scrollTop);
     for (const [opener, dialogName] of [
       ["来源", "补充来源"],
-      ["会话 ▾", "会话"],
+      ["切换会话：主 Agent", "会话"],
       ["查看处理记录", "持久处理记录"],
       ["上下文用量 42%", "上下文用量"],
     ]) {
@@ -507,7 +507,12 @@ try {
       await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
       await navigate(page, "/");
       await mainInput.waitFor();
-      await page.getByRole("button", { name: opener!, exact: true }).click();
+      if (opener === "来源" || opener === "查看处理记录") {
+        await page.getByRole("button", { name: "更多", exact: true }).click();
+        await page
+          .getByRole("menuitem", { name: opener === "来源" ? "补充来源" : "执行记录", exact: true })
+          .click();
+      } else await page.getByRole("button", { name: opener!, exact: true }).click();
       await page.getByRole("dialog", { name: dialogName!, exact: true }).waitFor();
       await page.goBack();
       await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
@@ -529,7 +534,7 @@ try {
       .locator("..")
       .screenshot({ path: join(output, `composer-after-${width}.png`) });
     await page.screenshot({ path: join(output, `tags-${width}.png`), fullPage: true });
-    await page.getByRole("button", { name: "会话 ▾" }).click();
+    await page.getByRole("button", { name: /^切换会话：/ }).click();
     await page.getByRole("dialog", { name: "会话" }).waitFor();
     await page.screenshot({ path: join(output, `drawer-${width}.png`), fullPage: true });
     let releaseSelection!: () => void;
@@ -667,7 +672,8 @@ try {
     await page.getByRole("heading", { name: "主 Agent", exact: true }).waitFor();
     await page.unroute(route);
 
-    await page.getByRole("button", { name: "查看处理记录" }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "执行记录", exact: true }).click();
     await page.getByRole("dialog", { name: "持久处理记录" }).waitFor();
     await page
       .getByRole("dialog", { name: "持久处理记录" })

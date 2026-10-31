@@ -1,4 +1,5 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useEffect, useContext, type ReactNode } from "react";
+import { OverlayVisibility, useOverlayState } from "./focus.ts";
 import { Button, type ButtonProps } from "./Button.tsx";
 import { choiceIndex } from "./Choices.tsx";
 import styles from "./Menu.module.css";
@@ -19,7 +20,11 @@ export function Menu({
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const entries = useRef<(HTMLButtonElement | null)[]>([]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useOverlayState(false);
+  const visible = useContext(OverlayVisibility);
+  useEffect(() => {
+    if (!visible) menu.current?.hidePopover();
+  }, [visible]);
   const close = () => {
     menu.current?.hidePopover();
     setExpanded(false);

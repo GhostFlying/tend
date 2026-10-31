@@ -1,4 +1,4 @@
-import { useOverlayState } from "../ui/focus.ts";
+import { rememberOpener } from "../ui/focus.ts";
 import { useEffect, useRef, useState } from "react";
 import { useServices } from "../app/services.tsx";
 import type {
@@ -7,16 +7,18 @@ import type {
   AgentRolloutWindow,
 } from "../api/generated/api.ts";
 import styles from "./Agents.module.css";
-export function Rollout() {
+export function Rollout({ open, onClose }: { open: boolean; onClose(): void }) {
   const { client, conversation } = useServices();
-  const [open, setOpen] = useOverlayState(false);
   const [page, setPage] = useState<AgentRolloutPage | null>(null);
   const [error, setError] = useState("");
   const ref = useRef<HTMLDialogElement>(null);
   const path = `/api/v1/agent-conversations/${encodeURIComponent(conversation?.id ?? "main")}/rollout`;
   useEffect(() => {
     if (!open) return;
-    ref.current?.showModal();
+    if (ref.current) {
+      rememberOpener(ref.current, document.activeElement);
+      ref.current.showModal();
+    }
     const abort = new AbortController();
     void client
       .get<AgentRolloutPage>(path, abort.signal)
@@ -36,16 +38,13 @@ export function Rollout() {
   };
   return (
     <>
-      <button aria-label="查看处理记录" onClick={() => setOpen(true)}>
-        记录
-      </button>
       {open && (
         <dialog
           ref={ref}
           className={styles.editor}
           aria-label="持久处理记录"
-          onCancel={() => setOpen(false)}
-          onClose={() => setOpen(false)}
+          onCancel={onClose}
+          onClose={onClose}
         >
           <h3>处理记录 · {conversation?.title ?? "主 Agent"}</h3>
           <p>
@@ -58,7 +57,7 @@ export function Rollout() {
           ))}
           {page?.more && <button onClick={() => void more()}>加载更多</button>}
           <footer>
-            <button onClick={() => setOpen(false)}>关闭</button>
+            <button onClick={onClose}>关闭</button>
           </footer>
         </dialog>
       )}
