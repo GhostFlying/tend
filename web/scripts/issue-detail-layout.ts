@@ -11,6 +11,7 @@ import type {
   Envelope,
   IssueView,
   IssueActivityPage,
+  IssueTranscriptBlock,
   IssueResultPage,
   AttentionView,
 } from "../src/api/generated/api.ts";
@@ -21,6 +22,7 @@ const root = fixtureRoot();
 const now = Date.now();
 let seq = 10;
 let activityDelay = 0;
+let continuationBlock: IssueTranscriptBlock | null = null;
 let pagedChildren = false;
 let pagedActivity = false;
 const streams = new Set<ServerResponse>();
@@ -189,6 +191,17 @@ const server = createServer(async (req, res) => {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(value));
   };
+  if (p === "/api/v1/conversation/blocks/owner-one" && continuationBlock)
+    return json(
+      u.searchParams.has("after")
+        ? continuationBlock
+        : {
+            ...continuationBlock,
+            items: [],
+            more: true,
+            next_seq: 2,
+          },
+    );
   if (p === "/api/v1/session")
     return json({
       token: "fixture",
@@ -1190,6 +1203,79 @@ try {
   console.log(
     "PASS 390: missing binding never leaks main's outbox; one click reads the earlier activity page",
   );
+  pagedActivity = false;
+  activityDelay = 0;
+  for (const width of [1440, 390]) {
+    const base = activity.items![0]!.block!;
+    const originalMore = base.more;
+    base.more = true;
+    const reply = {
+      ...base.items![0]!,
+      message_id: "continuation-reply",
+      seq: 3,
+      body: "续页流式回复。\n\n".repeat(80),
+      assistant_state: "streaming" as const,
+    };
+    continuationBlock = { ...base, items: [reply], more: false };
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+      const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+      await detail.getByRole("button", { name: "继续读取本轮消息", exact: true }).click();
+      await detail
+        .getByText(/续页流式回复/)
+        .first()
+        .waitFor({ state: "attached" });
+      await detail.getByRole("button", { name: "展开全文", exact: true }).first().click();
+      const scroller = detail.locator("[data-issue-scroll]");
+      await scroller.evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+      });
+      await page.waitForTimeout(100);
+      const height = await scroller.evaluate((node) => node.scrollHeight);
+      reply.body += "续页新增正文，基础活动行保持不变。\n\n".repeat(60);
+      publish();
+      await detail
+        .getByText(/续页新增正文/)
+        .first()
+        .waitFor({ state: "attached" });
+      await page.waitForFunction((height) => {
+        const node = document.querySelector("[data-issue-scroll]")!;
+        return (
+          node.scrollHeight > height && node.scrollHeight - node.scrollTop - node.clientHeight < 2
+        );
+      }, height);
+      const later = detail.locator('[data-scroll-id="result:artifact-one"]');
+      await later.scrollIntoViewIfNeeded();
+      await scroller.evaluate((node) => {
+        node.scrollTop -= 120;
+      });
+      await page.waitForTimeout(100);
+      const y = await later.evaluate((node) => node.getBoundingClientRect().top);
+      reply.body += "续页再次增长，保持暂停阅读。\n\n".repeat(60);
+      publish();
+      await detail
+        .getByText(/续页再次增长/)
+        .first()
+        .waitFor({ state: "attached" });
+      await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).waitFor();
+      assert(
+        Math.abs((await later.evaluate((node) => node.getBoundingClientRect().top)) - y) <= 2,
+        "continuation-only growth displaced paused reading",
+      );
+      console.log(
+        `PASS ${width}: continuation-only streaming follows latest and preserves paused anchor with prompt`,
+      );
+    } finally {
+      await context.close();
+      base.more = originalMore;
+      continuationBlock = null;
+    }
+  }
 } finally {
   await browser.close();
   for (const s of streams) s.end();

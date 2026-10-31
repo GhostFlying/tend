@@ -184,8 +184,8 @@ export function IssueActivity({
     }
     previousPending.current = outgoing.length;
   }, [rows, outgoing.length, scroll, reading]);
-  const activityContent = JSON.stringify(rows);
-  const latestContent = JSON.stringify([issue, rows]);
+  const activityContent = JSON.stringify([rows, transcript]);
+  const latestContent = JSON.stringify([issue, rows, transcript]);
   const previousContent = useRef("");
   const previousActivity = useRef(activityContent);
   useLayoutEffect(() => {
