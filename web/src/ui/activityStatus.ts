@@ -99,15 +99,8 @@ export function runActivityStatus(logs: readonly RunLogView[], state: string): A
   const type = typeof data.type === "string" ? data.type : (latest?.kind ?? "");
   const name = typeof data.tool === "string" ? data.tool : "";
   const active = ["running", "starting"].includes(state);
-  const start = logs.find(
-    (row) =>
-      /turn[._]started$/.test(row.kind) || /turn[._]started$/.test(String(object(row.body).kind)),
-  );
-  const end = logs.findLast(
-    (row) =>
-      /turn[._]completed$/.test(row.kind) ||
-      /turn[._]completed$/.test(String(object(row.body).kind)),
-  );
+  const start = logs.find((row) => /^(?:native[._])?turn[._]started$/.test(row.kind));
+  const end = logs.findLast((row) => /^(?:native[._])?turn[._]completed$/.test(row.kind));
   return {
     active,
     label: active ? stageLabel(type, name) : terminalLabel(state),
