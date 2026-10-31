@@ -135,6 +135,8 @@
 | D130 | App 业务测试每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移及历史库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md。 | 已实现 |
 | D131 | Web 界面改版（修订 D70 的单对话加覆盖层布局与 D121 UI r5 的侧栏摘要）：路由驱动的页面与可分享路径，旧 query 链接改写；侧栏只做分组导航，手机四标签；角色化 token 与共享基础组件，由检查脚本约束；界面使用用户术语，不默认显示内部标识；路由级拆包与全页面巡检。不引入路由或 UI 依赖，History API 与原生 dialog/popover 已满足需求。业务合同、owner API 与 runner wire 不变。见 docs/plans/web-ui-overhaul.md。 | 已实现 |
 
+| D132 | 交互式 Web 沙盒：独立 tend-sandbox 复用服务端组装与真实 owner API、账本、调度、工具及 runner 协议，仅替换托管 Agent 会话与 runner 的执行／工作区边界。只接受带沙盒标记的数据目录，不进入发布包、不连接真实模型或生产数据。前端回归逐步迁移到沙盒。见 docs/plans/web-sandbox.md。 | 实施中 |
+
 ## 2. 上下文注入（修订 v0.1 §7）
 
 > D45：当前先做的外挂形态里，上下文由各 agent 的 hook 追加，水位、完整快照与增量的规则不变，具体机制见阶段 C 计划。本节描述的 `thread/inject_items` 方式属于托管形态，随托管一起延后；记录的 app-server 能力也适用于 worker。
@@ -417,3 +419,11 @@ S2 使用每个 History entry 的本次页面会话身份判断返回：可确�
 侧栏只放分组导航（对话、工作、资源、设置），待处理由收件箱计数与主对话待处理区承担；侧栏宽度在各页面一致。样式只使用 token 定义的字号、间距、圆角、层级与颜色，控件来自共享基础组件。界面文案遵循中英混排加空格与统一术语，内部标识、哈希与工具名默认收起。计划见 [Web UI 整体改版](plans/web-ui-overhaul.md)。
 
 S6 中非聊天路由使用 lazy 与 Suspense 骨架，第三方模块独立共享；构建生成的离线 shell 清单仍包含全部路由资源。手机主操作与标签采用触控尺寸，输入区和浮动跳转避让安全区，详情及短暂弹层隐藏标签栏。全路由深浅主题巡检与导航回归纳入 CI。系统决定的问题与原因说明使用中文；内建选项字符串同时是回答标识和 Effects 键，保留其字节，由 Web 完整映射为中文显示。
+
+## D132：交互式 Web 沙盒
+
+`tend-sandbox` 是开发与前端验收入口，不是服务端运行模式，也不进入发布包。`internal/serverkit` 集中组装真实 SQLite、app/domain、views、owner API、runnerapi、scheduler、dispatch、contextbuilder、tools、mainthread 与嵌入 Web。显式注入 listener／WhoIs、时钟／ID 与托管会话 opener；正式服务端保留原配置和真实边界。
+
+沙盒只替换托管 Agent 会话和 runner 的 Workers／Workspaces：脚本通过真实工具回调写账本，进程内 runner 经回环 HTTP 领取并执行任务。数据目录必须为空或具有内容匹配的沙盒标记；重置只能作用于已验证目录，不读取生产配置、凭据或 tailnet 状态，不启动真实模型、git 或 updater。demo 通过带 request_id 的 app 命令播种，持久请求身份使重复启动不重复创建对象。所有后台循环随 context 取消并等待退出。
+
+Web 开发可使用同源嵌入页面或 `TEND_DEV_SERVER` 的 Vite 代理。既有 JSON fixture 回归保持不变，后续逐步以沙盒承载 UI 巡检与交互验收。实施与脚本规则见 [Web 交互沙盒](plans/web-sandbox.md)。
