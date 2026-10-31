@@ -98,6 +98,7 @@ function RunWindow({ run, label }: { run: RunView; label: string }) {
   const [usage, setUsage] = useState(false);
   const regionID = useId();
   const toggle = useRef<HTMLButtonElement>(null);
+  const fallbackFocus = useCallback(() => toggle.current, []);
   const readingPosition = useRef<ReadingPosition | null>(null);
   const [savedPosition, setSavedPosition] = useState<ReadingPosition | null>(null);
   const observed = run.observed;
@@ -183,7 +184,7 @@ function RunWindow({ run, label }: { run: RunView; label: string }) {
           target={target}
           position={readingPosition}
           restored={savedPosition}
-          fallbackFocus={toggle}
+          fallbackFocus={fallbackFocus}
           onClose={close}
         />
       )}
@@ -339,7 +340,7 @@ function Reader({
   target: string;
   position: RefObject<ReadingPosition | null>;
   restored: ReadingPosition | null;
-  fallbackFocus: RefObject<HTMLButtonElement | null>;
+  fallbackFocus(): HTMLButtonElement | null;
   onClose(): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -432,7 +433,7 @@ function Reader({
       panel?.close();
       if (opener instanceof HTMLElement && opener.isConnected)
         opener.focus({ preventScroll: true });
-      else fallbackFocus.current?.focus({ preventScroll: true });
+      else fallbackFocus()?.focus({ preventScroll: true });
     };
   }, [onClose, position, run.run_id, fallbackFocus]);
   useLayoutEffect(() => {
