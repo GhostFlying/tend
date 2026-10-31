@@ -562,6 +562,26 @@ try {
       0,
       "paused rollout masked formal completion",
     );
+    // Explicit navigation must work on a completed run with no arriving records.
+    await rollout.getByRole("button", { name: "恢复跟随", exact: true }).click();
+    await page.waitForFunction(() => {
+      const el = document.querySelector<HTMLElement>('[aria-label="执行过程正文"]')!;
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 4;
+    });
+    await reader.evaluate((el) => {
+      el.scrollTop = 200;
+    });
+    await rollout.getByText("历史阅读", { exact: true }).waitFor();
+    await rollout.getByRole("button", { name: /回到最新/ }).click();
+    await page.waitForTimeout(2200);
+    assert(
+      await reader.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 4),
+      "completed quiet run ignored explicit latest request",
+    );
+    await reader.evaluate((el, top) => {
+      el.scrollTop = top;
+    }, historyTop);
+    await rollout.getByText("历史阅读", { exact: true }).waitFor();
     task.runs[0]!.observed = "running";
     eventSeq++;
     for (const stream of streams)

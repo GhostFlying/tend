@@ -67,8 +67,27 @@ export function IssueActivity({
       if (following.current) reading.followLatest();
       else reading.pauseFollowing();
     };
+    let frame = 0;
+    const disclosure = (event: MouseEvent) => {
+      if (
+        !(event.target instanceof Element) ||
+        !event.target.closest("summary, button[aria-expanded]")
+      )
+        return;
+      following.current = false;
+      reading.pauseFollowing();
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(moved);
+      });
+    };
     node.addEventListener("scroll", moved);
-    return () => node.removeEventListener("scroll", moved);
+    node.addEventListener("click", disclosure, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      node.removeEventListener("scroll", moved);
+      node.removeEventListener("click", disclosure, true);
+    };
   }, [scroll, reading]);
   const last = useRef(0);
   const previousPending = useRef(0);
@@ -281,9 +300,10 @@ function ActivityBlock({
                 <div className={styles.author}>
                   {entry.author} <small>负责人</small>
                 </div>
-                <div className={!expanded && long ? styles.replyClamp : undefined}>
-                  <AgentTurn entry={row} />
-                </div>
+                <AgentTurn
+                  entry={row}
+                  proseClassName={!expanded && long ? styles.replyClamp : undefined}
+                />
                 {long && (
                   <button
                     className={styles.textLink}

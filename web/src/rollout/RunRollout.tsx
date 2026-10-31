@@ -343,6 +343,7 @@ function Reader({
   const flow = useRef<HTMLOListElement>(null);
   const contentKey = JSON.stringify(steps);
   const previousContent = useRef("");
+  const explicitLatest = useRef<{ page: WindowState["page"] } | null>(null);
   const initial = useRef(true);
   const closing = useRef(false);
   const anchor = useRef<{ key: string; top: number; page: WindowState["page"] } | null>(null);
@@ -430,6 +431,9 @@ function Reader({
           row.getBoundingClientRect().top - el.getBoundingClientRect().top - (saved?.top ?? 16);
       else el.scrollTop = el.scrollHeight;
       initial.current = false;
+    } else if (explicitLatest.current && state.page !== explicitLatest.current.page) {
+      el.scrollTop = el.scrollHeight;
+      explicitLatest.current = null;
     } else if (anchor.current && state.page !== anchor.current.page) {
       const saved = anchor.current;
       const row = [...el.querySelectorAll<HTMLElement>("[data-step-key]")].find(
@@ -442,6 +446,14 @@ function Reader({
     } else if (state.live && previousContent.current !== contentKey) el.scrollTop = el.scrollHeight;
     previousContent.current = contentKey;
   }, [contentKey, target, state.live, state.page, position, restored]);
+  const resume = (latest = false) => {
+    anchor.current = null;
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+    if (latest) {
+      explicitLatest.current = { page: state.page };
+      state.latest();
+    } else state.setLive(true);
+  };
   const earlier = () => {
     const el = scroller.current;
     if (el) {
@@ -492,7 +504,10 @@ function Reader({
           <i data-live={state.live} />
           {state.live ? "实时跟随" : "历史阅读"}
         </span>
-        <button aria-pressed={!state.live} onClick={() => state.setLive(!state.live)}>
+        <button
+          aria-pressed={!state.live}
+          onClick={() => (state.live ? state.setLive(false) : resume())}
+        >
           {state.live ? "暂停跟随" : "恢复跟随"}
         </button>
         <button aria-expanded={usage} onClick={() => setUsage(!usage)}>
@@ -577,7 +592,7 @@ function Reader({
         </div>
       </div>
       {!state.live && (
-        <button className={styles.toLatest} onClick={state.latest}>
+        <button className={styles.toLatest} onClick={() => resume(true)}>
           ↓ 回到最新
         </button>
       )}
