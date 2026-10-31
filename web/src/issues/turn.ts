@@ -21,7 +21,8 @@ export class IssueTurnRead {
     });
     this.state = this.read.state;
   }
-  open(trigger: string): Promise<void> {
+  open(trigger: string, pages = 2): Promise<void> {
+    this.pages = pages;
     return this.read.open(
       `/api/v1/conversation/blocks/${encodeURIComponent(trigger)}?projection=issues`,
     );

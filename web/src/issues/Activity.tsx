@@ -170,12 +170,18 @@ export function IssueActivity({
   const cancelContinuation = useCallback((trigger: string) => {
     if (pagination.current?.trigger === trigger) pagination.current = null;
   }, []);
-  const [continuations, setContinuations] = useState<Record<string, IssueTranscriptBlock>>({});
-  const rememberContinuation = useCallback((block: IssueTranscriptBlock, explicit: boolean) => {
-    if (explicit && pagination.current?.trigger === block.trigger.message_id)
-      pagination.current.ready = true;
-    setContinuations((previous) => ({ ...previous, [block.trigger.message_id]: block }));
-  }, []);
+  const [continuations, setContinuations] = useState<Record<string, IssueTranscriptBlock>>(
+    reading.continuations,
+  );
+  const rememberContinuation = useCallback(
+    (block: IssueTranscriptBlock, explicit: boolean) => {
+      if (explicit && pagination.current?.trigger === block.trigger.message_id)
+        pagination.current.ready = true;
+      reading.saveContinuation(block);
+      setContinuations(reading.continuations);
+    },
+    [reading],
+  );
   const transcript = useMemo(
     () =>
       buildTranscriptEntries(
@@ -229,6 +235,7 @@ export function IssueActivity({
   const latestContent = JSON.stringify([issue, rows, transcript]);
   const previousContent = useRef("");
   const previousActivity = useRef(activityContent);
+  const earlierPending = useRef(false);
   useLayoutEffect(() => {
     const node = scroll.current;
     if (node && pagination.current?.ready) {
@@ -272,7 +279,7 @@ export function IssueActivity({
             readingAnchor.current = captureAnchor(node);
           });
         }
-        if (previousActivity.current !== activityContent)
+        if (!earlierPending.current && previousActivity.current !== activityContent)
           requestAnimationFrame(() => setNewItems(true));
       }
     }
@@ -283,6 +290,8 @@ export function IssueActivity({
   const earlier = async () => {
     const node = scroll.current;
     const anchor = node ? captureAnchor(node) : null;
+    earlierPending.current = true;
+    setNewItems(false);
     try {
       if (!all) {
         setAll(true);
@@ -293,6 +302,11 @@ export function IssueActivity({
         requestAnimationFrame(() => correctScroll(node, () => restoreAnchor(node, anchor)));
     } catch {
       setError("更早记录读取失败，请重试。");
+    } finally {
+      requestAnimationFrame(() => {
+        earlierPending.current = false;
+        setNewItems(false);
+      });
     }
   };
   const jump = () => {
@@ -374,10 +388,11 @@ function ActivityBlock({
   const extra = useStore(continuation.state);
   const explicit = useRef(false);
   const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
+  const [depth, setDepth] = useEntryState(`activity-depth:${entry.id}`, 2);
   const block = entry.block!;
   useEffect(() => {
-    if (opened) void continuation.open(block.trigger.message_id);
-  }, [opened, block, continuation]);
+    if (opened) void continuation.open(block.trigger.message_id, depth);
+  }, [opened, block, continuation, depth]);
   useEffect(
     () => () => {
       continuation.close();
@@ -411,7 +426,7 @@ function ActivityBlock({
     }
     if (!opened) setOpened(true);
     else if (extra.error) void continuation.refresh();
-    else void continuation.more();
+    else setDepth(depth + 1);
   };
   return (
     <article className={styles.discussion} data-scroll-id={entry.id}>

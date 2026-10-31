@@ -25,6 +25,8 @@ let activityDelay = 0;
 let continuationBlock: IssueTranscriptBlock | null = null;
 let continuationFailure = false;
 let continuationDelay = 0;
+let thirdPage = false;
+let pagedRevision = 0;
 let pagedChildren = false;
 let pagedActivity = false;
 const streams = new Set<ServerResponse>();
@@ -197,6 +199,21 @@ const server = createServer(async (req, res) => {
     if (continuationDelay) await new Promise((resolve) => setTimeout(resolve, continuationDelay));
     if (continuationFailure)
       return json({ error: { code: "unavailable", message: "Continuation failed" } }, 503);
+    if (thirdPage && u.searchParams.get("after") === "53")
+      return json({
+        ...continuationBlock,
+        items: [
+          {
+            ...continuationBlock.items![0]!,
+            message_id: "third-page-reply",
+            seq: 54,
+            body: "第三页保留消息",
+          },
+        ],
+        more: false,
+      });
+    if (thirdPage && u.searchParams.get("after") === "51")
+      return json({ ...continuationBlock, more: true, next_seq: 53 });
     return json(
       u.searchParams.has("after")
         ? continuationBlock
@@ -296,7 +313,7 @@ const server = createServer(async (req, res) => {
                   id: `recent-fact-${index}`,
                   position: 11 + index,
                   kind: "issue.updated",
-                  title: `最近进展 ${index}`,
+                  title: `最近进展 ${index} 更新 ${pagedRevision}`,
                   author: "system",
                   created_at: now,
                 })),
@@ -1204,6 +1221,18 @@ try {
   const earlierFact = isolatedIssue.locator('[data-scroll-id="earlier-fact"]');
   await earlierFact.waitFor();
   assert((await earlierFact.innerText()).includes("更早的进展记录"));
+  assert.equal(
+    await isolatedIssue.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+    0,
+    "explicit earlier pagination showed a misleading new-progress prompt",
+  );
+  await isolatedIssue.locator("[data-issue-scroll]").evaluate((node) => {
+    node.scrollTop = 200;
+  });
+  await isolation.waitForTimeout(100);
+  pagedRevision++;
+  publish();
+  await isolatedIssue.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).waitFor();
 
   await isolationContext.close();
   console.log(
@@ -1484,6 +1513,57 @@ try {
         continuationFailure = false;
         continuationDelay = 0;
       }
+    }
+  }
+
+  for (const width of [1440, 390]) {
+    issue.conversation = { conversation_id: "issue:canonical-root", can_send: true };
+    const base = activity.items![0]!.block!;
+    const originalMore = base.more;
+    base.more = true;
+    thirdPage = true;
+    continuationBlock = {
+      ...base,
+      items: [{ ...base.items![0]!, message_id: "second-page-reply", seq: 52, body: "第二页内容" }],
+      more: true,
+      next_seq: 53,
+    };
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+      const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+      const more = detail.getByRole("button", { name: "继续读取本轮消息", exact: true });
+      await more.click();
+      await detail.getByText("第二页内容", { exact: true }).waitFor();
+      await more.click();
+      await detail.getByText("第三页保留消息", { exact: true }).waitFor();
+      const taskLink = detail
+        .getByRole("button", { name: "查看任务与验收 →", exact: true })
+        .first();
+      await taskLink.scrollIntoViewIfNeeded();
+      const top = await detail.locator("[data-issue-scroll]").evaluate((node) => node.scrollTop);
+      await taskLink.click();
+      await page.getByRole("region", { name: "任务详情", exact: true }).waitFor();
+      await page.goBack();
+      await detail.getByText("第三页保留消息", { exact: true }).waitFor({ state: "attached" });
+      await page.waitForTimeout(150);
+      assert(
+        Math.abs(
+          (await detail.locator("[data-issue-scroll]").evaluate((node) => node.scrollTop)) - top,
+        ) <= 2,
+        "returning from task lost continued-page reading position",
+      );
+      assert.equal(await more.count(), 0, "returned turn forgot loaded continuation depth");
+      console.log(`PASS third continuation page task return ${width}`);
+    } finally {
+      await context.close();
+      base.more = originalMore;
+      thirdPage = false;
+      continuationBlock = null;
     }
   }
 } finally {
