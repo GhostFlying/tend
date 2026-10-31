@@ -170,17 +170,23 @@ export function IssueActivity({
   const cancelContinuation = useCallback((trigger: string) => {
     if (pagination.current?.trigger === trigger) pagination.current = null;
   }, []);
-  const [continuations, setContinuations] = useState<Record<string, IssueTranscriptBlock>>(
-    reading.continuations,
+  const [continuations, setContinuations] = useEntryState<Record<string, IssueTranscriptBlock>>(
+    `activity-continuations:${issue.issue_id}`,
+    {},
   );
+  const [writeContinuations] = useState(() => setContinuations);
+  const continuationCache = useRef(continuations);
   const rememberContinuation = useCallback(
     (block: IssueTranscriptBlock, explicit: boolean) => {
       if (explicit && pagination.current?.trigger === block.trigger.message_id)
         pagination.current.ready = true;
-      reading.saveContinuation(block);
-      setContinuations(reading.continuations);
+      continuationCache.current = {
+        ...continuationCache.current,
+        [block.trigger.message_id]: block,
+      };
+      writeContinuations(continuationCache.current);
     },
-    [reading],
+    [writeContinuations],
   );
   const transcript = useMemo(
     () =>
@@ -234,9 +240,13 @@ export function IssueActivity({
   const activityContent = JSON.stringify([rows, transcript]);
   const latestContent = JSON.stringify([issue, rows, transcript]);
   const previousContent = useRef("");
-  const previousActivity = useRef(activityContent);
-  const earlierPending = useRef(false);
+  const previousFirst = useRef(rows[0]?.position ?? 0);
+  const previousNotification = useRef(activityContent);
   useLayoutEffect(() => {
+    const notificationContent = JSON.stringify([
+      rows.filter((row) => row.position >= previousFirst.current),
+      transcript.filter((row) => Number(row.key.split(":")[0]) >= previousFirst.current),
+    ]);
     const node = scroll.current;
     if (node && pagination.current?.ready) {
       const boundary = pagination.current;
@@ -279,19 +289,28 @@ export function IssueActivity({
             readingAnchor.current = captureAnchor(node);
           });
         }
-        if (!earlierPending.current && previousActivity.current !== activityContent)
+        if (previousNotification.current !== notificationContent)
           requestAnimationFrame(() => setNewItems(true));
       }
     }
     if (node) readingAnchor.current = captureAnchor(node);
     previousContent.current = latestContent;
-    previousActivity.current = activityContent;
-  }, [latestContent, activityContent, scroll, reading, continuations, correctScroll]);
+    previousNotification.current = activityContent;
+    previousFirst.current = rows[0]?.position ?? 0;
+  }, [
+    latestContent,
+    activityContent,
+    rows,
+    transcript,
+    scroll,
+    reading,
+    continuations,
+    correctScroll,
+  ]);
   const earlier = async () => {
     const node = scroll.current;
     const anchor = node ? captureAnchor(node) : null;
-    earlierPending.current = true;
-    setNewItems(false);
+
     try {
       if (!all) {
         setAll(true);
@@ -302,11 +321,6 @@ export function IssueActivity({
         requestAnimationFrame(() => correctScroll(node, () => restoreAnchor(node, anchor)));
     } catch {
       setError("更早记录读取失败，请重试。");
-    } finally {
-      requestAnimationFrame(() => {
-        earlierPending.current = false;
-        setNewItems(false);
-      });
     }
   };
   const jump = () => {

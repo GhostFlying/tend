@@ -1,4 +1,4 @@
-import { fixtureRoot } from "./navigation.ts";
+import { fixtureRoot, navigate } from "./navigation.ts";
 /// <reference lib="dom" />
 // D129: isolated complete-page and exact-recipient interaction regression.
 import assert from "node:assert/strict";
@@ -22,6 +22,8 @@ const root = fixtureRoot();
 const now = Date.now();
 let seq = 10;
 let activityDelay = 0;
+let holdEarlier: Promise<void> | null = null;
+let earlierStarted = () => {};
 let continuationBlock: IssueTranscriptBlock | null = null;
 let continuationFailure = false;
 let continuationDelay = 0;
@@ -287,6 +289,10 @@ const server = createServer(async (req, res) => {
     const current = p.includes(child.issue_id) ? child : issue;
     if (p.endsWith("/activity")) {
       if (activityDelay) await new Promise((resolve) => setTimeout(resolve, activityDelay));
+      if (pagedActivity && u.searchParams.has("before") && holdEarlier) {
+        earlierStarted();
+        await holdEarlier;
+      }
       if (pagedActivity)
         return json(
           u.searchParams.has("before")
@@ -1217,14 +1223,29 @@ try {
   );
   pagedActivity = true;
   await isolation.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+  let releaseEarlier = () => {};
+  holdEarlier = new Promise<void>((resolve) => {
+    releaseEarlier = resolve;
+  });
+  let notifyEarlier = () => {};
+  const startedEarlier = new Promise<void>((resolve) => {
+    notifyEarlier = resolve;
+  });
+  earlierStarted = notifyEarlier;
   await isolatedIssue.getByRole("button", { name: "查看更早记录", exact: true }).click();
+  await startedEarlier;
+  pagedRevision++;
+  publish();
+  await isolatedIssue.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).waitFor();
+  releaseEarlier();
+  holdEarlier = null;
   const earlierFact = isolatedIssue.locator('[data-scroll-id="earlier-fact"]');
   await earlierFact.waitFor();
   assert((await earlierFact.innerText()).includes("更早的进展记录"));
   assert.equal(
     await isolatedIssue.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
-    0,
-    "explicit earlier pagination showed a misleading new-progress prompt",
+    1,
+    "earlier pagination cleared a real update arriving during the request",
   );
   await isolatedIssue.locator("[data-issue-scroll]").evaluate((node) => {
     node.scrollTop = 200;
@@ -1558,6 +1579,20 @@ try {
         "returning from task lost continued-page reading position",
       );
       assert.equal(await more.count(), 0, "returned turn forgot loaded continuation depth");
+      await page.goto(`http://127.0.0.1:${address.port}/issues`);
+      base.items![0]!.body = `新访问的实时回复 ${width}`;
+      await detail.waitFor({ state: "hidden" });
+      await navigate(page, `/issues/${issue.issue_id}`);
+      await detail.getByRole("button", { name: "继续读取本轮消息", exact: true }).waitFor();
+      publish();
+      await detail
+        .getByText(`新访问的实时回复 ${width}`, { exact: true })
+        .waitFor({ state: "attached" });
+      assert.equal(
+        await detail.getByText("第三页保留消息", { exact: true }).count(),
+        0,
+        "fresh Issue visit reused a closed continuation cache",
+      );
       console.log(`PASS third continuation page task return ${width}`);
     } finally {
       await context.close();
