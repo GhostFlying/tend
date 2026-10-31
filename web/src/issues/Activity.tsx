@@ -538,6 +538,10 @@ function Milestone({
   if (entry.artifact_id)
     return (
       <div data-scroll-id={entry.id}>
+        <p className={styles.muted}>
+          {entry.author || "tend"} {entry.title} ·{" "}
+          {new Date(entry.created_at).toLocaleString("zh-CN")}
+        </p>
         {result ? (
           <IssueResultCard result={result} onTask={onTask} />
         ) : (
@@ -547,10 +551,12 @@ function Milestone({
     );
   return (
     <div className={styles.milestone} data-scroll-id={entry.id}>
-      <span className={styles.milestoneDot} />
+      <span className={styles.milestoneDot} aria-hidden="true">
+        {Array.from(entry.author || "tend")[0]}
+      </span>
       <span>
-        {entry.title}
-        <time>{new Date(entry.created_at).toLocaleString("zh-CN")}</time>
+        <strong>{entry.author || "tend"}</strong> {entry.title}
+        <time> · {new Date(entry.created_at).toLocaleString("zh-CN")}</time>
       </span>
       {entry.task_id ? (
         <button className={styles.textLink} onClick={() => onTask(entry.task_id!)}>

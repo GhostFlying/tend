@@ -423,6 +423,8 @@ S6 中非聊天路由使用 lazy 与 Suspense 骨架，第三方模块独立共�
 
 S8 将进行中的主对话、Issue 负责人轮次与任务执行统一为单行阶段和用时，步骤在一个默认收起的披露中保留；手动展开不随新步骤增长而重置，结束后收起并显示摘要。阶段仅使用现有事件与工具映射；缺少原生开始／结束时间的历史窗口显示用时未知，不据页面加载时间推造执行时间。阶段播报与计时 tick 分离，减少动态效果偏好生效。自动跟随只响应末尾数据变化，用户披露保持控制点位置，分页继续恢复原锚点。
 
+S9 的活动只读投影使用事件中持久的请求身份显示作者：你、主 Agent、冻结负责人目录名、执行 Agent 目录名、执行主机或 tend；不再把所有事件展示为无主体的系统动作。负责人交接不重写历史归属，缺少目录信息使用角色回退。当前进展展示 updated_by；沿用现有 Author 字符串，不新增 owner API 字段或迁移。
+
 ## D133：交互式 Web 沙盒
 
 `tend-sandbox` 是开发与前端验收入口，不是服务端运行模式，也不进入发布包。`internal/serverkit` 集中组装真实 SQLite、app/domain、views、owner API、runnerapi、scheduler、dispatch、contextbuilder、tools、mainthread 与嵌入 Web。显式注入 listener／WhoIs、时钟／ID 与托管会话 opener；正式服务端保留原配置和真实边界。

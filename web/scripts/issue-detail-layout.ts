@@ -175,7 +175,7 @@ const activity: IssueActivityPage = {
       position: 1002,
       kind: "artifact.submitted",
       created_at: now,
-      author: "system",
+      author: "执行 Agent",
       title: "实施已交付",
       artifact_id: "artifact-one",
       task_id: results.items![0]!.task_id,
@@ -591,6 +591,8 @@ try {
 
     assert.equal(await page.getByRole("dialog", { name: "Issue 详情" }).count(), 0);
     await detail.getByText(/暂无活动执行/).waitFor();
+    await detail.getByText(/由 (青竹|负责人 Agent) 更新/).waitFor();
+    await detail.getByText(/执行 Agent 实施已交付/).waitFor();
     assert.equal(
       await detail.getByText("native-manager-not-for-the-landing-page", { exact: true }).count(),
       0,
