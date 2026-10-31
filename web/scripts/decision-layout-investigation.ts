@@ -1105,6 +1105,96 @@ async function checkFocusedTranscriptResizeFollowing() {
   }
 }
 
+async function checkDelayedStoredThumbnail() {
+  for (const width of [1440, 390]) {
+    reset();
+    decisionVisible = false;
+    upgradeVisible = false;
+    appendedHistory.push(
+      {
+        author: "owner",
+        kind: "message",
+        message_id: "image-owner",
+        seq: 101,
+        body: "已保存的图片附件",
+        state: "replied",
+        created_at: "2026-10-27T01:00:00Z",
+        attachments: [
+          {
+            file_id: "stored-image",
+            sha256: "0".repeat(64),
+            name: "stored-image.png",
+            size: 100,
+            media_type: "image/png",
+          },
+        ],
+      },
+      {
+        author: "main_agent",
+        kind: "message",
+        message_id: "image-reply",
+        seq: 102,
+        reply_to: "image-owner",
+        body: "图片消息之后的末尾回复",
+        created_at: "2026-10-27T01:00:01Z",
+      },
+    );
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let requested!: () => void;
+    const arrived = new Promise<void>((resolve) => {
+      requested = resolve;
+    });
+    await page.route(
+      "**/conversation/attachments/stored-image/download-url?inline=1",
+      async (route) => {
+        requested();
+        await pending;
+        await route.fulfill({
+          json: {
+            url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jHhoAAAAASUVORK5CYII=",
+          },
+        });
+      },
+    );
+    try {
+      await page.goto(`http://127.0.0.1:${fixturePort}/`);
+      await arrived;
+      const transcript = page.getByRole("region", { name: "对话记录" });
+      await page.waitForTimeout(100);
+      const before = await transcript.evaluate((el) => ({
+        height: el.scrollHeight,
+        gap: el.scrollHeight - el.scrollTop - el.clientHeight,
+      }));
+      assert(before.gap < 2, "initial latest image message must start at bottom");
+      release();
+      await page.getByRole("button", { name: "查看图片 stored-image.png" }).waitFor();
+      await page.waitForTimeout(100);
+      const after = await transcript.evaluate((el) => ({
+        height: el.scrollHeight,
+        gap: el.scrollHeight - el.scrollTop - el.clientHeight,
+      }));
+      assert.equal(after.height, before.height, "stored thumbnail inserted unreserved height");
+      assert(after.gap < 2, "delayed stored thumbnail left latest reply below viewport");
+      assert.equal(
+        await transcript.locator("..").getByRole("button", { name: "跳到最新" }).count(),
+        0,
+      );
+      console.log(`PASS delayed stored image thumbnail ${width}`);
+    } finally {
+      release();
+      await context.close();
+    }
+  }
+}
+
 async function checkInitialSettingsKeyboard() {
   for (const width of [390, 1440]) {
     for (const key of ["ArrowDown", "ArrowUp"]) {
@@ -1732,6 +1822,7 @@ try {
     await checkJumpRecovery();
     await checkTranscriptExpansionWithoutFocus();
     await checkFocusedTranscriptResizeFollowing();
+    await checkDelayedStoredThumbnail();
     await checkComposerOverlays();
     await checkUsageKeyboard();
     await checkInitialSettingsKeyboard();

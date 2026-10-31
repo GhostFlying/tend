@@ -106,13 +106,17 @@ function StoredAttachment({ file }: { file: ConversationAttachment }) {
   }, [client, visible, image, file.file_id, attempt]);
   return (
     <div ref={element} className={styles.card}>
-      {source && !failed && (
-        <ImageTile
-          name={file.name}
-          source={source}
-          previewPath={`/api/v1/conversation/attachments/${encodeURIComponent(file.file_id)}/download-url?inline=1`}
-          onError={() => setFailed(true)}
-        />
+      {image && (
+        <div className={styles.thumbnail}>
+          {source && !failed && (
+            <ImageTile
+              name={file.name}
+              source={source}
+              previewPath={`/api/v1/conversation/attachments/${encodeURIComponent(file.file_id)}/download-url?inline=1`}
+              onError={() => setFailed(true)}
+            />
+          )}
+        </div>
       )}
       <span className={styles.name} title={file.name}>
         {file.name}

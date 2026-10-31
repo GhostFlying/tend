@@ -182,6 +182,7 @@ function RunWindow({ run, label }: { run: RunView; label: string }) {
           target={target}
           position={readingPosition}
           restored={savedPosition}
+          fallbackFocus={toggle}
           onClose={close}
         />
       )}
@@ -327,6 +328,7 @@ function Reader({
   target,
   position,
   restored,
+  fallbackFocus,
   onClose,
 }: {
   run: RunView;
@@ -336,6 +338,7 @@ function Reader({
   target: string;
   position: RefObject<ReadingPosition | null>;
   restored: ReadingPosition | null;
+  fallbackFocus: RefObject<HTMLButtonElement | null>;
   onClose(): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -344,6 +347,8 @@ function Reader({
   const contentKey = JSON.stringify(steps);
   const previousContent = useRef("");
   const explicitLatest = useRef<{ page: WindowState["page"] } | null>(null);
+  const disclosureFrame = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(disclosureFrame.current), []);
   const initial = useRef(true);
   const closing = useRef(false);
   const anchor = useRef<{ key: string; top: number; page: WindowState["page"] } | null>(null);
@@ -402,8 +407,9 @@ function Reader({
       panel?.close();
       if (opener instanceof HTMLElement && opener.isConnected)
         opener.focus({ preventScroll: true });
+      else fallbackFocus.current?.focus({ preventScroll: true });
     };
-  }, [onClose, position, run.run_id]);
+  }, [onClose, position, run.run_id, fallbackFocus]);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -546,6 +552,23 @@ function Reader({
         className={styles.reading}
         tabIndex={0}
         aria-label="执行过程正文"
+        onClickCapture={(event) => {
+          if (
+            !(event.target instanceof Element) ||
+            !event.target.closest("summary, button[aria-expanded]")
+          )
+            return;
+          const following = state.live;
+          state.setLive(false);
+          cancelAnimationFrame(disclosureFrame.current);
+          disclosureFrame.current = requestAnimationFrame(() => {
+            disclosureFrame.current = requestAnimationFrame(() => {
+              const el = scroller.current;
+              if (following && el && el.scrollHeight - el.scrollTop - el.clientHeight < 48)
+                state.setLive(true);
+            });
+          });
+        }}
         onScroll={(event) => {
           const el = event.currentTarget;
           if (state.live && el.scrollHeight - el.scrollTop - el.clientHeight > 48)
