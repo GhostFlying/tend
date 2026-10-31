@@ -1,3 +1,4 @@
+import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Unknown writes reconcile only against later facts for the same delivery.
@@ -76,6 +77,7 @@ const json = (res: ServerResponse, value: unknown, status = 200) => {
 };
 const server = await createServer({
   configFile: false,
+  cacheDir: fixtureRoot("cache"),
   server: { host: "127.0.0.1", port: 0, watch: { ignored: ["**/*"] } },
   plugins: [
     react(),

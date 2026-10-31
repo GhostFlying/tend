@@ -1,4 +1,4 @@
-import { navigate } from "./navigation.ts";
+import { navigate, fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 import { issuePage, issueView } from "./issue-fixture.ts";
@@ -8,11 +8,10 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium, type Locator } from "playwright";
 import type { Envelope, HostView, Snapshot } from "../src/api/generated/api.ts";
 
-const root = fileURLToPath(new URL("../../internal/webui/dist/app/", import.meta.url));
+const root = fixtureRoot();
 const output = process.env.TEND_LAYOUT_OUTPUT ?? join(tmpdir(), "tend-mobile-layout");
 await mkdir(output, { recursive: true });
 const host = (id: string, online = true, maintenance = false): HostView => ({
