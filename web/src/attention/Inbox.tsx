@@ -1,6 +1,6 @@
 import { WorkItemRead } from "../workitems/live.ts";
 import { Button, Tabs, Badge, EmptyState, Textarea } from "../ui/index.ts";
-import { navigate, Link, useEntryState } from "../app/router.ts";
+import { back, navigate, Link, useEntryState } from "../app/router.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { AttentionActionTime } from "./ActionTime.tsx";
 import { AttentionOriginalMessage } from "./OriginalMessage.tsx";
@@ -78,7 +78,10 @@ export function Inbox({
   return (
     <section className={styles.root} data-selected={!!selected} aria-label="待处理事项">
       <div className={styles.pageHeader}>
-        <PageHeader title="待处理" {...(selected ? { onBack: defer } : {})} />
+        <PageHeader
+          title="待处理"
+          {...(selected ? { onBack: () => back({ page: "inbox" }) } : {})}
+        />
       </div>
       <p className={`${styles.muted} ${styles.context}`}>需要你决定或亲自推进的事项。</p>
       <Tabs
