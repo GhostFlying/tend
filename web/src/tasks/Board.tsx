@@ -171,6 +171,7 @@ export function TaskBoard({
   useEffect(() => {
     if (active) live.tasks.open(tab);
     else live.tasks.close();
+    return () => live.tasks.close();
   }, [live, active, tab]);
   return (
     <>

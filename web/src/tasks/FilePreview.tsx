@@ -1,3 +1,4 @@
+import { useOverlayState } from "../ui/focus.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DownloadURLResponse } from "../api/generated/api.ts";
@@ -25,7 +26,7 @@ export function FilePreview({
   const [source, setSource] = useState("");
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [html, setHtml] = useState(false);
+  const [html, setHtml] = useOverlayState(false);
   const image = isImage(file);
   const path = `/api/v1/${scope}/${encodeURIComponent(file.file_id)}/download-url?inline=1`;
   useEffect(() => {

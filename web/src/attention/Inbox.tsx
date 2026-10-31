@@ -1,4 +1,4 @@
-import { back, navigate } from "../app/router.ts";
+import { navigate } from "../app/router.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { AttentionActionTime } from "./ActionTime.tsx";
 import { AttentionOriginalMessage } from "./OriginalMessage.tsx";
@@ -41,12 +41,13 @@ export function Inbox({
   useEffect(() => {
     void live.attention.openInbox({ ...(kind ? { kind } : {}) });
     void live.attention.openNext();
+    return () => live.attention.inbox.close();
   }, [live, kind]);
   const items = state.value?.items ?? [];
   return (
     <section className={styles.root} data-selected={!!selected} aria-label="待处理事项">
       <PageHeader title="待处理" onBack={onClose} />
-      <p className={styles.muted}>需要你决定或亲自推进的事项。</p>
+      <p className={`${styles.muted} ${styles.context}`}>需要你决定或亲自推进的事项。</p>
       <nav className={styles.tabs} aria-label="事项类型">
         {[
           ["", "全部"],
@@ -127,7 +128,7 @@ export function Inbox({
               id={selected}
               showBack={false}
               onIssue={onIssue}
-              onBack={() => back({ page: "inbox" })}
+              onBack={() => navigate({ page: "inbox" })}
             />
           ) : (
             <p className={styles.muted}>选择一个事项查看。</p>

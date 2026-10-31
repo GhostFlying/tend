@@ -177,7 +177,7 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
   return (
     <section className={styles.panel} aria-label={subject ? "本次执行 token 用量" : "Token 用量"}>
       <header>
-        <h2>{subject ? "本次执行用量" : "Token 用量"}</h2>
+        {subject && <h2>本次执行用量</h2>}
         <small>{subject ? "本次执行 · " : ""}已采集的请求消费 · Asia/Shanghai</small>
       </header>
       <div className={styles.filters}>

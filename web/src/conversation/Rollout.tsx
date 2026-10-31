@@ -1,3 +1,4 @@
+import { useOverlayState } from "../ui/focus.ts";
 import { useEffect, useRef, useState } from "react";
 import { useServices } from "../app/services.tsx";
 import type {
@@ -8,7 +9,7 @@ import type {
 import styles from "./Agents.module.css";
 export function Rollout() {
   const { client, conversation } = useServices();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOverlayState(false);
   const [page, setPage] = useState<AgentRolloutPage | null>(null);
   const [error, setError] = useState("");
   const ref = useRef<HTMLDialogElement>(null);

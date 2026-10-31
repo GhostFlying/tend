@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import { useOverlayState } from "../ui/focus.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   ConversationImage,
@@ -112,7 +113,7 @@ export function ImageTile({
   onError?(): void;
   previewPath?: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useOverlayState(false);
   return (
     <>
       <button
