@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { IssueConversationItem } from "../api/generated/api.ts";
-import { groupToolItems, toolLabel, toolLabels } from "./toolLabels.ts";
+import { groupToolItems, retainToolGroups, toolLabel, toolLabels } from "./toolLabels.ts";
 
 const item = (id: number, status?: "completed" | "running" | "failed"): IssueConversationItem => ({
   seq: id,
@@ -59,4 +59,27 @@ test("consecutive completed calls group while messages and unfinished calls rema
     choices: [{ choice_id: "c" }],
   } as IssueConversationItem;
   expect(groupToolItems([choice, item(2, "completed")])).toHaveLength(2);
+});
+
+test("deferred groups insert a transcript backfill before the newer streamed reply", () => {
+  const firstPage = Array.from({ length: 50 }, (_, index) => item(index + 1, "completed"));
+  const initial = groupToolItems(firstPage).map((group) => group.map((row) => row.message_id));
+  const streamed = retainToolGroups(initial, [...firstPage, item(61)]);
+  expect(streamed).toEqual([initial[0], ["61"]]);
+  const full = Array.from({ length: 61 }, (_, index) => item(index + 1, "completed"));
+  const backfilled = retainToolGroups(streamed, full);
+  expect(backfilled.flat()).toEqual(full.map((row) => row.message_id));
+  expect(backfilled[0]).toEqual(initial[0]);
+  expect(backfilled.at(-1)).toEqual(["61"]);
+  expect(retainToolGroups(backfilled, full)).toEqual(backfilled);
+});
+
+test("backfill inside an expanded group preserves its wrapper and existing child keys", () => {
+  const groups = [["1", "3"], ["5"]];
+  const full = [item(1), item(2), item(3), item(4), item(5)];
+  const retained = retainToolGroups(groups, full);
+  expect(retained).toEqual([["1", "2", "3"], ["4"], ["5"]]);
+  expect(retained.map((group) => group[0])).toEqual(["1", "4", "5"]);
+  expect(retained.flat()).toEqual(full.map((row) => row.message_id));
+  expect(retainToolGroups([], [])).toEqual([]);
 });
