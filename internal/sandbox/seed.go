@@ -97,6 +97,9 @@ func SeedDemo(ctx context.Context, runtime *serverkit.Runtime, root string) (Dem
 		var issue protocol.Issue
 		key := fmt.Sprintf("board-%d", n)
 		p := protocol.CreateIssuePayload{Plan: plan(names[n], "demo-web")}
+		if n != 2 {
+			p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "sandbox-hosted/manager"}
+		}
 		if err := s.execute(ctx, key, protocol.Target{Type: "issue"}, nil, p, app.CanonicalOwnerIssueCommand{Action: "create"}, &issue); err != nil {
 			return demo, err
 		}

@@ -591,6 +591,29 @@ try {
 
     assert.equal(await page.getByRole("dialog", { name: "Issue 详情" }).count(), 0);
     await detail.getByText(/暂无活动执行/).waitFor();
+    const alignedFooter = async () => {
+      const edges = await detail.evaluate((root) => {
+        const lane = root.querySelector("[data-issue-lane]")!;
+        const footer = root.querySelector("[data-issue-footer]")!;
+        const contentLeft =
+          lane.getBoundingClientRect().left + parseFloat(getComputedStyle(lane).paddingLeft);
+        const footerLeft =
+          footer.getBoundingClientRect().left + parseFloat(getComputedStyle(footer).paddingLeft);
+        const children = Array.from(footer.children).filter(
+          (node) => node.getBoundingClientRect().height > 0,
+        );
+        return {
+          contentLeft,
+          footerLeft,
+          children: children.map((node) => node.getBoundingClientRect().left),
+        };
+      });
+      assert(Math.abs(edges.contentLeft - edges.footerLeft) <= 1, JSON.stringify(edges));
+      for (const left of edges.children)
+        assert(Math.abs(left - edges.contentLeft) <= 1, JSON.stringify(edges));
+    };
+    await alignedFooter();
+
     await detail.getByText(/由 (青竹|负责人 Agent) 更新/).waitFor();
     await detail.getByText(/执行 Agent 实施已交付/).waitFor();
     assert.equal(
@@ -996,9 +1019,14 @@ try {
     issue.conversation!.reason = "owner";
     publish();
     await detail
-      .getByText("当前由你负责；可交接给 Agent 后继续负责人对话。", { exact: true })
+      .getByText("这个 Issue 由你负责，没有负责人 Agent 对话。", { exact: true })
       .waitFor();
-    assert(await detail.getByRole("button", { name: "发送", exact: true }).isDisabled());
+    await alignedFooter();
+    assert.equal(await detail.getByRole("textbox", { name: "消息", exact: true }).count(), 0);
+    assert.equal(await detail.getByText(/发给 .*本 Issue 负责人/).count(), 0);
+    await detail.getByRole("button", { name: "交给 Agent 负责", exact: true }).click();
+    await detail.getByRole("dialog", { name: "交接负责人", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
     issue.state = "closed";
     issue.conversation!.reason = "ended";
     publish();
@@ -1101,9 +1129,16 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-    await page
-      .getByText("当前由你负责；可交接给 Agent 后继续负责人对话。", { exact: true })
-      .waitFor();
+    await page.getByText("这个 Issue 由你负责，没有负责人 Agent 对话。", { exact: true }).waitFor();
+    const footerEdges = await page.evaluate(() => {
+      const lane = document.querySelector("[data-issue-lane]")!;
+      const reason = document.querySelector("[data-issue-footer] p")!;
+      return [
+        lane.getBoundingClientRect().left + parseFloat(getComputedStyle(lane).paddingLeft),
+        reason.getBoundingClientRect().left,
+      ];
+    });
+    assert(Math.abs(footerEdges[0]! - footerEdges[1]!) <= 1, JSON.stringify(footerEdges));
     await page.getByRole("button", { name: "展开全文", exact: true }).waitFor();
     await page.evaluate(
       () =>
@@ -1222,7 +1257,7 @@ try {
   });
   await isolation.reload();
   await isolatedIssue
-    .getByText("当前由你负责；可交接给 Agent 后继续负责人对话。", { exact: true })
+    .getByText("这个 Issue 由你负责，没有负责人 Agent 对话。", { exact: true })
     .waitFor();
   assert.equal(await isolatedIssue.getByText("只属于主对话的待发内容", { exact: true }).count(), 0);
   await isolatedIssue.getByRole("button", { name: "返回 Issue 列表或上一项", exact: true }).click();

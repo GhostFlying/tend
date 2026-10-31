@@ -202,6 +202,19 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	}
 	var board protocol.IssuePage
 	c.call(http.MethodGet, "/api/v1/issues?board=true&include_closed=true&limit=100", nil, &board)
+	ownerAssigned := 0
+	for _, id := range demo.Issues {
+		var view protocol.IssueView
+		c.call(http.MethodGet, "/api/v1/issues/"+id, nil, &view)
+		if view.Assignee.Kind == protocol.IssueAssigneeOwner {
+			ownerAssigned++
+		} else if view.Assignee.Ref != "sandbox-hosted/manager" {
+			t.Fatal("unexpected board assignee", view.Assignee)
+		}
+	}
+	if ownerAssigned != 1 {
+		t.Fatalf("owner board examples=%d, want 1", ownerAssigned)
+	}
 	for _, column := range protocol.IssueWorkStatusValues() {
 		if board.Counts[column] == 0 {
 			t.Fatalf("empty board column %s: %+v", column, board.Counts)

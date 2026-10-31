@@ -267,18 +267,37 @@
   padding-top: var(--space-2);
 }
 .composer {
-  padding: 10px var(--space-6) calc(var(--space-3) + env(safe-area-inset-bottom));
+  padding: 10px 0 calc(var(--space-3) + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border-soft);
   background: var(--bg);
   flex: none;
   max-height: 30dvh;
   overflow: auto;
+  scrollbar-gutter: stable;
+}
+.composerLane {
+  max-width: 900px;
+  padding-inline: var(--space-7);
+  margin: 0 auto;
+}
+.conversationReason {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.conversationReason p {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.conversationReason button {
+  flex: none;
 }
 .recipient {
   color: var(--label-3);
   font-size: var(--text-caption);
-  margin: 0 auto 6px;
-  max-width: 836px;
+  margin: 0 0 6px;
 }
 .sidebar {
   width: 280px;
@@ -448,7 +467,10 @@
     font-size: var(--text-title-lg);
   }
   .composer {
-    padding: var(--space-2) var(--space-3) calc(var(--space-2) + env(safe-area-inset-bottom));
+    padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom));
+  }
+  .composerLane {
+    padding-inline: var(--space-4);
   }
   .attention {
     padding: 14px;
