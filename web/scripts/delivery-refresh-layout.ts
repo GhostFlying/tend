@@ -199,6 +199,16 @@ try {
   assert(address && typeof address !== "string");
   browser = await chromium.launch();
   const context = await browser.newContext({ serviceWorkers: "block" });
+  const reactWarnings: string[] = [];
+  context.on("page", (opened) =>
+    opened.on("console", (message) => {
+      if (
+        ["warning", "error"].includes(message.type()) &&
+        /Cannot update a component|React.*warning/i.test(message.text())
+      )
+        reactWarnings.push(message.text());
+    }),
+  );
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
   await page.goto(`http://127.0.0.1:${address.port}/?issue=${id}`);
@@ -392,6 +402,7 @@ try {
     .waitFor();
   assert.equal(requests.size, before, "reading and closing never sends the local draft");
   await mobileContext.close();
+  assert.deepEqual(reactWarnings, [], "no React render-phase update warnings");
   console.log(
     "PASS unknown refresh: unrelated facts remain blocked; completed observation restores explicit refresh; no automatic writes; terminal lost-before-server reconnect and same-ID recovery; mobile canonical task-to-Issue reading preserves a reachable draft and attachment",
   );

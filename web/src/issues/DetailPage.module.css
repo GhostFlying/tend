@@ -270,7 +270,7 @@
   border-top: 1px solid var(--border-soft);
   background: var(--bg);
   flex: none;
-  max-height: 40dvh;
+  max-height: 30dvh;
   overflow: auto;
 }
 .recipient {
@@ -475,4 +475,27 @@
 
 .titleHeader {
   display: contents;
+}
+
+.deliverySummary {
+  margin: var(--space-6) 0;
+}
+.ended {
+  max-width: 836px;
+  margin: 0 auto;
+}
+.ended p {
+  margin: var(--space-1) 0;
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+
+.child,
+.resultLink,
+.sideEntry {
+  height: auto;
+  min-height: var(--control-l);
+}
+.resultLink {
+  align-items: flex-start;
 }

@@ -1,3 +1,4 @@
+import { editIssueFilters, navigate } from "./navigation.ts";
 import { fixtureRoot } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
@@ -311,10 +312,10 @@ try {
         .getByRole("link", { name: "Issues", exact: true })
         .click();
     else await page.getByRole("link", { name: "Issues", exact: true }).click();
-    const resourcesEntry = page.getByRole("button", { name: "资源与记录", exact: true });
-    await resourcesEntry.click();
-    const resources = page.getByRole("dialog", { name: "资源与记录", exact: true });
-    await resources.getByRole("button", { name: "执行主机状态", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "资源与记录", exact: true }).count(), 0);
+    const resourcesEntry = page.getByRole("button", { name: "新建 Issue", exact: true });
+    await resourcesEntry.focus();
+    await navigate(page, "/hosts");
     const hostsPage = page.getByRole("region", { name: "执行主机", exact: true });
     const hostEntry = hostsPage.getByRole("button", { name: "主机详情：host-a", exact: true });
     await hostEntry.click();
@@ -344,14 +345,16 @@ try {
     holdIssueBoard = false;
     issueReadArrived = undefined;
     for (const send of heldIssues.splice(0)) send();
-    await page.waitForFunction(() => document.activeElement?.textContent === "资源与记录");
+    await page.waitForFunction(() => document.activeElement?.textContent === "新建 Issue");
     assert(
       await resourcesEntry.evaluate((element) => document.activeElement === element),
       "resource back must return focus to its entry",
     );
     if (mobile) {
-      await page.getByLabel("按项目筛选Issue").fill("selected-project");
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await editIssueFilters(page, () =>
+        page.getByLabel("按项目筛选Issue").fill("selected-project"),
+      );
+      await navigate(page, "/tasks");
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })
@@ -369,9 +372,8 @@ try {
     const openRegistry = async () => {
       await entry.click();
     };
-    const closeRegistry = panel.getByRole("button", {
-      name: "← 返回",
-    });
+    const closeRegistry = { click: () => page.goBack() };
+    const registryRefresh = panel.getByRole("button", { name: "刷新仓库", exact: true });
     await openRegistry();
     await panel.getByText("已读取登记。", { exact: true }).waitFor();
     assert(reads > before, "reopening reads the independent API");
@@ -464,8 +466,8 @@ try {
     await panel.getByRole("button", { name: "刷新仓库" }).click();
     await panel.getByText("已读取登记。", { exact: true }).waitFor();
     await ordered(panel, registrationOrder);
-    await usable(closeRegistry, page);
-    await closeRegistry.focus();
+    await usable(registryRefresh, page);
+    await panel.getByRole("heading", { name: "已注册仓库", exact: true, level: 1 }).focus();
     await page.keyboard.press("Tab");
     assert(
       await panel.evaluate((element) => element.contains(globalThis.document.activeElement)),
@@ -505,17 +507,17 @@ try {
       await page.getByRole("dialog", { name: "主机详情", exact: true }).waitFor();
       await page.getByRole("button", { name: "关闭主机详情" }).click();
       await resources.locator(":scope > summary").click();
-      await page.getByRole("button", { name: "返回Issue", exact: true }).click();
+      await page.goBack();
       await usable(
         page
           .getByRole("region", { name: "Issue白板" })
           .getByRole("button", { name: "Sample ongoing Issue", exact: true }),
         page,
       );
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
     } else {
       await page.getByRole("link", { name: "Issues", exact: true }).click();
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
     }
     // Historical tasks that predate work items must remain reachable and paginated.
     await page.getByRole("heading", { name: "任务执行", exact: true }).waitFor();
@@ -558,7 +560,7 @@ try {
       .getByRole("heading", { name: "Sample ongoing Issue", exact: true })
       .waitFor();
     await closeIssue(page);
-    const ended = executions.getByRole("tab", { name: "已结束", exact: true });
+    const ended = executions.getByRole("tab", { name: /^已结束(?: · \d+\+?)?$/ });
     await ended.focus();
     await page.keyboard.press("Enter");
     await executions.getByRole("button", { name: "查看结果与验收 ›", exact: true }).waitFor();
@@ -578,14 +580,14 @@ try {
       await details.getByText(`Unlinked historical ${lifecycle} page 2`, { exact: true }).waitFor();
       await details.getByRole("button", { name: /← 返回/ }).click();
     }
-    await executions.getByRole("tab", { name: "全部", exact: true }).click();
+    await executions.getByRole("tab", { name: /^全部(?: · \d+\+?)?$/ }).click();
     await executions.getByText("正在启动", { exact: true }).waitFor();
     assert.equal(await executions.locator("article").count(), 8);
-    await executions.getByRole("tab", { name: "全部", exact: true }).focus();
+    await executions.getByRole("tab", { name: /^全部(?: · \d+\+?)?$/ }).focus();
     await page.keyboard.press("Home");
     assert.equal(
       await executions
-        .getByRole("tab", { name: "当前", exact: true })
+        .getByRole("tab", { name: /^当前(?: · \d+\+?)?$/ })
         .getAttribute("aria-selected"),
       "true",
     );
@@ -593,10 +595,10 @@ try {
       await executions.evaluate((el) => el.scrollWidth <= el.clientWidth),
       "task list does not overflow horizontally",
     );
-    await page.getByRole("button", { name: "返回Issue", exact: true }).click();
+    await page.goBack();
     await page.getByRole("region", { name: "Issue白板", exact: true }).waitFor();
     if (mobile) {
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })
@@ -674,7 +676,7 @@ try {
         .getByRole("navigation", { name: "视图" })
         .getByRole("link", { name: "Issues", exact: true })
         .click();
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })
@@ -683,6 +685,31 @@ try {
       await panel.getByText("全部 30 个 · 含已归档仓库", { exact: true }).waitFor();
       await ordered(panel, registrationOrder);
     }
+    const currentOnly = "**/api/v1/tasks?*";
+    await page.route(currentOnly, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("lifecycle")?.startsWith("draft"))
+        await route.fulfill({ json: { tasks: [] } });
+      else await route.continue();
+    });
+    await navigate(page, "/");
+    await navigate(page, "/tasks");
+    await executions.getByRole("tab", { name: /^已结束(?: · \d+\+?)?$/ }).waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector('[role="tab"][aria-selected="true"]')
+        ?.textContent?.startsWith("已结束"),
+    );
+    await executions
+      .getByRole("button", { name: "查看结果与验收 ›", exact: true })
+      .first()
+      .waitFor();
+    assert.equal(
+      await executions.getByRole("tab", { name: /^当前 · 0$/ }).count(),
+      1,
+      "known empty current count",
+    );
+    await page.unroute(currentOnly);
     assert.deepEqual(errors, [], "no browser runtime errors");
     console.log(
       `PASS ${viewport.width}x${viewport.height}: archive labels, stable mixed/archived/active/empty order, refresh, registry, scrolling, focus, resources, navigation`,

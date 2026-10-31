@@ -1,6 +1,6 @@
 import { useEntryState } from "../app/router.ts";
 import { AssigneeName } from "./AssigneeName.tsx";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { IssueSummary, IssueState, IssueView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
@@ -125,10 +125,10 @@ function Children({
   includeClosed: boolean;
 }) {
   const { live } = useServices();
-  const read = useMemo(
-    () => live.issues.children(id, undefined, includeClosed),
-    [live, id, includeClosed],
-  );
+  const read = useMemo(() => live.issues.childReader(id, includeClosed), [live, id, includeClosed]);
+  useEffect(() => {
+    live.issues.children(id, undefined, includeClosed);
+  }, [live, id, includeClosed]);
   const state = useStore(read.state);
   return (
     <div role="group">

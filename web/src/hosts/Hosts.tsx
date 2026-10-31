@@ -1,3 +1,4 @@
+import { Button, Badge } from "../ui/index.ts";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type { HostView } from "../api/generated/api.ts";
@@ -47,8 +48,9 @@ export function Hosts({
         </p>
       )}
       {(snapshot?.hosts ?? []).map((h) => (
-        <button
+        <Button
           type="button"
+          variant="ghost"
           className={styles.row}
           data-expanded={expanded || undefined}
           key={h.host_id}
@@ -61,9 +63,7 @@ export function Hosts({
         >
           <span className={styles.identity}>
             <span className={styles.name}>{h.host_id}</span>
-            <span className={styles.online} data-online={h.online}>
-              {hostOnline(h)}
-            </span>
+            <Badge tone={h.online === true ? "ok" : "neutral"}>{hostOnline(h)}</Badge>
           </span>
           <span className={styles.facts}>
             {hostMaintaining(h) && (
@@ -74,7 +74,7 @@ export function Hosts({
               {h.open_runs} / {h.slots} 槽位
             </span>
           </span>
-        </button>
+        </Button>
       ))}
       {snapshot && !snapshot.hosts?.length && <EmptyState>暂无已登记的执行主机。</EmptyState>}
       {host && <HostDetails host={host} waiting={waiting} onClose={close} />}
@@ -110,9 +110,9 @@ function HostDetails({
     >
       <div className={styles.header}>
         <h2>主机详情</h2>
-        <button type="button" onClick={onClose} aria-label="关闭主机详情">
+        <Button type="button" onClick={onClose} aria-label="关闭主机详情">
           ×
-        </button>
+        </Button>
       </div>
       <h3 className={styles.hostName}>{host.host_id}</h3>
       {waiting && <p className={styles.waiting}>等待连接恢复，显示最后观察状态。</p>}
@@ -162,7 +162,7 @@ function HostDetails({
         </p>
       )}
       {host.maintenance?.upgrade_id && (
-        <button
+        <Button
           type="button"
           onClick={() => {
             onClose();
@@ -170,7 +170,7 @@ function HostDetails({
           }}
         >
           查看发布详情
-        </button>
+        </Button>
       )}
       {host.maintenance?.reason && <p className={styles.reason}>{host.maintenance.reason}</p>}
     </dialog>

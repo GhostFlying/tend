@@ -35,8 +35,6 @@ export function RoutePage({
     if (root) return restorePage(root);
   }, [identity]);
   const chat = () => navigate({ page: "chat" });
-  const tasks = () => navigate({ page: "tasks" });
-  const repos = () => navigate({ page: "repos" });
   const inbox = (id?: string) => navigate(id ? { page: "attention", id } : { page: "inbox" });
   let content;
   switch (route.page) {
@@ -44,16 +42,7 @@ export function RoutePage({
     case "conversation":
       return <div ref={outlet} hidden />;
     case "issues":
-      content = (
-        <IssueBoard
-          active
-          onSelect={openIssue}
-          onChat={chat}
-          onRecords={tasks}
-          onInbox={inbox}
-          onRepos={repos}
-        />
-      );
+      content = <IssueBoard active onSelect={openIssue} onInbox={inbox} />;
       break;
     case "issue":
       content = (
@@ -69,15 +58,7 @@ export function RoutePage({
       );
       break;
     case "tasks":
-      content = (
-        <TaskBoard
-          active
-          connection={connection}
-          onChat={() => back({ page: "issues" })}
-          backLabel="返回Issue"
-          onRepos={repos}
-        />
-      );
+      content = <TaskBoard active connection={connection} />;
       break;
     case "task":
       content = (
@@ -105,13 +86,7 @@ export function RoutePage({
       content = <MorePage />;
       break;
     case "settings":
-      content = (
-        <Handoff
-          connection={connection}
-          onClose={() => back({ page: "chat" })}
-          onCatalog={() => navigate({ page: "agents" })}
-        />
-      );
+      content = <Handoff connection={connection} onCatalog={() => navigate({ page: "agents" })} />;
       break;
     case "agents":
       content = (
@@ -129,12 +104,12 @@ export function RoutePage({
       );
       break;
     case "repos":
-      content = <Repositories connection={connection} onClose={() => back({ page: "chat" })} />;
+      content = <Repositories connection={connection} />;
       break;
     case "usage":
       content = (
         <section className={styles.page}>
-          <PageHeader title="Token 用量" onBack={() => back({ page: "chat" })} />
+          <PageHeader title="Token 用量" />
           <UsagePanel />
         </section>
       );
@@ -142,7 +117,7 @@ export function RoutePage({
     case "hosts":
       content = (
         <section className={styles.page} aria-label="执行主机">
-          <PageHeader title="执行主机" onBack={() => back({ page: "chat" })} />
+          <PageHeader title="执行主机" />
           <Hosts connection={connection} expanded />
         </section>
       );

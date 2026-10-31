@@ -605,21 +605,59 @@ function overlaps(a: Rect, b: Rect) {
 
 async function reachable(locator: Locator) {
   await locator.scrollIntoViewIfNeeded();
+  const reachableNow = await locator.evaluate((element) => {
+    const r = element.getBoundingClientRect();
+    const x = Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2));
+    const y = Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2));
+    const hit = document.elementFromPoint(x, y);
+    return (
+      r.width > 0 &&
+      r.height > 0 &&
+      r.bottom > 0 &&
+      r.top < innerHeight &&
+      !!hit &&
+      element.contains(hit)
+    );
+  });
+  if (!reachableNow) {
+    await locator.page().screenshot({ path: join(output, "reachability-failure.png") });
+    await writeFile(
+      join(output, "reachability-failure.json"),
+      JSON.stringify(
+        await locator.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            Math.min(innerWidth - 1, Math.max(0, rect.left + rect.width / 2)),
+            Math.min(innerHeight - 1, Math.max(0, rect.top + rect.height / 2)),
+          );
+          return {
+            rect: rect.toJSON(),
+            hit: hit?.outerHTML,
+            active: document.activeElement?.outerHTML,
+            ancestors: Array.from(
+              (function* () {
+                let node: Element | null = element;
+                while (node) {
+                  yield node;
+                  node = node.parentElement;
+                }
+              })(),
+            ).map((node) => ({
+              tag: node.tagName,
+              className: node.className,
+              top: node.scrollTop,
+              height: node.clientHeight,
+              total: node.scrollHeight,
+            })),
+          };
+        }),
+        null,
+        2,
+      ),
+    );
+  }
   assert(
-    await locator.evaluate((element) => {
-      const r = element.getBoundingClientRect();
-      const x = Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2));
-      const y = Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2));
-      const hit = document.elementFromPoint(x, y);
-      return (
-        r.width > 0 &&
-        r.height > 0 &&
-        r.bottom > 0 &&
-        r.top < innerHeight &&
-        !!hit &&
-        element.contains(hit)
-      );
-    }),
+    reachableNow,
     `control is not reachable: ${(await locator.getAttribute("aria-label")) ?? (await locator.textContent())}`,
   );
 }

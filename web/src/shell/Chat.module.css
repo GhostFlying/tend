@@ -210,3 +210,9 @@
   flex-wrap: wrap;
   gap: 6px 18px;
 }
+
+/* A focused decision must fit inside its own viewport, not behind the composer.
+   The outer seat remains scrollable when enlarged text exhausts the dock budget. */
+.seatScroll:has(button:focus, textarea:focus) {
+  min-height: min(160px, 30dvh);
+}

@@ -18,26 +18,26 @@
   font-size: var(--text-caption);
 }
 .context {
-  padding: 0 var(--space-4);
+  padding: 0 var(--space-6);
 }
 .tabs {
   display: flex;
-  gap: var(--space-6);
+  gap: var(--space-2);
   border-bottom: 1px solid var(--border);
   padding: 0 var(--space-6);
 }
 .tabs button {
-  padding: var(--space-3) 0;
+  padding: var(--space-3);
   border-bottom: 2px solid transparent;
   white-space: nowrap;
 }
-.tabs button[aria-pressed="true"] {
+.tabs button[aria-selected="true"] {
   border-bottom-color: var(--label);
   font-weight: 600;
 }
 .split {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 36%) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
 }
@@ -48,21 +48,71 @@
   padding: var(--space-4);
 }
 .row {
+  min-width: 0;
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: var(--radius-m);
+}
+.row[data-selected="true"] {
+  background: var(--accent-soft);
+}
+.rowOpen {
+  height: auto;
+  min-height: 0;
+  font-size: var(--text-body);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
   width: 100%;
-  padding: var(--space-4);
   text-align: left;
-  border-left: 2px solid transparent;
-  border-radius: var(--radius-s);
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
-.row[aria-current="true"] {
-  background: var(--bg-l2);
-  border-left-color: var(--label);
+.rowTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  font-weight: 400;
 }
-.row strong {
-  font-weight: 600;
+.rowTitle[data-unread="true"] {
+  font-weight: 500;
+}
+.rowTitle > span:last-child,
+.summary {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.summary {
+  color: var(--label-3);
+  font-size: var(--text-caption);
+  font-weight: 400;
+}
+.unread {
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  flex: none;
+}
+.rowMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+.rowMeta time {
+  margin-left: auto;
+}
+.rowMeta a {
+  color: var(--accent);
 }
 .detail {
   min-width: 0;
@@ -199,4 +249,10 @@
 }
 .original h3 {
   margin-top: 0;
+}
+
+@media (max-width: 760px) {
+  .context {
+    padding-inline: var(--space-4);
+  }
 }

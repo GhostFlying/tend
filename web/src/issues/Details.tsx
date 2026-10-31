@@ -1,3 +1,4 @@
+import { Button, Badge, Section, EmptyState } from "../ui/index.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
@@ -112,10 +113,7 @@ export function IssueDetails({
   const results = useStore(reads.results.state);
   const deliveries = useStore(reads.deliveries.state);
   const activityState = useStore(reads.activity.state);
-  const childRead = useMemo(
-    () => reads.children(id, reading.childCursor(), true),
-    [reads, id, reading],
-  );
+  const childRead = useMemo(() => reads.childReader(id, true), [reads, id]);
   const childState = useStore(childRead.state);
   const restored = useRef(false);
   const initialTop = useRef(reading.top);
@@ -189,6 +187,9 @@ export function IssueDetails({
   const actionable =
     issue?.attentions?.items?.filter((a) => a.status === "open" && a.kind !== "information") ?? [];
   const execution = executionSummary(issue);
+  const ended = !!issue && ["closed", "cancelled"].includes(issue.state);
+  const deliveryCount =
+    (results.value?.items?.length ?? 0) + (deliveries.value?.items?.length ?? 0);
   const recentDeliveries = [
     ...(results.value?.items ?? []).map((result) => ({
       id: `artifact:${result.artifact.artifact_id}`,
@@ -226,9 +227,11 @@ export function IssueDetails({
             <AssigneeName assignee={issue.assignee} />
           </dd>
           <dt>状态</dt>
-          <dd>{issueStateLabel[issue.state]}</dd>
-          <dt>看板状态</dt>
-          <dd>{workStatusLabel(workStatus(issue))}</dd>
+          <dd data-issue-status>
+            {ended || issue.state !== "active"
+              ? issueStateLabel[issue.state]
+              : workStatusLabel(workStatus(issue))}
+          </dd>
           <dt>项目</dt>
           <dd>{issue.plan.project || "未分组"}</dd>
         </dl>
@@ -236,12 +239,9 @@ export function IssueDetails({
       {!!issue.ancestors?.length && (
         <section>
           <h2>上级 Issue</h2>
-          <button
-            className={styles.textLink}
-            onClick={() => onSelect(issue.ancestors!.at(-1)!.issue_id)}
-          >
+          <Button variant="link" onClick={() => onSelect(issue.ancestors!.at(-1)!.issue_id)}>
             {issue.ancestors.at(-1)!.title} →
-          </button>
+          </Button>
         </section>
       )}
       <section>
@@ -252,42 +252,30 @@ export function IssueDetails({
         {deliveries.error && (
           <ReadError label="外部交付读取失败" retry={() => void reads.deliveries.refresh()} />
         )}
-        {recentDeliveries.map((item) => (
-          <button
-            key={item.id}
-            className={styles.resultLink}
-            onClick={() => {
-              setSide(false);
-              setPanel(item.panel);
-            }}
-          >
-            <span>{item.title}</span>
-            <small>{item.status}</small>
-          </button>
-        ))}
-        {results.value && deliveries.value && !recentDeliveries.length && (
-          <p className={styles.muted}>暂无已登记交付</p>
-        )}
         {!!deliveries.value?.items?.length && (
-          <button
-            className={styles.textLink}
+          <Button
+            variant="link"
             onClick={() => {
               setSide(false);
               setPanel("followups");
             }}
           >
             外部交付 · {deliveries.value.items.length} 项 →
-          </button>
+          </Button>
         )}
-        <button
-          className={styles.textLink}
+        <Button
+          variant="link"
           onClick={() => {
             setSide(false);
             setPanel("results");
           }}
         >
-          查看全部交付 →
-        </button>
+          查看全部交付 ·{" "}
+          {results.value && deliveries.value
+            ? `${results.value.items?.length ?? 0}${results.value.more ? "+" : ""} 项`
+            : "正在读取"}{" "}
+          →
+        </Button>
       </section>
       <section>
         <h2>执行记录</h2>
@@ -295,7 +283,8 @@ export function IssueDetails({
           .sort((a, b) => taskPriority(a) - taskPriority(b))
           .slice(0, 3)
           .map((task) => (
-            <button
+            <Button
+              variant="ghost"
               className={styles.resultLink}
               key={task.task_id}
               onClick={() => {
@@ -312,14 +301,15 @@ export function IssueDetails({
                     : ""}
                 {taskLook(task).label}
               </small>
-            </button>
+            </Button>
           ))}
         {!issue.tasks?.length && <p className={styles.muted}>暂无任务</p>}
         {!!issue.tasks?.length && (
           <details>
             <summary>全部执行（{issue.tasks.length}）</summary>
             {issue.tasks.map((task) => (
-              <button
+              <Button
+                variant="ghost"
                 className={styles.resultLink}
                 key={task.task_id}
                 onClick={() => {
@@ -328,12 +318,13 @@ export function IssueDetails({
                 }}
               >
                 {task.title} · {taskLook(task).label}
-              </button>
+              </Button>
             ))}
           </details>
         )}
       </section>
-      <button
+      <Button
+        variant="ghost"
         className={styles.sideEntry}
         onClick={() => {
           setSide(false);
@@ -341,8 +332,9 @@ export function IssueDetails({
         }}
       >
         背景与原始输入 <span>›</span>
-      </button>
-      <button
+      </Button>
+      <Button
+        variant="ghost"
         className={styles.sideEntry}
         onClick={() => {
           setSide(false);
@@ -350,8 +342,9 @@ export function IssueDetails({
         }}
       >
         跟进与外部交付 <span>›</span>
-      </button>
-      <button
+      </Button>
+      <Button
+        variant="ghost"
         className={styles.sideEntry}
         onClick={() => {
           setSide(false);
@@ -359,56 +352,56 @@ export function IssueDetails({
         }}
       >
         变更历史 <span>›</span>
-      </button>
+      </Button>
     </>
   );
   return (
     <section className={styles.page} aria-label="Issue详情">
       <header className={styles.toolbar}>
-        <button onClick={onBack} aria-label="返回Issue列表或上一项">
+        <Button variant="ghost" onClick={onBack} aria-label="返回Issue列表或上一项">
           ← 返回
-        </button>
+        </Button>
         <nav aria-label="Issue路径">
           <span>Issues</span>
           {issue?.ancestors?.map((parent) => (
-            <button key={parent.issue_id} onClick={() => onSelect(parent.issue_id)}>
+            <Button key={parent.issue_id} onClick={() => onSelect(parent.issue_id)}>
               / {parent.title}
-            </button>
+            </Button>
           ))}
           <span>/ {issue?.plan.title ?? "正在读取"}</span>
         </nav>
         <span className={styles.spacer} />
-        <button className={styles.sideToggle} onClick={() => setSide(true)}>
+        <Button className={styles.sideToggle} onClick={() => setSide(true)}>
           详情
-        </button>
+        </Button>
         {issue && (
           <details className={styles.menu}>
             <summary aria-label="更多Issue操作">•••</summary>
             <div onClick={(event) => event.currentTarget.parentElement?.removeAttribute("open")}>
-              <button disabled={!editable} onClick={() => setPanel("progress")}>
+              <Button disabled={!editable} onClick={() => setPanel("progress")}>
                 编辑当前进展
-              </button>
-              <button disabled={!editable} onClick={() => setPanel("definition")}>
+              </Button>
+              <Button disabled={!editable} onClick={() => setPanel("definition")}>
                 编辑定义
-              </button>
-              <button disabled={!editable} onClick={() => setPanel("child")}>
+              </Button>
+              <Button disabled={!editable} onClick={() => setPanel("child")}>
                 新增子Issue
-              </button>
-              <button
+              </Button>
+              <Button
                 disabled={!editable || issue.assignment_state !== "active"}
                 onClick={() => setPanel("task")}
               >
                 创建任务
-              </button>
-              <button onClick={() => setPanel("handoff")}>交接负责人</button>
+              </Button>
+              <Button onClick={() => setPanel("handoff")}>交接负责人</Button>
               {issue.state === "active" && (
-                <button onClick={() => setPanel("pause")}>暂停Issue</button>
+                <Button onClick={() => setPanel("pause")}>暂停Issue</Button>
               )}
               {issue.state === "paused" && (
-                <button onClick={() => setPanel("resume")}>恢复Issue</button>
+                <Button onClick={() => setPanel("resume")}>恢复Issue</Button>
               )}
               {["closed", "cancelled"].includes(issue.state) && (
-                <button onClick={() => setPanel("reopen")}>重新打开Issue</button>
+                <Button onClick={() => setPanel("reopen")}>重新打开Issue</Button>
               )}
             </div>
           </details>
@@ -462,35 +455,35 @@ export function IssueDetails({
                         <details>
                           <summary>另有 {actionable.length - 1} 项</summary>
                           {actionable.slice(1).map((item) => (
-                            <button
-                              className={styles.textLink}
+                            <Button
+                              variant="link"
                               key={item.attention_id}
                               onClick={() => setAttention(item.attention_id)}
                             >
                               {item.title}
-                            </button>
+                            </Button>
                           ))}
                         </details>
                       )}
                     </div>
-                    <button
-                      className={styles.primary}
+                    <Button
+                      variant="primary"
                       onClick={() => setAttention(actionable[0]!.attention_id)}
                     >
                       {actionable[0].kind === "decision" ? "查看并决定" : "查看并处理"}
-                    </button>
+                    </Button>
                   </section>
                 )}
                 <section className={styles.progress}>
                   <div className={styles.sectionHead}>
                     <h2>当前进展</h2>
-                    <button
-                      className={styles.textLink}
+                    <Button
+                      variant="link"
                       disabled={!editable}
                       onClick={() => setPanel("progress")}
                     >
                       编辑
-                    </button>
+                    </Button>
                   </div>
                   {issue.progress?.summary ? (
                     <Expandable text={issue.progress.summary} />
@@ -523,11 +516,41 @@ export function IssueDetails({
                   onCreate={() => setPanel("child")}
                   editable={editable}
                 />
+                <Section title="交付物" className={styles.deliverySummary}>
+                  {results.error && (
+                    <ReadError label="交付读取失败" retry={() => void reads.results.refresh()} />
+                  )}
+                  {deliveries.error && (
+                    <ReadError
+                      label="外部交付读取失败"
+                      retry={() => void reads.deliveries.refresh()}
+                    />
+                  )}
+                  {recentDeliveries.map((item) => (
+                    <Button
+                      key={item.id}
+                      variant="ghost"
+                      className={styles.resultLink}
+                      onClick={() => setPanel(item.panel)}
+                    >
+                      <span>{item.title}</span>
+                      <Badge>{item.status}</Badge>
+                    </Button>
+                  ))}
+                  {results.value && deliveries.value && !recentDeliveries.length && (
+                    <EmptyState>暂无已登记交付</EmptyState>
+                  )}
+                  {!!deliveryCount && (
+                    <Button variant="link" onClick={() => setPanel("results")}>
+                      全部执行交付 →
+                    </Button>
+                  )}
+                </Section>
                 <div className={styles.sectionHead}>
                   <h2>讨论与进展</h2>
-                  <button className={styles.textLink} onClick={jump}>
+                  <Button variant="link" onClick={jump}>
                     到最新 ↓
-                  </button>
+                  </Button>
                 </div>
                 {conversation ? (
                   <ConversationSessionProvider conversation={conversation} connection={connection}>
@@ -555,34 +578,49 @@ export function IssueDetails({
               </div>
             </div>
             <div className={styles.composer}>
-              <Note />{" "}
-              <div className={styles.recipient}>
-                发给 <AssigneeName assignee={issue.assignee} /> · 本 Issue 负责人
-              </div>
+              {ended && (
+                <div className={styles.ended} role="status">
+                  <p>
+                    {issue.state === "cancelled"
+                      ? "Issue 已取消，对话记录仍可阅读。"
+                      : "Issue 已结束，对话记录仍可阅读。"}
+                  </p>
+                  <Button variant="link" onClick={() => setPanel("reopen")}>
+                    重新打开Issue →
+                  </Button>
+                </div>
+              )}
+              {!ended && (
+                <>
+                  <Note />
+                  <div className={styles.recipient}>
+                    发给 <AssigneeName assignee={issue.assignee} /> · 本 Issue 负责人
+                  </div>
+                </>
+              )}
               {conversation ? (
                 <ConversationSessionProvider conversation={conversation} connection={connection}>
                   <PendingQueue connection={connection} />
-                  <Composer
-                    connection={connection}
-                    disabled={!issue.conversation?.can_send}
-                    presentation="issue"
-                  />
+                  {!ended && (
+                    <Composer
+                      connection={connection}
+                      disabled={!issue.conversation?.can_send}
+                      presentation="issue"
+                    />
+                  )}
                 </ConversationSessionProvider>
               ) : (
-                <p className={styles.muted}>{conversationError || conversationReason(issue)}</p>
+                !ended && (
+                  <p className={styles.muted}>{conversationError || conversationReason(issue)}</p>
+                )
               )}
-              {conversation && !issue.conversation?.can_send && (
+              {!ended && conversation && !issue.conversation?.can_send && (
                 <p className={styles.muted}>{conversationReason(issue)}</p>
               )}
-              {!issue.conversation?.can_send && (
-                <button
-                  className={styles.textLink}
-                  onClick={() =>
-                    setPanel(["closed", "cancelled"].includes(issue.state) ? "reopen" : "handoff")
-                  }
-                >
-                  {["closed", "cancelled"].includes(issue.state) ? "重新打开Issue" : "交接负责人"} →
-                </button>
+              {!ended && !issue.conversation?.can_send && (
+                <Button variant="link" onClick={() => setPanel("handoff")}>
+                  交接负责人 →
+                </Button>
               )}
             </div>
           </div>
@@ -631,9 +669,9 @@ export function IssueDetails({
             {panel === "results" && (
               <>
                 <IssueResultsList id={id} onTask={onTask} />
-                <button className={styles.textLink} onClick={() => setPanel("followups")}>
+                <Button variant="link" onClick={() => setPanel("followups")}>
                   外部交付与观察 →
-                </button>
+                </Button>
               </>
             )}
           </div>
@@ -697,7 +735,7 @@ function taskPriority(task: NonNullable<IssueView["tasks"]>[number]): number {
 export function ReadError({ label, retry }: { label: string; retry(): void }) {
   return (
     <p role="status" className={styles.error}>
-      {label}。<button onClick={retry}>重新读取</button>
+      {label}。<Button onClick={retry}>重新读取</Button>
     </p>
   );
 }
@@ -720,9 +758,9 @@ function Expandable({ text }: { text: string }) {
         {text}
       </p>
       {(open || clipped) && (
-        <button className={styles.textLink} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Button variant="link" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? "收起" : "展开全文"}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -742,10 +780,10 @@ function ChildIssues({
   onCreate(): void;
   editable: boolean;
 }) {
-  const read = useMemo(
-    () => reads.children(issue.issue_id, reading.childCursor(), true),
-    [reads, issue.issue_id, reading],
-  );
+  const read = useMemo(() => reads.childReader(issue.issue_id, true), [reads, issue.issue_id]);
+  useEffect(() => {
+    reads.children(issue.issue_id, reading.childCursor(), true);
+  }, [reads, issue.issue_id, reading]);
   const state = useStore(read.state);
   const [expanded, setExpanded] = useState(reading.children);
   const [cursors, setCursors] = useState(reading.childCursors);
@@ -764,13 +802,14 @@ function ChildIssues({
       )}
       <div className={styles.sectionHead}>
         <h2>子 Issue</h2>
-        <button className={styles.textLink} disabled={!editable} onClick={onCreate}>
+        <Button variant="link" disabled={!editable} onClick={onCreate}>
           ＋ 新建
-        </button>
+        </Button>
       </div>
       <div>
         {(state.value.items ?? []).slice(0, expanded ? undefined : 5).map((child) => (
-          <button
+          <Button
+            variant="ghost"
             className={styles.child}
             key={child.issue_id}
             onClick={() => onSelect(child.issue_id)}
@@ -780,22 +819,22 @@ function ChildIssues({
               <AssigneeName assignee={child.assignee} />
             </span>
             <small>{issueStateLabel[child.state]}</small>
-          </button>
+          </Button>
         ))}
       </div>
       {(state.value.items?.length ?? 0) > 5 && !expanded && (
-        <button
-          className={styles.textLink}
+        <Button
+          variant="link"
           onClick={() => {
             setExpanded(true);
             reading.expandChildren();
           }}
         >
           查看全部子 Issue
-        </button>
+        </Button>
       )}
       {expanded && cursors.length > 1 && (
-        <button
+        <Button
           onClick={() => {
             const previous = cursors.slice(0, -1);
             setCursors(previous);
@@ -804,10 +843,10 @@ function ChildIssues({
           }}
         >
           上一页子 Issue
-        </button>
+        </Button>
       )}
       {expanded && state.value.more && (
-        <button
+        <Button
           onClick={() => {
             const next = [...cursors, state.value!.next!];
             setCursors(next);
@@ -816,7 +855,7 @@ function ChildIssues({
           }}
         >
           下一页子 Issue
-        </button>
+        </Button>
       )}
     </section>
   );
@@ -846,7 +885,7 @@ function IssueSources({ id, reads }: { id: string; reads: Issues }) {
       ))}
       {state.value && !state.value.sources?.length && <p>暂无已记录来源。</p>}
       {state.value?.more && (
-        <button onClick={() => void reads.openContext(id, state.value?.next)}>更早来源</button>
+        <Button onClick={() => void reads.openContext(id, state.value?.next)}>更早来源</Button>
       )}
     </>
   );
