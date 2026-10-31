@@ -477,7 +477,7 @@ try {
       page.getByRole("radio", { name: "层级", exact: true }).click(),
     );
     await editIssueFilters(page, () => page.getByLabel("包含已关闭").uncheck());
-    const board = page.getByRole("region", { name: "Issue白板", exact: true });
+    const board = page.getByRole("region", { name: "Issue 白板", exact: true });
     const title = board.getByRole("button", { name: items[0]!.plan.title, exact: true });
     await title.waitFor();
     assert.equal(await board.getByRole("treeitem").count(), 3);
@@ -486,7 +486,7 @@ try {
     await reachable(board.getByRole("button", { name: items[4]!.plan.title, exact: true }));
     assert(await board.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
     await page.screenshot({ path: join(output, `tree-last-${width}.png`) });
-    const filter = page.getByLabel("按项目筛选Issue");
+    const filter = page.getByLabel("按项目筛选 Issue");
     await editIssueFilters(page, async () => {
       await filter.click();
       await filter.pressSequentially("docs");
@@ -563,7 +563,7 @@ try {
       .filter({ visible: true })
       .first()
       .waitFor();
-    await taskDetail.getByRole("button", { name: /返回Issue/ }).click();
+    await taskDetail.getByRole("button", { name: /返回 Issue/ }).click();
     await openIssueDefinition(page);
     await detail.getByText("后续仍需明确安排。", { exact: true }).waitFor();
     const history = await openIssueAux(page, "历史");

@@ -154,7 +154,7 @@ export function MessageTags({ item }: { item: ConversationItem }) {
               )}
             </span>
           )}
-        {value?.disposition === "unassigned" && <span className={styles.tag}>无Issue</span>}
+        {value?.disposition === "unassigned" && <span className={styles.tag}>无 Issue</span>}
         {(!value || value.disposition === "pending") &&
           (item.author === "owner" || !!value?.processing) && (
             <span className={styles.tag}>关联处理中</span>
@@ -180,8 +180,8 @@ export function MessageTags({ item }: { item: ConversationItem }) {
         )}
         <button
           className={styles.menu}
-          title="修改Issue关联"
-          aria-label="修改Issue关联"
+          title="修改 Issue 关联"
+          aria-label="修改 Issue 关联"
           onClick={() => {
             setError("");
             setEditRevision(null);
@@ -207,17 +207,17 @@ export function MessageTags({ item }: { item: ConversationItem }) {
           className={styles.editor}
           onCancel={() => setOpen(false)}
           onClose={() => setOpen(false)}
-          aria-label="修改Issue关联"
+          aria-label="修改 Issue 关联"
         >
-          <h3>关联Issue</h3>
+          <h3>关联 Issue</h3>
           <p>关联用于汇集上下文，不代表授权或完成。</p>
           <input
             autoFocus
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索Issue"
-            aria-label="搜索Issue"
+            placeholder="搜索 Issue"
+            aria-label="搜索 Issue"
           />
           <label>
             <input
@@ -229,7 +229,7 @@ export function MessageTags({ item }: { item: ConversationItem }) {
                 if (e.target.checked) setSelection([]);
               }}
             />
-            明确不属于任何Issue
+            明确不属于任何 Issue
           </label>
           {items?.items
             ?.filter((x) => x.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
@@ -278,7 +278,7 @@ export function MessageTags({ item }: { item: ConversationItem }) {
                   });
               }}
             >
-              继续读取Issue
+              继续读取 Issue
             </button>
           )}
           {error && <p role="alert">{error}</p>}

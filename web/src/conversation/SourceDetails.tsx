@@ -62,7 +62,7 @@ export function SourceDetails({ id, original = true }: { id: string; original?: 
             </>
           )}
           <p className={styles.muted}>
-            补充于{new Date(source.created_at).toLocaleString("zh-CN")} · 来源记录：
+            补充于 {new Date(source.created_at).toLocaleString("zh-CN")} · 来源记录：
             {source.message_id}
           </p>
         </>
@@ -76,7 +76,7 @@ export function ExternalSourceMessage({ item }: { item: ConversationItem }) {
   return (
     <section className={sourceStyles.source} aria-label="外部来源">
       <strong>补充的原始来源</strong>
-      <p className={styles.muted}>保留来源原文，不代表你的执行指令或Agent结论。</p>
+      <p className={styles.muted}>保留来源原文，不代表你的执行指令或 Agent 结论。</p>
       <Markdown text={item.body ?? ""} />
       {!!item.attachments?.length && <MessageAttachments attachments={item.attachments} />}
       <SourceDetails id={item.message_id} original={false} />

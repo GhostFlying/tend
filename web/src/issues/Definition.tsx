@@ -144,7 +144,7 @@ export function IssueDefinition({
                       task_id: t.task_id,
                       spec_version: t.spec_version,
                       action: "continue_existing",
-                      reason: "更新Issue定义，保留当前任务原约定",
+                      reason: "更新 Issue 定义，保留当前任务原约定",
                     })),
                 })
               : createIssueCommand({
@@ -231,16 +231,16 @@ export function IssueDefinition({
     setResult(null);
   };
   return (
-    <section className={layout.root} aria-label={issue ? "编辑Issue定义" : "新建Issue"}>
-      <h2>{issue ? "编辑Issue定义" : parent ? "新增子Issue" : "新建Issue"}</h2>
+    <section className={layout.root} aria-label={issue ? "编辑 Issue 定义" : "新建 Issue"}>
+      <h2>{issue ? "编辑 Issue 定义" : parent ? "新增子 Issue" : "新建 Issue"}</h2>
       <p className={styles.muted}>
         {baseline?.plan.title ??
-          (parent ? `上级Issue：${parent.plan.title}` : "定义目标与完成条件，由负责人持续推进。")}
+          (parent ? `上级 Issue：${parent.plan.title}` : "定义目标与完成条件，由负责人持续推进。")}
       </p>
       {sourceDescription && <p className={layout.source}>{sourceDescription}</p>}
       {updated && !operation.pending && (
         <div className={layout.conflict} role="status">
-          <p>Issue已有新版本。你的草稿仍保留，保存将按编辑起始版本核对。</p>
+          <p>Issue 已有新版本。你的草稿仍保留，保存将按编辑起始版本核对。</p>
           <button className={styles.button} disabled={operation.busy} onClick={reloadDefinition}>
             载入最新定义并替换草稿
           </button>
@@ -340,7 +340,7 @@ export function IssueDefinition({
                     ) && <option value={shownAssignee}>原请求选择：{shownAssignee}</option>}
                   {activeCategories.map((category) => (
                     <option key={category.category_id} value={`category:${category.category_id}`}>
-                      {category.title} · {category.category_id}（runner 领取）
+                      {category.title} · {category.category_id}（执行主机领取）
                     </option>
                   ))}
                 </select>
@@ -394,7 +394,7 @@ export function IssueDefinition({
             <p className={styles.muted}>尚未修改定义。</p>
           )}
           <p className={styles.muted}>保存后保留定义变更记录。</p>
-          <p className={styles.muted}>Issue完成条件用于责任收尾；任务仍独立实施与验收。</p>
+          <p className={styles.muted}>Issue 完成条件用于责任收尾；任务仍独立实施与验收。</p>
         </aside>
       </div>
       {(operation.storageError || (result && result.kind !== "done")) && (
@@ -403,7 +403,7 @@ export function IssueDefinition({
         </p>
       )}
       <footer className={layout.footer}>
-        <p>更新Issue定义；已开始的任务仍按原约定执行。</p>
+        <p>更新 Issue 定义；已开始的任务仍按原约定执行。</p>
         <div className={styles.actions}>
           {operation.pending ? (
             <button
@@ -419,7 +419,7 @@ export function IssueDefinition({
               disabled={blocked || !title.trim() || !project.trim() || !intent.trim()}
               onClick={() => void save()}
             >
-              {issue ? "保存定义" : "创建Issue"}
+              {issue ? "保存定义" : "创建 Issue"}
             </button>
           )}
           <button className={styles.button} onClick={onBack}>

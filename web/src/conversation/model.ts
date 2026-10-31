@@ -146,31 +146,26 @@ export function latestReply(items: readonly ConversationItem[]): ConversationIte
   return undefined;
 }
 
-/** Fields of a tool's arguments that say what the call is about. */
-const telling = ["title", "question", "command", "query", "task_id", "decision_id", "project"];
-
-/** A one-line summary of a tool call's input. */
-export function toolSummary(input: string | undefined): string {
-  const text = (input ?? "").trim();
-  if (text === "") {
-    return "";
-  }
+/** Summaries use resolved titles only; arguments and identities are debug information. */
+export function toolSummary(
+  input: string | undefined,
+  lookup: (kind: "task" | "issue", id: string) => string | undefined = () => undefined,
+): string {
   try {
-    const value: unknown = JSON.parse(text);
+    const value: unknown = JSON.parse(input ?? "{}");
     if (value && typeof value === "object" && !Array.isArray(value)) {
-      const obj = value as Record<string, unknown>;
-      const parts = telling
-        .map((k) => obj[k])
-        .filter((v): v is string | number => typeof v === "string" || typeof v === "number")
-        .map(String);
-      if (parts.length > 0) {
-        return clip(parts.slice(0, 3).join(" · "), 120);
+      const args = value as Record<string, unknown>;
+      if (typeof args.task_id === "string") {
+        const title = lookup("task", args.task_id);
+        if (title) return title;
       }
+      const issueID = args.issue_id ?? args.work_item_id;
+      if (typeof issueID === "string") return lookup("issue", issueID) ?? "";
     }
   } catch {
-    // Not JSON: the first line says enough.
+    // Raw input remains available in the expanded debug view.
   }
-  return clip(text.split("\n", 1)[0]!, 120);
+  return "";
 }
 
 /** Shows a tool's input or output for reading: JSON indented, the rest as is. */
@@ -184,11 +179,6 @@ export function readable(text: string | undefined): string {
     }
   }
   return t;
-}
-
-function clip(s: string, n: number): string {
-  const chars = [...s];
-  return chars.length <= n ? s : `${chars.slice(0, n - 1).join("")}…`;
 }
 
 function sameDay(a: number, b: number): boolean {
@@ -211,10 +201,10 @@ export function dayLabel(at: number, now: number = Date.now()): string {
   if (sameDay(at, now - 24 * 60 * 60 * 1000)) {
     return `昨天 ${time}`;
   }
-  const date = `${d.getMonth() + 1}月${d.getDate()}日`;
+  const date = `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
   return d.getFullYear() === new Date(now).getFullYear()
     ? `${date} ${time}`
-    : `${d.getFullYear()}年${date} ${time}`;
+    : `${d.getFullYear()} 年 ${date} ${time}`;
 }
 
 export function clock(at: number): string {

@@ -1000,7 +1000,7 @@ async function checkTranscriptExpansionWithoutFocus() {
   const { context, page, errors } = await openPage(390, 844);
   try {
     const transcript = page.getByRole("region", { name: "对话记录" });
-    const tool = transcript.getByRole("button", { name: /review_tool/ });
+    const tool = transcript.getByRole("button", { name: /review tool/ });
     await tool.waitFor();
     const before = await rect(tool);
     await tool.evaluate((button) => {
@@ -1042,7 +1042,7 @@ async function checkFocusedTranscriptResizeFollowing() {
   const { context, page, errors } = await openPage(430, 932);
   try {
     const transcript = page.getByRole("region", { name: "对话记录" });
-    const tool = transcript.getByRole("button", { name: /review_tool/ });
+    const tool = transcript.getByRole("button", { name: /review tool/ });
     await tool.waitFor();
     await tool.focus();
     await transcript.evaluate((element) => {

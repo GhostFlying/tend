@@ -259,11 +259,11 @@ try {
           .click();
       else await p.getByRole("link", { name: "Issues", exact: true }).click();
       await p
-        .getByRole("region", { name: "Issue白板", exact: true })
+        .getByRole("region", { name: "Issue 白板", exact: true })
         .getByRole("button", { name: item.plan.title, exact: true })
         .click();
       await p
-        .getByRole("region", { name: "Issue详情", exact: true })
+        .getByRole("region", { name: "Issue 详情", exact: true })
         .getByRole("heading", { name: item.plan.title, exact: true })
         .waitFor();
       await openIssueAux(p, "跟进与交付");

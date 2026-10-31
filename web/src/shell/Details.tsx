@@ -1,3 +1,4 @@
+import { CommitHash, CopyIdentifier } from "../i18n/identifiers.tsx";
 import { RunConversation } from "../tasks/RunConversation.tsx";
 import { useDurableOp } from "../app/useDurableOp.ts";
 import type { ControlMode } from "../api/generated/api.ts";
@@ -79,7 +80,7 @@ function ManagerTaskContent({ task }: { task: TaskDetail }) {
           Issue 协调责任 ·{" "}
           {task.lifecycle === "running" ? "协调中" : lifecycleLabels[task.lifecycle]}
         </strong>
-        <span>{task.manager?.category_id ?? "issue-manager"}</span>
+        <span>负责人 Agent</span>
       </div>
       <p>每轮协调结束后释放执行槽，等待新输入。责任随 Issue 收尾或交接结束。</p>
       <TaskExecution task={task} />
@@ -89,7 +90,12 @@ function ManagerTaskContent({ task }: { task: TaskDetail }) {
           <Button variant="secondary" size="s" onClick={() => openIssue(task.manager!.issue_id)}>
             打开 Issue 与聊天
           </Button>
-          {task.manager.conversation_id && <p>会话：{task.manager.conversation_id}</p>}
+          {task.manager.conversation_id && (
+            <details>
+              <summary>详细信息</summary>
+              <CopyIdentifier value={task.manager.conversation_id} />
+            </details>
+          )}
         </Section>
       )}
       {typeof contract.reason === "string" && (
@@ -98,7 +104,7 @@ function ManagerTaskContent({ task }: { task: TaskDetail }) {
         </Section>
       )}
       <Section title="协调回合">
-        {!task.runs?.length && <p>等待 runner 领取。</p>}
+        {!task.runs?.length && <p>等待执行主机领取。</p>}
         {task.runs?.map((run) => (
           <div key={run.run_id} className={styles.progress}>
             <b>协调 · 第 {run.generation} 轮</b>
@@ -123,7 +129,8 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
       <div className={styles.summary}>
         <strong>任务阶段 · {lifecycleLabels[t.lifecycle]}</strong>
         <span>
-          {t.project || "未分组"} · {ratingLabels[t.rating]} · spec {t.spec_version}
+          {t.project || "未分组"}
+          {t.rating && ` · ${ratingLabels[t.rating]}`} · 第 {t.spec_version} 版要求
         </span>
         {t.control_mode !== "managed" && (
           <span className={styles.badge}>{controlLabels[t.control_mode]}</span>
@@ -146,22 +153,22 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
         <TaskExecution task={t} />
       </div>
       {!!t.issue_ids?.length && (
-        <Section title="所属Issue">
+        <Section title="所属 Issue">
           {t.issue_ids.map((id) => (
             <Button key={id} variant="secondary" size="s" onClick={() => openIssue(id)}>
-              {id === t.primary_issue_id ? t.primary_issue_title || id : id}
+              {id === t.primary_issue_id ? t.primary_issue_title || "所属 Issue" : "关联 Issue"}
             </Button>
           ))}
         </Section>
       )}
       {!!t.work_item_ids?.some((id) => !t.issue_ids?.includes(id)) && (
-        <Section title="历史关联">
+        <Fold title="历史关联详细信息">
           {t.work_item_ids
             .filter((id) => !t.issue_ids?.includes(id))
             .map((id) => (
               <code key={id}>{id} </code>
             ))}
-        </Section>
+        </Fold>
       )}
       {t.block_reason !== "none" && (
         <Section title="当前阻塞">
@@ -197,7 +204,7 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
       )}
       <div hidden={tab !== "delivery"}>
         {t.lifecycle === "completed" && (
-          <Section title={`本版交付与验收 · spec ${t.spec_version}`}>
+          <Section title={`本版交付与验收（第 ${t.spec_version} 版要求）`}>
             <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
           </Section>
         )}
@@ -224,9 +231,7 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
                         : "关联 · 对方声明"}
                   </span>
                   <strong>{relation.task.title}</strong>
-                  <small>
-                    {lifecycleLabels[relation.task.lifecycle]} · {relation.task.task_id}
-                  </small>
+                  <small>{lifecycleLabels[relation.task.lifecycle]}</small>
                 </button>
               ))}
             </div>
@@ -243,7 +248,7 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
       </div>
       <div hidden={tab !== "delivery"}>
         {t.lifecycle !== "completed" && current.artifacts.length > 0 && (
-          <Section title={`本版产物 · spec ${t.spec_version}`}>
+          <Section title={`本版产物（第 ${t.spec_version} 版要求）`}>
             <Artifacts artifacts={current.artifacts} verdicts={current.verdicts} />
           </Section>
         )}
@@ -274,7 +279,7 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
         <LogSection task={t} />
       </div>
       <div hidden={tab !== "inputs"}>
-        <Fold title={`完整目标与验收条件 · spec ${t.spec_version}`}>
+        <Fold title={`完整目标与验收条件（第 ${t.spec_version} 版要求）`}>
           {spec ? (
             Object.entries(spec).map(([key, value]) => (
               <div key={key}>
@@ -326,11 +331,11 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
         </Fold>
       </div>
       <div hidden={tab !== "history"}>
-        <Fold title="标识与原始记录">
+        <Fold title="详细信息">
           <dl className={styles.kv}>
             <dt>任务 ID</dt>
             <dd>
-              <code>{t.task_id}</code>
+              <CopyIdentifier value={t.task_id} />
             </dd>
             <dt>控制版本</dt>
             <dd>{t.control_revision}</dd>
@@ -507,7 +512,7 @@ function Artifacts({
                 <b>{verdictLabels[v.verdict]}</b>
                 <span className={styles.caption}>
                   {" "}
-                  · spec {v.spec_version}
+                  · 第 {v.spec_version} 版要求
                   {historical ? " · 历史记录" : ""}
                 </span>
                 {historical && <IssueList value={v.issues} />}
@@ -550,11 +555,11 @@ export function ArtifactRef({ value }: { value: unknown }) {
                   {mount.path !== mount.repo && ` · ${text(mount.path)}`}
                 </dt>
                 <dd>
-                  <code>{text(mount.commit_sha)}</code>
+                  <CommitHash value={text(mount.commit_sha)} />
                 </dd>
                 {typeof mount.snapshot_sha === "string" && mount.snapshot_sha && (
                   <dd>
-                    未提交变更快照 <code>{mount.snapshot_sha}</code>
+                    未提交变更快照 <CommitHash value={mount.snapshot_sha} />
                   </dd>
                 )}
               </div>
@@ -570,7 +575,7 @@ export function ArtifactRef({ value }: { value: unknown }) {
             <div key={repo}>
               <dt>{repo}</dt>
               <dd>
-                <code>{text(sha)}</code>
+                <CommitHash value={text(sha)} />
               </dd>
             </div>
           ))}

@@ -46,7 +46,7 @@ export function WorkspaceFacts({ task }: { task: TaskDetail }) {
         <p>
           复用来源{" "}
           <Button type="button" variant="link" onClick={() => openTask(source)}>
-            {source}
+            查看来源任务
           </Button>
         </p>
       )}
@@ -92,7 +92,7 @@ export function WorkspaceFacts({ task }: { task: TaskDetail }) {
                     variant="link"
                     onClick={() => openTask(resource.occupied_by!)}
                   >
-                    {resource.occupied_by}
+                    查看占用任务
                   </Button>
                 )}
               </dd>

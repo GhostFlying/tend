@@ -65,7 +65,7 @@ export function RoutePage({
         <section className={styles.page} aria-label="任务详情" data-task-scroll>
           <PageHeader
             title="任务详情"
-            backLabel={route.from ? "返回Issue" : "返回任务执行"}
+            backLabel={route.from ? "返回 Issue" : "返回任务执行"}
             onBack={() => back(route.from ? { page: "issue", id: route.from } : { page: "tasks" })}
           />
           <Details key={route.id} />

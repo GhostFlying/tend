@@ -26,7 +26,7 @@ export function IssueHierarchy({
   includeClosed?: boolean;
 }) {
   return (
-    <div className={styles.tree} role="tree" aria-label="Issue层级">
+    <div className={styles.tree} role="tree" aria-label="Issue 层级">
       <div className={styles.treeHead}>
         <span>Issue</span>
         <span>负责人</span>
@@ -89,7 +89,7 @@ function IssueNode({
           <div className={styles.treeName}>
             <button onClick={() => onSelect(item.issue_id)}>{item.title}</button>
             {depth === 0 && item.parent_issue_id && (
-              <small className={styles.muted}>上级Issue：{item.parent_issue_id}</small>
+              <small className={styles.muted}>存在上级 Issue</small>
             )}
           </div>
         </div>

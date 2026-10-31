@@ -227,7 +227,7 @@ export function AgentWorkspace({
               <header>
                 <div>
                   <h2>会话</h2>
-                  <p>主助理、Issue负责人会话与独立咨询</p>
+                  <p>主 Agent、Issue 负责人会话与独立咨询</p>
                 </div>
                 <button onClick={() => setOpen(false)} aria-label="关闭会话抽屉">
                   <Close width={18} height={18} />
@@ -300,7 +300,7 @@ export function AgentWorkspace({
                   </button>
                 ))}
                 {page && !page.items?.length && (
-                  <p>暂无匹配会话。可以开始独立咨询，或在Issue详情与负责人对话。</p>
+                  <p>暂无匹配会话。可以开始独立咨询，或在 Issue 详情与负责人对话。</p>
                 )}
                 {page?.next && (
                   <button disabled={loadingMore} onClick={() => void more()}>

@@ -287,10 +287,10 @@ function TaskRows({ feed, tab, onTab }: { feed: TaskFeed; tab: number; onTab(tab
 }
 function parentLabel(task: TaskSummary): string {
   return task.primary_issue_id
-    ? `所属Issue：${task.primary_issue_title ?? task.primary_issue_id}`
+    ? `所属 Issue：${task.primary_issue_title ?? "所属 Issue"}`
     : task.primary_work_item_id
-      ? `历史关联：${task.primary_work_item_title ?? task.primary_work_item_id}`
-      : "未关联Issue";
+      ? `历史关联：${task.primary_work_item_title ?? "历史关联"}`
+      : "未关联 Issue";
 }
 function TaskCard({ task }: { task: TaskSummary }) {
   const { openTask, openIssue } = useServices();
@@ -314,7 +314,8 @@ function TaskCard({ task }: { task: TaskSummary }) {
         </div>
         <div className={styles.taskMeta}>
           <span className={styles.meta}>
-            {task.project || "未分组"} · {ratingLabels[task.rating]} · spec {task.spec_version}
+            {task.project || "未分组"}
+            {task.rating && ` · ${ratingLabels[task.rating]}`} · 第 {task.spec_version} 版要求
           </span>
           {task.primary_issue_id ? (
             <button className={styles.parentLink} onClick={() => openIssue(task.primary_issue_id!)}>
