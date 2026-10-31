@@ -218,6 +218,7 @@ export function IssueActivity({
     }
     last.current = position;
     if (outgoing.length > previousPending.current && end) {
+      pagination.current = null;
       reading.followLatest();
       correctScroll(end, () => end.scrollTo({ top: end.scrollHeight }));
       requestAnimationFrame(() => setNewItems(false));
