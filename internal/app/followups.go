@@ -338,6 +338,9 @@ func followupFacts(ctx context.Context, q store.Querier, r protocol.FollowupRule
 	return
 }
 func cancelPendingFollowups(ctx context.Context, x *Exec, tx *store.Tx, id string) error {
+	if err := cancelPendingCommunicationNotices(ctx, x, tx, id); err != nil {
+		return err
+	}
 	if err := cancelBackgroundFollowups(ctx, x, tx, id); err != nil {
 		return err
 	}

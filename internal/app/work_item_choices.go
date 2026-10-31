@@ -92,6 +92,9 @@ func createChoice(ctx context.Context, x *Exec, tx *store.Tx, w protocol.WorkIte
 	if err := tx.SaveWorkItemChoice(ctx, c, key, 0); err != nil {
 		return Outcome{}, err
 	}
+	if err := registerSystemCommunication(ctx, x, tx, c.MessageID, "choice_opened:"+c.ChoiceID); err != nil {
+		return Outcome{}, err
+	}
 	return Outcome{Result: c, Events: []Event{choiceEvent(c, "opened"), {ObjectType: "message", ObjectID: c.MessageID, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": "system"}}}}, nil
 }
 
@@ -152,6 +155,9 @@ func (cmd UpdateWorkItemChoice) Apply(ctx context.Context, x *Exec, tx *store.Tx
 			id := x.IDs.New(protocol.PrefixMessage)
 			seq, e := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "owner", Body: p.Answer, ReplyTo: c.MessageID, CreatedAt: c.UpdatedAt})
 			if e != nil {
+				return Outcome{}, e
+			}
+			if e := registerWebCommunicationInput(ctx, tx, id, c.MessageID); e != nil {
 				return Outcome{}, e
 			}
 			c.AnswerSourceID = id

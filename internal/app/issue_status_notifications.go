@@ -95,6 +95,9 @@ func cancelQueuedIssueStatusNotice(ctx context.Context, x *Exec, tx *store.Tx, i
 	return len(batches) > 0, nil
 }
 
+// D131 extension point: a source-specific domain command first commits the
+// authoritative Issue change, then queues a source-bound manager wake in this
+// same transaction. Future external sources reuse this boundary, not main chat.
 func flushIssueStatusNotice(ctx context.Context, x *Exec, tx *store.Tx, id string) error {
 	notice, err := readIssueStatusNotice(ctx, tx.Q(), id)
 	if errors.Is(err, sql.ErrNoRows) {

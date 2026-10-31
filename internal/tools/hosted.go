@@ -71,6 +71,9 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"conversation_reply", "Reply to one admitted input. Tend selects its source endpoint; never repeat the body as native text.", "logical_turn", protocol.CoordinationReply{}, app.CoordinationReply{}, true},
+	{"conversation_notify", "Publish a sourced proactive notification. Tend selects Web and Telegram; no recipient addresses are accepted.", "logical_turn", protocol.MessagingPublication{}, app.PublishCommunication{Notify: true}, true},
+
 	{"issues_update_progress", "Maintain this Issue current progress and next step after findings, blockers or verified results. This assessment never changes task contracts or proves completion.", "issue", protocol.UpdateIssueProgressPayload{}, app.UpdateIssueProgress{}, false},
 	{"issues_followups_create", "Arrange a bounded check of this Issue's existing authorized work; it creates no worker, new goal or execution authority. Deadline-owned rules use the deadline API.", "issue", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "create"}, false},
 	{"issues_followups_update", "Revise this Issue's generic followup through its original rule revision; preserve unknown and previously claimed checks.", "followup", protocol.IssueFollowupPayload{}, app.IssueFollowupCommand{Action: "update"}, false},
@@ -136,8 +139,9 @@ func hostedMutationSchema(payload any) json.RawMessage {
 // NamedSpecs is a role capability surface, not a category permission grant.
 func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	var out []harness.ToolSpec
+	out = append(out, harness.ToolSpec{Name: "conversation_input_read", Description: "Read one exact admitted communication input and immediately record witnessed consumption. No address or channel selection.", InputSchema: json.RawMessage(`{"type":"object","properties":{"message_id":{"type":"string"}},"required":["message_id"],"additionalProperties":false}`)})
 	for _, m := range hostedMutations {
-		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && m.name != "issues_create" && !strings.HasPrefix(m.name, "attentions_") && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" {
+		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) && !communicationMutation(m.name) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && !communicationMutation(m.name) && m.name != "issues_create" && !strings.HasPrefix(m.name, "attentions_") && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" {
 			continue
 		}
 		out = append(out, harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)})
@@ -172,6 +176,10 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	}
 	return out
 }
+func communicationMutation(name string) bool {
+	return name == "conversation_reply" || name == "conversation_notify"
+}
+
 func namedLegacyRead(purpose agentconfig.Purpose, name string) bool {
 	if purpose == agentconfig.Consultation {
 		return name == "conversation_read"
@@ -238,11 +246,21 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 	if repair && !namedRepairTool(execution.Selection.Purpose, c.Tool) {
 		return fail(protocol.Errorf(protocol.CodeForbidden, "metadata repair cannot perform business operations"))
 	}
+	if c.Tool == "conversation_input_read" {
+		var args struct {
+			MessageID string `json:"message_id"`
+		}
+		if err := decode(c.Arguments, &args); err != nil {
+			return fail(err)
+		}
+		value, err := s.app.ReadCommunicationInput(ctx, execution.ID, args.MessageID)
+		return hostedAnswer(value, err), true
+	}
 	for _, m := range hostedMutations {
 		if c.Tool != m.name {
 			continue
 		}
-		if (m.name == "consultation_promote") != (execution.Selection.Purpose == agentconfig.Consultation) || execution.Selection.Purpose == agentconfig.Main && !m.main {
+		if (m.name == "consultation_promote") != (execution.Selection.Purpose == agentconfig.Consultation) && !communicationMutation(m.name) || execution.Selection.Purpose == agentconfig.Main && !m.main {
 			return fail(protocol.Errorf(protocol.CodeForbidden, "this role must delegate Issue execution"))
 		}
 		var args hostedMutationArgs

@@ -101,6 +101,17 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 				continue
 			}
 			if message.ItemType == harness.ItemUserMessage {
+				if message.ItemID != "" {
+					matches, err := m.app.MessagingNativeInputMatches(ctx, rec.RequestID, message.Text)
+					if err != nil {
+						return err
+					}
+					if matches {
+						if err := m.app.RecordMessagingConsumption(ctx, rec.RequestID, rec.MessageID, "native_receipt:"+message.ItemID); err != nil {
+							return err
+						}
+					}
+				}
 				if _, _, err := m.app.ConsumeMainSteer(ctx, th.ID(), rec.TurnID, message.Text, message.ItemID); err != nil {
 					return err
 				}
@@ -109,6 +120,9 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 					return err
 				}
 				if ok && source.NativeItemID == message.ItemID && message.ItemID != "" {
+					if err := m.app.RecordMessagingConsumption(ctx, source.RequestID, source.MessageID, "native_receipt:"+message.ItemID); err != nil {
+						return err
+					}
 					replyTo = source.MessageID
 					if !slices.Contains(sources, replyTo) {
 						sources = append(sources, replyTo)

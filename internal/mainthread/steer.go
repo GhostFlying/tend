@@ -54,7 +54,11 @@ func (m *Manager) steerOne(ctx context.Context, th harness.Thread, a *turn) erro
 	if err == nil {
 		images, err = m.app.MessageImageURLs(ctx, p.MessageID)
 	}
-	text := input(msg) + fmt.Sprintf("\n[Tend owner message sequence %d. Preserve the existing goal and constraints while applying this actual user message. This does not authorize repeating an unknown tool result.]", msg.Seq)
+	text := input(msg)
+	if communication, queryErr := m.app.MessagingMessage(ctx, msg.MessageID); queryErr == nil && communication.CorrectionOf != "" {
+		text += "\n[Tend correction of message " + communication.CorrectionOf + ". Preserve the original history and reconcile already committed effects; this is a new input, not an automatic rollback.]"
+	}
+	text += fmt.Sprintf("\n[Tend owner message sequence %d. Preserve the existing goal and constraints while applying this actual user message. This does not authorize repeating an unknown tool result.]", msg.Seq)
 	if err == nil {
 		var refs any
 		refs, err = m.app.MessageAttachmentReferences(ctx, p.MessageID)
@@ -116,6 +120,9 @@ func (m *Manager) consumeSteer(ctx context.Context, threadID, turnID, text, item
 		if err != nil || !ok || rec.NativeItemID != itemID || itemID == "" {
 			return err
 		}
+	}
+	if err := m.app.RecordMessagingConsumption(ctx, rec.RequestID, rec.MessageID, "native_input:"+itemID); err != nil {
+		return err
 	}
 	msg, err := m.app.Message(ctx, rec.MessageID)
 	if err != nil {

@@ -331,6 +331,9 @@ func evaluateDeadlineFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *pro
 			return true, err
 		}
 	}
+	if err := registerSystemCommunication(ctx, x, tx, message, "deadline_reminder:"+id+":"+window); err != nil {
+		return true, err
+	}
 	eid := x.IDs.New(protocol.PrefixEvent)
 	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: eid, Source: "app", ObjectType: "message", ObjectID: message, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"system","deadline":true}`, RequestID: x.Env.RequestID, CreatedAt: now}); err != nil {
 		return true, err

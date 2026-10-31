@@ -50,6 +50,8 @@ const (
 
 // DeliveryResult is what a delivery attempt or a reconciliation produced.
 type DeliveryResult struct {
+	ExternalMessageID int64
+
 	Outcome DeliveryOutcome
 	// RetryAfter delays the next attempt of a Retry outcome.
 	RetryAfter time.Duration
@@ -237,6 +239,26 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		}
 		if err := tx.TransitionOutbox(ctx, tr); err != nil {
 			return err
+		}
+		if d.Destination == MessagingDestination || d.Destination == MessagingReadDestination {
+			state := string(tr.To)
+			if r.Outcome == Delivered {
+				state = "accepted"
+			}
+			if r.Outcome == Retry {
+				state = "queued"
+			}
+			if _, err := tx.Exec(ctx, `UPDATE messaging_deliveries SET state=?,external_id=?,reason=?,updated_at=? WHERE delivery_id=?`, state, r.ExternalMessageID, r.Reason, now.UnixMilli(), d.OutboxID); err != nil {
+				return err
+			}
+			x := &Exec{IDs: a.ids, Now: now, Env: &protocol.Envelope{RequestID: d.RequestID}}
+			var id string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT message_id FROM messaging_deliveries WHERE delivery_id=?`, d.OutboxID).Scan(&id); err != nil {
+				return err
+			}
+			if err := communicationEvent(ctx, x, tx, id, "messaging.delivery"); err != nil {
+				return err
+			}
 		}
 		if (d.Destination == MainThreadDestination || strings.HasPrefix(d.Destination, "background_thread:")) && d.Operation == "conversation.repair_turn" && r.Outcome == Failed {
 			var m HandleMessage

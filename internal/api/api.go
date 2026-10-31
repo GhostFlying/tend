@@ -82,6 +82,12 @@ func New(a *app.App, s *store.Store, whois netx.WhoIs, secret []byte, cfg Config
 // Handler returns the API's routes, all under /api/v1/.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/messaging/channels", s.messaging)
+	mux.HandleFunc("GET /api/v1/messaging/channels/{channel}", s.messaging)
+	mux.HandleFunc("GET /api/v1/messaging/messages", s.messaging)
+	mux.HandleFunc("GET /api/v1/messaging/messages/{id}", s.messaging)
+	mux.HandleFunc("GET /api/v1/messaging/messages/{id}/{view}", s.messaging)
+	mux.HandleFunc("GET /api/v1/messaging/events", s.events)
 	mux.HandleFunc("GET /api/v1/archives", s.archiveCatalog)
 	mux.HandleFunc("GET /api/v1/archives/{archive}", s.archiveDetail)
 	mux.HandleFunc("GET /api/v1/archives/{archive}/records/{kind}", s.archiveRecords)

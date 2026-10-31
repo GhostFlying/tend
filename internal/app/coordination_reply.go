@@ -23,6 +23,53 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if x.coordinationExecution != nil && p.ReplyTo == "" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "reply_to is required for a named communication reply")
+	}
+	if p.ReplyTo != "" {
+		if err := communicationReplyInput(ctx, tx.Q(), p.ReplyTo); err != nil {
+			return Outcome{}, err
+		}
+	}
+	if x.coordinationExecution != nil && x.coordinationExecution.ConversationID != "main" {
+		if err := checkFactKinds(p.ReviewedKinds); err != nil {
+			return Outcome{}, err
+		}
+		issue := x.coordinationExecution.IssueID
+		if issue == "" && (p.Disposition != "unassigned" || len(p.WorkItemIDs) > 0 || len(p.Facts) > 0 || len(p.Contexts) > 0) {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "consultation publication grants no Issue authority")
+		}
+		if issue != "" {
+			if p.Disposition != "linked" || len(p.WorkItemIDs) != 1 || len(p.Contexts) != 1 {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "Issue reply requires its exact linked context revision")
+			}
+			for _, id := range p.WorkItemIDs {
+				if id != issue {
+					return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "publication scope is outside this Issue")
+				}
+			}
+			for _, review := range p.Contexts {
+				var current int64
+				if review.WorkItemID != issue {
+					return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "context outside this Issue")
+				}
+				if err := tx.Q().QueryRowContext(ctx, `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, issue).Scan(&current); err != nil {
+					return Outcome{}, err
+				}
+				if current != review.Revision {
+					return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "publication context changed")
+				}
+			}
+			if len(p.Facts) > 0 {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "record Issue facts with issues_context_fact before publishing")
+			}
+		}
+		child := *x
+		env := *x.Env
+		child.Env = &env
+		env.Payload, _ = json.Marshal(protocol.MessagingPublication{Body: p.Body, ReplyTo: p.ReplyTo, Attachments: p.Attachments, Purpose: p.Purpose})
+		return (PublishCommunication{}).Apply(ctx, &child, tx)
+	}
 	if p.Purpose != "progress" && p.Purpose != "final" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "purpose must be progress or final")
 	}
@@ -75,9 +122,15 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if len(sources) > 0 {
 		replyTo = sources[len(sources)-1]
 	}
+	if p.ReplyTo != "" {
+		if err := communicationSourceAllowed(ctx, tx.Q(), execution, store.ConversationID(x.Principal.ConversationID), p.ReplyTo); err != nil {
+			return Outcome{}, err
+		}
+		replyTo = p.ReplyTo
+	}
 	env.Payload, _ = json.Marshal(recordAgentMessagePayload{Body: p.Body, ReplyTo: replyTo, ReplySources: sources, TurnID: turn.TurnID, ItemID: "reply:" + x.Env.RequestID})
 	// This is explicit publication; ordinary native background prose may buffer.
-	out, err := recordVisibleAgentMessage(ctx, &child, tx)
+	out, err := recordVisibleAgentMessageWithFiles(ctx, &child, tx, p.Attachments)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -95,8 +148,17 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	}
 	env.Target = protocol.Target{Type: "message", ID: id}
 	env.ExpectedControlRevision = &assoc.Revision
-	env.Payload, _ = json.Marshal(protocol.SetMessageAssociationsPayload{Disposition: p.Disposition, WorkItemIDs: p.WorkItemIDs, ContentRevision: assoc.ContentRevision})
-	linked, err := (SetMessageAssociations{}).Apply(ctx, &child, tx)
+	var linked Outcome
+	if x.coordinationExecution != nil {
+		if len(p.Facts) > 0 {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "named planner delegates Issue fact management to its manager")
+		}
+		env.Payload, _ = json.Marshal(protocol.SetIssueMessageAssociationsPayload{Disposition: p.Disposition, IssueIDs: p.WorkItemIDs, ContentRevision: assoc.ContentRevision})
+		linked, err = (SetIssueMessageAssociations{}).Apply(ctx, &child, tx)
+	} else {
+		env.Payload, _ = json.Marshal(protocol.SetMessageAssociationsPayload{Disposition: p.Disposition, WorkItemIDs: p.WorkItemIDs, ContentRevision: assoc.ContentRevision})
+		linked, err = (SetMessageAssociations{}).Apply(ctx, &child, tx)
+	}
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -147,6 +209,9 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 			return Outcome{}, err
 		}
 		result["background_batch_id"] = batch.BatchID
+	}
+	if err := publishExistingCommunication(ctx, x, tx, id, protocol.MessagingPublication{Body: p.Body, ReplyTo: replyTo, Attachments: p.Attachments, Purpose: p.Purpose}, execution); err != nil {
+		return Outcome{}, err
 	}
 	out.Notify = true
 	result["purpose"] = p.Purpose

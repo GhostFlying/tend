@@ -258,6 +258,7 @@ export interface TendAPI {
   AttentionPage?: AttentionPage;
   AttentionView?: AttentionView;
   BackgroundSourcePage?: BackgroundSourcePage;
+  BindTelegram?: BindTelegram;
   CancelIssueDeadlinePayload?: CancelIssueDeadlinePayload;
   ConfirmAttentionPayload?: ConfirmAttentionPayload;
   ConversationAttachment?: ConversationAttachment;
@@ -309,6 +310,17 @@ export interface TendAPI {
   LedgerEvent?: LedgerEvent;
   ManagerMigrationPayload?: ManagerMigrationPayload;
   ManualSource?: ManualSource;
+  MessagingChannel?: MessagingChannel;
+  MessagingDelivery?: MessagingDelivery;
+  MessagingEvent?: MessagingEvent;
+  MessagingInput?: MessagingInput;
+  MessagingMessage?: MessagingMessage;
+  MessagingPage?: MessagingPage;
+  MessagingPublication?: MessagingPublication;
+  MessagingRead?: MessagingRead;
+  MessagingReadPayload?: MessagingReadPayload;
+  MessagingReceipts?: MessagingReceipts;
+  MessagingTrace?: MessagingTrace;
   NativeEntry?: NativeEntry;
   NextActionPage?: NextActionPage;
   PlannerEntry?: PlannerEntry;
@@ -1496,6 +1508,13 @@ export interface BackgroundSource {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BindTelegram".
+ */
+export interface BindTelegram {
+  user_id: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "CancelIssueDeadlinePayload".
  */
 export interface CancelIssueDeadlinePayload {
@@ -2671,6 +2690,164 @@ export interface ManualSource {
   metadata: ManualSourceMetadata;
   supplied_by: Principal;
   text: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingChannel".
+ */
+export interface MessagingChannel {
+  bot_mark_read: boolean;
+  channel_id: string;
+  files: boolean;
+  health: string;
+  last_observed_at: number;
+  pending_inputs: number;
+  revision: number;
+  status: string;
+  text: boolean;
+  user_read_receipts: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingDelivery".
+ */
+export interface MessagingDelivery {
+  attempts: number;
+  channel_id: string;
+  delivery_id: string;
+  external_id?: number;
+  kind: string;
+  message_id: string;
+  part: number;
+  reason?: string;
+  state: string;
+  updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingEvent".
+ */
+export interface MessagingEvent {
+  event_seq: number;
+  kind: string;
+  object_id: string;
+  object_type: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingInput".
+ */
+export interface MessagingInput {
+  attachments?: string[];
+  body?: string;
+  correction_of?: string;
+  reply_to?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingMessage".
+ */
+export interface MessagingMessage {
+  attachments: ConversationAttachment[] | null;
+  author: string;
+  body: string;
+  channel_id: string;
+  content_revision: number;
+  conversation_id: string;
+  correction_of?: string;
+  created_at: number;
+  direction: string;
+  execution_id?: string;
+  issue_ids: string[] | null;
+  message_id: string;
+  processing: string;
+  purpose?: string;
+  reason?: string;
+  reply_to?: string;
+  sequence: number;
+  source_message_ids: string[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingPage".
+ */
+export interface MessagingPage {
+  items: MessagingMessage[] | null;
+  more: boolean;
+  next: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingPublication".
+ */
+export interface MessagingPublication {
+  attachments?: string[];
+  body?: string;
+  issue_ids?: string[];
+  purpose: string;
+  reason?: string;
+  reply_to?: string;
+  source_message_ids?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingRead".
+ */
+export interface MessagingRead {
+  content_revision: number;
+  endpoint: string;
+  evidence: string;
+  execution_id?: string;
+  message_id: string;
+  read_at: number;
+  reader: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingReadPayload".
+ */
+export interface MessagingReadPayload {
+  content_revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingReceipts".
+ */
+export interface MessagingReceipts {
+  deliveries: MessagingDelivery[] | null;
+  reads: MessagingRead[] | null;
+  user_read_capability: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingTrace".
+ */
+export interface MessagingTrace {
+  message: MessagingMessage;
+  receipts: MessagingReceipts;
+  replies: string[] | null;
+  tasks: MessagingTask[] | null;
+  turns: MessagingTurn[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingTask".
+ */
+export interface MessagingTask {
+  control_mode: ControlMode;
+  lifecycle: TaskLifecycle;
+  run_id?: string;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingTurn".
+ */
+export interface MessagingTurn {
+  execution_id: string;
+  status: string;
+  thread_id: string;
+  turn_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

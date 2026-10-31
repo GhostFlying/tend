@@ -3,6 +3,7 @@ module github.com/GhostFlying/tend
 go 1.27.1
 
 require (
+	github.com/go-telegram/bot v1.27.0
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	modernc.org/sqlite v1.60.1
 	tailscale.com v1.104.1

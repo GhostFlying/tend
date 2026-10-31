@@ -203,6 +203,9 @@ func evaluateAttentionFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *pr
 		}
 	}
 	event := x.IDs.New(protocol.PrefixEvent)
+	if err := registerSystemCommunication(ctx, x, tx, message, "attention_reminder:"+a.AttentionID+":"+window); err != nil {
+		return true, false, err
+	}
 	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: event, Source: "app", ObjectType: "message", ObjectID: message, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"system","attention_reminder":true}`, RequestID: x.Env.RequestID, CreatedAt: now}); err != nil {
 		return true, false, err
 	}

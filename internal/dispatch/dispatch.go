@@ -238,3 +238,13 @@ func (d *Dispatcher) work(ctx context.Context, dest string, h Handler, wake <-ch
 		}
 	}
 }
+
+// Fanout gives independent dispatch loops their own wakeups. A shared channel
+// would let an ordinary delivery consume a read-control notification.
+type Fanout []app.Notifier
+
+func (f Fanout) Notify() {
+	for _, n := range f {
+		n.Notify()
+	}
+}

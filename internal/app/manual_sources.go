@@ -69,6 +69,9 @@ func (InjectSource) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO messaging_messages(message_id,direction,channel_id) VALUES(?,'input','web')`, id); err != nil {
+		return Outcome{}, err
+	}
 	out.Result = value
 	return out, nil
 }
