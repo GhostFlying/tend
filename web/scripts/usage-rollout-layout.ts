@@ -567,6 +567,28 @@ try {
     await rollout.waitFor();
     await rollout.getByRole("button", { name: /回到最新/ }).click();
     await rollout.getByText("实时跟随", { exact: true }).waitFor();
+    await reader.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(100);
+    await page.setViewportSize({
+      width: viewport.width > 760 ? 390 : 1440,
+      height: viewport.width > 760 ? 568 : 900,
+    });
+    await page.waitForFunction(() => {
+      const el = document.querySelector<HTMLElement>('[aria-label="执行过程正文"]')!;
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 2;
+    });
+    assert.equal(
+      await rollout.getByText("实时跟随", { exact: true }).count(),
+      1,
+      "reader resize changed latest follow intent",
+    );
+    await page.setViewportSize(viewport);
+    await page.waitForFunction(() => {
+      const el = document.querySelector<HTMLElement>('[aria-label="执行过程正文"]')!;
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 2;
+    });
     const newSeq = logs.at(-1)!.seq + 1;
     logs.push({
       seq: newSeq,
@@ -703,11 +725,31 @@ try {
         `event: ledger\ndata: ${JSON.stringify({ event_seq: eventSeq, object_type: "task", object_id: taskID, kind: "task.changed" })}\n\n`,
       );
     await rollout.locator('header [data-active="false"]').filter({ hasText: "已完成" }).waitFor();
+    if (viewport.width <= 390) await page.setViewportSize({ width: viewport.width, height: 568 });
+    const headerSize = await rollout.locator("header").evaluate((header) => {
+      const title = header.querySelector<HTMLElement>("strong")!;
+      return {
+        height: header.getBoundingClientRect().height,
+        titleWidth: title.getBoundingClientRect().width,
+        titleHeight: title.getBoundingClientRect().height,
+      };
+    });
+    if (viewport.width <= 390) {
+      assert(
+        headerSize.height <= 96,
+        `completed reader header too tall: ${JSON.stringify(headerSize)}`,
+      );
+      assert(
+        headerSize.titleWidth >= 48 && headerSize.titleHeight <= 28,
+        `completed reader title squeezed: ${JSON.stringify(headerSize)}`,
+      );
+    }
     assert.equal(
       await card.getByRole("button", { name: /查看完整过程/ }).count(),
       0,
       "completed run must remove the original compact opener",
     );
+    await page.setViewportSize(viewport);
     await page.screenshot({ path: join(output, `rollout-${viewport.width}.png`), fullPage: true });
     await rollout.getByRole("button", { name: "关闭完整过程" }).click();
     await rollout.waitFor({ state: "detached" });
