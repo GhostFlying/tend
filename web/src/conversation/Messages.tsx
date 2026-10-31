@@ -136,7 +136,13 @@ export function OutgoingRow({
   );
 }
 
-export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> }) {
+export function AgentTurn({
+  entry,
+  proseClassName,
+}: {
+  entry: Extract<Entry, { kind: "agent" }>;
+  proseClassName?: string | undefined;
+}) {
   const root = useRef<HTMLDivElement>(null);
   const status = conversationStatus(
     entry.items,
@@ -237,6 +243,7 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
           <AgentItem
             key={item.message_id}
             item={item}
+            proseClassName={proseClassName}
             hidden={false}
             id={`${prefix}-item-${item.message_id}`}
             onToolOpenChange={() => {}}
@@ -260,10 +267,12 @@ const AgentItem = memo(function AgentItem({
   id,
   onToolOpenChange,
   hideChoices = false,
+  proseClassName,
 }: {
   item: ConversationItem;
   hidden: boolean;
   hideChoices?: boolean;
+  proseClassName?: string | undefined;
   id: string;
   onToolOpenChange(id: string, open: boolean): void;
 }) {
@@ -295,7 +304,9 @@ const AgentItem = memo(function AgentItem({
         />
       ) : (
         <>
-          <Markdown text={item.body ?? ""} />
+          <div className={proseClassName}>
+            <Markdown text={item.body ?? ""} />
+          </div>
           <MessageTags item={item} />
           {status && status !== "completed" && status !== "streaming" && (
             <div className={styles.assistantState} data-state={status} role="status">

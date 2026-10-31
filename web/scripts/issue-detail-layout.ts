@@ -701,6 +701,110 @@ try {
     await page.waitForFunction(() => document.activeElement?.textContent === "查看任务与验收 →");
     assert(await taskLink.evaluate((element) => element === document.activeElement));
 
+    // Long prose must not clip the trace, and tool expansion must pause bottom following.
+    const traceBlock = activity.items![0]!.block!;
+    const traceReply = traceBlock.items![0]!;
+    const savedBody = traceReply.body;
+    traceReply.body = "长回复正文仅自身被截断。\n\n".repeat(80);
+    traceReply.assistant_revision!++;
+    const toolID = `tool-disclosure-${width}`;
+    traceBlock.items!.push({
+      message_id: toolID,
+      seq: 3,
+      kind: "message",
+      author: "main_agent",
+      reply_to: "owner-one",
+      created_at: new Date(now).toISOString(),
+      tool: {
+        name: "files_read",
+        status: "running",
+        turn_id: "turn-disclosure",
+        updated_at: new Date(now).toISOString(),
+        input: "示例文件",
+        output: "工具输出不受回复截断影响。\n".repeat(80),
+      },
+    });
+    publish();
+    const traceTurn = detail.locator('[data-scroll-id="conversation-one"]');
+    const traceToggle = traceTurn.locator("details[data-trace] > summary");
+    await traceToggle.waitFor();
+    assert.equal(
+      await traceToggle.locator('xpath=ancestor::*[contains(@class,"replyClamp")]').count(),
+      0,
+      "long prose clamp contains the trace disclosure",
+    );
+    assert.equal(
+      await traceTurn
+        .locator('[role="status"]')
+        .first()
+        .locator('xpath=ancestor::*[contains(@class,"replyClamp")]')
+        .count(),
+      0,
+      "long prose clamp contains live status",
+    );
+    await traceToggle.evaluate((node) => (node as HTMLElement).click());
+    const toolToggle = traceTurn.locator(`[data-scroll-id="${toolID}"] button[aria-expanded]`);
+    await toolToggle.waitFor();
+    await toolToggle.scrollIntoViewIfNeeded();
+    const issueScroll = detail.locator("[data-issue-scroll]");
+    await issueScroll.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
+    await page.waitForTimeout(100);
+    const controlY = await toolToggle.evaluate((node) => node.getBoundingClientRect().top);
+    await toolToggle.evaluate((node) => (node as HTMLElement).click());
+    await page.waitForTimeout(100);
+    assert(
+      Math.abs(
+        (await toolToggle.evaluate((node) => node.getBoundingClientRect().top)) - controlY,
+      ) <= 2,
+      "Issue tool expansion moved its control",
+    );
+    const toolOutput = traceTurn.getByText("工具输出不受回复截断影响。\n".repeat(80), {
+      exact: true,
+    });
+    assert.equal(
+      await toolOutput.locator('xpath=ancestor::*[contains(@class,"replyClamp")]').count(),
+      0,
+      "long prose clamp clips tool output",
+    );
+    assert(
+      await toolOutput.evaluate((node) => node.getBoundingClientRect().height > 100),
+      "fixture tool output must extend beyond the reply preview",
+    );
+    const readingTop = await issueScroll.evaluate((node) => node.scrollTop);
+    traceReply.body += "新的流式正文，不应抢走工具阅读位置。\n\n".repeat(40);
+    traceReply.assistant_revision!++;
+    publish();
+    await traceTurn
+      .getByText(/新的流式正文/)
+      .first()
+      .waitFor({ state: "attached" });
+    await page.waitForTimeout(150);
+    assert(
+      Math.abs((await issueScroll.evaluate((node) => node.scrollTop)) - readingTop) <= 2,
+      "streamed Issue update resumed following over expanded tool output",
+    );
+    assert(
+      Math.abs(
+        (await toolToggle.evaluate((node) => node.getBoundingClientRect().top)) - controlY,
+      ) <= 2,
+      "streamed Issue update moved the tool reading control",
+    );
+    await toolToggle.evaluate((node) => (node as HTMLElement).click());
+    await page.waitForTimeout(100);
+    assert(
+      Math.abs(
+        (await toolToggle.evaluate((node) => node.getBoundingClientRect().top)) - controlY,
+      ) <= 2,
+      "Issue tool collapse moved its control",
+    );
+    traceBlock.items!.pop();
+    traceReply.body = savedBody!;
+    traceReply.assistant_revision!++;
+    publish();
+    await traceToggle.waitFor({ state: "detached" });
+
     // A stable activity ID can grow while streaming without changing ledger order.
     const reply = activity.items![0]!.block!.items![0]!;
     const originalBody = reply.body!;
