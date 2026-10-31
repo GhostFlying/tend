@@ -616,9 +616,74 @@ try {
       .locator('pre[data-scroll="output"]')
       .filter({ hasText: "ok   example/internal/domain" })
       .waitFor();
+    if (await rollout.getByRole("button", { name: /回到最新/ }).count())
+      await rollout.getByRole("button", { name: /回到最新/ }).click();
+    const disclosureSeq = logs.at(-1)!.seq + 1;
+    logs.push({
+      seq: disclosureSeq,
+      native_id: "last-tool",
+      kind: "item.completed",
+      created_at: "2026-10-27T03:02:00Z",
+      body: {
+        type: "commandExecution",
+        command: "last-tool-command",
+        status: "completed",
+        aggregatedOutput: "最后一个工具的完整输出。\n".repeat(80),
+      },
+    });
+    const lastTool = rollout.locator("article").filter({ hasText: "last-tool-command" });
+    const lastToggle = lastTool.locator("summary").first();
+    await lastToggle.waitFor();
+    await reader.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(100);
+    const toolY = await lastToggle.evaluate((el) => el.getBoundingClientRect().top);
+    await lastToggle.evaluate((el) => (el as HTMLElement).click());
+    await page.waitForTimeout(100);
+    await rollout.getByText("历史阅读", { exact: true }).waitFor();
+    assert(
+      Math.abs((await lastToggle.evaluate((el) => el.getBoundingClientRect().top)) - toolY) <= 2,
+      "last-tool disclosure moved its control",
+    );
+    const toolReadingTop = await reader.evaluate((el) => el.scrollTop);
+    logs.push({
+      seq: disclosureSeq + 1,
+      native_id: "after-last-tool",
+      kind: "item.completed",
+      created_at: "2026-10-27T03:02:01Z",
+      body: { type: "agentMessage", text: "新记录不得抢走工具阅读位置" },
+    });
+    await page.waitForTimeout(2300);
+    assert(
+      Math.abs((await reader.evaluate((el) => el.scrollTop)) - toolReadingTop) <= 2,
+      "new record displaced expanded last-tool output",
+    );
+    await rollout.getByRole("button", { name: /回到最新/ }).click();
+    await rollout.getByText("新记录不得抢走工具阅读位置", { exact: true }).waitFor();
+    task.runs[0]!.observed = "finished";
+    eventSeq++;
+    for (const stream of streams)
+      stream.write(
+        `event: ledger\ndata: ${JSON.stringify({ event_seq: eventSeq, object_type: "task", object_id: taskID, kind: "task.changed" })}\n\n`,
+      );
+    await rollout.locator('header [data-active="false"]').filter({ hasText: "已完成" }).waitFor();
+    assert.equal(
+      await card.getByRole("button", { name: /查看完整过程/ }).count(),
+      0,
+      "completed run must remove the original compact opener",
+    );
     await page.screenshot({ path: join(output, `rollout-${viewport.width}.png`), fullPage: true });
     await rollout.getByRole("button", { name: "关闭完整过程" }).click();
     await rollout.waitFor({ state: "detached" });
+    assert(
+      await card
+        .getByRole("button", { name: "展开执行步骤" })
+        .evaluate((el) => document.activeElement === el),
+      "closing a completed run reader lost focus instead of using the persistent toggle",
+    );
+    task.runs[0]!.observed = "running";
+    logs.splice(-2);
     logs.pop();
     assert.deepEqual(errors, []);
     await context.close();

@@ -32,3 +32,8 @@
   font-size: var(--text-caption);
   text-align: left;
 }
+
+.thumbnail {
+  height: 135px;
+  flex: none;
+}
