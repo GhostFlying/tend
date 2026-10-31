@@ -1,3 +1,5 @@
+import { SegmentedControl } from "../ui/Choices.tsx";
+import { theme, themeLabels, setTheme } from "../theme/theme.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 // Independent owner preferences for idle preparation; model settings stay separate.
 import { useEffect, useId, useState } from "react";
@@ -19,6 +21,7 @@ export function Handoff({
   const { client, live } = useServices();
   const handoff = live.handoff;
   const state = useStore(handoff.state);
+  const choice = useStore(theme);
 
   const [draft, setDraft] = useState<string | null>(null);
 
@@ -79,6 +82,19 @@ export function Handoff({
   return (
     <section className={styles.panel} aria-label="设置">
       <PageHeader title="设置" onBack={onClose} />
+      <section aria-label="外观">
+        <h2 className={styles.sectionHeading}>外观</h2>
+        <SegmentedControl
+          label="主题"
+          value={choice}
+          onChange={setTheme}
+          items={[
+            { value: "system", label: themeLabels.system },
+            { value: "light", label: themeLabels.light },
+            { value: "dark", label: themeLabels.dark },
+          ]}
+        />
+      </section>
       {onCatalog && (
         <button type="button" className={styles.save} onClick={onCatalog}>
           Agent与类别

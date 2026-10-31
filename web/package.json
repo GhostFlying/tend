@@ -28,7 +28,8 @@
     "test:followups": "node scripts/layout-fixture.ts scripts/followups-layout.ts",
     "test:issue-surfaces-layout": "node scripts/layout-fixture.ts scripts/issue-surfaces-layout.ts",
     "test:issue-detail-layout": "node scripts/layout-fixture.ts scripts/issue-detail-layout.ts",
-    "style:check": "node scripts/style-check.ts"
+    "style:check": "node scripts/style-check.ts",
+    "test:navigation-layout": "node scripts/layout-fixture.ts scripts/issue-surfaces-layout.ts --navigation-only"
   },
   "dependencies": {
     "markdown-it": "^15.0.3",

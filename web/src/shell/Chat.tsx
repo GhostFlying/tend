@@ -1,3 +1,5 @@
+import { Link } from "../app/router.ts";
+import { Menu } from "../ui/Menu.tsx";
 import { PageHeader } from "./PageHeader.tsx";
 import { MainPending } from "../attention/MainPending.tsx";
 import type { AttentionPage } from "../api/generated/api.ts";
@@ -10,18 +12,16 @@ import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
 // The one conversation with the main agent (D27): the transcript, and the
 // seat docked at the bottom with notes and the composer.
 import { useServices } from "../app/services.tsx";
-import { useState } from "react";
 import type { Connection } from "../api/client.ts";
 import { dismissNotice, notice } from "../app/notice.ts";
 import { Composer } from "../conversation/Composer.tsx";
 import { Transcript } from "../conversation/Transcript.tsx";
 import { DecisionDock } from "../decisions/DecisionDock.tsx";
-import { theme, themeLabels, toggleTheme } from "../theme/theme.ts";
 import { useStore } from "../state/store.ts";
 import styles from "./Chat.module.css";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { ArrowDown } from "./icons.tsx";
+import { ChevronDown, More } from "./icons.tsx";
 import { OverlayVisibility, useOverlayState } from "../ui/focus.ts";
 
 export function Chat({
@@ -37,11 +37,9 @@ export function Chat({
   onAttention?: (id?: string) => void;
   onIssue?: (id: string) => void;
 }) {
-  const choice = useStore(theme);
-  const { conversation, openAgentDrawer, selectConversation, openIssue } = useServices();
-  const [jump, setJump] = useState(0);
+  const { conversation, openAgentDrawer } = useServices();
   const [sourceOpen, setSourceOpen] = useOverlayState(false, visible);
-  const toLatest = () => setJump((n) => n + 1);
+  const [rolloutOpen, setRolloutOpen] = useOverlayState(false, visible);
 
   return (
     <OverlayVisibility value={visible}>
@@ -54,45 +52,37 @@ export function Chat({
               : "一个会话，所有设备共享"}
         </span>
         <span className={styles.spacer} />
-        {
-          <nav aria-label="Agent 切换" className={styles.agentNav}>
-            {conversation?.id !== "main" && conversation?.id && (
-              <button onClick={() => selectConversation?.("main")}>主 Agent</button>
-            )}
-            <button aria-pressed={!!conversation?.workItemID} onClick={openAgentDrawer}>
-              会话 ▾
-            </button>
-            {conversation?.workItemID && (
-              <button onClick={() => openIssue(conversation.workItemID!)}>Issue ↗</button>
-            )}
-          </nav>
-        }
-        <Button variant="secondary" size="s" onClick={() => setSourceOpen(true)}>
-          来源
-        </Button>
-        <Rollout />
         <Button
-          type="button"
-          variant="secondary"
+          variant="ghost"
           size="s"
-          onClick={toggleTheme}
-          aria-label={`切换主题：${themeLabels[choice]}`}
+          className={styles.switcher}
+          title={conversation?.title ?? "主 Agent"}
+          onClick={openAgentDrawer}
+          aria-label={`切换会话：${conversation?.title ?? "主 Agent"}`}
         >
-          {themeLabels[choice]}
+          <span>{conversation?.title ?? "主 Agent"}</span>
+          <ChevronDown />
         </Button>
+        {conversation?.workItemID && (
+          <Link className={styles.issueLink} to={{ page: "issue", id: conversation.workItemID }}>
+            Issue
+          </Link>
+        )}
+        <Menu
+          label="更多"
+          variant="ghost"
+          size="s"
+          icon
+          items={[
+            { id: "source", label: "补充来源", onSelect: () => setSourceOpen(true) },
+            { id: "rollout", label: "执行记录", onSelect: () => setRolloutOpen(true) },
+          ]}
+        >
+          <More />
+        </Menu>
         <span className={styles.mobileOnly}>
           <ConnectionBadge connection={connection} compact />
         </span>
-        <Button
-          type="button"
-          variant="ghost"
-          icon
-          onClick={toLatest}
-          title="跳到最新"
-          aria-label="跳到最新"
-        >
-          <ArrowDown />
-        </Button>
       </PageHeader>
       {conversation?.kind === "consultation" && (
         <div className={styles.roleNote}>
@@ -111,15 +101,16 @@ export function Chat({
           <ManualSource onBack={() => setSourceOpen(false)} />
         </Sheet>
       )}
+      <Rollout open={rolloutOpen} onClose={() => setRolloutOpen(false)} />
       <UpgradeBanner connection={connection} />
       <div className={styles.body}>
-        <Transcript jump={jump} visible={visible} />
+        <Transcript visible={visible} />
         <div className={styles.seat}>
           <div className={styles.seatInner}>
             <Note />
             <div className={styles.seatScroll}>
               {conversation?.id === "main" && mainAttention?.value && onAttention && onIssue && (
-                <MainPending summary={mainAttention} onOpen={onAttention} onIssue={onIssue} />
+                <MainPending summary={mainAttention} />
               )}
               {!conversation?.workItemID && !mainAttention?.value && <DecisionDock />}
               <PendingQueue connection={connection} />

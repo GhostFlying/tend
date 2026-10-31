@@ -31,6 +31,11 @@
 .page {
   overflow: auto;
 }
+@media (min-width: 761px) and (max-width: 1023px) {
+  .app {
+    --sidebar-width: 64px;
+  }
+}
 @media (max-width: 760px) {
   .app {
     grid-template-columns: 100%;

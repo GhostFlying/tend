@@ -24,8 +24,7 @@ const emptyNote =
   "这里是和主 Agent 的对话。发出的消息先存在这台设备上，tend 收到后才算发出；" +
   "断网或关掉页面也不会丢。";
 
-/** jump counts requests to jump to the latest, such as the header's button. */
-export function Transcript({ jump, visible }: { jump: number; visible: boolean }) {
+export function Transcript({ visible }: { visible: boolean }) {
   const { live, queue } = useServices();
   const scroller = useRef<HTMLDivElement>(null);
   const raw = useStore(live.conversation);
@@ -59,7 +58,6 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
             .find((e) => e.status === "processing")?.item
         : processing(conversation.items);
 
-  const lastJump = useRef(jump);
   const [atBottom, setAtBottom] = useState(true);
   const following = useRef(true);
   const wasVisible = useRef(visible);
@@ -176,14 +174,6 @@ export function Transcript({ jump, visible }: { jump: number; visible: boolean }
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
   }, []);
-
-  useEffect(() => {
-    const el = scroller.current;
-    if (visible && jump !== lastJump.current && el) {
-      lastJump.current = jump;
-      toLatest();
-    }
-  }, [jump, visible, toLatest]);
 
   return (
     <div className={styles.wrap}>

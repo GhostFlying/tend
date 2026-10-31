@@ -1006,7 +1006,7 @@ try {
   await isolatedIssue.getByRole("button", { name: "返回Issue列表或上一项", exact: true }).click();
   await isolation
     .getByRole("navigation", { name: "视图", exact: true })
-    .getByRole("button", { name: "对话", exact: true })
+    .getByRole("link", { name: "对话", exact: true })
     .click();
   await isolation.getByText("只属于主对话的待发内容", { exact: true }).waitFor();
   assert(

@@ -1,97 +1,92 @@
-import { ResourceNavigation, ResourceHosts } from "./Resources.tsx";
-// Work items are the primary navigation; execution records have a separate view.
 import type { Connection } from "../api/client.ts";
 import type { AttentionPage } from "../api/generated/api.ts";
-import type { ReadState } from "../workitems/live.ts";
-import { NextSummary } from "../attention/NextSummary.tsx";
+import { Link, useRoute } from "../app/router.ts";
+import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
-import { theme, themeLabels, toggleTheme } from "../theme/theme.ts";
-import { Note } from "./Chat.tsx";
+import { useInboxCount } from "../attention/useInboxCount.ts";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
-import { RecentTasks } from "../tasks/Board.tsx";
-import { IssueOverview } from "../issues/Overview.tsx";
-import { Button } from "../ui/Button.tsx";
+import { StatusDot } from "./StatusDot.tsx";
+import { groups, settings, navActive, type NavItem } from "./navigation.tsx";
 import styles from "./Sidebar.module.css";
-import type { View } from "./TabBar.tsx";
 
 export function Sidebar({
-  view,
-  records,
   connection,
-  onChat,
-  onBoard,
-  onRecords,
-  onSettings,
-  onRepos,
-  mainAttention,
-  onInbox,
-  onIssue,
+  summary,
 }: {
-  view: View;
-  records: boolean;
   connection: Connection;
-  onChat(): void;
-  onBoard(): void;
-  onRecords(): void;
-  onSettings(): void;
-  onRepos(): void;
-  mainAttention: ReadState<AttentionPage>;
-  onInbox(id?: string): void;
-  onIssue(id: string): void;
+  summary: AttentionPage | undefined;
 }) {
-  const choice = useStore(theme);
+  const route = useRoute();
+  const { live } = useServices();
+  const snapshot = useStore(live.snapshot);
+  const pending = useInboxCount(summary);
+  const hosts = snapshot?.hosts ?? [];
+  const hostStatus = !hosts.length
+    ? "暂无主机"
+    : hosts.every((host) => host.online === true)
+      ? "全部主机在线"
+      : "部分主机离线";
+  const item = ({ path, label, Icon }: NavItem) => (
+    <Link
+      key={path}
+      to={path}
+      className={styles.item}
+      aria-label={label}
+      title={label}
+      aria-current={navActive(route, path) ? "page" : undefined}
+      onClick={path === "/tasks" ? () => live.tasks.setProject("") : undefined}
+    >
+      <Icon />
+      <span className={styles.label}>{label}</span>
+      {path === "/inbox" && pending.count > 0 && (
+        <span className={styles.badge}>
+          {pending.count}
+          {pending.more ? "+" : ""}
+        </span>
+      )}
+      {path === "/hosts" && (
+        <span
+          className={styles.hostStatus}
+          title={connection.status === "online" ? hostStatus : `上次观察：${hostStatus}`}
+          role="status"
+          aria-label={connection.status === "online" ? hostStatus : `上次观察：${hostStatus}`}
+        >
+          <StatusDot
+            tone={
+              !hosts.length ? "idle" : hosts.every((host) => host.online === true) ? "ok" : "warn"
+            }
+          />
+        </span>
+      )}
+    </Link>
+  );
   return (
-    <div className={styles.root} data-view={view}>
+    <div className={styles.root}>
       <div className={styles.brand}>
         <div className={styles.logo} aria-hidden>
           t
         </div>
         <b>tend</b>
         <span className={styles.conn}>
-          <ConnectionBadge connection={connection} />
+          <span className={styles.fullConnection}>
+            <ConnectionBadge connection={connection} />
+          </span>
+          <span className={styles.railConnection}>
+            <ConnectionBadge connection={connection} compact />
+          </span>
         </span>
       </div>
-      <nav className={styles.primaryNav} aria-label="主导航">
-        <button onClick={onChat}>主对话</button>
-        <button onClick={() => onInbox()}>收件箱</button>
+      <nav className={styles.scroll} aria-label="主导航">
+        {groups.map((group) => (
+          <section key={group.label} className={styles.group} aria-label={group.label}>
+            <h2>{group.label}</h2>
+            {group.items.map(item)}
+          </section>
+        ))}
       </nav>
-      <h2 className={styles.mobileTitle}>{view === "decisions" ? "待处理" : "Issue"}</h2>
-      <div className={styles.mobileNotice}>
-        <Note />
-      </div>
-      <div className={styles.scroll}>
-        <div className={styles.decisions}>
-          <NextSummary onOpen={onInbox} onIssue={onIssue} summary={mainAttention} />
-        </div>
-        <section className={styles.tasks} aria-label="Issue与资源">
-          <Button
-            type="button"
-            variant="secondary"
-            size="s"
-            className={styles.allTasks}
-            onClick={onBoard}
-          >
-            Issue · 白板 ›
-          </Button>
-          <IssueOverview onSelect={onIssue} onAll={onBoard} active={view === "chat"} />
-          <div className={styles.recent}>
-            <RecentTasks limit={3} detailed />
-          </div>
-          <div className={styles.sectionTitle}>资源与记录</div>
-          <ResourceNavigation onRecords={onRecords} onRepos={onRepos} records={records} />
-          <ResourceHosts connection={connection} />
-        </section>
-      </div>
-      <div className={styles.foot}>
-        <div className={styles.footActions}>
-          <button type="button" className={styles.themeButton} onClick={onSettings}>
-            设置
-          </button>
-          <button type="button" className={styles.themeButton} onClick={toggleTheme}>
-            主题：{themeLabels[choice]}
-          </button>
-        </div>
-      </div>
+      <nav className={styles.foot} aria-label="设置导航">
+        {item(settings)}
+      </nav>
     </div>
   );
 }

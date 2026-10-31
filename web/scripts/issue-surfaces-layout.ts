@@ -1072,11 +1072,147 @@ await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
-try {
+async function checkNavigation() {
+  assert(address && typeof address !== "string");
   for (const viewport of [
-    { width: 1440, height: 1000 },
+    { width: 1440, height: 900 },
+    { width: 900, height: 800 },
+    { width: 761, height: 800 },
+    { width: 760, height: 844 },
     { width: 390, height: 844 },
   ]) {
+    const context = await browser.newContext({ viewport, serviceWorkers: "block" });
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+    await page.goto(`http://127.0.0.1:${address.port}/`);
+    await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
+    const sidebar = page.locator("aside").first();
+    const tabs = page.getByRole("navigation", { name: "视图", exact: true });
+    const mobile = viewport.width <= 760;
+    const width = mobile ? 0 : (await sidebar.boundingBox())!.width;
+    assert.equal(await sidebar.isVisible(), !mobile);
+    assert.equal(await tabs.isVisible(), mobile);
+    if (!mobile) {
+      assert.equal(width, viewport.width < 1024 ? 64 : 288);
+      assert.equal(await sidebar.getByRole("link").count(), 8);
+      assert.equal(await sidebar.getByRole("region", { name: "需要你处理" }).count(), 0);
+      assert.equal(await sidebar.getByRole("region", { name: "持续跟进" }).count(), 0);
+      assert.equal(await sidebar.getByRole("region", { name: "执行主机占用" }).count(), 0);
+      const issues = sidebar.getByRole("link", { name: "Issues", exact: true });
+      assert.equal(await issues.getAttribute("title"), "Issues");
+      if (viewport.width < 1024) {
+        const label = await issues.locator("span").first().boundingBox();
+        assert(label && label.width <= 1, "rail labels stay visually hidden");
+      }
+    } else assert.equal(await tabs.getByRole("link").count(), 4);
+    const nav = mobile ? tabs : page.getByRole("navigation", { name: "主导航", exact: true });
+    await nav
+      .getByRole("link", { name: "收件箱", exact: true })
+      .locator("span")
+      .last()
+      .getByText("2", { exact: true })
+      .waitFor();
+    assert.equal(
+      (
+        await nav
+          .getByRole("link", { name: "收件箱", exact: true })
+          .locator("span")
+          .last()
+          .innerText()
+      ).trim(),
+      "2",
+    );
+    for (const path of [
+      "/",
+      "/issues",
+      "/issues/issue-root",
+      "/settings",
+      "/inbox",
+      "/inbox/attention-decision",
+      `/tasks/${activeTask.task_id}`,
+      "/more",
+    ]) {
+      if (path === "/more" && !mobile) {
+        await page.evaluate(() =>
+          (window as unknown as { tendNavigate(path: string): void }).tendNavigate("/more"),
+        );
+        await page.waitForURL((url) => url.pathname === "/");
+      } else await navigate(page, path);
+      await page.locator("main h1:visible").waitFor();
+      if (path === "/issues/issue-root") {
+        await issueSidebar(page);
+        const auxiliary = page.getByRole("dialog", { name: "Issue辅助信息", exact: true });
+        if (await auxiliary.isVisible())
+          await auxiliary.getByRole("button", { name: /^关闭/ }).first().click();
+      }
+      const detail = [
+        "/issues/issue-root",
+        "/inbox/attention-decision",
+        `/tasks/${activeTask.task_id}`,
+      ].includes(path);
+      assert.equal(await tabs.isVisible(), mobile && !detail, `tabs ${viewport.width} ${path}`);
+      if (!mobile) {
+        assert.equal((await sidebar.boundingBox())!.width, width, `sidebar width ${path}`);
+        if (path === "/issues/issue-root")
+          assert.equal(
+            await sidebar
+              .getByRole("link", { name: "Issues", exact: true })
+              .getAttribute("aria-current"),
+            "page",
+          );
+      } else if (!detail) {
+        const main = (await page.locator("main").boundingBox())!;
+        const bar = (await tabs.boundingBox())!;
+        assert(main.y + main.height <= bar.y + 1, `content avoids tabs ${path}`);
+      }
+      if (path === "/more" && mobile) {
+        const more = page.getByRole("navigation", { name: "更多导航", exact: true });
+        assert.equal(await more.getByRole("link").count(), 5);
+        await more.getByRole("link", { name: "设置", exact: true }).click();
+        await page.getByRole("radiogroup", { name: "主题", exact: true }).waitFor();
+      }
+    }
+    await navigate(page, "/settings");
+    const theme = page.getByRole("radiogroup", { name: "主题", exact: true });
+    await theme.getByRole("radio", { name: "深色", exact: true }).click();
+    assert(await page.locator("body").evaluate((el) => el.hasAttribute("data-dark")));
+    await page.reload();
+    await theme.getByRole("radio", { name: "深色", exact: true }).waitFor();
+    assert.equal(
+      await theme.getByRole("radio", { name: "深色", exact: true }).getAttribute("aria-checked"),
+      "true",
+    );
+    await theme.getByRole("radio", { name: "跟随系统", exact: true }).click();
+    assert.equal(await page.evaluate(() => localStorage.getItem("tend.theme")), null);
+    await navigate(page, "/");
+    const head = page.locator("main header:visible").first();
+    if (mobile) assert((await head.boundingBox())!.height <= 60, "phone chat header stays one row");
+    assert.equal(await head.getByRole("button", { name: "跳到最新", exact: true }).count(), 0);
+    await head.getByRole("button", { name: "更多", exact: true }).click();
+    const menu = page.getByRole("menu", { name: "更多", exact: true });
+    await menu.getByRole("menuitem", { name: "补充来源", exact: true }).waitFor();
+    assert.equal(await menu.getByRole("menuitem").count(), 2);
+    await navigate(page, "/issues");
+    await menu.waitFor({ state: "hidden" });
+    await navigate(page, "/");
+    assert.equal(
+      await head.getByRole("button", { name: "更多", exact: true }).getAttribute("aria-expanded"),
+      "false",
+    );
+    await context.close();
+    console.log(`PASS grouped navigation ${viewport.width}`);
+  }
+}
+
+try {
+  const navigationOnly = process.argv.includes("--navigation-only");
+  if (navigationOnly) await checkNavigation();
+  for (const viewport of navigationOnly
+    ? []
+    : [
+        { width: 1440, height: 1000 },
+        { width: 390, height: 844 },
+      ]) {
     messageAssociations = {
       ...messageAssociations,
       revision: 3,
@@ -1161,7 +1297,7 @@ try {
     await page.goto(`http://127.0.0.1:${address.port}`);
     await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
     const mobile = viewport.width < 760;
-    await page.getByRole("button", { name: "会话 ▾", exact: true }).click();
+    await page.getByRole("button", { name: /^切换会话：/ }).click();
     await page
       .getByRole("dialog", { name: "会话", exact: true })
       .getByRole("button", { name: "Agent与类别", exact: true })
@@ -1174,9 +1310,9 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "Issue", exact: true })
+        .getByRole("link", { name: "Issues", exact: true })
         .click();
-    else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+    else await page.getByRole("link", { name: "Issues", exact: true }).click();
     const emptyRead = page.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/v1/categories",
     );
@@ -1191,7 +1327,7 @@ try {
     await createForm.getByRole("button", { name: "返回", exact: true }).click();
     await page.getByRole("button", { name: "返回对话", exact: true }).click();
     hostedUnconfigured = false;
-    await page.getByRole("button", { name: "会话 ▾", exact: true }).click();
+    await page.getByRole("button", { name: /^切换会话：/ }).click();
     await page
       .getByRole("dialog", { name: "会话", exact: true })
       .getByRole("button", { name: "Agent与类别", exact: true })
@@ -1203,9 +1339,9 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "Issue", exact: true })
+        .getByRole("link", { name: "Issues", exact: true })
         .click();
-    else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+    else await page.getByRole("link", { name: "Issues", exact: true }).click();
     await page.getByRole("button", { name: "＋ 新建 Issue", exact: true }).click();
     await managerSelect
       .locator('option[value="category:custom-coordinator"]')
@@ -1228,7 +1364,10 @@ try {
       );
       continue;
     }
-    if (!mobile) await page.getByRole("button", { name: /确认灰度发布范围 待决策/ }).waitFor();
+    await page
+      .getByRole("complementary", { name: "当前待处理", exact: true })
+      .getByText("确认灰度发布范围", { exact: true })
+      .waitFor();
     await page
       .locator('[data-scroll-id="owner-plan"]')
       .getByRole("button", { name: "发布流程整理", exact: true })
@@ -1242,19 +1381,22 @@ try {
     );
     assert.equal(
       await page
-        .getByRole("region", { name: "需要你处理", exact: true })
+        .getByRole("complementary", { name: "当前待处理", exact: true })
         .getByText(information.title, { exact: true })
         .count(),
       0,
     );
     assert.match(
-      await page.locator('nav[aria-label="视图"] button').filter({ hasText: "待处理" }).innerText(),
+      await page
+        .getByRole("navigation", { name: mobile ? "视图" : "主导航", exact: true })
+        .getByRole("link", { name: "收件箱", exact: true })
+        .innerText(),
       /2/,
     );
     await page.screenshot({ path: join(output, `main-${viewport.width}.png`) });
     await page
       .getByRole("complementary", { name: "当前待处理", exact: true })
-      .getByRole("button", { name: "查看并处理", exact: true })
+      .getByRole("link", { name: "查看并处理", exact: true })
       .click();
     await page.getByRole("button", { name: "稍后处理", exact: true }).click();
     await page.waitForURL((url) => url.pathname === "/inbox");
@@ -1353,9 +1495,9 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "Issue", exact: true })
+        .getByRole("link", { name: "Issues", exact: true })
         .click();
-    else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+    else await page.getByRole("link", { name: "Issues", exact: true }).click();
     await page.getByRole("tab", { name: "层级", exact: true }).click();
     await page.getByRole("button", { name: "展开 发布流程整理", exact: true }).click();
     await page.getByRole("button", { name: "展开 补齐回滚文档", exact: true }).click();
@@ -1544,12 +1686,15 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: /待处理/ })
+        .getByRole("link", { name: "收件箱", exact: true })
         .click();
     else {
       if (await page.getByRole("button", { name: "返回对话", exact: true }).isVisible())
         await page.getByRole("button", { name: "返回对话", exact: true }).click();
-      await page.getByRole("button", { name: /确认灰度发布范围 待决策/ }).click();
+      await page
+        .getByRole("navigation", { name: "主导航", exact: true })
+        .getByRole("link", { name: "收件箱", exact: true })
+        .click();
     }
     const inbox = page.getByRole("region", { name: "待处理事项", exact: true });
     await inbox.getByRole("button", { name: "通知", exact: true }).click();
@@ -1570,11 +1715,13 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: /待处理/ })
+        .getByRole("link", { name: "收件箱", exact: true })
         .click();
     else {
-      await page.getByRole("button", { name: /确认灰度发布范围 待决策/ }).waitFor();
-      await page.getByRole("button", { name: /确认灰度发布范围 待决策/ }).click();
+      await page
+        .getByRole("navigation", { name: "主导航", exact: true })
+        .getByRole("link", { name: "收件箱", exact: true })
+        .click();
     }
     await inbox.getByRole("button", { name: "待行动", exact: true }).click();
     await inbox.getByRole("button", { name: /提供验收设备清单/ }).click();
@@ -1596,12 +1743,13 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "对话", exact: true })
+        .getByRole("link", { name: "对话", exact: true })
         .click();
     if (await page.getByRole("button", { name: "主 Agent", exact: true }).first().isVisible())
       await page.getByRole("button", { name: "主 Agent", exact: true }).first().click();
     await navigate(page, "/");
-    await page.getByRole("button", { name: "来源", exact: true }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "补充来源", exact: true }).click();
     let source = page.getByRole("dialog", { name: "补充来源", exact: true });
     await source
       .getByRole("textbox", { name: "原文", exact: true })
@@ -1631,7 +1779,8 @@ try {
     assert.equal(sourceCount, 0);
     await page.reload();
     await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
-    await page.getByRole("button", { name: "来源", exact: true }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "补充来源", exact: true }).click();
     source = page.getByRole("dialog", { name: "补充来源", exact: true });
     await source.getByRole("textbox", { name: "原文", exact: true }).waitFor();
     await page.waitForFunction(
@@ -1656,7 +1805,7 @@ try {
     assert.equal(writes.filter((w) => w.operation === "conversation.submit_message").length, 0);
     await page.screenshot({ path: join(output, `source-receipt-${viewport.width}.png`) });
     await source.getByRole("button", { name: "返回会话", exact: true }).click();
-    await page.getByRole("button", { name: "会话 ▾", exact: true }).click();
+    await page.getByRole("button", { name: /^切换会话：/ }).click();
     const drawer = page.getByRole("dialog", { name: "会话", exact: true });
     await drawer.getByRole("button", { name: "新建咨询", exact: true }).click();
     await drawer.getByRole("combobox", { name: /咨询Agent/ }).selectOption("hosted/qingzhu");
@@ -1666,7 +1815,10 @@ try {
     assert.equal(writes.filter((w) => w.operation === "conversation.consult").length, 1);
     assert.equal(writes.filter((w) => w.operation.startsWith("issues.")).length, 0);
     await page.screenshot({ path: join(output, `consultation-${viewport.width}.png`) });
-    await page.getByRole("button", { name: "会话 ▾", exact: true }).last().click();
+    await page
+      .getByRole("button", { name: /^切换会话：/ })
+      .last()
+      .click();
     await drawer.getByRole("button", { name: "历史归档", exact: true }).click();
     const archives = page.getByRole("region", { name: "历史归档", exact: true });
     await archives.getByText("历史发布验证", { exact: true }).first().waitFor();
@@ -1754,7 +1906,8 @@ try {
     await closeIssue(page);
     await navigate(page, "/");
     await page.getByRole("heading", { name: "主 Agent", exact: true }).waitFor();
-    await page.getByRole("button", { name: "来源", exact: true }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "补充来源", exact: true }).click();
     let rejected = page.getByRole("dialog", { name: "补充来源", exact: true });
     await rejected
       .getByRole("textbox", { name: "原文", exact: true })
@@ -1772,7 +1925,8 @@ try {
       .filter((w) => w.operation === "conversation.inject_source")
       .at(-1)!.request_id;
     await rejected.getByRole("button", { name: /^关闭/ }).first().click();
-    await page.getByRole("button", { name: "来源", exact: true }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "补充来源", exact: true }).click();
     rejected = page.getByRole("dialog", { name: "补充来源", exact: true });
     await rejected.getByRole("button", { name: "取回原输入后修改", exact: true }).waitFor();
     assert.equal(
@@ -1782,7 +1936,8 @@ try {
     await rejected.getByRole("button", { name: "取回原输入后修改", exact: true }).click();
     await rejected.getByRole("button", { name: "保存来源", exact: true }).waitFor();
     await rejected.getByRole("button", { name: /^关闭/ }).first().click();
-    await page.getByRole("button", { name: "来源", exact: true }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "补充来源", exact: true }).click();
     rejected = page.getByRole("dialog", { name: "补充来源", exact: true });
     await page.waitForFunction(() => {
       const input = document.querySelector(
@@ -1829,9 +1984,9 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: "Issue", exact: true })
+        .getByRole("link", { name: "Issues", exact: true })
         .click();
-    else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+    else await page.getByRole("link", { name: "Issues", exact: true }).click();
     await page.getByRole("button", { name: "发布流程整理", exact: true }).first().click();
     const handoffDialog = await openIssueAux(page, "交接负责人");
     const customCategory = handoffDialog
@@ -1897,12 +2052,15 @@ try {
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
-        .getByRole("button", { name: /待处理/ })
+        .getByRole("link", { name: "收件箱", exact: true })
         .click();
     else {
       if (await page.getByRole("button", { name: "返回对话", exact: true }).isVisible())
         await page.getByRole("button", { name: "返回对话", exact: true }).click();
-      await page.getByRole("button", { name: /确认灰度发布范围 待决策/ }).click();
+      await page
+        .getByRole("navigation", { name: "主导航", exact: true })
+        .getByRole("link", { name: "收件箱", exact: true })
+        .click();
     }
     const finalInbox = page.getByRole("region", { name: "待处理事项", exact: true });
     await finalInbox.getByRole("button", { name: "待行动", exact: true }).click();

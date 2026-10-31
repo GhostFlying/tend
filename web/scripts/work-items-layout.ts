@@ -467,9 +467,9 @@ try {
       if (width <= 760)
         await page
           .getByRole("navigation", { name: "视图" })
-          .getByRole("button", { name: "Issue", exact: true })
+          .getByRole("link", { name: "Issues", exact: true })
           .click();
-      else await page.getByRole("button", { name: "Issue · 白板 ›", exact: true }).click();
+      else await page.getByRole("link", { name: "Issues", exact: true }).click();
     };
     await openBoard();
     await page.getByRole("tab", { name: "层级", exact: true }).click();

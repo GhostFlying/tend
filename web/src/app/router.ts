@@ -10,6 +10,7 @@ declare global {
 
 export const paths = {
   chat: "/",
+  more: "/more",
   conversation: "/chat/:id",
   inbox: "/inbox",
   attention: "/inbox/:id",
@@ -35,6 +36,7 @@ export type Route =
   | {
       page:
         | "chat"
+        | "more"
         | "inbox"
         | "tasks"
         | "repos"

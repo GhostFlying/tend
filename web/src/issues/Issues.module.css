@@ -119,14 +119,6 @@
 .task span {
   margin-left: auto;
 }
-.overview {
-  display: grid;
-  gap: 6px;
-}
-.overview button {
-  padding: var(--space-2);
-  text-align: left;
-}
 @media (max-width: 760px) {
   .header,
   .body {
@@ -145,11 +137,6 @@
   .button {
     min-height: 44px;
   }
-}
-
-.overview strong,
-.overview small {
-  display: block;
 }
 
 .taskPeek {

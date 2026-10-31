@@ -363,7 +363,7 @@ try {
   await taskDrawer.getByRole("button", { name: /← 返回/ }).click();
   await mobilePage
     .getByRole("navigation", { name: "视图" })
-    .getByRole("button", { name: "对话", exact: true })
+    .getByRole("link", { name: "对话", exact: true })
     .click();
   const composer = mobilePage.getByRole("textbox", { name: "消息", exact: true });
   await composer.fill("Existing unsent constraint");
