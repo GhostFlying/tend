@@ -200,3 +200,16 @@
     margin-left: var(--space-2);
   }
 }
+
+.root button {
+  height: auto;
+  min-height: var(--control-m);
+}
+
+.record label {
+  min-width: 0;
+}
+.record label h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

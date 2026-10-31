@@ -150,3 +150,8 @@
   cursor: pointer;
   list-style: none;
 }
+
+.composer[data-presentation="issue"] textarea {
+  max-height: 16dvh;
+  overflow-y: auto;
+}

@@ -1,4 +1,4 @@
-import { navigate, fixtureRoot } from "./navigation.ts";
+import { navigate, fixtureRoot, editIssueFilters } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Synthetic conversations exercise UI routing; no native harness or deployed API.
@@ -519,8 +519,10 @@ try {
       assert.equal(await page.locator("dialog[open]").count(), 0);
       assert.equal(await page.getByRole("dialog").count(), 0);
       const filter = page.getByLabel("按项目筛选Issue");
-      await filter.click();
-      assert(await filter.evaluate((element) => element === document.activeElement));
+      await editIssueFilters(page, async () => {
+        await filter.click();
+        assert(await filter.evaluate((element) => element === document.activeElement));
+      });
       if (width === 390) await page.getByRole("navigation", { name: "视图" }).waitFor();
       await page.screenshot({ path: join(output, `overlay-back-${dialogName}-${width}.png`) });
       await navigate(page, "/");

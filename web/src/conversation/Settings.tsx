@@ -1,3 +1,4 @@
+import { Button } from "../ui/Button.tsx";
 import { useOverlayState } from "../ui/focus.ts";
 // The composer's compact model seat: a two-level menu shared across devices.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
@@ -185,7 +186,8 @@ export function Settings({ connection }: { connection: Connection }) {
           close();
       }}
     >
-      <button
+      <Button
+        variant="ghost"
         ref={trigger}
         type="button"
         className={styles.trigger}
@@ -217,7 +219,7 @@ export function Settings({ connection }: { connection: Connection }) {
             aria-label={status}
           />
         )}
-      </button>
+      </Button>
       {open &&
         createPortal(
           <div
@@ -233,7 +235,8 @@ export function Settings({ connection }: { connection: Connection }) {
             aria-busy={state.saving}
           >
             {pane !== "root" && (
-              <button
+              <Button
+                variant="ghost"
                 type="button"
                 role="menuitem"
                 tabIndex={-1}
@@ -243,12 +246,13 @@ export function Settings({ connection }: { connection: Connection }) {
               >
                 <Back />
                 {pane === "model" ? "模型" : "思考强度"}
-              </button>
+              </Button>
             )}
             <div className={styles.options}>
               {pane === "root" ? (
                 <>
-                  <button
+                  <Button
+                    variant="ghost"
                     type="button"
                     role="menuitem"
                     tabIndex={-1}
@@ -264,8 +268,9 @@ export function Settings({ connection }: { connection: Connection }) {
                       {modelLabel}
                     </span>
                     <Chevron />
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
                     type="button"
                     role="menuitem"
                     tabIndex={-1}
@@ -281,11 +286,12 @@ export function Settings({ connection }: { connection: Connection }) {
                       {effortLabel(view?.effort ?? "")}
                     </span>
                     <Chevron />
-                  </button>
+                  </Button>
                 </>
               ) : pane === "model" ? (
                 view?.models?.map((choice) => (
-                  <button
+                  <Button
+                    variant="ghost"
                     key={choice.id}
                     type="button"
                     role="menuitemradio"
@@ -306,11 +312,12 @@ export function Settings({ connection }: { connection: Connection }) {
                     <span className={styles.check} aria-hidden>
                       {choice.id === view.model ? "✓" : ""}
                     </span>
-                  </button>
+                  </Button>
                 ))
               ) : (
                 efforts.map((effort) => (
-                  <button
+                  <Button
+                    variant="ghost"
                     key={effort}
                     type="button"
                     role="menuitemradio"
@@ -327,7 +334,7 @@ export function Settings({ connection }: { connection: Connection }) {
                     <span className={styles.check} aria-hidden>
                       {effort === view?.effort ? "✓" : ""}
                     </span>
-                  </button>
+                  </Button>
                 ))
               )}
             </div>
@@ -338,7 +345,8 @@ export function Settings({ connection }: { connection: Connection }) {
               </div>
             )}
             {(state.pendingId || state.readError || (view && !view.available)) && (
-              <button
+              <Button
+                variant="ghost"
                 type="button"
                 role="menuitem"
                 tabIndex={-1}
@@ -349,7 +357,7 @@ export function Settings({ connection }: { connection: Connection }) {
                 }
               >
                 {state.pendingId ? "核对设置" : "重新读取"}
-              </button>
+              </Button>
             )}
             <div className={styles.note}>
               用于下一次开始的回复，含排队消息。

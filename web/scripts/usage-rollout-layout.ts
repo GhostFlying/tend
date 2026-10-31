@@ -1,3 +1,4 @@
+import { navigate } from "./navigation.ts";
 import { fixtureRoot } from "./navigation.ts";
 /// <reference lib="dom" />
 // Render the built product against isolated API fixtures; reject every write.
@@ -317,7 +318,7 @@ try {
         .getByRole("navigation", { name: "视图" })
         .getByRole("link", { name: "Issues", exact: true })
         .click();
-      await page.getByRole("button", { name: "任务执行记录", exact: true }).click();
+      await navigate(page, "/tasks");
       await page
         .locator("main details > summary")
         .filter({ hasText: /^资源与记录$/ })
@@ -358,7 +359,7 @@ try {
     await panel.locator('[class*="hero"]').getByText("—", { exact: true }).waitFor();
     assert(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
     await page.screenshot({ path: join(output, `usage-${viewport.width}.png`), fullPage: true });
-    await page.getByRole("button", { name: "← 返回", exact: true }).click();
+    await page.goBack();
     runsAvailable = false;
     await page.goto(`http://127.0.0.1:${address.port}/?task=${taskID}`);
     const card = page.getByRole("region", { name: "执行过程与用量" });

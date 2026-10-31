@@ -15,3 +15,15 @@ export async function navigate(page: Page, path: string) {
   );
   await page.waitForURL((url) => url.pathname + url.search === path);
 }
+
+export async function editIssueFilters(page: Page, edit: () => Promise<void>) {
+  const trigger = page.getByRole("button", { name: "筛选", exact: true });
+  const sheet = await trigger.isVisible();
+  if (sheet) await trigger.click();
+  await edit();
+  if (sheet)
+    await page
+      .getByRole("dialog", { name: "筛选 Issue", exact: true })
+      .getByRole("button", { name: "完成", exact: true })
+      .click();
+}

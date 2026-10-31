@@ -1,3 +1,4 @@
+import { Button, Select } from "../ui/index.ts";
 import { useEffect, useRef, useState } from "react";
 import { useServices } from "../app/services.tsx";
 import type { TokenUsageTotals, TokenUsageView } from "../api/generated/api.ts";
@@ -184,35 +185,35 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
         {!subject && (
           <label>
             范围
-            <select value={window} onChange={(e) => changeWindow(e.target.value)}>
+            <Select value={window} onChange={(e) => changeWindow(e.target.value)}>
               {windows.map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
         )}
         <label>
           实际模型
-          <select value={model} onChange={(e) => changeModel(e.target.value)}>
+          <Select value={model} onChange={(e) => changeModel(e.target.value)}>
             <option value="">全部模型</option>
             {[...new Set([...models, ...(model ? [model] : [])])].map((m) => (
               <option key={m}>{m}</option>
             ))}
-          </select>
+          </Select>
         </label>
         {calendar && (
           <div className={styles.period}>
-            <button
+            <Button
               onClick={() => {
                 setOffset((x) => x - 1);
                 setBefore(0);
               }}
             >
               上一周期
-            </button>
-            <button
+            </Button>
+            <Button
               disabled={offset === 0}
               onClick={() => {
                 setOffset(0);
@@ -220,12 +221,12 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
               }}
             >
               当前周期
-            </button>
+            </Button>
           </div>
         )}
-        <button disabled={loading} onClick={refresh}>
+        <Button disabled={loading} onClick={refresh}>
           {loading ? "更新中…" : "刷新"}
-        </button>
+        </Button>
       </div>
       {failed && (
         <div className={styles.notice} role="alert">
@@ -235,9 +236,9 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
               : "暂时无法读取此范围用量。"}
             将自动重试。
           </p>
-          <button disabled={loading} onClick={refresh}>
+          <Button disabled={loading} onClick={refresh}>
             重新读取
-          </button>
+          </Button>
         </div>
       )}
       <span className={styles.srOnly} role="status">
@@ -275,12 +276,12 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
                   <TokenLine totals={data.unattributed} />
                   <p>请求未提供发生时间。采集时间仅供同步参考，不代替发生时间。</p>
                 </details>
-                {!historical && <button onClick={() => changeWindow("total")}>查看全部历史</button>}
+                {!historical && <Button onClick={() => changeWindow("total")}>查看全部历史</Button>}
               </section>
             )}
           </div>
           {!historical && !data.totals.requests && !data.unattributed.requests && (
-            <button onClick={() => changeWindow("total")}>查看全部历史</button>
+            <Button onClick={() => changeWindow("total")}>查看全部历史</Button>
           )}
           {data.conflicts > 0 && (
             <p className={styles.notice} role="status">
@@ -328,9 +329,9 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
                     <h4>实际模型</h4>
                     {data.models!.map((m) => (
                       <div className={styles.row} key={m.name}>
-                        <button className={styles.groupName} onClick={() => changeModel(m.name)}>
+                        <Button className={styles.groupName} onClick={() => changeModel(m.name)}>
                           {m.name}
-                        </button>
+                        </Button>
                         <span>{field(m.total, m.total_known, m.requests)} token</span>
                         <small>
                           {m.total_known}/{m.requests} 个请求提供总量
@@ -406,8 +407,8 @@ export function UsagePanel({ subject = "" }: { subject?: string }) {
               </details>
             ))}
             <div className={styles.pagination}>
-              {before > 0 && <button onClick={() => setBefore(0)}>最新请求</button>}
-              {data.more && <button onClick={() => setBefore(data.next)}>更早请求</button>}
+              {before > 0 && <Button onClick={() => setBefore(0)}>最新请求</Button>}
+              {data.more && <Button onClick={() => setBefore(data.next)}>更早请求</Button>}
             </div>
           </section>
           <details className={styles.coverage}>

@@ -4,6 +4,8 @@
   padding: 14px var(--space-2) 6px;
 }
 .row {
+  height: auto;
+  min-height: var(--control-l);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -32,6 +34,9 @@
 .row[data-expanded="true"] .name {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+.expanded {
+  padding: var(--space-4);
 }
 .expanded .title {
   padding: 0 0 var(--space-3);
