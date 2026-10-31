@@ -245,7 +245,14 @@ export function IssueActivity({
   useLayoutEffect(() => {
     const notificationContent = JSON.stringify([
       rows.filter((row) => row.position >= previousFirst.current),
-      transcript.filter((row) => Number(row.key.split(":")[0]) >= previousFirst.current),
+      transcript.filter((row) =>
+        rows.some(
+          (entry) =>
+            entry.position >= previousFirst.current &&
+            entry.block &&
+            row.key.startsWith(`${entry.block.position}:`),
+        ),
+      ),
     ]);
     const node = scroll.current;
     if (node && pagination.current?.ready) {

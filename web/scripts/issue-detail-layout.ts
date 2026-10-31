@@ -139,7 +139,7 @@ const activity: IssueActivityPage = {
   items: [
     {
       id: "conversation-one",
-      position: 1,
+      position: 1001,
       kind: "conversation",
       created_at: now,
       author: "青竹",
@@ -172,7 +172,7 @@ const activity: IssueActivityPage = {
     },
     {
       id: "result:artifact-one",
-      position: 2,
+      position: 1002,
       kind: "artifact.submitted",
       created_at: now,
       author: "system",
@@ -743,6 +743,21 @@ try {
     await page.waitForFunction(() => document.activeElement?.textContent === "查看任务与验收 →");
     assert(await taskLink.evaluate((element) => element === document.activeElement));
 
+    const noticeScroller = detail.locator("[data-issue-scroll]");
+    await noticeScroller.evaluate((node) => {
+      node.scrollTop = 250;
+    });
+    await page.waitForTimeout(100);
+    issue.revision++;
+    issue.progress!.issue_revision = issue.revision;
+    publish();
+    await page.waitForTimeout(150);
+    assert.equal(
+      await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+      0,
+      "details-only refresh produced a notice with independent activity/block counters",
+    );
+
     // Long prose must not clip the trace, and tool expansion must pause bottom following.
     const traceBlock = activity.items![0]!.block!;
     const traceReply = traceBlock.items![0]!;
@@ -943,7 +958,7 @@ try {
       {
         ...activity.items![0]!,
         id: "supplement-block",
-        position: 3,
+        position: 1003,
         block: {
           ...firstBlock,
           position: 3,
@@ -1223,6 +1238,24 @@ try {
   );
   pagedActivity = true;
   await isolation.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+  const quietContext = await browser.newContext({ viewport: { width: 390, height: 1000 } });
+  const quietPage = await quietContext.newPage();
+  await quietPage.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+  const quietIssue = quietPage.getByRole("region", { name: "Issue 详情", exact: true });
+  await quietIssue.locator('[data-scroll-id="recent-fact-19"]').waitFor({ state: "attached" });
+  const previousPrompt = quietIssue.getByRole("button", {
+    name: "有新进展 · 到最新 ↓",
+    exact: true,
+  });
+  if (await previousPrompt.count()) await previousPrompt.click();
+  await quietIssue.getByRole("button", { name: "查看更早记录", exact: true }).click();
+  await quietIssue.locator('[data-scroll-id="earlier-fact"]').waitFor();
+  assert.equal(
+    await quietIssue.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+    0,
+    "quiet earlier install produced a progress notice with independent counters",
+  );
+  await quietContext.close();
   let releaseEarlier = () => {};
   holdEarlier = new Promise<void>((resolve) => {
     releaseEarlier = resolve;
