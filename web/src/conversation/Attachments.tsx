@@ -116,25 +116,25 @@ function StoredAttachment({ file }: { file: ConversationAttachment }) {
               onError={() => setFailed(true)}
             />
           )}
+          {failed && (
+            <button
+              type="button"
+              className={styles.retry}
+              onClick={() => {
+                setFailed(false);
+                setSource("");
+                setAttempt((n) => n + 1);
+              }}
+            >
+              预览不可用，重试
+            </button>
+          )}
         </div>
       )}
       <span className={styles.name} title={file.name}>
         {file.name}
       </span>
       <span className={styles.meta}>{fileSize(file.size)}</span>
-      {failed && (
-        <button
-          type="button"
-          className={styles.retry}
-          onClick={() => {
-            setFailed(false);
-            setSource("");
-            setAttempt((n) => n + 1);
-          }}
-        >
-          预览不可用，重试
-        </button>
-      )}
       <FileDownload fileId={file.file_id} name={file.name} scope="conversation/attachments" />
     </div>
   );

@@ -61,6 +61,7 @@ export function Transcript({ visible }: { visible: boolean }) {
 
   const [atBottom, setAtBottom] = useState(true);
   const following = useRef(true);
+  const scrollportSize = useRef({ width: 0, height: 0 });
   const wasVisible = useRef(visible);
   const contentKey = JSON.stringify(entries);
   const previousContent = useRef("");
@@ -80,6 +81,15 @@ export function Transcript({ visible }: { visible: boolean }) {
   const onScroll = () => {
     const el = scroller.current;
     if (!visible || !el || el.clientHeight === 0) return;
+    if (
+      el.clientWidth !== scrollportSize.current.width ||
+      el.clientHeight !== scrollportSize.current.height
+    ) {
+      scrollportSize.current = { width: el.clientWidth, height: el.clientHeight };
+      if (following.current) el.scrollTop = el.scrollHeight;
+      readingAnchor.current = captureAnchor(el);
+      return;
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < nearBottomPx;
     if (near) anchor.current = null;
     else if (anchor.current) anchor.current = captureAnchor(el);
@@ -137,6 +147,7 @@ export function Transcript({ visible }: { visible: boolean }) {
     const el = scroller.current;
     if (!visible || !el) return;
     const update = () => {
+      scrollportSize.current = { width: el.clientWidth, height: el.clientHeight };
       if (el.clientHeight === 0) {
         setAtBottom(true);
         return;
@@ -147,13 +158,29 @@ export function Transcript({ visible }: { visible: boolean }) {
       }
       readingAnchor.current = captureAnchor(el);
     };
+    let disclosureFrame = 0;
     const disclosure = (event: MouseEvent) => {
       if (
         !(event.target instanceof Element) ||
         !event.target.closest("summary, button[aria-expanded]")
       )
         return;
-      requestAnimationFrame(() => {
+      const viewportWidth = innerWidth;
+      const viewportHeight = innerHeight;
+      const width = el.clientWidth;
+      const height = el.clientHeight;
+      cancelAnimationFrame(disclosureFrame);
+      disclosureFrame = requestAnimationFrame(() => {
+        // A viewport resize is not a request to stop following new output.
+        if (
+          el.clientWidth !== width ||
+          el.clientHeight !== height ||
+          innerWidth !== viewportWidth ||
+          innerHeight !== viewportHeight
+        ) {
+          update();
+          return;
+        }
         const near = el.scrollHeight - el.scrollTop - el.clientHeight < nearBottomPx;
         following.current = near;
         setAtBottom(near);
@@ -166,6 +193,7 @@ export function Transcript({ visible }: { visible: boolean }) {
     update();
     return () => {
       observer.disconnect();
+      cancelAnimationFrame(disclosureFrame);
       el.removeEventListener("click", disclosure, true);
     };
   }, [visible]);
