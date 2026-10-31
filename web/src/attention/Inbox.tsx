@@ -1,3 +1,4 @@
+import { actorLabel } from "./actorLabel.ts";
 import { WorkItemRead } from "../workitems/live.ts";
 import { Button, Tabs, Badge, EmptyState, Textarea } from "../ui/index.ts";
 import { back, navigate, Link, useEntryState } from "../app/router.ts";
@@ -341,14 +342,7 @@ function AttentionForm({
       </p>
       <p className={styles.muted}>
         提出者：
-        {a.raised_by.kind === "owner"
-          ? "你"
-          : a.raised_by.kind === "main_agent"
-            ? "主 Agent"
-            : a.raised_by.kind === "worker"
-              ? "执行 Agent"
-              : "负责人 Agent"}{" "}
-        · 提出于 {new Date(a.created_at).toLocaleString("zh-CN")}
+        {actorLabel(a.raised_by)} · 提出于 {new Date(a.created_at).toLocaleString("zh-CN")}
       </p>
       <p className={styles.muted}>
         <AttentionActionTime item={a} />

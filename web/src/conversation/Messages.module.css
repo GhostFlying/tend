@@ -104,3 +104,13 @@
 .user[data-layout="issue"] .state {
   justify-content: flex-start;
 }
+
+.systemDetails {
+  margin-bottom: var(--space-2);
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+.systemLink {
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}

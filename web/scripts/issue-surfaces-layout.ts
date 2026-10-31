@@ -196,6 +196,14 @@ const server = createServer(async (req, res) => {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(issueBoardFixture(res.req.url, data)));
   };
+  if (copyOnly && p === "/fixture/complete-tool" && req.method === "POST") {
+    copyTools[1]!.tool.status = "completed";
+    for (const stream of streams)
+      stream.write(
+        `id: ${++seq}\nevent: ledger\ndata: ${JSON.stringify({ event_seq: seq, object_type: "message", object_id: "copy-tool-1", kind: "conversation.associations_changed", created_at: new Date().toISOString() })}\n\n`,
+      );
+    return json({ completed: true });
+  }
   if (p === "/api/v1/session")
     return json({
       token: "fixture-token",
@@ -1184,7 +1192,22 @@ async function captureS5() {
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       await page.screenshot({ path: join(output, `s5-${name}-${viewport.width}.png`) });
     };
+    copyTools[1]!.tool.status = "running";
     await page.goto(`http://127.0.0.1:${address.port}/`);
+    const firstTool = page.locator('[data-scroll-id="copy-tool-0"]');
+    const firstButton = firstTool.getByRole("button");
+    await firstButton.click();
+    await firstButton.evaluate((element) => element.setAttribute("data-retained-tool", "true"));
+    await page.request.post(`http://127.0.0.1:${address.port}/fixture/complete-tool`);
+    await page
+      .locator('[data-scroll-id="copy-tool-1"] [data-status="running"]')
+      .waitFor({ state: "hidden" });
+    assert.equal(await firstButton.getAttribute("data-retained-tool"), "true");
+    assert.equal(await firstButton.getAttribute("aria-expanded"), "true");
+    assert(await firstButton.evaluate((element) => document.activeElement === element));
+    await firstTool.getByText("原始工具输出保持不变", { exact: true }).waitFor();
+    await firstButton.click();
+    await page.getByRole("textbox", { name: "消息", exact: true }).focus();
     await page.getByText("使用了 2 个工具", { exact: true }).waitFor();
     assert.equal(await page.getByRole("button", { name: /读取背景来源/ }).count(), 1);
     assert.equal(await page.getByRole("button", { name: /查看仓库/ }).count(), 1);
@@ -1205,6 +1228,18 @@ async function captureS5() {
     await page.getByText("任务阶段 · 实现中", { exact: true }).waitFor();
     await page.getByText("sample · 优先级 P1 · 第 2 版要求", { exact: true }).waitFor();
     await shot("task");
+    const tabs = page.getByRole("navigation", { name: "详情内容" });
+    if (viewport.width === 390) {
+      assert.notEqual(
+        await tabs.evaluate((element) => getComputedStyle(element).maskImage),
+        "none",
+      );
+      await tabs.getByRole("button", { name: "历史", exact: true }).click();
+      await tabs
+        .getByRole("button", { name: "历史", exact: true })
+        .evaluate((element) => element.scrollIntoView({ inline: "center", block: "nearest" }));
+      await shot("task-tabs-scrolled");
+    }
     await navigate(page, "/issues/issue-root");
     await page.getByRole("heading", { name: "发布流程整理", level: 1 }).waitFor();
     await shot("issue");
