@@ -23,7 +23,7 @@
   color: var(--on-accent);
   background: var(--accent);
 }
-.primary:hover {
+.primary:hover:not(:disabled) {
   background: var(--accent);
   opacity: 0.9;
 }
@@ -65,4 +65,11 @@
 .icon svg {
   width: 18px;
   height: 18px;
+}
+
+.primary:disabled {
+  opacity: 0.3;
+}
+.primary:disabled:hover {
+  background: var(--accent);
 }

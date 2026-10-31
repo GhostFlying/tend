@@ -26,15 +26,6 @@
   border-bottom: 1px solid var(--border);
   padding: 0 var(--space-6);
 }
-.tabs button {
-  padding: var(--space-3);
-  border-bottom: 2px solid transparent;
-  white-space: nowrap;
-}
-.tabs button[aria-selected="true"] {
-  border-bottom-color: var(--label);
-  font-weight: 600;
-}
 .split {
   display: grid;
   grid-template-columns: minmax(300px, 36%) minmax(0, 1fr);
@@ -112,7 +103,11 @@
   margin-left: auto;
 }
 .rowMeta a {
-  color: var(--accent);
+  color: var(--label-3);
+  text-decoration: none;
+}
+.rowMeta a:hover {
+  text-decoration: underline;
 }
 .detail {
   min-width: 0;
@@ -254,5 +249,16 @@
 @media (max-width: 760px) {
   .context {
     padding-inline: var(--space-4);
+  }
+}
+
+.detailMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+@media (min-width: 761px) {
+  .pageHeader button {
+    display: none;
   }
 }

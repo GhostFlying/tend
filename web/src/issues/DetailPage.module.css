@@ -289,8 +289,8 @@
 }
 .sidebar section,
 .drawer section {
-  padding-bottom: var(--space-6);
-  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-4);
   border-bottom: 1px solid var(--border-soft);
 }
 .sidebar h2,
@@ -498,4 +498,24 @@
 }
 .resultLink {
   align-items: flex-start;
+}
+
+.back {
+  display: none;
+}
+.child > span:last-child {
+  justify-self: end;
+}
+.sidebar section:last-of-type,
+.drawer section:last-of-type {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+@media (max-width: 760px) {
+  .back {
+    display: block;
+  }
+  .toolbar nav {
+    display: none;
+  }
 }

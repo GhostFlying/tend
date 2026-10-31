@@ -25,3 +25,13 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-l);
 }
+
+.tabs button {
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  min-height: var(--control-l);
+}
+.tabs button[aria-selected="true"] {
+  background: transparent;
+  border-bottom-color: var(--accent);
+}

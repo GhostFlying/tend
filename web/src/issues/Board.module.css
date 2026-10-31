@@ -421,7 +421,9 @@
   padding: 0;
 }
 .column[data-collapsed="true"] .columnToggle {
-  writing-mode: vertical-rl;
+  display: flex;
+  flex-direction: column;
+  height: auto;
   min-height: 100px;
   padding: var(--space-2) 0;
 }
@@ -473,7 +475,7 @@
     flex-direction: row;
   }
   .column[data-collapsed="true"] .columnToggle {
-    writing-mode: horizontal-tb;
+    flex-direction: row;
     min-height: 44px;
   }
   .column[data-collapsed="true"] .cardList {
@@ -558,4 +560,22 @@
 .cardHead button {
   padding: 0;
   white-space: nowrap;
+}
+
+.filterButton {
+  display: none;
+}
+@media (min-width: 761px) {
+  .column[data-collapsed="true"] .columnLabel {
+    writing-mode: vertical-rl;
+  }
+}
+@media (max-width: 760px) {
+  .filterButton {
+    display: block;
+    min-height: var(--control-touch);
+  }
+  .create {
+    min-height: var(--control-touch);
+  }
 }

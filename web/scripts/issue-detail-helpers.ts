@@ -50,10 +50,14 @@ export async function closeIssue(page: Page): Promise<void> {
     const close = dialog.getByRole("button", { name: /^关闭/ }).first();
     if (await close.isVisible()) await close.click();
   }
-  await page
-    .getByRole("region", { name: "Issue详情", exact: true })
-    .getByRole("button", { name: "返回Issue列表或上一项", exact: true })
-    .click();
+  const issue = page.getByRole("region", { name: "Issue详情", exact: true });
+  const back = issue.getByRole("button", { name: "返回Issue列表或上一项", exact: true });
+  if (await back.isVisible()) await back.click();
+  else
+    await issue
+      .getByRole("navigation", { name: "Issue路径", exact: true })
+      .getByRole("button", { name: "Issues", exact: true })
+      .click();
 }
 export async function openIssueDefinition(page: Page): Promise<void> {
   const dialogs = page.getByRole("dialog");

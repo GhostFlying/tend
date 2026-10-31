@@ -1,7 +1,6 @@
 .panel {
-  padding: var(--space-6) var(--space-5);
-  max-width: 1080px;
-  margin: 0 auto;
+  padding: var(--space-4);
+  margin: 0;
   width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
