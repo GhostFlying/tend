@@ -1195,7 +1195,7 @@ async function captureS5() {
     copyTools[1]!.tool.status = "running";
     await page.goto(`http://127.0.0.1:${address.port}/`);
     const firstTool = page.locator('[data-scroll-id="copy-tool-0"]');
-    const firstButton = firstTool.getByRole("button");
+    const firstButton = firstTool.getByRole("button", { includeHidden: true });
     await firstButton.click();
     await firstButton.evaluate((element) => element.setAttribute("data-retained-tool", "true"));
     await page.request.post(`http://127.0.0.1:${address.port}/fixture/complete-tool`);
@@ -1208,7 +1208,12 @@ async function captureS5() {
     await firstTool.getByText("原始工具输出保持不变", { exact: true }).waitFor();
     await firstButton.click();
     await page.getByRole("textbox", { name: "消息", exact: true }).focus();
-    await page.getByText("使用了 2 个工具", { exact: true }).waitFor();
+    const groupButton = page.getByRole("button", { name: "使用了 2 个工具", exact: true });
+    await groupButton.waitFor();
+    if ((await groupButton.getAttribute("aria-expanded")) === "true") await groupButton.click();
+    await firstButton.waitFor({ state: "hidden" });
+    assert.equal(await firstButton.getAttribute("data-retained-tool"), "true");
+    assert.equal((await groupButton.getAttribute("aria-controls"))?.split(" ").length, 2);
     assert.equal(await page.getByRole("button", { name: /读取背景来源/ }).count(), 1);
     assert.equal(await page.getByRole("button", { name: /查看仓库/ }).count(), 1);
     assert.equal(await page.getByText(activeTask.task_id, { exact: true }).count(), 0);

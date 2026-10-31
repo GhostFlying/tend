@@ -7,7 +7,7 @@ import { noticeTitle } from "../upgrades/status.ts";
 // The transcript's rows: the owner's messages as right-hand bubbles with
 // their state below, and what the main agent did for each as full-width
 // Markdown with its tool uses.
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   AssistantState,
   IssueConversationItem as ConversationItem,
@@ -25,7 +25,7 @@ import {
   systemMessageBody,
   type Entry,
 } from "./model.ts";
-import { toolGroups, retainToolGroups } from "./toolLabels.ts";
+import { toolGroups, settleToolGroups, flatTurnRows } from "./toolLabels.ts";
 import { CopyIdentifier } from "../i18n/identifiers.tsx";
 import { Chevron } from "../shell/icons.tsx";
 import toolStyles from "./ToolRow.module.css";
@@ -143,54 +143,57 @@ export function OutgoingRow({
 
 export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> }) {
   const root = useRef<HTMLDivElement>(null);
-  const [groups, setGroups] = useState(() => toolGroups(entry.items));
-  const [, interaction] = useState(0);
+  const prefix = useId();
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [states, setStates] = useState(() =>
+    settleToolGroups(toolGroups(entry.items), new Map(), new Set()),
+  );
+  const onToolOpenChange = useCallback((id: string, open: boolean) => {
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
   useLayoutEffect(() => {
-    const reading = root.current?.querySelector("[data-open], details[open], :focus");
-    const anchors = new Map<string, string>();
-    for (const group of groups) {
-      const disclosure = root.current?.querySelector(`[data-tool-group="${group.key}"]`);
-      const active =
-        disclosure?.querySelector(":focus") ?? disclosure?.querySelector("[data-open]");
-      if (disclosure?.hasAttribute("open") || active) {
-        anchors.set(
-          group.key,
-          active?.closest("[data-scroll-id]")?.getAttribute("data-scroll-id") ?? group.ids[0]!,
-        );
-      }
-    }
-    const next = reading ? retainToolGroups(groups, entry.items, anchors) : toolGroups(entry.items);
-    if (JSON.stringify(next) !== JSON.stringify(groups)) setGroups(next);
-  });
-  const current = new Map(entry.items.map((item) => [item.message_id, item]));
+    const focused =
+      root.current
+        ?.querySelector(":focus")
+        ?.closest("[data-tool-item]")
+        ?.getAttribute("data-tool-item") ?? undefined;
+    const next = settleToolGroups(toolGroups(entry.items), states, expanded, focused);
+    if (JSON.stringify([...next]) !== JSON.stringify([...states])) setStates(next);
+  }, [entry.items, states, expanded]);
   return (
-    <div
-      ref={root}
-      className={styles.agent}
-      onClickCapture={() => interaction((n) => n + 1)}
-      onBlurCapture={() => interaction((n) => n + 1)}
-    >
-      {groups
-        .map((group) => ({
-          ...group,
-          items: group.ids.map((id) => current.get(id)!).filter(Boolean),
-        }))
-        .filter((group) => group.items.length > 0)
-        .map(({ key, grouped, items }) =>
-          grouped ? (
-            <details key={key} data-tool-group={key} className={toolStyles.group}>
-              <summary className={toolStyles.row}>
-                <Chevron className={toolStyles.chevron} />
-                <span className={toolStyles.name}>使用了 {items.length} 个工具</span>
-              </summary>
-              {items.map((it) => (
-                <AgentItem key={it.message_id} item={it} />
-              ))}
-            </details>
-          ) : (
-            <AgentItem key={key} item={items[0]!} />
-          ),
-        )}
+    <div ref={root} className={styles.agent}>
+      {flatTurnRows(entry.items, states, expanded).map((row) =>
+        row.kind === "group" ? (
+          <button
+            key={row.key}
+            type="button"
+            className={`${toolStyles.row} ${toolStyles.groupToggle}`}
+            aria-expanded={row.open}
+            aria-controls={row.group.ids.map((id) => `${prefix}-item-${id}`).join(" ")}
+            onClick={() =>
+              setStates((previous) =>
+                new Map(previous).set(row.group.first, { ids: row.group.ids, open: !row.open }),
+              )
+            }
+          >
+            <Chevron className={toolStyles.chevron} />
+            <span className={toolStyles.name}>使用了 {row.group.ids.length} 个工具</span>
+          </button>
+        ) : (
+          <AgentItem
+            key={row.key}
+            item={row.item}
+            hidden={row.hidden}
+            id={`${prefix}-item-${row.item.message_id}`}
+            onToolOpenChange={onToolOpenChange}
+          />
+        ),
+      )}
       {entry.done && (
         <div className={styles.foot}>
           {clock(entry.done.at)}
@@ -208,21 +211,44 @@ const assistantLabels: Record<Exclude<AssistantState, "completed">, string> = {
   unknown: "回复结果未知，保留已生成内容",
 };
 
-const AgentItem = memo(function AgentItem({ item }: { item: ConversationItem }) {
+const AgentItem = memo(function AgentItem({
+  item,
+  hidden,
+  id,
+  onToolOpenChange,
+}: {
+  item: ConversationItem;
+  hidden: boolean;
+  id: string;
+  onToolOpenChange(id: string, open: boolean): void;
+}) {
   const status = item.assistant_state;
   if (item.author === "external")
     return (
-      <div data-scroll-id={item.message_id}>
+      <div
+        id={id}
+        hidden={hidden}
+        data-scroll-id={item.message_id}
+        data-tool-item={item.tool ? item.message_id : undefined}
+      >
         <ExternalSourceMessage item={item} />
       </div>
     );
   return (
-    <div data-scroll-id={item.message_id}>
+    <div
+      id={id}
+      hidden={hidden}
+      data-scroll-id={item.message_id}
+      data-tool-item={item.tool ? item.message_id : undefined}
+    >
       {item.choices?.map((choice) => (
         <ChoiceCard key={choice.choice_id} choice={choice} />
       ))}
       {item.tool ? (
-        <ToolRow tool={item.tool} />
+        <ToolRow
+          tool={item.tool}
+          onOpenChange={(open) => onToolOpenChange(item.message_id, open)}
+        />
       ) : (
         <>
           <Markdown text={item.body ?? ""} />
