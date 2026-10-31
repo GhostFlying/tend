@@ -46,6 +46,8 @@ type Options struct {
 	Ready func(*serverkit.Runtime, Demo)
 	// replyDelta is a sandbox-test synchronization point after the first delta.
 	replyDelta func(context.Context, harness.TurnInput)
+	// runnerTransport observes real loopback requests in lifecycle tests.
+	runnerTransport http.RoundTripper
 }
 
 // Run owns all serving and runner goroutines until context cancellation.
@@ -125,8 +127,13 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			defer j.Close()
 			transport := &http.Transport{} // No environment proxy or external endpoint.
 			defer transport.CloseIdleConnections()
-			r := runner.New(runner.Config{ServerURL: "http://" + runnerListener.Addr().String(), HostID: hostID, HostToken: hostToken, Version: "sandbox",
-				Journal: j, HTTPClient: &http.Client{Transport: transport}, Worker: protocol.WorkerAppServer,
+			var clientTransport http.RoundTripper = transport
+			if options.runnerTransport != nil {
+				clientTransport = options.runnerTransport
+			}
+			instance := runtime.IDs.New(protocol.Prefix("rni"))
+			r := runner.New(runner.Config{InstanceID: instance, ServerURL: "http://" + runnerListener.Addr().String(), HostID: hostID, HostToken: hostToken, Version: "sandbox",
+				Journal: j, HTTPClient: &http.Client{Transport: clientTransport}, Worker: protocol.WorkerAppServer,
 				Workers: &scriptedWorkers{}, Workspaces: workspaces{root: filepath.Join(root, "workspaces")},
 				Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: log,
 				RetryDelay: 50 * time.Millisecond, EventFlush: 50 * time.Millisecond, HeartbeatInterval: time.Second,
@@ -156,29 +163,37 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 					log.Error("scripted shutdown proof could not be persisted", "err", proofErr)
 				}
 			}()
-			readyCtx, readyCancel := context.WithTimeout(ctx, 10*time.Second)
+			readyCtx, readyCancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer readyCancel()
 			for {
 				ready := false
 				err := runtime.Store.Read(readyCtx, func(tx *store.ReadTx) error {
-					host, err := store.GetHost(readyCtx, tx.Q(), hostID)
-					ready = err == nil && host.WorkspaceProtocol >= 1
-					return err
+					return tx.Q().QueryRowContext(readyCtx, `SELECT EXISTS(SELECT 1 FROM host_runtime r JOIN hosts h USING(host_id) WHERE h.host_id=? AND h.workspace_protocol>=1 AND r.instance_id=?)`, hostID, instance).Scan(&ready)
 				})
 				if err != nil {
 					return err
 				}
 				if ready {
+					log.Info("sandbox runner registered", "instance", instance)
 					break
 				}
-				if !delay(readyCtx, 25*time.Millisecond) {
+				select {
+				case err := <-done:
+					done <- err // Preserve the result for the joining cleanup.
+					if err == nil {
+						return fmt.Errorf("sandbox runner stopped before registration")
+					}
+					return fmt.Errorf("sandbox runner startup: %w", err)
+				case <-readyCtx.Done():
 					return readyCtx.Err()
+				case <-time.After(25 * time.Millisecond):
 				}
 			}
 			demo, err := SeedDemo(ctx, runtime, root)
 			if err != nil {
 				return err
 			}
+			log.Info("sandbox ready", "addr", listener.Addr().String(), "scenario", options.Scenario, "runner_instance", instance)
 			if options.Ready != nil {
 				options.Ready(runtime, demo)
 			}
@@ -186,7 +201,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			return ctx.Err()
 		},
 	}
-	log.Info("sandbox ready", "addr", listener.Addr().String(), "scenario", options.Scenario)
+	log.Info("sandbox starting", "addr", listener.Addr().String(), "scenario", options.Scenario)
 	err = serverkit.Run(runCtx, cfg, []byte("sandbox-only-server-secret-32-bytes"), deps, log)
 	cancel()
 	h.Wait()
