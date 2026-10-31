@@ -588,6 +588,53 @@ try {
             .getByText("请列出可用于灰度验收的设备和发布模块。", { exact: true })
             .first()
             .waitFor();
+        if (
+          [1440, 390].includes(viewport.width) &&
+          theme === "light" &&
+          !path.startsWith("/issues?") &&
+          path !== "/issues"
+        ) {
+          const controls = page.locator("main summary:visible, main button[aria-expanded]:visible");
+          const handles = await controls.elementHandles();
+          for (const control of handles) {
+            // Navigation menus are overlays, not growing in-place disclosures.
+            if ((await control.getAttribute("aria-haspopup")) || !(await control.isVisible()))
+              continue;
+            await control.scrollIntoViewIfNeeded();
+            const original = await control.evaluate((node) => node.getBoundingClientRect().top);
+            const label = await control.textContent();
+            for (const phase of ["open", "close"]) {
+              await control.evaluate((node: HTMLElement) => node.click());
+              await page.waitForTimeout(120);
+              const y = await control.evaluate((node) => node.getBoundingClientRect().top);
+              assert(
+                Math.abs(y - original) <= 2,
+                `${path} ${label} ${phase}: disclosure moved ${original} → ${y}`,
+              );
+              results.push({ disclosure: label, path, viewport, phase, original, y });
+            }
+          }
+          if (path === "/issues/issue-in_progress") {
+            const summary = page.getByText("目标与完成条件", { exact: true });
+            await summary.evaluate((node) => {
+              for (let parent = node.parentElement; parent; parent = parent.parentElement)
+                if (/auto|scroll/.test(getComputedStyle(parent).overflowY))
+                  parent.scrollTop = parent.scrollHeight;
+            });
+            await page.waitForTimeout(120);
+            const original = await summary.evaluate((node) => node.getBoundingClientRect().top);
+            for (const phase of ["bottom-open", "bottom-close"]) {
+              await summary.evaluate((node: HTMLElement) => node.click());
+              await page.waitForTimeout(120);
+              const y = await summary.evaluate((node) => node.getBoundingClientRect().top);
+              assert(
+                Math.abs(y - original) <= 2,
+                `${path} ${phase}: following latest moved ${original} → ${y}`,
+              );
+              results.push({ disclosure: "目标与完成条件", path, viewport, phase, original, y });
+            }
+          }
+        }
         assert.deepEqual(errors, [], `${path}: console errors; API ${unexpected.join(", ")}`);
         const geometry = await page.evaluate(() => {
           const visible = (e: HTMLElement) =>

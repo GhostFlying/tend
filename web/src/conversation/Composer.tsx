@@ -317,8 +317,10 @@ export function Composer({
         ) : (
           <details className={styles.options}>
             <summary>会话设置</summary>
-            <Settings connection={connection} />
-            <ContextUsage connection={connection} />
+            <div className={styles.optionsPanel}>
+              <Settings connection={connection} />
+              <ContextUsage connection={connection} />
+            </div>
           </details>
         )}
         {busy && !showStop && (

@@ -403,14 +403,6 @@ function Reader({
       anchor.current = null;
     } else if (state.live) el.scrollTop = el.scrollHeight;
   }, [steps, target, state.live, state.page, position, restored]);
-  useEffect(() => {
-    const observer = new ResizeObserver(() => {
-      if (state.live && scroller.current)
-        scroller.current.scrollTop = scroller.current.scrollHeight;
-    });
-    if (flow.current) observer.observe(flow.current);
-    return () => observer.disconnect();
-  }, [state.live]);
   const earlier = () => {
     const el = scroller.current;
     if (el) {
