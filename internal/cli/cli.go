@@ -38,6 +38,8 @@ const (
 const usage = `usage: tend <command> [arguments]
 
 Owner commands:
+  channel list|show|telegram bind|unbind  communication channels
+  message send|reply|notify|list|show|receipts|trace|read|watch
   login --server <url>             get an owner token for this machine
   status [--project <p>] [--json]  projects with their tasks and queue, open decisions and hosts
   attention list|show|create|respond|confirm  original questions and human actions
@@ -82,6 +84,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
+	case "message", "channel":
+		return report(e, runMessaging(ctx, e, cmd, rest))
 	case "login":
 		return report(e, runLogin(ctx, e, rest))
 	case "next-action", "planner":

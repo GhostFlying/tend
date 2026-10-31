@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -92,11 +93,39 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, ev := range batch {
-			if writeEvent(w, "ledger", ev.EventSeq, ev) != nil {
+			after = ev.EventSeq
+			var payload any = ev
+			if strings.HasPrefix(r.URL.Path, "/api/v1/messaging/") {
+				kind := ev.Kind
+				if kind == "conversation.message" {
+					message, err := s.app.MessagingMessage(ctx, ev.ObjectID)
+					if err != nil || message.Direction != "input" {
+						continue
+					}
+					kind = "messaging.input"
+				} else if kind == "conversation.associations_changed" {
+					if _, err := s.app.MessagingMessage(ctx, ev.ObjectID); err != nil {
+						continue
+					}
+					kind = "messaging.associations_changed"
+				} else if kind == "conversation.message_state" || kind == "conversation.turn_reviewed" || strings.HasPrefix(kind, "conversation.processing_") || strings.HasPrefix(kind, "conversation.clarification_") {
+					message, err := s.app.MessagingMessage(ctx, ev.ObjectID)
+					if err != nil || message.Direction != "input" {
+						continue
+					}
+					kind = "messaging.processing"
+				} else if strings.HasPrefix(kind, "task.") || strings.HasPrefix(kind, "issue.") || kind == "run.observed" {
+					kind = "messaging.work_changed"
+				} else if !strings.HasPrefix(kind, "messaging.") {
+					continue
+				}
+				payload = protocol.MessagingEvent{EventSeq: ev.EventSeq, Kind: kind, ObjectType: ev.ObjectType, ObjectID: ev.ObjectID}
+			}
+			if writeEvent(w, "ledger", ev.EventSeq, payload) != nil {
 				return
 			}
-			after = ev.EventSeq
 		}
+
 		if len(batch) > 0 {
 			flusher.Flush()
 			if len(batch) == eventBatch {

@@ -79,12 +79,17 @@ func (c BackgroundCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if visible.Body != "" {
 				page.Sources[i].Body, page.Sources[i].Data = visible.Body, nil
 			}
+			if visible.Body == "" && page.Sources[i].CancelledAt == 0 {
+				if err := recordCommunicationRead(ctx, x, tx, message.MessageID, 0, "agent", "agent", "background_source_tool", c.DeliveryID); err != nil {
+					return Outcome{}, err
+				}
+			}
 			if page.Sources[i].CancelledAt != 0 {
 				page.Sources[i].Body = "[cancelled before delivery; instruction withheld]"
 				page.Sources[i].Data = nil
 			}
 		}
-		return Outcome{Result: page}, nil
+		return Outcome{Result: page, Notify: true}, nil
 	}
 	var published bool
 	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_agent_messages a JOIN conversation_messages m ON m.message_id=a.message_id JOIN request_records r ON r.request_id=m.request_id WHERE a.thread_id=? AND a.turn_id=? AND r.operation='conversation.reply' AND r.status='succeeded')`, x.Principal.Thread, c.TurnID).Scan(&published); err != nil {

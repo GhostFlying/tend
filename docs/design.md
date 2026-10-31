@@ -133,6 +133,7 @@
 | D128 | Issue manager 改为真实的 issue_manager task，由 main/owner 按 category 发布，runner 首次领取时原子更新具体负责人。每轮共用 claim/租约/槽位/journal，等待释放槽位；责任按 Issue 收尾/交接结束，不独立验收管理任务。Codex/Traex app-server 承载，main/consultation 保留 host。协议 2/1、配置格式 2、保留账本受控迁移，unknown 先对账。修订 D122 的本机 manager 执行位置及 D123 的 manager 库存/领取方式。详见 docs/plans/runner-issue-managers.md。 | 实施中，未发布 |
 | D129 | Issue 完整详情页统一负责人对话、当前进展、子项与交付，原执行及验收会话保持独立；摘要按 Issue revision 留存，活动／结果只读投影沿原账本。见 docs/plans/issue-detail-conversation.md。 | 已实现 |
 | D130 | App 业务测试每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移及历史库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md。 | 已实现 |
+| D131 | 通信模型独立于原生 Agent 会话：Web IM/CLI 使用正式发布、来源端点、投递与阅读回执；legacy conversation/rollout 保留诊断。Agent 仅选回复输入，Tend 固定渠道地址；主动通知默认 Web 与已绑定 Telegram。Telegram 单 owner 私聊，先持久化后确认更新，unknown 不重发；消费证据即时推送，渠道 MarkRead 为可选能力。PR/CI 仅预留领域更新与按需唤醒接点，协议仍为 2/1。见 docs/plans/messaging-web-telegram.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

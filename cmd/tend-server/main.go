@@ -36,6 +36,8 @@ import (
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/mainthread"
+	"github.com/GhostFlying/tend/internal/messaging"
+	"github.com/GhostFlying/tend/internal/messaging/telegram"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runnerapi"
@@ -89,11 +91,17 @@ type config struct {
 	// MainAgent runs the hosted main agent alongside the agents the owner
 	// works in (D68).
 	Upgrades  *upgradeConfig       `json:"upgrades"`
+	Telegram  *telegramConfig      `json:"telegram,omitempty"`
 	MainAgent *mainAgentConfig     `json:"main_agent"`
 	Hosts     []app.HostConfig     `json:"hosts"`
 	Repos     []app.RepoConfig     `json:"repos"`
 	Templates []app.TemplateConfig `json:"templates"`
 	Projects  []app.ProjectConfig  `json:"projects"`
+}
+
+// telegramConfig references local credentials; identities are bound through owner CLI.
+type telegramConfig struct {
+	TokenEnv string `json:"token_env"`
 }
 
 // mainAgentConfig configures the hosted main agent (D68). Every field is
@@ -178,7 +186,8 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	defer s.Close()
 	ids := protocol.NewULIDGen(time.Now, nil)
 	wake := dispatch.NewSignal()
-	opts := []app.Option{app.WithNotifier(wake)}
+	readWake := dispatch.NewSignal()
+	opts := []app.Option{app.WithNotifier(dispatch.Fanout{wake, readWake})}
 	if cfg.LeaseTTL > 0 {
 		opts = append(opts, app.WithLeaseTTL(time.Duration(cfg.LeaseTTL)))
 	}
@@ -300,6 +309,26 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		}}
 		handlers[app.MainThreadControlDestination] = background
 	}
+	var telegramClient *telegram.Client
+	if cfg.Telegram != nil {
+		if cfg.Telegram.TokenEnv == "" {
+			return errors.New("telegram.token_env is required")
+		}
+		telegramClient, err = telegram.New(a, os.Getenv(cfg.Telegram.TokenEnv), nil, "", log)
+		if err != nil {
+			return err
+		}
+		prepareCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err = telegramClient.Prepare(prepareCtx)
+		cancel()
+		if err != nil {
+			return err
+		}
+		handlers[app.MessagingDestination] = telegramClient
+	} else if err = a.DisableTelegramRuntime(ctx); err != nil {
+		return err
+	}
+	readDispatch := dispatch.New(a, map[string]dispatch.Handler{app.MessagingReadDestination: messaging.ReadHandler{App: a}}, readWake, time.Now, dispatch.Config{}, log)
 	d := dispatch.New(a, handlers, wake, time.Now, dispatch.Config{}, log)
 	releaseDir := ""
 	if cfg.Upgrades != nil {
@@ -345,6 +374,9 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	var wg sync.WaitGroup
+	if telegramClient != nil {
+		wg.Go(func() { telegramClient.Run(runCtx) })
+	}
 	wg.Go(func() { a.RunIssueStatusNotifications(runCtx, log) })
 	if localSocket != "" {
 		wg.Go(func() {
@@ -368,6 +400,7 @@ func run(ctx context.Context, path string, log *slog.Logger) error {
 		wg.Go(func() { background.Run(runCtx) })
 	}
 	wg.Go(func() { _ = d.Run(runCtx) })
+	wg.Go(func() { _ = readDispatch.Run(runCtx) })
 	wg.Go(func() { runners.SweepLeases(runCtx, a.LeaseTTL()/4) })
 	wg.Go(func() { runners.SweepWorkspaces(runCtx, time.Minute) })
 	shutdownResult := make(chan error, 1)

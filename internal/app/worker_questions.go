@@ -248,6 +248,9 @@ func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d st
 	if err != nil {
 		return nil, err
 	}
+	if err := registerWebCommunicationInput(ctx, tx, id, d.AskedMessageID); err != nil {
+		return nil, err
+	}
 	if err := tx.BindMessage(ctx, id, "decision", d.DecisionID, "answers"); err != nil {
 		return nil, err
 	}

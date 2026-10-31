@@ -1742,6 +1742,19 @@
       "title": "BackgroundSourcePage",
       "type": "object"
     },
+    "BindTelegram": {
+      "additionalProperties": false,
+      "properties": {
+        "user_id": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "user_id"
+      ],
+      "title": "BindTelegram",
+      "type": "object"
+    },
     "BlockReason": {
       "enum": [
         "none",
@@ -6021,6 +6034,524 @@
       "title": "MessageWorkItem",
       "type": "object"
     },
+    "MessagingChannel": {
+      "additionalProperties": false,
+      "properties": {
+        "bot_mark_read": {
+          "type": "boolean"
+        },
+        "channel_id": {
+          "type": "string"
+        },
+        "files": {
+          "type": "boolean"
+        },
+        "health": {
+          "type": "string"
+        },
+        "last_observed_at": {
+          "type": "integer"
+        },
+        "pending_inputs": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "text": {
+          "type": "boolean"
+        },
+        "user_read_receipts": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "health",
+        "last_observed_at",
+        "pending_inputs",
+        "channel_id",
+        "status",
+        "revision",
+        "bot_mark_read",
+        "user_read_receipts",
+        "text",
+        "files"
+      ],
+      "title": "MessagingChannel",
+      "type": "object"
+    },
+    "MessagingDelivery": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer"
+        },
+        "channel_id": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "external_id": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "part": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "delivery_id",
+        "message_id",
+        "channel_id",
+        "part",
+        "kind",
+        "state",
+        "attempts",
+        "updated_at"
+      ],
+      "title": "MessagingDelivery",
+      "type": "object"
+    },
+    "MessagingEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "event_seq": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "object_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_seq",
+        "kind",
+        "object_type",
+        "object_id"
+      ],
+      "title": "MessagingEvent",
+      "type": "object"
+    },
+    "MessagingInput": {
+      "additionalProperties": false,
+      "properties": {
+        "attachments": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": "string"
+        },
+        "correction_of": {
+          "type": "string"
+        },
+        "reply_to": {
+          "type": "string"
+        }
+      },
+      "title": "MessagingInput",
+      "type": "object"
+    },
+    "MessagingMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "attachments": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConversationAttachment"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "author": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "channel_id": {
+          "type": "string"
+        },
+        "content_revision": {
+          "type": "integer"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "correction_of": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "direction": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "issue_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "processing": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reply_to": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "source_message_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source_message_ids",
+        "message_id",
+        "sequence",
+        "conversation_id",
+        "author",
+        "body",
+        "content_revision",
+        "direction",
+        "channel_id",
+        "created_at",
+        "attachments",
+        "issue_ids",
+        "processing"
+      ],
+      "title": "MessagingMessage",
+      "type": "object"
+    },
+    "MessagingPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MessagingMessage"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "more",
+        "next"
+      ],
+      "title": "MessagingPage",
+      "type": "object"
+    },
+    "MessagingPublication": {
+      "additionalProperties": false,
+      "properties": {
+        "attachments": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": "string"
+        },
+        "issue_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reply_to": {
+          "type": "string"
+        },
+        "source_message_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "purpose"
+      ],
+      "title": "MessagingPublication",
+      "type": "object"
+    },
+    "MessagingRead": {
+      "additionalProperties": false,
+      "properties": {
+        "content_revision": {
+          "type": "integer"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "read_at": {
+          "type": "integer"
+        },
+        "reader": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "content_revision",
+        "reader",
+        "endpoint",
+        "evidence",
+        "read_at"
+      ],
+      "title": "MessagingRead",
+      "type": "object"
+    },
+    "MessagingReadPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "content_revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content_revision"
+      ],
+      "title": "MessagingReadPayload",
+      "type": "object"
+    },
+    "MessagingReceipts": {
+      "additionalProperties": false,
+      "properties": {
+        "deliveries": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MessagingDelivery"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reads": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MessagingRead"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "user_read_capability": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reads",
+        "deliveries",
+        "user_read_capability"
+      ],
+      "title": "MessagingReceipts",
+      "type": "object"
+    },
+    "MessagingTask": {
+      "additionalProperties": false,
+      "properties": {
+        "control_mode": {
+          "$ref": "#/definitions/ControlMode"
+        },
+        "lifecycle": {
+          "$ref": "#/definitions/TaskLifecycle"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "lifecycle",
+        "control_mode"
+      ],
+      "title": "MessagingTask",
+      "type": "object"
+    },
+    "MessagingTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "$ref": "#/definitions/MessagingMessage"
+        },
+        "receipts": {
+          "$ref": "#/definitions/MessagingReceipts"
+        },
+        "replies": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MessagingTask"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turns": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MessagingTurn"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "tasks",
+        "message",
+        "receipts",
+        "replies",
+        "turns"
+      ],
+      "title": "MessagingTrace",
+      "type": "object"
+    },
+    "MessagingTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "thread_id",
+        "turn_id",
+        "status"
+      ],
+      "title": "MessagingTurn",
+      "type": "object"
+    },
     "MountView": {
       "additionalProperties": false,
       "properties": {
@@ -9904,6 +10435,9 @@
     "BackgroundSourcePage": {
       "$ref": "#/definitions/BackgroundSourcePage"
     },
+    "BindTelegram": {
+      "$ref": "#/definitions/BindTelegram"
+    },
     "CancelIssueDeadlinePayload": {
       "$ref": "#/definitions/CancelIssueDeadlinePayload"
     },
@@ -10056,6 +10590,39 @@
     },
     "ManualSource": {
       "$ref": "#/definitions/ManualSource"
+    },
+    "MessagingChannel": {
+      "$ref": "#/definitions/MessagingChannel"
+    },
+    "MessagingDelivery": {
+      "$ref": "#/definitions/MessagingDelivery"
+    },
+    "MessagingEvent": {
+      "$ref": "#/definitions/MessagingEvent"
+    },
+    "MessagingInput": {
+      "$ref": "#/definitions/MessagingInput"
+    },
+    "MessagingMessage": {
+      "$ref": "#/definitions/MessagingMessage"
+    },
+    "MessagingPage": {
+      "$ref": "#/definitions/MessagingPage"
+    },
+    "MessagingPublication": {
+      "$ref": "#/definitions/MessagingPublication"
+    },
+    "MessagingRead": {
+      "$ref": "#/definitions/MessagingRead"
+    },
+    "MessagingReadPayload": {
+      "$ref": "#/definitions/MessagingReadPayload"
+    },
+    "MessagingReceipts": {
+      "$ref": "#/definitions/MessagingReceipts"
+    },
+    "MessagingTrace": {
+      "$ref": "#/definitions/MessagingTrace"
     },
     "NativeEntry": {
       "$ref": "#/definitions/NativeEntry"

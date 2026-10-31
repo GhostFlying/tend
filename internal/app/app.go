@@ -429,7 +429,7 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 				return err
 			}
 		}
-		if e.Kind != "task.completed" && (wakesMain(x.Principal, e.Kind) || questionIssue != "" && (e.Kind == "decision.opened" || e.Kind == "decision.answered" || e.Kind == "work_item_choice.answered")) {
+		if e.Kind != "task.completed" && (e.Kind == "decision.opened" || wakesMain(x.Principal, e.Kind) || questionIssue != "" && (e.Kind == "decision.answered" || e.Kind == "work_item_choice.answered")) {
 			if e.Kind == "task.context_changed" {
 				if err := recordTaskContextWake(ctx, x, tx, e, eventID); err != nil {
 					return err

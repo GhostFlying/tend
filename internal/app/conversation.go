@@ -53,6 +53,7 @@ const maxMessageBytes = 64 << 10
 // one message per turn.
 type SubmitMessage struct {
 	externalSource bool
+	origin         *communicationOrigin
 }
 
 // Operation implements Command.
@@ -163,6 +164,15 @@ func (c SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 			if err := queueCoordinationNotice(ctx, x, tx, "The owner sent an original message to the work-item background conversation. Read its exact text and attachments; reconcile any business or authority changes as main coordinator.", id, p.ConversationID); err != nil {
 				return Outcome{}, err
 			}
+		}
+	}
+	if !c.externalSource || c.origin != nil {
+		origin := communicationOrigin{Channel: "web", ReplyTo: p.ReplyTo}
+		if c.origin != nil {
+			origin = *c.origin
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO messaging_messages(message_id,direction,channel_id,bot_id,chat_id,external_id,reply_to,correction_of) VALUES(?,'input',?,?,?,?,?,?)`, id, origin.Channel, origin.BotID, origin.ChatID, origin.ExternalID, origin.ReplyTo, origin.CorrectionOf); err != nil {
+			return Outcome{}, err
 		}
 	}
 	out := Outcome{
@@ -352,6 +362,10 @@ func (c RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 	return recordVisibleAgentMessage(ctx, x, tx, c.Reconciled)
 }
 func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx, reconciled ...bool) (Outcome, error) {
+	return recordVisibleAgentMessageWithFiles(ctx, x, tx, nil, reconciled...)
+}
+
+func recordVisibleAgentMessageWithFiles(ctx context.Context, x *Exec, tx *store.Tx, files []string, reconciled ...bool) (Outcome, error) {
 	var p recordAgentMessagePayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -395,7 +409,7 @@ func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx, recon
 		}
 	}
 	if id == "" {
-		if p.Body == "" {
+		if p.Body == "" && len(files) == 0 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body is required")
 		}
 		id = x.IDs.New(protocol.PrefixMessage)
@@ -527,6 +541,21 @@ func recordMessageState(ctx context.Context, tx *store.Tx, ids protocol.IDGen, m
 		EventID: ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: messageID,
 		Kind: "conversation.message_state", BodyJSON: string(body), CreatedAt: now,
 	})
+	if err != nil {
+		return err
+	}
+	if err == nil {
+		sources, queryErr := store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT s.message_id FROM background_batches b JOIN background_sources s USING(batch_id) JOIN messaging_messages m ON m.message_id=s.message_id WHERE b.message_id=? AND s.cancelled_at=0`, messageID)
+		if queryErr != nil {
+			return queryErr
+		}
+		for _, source := range sources {
+			if _, err = tx.InsertEvent(ctx, store.EventRow{EventID: ids.New(protocol.PrefixEvent), Source: "messaging", ObjectType: "message", ObjectID: source, Kind: "messaging.processing", BodyJSON: string(body), CreatedAt: now}); err != nil {
+				return err
+			}
+		}
+	}
+
 	return err
 }
 

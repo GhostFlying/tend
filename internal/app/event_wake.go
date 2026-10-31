@@ -150,6 +150,11 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
+	if e.Kind == "decision.opened" {
+		if err := registerSystemCommunication(ctx, x, tx, id, "decision_opened:"+d.DecisionID); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.InsertEvent(ctx, store.EventRow{
 		EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id,
 		ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"system"}`,
@@ -172,6 +177,11 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 	}
 	if routed, err := routeQuestionAttention(ctx, x, tx, e, id, eventID, recordedAnswer); routed || err != nil {
 		return err
+	}
+	// Publishing the owner's decision notice is independent of waking a model.
+	// Main's own new question must not enqueue another main turn.
+	if !wakesMain(x.Principal, e.Kind) {
+		return nil
 	}
 	return queueEventTurn(ctx, x, tx, id, eventID, e.Kind, recordedAnswer)
 }

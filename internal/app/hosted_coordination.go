@@ -49,12 +49,12 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		return protocol.Errorf(protocol.CodeForbidden, "tool caller does not own this native execution")
 	}
 	if execution.Selection.Purpose == agentconfig.Consultation {
-		if x.Principal.Kind != protocol.PrincipalBackgroundAgent || c.Operation() != "conversation.promote" || x.Env.Target.Type != "conversation" || x.Env.Target.ID != execution.ConversationID {
-			return protocol.Errorf(protocol.CodeForbidden, "consultation can only delegate its own selected owner request")
+		if x.Principal.Kind != protocol.PrincipalBackgroundAgent || !slices.Contains([]string{"conversation.promote", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) || (c.Operation() == "conversation.promote" && (x.Env.Target.Type != "conversation" || x.Env.Target.ID != execution.ConversationID)) {
+			return protocol.Errorf(protocol.CodeForbidden, "consultation can only communicate or delegate its own admitted request")
 		}
 	}
 	if execution.Selection.Purpose == agentconfig.Main {
-		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put"}, c.Operation()) {
+		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "the personal planner must delegate issue work, not execute its task planning")
 		}
 	} else if execution.Selection.Purpose != agentconfig.Consultation {
@@ -72,6 +72,11 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			return protocol.Errorf(protocol.CodeForbidden, "cancelling responsibility permits settlement only")
 		}
 		switch c.Operation() {
+		case "conversation.reply", "conversation.publish", "conversation.notify":
+			if x.Env.Target.Type != "logical_turn" {
+				return protocol.Errorf(protocol.CodeForbidden, "communication requires an admitted execution")
+			}
+
 		case "issues.deadlines_put":
 			var p protocol.PutIssueDeadlinePayload
 			if err := decodePayload(x.Env, &p); err != nil {
@@ -175,7 +180,7 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 
 func cancellationSettlementOperation(operation string) bool {
 	switch operation {
-	case "issues.cancel", "issues.finish_cancel", "issues.review_sources", "issues.review_completions", "issues.review_context", "issues.context_fact", "issues.followups_cancel", "tasks.cancel", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "conversation.commit_turn":
+	case "conversation.reply", "conversation.publish", "conversation.notify", "issues.cancel", "issues.finish_cancel", "issues.review_sources", "issues.review_completions", "issues.review_context", "issues.context_fact", "issues.followups_cancel", "tasks.cancel", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "conversation.commit_turn":
 		return true
 	}
 	return false

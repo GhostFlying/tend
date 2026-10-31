@@ -69,6 +69,9 @@ func recordAttentionNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, 
 	if err := tx.BindMessage(ctx, message, "attention", a.AttentionID, "notice"); err != nil {
 		return err
 	}
+	if err := registerSystemCommunication(ctx, x, tx, message, "attention_changed:"+a.AttentionID); err != nil {
+		return err
+	}
 	if a.Status == "open" || a.IssueID == "" || a.Kind == "decision" && a.Status == "withdrawn" {
 		if x.Principal.Kind == protocol.PrincipalMainAgent {
 			return nil
