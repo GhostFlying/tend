@@ -1105,6 +1105,42 @@ async function checkFocusedTranscriptResizeFollowing() {
   }
 }
 
+async function checkPausedTranscriptAnchor() {
+  for (const width of [1440, 390]) {
+    reset();
+    decisionVisible = false;
+    upgradeVisible = false;
+    const { context, page } = await openPage(width, 844);
+    const older = history[3]!;
+    const original = older.body;
+    try {
+      const transcript = page.getByRole("region", { name: "对话记录" });
+      const later = transcript.locator('[data-scroll-id="msg_fixture_owner_8"]');
+      await later.scrollIntoViewIfNeeded();
+      await transcript.evaluate((node) => {
+        node.scrollTop -= 60;
+      });
+      await page.waitForTimeout(100);
+      const y = await later.evaluate((node) => node.getBoundingClientRect().top);
+      older.body += "较早回复继续生成。\n\n".repeat(60);
+      publish("conversation.message");
+      await transcript
+        .getByText(/较早回复继续生成/)
+        .first()
+        .waitFor({ state: "attached" });
+      await page.waitForTimeout(100);
+      assert(
+        Math.abs((await later.evaluate((node) => node.getBoundingClientRect().top)) - y) <= 2,
+        "earlier streaming content displaced paused chat reading",
+      );
+      console.log(`PASS paused transcript anchor ${width}`);
+    } finally {
+      older.body = original!;
+      await context.close();
+    }
+  }
+}
+
 async function checkDelayedStoredThumbnail() {
   for (const width of [1440, 390]) {
     reset();
@@ -1823,6 +1859,7 @@ try {
     await checkTranscriptExpansionWithoutFocus();
     await checkFocusedTranscriptResizeFollowing();
     await checkDelayedStoredThumbnail();
+    await checkPausedTranscriptAnchor();
     await checkComposerOverlays();
     await checkUsageKeyboard();
     await checkInitialSettingsKeyboard();

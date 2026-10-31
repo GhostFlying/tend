@@ -108,6 +108,12 @@ export function Transcript({ visible }: { visible: boolean }) {
       if (!conversation.loadingEarlier) anchor.current = null;
     } else if (following.current && (previousContent.current !== contentKey || entered)) {
       el.scrollTop = el.scrollHeight;
+    } else if (
+      !following.current &&
+      previousContent.current !== contentKey &&
+      readingAnchor.current
+    ) {
+      restoreAnchor(el, readingAnchor.current);
     }
     previousContent.current = contentKey;
     readingAnchor.current = captureAnchor(el);

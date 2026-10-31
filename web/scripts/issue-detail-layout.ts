@@ -829,6 +829,26 @@ try {
       const n = document.querySelector("[data-issue-scroll]")!;
       return n.scrollHeight > previousHeight && n.scrollHeight - n.scrollTop - n.clientHeight < 20;
     }, previousHeight);
+    const laterEntry = detail.locator('[data-scroll-id="result:artifact-one"]');
+    await laterEntry.scrollIntoViewIfNeeded();
+    await scroller.evaluate((node) => {
+      node.scrollTop -= 120;
+    });
+    await page.waitForTimeout(100);
+    const entryY = await laterEntry.evaluate((node) => node.getBoundingClientRect().top);
+    reply.body += "在较早回复继续生成内容。\n\n".repeat(60);
+    reply.assistant_revision!++;
+    publish();
+    await turn
+      .getByText(/在较早回复继续生成内容/)
+      .first()
+      .waitFor({ state: "attached" });
+    await page.waitForTimeout(100);
+    assert(
+      Math.abs((await laterEntry.evaluate((node) => node.getBoundingClientRect().top)) - entryY) <=
+        2,
+      "streamed reply above paused Issue reading displaced the later entry",
+    );
     reply.body = originalBody;
     reply.assistant_revision!++;
     publish();
