@@ -62,6 +62,12 @@ export function IssueActivity({
   const readingAnchor = useRef<ScrollAnchor | null>(null);
   const scrollportSize = useRef({ width: 0, height: 0 });
   const dataFrame = useRef(0);
+  const expectedScroll = useRef<number | null>(null);
+  const correctScroll = useCallback((node: HTMLElement, correct: () => void) => {
+    const before = node.scrollTop;
+    correct();
+    if (node.scrollTop !== before) expectedScroll.current = node.scrollTop;
+  }, []);
   const pagination = useRef<{
     trigger: string;
     top: number;
@@ -79,14 +85,20 @@ export function IssueActivity({
       )
         return false;
       scrollportSize.current = { width: node.clientWidth, height: node.clientHeight };
-      if (following.current || reading.followsLatest()) node.scrollTop = node.scrollHeight;
-      else if (readingAnchor.current) restoreAnchor(node, readingAnchor.current);
+      if (following.current || reading.followsLatest())
+        correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
+      else if (readingAnchor.current)
+        correctScroll(node, () => restoreAnchor(node, readingAnchor.current!));
       readingAnchor.current = captureAnchor(node);
       return true;
     };
     const moved = () => {
-      if (pagination.current && !pagination.current.ready) pagination.current = null;
       if (resized()) return;
+      const programmatic =
+        expectedScroll.current !== null && Math.abs(node.scrollTop - expectedScroll.current) < 1;
+      expectedScroll.current = null;
+      if (!programmatic && pagination.current && !pagination.current.ready)
+        pagination.current = null;
       following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
       if (following.current) reading.followLatest();
       else reading.pauseFollowing();
@@ -118,7 +130,7 @@ export function IssueActivity({
       node.removeEventListener("scroll", moved);
       node.removeEventListener("click", disclosure, true);
     };
-  }, [scroll, reading]);
+  }, [scroll, reading, correctScroll]);
   const last = useRef(0);
   const previousPending = useRef(0);
   useEffect(() => {
@@ -201,17 +213,17 @@ export function IssueActivity({
     const position = rows.at(-1)?.position ?? 0;
     if (position > last.current && last.current && end) {
       const near = following.current || reading.followsLatest();
-      if (near) end.scrollTo({ top: end.scrollHeight });
+      if (near) correctScroll(end, () => end.scrollTo({ top: end.scrollHeight }));
       else requestAnimationFrame(() => setNewItems(true));
     }
     last.current = position;
     if (outgoing.length > previousPending.current && end) {
       reading.followLatest();
-      end.scrollTo({ top: end.scrollHeight });
+      correctScroll(end, () => end.scrollTo({ top: end.scrollHeight }));
       requestAnimationFrame(() => setNewItems(false));
     }
     previousPending.current = outgoing.length;
-  }, [rows, outgoing.length, scroll, reading]);
+  }, [rows, outgoing.length, scroll, reading, correctScroll]);
   const activityContent = JSON.stringify([rows, transcript]);
   const latestContent = JSON.stringify([issue, rows, transcript]);
   const previousContent = useRef("");
@@ -237,20 +249,25 @@ export function IssueActivity({
           );
           const item = row?.checkVisibility() ? row : group?.checkVisibility() ? group : null;
           if (!item) continue;
-          node.scrollTo({ top: node.scrollTop + item.getBoundingClientRect().top - boundary.top });
+          correctScroll(node, () =>
+            node.scrollTo({
+              top: node.scrollTop + item.getBoundingClientRect().top - boundary.top,
+            }),
+          );
           break;
         }
         readingAnchor.current = captureAnchor(node);
       });
     } else if (node && previousContent.current && previousContent.current !== latestContent) {
-      if (following.current || reading.followsLatest()) node.scrollTo({ top: node.scrollHeight });
+      if (following.current || reading.followsLatest())
+        correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
       else {
         const anchor = readingAnchor.current;
         if (anchor) {
-          restoreAnchor(node, anchor);
+          correctScroll(node, () => restoreAnchor(node, anchor));
           cancelAnimationFrame(dataFrame.current);
           dataFrame.current = requestAnimationFrame(() => {
-            restoreAnchor(node, anchor);
+            correctScroll(node, () => restoreAnchor(node, anchor));
             readingAnchor.current = captureAnchor(node);
           });
         }
@@ -261,7 +278,7 @@ export function IssueActivity({
     if (node) readingAnchor.current = captureAnchor(node);
     previousContent.current = latestContent;
     previousActivity.current = activityContent;
-  }, [latestContent, activityContent, scroll, reading, continuations]);
+  }, [latestContent, activityContent, scroll, reading, continuations, correctScroll]);
   const earlier = async () => {
     const node = scroll.current;
     const anchor = node ? captureAnchor(node) : null;
@@ -271,7 +288,8 @@ export function IssueActivity({
         reading.expandActivity();
         if (visible.length === rows.length) await reads.activity.earlier();
       } else await reads.activity.earlier();
-      if (node && anchor) requestAnimationFrame(() => restoreAnchor(node, anchor));
+      if (node && anchor)
+        requestAnimationFrame(() => correctScroll(node, () => restoreAnchor(node, anchor)));
     } catch {
       setError("更早记录读取失败，请重试。");
     }

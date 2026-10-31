@@ -1304,7 +1304,7 @@ try {
   }
 
   for (const width of [1440, 390]) {
-    for (const scenario of ["failure", "scroll", "group"] as const) {
+    for (const scenario of ["failure", "scroll", "group", "progress"] as const) {
       const base = activity.items![0]!.block!;
       const original = { items: base.items, more: base.more };
       const older = { ...base.items![0]!, body: "基础长回复内容。\n\n".repeat(100), seq: 2 };
@@ -1337,7 +1337,7 @@ try {
         more: false,
       };
       continuationFailure = scenario === "failure";
-      continuationDelay = scenario === "scroll" ? 700 : 0;
+      continuationDelay = ["scroll", "progress"].includes(scenario) ? 700 : 0;
       const context = await browser.newContext({
         viewport: { width, height: 844 },
         serviceWorkers: "block",
@@ -1391,6 +1391,28 @@ try {
             Math.abs((await scroller.evaluate((node) => node.scrollTop)) - saved) <= 2,
             "pagination undid scrolling performed during the request",
           );
+        } else if (scenario === "progress") {
+          const progress = issue.progress!.summary;
+          issue.progress!.summary = "等待续页时上方进展更新。\n\n".repeat(60);
+          issue.revision++;
+          publish();
+          await detail
+            .getByText(/等待续页时上方进展更新/)
+            .first()
+            .waitFor({ state: "attached" });
+          const first = detail.locator('[data-scroll-id="scenario-reply-progress"]');
+          await first.waitFor();
+          await page.waitForTimeout(100);
+          assert(
+            Math.abs((await first.evaluate((node) => node.getBoundingClientRect().top)) - y) <= 2,
+            "programmatic progress anchor restoration cancelled pending continuation boundary",
+          );
+          assert.equal(
+            await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+            0,
+          );
+          issue.progress!.summary = progress;
+          issue.revision++;
         } else {
           const group = detail.getByRole("button", { name: "使用了 50 个工具", exact: true });
           await group.waitFor();
