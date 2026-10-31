@@ -25,7 +25,7 @@ import {
   systemMessageBody,
   type Entry,
 } from "./model.ts";
-import { groupToolItems, retainToolGroups } from "./toolLabels.ts";
+import { toolGroups, retainToolGroups } from "./toolLabels.ts";
 import { CopyIdentifier } from "../i18n/identifiers.tsx";
 import { Chevron } from "../shell/icons.tsx";
 import toolStyles from "./ToolRow.module.css";
@@ -143,15 +143,23 @@ export function OutgoingRow({
 
 export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> }) {
   const root = useRef<HTMLDivElement>(null);
-  const [groups, setGroups] = useState(() =>
-    groupToolItems(entry.items).map((items) => items.map((item) => item.message_id)),
-  );
+  const [groups, setGroups] = useState(() => toolGroups(entry.items));
   const [, interaction] = useState(0);
   useLayoutEffect(() => {
     const reading = root.current?.querySelector("[data-open], details[open], :focus");
-    const next = reading
-      ? retainToolGroups(groups, entry.items)
-      : groupToolItems(entry.items).map((items) => items.map((item) => item.message_id));
+    const anchors = new Map<string, string>();
+    for (const group of groups) {
+      const disclosure = root.current?.querySelector(`[data-tool-group="${group.key}"]`);
+      const active =
+        disclosure?.querySelector(":focus") ?? disclosure?.querySelector("[data-open]");
+      if (disclosure?.hasAttribute("open") || active) {
+        anchors.set(
+          group.key,
+          active?.closest("[data-scroll-id]")?.getAttribute("data-scroll-id") ?? group.ids[0]!,
+        );
+      }
+    }
+    const next = reading ? retainToolGroups(groups, entry.items, anchors) : toolGroups(entry.items);
     if (JSON.stringify(next) !== JSON.stringify(groups)) setGroups(next);
   });
   const current = new Map(entry.items.map((item) => [item.message_id, item]));
@@ -163,23 +171,24 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
       onBlurCapture={() => interaction((n) => n + 1)}
     >
       {groups
-        .map((ids) => ids.map((id) => current.get(id)!).filter(Boolean))
-        .filter((items) => items.length > 0)
-        .map((items) =>
-          items.length > 1 ? (
-            <details key={items[0]!.message_id} className={toolStyles.group}>
+        .map((group) => ({
+          ...group,
+          items: group.ids.map((id) => current.get(id)!).filter(Boolean),
+        }))
+        .filter((group) => group.items.length > 0)
+        .map(({ key, grouped, items }) =>
+          grouped ? (
+            <details key={key} data-tool-group={key} className={toolStyles.group}>
               <summary className={toolStyles.row}>
                 <Chevron className={toolStyles.chevron} />
-                <span className={toolStyles.name}>
-                  使用了 {items.filter((item) => item.tool).length} 个工具
-                </span>
+                <span className={toolStyles.name}>使用了 {items.length} 个工具</span>
               </summary>
               {items.map((it) => (
                 <AgentItem key={it.message_id} item={it} />
               ))}
             </details>
           ) : (
-            <AgentItem key={items[0]!.message_id} item={items[0]!} />
+            <AgentItem key={key} item={items[0]!} />
           ),
         )}
       {entry.done && (
