@@ -57,38 +57,17 @@ export function IssueActivity({
   const [all, setAll] = useState(reading.activityExpanded);
   const [error, setError] = useState("");
   const [newItems, setNewItems] = useState(false);
+  const following = useRef(reading.followsLatest());
   useEffect(() => {
     const node = scroll.current;
     if (!node) return;
-    let following = false;
-    let anchor = captureAnchor(node);
     const moved = () => {
-      following =
-        node.scrollTop > 0 && node.scrollHeight - node.scrollTop - node.clientHeight < 100;
-      if (following) reading.followLatest();
+      following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
+      if (following.current) reading.followLatest();
       else reading.pauseFollowing();
-      anchor = captureAnchor(node);
     };
-    const control = (event: Event) => {
-      if (event.target instanceof Element && event.target.closest("button, summary, a")) {
-        following = false;
-        reading.pauseFollowing();
-        anchor = captureAnchor(node);
-      }
-    };
-    const observer = new ResizeObserver(() => {
-      if (following || reading.followsLatest()) node.scrollTo({ top: node.scrollHeight });
-      else restoreAnchor(node, anchor);
-      anchor = captureAnchor(node);
-    });
     node.addEventListener("scroll", moved);
-    node.addEventListener("click", control, true);
-    if (node.firstElementChild) observer.observe(node.firstElementChild);
-    return () => {
-      observer.disconnect();
-      node.removeEventListener("scroll", moved);
-      node.removeEventListener("click", control, true);
-    };
+    return () => node.removeEventListener("scroll", moved);
   }, [scroll, reading]);
   const last = useRef(0);
   const previousPending = useRef(0);
@@ -150,7 +129,7 @@ export function IssueActivity({
     const end = scroll.current;
     const position = rows.at(-1)?.position ?? 0;
     if (position > last.current && last.current && end) {
-      const near = end.scrollHeight - end.scrollTop - end.clientHeight < 100;
+      const near = following.current || reading.followsLatest();
       if (near) end.scrollTo({ top: end.scrollHeight });
       else requestAnimationFrame(() => setNewItems(true));
     }
@@ -162,6 +141,12 @@ export function IssueActivity({
     }
     previousPending.current = outgoing.length;
   }, [rows, outgoing.length, scroll, reading]);
+  const latestContent = JSON.stringify(rows.at(-1));
+  useLayoutEffect(() => {
+    const node = scroll.current;
+    if (node && (following.current || reading.followsLatest()))
+      node.scrollTo({ top: node.scrollHeight });
+  }, [latestContent, scroll, reading]);
   const earlier = async () => {
     const node = scroll.current;
     const anchor = node ? captureAnchor(node) : null;
@@ -296,7 +281,7 @@ function ActivityBlock({
                   <AgentTurn entry={{ ...row, items: row.items.filter((item) => !item.tool) }} />
                 </div>
                 {long && (
-                  <button className={styles.textLink} onClick={() => setExpanded(!expanded)}>
+                  <button className={styles.textLink} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
                     {expanded ? "收起" : "展开全文"}
                   </button>
                 )}
