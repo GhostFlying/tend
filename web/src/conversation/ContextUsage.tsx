@@ -1,3 +1,4 @@
+import { useOverlayState } from "../ui/focus.ts";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Connection } from "../api/client.ts";
@@ -16,7 +17,7 @@ export function ContextUsage({ connection }: { connection: Connection }) {
   const id = conversation?.id ?? "main";
   const [usage, setUsage] = useState<AgentContextUsage | null>(null);
   const [history, setHistory] = useState<AgentCompactionPage | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOverlayState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -56,7 +57,7 @@ export function ContextUsage({ connection }: { connection: Connection }) {
       trigger.current?.focus();
       suppressFocus.current = false;
     }
-  }, []);
+  }, [setOpen]);
   useEffect(() => {
     if (!open || position.visibility === "hidden") return;
     const escape = (event: globalThis.KeyboardEvent) => {
@@ -89,7 +90,7 @@ export function ContextUsage({ connection }: { connection: Connection }) {
     };
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
-  }, [open]);
+  }, [open, setOpen]);
   useLayoutEffect(() => {
     if (open && position.visibility !== "hidden" && focusOnOpen.current) {
       panel.current?.focus();
