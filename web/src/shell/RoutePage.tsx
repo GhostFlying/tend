@@ -1,4 +1,4 @@
-import { lazy, Suspense, useLayoutEffect, useRef } from "react";
+import { Component, lazy, Suspense, useLayoutEffect, useRef, type ReactNode } from "react";
 import type { Connection } from "../api/client.ts";
 import { back, href, navigate, restorePage, type Route } from "../app/router.ts";
 import { useServices } from "../app/services.tsx";
@@ -32,8 +32,43 @@ const UsagePanel = lazy(() =>
 const Hosts = lazy(() => import("../hosts/Hosts.tsx").then((m) => ({ default: m.Hosts })));
 const Details = lazy(() => import("./Details.tsx").then((m) => ({ default: m.Details })));
 const MorePage = lazy(() => import("./More.tsx").then((m) => ({ default: m.MorePage })));
+import { Button } from "../ui/Button.tsx";
 import { PageHeader } from "./PageHeader.tsx";
 import styles from "./Shell.module.css";
+
+type RouteBoundaryProps = { identity: string; children: ReactNode };
+type RouteBoundaryState = { identity: string; failed: boolean };
+
+// A failed route must not tear down the persistent chat or shell navigation.
+export class RouteErrorBoundary extends Component<RouteBoundaryProps, RouteBoundaryState> {
+  override state = { identity: this.props.identity, failed: false };
+
+  static getDerivedStateFromProps(
+    props: RouteBoundaryProps,
+    state: RouteBoundaryState,
+  ): RouteBoundaryState | null {
+    return props.identity === state.identity ? null : { identity: props.identity, failed: false };
+  }
+
+  static getDerivedStateFromError(): Pick<RouteBoundaryState, "failed"> {
+    return { failed: true };
+  }
+
+  override render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <section className={styles.page}>
+        <PageHeader title="页面已更新" />
+        <div className={styles.routeError} role="alert">
+          <p>页面已更新，需要重新加载。</p>
+          <Button variant="primary" onClick={() => window.location.reload()}>
+            重新加载
+          </Button>
+        </div>
+      </section>
+    );
+  }
+}
 
 export function RoutePage({
   route,
@@ -154,16 +189,18 @@ export function RoutePage({
   }
   return (
     <div ref={outlet} className={styles.content}>
-      <Suspense
-        fallback={
-          <section className={styles.page} aria-busy="true">
-            <PageHeader title="正在读取…" />
-            <div className={styles.skeleton} aria-hidden="true" />
-          </section>
-        }
-      >
-        {content}
-      </Suspense>
+      <RouteErrorBoundary identity={identity}>
+        <Suspense
+          fallback={
+            <section className={styles.page} aria-busy="true">
+              <PageHeader title="正在读取…" />
+              <div className={styles.skeleton} aria-hidden="true" />
+            </section>
+          }
+        >
+          {content}
+        </Suspense>
+      </RouteErrorBoundary>
     </div>
   );
 }
