@@ -150,7 +150,12 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
   const [traceOpen, setTraceOpen] = useState(false);
   const wasActive = useRef(status.active);
   useLayoutEffect(() => {
-    if (wasActive.current && !status.active) setTraceOpen(false);
+    if (wasActive.current && !status.active) {
+      const trace = root.current?.querySelector("details[data-trace]");
+      if (trace?.contains(document.activeElement))
+        trace.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+      setTraceOpen(false);
+    }
     wasActive.current = status.active;
   }, [status.active]);
   const prefix = useId();
@@ -178,8 +183,17 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
   return (
     <div ref={root} className={styles.agent}>
       <LiveStatus status={status} />
+      {tools
+        .flatMap((item) => item.choices ?? [])
+        .map((choice) => (
+          <ChoiceCard key={choice.choice_id} choice={choice} />
+        ))}
       {!!tools.length && (
-        <details open={traceOpen} onToggle={(event) => setTraceOpen(event.currentTarget.open)}>
+        <details
+          data-trace
+          open={traceOpen}
+          onToggle={(event) => setTraceOpen(event.currentTarget.open)}
+        >
           <summary>{tools.length} 个步骤</summary>
           {flatTurnRows(entry.items, states)
             .filter((row) => row.kind === "group" || row.item.tool)
@@ -209,6 +223,7 @@ export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> 
                   key={row.key}
                   item={row.item}
                   hidden={row.hidden}
+                  hideChoices
                   id={`${prefix}-item-${row.item.message_id}`}
                   onToolOpenChange={onToolOpenChange}
                 />
@@ -244,9 +259,11 @@ const AgentItem = memo(function AgentItem({
   hidden,
   id,
   onToolOpenChange,
+  hideChoices = false,
 }: {
   item: ConversationItem;
   hidden: boolean;
+  hideChoices?: boolean;
   id: string;
   onToolOpenChange(id: string, open: boolean): void;
 }) {
@@ -269,9 +286,8 @@ const AgentItem = memo(function AgentItem({
       data-scroll-id={item.message_id}
       data-tool-item={item.tool ? item.message_id : undefined}
     >
-      {item.choices?.map((choice) => (
-        <ChoiceCard key={choice.choice_id} choice={choice} />
-      ))}
+      {!hideChoices &&
+        item.choices?.map((choice) => <ChoiceCard key={choice.choice_id} choice={choice} />)}
       {item.tool ? (
         <ToolRow
           tool={item.tool}

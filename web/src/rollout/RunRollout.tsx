@@ -3,6 +3,7 @@ import { runActivityStatus } from "../ui/activityStatus.ts";
 import { runLabel } from "../tasks/runLabel.ts";
 import {
   useCallback,
+  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -12,14 +13,37 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useOverlayState } from "../ui/focus.ts";
-import type { RunView } from "../api/generated/api.ts";
+import { useServices } from "../app/services.tsx";
+import { useStore } from "../state/store.ts";
+import { WorkItemRead } from "../workitems/live.ts";
+import type { TaskDetail, RunView } from "../api/generated/api.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { UsagePanel } from "../usage/Usage.tsx";
 import { buildSteps, type Step } from "./model.ts";
 import { useRunWindow } from "./useRunWindow.ts";
 import styles from "./RunRollout.module.css";
 
+export function TaskRunStatus({ id }: { id: string }) {
+  const { client, live } = useServices();
+  const read = useMemo(() => new WorkItemRead<TaskDetail>(client), [client]);
+  const state = useStore(read.state);
+  useEffect(() => {
+    void read.open(`/api/v1/tasks/${encodeURIComponent(id)}`);
+    const stop = live.snapshot.subscribe(() => void read.refresh());
+    return () => {
+      stop();
+      read.close();
+    };
+  }, [id, read, live]);
+  const runs = state.value?.runs;
+  return runs?.length ? <RunRollout runs={runs} /> : null;
+}
+
 export function RunStatusLine({ id, observed }: { id: string; observed: string }) {
+  return <RunStatusWindow key={id} id={id} observed={observed} />;
+}
+
+function RunStatusWindow({ id, observed }: { id: string; observed: string }) {
   const window = useRunWindow(id);
   return <LiveStatus status={runActivityStatus(window.page?.logs ?? [], observed)} />;
 }
@@ -72,6 +96,7 @@ function RunWindow({ run, label }: { run: RunView; label: string }) {
   const [target, setTarget] = useState("");
   const [usage, setUsage] = useState(false);
   const regionID = useId();
+  const toggle = useRef<HTMLButtonElement>(null);
   const readingPosition = useRef<ReadingPosition | null>(null);
   const [savedPosition, setSavedPosition] = useState<ReadingPosition | null>(null);
   const observed = run.observed;
@@ -79,9 +104,13 @@ function RunWindow({ run, label }: { run: RunView; label: string }) {
   const status = runActivityStatus(window.page?.logs ?? [], observed);
   const wasActive = useRef(active);
   useLayoutEffect(() => {
-    if (wasActive.current && !active) setExpanded(false);
+    if (wasActive.current && !active) {
+      if (document.getElementById(regionID)?.contains(document.activeElement))
+        toggle.current?.focus({ preventScroll: true });
+      setExpanded(false);
+    }
     wasActive.current = active;
-  }, [active]);
+  }, [active, regionID]);
   const close = useCallback(() => setFull(false), [setFull]);
   const open = (step?: Step) => {
     if (step) window.setLive(false);
@@ -92,6 +121,7 @@ function RunWindow({ run, label }: { run: RunView; label: string }) {
   return (
     <>
       <button
+        ref={toggle}
         className={styles.activity}
         aria-label="展开执行步骤"
         aria-expanded={expanded}

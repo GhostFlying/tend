@@ -141,11 +141,26 @@ export function Transcript({ visible }: { visible: boolean }) {
       }
       readingAnchor.current = captureAnchor(el);
     };
+    const disclosure = (event: MouseEvent) => {
+      if (
+        !(event.target instanceof Element) ||
+        !event.target.closest("summary, button[aria-expanded]")
+      )
+        return;
+      requestAnimationFrame(() => {
+        const near = el.scrollHeight - el.scrollTop - el.clientHeight < nearBottomPx;
+        following.current = near;
+        setAtBottom(near);
+        readingAnchor.current = captureAnchor(el);
+      });
+    };
+    el.addEventListener("click", disclosure, true);
     const observer = new ResizeObserver(update);
     observer.observe(el);
     update();
     return () => {
       observer.disconnect();
+      el.removeEventListener("click", disclosure, true);
     };
   }, [visible]);
 

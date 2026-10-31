@@ -556,7 +556,7 @@ try {
       stream.write(
         `event: ledger\ndata: ${JSON.stringify({ event_seq: eventSeq, object_type: "task", object_id: taskID, kind: "task.changed", created_at: "2026-10-27T03:01:00Z" })}\n\n`,
       );
-    await rollout.getByText("已结束", { exact: false }).waitFor();
+    await rollout.locator('header [data-active="false"]').filter({ hasText: "已完成" }).waitFor();
     assert.equal(
       await rollout.getByText("正在执行…", { exact: true }).count(),
       0,
@@ -568,7 +568,7 @@ try {
       stream.write(
         `event: ledger\ndata: ${JSON.stringify({ event_seq: eventSeq, object_type: "task", object_id: taskID, kind: "task.changed", created_at: "2026-10-27T03:01:00Z" })}\n\n`,
       );
-    await rollout.getByText("执行中", { exact: false }).waitFor();
+    await rollout.locator('header [data-active="true"]').waitFor();
 
     await page.waitForTimeout(2200);
     assert(Math.abs((await reader.evaluate((el) => el.scrollTop)) - historyTop) < 3);
@@ -706,8 +706,12 @@ try {
   const boundary = await boundaryContext.newPage();
   await boundary.goto(`http://127.0.0.1:${address.port}/?task=${taskID}`);
   const shortCard = boundary.getByRole("region", { name: "执行过程与用量" });
-  await shortCard.getByText("隔离记录 10", { exact: true }).waitFor();
+  await shortCard
+    .getByText(/\d+ 个步骤/)
+    .first()
+    .waitFor();
   await shortCard.getByRole("button", { name: "展开执行步骤" }).click();
+  await shortCard.getByText("隔离记录 10", { exact: true }).first().waitFor();
   await shortCard.getByRole("button", { name: /查看完整过程/ }).click();
   const short = boundary.getByRole("dialog", { name: "完整执行过程", exact: true });
   const earlier = short.getByRole("button", { name: "加载更早记录" });
