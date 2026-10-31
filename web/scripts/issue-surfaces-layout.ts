@@ -635,6 +635,8 @@ const server = createServer(async (req, res) => {
       deadlines: [],
     });
   if (p === "/api/v1/inbox") {
+    if (copyOnly && u.searchParams.get("status") === "open")
+      return json({ items: [], more: false });
     let rows = [information, decision, action].filter(
       (row) => !row.archived_at || u.searchParams.get("include_archived") === "true",
     );
