@@ -216,3 +216,12 @@
 .seatScroll:has(button:focus, textarea:focus) {
   min-height: min(160px, 30dvh);
 }
+
+@media (max-width: 760px) {
+  .seat {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+  .switcher {
+    min-height: var(--control-touch);
+  }
+}

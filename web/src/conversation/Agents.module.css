@@ -252,3 +252,10 @@
     overflow: auto;
   }
 }
+
+@media (max-width: 760px) {
+  .ring {
+    width: var(--control-touch);
+    height: var(--control-touch);
+  }
+}

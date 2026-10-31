@@ -183,3 +183,9 @@
     max-height: calc(100dvh - 160px);
   }
 }
+
+@media (max-width: 760px) {
+  .trigger {
+    min-height: var(--control-touch);
+  }
+}
