@@ -23,7 +23,7 @@ import { ToolRow } from "../conversation/ToolRow.tsx";
 import { captureAnchor, restoreAnchor } from "../conversation/scrollAnchor.ts";
 import { IssueTurnRead } from "./turn.ts";
 import { IssueResultCard, HistoricalResultCard } from "./Results.tsx";
-import type { IssueReadingState } from "./Details.tsx";
+import type { IssueReadingState } from "./reading.ts";
 import type { Issues } from "./data.ts";
 import styles from "./DetailPage.module.css";
 

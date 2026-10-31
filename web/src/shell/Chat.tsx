@@ -7,7 +7,7 @@ import { ManualSource } from "../conversation/ManualSource.tsx";
 import { Sheet } from "../ui/Modal.tsx";
 import { Rollout } from "../conversation/Rollout.tsx";
 import { PendingQueue } from "../conversation/PendingQueue.tsx";
-import { UpgradeBanner } from "../upgrades/Upgrade.tsx";
+import { UpgradeBanner } from "../upgrades/Banner.tsx";
 // The one conversation with the main agent (D27): the transcript, and the
 // seat docked at the bottom with notes and the composer.
 import { useServices } from "../app/services.tsx";

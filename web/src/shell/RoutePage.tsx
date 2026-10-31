@@ -1,20 +1,37 @@
-import { useLayoutEffect, useRef } from "react";
+import { lazy, Suspense, useLayoutEffect, useRef } from "react";
 import type { Connection } from "../api/client.ts";
 import { back, href, navigate, restorePage, type Route } from "../app/router.ts";
 import { useServices } from "../app/services.tsx";
-import { ArchiveBrowser } from "../archive/Archive.tsx";
-import { AgentCatalogView } from "../agents/Catalog.tsx";
-import { Inbox } from "../attention/Inbox.tsx";
-import { IssueBoard } from "../issues/Board.tsx";
-import { IssueDetails, type IssueReadingStates } from "../issues/Details.tsx";
-import { Handoff } from "../conversation/Handoff.tsx";
-import { UpgradeDetails } from "../upgrades/Upgrade.tsx";
-import { TaskBoard } from "../tasks/Board.tsx";
-import { Repositories } from "../repos/Repositories.tsx";
-import { UsagePanel } from "../usage/Usage.tsx";
-import { Hosts } from "../hosts/Hosts.tsx";
-import { Details } from "./Details.tsx";
-import { MorePage } from "./More.tsx";
+const ArchiveBrowser = lazy(() =>
+  import("../archive/Archive.tsx").then((m) => ({ default: m.ArchiveBrowser })),
+);
+const AgentCatalogView = lazy(() =>
+  import("../agents/Catalog.tsx").then((m) => ({ default: m.AgentCatalogView })),
+);
+const Inbox = lazy(() => import("../attention/Inbox.tsx").then((m) => ({ default: m.Inbox })));
+const IssueBoard = lazy(() =>
+  import("../issues/Board.tsx").then((m) => ({ default: m.IssueBoard })),
+);
+import type { IssueReadingStates } from "../issues/reading.ts";
+const IssueDetails = lazy(() =>
+  import("../issues/Details.tsx").then((m) => ({ default: m.IssueDetails })),
+);
+const Handoff = lazy(() =>
+  import("../conversation/Handoff.tsx").then((m) => ({ default: m.Handoff })),
+);
+const UpgradeDetails = lazy(() =>
+  import("../upgrades/Upgrade.tsx").then((m) => ({ default: m.UpgradeDetails })),
+);
+const TaskBoard = lazy(() => import("../tasks/Board.tsx").then((m) => ({ default: m.TaskBoard })));
+const Repositories = lazy(() =>
+  import("../repos/Repositories.tsx").then((m) => ({ default: m.Repositories })),
+);
+const UsagePanel = lazy(() =>
+  import("../usage/Usage.tsx").then((m) => ({ default: m.UsagePanel })),
+);
+const Hosts = lazy(() => import("../hosts/Hosts.tsx").then((m) => ({ default: m.Hosts })));
+const Details = lazy(() => import("./Details.tsx").then((m) => ({ default: m.Details })));
+const MorePage = lazy(() => import("./More.tsx").then((m) => ({ default: m.MorePage })));
 import { PageHeader } from "./PageHeader.tsx";
 import styles from "./Shell.module.css";
 
@@ -137,7 +154,16 @@ export function RoutePage({
   }
   return (
     <div ref={outlet} className={styles.content}>
-      {content}
+      <Suspense
+        fallback={
+          <section className={styles.page} aria-busy="true">
+            <PageHeader title="正在读取…" />
+            <div className={styles.skeleton} aria-hidden="true" />
+          </section>
+        }
+      >
+        {content}
+      </Suspense>
     </div>
   );
 }

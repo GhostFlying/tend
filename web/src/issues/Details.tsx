@@ -1,9 +1,10 @@
+import type { IssueReadingState } from "./reading.ts";
 import { Button, Badge, Section, EmptyState } from "../ui/index.ts";
 import { navigate } from "../app/router.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
-import type { IssueAgentConversation, IssueView, IssueActivityPage } from "../api/generated/api.ts";
+import type { IssueAgentConversation, IssueView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { Sheet } from "../ui/Modal.tsx";
@@ -46,53 +47,6 @@ type Panel =
   | "reopen"
   | "pause"
   | "resume";
-export class IssueReadingState {
-  top = 0;
-  children = false;
-  childCursors = [""];
-  childCursor(): string | undefined {
-    return this.childCursors.at(-1) || undefined;
-  }
-  saveChildCursors(cursors: string[]): void {
-    this.childCursors = cursors;
-  }
-  activity: IssueActivityPage | null = null;
-  activityExpanded = false;
-  private following = false;
-  followLatest(): void {
-    this.following = true;
-  }
-  pauseFollowing(): void {
-    this.following = false;
-  }
-  followsLatest(): boolean {
-    return this.following;
-  }
-  saveActivity(page: IssueActivityPage | null): void {
-    if (page) this.activity = page;
-  }
-  expandActivity(): void {
-    this.activityExpanded = true;
-  }
-  saveTop(top: number): void {
-    this.top = top;
-  }
-  expandChildren(): void {
-    this.children = true;
-  }
-}
-export class IssueReadingStates {
-  private states = new Map<string, IssueReadingState>();
-  get(id: string): IssueReadingState {
-    let reading = this.states.get(id);
-    if (!reading) {
-      reading = new IssueReadingState();
-      this.states.set(id, reading);
-    }
-    return reading;
-  }
-}
-
 export function IssueDetails({
   id,
   connection,
