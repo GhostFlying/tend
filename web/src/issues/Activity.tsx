@@ -17,9 +17,10 @@ import type {
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { noOutbox } from "../queue/sendQueue.ts";
+import { LiveStatus } from "../ui/LiveStatus.tsx";
+import { conversationStatus } from "../ui/activityStatus.ts";
 import { AgentTurn, OwnerMessage, OutgoingRow, SystemMessage } from "../conversation/Messages.tsx";
 import { buildTranscriptEntries, type TranscriptEntry } from "../conversation/transcriptBlocks.ts";
-import { ToolRow } from "../conversation/ToolRow.tsx";
 import { captureAnchor, restoreAnchor } from "../conversation/scrollAnchor.ts";
 import { IssueTurnRead } from "./turn.ts";
 import { IssueResultCard, HistoricalResultCard } from "./Results.tsx";
@@ -244,7 +245,6 @@ function ActivityBlock({
   const items = rows.flatMap((row) =>
     row.kind === "agent" ? row.items : row.kind === "system" ? [row.item] : [],
   );
-  const tools = items.filter((item) => item.tool);
   const [expanded, setExpanded] = useEntryState(`activity-expanded:${entry.id}`, false);
   const long = items.some((item) => (item.body?.length ?? 0) > 400);
   const more = () => {
@@ -278,10 +278,14 @@ function ActivityBlock({
                   {entry.author} <small>负责人</small>
                 </div>
                 <div className={!expanded && long ? styles.replyClamp : undefined}>
-                  <AgentTurn entry={{ ...row, items: row.items.filter((item) => !item.tool) }} />
+                  <AgentTurn entry={row} />
                 </div>
                 {long && (
-                  <button className={styles.textLink} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+                  <button
+                    className={styles.textLink}
+                    aria-expanded={expanded}
+                    onClick={() => setExpanded(!expanded)}
+                  >
                     {expanded ? "收起" : "展开全文"}
                   </button>
                 )}
@@ -299,6 +303,11 @@ function ActivityBlock({
             return null;
         }
       })}
+      {block.trigger.state === "processing" && !rows.some((row) => row.kind === "agent") && (
+        <LiveStatus
+          status={conversationStatus([], "processing", Date.parse(block.trigger.created_at))}
+        />
+      )}
       {items.some(
         (item) =>
           item.assistant_state && !["completed", "streaming"].includes(item.assistant_state),
@@ -306,18 +315,6 @@ function ActivityBlock({
         <p role="status" className={styles.muted}>
           本轮回复已中断、失败或结果未知；已生成内容和原请求仍保留。
         </p>
-      )}
-      {!!tools.length && (
-        <details className={styles.processing}>
-          <summary>
-            处理记录 · {tools.length}
-            {tools.some((item) => item.tool?.status === "failed") ? " · 有失败记录" : ""}
-            {tools.some((item) => item.tool?.status === "interrupted") ? " · 有中断记录" : ""}
-          </summary>
-          {tools.map((item) => (
-            <ToolRow key={item.message_id} tool={item.tool!} />
-          ))}
-        </details>
       )}
       {extra.error && (
         <p role="status">

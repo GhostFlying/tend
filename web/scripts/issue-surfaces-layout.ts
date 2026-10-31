@@ -1194,6 +1194,7 @@ async function captureS5() {
     };
     copyTools[1]!.tool.status = "running";
     await page.goto(`http://127.0.0.1:${address.port}/`);
+    await page.getByText(`${copyTools.length} 个步骤`, { exact: true }).click();
     const firstTool = page.locator('[data-scroll-id="copy-tool-0"]');
     const firstButton = firstTool.getByRole("button", { includeHidden: true });
     await firstButton.click();

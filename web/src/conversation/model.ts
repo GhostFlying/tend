@@ -50,6 +50,8 @@ export type Entry =
       key: string;
       replyTo: string;
       items: ConversationItem[];
+      startedAt?: number;
+      state?: MessageState;
       /** Set once the turn is over: when it ended and how long it took. */
       done?: { at: number; tookMs?: number };
     };
@@ -98,6 +100,8 @@ export function buildEntries(
       continue;
     }
     const trigger = triggers.get(e.replyTo);
+    if (trigger) e.startedAt = Date.parse(trigger.created_at);
+    if (trigger?.state) e.state = trigger.state;
     if (trigger?.state && trigger.state !== "processing" && trigger.state !== "queued") {
       const at = Date.parse(e.items.at(-1)!.created_at);
       const took = at - Date.parse(trigger.created_at);

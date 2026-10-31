@@ -1,0 +1,52 @@
+.line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+.indicator {
+  flex: none;
+  width: 1em;
+  text-align: center;
+}
+.label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.timer {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.line[data-active="true"] .indicator {
+  animation: spin 1.4s linear infinite;
+}
+.line[data-active="true"] .label {
+  animation: pulse 2s ease-in-out infinite;
+}
+.line[data-tone="error"] {
+  color: var(--danger);
+}
+.line[data-tone="warning"] {
+  color: var(--warn);
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .line[data-active="true"] .indicator,
+  .line[data-active="true"] .label {
+    animation: none;
+  }
+}

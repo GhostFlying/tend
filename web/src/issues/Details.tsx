@@ -31,6 +31,7 @@ import { CreateIssueTask } from "./CreateTask.tsx";
 import { IssueActivity } from "./Activity.tsx";
 import { ProgressEditor, IssueControlEditor } from "./Progress.tsx";
 import { IssueResultsList, resultStatus } from "./Results.tsx";
+import { RunStatusLine } from "../rollout/RunRollout.tsx";
 import { taskLook } from "../tasks/status.ts";
 import styles from "./DetailPage.module.css";
 
@@ -237,25 +238,29 @@ export function IssueDetails({
           .sort((a, b) => taskPriority(a) - taskPriority(b))
           .slice(0, 3)
           .map((task) => (
-            <Button
-              variant="ghost"
-              className={styles.resultLink}
-              key={task.task_id}
-              onClick={() => {
-                setSide(false);
-                onTask(task.task_id);
-              }}
-            >
-              <span>{task.title}</span>
-              <small>
-                {task.execution?.role === "accept"
-                  ? "独立验收 · "
-                  : task.execution?.role === "implement"
-                    ? "实施 · "
-                    : ""}
-                {taskLook(task).label}
-              </small>
-            </Button>
+            <div key={task.task_id}>
+              <Button
+                variant="ghost"
+                className={styles.resultLink}
+                onClick={() => {
+                  setSide(false);
+                  onTask(task.task_id);
+                }}
+              >
+                <span>{task.title}</span>
+                <small>
+                  {task.execution?.role === "accept"
+                    ? "独立验收 · "
+                    : task.execution?.role === "implement"
+                      ? "实施 · "
+                      : ""}
+                  {taskLook(task).label}
+                </small>
+              </Button>
+              {task.execution?.run_id && ["running", "starting"].includes(task.execution.state) && (
+                <RunStatusLine id={task.execution.run_id} observed={task.execution.state} />
+              )}
+            </div>
           ))}
         {!issue.tasks?.length && <p className={styles.muted}>暂无任务</p>}
         {!!issue.tasks?.length && (

@@ -8,10 +8,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useServices } from "../app/services.tsx";
 import { noOutbox } from "../queue/sendQueue.ts";
 import { ArrowDown } from "../shell/icons.tsx";
-import { StatusDot } from "../shell/StatusDot.tsx";
+import { LiveStatus } from "../ui/LiveStatus.tsx";
+import { conversationStatus } from "../ui/activityStatus.ts";
 import { useStore } from "../state/store.ts";
 import { AgentTurn, Divider, OutgoingRow, OwnerMessage, SystemMessage } from "./Messages.tsx";
-import { buildEntries, duration, processing } from "./model.ts";
+import { buildEntries, processing } from "./model.ts";
 import styles from "./Transcript.module.css";
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "./scrollAnchor.ts";
 
@@ -61,6 +62,8 @@ export function Transcript({ visible }: { visible: boolean }) {
   const [atBottom, setAtBottom] = useState(true);
   const following = useRef(true);
   const wasVisible = useRef(visible);
+  const contentKey = JSON.stringify(entries);
+  const previousContent = useRef("");
   const readingAnchor = useRef<ScrollAnchor | null>(null);
   /** Where the reader was when the page before was asked for. */
   const anchor = useRef<ScrollAnchor | null>(null);
@@ -94,7 +97,8 @@ export function Transcript({ visible }: { visible: boolean }) {
       wasVisible.current = false;
       return;
     }
-    if (!wasVisible.current && !following.current && readingAnchor.current)
+    const entered = !wasVisible.current;
+    if (entered && !following.current && readingAnchor.current)
       restoreAnchor(el, readingAnchor.current);
     wasVisible.current = true;
     const a = anchor.current;
@@ -102,11 +106,12 @@ export function Transcript({ visible }: { visible: boolean }) {
       // Appended live output must not count as prepended page height.
       restoreAnchor(el, a);
       if (!conversation.loadingEarlier) anchor.current = null;
-    } else if (following.current) {
+    } else if (following.current && (previousContent.current !== contentKey || entered)) {
       el.scrollTop = el.scrollHeight;
     }
+    previousContent.current = contentKey;
     readingAnchor.current = captureAnchor(el);
-  }, [entries, visible, conversation.loadingEarlier]);
+  }, [contentKey, visible, conversation.loadingEarlier]);
 
   useEffect(() => {
     // A first page too short to scroll cannot be scrolled up to load more.
@@ -184,7 +189,16 @@ export function Transcript({ visible }: { visible: boolean }) {
               case "outgoing":
                 return <OutgoingRow key={e.key} message={e.message} queue={queue} />;
               case "agent":
-                return <AgentTurn key={e.key} entry={e} />;
+                return (
+                  <AgentTurn
+                    key={e.key}
+                    entry={
+                      conversation.processingSince.has(e.replyTo)
+                        ? { ...e, startedAt: conversation.processingSince.get(e.replyTo)! }
+                        : e
+                    }
+                  />
+                );
               case "block-more":
                 return (
                   <button
@@ -200,13 +214,16 @@ export function Transcript({ visible }: { visible: boolean }) {
                 );
             }
           })}
-          {busy && (
-            <Working
-              since={
-                conversation.processingSince.get(busy.message_id) ?? Date.parse(busy.created_at)
-              }
-            />
-          )}
+          {busy &&
+            !entries.some(
+              (entry) => entry.kind === "agent" && entry.replyTo === busy.message_id,
+            ) && (
+              <Working
+                since={
+                  conversation.processingSince.get(busy.message_id) ?? Date.parse(busy.created_at)
+                }
+              />
+            )}
         </div>
       </div>
       {!atBottom && (
@@ -219,18 +236,6 @@ export function Transcript({ visible }: { visible: boolean }) {
   );
 }
 
-/** "正在处理" with the time since the turn started. */
 function Working({ since }: { since: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(t);
-  }, []);
-  return (
-    <div className={styles.working} role="status">
-      <StatusDot tone="run" />
-      <span className={styles.shimmer}>正在处理…</span>
-      <span className={styles.elapsed}>· {duration(now - since)}</span>
-    </div>
-  );
+  return <LiveStatus status={conversationStatus([], "processing", since)} />;
 }

@@ -370,10 +370,14 @@ try {
       stream.write(
         `event: ledger\ndata: ${JSON.stringify({ event_seq: eventSeq, object_type: "task", object_id: taskID, kind: "task.changed", created_at: "2026-10-27T03:00:00Z" })}\n\n`,
       );
-    await card.getByText("隔离记录 150", { exact: true }).waitFor();
+    await card
+      .getByText(/\d+ 个步骤/)
+      .first()
+      .waitFor();
     assert.equal(await card.locator("article").count(), 0);
     await card.screenshot({ path: join(output, `rollout-card-${viewport.width}.png`) });
     await card.getByRole("button", { name: "展开执行步骤" }).click();
+    await card.getByText("隔离记录 150", { exact: true }).first().waitFor();
     assert.equal(await card.locator("article").count(), 6);
     await card.getByRole("button", { name: "本次用量", exact: true }).click();
     const runUsage = card.getByRole("region", { name: "本次执行 Token 用量" });

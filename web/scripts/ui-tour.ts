@@ -336,11 +336,33 @@ const server = createServer(async (req, res) => {
     return json({ run_id: "run-tour", messages: [], more: false });
   if (p.startsWith("/api/v1/runs/") && p.endsWith("/rollout"))
     return json({
-      run_id: "run-tour",
-      status: "unavailable",
-      reason: "尚无执行记录",
-      items: [],
-      more: false,
+      run_id: p.split("/")[4],
+      observed: p.includes("run-completed") ? "finished" : "running",
+      logs: [
+        { seq: 1, kind: "turn.started", created_at: new Date(now - 5000).toISOString(), body: {} },
+        ...["item.started", "item.completed"].map((kind, index) => ({
+          seq: index + 2,
+          kind,
+          created_at: new Date(now - 3000 + index * 1000).toISOString(),
+          body: {
+            kind,
+            thread_id: "tour-thread",
+            turn_id: "tour-turn",
+            item_id: "tour-command",
+            data: {
+              type: "commandExecution",
+              command: "示例检查",
+              status: index ? "completed" : "inProgress",
+              aggregatedOutput: index ? "示例结果" : "",
+            },
+          },
+        })),
+      ],
+      before: 1,
+      after: 3,
+      watermark: 3,
+      more_before: false,
+      more_after: false,
     });
   if (p === "/api/v1/issues")
     return json({
@@ -596,23 +618,70 @@ try {
         ) {
           const controls = page.locator("main summary:visible, main button[aria-expanded]:visible");
           const handles = await controls.elementHandles();
-          for (const control of handles) {
+          const tested = new Set<string>();
+          let probeIndex = 0;
+          const probe = async (control: (typeof handles)[number], scroll = true) => {
             // Navigation menus are overlays, not growing in-place disclosures.
             if ((await control.getAttribute("aria-haspopup")) || !(await control.isVisible()))
-              continue;
-            await control.scrollIntoViewIfNeeded();
-            const original = await control.evaluate((node) => node.getBoundingClientRect().top);
+              return;
+            const id = await control.evaluate((node, next) => {
+              const el = node as HTMLElement;
+              return el.dataset.s8Probe ?? (el.dataset.s8Probe = next);
+            }, String(probeIndex++));
+            if (tested.has(id)) return;
+            tested.add(id);
+            if (scroll) await control.scrollIntoViewIfNeeded();
+            const original = await control.evaluate(
+              (node) => (node as Element).getBoundingClientRect().top,
+            );
             const label = await control.textContent();
             for (const phase of ["open", "close"]) {
               await control.evaluate((node: HTMLElement) => node.click());
               await page.waitForTimeout(120);
-              const y = await control.evaluate((node) => node.getBoundingClientRect().top);
+              const y = await control.evaluate(
+                (node) => (node as Element).getBoundingClientRect().top,
+              );
               assert(
                 Math.abs(y - original) <= 2,
                 `${path} ${label} ${phase}: disclosure moved ${original} → ${y}`,
               );
               results.push({ disclosure: label, path, viewport, phase, original, y });
+              if (phase === "open") {
+                const container = await control.evaluateHandle((node) => {
+                  const el = node as HTMLElement;
+                  return el.tagName === "SUMMARY"
+                    ? el.parentElement
+                    : document.getElementById(
+                        el.getAttribute("aria-controls")?.split(" ")[0] ?? "",
+                      );
+                });
+                const root = container.asElement();
+                if (root) {
+                  const nested = await root.$$("summary:visible, button[aria-expanded]:visible");
+                  for (const child of nested) {
+                    if (
+                      await child.evaluate(
+                        (node, id) => (node as HTMLElement).dataset.s8Probe !== id,
+                        id,
+                      )
+                    )
+                      await probe(child, false);
+                  }
+                }
+                await container.dispose();
+              }
             }
+          };
+          for (const control of handles) await probe(control);
+          if (path === "/tasks/task-tour") {
+            const open = page.getByRole("button", { name: "展开执行步骤" });
+            await open.click();
+            await page.getByRole("button", { name: /查看完整过程/ }).click();
+            const reader = page.getByRole("dialog", { name: "完整执行过程" });
+            for (const summary of await reader.locator("summary:visible").elementHandles())
+              await probe(summary);
+            await page.getByRole("button", { name: "关闭完整过程" }).click();
+            await open.click();
           }
           if (path === "/issues/issue-in_progress") {
             const summary = page.getByText("目标与完成条件", { exact: true });
