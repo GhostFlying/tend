@@ -840,7 +840,9 @@ async function checkNormalInboxAndTaskAnswer() {
         0,
         "reading/selecting the real pending question is not a submitted answer",
       );
-      await inbox.getByRole("button", { name: "← 返回", exact: true }).click();
+      await inbox
+        .getByRole("button", { name: width <= 760 ? "← 返回" : "稍后处理", exact: true })
+        .click();
       await page.goto(`http://127.0.0.1:${fixturePort}/?task=${task.task_id}`);
       const detail = page.getByRole("region", { name: "任务详情", exact: true });
       await detail.getByRole("button", { name: originalOptions[0]!, exact: true }).waitFor();
@@ -935,6 +937,21 @@ async function checkJumpRecovery() {
   const { context, page, errors } = await openPage(390, 844);
   try {
     await page.getByText("历史消息 14", { exact: false }).waitFor();
+    const banner = page.getByRole("button", { name: "查看发布进度", exact: true });
+    await banner.waitFor();
+    assert(
+      await banner.evaluate((button) => {
+        const bounds = button.getBoundingClientRect();
+        const next = button.nextElementSibling!.getBoundingClientRect();
+        return (
+          Array.from(button.children).every((child) => {
+            const box = child.getBoundingClientRect();
+            return box.top >= bounds.top && box.bottom <= bounds.bottom;
+          }) && bounds.bottom <= next.top
+        );
+      }),
+      "390px upgrade banner contains wrapped text and avoids the next control",
+    );
     assert.equal(
       await page
         .getByRole("region", { name: "对话记录" })

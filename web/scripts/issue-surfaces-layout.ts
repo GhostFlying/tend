@@ -1148,12 +1148,22 @@ async function captureS4() {
         await navigate(page, path!);
         await page.locator("main h1:visible").waitFor();
         if (
-          ["board", "hierarchy", "settings", "tasks", "usage", "repos", "hosts"].includes(name!)
+          [
+            "board",
+            "hierarchy",
+            "settings",
+            "tasks",
+            "usage",
+            "repos",
+            "hosts",
+            ...(viewport.width === 1440 ? ["inbox", "inbox-detail"] : []),
+          ].includes(name!)
         ) {
           assert.equal(
             await page
               .locator("main")
               .getByRole("button", { name: /^(← 返回|返回对话|返回Issue)$/ })
+              .filter({ visible: true })
               .count(),
             0,
             "top-level pages have no back controls",
@@ -1178,6 +1188,16 @@ async function captureS4() {
             .first()
             .waitFor();
         if (name === "board") {
+          if (viewport.width === 390) {
+            const create = (await page
+              .getByRole("button", { name: "新建 Issue", exact: true })
+              .boundingBox())!;
+            const filter = (await page
+              .getByRole("button", { name: "筛选", exact: true })
+              .boundingBox())!;
+            assert.equal(create.height, filter.height, "phone toolbar buttons use one height");
+            assert.equal(create.y, filter.y, "phone toolbar actions share a row");
+          }
           assert(
             await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
             "board has no horizontal page overflow",
@@ -1229,6 +1249,11 @@ async function captureS4() {
             "one issue status row",
           );
           assert.equal(await auxiliary.getByText("看板状态", { exact: true }).count(), 0);
+          const status = (await auxiliary.locator("[data-issue-status]").innerText()).trim();
+          assert(
+            await page.locator("main p").filter({ hasText: status }).count(),
+            "header and sidebar share the issue status label",
+          );
           if (viewport.width <= 760)
             await page
               .getByRole("dialog", { name: "Issue辅助信息", exact: true })
@@ -1237,6 +1262,7 @@ async function captureS4() {
               .click();
         }
         await page.evaluate(() => document.fonts.ready);
+        await page.mouse.move(0, 0);
         await page.screenshot({
           path: join(output, `${name}-${viewport.width}-${colorScheme}.png`),
         });
@@ -1593,9 +1619,9 @@ try {
     await page.getByRole("button", { name: /^切换会话：/ }).click();
     await page
       .getByRole("dialog", { name: "会话", exact: true })
-      .getByRole("button", { name: "Agent与类别", exact: true })
+      .getByRole("button", { name: "Agent 与类别", exact: true })
       .click();
-    const emptyCatalog = page.getByRole("region", { name: "Agent与类别", exact: true });
+    const emptyCatalog = page.getByRole("region", { name: "Agent 与类别", exact: true });
     await emptyCatalog.getByText("尚未配置托管Agent", { exact: true }).waitFor();
     assert.equal(await emptyCatalog.getByText(/部分登记暂时无法读取/).count(), 0);
     await page.screenshot({ path: join(output, `catalog-unconfigured-${viewport.width}.png`) });
@@ -1623,7 +1649,7 @@ try {
     await page.getByRole("button", { name: /^切换会话：/ }).click();
     await page
       .getByRole("dialog", { name: "会话", exact: true })
-      .getByRole("button", { name: "Agent与类别", exact: true })
+      .getByRole("button", { name: "Agent 与类别", exact: true })
       .click();
     await emptyCatalog.getByRole("button", { name: /青竹 planner/ }).waitFor();
     assert.equal(await emptyCatalog.getByText("尚未配置托管Agent", { exact: true }).count(), 0);
@@ -1701,6 +1727,27 @@ try {
     await page.getByRole("button", { name: "稍后处理", exact: true }).click();
     await page.waitForURL((url) => url.pathname === "/inbox");
     assert.equal(new URL(page.url()).pathname, "/inbox", "defer always opens the list");
+    await page.goBack();
+    await page.waitForURL((url) => url.pathname.startsWith("/inbox/"));
+    await page.goForward();
+    await page.waitForURL((url) => url.pathname === "/inbox");
+    const inboxList = page.getByRole("region", { name: "待处理事项", exact: true });
+    await inboxList.getByRole("button", { name: /发布进度已更新/ }).waitFor();
+    assert.equal(
+      await inboxList.getAttribute("data-selected"),
+      "false",
+      "forward preserves deferral",
+    );
+    await navigate(page, "/settings");
+    await page.getByLabel("空闲分钟", { exact: true }).waitFor();
+    await page.goBack();
+    await page.waitForURL((url) => url.pathname === "/inbox");
+    await inboxList.getByRole("button", { name: /发布进度已更新/ }).waitFor();
+    assert.equal(
+      await inboxList.getAttribute("data-selected"),
+      "false",
+      "return preserves deferral",
+    );
     await navigate(page, "/");
     replyBody = "实际流式回复：先核对证据，再安排下一步。";
     replyRevision++;
@@ -2006,7 +2053,7 @@ try {
     assert.equal(writes.length, 1);
     const requestID = writes[0]!.request_id;
     await page.screenshot({ path: join(output, `inbox-unknown-${viewport.width}.png`) });
-    await inbox.getByRole("button", { name: "← 返回", exact: true }).click();
+    await inbox.getByRole("button", { name: mobile ? "← 返回" : "稍后处理", exact: true }).click();
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -2034,7 +2081,7 @@ try {
       .waitFor();
     assert.equal(writes.length, 1);
     assert.equal(writes[0]!.request_id, requestID);
-    await inbox.getByRole("button", { name: "← 返回", exact: true }).click();
+    await inbox.getByRole("button", { name: mobile ? "← 返回" : "稍后处理", exact: true }).click();
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -2256,7 +2303,7 @@ try {
     );
     await rejected.getByRole("button", { name: "返回会话", exact: true }).click();
     await navigate(page, "/settings/agents");
-    const catalogDialog = page.getByRole("region", { name: "Agent与类别", exact: true });
+    const catalogDialog = page.getByRole("region", { name: "Agent 与类别", exact: true });
     await catalogDialog
       .getByRole("button", { name: /松风 implementer/ })
       .first()
@@ -2503,7 +2550,9 @@ try {
     assert.equal(new URL(routeSmoke.url()).searchParams.get("from"), issue.issue_id);
     await routeSmoke.goto(`${fixtureOrigin}/inbox/${action.attention_id}`);
     await routeSmoke.getByRole("heading", { name: "待处理", exact: true, level: 1 }).waitFor();
-    await routeSmoke.getByRole("button", { name: "← 返回", exact: true }).click();
+    await routeSmoke
+      .getByRole("button", { name: mobile ? "← 返回" : "稍后处理", exact: true })
+      .click();
     await routeSmoke.waitForURL(`${fixtureOrigin}/inbox`);
     await routeSmoke.close();
     assert(

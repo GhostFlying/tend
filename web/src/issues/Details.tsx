@@ -188,6 +188,9 @@ export function IssueDetails({
     issue?.attentions?.items?.filter((a) => a.status === "open" && a.kind !== "information") ?? [];
   const execution = executionSummary(issue);
   const ended = !!issue && ["closed", "cancelled"].includes(issue.state);
+  const statusLabel =
+    issue &&
+    (issue.state !== "active" ? issueStateLabel[issue.state] : workStatusLabel(workStatus(issue)));
   const deliveryCount =
     (results.value?.items?.length ?? 0) + (deliveries.value?.items?.length ?? 0);
   const recentDeliveries = [
@@ -227,11 +230,7 @@ export function IssueDetails({
             <AssigneeName assignee={issue.assignee} />
           </dd>
           <dt>状态</dt>
-          <dd data-issue-status>
-            {ended || issue.state !== "active"
-              ? issueStateLabel[issue.state]
-              : workStatusLabel(workStatus(issue))}
-          </dd>
+          <dd data-issue-status>{statusLabel}</dd>
           <dt>项目</dt>
           <dd>{issue.plan.project || "未分组"}</dd>
         </dl>
@@ -358,11 +357,18 @@ export function IssueDetails({
   return (
     <section className={styles.page} aria-label="Issue详情">
       <header className={styles.toolbar}>
-        <Button variant="ghost" onClick={onBack} aria-label="返回Issue列表或上一项">
+        <Button
+          variant="ghost"
+          className={styles.back}
+          onClick={onBack}
+          aria-label="返回Issue列表或上一项"
+        >
           ← 返回
         </Button>
         <nav aria-label="Issue路径">
-          <span>Issues</span>
+          <Button variant="link" onClick={onBack}>
+            Issues
+          </Button>
           {issue?.ancestors?.map((parent) => (
             <Button key={parent.issue_id} onClick={() => onSelect(parent.issue_id)}>
               / {parent.title}
@@ -437,7 +443,7 @@ export function IssueDetails({
                 <PageHeader className={styles.titleHeader} title={issue.plan.title} />
                 <p className={styles.metadata}>
                   <span className={styles.dot} />
-                  {issueStateLabel[issue.state]}
+                  {statusLabel}
                   <span>·</span>
                   <AssigneeName assignee={issue.assignee} />
                   负责<span>·</span>
@@ -818,7 +824,7 @@ function ChildIssues({
             <span className={styles.muted}>
               <AssigneeName assignee={child.assignee} />
             </span>
-            <small>{issueStateLabel[child.state]}</small>
+            <Badge>{issueStateLabel[child.state]}</Badge>
           </Button>
         ))}
       </div>
