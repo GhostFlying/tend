@@ -1,6 +1,5 @@
 import { Link } from "../app/router.ts";
 import { Menu } from "../ui/Menu.tsx";
-import { PageHeader } from "./PageHeader.tsx";
 import { MainPending } from "../attention/MainPending.tsx";
 import type { AttentionPage } from "../api/generated/api.ts";
 import type { ReadState } from "../workitems/live.ts";
@@ -38,12 +37,29 @@ export function Chat({
   onIssue?: (id: string) => void;
 }) {
   const { conversation, openAgentDrawer } = useServices();
+  const title = conversation?.title ?? "主 Agent";
   const [sourceOpen, setSourceOpen] = useOverlayState(false, visible);
   const [rolloutOpen, setRolloutOpen] = useOverlayState(false, visible);
 
   return (
     <OverlayVisibility value={visible}>
-      <PageHeader className={styles.head} title={conversation?.title ?? "主 Agent"}>
+      <header className={styles.head}>
+        <h1 tabIndex={-1} aria-label={title}>
+          <Button
+            variant="ghost"
+            size="s"
+            className={styles.switcher}
+            title={title}
+            onClick={openAgentDrawer}
+            aria-label={`切换会话：${title}`}
+          >
+            <span>{title}</span>
+            <ChevronDown />
+          </Button>
+        </h1>
+        <span className={styles.mobileOnly}>
+          <ConnectionBadge connection={connection} compact />
+        </span>
         <span className={styles.sub}>
           {conversation?.kind === "consultation"
             ? "独立咨询 · 普通问答不创建任务"
@@ -52,17 +68,6 @@ export function Chat({
               : "一个会话，所有设备共享"}
         </span>
         <span className={styles.spacer} />
-        <Button
-          variant="ghost"
-          size="s"
-          className={styles.switcher}
-          title={conversation?.title ?? "主 Agent"}
-          onClick={openAgentDrawer}
-          aria-label={`切换会话：${conversation?.title ?? "主 Agent"}`}
-        >
-          <span>{conversation?.title ?? "主 Agent"}</span>
-          <ChevronDown />
-        </Button>
         {conversation?.workItemID && (
           <Link className={styles.issueLink} to={{ page: "issue", id: conversation.workItemID }}>
             Issue
@@ -80,10 +85,7 @@ export function Chat({
         >
           <More />
         </Menu>
-        <span className={styles.mobileOnly}>
-          <ConnectionBadge connection={connection} compact />
-        </span>
-      </PageHeader>
+      </header>
       {conversation?.kind === "consultation" && (
         <div className={styles.roleNote}>
           独立咨询 · 普通问答不创建任务

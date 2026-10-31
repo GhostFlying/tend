@@ -32,6 +32,7 @@ export function Sidebar({
       to={path}
       className={styles.item}
       aria-label={label}
+      aria-description={path === "/inbox" ? pending.description : undefined}
       title={label}
       aria-current={navActive(route, path) ? "page" : undefined}
       onClick={path === "/tasks" ? () => live.tasks.setProject("") : undefined}

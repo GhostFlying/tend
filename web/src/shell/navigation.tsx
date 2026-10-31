@@ -1,6 +1,6 @@
 import type { ComponentType, SVGProps } from "react";
 import type { Route } from "../app/router.ts";
-import { Chat, Pending, Tasks, Gear, Repository, Usage, Host, More } from "./icons.tsx";
+import { Chat, Pending, Tasks, Run, Gear, Repository, Usage, Host, More } from "./icons.tsx";
 
 export type NavItem = { path: string; label: string; Icon: ComponentType<SVGProps<SVGSVGElement>> };
 export const groups: { label: string; items: NavItem[] }[] = [
@@ -15,7 +15,7 @@ export const groups: { label: string; items: NavItem[] }[] = [
     label: "工作",
     items: [
       { path: "/issues", label: "Issues", Icon: Tasks },
-      { path: "/tasks", label: "任务执行", Icon: Tasks },
+      { path: "/tasks", label: "任务执行", Icon: Run },
     ],
   },
   {
