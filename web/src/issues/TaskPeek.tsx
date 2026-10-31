@@ -1,3 +1,4 @@
+import { runLabel } from "../tasks/runLabel.ts";
 import { useEffect, useMemo, useState } from "react";
 import type { IssueTaskSummary, TaskDetail } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
@@ -70,7 +71,7 @@ export function IssueTaskPeek({
                 return (
                   <div className={styles.phase} key={role}>
                     <strong>{role === "implement" ? "实施" : "独立验收"}</strong>
-                    <span>{run ? `第 ${run.generation} 轮` : "尚未开始"}</span>
+                    <span>{run ? runLabel(detail.runs ?? [], run) : "尚未开始"}</span>
                     <span>
                       {run
                         ? runLabels[run.observed] || run.observed

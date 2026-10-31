@@ -30,3 +30,16 @@
     min-height: 44px;
   }
 }
+
+@media (max-width: 760px) {
+  .tabs {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      var(--mask-opaque) var(--space-4),
+      var(--mask-opaque) calc(100% - var(--space-5)),
+      transparent
+    );
+    padding-right: var(--space-6);
+  }
+}

@@ -1,3 +1,4 @@
+import { runLabel } from "../tasks/runLabel.ts";
 import { CommitHash, CopyIdentifier } from "../i18n/identifiers.tsx";
 import { RunConversation } from "../tasks/RunConversation.tsx";
 import { useDurableOp } from "../app/useDurableOp.ts";
@@ -107,7 +108,7 @@ function ManagerTaskContent({ task }: { task: TaskDetail }) {
         {!task.runs?.length && <p>等待执行主机领取。</p>}
         {task.runs?.map((run) => (
           <div key={run.run_id} className={styles.progress}>
-            <b>协调 · 第 {run.generation} 轮</b>
+            <b>{runLabel(task.runs ?? [], run)}</b>
             <span>{statusLabels[run.observed] ?? run.observed}</span>
             <small>{run.host}</small>
           </div>
@@ -268,9 +269,7 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
             .reverse()
             .map((r) => (
               <div className={styles.progress} key={r.run_id}>
-                <b>
-                  {r.role === "implement" ? "实现" : "验收"} · 第 {r.generation} 代
-                </b>
+                <b>{runLabel(t.runs ?? [], r)}</b>
                 <span>{statusLabels[r.observed] ?? r.observed}</span>
                 <small>{r.host}</small>
               </div>

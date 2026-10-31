@@ -7,7 +7,7 @@ import { noticeTitle } from "../upgrades/status.ts";
 // The transcript's rows: the owner's messages as right-hand bubbles with
 // their state below, and what the main agent did for each as full-width
 // Markdown with its tool uses.
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import type {
   AssistantState,
   IssueConversationItem as ConversationItem,
@@ -27,6 +27,8 @@ import {
 } from "./model.ts";
 import { groupToolItems } from "./toolLabels.ts";
 import { CopyIdentifier } from "../i18n/identifiers.tsx";
+import { Chevron } from "../shell/icons.tsx";
+import toolStyles from "./ToolRow.module.css";
 import { ToolRow } from "./ToolRow.tsx";
 import { MessageImages, OutgoingImages } from "./Images.tsx";
 import { MessageAttachments, OutgoingAttachments } from "./Attachments.tsx";
@@ -140,20 +142,50 @@ export function OutgoingRow({
 }
 
 export function AgentTurn({ entry }: { entry: Extract<Entry, { kind: "agent" }> }) {
+  const root = useRef<HTMLDivElement>(null);
+  const [groups, setGroups] = useState(() =>
+    groupToolItems(entry.items).map((items) => items.map((item) => item.message_id)),
+  );
+  const [, interaction] = useState(0);
+  useLayoutEffect(() => {
+    const reading = root.current?.querySelector("[data-open], details[open], :focus");
+    const known = new Set(groups.flat());
+    const next = reading
+      ? [
+          ...groups,
+          ...entry.items
+            .filter((item) => !known.has(item.message_id))
+            .map((item) => [item.message_id]),
+        ]
+      : groupToolItems(entry.items).map((items) => items.map((item) => item.message_id));
+    if (JSON.stringify(next) !== JSON.stringify(groups)) setGroups(next);
+  });
+  const current = new Map(entry.items.map((item) => [item.message_id, item]));
   return (
-    <div className={styles.agent}>
-      {groupToolItems(entry.items).map((items) =>
-        items.length > 1 ? (
-          <details key={items[0]!.message_id}>
-            <summary>使用了 {items.length} 个工具</summary>
-            {items.map((it) => (
-              <AgentItem key={it.message_id} item={it} />
-            ))}
-          </details>
-        ) : (
-          <AgentItem key={items[0]!.message_id} item={items[0]!} />
-        ),
-      )}
+    <div
+      ref={root}
+      className={styles.agent}
+      onClickCapture={() => interaction((n) => n + 1)}
+      onBlurCapture={() => interaction((n) => n + 1)}
+    >
+      {groups
+        .map((ids) => ids.map((id) => current.get(id)!).filter(Boolean))
+        .filter((items) => items.length > 0)
+        .map((items) =>
+          items.length > 1 ? (
+            <details key={items[0]!.message_id} className={toolStyles.group}>
+              <summary className={toolStyles.row}>
+                <Chevron className={toolStyles.chevron} />
+                <span className={toolStyles.name}>使用了 {items.length} 个工具</span>
+              </summary>
+              {items.map((it) => (
+                <AgentItem key={it.message_id} item={it} />
+              ))}
+            </details>
+          ) : (
+            <AgentItem key={items[0]!.message_id} item={items[0]!} />
+          ),
+        )}
       {entry.done && (
         <div className={styles.foot}>
           {clock(entry.done.at)}
@@ -224,7 +256,7 @@ export function SystemMessage({ item, scrollID }: { item: ConversationItem; scro
       {item.notice_type?.startsWith("upgrade_") ? (
         <>
           <p>{item.notice_type === "upgrade_completed" ? "已更新到新版本" : title}</p>
-          <details>
+          <details className={styles.systemDetails}>
             <summary>详细信息</summary>
             <Markdown text={systemMessageBody(item)} />
             {item.upgrade_id && <CopyIdentifier value={item.upgrade_id} />}
@@ -248,9 +280,13 @@ export function SystemMessage({ item, scrollID }: { item: ConversationItem; scro
         <ChoiceCard key={choice.choice_id} choice={choice} />
       ))}
       {item.upgrade_id && (
-        <button type="button" onClick={() => openUpgrade(item.upgrade_id!)}>
+        <Button
+          variant="link"
+          className={styles.systemLink}
+          onClick={() => openUpgrade(item.upgrade_id!)}
+        >
           查看发布详情
-        </button>
+        </Button>
       )}
     </section>
   );
