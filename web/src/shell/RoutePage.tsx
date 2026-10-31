@@ -75,11 +75,7 @@ export function RoutePage({
     case "inbox":
     case "attention":
       content = (
-        <Inbox
-          initial={route.page === "attention" ? route.id : undefined}
-          onIssue={openIssue}
-          onClose={() => back({ page: route.page === "attention" ? "inbox" : "chat" })}
-        />
+        <Inbox initial={route.page === "attention" ? route.id : undefined} onIssue={openIssue} />
       );
       break;
     case "more":
@@ -90,8 +86,8 @@ export function RoutePage({
       break;
     case "agents":
       content = (
-        <section className={styles.page} aria-label="Agent与类别">
-          <PageHeader title="Agent与类别" onBack={() => back({ page: "settings" })} />
+        <section className={styles.page} aria-label="Agent 与类别">
+          <PageHeader title="Agent 与类别" onBack={() => back({ page: "settings" })} />
           <AgentCatalogView />
         </section>
       );

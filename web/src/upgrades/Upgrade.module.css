@@ -1,4 +1,6 @@
 .banner {
+  height: auto;
+  min-height: var(--control-l);
   display: flex;
   align-items: center;
   gap: 10px;

@@ -97,10 +97,10 @@ export function Handoff({
       </Section>
       {onCatalog && (
         <Link className={styles.catalogLink} to={{ page: "agents" }}>
-          Agent与类别<span>管理类别与 Agent 登记 →</span>
+          Agent 与类别<span aria-hidden="true">›</span>
         </Link>
       )}
-      <Section className={styles.section} title="主 agent" aria-label="主 agent">
+      <Section className={styles.section} title="主 Agent" aria-label="主 Agent">
         <h3 className={styles.heading}>预备摘要</h3>
         <p className={styles.status} role="status" data-warning={warning || undefined}>
           {status}

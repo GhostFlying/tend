@@ -69,15 +69,6 @@
   font-size: var(--text-caption);
   color: var(--label-2);
 }
-.readStatus button {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  padding: var(--space-2) var(--space-3);
-  min-height: 44px;
-}
-.readStatus button:disabled {
-  opacity: 0.5;
-}
 .list,
 .hosts {
   list-style: none;
@@ -153,7 +144,7 @@
 }
 
 .panel > p {
-  margin: var(--space-4);
+  margin: var(--space-3) var(--space-4) 0;
   font-size: var(--text-caption);
   color: var(--label-3);
 }

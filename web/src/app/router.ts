@@ -116,7 +116,7 @@ export function legacyURL(input: string | URL): string | null {
   return null;
 }
 
-type Entry = { session: string; key: number; previous?: number };
+type Entry = { session: string; key: number; previous?: number; state?: Record<string, unknown> };
 type SavedPage = {
   disclosures: string[];
   scroll: { path: string; top: number; left: number }[];
@@ -176,7 +176,7 @@ export function useEntryState<T>(name: string, initial: T) {
   }
   let store = values.get(name);
   if (!store) {
-    store = new Store<unknown>(initial);
+    store = new Store<unknown>(current.state?.[name] ?? initial);
     values.set(name, store);
   }
   const selected = store;
@@ -187,7 +187,13 @@ export function useRoute(): Route {
   startRouter();
   return useStore(state);
 }
-export function navigate(route: Route | string, { replace = false }: { replace?: boolean } = {}) {
+export function navigate(
+  route: Route | string,
+  {
+    replace = false,
+    state: viewState,
+  }: { replace?: boolean; state?: Record<string, unknown> } = {},
+) {
   startRouter();
   const url =
     typeof route === "string"
@@ -205,6 +211,7 @@ export function navigate(route: Route | string, { replace = false }: { replace?:
   savePage();
   returning = false;
   current = replace ? current : { session, key: ++sequence, previous: current.key };
+  if (viewState) current = { ...current, state: viewState };
   window.history[replace ? "replaceState" : "pushState"](
     { ...window.history.state, tendRoute: current },
     "",

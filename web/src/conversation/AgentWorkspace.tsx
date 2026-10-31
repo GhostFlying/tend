@@ -239,7 +239,7 @@ export function AgentWorkspace({
                   navigate({ page: "agents" });
                 }}
               >
-                Agent与类别
+                Agent 与类别
               </button>
               <button
                 onClick={() => {

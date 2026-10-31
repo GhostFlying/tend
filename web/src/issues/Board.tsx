@@ -236,13 +236,13 @@ export function IssueBoard({
         >
           新建 Issue
         </Button>
+        <Button className={styles.filterButton} onClick={() => setFilterOpen(true)}>
+          筛选
+        </Button>
       </PageHeader>
       <div className={styles.toolbar}>{!filterOpen && filterControls}</div>
       <div className={styles.mobileFilter}>
         <span>{view === "board" ? "看板" : "层级"} · 仅顶层 Issue</span>
-        <Button size="s" onClick={() => setFilterOpen(true)}>
-          筛选
-        </Button>
       </div>
       {filterOpen && (
         <Sheet open title="筛选 Issue" onClose={() => setFilterOpen(false)}>
@@ -498,8 +498,8 @@ function BoardColumn({
             aria-expanded={!collapsed}
             onClick={onToggle}
           >
-            {label}
-            <span>{count ?? "…"}</span>
+            <span className={styles.columnLabel}>{label}</span>
+            <Badge>{count ?? "…"}</Badge>
           </Button>
         ) : (
           <>

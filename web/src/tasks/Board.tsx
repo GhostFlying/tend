@@ -210,7 +210,7 @@ export function TaskBoard({ active, connection }: { active: boolean; connection:
       <UpgradeBanner connection={connection} />
       <BoardResources connection={connection} onRepos={() => navigate({ page: "repos" })} />
       <section className={styles.board} aria-label="任务执行列表">
-        <p className={styles.note}>按任务查看执行与历史；Issue计划在Issue白板中跟进。</p>
+        <p className={styles.note}>按任务查看执行与历史；Issue 计划在 Issue 白板中跟进。</p>
         <Tabs
           className={styles.tabs ?? ""}
           label="任务范围"

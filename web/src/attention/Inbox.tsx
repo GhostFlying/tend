@@ -1,6 +1,6 @@
 import { WorkItemRead } from "../workitems/live.ts";
 import { Button, Tabs, Badge, EmptyState, Textarea } from "../ui/index.ts";
-import { navigate, Link } from "../app/router.ts";
+import { navigate, Link, useEntryState } from "../app/router.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { AttentionActionTime } from "./ActionTime.tsx";
 import { AttentionOriginalMessage } from "./OriginalMessage.tsx";
@@ -12,7 +12,7 @@ import {
   OutgoingAttachments,
   MessageAttachments,
 } from "../conversation/Attachments.tsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   AttentionView,
   IssueConversationItem,
@@ -29,27 +29,20 @@ import styles from "./Inbox.module.css";
 export function Inbox({
   initial,
   onIssue,
-  onClose,
 }: {
   initial?: string | undefined;
   onIssue(id: string): void;
-  onClose(): void;
 }) {
   const { live } = useServices();
   const [kind, setKind] = useState("");
   const selected = initial ?? "";
-  const autoSelect = useRef(!initial);
-  const deferred = useRef(false);
-  const previousSelection = useRef(selected);
-  useEffect(() => {
-    if (previousSelection.current && !selected) {
-      autoSelect.current = !deferred.current;
-      deferred.current = false;
-    }
-    previousSelection.current = selected;
-  }, [selected]);
+  const [autoSelect, setAutoSelect] = useEntryState("inboxAutoSelect", !initial);
   const [now, setNow] = useState(() => Date.now());
-  const setSelected = (id: string) => navigate(id ? { page: "attention", id } : { page: "inbox" });
+  const setSelected = (id: string) =>
+    navigate(id ? { page: "attention", id } : { page: "inbox" }, {
+      state: { inboxAutoSelect: !id },
+    });
+  const defer = () => navigate({ page: "inbox" }, { state: { inboxAutoSelect: false } });
   const state = useStore(live.attention.inbox.state);
   const next = useStore(live.attention.next.state);
   useEffect(() => {
@@ -66,35 +59,27 @@ export function Inbox({
         media.matches &&
         !selected &&
         firstID &&
-        autoSelect.current &&
+        autoSelect &&
         !state.loading &&
         live.attention.inbox.state.get().value === state.value
       ) {
-        autoSelect.current = false;
+        setAutoSelect(false);
         navigate({ page: "attention", id: firstID }, { replace: true });
       }
     };
     selectFirst();
     media.addEventListener("change", selectFirst);
     return () => media.removeEventListener("change", selectFirst);
-  }, [firstID, selected, state.loading, state.value, live]);
+  }, [firstID, selected, state.loading, state.value, live, autoSelect, setAutoSelect]);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
   return (
     <section className={styles.root} data-selected={!!selected} aria-label="待处理事项">
-      <PageHeader
-        title="待处理"
-        {...(selected
-          ? {
-              onBack: () => {
-                deferred.current = true;
-                onClose();
-              },
-            }
-          : {})}
-      />
+      <div className={styles.pageHeader}>
+        <PageHeader title="待处理" {...(selected ? { onBack: defer } : {})} />
+      </div>
       <p className={`${styles.muted} ${styles.context}`}>需要你决定或亲自推进的事项。</p>
       <Tabs
         className={styles.tabs ?? ""}
@@ -107,7 +92,7 @@ export function Inbox({
           { value: "information", label: "通知" },
         ]}
         onChange={(key) => {
-          autoSelect.current = true;
+          setAutoSelect(true);
           setKind(key);
           setSelected("");
         }}
@@ -136,7 +121,7 @@ export function Inbox({
                   className={styles.rowOpen}
                   aria-current={item.attention_id === selected}
                   onClick={() => {
-                    autoSelect.current = false;
+                    setAutoSelect(false);
                     setSelected(item.attention_id);
                   }}
                 >
@@ -195,11 +180,7 @@ export function Inbox({
               id={selected}
               showBack={false}
               onIssue={onIssue}
-              onBack={() => {
-                autoSelect.current = false;
-                deferred.current = true;
-                navigate({ page: "inbox" });
-              }}
+              onBack={defer}
             />
           ) : (
             <EmptyState>选择一个事项查看。</EmptyState>
@@ -347,9 +328,13 @@ function AttentionForm({
   return (
     <>
       <h2>{a.title}</h2>
-      {a.issue_id && <Button onClick={() => onIssue(a.issue_id!)}>查看所属Issue →</Button>}
-      <p className={styles.muted}>
-        <Badge>{kindLabel(a.kind)}</Badge> · {statusLabel(a.status)}
+      {a.issue_id && (
+        <Button variant="link" onClick={() => onIssue(a.issue_id!)}>
+          查看所属 Issue →
+        </Button>
+      )}
+      <p className={`${styles.muted} ${styles.detailMeta}`}>
+        <Badge>{kindLabel(a.kind)}</Badge> <span>·</span> <span>{statusLabel(a.status)}</span>
       </p>
       <p className={styles.muted}>
         提出者：{a.raised_by.kind === "owner" ? "你" : a.raised_by.subject || a.raised_by.kind} ·

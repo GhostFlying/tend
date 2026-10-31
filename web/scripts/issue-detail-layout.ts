@@ -572,10 +572,13 @@ try {
       "issue:canonical-child",
     );
     await page.screenshot({ path: join(output, `detail-child-${width}.png`) });
-    await detail
-      .getByRole("navigation", { name: "Issue路径" })
-      .getByRole("button", { name: /发布流程整理/ })
-      .click();
+    if (width <= 760)
+      await detail.getByRole("button", { name: "返回Issue列表或上一项", exact: true }).click();
+    else
+      await detail
+        .getByRole("navigation", { name: "Issue路径" })
+        .getByRole("button", { name: /发布流程整理/ })
+        .click();
     await detail.getByRole("heading", { name: "发布流程整理", exact: true }).waitFor();
     assert.equal(
       await detail.getByRole("textbox", { name: "消息", exact: true }).inputValue(),
@@ -906,10 +909,7 @@ try {
   await detail.getByRole("button", { name: "下一页子 Issue", exact: true }).click();
   await detail.getByRole("button", { name: /整理发布步骤/ }).click();
   await detail.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
-  await detail
-    .getByRole("navigation", { name: "Issue路径" })
-    .getByRole("button", { name: /发布流程整理/ })
-    .click();
+  await detail.getByRole("button", { name: "返回Issue列表或上一项", exact: true }).click();
   await detail.getByRole("button", { name: "上一页子 Issue", exact: true }).waitFor();
   assert.equal(await detail.getByRole("button", { name: /其它子项 0/ }).count(), 0);
   await detail.getByRole("button", { name: /整理发布步骤/ }).waitFor();
