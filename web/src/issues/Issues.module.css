@@ -177,3 +177,9 @@
 .check input {
   accent-color: var(--label);
 }
+
+@media (max-width: 760px) {
+  .primary {
+    min-height: var(--control-touch);
+  }
+}

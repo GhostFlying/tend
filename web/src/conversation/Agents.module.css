@@ -259,3 +259,9 @@
     height: var(--control-touch);
   }
 }
+
+@media (max-width: 760px) {
+  .drawer button.primary {
+    min-height: var(--control-touch);
+  }
+}
