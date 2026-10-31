@@ -23,6 +23,8 @@ const now = Date.now();
 let seq = 10;
 let activityDelay = 0;
 let continuationBlock: IssueTranscriptBlock | null = null;
+let continuationFailure = false;
+let continuationDelay = 0;
 let pagedChildren = false;
 let pagedActivity = false;
 const streams = new Set<ServerResponse>();
@@ -191,17 +193,21 @@ const server = createServer(async (req, res) => {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(value));
   };
-  if (p === "/api/v1/conversation/blocks/owner-one" && continuationBlock)
+  if (p === "/api/v1/conversation/blocks/owner-one" && continuationBlock) {
+    if (continuationDelay) await new Promise((resolve) => setTimeout(resolve, continuationDelay));
+    if (continuationFailure)
+      return json({ error: { code: "unavailable", message: "Continuation failed" } }, 503);
     return json(
       u.searchParams.has("after")
         ? continuationBlock
         : {
             ...continuationBlock,
-            items: [],
+            items: activity.items![0]!.block!.items,
             more: true,
-            next_seq: 2,
+            next_seq: 51,
           },
     );
+  }
   if (p === "/api/v1/session")
     return json({
       token: "fixture",
@@ -1294,6 +1300,119 @@ try {
       base.more = originalMore;
       base.items![0]!.body = baseBody!;
       continuationBlock = null;
+    }
+  }
+
+  for (const width of [1440, 390]) {
+    for (const scenario of ["failure", "scroll", "group"] as const) {
+      const base = activity.items![0]!.block!;
+      const original = { items: base.items, more: base.more };
+      const older = { ...base.items![0]!, body: "基础长回复内容。\n\n".repeat(100), seq: 2 };
+      const tools = Array.from({ length: scenario === "group" ? 49 : 0 }, (_, index) => ({
+        ...older,
+        message_id: `existing-tool-${index}`,
+        seq: index + 3,
+        body: "",
+        tool: {
+          name: "files_read",
+          status: "completed" as const,
+          turn_id: "group-turn",
+          updated_at: older.created_at,
+          input: "{}",
+          output: "已完成",
+        },
+      }));
+      base.items = [older, ...tools];
+      base.more = true;
+      const newTool = { ...tools[0]!, message_id: "new-group-tool", seq: 52 };
+      const reply = {
+        ...older,
+        message_id: `scenario-reply-${scenario}`,
+        seq: 53,
+        body: "新续页正文。\n\n".repeat(100),
+      };
+      continuationBlock = {
+        ...base,
+        items: scenario === "group" ? [newTool, reply] : [reply],
+        more: false,
+      };
+      continuationFailure = scenario === "failure";
+      continuationDelay = scenario === "scroll" ? 700 : 0;
+      const context = await browser.newContext({
+        viewport: { width, height: 844 },
+        serviceWorkers: "block",
+      });
+      const page = await context.newPage();
+      try {
+        await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+        const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+        await detail.getByRole("button", { name: "展开全文", exact: true }).first().click();
+        if (scenario === "group") await detail.locator("details[data-trace] > summary").click();
+        const load = detail.getByRole("button", { name: "继续读取本轮消息", exact: true });
+        await load.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(100);
+        const y = await load.evaluate((node) => node.getBoundingClientRect().top);
+        await load.click();
+        const scroller = detail.locator("[data-issue-scroll]");
+        const later = detail.locator('[data-scroll-id="result:artifact-one"]');
+        if (scenario === "failure") {
+          await detail.getByText("本轮后续记录读取失败", { exact: false }).waitFor();
+          await later.scrollIntoViewIfNeeded();
+          await scroller.evaluate((node) => {
+            node.scrollTop -= 100;
+          });
+          await page.waitForTimeout(100);
+          const saved = await later.evaluate((node) => node.getBoundingClientRect().top);
+          older.body += "失败后基础消息继续生成。\n\n".repeat(80);
+          older.assistant_revision!++;
+          publish();
+          await detail
+            .getByText(/失败后基础消息继续生成/)
+            .first()
+            .waitFor({ state: "attached" });
+          await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).waitFor();
+          assert(
+            Math.abs((await later.evaluate((node) => node.getBoundingClientRect().top)) - saved) <=
+              2,
+            "failed pagination suppressed unrelated paused-anchor updates",
+          );
+        } else if (scenario === "scroll") {
+          await scroller.evaluate((node) => {
+            node.scrollTop -= 500;
+          });
+          await page.waitForTimeout(100);
+          const saved = await scroller.evaluate((node) => node.scrollTop);
+          await detail
+            .getByText(/新续页正文/)
+            .first()
+            .waitFor({ state: "attached" });
+          await page.waitForTimeout(100);
+          assert(
+            Math.abs((await scroller.evaluate((node) => node.scrollTop)) - saved) <= 2,
+            "pagination undid scrolling performed during the request",
+          );
+        } else {
+          const group = detail.getByRole("button", { name: "使用了 50 个工具", exact: true });
+          await group.waitFor();
+          await page.waitForTimeout(100);
+          assert(
+            Math.abs((await group.evaluate((node) => node.getBoundingClientRect().top)) - y) <= 2,
+            "pagination anchored a hidden grouped member instead of its visible disclosure",
+          );
+          assert.equal(
+            await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+            0,
+          );
+        }
+        console.log(`PASS continuation ${scenario} ${width}`);
+      } finally {
+        await context.close();
+        base.items = original.items;
+        base.more = original.more;
+        continuationBlock = null;
+        continuationFailure = false;
+        continuationDelay = 0;
+      }
     }
   }
 } finally {
