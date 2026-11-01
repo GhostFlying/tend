@@ -61,6 +61,18 @@ export function FollowupForm({
   const snap = useStore(live.snapshot);
   const decisions =
     snap?.decisions?.filter((d) => item.tasks?.some((t) => t.task_id === d.task_id)) ?? [];
+  if (base?.kind === "cron")
+    return (
+      <section className={styles.form} aria-label="日历定时安排">
+        <p>日历定时安排请通过 CLI 编辑。已有请求请沿原 request ID 核对，保留原规则与时区。</p>
+        <p>
+          {base.cron} · {base.timezone}
+        </p>
+        <button type="button" onClick={onCancel} disabled={disabled}>
+          返回安排
+        </button>
+      </section>
+    );
   return (
     <form
       className={styles.form}

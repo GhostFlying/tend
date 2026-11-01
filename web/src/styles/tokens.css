@@ -26,6 +26,9 @@
   --border: rgba(15, 17, 21, 0.1);
   --border-soft: rgba(15, 17, 21, 0.06);
 
+  --diagnostic-accent: #4176e6;
+  --diagnostic-selection: #edf4ff;
+
   /* accent and states */
   --accent: rgb(18, 20, 23);
   --accent-soft: rgba(18, 20, 23, 0.06);
@@ -130,6 +133,8 @@
 }
 
 body[data-dark] {
+  --diagnostic-accent: #8ab4ff;
+  --diagnostic-selection: #202d44;
   --bg: rgb(21, 21, 23);
   --bg-l1: rgb(27, 27, 28);
   --bg-l2: rgb(36, 36, 38);

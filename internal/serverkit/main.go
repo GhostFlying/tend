@@ -36,11 +36,15 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/tools"
 	"github.com/GhostFlying/tend/internal/upgradectl"
+	"github.com/GhostFlying/tend/internal/webhookauth"
 	"github.com/GhostFlying/tend/internal/webui"
 )
 
 // Config is the server's configuration file.
 type Config struct {
+	Webhooks *struct {
+		Listen string `json:"listen"`
+	} `json:"webhooks,omitempty"`
 	Archives map[string]string `json:"archives,omitempty"`
 
 	// DataDir holds the ledger and the tailnet state.
@@ -173,7 +177,8 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	wake := dispatch.NewSignal()
 	readWake := dispatch.NewSignal()
 	interactionWake := dispatch.NewSignal()
-	opts := []app.Option{app.WithNotifier(dispatch.Fanout{wake, readWake, interactionWake})}
+	webhookKeys := &webhookauth.Files{Dir: filepath.Join(dataDir, "webhook-keys")}
+	opts := []app.Option{app.WithWebhookKeys(webhookKeys), app.WithNotifier(dispatch.Fanout{wake, readWake, interactionWake})}
 	if cfg.LeaseTTL > 0 {
 		opts = append(opts, app.WithLeaseTTL(time.Duration(cfg.LeaseTTL)))
 	}
@@ -373,12 +378,26 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		}
 		return true, nil
 	}}
-	ownerConfig := api.Config{Archives: archives, Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil, Now: now}
+	ownerConfig := api.Config{WebhookKeys: webhookKeys, Archives: archives, Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil, Now: now}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
 		ownerConfig.ConversationHandoff = front.HandoffStatus
 	}
 	owner := api.New(a, s, whois, secret, ownerConfig, log)
+	var hookListener net.Listener
+	var hookServer *http.Server
+	if cfg.Webhooks != nil {
+		address := cfg.Webhooks.Listen
+		if address == "" {
+			address = "127.0.0.1:8641"
+		}
+		hookListener, err = net.Listen("tcp", address)
+		if err != nil {
+			return fmt.Errorf("webhook listener: %w", err)
+		}
+		defer hookListener.Close()
+		hookServer = &http.Server{Handler: owner.WebhookHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute}
+	}
 	server := &http.Server{Handler: serverHandler(runners.Handler(), owner.Handler()), ReadHeaderTimeout: 10 * time.Second}
 	// Shutdown waits for requests to finish; event streams never do.
 	server.RegisterOnShutdown(owner.EndStreams)
@@ -394,7 +413,19 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	var wg sync.WaitGroup
-	backgroundErrors := make(chan error, 1)
+	backgroundErrors := make(chan error, 2)
+	if hookServer != nil {
+		wg.Go(func() {
+			if err := hookServer.Serve(hookListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				backgroundErrors <- err
+				stop()
+			}
+		})
+		wg.Go(func() {
+			<-runCtx.Done()
+			_ = shutdownHTTP(context.WithoutCancel(runCtx), hookServer, 10*time.Second, log)
+		})
+	}
 	if deps.Background != nil {
 		wg.Go(func() {
 			if err := deps.Background(runCtx, runtime); err != nil && runCtx.Err() == nil {
@@ -407,6 +438,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	if telegramClient != nil {
 		wg.Go(func() { telegramClient.Run(runCtx) })
 	}
+	wg.Go(func() { a.RunFollowups(runCtx, log) })
 	wg.Go(func() { a.RunIssueStatusNotifications(runCtx, log) })
 	if localSocket != "" {
 		wg.Go(func() {
@@ -424,7 +456,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	}
 	if front != nil {
 		wg.Go(func() { _ = front.Run(runCtx) })
-		wg.Go(func() { a.RunFollowups(runCtx, log) })
+
 	}
 	if background != nil {
 		wg.Go(func() { background.Run(runCtx) })

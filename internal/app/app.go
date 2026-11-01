@@ -39,6 +39,7 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	webhookKeys           WebhookKeys
 	interactionOrigin     *communicationOrigin
 	coordinationExecution *store.HostedExecution
 	coordinationEffectSeq int64
@@ -104,6 +105,7 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
+	webhookKeys          WebhookKeys
 	archiveAdmission     sync.Mutex
 	archiveOwnerRequests int64
 	hostedConfiguration  *hostedconfig.Prepared
@@ -176,7 +178,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	if scoped, ok := cmd.(interface{ executionRequestID() string }); ok {
 		if p.Kind != protocol.PrincipalMainAgent {
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "execution scope requires a hosted main agent")
@@ -464,6 +466,12 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		}
 	}
 	if err := syncMessagingInteractions(ctx, x, tx, out.Events); err != nil {
+		return err
+	}
+	if err := observationIssueEvents(ctx, x, tx, out.Events); err != nil {
+		return err
+	}
+	if err := webhookIssueEvents(ctx, x, tx, out.Events); err != nil {
 		return err
 	}
 	matched, err := followupEvents(ctx, x, tx, out.Events)

@@ -13,7 +13,7 @@ import (
 // ownerCommands are the writes the owner API accepts, by operation. Work
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
-var ownerCommands = commandMap(
+var ownerCommands = commandMap(app.WebhookCommand{Action: "create"}, app.WebhookCommand{Action: "update"}, app.WebhookCommand{Action: "pause"}, app.WebhookCommand{Action: "resume"}, app.WebhookCommand{Action: "cancel"}, app.WebhookCommand{Action: "rotate"},
 	app.RespondMessagingInteraction{},
 	app.MessagingCommand{Action: "send"}, app.MessagingCommand{Action: "reply"}, app.MessagingCommand{Action: "notify"}, app.MessagingCommand{Action: "read"}, app.MessagingCommand{Action: "bind"}, app.MessagingCommand{Action: "unbind"},
 	app.CanonicalOwnerIssueCommand{Action: "set_status"}, app.SetIssueNotificationSettings{},

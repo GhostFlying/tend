@@ -151,7 +151,7 @@ func applyFollowup(ctx context.Context, x *Exec, tx *store.Tx, action string, ca
 		if err != nil {
 			return Outcome{}, err
 		}
-		if r.Kind == "every" && r.MaxTriggers <= r.TriggerCount {
+		if (r.Kind == "every" || r.Kind == "cron") && r.MaxTriggers <= r.TriggerCount {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new limit must exceed accumulated trigger count")
 		}
 		if err := validateFollowup(ctx, x, tx, r, w); err != nil {
@@ -208,6 +208,18 @@ func scheduleFollowup(r *protocol.FollowupRule, now int64) {
 		r.NextAt = r.At
 	case "every":
 		r.NextAt = now + r.EverySeconds*1000
+	case "cron":
+		c, err := domain.ParseCron(r.Cron, r.Timezone)
+		if err != nil {
+			r.NextAt = r.ExpiresAt
+			break
+		}
+		next, err := c.Next(time.UnixMilli(now))
+		if err != nil {
+			r.NextAt = r.ExpiresAt
+		} else {
+			r.NextAt = next.UnixMilli()
+		}
 	case "condition":
 		r.NextAt = r.ExpiresAt
 	}
@@ -344,7 +356,7 @@ func cancelPendingFollowups(ctx context.Context, x *Exec, tx *store.Tx, id strin
 	if err := cancelBackgroundFollowups(ctx, x, tx, id); err != nil {
 		return err
 	}
-	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT f.message_id FROM followup_occurrences f WHERE f.rule_id=? AND f.status='queued' AND EXISTS(SELECT 1 FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND json_extract(o.payload_json,'$.message_id')=f.message_id AND o.status='pending') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=f.message_id AND t.status<>'rejected')`, id)
+	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT f.message_id FROM followup_occurrences f WHERE f.rule_id=? AND f.status='queued' AND (EXISTS(SELECT 1 FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND json_extract(o.payload_json,'$.message_id')=f.message_id AND o.status='pending') OR NOT EXISTS(SELECT 1 FROM background_sources s WHERE s.message_id=f.message_id)) AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=f.message_id AND t.status<>'rejected')`, id)
 	if err != nil {
 		return err
 	}

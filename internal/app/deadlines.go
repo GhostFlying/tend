@@ -323,7 +323,7 @@ func evaluateDeadlineFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *pro
 		return true, err
 	}
 	o := protocol.FollowupOccurrence{OccurrenceID: x.IDs.New(protocol.Prefix("occurrence")), RuleID: r.RuleID, Revision: r.Revision, WorkItemID: d.IssueID, MessageID: message, Status: "queued", Reason: "deadline." + window, CreatedAt: now}
-	if err := tx.InsertFollowupOccurrence(ctx, o, "revision:1"); err != nil {
+	if err := recordFollowupOccurrence(ctx, x, tx, *r, o, "revision:1"); err != nil {
 		return true, err
 	}
 	for _, b := range []struct{ kind, id string }{{"deadline", id}, {"followup", r.RuleID}, {"followup_occurrence", o.OccurrenceID}} {

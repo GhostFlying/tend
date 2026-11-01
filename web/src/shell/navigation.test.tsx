@@ -20,6 +20,7 @@ describe("grouped navigation", () => {
       "/repos",
       "/usage",
       "/hosts",
+      "/diagnostics",
       "/diagnostics/main",
       "/settings",
     ]);

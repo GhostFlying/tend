@@ -14,6 +14,7 @@ import (
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/webhookauth"
 )
 
 // maxBody bounds a request body.
@@ -21,6 +22,7 @@ const maxBody = 1 << 20
 
 // Config configures the API. Zero values select the defaults.
 type Config struct {
+	WebhookKeys *webhookauth.Files
 	// Archives are explicitly configured, already verified read-only handles.
 	Archives map[string]ConfiguredArchive
 
@@ -82,6 +84,10 @@ func New(a *app.App, s *store.Store, whois netx.WhoIs, secret []byte, cfg Config
 // Handler returns the API's routes, all under /api/v1/.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/diagnostics/{kind}", s.triggerList)
+	mux.HandleFunc("GET /api/v1/diagnostics/{kind}/{id}", s.triggerDetail)
+	mux.HandleFunc("GET /api/v1/diagnostics/events/{id}/sources", s.triggerSources)
+	mux.HandleFunc("PUT /api/v1/webhook-keys/{id}", s.stageWebhookKey)
 	mux.HandleFunc("GET /api/v1/messaging/channels", s.messaging)
 	mux.HandleFunc("GET /api/v1/messaging/channels/{channel}", s.messaging)
 	mux.HandleFunc("GET /api/v1/messaging/messages", s.messaging)
