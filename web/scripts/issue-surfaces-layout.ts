@@ -2271,7 +2271,7 @@ try {
     await inbox.getByRole("button", { name: /确认灰度发布范围/ }).waitFor();
     assert.equal(await inbox.getByRole("button", { name: /发布进度已更新/ }).count(), 0);
 
-    await inbox.getByRole("tab", { name: "待行动", exact: true }).click();
+    await inbox.getByRole("tab", { name: "需要你处理", exact: true }).click();
     await inbox.getByRole("button", { name: /提供验收设备清单/ }).click();
     await inbox.getByRole("textbox").fill("设备A：Android 14，明天上午可用。");
     await inbox.getByRole("button", { name: "提交处理结果", exact: true }).click();
@@ -2291,7 +2291,7 @@ try {
         .getByRole("link", { name: "收件箱", exact: true })
         .click();
     }
-    await inbox.getByRole("tab", { name: "待行动", exact: true }).click();
+    await inbox.getByRole("tab", { name: "需要你处理", exact: true }).click();
     await inbox.getByRole("button", { name: /提供验收设备清单/ }).click();
     await inbox.getByRole("button", { name: "核实原提交结果", exact: true }).waitFor();
     assert.equal(
@@ -2303,7 +2303,7 @@ try {
     await inbox.getByRole("button", { name: "核实原提交结果", exact: true }).click();
     await inbox
       .locator("p")
-      .filter({ hasText: /^待行动 · 已处理$/ })
+      .filter({ hasText: /^需要你处理 · 已处理$/ })
       .waitFor();
     assert.equal(writes.length, 1);
     assert.equal(writes[0]!.request_id, requestID);
@@ -2627,7 +2627,7 @@ try {
         .click();
     }
     const finalInbox = page.getByRole("region", { name: "待处理事项", exact: true });
-    await finalInbox.getByRole("tab", { name: "待行动", exact: true }).click();
+    await finalInbox.getByRole("tab", { name: "需要你处理", exact: true }).click();
     await finalInbox.getByRole("button", { name: /补充验收原件/ }).click();
     await finalInbox
       .getByRole("textbox", { name: "处理结果", exact: true })
@@ -2654,7 +2654,7 @@ try {
     await finalInbox.getByText(`来源记录：${sourceID}`, { exact: false }).waitFor();
     await page.screenshot({ path: join(output, `inbox-action-original-${viewport.width}.png`) });
     if (mobile) await finalInbox.getByRole("button", { name: "← 返回", exact: true }).click();
-    await finalInbox.getByRole("tab", { name: "待决策", exact: true }).click();
+    await finalInbox.getByRole("tab", { name: "需要你决定", exact: true }).click();
     await finalInbox.getByRole("button", { name: /确认灰度发布范围/ }).click();
     await finalInbox.getByRole("radio", { name: "小范围灰度", exact: true }).check();
     await finalInbox
@@ -2664,7 +2664,7 @@ try {
     await finalInbox.getByRole("button", { name: "提交决定", exact: true }).click();
     await finalInbox
       .locator("p")
-      .filter({ hasText: /^待决策 · 已处理$/ })
+      .filter({ hasText: /^需要你决定 · 已处理$/ })
       .waitFor();
     const answer = writes.filter((w) => w.operation === "attentions.respond").at(-1)!;
     assert.equal((answer.payload as { version: number }).version, 3);
