@@ -1,5 +1,7 @@
 # P2a：本地 Agent 定义与公共投影基础
 
+当前定义的命名约定见 [编写 Agent 定义](../agent-definitions.md)：`local_id` 为定义时确定的稳定 slug，`display_name` 为显示名字。下文保留本片交付时的范围与格式记录。
+
 状态：纯配置基础已实现，定向 race/vet 和本地完整 make check 已通过，正式分片独立人工及规定 CLI review 均通过，无 findings；PR CI、合并未完成；尚无生产加载、登记或执行入口，P2 后续分片未实施，本批不部署。Refs: D123；依赖 P1 身份合同，但本包不导入 P1 实现。固定 base 为 `9b7b85530b65dc2516425c8e7a131d762ead08a1`。
 
 ## 范围与依赖
