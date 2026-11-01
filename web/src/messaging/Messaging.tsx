@@ -13,7 +13,7 @@ import { runOp } from "../app/ops.ts";
 import { Button } from "../ui/Button.tsx";
 import { Sheet } from "../ui/Modal.tsx";
 import { Textarea } from "../ui/Field.tsx";
-import { Close, Send } from "../shell/icons.tsx";
+import { Close, Paperclip, Send } from "../shell/icons.tsx";
 import { ConnectionBadge } from "../shell/ConnectionBadge.tsx";
 import { MessagingFeed } from "./feed.ts";
 import { Interaction, interactionStatus } from "./Interaction.tsx";
@@ -571,15 +571,7 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
                     e.target.value = "";
                   }}
                 />
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  aria-hidden
-                >
-                  <path d="m8 13 7-7a3 3 0 0 1 4 4L9 20a5 5 0 0 1-7-7L13 2a2 2 0 0 1 4 4L7 16" />
-                </svg>
+                <Paperclip />
               </label>
               <span className={styles.hint}>Enter 发送 · Shift+Enter 换行</span>
               <Button

@@ -11,7 +11,7 @@ import { ContextUsage } from "./ContextUsage.tsx";
 import { Settings } from "./Settings.tsx";
 import { Interrupt } from "./interrupt.ts";
 import { useServices } from "../app/services.tsx";
-import { Send, Stop } from "../shell/icons.tsx";
+import { Paperclip, Send, Stop } from "../shell/icons.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Composer.module.css";
 import { clock, latestReply, processing } from "./model.ts";
@@ -294,17 +294,7 @@ export function Composer({
           onClick={() => fileInput.current?.click()}
           disabled={blocked || persisting}
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.5-8.5" />
-          </svg>
+          <Paperclip />
         </button>
         <span className={styles.hint} role="status" title={hint}>
           {dragging ? "松开以添加附件" : hint}
