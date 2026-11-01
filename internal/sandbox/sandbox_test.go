@@ -26,6 +26,7 @@ import (
 
 type webClient struct {
 	t       *testing.T
+	ctx     context.Context
 	url     string
 	session protocol.SessionView
 	http    *http.Client
@@ -37,7 +38,8 @@ func (c *webClient) call(method, path string, body, out any) {
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(c.t.Context(), 3*time.Second)
+	// Functional reads share the test budget, not a latency SLA under race instrumentation.
+	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, method, c.url+path, bytes.NewReader(raw))
 	if err != nil {
@@ -119,7 +121,7 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		t.Fatal("sandbox seed timed out")
 	}
 	r := <-runtime
-	c := webClient{t: t, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
+	c := webClient{t: t, ctx: ctx, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
 	defer c.http.CloseIdleConnections()
 	c.call(http.MethodPost, "/api/v1/session", protocol.SessionRequest{ClientID: "sandbox-web-test", Scope: protocol.ScopeOwner}, &c.session)
 	if c.session.Token == "" {
@@ -610,7 +612,7 @@ func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		client := &webClient{t: t, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
+		client := &webClient{t: t, ctx: ctx, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
 		t.Cleanup(client.http.CloseIdleConnections)
 		client.call(http.MethodPost, "/api/v1/session", protocol.SessionRequest{ClientID: "sandbox-restart-test", Scope: protocol.ScopeOwner}, &client.session)
 		return current.runtime, current.demo, client, stop
@@ -954,5 +956,29 @@ func TestSandboxStory(t *testing.T) {
 	replay, err := seedDemo(ctx, r, root, false, true)
 	if err != nil || fmt.Sprint(replay) != fmt.Sprint(demo) {
 		t.Fatalf("story replay: %+v %v", replay, err)
+	}
+}
+
+type webRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f webRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestWebClientUsesEnclosingDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+	want, _ := ctx.Deadline()
+	called := false
+	client := webClient{t: t, ctx: ctx, url: "http://example.invalid", http: &http.Client{
+		Transport: webRoundTripper(func(r *http.Request) (*http.Response, error) {
+			called = true
+			if got, ok := r.Context().Deadline(); !ok || !got.Equal(want) {
+				t.Fatalf("owner request deadline = %v, want test deadline %v", got, want)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader([]byte(`{}`)))}, nil
+		}),
+	}}
+	client.call(http.MethodGet, "/api/v1/conversation", nil, nil)
+	if !called {
+		t.Fatal("owner request did not reach the transport")
 	}
 }
