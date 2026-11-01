@@ -214,7 +214,7 @@ try {
     page.setDefaultTimeout(10_000);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
-    await page.goto(`http://127.0.0.1:${address.port}/`);
+    await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     const mobile = viewport.width <= 760;
     const tabs = page.getByRole("navigation", { name: "视图" });
     assert.equal(
@@ -390,8 +390,7 @@ try {
     });
     await page.goBack();
     assert(await settings.evaluate((el) => el === document.activeElement));
-    if (mobile) await tabs.getByRole("link", { name: "对话", exact: true }).click();
-    else await page.getByRole("link", { name: "主对话", exact: true }).click();
+    await navigate(page, "/diagnostics/main");
     await page.getByRole("heading", { name: "主 Agent" }).waitFor();
     assert.deepEqual(errors, []);
     await context.close();

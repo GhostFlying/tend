@@ -243,12 +243,19 @@ func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d st
 		}
 		body += p.Text
 	}
+	if x.interactionOrigin != nil && x.interactionOrigin.RawBody != "" {
+		body = x.interactionOrigin.RawBody
+	}
 	id := x.IDs.New(protocol.PrefixMessage)
-	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: author, Body: body, ReplyTo: d.AskedMessageID, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
+	reply := d.AskedMessageID
+	if x.interactionOrigin != nil && x.interactionOrigin.ReplyTo != "" {
+		reply = x.interactionOrigin.ReplyTo
+	}
+	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: author, Body: body, ReplyTo: reply, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
 		return nil, err
 	}
-	if err := registerWebCommunicationInput(ctx, tx, id, d.AskedMessageID); err != nil {
+	if err := registerInteractionAnswerInput(ctx, x, tx, id, d.AskedMessageID); err != nil {
 		return nil, err
 	}
 	if err := tx.BindMessage(ctx, id, "decision", d.DecisionID, "answers"); err != nil {

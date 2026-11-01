@@ -212,6 +212,12 @@ const server = createServer(async (req, res) => {
       scope: "owner",
       deployment_id: "issue-surfaces-fixture",
     });
+  if (p === "/api/v1/messaging/events") {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.write('event: start\ndata: {"event_seq":1}\n\n');
+    return;
+  }
+  if (p === "/api/v1/messaging/messages") return json({ items: [], next: 0, more: false });
   if (p === "/api/v1/snapshot")
     return json({
       event_seq: seq,
@@ -1193,7 +1199,7 @@ async function captureS5() {
       await page.screenshot({ path: join(output, `s5-${name}-${viewport.width}.png`) });
     };
     copyTools[1]!.tool.status = "running";
-    await page.goto(`http://127.0.0.1:${address.port}/`);
+    await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     await page.getByText(`${copyTools.length} 个步骤`, { exact: true }).click();
     const firstTool = page.locator('[data-scroll-id="copy-tool-0"]');
     const firstButton = firstTool.getByRole("button", { includeHidden: true });
@@ -1288,7 +1294,7 @@ async function captureS4() {
   ]) {
     const context = await browser.newContext({ viewport, serviceWorkers: "block" });
     const page = await context.newPage();
-    await page.goto(`http://127.0.0.1:${address.port}/`);
+    await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
     for (const colorScheme of viewport.width === 1440
       ? (["light", "dark"] as const)
@@ -1464,7 +1470,7 @@ async function checkNavigation() {
     const context = await browser.newContext({ viewport, serviceWorkers: "block" });
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
-    await page.goto(`http://127.0.0.1:${address.port}/`);
+    await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
     const sidebar = page.locator("aside").first();
     const tabs = page.getByRole("navigation", { name: "视图", exact: true });
@@ -1474,7 +1480,7 @@ async function checkNavigation() {
     assert.equal(await tabs.isVisible(), mobile);
     if (!mobile) {
       assert.equal(width, viewport.width < 1024 ? 64 : 288);
-      assert.equal(await sidebar.getByRole("link").count(), 8);
+      assert.equal(await sidebar.getByRole("link").count(), 9);
       assert.equal(await sidebar.getByRole("region", { name: "需要你处理" }).count(), 0);
       assert.equal(await sidebar.getByRole("region", { name: "持续跟进" }).count(), 0);
       assert.equal(await sidebar.getByRole("region", { name: "执行主机占用" }).count(), 0);
@@ -1531,7 +1537,7 @@ async function checkNavigation() {
       await sidebar.getByRole("status", { name: "已连接", exact: true }).waitFor();
     }
     for (const path of [
-      "/",
+      "/diagnostics/main",
       "/issues",
       "/issues/issue-root",
       "/settings",
@@ -1578,7 +1584,7 @@ async function checkNavigation() {
       if (path === "/more" && mobile) {
         const more = page.getByRole("navigation", { name: "更多导航", exact: true });
         await more.waitFor();
-        assert.equal(await more.getByRole("link").count(), 5);
+        assert.equal(await more.getByRole("link").count(), 6);
         await more.getByRole("link", { name: "设置", exact: true }).click();
         await page.getByRole("radiogroup", { name: "主题", exact: true }).waitFor();
       }
@@ -1595,7 +1601,7 @@ async function checkNavigation() {
     );
     await theme.getByRole("radio", { name: "跟随系统", exact: true }).click();
     assert.equal(await page.evaluate(() => localStorage.getItem("tend.theme")), null);
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     const head = page.locator("main header:visible").first();
     if (mobile) assert((await head.boundingBox())!.height <= 60, "phone chat header stays one row");
     assert.equal(
@@ -1627,7 +1633,7 @@ async function checkNavigation() {
     assert.equal(await menu.getByRole("menuitem").count(), 2);
     await navigate(page, "/issues");
     await menu.waitFor({ state: "hidden" });
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     assert.equal(
       await head.getByRole("button", { name: "更多", exact: true }).getAttribute("aria-expanded"),
       "false",
@@ -1781,7 +1787,7 @@ try {
         httpErrors.push({ path: new URL(response.url()).pathname, status: response.status() });
     });
     hostedUnconfigured = true;
-    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
     const mobile = viewport.width < 760;
     await page.getByRole("button", { name: /^切换会话：/ }).click();
@@ -1812,7 +1818,7 @@ try {
     assert.equal(await managerSelect.inputValue(), "owner");
     await page.screenshot({ path: join(output, `create-owner-only-${viewport.width}.png`) });
     await createForm.getByRole("button", { name: "返回", exact: true }).click();
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     hostedUnconfigured = false;
     await page.getByRole("button", { name: /^切换会话：/ }).click();
     await page
@@ -1836,7 +1842,7 @@ try {
     await managerSelect.selectOption("category:custom-coordinator");
     assert.equal(await managerSelect.inputValue(), "category:custom-coordinator");
     await createForm.getByRole("button", { name: "返回", exact: true }).click();
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     if (catalogOnly) {
       assert.deepEqual(errors, []);
       assert.deepEqual(httpErrors, []);
@@ -1898,8 +1904,12 @@ try {
         "phone Inbox back restores the originating row focus",
       );
       await page.goBack();
-      await page.waitForURL((url) => url.pathname === "/");
-      assert.equal(new URL(page.url()).pathname, "/", "next back leaves Inbox, not reopens detail");
+      await page.waitForURL((url) => url.pathname === "/diagnostics/main");
+      assert.equal(
+        new URL(page.url()).pathname,
+        "/diagnostics/main",
+        "next back leaves Inbox, not reopens detail",
+      );
     } else {
       await navigate(page, "/inbox");
       const list = page.getByRole("region", { name: "待处理事项", exact: true });
@@ -1916,7 +1926,7 @@ try {
         "/issues",
         "root crumb goes to Issue list, not Inbox",
       );
-      await navigate(page, "/");
+      await navigate(page, "/diagnostics/main");
     }
     await page
       .getByRole("complementary", { name: "当前待处理", exact: true })
@@ -1953,7 +1963,7 @@ try {
       "false",
       "return preserves deferral",
     );
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     replyBody = "实际流式回复：先核对证据，再安排下一步。";
     replyRevision++;
     for (const stream of streams)
@@ -2237,7 +2247,7 @@ try {
         .click();
     else {
       if (await page.getByRole("button", { name: "返回对话", exact: true }).isVisible())
-        await navigate(page, "/");
+        await navigate(page, "/diagnostics/main");
       await page
         .getByRole("navigation", { name: "主导航", exact: true })
         .getByRole("link", { name: "收件箱", exact: true })
@@ -2287,14 +2297,10 @@ try {
     assert.equal(writes.length, 1);
     assert.equal(writes[0]!.request_id, requestID);
     await inbox.getByRole("button", { name: mobile ? "← 返回" : "稍后处理", exact: true }).click();
-    if (mobile)
-      await page
-        .getByRole("navigation", { name: "视图" })
-        .getByRole("link", { name: "对话", exact: true })
-        .click();
+    await navigate(page, "/diagnostics/main");
     if (await page.getByRole("button", { name: "主 Agent", exact: true }).first().isVisible())
       await page.getByRole("button", { name: "主 Agent", exact: true }).first().click();
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     await page.getByRole("button", { name: "更多", exact: true }).click();
     await page.getByRole("menuitem", { name: "补充来源", exact: true }).click();
     let source = page.getByRole("dialog", { name: "补充来源", exact: true });
@@ -2451,7 +2457,7 @@ try {
     assert(!JSON.stringify(newIssueWrite.payload).includes('"source_message_id":"old-report"'));
     assert.equal(writes.filter((w) => w.operation.startsWith("archive")).length, 0);
     await closeIssue(page);
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     await page.getByRole("heading", { name: "主 Agent", exact: true }).waitFor();
     await page.getByRole("button", { name: "更多", exact: true }).click();
     await page.getByRole("menuitem", { name: "补充来源", exact: true }).click();
@@ -2603,7 +2609,7 @@ try {
         .click();
     else {
       if (await page.getByRole("button", { name: "返回对话", exact: true }).isVisible())
-        await navigate(page, "/");
+        await navigate(page, "/diagnostics/main");
       await page
         .getByRole("navigation", { name: "主导航", exact: true })
         .getByRole("link", { name: "收件箱", exact: true })
@@ -2680,7 +2686,7 @@ try {
       if (message.type() === "error") consoleErrors.push(message.text());
     });
     for (const [path, heading, name] of [
-      ["/", "主 Agent", "main"],
+      ["/diagnostics/main", "主 Agent", "main"],
       ["/issues", "所有 Issue", "issues"],
       ["/inbox", "待处理", "inbox"],
       ["/settings", "设置", "settings"],
@@ -2741,7 +2747,7 @@ try {
     const cancelledFeed = routeSmoke.waitForEvent("requestfailed", {
       predicate: (request) => request === requestedFeed,
     });
-    await navigate(routeSmoke, "/");
+    await navigate(routeSmoke, "/diagnostics/main");
     await cancelledFeed;
     holdTaskFeed = false;
     await routeSmoke.goto(`${fixtureOrigin}/?issue=${issue.issue_id}`);

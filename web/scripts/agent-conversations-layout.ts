@@ -376,7 +376,7 @@ try {
       if (["warning", "error"].includes(message.type())) consoleErrors.push(message.text());
     });
     page.setDefaultTimeout(15000);
-    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     if (process.env.TEND_LAYOUT_FONT) {
       const font = await readFile(process.env.TEND_LAYOUT_FONT);
       await page.addStyleTag({
@@ -505,7 +505,7 @@ try {
     ]) {
       await navigate(page, "/issues");
       await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
-      await navigate(page, "/");
+      await navigate(page, "/diagnostics/main");
       await mainInput.waitFor();
       if (opener === "来源" || opener === "查看处理记录") {
         await page.getByRole("button", { name: "更多", exact: true }).click();
@@ -525,7 +525,7 @@ try {
       });
       if (width === 390) await page.getByRole("navigation", { name: "视图" }).waitFor();
       await page.screenshot({ path: join(output, `overlay-back-${dialogName}-${width}.png`) });
-      await navigate(page, "/");
+      await navigate(page, "/diagnostics/main");
       assert.equal(await mainInput.getAttribute("data-retained-composer"), "main");
       assert.equal(await mainInput.inputValue(), "主会话草稿保留");
       assert.equal(await transcript.evaluate((element) => element.scrollTop), mainTop);
@@ -665,7 +665,7 @@ try {
     });
     await navigate(page, `/chat/${encodeURIComponent(conversations[1]!.conversation_id)}`);
     await arrived;
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     const answered = page.waitForResponse((r) =>
       r.url().includes(encodeURIComponent(conversations[1]!.conversation_id)),
     );

@@ -46,3 +46,17 @@ tend channel show telegram
 ## 后续事件来源
 
 未来连接器先关联业务对象，通过领域用例更新 Issue/交付事实，再在同一事务登记来源和按需 manager 唤醒。现有 Issue 状态变更与 background batch 是接点。此版本没有 PR/CI/GitHub 连接器、状态映射、通用规则引擎或公开任意状态补丁接口。
+
+## IM 内回答（D134）
+
+Web `/` 是正式通信入口，`/diagnostics/main` 保留原生主 Agent 页面，具名诊断会话继续使用 `/chat/:id`。两种入口复用消息与执行账本，但各自保存草稿和发送队列。新标签页可恢复此前暂存的 IM 草稿。
+
+`GET messages?latest=1` 返回最近一页，`GET messages?before=<next>` 向前翻页；页内仍按时间升序。原有 `after` 向后游标继续供 CLI 和断线补齐使用。通信事件同时通知问题状态变化，列表读取不产生阅读确认。
+
+消息的 `interaction` 引用原 decision、action attention 或 worker 问题，包含该版问题、依据、允许选项及处理状态。Web 控件、Telegram inline keyboard、引用文字均调用原业务用例。`messaging.respond` 的 target 为 interaction ID，payload 含 `version` 与 `option` 或 `text`；人工行动的完成说明还须显式 `confirm: true`。该操作只用于 owner，不增加 Agent 选渠道的能力。
+
+引用问题回复完整选项或编号可明确选择；完整选项与编号相同而语义冲突时优先完整选项。原始输入正文仍按原文保存，解析出的业务选择另行记录。含新条件的控制回答交当前负责人继续协调，不能默默重试旧要求。人工事项的普通提问不会标为完成；Telegram 可引用问题回复 `已完成：具体完成说明`。
+
+一个渠道正式受理后，其他渠道的原问题失效并显示实际处理渠道、答案和时间，原始问题版本保持不变。Web 保留已经输入的草稿；Telegram 对失效问题的迟到文字仍保存原文并解释状态，不再次执行业务动作。回调 ACK、阅读和普通输入受理均不代表已回答。
+
+Telegram 原消息编辑走独立、持久化的控制投递，避免排在附件后面；无法编辑时追加一次关联提示。`near` 与 `due` 提醒保留各自约定时间窗口的说明，共用原问题控制。正式回答受理、后续执行和渠道展示同步继续分别记账。

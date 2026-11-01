@@ -6,7 +6,7 @@ import { useStore } from "../state/store.ts";
 import { useInboxCount } from "../attention/useInboxCount.ts";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import { StatusDot } from "./StatusDot.tsx";
-import { groups, settings, navActive, type NavItem } from "./navigation.tsx";
+import { groups, settings, diagnostics, navActive, type NavItem } from "./navigation.tsx";
 import styles from "./Sidebar.module.css";
 
 export function Sidebar({
@@ -86,6 +86,7 @@ export function Sidebar({
         ))}
       </nav>
       <nav className={styles.foot} aria-label="设置导航">
+        {item(diagnostics)}
         {item(settings)}
       </nav>
     </div>

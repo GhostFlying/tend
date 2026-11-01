@@ -1276,10 +1276,7 @@ try {
     .waitFor();
   assert.equal(await isolatedIssue.getByText("只属于主对话的待发内容", { exact: true }).count(), 0);
   await isolatedIssue.getByRole("button", { name: "返回 Issue 列表或上一项", exact: true }).click();
-  await isolation
-    .getByRole("navigation", { name: "视图", exact: true })
-    .getByRole("link", { name: "对话", exact: true })
-    .click();
+  await navigate(isolation, "/diagnostics/main");
   await isolation.getByText("只属于主对话的待发内容", { exact: true }).waitFor();
   assert(
     !writes.some(

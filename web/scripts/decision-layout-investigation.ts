@@ -1,4 +1,4 @@
-import { fixtureRoot } from "./navigation.ts";
+import { fixtureRoot, navigate } from "./navigation.ts";
 /// <reference lib="dom" />
 // Exercise the built application with an isolated owner API. The fixture only
 // accepts the decision write under test and never contacts a deployed server.
@@ -706,7 +706,7 @@ async function openPage(width: number, height: number) {
       if (!expectedInboxFailure) consoleErrors.push(message.text());
     }
   });
-  await page.goto(`http://127.0.0.1:${fixturePort}/`);
+  await page.goto(`http://127.0.0.1:${fixturePort}/diagnostics/main`);
   return { context, page, errors, consoleErrors };
 }
 
@@ -1203,7 +1203,7 @@ async function checkDelayedStoredThumbnail() {
         },
       );
       try {
-        await page.goto(`http://127.0.0.1:${fixturePort}/`);
+        await page.goto(`http://127.0.0.1:${fixturePort}/diagnostics/main`);
         await arrived;
         const transcript = page.getByRole("region", { name: "对话记录" });
         await page.waitForTimeout(100);
@@ -1382,7 +1382,7 @@ async function checkComposerOverlays() {
       await popover.waitFor({ state: "hidden" });
       if (width === 390) {
         const navigation = page.getByRole("navigation", { name: "视图", exact: true });
-        await navigation.getByRole("link", { name: "对话", exact: true }).click();
+        await navigate(page, "/diagnostics/main");
         await usage.waitFor();
         assert.equal(await usage.getAttribute("aria-expanded"), "false");
         await popover.waitFor({ state: "hidden" });

@@ -110,6 +110,16 @@ func messagingMessage(ctx context.Context, q store.Querier, id string) (protocol
 	if m.SourceMessageIDs == nil {
 		m.SourceMessageIDs = []string{}
 	}
+	m.Interaction, err = interactionForMessage(ctx, q, id)
+	if err != nil {
+		return m, err
+	}
+	if err = q.QueryRowContext(ctx, `SELECT COALESCE(max(read_at),0) FROM messaging_reads WHERE message_id=? AND content_revision=? AND reader LIKE 'agent:%'`, id, m.ContentRevision).Scan(&m.AgentReadAt); err != nil {
+		return m, err
+	}
+	if err = q.QueryRowContext(ctx, `SELECT COALESCE((SELECT CASE WHEN o.status='sending' THEN 'sending' ELSE d.state END FROM messaging_deliveries d LEFT JOIN outbox o ON o.outbox_id=d.delivery_id WHERE d.message_id=? AND d.kind IN ('text','file') ORDER BY CASE d.state WHEN 'unknown' THEN 0 WHEN 'failed' THEN 1 WHEN 'queued' THEN 2 WHEN 'unavailable' THEN 3 ELSE 4 END LIMIT 1),'')`, id).Scan(&m.DeliveryState); err != nil {
+		return m, err
+	}
 	m.Processing = "pending"
 	var messageState string
 	if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT json_extract(body_json,'$.state') FROM events WHERE object_id=? AND kind='conversation.message_state' ORDER BY event_seq DESC LIMIT 1),'')`, id).Scan(&messageState); err != nil {
@@ -269,4 +279,48 @@ func (a *App) MessagingTrace(ctx context.Context, id string) (protocol.Messaging
 		return work.Err()
 	})
 	return t, err
+}
+
+// MessagingRecentMessages pages backwards without changing the CLI's forward cursor.
+func (a *App) MessagingRecentMessages(ctx context.Context, before int64) (protocol.MessagingPage, error) {
+	page := protocol.MessagingPage{Items: []protocol.MessagingMessage{}}
+	if before == 0 {
+		before = 1<<63 - 1
+	}
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		rows, err := tx.Q().QueryContext(ctx, `SELECT c.message_id FROM messaging_messages m JOIN conversation_messages c USING(message_id) WHERE c.seq<? ORDER BY c.seq DESC LIMIT 101`, before)
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		page.More = len(ids) > 100
+		if page.More {
+			ids = ids[:100]
+		}
+		for n := len(ids) - 1; n >= 0; n-- {
+			m, e := messagingMessage(ctx, tx.Q(), ids[n])
+			if e != nil {
+				return e
+			}
+			page.Items = append(page.Items, m)
+		}
+		if len(page.Items) > 0 {
+			page.Next = page.Items[0].Sequence
+		}
+		return nil
+	})
+	return page, err
 }

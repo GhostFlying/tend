@@ -158,7 +158,7 @@ func (c *Client) poll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	raw, _ := json.Marshal(map[string]any{"offset": offset, "timeout": 25, "limit": 50, "allowed_updates": []string{"message", "edited_message"}})
+	raw, _ := json.Marshal(map[string]any{"offset": offset, "timeout": 25, "limit": 50, "allowed_updates": []string{"message", "edited_message", "callback_query"}})
 	result, err := c.request(ctx, "getUpdates", "application/json", bytes.NewReader(raw))
 	if err != nil {
 		return err
@@ -177,7 +177,17 @@ func (c *Client) poll(ctx context.Context) error {
 		}
 		batch = append(batch, app.TelegramInbox{UpdateID: head.ID, Payload: raw})
 	}
-	return c.app.PersistTelegramBatch(ctx, c.botID, batch)
+	if err := c.app.PersistTelegramBatch(ctx, c.botID, batch); err != nil {
+		return err
+	}
+	// A media download ahead of a callback must not hold the client's spinner.
+	for _, raw := range updates {
+		var update models.Update
+		if json.Unmarshal(raw, &update) == nil && update.CallbackQuery != nil {
+			c.ackCallback(ctx, update.CallbackQuery.ID, "")
+		}
+	}
+	return nil
 }
 
 func (c *Client) consume(ctx context.Context) {
@@ -210,6 +220,9 @@ func (c *Client) process(ctx context.Context, u app.TelegramInbox) error {
 	var update models.Update
 	if err := json.Unmarshal(u.Payload, &update); err != nil {
 		return c.app.SettleTelegramInput(ctx, u, "unsupported_update")
+	}
+	if update.CallbackQuery != nil {
+		return c.processCallback(ctx, u, update.CallbackQuery)
 	}
 	m := update.Message
 	edited := false
@@ -398,8 +411,23 @@ func (c *Client) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult
 	if p.BotID != c.botID {
 		return app.DeliveryResult{Outcome: app.Failed, Reason: "bot_identity_changed"}
 	}
+	if p.Kind == "interaction" {
+		return c.editInteraction(ctx, p)
+	}
 	if p.Kind == "text" {
 		params := &bot.SendMessageParams{ChatID: p.ChatID, Text: p.Body}
+		if p.ForceReply {
+			params.ReplyMarkup = &models.ForceReply{ForceReply: true}
+		} else if p.Part == 0 {
+			message, err := c.app.MessagingMessage(ctx, p.MessageID)
+			if err != nil {
+				return app.DeliveryResult{Outcome: app.Retry, Reason: "interaction_projection_unavailable"}
+			}
+			if i := message.Interaction; i != nil {
+				params.Text = boundedInteractionMessage(message)
+				params.ReplyMarkup = interactionKeyboard(*i)
+			}
+		}
 		if p.ReplyExternalID != 0 {
 			params.ReplyParameters = &models.ReplyParameters{MessageID: int(p.ReplyExternalID)}
 		}
@@ -418,6 +446,10 @@ func (c *Client) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult
 	return c.sendFile(ctx, p)
 }
 func (c *Client) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	var p app.MessagingPart
+	if json.Unmarshal(d.Payload, &p) == nil && p.Kind == "interaction" {
+		return c.Deliver(ctx, d)
+	}
 	return app.DeliveryResult{Outcome: app.Unknown, Reason: "telegram_send_receipt_missing"}
 }
 func (c *Client) sendFile(ctx context.Context, p app.MessagingPart) app.DeliveryResult {

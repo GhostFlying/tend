@@ -172,7 +172,8 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	}
 	wake := dispatch.NewSignal()
 	readWake := dispatch.NewSignal()
-	opts := []app.Option{app.WithNotifier(dispatch.Fanout{wake, readWake})}
+	interactionWake := dispatch.NewSignal()
+	opts := []app.Option{app.WithNotifier(dispatch.Fanout{wake, readWake, interactionWake})}
 	if cfg.LeaseTTL > 0 {
 		opts = append(opts, app.WithLeaseTTL(time.Duration(cfg.LeaseTTL)))
 	}
@@ -333,6 +334,14 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		return err
 	}
 	readDispatch := dispatch.New(a, map[string]dispatch.Handler{app.MessagingReadDestination: messaging.ReadHandler{App: a}}, readWake, now, dispatch.Config{}, log)
+	interactionHandlers := map[string]dispatch.Handler{}
+	if telegramClient != nil {
+		interactionHandlers[app.MessagingInteractionDestination] = telegramClient
+	}
+	interactionDispatch := dispatch.New(a, interactionHandlers, interactionWake, now, dispatch.Config{}, log)
+	if err := a.InitializeMessagingInteractions(ctx); err != nil {
+		return err
+	}
 	d := dispatch.New(a, handlers, wake, now, dispatch.Config{}, log)
 	releaseDir := ""
 	if cfg.Upgrades != nil {
@@ -422,6 +431,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	}
 	wg.Go(func() { _ = d.Run(runCtx) })
 	wg.Go(func() { _ = readDispatch.Run(runCtx) })
+	wg.Go(func() { _ = interactionDispatch.Run(runCtx) })
 	wg.Go(func() { runners.SweepLeases(runCtx, a.LeaseTTL()/4) })
 	wg.Go(func() { runners.SweepWorkspaces(runCtx, time.Minute) })
 	shutdownResult := make(chan error, 1)
