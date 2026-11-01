@@ -43,6 +43,10 @@ type RuntimeBinding struct {
 	Enabled          bool        `json:"enabled"`
 }
 
+// AgentDefinition uses an author-chosen LocalID as its stable environment-local
+// slug; it is never derived from a name or execution profile. DisplayName is a
+// human-readable label, not an identity key. Label changes still follow the
+// definition revision and explicit acceptance process.
 type AgentDefinition struct {
 	// OwnerRuntimeID optionally supplies coordination transport for this same
 	// identity, for example when its execution transport is an Orca terminal.
