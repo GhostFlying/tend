@@ -95,10 +95,10 @@ func recordAttentionNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, 
 // concrete responsibility becomes human. Original source facts remain history;
 // frozen/sending/unknown deliveries keep their existing reconciliation path.
 func redirectPendingIssueInputsToOwner(ctx context.Context, x *Exec, tx *store.Tx, issue string) error {
-	// Reversible status notices belong only to the Issue manager, never the
-	// personal planner. Keep their pending group available for supersession;
+	// Status notices and configured webhook input belong to the Issue manager,
+	// never the personal planner. Keep their pending groups available;
 	// canonical manager admission already waits while responsibility is human.
-	messages, err := store.FollowupIDs(ctx, tx.Q(), `SELECT b.message_id FROM background_batches b WHERE b.work_item_id=? AND b.group_key<>? AND b.status='pending' AND EXISTS(SELECT 1 FROM outbox o WHERE json_extract(o.payload_json,'$.message_id')=b.message_id AND o.status='pending') AND NOT EXISTS(SELECT 1 FROM outbox o WHERE json_extract(o.payload_json,'$.message_id')=b.message_id AND o.status IN ('sending','unknown')) AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=b.message_id) ORDER BY b.batch_id`, issue, "issue_status:"+issue)
+	messages, err := store.FollowupIDs(ctx, tx.Q(), `SELECT b.message_id FROM background_batches b WHERE b.work_item_id=? AND b.group_key NOT IN (?,?) AND b.status='pending' AND EXISTS(SELECT 1 FROM outbox o WHERE json_extract(o.payload_json,'$.message_id')=b.message_id AND o.status='pending') AND NOT EXISTS(SELECT 1 FROM outbox o WHERE json_extract(o.payload_json,'$.message_id')=b.message_id AND o.status IN ('sending','unknown')) AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=b.message_id) ORDER BY b.batch_id`, issue, "issue_status:"+issue, "webhook:"+issue)
 	if err != nil {
 		return err
 	}

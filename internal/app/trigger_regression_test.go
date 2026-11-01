@@ -134,6 +134,9 @@ func TestTriggerWebhookPauseAfterOwnerHandoff(t *testing.T) {
 	next := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.assign", protocol.Target{Type: "issue", ID: issue.IssueID}, p, rev(issue.Revision)), HostedIssueAssignment{}))
 	fin := protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: next.AssignmentEpoch, HandoffID: next.PendingHandoffID, Reason: "old execution not started"}
 	issue = canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.finish_assignment", protocol.Target{Type: "issue", ID: issue.IssueID}, fin, rev(next.Revision)), HostedIssueAssignment{Finish: true}))
+	if n := h.count("background_sources s JOIN background_batches b USING(batch_id) WHERE s.kind='webhook.received' AND s.cancelled_at=0 AND b.work_item_id='' AND b.status='pending'"); n != 0 {
+		t.Fatalf("owner handoff redirected %d configured webhook sources to the personal planner", n)
+	}
 	op := h.exec(owner, h.env("webhooks.pause", protocol.Target{Type: "webhook", ID: sub.ID}, protocol.WebhookSubscriptionPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, rev(sub.Revision)), WebhookCommand{Action: "pause"})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -345,6 +348,28 @@ func TestTriggerFollowupRecordsItsOwnBatchAdmission(t *testing.T) {
 			t.Errorf("expected one recorded queue admission, got %d", queued)
 		}
 		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTriggerLateObservationReportCorrectsOriginalTrace(t *testing.T) {
+	h := newHarness(t)
+	item := observerItem(t, h)
+	observerHello(t, h, "linux-1", "observer")
+	assignment := pollDelivery(t, h, "linux-1", "observer")[0]
+	h.clock.Advance(3 * time.Minute)
+	cmd := SweepTriggers{}
+	h.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, h.env(cmd.Operation(), protocol.Target{Type: "followups"}, struct{}{}, nil), cmd)
+	if !accepted(t, reportDelivery(t, h, "linux-1", "observer", assignment, "merged", "")) {
+		t.Fatal("latest nonce must still accept a late read")
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		page, err := store.TriggerEvents(t.Context(), tx.Q(), protocol.TriggerQuery{IssueID: item.WorkItemID}, h.clock.Now().UnixMilli())
+		if err == nil && (len(page.Items) != 1 || page.Items[0].Status == "failed") {
+			t.Errorf("accepted provider report left a failed trace: %+v", page.Items)
+		}
+		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
