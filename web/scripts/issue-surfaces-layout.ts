@@ -2264,6 +2264,33 @@ try {
         .click();
     }
     const inbox = page.getByRole("region", { name: "待处理事项", exact: true });
+    if (!mobile) {
+      const selectedFilter = (label: string) =>
+        inbox
+          .locator('[role="tab"][aria-selected="true"]')
+          .filter({ hasText: new RegExp(`^${label}$`) });
+      await page.waitForURL("**/inbox/attention-decision");
+      await inbox.getByRole("tab", { name: "全部记录", exact: true }).click();
+      await page.waitForURL("**/inbox/attention-information");
+      await selectedFilter("全部记录").waitFor();
+      await page.goBack();
+      await page.waitForURL("**/inbox/attention-decision");
+      await selectedFilter("待处理").waitFor();
+      await page.goForward();
+      await page.waitForURL("**/inbox/attention-information");
+      await selectedFilter("全部记录").waitFor();
+      await page.goBack();
+      await selectedFilter("待处理").waitFor();
+      await inbox.getByRole("tab", { name: "需要你决定", exact: true }).click();
+      await selectedFilter("需要你决定").waitFor();
+      await inbox.getByRole("tab", { name: "需要你处理", exact: true }).click();
+      await page.waitForURL("**/inbox/attention-action");
+      await page.goBack();
+      await page.waitForURL("**/inbox/attention-decision");
+      await selectedFilter("需要你决定").waitFor();
+      await page.goBack();
+      await selectedFilter("全部").waitFor();
+    }
     await inbox.getByRole("tab", { name: "通知", exact: true }).click();
     await inbox.getByRole("button", { name: /发布进度已更新/ }).waitFor();
     await page.screenshot({ path: join(output, `information-filter-${viewport.width}.png`) });

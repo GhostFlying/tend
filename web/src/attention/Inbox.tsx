@@ -111,8 +111,10 @@ export function Inbox({
           { value: "all", label: "全部记录" },
         ]}
         onChange={(value) => {
-          setScope(value);
-          setAutoSelect(true);
+          if (!selected) {
+            setScope(value);
+            setAutoSelect(true);
+          }
           setSelected("", value);
         }}
       />
@@ -127,8 +129,10 @@ export function Inbox({
           { value: "information", label: "通知" },
         ]}
         onChange={(key) => {
-          setAutoSelect(true);
-          setKind(key);
+          if (!selected) {
+            setAutoSelect(true);
+            setKind(key);
+          }
           setSelected("", scope, key);
         }}
       />
