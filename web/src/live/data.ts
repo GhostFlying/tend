@@ -268,7 +268,10 @@ export class LiveData {
     }
     // Execution and resource facts can change primary-task summaries without a
     // task event (for example lease expiry). Hidden reads stay lazy.
-    if (["run", "host", "workspace"].includes(event.object_type)) this.issues.refresh();
+    if (["run", "host", "workspace"].includes(event.object_type)) {
+      this.issues.refresh();
+      this.attention.refresh();
+    }
     if (event.object_type === "message" && event.item?.author !== "main_agent") {
       this.issues.refresh();
       this.attention.refresh();

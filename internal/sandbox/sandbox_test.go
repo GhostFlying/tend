@@ -982,3 +982,64 @@ func TestWebClientUsesEnclosingDeadline(t *testing.T) {
 		t.Fatal("owner request did not reach the transport")
 	}
 }
+
+func TestSandboxInboxPendingHistoryAndRetry(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := make(chan Demo, 1)
+	done := make(chan error, 1)
+	root := t.TempDir()
+	go func() {
+		done <- Run(ctx, Options{Scenario: "inbox", FastPacing: true, Data: root, Listener: listener, Ready: func(_ *serverkit.Runtime, demo Demo) { ready <- demo }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
+	}()
+	defer func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+				t.Error(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("inbox sandbox did not stop")
+		}
+	}()
+	var demo Demo
+	select {
+	case demo = <-ready:
+	case err := <-done:
+		done <- err
+		t.Fatalf("inbox seed: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	client := webClient{t: t, ctx: ctx, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
+	defer client.http.CloseIdleConnections()
+	client.call(http.MethodPost, "/api/v1/session", protocol.SessionRequest{ClientID: "inbox-test", Scope: protocol.ScopeOwner}, &client.session)
+	var pending, all protocol.AttentionPage
+	client.call(http.MethodGet, "/api/v1/inbox?status=open&include_archived=true", nil, &pending)
+	client.call(http.MethodGet, "/api/v1/inbox?include_archived=true", nil, &all)
+	if len(pending.Items) != 1 || len(all.Items) != 3 || pending.Items[0].AttentionID != demo.Decision || pending.Items[0].IssueTitle != "移动端 PWA 安全区、附件间距与输入光标修复" || pending.Items[0].TaskTitle == "" || pending.Items[0].TaskContext == nil || pending.Items[0].TaskContext.HasCurrentArtifact {
+		t.Fatalf("inbox context mismatch: pending=%+v all=%+v", pending, all)
+	}
+	a := pending.Items[0]
+	client.operation("inbox-retry", "attentions.respond", protocol.Target{Type: "attention", ID: a.AttentionID}, &a.Revision, protocol.RespondAttentionPayload{Version: a.QuestionVersion, Option: "retry the implementation"})
+	client.call(http.MethodGet, "/api/v1/inbox?status=open&include_archived=true", nil, &pending)
+	client.call(http.MethodGet, "/api/v1/inbox?include_archived=true", nil, &all)
+	if len(pending.Items) != 0 || len(all.Items) != 3 {
+		t.Fatal("answer did not move the original item out of pending", pending, all)
+	}
+	var task protocol.TaskDetail
+	client.call(http.MethodGet, "/api/v1/tasks/"+demo.Tasks[0], nil, &task)
+	if len(task.Actions) != 2 || task.Actions[1].Generation != 2 || len(task.Runs) != 1 || task.Runs[0].Observed != protocol.RunFailed {
+		t.Fatal("retry did not retain failure and enqueue the next explicit generation", task)
+	}
+	var answered protocol.AttentionView
+	client.call(http.MethodGet, "/api/v1/attentions/"+a.AttentionID, nil, &answered)
+	if answered.Status != "resolved" || answered.DecisionID != a.DecisionID || answered.TaskContext == nil || answered.TaskContext.HasCurrentArtifact || answered.TaskContext.CurrentArtifactAccepted {
+		t.Fatal("retry lost the original question or current delivery evidence", answered)
+	}
+}

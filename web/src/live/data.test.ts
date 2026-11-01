@@ -965,6 +965,46 @@ test("opened Issue follows run recovery and resource facts without opening hidde
   }
 });
 
+test("opened inbox and attention follow run and resource facts", async () => {
+  const api = new FakeApi(),
+    live = new LiveData(api);
+  try {
+    const opened = live.attention.openInbox();
+    const detail = live.attention.attention("attention-one");
+    const attention = (state: string) => ({
+      attention_id: "attention-one",
+      task_context: { execution: { state } },
+    });
+    await api.answer("/api/v1/inbox", { items: [attention("running")], more: false });
+    await api.answer("/api/v1/attentions/attention-one", attention("running"));
+    await opened;
+    const changes = [
+      { type: "run", kind: "run.unknown", state: "unknown" },
+      { type: "run", kind: "run.recovery", state: "recovering" },
+      { type: "host", kind: "host.maintenance_changed", state: "queued" },
+      { type: "workspace", kind: "workspace.released", state: "running" },
+    ];
+    for (const [index, changed] of changes.entries()) {
+      live.apply({
+        event_seq: 50 + index,
+        object_type: changed.type,
+        object_id: "resource-one",
+        kind: changed.kind,
+        created_at: "2026-10-29T00:00:00Z",
+      });
+      await api.answer("/api/v1/inbox", { items: [attention(changed.state)], more: false });
+      await api.answer("/api/v1/attentions/attention-one", attention(changed.state));
+      await api.answer("/api/v1/snapshot", snapshot);
+      expect(detail.state.get().value?.task_context?.execution?.state).toBe(changed.state);
+      expect(
+        live.attention.inbox.state.get().value?.items?.[0]?.task_context?.execution?.state,
+      ).toBe(changed.state);
+    }
+  } finally {
+    await live.stop();
+  }
+});
+
 test("public agent catalogs stay lazy and follow existing fact and reload lifecycle", async () => {
   const api = new FakeApi(),
     live = new LiveData(api);

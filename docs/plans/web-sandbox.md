@@ -35,6 +35,8 @@ Refs: D133、D132。Plan: S7。
 
 HMR：先运行沙盒，再以 `TEND_DEV_SERVER=http://localhost:8790 pnpm --dir web dev` 启动 Vite。沙盒默认仅绑定回环；外部访问由协调者明确配置 listener／代理，不自动加入 tailnet。
 
+收件箱专用场景：`SANDBOX_ARGS='-scenario inbox'`，在新的沙盒数据目录中通过真实 app 命令生成两条已处理历史与“移动端 PWA 安全区、附件间距与输入光标修复”的待处理决定。失败由脚本 runner 实际上报；用户显式选择重新实现后，在原任务排入下一代实现动作，仍遵循上下文复核等正常调度条件，不把排队当作已交付或已通过验收。用于验证所属 Issue、任务标题、默认待处理与全部记录的切换、已读及答复后的角标变化。
+
 ## 验证
 
 默认 Go 测试使用临时目录与回环 listener，不调用外网或模型：登录与 owner API 读取每个看板列／三类 attention，主会话派发走真实工具和 runner 达到终态，owner API 回答决定并验证解决；再次播种验证幂等；错误目录与 reset 验证保护；取消等待所有后台循环退出，目标少于 30 秒。

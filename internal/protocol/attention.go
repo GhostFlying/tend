@@ -31,8 +31,28 @@ type Attention struct {
 }
 type AttentionView struct {
 	Attention
-	Decision *DecisionView   `json:"decision,omitempty"`
-	Choice   *WorkItemChoice `json:"choice,omitempty"`
+	IssueTitle  string                `json:"issue_title,omitempty"`
+	IssueIntent string                `json:"issue_intent,omitempty"`
+	TaskTitle   string                `json:"task_title,omitempty"`
+	TaskContext *AttentionTaskContext `json:"task_context,omitempty"`
+	Decision    *DecisionView         `json:"decision,omitempty"`
+	Choice      *WorkItemChoice       `json:"choice,omitempty"`
+}
+
+// AttentionTaskContext describes current task facts, not a diagnosis of a failed
+// run or a promise that a selected effect will pass control validation.
+type AttentionTaskContext struct {
+	// QuestionCurrent preserves the original decision's control-revision pin.
+	QuestionCurrent bool               `json:"question_current"`
+	Goal            string             `json:"goal"`
+	Lifecycle       TaskLifecycle      `json:"lifecycle"`
+	ControlMode     ControlMode        `json:"control_mode"`
+	Execution       *TaskExecutionView `json:"execution,omitempty"`
+	BlockReason     BlockReason        `json:"block_reason"`
+	// Submitted artifacts remain evidence even after a changes-required verdict
+	// clears the task's current acceptance candidate.
+	HasCurrentArtifact      bool `json:"has_current_artifact"`
+	CurrentArtifactAccepted bool `json:"current_artifact_accepted"`
 }
 type AttentionPage struct {
 	Items []AttentionView `json:"items"`

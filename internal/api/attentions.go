@@ -11,6 +11,7 @@ import (
 func (s *Server) attentions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := views.AttentionFilter{IssueID: q.Get("issue_id"), Kind: q.Get("kind"), Status: q.Get("status"), After: q.Get("after"), IncludeArchived: q.Get("include_archived") == "true", Limit: 50}
+	f.ActionableOnly = q.Get("actionable_only") == "true"
 	if q.Has("limit") {
 		n, err := strconv.Atoi(q.Get("limit"))
 		if err != nil || n < 1 || n > 100 {

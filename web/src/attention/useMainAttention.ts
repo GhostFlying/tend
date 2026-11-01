@@ -9,7 +9,7 @@ import { useStore } from "../state/store.ts";
 export function useMainAttention(client: ApiClient, live: LiveData) {
   const read = useMemo(() => new WorkItemRead<AttentionPage>(client), [client]);
   useEffect(() => {
-    void read.open("/api/v1/inbox?status=open");
+    void read.open("/api/v1/inbox?status=open&include_archived=true&actionable_only=true");
     // The existing Next read already receives Attention/planner/deadline SSE
     // invalidation and reload. Reuse its completion signal, not another stream.
     const stop = live.attention.next.state.subscribe(() => {

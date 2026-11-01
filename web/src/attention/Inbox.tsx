@@ -1,4 +1,5 @@
 import { actorLabel } from "./actorLabel.ts";
+import { taskLook } from "../tasks/status.ts";
 import { WorkItemRead } from "../workitems/live.ts";
 import { Button, Tabs, Badge, EmptyState, Textarea } from "../ui/index.ts";
 import { back, navigate, Link, useEntryState } from "../app/router.ts";
@@ -35,23 +36,36 @@ export function Inbox({
   onIssue(id: string): void;
 }) {
   const { live } = useServices();
-  const [kind, setKind] = useState("");
+  const [kind, setKind] = useEntryState("inboxKind", "");
+  const [scope, setScope] = useEntryState<"pending" | "all">("inboxScope", "pending");
   const selected = initial ?? "";
   const [autoSelect, setAutoSelect] = useEntryState("inboxAutoSelect", !initial);
   const [now, setNow] = useState(() => Date.now());
-  const setSelected = (id: string) =>
+  const setSelected = (id: string, nextScope = scope, nextKind = kind) =>
     navigate(id ? { page: "attention", id } : { page: "inbox" }, {
-      state: { inboxAutoSelect: !id },
+      replace: !id && !selected,
+      state: { inboxAutoSelect: !id, inboxScope: nextScope, inboxKind: nextKind },
     });
-  const defer = () => navigate({ page: "inbox" }, { state: { inboxAutoSelect: false } });
+  const defer = () =>
+    navigate(
+      { page: "inbox" },
+      { state: { inboxAutoSelect: false, inboxScope: scope, inboxKind: kind } },
+    );
   const state = useStore(live.attention.inbox.state);
   const next = useStore(live.attention.next.state);
   useEffect(() => {
-    void live.attention.openInbox({ ...(kind ? { kind } : {}) });
+    void live.attention.openInbox({
+      ...(kind ? { kind } : {}),
+      ...(scope === "pending" ? { status: "open" } : {}),
+      includeArchived: scope === "all" || kind !== "information",
+      actionableOnly: scope === "pending" && kind !== "information",
+    });
     void live.attention.openNext();
     return () => live.attention.inbox.close();
-  }, [live, kind]);
-  const items = state.value?.items ?? [];
+  }, [live, kind, scope]);
+  const items = (state.value?.items ?? []).filter(
+    (item) => scope !== "pending" || item.kind !== "information" || !item.archived_at,
+  );
   const firstID = items[0]?.attention_id;
   useEffect(() => {
     const media = window.matchMedia("(min-width: 761px)");
@@ -65,13 +79,16 @@ export function Inbox({
         live.attention.inbox.state.get().value === state.value
       ) {
         setAutoSelect(false);
-        navigate({ page: "attention", id: firstID }, { replace: true });
+        navigate(
+          { page: "attention", id: firstID },
+          { replace: true, state: { inboxScope: scope, inboxKind: kind } },
+        );
       }
     };
     selectFirst();
     media.addEventListener("change", selectFirst);
     return () => media.removeEventListener("change", selectFirst);
-  }, [firstID, selected, state.loading, state.value, live, autoSelect, setAutoSelect]);
+  }, [firstID, selected, state.loading, state.value, live, autoSelect, setAutoSelect, scope, kind]);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
@@ -80,11 +97,25 @@ export function Inbox({
     <section className={styles.root} data-selected={!!selected} aria-label="待处理事项">
       <div className={styles.pageHeader}>
         <PageHeader
-          title="待处理"
+          title="收件箱"
           {...(selected ? { onBack: () => back({ page: "inbox" }) } : {})}
         />
       </div>
       <p className={`${styles.muted} ${styles.context}`}>需要你决定或亲自推进的事项。</p>
+      <Tabs
+        className={styles.tabs ?? ""}
+        label="记录范围"
+        value={scope}
+        items={[
+          { value: "pending", label: "待处理" },
+          { value: "all", label: "全部记录" },
+        ]}
+        onChange={(value) => {
+          setScope(value);
+          setAutoSelect(true);
+          setSelected("", value);
+        }}
+      />
       <Tabs
         className={styles.tabs ?? ""}
         label="事项类型"
@@ -98,7 +129,7 @@ export function Inbox({
         onChange={(key) => {
           setAutoSelect(true);
           setKind(key);
-          setSelected("");
+          setSelected("", scope, key);
         }}
       />
       <div className={styles.split} data-selected={!!selected}>
@@ -111,7 +142,11 @@ export function Inbox({
           )}
           {!state.value && !state.error && <p>正在读取…</p>}
           {state.value && items.length === 0 && (
-            <EmptyState>暂无此类事项。新的决定、行动与通知会显示在这里。</EmptyState>
+            <EmptyState>
+              {scope === "pending"
+                ? "暂无待处理事项。已处理事项可在全部记录中查看。"
+                : "暂无此类记录。"}
+            </EmptyState>
           )}
           {items.map((item) => {
             return (
@@ -131,8 +166,19 @@ export function Inbox({
                 >
                   <span className={styles.rowTitle} data-unread={!item.read_at}>
                     {!item.read_at && <span className={styles.unread} aria-label="未读" />}
-                    <span title={item.title}>{item.title}</span>
+                    <span>{attentionContextTitle(item)}</span>
                   </span>
+                  <span className={styles.questionSummary}>{attentionHeading(item)}</span>
+                  {item.task_context && (
+                    <span className={styles.summary}>
+                      {item.task_context.has_current_artifact
+                        ? "当前版本已有交付物"
+                        : "当前版本尚无交付物"}
+                      {item.task_context.current_artifact_accepted
+                        ? " · 已通过验收"
+                        : " · 尚无通过验收的记录"}
+                    </span>
+                  )}
                   <InboxSummary item={item} />
                 </Button>
                 <div className={styles.rowMeta}>
@@ -146,7 +192,7 @@ export function Inbox({
                   </time>
                   {item.issue_id && (
                     <Link to={{ page: "issue", id: item.issue_id }} title={item.issue_id}>
-                      所属 Issue →
+                      查看 Issue →
                     </Link>
                   )}
                 </div>
@@ -169,6 +215,9 @@ export function Inbox({
               onClick={() =>
                 void live.attention.openInbox({
                   ...(kind ? { kind } : {}),
+                  ...(scope === "pending" ? { status: "open" } : {}),
+                  includeArchived: scope === "all" || kind !== "information",
+                  actionableOnly: scope === "pending" && kind !== "information",
                   ...(state.value?.next ? { after: state.value.next } : {}),
                 })
               }
@@ -265,6 +314,10 @@ function AttentionForm({
       : undefined;
   const recordedOption = typeof recordedAnswer?.option === "string" ? recordedAnswer.option : "";
   const recordedText = typeof recordedAnswer?.text === "string" ? recordedAnswer.text : "";
+  const recordedEffect =
+    recordedAnswer?.effect && typeof recordedAnswer.effect === "object"
+      ? (recordedAnswer.effect as Record<string, unknown>)
+      : undefined;
   const shownText =
     a.status === "resolved"
       ? a.kind === "action"
@@ -329,30 +382,64 @@ function AttentionForm({
     }
   };
   const blocked = operation.busy || operation.pending || source.busy || a.status !== "open";
+  const failure = attentionFailure(a);
+  const currentFailure =
+    a.status === "open" &&
+    a.task_context?.question_current &&
+    a.task_context?.block_reason === "waiting_decision" &&
+    a.task_context.execution?.state === "waiting_owner"
+      ? failure
+      : undefined;
   return (
     <>
-      <h2>{a.title}</h2>
-      {a.issue_id && (
-        <Button variant="link" onClick={() => onIssue(a.issue_id!)}>
-          查看所属 Issue →
-        </Button>
+      <header className={styles.issueContext}>
+        <h2>
+          {a.issue_id ? (
+            <Button variant="link" onClick={() => onIssue(a.issue_id!)}>
+              {attentionContextTitle(a)}
+            </Button>
+          ) : (
+            attentionContextTitle(a)
+          )}
+        </h2>
+        {a.task_title && <p className={styles.taskContext}>执行任务：{a.task_title}</p>}
+      </header>
+      {a.task_context && (
+        <section className={styles.currentResult} aria-label="当前结果">
+          <h3>当前结果</h3>
+          {currentFailure ? (
+            <p>
+              <strong>{currentFailure.stage}失败</strong>：{currentFailure.reason}。
+            </p>
+          ) : (
+            <p>{attentionTaskStatus(a)}</p>
+          )}
+          <p>
+            {a.task_context.has_current_artifact ? "当前版本已有交付物。" : "当前版本尚无交付物。"}
+            {a.task_context.current_artifact_accepted
+              ? "当前交付物已有通过验收的记录。"
+              : "当前版本尚无通过验收的记录。"}
+          </p>
+          {a.task_id && <Link to={{ page: "task", id: a.task_id }}>查看执行与交付记录 →</Link>}
+        </section>
+      )}
+      {(a.task_context?.goal || a.issue_intent) && (
+        <section aria-label="事项目标">
+          <h3>原本要完成什么</h3>
+          <p>{a.task_context?.goal || a.issue_intent}</p>
+        </section>
       )}
       <p className={`${styles.muted} ${styles.detailMeta}`}>
         <Badge>{kindLabel(a.kind)}</Badge> <span>·</span> <span>{statusLabel(a.status)}</span>
       </p>
-      <p className={styles.muted}>
-        提出者：
-        {actorLabel(a.raised_by)} · 提出于 {new Date(a.created_at).toLocaleString("zh-CN")}
-      </p>
-      <p className={styles.muted}>
-        <AttentionActionTime item={a} />
-      </p>
-      {a.source_message_id && <AttentionOriginalMessage id={a.source_message_id} />}
       {a.kind === "decision" && (
         <>
-          <h3>请选择</h3>
-          {a.decision?.question && <p>{question(a.decision).text}</p>}
-          {a.choice?.question && <p>{a.choice.question}</p>}
+          <h3>{a.status === "open" ? "需要你决定" : "原始问题与答复"}</h3>
+          {currentFailure ? (
+            <p>接下来如何推进这项任务？</p>
+          ) : (
+            <p>{a.decision ? question(a.decision).text : a.choice?.question || a.title}</p>
+          )}
           <div className={styles.options}>
             {options.map((option) => (
               <label key={option} className={styles.option}>
@@ -364,7 +451,12 @@ function AttentionForm({
                   disabled={blocked}
                   onChange={() => setChoice(option)}
                 />
-                {a.decision ? optionLabel(a.decision, option) : option}
+                <span>
+                  <span>{a.decision ? optionLabel(a.decision, option) : option}</span>
+                  {attentionOptionHelp(a, option) && (
+                    <span className={styles.optionHelp}>{attentionOptionHelp(a, option)}</span>
+                  )}
+                </span>
               </label>
             ))}
           </div>
@@ -379,6 +471,14 @@ function AttentionForm({
           </label>
         </>
       )}
+      {a.kind === "action" && (
+        <>
+          <h3>{a.status === "open" ? "需要你处理" : "原始事项"}</h3>
+          <p>{a.title}</p>
+        </>
+      )}
+      {a.kind === "information" && <p>{a.title}</p>}
+      {a.source_message_id && <AttentionOriginalMessage id={a.source_message_id} />}
       {a.kind === "action" && (
         <label>
           <h3>处理结果</h3>
@@ -439,6 +539,16 @@ function AttentionForm({
       {a.status === "resolved" && a.resolution_source_id && (
         <SourceDetails id={a.resolution_source_id} />
       )}
+      {a.status === "resolved" && recordedEffect && (
+        <p
+          role="status"
+          className={recordedEffect.applied === true ? styles.muted : styles.warning}
+        >
+          {recordedEffect.applied === true
+            ? "答复已记录，后续任务动作已安排；实际进度见当前结果。"
+            : `答复已记录，任务动作未执行${typeof recordedEffect.reason === "string" ? `：${recordedEffect.reason}` : "。"}`}
+        </p>
+      )}
       {operation.storageError && (
         <p role="alert" className={styles.warning}>
           {operation.storageError}
@@ -458,7 +568,7 @@ function AttentionForm({
         </div>
       )}
       <div className={styles.actions}>
-        {a.kind === "decision" && (
+        {a.kind === "decision" && a.status === "open" && (
           <Button
             variant="primary"
             disabled={blocked || (!choice && !text.trim())}
@@ -467,7 +577,7 @@ function AttentionForm({
             提交决定
           </Button>
         )}
-        {a.kind === "action" && (
+        {a.kind === "action" && a.status === "open" && (
           <Button
             variant="primary"
             disabled={blocked || !shownText.trim() || !source.content.loaded}
@@ -477,18 +587,90 @@ function AttentionForm({
           </Button>
         )}
         <Button variant="secondary" onClick={onBack}>
-          稍后处理
+          {a.status === "open" ? "稍后处理" : "返回列表"}
         </Button>
         <Button disabled={operation.busy || operation.pending} onClick={() => void run("read")}>
           {a.read_at ? "标记未读" : "标记已读"}
         </Button>
-        <Button disabled={operation.busy || operation.pending} onClick={() => void run("archive")}>
-          {a.archived_at ? "展开" : "收起"}
-        </Button>
+        {a.kind === "information" && (
+          <Button
+            disabled={operation.busy || operation.pending}
+            onClick={() => void run("archive")}
+          >
+            {a.archived_at ? "展开" : "收起"}
+          </Button>
+        )}
       </div>
-      <p className={styles.muted}>已读和收起不会解决此项；稍后处理仅返回列表。</p>
+      <p className={styles.muted}>
+        {a.status === "open"
+          ? a.kind === "information"
+            ? "这是一条通知，无需回复，不计入待处理数。"
+            : "已读不会完成此项；实际执行动作以提交回执为准，答复将保留在全部记录中。"
+          : "此项已结束，保留原问题和处理记录，无需再次提交。"}
+      </p>
+      <p className={styles.muted}>
+        提出者：{actorLabel(a.raised_by)} · {new Date(a.created_at).toLocaleString("zh-CN")}
+      </p>
+      <details className={styles.timing}>
+        <summary>原始问题、时间与提醒</summary>
+        <p>{a.decision?.question || a.choice?.question || a.title}</p>
+        <p className={styles.muted}>
+          <AttentionActionTime item={a} />
+        </p>
+      </details>
     </>
   );
+}
+
+export function attentionContextTitle(item: AttentionView): string {
+  return item.issue_title || (item.issue_id ? "所属 Issue 名称暂不可用" : "全局事项");
+}
+
+export function attentionFailure(
+  item: AttentionView,
+): { stage: string; reason: string } | undefined {
+  if (!item.decision?.effects || !Object.keys(item.decision.effects).length) return undefined;
+  const match = /^(实现|验收)失败（(.*)）。这个任务接下来怎么办？$/s.exec(
+    question(item.decision).text,
+  );
+  return match ? { stage: match[1]!, reason: match[2]! } : undefined;
+}
+
+export function attentionTaskStatus(item: AttentionView): string {
+  const task = item.task_context;
+  if (!task) return "执行状态未提供";
+  if (task.execution?.state === "waiting_owner" && task.block_reason === "waiting_decision")
+    return "等待你的决定";
+  return taskLook(task).label;
+}
+
+export function attentionOptionHelp(item: AttentionView, option: string): string {
+  const effect = item.decision?.effects?.[option];
+  if (effect === "implement")
+    return "按当前任务要求再次执行，保留已有失败记录；仍受任务控制与次数限制。";
+  if (effect === "cancel") return "取消这项执行任务，不等于关闭所属 Issue。";
+  if (effect === "accept") return "对当前交付物重新发起独立验收。";
+  if (
+    option === "revise the spec" &&
+    item.decision?.effects &&
+    Object.keys(item.decision.effects).length
+  ) {
+    return "记录修改意图；请补充要改的内容。任务要求仍需后续修改，不会直接重新执行。";
+  }
+  return "";
+}
+
+export function attentionHeading(item: AttentionView): string {
+  const text = item.decision ? question(item.decision).text : item.title;
+  if (
+    item.status === "open" &&
+    item.decision?.effects?.["retry the implementation"] === "implement"
+  ) {
+    if (/^实现失败（.*）。这个任务接下来怎么办？$/s.test(text)) {
+      return "实现失败，等待你决定下一步";
+    }
+  }
+  return text;
 }
 
 function kindLabel(kind: string): string {
@@ -530,7 +712,8 @@ function InboxSummary({ item }: { item: AttentionView }) {
   const text =
     summary ||
     state.value?.body?.split(/\r?\n/).find((line) => line.trim()) ||
-    (state.error ? "原始说明暂时无法读取" : state.loading ? "正在读取原始说明…" : "无文字说明");
+    (state.error ? "原始说明暂时无法读取" : state.loading ? "正在读取原始说明…" : "");
+  if (!text) return null;
   return (
     <span className={styles.summary} title={text}>
       {text}

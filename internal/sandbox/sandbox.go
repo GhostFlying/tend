@@ -62,7 +62,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 	if options.Scenario == "" {
 		options.Scenario = "demo"
 	}
-	if options.Scenario != "demo" {
+	if options.Scenario != "demo" && options.Scenario != "inbox" {
 		return fmt.Errorf("unknown sandbox scenario %q", options.Scenario)
 	}
 	root, release, err := prepareData(options.Data, options.Reset)
@@ -207,7 +207,12 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 				case <-time.After(25 * time.Millisecond):
 				}
 			}
-			demo, err := seedDemo(ctx, runtime, root, options.skipStory, options.storyOnly)
+			var demo Demo
+			if options.Scenario == "inbox" {
+				demo, err = seedInbox(ctx, runtime, root)
+			} else {
+				demo, err = seedDemo(ctx, runtime, root, options.skipStory, options.storyOnly)
+			}
 			if err != nil {
 				return err
 			}
