@@ -193,9 +193,7 @@ func (HostMaintenance) Authorize(_ context.Context, x *Exec, _ store.Querier) er
 	return allowKinds(x.Principal, protocol.PrincipalOwner, protocol.PrincipalSystem)
 }
 func (HostMaintenance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	var p struct {
-		Mode string `json:"mode"`
-	}
+	var p protocol.HostMaintenancePayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}

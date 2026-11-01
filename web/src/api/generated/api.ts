@@ -259,6 +259,7 @@ export interface TendAPI {
   AttentionPage?: AttentionPage;
   AttentionView?: AttentionView;
   BackgroundSourcePage?: BackgroundSourcePage;
+  BindLocalRepositoryRequest?: BindLocalRepositoryRequest;
   BindTelegram?: BindTelegram;
   CancelIssueDeadlinePayload?: CancelIssueDeadlinePayload;
   ConfirmAttentionPayload?: ConfirmAttentionPayload;
@@ -279,6 +280,7 @@ export interface TendAPI {
   ExplainDecisionPayload?: ExplainDecisionPayload;
   FinishIssueAssignmentPayload?: FinishIssueAssignmentPayload;
   FollowupSpec?: FollowupSpec;
+  HostMaintenancePayload?: HostMaintenancePayload;
   HostedAgentInventory?: HostedAgentInventory;
   InjectSourcePayload?: InjectSourcePayload;
   InterruptReplyPayload?: InterruptReplyPayload;
@@ -309,6 +311,8 @@ export interface TendAPI {
   IssueTranscriptPage?: IssueTranscriptPage;
   IssueView?: IssueView;
   LedgerEvent?: LedgerEvent;
+  LocalRepositoryBinding?: LocalRepositoryBinding;
+  LocalRepositoryStatus?: LocalRepositoryStatus;
   ManagerMigrationPayload?: ManagerMigrationPayload;
   ManualSource?: ManualSource;
   MessagingChannel?: MessagingChannel;
@@ -375,6 +379,7 @@ export interface TendAPI {
   UpdateIssueProgressPayload?: UpdateIssueProgressPayload;
   UpdateIssueTaskPayload?: UpdateIssueTaskPayload;
   UpdateWorkItemChoicePayload?: UpdateWorkItemChoicePayload;
+  UpgradeControlPayload?: UpgradeControlPayload;
   WebhookReceipt?: WebhookReceipt;
   WebhookSubscription?: WebhookSubscription;
   WebhookSubscriptionPage?: WebhookSubscriptionPage;
@@ -1551,6 +1556,24 @@ export interface BackgroundSource {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BindLocalRepositoryRequest".
+ */
+export interface BindLocalRepositoryRequest {
+  binding: LocalRepositoryBinding;
+  expected_control_revision: number;
+  request_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LocalRepositoryBinding".
+ */
+export interface LocalRepositoryBinding {
+  orca?: string;
+  remote_url: string;
+  repo: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "BindTelegram".
  */
 export interface BindTelegram {
@@ -1979,6 +2002,13 @@ export interface FollowupCondition {
   delivery_state?: string;
   kind: string;
   task_ids?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "HostMaintenancePayload".
+ */
+export interface HostMaintenancePayload {
+  mode: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2729,6 +2759,15 @@ export interface MessageWorkItem {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LocalRepositoryStatus".
+ */
+export interface LocalRepositoryStatus {
+  control_revision: number;
+  error?: string;
+  repositories: RunnerRepository[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ManagerMigrationPayload".
  */
 export interface ManagerMigrationPayload {
@@ -3402,6 +3441,7 @@ export interface Snapshot {
 export interface HostView {
   arch: string;
   build_version?: string;
+  control_revision?: number;
   host_id: string;
   labels: string[] | null;
   last_heartbeat_at?: string;
@@ -3944,6 +3984,13 @@ export interface CreateWorkItemChoicePayload {
   recommendation?: string;
   source_id: string;
   task_ids?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpgradeControlPayload".
+ */
+export interface UpgradeControlPayload {
+  action: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

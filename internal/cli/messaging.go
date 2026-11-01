@@ -27,6 +27,9 @@ func runMessaging(ctx context.Context, e *Env, kind string, args []string) error
 		tail = tail[1:]
 	}
 	fs := newFlags(e, kind+" "+action)
+	reason := fs.String("reason", "", "reason retained in the operation record")
+	dry := fs.Bool("dry-run", false, "print original Envelope without sending")
+	fs.Bool("json", true, "print structured response")
 	file := fs.String("file", "", "JSON payload file or - for stdin")
 	data := fs.String("data", "", "JSON payload")
 	request := fs.String("request-id", "", "original request ID for identical retry")
@@ -154,9 +157,12 @@ func runMessaging(ctx context.Context, e *Env, kind string, args []string) error
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)
 	}
-	env := protocol.Envelope{RequestID: *request, Operation: op, Target: target, Payload: body}
+	env := protocol.Envelope{RequestID: *request, Operation: op, Target: target, Payload: body, Reason: *reason}
 	if action == "bind" || action == "unbind" {
 		env.ExpectedControlRevision = revision
+	}
+	if *dry {
+		return o.printJSON(env)
 	}
 	return sendDirectEnvelope(ctx, o, env)
 }

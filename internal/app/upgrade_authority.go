@@ -259,9 +259,7 @@ func (ControlUpgrade) Authorize(_ context.Context, x *Exec, _ store.Querier) err
 	return allowKinds(x.Principal, protocol.PrincipalOwner, protocol.PrincipalSystem)
 }
 func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	var p struct {
-		Action string `json:"action"`
-	}
+	var p protocol.UpgradeControlPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}

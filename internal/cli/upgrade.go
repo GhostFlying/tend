@@ -27,6 +27,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 		return usagef("upgrade expects start, status, retry or cancel")
 	}
 	fs := newFlags(e, "upgrade "+action)
+	dry := fs.Bool("dry-run", false, "print the local control request without executing it")
 	configPlan := fs.String("runner-configurations", "", "private JSON metadata for a single runner configuration maintenance")
 	bundle := fs.String("release", "", "verified local release directory")
 	upgradeID := fs.String("upgrade-id", "", "stable upgrade batch ID")
@@ -101,6 +102,12 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	if *requestID != "" && !protocol.ValidID(protocol.PrefixRequest, *requestID) {
 		return usagef("upgrade --request-id is malformed")
 	}
+	if *dry {
+		if action == "status" {
+			return usagef("status takes no dry-run")
+		}
+		return (owner{e: e, json: true}).printJSON(map[string]any{"method": method, "path": path, "request": input})
+	}
 	if action != "status" {
 		fmt.Fprintf(e.Stderr, "Upgrade %s; request %s\n", *upgradeID, *requestID)
 	}
@@ -147,7 +154,7 @@ func localUpgradeRequest(ctx context.Context, socket, method, path string, input
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
-		return errors.New("local upgrade service unavailable; preserve the request ID and inspect status before retrying")
+		return errors.New("local control service unavailable; preserve the request ID and inspect status before retrying")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -157,7 +164,7 @@ func localUpgradeRequest(ctx context.Context, socket, method, path string, input
 		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&failure); err == nil && failure.Error != "" {
 			return errors.New(failure.Error)
 		}
-		return fmt.Errorf("local upgrade service returned HTTP %d", response.StatusCode)
+		return fmt.Errorf("local control service returned HTTP %d", response.StatusCode)
 	}
 	return json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(out)
 }

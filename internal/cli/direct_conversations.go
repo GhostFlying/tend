@@ -23,6 +23,9 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 	request := fs.String("request-id", "", "original request identity for an identical retry")
 	revision := fs.Int64("revision", -1, "original task control revision (run message only)")
 	after := fs.Int64("after", 0, "message sequence cursor")
+	reason := fs.String("reason", "", "reason retained in the operation record")
+	dry := fs.Bool("dry-run", false, "print original Envelope without sending")
+	fs.Bool("json", true, "print structured output")
 	provider := fs.String("provider", "", "optional native entry provider: orca or cove")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
@@ -65,7 +68,7 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 		return usagef("provider is only valid for native-entry")
 	}
 	if path != "" {
-		if *data != "" || *file != "" || *request != "" || *revision != -1 {
+		if *data != "" || *file != "" || *request != "" || *revision != -1 || *dry {
 			return usagef("read commands take no mutation input")
 		}
 		var v json.RawMessage
@@ -134,9 +137,12 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 	if !protocol.ValidID(protocol.PrefixRequest, *request) {
 		return usagef("request-id is malformed")
 	}
-	env := protocol.Envelope{RequestID: *request, Operation: operation, Target: target, Payload: body}
+	env := protocol.Envelope{RequestID: *request, Operation: operation, Target: target, Payload: body, Reason: *reason}
 	if *revision >= 0 {
 		env.ExpectedControlRevision = revision
+	}
+	if *dry {
+		return o.printJSON(env)
 	}
 	return sendDirectEnvelope(ctx, o, env)
 }
