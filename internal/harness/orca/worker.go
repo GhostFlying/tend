@@ -948,6 +948,15 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 		if err := w.recordRootObservation(ctx, a); err != nil {
 			return a, false, err
 		}
+		if r := w.st.Recovery; r != nil && r.Phase == recoveryContinuing {
+			if !backgroundSettled(a, wait) {
+				if err := sleep(ctx, w.ws.opts.Poll); err != nil {
+					return Agent{}, false, nil
+				}
+				return a, false, nil
+			}
+			return a, false, w.continueObservedSession(ctx, a, true)
+		}
 		if r := a.RootTurn; r != nil && r.State == "unknown" && !rootFailed(a, w.st.Turn) {
 			if err := sleep(ctx, w.ws.opts.Poll); err != nil {
 				return Agent{}, false, nil

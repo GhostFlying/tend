@@ -12,11 +12,16 @@ import (
 )
 
 type failedTurn struct {
-	Code   string
-	TurnID string
+	Code           string
+	TurnID         string
+	TraexRateLimit bool
 }
 
 var recoveryErrorCode = regexp.MustCompile(`(?:^|[\s:;"{])code:\s*(invalid_encrypted_content|rate_limit_exceeded)(?:[;\s"}]|$)`)
+
+// TraeX currently loses the provider code for this terminal stream error. Match
+// its complete diagnostic only inside a bound TraeX/Trae completion record.
+const traexTerminalRateLimit = "stream disconnected before completion: We're sorry, your requests have exceeded the rate limit. Please wait and try again later or contact our support team for assistance."
 
 // readFailedTurn reads only the provider's explicitly bound root transcript.
 // Assistant prose, child notifications and old turn errors never classify a
@@ -30,6 +35,7 @@ func readFailedTurn(ctx context.Context, session ProviderSession, since int64) (
 	defer f.Close()
 	decoder := json.NewDecoder(f)
 	identity := ""
+	traexProvider := false
 	latestTurn := ""
 	var result failedTurn
 	pending := map[string]bool{}
@@ -41,11 +47,13 @@ func readFailedTurn(ctx context.Context, session ProviderSession, since int64) (
 			Type      string    `json:"type"`
 			Timestamp time.Time `json:"timestamp"`
 			Payload   struct {
-				Type   string `json:"type"`
-				ID     string `json:"id"`
-				TurnID string `json:"turn_id"`
-				CallID string `json:"call_id"`
-				Error  *struct {
+				Originator    string `json:"originator"`
+				ModelProvider string `json:"model_provider"`
+				Type          string `json:"type"`
+				ID            string `json:"id"`
+				TurnID        string `json:"turn_id"`
+				CallID        string `json:"call_id"`
+				Error         *struct {
 					Code           string          `json:"code"`
 					Message        string          `json:"message"`
 					CodexErrorInfo json.RawMessage `json:"codex_error_info"`
@@ -59,6 +67,7 @@ func readFailedTurn(ctx context.Context, session ProviderSession, since int64) (
 		}
 		if row.Type == "session_meta" {
 			identity = row.Payload.ID
+			traexProvider = row.Payload.Originator == "traex-tui" && row.Payload.ModelProvider == "trae"
 			continue
 		}
 		if row.Timestamp.UnixMilli() < since {
@@ -87,6 +96,12 @@ func readFailedTurn(ctx context.Context, session ProviderSession, since int64) (
 			result = failedTurn{}
 			if p.Error != nil {
 				result = failedTurn{Code: classifyRootError(p.Error.Code, p.Error.Message, p.Error.CodexErrorInfo), TurnID: p.TurnID}
+				var info string
+				if traexProvider && result.Code == "" && p.Error.Code == "" &&
+					json.Unmarshal(p.Error.CodexErrorInfo, &info) == nil && info == "other" &&
+					p.Error.Message == traexTerminalRateLimit {
+					result.Code, result.TraexRateLimit = "rate_limit_exceeded", true
+				}
 			}
 		case "turn_aborted":
 			result = failedTurn{}

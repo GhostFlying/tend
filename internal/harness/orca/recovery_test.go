@@ -232,6 +232,7 @@ func TestRateLimitRecoveryUsesOriginalSessionAndSharedBudget(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, w, a := failedWorker(t)
+			f.ws.opts.Poll = time.Nanosecond
 			body, err := os.ReadFile(a.ProviderSession.TranscriptPath)
 			if err != nil {
 				t.Fatal(err)
@@ -252,6 +253,10 @@ func TestRateLimitRecoveryUsesOriginalSessionAndSharedBudget(t *testing.T) {
 					t.Fatal("retried a nonrecoverable client error")
 				}
 				return
+			}
+			f.ws.opts.Now = func() time.Time { return time.UnixMilli(w.st.Recovery.NotBefore) }
+			if _, _, err := w.step(t.Context()); err != nil {
+				t.Fatal(err)
 			}
 			if w.st.Recovery.Code != "rate_limit_exceeded" || w.st.Recovery.Attempts != 1 || f.orca.count("terminal send", nil) != 1 {
 				t.Fatal("did not recover once in original session")
@@ -503,6 +508,7 @@ func TestUnconfirmedRootOutcomesWaitForChildrenThenRequireReconciliation(t *test
 
 func TestOldSendReceiptSettlesBeforeDistinctRecoveryPrompt(t *testing.T) {
 	f, w, a := failedWorker(t)
+	f.ws.opts.Poll = time.Nanosecond
 	body, err := os.ReadFile(a.ProviderSession.TranscriptPath)
 	if err != nil {
 		t.Fatal(err)
@@ -519,6 +525,10 @@ func TestOldSendReceiptSettlesBeforeDistinctRecoveryPrompt(t *testing.T) {
 	if w.st.Send != "" || w.st.Recovery != nil {
 		t.Fatal("old receipt was not settled independently")
 	}
+	if _, _, err := w.step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.ws.opts.Now = func() time.Time { return time.UnixMilli(w.st.Recovery.NotBefore) }
 	if _, _, err := w.step(t.Context()); err != nil {
 		t.Fatal(err)
 	}

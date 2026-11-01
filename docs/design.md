@@ -141,6 +141,7 @@
 | D135 | 具名委派工具明确要求原消息及内容版本；planner 使用可编辑输入合同；委派失败与请求回执原子记录，未消解失败使回合进入 needs_review，不自动重放业务。runner wire 保持 2/1。见 docs/plans/coordination-delegation-contract.md。 | 已实现 |
 | D136 | Issue owner 是普通 Agent 在具体 Issue 上的持续责任；同一身份可以协调与执行。跨 Agent 委派必须经过子 Issue，独立验收具有自己的子 Issue 与运行关联；保留人工控制及历史合同，不改 Issue 交互。见 docs/plans/issue-owner-responsibility.md。 | 已实现 |
 | D137 | Server 统一调度持久观察、有限 cron 和单 Issue webhook；事件来源、分发及消费只读可追踪，完整 Issue/自动化 CLI 共用原业务用例与请求身份；独立接收入口及私有凭据，不改变 runner wire 2/1。见 docs/plans/unified-issue-triggers.md。 | 已实现，未发布 |
+| D138 | TraeX 流内限流的 `other` 终态仅通过绑定原 session/turn 的完整原始记录和精确 provider 诊断补足分类；原生根必须已失败且操作收敛。限流等待 30 秒再沿同 run/会话续接，截止时间与既有一次预算持久化；未知发送先对账，耗尽后交由 Issue owner。wire 保持 2/1。见 docs/plans/traex-terminal-rate-limit.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
