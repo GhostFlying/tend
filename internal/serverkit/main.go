@@ -364,7 +364,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		}
 		return true, nil
 	}}
-	ownerConfig := api.Config{Archives: archives, Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil}
+	ownerConfig := api.Config{Archives: archives, Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil, Now: now}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
 		ownerConfig.ConversationHandoff = front.HandoffStatus

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"io"
 	"log/slog"
@@ -235,5 +236,50 @@ func TestInjectedTelegramPreparationAndLifecycle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInjectedClockSetsOwnerSessionExpiry(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	now := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
+	finished := errors.New("owner clock verified")
+	client := &http.Client{Transport: &http.Transport{}}
+	defer client.CloseIdleConnections()
+	err = Run(ctx, Config{DataDir: t.TempDir(), Owners: []string{"test-owner"}}, []byte("isolated-test-secret"), Dependencies{
+		Listeners: []net.Listener{listener},
+		WhoIs:     netx.Static{Identity: &netx.Identity{User: "test-owner"}},
+		Now:       func() time.Time { return now },
+		Background: func(ctx context.Context, _ *Runtime) error {
+			body := strings.NewReader(`{"client_id":"clock-owner-test","scope":"owner"}`)
+			request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+listener.Addr().String()+"/api/v1/session", body)
+			if err != nil {
+				return err
+			}
+			response, err := client.Do(request)
+			if err != nil {
+				return err
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				return fmt.Errorf("create owner session: status %d", response.StatusCode)
+			}
+			var session protocol.SessionView
+			if err := json.NewDecoder(response.Body).Decode(&session); err != nil {
+				return err
+			}
+			if want := now.Add(30 * 24 * time.Hour); !session.ExpiresAt.Equal(want) {
+				return fmt.Errorf("owner session expiry = %v, want injected clock plus token TTL %v", session.ExpiresAt, want)
+			}
+			return finished
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if !errors.Is(err, finished) {
+		t.Fatal(err)
 	}
 }
