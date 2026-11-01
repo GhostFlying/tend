@@ -144,7 +144,9 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 				clientTransport = options.runnerTransport
 			}
 			instance := runtime.IDs.New(protocol.Prefix("rni"))
+			executions := &scriptedExecutions{sessions: sessions}
 			r := runner.New(runner.Config{InstanceID: instance, ServerURL: "http://" + runnerListener.Addr().String(), HostID: hostID, HostToken: hostToken, Version: "sandbox",
+				Executions: executions, AgentInventory: executions.configuration,
 				Journal: j, HTTPClient: &http.Client{Transport: clientTransport}, Worker: protocol.WorkerAppServer,
 				Workers: &scriptedWorkers{pacing: pacing(options.FastPacing), fastSeed: seeding.Load, generation: func(ctx context.Context, id string) (int64, error) {
 					var generation int64
