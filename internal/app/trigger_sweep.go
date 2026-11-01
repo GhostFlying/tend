@@ -82,7 +82,10 @@ func stageDeliveryObservations(ctx context.Context, x *Exec, tx *store.Tx) (int,
 					return 0, err
 				}
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO observation_jobs(issue_id,delivery_id,status,event_id,due_at,updated_at) VALUES(?,?,'pending','',?,?) ON CONFLICT(issue_id,delivery_id) DO UPDATE SET status='pending',event_id='',due_at=excluded.due_at,updated_at=excluded.updated_at`, item.WorkItemID, delivery.DeliveryID, row.NextCheckAt, now)
+			// Until a new claim replaces the nonce, the runner protocol still
+			// accepts the previous read's late report. Keep its event identity
+			// so that accepted facts correct the same diagnostic record.
+			_, err = tx.Exec(ctx, `INSERT INTO observation_jobs(issue_id,delivery_id,status,event_id,due_at,updated_at) VALUES(?,?,'pending','',?,?) ON CONFLICT(issue_id,delivery_id) DO UPDATE SET status='pending',event_id=CASE WHEN observation_jobs.status='claimed' THEN observation_jobs.event_id ELSE '' END,due_at=excluded.due_at,updated_at=excluded.updated_at`, item.WorkItemID, delivery.DeliveryID, row.NextCheckAt, now)
 			if err != nil {
 				return 0, err
 			}
