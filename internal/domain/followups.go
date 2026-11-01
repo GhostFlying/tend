@@ -7,7 +7,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func NormalizeFollowup(p protocol.FollowupSpec, now int64) (protocol.FollowupSpec, error) {
+func NormalizeFollowup(p protocol.FollowupSpec, now int64, zone *time.Location) (protocol.FollowupSpec, error) {
 	bad := func() (protocol.FollowupSpec, error) {
 		return p, protocol.Errorf(protocol.CodeInvalidRequest, "followup needs purpose, instruction, source, IANA timezone and a valid bounded trigger")
 	}
@@ -40,7 +40,7 @@ func NormalizeFollowup(p protocol.FollowupSpec, now int64) (protocol.FollowupSpe
 		if p.ExpiresAt <= now || p.At != 0 || p.EverySeconds != 0 || p.Condition != nil || p.ExpirySilent {
 			return bad()
 		}
-		c, err := ParseCron(p.Cron, p.Timezone)
+		c, err := ParseCron(p.Cron, zone)
 		if err != nil {
 			return bad()
 		}
