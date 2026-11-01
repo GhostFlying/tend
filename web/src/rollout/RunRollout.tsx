@@ -360,8 +360,9 @@ function Reader({
   const observed = run.observed;
   const active = observed === "running" || observed === "starting";
   const resized = useCallback(
-    (el: HTMLElement) => {
+    (el: HTMLElement, viewportChanged = false) => {
       if (
+        !viewportChanged &&
         el.clientWidth === scrollportSize.current.width &&
         el.clientHeight === scrollportSize.current.height
       )
@@ -379,7 +380,14 @@ function Reader({
     if (!node) return;
     const observer = new ResizeObserver(() => resized(node));
     observer.observe(node);
-    return () => observer.disconnect();
+    // Intermediate layouts can clamp scrollTop before the viewport returns to
+    // its last observed size. ResizeObserver may coalesce those size changes.
+    const viewportChanged = () => resized(node, true);
+    globalThis.window.addEventListener("resize", viewportChanged);
+    return () => {
+      observer.disconnect();
+      globalThis.window.removeEventListener("resize", viewportChanged);
+    };
   }, [resized]);
   const close = () => {
     if (closing.current) return;

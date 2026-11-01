@@ -584,11 +584,28 @@ try {
       1,
       "reader resize changed latest follow intent",
     );
-    await page.setViewportSize(viewport);
-    await page.waitForFunction(() => {
-      const el = document.querySelector<HTMLElement>('[aria-label="执行过程正文"]')!;
-      return el.scrollHeight - el.scrollTop - el.clientHeight < 2;
-    });
+    // Rapidly returning to the same size can coalesce ResizeObserver entries
+    // after an intermediate layout has already clamped the scroll position.
+    for (let resize = 0; resize < 12; resize++) {
+      for (const size of [
+        {
+          width: viewport.width > 760 ? 390 : 1440,
+          height: viewport.width > 760 ? 568 : 900,
+        },
+        viewport,
+      ]) {
+        await page.setViewportSize(size);
+        await page.waitForFunction(() => {
+          const el = document.querySelector<HTMLElement>('[aria-label="执行过程正文"]')!;
+          return el.scrollHeight - el.scrollTop - el.clientHeight < 2;
+        });
+        assert.equal(
+          await rollout.getByText("实时跟随", { exact: true }).count(),
+          1,
+          "repeated resize changed latest follow intent",
+        );
+      }
+    }
     const newSeq = logs.at(-1)!.seq + 1;
     logs.push({
       seq: newSeq,
