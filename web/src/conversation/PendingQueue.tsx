@@ -13,7 +13,13 @@ import type { Category } from "./queueView.ts";
 import styles from "./PendingQueue.module.css";
 import { steerNotice } from "./steer.ts";
 
-export function PendingQueue({ connection }: { connection: Connection }) {
+export function PendingQueue({
+  connection,
+  awaitingAgent = false,
+}: {
+  connection: Connection;
+  awaitingAgent?: boolean;
+}) {
   const { live, client, queue, draft, conversation } = useServices();
   const state = useStore(live.queueView.state);
   const settings = useStore(live.settings.state).view;
@@ -65,6 +71,7 @@ export function PendingQueue({ connection }: { connection: Connection }) {
         当前服务端不支持队列管理，使用原聊天视图；撤回和自动跟进不可用。
       </div>
     );
+  const mainConversation = !conversation || conversation.id === "main";
   const owner = state.pages.owner;
   const waiting = owner?.items?.filter((it) => it.status !== "processing") ?? [];
   const background = state.pages.background;
@@ -74,7 +81,9 @@ export function PendingQueue({ connection }: { connection: Connection }) {
     <article key={entry.item.message_id} className={styles.item}>
       <div className={styles.summary}>
         {entry.status === "queued"
-          ? "等待处理"
+          ? awaitingAgent
+            ? "未送达，交给 Agent 后送达"
+            : "等待处理"
           : entry.status === "starting"
             ? "正在启动"
             : entry.status === "withdrawn"
@@ -121,15 +130,15 @@ export function PendingQueue({ connection }: { connection: Connection }) {
           队列不是实时状态，恢复连接后核对{state.error ? `：${state.error}` : ""}
         </p>
       )}
-      {settings?.enabled && !settings.available && (
+      {mainConversation && settings?.enabled && !settings.available && (
         <p className={styles.note}>托管主 Agent 暂不可用，消息保留在队列中。</p>
       )}
-      {handoff?.pending && (
+      {mainConversation && handoff?.pending && (
         <p className={styles.note}>
           {handoff.preparing ? "主会话正在准备摘要" : "主会话正在交接"}；待处理消息会继续保留。
         </p>
       )}
-      {owner && !owner.enabled && (
+      {mainConversation && owner && !owner.enabled && (
         <p className={styles.note}>托管主 Agent 未启用，消息暂不自动处理。</p>
       )}
       {!!localPending.length && (

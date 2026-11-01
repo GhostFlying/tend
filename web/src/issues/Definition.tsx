@@ -9,7 +9,7 @@ import type {
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { useDurableOp } from "../app/useDurableOp.ts";
-import { createIssueCommand, issueCommand } from "./actions.ts";
+import { createIssueCommand, createIssueResponsibility, issueCommand } from "./actions.ts";
 import type { OpOutcome } from "../app/ops.ts";
 import styles from "../agents/Catalog.module.css";
 import layout from "./Definition.module.css";
@@ -53,7 +53,17 @@ export function IssueDefinition({
       .map((f) => f.text)
       .join("\n") ?? "",
   );
-  const [assignee, setAssignee] = useState("owner");
+  const [selectedAssignee, setAssignee] = useState<string>();
+  const preferredCategory =
+    activeCategories.find((category) => category.category_id === "issue-manager") ??
+    activeCategories[0];
+  const assignee =
+    selectedAssignee ??
+    (preferredCategory
+      ? `category:${preferredCategory.category_id}`
+      : categories.value
+        ? "owner"
+        : "");
   const [result, setResult] = useState<OpOutcome | null>(null);
   const operation = useDurableOp(
     client,
@@ -64,23 +74,26 @@ export function IssueDefinition({
   const original = operation.original?.payload as
     UpdateIssuePayload | CreateIssuePayload | undefined;
   const originalCreate = !issue ? (original as CreateIssuePayload | undefined) : undefined;
-  const shownAssignee = originalCreate?.manager
-    ? `category:${originalCreate.manager.category_id ?? "issue-manager"}`
-    : originalCreate?.assignee
-      ? originalCreate.assignee.kind === "owner"
-        ? "owner"
-        : originalCreate.assignee.ref
-      : assignee;
+  const shownAssignee = originalCreate?.owner
+    ? `category:${originalCreate.owner.category_id}`
+    : originalCreate?.manager
+      ? `category:${originalCreate.manager.category_id ?? "issue-manager"}`
+      : originalCreate?.assignee
+        ? originalCreate.assignee.kind === "owner"
+          ? "owner"
+          : originalCreate.assignee.ref
+        : assignee;
   const shown = original?.plan;
   const restoredPayload = restored?.payload as UpdateIssuePayload | undefined;
   const editPlan = restoredPayload?.plan ?? baseline?.plan;
   const request = operation.original;
   if (
     request &&
-    request.operation === "issues.update" &&
+    (request.operation === "issues.update" || request.operation === "issues.create") &&
     request.request_id !== restored?.request_id
   ) {
-    const payload = request.payload as UpdateIssuePayload;
+    const payload = request.payload as UpdateIssuePayload | CreateIssuePayload;
+    if (request.operation === "issues.create") setAssignee(shownAssignee);
     // Capture a newly restored request once, before a later receipt can clear it.
     setRestored(request);
     setTitle(payload.plan.title);
@@ -99,6 +112,7 @@ export function IssueDefinition({
     if (!issue) void live.agents.openCategories();
   }, [live, issue]);
   const save = async (reconcile = false) => {
+    if (!issue && !assignee && !reconcile) return;
     const old = editPlan;
     const plan: IssuePlan = {
       ...(old ?? { stages: [] }),
@@ -126,7 +140,7 @@ export function IssueDefinition({
       const out = await operation.execute(
         reconcile
           ? undefined
-          : restored && restoredPayload
+          : restored && restoredPayload && restored.operation === "issues.update"
             ? {
                 operation: restored.operation,
                 target: restored.target,
@@ -147,35 +161,30 @@ export function IssueDefinition({
                       reason: "更新 Issue 定义，保留当前任务原约定",
                     })),
                 })
-              : createIssueCommand({
-                  plan,
-                  ...(parent
-                    ? {
-                        parent_issue_id: parent.issue_id,
-                        expected_parent_revision: parent.revision,
-                      }
-                    : {}),
-                  ...(sourceMessageID
-                    ? {
-                        source_message_id: sourceMessageID,
-                        expected_source_revision: sourceRevision,
-                      }
-                    : {}),
-                  ...(assignee.startsWith("category:")
-                    ? {
-                        manager: {
-                          category_id: assignee.slice("category:".length),
-                          expected_assignment_epoch: 1,
-                          reason: "按类别委派 Issue 持续协调责任",
-                        },
-                      }
-                    : {
-                        assignee: {
-                          kind: "owner",
-                          ref: connection.status === "online" ? connection.login : "",
-                        },
-                      }),
-                }),
+              : createIssueCommand(
+                  createIssueResponsibility(
+                    {
+                      ...(restored?.operation === "issues.create"
+                        ? (restored.payload as CreateIssuePayload)
+                        : {}),
+                      plan,
+                      ...(parent
+                        ? {
+                            parent_issue_id: parent.issue_id,
+                            expected_parent_revision: parent.revision,
+                          }
+                        : {}),
+                      ...(sourceMessageID
+                        ? {
+                            source_message_id: sourceMessageID,
+                            expected_source_revision: sourceRevision,
+                          }
+                        : {}),
+                    },
+                    assignee,
+                    connection.status === "online" ? connection.login : "",
+                  ),
+                ),
       );
       setResult(out);
       if (out.kind === "done") {
@@ -333,14 +342,26 @@ export function IssueDefinition({
                   value={shownAssignee}
                   onChange={(e) => setAssignee(e.target.value)}
                 >
-                  <option value="owner">你</option>
-                  {shownAssignee !== "owner" &&
+                  {!shownAssignee && (
+                    <option value="" disabled>
+                      正在读取负责人类别…
+                    </option>
+                  )}
+                  <option value="owner">我自己负责（不会有 Agent 对话）</option>
+                  {shownAssignee &&
+                    shownAssignee !== "owner" &&
                     !activeCategories.some(
                       (category) => `category:${category.category_id}` === shownAssignee,
-                    ) && <option value={shownAssignee}>原请求选择：{shownAssignee}</option>}
+                    ) && (
+                      <option value={shownAssignee}>
+                        {shownAssignee.startsWith("category:")
+                          ? "原请求类别（当前不可用）"
+                          : "原请求负责人 Agent"}
+                      </option>
+                    )}
                   {activeCategories.map((category) => (
                     <option key={category.category_id} value={`category:${category.category_id}`}>
-                      {category.title} · {category.category_id}（执行主机领取）
+                      {category.title} · Issue 负责人 Agent（按类别，由执行主机领取）
                     </option>
                   ))}
                 </select>
@@ -353,6 +374,7 @@ export function IssueDefinition({
                   下一页类别
                 </button>
               )}
+              {!shownAssignee && !categories.error && <p role="status">正在读取负责人类别…</p>}
               {categories.error && (
                 <p role="status">
                   类别读取失败，保留已读取结果。
@@ -367,7 +389,7 @@ export function IssueDefinition({
             <div className={layout.field}>
               <span>负责人</span>
               <div>
-                <AssigneeName assignee={issue.assignee} />
+                <AssigneeName assignee={issue.assignee} manager={issue.manager} />
                 <p className={styles.muted}>调整责任请返回使用“交接负责人”。</p>
               </div>
             </div>
@@ -403,7 +425,9 @@ export function IssueDefinition({
         </p>
       )}
       <footer className={layout.footer}>
-        <p>更新 Issue 定义；已开始的任务仍按原约定执行。</p>
+        <p>
+          {issue ? "更新 Issue 定义；已开始的任务仍按原约定执行。" : "创建后由所选负责人持续推进。"}
+        </p>
         <div className={styles.actions}>
           {operation.pending ? (
             <button
@@ -416,7 +440,13 @@ export function IssueDefinition({
           ) : (
             <button
               className={styles.primary}
-              disabled={blocked || !title.trim() || !project.trim() || !intent.trim()}
+              disabled={
+                blocked ||
+                (!issue && !assignee) ||
+                !title.trim() ||
+                !project.trim() ||
+                !intent.trim()
+              }
               onClick={() => void save()}
             >
               {issue ? "保存定义" : "创建 Issue"}

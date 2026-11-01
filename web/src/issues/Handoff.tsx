@@ -100,7 +100,7 @@ export function IssueHandoff({
       <p>{issue.plan.title}</p>
       <p>
         上次确认负责人：
-        <AssigneeName assignee={issue.assignee} />
+        <AssigneeName assignee={issue.assignee} manager={issue.manager} />
       </p>
       {issue.pending_assignee && (
         <p className={styles.warning}>
