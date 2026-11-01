@@ -19,6 +19,7 @@ func runArchive(ctx context.Context, e *Env, args []string) error {
 		return usagef("archive expects prepare, status, cancel or host")
 	}
 	fs := newFlags(e, "archive "+action)
+	dry := fs.Bool("dry-run", false, "print local control input without mutation")
 	socket := fs.String("socket", e.Getenv("TEND_UPGRADE_SOCKET"), "server local control socket")
 	request := fs.String("request-id", "", "original ID for an identical retry")
 	revision := fs.Int64("revision", -1, "original CAS revision when retrying")
@@ -39,6 +40,9 @@ func runArchive(ctx context.Context, e *Env, args []string) error {
 		return usagef("archive --socket must be absolute")
 	}
 	if action == "status" {
+		if *dry {
+			return usagef("status takes no dry-run")
+		}
 		if *request != "" || *revision != -1 || *host != "" {
 			return usagef("status takes no request, revision or host")
 		}
@@ -98,6 +102,9 @@ func runArchive(ctx context.Context, e *Env, args []string) error {
 	var input any = protocol.ArchiveControlRequest{RequestID: *request, ExpectedControlRevision: *revision}
 	if action == "host" {
 		input = protocol.ArchiveHostControlRequest{RequestID: *request, ExpectedControlRevision: *revision, HostID: *host, Mode: *mode}
+	}
+	if *dry {
+		return (owner{e: e, json: true}).printJSON(map[string]any{"method": "POST", "path": "/archive/" + action, "request": input})
 	}
 	var result json.RawMessage
 	if err := localUpgradeRequest(ctx, *socket, http.MethodPost, "/archive/"+action, input, &result); err != nil {

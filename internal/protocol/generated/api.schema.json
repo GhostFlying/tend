@@ -1800,6 +1800,27 @@
       "title": "BackgroundSourcePage",
       "type": "object"
     },
+    "BindLocalRepositoryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/definitions/LocalRepositoryBinding"
+        },
+        "expected_control_revision": {
+          "type": "integer"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "expected_control_revision",
+        "binding"
+      ],
+      "title": "BindLocalRepositoryRequest",
+      "type": "object"
+    },
     "BindTelegram": {
       "additionalProperties": false,
       "properties": {
@@ -3302,6 +3323,19 @@
       "title": "FollowupSpec",
       "type": "object"
     },
+    "HostMaintenancePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "HostMaintenancePayload",
+      "type": "object"
+    },
     "HostMaintenanceView": {
       "additionalProperties": false,
       "properties": {
@@ -3338,6 +3372,9 @@
         },
         "build_version": {
           "type": "string"
+        },
+        "control_revision": {
+          "type": "integer"
         },
         "host_id": {
           "type": "string"
@@ -5863,6 +5900,56 @@
         "created_at"
       ],
       "title": "LedgerEvent",
+      "type": "object"
+    },
+    "LocalRepositoryBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "orca": {
+          "type": "string"
+        },
+        "remote_url": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo",
+        "remote_url"
+      ],
+      "title": "LocalRepositoryBinding",
+      "type": "object"
+    },
+    "LocalRepositoryStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "control_revision": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        },
+        "repositories": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RunnerRepository"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "control_revision",
+        "repositories"
+      ],
+      "title": "LocalRepositoryStatus",
       "type": "object"
     },
     "LogicalTurnReview": {
@@ -10443,6 +10530,19 @@
       "title": "UpgradeBinding",
       "type": "object"
     },
+    "UpgradeControlPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "UpgradeControlPayload",
+      "type": "object"
+    },
     "UpgradeEvidence": {
       "additionalProperties": false,
       "properties": {
@@ -11080,6 +11180,9 @@
     "BackgroundSourcePage": {
       "$ref": "#/definitions/BackgroundSourcePage"
     },
+    "BindLocalRepositoryRequest": {
+      "$ref": "#/definitions/BindLocalRepositoryRequest"
+    },
     "BindTelegram": {
       "$ref": "#/definitions/BindTelegram"
     },
@@ -11139,6 +11242,9 @@
     },
     "FollowupSpec": {
       "$ref": "#/definitions/FollowupSpec"
+    },
+    "HostMaintenancePayload": {
+      "$ref": "#/definitions/HostMaintenancePayload"
     },
     "HostedAgentInventory": {
       "$ref": "#/definitions/HostedAgentInventory"
@@ -11229,6 +11335,12 @@
     },
     "LedgerEvent": {
       "$ref": "#/definitions/LedgerEvent"
+    },
+    "LocalRepositoryBinding": {
+      "$ref": "#/definitions/LocalRepositoryBinding"
+    },
+    "LocalRepositoryStatus": {
+      "$ref": "#/definitions/LocalRepositoryStatus"
     },
     "ManagerMigrationPayload": {
       "$ref": "#/definitions/ManagerMigrationPayload"
@@ -11427,6 +11539,9 @@
     },
     "UpdateWorkItemChoicePayload": {
       "$ref": "#/definitions/UpdateWorkItemChoicePayload"
+    },
+    "UpgradeControlPayload": {
+      "$ref": "#/definitions/UpgradeControlPayload"
     },
     "WebhookReceipt": {
       "$ref": "#/definitions/WebhookReceipt"

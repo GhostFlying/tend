@@ -21,11 +21,7 @@ import (
 	"github.com/GhostFlying/tend/internal/runner/gitws"
 )
 
-type repositoryStatus struct {
-	Revision     int64                       `json:"control_revision"`
-	Repositories []protocol.RunnerRepository `json:"repositories"`
-	Error        string                      `json:"error,omitempty"`
-}
+type repositoryStatus = protocol.LocalRepositoryStatus
 
 // repositorySocketPath is shared by the service and its local CLI. Long data
 // directories use a short private socket directory and a private locator file.

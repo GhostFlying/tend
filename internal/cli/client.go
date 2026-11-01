@@ -64,7 +64,9 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 		return transportError{err}
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	// Retained images can exceed 16 MiB after base64 encoding. Read the
+	// complete authenticated view under the caller's context and HTTP timeout.
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return transportError{err}
 	}

@@ -170,6 +170,7 @@ type HostMaintenanceView struct {
 
 // HostView is an active execution host.
 type HostView struct {
+	ControlRevision   int64                `json:"control_revision,omitempty"`
 	Online            *bool                `json:"online,omitempty"`
 	LastHeartbeatAt   *time.Time           `json:"last_heartbeat_at,omitempty"`
 	Maintenance       *HostMaintenanceView `json:"maintenance,omitempty"`
