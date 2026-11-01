@@ -34,6 +34,7 @@ type recoveryState struct {
 	TurnAt             int64  `json:"turn_at"`
 	OriginalPrompt     string `json:"original_prompt,omitempty"`
 	ContinuationIssued bool   `json:"continuation_issued,omitempty"`
+	NotBefore          int64  `json:"not_before,omitempty"`
 }
 
 func (w *worker) resetNative() {
@@ -96,11 +97,13 @@ func (w *worker) recoverFailure(ctx context.Context, a Agent) error {
 	var err error
 	if a.RootTurn != nil {
 		fact, err = nativeFailedTurn(a, w.st.Turn)
-		// Context reconstruction still requires the original complete JSONL proof.
-		// Native metadata alone never authorizes closing/rebuilding a conversation.
+		// Context reconstruction still requires the same turn's full transcript.
+		// The opaque TraeX rate-limit fallback additionally requires its exact
+		// diagnostic and cannot override an explicit native error classification.
 		if err != nil && validRootTurn(a, w.st.Turn) && a.RootTurn.State == "failed" && a.RootTurn.Operations == "settled" && a.ProviderSession.TranscriptPath != "" {
 			legacy, legacyErr := readFailedTurn(ctx, *a.ProviderSession, w.st.Turn)
-			if legacyErr == nil && legacy.Code == "invalid_encrypted_content" && legacy.TurnID == a.RootTurn.TurnID {
+			if legacyErr == nil && legacy.TurnID == a.RootTurn.TurnID && (legacy.Code == "invalid_encrypted_content" ||
+				a.AgentType == "traex" && a.RootTurn.ErrorCode == "other" && legacy.TraexRateLimit) {
 				fact, err = legacy, nil
 			}
 		}
@@ -121,6 +124,9 @@ func (w *worker) recoverFailure(ctx context.Context, a Agent) error {
 	}
 	if fact.Code != "invalid_encrypted_content" {
 		w.st.Recovery.Phase = recoveryContinuing
+	}
+	if fact.Code == "rate_limit_exceeded" {
+		w.st.Recovery.NotBefore = w.ws.opts.Now().Add(30 * time.Second).UnixMilli()
 	}
 	if err := w.save(); err != nil {
 		return err
@@ -193,6 +199,12 @@ func (w *worker) continueFailedSession(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return w.continueObservedSession(ctx, a, alive)
+}
+
+// The polling loop supplies its observation after applying the ordinary bounded
+// read retries. Startup uses continueFailedSession to obtain its own observation.
+func (w *worker) continueObservedSession(ctx context.Context, a Agent, alive bool) error {
 	r := w.st.Recovery
 	if !alive || a.ProviderSession == nil || a.ProviderSession.ID != r.SessionID || w.spec.HandBack {
 		return errors.New("orca: original failed session is unavailable for continuation")
@@ -203,6 +215,20 @@ func (w *worker) continueFailedSession(ctx context.Context) error {
 		}
 		if a.RootTurn.LaunchID != r.LaunchID || a.RuntimeID != r.RuntimeID {
 			return fmt.Errorf("%w: recovery runtime or terminal launch changed", harness.ErrHeld)
+		}
+	}
+	if w.st.Send == "" && !r.ContinuationIssued {
+		if reason := w.takenOver(a); reason != "" {
+			w.recordTakeover(a, reason)
+			return fmt.Errorf("%w: %s", harness.ErrHeld, reason)
+		}
+		if a.RootTurn != nil && (!validRootTurn(a, w.st.Turn) || a.RootTurn.State == "unknown" || a.RootTurn.Operations != "settled") {
+			return errRecoveryUncertain
+		}
+		if delay := time.UnixMilli(r.NotBefore).Sub(w.ws.opts.Now()); delay > 0 {
+			// Return to the worker loop after a short, cancellable wait. The
+			// persisted deadline and allowance survive runner restarts.
+			return sleep(ctx, min(delay, w.ws.opts.Poll))
 		}
 	}
 	if w.st.Send != "" {
@@ -318,6 +344,9 @@ func (w *worker) recheckFailedTurn(ctx context.Context, wait Wait) error {
 		return fmt.Errorf("%w: native recovery identity changed", harness.ErrHeld)
 	}
 	if !backgroundSettled(a, wait) {
+		if r.Phase == recoveryContinuing {
+			return errRecoveryUncertain
+		}
 		return errors.New("orca: failed turn background work changed while waiting for recovery")
 	}
 	return nil
