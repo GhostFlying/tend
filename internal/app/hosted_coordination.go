@@ -27,9 +27,6 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 	if err := allowKinds(x.Principal, protocol.PrincipalMainAgent, protocol.PrincipalBackgroundAgent, protocol.PrincipalRun); err != nil {
 		return err
 	}
-	if c.EffectSeq < 1 {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "positive effect_seq is required")
-	}
 	execution, err := store.GetHostedExecution(ctx, q, c.ExecutionID)
 	if err != nil {
 		return errNotFound(err, "coordination execution does not exist")
@@ -54,7 +51,7 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		}
 	}
 	if execution.Selection.Purpose == agentconfig.Main {
-		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
+		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{protocol.OpIssueRequestOwner, protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "the personal planner must delegate issue work, not execute its task planning")
 		}
 	} else if execution.Selection.Purpose != agentconfig.Consultation {
@@ -72,6 +69,14 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			return protocol.Errorf(protocol.CodeForbidden, "cancelling responsibility permits settlement only")
 		}
 		switch c.Operation() {
+		case protocol.OpIssueRequestOwner:
+			child, err := store.GetCanonicalIssue(ctx, q, x.Env.Target.ID)
+			if err != nil {
+				return err
+			}
+			if x.Env.Target.Type != "issue" || child.ParentIssueID != current.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "delegate only a direct child Issue")
+			}
 		case "conversation.reply", "conversation.publish", "conversation.notify":
 			if x.Env.Target.Type != "logical_turn" {
 				return protocol.Errorf(protocol.CodeForbidden, "communication requires an admitted execution")
@@ -186,6 +191,9 @@ func cancellationSettlementOperation(operation string) bool {
 	return false
 }
 func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	if c.EffectSeq < 1 {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "positive effect_seq is required")
+	}
 	execution, err := store.GetHostedExecution(ctx, tx.Q(), c.ExecutionID)
 	if err != nil {
 		return Outcome{}, err
@@ -226,7 +234,7 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 			delegationSources = append(delegationSources, create.Manager.SourceMessageID)
 		}
 	}
-	if execution.Selection.Purpose == agentconfig.Main && (c.Operation() == "issues.create" || c.Operation() == protocol.OpIssueRequestManager) {
+	if execution.Selection.Purpose == agentconfig.Main && (c.Operation() == "issues.create" || c.Operation() == protocol.OpIssueRequestManager || c.Operation() == protocol.OpIssueRequestOwner) {
 		for _, source := range delegationSources {
 			var admitted bool
 			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN logical_turn_messages m USING(logical_turn_id) WHERE e.request_id=? AND m.message_id=?) OR EXISTS(SELECT 1 FROM main_steers s JOIN main_turns t ON t.thread_id=s.thread_id AND t.turn_id=s.turn_id WHERE t.request_id=? AND s.message_id=? AND s.native_item_id<>'')`, execution.ID, source, execution.ID, source).Scan(&admitted); err != nil {

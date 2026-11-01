@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 )
@@ -66,62 +67,76 @@ func TestIntegrationNativePlanningParameterTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.Close()
-	for _, mode := range []bool{false, true} {
-		t.Run(fmt.Sprintf("requested_code_mode_%t", mode), func(t *testing.T) {
-			th, err := session.StartThread(ctx, harness.ThreadConfig{Cwd: cwd, Model: "probe-model", Ephemeral: true, Tools: Specs(), Sandbox: "read-only", ApprovalPolicy: "never", Config: map[string]any{"features.code_mode": mode, "features.code_mode_only": mode}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := session.ReleaseThread(ctx, th.ID()); err != nil {
-					t.Error(err)
+	for _, purpose := range []agentconfig.Purpose{agentconfig.Main, agentconfig.IssueManager} {
+		specs := NamedSpecs(purpose)
+		for _, mode := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s_requested_code_mode_%t", purpose, mode), func(t *testing.T) {
+				th, err := session.StartThread(ctx, harness.ThreadConfig{Cwd: cwd, Model: "probe-model", Ephemeral: true, Tools: specs, Sandbox: "read-only", ApprovalPolicy: "never", Config: map[string]any{"features.code_mode": mode, "features.code_mode_only": mode}})
+				if err != nil {
+					t.Fatal(err)
 				}
-			}()
-			if _, err := th.StartTurn(ctx, harness.TurnInput{Text: "Return done. This is an isolated schema transport probe."}); err != nil {
-				t.Fatal(err)
-			}
-			for {
-				select {
-				case <-ctx.Done():
-					t.Fatal(ctx.Err())
-				case event := <-th.Events():
-					if event.Kind == harness.EventTurnCompleted {
-						if event.TurnStatus != "completed" {
-							t.Fatalf("probe turn failed: %+v", event)
+				defer func() {
+					if err := session.ReleaseThread(ctx, th.ID()); err != nil {
+						t.Error(err)
+					}
+				}()
+				if _, err := th.StartTurn(ctx, harness.TurnInput{Text: "Return done. This is an isolated schema transport probe."}); err != nil {
+					t.Fatal(err)
+				}
+				for {
+					select {
+					case <-ctx.Done():
+						t.Fatal(ctx.Err())
+					case event := <-th.Events():
+						if event.Kind == harness.EventTurnCompleted {
+							if event.TurnStatus != "completed" {
+								t.Fatalf("probe turn failed: %+v", event)
+							}
+							goto completed
 						}
-						goto completed
 					}
 				}
-			}
-		completed:
-			var request map[string]any
-			select {
-			case request = <-requests:
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			}
-			found := map[string]bool{}
-			for _, raw := range request["tools"].([]any) {
-				tool := raw.(map[string]any)
-				name, _ := tool["name"].(string)
-				var path []string
-				switch name {
-				case "tasks_create":
-					path = []string{"spec", "inputs", "[]", "file_id"}
-				case "work_items_create":
-					path = []string{"initial_context", "source_reviews", "[]", "message_id"}
-				default:
-					continue
+			completed:
+				var request map[string]any
+				select {
+				case request = <-requests:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
 				}
-				schema := tool["parameters"].(map[string]any)
-				if field := planningSchemaAt(t, schema, path...); field["type"] != "string" {
-					t.Fatalf("%s lost typed nested field: %+v", name, field)
+				found := map[string]bool{}
+				for _, raw := range request["tools"].([]any) {
+					tool := raw.(map[string]any)
+					name, _ := tool["name"].(string)
+					var path []string
+					switch name {
+					case "issues_create":
+						path = []string{"payload", "source_message_id"}
+					case "planner_entry_put":
+						path = []string{"payload", "entry", "kind"}
+					default:
+						continue
+					}
+					schema := tool["parameters"].(map[string]any)
+					if field := planningSchemaAt(t, schema, path...); field["type"] != "string" {
+						t.Fatalf("%s lost typed nested field: %+v", name, field)
+					}
+					if name == "issues_create" {
+						if planningSchemaAt(t, schema, "payload", "expected_source_revision")["type"] != "integer" {
+							t.Fatal("source revision type lost")
+						}
+					}
+					if name == "planner_entry_put" {
+						kind := planningSchemaAt(t, schema, "payload", "entry", "kind")
+						if len(kind["enum"].([]any)) != 2 {
+							t.Fatal("planner kind enum lost")
+						}
+					}
+					found[name] = true
 				}
-				found[name] = true
-			}
-			if len(found) != 2 {
-				t.Fatalf("planning tools missing from native request: %+v", found)
-			}
-		})
+				if len(found) != 2 {
+					t.Fatalf("planning tools missing from native request: %+v", found)
+				}
+			})
+		}
 	}
 }

@@ -10,11 +10,16 @@ const (
 	TaskKindIssueManager        TaskKind = "issue_manager"
 	DefaultIssueManagerCategory          = "issue-manager"
 	CapabilityIssueManager               = "runner-issue-manager-v1"
+	CapabilityIssueOwner                 = "runner-issue-owner-v1"
 	OpIssueRequestManager                = "issues.request_manager"
+	OpIssueRequestOwner                  = "issues.request_owner"
+	IssueOwnerPolicy                     = "issue-owner-v1"
 )
 
-// RequestIssueManagerPayload selects a category, never a particular machine.
+// RequestIssueManagerPayload selects a capability category and optional Agent
+// identity. Runtime installation and availability remain runner-local facts.
 type RequestIssueManagerPayload struct {
+	AgentID                 string `json:"agent_id,omitempty"`
 	Replace                 bool   `json:"replace,omitempty"`
 	CategoryID              string `json:"category_id,omitempty"`
 	ExpectedAssignmentEpoch int64  `json:"expected_assignment_epoch"`
@@ -24,6 +29,8 @@ type RequestIssueManagerPayload struct {
 
 // IssueManagerSpec is an immutable responsibility contract, not a code workspace.
 type IssueManagerSpec struct {
+	AgentID                   string `json:"agent_id,omitempty"`
+	OwnershipPolicy           string `json:"ownership_policy,omitempty"`
 	SourceContentRevision     int64  `json:"source_content_revision,omitempty"`
 	SourceAssociationRevision int64  `json:"source_association_revision,omitempty"`
 	ReceiptOnly               bool   `json:"receipt_only,omitempty"`
@@ -41,6 +48,18 @@ type IssueManagerAssignment struct {
 	ConversationID  string `json:"conversation_id"`
 	AssignmentEpoch int64  `json:"assignment_epoch"`
 	CategoryID      string `json:"category_id"`
+}
+
+// ExecutionResponsibility identifies the Issue whose owner is doing this run.
+// It does not grant coordination or acceptance permissions by itself.
+type ExecutionResponsibility struct {
+	IssueID         string  `json:"issue_id"`
+	IssueRevision   int64   `json:"issue_revision"`
+	AssignmentEpoch int64   `json:"assignment_epoch"`
+	AgentRef        string  `json:"agent_ref"`
+	TaskID          string  `json:"task_id"`
+	RunID           string  `json:"run_id"`
+	Role            RunRole `json:"role"`
 }
 
 // ManagerNativeRequest is a durable native operation routed to its leased executor.

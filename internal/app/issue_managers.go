@@ -14,6 +14,52 @@ import (
 // RequestIssueManager publishes category-selected work without choosing a runner.
 type RequestIssueManager struct{ migration bool }
 
+// RequestIssueOwner publishes the same continuing execution role for an
+// ordinary Agent, with the explicit child-Issue delegation contract.
+type RequestIssueOwner struct{}
+
+func (RequestIssueOwner) Operation() string { return protocol.OpIssueRequestOwner }
+func (RequestIssueOwner) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
+	return (RequestIssueManager{}).Authorize(ctx, x, q)
+}
+func (RequestIssueOwner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p protocol.RequestIssueManagerPayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	if p.CategoryID == "" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "select an active owner capability category with agent_categories_list")
+	}
+	if _, err := store.GetCanonicalIssue(ctx, tx.Q(), x.Env.Target.ID); err != nil {
+		return Outcome{}, errNotFound(err, "Issue does not exist")
+	}
+	if existing, err := store.CurrentIssueManagerTask(ctx, tx.Q(), x.Env.Target.ID); err == nil && !p.Replace {
+		raw, err := store.GetSpec(ctx, tx.Q(), existing.TaskID, 1)
+		if err != nil {
+			return Outcome{}, err
+		}
+		var spec protocol.IssueManagerSpec
+		if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+			return Outcome{}, err
+		}
+		if spec.OwnershipPolicy != protocol.IssueOwnerPolicy || spec.AgentID != p.AgentID {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "replace=true is required to change the responsibility contract")
+		}
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
+	if p.AgentID != "" {
+		parts := strings.Split(p.AgentID, "/")
+		if len(parts) != 2 || !protocol.AgentInventoryID(parts[0]) || !protocol.AgentInventoryID(parts[1]) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "agent_id requires an environment/local identity")
+		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO issue_ownership_policies(issue_id,policy,request_id,created_at) VALUES(?,?,?,?) ON CONFLICT(issue_id) DO NOTHING`, x.Env.Target.ID, protocol.IssueOwnerPolicy, x.Env.RequestID, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	return (RequestIssueManager{}).Apply(ctx, x, tx)
+}
+
 func (RequestIssueManager) Operation() string { return protocol.OpIssueRequestManager }
 func (RequestIssueManager) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
 	return allowKinds(x.Principal, protocol.PrincipalOwner, protocol.PrincipalMainAgent)
@@ -48,7 +94,7 @@ func (c RequestIssueManager) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 	}
 	category, err := store.GetAgentCategory(ctx, tx.Q(), p.CategoryID)
 	if err != nil {
-		return Outcome{}, err
+		return Outcome{}, errNotFound(err, "Agent capability category does not exist; read agent_categories_list and configure an active category")
 	}
 	if category.State != "active" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manager category is inactive")
@@ -135,7 +181,14 @@ func (c RequestIssueManager) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 	}
 	now := x.Now.UnixMilli()
 	id := x.IDs.New(protocol.PrefixTask)
-	spec := protocol.IssueManagerSpec{SourceContentRevision: sourceContent, SourceAssociationRevision: sourceAssociation, IssueID: issue.IssueID, CategoryID: p.CategoryID, ExpectedAssignmentEpoch: issue.AssignmentEpoch, SourceMessageID: p.SourceMessageID, Reason: p.Reason}
+	spec := protocol.IssueManagerSpec{AgentID: p.AgentID, SourceContentRevision: sourceContent, SourceAssociationRevision: sourceAssociation, IssueID: issue.IssueID, CategoryID: p.CategoryID, ExpectedAssignmentEpoch: issue.AssignmentEpoch, SourceMessageID: p.SourceMessageID, Reason: p.Reason}
+	ownerPolicy, err := store.IssueUsesOwnerExecution(ctx, tx.Q(), issue.IssueID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if ownerPolicy {
+		spec.OwnershipPolicy = protocol.IssueOwnerPolicy
+	}
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return Outcome{}, err

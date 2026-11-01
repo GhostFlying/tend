@@ -31,6 +31,7 @@ type canonicalOwnerIssueSource struct {
 	ExpectedSourceRevision *int64 `json:"expected_source_revision,omitempty"`
 }
 type canonicalOwnerIssueCreate struct {
+	Owner   *protocol.IssueOwnerRequest          `json:"owner,omitempty"`
 	Manager *protocol.RequestIssueManagerPayload `json:"manager,omitempty"`
 	canonicalOwnerIssueSource
 	Plan                   protocol.IssuePlan      `json:"plan"`
@@ -91,6 +92,22 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 	var p canonicalOwnerIssueCreate
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
+	}
+	if x.coordinationExecution != nil && x.coordinationExecution.Selection.OwnershipPolicy == protocol.IssueOwnerPolicy && p.Owner == nil {
+		if p.Assignee != nil && p.Assignee.Kind == protocol.IssueAssigneeAgent {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "publish child ownership with owner.category_id and optional owner.agent_id")
+		}
+		if p.Manager != nil {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "use owner for new child responsibility; manager names the historical publication contract")
+		} else if p.Assignee == nil && x.coordinationExecution.IssueID != "" {
+			p.Owner = &protocol.IssueOwnerRequest{CategoryID: x.coordinationExecution.Selection.Definition.Categories[0], AgentID: hostedconfig.IdentityRef(x.coordinationExecution.Selection.Identity), Reason: "Retain child responsibility with the current Agent"}
+		}
+	}
+	if p.Owner != nil {
+		if p.Manager != nil || p.Owner.CategoryID == "" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "owner requires an explicit capability category and cannot be combined with manager")
+		}
+		p.Manager = &protocol.RequestIssueManagerPayload{CategoryID: p.Owner.CategoryID, AgentID: p.Owner.AgentID, Reason: p.Owner.Reason}
 	}
 	if p.Manager == nil && p.Assignee == nil && x.coordinationExecution != nil && (x.coordinationExecution.Selection.RunnerManaged || x.coordinationExecution.Selection.Purpose == agentconfig.Main) {
 		p.Manager = &protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, Reason: "Delegate a child responsibility by category"}
@@ -185,7 +202,12 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 		nested.Env.Target = protocol.Target{Type: "issue", ID: next.IssueID}
 		nested.Env.ExpectedControlRevision = &next.Revision
 		nested.Env.Payload = raw
-		requested, err := (RequestIssueManager{}).Apply(ctx, &nested, tx)
+		var requested Outcome
+		if p.Owner != nil {
+			requested, err = (RequestIssueOwner{}).Apply(ctx, &nested, tx)
+		} else {
+			requested, err = (RequestIssueManager{}).Apply(ctx, &nested, tx)
+		}
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -349,8 +371,12 @@ func validateCanonicalSourceReference(ctx context.Context, q store.Querier, sour
 		}
 		return nil
 	}
-	if !protocol.ValidID(protocol.PrefixMessage, source.SourceMessageID) || source.ExpectedSourceRevision == nil || *source.ExpectedSourceRevision < 1 {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "source requires exact message and content revision")
+	if !protocol.ValidID(protocol.PrefixMessage, source.SourceMessageID) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "source_message_id must be an exact message_id; do not append @revision; pass content_revision separately as expected_source_revision")
+	}
+	if source.ExpectedSourceRevision == nil || *source.ExpectedSourceRevision < 1 {
+		details, _ := json.Marshal(map[string]any{"field": "payload.expected_source_revision", "kind": "required_field", "minimum": 1})
+		return &protocol.Error{Code: protocol.CodeInvalidRequest, Message: "expected_source_revision is required with source_message_id; copy that message's content_revision from conversation_turn_read", Details: details}
 	}
 	var revision int64
 	var withdrawn bool

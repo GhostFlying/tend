@@ -39,11 +39,15 @@ type Options struct {
 	Log           *slog.Logger
 	// Probe is read-only adapter setup; Build creates the existing harness factory.
 	Probe func(context.Context, BuildInput) error
-	Build func(BuildInput) (harness.Workers, error)
+	// ProbeOwner independently verifies the coordination adapter. Nil uses the
+	// actual native read-only/never permission probe, without a model turn.
+	ProbeOwner func(context.Context, BuildInput) error
+	Build      func(BuildInput) (harness.Workers, error)
 }
 
 type entry struct {
 	input        BuildInput
+	ownerInput   *BuildInput
 	workers      harness.Workers
 	reason       string
 	managerReady bool
@@ -91,6 +95,14 @@ func (p *Pool) load(ctx context.Context, id string) (map[string]*entry, error) {
 	for _, a := range cfg.Agents {
 		r := runtimes[a.RuntimeID]
 		e := &entry{input: BuildInput{Runtime: r, Agent: a, Installation: installation[r.ID]}}
+		ownerRuntime := r
+		if a.OwnerRuntimeID != "" {
+			ownerRuntime = runtimes[a.OwnerRuntimeID]
+		}
+		if ownerRuntime.Kind == agentconfig.AppServerWorker && (slices.Contains(a.Purposes, agentconfig.IssueManager) || ownerRuntime.CLI != "" && slices.Contains(a.Purposes, agentconfig.WorkerRun)) {
+			input := BuildInput{Runtime: ownerRuntime, Agent: a, Installation: installation[ownerRuntime.ID]}
+			e.ownerInput = &input
+		}
 		switch {
 		case !a.Enabled || !r.Enabled:
 			e.reason = "definition_disabled"
@@ -136,8 +148,10 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 		if slices.Contains(e.input.Agent.Purposes, agentconfig.WorkerRun) {
 			out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.reason == "" && e.workers != nil, Reason: e.reason})
 		}
-		if slices.Contains(e.input.Agent.Purposes, agentconfig.IssueManager) && e.input.Runtime.Kind == agentconfig.AppServerWorker {
+		if managerPurpose(e) {
 			pin.Purpose = "issue_manager"
+			pin.Worker = protocol.WorkerAppServer
+			pin.Runtime = protocol.AgentRuntimeReference{RuntimeID: e.ownerInput.Runtime.ID, Revision: e.ownerInput.Runtime.Revision}
 			pin.BackendID = ""
 			reason := ""
 			if !e.managerReady {
@@ -256,10 +270,6 @@ func (p *Pool) initialize(ctx context.Context, e *entry) error {
 	}
 	e.workers = workers
 	e.reason = ""
-	e.managerReady = p.probeManager(ctx, e)
-	if managerPurpose(e) && !e.managerReady {
-		return errors.New("manager native isolation is not verified")
-	}
 	return nil
 }
 
@@ -280,13 +290,14 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	}
 	var retry error
 	for _, e := range entries {
-		if canProbe(e.reason) {
-			retry = errors.Join(retry, p.initialize(ctx, e))
-		} else if e.reason == "" && managerPurpose(e) && !e.managerReady {
+		if managerPurpose(e) && !e.managerReady {
 			e.managerReady = p.probeManager(ctx, e)
 			if !e.managerReady {
-				retry = errors.Join(retry, errors.New("manager native isolation is not verified"))
+				retry = errors.Join(retry, errors.New("owner native isolation is not verified"))
 			}
+		}
+		if canProbe(e.reason) {
+			retry = errors.Join(retry, p.initialize(ctx, e))
 		}
 	}
 	return retry

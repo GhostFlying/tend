@@ -26,6 +26,24 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 	if err != nil {
 		return out, err
 	}
+	ownerPolicy, err := store.IssueUsesOwnerExecution(ctx, q, id)
+	if err != nil {
+		return out, err
+	}
+	if ownerPolicy {
+		out.OwnershipPolicy = protocol.IssueOwnerPolicy
+	}
+	responsibilityRuns, err := store.FollowupIDs(ctx, q, `SELECT run_id FROM run_issue_responsibilities WHERE issue_id=? ORDER BY created_at,rowid`, id)
+	if err != nil {
+		return out, err
+	}
+	for _, run := range responsibilityRuns {
+		responsibility, err := store.RunIssueResponsibility(ctx, q, run)
+		if err != nil {
+			return out, err
+		}
+		out.ResponsibilityRuns = append(out.ResponsibilityRuns, responsibility)
+	}
 	manager, e := store.CurrentIssueManagerTask(ctx, q, id)
 	if errors.Is(e, store.ErrNotFound) {
 		manager, e = store.LatestIssueManagerTask(ctx, q, id)

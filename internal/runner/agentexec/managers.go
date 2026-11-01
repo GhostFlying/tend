@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"slices"
 	"time"
 
-	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/coordination"
 	"github.com/GhostFlying/tend/internal/harness/traex"
@@ -17,12 +15,15 @@ import (
 )
 
 func managerPurpose(e *entry) bool {
-	return e.input.Runtime.Kind == agentconfig.AppServerWorker && slices.Contains(e.input.Runtime.DeclaredPurposes, agentconfig.IssueManager) && slices.Contains(e.input.Agent.Purposes, agentconfig.IssueManager)
+	return e.ownerInput != nil && e.ownerInput.Runtime.Enabled && e.input.Agent.Enabled
 }
 
 func (p *Pool) probeManager(ctx context.Context, e *entry) bool {
 	if !managerPurpose(e) {
 		return false
+	}
+	if p.options.ProbeOwner != nil {
+		return p.options.ProbeOwner(ctx, *e.ownerInput) == nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -31,7 +32,7 @@ func (p *Pool) probeManager(ctx context.Context, e *entry) bool {
 		return false
 	}
 	defer os.RemoveAll(dir)
-	s, err := traex.Start(ctx, traex.Options{Bin: e.input.Runtime.ExecutableRef, Dir: dir, HostedCoordination: true, Log: p.options.Log})
+	s, err := traex.Start(ctx, traex.Options{Bin: e.ownerInput.Runtime.ExecutableRef, Dir: dir, HostedCoordination: true, Log: p.options.Log})
 	if err != nil {
 		return false
 	}
@@ -85,10 +86,10 @@ func (p *Pool) ResolveManager(ctx context.Context, pin protocol.RunExecutionPin)
 		return runner.ManagerExecution{}, err
 	}
 	e := entries[pin.Identity.LocalID]
-	if e == nil || !e.input.Agent.Enabled || !e.input.Runtime.Enabled || e.input.Agent.Revision != pin.AgentRevision || e.input.Runtime.ID != pin.Runtime.RuntimeID || e.input.Runtime.Revision != pin.Runtime.Revision || e.input.Agent.Model != pin.Profile.Model || e.input.Agent.Effort != pin.Profile.Effort || !p.probeManager(ctx, e) {
+	if e == nil || !managerPurpose(e) || e.input.Agent.Revision != pin.AgentRevision || e.ownerInput.Runtime.ID != pin.Runtime.RuntimeID || e.ownerInput.Runtime.Revision != pin.Runtime.Revision || e.input.Agent.Model != pin.Profile.Model || e.input.Agent.Effort != pin.Profile.Effort || !p.probeManager(ctx, e) {
 		return runner.ManagerExecution{}, errors.New("original manager executor is unavailable")
 	}
-	bin := e.input.Runtime.ExecutableRef
+	bin := e.ownerInput.Runtime.ExecutableRef
 	return runner.ManagerExecution{Instructions: e.input.Agent.Instructions, Profile: pin.Profile, Open: func(ctx context.Context, dir string) (harness.Session, error) {
 		return traex.Start(ctx, traex.Options{Bin: bin, Dir: dir, HostedCoordination: true, Log: p.options.Log})
 	}}, nil

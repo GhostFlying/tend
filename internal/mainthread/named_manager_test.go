@@ -343,8 +343,20 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 				if !invoke("issues_deadline_cancel", map[string]any{"effect_seq": seq + 2, "target_id": dated.Outcome.DeadlineID, "expected_control_revision": dated.Outcome.Revision, "payload": cancellation}, nil) {
 					return "failed"
 				}
-				entry := protocol.PutPlannerEntryPayload{Entry: protocol.PlannerEntry{Kind: "issue_priority", IssueID: created.Outcome.IssueID, Title: "First responsibility to coordinate", Responsible: owner.Subject, Status: "open", Rank: 1, Reason: "Explicit planner order; execution still uses task rating"}}
-				if !invoke("planner_entry_put", map[string]any{"effect_seq": seq + 3, "payload": entry}, nil) {
+				entry := protocol.PutPlannerEntryInput{Entry: protocol.PlannerEntryInput{Kind: "issue_priority", IssueID: created.Outcome.IssueID, Title: "First responsibility to coordinate", Responsible: owner.Subject, Status: "open", Rank: 1, Reason: "Explicit planner order; execution still uses task rating"}}
+				var planned struct {
+					Outcome protocol.PlannerEntry `json:"outcome"`
+				}
+				if !invoke("planner_entry_put", map[string]any{"effect_seq": seq + 3, "payload": entry}, &planned) {
+					return "failed"
+				}
+				// Retained callbacks can still contain the previous record-shaped
+				// input. Preserve its original payload and request receipt on replay.
+				legacy := map[string]any{"effect_seq": seq + 4, "target_id": planned.Outcome.EntryID, "expected_control_revision": planned.Outcome.Revision, "payload": protocol.PutPlannerEntryPayload{Entry: planned.Outcome}}
+				first := th.CallTool(context.Background(), turn, "retained-planner-write", "planner_entry_put", legacy)
+				replay := th.CallTool(context.Background(), turn, "retained-planner-write", "planner_entry_put", legacy)
+				if !first.Success || !replay.Success || first.Text != replay.Text {
+					failed <- "record-shaped planner callback lost its exact durable replay: " + replay.Text
 					return "failed"
 				}
 			}
@@ -673,11 +685,14 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		})
 	}
 	expectedTurns := 2
+	expectedBlocked := 0
 	if ownerTransfer {
-		expectedTurns = 3
+		// This fixture deliberately attempts an invalid owner assignee. The
+		// separate valid delegation cannot discharge that failed intention.
+		expectedBlocked = 1
 	}
 	eventually(t, "separate planner, manager and exact owner continuation settle", func() bool {
-		return e.count(`SELECT COUNT(*) FROM logical_turns WHERE status='completed'`) == expectedTurns
+		return e.count(`SELECT COUNT(*) FROM logical_turns WHERE status='completed'`) == expectedTurns && e.count(`SELECT COUNT(*) FROM logical_turns WHERE status='needs_review' AND reason LIKE '%delegation%'`) == expectedBlocked
 	})
 	if opts.Callers {
 		execute(owner, "issues.followups_trigger", protocol.Target{Type: "followup", ID: followupRule.RuleID}, protocol.IssueFollowupPayload{ExpectedAssignmentEpoch: 1}, app.IssueFollowupCommand{Action: "trigger"})

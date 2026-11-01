@@ -8,6 +8,7 @@ type IssueSourceReference struct {
 }
 
 type CreateIssuePayload struct {
+	Owner   *IssueOwnerRequest          `json:"owner,omitempty"`
 	Manager *RequestIssueManagerPayload `json:"manager,omitempty"`
 	IssueSourceReference
 	Plan                   IssuePlan      `json:"plan"`
@@ -15,6 +16,14 @@ type CreateIssuePayload struct {
 	ParentIssueID          string         `json:"parent_issue_id,omitempty"`
 	ExpectedParentRevision *int64         `json:"expected_parent_revision,omitempty"`
 	DependsOn              []string       `json:"depends_on,omitempty"`
+}
+
+// IssueOwnerRequest selects responsibility for a new Issue. Its source and
+// assignment epoch come from the enclosing transaction, never model guesses.
+type IssueOwnerRequest struct {
+	CategoryID string `json:"category_id"`
+	AgentID    string `json:"agent_id,omitempty"`
+	Reason     string `json:"reason"`
 }
 
 type UpdateIssuePayload struct {

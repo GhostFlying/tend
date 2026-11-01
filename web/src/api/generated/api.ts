@@ -616,12 +616,14 @@ export interface IssueView {
   historical?: boolean;
   issue_id: string;
   manager?: IssueManagerView;
+  ownership_policy?: string;
   parent_issue_id?: string;
   pending_assignee?: IssueAssignee;
   pending_handoff_id?: string;
   pending_reviews?: WorkItemCompletionReview[];
   plan: IssuePlan;
   progress?: IssueProgress;
+  responsibility_runs?: ExecutionResponsibility[];
   revision: number;
   source_reviews?: IssueSourceReview[];
   state: IssueState;
@@ -943,6 +945,19 @@ export interface IssueProgress {
   summary: string;
   updated_at: number;
   updated_by: IssueAssignee;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutionResponsibility".
+ */
+export interface ExecutionResponsibility {
+  agent_ref: string;
+  assignment_epoch: number;
+  issue_id: string;
+  issue_revision: number;
+  role: RunRole;
+  run_id: string;
+  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1699,6 +1714,7 @@ export interface CreateIssuePayload {
   expected_parent_revision?: number;
   expected_source_revision?: number;
   manager?: RequestIssueManagerPayload;
+  owner?: IssueOwnerRequest;
   parent_issue_id?: string;
   plan: IssuePlan;
   source_message_id?: string;
@@ -1708,11 +1724,21 @@ export interface CreateIssuePayload {
  * via the `definition` "RequestIssueManagerPayload".
  */
 export interface RequestIssueManagerPayload {
+  agent_id?: string;
   category_id?: string;
   expected_assignment_epoch: number;
   reason: string;
   replace?: boolean;
   source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueOwnerRequest".
+ */
+export interface IssueOwnerRequest {
+  agent_id?: string;
+  category_id: string;
+  reason: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1771,6 +1797,7 @@ export interface TaskAgentSelection {
  * via the `definition` "AgentRequirement".
  */
 export interface AgentRequirement {
+  agent_id?: string;
   category_id: string;
   effort?: string;
   model?: string;
@@ -1959,6 +1986,7 @@ export interface AgentInventoryDefinition {
   display_name: string;
   enabled: boolean;
   identity: AgentIdentity;
+  owner_runtime_binding_ref?: AgentRuntimeReference;
   purposes: string[] | null;
   registration: string;
   requested_effort: string;

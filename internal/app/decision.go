@@ -91,6 +91,13 @@ func applyDecision(ctx context.Context, x *Exec, tx *store.Tx, prev store.TaskRo
 	for _, e := range d.Events {
 		events = append(events, Event{ObjectType: "task", ObjectID: d.Task.ID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
 	}
+	if d.Task.Lifecycle == protocol.TaskCancelled {
+		ownerEvents, err := settleCancelledOwnerReview(ctx, x, tx, d.Task.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		events = append(events, ownerEvents...)
+	}
 	if d.AbandonWorkspace && prev.WorkspaceAssigned {
 		w, err := tx.AbandonWorkspace(ctx, d.Task.ID, now)
 		if err != nil {

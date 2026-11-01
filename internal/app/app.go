@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -280,7 +281,17 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		}
 		if applyErr != nil {
 			pe, ok := errors.AsType[*protocol.Error](applyErr)
-			if !ok || !businessCodes[pe.Code] {
+			delegation := false
+			if c, tracked := delegationCommand(cmd); tracked && ok && pe.Code == protocol.CodeForbidden {
+				execution, err := store.GetHostedExecution(ctx, tx.Q(), c.ExecutionID)
+				if err != nil {
+					return err
+				}
+				delegation = execution.Selection.Purpose == agentconfig.Main
+			}
+			// An authenticated coordinator's rejected source is a known failed
+			// delegation, not an authorization grant or an unknown side effect.
+			if !ok || !businessCodes[pe.Code] && !(delegation && pe.Code == protocol.CodeForbidden) {
 				return applyErr
 			}
 			// Undo the partial apply but keep the transaction, so the
@@ -290,7 +301,15 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			}
 			rec.Status, rec.ErrorCode, rec.ErrorMessage, rec.ErrorDetails = protocol.OpFailed, string(pe.Code), pe.Message, string(pe.Details)
 			rec.ResultJSON = ""
+			recorded, err := recordDelegationAttempt(ctx, x, tx, cmd, pe)
+			if err != nil {
+				return err
+			}
+			applied = recorded
 		} else {
+			if _, err := recordDelegationAttempt(ctx, x, tx, cmd, nil); err != nil {
+				return err
+			}
 			if err := tx.Release(ctx, applySavepoint); err != nil {
 				return err
 			}

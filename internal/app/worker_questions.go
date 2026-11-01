@@ -79,6 +79,17 @@ func (AskOwner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, erro
 	if !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
 	}
+	currentOwner, err := store.TaskOwnerContractCurrent(ctx, tx.Q(), rc.task.TaskID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	currentRun, err := store.RunIssueResponsibilityCurrent(ctx, tx.Q(), rc.run.RunID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !currentOwner || !currentRun {
+		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "the run's Issue responsibility changed; retain its facts without opening a new owner question")
+	}
 	questions, err := store.ListWorkerQuestions(ctx, tx.Q(), rc.run.RunID)
 	if err != nil {
 		return Outcome{}, err
@@ -132,7 +143,15 @@ func (a *App) WorkerQuestions(ctx context.Context, p protocol.Principal) ([]prot
 		if err != nil {
 			return err
 		}
-		if desiredFor(rc.run, rc.action, rc.task) == protocol.DesiredStopped {
+		currentOwner, err := store.TaskOwnerContractCurrent(ctx, tx.Q(), rc.task.TaskID)
+		if err != nil {
+			return err
+		}
+		currentRun, err := store.RunIssueResponsibilityCurrent(ctx, tx.Q(), rc.run.RunID)
+		if err != nil {
+			return err
+		}
+		if desiredFor(rc.run, rc.action, rc.task) == protocol.DesiredStopped || !currentOwner || !currentRun {
 			for i := range out {
 				out[i].Status = store.DecisionCancelled
 				out[i].Answer = nil
@@ -190,12 +209,12 @@ func checkQuestionRunRecovery(ctx context.Context, q store.Querier, host string,
 	return nil
 }
 
-// cancelObsoleteQuestions runs only after task/run changes, in the originating
+// cancelObsoleteQuestions runs after task, run or Issue changes, in the originating
 // transaction. It removes stale questions from attention without inventing answers.
 func cancelObsoleteQuestions(ctx context.Context, x *Exec, tx *store.Tx, out *Outcome) error {
 	relevant := false
 	for _, e := range out.Events {
-		relevant = relevant || e.ObjectType == "task" || e.ObjectType == "run"
+		relevant = relevant || e.ObjectType == "task" || e.ObjectType == "run" || e.ObjectType == "issue"
 	}
 	if !relevant {
 		return nil

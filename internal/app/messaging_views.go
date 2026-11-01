@@ -169,7 +169,7 @@ func messagingMessage(ctx context.Context, q store.Querier, id string) (protocol
 	}
 	if m.Direction != "input" {
 		m.Processing = "published"
-	} else if len(m.IssueIDs) > 0 && m.Processing != "failed" && m.Processing != "interrupted" && m.Processing != "unknown" {
+	} else if len(m.IssueIDs) > 0 && m.Processing != "failed" && m.Processing != "interrupted" && m.Processing != "unknown" && m.Processing != "needs_review" {
 		var waitingOwner, waitingExecution, waitingAssignment bool
 		if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM message_work_items w JOIN task_work_item_owners o USING(work_item_id) JOIN decisions d USING(task_id) WHERE w.message_id=? AND w.active=1 AND d.status='open'),EXISTS(SELECT 1 FROM message_work_items w JOIN task_work_item_owners o USING(work_item_id) JOIN tasks t USING(task_id) WHERE w.message_id=? AND w.active=1 AND t.kind='execution' AND t.lifecycle IN ('queued','running','waiting','awaiting_acceptance','changes_required')),EXISTS(SELECT 1 FROM message_work_items w JOIN issue_controls i ON i.issue_id=w.work_item_id WHERE w.message_id=? AND w.active=1 AND (i.assignee_kind<>'agent' OR i.assignment_state<>'active'))`, id, id, id).Scan(&waitingOwner, &waitingExecution, &waitingAssignment); err != nil {
 			return m, err

@@ -16,6 +16,9 @@ type Executor struct {
 // Only the current run's choice is returned and subsequently frozen by app.
 func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 	if c.Manager != nil {
+		if c.Manager.OwnershipPolicy == protocol.IssueOwnerPolicy && !h.IssueOwners && !c.Manager.ReceiptOnly {
+			return nil, "runner does not support Issue owner responsibility"
+		}
 		if c.ManagerPin != nil {
 			if c.ManagerPin.Identity.ExecutionEnvironmentID != h.ID {
 				return nil, "manager session belongs to another runner"
@@ -42,7 +45,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		}
 		var selected *protocol.RunExecutionPin
 		for _, e := range h.Executors {
-			if e.Pin.Purpose != "issue_manager" || !slices.Contains(e.Categories, c.Manager.CategoryID) {
+			if e.Pin.Purpose != "issue_manager" || !slices.Contains(e.Categories, c.Manager.CategoryID) || c.Manager.AgentID != "" && c.Manager.AgentID != e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID {
 				continue
 			}
 			if selected == nil || e.Pin.Identity.LocalID < selected.Identity.LocalID {
@@ -58,12 +61,21 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 	if c.AgentSelection == nil {
 		return nil, ""
 	}
+	if c.OwnerAgentRevision != 0 && !h.IssueOwners {
+		return nil, "runner does not support Issue owner execution contracts"
+	}
 	role := c.AgentSelection.Implementation
 	if c.Kind == protocol.ActionAccept {
 		role = c.AgentSelection.Acceptance
 	}
 	matches := func(e Executor, r protocol.AgentRequirement, accept bool) bool {
-		return e.Pin.Purpose != "issue_manager" && r.MatchesProfile(e.Pin.Profile) && e.Pin.Identity.ExecutionEnvironmentID == h.ID && slices.Contains(e.Categories, r.CategoryID) && (r.RuntimeID == "" || r.RuntimeID == e.Pin.Runtime.RuntimeID) && (c.WorkspaceBackendID == "" || c.WorkspaceBackendID == e.Pin.BackendID) && (c.Mounts <= 1 || e.Pin.BackendID == "git") && (!accept || c.AcceptanceProfile == nil || *c.AcceptanceProfile == e.Pin.Profile)
+		if !accept && c.OwnerAgentRevision != 0 && (e.Pin.AgentRevision != c.OwnerAgentRevision || e.Pin.Runtime.Revision != c.OwnerRuntimeRevision) {
+			return false
+		}
+		if accept && c.ReviewOwnerPin != nil && (e.Pin.Identity != c.ReviewOwnerPin.Identity || e.Pin.AgentRevision != c.ReviewOwnerPin.AgentRevision || e.Pin.Runtime != c.ReviewOwnerPin.Runtime || e.Pin.Profile != c.ReviewOwnerPin.Profile) {
+			return false
+		}
+		return e.Pin.Purpose != "issue_manager" && (r.AgentID == "" || r.AgentID == e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID) && r.MatchesProfile(e.Pin.Profile) && e.Pin.Identity.ExecutionEnvironmentID == h.ID && slices.Contains(e.Categories, r.CategoryID) && (r.RuntimeID == "" || r.RuntimeID == e.Pin.Runtime.RuntimeID) && (c.WorkspaceBackendID == "" || c.WorkspaceBackendID == e.Pin.BackendID) && (c.Mounts <= 1 || e.Pin.BackendID == "git") && (!accept || c.AcceptanceProfile == nil || *c.AcceptanceProfile == e.Pin.Profile)
 	}
 	executors := slices.Clone(h.Executors)
 	slices.SortFunc(executors, func(a, b Executor) int {

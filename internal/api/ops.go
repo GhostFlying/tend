@@ -27,7 +27,7 @@ var ownerCommands = commandMap(
 	app.CanonicalOwnerIssueCommand{Action: "close"}, app.CanonicalOwnerIssueCommand{Action: "reopen"},
 	app.CanonicalOwnerIssueCommand{Action: "reparent"}, app.CanonicalOwnerIssueCommand{Action: "dependencies"},
 	app.CanonicalOwnerIssueCommand{Action: "review_sources"}, app.CanonicalOwnerIssueCommand{Action: "review_completions"},
-	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.RequestIssueManager{}, app.ManagerMigration{}, app.HostedIssueAssignment{}, app.HostedIssueAssignment{Finish: true}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetIssueMessageAssociations{},
+	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.RequestIssueManager{}, app.RequestIssueOwner{}, app.ManagerMigration{}, app.HostedIssueAssignment{}, app.HostedIssueAssignment{Finish: true}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetIssueMessageAssociations{},
 	app.WithdrawMessage{},
 	app.UpdateWorkItemChoice{Action: "respond"},
 	app.HostMaintenance{},
