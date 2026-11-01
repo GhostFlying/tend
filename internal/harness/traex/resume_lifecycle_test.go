@@ -11,6 +11,36 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 )
 
+func TestAttachUnstartedThreadRetainsOriginalRegistration(t *testing.T) {
+	f, s := newFake(t)
+	f.on(methodThreadStart, func(json.RawMessage) any { return ThreadStartResponse{Thread: Thread{ID: "original"}} })
+	original, err := s.StartThread(t.Context(), harness.ThreadConfig{OnToolCall: func(context.Context, harness.ToolCall) harness.ToolResult {
+		t.Error("obsolete preparation handler was used")
+		return harness.ToolResult{}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached, err := s.AttachUnstartedThread(t.Context(), original.ID(), func(context.Context, harness.ToolCall) harness.ToolResult {
+		return harness.ToolResult{Success: true, Text: "prepared-handler"}
+	})
+	if err != nil || attached != original || f.params(methodThreadResume) != nil {
+		t.Fatalf("unstarted attachment loaded history or replaced its identity: %v", err)
+	}
+	raw, _ := json.Marshal(DynamicToolCallParams{ThreadID: original.ID(), CallID: "call", Tool: "read", Arguments: json.RawMessage(`{}`)})
+	result, err := s.serverRequest(t.Context(), methodToolCall, raw)
+	if err != nil || !result.(DynamicToolCallResponse).Success {
+		t.Fatal("preparation handler did not move to the new attempt", result, err)
+	}
+	original.(*thread).push(harness.Event{Kind: harness.EventTurnStarted})
+	if _, err := s.AttachUnstartedThread(t.Context(), original.ID(), nil); !errors.Is(err, harness.ErrRejected) {
+		t.Fatal("started native thread bypassed normal resume", err)
+	}
+	if _, err := s.AttachUnstartedThread(t.Context(), "missing", nil); !errors.Is(err, harness.ErrRejected) {
+		t.Fatal("missing preparation thread was recreated", err)
+	}
+}
+
 func TestRepeatedResumePreservesEventStreamAndClosesEveryHandle(t *testing.T) {
 	f, s := newFake(t)
 	ctx := context.Background()

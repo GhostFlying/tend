@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/harness/remote"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -59,6 +60,8 @@ func HashToken(token string) string {
 
 // Config tunes the server. Zero values select the defaults.
 type Config struct {
+	NativeWorkers *remote.Broker
+
 	ReleaseDir string
 	// ClaimWait bounds how long a claim waits for work. Default 25s.
 	ClaimWait time.Duration
@@ -87,6 +90,7 @@ func New(a *app.App, whois netx.WhoIs, secret []byte, cfg Config, log *slog.Logg
 // Handler returns the HTTP handler of the protocol.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+remote.Path+"{channel}", s.nativeExecution)
 	mux.HandleFunc("POST "+Path, s.serve)
 	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/manifest", s.releaseFile)
 	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/artifacts/{sha}", s.releaseFile)

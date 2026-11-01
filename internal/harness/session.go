@@ -77,6 +77,9 @@ type PermissionedThread interface {
 
 // ThreadConfig configures a thread.
 type ThreadConfig struct {
+	// EnvironmentID is explicit for remote execution; an empty value retains native defaults.
+	EnvironmentID string
+
 	// NetworkAccess explicitly enables networking without widening filesystem access.
 	NetworkAccess bool
 	Ephemeral     bool

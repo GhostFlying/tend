@@ -144,6 +144,7 @@
 | D138 | TraeX 流内限流的 `other` 终态仅通过绑定原 session/turn 的完整原始记录和精确 provider 诊断补足分类；原生根必须已失败且操作收敛。限流等待 30 秒再沿同 run/会话续接，截止时间与既有一次预算持久化；未知发送先对账，耗尽后交由 Issue owner。wire 保持 2/1。见 docs/plans/traex-terminal-rate-limit.md。 | 已实现 |
 | D139 | 复用目录的 commit 任务缺少继承改动授权时，由 runner 上报明确未启动的有界结构化诊断；当前 Issue owner 修正同一任务合同，保留历史 run，不自动吸收改动或生成用户重试决定。独立 preparation_required 阻塞不能被主机健康扫描清除；旧协议、未知及旧责任仍走原围栏。见 docs/plans/workspace-preparation-recovery.md。 | 已实现，未发布 |
 | D140 | 在 D136 的 owner 责任之上，Issue 对话始终面向负责 Agent：默认请求 issue-manager 类别；同事务建立待领取对话，owner 消息保留原队列，领取后投递；退回 owner 不转发或重发已提交的 owner 消息。看板追加可选只读待领取类别字段，Web 明示待领取及一键委派，沙盒经真实 runner 协议领取负责人。见 docs/plans/web-ui-overhaul-s10.md。 | 已实现 |
+| D141 | 可选集中 TraeX worker loop：中心持有模型认证及原生会话，runner 保留 exec-server、工作区和 Orca 原生 TUI。按冻结 runtime 选择，原 run/thread 绑定、人工接管与停止证明沿既有生命周期；本地模式继续可用，wire 保持 2/1。见 docs/plans/central-traex.md。 | 已实现，未发布 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -514,3 +515,9 @@ Runner 在实际工作目录适配器中构造有类型的准备失败，记录 
 在 D136 的 owner 责任之上，Web 新建及类别交接使用显式 owner 合同；历史 manager 请求不静默升级。新建 Issue 默认请求活动的 issue-manager 能力类别，不可用时退到首个活动类别，无类别时由 owner 负责；显式选择及恢复原请求不被默认值覆盖。普通 Agent 的 owner 请求与历史类别 manager 请求共用发布路径，在同一事务建立稳定负责人会话，待领取可提交消息但 admission 继续等待真实领取，不提前选择执行者或启动会话。
 
 退回 owner 时尚未投递的 owner 消息保留原队列及撤回能力，再委派后送达；sent 与 unknown 沿用核对，不重发。owner 负责时不提供私人备注输入，提供持久请求的一键默认类别交接及完整交接入口。沙盒通过现有 ManagerExecutionResolver 承接真实 runner 领取，正式 runner 行为与 wire 不变。看板的 pending_manager_category_id 是可选只读派生字段，避免 Web 按卡片读取完整详情；不改变 runner wire、控制入口或迁移。实施见 [S10 计划](plans/web-ui-overhaul-s10.md)。
+
+## D141：集中 TraeX loop 与 runner 原生 TUI
+
+本地与集中 Agent 长期共存，按冻结的具体 Agent/runtime 配置显式选择。集中模式由中心运行 app-server，复用中心用户的模型认证、全局配置与 session；真实代码、Git/工具认证、exec-server 和 Orca TUI 留在 runner。原生 TUI 是同一 thread 的远程客户端，不启动第二个 loop。Cove 后续复用该会话和控制权边界。
+
+执行连接沿现有 run 与节点鉴权由 runner 主动建立，不开放无鉴权的执行端口。冷恢复固定中心、run、工作区和 Environment，缺失绑定时明确阻断，不回退中心本机执行。执行资源仍由 runner 对租约、fencing、取消和未知结果负责。中心会话持有与 worker attempt 分离，人工 held 不销毁会话、不自动完成；TUI 断线或退出不交还控制权。首次人工写入须先完成既有 takeover，显式 resume 才恢复自动驱动。业务动态工具由 Tend 控制连接唯一回答，TUI 入口限定原 thread。参见 [实施计划](plans/central-traex.md)。

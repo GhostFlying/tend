@@ -218,12 +218,16 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	}
 	var res ThreadStartResponse
 	err := s.conn.call(ctx, methodThreadStart, ThreadStartParams{
+		Environments:          threadEnvironments(cfg),
 		ExperimentalRawEvents: true,
 		Ephemeral:             cfg.Ephemeral,
 		Model:                 cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
 		DeveloperInstructions: cfg.DeveloperInstructions, Config: cfg.Config, DynamicTools: dynamicTools(cfg.Tools),
 	}, &res)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkEnvironment(cfg, res); err != nil {
 		return nil, err
 	}
 	t := s.register(res.Thread.ID, cfg.OnToolCall)
@@ -269,6 +273,9 @@ func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness
 			s.mu.Unlock()
 			t.releaseLocal()
 		}
+		return nil, err
+	}
+	if err := checkEnvironment(cfg, res); err != nil {
 		return nil, err
 	}
 	t.setToolHandler(cfg.OnToolCall)
@@ -542,6 +549,7 @@ type thread struct {
 	queue                            []harness.Event
 	wake                             chan struct{}
 	ended                            bool
+	started                          bool
 	events                           chan harness.Event
 	permissions                      harness.PermissionSettings
 	networkPolicy                    map[string]any
@@ -566,6 +574,9 @@ func (t *thread) push(ev harness.Event) {
 		return
 	}
 	t.queue = append(t.queue, ev)
+	if ev.Kind == harness.EventTurnStarted {
+		t.started = true
+	}
 	if ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemUserMessage {
 		t.userText, t.userItemID, t.userTurnID = ev.Text, ev.ItemID, ev.TurnID
 	}
@@ -683,6 +694,9 @@ func (t *thread) StartTurn(ctx context.Context, in harness.TurnInput) (string, e
 		}
 		wire = fields
 	}
+	t.mu.Lock()
+	t.started = true
+	t.mu.Unlock()
 	err := t.s.conn.call(ctx, methodTurnStart, wire, &res)
 	if err != nil {
 		return "", err
@@ -705,3 +719,19 @@ func (t *thread) Steer(ctx context.Context, turnID, text string) error {
 }
 
 var errSteerIdentity = errors.New("traex: steer receipt turn does not match")
+
+func threadEnvironments(cfg harness.ThreadConfig) []ThreadEnvironment {
+	if cfg.EnvironmentID == "" {
+		return nil
+	}
+	return []ThreadEnvironment{{EnvironmentID: cfg.EnvironmentID, Cwd: cfg.Cwd}}
+}
+func checkEnvironment(cfg harness.ThreadConfig, res ThreadStartResponse) error {
+	if cfg.EnvironmentID == "" {
+		return nil
+	}
+	if len(res.Thread.Environments) != 1 || res.Thread.Environments[0].EnvironmentID != cfg.EnvironmentID || res.Thread.Environments[0].Cwd != cfg.Cwd {
+		return fmt.Errorf("%w: remote execution environment differs", harness.ErrRejected)
+	}
+	return nil
+}
