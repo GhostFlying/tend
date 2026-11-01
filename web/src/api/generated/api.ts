@@ -489,6 +489,8 @@ export interface AttentionView {
   decision?: DecisionView;
   decision_id?: string;
   issue_id?: string;
+  issue_intent?: string;
+  issue_title?: string;
   kind: string;
   latest_action_at?: number;
   latest_action_due_rule_id?: string;
@@ -504,7 +506,9 @@ export interface AttentionView {
   revision: number;
   source_message_id?: string;
   status: string;
+  task_context?: AttentionTaskContext;
   task_id?: string;
+  task_title?: string;
   title: string;
   updated_at: number;
 }
@@ -603,6 +607,20 @@ export interface Principal {
   role?: RunRole;
   subject?: string;
   thread?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AttentionTaskContext".
+ */
+export interface AttentionTaskContext {
+  block_reason: BlockReason;
+  control_mode: ControlMode;
+  current_artifact_accepted: boolean;
+  execution?: TaskExecutionView;
+  goal: string;
+  has_current_artifact: boolean;
+  lifecycle: TaskLifecycle;
+  question_current: boolean;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

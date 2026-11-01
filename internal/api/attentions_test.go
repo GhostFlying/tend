@@ -67,12 +67,16 @@ func TestAttentionCLIRealHTTPOriginalDecisionAndInboxIdentity(t *testing.T) {
 		t.Fatal("display change changed clock or question", a)
 	}
 	var inbox protocol.AttentionPage
-	if status := e.do("GET", "/api/v1/inbox?issue_id="+issue.IssueID, token, nil, &inbox); status != http.StatusOK || len(inbox.Items) != 1 || inbox.Items[0].AttentionID != a.AttentionID || inbox.Items[0].Decision.DecisionID != a.DecisionID {
+	if status := e.do("GET", "/api/v1/inbox?issue_id="+issue.IssueID, token, nil, &inbox); status != http.StatusOK || len(inbox.Items) != 1 || inbox.Items[0].AttentionID != a.AttentionID || inbox.Items[0].Decision.DecisionID != a.DecisionID || inbox.Items[0].IssueTitle != issue.Plan.Title {
 		t.Fatal(status, inbox)
 	}
 	presented := run("archive", a.AttentionID, "--revision", strconv.FormatInt(a.Revision, 10))
 	if err := json.Unmarshal(presented.Operation.Result, &a); err != nil {
 		t.Fatal(err)
+	}
+	run("create", "--data", `{"kind":"information","title":"An informational update"}`)
+	if status := e.do("GET", "/api/v1/inbox?status=open&include_archived=true&actionable_only=true", token, nil, &inbox); status != http.StatusOK || len(inbox.Items) != 1 || inbox.Items[0].AttentionID != a.AttentionID {
+		t.Fatal("actionable summary hid an archived obligation or counted a notification", status, inbox)
 	}
 	response := run("respond", a.AttentionID, "--revision", strconv.FormatInt(a.Revision, 10), "--data", `{"version":1,"option":"report"}`)
 	var answered protocol.Attention
@@ -93,6 +97,56 @@ func TestAttentionCLIRealHTTPOriginalDecisionAndInboxIdentity(t *testing.T) {
 	status, stale := e.op(token, e.envelope("attentions.present", protocol.Target{Type: "attention", ID: a.AttentionID}, &a.Revision, protocol.PresentAttentionPayload{}))
 	if status != http.StatusOK || stale.CurrentAttention == nil || stale.CurrentAttention.Revision != answered.Revision {
 		t.Fatal(status, stale)
+	}
+}
+
+func TestAttentionContextTitlesRetainOriginalQuestionAndScope(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	payload := protocol.CreateIssueTaskPayload{
+		ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Mobile repair execution",
+		Spec:   protocol.OwnerTaskSpec{Goal: "Repair mobile layout", Acceptance: []string{"Mobile layout is readable"}, Delivery: "commit", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}},
+		Rating: protocol.RatingP1,
+	}
+	status, response := e.op(token, e.envelope("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, payload))
+	if status != http.StatusOK || response.Operation == nil || response.Operation.Status != protocol.OpSucceeded {
+		t.Fatal(status, response)
+	}
+	var task struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(response.Operation.Result, &task); err != nil {
+		t.Fatal(err)
+	}
+	for _, scoped := range []bool{true, false} {
+		p := protocol.CreateAttentionPayload{Kind: "decision", Title: "How should this proceed?", Options: []string{"Continue"}}
+		if scoped {
+			p.IssueID, p.TaskID = issue.IssueID, task.TaskID
+		}
+		status, created := e.op(token, e.envelope("attentions.create", protocol.Target{Type: "attention"}, nil, p))
+		if status != http.StatusOK || created.Operation == nil || created.Operation.Status != protocol.OpSucceeded {
+			t.Fatal(status, created)
+		}
+		var original protocol.Attention
+		if err := json.Unmarshal(created.Operation.Result, &original); err != nil {
+			t.Fatal(err)
+		}
+		var detail protocol.AttentionView
+		if status := e.do("GET", "/api/v1/attentions/"+original.AttentionID, token, nil, &detail); status != http.StatusOK {
+			t.Fatal(status, detail)
+		}
+		if detail.Title != p.Title || detail.Decision.Question != p.Title || detail.DecisionID != original.DecisionID || detail.Revision != original.Revision {
+			t.Fatal("context projection changed the original question", detail)
+		}
+		if scoped {
+			if detail.IssueTitle != issue.Plan.Title || detail.IssueIntent != issue.Plan.Intent || detail.TaskTitle != payload.Title || detail.TaskContext == nil || detail.TaskContext.Goal != payload.Spec.Goal || detail.TaskContext.HasCurrentArtifact || detail.TaskContext.CurrentArtifactAccepted {
+				t.Fatal("missing business context", detail)
+			}
+		} else if detail.IssueTitle != "" || detail.IssueIntent != "" || detail.TaskTitle != "" || detail.TaskContext != nil {
+			t.Fatal("global attention inherited another item's context", detail)
+		}
 	}
 }
 

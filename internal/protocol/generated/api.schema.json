@@ -1506,6 +1506,46 @@
       "title": "AttentionPage",
       "type": "object"
     },
+    "AttentionTaskContext": {
+      "additionalProperties": false,
+      "properties": {
+        "block_reason": {
+          "$ref": "#/definitions/BlockReason"
+        },
+        "control_mode": {
+          "$ref": "#/definitions/ControlMode"
+        },
+        "current_artifact_accepted": {
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/definitions/TaskExecutionView"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "has_current_artifact": {
+          "type": "boolean"
+        },
+        "lifecycle": {
+          "$ref": "#/definitions/TaskLifecycle"
+        },
+        "question_current": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "question_current",
+        "goal",
+        "lifecycle",
+        "control_mode",
+        "block_reason",
+        "has_current_artifact",
+        "current_artifact_accepted"
+      ],
+      "title": "AttentionTaskContext",
+      "type": "object"
+    },
     "AttentionView": {
       "additionalProperties": false,
       "properties": {
@@ -1534,6 +1574,12 @@
           "type": "string"
         },
         "issue_id": {
+          "type": "string"
+        },
+        "issue_intent": {
+          "type": "string"
+        },
+        "issue_title": {
           "type": "string"
         },
         "kind": {
@@ -1584,7 +1630,13 @@
         "status": {
           "type": "string"
         },
+        "task_context": {
+          "$ref": "#/definitions/AttentionTaskContext"
+        },
         "task_id": {
+          "type": "string"
+        },
+        "task_title": {
           "type": "string"
         },
         "title": {

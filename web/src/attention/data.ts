@@ -13,6 +13,7 @@ export interface AttentionFilter {
   status?: string;
   after?: string;
   includeArchived?: boolean;
+  actionableOnly?: boolean;
 }
 
 export class AttentionData {
@@ -34,6 +35,7 @@ export class AttentionData {
     if (filter.status) query.set("status", filter.status);
     if (filter.after) query.set("after", filter.after);
     if (filter.includeArchived) query.set("include_archived", "true");
+    if (filter.actionableOnly) query.set("actionable_only", "true");
     return this.inbox.open(`/api/v1/inbox${query.size ? `?${query}` : ""}`);
   }
 

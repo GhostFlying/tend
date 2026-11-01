@@ -117,6 +117,8 @@ let messageAssociations = {
 const baseAttention = {
   latest_action_reminders: false,
   issue_id: "issue-root",
+  issue_title: "发布流程整理",
+  issue_intent: "整理发布流程并补齐验收证据",
   revision: 1,
   status: "open",
   source_message_id: "attention-source-note",
@@ -658,6 +660,8 @@ const server = createServer(async (req, res) => {
     const status = u.searchParams.get("status");
     if (kind) rows = rows.filter((row) => row.kind === kind);
     if (status) rows = rows.filter((row) => row.status === status);
+    if (u.searchParams.get("actionable_only") === "true")
+      rows = rows.filter((row) => row.kind !== "information");
     return json({ items: rows, more: inboxMore });
   }
   if (p.startsWith("/api/v1/attentions/"))
@@ -1263,7 +1267,7 @@ async function captureS5() {
     await page.getByRole("heading", { name: "发布流程整理", level: 1 }).waitFor();
     await shot("issue");
     await navigate(page, "/inbox");
-    await page.getByRole("heading", { name: "待处理", level: 1 }).waitFor();
+    await page.getByRole("heading", { name: "收件箱", level: 1 }).waitFor();
     await shot("inbox");
     await navigate(page, "/upgrades/" + copyUpgrade.upgrade_id);
     await page.getByRole("heading", { name: "发布详情", level: 1 }).waitFor();
@@ -1407,7 +1411,7 @@ async function captureS4() {
         }
         if (name === "inbox") {
           if (viewport.width > 760)
-            await page.waitForURL((url) => url.pathname === `/inbox/${information.attention_id}`);
+            await page.waitForURL((url) => url.pathname === `/inbox/${decision.attention_id}`);
           else assert.equal(new URL(page.url()).pathname, "/inbox", "phone keeps the inbox list");
         }
         if (name!.startsWith("issue-")) {
@@ -1558,7 +1562,7 @@ async function checkNavigation() {
       } else await navigate(page, path);
       await page.locator("main h1:visible").waitFor();
       if (path === "/inbox" && !mobile)
-        await page.waitForURL((url) => url.pathname === `/inbox/${information.attention_id}`);
+        await page.waitForURL((url) => url.pathname === `/inbox/${decision.attention_id}`);
       if (path === "/issues/issue-root") {
         await issueSidebar(page);
         const auxiliary = page.getByRole("dialog", { name: "Issue 辅助信息", exact: true });
@@ -1894,6 +1898,7 @@ try {
     if (mobile) {
       await navigate(page, "/inbox");
       const list = page.getByRole("region", { name: "待处理事项", exact: true });
+      await list.getByRole("tab", { name: "通知", exact: true }).click();
       const opener = list.getByRole("button", { name: /发布进度已更新/ });
       await opener.click();
       await page.waitForURL((url) => url.pathname === `/inbox/${information.attention_id}`);
@@ -1917,7 +1922,7 @@ try {
     } else {
       await navigate(page, "/inbox");
       const list = page.getByRole("region", { name: "待处理事项", exact: true });
-      await list.getByRole("button", { name: "查看所属 Issue →", exact: true }).click();
+      await list.getByRole("button", { name: "发布流程整理", exact: true }).click();
       await page.waitForURL((url) => url.pathname === `/issues/${issue.issue_id}`);
       await page
         .getByRole("region", { name: "Issue 详情", exact: true })
@@ -1939,6 +1944,7 @@ try {
     await page.getByRole("button", { name: "稍后处理", exact: true }).click();
     await page.waitForURL((url) => url.pathname === "/inbox");
     assert.equal(new URL(page.url()).pathname, "/inbox");
+    await page.getByRole("tab", { name: "通知", exact: true }).click();
     await page
       .getByRole("region", { name: "待处理事项", exact: true })
       .getByRole("button", { name: /发布进度已更新/ })
@@ -2262,7 +2268,8 @@ try {
     await inbox.getByRole("button", { name: /发布进度已更新/ }).waitFor();
     await page.screenshot({ path: join(output, `information-filter-${viewport.width}.png`) });
     await inbox.getByRole("tab", { name: "全部", exact: true }).click();
-    await inbox.getByRole("button", { name: /发布进度已更新/ }).waitFor();
+    await inbox.getByRole("button", { name: /确认灰度发布范围/ }).waitFor();
+    assert.equal(await inbox.getByRole("button", { name: /发布进度已更新/ }).count(), 0);
 
     await inbox.getByRole("tab", { name: "待行动", exact: true }).click();
     await inbox.getByRole("button", { name: /提供验收设备清单/ }).click();
@@ -2300,7 +2307,7 @@ try {
       .waitFor();
     assert.equal(writes.length, 1);
     assert.equal(writes[0]!.request_id, requestID);
-    await inbox.getByRole("button", { name: mobile ? "← 返回" : "稍后处理", exact: true }).click();
+    await inbox.getByRole("button", { name: mobile ? "← 返回" : "返回列表", exact: true }).click();
     await navigate(page, "/diagnostics/main");
     if (await page.getByRole("button", { name: "主 Agent", exact: true }).first().isVisible())
       await page.getByRole("button", { name: "主 Agent", exact: true }).first().click();
@@ -2668,7 +2675,7 @@ try {
     await finalInbox.getByRole("button", { name: "收起", exact: true }).click();
     if (mobile) await finalInbox.getByRole("button", { name: "← 返回", exact: true }).click();
     await finalInbox
-      .getByText("暂无此类事项。新的决定、行动与通知会显示在这里。", { exact: true })
+      .getByText("暂无待处理事项。已处理事项可在全部记录中查看。", { exact: true })
       .waitFor();
     assert.equal(information.status, "open", "archiving information must not resolve it");
     await page.screenshot({ path: join(output, `inbox-empty-${viewport.width}.png`) });
@@ -2692,7 +2699,7 @@ try {
     for (const [path, heading, name] of [
       ["/diagnostics/main", "主 Agent", "main"],
       ["/issues", "所有 Issue", "issues"],
-      ["/inbox", "待处理", "inbox"],
+      ["/inbox", "收件箱", "inbox"],
       ["/settings", "设置", "settings"],
       [`/issues/${encodeURIComponent(issue.issue_id)}`, issue.plan.title, "issue"],
       [`/tasks/${encodeURIComponent(activeTask.task_id)}`, "任务详情", "task"],
@@ -2728,10 +2735,11 @@ try {
       await routeSmoke.screenshot({ path: join(output, `s2-${name}-${viewport.width}.png`) });
       await routeSmoke.reload();
       await routeSmoke.getByRole("heading", { name: heading!, exact: true, level: 1 }).waitFor();
+      const firstPending = [information, decision, action].find(
+        (item) => item.status === "open" && item.kind !== "information",
+      );
       const expectedPath =
-        name === "inbox" && !mobile
-          ? `/inbox/${[information, decision, action].find((item) => !item.archived_at)!.attention_id}`
-          : path;
+        name === "inbox" && !mobile && firstPending ? `/inbox/${firstPending.attention_id}` : path;
       await routeSmoke.waitForURL((url) => url.pathname === expectedPath);
       assert.equal(new URL(routeSmoke.url()).pathname, expectedPath);
       await routeSmoke.keyboard.press("Escape");
@@ -2764,9 +2772,9 @@ try {
     assert.equal(new URL(routeSmoke.url()).pathname, `/tasks/${activeTask.task_id}`);
     assert.equal(new URL(routeSmoke.url()).searchParams.get("from"), issue.issue_id);
     await routeSmoke.goto(`${fixtureOrigin}/inbox/${action.attention_id}`);
-    await routeSmoke.getByRole("heading", { name: "待处理", exact: true, level: 1 }).waitFor();
+    await routeSmoke.getByRole("heading", { name: "收件箱", exact: true, level: 1 }).waitFor();
     await routeSmoke
-      .getByRole("button", { name: mobile ? "← 返回" : "稍后处理", exact: true })
+      .getByRole("button", { name: mobile ? "← 返回" : "返回列表", exact: true })
       .click();
     await routeSmoke.waitForURL(`${fixtureOrigin}/inbox`);
     await routeSmoke.close();

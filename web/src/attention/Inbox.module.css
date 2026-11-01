@@ -56,6 +56,7 @@
   gap: var(--space-1);
   width: 100%;
   text-align: left;
+  white-space: normal;
   padding: 0;
   border: 0;
   background: transparent;
@@ -66,12 +67,23 @@
   gap: var(--space-2);
   min-width: 0;
   max-width: 100%;
-  font-weight: 400;
+  font-weight: 600;
+  font-size: var(--text-body-lg);
+  line-height: 1.5;
 }
 .rowTitle[data-unread="true"] {
-  font-weight: 500;
+  font-weight: 600;
 }
-.rowTitle > span:last-child,
+.rowTitle > span:last-child {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.questionSummary {
+  color: var(--label-2);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+  text-align: left;
+}
 .summary {
   overflow: hidden;
   white-space: nowrap;
@@ -118,6 +130,36 @@
   font-size: var(--text-subheading);
   margin: 0 0 var(--space-2);
 }
+.issueContext {
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+.issueContext h2 button {
+  display: block;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  white-space: normal;
+  text-align: left;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--label);
+}
+.taskContext {
+  margin: var(--space-2) 0 0;
+  color: var(--label-3);
+  font-size: var(--text-caption);
+  line-height: 1.6;
+}
+.timing {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--text-caption);
+}
+.timing summary {
+  cursor: pointer;
+}
 .detail h3 {
   font-size: var(--text-body-lg);
   margin: var(--space-6) 0 10px;
@@ -143,6 +185,21 @@
 }
 .option input {
   accent-color: var(--label);
+}
+.optionHelp {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--label-3);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+}
+.currentResult {
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+.currentResult a {
+  color: var(--label-2);
+  font-size: var(--text-caption);
 }
 .textarea {
   display: block;

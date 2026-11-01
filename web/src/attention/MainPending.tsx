@@ -1,30 +1,16 @@
-import { useEffect, useMemo } from "react";
-import { WorkItemRead } from "../workitems/live.ts";
 import { Link } from "../app/router.ts";
 import { useInboxCount } from "./useInboxCount.ts";
 import { AttentionActionTime } from "./ActionTime.tsx";
-import type { AttentionPage, IssueView } from "../api/generated/api.ts";
+import type { AttentionPage } from "../api/generated/api.ts";
 import type { ReadState } from "../workitems/live.ts";
-import { useServices } from "../app/services.tsx";
-import { useStore } from "../state/store.ts";
 import styles from "./MainPending.module.css";
 
 export function MainPending({ summary }: { summary: ReadState<AttentionPage> }) {
-  const { client, live } = useServices();
-  const issues = useStore(live.issues.list.state);
   const items =
     summary.value?.items?.filter((item) => item.status === "open" && item.kind !== "information") ??
     [];
   const item = items[0];
   const pending = useInboxCount(summary.value ?? undefined);
-  // The sidebar no longer fetches a list just to resolve this one title.
-  const read = useMemo(() => new WorkItemRead<IssueView>(client), [client]);
-  const issue = useStore(read.state);
-  const issueID = item?.issue_id;
-  useEffect(() => {
-    if (issueID) void read.open(`/api/v1/issues/${encodeURIComponent(issueID)}`);
-    return () => read.close();
-  }, [read, issueID]);
   if (!item)
     return pending.count > 0 ? (
       <aside className={styles.card} aria-label="当前待处理">
@@ -45,9 +31,7 @@ export function MainPending({ summary }: { summary: ReadState<AttentionPage> }) 
         {item.issue_id && (
           <Link className={styles.issue} to={{ page: "issue", id: item.issue_id }}>
             所属 Issue：
-            {(issue.value?.issue_id === item.issue_id ? issue.value.plan.title : undefined) ||
-              issues.value?.items?.find((i) => i.issue_id === item.issue_id)?.title ||
-              "所属 Issue"}
+            {item.issue_title || "所属 Issue 名称暂不可用"}
           </Link>
         )}
       </div>

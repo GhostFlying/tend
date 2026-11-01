@@ -444,6 +444,8 @@ S9 补充：Issue Footer 的结束提示、收件人、队列、输入区和不�
 
 ## D133：交互式 Web 沙盒
 
+收件箱上下文修正沿用 D125 与 D132：owner Attention 只读投影返回当前 Issue 与执行任务的可读标题，列表及详情首先呈现责任事项，再呈现原问题和动作。默认查看尚未解决的记录，“全部记录”保留历史及直接链接；已读和收起不能隐藏未解决义务。只增加 owner view 的可选字段，不改变原决定、任务控制、存储或 runner wire。独立 `inbox` 沙盒场景复现两条已处理历史与一条等待答复的真实脚本失败决定。见 [收件箱上下文](plans/inbox-issue-context.md)。
+
 `tend-sandbox` 是开发与前端验收入口，不是服务端运行模式，也不进入发布包。`internal/serverkit` 集中组装真实 SQLite、app/domain、views、owner API、runnerapi、scheduler、dispatch、contextbuilder、tools、mainthread 与嵌入 Web。显式注入 listener／WhoIs、时钟／ID 与托管会话 opener；正式服务端保留原配置和真实边界。
 
 沙盒只替换托管 Agent 会话和 runner 的 Workers／Workspaces：脚本通过真实工具回调写账本，进程内 runner 经回环 HTTP 领取并执行任务。数据目录必须为空或具有内容匹配的沙盒标记；重置只能作用于已验证目录，不读取生产配置、凭据或 tailnet 状态，不启动真实模型、git 或 updater。demo 通过带 request_id 的 app 命令播种，持久请求身份使重复启动不重复创建对象。所有后台循环随 context 取消并等待退出。
