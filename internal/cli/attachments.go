@@ -26,6 +26,7 @@ func runAttachment(ctx context.Context, e *Env, args []string) error {
 		return usagef("attachment download <file_id> --out <path>")
 	}
 	fs := newFlags(e, "attachment download")
+	asJSON := fs.Bool("json", false, "print saved path as JSON")
 	out := fs.String("out", "", "save the original file at this path")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
@@ -45,16 +46,24 @@ func runAttachment(ctx context.Context, e *Env, args []string) error {
 	if err := c.downloadAttachment(ctx, pos[0], path); err != nil {
 		return err
 	}
+	if *asJSON {
+		return (owner{e: e, json: true}).printJSON(map[string]string{"path": path})
+	}
 	_, err = fmt.Fprintln(e.Stdout, path)
 	return err
 }
 
 func (c *client) downloadAttachment(ctx context.Context, id, path string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(c.server, "/")+"/api/v1/conversation/attachments/"+url.PathEscape(id), nil)
+	return c.downloadFile(ctx, "/api/v1/conversation/attachments/"+url.PathEscape(id), path)
+}
+
+func (c *client) downloadFile(ctx context.Context, route, path string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(c.server, "/")+route, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("X-Tend-Deployment-ID", c.deploymentID)
 	// File transfers follow caller cancellation, not the ordinary JSON RPC
 	// deadline. Keep the configured transport and redirect behavior unchanged.
 	client := *c.http
@@ -107,4 +116,19 @@ func (c *client) downloadAttachment(ctx context.Context, id, path string) error 
 		return err
 	}
 	return errors.Join(dir.Sync(), dir.Close())
+}
+
+func downloadOwnerFile(ctx context.Context, e *Env, c *client, route, out string, asJSON bool) error {
+	path, err := filepath.Abs(out)
+	if err != nil {
+		return err
+	}
+	if err := c.downloadFile(ctx, route, path); err != nil {
+		return err
+	}
+	if asJSON {
+		return (owner{e: e, json: true}).printJSON(map[string]string{"path": path})
+	}
+	_, err = fmt.Fprintln(e.Stdout, path)
+	return err
 }

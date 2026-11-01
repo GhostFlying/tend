@@ -17,18 +17,10 @@ import (
 var repositoryName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 // RepositoryBinding contains local provider identity and a verified remote.
-type RepositoryBinding struct {
-	Repo      string `json:"repo"`
-	RemoteURL string `json:"remote_url"`
-	Orca      string `json:"orca,omitempty"`
-}
+type RepositoryBinding = protocol.LocalRepositoryBinding
 
 // BindRepositoryRequest is persisted under its identity before publication.
-type BindRepositoryRequest struct {
-	RequestID        string            `json:"request_id"`
-	ExpectedRevision int64             `json:"expected_control_revision"`
-	Binding          RepositoryBinding `json:"binding"`
-}
+type BindRepositoryRequest = protocol.BindLocalRepositoryRequest
 
 type bindingReceipt struct {
 	Request  BindRepositoryRequest `json:"request"`

@@ -15,6 +15,7 @@ import (
 )
 
 var issueOperations = map[string]string{
+	"set-status":       "issues.set_status",
 	"request-owner":    protocol.OpIssueRequestOwner,
 	"refresh-delivery": "issues.refresh_delivery", "followups-create": "issues.followups_create", "followups-update": "issues.followups_update", "followups-pause": "issues.followups_pause", "followups-resume": "issues.followups_resume", "followups-cancel": "issues.followups_cancel", "followups-trigger": "issues.followups_trigger",
 
@@ -58,8 +59,13 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	request := fs.String("request-id", "", "reuse the original request identity with its original revision, epoch and payload")
 	revision := fs.Int64("revision", -1, "expected control revision; first requests may read the current value")
 	epoch := fs.Int64("epoch", -1, "expected assignment epoch; first requests may read the current value")
+	reason := fs.String("reason", "", "reason retained in the operation record")
 	dry := fs.Bool("dry-run", false, "print the complete original Envelope without sending it")
 	project := fs.String("project", "", "issue project filter")
+	board := fs.Bool("board", false, "use the global board projection")
+	boardStatus := fs.String("board-status", "", "board work status")
+	assigneeKind := fs.String("assignee-kind", "", "owner or agent filter")
+	assigneeRef := fs.String("assignee-ref", "", "exact assignee identity")
 	parent := fs.String("parent", "", "list direct children of this issue")
 	roots := fs.Bool("roots", false, "list root issues")
 	state := fs.String("state", "", "issue state filter")
@@ -74,6 +80,17 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	if *revision == 0 || *revision < -1 || *epoch == 0 || *epoch < -1 {
 		return usagef("revision and epoch must be positive when provided")
 	}
+	if action == "list" {
+		if *board && *parent != "" {
+			return usagef("the global board contains root Issues; parent filtering requires a non-board list")
+		}
+		if (*boardStatus != "" || *assigneeKind != "" || *assigneeRef != "") && !*board {
+			return usagef("board-status and assignee filters require --board")
+		}
+		if (*assigneeKind != "") != (*assigneeRef != "") {
+			return usagef("assignee-kind and assignee-ref must be supplied together")
+		}
+	}
 	c, err := e.client(protocol.ScopeOwner)
 	if err != nil {
 		return err
@@ -85,6 +102,18 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 			return usagef("issue list takes no ID and at most one of --roots/--parent")
 		}
 		query := url.Values{"limit": {strconv.Itoa(*limit)}}
+		if *board {
+			query.Set("board", "true")
+		}
+		if *boardStatus != "" {
+			query.Set("board_status", *boardStatus)
+		}
+		if *assigneeKind != "" {
+			query.Set("assignee_kind", *assigneeKind)
+		}
+		if *assigneeRef != "" {
+			query.Set("assignee_ref", *assigneeRef)
+		}
 		if *project != "" {
 			query.Set("project", *project)
 		}
@@ -247,7 +276,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	} else if !protocol.ValidID(protocol.PrefixRequest, *request) {
 		return usagef("request-id must be a valid request identity")
 	}
-	env := protocol.Envelope{RequestID: *request, Operation: operation, Target: target, Payload: body}
+	env := protocol.Envelope{RequestID: *request, Operation: operation, Target: target, Payload: body, Reason: *reason}
 	if action != "create" {
 		value := *revision
 		env.ExpectedControlRevision = &value
@@ -266,7 +295,14 @@ func issueInput(e *Env, data, file string) ([]byte, error) {
 		return []byte(data), nil
 	}
 	if file == "-" {
-		return io.ReadAll(io.LimitReader(e.Stdin, 1<<20))
+		raw, err := io.ReadAll(io.LimitReader(e.Stdin, (28<<20)+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) > 28<<20 {
+			return nil, usagef("JSON input exceeds the largest owner API request limit")
+		}
+		return raw, nil
 	}
 	if file != "" {
 		return os.ReadFile(file)
@@ -302,7 +338,7 @@ func sendIssueEnvelope(ctx context.Context, o owner, env protocol.Envelope) erro
 		return errors.New("the server sent no outcome")
 	}
 	switch response.Operation.Status {
-	case protocol.OpSucceeded:
+	case protocol.OpSucceeded, protocol.OpAccepted:
 		return nil
 	case protocol.OpFailed:
 		if response.Operation.Error != nil {

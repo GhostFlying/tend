@@ -19,6 +19,11 @@ func runAgentCategory(ctx context.Context, e *Env, args []string) error {
 		return usagef("category expects put|show <id> [--title <text>] [--description <text>] [--state active|retired]")
 	}
 	fs := newFlags(e, "category "+args[0])
+	fs.Bool("json", true, "print structured response")
+	reason := fs.String("reason", "", "reason retained in the operation record")
+	dry := fs.Bool("dry-run", false, "print original Envelope")
+	data := fs.String("data", "", "complete category payload")
+	file := fs.String("file", "", "payload JSON file; - reads stdin")
 	title := fs.String("title", "", "classification title; required for put")
 	description := fs.String("description", "", "classification description")
 	state := fs.String("state", "active", "active or retired; classification does not grant execution permission")
@@ -31,7 +36,14 @@ func runAgentCategory(ctx context.Context, e *Env, args []string) error {
 	if len(pos) != 1 {
 		return usagef("category %s requires one ID", args[0])
 	}
-	if args[0] == "put" && (strings.TrimSpace(*title) == "" || (*state != "active" && *state != "retired")) {
+	input, err := issueInput(e, *data, *file)
+	if err != nil {
+		return err
+	}
+	if args[0] == "show" && (len(input) > 0 || *dry || *requestID != "" || *revision != -1) {
+		return usagef("show takes no mutation input")
+	}
+	if args[0] == "put" && len(input) == 0 && (strings.TrimSpace(*title) == "" || (*state != "active" && *state != "retired")) {
 		return usagef("put requires --title and --state active|retired")
 	}
 	if args[0] == "put" && *requestID != "" && *revision < 0 {
@@ -42,7 +54,9 @@ func runAgentCategory(ctx context.Context, e *Env, args []string) error {
 		return err
 	}
 	var current protocol.AgentCategory
-	err = c.do(ctx, "GET", "/api/v1/categories/"+url.PathEscape(pos[0]), nil, &current)
+	if args[0] == "show" || *revision < 0 {
+		err = c.do(ctx, "GET", "/api/v1/categories/"+url.PathEscape(pos[0]), nil, &current)
+	}
 	if args[0] == "show" {
 		if err != nil {
 			return err
@@ -65,7 +79,13 @@ func runAgentCategory(ctx context.Context, e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	env := protocol.Envelope{RequestID: *requestID, Operation: "categories.put", Target: protocol.Target{Type: "category", ID: pos[0]}, ExpectedControlRevision: revision, Payload: payload}
+	if len(input) > 0 {
+		payload = input
+	}
+	env := protocol.Envelope{RequestID: *requestID, Operation: "categories.put", Target: protocol.Target{Type: "category", ID: pos[0]}, ExpectedControlRevision: revision, Payload: payload, Reason: *reason}
+	if *dry {
+		return (owner{e: e, json: true}).printJSON(env)
+	}
 	fmt.Fprintf(e.Stderr, "Category request %s; revision %d\n", *requestID, *revision)
 	var response protocol.APIResponse
 	err = c.do(ctx, "POST", "/api/v1/ops", env, &response)

@@ -51,8 +51,8 @@ func TestConversationHandoffLostAnswerKeepsRequestAndUnknownIsNotRepeated(t *tes
 		_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: "request", Status: protocol.OpUnknown}})
 	})
 	te := newTestEnv(t, f.srv.URL)
-	if code := te.main("conversation", "handoff"); code != exitOK {
-		t.Fatalf("handoff=%d %s", code, te.errOut)
+	if code := te.main("conversation", "handoff"); code != exitError {
+		t.Fatalf("unknown handoff=%d %s", code, te.errOut)
 	}
 	sent := f.seen("POST /api/v1/ops")
 	if len(sent) != 2 || string(sent[0].body) != string(sent[1].body) || !strings.Contains(te.out.String(), "unknown") {

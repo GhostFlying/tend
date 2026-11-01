@@ -19,6 +19,12 @@ import (
 func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 	fs := newFlags(e, cmd)
 	asJSON := fs.Bool("json", false, "print the server's answer as JSON")
+	request := fs.String("request-id", "", "original request ID; requires original complete payload")
+	revision := fs.Int64("revision", -1, "original expected control revision")
+	data := fs.String("data", "", "complete frozen operation payload")
+	file := fs.String("file", "", "payload JSON file; - reads stdin")
+	dry := fs.Bool("dry-run", false, "print the exact original Envelope without sending")
+	reason := fs.String("reason", "", "control reason")
 	var follow *bool
 	var note, kind, project *string
 	switch cmd {
@@ -51,6 +57,48 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 		return err
 	}
 	o := owner{e: e, c: c, json: *asJSON}
+	o.dry = *dry
+	o.reason = *reason
+	if *revision < -1 {
+		return usagef("revision must be nonnegative")
+	}
+	body, err := issueInput(e, *data, *file)
+	if err != nil {
+		return err
+	}
+	if len(body) > 0 || *request != "" || *revision >= 0 {
+		op, ok := map[string]string{"decide": "decisions.respond", "retry": "actions.create", "pause": "control.set_mode", "resume": "control.set_mode", "takeover": "control.set_mode", "rate": "tasks.rate", "cancel": "tasks.cancel"}[cmd]
+		if !ok || len(pos) < 1 {
+			return usagef("this read command takes no mutation input")
+		}
+		if len(body) == 0 {
+			return usagef("recovery requires the original complete payload with --data or --file")
+		}
+		target := protocol.Target{Type: "task", ID: pos[0]}
+		if cmd == "decide" {
+			target.Type = "decision"
+			if *revision >= 0 {
+				return usagef("decision version belongs in the original payload")
+			}
+		} else if *revision < 0 {
+			return usagef("supply the original --revision")
+		}
+		if *request == "" {
+			*request = e.IDs.New(protocol.PrefixRequest)
+		}
+		if !protocol.ValidID(protocol.PrefixRequest, *request) {
+			return usagef("malformed request ID")
+		}
+		env := protocol.Envelope{RequestID: *request, Operation: op, Target: target, Payload: body, Reason: *reason}
+		if *revision >= 0 {
+			env.ExpectedControlRevision = revision
+		}
+		if *dry {
+			return o.printJSON(env)
+		}
+		return sendDirectEnvelope(ctx, o, env)
+	}
+
 	switch cmd {
 	case "status":
 		return o.status(ctx, *project)
@@ -83,9 +131,11 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 }
 
 type owner struct {
-	e    *Env
-	c    *client
-	json bool
+	e      *Env
+	c      *client
+	json   bool
+	dry    bool
+	reason string
 }
 
 func (o owner) printJSON(v any) error {
@@ -448,6 +498,12 @@ func (o owner) writeResult(ctx context.Context, op string, target protocol.Targe
 		return nil, err
 	}
 	env := protocol.Envelope{RequestID: o.e.IDs.New(protocol.PrefixRequest), Operation: op, Target: target, ExpectedControlRevision: revision, Payload: b}
+	env.Reason = o.reason
+	if o.dry {
+		return nil, o.printJSON(env)
+	}
+	fmt.Fprintf(o.e.Stderr, "request %s (%s); inspect with tend request show %s; preserve the original Envelope for retry\n", env.RequestID, env.Operation, env.RequestID)
+
 	var res protocol.APIResponse
 	// A lost answer is resent once under the same request ID: the server
 	// returns the recorded outcome instead of acting twice.
@@ -464,12 +520,15 @@ func (o owner) writeResult(ctx context.Context, op string, target protocol.Targe
 	if opr == nil {
 		return nil, errors.New("the server sent no outcome")
 	}
-	if opr.Status == protocol.OpFailed {
+	if opr.Status != protocol.OpSucceeded && opr.Status != protocol.OpAccepted {
 		if res.Current != nil && !o.json {
 			fmt.Fprintln(o.e.Stdout, "The task changed since it was read; it is now:")
 			printSummary(o.e.Stdout, *res.Current)
 		}
-		return nil, opr.Error
+		if opr.Error != nil {
+			return nil, opr.Error
+		}
+		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "request %s is %s; inspect the original request before any new action", env.RequestID, opr.Status)
 	}
 	if !o.json {
 		fmt.Fprintf(o.e.Stdout, "%s: %s (request %s)\n", op, opr.Status, opr.RequestID)

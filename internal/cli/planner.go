@@ -23,6 +23,7 @@ func runPlanningRecord(ctx context.Context, e *Env, args []string, deadline bool
 	}
 	action := args[0]
 	fs := newFlags(e, noun+" "+action)
+	fs.Bool("json", true, "print structured response")
 	data := fs.String("data", "", "inline payload or original Envelope")
 	file := fs.String("file", "", "JSON file; - reads stdin")
 	request := fs.String("request-id", "", "original request for retry")
