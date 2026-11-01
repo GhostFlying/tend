@@ -122,8 +122,8 @@ export function Inbox({
         value={kind}
         items={[
           { value: "", label: "全部" },
-          { value: "decision", label: "待决策" },
-          { value: "action", label: "待行动" },
+          { value: "decision", label: "需要你决定" },
+          { value: "action", label: "需要你处理" },
           { value: "information", label: "通知" },
         ]}
         onChange={(key) => {
@@ -675,9 +675,12 @@ export function attentionHeading(item: AttentionView): string {
 
 function kindLabel(kind: string): string {
   return (
-    ({ decision: "待决策", action: "待行动", information: "通知" } as Record<string, string>)[
-      kind
-    ] ?? kind
+    (
+      { decision: "需要你决定", action: "需要你处理", information: "通知" } as Record<
+        string,
+        string
+      >
+    )[kind] ?? kind
   );
 }
 function statusLabel(status: string): string {
