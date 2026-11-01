@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/serverkit"
@@ -1093,5 +1094,138 @@ func TestSandboxInboxPendingHistoryAndRetry(t *testing.T) {
 	client.call(http.MethodGet, "/api/v1/attentions/"+a.AttentionID, nil, &answered)
 	if answered.Status != "resolved" || answered.DecisionID != a.DecisionID || answered.TaskContext == nil || answered.TaskContext.HasCurrentArtifact || answered.TaskContext.CurrentArtifactAccepted {
 		t.Fatal("retry lost the original question or current delivery evidence", answered)
+	}
+}
+
+func TestSandboxUpgradeRetainsClaimedManagerSnapshot(t *testing.T) {
+	ctx := t.Context()
+	clock := testkit.NewClock()
+	ledger, err := store.Open(ctx, filepath.Join(t.TempDir(), "tend.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ledger.Close() })
+	ids := testkit.NewIDGen(clock, 42)
+	application := app.New(ledger, ids, clock.Now)
+	owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: localOwner, Client: "upgrade-test"}
+	runner := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: hostID}
+	execute := func(principal protocol.Principal, command app.Command, target protocol.Target, payload any, revision *int64) protocol.Operation {
+		t.Helper()
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		op, err := application.Execute(ctx, principal, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: command.Operation(), Target: target, Payload: raw, ExpectedControlRevision: revision}, command)
+		if err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatalf("%s: %+v %v", command.Operation(), op, err)
+		}
+		return op
+	}
+	execute(protocol.Principal{Kind: protocol.PrincipalSystem}, app.SyncConfig{}, protocol.Target{Type: "config"}, app.ConfigPayload{Hosts: []app.HostConfig{{HostID: hostID, OS: "linux", Arch: "amd64", Slots: 4, TokenHash: fmt.Sprintf("%064x", 1), Nodes: []string{"tag:local"}, Worker: protocol.WorkerAppServer}}, Projects: []app.ProjectConfig{{Name: "demo-web", Title: "Demo"}}}, nil)
+	if err := seedCategories(ctx, application, ids); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := sandboxManagerConfiguration(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := legacy.Projection.Agents[0]
+	pin := protocol.RunExecutionPin{Purpose: "issue_manager", Identity: agent.Identity, AgentRevision: agent.Revision, Runtime: agent.Binding, InventoryRevision: int64(legacy.Revision), SnapshotID: legacy.SnapshotID, PublicSHA256: legacy.PublicSHA256, Worker: protocol.WorkerAppServer, Profile: protocol.ExecutionProfile{Model: model}}
+	runtime := &protocol.RunnerRuntime{InstanceID: "upgrade-test", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, JournalVersion: 13, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityAgentInventory, protocol.CapabilityAgentExecution, protocol.CapabilityIssueManager, protocol.CapabilityIssueOwner}, AgentExecutors: []protocol.AgentExecutor{{Available: true, Pin: pin}}}
+	host := protocol.Target{Type: "host", ID: hostID}
+	execute(runner, app.Hello{}, host, protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil)
+	serverRevision := int64(0)
+	register := func(config protocol.LocalAgentConfiguration) {
+		t.Helper()
+		op := execute(runner, app.RegisterAgentInventory{}, host, protocol.RegisterAgentInventoryPayload{Runtime: runtime, LocalRevision: int64(config.Revision), SnapshotID: config.SnapshotID, PublicSHA256: config.PublicSHA256, Projection: *config.Projection}, &serverRevision)
+		var receipt protocol.AgentInventoryReceipt
+		if err := json.Unmarshal(op.Result, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		serverRevision = receipt.ServerRevision
+	}
+	register(legacy)
+	created := execute(owner, app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: plan("Retained manager", "demo-web"), Manager: &protocol.RequestIssueManagerPayload{Reason: "Base manager responsibility"}}, nil)
+	var issue protocol.Issue
+	if err := json.Unmarshal(created.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	claim := execute(runner, app.Claim{}, host, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil)
+	var result struct {
+		Assignment protocol.Assignment `json:"assignment"`
+	}
+	if err := json.Unmarshal(claim.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Assignment.Manager == nil || result.Assignment.Execution == nil || *result.Assignment.Execution != pin {
+		t.Fatalf("v1 was not claimed: %+v", result.Assignment)
+	}
+	fake := testkit.NewHarness()
+	fake.Turn = func(thread *testkit.FakeThread, turn string, _ harness.TurnInput) string {
+		thread.Say(turn, "reply", "retained owner answered")
+		return "completed"
+	}
+	executions := &scriptedExecutions{sessions: &scriptedSessions{harness: fake, ctx: ctx}}
+	current, err := executions.configuration(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := executions.Observe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Revision != 2 {
+		t.Fatal(current)
+	}
+	for _, executor := range observed {
+		if executor.Pin.InventoryRevision != int64(current.Revision) {
+			t.Fatal(executor)
+		}
+	}
+	runtime.Sequence++
+	runtime.AgentExecutors = observed
+	register(current)
+	if err := ledger.Read(ctx, func(tx *store.ReadTx) error {
+		retained, err := store.GetIssueManagerTask(ctx, tx.Q(), result.Assignment.TaskID)
+		if err != nil {
+			return err
+		}
+		if retained.Pin == nil || *retained.Pin != pin {
+			t.Fatal("registration rewrote the frozen manager", retained)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := executions.ResolveManager(ctx, pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := resolved.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	thread, err := session.StartThread(ctx, harness.ThreadConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := thread.StartTurn(ctx, harness.TurnInput{UserMessageID: "retained-source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for event := range thread.Events() {
+		if event.Kind == harness.EventTurnCompleted {
+			break
+		}
+	}
+	receipt, found, err := thread.(harness.TurnReader).FindTurn(ctx, "retained-source", turn)
+	if err != nil || !found || len(receipt.Messages) != 1 || receipt.Messages[0].Text != "retained owner answered" {
+		t.Fatalf("retained reply: %+v %v", receipt, err)
+	}
+	changed := pin
+	changed.Profile.Model = "another-model"
+	if _, err := executions.ResolveManager(ctx, changed); err == nil {
+		t.Fatal("legacy resolution accepted a different frozen profile")
 	}
 }
