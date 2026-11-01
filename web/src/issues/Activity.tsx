@@ -85,15 +85,14 @@ export function IssueActivity({
       )
         return false;
       scrollportSize.current = { width: node.clientWidth, height: node.clientHeight };
-      if (
-        following.current ||
-        reading.followsLatest() ||
-        node.scrollHeight - node.scrollTop - node.clientHeight < 100
-      ) {
+      if (following.current || reading.followsLatest()) {
         correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
         setNewItems(false);
       } else if (readingAnchor.current)
         correctScroll(node, () => restoreAnchor(node, readingAnchor.current!));
+      // A resize can enqueue a scroll event without changing scrollTop.
+      // That event must not reinterpret paused intent using the new height.
+      expectedScroll.current = node.scrollTop;
       readingAnchor.current = captureAnchor(node);
       return true;
     };
@@ -105,9 +104,11 @@ export function IssueActivity({
       expectedScroll.current = null;
       if (!programmatic && pagination.current && !pagination.current.ready)
         pagination.current = null;
-      following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
-      if (following.current) reading.followLatest();
-      else reading.pauseFollowing();
+      if (!programmatic) {
+        following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
+        if (following.current) reading.followLatest();
+        else reading.pauseFollowing();
+      }
       readingAnchor.current = captureAnchor(node);
     };
     let frame = 0;
@@ -297,11 +298,7 @@ export function IssueActivity({
         readingAnchor.current = captureAnchor(node);
       });
     } else if (node && previousContent.current && previousContent.current !== latestContent) {
-      if (
-        following.current ||
-        reading.followsLatest() ||
-        node.scrollHeight - node.scrollTop - node.clientHeight < 100
-      ) {
+      if (following.current || reading.followsLatest()) {
         correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
         setNewItems(false);
       } else {
