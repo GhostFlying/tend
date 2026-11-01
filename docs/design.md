@@ -143,6 +143,7 @@
 | D137 | Server 统一调度持久观察、有限 cron 和单 Issue webhook；事件来源、分发及消费只读可追踪，完整 Issue/自动化 CLI 共用原业务用例与请求身份；独立接收入口及私有凭据，不改变 runner wire 2/1。见 docs/plans/unified-issue-triggers.md。 | 已实现，未发布 |
 | D138 | TraeX 流内限流的 `other` 终态仅通过绑定原 session/turn 的完整原始记录和精确 provider 诊断补足分类；原生根必须已失败且操作收敛。限流等待 30 秒再沿同 run/会话续接，截止时间与既有一次预算持久化；未知发送先对账，耗尽后交由 Issue owner。wire 保持 2/1。见 docs/plans/traex-terminal-rate-limit.md。 | 已实现 |
 | D139 | 复用目录的 commit 任务缺少继承改动授权时，由 runner 上报明确未启动的有界结构化诊断；当前 Issue owner 修正同一任务合同，保留历史 run，不自动吸收改动或生成用户重试决定。独立 preparation_required 阻塞不能被主机健康扫描清除；旧协议、未知及旧责任仍走原围栏。见 docs/plans/workspace-preparation-recovery.md。 | 已实现，未发布 |
+| D140 | 在 D136 的 owner 责任之上，Issue 对话始终面向负责 Agent：默认请求 issue-manager 类别；同事务建立待领取对话，owner 消息保留原队列，领取后投递；退回 owner 不转发或重发已提交的 owner 消息。看板追加可选只读待领取类别字段，Web 明示待领取及一键委派，沙盒经真实 runner 协议领取负责人。见 docs/plans/web-ui-overhaul-s10.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -508,3 +509,8 @@ Runner 在实际工作目录适配器中构造有类型的准备失败，记录 
 只有当前普通 Agent owner、有效责任代次与当前执行合同、活动 Issue/托管任务下的确定准备缺项，进入 `preparation_required`。任务阻塞但不排队重试、不打开面向用户的 retry 决定；持久事件仅路由到该 Issue 的现有负责人。该阻塞与主机不可用独立，健康检查不能自动解除。旧 spec/代次、取消、暂停及 unknown 保持既有控制和对账规则，不自动转交主 Agent。
 
 `tasks_read` 的 run 投影携带诊断，owner API/CLI 共用同一事实。具名负责人的实际工具 schema 与常驻指令均说明复用和提交授权；创建受理不宣称 worker 已启动。Runner 承载的负责人可在当前准入会话和责任代次中读取本 Issue 的 run 消息，不能跨 Issue、伪造其他 run 或沿用旧 assignment；不增加发送和执行权限。前端只补充新阻塞标签及生成类型，不改变页面交互。
+## D140：Issue 对话始终面向负责 Agent
+
+在 D136 的 owner 责任之上，Web 新建及类别交接使用显式 owner 合同；历史 manager 请求不静默升级。新建 Issue 默认请求活动的 issue-manager 能力类别，不可用时退到首个活动类别，无类别时由 owner 负责；显式选择及恢复原请求不被默认值覆盖。普通 Agent 的 owner 请求与历史类别 manager 请求共用发布路径，在同一事务建立稳定负责人会话，待领取可提交消息但 admission 继续等待真实领取，不提前选择执行者或启动会话。
+
+退回 owner 时尚未投递的 owner 消息保留原队列及撤回能力，再委派后送达；sent 与 unknown 沿用核对，不重发。owner 负责时不提供私人备注输入，提供持久请求的一键默认类别交接及完整交接入口。沙盒通过现有 ManagerExecutionResolver 承接真实 runner 领取，正式 runner 行为与 wire 不变。看板的 pending_manager_category_id 是可选只读派生字段，避免 Web 按卡片读取完整详情；不改变 runner wire、控制入口或迁移。实施见 [S10 计划](plans/web-ui-overhaul-s10.md)。

@@ -126,6 +126,16 @@ func (c RequestIssueManager) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 			if existing.CategoryID != p.CategoryID {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "change manager category through an explicit replacement")
 			}
+			conversation, err := ensureCanonicalManagerConversation(ctx, tx, issue, x.Now.UnixMilli())
+			if err != nil {
+				return Outcome{}, err
+			}
+			if existing.ConversationID == "" {
+				if _, err := tx.Exec(ctx, `UPDATE issue_manager_tasks SET conversation_id=? WHERE task_id=?`, conversation, existing.TaskID); err != nil {
+					return Outcome{}, err
+				}
+				existing.ConversationID = conversation
+			}
 			return Outcome{Result: existing}, nil
 		}
 		retiring = &existing
@@ -180,6 +190,10 @@ func (c RequestIssueManager) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 		issue = next
 	}
 	now := x.Now.UnixMilli()
+	conversation, err := ensureCanonicalManagerConversation(ctx, tx, issue, now)
+	if err != nil {
+		return Outcome{}, err
+	}
 	id := x.IDs.New(protocol.PrefixTask)
 	spec := protocol.IssueManagerSpec{AgentID: p.AgentID, SourceContentRevision: sourceContent, SourceAssociationRevision: sourceAssociation, IssueID: issue.IssueID, CategoryID: p.CategoryID, ExpectedAssignmentEpoch: issue.AssignmentEpoch, SourceMessageID: p.SourceMessageID, Reason: p.Reason}
 	ownerPolicy, err := store.IssueUsesOwnerExecution(ctx, tx.Q(), issue.IssueID)
@@ -202,7 +216,7 @@ func (c RequestIssueManager) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 	if err = tx.InsertTaskIssueOwner(ctx, id, issue.IssueID); err != nil {
 		return Outcome{}, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO issue_manager_tasks(task_id,issue_id,category_id,expected_epoch,source_message_id,request_id,created_at,updated_at,handoff_id) VALUES(?,?,?,?,?,?,?,?,?)`, id, issue.IssueID, p.CategoryID, issue.AssignmentEpoch, p.SourceMessageID, x.Env.RequestID, now, now, handoff)
+	_, err = tx.Exec(ctx, `INSERT INTO issue_manager_tasks(task_id,issue_id,category_id,expected_epoch,source_message_id,request_id,created_at,updated_at,handoff_id,conversation_id) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, issue.IssueID, p.CategoryID, issue.AssignmentEpoch, p.SourceMessageID, x.Env.RequestID, now, now, handoff, conversation)
 	if err != nil {
 		return Outcome{}, err
 	}
