@@ -1821,7 +1821,8 @@
         "waiting_approval",
         "acceptance_env_unavailable",
         "budget_exhausted",
-        "workspace_unavailable"
+        "workspace_unavailable",
+        "preparation_required"
       ],
       "title": "BlockReason",
       "type": "string"
@@ -7274,6 +7275,31 @@
       "title": "PlannerEntry",
       "type": "object"
     },
+    "PreparationChange": {
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "type": "string"
+        },
+        "mount": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mount",
+        "path",
+        "status",
+        "head"
+      ],
+      "title": "PreparationChange",
+      "type": "object"
+    },
     "PresentAttentionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -8200,6 +8226,61 @@
       "title": "RunObserved",
       "type": "string"
     },
+    "RunPreparationFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "change_count": {
+          "type": "integer"
+        },
+        "changes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/PreparationChange"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "required_field": {
+          "type": "string"
+        },
+        "source_task_id": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "worker_started": {
+          "type": "boolean"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "code",
+        "worker_started",
+        "workspace_id",
+        "source_task_id",
+        "required_field",
+        "changes",
+        "change_count",
+        "truncated"
+      ],
+      "title": "RunPreparationFailure",
+      "type": "object"
+    },
     "RunRole": {
       "enum": [
         "implement",
@@ -8271,6 +8352,9 @@
         },
         "observed": {
           "$ref": "#/definitions/RunObserved"
+        },
+        "preparation": {
+          "$ref": "#/definitions/RunPreparationFailure"
         },
         "role": {
           "$ref": "#/definitions/RunRole"

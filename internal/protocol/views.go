@@ -97,9 +97,10 @@ type ActionView struct {
 
 // RunView is a run of a task.
 type RunView struct {
-	RunID      string  `json:"run_id"`
-	Role       RunRole `json:"role"`
-	Generation int64   `json:"generation"`
+	Preparation *RunPreparationFailure `json:"preparation,omitempty"`
+	RunID       string                 `json:"run_id"`
+	Role        RunRole                `json:"role"`
+	Generation  int64                  `json:"generation"`
 	// SpecVersion is the immutable spec of the run's action. A generation
 	// alone cannot identify it, since each spec starts at generation one.
 	SpecVersion int64       `json:"spec_version,omitempty"`

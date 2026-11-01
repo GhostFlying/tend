@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -51,5 +52,28 @@ func TestNamedCoordinationSchemasDescribeWritableContracts(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestNamedOwnerSchemasCarryWorkspaceRecoveryInstructions(t *testing.T) {
+	found := 0
+	for _, spec := range NamedSpecs(agentconfig.IssueManager) {
+		if spec.Name != "issues_create_task" && spec.Name != "issues_update_task" {
+			continue
+		}
+		found++
+		var root map[string]any
+		if err := json.Unmarshal(spec.InputSchema, &root); err != nil {
+			t.Fatal(err)
+		}
+		for field, text := range map[string]string{"mode": "Omitted means new", "source_task_id": "follow_up", "include_existing_changes": "issues_update_task"} {
+			description, _ := planningSchemaAt(t, root, "payload", "spec", "workspace", field)["description"].(string)
+			if !strings.Contains(description, text) {
+				t.Fatalf("%s lost %s instructions in actual named tool schema", spec.Name, field)
+			}
+		}
+	}
+	if found != 2 {
+		t.Fatal("named execution tools missing", found)
 	}
 }

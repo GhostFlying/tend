@@ -81,12 +81,15 @@ const (
 	// BlockWorkspaceUnavailable: the host holding the task's workspace is
 	// retired or has not been seen for too long (D62).
 	BlockWorkspaceUnavailable BlockReason = "workspace_unavailable"
+	// BlockPreparationRequired needs an explicit contract correction, not a
+	// host-health recovery or a repeated dispatch of the same action.
+	BlockPreparationRequired BlockReason = "preparation_required"
 )
 
 // Valid reports whether r is a known block reason.
 func (r BlockReason) Valid() bool {
 	return slices.Contains([]BlockReason{BlockNone, BlockWaitingResource, BlockWaitingDecision, BlockWaitingApproval, BlockAcceptanceEnvUnavailable,
-		BlockBudgetExhausted, BlockWorkspaceUnavailable}, r)
+		BlockBudgetExhausted, BlockWorkspaceUnavailable, BlockPreparationRequired}, r)
 }
 
 // RunObserved is the last confirmed fact about a run.

@@ -75,6 +75,7 @@ const waitLabels = {
   acceptance_env_unavailable: "等待验收环境恢复",
   budget_exhausted: "等待调整实现次数",
   workspace_unavailable: "等待工作区恢复",
+  preparation_required: "等待负责人修正执行配置",
   waiting_resource: "等待资源",
   none: "等待任务条件满足",
 };

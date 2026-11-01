@@ -109,8 +109,8 @@ var hostedMutations = []hostedMutation{
 	{"issues_dependencies", "Revise this Issue's explicit completion dependencies without adding task execution ownership.", "issue", protocol.SetIssueDependenciesPayload{}, app.CanonicalOwnerIssueCommand{Action: "dependencies"}, false},
 	{"issues_review_sources", "Review named late source shares on a terminal Issue while retaining its terminal history.", "issue", protocol.ReviewIssueSourcesPayload{}, app.CanonicalOwnerIssueCommand{Action: "review_sources"}, false},
 	{"issues_review_completions", "Acknowledge exact primary task completion facts on this Issue without changing acceptance results.", "issue", protocol.ReviewIssueCompletionsPayload{}, app.CanonicalOwnerIssueCommand{Action: "review_completions"}, false},
-	{"issues_create_task", "Execute your own Issue through a frozen task using your same Agent identity and explicit acceptance category. Another implementation Agent must first own a child Issue. Tend records a review child for independent acceptance; native subagents cannot bypass this contract.", "issue", protocol.CreateIssueTaskPayload{}, app.CanonicalOwnerTaskCreate{}, false},
-	{"issues_update_task", "Explicitly refresh an existing primary task contract through its current revision and Issue epoch; active runs retain their frozen contracts.", "task", protocol.UpdateIssueTaskPayload{}, app.CanonicalOwnerTaskUpdate{}, false},
+	{"issues_create_task", "Execute your own Issue through a frozen task using your same Agent identity and explicit acceptance category. Acceptance queues a contract; inspect execution state to establish worker startup. Another implementation Agent must first own a child Issue. Tend records a review child for independent acceptance; native subagents cannot bypass this contract.", "issue", protocol.CreateIssueTaskPayload{}, app.CanonicalOwnerTaskCreate{}, false},
+	{"issues_update_task", "Explicitly refresh an existing primary task contract through its current revision and Issue epoch; active runs retain their frozen contracts. Correct a confirmed prelaunch defect here after reading runs[].preparation and reviewing inherited changes; an unchanged spec never retries work. A changed owner epoch or execution identity requires a new contract.", "task", protocol.UpdateIssueTaskPayload{}, app.CanonicalOwnerTaskUpdate{}, false},
 	{"tasks_cancel", "Cancel only this Issue's primary task through its current revision and existing run reconciliation rules.", "task", hostedEmptyPayload{}, app.CancelTask{}, false},
 	{"tasks_rate", "Set an explicitly selected primary task priority through its current revision; this does not change its contract.", "task", protocol.RateTaskPayload{}, app.RateTask{}, true},
 	{"actions_create", "Request only an implement or independent acceptance generation for this Issue's primary task; native takeover and handback remain owner-only.", "task", protocol.CreateActionPayload{}, app.CreateAction{}, false},
@@ -128,6 +128,14 @@ func hostedMutationSchema(payload any) json.RawMessage {
 		panic(err)
 	}
 	root["definitions"] = body["definitions"]
+	if definitions, ok := body["definitions"].(map[string]any); ok {
+		if workspace, ok := definitions["OwnerTaskWorkspace"].(map[string]any); ok {
+			props := workspace["properties"].(map[string]any)
+			props["mode"].(map[string]any)["description"] = "Omitted means new. Set reuse explicitly with source_task_id to continue a known same-Issue resource. Reuse preserves files but does not authorize committing inherited edits."
+			props["source_task_id"].(map[string]any)["description"] = "Read the referenced source task and resource first; use only for explicit mode=reuse. A follow_up relation does not inherit its workspace or input files."
+			props["include_existing_changes"].(map[string]any)["description"] = "For a reused commit task, set true only after establishing that inherited dirty edits belong to the existing authorized goal. Preserving files alone does not include them in commit scope. Inspect runs[].preparation on a confirmed prelaunch failure, then correct the same task with issues_update_task. Never absorb unrelated edits or blindly repeat the unchanged contract."
+		}
+	}
 	delete(body, "definitions")
 	root["properties"].(map[string]any)["payload"] = body
 	root["properties"].(map[string]any)["effect_seq"].(map[string]any)["minimum"] = 1

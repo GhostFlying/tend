@@ -77,7 +77,7 @@ func (w Workspace) Validate() error {
 	switch w.ModeValue() {
 	case WorkspaceNew:
 		if w.SourceTaskID != "" || w.IncludeExistingChanges {
-			return invalid("new workspaces cannot reference an existing task or its changes")
+			return invalid("new workspaces cannot reference an existing task or its changes; continuing a source_task_id requires explicit workspace.mode=reuse and separate review of include_existing_changes for commit scope")
 		}
 	case WorkspaceTemporary:
 		if len(w.Mounts) != 0 || w.Template != "" || w.SourceTaskID != "" || w.IncludeExistingChanges {

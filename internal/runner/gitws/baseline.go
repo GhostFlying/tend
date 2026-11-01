@@ -88,7 +88,7 @@ func (w *Workspaces) baseline(ctx context.Context, as protocol.Assignment, home 
 		}
 		for _, m := range mounts {
 			if as.Workspace.Reused && commit && m.Status != "" && !spec.Workspace.Include {
-				return nil, fmt.Errorf("gitws: inherited changes require workspace.include_existing_changes before a commit task")
+				return nil, w.inheritedChanges(ctx, as, home, *st)
 			}
 		}
 		for _, m := range mounts {
@@ -122,7 +122,7 @@ func (w *Workspaces) baseline(ctx context.Context, as protocol.Assignment, home 
 			return nil, err
 		}
 		if as.Workspace.Reused && commit && status != "" && !spec.Workspace.Include {
-			return nil, fmt.Errorf("gitws: inherited changes require workspace.include_existing_changes before a commit task")
+			return nil, w.inheritedChanges(ctx, as, home, *st)
 		}
 		index, entries, err := w.baselineIndex(ctx, dir)
 		if err != nil {

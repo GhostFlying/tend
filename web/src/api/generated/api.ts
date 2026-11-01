@@ -11,7 +11,8 @@ export type BlockReason =
   | "waiting_approval"
   | "acceptance_env_unavailable"
   | "budget_exhausted"
-  | "workspace_unavailable";
+  | "workspace_unavailable"
+  | "preparation_required";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ControlMode".
@@ -3579,9 +3580,35 @@ export interface RunView {
   generation: number;
   host: string;
   observed: RunObserved;
+  preparation?: RunPreparationFailure;
   role: RunRole;
   run_id: string;
   spec_version?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunPreparationFailure".
+ */
+export interface RunPreparationFailure {
+  change_count: number;
+  changes: PreparationChange[] | null;
+  code: string;
+  phase: string;
+  required_field: string;
+  source_task_id: string;
+  truncated: boolean;
+  worker_started: boolean;
+  workspace_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "PreparationChange".
+ */
+export interface PreparationChange {
+  head: string;
+  mount: string;
+  path: string;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

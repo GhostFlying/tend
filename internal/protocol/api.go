@@ -38,7 +38,7 @@ func APIEnums() []any {
 		[]TaskLifecycle{TaskDraft, TaskQueued, TaskRunning, TaskWaiting, TaskAwaitingAcceptance, TaskChangesRequired, TaskCompleted, TaskCancelled},
 		[]ControlMode{ControlManaged, ControlPaused, ControlHumanControl},
 		[]Rating{RatingNone, RatingP0, RatingP1, RatingP2, RatingP3},
-		[]BlockReason{BlockNone, BlockWaitingResource, BlockWaitingDecision, BlockWaitingApproval, BlockAcceptanceEnvUnavailable, BlockBudgetExhausted, BlockWorkspaceUnavailable},
+		[]BlockReason{BlockNone, BlockWaitingResource, BlockWaitingDecision, BlockWaitingApproval, BlockAcceptanceEnvUnavailable, BlockBudgetExhausted, BlockWorkspaceUnavailable, BlockPreparationRequired},
 		[]RunObserved{RunStarting, RunRunning, RunWaiting, RunFinished, RunFailed, RunInterrupted, RunUnknown},
 		[]RunDesired{DesiredRun, DesiredPaused, DesiredStopped, DesiredHeld},
 		[]MessageState{MessageQueued, MessageAccepted, MessageProcessed, MessageProcessing, MessageReplied, MessageInterrupted, MessageFailed, MessageUnknown},
