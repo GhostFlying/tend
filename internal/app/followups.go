@@ -209,7 +209,12 @@ func scheduleFollowup(r *protocol.FollowupRule, now int64) {
 	case "every":
 		r.NextAt = now + r.EverySeconds*1000
 	case "cron":
-		c, err := domain.ParseCron(r.Cron, r.Timezone)
+		zone, err := time.LoadLocation(r.Timezone)
+		if err != nil {
+			r.NextAt = r.ExpiresAt
+			break
+		}
+		c, err := domain.ParseCron(r.Cron, zone)
 		if err != nil {
 			r.NextAt = r.ExpiresAt
 			break
@@ -375,8 +380,9 @@ func cancelPendingFollowups(ctx context.Context, x *Exec, tx *store.Tx, id strin
 }
 
 func normalizeFollowup(p protocol.FollowupSpec, now int64) (protocol.FollowupSpec, error) {
-	if _, err := time.LoadLocation(p.Timezone); err != nil {
+	zone, err := time.LoadLocation(p.Timezone)
+	if err != nil {
 		return p, protocol.Errorf(protocol.CodeInvalidRequest, "unknown IANA timezone")
 	}
-	return domain.NormalizeFollowup(p, now)
+	return domain.NormalizeFollowup(p, now, zone)
 }

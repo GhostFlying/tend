@@ -16,7 +16,11 @@ func TestCronCalendarAndDST(t *testing.T) {
 		{"0 0 1 * 7", "UTC", "2026-11-02T00:00:00Z", "2026-11-08T00:00:00Z"},
 	} {
 		t.Run(tt.expression+tt.after, func(t *testing.T) {
-			c, err := ParseCron(tt.expression, tt.zone)
+			zone, err := time.LoadLocation(tt.zone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := ParseCron(tt.expression, zone)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -31,16 +35,16 @@ func TestCronCalendarAndDST(t *testing.T) {
 
 func TestCronRejectsMalformedAndImpossibleSchedules(t *testing.T) {
 	for _, expression := range []string{"* * * *", "60 * * * *", "*/0 * * * *", "0 0 * * MON", "0 0 4-1 * *", "0 0 * 13 *", "@daily", "0 0 * * 8", "0 0 * * 1/2/3"} {
-		if _, err := ParseCron(expression, "UTC"); err == nil {
+		if _, err := ParseCron(expression, time.UTC); err == nil {
 			t.Errorf("accepted %q", expression)
 		}
 	}
-	for _, zone := range []string{"", "Local", "Not/AZone"} {
+	for _, zone := range []*time.Location{nil, time.Local, time.FixedZone("", 0)} {
 		if _, err := ParseCron("* * * * *", zone); err == nil {
-			t.Errorf("accepted zone %q", zone)
+			t.Errorf("accepted zone %v", zone)
 		}
 	}
-	c, _ := ParseCron("0 0 31 2 *", "UTC")
+	c, _ := ParseCron("0 0 31 2 *", time.UTC)
 	if _, err := c.Next(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err == nil {
 		t.Fatal("accepted impossible calendar date")
 	}

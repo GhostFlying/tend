@@ -15,17 +15,14 @@ type Cron struct {
 	zone   *time.Location
 }
 
-func ParseCron(expression, zone string) (Cron, error) {
+func ParseCron(expression string, zone *time.Location) (Cron, error) {
 	var c Cron
 	parts := strings.Fields(expression)
-	if len(parts) != 5 || zone == "" || zone == "Local" {
+	if len(parts) != 5 || zone == nil || zone.String() == "" || zone.String() == "Local" {
 		return c, fmt.Errorf("cron requires five numeric fields and an explicit IANA timezone")
 	}
 	var err error
-	c.zone, err = time.LoadLocation(zone)
-	if err != nil {
-		return c, fmt.Errorf("cron timezone: %w", err)
-	}
+	c.zone = zone
 	for i, bounds := range [][2]int{{0, 59}, {0, 23}, {1, 31}, {1, 12}, {0, 7}} {
 		c.fields[i], err = cronField(parts[i], bounds[0], bounds[1])
 		if err != nil {
