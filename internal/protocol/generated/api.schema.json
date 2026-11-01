@@ -3771,6 +3771,9 @@
         "notification_due_at": {
           "type": "integer"
         },
+        "pending_manager_category_id": {
+          "type": "string"
+        },
         "stage_title": {
           "type": "string"
         },

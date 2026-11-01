@@ -32,13 +32,14 @@ func (c IssueControl) BoardStatus() IssueWorkStatus {
 }
 
 type IssueBoardCard struct {
-	Status            IssueWorkStatus `json:"status"`
-	StageTitle        string          `json:"stage_title,omitempty"`
-	StagesTotal       int             `json:"stages_total"`
-	StagesDone        int             `json:"stages_done"`
-	Execution         ExecutionCounts `json:"execution"`
-	AttentionCount    int             `json:"attention_count"`
-	NotificationDueAt int64           `json:"notification_due_at,omitempty"`
+	PendingManagerCategoryID string          `json:"pending_manager_category_id,omitempty"`
+	Status                   IssueWorkStatus `json:"status"`
+	StageTitle               string          `json:"stage_title,omitempty"`
+	StagesTotal              int             `json:"stages_total"`
+	StagesDone               int             `json:"stages_done"`
+	Execution                ExecutionCounts `json:"execution"`
+	AttentionCount           int             `json:"attention_count"`
+	NotificationDueAt        int64           `json:"notification_due_at,omitempty"`
 }
 
 type SetIssueStatusPayload struct {

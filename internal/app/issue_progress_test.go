@@ -119,8 +119,8 @@ func TestIssueConversationPendingManagerKeepsActualBinding(t *testing.T) {
 	}
 	request(false)
 	queued := read(0)
-	if queued.Manager == nil || queued.Conversation == nil || queued.Conversation.CanSend || queued.Conversation.Reason != "manager_pending" || queued.Conversation.ConversationID != "" {
-		t.Fatal("unclaimed category was treated as an assigned conversation", queued)
+	if queued.Manager == nil || queued.Conversation == nil || !queued.Conversation.CanSend || queued.Conversation.Reason != "manager_pending" || queued.Conversation.ConversationID != "issue:"+issue.IssueID {
+		t.Fatal("pending manager did not expose its queued conversation", queued)
 	}
 	if len(queued.Tasks) != 0 || h.task(queued.Manager.TaskID).Kind != protocol.TaskKindIssueManager {
 		t.Fatal("management responsibility leaked into execution summaries", queued.Tasks)
@@ -149,8 +149,8 @@ func TestIssueConversationPendingManagerKeepsActualBinding(t *testing.T) {
 	issue = claimed.Issue
 	request(true)
 	fenced := read(0)
-	if fenced.Conversation == nil || fenced.Conversation.CanSend || fenced.Conversation.Reason != "manager_pending" || fenced.Conversation.ConversationID != claimed.Conversation.ConversationID {
-		t.Fatal("pending replacement changed the binding or allowed new sends", fenced)
+	if fenced.Conversation == nil || !fenced.Conversation.CanSend || fenced.Conversation.Reason != "manager_pending" || fenced.Conversation.ConversationID != claimed.Conversation.ConversationID {
+		t.Fatal("pending replacement did not preserve the queued conversation", fenced)
 	}
 	historical := read(1)
 	if historical.Manager != nil || historical.Conversation != nil {

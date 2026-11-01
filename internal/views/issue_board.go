@@ -140,7 +140,7 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 			}
 		}
 	}
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM attentions WHERE issue_id=? AND status='open' AND kind IN ('action','decision')`, issue.IssueID).Scan(&card.AttentionCount); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE((SELECT m.category_id FROM issue_manager_tasks m JOIN tasks t ON t.task_id=m.task_id WHERE m.issue_id=? AND m.state IN ('pending','assigned') AND COALESCE(m.host_id,'')='' AND t.lifecycle NOT IN ('completed','cancelled') LIMIT 1),'') FROM attentions WHERE issue_id=? AND status='open' AND kind IN ('action','decision')`, issue.IssueID, issue.IssueID).Scan(&card.AttentionCount, &card.PendingManagerCategoryID); err != nil {
 		return card, err
 	}
 	if issue.Assignee.Kind == protocol.IssueAssigneeAgent {

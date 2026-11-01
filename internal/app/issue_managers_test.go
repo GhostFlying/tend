@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func TestManagerPublicationAndClaimFreezeResponsibilityWithoutWorkspace(t *testing.T) {
@@ -430,4 +432,155 @@ func TestMainAgentCreatesCategoryManagerBeforeAnyRunnerIdentityIsSelected(t *tes
 	if err := json.Unmarshal(claimed.Result, &assignment); err != nil || assignment.Assignment.Manager == nil || assignment.Assignment.TaskID != published.TaskID {
 		t.Fatal("main's category task was not claimable", claimed, err)
 	}
+}
+
+func TestManagerPendingMessagesSurviveOwnerReturnAndClaim(t *testing.T) {
+	for _, test := range []struct{ cancel, ordinary bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		t.Run(fmt.Sprintf("cancel=%t/ordinary=%t", test.cancel, test.ordinary), func(t *testing.T) {
+			h, runtime := managerClaimHarness(t)
+			category, agent := protocol.DefaultIssueManagerCategory, ""
+			if test.ordinary {
+				h, runtime = pendingIssueOwnerHarness(t)
+				category, agent = "implementer", "linux-1/alpha"
+			}
+			issue := createCanonicalOwnerTestIssue(t, h)
+			publish := func() {
+				command := Command(RequestIssueManager{})
+				if test.ordinary {
+					command = RequestIssueOwner{}
+				}
+				op := h.exec(owner, h.env(command.Operation(), protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{CategoryID: category, AgentID: agent, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Delegate"}, rev(issue.Revision)), command)
+				if op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
+			publish()
+			conversation := "issue:" + issue.IssueID
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				view, err := views.CanonicalIssue(t.Context(), tx.Q(), issue.IssueID, 0)
+				if err != nil {
+					return err
+				}
+				board, err := views.CanonicalIssues(t.Context(), tx.Q(), views.CanonicalIssueFilter{Board: true})
+				if err != nil {
+					return err
+				}
+				if len(board.Items) != 1 || board.Items[0].Board.PendingManagerCategoryID != category {
+					t.Fatal("pending category missing from board projection", board)
+				}
+				if view.Conversation.ConversationID != conversation || !view.Conversation.CanSend || view.Conversation.Reason != "manager_pending" {
+					t.Fatal(view.Conversation)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if test.ordinary {
+				current := canonicalTaskIssue(t, h, issue.IssueID)
+				if current.AssignmentEpoch != issue.AssignmentEpoch || current.Assignee != issue.Assignee {
+					t.Fatal("pending owner publication changed responsibility", current)
+				}
+			}
+			submitHostedAdmissionInput(t, h, conversation)
+			destination := "background_thread:" + conversation
+			if _, _, ok, err := h.app.NextDelivery(t.Context(), destination); err != nil || ok {
+				t.Fatal("pending input admitted", ok, err)
+			}
+			if ready, err := h.app.AgentConversationClaimed(t.Context(), conversation); err != nil || ready {
+				t.Fatal("pending session admitted", ready, err)
+			}
+			if h.count("main_turns") != 0 {
+				t.Fatal("session started before claim")
+			}
+			if test.cancel {
+				op := h.exec(owner, h.env(OpManagerMigration, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.ManagerMigrationPayload{Phase: "cancel", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Return to owner"}, rev(issue.Revision)), ManagerMigration{})
+				if op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+				issue = canonicalLifecycleIssue(t, op)
+				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+					board, err := views.CanonicalIssues(t.Context(), tx.Q(), views.CanonicalIssueFilter{Board: true})
+					if err != nil {
+						return err
+					}
+					if board.Items[0].Board.PendingManagerCategoryID != "" {
+						t.Fatal("cancelled task remains pending on board", board)
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if _, _, ok, err := h.app.NextDelivery(t.Context(), destination); err != nil || ok {
+					t.Fatal("owner input admitted", ok, err)
+				}
+				publish()
+			}
+			op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil), Claim{})
+			var claimed claimResult
+			if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &claimed) != nil {
+				t.Fatal(op)
+			}
+			if claimed.Assignment.Manager == nil || claimed.Assignment.Manager.ConversationID != conversation {
+				t.Fatal(claimed)
+			}
+			if test.ordinary {
+				var spec protocol.IssueManagerSpec
+				if err := json.Unmarshal(claimed.Assignment.Spec, &spec); err != nil {
+					t.Fatal(err)
+				}
+				current := canonicalTaskIssue(t, h, issue.IssueID)
+				if spec.OwnershipPolicy != protocol.IssueOwnerPolicy || spec.AgentID != agent || current.Assignee.Ref != agent || current.AssignmentEpoch != issue.AssignmentEpoch+1 || claimed.Assignment.Manager.AssignmentEpoch != current.AssignmentEpoch || claimed.Assignment.Execution.Identity.LocalID != "alpha" {
+					t.Fatal("claim bypassed ordinary owner identity or epoch", spec, current, claimed)
+				}
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				board, err := views.CanonicalIssues(t.Context(), tx.Q(), views.CanonicalIssueFilter{Board: true})
+				if err != nil {
+					return err
+				}
+				if board.Items[0].Board.PendingManagerCategoryID != "" {
+					t.Fatal("claimed manager remains pending on board", board)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			delivery, _, ok, err := h.app.NextDelivery(t.Context(), destination)
+			if err != nil || !ok || delivery.Operation != OpHandleMessage {
+				t.Fatal(delivery, ok, err)
+			}
+			if err := h.app.FinishDelivery(t.Context(), delivery, DeliveryResult{Outcome: Delivered}); err != nil {
+				t.Fatal(err)
+			}
+			if next, _, ok, err := h.app.NextDelivery(t.Context(), destination); err != nil || (ok && next.OutboxID == delivery.OutboxID) {
+				t.Fatal("input delivered twice", ok, err)
+			}
+		})
+	}
+}
+
+// An ordinary worker uses its available coordination adapter, without a second
+// manager identity. Publication must retain the D136 ownership contract.
+func pendingIssueOwnerHarness(t *testing.T) (*harness, *protocol.RunnerRuntime) {
+	t.Helper()
+	h, r, p, _ := inventorySetup(t)
+	p.FormatVersion = 2
+	p.Runtimes[0].CLI = "codex"
+	p.Agents[0].Categories = []string{"implementer"}
+	_, hash, err := protocol.CanonicalAgentInventory(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 1, 0, "pending-owner-snapshot"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	r.Capabilities = append(r.Capabilities, protocol.CapabilityAgentExecution, protocol.CapabilityIssueManager, protocol.CapabilityIssueOwner)
+	r.JournalVersion = 13
+	a := p.Agents[0]
+	r.AgentExecutors = []protocol.AgentExecutor{{Available: true, Pin: protocol.RunExecutionPin{Purpose: "issue_manager", Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: 1, SnapshotID: "pending-owner-snapshot", PublicSHA256: hash, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: protocol.WorkerAppServer}}}
+	r.Sequence++
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	return h, r
 }
