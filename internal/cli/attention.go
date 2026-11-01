@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"net/url"
+	"strconv"
 )
 
 func runAttention(ctx context.Context, e *Env, args []string) error {
@@ -21,6 +22,9 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 	dry := fs.Bool("dry-run", false, "print the complete request without sending")
 	issue := fs.String("issue", "", "Issue filter")
 	status := fs.String("status", "", "business state filter")
+	kind := fs.String("kind", "", "attention kind filter")
+	limit := fs.Int("limit", 50, "page size, 1..100")
+	fs.Bool("json", true, "print structured response")
 	all := fs.Bool("all", false, "include archived")
 	after := fs.String("after", "", "continuation cursor from the previous page")
 	pos, err := parse(fs, args[1:])
@@ -36,7 +40,7 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 		if len(pos) != 0 {
 			return usagef("attention list takes no ID")
 		}
-		q := url.Values{"issue_id": {*issue}, "status": {*status}}
+		q := url.Values{"issue_id": {*issue}, "status": {*status}, "kind": {*kind}, "limit": {strconv.Itoa(*limit)}}
 		if *after != "" {
 			q.Set("after", *after)
 		}

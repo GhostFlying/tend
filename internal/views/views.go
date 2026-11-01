@@ -559,6 +559,7 @@ func Hosts(ctx context.Context, q store.Querier) ([]protocol.HostView, error) {
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return nil, err
 		}
+		hv.ControlRevision = control.Revision
 		if control.Mode == protocol.RunnerMaintenance || rt.Runtime.Mode == protocol.RunnerMaintenance || rt.Runtime.Mode == protocol.RunnerReady {
 			hv.Maintenance = &protocol.HostMaintenanceView{Mode: protocol.RunnerMaintenance, Phase: "draining", ReleaseID: control.ReleaseID, UpgradeID: control.UpgradeID, RemainingRuns: n}
 			if rt.Runtime.Mode == protocol.RunnerReady && n == 0 && rt.Runtime.AppliedControlRevision == control.Revision {

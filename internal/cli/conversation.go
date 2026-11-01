@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -15,6 +16,8 @@ func runConversation(ctx context.Context, e *Env, args []string) error {
 		return usagef("conversation expects handoff [--prepare-only | --status] [--json]")
 	}
 	fs := newFlags(e, "conversation handoff")
+	request := fs.String("request-id", "", "original request ID for an identical retry")
+	dry := fs.Bool("dry-run", false, "print the original Envelope without sending")
 	prepare := fs.Bool("prepare-only", false, "prepare a summary without switching the native thread")
 	status := fs.Bool("status", false, "show shared handoff and summary status")
 	asJSON := fs.Bool("json", false, "print the server's answer as JSON")
@@ -31,6 +34,9 @@ func runConversation(ctx context.Context, e *Env, args []string) error {
 	}
 	o := owner{e: e, c: c, json: *asJSON}
 	if *status {
+		if *request != "" || *dry {
+			return usagef("status takes no mutation input")
+		}
 		var view protocol.ConversationHandoffView
 		if err := c.do(ctx, "GET", "/api/v1/conversation/handoff", nil, &view); err != nil {
 			return err
@@ -61,5 +67,16 @@ func runConversation(ctx context.Context, e *Env, args []string) error {
 		}
 		return nil
 	}
-	return o.write(ctx, "conversation.handoff", protocol.Target{Type: "conversation"}, nil, protocol.ConversationHandoffPayload{PrepareOnly: *prepare})
+	body, _ := json.Marshal(protocol.ConversationHandoffPayload{PrepareOnly: *prepare})
+	if *request == "" {
+		*request = e.IDs.New(protocol.PrefixRequest)
+	}
+	if !protocol.ValidID(protocol.PrefixRequest, *request) {
+		return usagef("malformed request ID")
+	}
+	env := protocol.Envelope{RequestID: *request, Operation: "conversation.handoff", Target: protocol.Target{Type: "conversation"}, Payload: body}
+	if *dry {
+		return o.printJSON(env)
+	}
+	return sendDirectEnvelope(ctx, o, env)
 }

@@ -81,7 +81,7 @@ func TestHostedAgentCatalogCLIReadsExistingProjectionAndErrors(t *testing.T) {
 	if code := te.main("agents", "hosted"); code != exitError || te.out.Len() != 0 || !strings.Contains(te.errOut.String(), "forbidden") {
 		t.Fatal(code, te.out.String(), te.errOut.String())
 	}
-	if len(f.seen("GET /api/v1/hosted-agents")) != 2 || len(f.seen("POST /api/v1/ops")) != 0 || !strings.Contains(usage, "assign|finish-assignment") || !strings.Contains(usage, "agents show --host <id>|hosted") {
+	if len(f.seen("GET /api/v1/hosted-agents")) != 2 || len(f.seen("POST /api/v1/ops")) != 0 || !strings.Contains(usage, "issue finish-assignment") || !strings.Contains(usage, "agents hosted") {
 		t.Fatal("read command mutated state or help omitted entry")
 	}
 }

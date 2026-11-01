@@ -227,7 +227,10 @@ func runTriggers(ctx context.Context, e *Env, noun string, args []string) error 
 			return usagef("webhook control takes one subscription ID")
 		}
 		target.ID = pos[0]
-		if err = c.do(ctx, "GET", base+"/"+url.PathEscape(pos[0]), nil, &current); err != nil {
+		if *issue != "" && *revision > 0 && *epoch > 0 {
+			current.IssueID = *issue
+			current.Revision = *revision
+		} else if err = c.do(ctx, "GET", base+"/"+url.PathEscape(pos[0]), nil, &current); err != nil {
 			return err
 		}
 		if *issue != "" && *issue != current.IssueID {
@@ -296,6 +299,7 @@ func runTriggers(ctx context.Context, e *Env, noun string, args []string) error 
 			if len(key) < 32 || len(key) > 4096 {
 				return usagef("private key must contain 32..4096 bytes")
 			}
+			fmt.Fprintf(e.Stderr, "webhook credential staging for request %s; retain the original identity\n", *request)
 			if err = stageCLIWebhookKey(ctx, c, p.KeyRef, key); err != nil {
 				return err
 			}

@@ -17,6 +17,10 @@ func runRepository(ctx context.Context, e *Env, args []string) error {
 		return usagef("repo expects register|show <name> [--remote <url>] [--base <branch,...>] [--retired] [--json]")
 	}
 	fs := newFlags(e, "repo "+args[0])
+	reason := fs.String("reason", "Register the owner's repository in the persistent online catalog.", "reason retained in the operation record")
+	dry := fs.Bool("dry-run", false, "print original Envelope")
+	data := fs.String("data", "", "complete repository payload")
+	file := fs.String("file", "", "payload JSON file; - reads stdin")
 	remote := fs.String("remote", "", "repository remote URL")
 	bases := fs.String("base", "", "comma-separated default base candidates")
 	retired := fs.Bool("retired", false, "stop new mounts while retaining existing tasks")
@@ -34,7 +38,17 @@ func runRepository(ctx context.Context, e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	if args[0] == "register" && *requestID != "" {
+	input, err := issueInput(e, *data, *file)
+	if err != nil {
+		return err
+	}
+	if args[0] == "show" && (len(input) > 0 || *dry || *requestID != "" || *revision != -1) {
+		return usagef("show takes no mutation input")
+	}
+	if args[0] == "register" && *requestID != "" && len(input) > 0 && *revision < 0 {
+		return usagef("retry requires original --revision and payload")
+	}
+	if args[0] == "register" && *requestID != "" && len(input) == 0 {
 		var recorded protocol.RequestView
 		err := c.do(ctx, "GET", "/api/v1/requests/"+url.PathEscape(*requestID), nil, &recorded)
 		if err == nil {
@@ -56,9 +70,12 @@ func runRepository(ctx context.Context, e *Env, args []string) error {
 		if !ok || pe.Code != protocol.CodeNotFound {
 			return err
 		}
+		return usagef("original request is absent; supply original complete --data/--file and --revision, or use request replay")
 	}
 	var current protocol.RepositoryRegistration
-	err = c.do(ctx, "GET", "/api/v1/repos/"+url.PathEscape(pos[0]), nil, &current)
+	if args[0] == "show" || len(input) == 0 || *revision < 0 {
+		err = c.do(ctx, "GET", "/api/v1/repos/"+url.PathEscape(pos[0]), nil, &current)
+	}
 	if args[0] == "show" {
 		if err != nil {
 			return err
@@ -74,7 +91,7 @@ func runRepository(ctx context.Context, e *Env, args []string) error {
 	if *remote == "" {
 		*remote = current.RemoteURL
 	}
-	if *remote == "" {
+	if *remote == "" && len(input) == 0 {
 		return usagef("--remote is required for a new repository")
 	}
 	if *requestID == "" {
@@ -107,7 +124,13 @@ func runRepository(ctx context.Context, e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	env := protocol.Envelope{RequestID: *requestID, Operation: "repos.register", Target: protocol.Target{Type: "repo", ID: pos[0]}, ExpectedControlRevision: revision, Payload: raw, Reason: "Register the owner's repository in the persistent online catalog."}
+	if len(input) > 0 {
+		raw = input
+	}
+	env := protocol.Envelope{RequestID: *requestID, Operation: "repos.register", Target: protocol.Target{Type: "repo", ID: pos[0]}, ExpectedControlRevision: revision, Payload: raw, Reason: *reason}
+	if *dry {
+		return (owner{e: e, json: true}).printJSON(env)
+	}
 	fmt.Fprintf(e.Stderr, "Repository request %s; revision %d\n", *requestID, *revision)
 	var response protocol.APIResponse
 	err = c.do(ctx, "POST", "/api/v1/ops", env, &response)

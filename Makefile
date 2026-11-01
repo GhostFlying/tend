@@ -11,7 +11,7 @@ WEB := web
 .PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check
 
 ## check: everything that must pass before a commit is merged
-check: protocol-check fmt-check vet staticcheck test web-check
+check: capability-check protocol-check fmt-check vet staticcheck test web-check
 
 fmt-check:
 	@out="$$(gofmt -l $$(git ls-files '*.go'))"; \
@@ -70,3 +70,9 @@ sandbox: web
 	if [ -z "$$data" ]; then data=$$(mktemp -d); data=$$(cd "$$data" && pwd -P); temporary=1; fi; \
 	trap 'if [ -n "$$temporary" ]; then rm -rf "$$data"; fi' EXIT; \
 	$(GO) run ./cmd/tend-sandbox -data "$$data" $(SANDBOX_ARGS)
+
+.PHONY: capability-check
+## capability-check: public interfaces must have executable, documented CLI entries
+capability-check:
+	$(GO) test ./internal/api -run '^TestPublicCapability' -count=1
+	$(GO) test ./internal/cli -run '^TestCapability' -count=1

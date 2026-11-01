@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -35,58 +36,65 @@ const (
 	exitUsage = 2
 )
 
-const usage = `usage: tend <command> [arguments]
-
-Owner commands:
-  schedule list|show|create|update|pause|resume|cancel|trigger|history
-  webhook list|show|create|update|pause|resume|cancel|rotate|receipts
-  event list|show|trace|sources|watch read-only event diagnosis (--issue, --json)
-  observation list|show|refresh    delivery queries without worker slots
-  request show|replay             reconcile or replay the original owner Envelope
-  channel list|show|telegram bind|unbind  communication channels
-  message send|reply|notify|list|show|receipts|trace|read|watch
-  login --server <url>             get an owner token for this machine
-  status [--project <p>] [--json]  projects with their tasks and queue, open decisions and hosts
-  attention list|show|create|respond|confirm  original questions and human actions
-  next-action list|put                    personal action / Issue planning order
-  issue deadline list|show|put|cancel     sourced time and bounded reminders
-  issue [list]|show|create|update|<control>  full Issue lifecycle; --json for structured reads
-  issue events|schedules|webhooks|activity|results  Issue facts and diagnosis
-  issue assign|finish-assignment        transfer concrete responsibility with epoch/CAS
-  issue create-task|update-task          owner task contracts, independent workers
-  issue request|replay                   inspect/replay an original request
-  task <task_id> [--json]          one task in full
-  logs [-f] <run_id|task_id>       a run's logs, or all runs of a task; -f follows the last
-  decide <decision_id> <option> [--note <text>]
-  retry <task_id> --kind implement|accept
-  rate <task_id> <p0|p1|p2|p3>     rate a task: urgent, high, normal or low
-  pause|resume|cancel <task_id>
-  category put|show <id>           manage global agent classifications
-  repo register|show <name>       manage repositories online
-  archive prepare|status|cancel|host [--socket <path>] [--json]
-  upgrade [start|status|retry|cancel] [--release <directory>] [--json]
-  conversation list|show|send      direct explicit conversation; JSON input/output
-  run message|messages <run_id>     exact current worker supplement/history
-  source inject|show                original text/files/link and source metadata
-  attachment upload <path>          retain an immutable original for a source
-  conversation handoff [--prepare-only | --status] [--json]
-  attachment download <file_id> --out <path>  save an original attachment
-  category list|show|put           global Agent classifications
-  agents show --host <id>|hosted  public runner or hosted agent catalog
-  conversation list|show|send|consult|promote  direct owner conversations
-  source inject|show              preserve external originals and attribution
-  run message|messages|native-entry  exact run supplements and owner facts
-  attachment upload <file>         upload an immutable source original
-  takeover <task_id>               work in the task's agent yourself; resume hands it back
-
-`
+var usage = commandUsage(nil)
 
 // Main runs the tend command with args, without the program name, and
 // returns the exit code.
 func Main(ctx context.Context, e *Env, args []string) int {
+	// Interrupting a CLI command must also release a blocked stdin producer,
+	// including JSON input collected before an HTTP request is constructed.
+	if input, ok := e.Stdin.(io.Closer); ok {
+		stop := context.AfterFunc(ctx, func() { _ = input.Close() })
+		defer stop()
+	}
+
 	if len(args) == 0 {
 		fmt.Fprint(e.Stderr, usage)
 		return exitUsage
+	}
+
+	if args[0] == "help" {
+		if len(args) == 1 {
+			fmt.Fprint(e.Stdout, commandUsage(nil))
+			return exitOK
+		}
+		return Main(ctx, e, append(append([]string(nil), args[1:]...), "--help"))
+	}
+	if args[len(args)-1] == "--help" || args[len(args)-1] == "-h" {
+		prefix := args[:len(args)-1]
+
+		if len(prefix) == 2 && prefix[0] == "issue" && slices.Contains([]string{"events", "schedules", "webhooks"}, prefix[1]) {
+			noun := map[string]string{"events": "event", "schedules": "schedule", "webhooks": "webhook"}[prefix[1]]
+			fmt.Fprintf(e.Stdout, "Alias: tend issue %s <issue_id> [flags]\n", prefix[1])
+			return Main(ctx, e, []string{noun, "list", "--help"})
+		}
+		if len(prefix) == 0 || hasCommandChildren(prefix) {
+			fmt.Fprint(e.Stdout, commandUsage(prefix))
+			return exitOK
+		}
+		// A leaf command owns its FlagSet help. Route that output to stdout while
+		// preserving the same parser and its complete flag definitions.
+		helpEnv := *e
+		helpEnv.Stderr = e.Stdout
+		e = &helpEnv
+	}
+	if command, tail, ok := findCapabilityCommand(args); ok {
+		return report(e, runCapabilityCommand(ctx, e, command, tail))
+	}
+	if len(args) >= 2 && args[0] == "request" && args[1] == "replay" {
+		return report(e, runRequestReplay(ctx, e, args[2:]))
+	}
+	if len(args) >= 2 && args[0] == "repo" && args[1] == "local" {
+		return report(e, runLocalRepository(ctx, e, args[2:]))
+	}
+	if len(args) >= 2 && args[0] == "agents" && args[1] == "local" {
+		return report(e, runLocalAgentCommand(ctx, e, args[2:]))
+	}
+	if args[0] == "doctor" {
+		return report(e, runDoctor(ctx, e, args[1:]))
+	}
+	if args[0] == "host" || args[0] == "queue" {
+		return report(e, runHostQueue(ctx, e, args))
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
@@ -137,7 +145,7 @@ func usagef(format string, args ...any) error { return usageError{fmt.Sprintf(fo
 
 // report prints err and maps it to an exit code.
 func report(e *Env, err error) int {
-	if err == nil {
+	if err == nil || err == flag.ErrHelp {
 		return exitOK
 	}
 	fmt.Fprintf(e.Stderr, "tend: %v\n", err)
@@ -160,6 +168,9 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
 	for {
 		if err := fs.Parse(args); err != nil {
+			if err == flag.ErrHelp {
+				return nil, err
+			}
 			return nil, usageError{err.Error()}
 		}
 		if fs.NArg() == 0 {

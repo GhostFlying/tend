@@ -11,6 +11,7 @@ import (
 
 func runAgentCategoryList(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "category list")
+	fs.Bool("json", true, "print complete structured response")
 	state := fs.String("state", "active", "active, retired or all")
 	after := fs.String("after", "", "last category ID from the preceding page")
 	limit := fs.Int("limit", 50, "page size, at most 100")
@@ -41,6 +42,7 @@ func runAgentCatalog(ctx context.Context, e *Env, args []string) error {
 		return usagef("agents expects show --host <id>|hosted")
 	}
 	fs := newFlags(e, "agents show")
+	fs.Bool("json", true, "print complete structured response")
 	host := fs.String("host", "", "runner host ID")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
@@ -62,6 +64,7 @@ func runAgentCatalog(ctx context.Context, e *Env, args []string) error {
 
 func runHostedAgentCatalog(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "agents hosted")
+	fs.Bool("json", true, "print complete structured response")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
