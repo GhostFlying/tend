@@ -65,11 +65,27 @@ func IssueManagerCandidates(ctx context.Context, q store.Querier) ([]scheduler.C
 		if err != nil {
 			return nil, err
 		}
+		policy, err := store.IssueUsesOwnerExecution(ctx, q, m.IssueID)
+		if err != nil {
+			return nil, err
+		}
+		ownershipPolicy := ""
+		if policy {
+			ownershipPolicy = protocol.IssueOwnerPolicy
+		}
+		rawSpec, err := store.GetSpec(ctx, q, m.TaskID, 1)
+		if err != nil {
+			return nil, err
+		}
+		var contract protocol.IssueManagerSpec
+		if err := json.Unmarshal([]byte(rawSpec), &contract); err != nil {
+			return nil, err
+		}
 		pending, err := ManagerReceiptPending(ctx, q, m)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, scheduler.Candidate{ManagerAuthorizationInvalid: !receipt.ReceiptOnly && !valid, Manager: &protocol.IssueManagerSpec{ReceiptOnly: receipt.ReceiptOnly, IssueID: m.IssueID, CategoryID: m.CategoryID, ExpectedAssignmentEpoch: m.ExpectedEpoch}, ManagerPin: m.Pin, ActionID: a.ActionID, TaskID: t.TaskID, Kind: a.Kind, Status: a.Status, Generation: a.Generation, TargetSpecVersion: 1, SpecVersion: 1, CreatedAt: a.CreatedAt, Lifecycle: t.Lifecycle, Control: t.ControlMode, Block: t.BlockReason, Rating: t.Rating, Weight: project.Weight, DependenciesDone: true, WorkspaceOccupied: occupied || (pending && !receipt.ReceiptOnly)})
+		out = append(out, scheduler.Candidate{ManagerAuthorizationInvalid: !receipt.ReceiptOnly && !valid, Manager: &protocol.IssueManagerSpec{AgentID: contract.AgentID, OwnershipPolicy: ownershipPolicy, ReceiptOnly: receipt.ReceiptOnly, IssueID: m.IssueID, CategoryID: m.CategoryID, ExpectedAssignmentEpoch: m.ExpectedEpoch}, ManagerPin: m.Pin, ActionID: a.ActionID, TaskID: t.TaskID, Kind: a.Kind, Status: a.Status, Generation: a.Generation, TargetSpecVersion: 1, SpecVersion: 1, CreatedAt: a.CreatedAt, Lifecycle: t.Lifecycle, Control: t.ControlMode, Block: t.BlockReason, Rating: t.Rating, Weight: project.Weight, DependenciesDone: true, WorkspaceOccupied: occupied || (pending && !receipt.ReceiptOnly)})
 	}
 	return out, nil
 }

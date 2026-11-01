@@ -56,6 +56,37 @@ func TestManagerReadinessRetriesWithoutDisablingHealthyWorker(t *testing.T) {
 	}
 }
 
+func TestOrdinaryAgentOwnerTransportRemainsReadyWhenExecutionIsUnavailable(t *testing.T) {
+	f := newSource(t)
+	f.config.FormatVersion = 2
+	f.config.Runtimes[0].CLI = "codex"
+	f.config.Agents[0].OwnerRuntimeID = "native"
+	f.reload(t)
+	var ownerProbes atomic.Int64
+	p, err := agentexec.New(agentexec.Options{Source: f.control, BackendID: "git", Workspaces: gitws.New(gitws.Config{Home: t.TempDir()}), Probe: func(context.Context, agentexec.BuildInput) error {
+		return errors.New("execution transport unavailable")
+	}, ProbeOwner: func(_ context.Context, input agentexec.BuildInput) error {
+		ownerProbes.Add(1)
+		if input.Runtime.ID != "native" || input.Agent.LocalID != "worker" {
+			t.Fatal("owner identity or transport was substituted", input)
+		}
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Refresh(t.Context()); err == nil {
+		t.Fatal("execution failure was hidden")
+	}
+	observations, err := p.Observe(t.Context())
+	if err != nil || len(observations) != 2 || observations[0].Available || !observations[1].Available || observations[0].Pin.Identity != observations[1].Pin.Identity {
+		t.Fatal("owner readiness depends on execution or uses a different identity", observations, err)
+	}
+	if _, err := p.ResolveManager(t.Context(), observations[1].Pin); err != nil || ownerProbes.Load() < 2 {
+		t.Fatal("retained owner configuration cannot recover independently", err)
+	}
+}
+
 type sourceFixture struct {
 	control  *agentcontrol.Control
 	config   agentconfig.Config

@@ -361,6 +361,9 @@
         "identity": {
           "$ref": "#/definitions/AgentIdentity"
         },
+        "owner_runtime_binding_ref": {
+          "$ref": "#/definitions/AgentRuntimeReference"
+        },
         "purposes": {
           "anyOf": [
             {
@@ -595,6 +598,9 @@
     "AgentRequirement": {
       "additionalProperties": false,
       "properties": {
+        "agent_id": {
+          "type": "string"
+        },
         "category_id": {
           "type": "string"
         },
@@ -2496,6 +2502,9 @@
         "manager": {
           "$ref": "#/definitions/RequestIssueManagerPayload"
         },
+        "owner": {
+          "$ref": "#/definitions/IssueOwnerRequest"
+        },
         "parent_issue_id": {
           "type": "string"
         },
@@ -3016,6 +3025,43 @@
         "phase"
       ],
       "title": "ExecutionRecovery",
+      "type": "object"
+    },
+    "ExecutionResponsibility": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_ref": {
+          "type": "string"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "issue_revision": {
+          "type": "integer"
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "issue_revision",
+        "assignment_epoch",
+        "agent_ref",
+        "task_id",
+        "run_id",
+        "role"
+      ],
+      "title": "ExecutionResponsibility",
       "type": "object"
     },
     "ExecutionStartup": {
@@ -4981,6 +5027,26 @@
       "title": "IssueNotificationSettings",
       "type": "object"
     },
+    "IssueOwnerRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "category_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category_id",
+        "reason"
+      ],
+      "title": "IssueOwnerRequest",
+      "type": "object"
+    },
     "IssuePage": {
       "additionalProperties": false,
       "properties": {
@@ -5626,6 +5692,9 @@
         "manager": {
           "$ref": "#/definitions/IssueManagerView"
         },
+        "ownership_policy": {
+          "type": "string"
+        },
         "parent_issue_id": {
           "type": "string"
         },
@@ -5646,6 +5715,12 @@
         },
         "progress": {
           "$ref": "#/definitions/IssueProgress"
+        },
+        "responsibility_runs": {
+          "items": {
+            "$ref": "#/definitions/ExecutionResponsibility"
+          },
+          "type": "array"
         },
         "revision": {
           "type": "integer"
@@ -7596,6 +7671,9 @@
     "RequestIssueManagerPayload": {
       "additionalProperties": false,
       "properties": {
+        "agent_id": {
+          "type": "string"
+        },
         "category_id": {
           "type": "string"
         },

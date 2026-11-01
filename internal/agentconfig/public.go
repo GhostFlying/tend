@@ -22,11 +22,16 @@ func (d *Definitions) Public() protocol.AgentInventoryProjection {
 	}
 	for _, a := range d.config.Agents {
 		r := runtimes[a.RuntimeID]
+		var owner *protocol.AgentRuntimeReference
+		if a.OwnerRuntimeID != "" {
+			binding := runtimes[a.OwnerRuntimeID]
+			owner = &protocol.AgentRuntimeReference{RuntimeID: binding.ID, Revision: binding.Revision}
+		}
 		categories, purposes := slices.Clone(a.Categories), publicPurposes(a.Purposes)
 		slices.Sort(categories)
 		slices.Sort(purposes)
 		p.Agents = append(p.Agents, protocol.AgentInventoryDefinition{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: d.environmentID, LocalID: a.LocalID},
-			Revision: a.Revision, DisplayName: a.DisplayName, Binding: protocol.AgentRuntimeReference{RuntimeID: r.ID, Revision: r.Revision},
+			Revision: a.Revision, DisplayName: a.DisplayName, Binding: protocol.AgentRuntimeReference{RuntimeID: r.ID, Revision: r.Revision}, OwnerBinding: owner,
 			Categories: categories, Purposes: purposes, RequestedModel: a.Model, RequestedEffort: a.Effort,
 			Enabled: a.Enabled, Registration: "staged", Availability: unavailable(r, a.Enabled)})
 	}

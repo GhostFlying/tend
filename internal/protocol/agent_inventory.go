@@ -72,6 +72,7 @@ type AgentInventoryRuntime struct {
 }
 
 type AgentInventoryDefinition struct {
+	OwnerBinding    *AgentRuntimeReference     `json:"owner_runtime_binding_ref,omitempty"`
 	Identity        AgentIdentity              `json:"identity"`
 	Revision        uint64                     `json:"revision"`
 	DisplayName     string                     `json:"display_name"`
@@ -163,6 +164,14 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 			return bad()
 		}
 		seen[a.Identity.LocalID] = true
+		if a.OwnerBinding != nil {
+			owner, ok := runtimes[a.OwnerBinding.RuntimeID]
+			if p.FormatVersion != 2 || !ok || owner.Kind != "appserver-worker" || owner.CLI == "" || owner.Revision != a.OwnerBinding.Revision {
+				return bad()
+			}
+			binding := *a.OwnerBinding
+			a.OwnerBinding = &binding
+		}
 		if !inventoryPurposes(a.Purposes, r.Kind, p.FormatVersion) || len(a.Categories) == 0 || !uniqueInventoryStrings(a.Categories) || !slices.Contains([]string{"", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}, a.RequestedEffort) {
 			return bad()
 		}

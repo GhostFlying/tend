@@ -15,6 +15,7 @@ import (
 // Host is the claiming host as configured, with its current load.
 type Host struct {
 	IssueManagers bool
+	IssueOwners   bool
 	Executors     []Executor
 	ID            string
 	OS            string
@@ -34,6 +35,10 @@ type Host struct {
 
 // Candidate is a pending action together with the facts the rules need.
 type Candidate struct {
+	OwnerResponsibilityChanged  bool
+	OwnerAgentRevision          uint64
+	OwnerRuntimeRevision        uint64
+	ReviewOwnerPin              *protocol.RunExecutionPin
 	ManagerAuthorizationInvalid bool
 	Manager                     *protocol.IssueManagerSpec
 	ManagerPin                  *protocol.RunExecutionPin
@@ -185,6 +190,8 @@ func HeldReason(c Candidate) *protocol.QueueWaitReason {
 		return waitReason(protocol.QueueTaskBlocked, "task is blocked")
 	case c.ContextPending:
 		return waitReason(protocol.QueueTaskBlocked, "work item context review is incomplete")
+	case c.OwnerResponsibilityChanged:
+		return waitReason(protocol.QueueTaskBlocked, "Issue responsibility changed; explicitly reconcile or replace its frozen execution contract")
 	case !c.DependenciesDone:
 		return waitReason(protocol.QueueDependency, "dependencies are not completed")
 	case c.Kind == protocol.ActionImplement && c.Generation != c.ImplementGeneration:

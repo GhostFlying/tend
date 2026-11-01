@@ -44,18 +44,21 @@ type RuntimeBinding struct {
 }
 
 type AgentDefinition struct {
-	Instructions string    `json:"instructions,omitempty"`
-	LocalID      string    `json:"local_id"`
-	Revision     uint64    `json:"revision"`
-	DisplayName  string    `json:"display_name"`
-	RuntimeID    string    `json:"runtime_id"`
-	Categories   []string  `json:"categories"`
-	Purposes     []Purpose `json:"purposes"`
-	Model        string    `json:"model"`
-	Effort       string    `json:"effort,omitempty"`
-	Skills       []string  `json:"skills,omitempty"`
-	MCPServers   []string  `json:"mcp_servers,omitempty"`
-	Enabled      bool      `json:"enabled"`
+	// OwnerRuntimeID optionally supplies coordination transport for this same
+	// identity, for example when its execution transport is an Orca terminal.
+	OwnerRuntimeID string    `json:"owner_runtime_id,omitempty"`
+	Instructions   string    `json:"instructions,omitempty"`
+	LocalID        string    `json:"local_id"`
+	Revision       uint64    `json:"revision"`
+	DisplayName    string    `json:"display_name"`
+	RuntimeID      string    `json:"runtime_id"`
+	Categories     []string  `json:"categories"`
+	Purposes       []Purpose `json:"purposes"`
+	Model          string    `json:"model"`
+	Effort         string    `json:"effort,omitempty"`
+	Skills         []string  `json:"skills,omitempty"`
+	MCPServers     []string  `json:"mcp_servers,omitempty"`
+	Enabled        bool      `json:"enabled"`
 }
 
 // SourceReference identifies local provenance. Only Kind is public metadata.
@@ -173,6 +176,12 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 		r, found := runtimes[a.RuntimeID]
 		if !found {
 			return nil, invalid("missing_runtime", path+".runtime_id")
+		}
+		if a.OwnerRuntimeID != "" {
+			owner, ok := runtimes[a.OwnerRuntimeID]
+			if cfg.FormatVersion != 2 || !ok || owner.Kind != AppServerWorker || owner.CLI == "" {
+				return nil, invalid("unsupported_owner_runtime", path+".owner_runtime_id")
+			}
 		}
 		if len(a.Categories) == 0 {
 			return nil, invalid("required", path+".categories")

@@ -83,6 +83,12 @@ func argumentSchema(v any) string {
 		panic(err)
 	}
 	defs := doc["definitions"].(map[string]any)
+	if entry, ok := defs["PlannerEntryInput"].(map[string]any); ok {
+		props := entry["properties"].(map[string]any)
+		props["kind"].(map[string]any)["enum"] = []string{"user_action", "issue_priority"}
+		props["status"].(map[string]any)["enum"] = []string{"open", "blocked", "done", "cancelled"}
+		props["rank"].(map[string]any)["minimum"] = 0
+	}
 	if fact, ok := defs["ContextFact"].(map[string]any); ok {
 		// These fields are assigned by the server, not required author input.
 		required := []any{"scope", "kind", "body", "source_message_id"}

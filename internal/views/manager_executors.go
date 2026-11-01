@@ -3,10 +3,11 @@ package views
 import (
 	"context"
 	"errors"
+	"slices"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
-	"slices"
 )
 
 func HostExecutors(ctx context.Context, q store.Querier, host string, now int64) ([]scheduler.Executor, error) {
@@ -34,12 +35,16 @@ func HostExecutors(ctx context.Context, q store.Querier, host string, now int64)
 			continue
 		}
 		for _, a := range inv.Projection.Agents {
-			if a.Identity != p.Identity || a.Revision != p.AgentRevision || a.Binding != p.Runtime || !a.Enabled || a.RequestedModel != p.Profile.Model || a.RequestedEffort != p.Profile.Effort || ((p.Purpose == "issue_manager" && (!slices.Contains(a.Purposes, "issue_manager") || p.Worker != protocol.WorkerAppServer || p.BackendID != "")) || (p.Purpose != "issue_manager" && !slices.Contains(a.Purposes, "worker_run"))) {
+			binding := a.Binding
+			if p.Purpose == "issue_manager" && a.OwnerBinding != nil {
+				binding = *a.OwnerBinding
+			}
+			if a.Identity != p.Identity || a.Revision != p.AgentRevision || binding != p.Runtime || !a.Enabled || a.RequestedModel != p.Profile.Model || a.RequestedEffort != p.Profile.Effort || ((p.Purpose == "issue_manager" && ((!slices.Contains(a.Purposes, "issue_manager") && !slices.Contains(a.Purposes, "worker_run")) || p.Worker != protocol.WorkerAppServer || p.BackendID != "")) || (p.Purpose != "issue_manager" && !slices.Contains(a.Purposes, "worker_run"))) {
 				continue
 			}
 			runtimeEnabled := false
 			for _, r := range inv.Projection.Runtimes {
-				if r.RuntimeID == p.Runtime.RuntimeID && r.Revision == p.Runtime.Revision && r.Enabled && (p.Purpose != "issue_manager" || slices.Contains(r.DeclaredPurposes, "issue_manager")) && ((r.Kind == "appserver-worker" && p.Worker == protocol.WorkerAppServer) || (r.Kind == "orca-worker" && p.Worker == protocol.WorkerOrca)) {
+				if r.RuntimeID == p.Runtime.RuntimeID && r.Revision == p.Runtime.Revision && r.Enabled && (p.Purpose != "issue_manager" || slices.Contains(r.DeclaredPurposes, "issue_manager") || r.CLI != "" && (a.OwnerBinding != nil || slices.Contains(r.DeclaredPurposes, "worker_run"))) && ((r.Kind == "appserver-worker" && p.Worker == protocol.WorkerAppServer) || (r.Kind == "orca-worker" && p.Worker == protocol.WorkerOrca)) {
 					runtimeEnabled = true
 				}
 			}

@@ -86,14 +86,15 @@ var hostedMutations = []hostedMutation{
 	{"runs_send_message", "Send supplemental evidence to this Issue primary task exact active run. It cannot revise its frozen contract or answer worker decisions; unknown is not resent.", "run", protocol.SendRunMessagePayload{}, app.SendRunMessage{}, false},
 	{"issues_deadline_put", "Record a sourced deadline or estimate, with known/unknown time and default 24h/due reminders; never silently change a user commitment.", "deadline", protocol.PutIssueDeadlinePayload{}, app.IssueDeadlineCommand{}, true},
 	{"issues_deadline_cancel", "Cancel a deadline with an explicit reason, preserving already claimed/unknown reminder facts.", "deadline", protocol.CancelIssueDeadlinePayload{}, app.IssueDeadlineCommand{Cancel: true}, true},
-	{"planner_entry_put", "Record a personal next action or explicit Issue planning rank; task execution priority remains tasks_rate.", "planner_entry", protocol.PutPlannerEntryPayload{}, app.PutPlannerEntry{}, true},
+	{"planner_entry_put", "Record a user_action or issue_priority. Omit target_id when creating; on update provide target_id and expected_control_revision. The server assigns identity, revision and timestamps. This does not schedule an agent retry; task execution priority remains tasks_rate.", "planner_entry", protocol.PutPlannerEntryInput{}, app.PutPlannerEntry{}, true},
 	{"attentions_create", "Ask the owner a distinct decision or human action, or record nonblocking information. Optional latest_action_at gives its true deadline with 24h/due reminders to main, even without an Issue. Assignment stays unchanged.", "attention", protocol.CreateAttentionPayload{}, app.AttentionCommand{Action: "create"}, true},
 	{"attentions_update", "Revise this stable attention without replacing or answering its original decision. Omit latest_action_at to retain it, set 0 to clear; timezone only changes display.", "attention", protocol.UpdateAttentionPayload{}, app.AttentionCommand{Action: "update"}, true},
 	{"attentions_respond", "Relay the owner's actual message to the original decision/version. Never answer on the owner's behalf.", "attention", protocol.RespondAttentionPayload{}, app.AttentionCommand{Action: "respond", FromMessage: true}, true},
 	{"attentions_confirm", "Relay an actual owner's confirmation of a human action; agent narration is insufficient.", "attention", protocol.ConfirmAttentionPayload{}, app.AttentionCommand{Action: "confirm", FromMessage: true}, true},
 	{"attentions_withdraw", "Withdraw an ordinary open action/information with a reason; decisions retain their original business path.", "attention", hostedEmptyPayload{}, app.AttentionCommand{Action: "withdraw"}, true},
 	{"conversation_associate_issues", "Classify this exact message into canonical Issues or explicitly leave it unassigned. Preserve owner corrections; this acknowledges routing only and never clears Issue source-review duties or authorizes execution.", "message", protocol.SetIssueMessageAssociationsPayload{}, app.SetIssueMessageAssociations{}, true},
-	{"issues_create", "Delegate a vague goal by setting manager.category_id. A runner selects the actual Issue manager on claim. Managers create only child Issues within their own scope.", "issue", protocol.CreateIssuePayload{}, app.CanonicalOwnerIssueCommand{Action: "create"}, true},
+	{"issues_create", "Create responsibility with owner.category_id and optional owner.agent_id. Any capable Agent can own an Issue. Owners create only direct children; another Agent needs its own child Issue.", "issue", protocol.CreateIssuePayload{}, app.CanonicalOwnerIssueCommand{Action: "create"}, true},
+	{"issues_request_owner", "Assign continuing responsibility to an ordinary Agent by capability category, optionally agent_id. A child Issue is required when another Agent takes delegated work.", "issue", protocol.RequestIssueManagerPayload{}, app.RequestIssueOwner{}, true},
 	{"issues_request_manager", "Publish a continuing Issue manager task by category. A matching runner claims it and becomes the assignee; no runner is selected at publication.", "issue", protocol.RequestIssueManagerPayload{}, app.RequestIssueManager{}, true},
 	{"issues_assign", "Fence a concrete Issue assignee before reconciling and enabling its replacement. Does not stop independent workers.", "issue", protocol.IssueAssignmentPayload{}, app.HostedIssueAssignment{}, true},
 	{"issues_finish_assignment", "Enable a fenced assignee only after the previous manager's actual operations are reconciled.", "issue", protocol.FinishIssueAssignmentPayload{}, app.HostedIssueAssignment{Finish: true}, true},
@@ -108,7 +109,7 @@ var hostedMutations = []hostedMutation{
 	{"issues_dependencies", "Revise this Issue's explicit completion dependencies without adding task execution ownership.", "issue", protocol.SetIssueDependenciesPayload{}, app.CanonicalOwnerIssueCommand{Action: "dependencies"}, false},
 	{"issues_review_sources", "Review named late source shares on a terminal Issue while retaining its terminal history.", "issue", protocol.ReviewIssueSourcesPayload{}, app.CanonicalOwnerIssueCommand{Action: "review_sources"}, false},
 	{"issues_review_completions", "Acknowledge exact primary task completion facts on this Issue without changing acceptance results.", "issue", protocol.ReviewIssueCompletionsPayload{}, app.CanonicalOwnerIssueCommand{Action: "review_completions"}, false},
-	{"issues_create_task", "Delegate all investigation and execution through a frozen no-stage or explicitly staged task with independent acceptance. Never execute native work yourself.", "issue", protocol.CreateIssueTaskPayload{}, app.CanonicalOwnerTaskCreate{}, false},
+	{"issues_create_task", "Execute your own Issue through a frozen task using your same Agent identity and explicit acceptance category. Another implementation Agent must first own a child Issue. Tend records a review child for independent acceptance; native subagents cannot bypass this contract.", "issue", protocol.CreateIssueTaskPayload{}, app.CanonicalOwnerTaskCreate{}, false},
 	{"issues_update_task", "Explicitly refresh an existing primary task contract through its current revision and Issue epoch; active runs retain their frozen contracts.", "task", protocol.UpdateIssueTaskPayload{}, app.CanonicalOwnerTaskUpdate{}, false},
 	{"tasks_cancel", "Cancel only this Issue's primary task through its current revision and existing run reconciliation rules.", "task", hostedEmptyPayload{}, app.CancelTask{}, false},
 	{"tasks_rate", "Set an explicitly selected primary task priority through its current revision; this does not change its contract.", "task", protocol.RateTaskPayload{}, app.RateTask{}, true},
@@ -129,6 +130,7 @@ func hostedMutationSchema(payload any) json.RawMessage {
 	root["definitions"] = body["definitions"]
 	delete(body, "definitions")
 	root["properties"].(map[string]any)["payload"] = body
+	root["properties"].(map[string]any)["effect_seq"].(map[string]any)["minimum"] = 1
 	b, err := json.Marshal(root)
 	if err != nil {
 		panic(err)
@@ -141,10 +143,35 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	var out []harness.ToolSpec
 	out = append(out, harness.ToolSpec{Name: "conversation_input_read", Description: "Read one exact admitted communication input and immediately record witnessed consumption. No address or channel selection.", InputSchema: json.RawMessage(`{"type":"object","properties":{"message_id":{"type":"string"}},"required":["message_id"],"additionalProperties":false}`)})
 	for _, m := range hostedMutations {
-		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) && !communicationMutation(m.name) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && !communicationMutation(m.name) && m.name != "issues_create" && !strings.HasPrefix(m.name, "attentions_") && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" {
+		if m.name == "issues_request_manager" {
+			// Historical callbacks and the owner CLI retain their original
+			// command. New named turns publish ordinary Agent ownership.
 			continue
 		}
-		out = append(out, harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)})
+		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) && !communicationMutation(m.name) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && !communicationMutation(m.name) && m.name != "issues_create" && m.name != "issues_request_owner" && !strings.HasPrefix(m.name, "attentions_") && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" {
+			continue
+		}
+		spec := harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)}
+		if m.name == "issues_create" || m.name == "issues_request_manager" || m.name == "issues_request_owner" {
+			var root map[string]any
+			_ = json.Unmarshal(spec.InputSchema, &root)
+			body := root["properties"].(map[string]any)["payload"].(map[string]any)
+			body["required"] = append(body["required"].([]any), "source_message_id")
+			props := body["properties"].(map[string]any)
+			if m.name == "issues_create" {
+				delete(props, "manager")
+			}
+			if m.name == "issues_request_owner" {
+				body["required"] = append(body["required"].([]any), "category_id")
+			}
+			props["source_message_id"] = map[string]any{"type": "string", "minLength": 1, "description": "Exact admitted message_id from conversation_turn_read. Never append @revision or substitute an attachment ID."}
+			if m.name == "issues_create" {
+				body["required"] = append(body["required"].([]any), "expected_source_revision")
+				props["expected_source_revision"] = map[string]any{"type": "integer", "minimum": 1, "description": "Exact content_revision of source_message_id from conversation_turn_read; required with the source message ID."}
+			}
+			spec.InputSchema, _ = json.Marshal(root)
+		}
+		out = append(out, spec)
 	}
 	if purpose == agentconfig.Main || purpose == agentconfig.IssueManager {
 		out = append(out, harness.ToolSpec{Name: "issues_list", Description: "Discover canonical Issues and responsibility hierarchy. Managers see only their Issue and descendants; listing grants no write permission.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueListArgs{})))})

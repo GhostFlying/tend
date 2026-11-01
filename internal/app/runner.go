@@ -103,7 +103,8 @@ func desiredFor(run store.RunRow, action store.ActionRow, task store.TaskRow) pr
 		return protocol.DesiredRun
 	}
 	switch {
-	case run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed,
+	case run.DesiredState == protocol.DesiredStopped,
+		run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed,
 		task.Lifecycle.Terminal(),
 		action.Status == protocol.ActionCancelled || action.Status == protocol.ActionSuperseded,
 		action.TargetSpecVersion != task.SpecVersion:
@@ -192,6 +193,11 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		Spec:        workerInput, Workspace: ws,
 	}
 	if err := assignmentQuestions(ctx, q, &as, run.HostID); err != nil {
+		return protocol.Assignment{}, err
+	}
+	if responsibility, err := store.RunIssueResponsibility(ctx, q, run.RunID); err == nil {
+		as.Responsibility = &responsibility
+	} else if !errors.Is(err, store.ErrNotFound) {
 		return protocol.Assignment{}, err
 	}
 	if action.Kind == protocol.ActionAccept {
@@ -322,6 +328,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		}
 	}
 	schedulingHost := scheduler.Host{
+		IssueOwners:   p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueOwner),
 		IssueManagers: p.Runtime != nil && p.Runtime.Protocol >= protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),
 		ID:            host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
@@ -370,6 +377,10 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if pick.Kind == protocol.ActionCoordinate {
 		return claimIssueManager(ctx, x, tx, pick, run, lease, execution)
 	}
+	ownerEvents, err := claimOwnerExecution(ctx, x, tx, run, execution)
+	if err != nil {
+		return Outcome{}, err
+	}
 	if pick.Kind == protocol.ActionImplement && pick.WorkspaceHost == "" {
 		task, err := store.GetTask(ctx, q, pick.TaskID)
 		if err != nil {
@@ -403,9 +414,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	}
 	return Outcome{
 		Result: claimResult{Assignment: as},
-		Events: []Event{{ObjectType: "run", ObjectID: run.RunID, Kind: "run.assigned", Body: map[string]any{
+		Events: append(ownerEvents, Event{ObjectType: "run", ObjectID: run.RunID, Kind: "run.assigned", Body: map[string]any{
 			"task_id": run.TaskID, "action_id": run.ActionID, "role": run.Role, "host_id": host.HostID,
-		}}},
+		}}),
 	}, nil
 }
 
@@ -775,7 +786,19 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 			return Outcome{}, err
 		}
 	}
-	d := domain.RunFailed(toDomain(rc.task, rc.spec.Budget()), rc.fact(), p.Reason)
+	var d domain.Decision
+	fenced := false
+	if _, err := store.GetTaskOwnerContract(ctx, tx.Q(), rc.task.TaskID); err == nil {
+		d, fenced, err = fenceChangedTaskContext(ctx, tx.Q(), rc, "run.failed", rc.run.RunID)
+		if err != nil {
+			return Outcome{}, err
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
+	if !fenced {
+		d = domain.RunFailed(toDomain(rc.task, rc.spec.Budget()), rc.fact(), p.Reason)
+	}
 	_, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "run.failed", "run_id": rc.run.RunID})
 	if err != nil {
 		return Outcome{}, err

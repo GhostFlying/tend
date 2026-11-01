@@ -188,6 +188,19 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 		return Outcome{}, err
 	}
 	itemEvents = append(itemEvents, linkedEvents...)
+	if canonical != nil {
+		agent, err := prepareOwnerExecution(ctx, x, tx.Q(), canonical.Issue, &p.Spec)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if agent != nil {
+			ownerEvents, err := recordOwnerExecution(ctx, x, tx, canonical.Issue, taskID, *agent, p.Spec)
+			if err != nil {
+				return Outcome{}, err
+			}
+			itemEvents = append(itemEvents, ownerEvents...)
+		}
+	}
 	planRef := ""
 	if p.SourceMessageID != "" {
 		planRef = fmt.Sprintf("%s#%d", p.SourceMessageID, p.CommitSeq)
@@ -260,6 +273,30 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	if row.Kind == protocol.TaskKindIssueManager {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manager responsibility changes require an issue manager handoff")
+	}
+	if p.Spec != nil {
+		contract, err := store.GetTaskOwnerContract(ctx, tx.Q(), row.TaskID)
+		if err == nil {
+			issue, err := store.GetCanonicalIssue(ctx, tx.Q(), contract.IssueID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if issue.AssignmentEpoch != contract.AssignmentEpoch || issue.Assignee.Ref != contract.AgentRef {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "handoff requires a new owner execution contract; retain this task as historical evidence")
+			}
+			agent, err := prepareOwnerExecution(ctx, x, tx.Q(), issue, p.Spec)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if agent == nil || uint64(contract.AgentRevision) != agent.Revision || contract.RuntimeID != agent.Binding.RuntimeID || uint64(contract.RuntimeRevision) != agent.Binding.Revision || contract.Model != agent.RequestedModel || contract.Effort != agent.RequestedEffort {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "the owner execution configuration changed; create a new task contract and retain this task's historical pins")
+			}
+			if err := validateRetainedReviewer(ctx, tx.Q(), contract, current, *p.Spec); err != nil {
+				return Outcome{}, err
+			}
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return Outcome{}, err
+		}
 	}
 	task := toDomain(row, current.Budget())
 	if expected != row.ControlRevision {
@@ -578,6 +615,13 @@ func (CreateAction) Authorize(ctx context.Context, x *Exec, q store.Querier) err
 
 // Apply implements Command.
 func (CreateAction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	currentOwner, err := store.TaskOwnerContractCurrent(ctx, tx.Q(), x.Env.Target.ID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !currentOwner {
+		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "Issue responsibility changed; create a current owner execution contract before requesting another action")
+	}
 	var p protocol.CreateActionPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err

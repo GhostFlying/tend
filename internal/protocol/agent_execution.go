@@ -6,6 +6,8 @@ const CapabilityAgentExecution = "runner-agent-execution-v1"
 
 // AgentRequirement selects metadata; the run role remains separately authorized.
 type AgentRequirement struct {
+	// AgentID pins a concrete identity when execution is retained by its owner.
+	AgentID    string `json:"agent_id,omitempty"`
 	CategoryID string `json:"category_id"`
 	RuntimeID  string `json:"runtime_id,omitempty"`
 	Model      string `json:"model,omitempty"`
@@ -19,6 +21,12 @@ type TaskAgentSelection struct {
 
 func (s TaskAgentSelection) Validate() error {
 	for _, r := range []AgentRequirement{s.Implementation, s.Acceptance} {
+		if r.AgentID != "" {
+			parts := strings.Split(r.AgentID, "/")
+			if len(parts) != 2 || !AgentInventoryID(parts[0]) || !AgentInventoryID(parts[1]) {
+				return Errorf(CodeInvalidRequest, "agent_id requires an environment/local identity")
+			}
+		}
 		if r.Model != "" {
 			if err := (ExecutionProfile{Model: r.Model, Effort: r.Effort}).Validate(); err != nil {
 				return err

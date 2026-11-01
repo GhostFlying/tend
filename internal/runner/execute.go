@@ -269,6 +269,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return owner.ask(callCtx, payload)
 		}
 	}
+	if as.Responsibility != nil {
+		p.Guide += fmt.Sprintf("\nYou are executing as owner of Issue %s at assignment epoch %d, role %s. Fulfill the frozen task agreement and submit its result through the existing role-specific tools. Do not launch or delegate to another Agent outside Tend: another Agent requires its own child Issue. Preserve independent acceptance isolation. Report any need for further delegation as a blocker to this Issue's coordination turn.\n", as.Responsibility.IssueID, as.Responsibility.AssignmentEpoch, as.Role)
+	}
 	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{
 		FrozenExecution: execution.Profile, RoleInstructions: execution.Instructions,
 		Execution: as.AcceptanceExecution, QuestionContext: as.QuestionContext, RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,

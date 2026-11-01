@@ -82,10 +82,11 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
-	Manager             *IssueManagerAssignment `json:"manager,omitempty"`
-	Execution           *RunExecutionPin        `json:"execution,omitempty"`
-	AcceptanceExecution *ExecutionProfile       `json:"acceptance_execution,omitempty"`
-	QuestionContext     bool                    `json:"question_context,omitempty"`
+	Responsibility      *ExecutionResponsibility `json:"responsibility,omitempty"`
+	Manager             *IssueManagerAssignment  `json:"manager,omitempty"`
+	Execution           *RunExecutionPin         `json:"execution,omitempty"`
+	AcceptanceExecution *ExecutionProfile        `json:"acceptance_execution,omitempty"`
+	QuestionContext     bool                     `json:"question_context,omitempty"`
 	// RunMessages enables the additive, run-scoped supplement delivery protocol.
 	RunMessages bool `json:"run_messages,omitempty"`
 	// WorkerQuestions is negotiated before exposing ask_owner to the worker.

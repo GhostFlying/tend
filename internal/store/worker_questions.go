@@ -101,12 +101,14 @@ func ListWorkerQuestions(ctx context.Context, q Querier, runID string) ([]protoc
 }
 
 // CancelObsoleteWorkerQuestions preserves answers as history, but retires open
-// questions whose run can no longer continue. Pause and human control retain them.
+// questions whose run or frozen Issue ownership can no longer continue.
+// Pause and human control retain questions under an unchanged responsibility.
 func (t *Tx) CancelObsoleteWorkerQuestions(ctx context.Context, now int64) ([]string, error) {
-	rows, err := t.Q().QueryContext(ctx, `UPDATE decisions SET status='cancelled',version=version+1,updated_at=? WHERE status='open' AND decision_id IN (
+	rows, err := t.Q().QueryContext(ctx, `UPDATE decisions SET status='cancelled',version=version+1,updated_at=? WHERE status='open' AND (decision_id IN (
  SELECT w.decision_id FROM worker_questions w JOIN runs r ON r.run_id=w.run_id JOIN plan_actions a ON a.action_id=w.action_id JOIN tasks t ON t.task_id=r.task_id
  WHERE t.lifecycle IN ('completed','cancelled') OR r.observed_state IN ('finished','failed') OR a.status IN ('cancelled','superseded') OR a.target_spec_version<>t.spec_version
- ) RETURNING decision_id`, now)
+ OR EXISTS(SELECT 1 FROM run_issue_responsibilities owned JOIN issue_controls i USING(issue_id) WHERE owned.run_id=r.run_id AND (owned.assignment_epoch<>i.assignment_epoch OR owned.agent_ref<>i.assignee_ref OR i.assignment_state<>'active' OR i.state NOT IN ('active','paused')))
+ ) OR EXISTS(SELECT 1 FROM task_owner_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=decisions.task_id AND (c.assignment_epoch<>i.assignment_epoch OR c.agent_ref<>i.assignee_ref OR i.assignment_state<>'active'))) RETURNING decision_id`, now)
 	if err != nil {
 		return nil, fmt.Errorf("store: cancel stale worker questions: %w", err)
 	}

@@ -22,7 +22,13 @@ func (PutPlannerEntry) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		return Outcome{}, err
 	}
 	v := p.Entry
-	if !oneOf(v.Kind, "user_action", "issue_priority") || !oneOf(v.Status, "open", "blocked", "done", "cancelled") || strings.TrimSpace(v.Title) == "" || strings.TrimSpace(v.Responsible) == "" || strings.TrimSpace(v.Reason) == "" || v.Rank < 0 || v.EstimateSeconds != nil && *v.EstimateSeconds < 0 {
+	if !oneOf(v.Kind, "user_action", "issue_priority") {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "entry.kind must be user_action or issue_priority")
+	}
+	if !oneOf(v.Status, "open", "blocked", "done", "cancelled") {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "entry.status must be open, blocked, done or cancelled")
+	}
+	if strings.TrimSpace(v.Title) == "" || strings.TrimSpace(v.Responsible) == "" || strings.TrimSpace(v.Reason) == "" || v.Rank < 0 || v.EstimateSeconds != nil && *v.EstimateSeconds < 0 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "planner entry needs concrete kind/action/responsibility/status/rank and reason")
 	}
 	var old protocol.PlannerEntry

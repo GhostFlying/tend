@@ -26,6 +26,26 @@ func fenceChangedTaskContext(ctx context.Context, q store.Querier, rc runContext
 		return domain.Decision{}, false, err
 	}
 	if scope.Canonical {
+		current, err := store.TaskOwnerContractCurrent(ctx, q, rc.task.TaskID)
+		if err != nil {
+			return domain.Decision{}, false, err
+		}
+		runCurrent, err := store.RunIssueResponsibilityCurrent(ctx, q, rc.run.RunID)
+		if err != nil {
+			return domain.Decision{}, false, err
+		}
+		if !current || !runCurrent {
+			task := toDomain(rc.task, rc.spec.Budget())
+			d := domain.Decision{Task: task}
+			if task.Control == protocol.ControlManaged {
+				d, err = domain.SetControlMode(task, protocol.ControlPaused, task.ControlRevision)
+				if err != nil {
+					return d, false, err
+				}
+			}
+			d.Events = append(d.Events, domain.EventDraft{Kind: kind, Body: map[string]any{"stale": true, "owner_changed": true, "run_id": rc.run.RunID, "evidence_id": evidenceID}}, domain.EventDraft{Kind: "task.context_changed", Body: map[string]any{"reason": "Issue owner changed; reconcile the retained result"}})
+			return d, true, nil
+		}
 		// The owner's frozen spec authorizes this run. Source changes gate a
 		// subsequent claim, not a result produced under the existing agreement.
 		return domain.Decision{}, false, nil

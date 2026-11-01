@@ -309,6 +309,13 @@ func (SubmitAcceptance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err != nil {
 		return Outcome{}, err
 	}
+	if !fenced && d.Task.Lifecycle == protocol.TaskCompleted {
+		ownerEvents, err := finishOwnerReview(ctx, x, tx, rc.run, acceptanceID, p.Verdict)
+		if err != nil {
+			return Outcome{}, err
+		}
+		events = append(events, ownerEvents...)
+	}
 	return Outcome{Result: map[string]any{"acceptance_id": acceptanceID, "task": newTaskResult(d.Task, actions)}, Events: events}, nil
 }
 

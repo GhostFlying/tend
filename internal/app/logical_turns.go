@@ -309,6 +309,18 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 	if v.Status == "stopped" || v.Status == "awaiting_clarification" {
 		return true, nil
 	}
+	blocked, err := delegationBlockReason(ctx, tx.Q(), v.ID)
+	if err != nil {
+		return false, err
+	}
+	if blocked != "" {
+		if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='needs_review',reason=?,updated_at=? WHERE logical_turn_id=?`, blocked, now, v.ID); err != nil {
+			return false, err
+		}
+		body, _ := json.Marshal(map[string]any{"logical_turn_id": v.ID, "reason": blocked})
+		_, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: m.MessageID, Kind: "conversation.processing_blocked", BodyJSON: string(body), RequestID: m.RequestID, CreatedAt: now})
+		return true, err
+	}
 	if missing == 0 && unready == 0 {
 		_, err = tx.Exec(ctx, `UPDATE logical_turns SET status='completed',reason='',updated_at=? WHERE logical_turn_id=?`, now, v.ID)
 		if err != nil {
@@ -377,6 +389,13 @@ func (ResumeLogicalTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	}
 	if status == "completed" {
 		return Outcome{NoEffect: true}, nil
+	}
+	blocked, err := delegationBlockReason(ctx, tx.Q(), x.Env.Target.ID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if blocked != "" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "unresolved delegation requires a new owner message; processing resume only repairs metadata and cannot retry business writes")
 	}
 	var uncertain bool
 	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN outbox o ON o.request_id=e.request_id WHERE e.logical_turn_id=? AND o.status IN ('sending','unknown')) OR EXISTS(SELECT 1 FROM logical_turn_executions e JOIN main_turns t ON t.request_id=e.request_id WHERE e.logical_turn_id=? AND t.status IN ('starting','started')) OR EXISTS(SELECT 1 FROM logical_turn_executions e JOIN native_turn_receipts_pending p ON p.request_id=e.request_id WHERE e.logical_turn_id=?)`, x.Env.Target.ID, x.Env.Target.ID, x.Env.Target.ID).Scan(&uncertain); err != nil {

@@ -138,6 +138,8 @@
 
 | D133 | 交互式 Web 沙盒：独立 tend-sandbox 复用服务端组装与真实 owner API、账本、调度、工具及 runner 协议，仅替换托管 Agent 会话与 runner 的执行／工作区边界。只接受带沙盒标记的数据目录，不进入发布包、不连接真实模型或生产数据。前端回归逐步迁移到沙盒。见 docs/plans/web-sandbox.md。 | 已实现 |
 | D134 | 正式通信 IM 与版本化问题投影：渠道内回答复用既有业务用例；同事务记录处理渠道与失效原卡片，保留独立原生诊断入口，runner wire 保持 2/1。 | 已实现 |
+| D135 | 具名委派工具明确要求原消息及内容版本；planner 使用可编辑输入合同；委派失败与请求回执原子记录，未消解失败使回合进入 needs_review，不自动重放业务。runner wire 保持 2/1。见 docs/plans/coordination-delegation-contract.md。 | 已实现 |
+| D136 | Issue owner 是普通 Agent 在具体 Issue 上的持续责任；同一身份可以协调与执行。跨 Agent 委派必须经过子 Issue，独立验收具有自己的子 Issue 与运行关联；保留人工控制及历史合同，不改 Issue 交互。见 docs/plans/issue-owner-responsibility.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -453,3 +455,25 @@ S9 看板示例只保留一个 owner 负责的 Issue，其余通过真实创建�
 S9 R2：播种推进必须验证创建业务结果，元数据修复完成不等于业务操作成功；缺少结果时沿用稳定恢复来源请求重新触发真实主 Agent 创建。重型生命周期测试使用内部旧 demo 选项，不重复播种多轮故事；独立快速故事测试覆盖完整交互、元数据修复后的创建恢复与回执重播。CLI 默认仍播种完整故事；内部旧 demo 模式也保留原先 owner 分配，避免新增的负责人工具轮次拖慢通用生命周期测试。
 
 Web 开发可使用同源嵌入页面或 `TEND_DEV_SERVER` 的 Vite 代理。既有 JSON fixture 回归保持不变，后续逐步以沙盒承载 UI 巡检与交互验收。实施与脚本规则见 [Web 交互沙盒](plans/web-sandbox.md)。
+
+## D135：委派合同与未完成责任
+
+具名 issues_create 必须提交准入消息的原 ID 和独立 content revision。工具 schema、字段说明及服务端错误明确同一合同；来源校验和业务版本围栏保持。Owner API 仍保留可选来源的原语义。planner 的具名写入 DTO 只包含可编辑字段，明确 kind/status 枚举，身份、版本和时间由服务端分配，不复用完整存储记录作为模型输入。执行层继续接受原 owner 有效 payload，不重写历史 callback 参数，保留原请求 hash 及回执重放。
+
+具名主会话的 Issue 创建／manager 发布结果与请求回执同事务追加记录。失败 Apply 的部分业务写入回滚，随后提交失败责任；授权失败不产生准入。同逻辑责任（包含澄清继承）、同来源、同操作、同目标及同委派内容的后续成功才消解此前失败；原失败及错误不删除，错误或缺失来源不靠另一条输入成功自动消解。
+
+消息分类及事实审阅完成不代表委派成功。原生回合结束时仍有未消解失败，则持久进入 needs_review 并追加事件，供现有通信查询和事件流诊断。不调度业务重放或放宽 metadata repair 权限；后续业务需正式输入和既有授权路径。追加迁移不回填历史失败，runner wire 继续 2/1。见 [实施计划](plans/coordination-delegation-contract.md)。
+
+## D136：普通 Agent 的 Issue owner 责任
+
+Owner 是具体 Agent 对具体 Issue 的责任，不是一种专用 Agent 类型。保留 `issue_manager` 作为既有持续责任执行角色的 wire/存储名称；它与 worker execution 可以使用同一 Agent identity、模型和配置修订。格式 2 的 Agent 可通过可选 `owner_runtime_id` 指定协调适配器，例如 Orca 执行加 app-server 协调；不创建第二个 manager 身份。app-server worker 在声明 CLI、实际验证协调能力后也可直接承担 owner。类别表达能力，不要求专用 issue-manager 类别。协调就绪失败与执行适配器失败分开记录；不因一方失败补造另一方能力。
+
+新 `issues.request_owner` 和 Issue 创建的 `owner` 输入显式建立 `issue-owner-v1` 合同。可以按能力类别选择，也可约束具体 Agent 身份；首次领取冻结实际执行配置。runner wire 保持 2/1，新增可选能力 `runner-issue-owner-v1`，旧 runner 不领取新责任。旧 `manager` 请求、已有任务和历史会话保持原合同，不静默升级或重写待对账执行。显式变更既有责任需要 replace/既有交接及其围栏。
+
+当前 owner 可以通过冻结任务使用自己的执行适配器工作；实现身份、Agent/runtime revision、模型和 Issue assignment epoch 由服务端固定。跨 Agent 的工作委派必须先创建子 Issue，由接收 Agent 成为该子项 owner；子项 owner 可递归委派。省略子项 owner 时保留当前 Agent 身份，不默认选择另一 manager。父 owner 始终负责协调与结果整合。Task、Run、session 仅承载执行，不成为跨 Agent 派工旁路。
+
+既有独立验收流程与材料隔离保留。新自身执行任务同事务建立有界验收子 Issue，并冻结其原始范围。验收领取将实际 reviewer 身份和配置与该子项绑定，运行关联可通过 owner 查询和 CLI 追踪。最终有效验收结论在通常收尾条件满足时可结清此有界责任；人工扩展的目标不能被原验收结论自动关闭。取消子项请求对应执行停止，实际执行及未知结果核清前不得确认取消。父 Issue 的完成仍走原证据与显式责任收尾路径。
+
+旧 epoch 的实现、验收及失败结果都作为历史事实保存并暂停后续推进，不因旧执行退出产生新的重试决策。交接使旧合同的未决问题失效；旧执行不能发起新问题或创建后续动作，已记录答案仍保留历史事实。任务合同刷新不能偷换实现或已领取验收的身份和配置；不兼容更新明确拒绝，由当前负责人显式建立新执行合同。
+
+本轮不修改 Issue 页面、人工指派、暂停、取消或交接入口。人工干预仍是迭代期必要能力。模型或 runtime 的补充指令可以影响自己执行、拆分粒度和能力选择，不能改变责任与授权规则。原生子 Agent、mention 或咨询不能绕过正式子 Issue 委派。协调适配器继续保持其实际工具隔离；不把提示词要求宣称为任意原生命令的 OS 隔离。实施与验收见 [计划](plans/issue-owner-responsibility.md)。

@@ -220,6 +220,16 @@ func answerEffect(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRo
 		res.Reason = fmt.Sprintf("the task changed after the question was asked (control revision %d, now %d)", d.AskedRevision.Int64, row.ControlRevision)
 		return res, nil, nil
 	}
+	if kind != protocol.EffectCancel {
+		currentOwner, err := store.TaskOwnerContractCurrent(ctx, tx.Q(), row.TaskID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !currentOwner {
+			res.Reason = "Issue responsibility changed; the answer is retained but a current owner execution contract is required"
+			return res, nil, nil
+		}
+	}
 	task := toDomainWithWorkspace(row, spec)
 	var dec domain.Decision
 	switch kind {

@@ -90,6 +90,9 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		}
 		spec.Workspace = domain.Workspace{Mode: domain.WorkspaceReuse, SourceTaskID: current.Plan.DefaultWorkspaceTaskID, IncludeExistingChanges: spec.Workspace.IncludeExistingChanges}
 	}
+	if _, err := prepareOwnerExecution(ctx, x, tx.Q(), current, &spec); err != nil {
+		return Outcome{}, err
+	}
 	payload := createTaskPayload{Title: p.Title, Spec: spec, Rating: p.Rating, Project: current.Plan.Project, WorkspaceName: p.WorkspaceName, StageIDs: p.StageIDs, Relations: p.Relations}
 	return createTask(ctx, x, tx, payload, &canonicalTaskCreateContext{Issue: current, Source: p.canonicalOwnerIssueSource, Reason: p})
 }

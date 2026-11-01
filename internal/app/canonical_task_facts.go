@@ -76,7 +76,7 @@ func appendCanonicalTaskFacts(ctx context.Context, q store.Querier, root string,
 	for _, review := range reviews {
 		f.OpenAttention = append(f.OpenAttention, protocol.IssueBlocker{Code: "completion_review", ObjectID: review.EventID})
 	}
-	return nil
+	return appendDelegatedRunFacts(ctx, q, root, f)
 }
 
 func cancelCanonicalPrimaryTasks(ctx context.Context, x *Exec, tx *store.Tx, root string) ([]Event, error) {
@@ -103,7 +103,66 @@ func cancelCanonicalPrimaryTasks(ctx context.Context, x *Exec, tx *store.Tx, roo
 		}
 		events = append(events, next...)
 	}
+	reviewEvents, err := cancelDelegatedReviewRuns(ctx, x, tx, root)
+	return append(events, reviewEvents...), err
+}
+
+// A review run belongs to its child Issue, while the frozen delivery task and
+// workspace still belong to the implementation Issue. Do not cancel another
+// Issue's implementation when withdrawing only its delegated review.
+func cancelDelegatedReviewRuns(ctx context.Context, x *Exec, tx *store.Tx, root string) ([]Event, error) {
+	actions, err := store.FollowupIDs(ctx, tx.Q(), `WITH RECURSIVE scope(id) AS (SELECT issue_id FROM issue_controls WHERE issue_id=? UNION ALL SELECT c.issue_id FROM issue_controls c JOIN scope s ON c.parent_issue_id=s.id)
+ SELECT a.action_id FROM task_owner_contracts c JOIN scope s ON s.id=c.review_issue_id JOIN plan_actions a ON a.task_id=c.task_id WHERE a.kind='accept' AND a.status IN ('pending','dispatched') ORDER BY a.action_id`, root)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range actions {
+		if err := tx.SetActionStatus(ctx, id, protocol.ActionCancelled, x.Now.UnixMilli()); err != nil {
+			return nil, err
+		}
+	}
+	runs, err := store.FollowupIDs(ctx, tx.Q(), `WITH RECURSIVE scope(id) AS (SELECT issue_id FROM issue_controls WHERE issue_id=? UNION ALL SELECT c.issue_id FROM issue_controls c JOIN scope s ON c.parent_issue_id=s.id)
+ SELECT r.run_id FROM run_issue_responsibilities d JOIN scope s ON s.id=d.issue_id JOIN runs r USING(run_id) WHERE r.role='accept' AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') ORDER BY r.run_id`, root)
+	if err != nil {
+		return nil, err
+	}
+	var events []Event
+	for _, run := range runs {
+		if _, err := tx.Exec(ctx, `UPDATE runs SET desired_state='stopped',updated_at=? WHERE run_id=?`, x.Now.UnixMilli(), run); err != nil {
+			return nil, err
+		}
+		events = append(events, Event{ObjectType: "run", ObjectID: run, Kind: "run.stop_requested", Body: map[string]any{"issue_id": root, "reason": "review responsibility cancelled"}})
+	}
 	return events, nil
+}
+
+func appendDelegatedRunFacts(ctx context.Context, q store.Querier, root string, f *domain.IssueLifecycleFacts) error {
+	rows, err := q.QueryContext(ctx, `WITH RECURSIVE scope(id) AS (SELECT issue_id FROM issue_controls WHERE issue_id=? UNION ALL SELECT c.issue_id FROM issue_controls c JOIN scope s ON c.parent_issue_id=s.id)
+ SELECT r.run_id,r.generation,r.observed_state,
+ EXISTS(SELECT 1 FROM leases l WHERE l.run_id=r.run_id AND l.status<>'released'),
+ EXISTS(SELECT 1 FROM run_messages m WHERE m.run_id=r.run_id AND m.status IN ('dispatching','unknown'))
+ FROM run_issue_responsibilities d JOIN scope s ON s.id=d.issue_id JOIN runs r USING(run_id)
+ WHERE NOT EXISTS(SELECT 1 FROM task_work_item_owners o JOIN scope owned ON owned.id=o.work_item_id WHERE o.task_id=r.task_id) ORDER BY r.run_id`, root)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var generation int64
+		var observed protocol.RunObserved
+		var lease, unknown bool
+		if err := rows.Scan(&id, &generation, &observed, &lease, &unknown); err != nil {
+			return err
+		}
+		if observed != protocol.RunFinished && observed != protocol.RunFailed || lease {
+			f.Executions = append(f.Executions, protocol.IssueBlocker{Code: "delegated_execution", ObjectID: id, Revision: generation})
+		}
+		if observed == protocol.RunUnknown || unknown {
+			f.UnknownOperations = append(f.UnknownOperations, protocol.IssueBlocker{Code: "delegated_execution_unknown", ObjectID: id, Revision: generation})
+		}
+	}
+	return rows.Err()
 }
 
 func acknowledgeCanonicalCompletions(ctx context.Context, tx *store.Tx, issue string, revision int64, reviews []protocol.CompletionReviewAcknowledgement) error {
