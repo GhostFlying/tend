@@ -1,8 +1,9 @@
 import type { IssueReadingState } from "./reading.ts";
-import { Button, Badge, Section, EmptyState } from "../ui/index.ts";
+import { Button, Badge } from "../ui/index.ts";
 import { useDurableOp } from "../app/useDurableOp.ts";
 import { issueHandoffCommand } from "./actions.ts";
 import { navigate } from "../app/router.ts";
+import { Chevron } from "../shell/icons.tsx";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
@@ -28,11 +29,11 @@ import { IssueDefinition } from "./Definition.tsx";
 import { IssueHandoff } from "./Handoff.tsx";
 import { ManagerStatus } from "./ManagerStatus.tsx";
 import { IssueHistory } from "./History.tsx";
-import { IssueFollowupsDelivery, externalDeliveryStatus } from "./FollowupsDelivery.tsx";
+import { IssueFollowupsDelivery } from "./FollowupsDelivery.tsx";
 import { CreateIssueTask } from "./CreateTask.tsx";
 import { IssueActivity } from "./Activity.tsx";
 import { ProgressEditor, IssueControlEditor } from "./Progress.tsx";
-import { IssueResultsList, resultStatus } from "./Results.tsx";
+import { IssueResultsList } from "./Results.tsx";
 import { TaskRunStatus } from "../rollout/RunRollout.tsx";
 import { taskLook } from "../tasks/status.ts";
 import styles from "./DetailPage.module.css";
@@ -77,6 +78,7 @@ export function IssueDetails({
   const initialTop = useRef(reading.top);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [attention, setAttention] = useState("");
+  const [progressExpanded, setProgressExpanded] = useState(false);
   const [side, setSide] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
   const conversationRead = useMemo(
@@ -180,26 +182,6 @@ export function IssueDetails({
   const statusLabel =
     issue &&
     (issue.state !== "active" ? issueStateLabel[issue.state] : workStatusLabel(workStatus(issue)));
-  const deliveryCount =
-    (results.value?.items?.length ?? 0) + (deliveries.value?.items?.length ?? 0);
-  const recentDeliveries = [
-    ...(results.value?.items ?? []).map((result) => ({
-      id: `artifact:${result.artifact.artifact_id}`,
-      title: result.title,
-      status: resultStatus(result),
-      at: result.created_at,
-      panel: "results" as const,
-    })),
-    ...(deliveries.value?.items ?? []).map((item) => ({
-      id: `external:${item.delivery.delivery_id}`,
-      title: `${item.delivery.repository} · #${item.delivery.number}`,
-      status: externalDeliveryStatus(item),
-      at: item.observation.checked_at ?? item.observation.attempted_at ?? 0,
-      panel: "followups" as const,
-    })),
-  ]
-    .sort((a, b) => b.at - a.at)
-    .slice(0, 3);
   const sideContent = issue && (
     <>
       <section>
@@ -274,7 +256,7 @@ export function IssueDetails({
           .sort((a, b) => taskPriority(a) - taskPriority(b))
           .slice(0, 3)
           .map((task) => (
-            <div key={task.task_id}>
+            <div key={task.task_id} className={styles.runEntry}>
               <Button
                 variant="ghost"
                 className={styles.resultLink}
@@ -298,8 +280,10 @@ export function IssueDetails({
           ))}
         {!issue.tasks?.length && <p className={styles.muted}>暂无任务</p>}
         {!!issue.tasks?.length && (
-          <details>
-            <summary>全部执行（{issue.tasks.length}）</summary>
+          <details className={styles.runList}>
+            <summary>
+              <Chevron /> 全部执行（{issue.tasks.length}）
+            </summary>
             {issue.tasks.map((task) => (
               <Button
                 variant="ghost"
@@ -480,7 +464,11 @@ export function IssueDetails({
                     </Button>
                   </section>
                 )}
-                <section className={styles.progress}>
+                <section
+                  data-issue-progress
+                  className={styles.progress}
+                  data-expanded={progressExpanded || !issue.progress?.summary}
+                >
                   <div className={styles.sectionHead}>
                     <h2>当前进展</h2>
                     <Button
@@ -492,21 +480,23 @@ export function IssueDetails({
                     </Button>
                   </div>
                   {issue.progress?.summary ? (
-                    <Expandable text={issue.progress.summary} />
+                    <Expandable text={issue.progress.summary} onOpenChange={setProgressExpanded} />
                   ) : (
                     <p className={styles.muted}>负责人尚未更新进展</p>
                   )}
-                  {issue.progress?.next_step && <p>下一步：{issue.progress.next_step}</p>}
-                  <p className={styles.muted}>
-                    {execution}
-                    {issue.progress && (
-                      <>
-                        {" "}
-                        · 由 <AssigneeName assignee={issue.progress.updated_by} /> 更新 ·{" "}
-                        {new Date(issue.progress.updated_at).toLocaleString("zh-CN")}
-                      </>
-                    )}
-                  </p>
+                  <div className={styles.progressDetails}>
+                    {issue.progress?.next_step && <p>下一步：{issue.progress.next_step}</p>}
+                    <p className={styles.muted}>
+                      {execution}
+                      {issue.progress && (
+                        <>
+                          {" "}
+                          · 由 <AssigneeName assignee={issue.progress.updated_by} /> 更新 ·{" "}
+                          {new Date(issue.progress.updated_at).toLocaleString("zh-CN")}
+                        </>
+                      )}
+                    </p>
+                  </div>
                   {issue.assignment_state !== "active" && (
                     <p role="status">正在交接负责人，当前执行事实仍予保留。</p>
                   )}
@@ -523,36 +513,6 @@ export function IssueDetails({
                   onCreate={() => setPanel("child")}
                   editable={editable}
                 />
-                <Section title="交付物" className={styles.deliverySummary}>
-                  {results.error && (
-                    <ReadError label="交付读取失败" retry={() => void reads.results.refresh()} />
-                  )}
-                  {deliveries.error && (
-                    <ReadError
-                      label="外部交付读取失败"
-                      retry={() => void reads.deliveries.refresh()}
-                    />
-                  )}
-                  {recentDeliveries.map((item) => (
-                    <Button
-                      key={item.id}
-                      variant="ghost"
-                      className={styles.resultLink}
-                      onClick={() => setPanel(item.panel)}
-                    >
-                      <span>{item.title}</span>
-                      <Badge>{item.status}</Badge>
-                    </Button>
-                  ))}
-                  {results.value && deliveries.value && !recentDeliveries.length && (
-                    <EmptyState>暂无已登记交付</EmptyState>
-                  )}
-                  {!!deliveryCount && (
-                    <Button variant="link" onClick={() => setPanel("results")}>
-                      全部执行交付 →
-                    </Button>
-                  )}
-                </Section>
                 <div className={styles.sectionHead}>
                   <h2>讨论与进展</h2>
                   <Button variant="link" onClick={jump}>
@@ -797,7 +757,7 @@ export function ReadError({ label, retry }: { label: string; retry(): void }) {
     </p>
   );
 }
-function Expandable({ text }: { text: string }) {
+function Expandable({ text, onOpenChange }: { text: string; onOpenChange?(open: boolean): void }) {
   const [open, setOpen] = useState(false);
   const [clipped, setClipped] = useState(false);
   const paragraph = useRef<HTMLParagraphElement>(null);
@@ -815,8 +775,17 @@ function Expandable({ text }: { text: string }) {
       <p ref={paragraph} className={open ? undefined : styles.clamp}>
         {text}
       </p>
-      {(open || clipped) && (
-        <Button variant="link" aria-expanded={open} onClick={() => setOpen(!open)}>
+      {(open || clipped || !!onOpenChange) && (
+        <Button
+          variant="link"
+          className={onOpenChange ? styles.progressExpand : undefined}
+          data-clipped={clipped || open}
+          aria-expanded={open}
+          onClick={() => {
+            setOpen(!open);
+            onOpenChange?.(!open);
+          }}
+        >
           {open ? "收起" : "展开全文"}
         </Button>
       )}

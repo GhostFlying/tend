@@ -103,3 +103,30 @@ export class IssueActivityRead {
     this.read.close();
   }
 }
+
+/** Merge only adjacent background events from the same actor and Issue within two minutes. */
+export function groupActivityEvents(rows: readonly IssueActivityEntry[]): IssueActivityEntry[][] {
+  const groups: IssueActivityEntry[][] = [];
+  for (const row of rows) {
+    const group = groups.at(-1);
+    const previous = group?.at(-1);
+    const first = group?.[0];
+    const background = (entry: IssueActivityEntry) =>
+      !entry.block &&
+      !entry.artifact_id &&
+      !/attention|decision|failed|failure|acceptance|delivery/.test(entry.kind);
+    if (
+      previous &&
+      first &&
+      background(previous) &&
+      background(row) &&
+      previous.author === row.author &&
+      previous.issue_id === row.issue_id &&
+      row.created_at >= first.created_at &&
+      row.created_at - first.created_at <= 120_000
+    )
+      group!.push(row);
+    else groups.push([row]);
+  }
+  return groups;
+}

@@ -226,3 +226,31 @@ test("newly admitted older blocks are discovered even when the head overlaps exh
   expect(read.state.get().value?.more).toBe(false);
   read.close();
 });
+
+test("merges only adjacent background events by actor, Issue and a bounded window", async () => {
+  const { groupActivityEvents } = await import("./activity.ts");
+  const event = (id: string, at: number, author = "负责人", issue = "one") => ({
+    ...entry(id, at),
+    author,
+    issue_id: issue,
+    created_at: at,
+    kind: "issue.progress_updated",
+  });
+  const rows = [
+    event("a", 1000),
+    event("b", 2000),
+    event("c", 3000, "你"),
+    event("d", 4000, "你", "child"),
+    event("e", 200000, "你", "child"),
+    { ...event("f", 201000, "你", "child"), kind: "task.failed" },
+    event("g", 202000, "你", "child"),
+  ];
+  expect(groupActivityEvents(rows).map((group) => group.map((row) => row.id))).toEqual([
+    ["a", "b"],
+    ["c"],
+    ["d"],
+    ["e"],
+    ["f"],
+    ["g"],
+  ]);
+});

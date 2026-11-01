@@ -48,11 +48,20 @@ const tags = new Set([
 export const Markdown = memo(function Markdown({
   text,
   files,
+  demoteHeadings = false,
 }: {
   text: string;
   files?: readonly PreviewFile[];
+  demoteHeadings?: boolean;
 }) {
-  const nodes = useMemo(() => render(md.parse(text, {}), { next: 0 }, files), [text, files]);
+  const nodes = useMemo(() => {
+    const tokens = md.parse(text, {});
+    if (demoteHeadings)
+      for (const token of tokens) {
+        if (token.type === "heading_open" || token.type === "heading_close") token.tag = "h4";
+      }
+    return render(tokens, { next: 0 }, files);
+  }, [text, files, demoteHeadings]);
   return <div className={styles.md}>{nodes}</div>;
 });
 
