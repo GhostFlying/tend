@@ -492,3 +492,12 @@ Webhook 订阅绑定一个已有 Issue，owner 创建、修改、暂停、恢复
 诊断投影复用规则、触发、观察、来源、批次和原生处理事实，增加每次实际触发/观察的关联记录与阶段，不记录空轮询。分开表达已接收、待分发、已入队、处理中、处理结束、未分发、失败、未知和取消；业务完成仍由 Issue 收尾约束决定。历史没有时间证据的阶段显示未记录，不猜测。owner 认证的只读 API 提供按 Issue、来源、状态、时间、关联身份筛选及稳定游标，返回同一读取快照的水位。事件通知仅用于重新读取。
 
 Web 提供全局调度/事件及 Issue 过滤视图，页面只读。CLI 复用现有完整 Issue 生命周期，提供完整 schedule、webhook、event、observation、request 管理/诊断与 JSON 输出、原信封 dry-run/replay，不创建第二份客户端请求账本。新增内部存储及 owner API 不改变 runner 协议 2/1。详见 `docs/plans/unified-issue-triggers.md`。
+
+
+## D138：CLI 能力全集与持续覆盖
+
+CLI 是全部用户业务、管理与诊断能力的完整入口；Web、Telegram 根据交互场景使用其子集。能力覆盖包括完整有效输入、业务筛选、分页、输出、原文件和原请求恢复。内部执行协议保持原角色、租约与执行上下文，不转成 owner 旁路。新增或修改用户能力必须在同一 PR 同步命令、帮助、能力目录及验证。
+
+Owner HTTP 路由统一登记，实际 owner/hosted operation 与 CLI 命令绑定在 make check 中核对。别名归并到已有能力，未覆盖的公开入口拒绝通过；入口测试执行真实 CLI 分发并核对 HTTP/socket 与 Envelope。CLI 仍只依赖标准库和 protocol，服务端业务规则、去重、CAS/assignment epoch 及 unknown 对账继续由 app 负责。请求重放保留原身份和输入，不产生第二账本。
+
+本轮补齐会话、消息交互、Issue 状态与通知、决策、任务/运行/交付、归档、用量与目录，并增加只读 doctor 及已有维护入口。本机 Agent 管理只连接原私有 socket。Artifact 详情使用 owner 认证的只读 API 与现有视图，修复 Web 已有调用。新增 owner 能力不改变 runner wire 2/1，不新增存储迁移。实施与验收见 [计划](plans/cli-capability-parity.md)。

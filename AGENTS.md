@@ -45,7 +45,7 @@ tend/
     release/               不可变发布 manifest 与产物校验，只用标准库
     updater/               单实例进程监督与受控安装，不访问业务数据库
     upgradectl/            server 本机升级入口与更新器组装，业务写入经 app
-    cli/                   tend CLI：login、MCP 桥、hook 命令、setup、owner 命令（D46）
+    cli/                   tend CLI：owner 能力全集、诊断与本机管理（D138）
     netx/                  tsnet 封装（listener、WhoIs）；测试时替换为本地 listener
     webui/                 嵌入并提供 Web 客户端的构建产物（D70）；dist/app/ 由 make web 生成，不提交
     testkit/               fake harness、fake runner、可控时钟、ID 生成器、故障注入
@@ -108,6 +108,9 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 15. **先写计划**：非平凡的功能在编码前先在 `docs/plans/` 写计划；设计变化在同一个 commit 里更新 `docs/design.md`，并引用决策编号。
 16. **协议 breaking change 与退役**：server / runner 通信发生不兼容变更时必须递增协议版本，不能只改程序版本、任务 spec 或存储 schema。每代支持 N 和 N−1；提升到 N+1 的同一变更必须实现 N+1、保留 N 的适配与兼容测试、删除 N−1 的通信适配，并增加拒绝 N−1 的测试。删除/重命名字段、改变类型、增加必填条件、收紧旧有效请求校验或改变默认语义都必须评估为 breaking change。
 17. **兼容代码有期限**：旧协议适配集中放置，登记 ID、适配协议、退役版本及关联代码/测试，代码用 `tend:compat` 标记引用登记。`make check` 必须拒绝过期适配器或登记不一致；开发者在协议升级 PR 中删除代码并更新设计及发布元信息，不通过删除标记或延后期限逃避退役。通信适配退役不删除已提交迁移、历史任务或产物；旧持久化格式需先迁移或保留专用历史读取。发布前必须确认主机及未结束 run/待对账操作不再依赖已退役协议。
+
+
+18. **CLI 能力全集**：Tend CLI 必须覆盖全部用户业务、管理和诊断能力；Web、Telegram 等交互端按场景提供其子集。新增或修改用户能力时，必须在同一 PR 中同步完成 CLI 入口、完整有效输入与输出、适用的筛选与分页、帮助文档、请求恢复语义、能力目录及验证。仅提供通用 HTTP/RPC 调用或声明映射不算完成 CLI 支持。执行器内部协议保留其身份、角色和租约边界。能力覆盖检查必须纳入 `make check`；公共路由、owner operation 和本机管理入口必须登记对应命令及入口用例。Refs: D138。
 
 ## 3. 代码风格
 
