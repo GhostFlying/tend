@@ -146,6 +146,8 @@
 | D140 | 在 D136 的 owner 责任之上，Issue 对话始终面向负责 Agent：默认请求 issue-manager 类别；同事务建立待领取对话，owner 消息保留原队列，领取后投递；退回 owner 不转发或重发已提交的 owner 消息。看板追加可选只读待领取类别字段，Web 明示待领取及一键委派，沙盒经真实 runner 协议领取负责人。见 docs/plans/web-ui-overhaul-s10.md。 | 已实现 |
 | D141 | 可选集中 TraeX worker loop：中心持有模型认证及原生会话，runner 保留 exec-server、工作区和 Orca 原生 TUI。按冻结 runtime 选择，原 run/thread 绑定、人工接管与停止证明沿既有生命周期；本地模式继续可用，wire 保持 2/1。见 docs/plans/central-traex.md。 | 已实现，未发布 |
 
+| D142 | CLI 覆盖全部用户业务、管理与诊断能力，Web/Telegram 为子集；公开接口登记、完整输入输出、请求恢复、帮助及真实入口验证随能力在同一 PR 完成，覆盖门禁进入 make check。见 docs/plans/cli-capability-parity.md。 | 已实现，未发布 |
+
 ## 2. 上下文注入（修订 v0.1 §7）
 
 > D45：当前先做的外挂形态里，上下文由各 agent 的 hook 追加，水位、完整快照与增量的规则不变，具体机制见阶段 C 计划。本节描述的 `thread/inject_items` 方式属于托管形态，随托管一起延后；记录的 app-server 能力也适用于 worker。
@@ -523,3 +525,12 @@ Runner 在实际工作目录适配器中构造有类型的准备失败，记录 
 执行连接沿现有 run 与节点鉴权由 runner 主动建立，不开放无鉴权的执行端口。冷恢复固定中心、run、工作区和 Environment，缺失绑定时明确阻断，不回退中心本机执行。执行资源仍由 runner 对租约、fencing、取消和未知结果负责。中心会话持有与 worker attempt 分离，人工 held 不销毁会话、不自动完成；TUI 断线或退出不交还控制权。首次人工写入须先完成既有 takeover，显式 resume 才恢复自动驱动。业务动态工具由 Tend 控制连接唯一回答，TUI 入口限定原 thread。参见 [实施计划](plans/central-traex.md)。
 
 原生前端正常退出保存绑定原 capability 的本机证明，区别于仍可重连的 helper；连接中的 Orca PTY 不单独证明原生前端存活。恢复只重建同一 thread 的视图，保留 owner 已退回的 shell。确认的 provider、终端、pane 和 thread 通过既有 native identity 事件记入账本，供原生会话入口读取；导航事实不授予控制权限。默认及示例服务端配置不启用中央 worker，本地 runtime 不自动迁移。
+
+
+## D142：CLI 能力全集与持续覆盖
+
+CLI 是全部用户业务、管理与诊断能力的完整入口；Web、Telegram 根据交互场景使用其子集。能力覆盖包括完整有效输入、业务筛选、分页、输出、原文件和原请求恢复。内部执行协议保持原角色、租约与执行上下文，不转成 owner 旁路。新增或修改用户能力必须在同一 PR 同步命令、帮助、能力目录及验证。
+
+Owner HTTP 路由统一登记，实际 owner/hosted operation 与 CLI 命令绑定在 make check 中核对。别名归并到已有能力，未覆盖的公开入口拒绝通过；入口测试执行真实 CLI 分发并核对 HTTP/socket 与 Envelope。CLI 仍只依赖标准库和 protocol，服务端业务规则、去重、CAS/assignment epoch 及 unknown 对账继续由 app 负责。请求重放保留原身份和输入，不产生第二账本。
+
+本轮补齐会话、消息交互、Issue 状态与通知、决策、任务/运行/交付、归档、用量与目录，并增加只读 doctor 及已有维护入口。本机 Agent 管理只连接原私有 socket。Artifact 详情使用 owner 认证的只读 API 与现有视图，修复 Web 已有调用。新增 owner 能力不改变 runner wire 2/1，不新增存储迁移。实施与验收见 [计划](plans/cli-capability-parity.md)。
