@@ -24,7 +24,7 @@ import { buildTranscriptEntries, type TranscriptEntry } from "../conversation/tr
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "../conversation/scrollAnchor.ts";
 import { Chevron } from "../shell/icons.tsx";
 import { clock } from "../conversation/model.ts";
-import { groupActivityEvents } from "./activity.ts";
+import { groupActivityEvents, identifyActivityGroups } from "./activity.ts";
 import { IssueTurnRead } from "./turn.ts";
 import { IssueResultCard, HistoricalResultCard } from "./Results.tsx";
 import type { IssueReadingState } from "./reading.ts";
@@ -164,13 +164,7 @@ export function IssueActivity({
     return rows.filter((row) => row.position >= first);
   }, [rows, all]);
   const activityGroups = useMemo(
-    () =>
-      groupActivityEvents(visible).map((entries) => {
-        const key =
-          entries.map((entry) => eventIdentities.get(entry.id)).find(Boolean) ?? entries[0]!.id;
-        for (const entry of entries) eventIdentities.set(entry.id, key);
-        return { entries, key };
-      }),
+    () => identifyActivityGroups(groupActivityEvents(visible), eventIdentities),
     [visible, eventIdentities],
   );
   const beginContinuation = useCallback(
