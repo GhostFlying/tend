@@ -66,6 +66,7 @@ test("column pagination appends the loaded prefix, counts remain server totals, 
     counts: { todo: 3 },
     facts_seq: 2,
   });
+  expect(api.requests.every((request) => !request.path.startsWith("/api/v1/issues/"))).toBe(true);
   const column = board.columns.get("todo")!;
   void column.more();
   await api.answer("todo", {

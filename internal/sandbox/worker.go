@@ -180,7 +180,7 @@ func (w workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runner
 			return runner.Prepared{}, err
 		}
 	}
-	return runner.Prepared{Dir: dir, ScratchDir: scratch, StateDir: state}, nil
+	return runner.Prepared{Dir: dir, ScratchDir: scratch, StateDir: state, Report: protocol.WorkspaceReport{BackendID: as.Workspace.BackendID}}, nil
 }
 func (workspaces) Collect(ctx context.Context, _ protocol.Assignment) (protocol.ArtifactPayload, error) {
 	return protocol.ArtifactPayload{}, ctx.Err()
@@ -208,4 +208,84 @@ func (workers *scriptedWorkers) Release(ctx context.Context, run, _ string) erro
 
 func (workers *scriptedWorkers) ReleaseHistorical(ctx context.Context, run, thread string, _ bool, _ int64) error {
 	return workers.Release(ctx, run, thread)
+}
+
+// scriptedExecutions advertises a frozen sandbox-only local manager snapshot.
+// Registration and claims still use the real runner transport and journal.
+type scriptedExecutions struct {
+	sessions *scriptedSessions
+	workers  *scriptedWorkers
+	spaces   workspaces
+}
+
+func (s *scriptedExecutions) configuration(context.Context) (protocol.LocalAgentConfiguration, error) {
+	return sandboxManagerConfiguration(false)
+}
+
+// Retained v1 pins keep their original inventory bytes and execution identity.
+func sandboxManagerConfiguration(legacy bool) (protocol.LocalAgentConfiguration, error) {
+	projection := protocol.AgentInventoryProjection{FormatVersion: 2, ExecutionEnvironmentID: hostID, SourceKind: protocol.AgentSourceInline,
+		Runtimes: []protocol.AgentInventoryRuntime{{RuntimeID: "script", Revision: 1, Kind: "appserver-worker", CLI: "codex", DeclaredPurposes: []string{"issue_manager", "worker_run"}, Enabled: true, Registration: "staged", Availability: protocol.AgentInventoryAvailability{Reason: "runtime_not_verified"}}},
+		Agents:   []protocol.AgentInventoryDefinition{{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: hostID, LocalID: "manager"}, Revision: 1, DisplayName: "沙盒 Issue 负责人", Binding: protocol.AgentRuntimeReference{RuntimeID: "script", Revision: 1}, Categories: []string{protocol.DefaultIssueManagerCategory}, Purposes: []string{"issue_manager", "worker_run"}, RequestedModel: model, Enabled: true, Registration: "staged", Availability: protocol.AgentInventoryAvailability{Reason: "runtime_not_verified"}}},
+	}
+	revision, snapshot := uint64(2), "sandbox-owner-v2"
+	if legacy {
+		revision, snapshot = 1, "sandbox-manager-v1"
+		projection.Runtimes[0].DeclaredPurposes = []string{"issue_manager"}
+		projection.Agents[0].Purposes = []string{"issue_manager"}
+	} else {
+		reviewer := projection.Agents[0]
+		reviewer.Identity.LocalID = "reviewer"
+		reviewer.DisplayName = "沙盒独立验收"
+		reviewer.Categories = []string{"sandbox-reviewer"}
+		reviewer.Purposes = []string{"worker_run"}
+		projection.Agents = append(projection.Agents, reviewer)
+	}
+	_, hash, err := protocol.CanonicalAgentInventory(projection)
+	return protocol.LocalAgentConfiguration{State: "accepted", Revision: revision, SnapshotID: snapshot, PublicSHA256: hash, Projection: &projection}, err
+}
+func (s *scriptedExecutions) Refresh(ctx context.Context) error { return ctx.Err() }
+func (s *scriptedExecutions) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
+	config, err := s.configuration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	agent := config.Projection.Agents[0]
+	pin := protocol.RunExecutionPin{Purpose: "issue_manager", Identity: agent.Identity, AgentRevision: 1, Runtime: agent.Binding, InventoryRevision: int64(config.Revision), SnapshotID: config.SnapshotID, PublicSHA256: config.PublicSHA256, Worker: protocol.WorkerAppServer, Profile: protocol.ExecutionProfile{Model: model}}
+	worker := pin
+	worker.Purpose, worker.BackendID = "", "git"
+	reviewer := worker
+	reviewer.Identity = config.Projection.Agents[1].Identity
+	return []protocol.AgentExecutor{{Available: true, Pin: pin}, {Available: true, Pin: worker}, {Available: true, Pin: reviewer}}, ctx.Err()
+}
+func (s *scriptedExecutions) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runner.ResolvedExecution, error) {
+	executors, err := s.Observe(ctx)
+	if err != nil {
+		return runner.ResolvedExecution{}, err
+	}
+	for _, executor := range executors[1:] {
+		if pin == executor.Pin {
+			profile := pin.Profile
+			return runner.ResolvedExecution{Workers: s.workers, Workspaces: s.spaces, Profile: &profile}, nil
+		}
+	}
+	return runner.ResolvedExecution{}, errors.New("sandbox worker snapshot does not match the accepted pin")
+}
+func (s *scriptedExecutions) ResolveManager(ctx context.Context, pin protocol.RunExecutionPin) (runner.ManagerExecution, error) {
+	executors, err := s.Observe(ctx)
+	if err != nil {
+		return runner.ManagerExecution{}, err
+	}
+	expected := executors[0].Pin
+	if pin != expected {
+		legacy, err := sandboxManagerConfiguration(true)
+		if err != nil {
+			return runner.ManagerExecution{}, err
+		}
+		expected.InventoryRevision, expected.SnapshotID, expected.PublicSHA256 = int64(legacy.Revision), legacy.SnapshotID, legacy.PublicSHA256
+		if pin != expected {
+			return runner.ManagerExecution{}, errors.New("sandbox manager snapshot does not match the accepted pin")
+		}
+	}
+	return runner.ManagerExecution{Open: func(ctx context.Context, _ string) (harness.Session, error) { return s.sessions.open(ctx) }, Profile: pin.Profile}, nil
 }

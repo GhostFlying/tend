@@ -57,7 +57,7 @@ func (s seeder) execute(ctx context.Context, key string, target protocol.Target,
 func seedCategories(ctx context.Context, a *app.App, _ protocol.IDGen) error {
 	s := seeder{app: a}
 	zero := int64(0)
-	for _, entry := range []struct{ id, title string }{{"sandbox-planner", "沙盒协调与咨询"}, {protocol.DefaultIssueManagerCategory, "沙盒 Issue 负责人"}} {
+	for _, entry := range []struct{ id, title string }{{"sandbox-planner", "沙盒协调与咨询"}, {protocol.DefaultIssueManagerCategory, "沙盒 Issue 负责人"}, {"sandbox-reviewer", "沙盒独立验收"}} {
 		if err := s.execute(ctx, "category-"+entry.id, protocol.Target{Type: "category", ID: entry.id}, &zero, protocol.PutAgentCategoryPayload{Title: entry.title, State: "active"}, app.PutAgentCategory{}, nil); err != nil {
 			return err
 		}
@@ -105,6 +105,9 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 	for n, status := range protocol.IssueWorkStatusValues() {
 		var issue protocol.Issue
 		key := fmt.Sprintf("board-%d", n)
+		if !skipStory {
+			key += "-s10"
+		}
 		p := protocol.CreateIssuePayload{Plan: plan(names[n], "demo-web")}
 		if !skipStory && n != 2 {
 			p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "sandbox-hosted/manager"}
@@ -118,12 +121,24 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 		}
 	}
 	var parent protocol.Issue
-	if err := s.execute(ctx, "parent", protocol.Target{Type: "issue"}, nil, protocol.CreateIssuePayload{Plan: plan("端到端交付体验：从对话到验收", "demo-service")}, app.CanonicalOwnerIssueCommand{Action: "create"}, &parent); err != nil {
+	parentKey := "parent"
+	parentPayload := protocol.CreateIssuePayload{Plan: plan("端到端交付体验：从对话到验收", "demo-service")}
+	if !skipStory {
+		parentKey += "-s10"
+		parentPayload.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "sandbox-hosted/manager"}
+	}
+	if err := s.execute(ctx, parentKey, protocol.Target{Type: "issue"}, nil, parentPayload, app.CanonicalOwnerIssueCommand{Action: "create"}, &parent); err != nil {
 		return demo, err
 	}
 	demo.Parent = parent.IssueID
 	for n, title := range []string{"核对进展消息", "核对交付物与验收结论"} {
-		if err := s.execute(ctx, fmt.Sprintf("child-%d", n), protocol.Target{Type: "issue"}, nil, protocol.CreateIssuePayload{Plan: plan(title, "demo-service"), ParentIssueID: parent.IssueID, ExpectedParentRevision: &parent.Revision}, app.CanonicalOwnerIssueCommand{Action: "create"}, nil); err != nil {
+		key := fmt.Sprintf("child-%d", n)
+		p := protocol.CreateIssuePayload{Plan: plan(title, "demo-service"), ParentIssueID: parent.IssueID, ExpectedParentRevision: &parent.Revision}
+		if !skipStory {
+			key += "-s10"
+			p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "sandbox-hosted/manager"}
+		}
+		if err := s.execute(ctx, key, protocol.Target{Type: "issue"}, nil, p, app.CanonicalOwnerIssueCommand{Action: "create"}, nil); err != nil {
 			return demo, err
 		}
 	}
@@ -131,8 +146,11 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 	for n, title := range []string{"示例报告：完成输入检查与交付", "失败示例：保留真实执行错误", "问我：选择布局后继续生成报告"} {
 		var issue protocol.Issue
 		key := fmt.Sprintf("execution-%d", n)
+		if !skipStory {
+			key += "-s10"
+		}
 		p := protocol.CreateIssuePayload{Plan: plan(title, "demo-docs")}
-		if n == 0 {
+		if n == 0 || !skipStory {
 			p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "sandbox-hosted/manager"}
 		}
 		if err := s.execute(ctx, key, protocol.Target{Type: "issue"}, nil, p, app.CanonicalOwnerIssueCommand{Action: "create"}, &issue); err != nil {

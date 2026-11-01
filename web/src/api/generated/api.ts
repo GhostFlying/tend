@@ -2612,6 +2612,7 @@ export interface IssueBoardCard {
   attention_count: number;
   execution: ExecutionCounts;
   notification_due_at?: number;
+  pending_manager_category_id?: string;
   stage_title?: string;
   stages_done: number;
   stages_total: number;

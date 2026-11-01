@@ -373,6 +373,19 @@ const server = createServer(async (req, res) => {
       attentions: { items: current === issue ? [decision] : [], more: false },
     });
   }
+  if (p === "/api/v1/categories")
+    return json({
+      items: [
+        {
+          category_id: "issue-manager",
+          revision: 1,
+          title: "Issue 负责人",
+          description: "",
+          state: "active",
+        },
+      ],
+      more: false,
+    });
   if (p.startsWith("/api/v1/agent-conversations/")) {
     if (conversationFailure)
       return json({ error: { code: "unavailable", message: "Conversation unavailable" } }, 503);
@@ -399,14 +412,14 @@ const server = createServer(async (req, res) => {
   if (p === "/api/v1/conversation/settings")
     return json({
       enabled: true,
-      available: true,
+      available: false,
       revision: 1,
       model: "model",
       effort: "high",
       models: [],
     });
   if (p === "/api/v1/conversation/handoff")
-    return json({ enabled: false, revision: 1, idle_minutes: 30 });
+    return json({ enabled: false, pending: true, revision: 1, idle_minutes: 30 });
   if (p.includes("/usage"))
     return json({ available: false, measurement: "unavailable", sampled_at: now, updated_at: now });
   if (p.startsWith("/api/v1/artifacts/"))
@@ -937,6 +950,38 @@ try {
       const node = document.querySelector("[data-issue-scroll]")!;
       return node.scrollHeight - node.scrollTop - node.clientHeight < 2;
     });
+
+    // Paused intent survives viewport growth even when the new remaining
+    // distance is inside the automatic follow threshold.
+    await page.setViewportSize({ width, height: 800 });
+    await page.waitForTimeout(150);
+    await scroller.evaluate((node) => {
+      node.scrollTop = node.scrollHeight - node.clientHeight - 220;
+    });
+    await page.waitForTimeout(150);
+    const pausedTop = await scroller.evaluate((node) => node.scrollTop);
+    await page.setViewportSize({ width, height: 950 });
+    await page.waitForTimeout(200);
+    assert(
+      Math.abs((await scroller.evaluate((node) => node.scrollTop)) - pausedTop) <= 2,
+      "viewport growth resumed paused Issue following",
+    );
+    const pausedHeight = await scroller.evaluate((node) => node.scrollHeight);
+    reply.body += "窗口增高后仍保持暂停阅读。\n\n".repeat(30);
+    reply.assistant_revision!++;
+    publish();
+    await page.waitForFunction((height) => {
+      const node = document.querySelector("[data-issue-scroll]")!;
+      return node.scrollHeight > height;
+    }, pausedHeight);
+    await page.waitForTimeout(150);
+    assert(
+      (await scroller.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)) >=
+        50,
+      "content growth after resize resumed paused Issue following",
+    );
+    await page.setViewportSize({ width, height: 1000 });
+    await page.waitForTimeout(100);
     const laterEntry = detail.locator('[data-scroll-id="result:artifact-one"]');
     await laterEntry.scrollIntoViewIfNeeded();
     await scroller.evaluate((node) => {
@@ -1037,9 +1082,46 @@ try {
       .getByText("这个 Issue 由你负责，没有负责人 Agent 对话。", { exact: true })
       .waitFor();
     await alignedFooter();
+    const ownerCopy = await detail
+      .getByText("这个 Issue 由你负责，没有负责人 Agent 对话。", { exact: true })
+      .boundingBox();
+    assert(
+      ownerCopy && ownerCopy.width >= Math.min(width - 80, 600),
+      "owner explanation occupies a readable full row",
+    );
     assert.equal(await detail.getByRole("textbox", { name: "消息", exact: true }).count(), 0);
     assert.equal(await detail.getByText(/发给 .*本 Issue 负责人/).count(), 0);
-    await detail.getByRole("button", { name: "交给 Agent 负责", exact: true }).click();
+    const managerSent = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/v1/ops",
+    );
+    await detail.getByRole("button", { name: "交给 Issue 负责人 Agent", exact: true }).click();
+    await managerSent;
+    assert.equal((writes.at(-1)!.payload as { category_id: string }).category_id, "issue-manager");
+    assert.equal(writes.at(-1)!.operation, "issues.request_owner");
+    issue.conversation = {
+      conversation_id: "issue:canonical-root",
+      can_send: true,
+      reason: "manager_pending",
+    };
+    issue.manager = { task_id: "pending-manager", category_id: "issue-manager", state: "queued" };
+    publish();
+    await detail
+      .getByText("等待执行主机领取负责人；消息会在领取后送达。", { exact: true })
+      .waitFor();
+    assert.equal(
+      await detail.getByText(/主会话正在交接|托管主 Agent 暂不可用|托管主 Agent 未启用/).count(),
+      0,
+    );
+    await detail.getByText("发给 Issue 负责人（待领取）", { exact: true }).waitFor();
+    assert(!(await detail.getByRole("button", { name: "发送", exact: true }).isDisabled()));
+    await page.screenshot({ path: join(output, `pending-manager-${width}.png`) });
+    issue.conversation = {
+      conversation_id: "issue:canonical-root",
+      can_send: false,
+      reason: "owner",
+    };
+    publish();
+    await detail.getByRole("button", { name: "选择其他负责人 →", exact: true }).click();
     await detail.getByRole("dialog", { name: "交接负责人", exact: true }).waitFor();
     await page.keyboard.press("Escape");
     issue.state = "closed";
@@ -1138,6 +1220,25 @@ try {
   issue.assignee = { kind: "owner", ref: "owner" };
   issue.state = "active";
   issue.conversation = { can_send: false, reason: "owner" };
+  const savedActivity = structuredClone(activity);
+  activity.items = activity.items!.filter((entry) => !entry.block).slice(0, 2);
+  activity.more = false;
+  for (const width of [1440, 390]) {
+    const context = await browser.newContext({ viewport: { width, height: 1000 } });
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+    await page.getByText("这个 Issue 由你负责，没有负责人 Agent 对话。", { exact: true }).waitFor();
+    await page.waitForTimeout(500);
+    assert.equal(
+      await page.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+      0,
+    );
+    await page.setViewportSize({ width, height: 1100 });
+    await page.waitForTimeout(200);
+    assert.equal(await page.getByText("有新进展 · 到最新", { exact: false }).count(), 0);
+    await context.close();
+  }
+  Object.assign(activity, savedActivity);
   activity.items![0]!.block!.items![0]!.body = "需要从顶部开始阅读的历史。\n\n".repeat(200);
   activityDelay = 300;
   for (const width of [1440, 390]) {

@@ -23,6 +23,7 @@ import type { OwnerCommand } from "../app/ownerCommand.ts";
 interface IssuePayloads {
   manager_migration: ManagerMigrationPayload;
   request_manager: RequestIssueManagerPayload;
+  request_owner: RequestIssueManagerPayload;
   update: UpdateIssuePayload;
   update_progress: UpdateIssueProgressPayload;
   pause: IssueControlPayload;
@@ -60,7 +61,7 @@ export function issueHandoffCommand(
     const category_id = target.slice("category:".length);
     return issue.assignee.kind === "agent" && !issue.manager
       ? issueCommand(issue, "manager_migration", { phase: "switch", category_id, reason })
-      : issueCommand(issue, "request_manager", {
+      : issueCommand(issue, "request_owner", {
           category_id,
           replace: pendingManager || issue.assignee.kind === "agent",
           reason,
@@ -72,6 +73,25 @@ export function issueHandoffCommand(
     assignee: target === "owner" ? { kind: "owner", ref: owner } : { kind: "agent", ref: target },
     reason,
   });
+}
+
+/** A fresh create keeps restored source facts but uses the current responsibility choice. */
+export function createIssueResponsibility(
+  payload: CreateIssuePayload,
+  target: string,
+  owner: string,
+): CreateIssuePayload {
+  const next = { ...payload };
+  delete next.manager;
+  delete next.owner;
+  delete next.assignee;
+  if (target.startsWith("category:"))
+    next.owner = {
+      category_id: target.slice("category:".length),
+      reason: "按类别委派 Issue 持续协调责任",
+    };
+  else next.assignee = { kind: "owner", ref: owner };
+  return next;
 }
 
 export function createIssueCommand(payload: CreateIssuePayload): OwnerCommand {
@@ -130,4 +150,22 @@ export function issueFollowupCommand(
     expected_control_revision: rule.revision,
     payload: { ...payload, expected_assignment_epoch: issue.assignment_epoch },
   };
+}
+
+/** Decode the frozen category choice before reconciling a retained handoff. */
+export function issueHandoffCategoryTarget(
+  original: Pick<OwnerCommand, "operation" | "payload"> | null | undefined,
+): string | undefined {
+  if (
+    original?.operation === "issues.manager_migration" &&
+    (original.payload as ManagerMigrationPayload).phase === "cancel"
+  )
+    return "owner";
+  if (
+    original?.operation === "issues.request_owner" ||
+    original?.operation === "issues.request_manager" ||
+    original?.operation === "issues.manager_migration"
+  )
+    return `category:${(original.payload as RequestIssueManagerPayload | ManagerMigrationPayload).category_id ?? "issue-manager"}`;
+  return undefined;
 }

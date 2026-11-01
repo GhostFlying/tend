@@ -92,6 +92,28 @@ let takeRequest = "",
 const summary = (id: string, title: string, parent = ""): IssueSummary => ({
   issue_id: id,
   title,
+  ...(id === "issue-root"
+    ? {
+        board: {
+          status: "in_progress" as const,
+          pending_manager_category_id: "issue-manager",
+          stages_total: 0,
+          stages_done: 0,
+          execution: {
+            accepting: 0,
+            cancelled: 0,
+            completed: 0,
+            idle: 0,
+            paused: 0,
+            queued: 0,
+            running: 0,
+            unknown: 0,
+            waiting_owner: 0,
+          },
+          attention_count: 0,
+        },
+      }
+    : {}),
   project: "sample",
   parent_issue_id: parent,
   state: "active",
@@ -930,7 +952,7 @@ const server = createServer(async (req, res) => {
         source_message_id?: string;
         expected_source_revision?: number;
         assignee?: { kind: string; ref: string };
-        manager?: { category_id: string; expected_assignment_epoch: number };
+        owner?: { category_id: string };
       };
       // Mirror actual owner API validation instead of accepting impossible input.
       if (payload.source_message_id && payload.expected_source_revision !== sourceContentRevision)
@@ -945,20 +967,19 @@ const server = createServer(async (req, res) => {
           },
         });
       assert(
-        payload.assignee?.kind === "owner" || payload.manager?.category_id === "custom-coordinator",
+        payload.assignee?.kind === "owner" || payload.owner?.category_id === "custom-coordinator",
       );
-      assert(!(payload.assignee && payload.manager));
-      if (payload.manager) assert.equal(payload.manager.expected_assignment_epoch, 1);
+      assert(!(payload.assignee && payload.owner));
       importedIssue = {
         ...issue,
         issue_id: "issue-imported",
         plan: payload.plan,
         tasks: [],
         assignee: payload.assignee ?? { kind: "owner", ref: "owner" },
-        manager: payload.manager
+        manager: payload.owner
           ? {
               task_id: "task-imported-manager",
-              category_id: payload.manager.category_id,
+              category_id: payload.owner.category_id,
               state: "queued",
             }
           : undefined,
@@ -1364,6 +1385,10 @@ async function captureS4() {
             .first()
             .waitFor();
         if (name === "board") {
+          await page
+            .locator('[data-issue-id="issue-root"]')
+            .getByText("待领取 · Issue manager", { exact: true })
+            .waitFor();
           if (viewport.width === 390) {
             const create = (await page
               .getByRole("button", { name: "新建 Issue", exact: true })
@@ -1784,6 +1809,65 @@ try {
       isMobile: viewport.width < 760,
       hasTouch: viewport.width < 760,
     });
+    // A fresh context has no cached categories: an unknown list is not an empty list.
+    const discoveryContext = await browser.newContext({ viewport });
+    const discoveryPage = await discoveryContext.newPage();
+    let releaseCategories!: () => void;
+    const categoriesHeld = new Promise<void>((done) => {
+      releaseCategories = done;
+    });
+    const discoveryWrites: Envelope[] = [];
+    await discoveryPage.route("**/api/v1/categories*", async (route) => {
+      await categoriesHeld;
+      await route.continue();
+    });
+    await discoveryPage.route("**/api/v1/ops", async (route) => {
+      const envelope = route.request().postDataJSON() as Envelope;
+      discoveryWrites.push(envelope);
+      await route.fulfill({
+        json: { operation: { request_id: envelope.request_id, status: "unknown" } },
+      });
+    });
+    try {
+      await discoveryPage.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
+      await discoveryPage.getByRole("textbox", { name: "消息", exact: true }).waitFor();
+      await navigate(discoveryPage, "/issues");
+      await discoveryPage.getByRole("button", { name: "新建 Issue", exact: true }).click();
+      const discoveryForm = discoveryPage.getByRole("region", { name: "新建 Issue", exact: true });
+      await discoveryForm
+        .getByRole("textbox", { name: "标题", exact: true })
+        .fill("明确选择 owner");
+      await discoveryForm
+        .getByRole("textbox", { name: "目标", exact: true })
+        .fill("等待类别时不误选 owner");
+      const discoverySelect = discoveryForm.getByRole("combobox", { name: "负责人", exact: true });
+      const discoverySubmit = discoveryForm.getByRole("button", {
+        name: "创建 Issue",
+        exact: true,
+      });
+      await discoveryForm
+        .getByRole("status")
+        .getByText("正在读取负责人类别…", { exact: true })
+        .waitFor();
+      assert.equal(await discoverySelect.inputValue(), "");
+      assert(await discoverySubmit.isDisabled());
+      assert.equal(discoveryWrites.length, 0);
+      await discoverySelect.selectOption("owner");
+      assert(await discoverySubmit.isEnabled());
+      await discoverySubmit.click();
+      await discoveryForm.getByRole("button", { name: "核实原保存请求", exact: true }).waitFor();
+      assert.equal(discoveryWrites.length, 1);
+      assert.equal(discoveryWrites[0]!.operation, "issues.create");
+      const discoveryPayload = discoveryWrites[0]!.payload as {
+        assignee?: { kind: string };
+        manager?: unknown;
+      };
+      assert.equal(discoveryPayload.assignee?.kind, "owner");
+      assert.equal(discoveryPayload.manager, undefined);
+    } finally {
+      releaseCategories();
+      await discoveryContext.close();
+    }
     const page = await context.newPage();
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -1823,8 +1907,8 @@ try {
     const managerSelect = createForm.getByRole("combobox", { name: "负责人", exact: true });
     assert.equal(await managerSelect.locator('option[value="category:issue-manager"]').count(), 1);
     assert.equal(await managerSelect.locator('option[value="hosted/qingzhu"]').count(), 0);
-    assert.equal(await managerSelect.inputValue(), "owner");
-    await page.screenshot({ path: join(output, `create-owner-only-${viewport.width}.png`) });
+    assert.equal(await managerSelect.inputValue(), "category:issue-manager");
+    await page.screenshot({ path: join(output, `create-default-manager-${viewport.width}.png`) });
     await createForm.getByRole("button", { name: "返回", exact: true }).click();
     await navigate(page, "/diagnostics/main");
     hostedUnconfigured = false;
@@ -2489,7 +2573,7 @@ try {
     );
     assert.equal((newIssueWrite.payload as { assignee?: unknown }).assignee, undefined);
     assert.equal(
-      (newIssueWrite.payload as { manager: { category_id: string } }).manager.category_id,
+      (newIssueWrite.payload as { owner: { category_id: string } }).owner.category_id,
       "custom-coordinator",
     );
     assert(!JSON.stringify(newIssueWrite.payload).includes('"source_message_id":"old-report"'));

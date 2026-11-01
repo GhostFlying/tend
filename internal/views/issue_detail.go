@@ -34,6 +34,7 @@ func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.Iss
 		binding.Reason = "handoff"
 	case out.Manager != nil && out.Manager.HostID == "" && !out.Manager.State.Terminal():
 		binding.Reason = "manager_pending"
+		binding.CanSend = binding.ConversationID != ""
 	case out.Assignee.Kind == protocol.IssueAssigneeOwner:
 		binding.Reason = "owner"
 	case binding.ConversationID != "":

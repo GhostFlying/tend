@@ -291,6 +291,9 @@
   flex: 1;
   min-width: 0;
 }
+.conversationReason[data-owner-conversation] p {
+  flex-basis: 100%;
+}
 .conversationReason button {
   flex: none;
 }
