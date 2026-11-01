@@ -57,7 +57,7 @@ func (s seeder) execute(ctx context.Context, key string, target protocol.Target,
 func seedCategories(ctx context.Context, a *app.App, _ protocol.IDGen) error {
 	s := seeder{app: a}
 	zero := int64(0)
-	for _, entry := range []struct{ id, title string }{{"sandbox-planner", "沙盒协调与咨询"}, {protocol.DefaultIssueManagerCategory, "沙盒 Issue 负责人"}} {
+	for _, entry := range []struct{ id, title string }{{"sandbox-planner", "沙盒协调与咨询"}, {protocol.DefaultIssueManagerCategory, "沙盒 Issue 负责人"}, {"sandbox-reviewer", "沙盒独立验收"}} {
 		if err := s.execute(ctx, "category-"+entry.id, protocol.Target{Type: "category", ID: entry.id}, &zero, protocol.PutAgentCategoryPayload{Title: entry.title, State: "active"}, app.PutAgentCategory{}, nil); err != nil {
 			return err
 		}

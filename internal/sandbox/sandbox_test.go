@@ -154,6 +154,30 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		}
 		return count == 1
 	})
+	c.operation("test-owner-child", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "创建 owner 子项"})
+	waitFor(t, ctx, "owner child created and claimed", func() bool {
+		var children protocol.IssuePage
+		c.call(http.MethodGet, "/api/v1/issues?parent_id="+managed.IssueID+"&limit=100", nil, &children)
+		for _, child := range children.Items {
+			if child.ParentIssueID == managed.IssueID && child.Title == "创建 owner 子项" && child.Assignee.Ref == hostID+"/manager" {
+				return true
+			}
+		}
+		return false
+	})
+	c.operation("test-owner-dispatch", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "派发 owner 示例任务"})
+	waitFor(t, ctx, "owner execution and independent review completed", func() bool {
+		var issue protocol.IssueView
+		c.call(http.MethodGet, "/api/v1/issues/"+managed.IssueID, nil, &issue)
+		for _, task := range issue.Tasks {
+			var view protocol.TaskDetail
+			c.call(http.MethodGet, "/api/v1/tasks/"+task.TaskID, nil, &view)
+			if view.Title == "派发 owner 示例任务" && view.Lifecycle == protocol.TaskCompleted {
+				return true
+			}
+		}
+		return false
+	})
 	var board protocol.IssuePage
 	c.call(http.MethodGet, "/api/v1/issues?board=true&include_closed=true&limit=100", nil, &board)
 	ownerAssigned := 0
