@@ -81,8 +81,9 @@ func waitFor(t *testing.T, ctx context.Context, label string, check func() bool)
 }
 
 func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
-	// Race-instrumented SQLite can be slow under shared-host load.
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	// Owner child execution adds real coordination and acceptance turns; race
+	// instrumentation needs room for the complete interruption/recovery scenario.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
