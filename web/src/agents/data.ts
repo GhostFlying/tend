@@ -11,8 +11,9 @@ export class AgentCatalog {
   readonly categories: WorkItemRead<AgentCategoryPage>;
   readonly hosted: WorkItemRead<HostedAgentInventory>;
   readonly runner: WorkItemRead<RunnerAgentCatalog>;
+  private readonly runners = new Map<string, WorkItemRead<RunnerAgentCatalog>>();
 
-  constructor(api: Reader) {
+  constructor(private api: Reader) {
     this.categories = new WorkItemRead(api);
     this.hosted = new WorkItemRead(api);
     this.runner = new WorkItemRead(api);
@@ -32,11 +33,22 @@ export class AgentCatalog {
     return this.runner.open(`/api/v1/hosts/${encodeURIComponent(hostID)}/agents`);
   }
 
+  runnerFor(hostID: string): WorkItemRead<RunnerAgentCatalog> {
+    let read = this.runners.get(hostID);
+    if (!read) {
+      read = new WorkItemRead(this.api);
+      this.runners.set(hostID, read);
+    }
+    return read;
+  }
+
   refresh(): void {
-    for (const read of [this.categories, this.hosted, this.runner]) void read.refresh();
+    for (const read of [this.categories, this.hosted, this.runner, ...this.runners.values()])
+      void read.refresh();
   }
 
   stop(): void {
-    for (const read of [this.categories, this.hosted, this.runner]) read.close();
+    for (const read of [this.categories, this.hosted, this.runner, ...this.runners.values()])
+      read.close();
   }
 }

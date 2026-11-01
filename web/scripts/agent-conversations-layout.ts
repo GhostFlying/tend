@@ -121,6 +121,7 @@ const server = createServer(async (req, res) => {
       projects: [],
     });
   if (p === "/api/v1/hosted-agents") return json(res, { items: [] });
+  if (p === "/api/v1/categories") return json(res, { items: [], more: false });
   if (p === "/api/v1/repos") return json(res, { items: [], revision: 0 });
   if (p === "/api/v1/tasks") return json(res, { items: [], more: false });
   if (p === "/api/v1/agent-conversations")

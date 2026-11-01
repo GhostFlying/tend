@@ -85,15 +85,21 @@ export function IssueActivity({
       )
         return false;
       scrollportSize.current = { width: node.clientWidth, height: node.clientHeight };
-      if (following.current || reading.followsLatest())
+      if (
+        following.current ||
+        reading.followsLatest() ||
+        node.scrollHeight - node.scrollTop - node.clientHeight < 100
+      ) {
         correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
-      else if (readingAnchor.current)
+        setNewItems(false);
+      } else if (readingAnchor.current)
         correctScroll(node, () => restoreAnchor(node, readingAnchor.current!));
       readingAnchor.current = captureAnchor(node);
       return true;
     };
     const moved = () => {
       if (resized()) return;
+      if (node.scrollHeight - node.scrollTop - node.clientHeight < 100) setNewItems(false);
       const programmatic =
         expectedScroll.current !== null && Math.abs(node.scrollTop - expectedScroll.current) < 1;
       expectedScroll.current = null;
@@ -224,9 +230,15 @@ export function IssueActivity({
     const end = scroll.current;
     const position = rows.at(-1)?.position ?? 0;
     if (position > last.current && last.current && end) {
-      const near = following.current || reading.followsLatest();
+      const near =
+        following.current ||
+        reading.followsLatest() ||
+        end.scrollHeight - end.scrollTop - end.clientHeight < 100;
       if (near) correctScroll(end, () => end.scrollTo({ top: end.scrollHeight }));
-      else requestAnimationFrame(() => setNewItems(true));
+      else
+        requestAnimationFrame(() =>
+          setNewItems(end.scrollHeight - end.scrollTop - end.clientHeight >= 100),
+        );
     }
     last.current = position;
     if (outgoing.length > previousPending.current && end) {
@@ -242,6 +254,7 @@ export function IssueActivity({
   const previousContent = useRef("");
   const previousFirst = useRef(rows[0]?.position ?? 0);
   const previousNotification = useRef(activityContent);
+  const previousHadActivity = useRef(rows.length > 0);
   useLayoutEffect(() => {
     const notificationContent = JSON.stringify([
       rows.filter((row) => row.position >= previousFirst.current),
@@ -284,9 +297,14 @@ export function IssueActivity({
         readingAnchor.current = captureAnchor(node);
       });
     } else if (node && previousContent.current && previousContent.current !== latestContent) {
-      if (following.current || reading.followsLatest())
+      if (
+        following.current ||
+        reading.followsLatest() ||
+        node.scrollHeight - node.scrollTop - node.clientHeight < 100
+      ) {
         correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
-      else {
+        setNewItems(false);
+      } else {
         const anchor = readingAnchor.current;
         if (anchor) {
           correctScroll(node, () => restoreAnchor(node, anchor));
@@ -296,14 +314,17 @@ export function IssueActivity({
             readingAnchor.current = captureAnchor(node);
           });
         }
-        if (previousNotification.current !== notificationContent)
-          requestAnimationFrame(() => setNewItems(true));
+        if (previousHadActivity.current && previousNotification.current !== notificationContent)
+          requestAnimationFrame(() =>
+            setNewItems(node.scrollHeight - node.scrollTop - node.clientHeight >= 100),
+          );
       }
     }
     if (node) readingAnchor.current = captureAnchor(node);
     previousContent.current = latestContent;
     previousNotification.current = activityContent;
     previousFirst.current = rows[0]?.position ?? 0;
+    previousHadActivity.current = rows.length > 0;
   }, [
     latestContent,
     activityContent,

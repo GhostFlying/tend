@@ -1,5 +1,7 @@
 import type { IssueReadingState } from "./reading.ts";
 import { Button, Badge, Section, EmptyState } from "../ui/index.ts";
+import { useDurableOp } from "../app/useDurableOp.ts";
+import { issueHandoffCommand } from "./actions.ts";
 import { navigate } from "../app/router.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -101,6 +103,37 @@ export function IssueDetails({
     };
   }, [reads, live, id, reading]);
   const issue = state.value;
+  const categories = useStore(live.agents.categories.state);
+  const managerRequest = useDurableOp(client, `issue-handoff:${id}`);
+  const [managerRequestNotice, setManagerRequestNotice] = useState("");
+  useEffect(() => {
+    void live.agents.openCategories();
+  }, [live]);
+  const defaultCategory =
+    categories.value?.items?.find(
+      (category) => category.state === "active" && category.category_id === "issue-manager",
+    ) ?? categories.value?.items?.find((category) => category.state === "active");
+  const requestManager = async () => {
+    if (!issue || (!managerRequest.pending && !defaultCategory)) return;
+    try {
+      const result = await managerRequest.execute(
+        managerRequest.pending
+          ? undefined
+          : issueHandoffCommand(
+              issue,
+              `category:${defaultCategory!.category_id}`,
+              "交给 Issue 负责人 Agent",
+              connection.status === "online" ? connection.login : "",
+            ),
+      );
+      setManagerRequestNotice(
+        result.kind === "done" ? "" : (result.message ?? "交接结果待核实，请核实原请求。"),
+      );
+      void reads.open(id);
+    } catch {
+      setManagerRequestNotice("交接结果待核实，请核实原请求。");
+    }
+  };
   const conversationID = issue?.conversation?.conversation_id;
   const conversation =
     conversationState.value?.conversation_id === conversationID ? conversationState.value : null;
@@ -183,7 +216,7 @@ export function IssueDetails({
         <dl>
           <dt>负责人</dt>
           <dd>
-            <AssigneeName assignee={issue.assignee} />
+            <AssigneeName assignee={issue.assignee} manager={issue.manager} />
           </dd>
           <dt>状态</dt>
           <dd data-issue-status>{statusLabel}</dd>
@@ -409,7 +442,7 @@ export function IssueDetails({
                   <span className={styles.dot} />
                   {statusLabel}
                   <span>·</span>
-                  <AssigneeName assignee={issue.assignee} />
+                  <AssigneeName assignee={issue.assignee} manager={issue.manager} />
                   负责<span>·</span>
                   <time>{new Date(issue.updated_at).toLocaleString("zh-CN")}</time>
                 </p>
@@ -564,17 +597,38 @@ export function IssueDetails({
                 )}
                 {!ended && (
                   <>
-                    <Note />
+                    {issue.conversation?.reason !== "owner" && <Note />}
                     {issue.conversation?.can_send && (
                       <div className={styles.recipient}>
-                        发给 <AssigneeName assignee={issue.assignee} /> · 本 Issue 负责人
+                        发给{" "}
+                        {issue.conversation.reason === "manager_pending" ? (
+                          <>
+                            {categories.value?.items?.find(
+                              (category) => category.category_id === issue.manager?.category_id,
+                            )?.title ?? "Issue 负责人 Agent"}
+                            （待领取）
+                          </>
+                        ) : (
+                          <>
+                            <AssigneeName assignee={issue.assignee} manager={issue.manager} /> · 本
+                            Issue 负责人
+                          </>
+                        )}
                       </div>
                     )}
                   </>
                 )}
+                {!ended && issue.conversation?.reason === "manager_pending" && (
+                  <p className={styles.muted} role="status">
+                    等待执行主机领取负责人；消息会在领取后送达。
+                  </p>
+                )}
                 {conversation ? (
                   <ConversationSessionProvider conversation={conversation} connection={connection}>
-                    <PendingQueue connection={connection} />
+                    <PendingQueue
+                      connection={connection}
+                      awaitingAgent={issue.conversation?.reason === "owner"}
+                    />
                     {!ended && issue.conversation?.reason !== "owner" && (
                       <Composer
                         connection={connection}
@@ -589,14 +643,36 @@ export function IssueDetails({
                   </p>
                 ) : null}
                 {!ended && !issue.conversation?.can_send && (
-                  <div className={styles.conversationReason}>
+                  <div
+                    className={styles.conversationReason}
+                    data-owner-conversation={issue.conversation?.reason === "owner" || undefined}
+                  >
                     <p className={styles.muted}>
                       {issue.conversation?.reason === "owner"
                         ? "这个 Issue 由你负责，没有负责人 Agent 对话。"
                         : conversationError || conversationReason(issue)}
                     </p>
-                    <Button variant="secondary" onClick={() => setPanel("handoff")}>
-                      {issue.conversation?.reason === "owner" ? "交给 Agent 负责" : "交接负责人 →"}
+                    {issue.conversation?.reason === "owner" && (
+                      <>
+                        <Button
+                          variant="primary"
+                          disabled={
+                            connection.status !== "online" ||
+                            managerRequest.busy ||
+                            !!managerRequest.storageError ||
+                            (!managerRequest.pending && !defaultCategory)
+                          }
+                          onClick={() => void requestManager()}
+                        >
+                          {managerRequest.pending ? "核实原交接请求" : "交给 Issue 负责人 Agent"}
+                        </Button>
+                        {(managerRequestNotice || managerRequest.storageError) && (
+                          <p role="status">{managerRequestNotice || managerRequest.storageError}</p>
+                        )}
+                      </>
+                    )}
+                    <Button variant="link" onClick={() => setPanel("handoff")}>
+                      {issue.conversation?.reason === "owner" ? "选择其他负责人 →" : "交接负责人 →"}
                     </Button>
                   </div>
                 )}

@@ -59,6 +59,9 @@ export function IssueBoard({
   const catalog = useStore(live.agents.hosted.state);
   const board = live.issues.board;
   const summary = useStore(board.summary);
+  useEffect(() => {
+    void live.agents.openCategories();
+  }, [live]);
   const tree = useStore(live.issues.list.state);
   const route = useRoute();
   const filters = route.page === "issues" ? route : { page: "issues" as const };
@@ -150,7 +153,7 @@ export function IssueBoard({
   const blockedItem = actions.feedback?.item;
   const name = (a: IssueAssignee) =>
     a.kind === "owner"
-      ? "你"
+      ? "你 / 待领取"
       : (catalog.value?.projection.agents?.find(
           (agent) =>
             `${agent.identity.execution_environment_id}/${agent.identity.local_id}` === a.ref,
@@ -594,9 +597,16 @@ const BoardCard = memo(function BoardCard({
       <div className={styles.cardFooter}>
         <span className={styles.assignee}>
           <span className={styles.avatar} aria-hidden>
-            <AssigneeName assignee={item.assignee} initial />
+            <AssigneeName
+              assignee={item.assignee}
+              pendingCategoryID={item.board?.pending_manager_category_id}
+              initial
+            />
           </span>
-          <AssigneeName assignee={item.assignee} />
+          <AssigneeName
+            assignee={item.assignee}
+            pendingCategoryID={item.board?.pending_manager_category_id}
+          />
         </span>
         <Badge
           className={styles.execution}

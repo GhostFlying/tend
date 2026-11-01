@@ -1,4 +1,5 @@
 import type { IssueManagerView } from "../api/generated/api.ts";
+import { queueReasonText } from "../tasks/execution.ts";
 import { controlLabels, lifecycleLabels } from "../tasks/status.ts";
 import styles from "./DetailPage.module.css";
 
@@ -39,7 +40,14 @@ export function ManagerStatus({
               : "负责人恢复需要处理"}
         </p>
       )}
-      {manager.queue_reason && <p>{manager.queue_reason.message}</p>}
+      {manager.queue_reason && (
+        <p>
+          {queueReasonText({
+            block_reason: "none",
+            execution: { state: "queued", queue_reason: manager.queue_reason },
+          })}
+        </p>
+      )}
     </section>
   );
 }
