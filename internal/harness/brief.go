@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -33,8 +35,9 @@ var VerdictToolSpec = ToolSpec{
 // Verdicts records the verdict an acceptance worker reports through
 // VerdictTool; the last valid call counts.
 type Verdicts struct {
-	mu      sync.Mutex
-	verdict *protocol.VerdictPayload
+	StateDir string
+	mu       sync.Mutex
+	verdict  *protocol.VerdictPayload
 }
 
 // Handle answers a call of VerdictTool.
@@ -48,8 +51,46 @@ func (v *Verdicts) Handle(_ context.Context, c ToolCall) ToolResult {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if v.StateDir != "" {
+		if err := os.MkdirAll(v.StateDir, 0o700); err != nil {
+			return ToolResult{Text: fmt.Sprintf("verdict was not recorded: %v", err)}
+		}
+		body, _ := json.Marshal(p)
+		path := filepath.Join(v.StateDir, "verdict.json")
+		if err := os.WriteFile(path+".tmp", body, 0o600); err != nil {
+			return ToolResult{Text: fmt.Sprintf("verdict was not recorded: %v", err)}
+		}
+		if err := os.Rename(path+".tmp", path); err != nil {
+			return ToolResult{Text: fmt.Sprintf("verdict was not recorded: %v", err)}
+		}
+	}
 	v.verdict = &p
 	return ToolResult{Success: true, Text: "verdict recorded"}
+}
+
+// Restore retains an acknowledged verdict across attempts of the same run.
+func (v *Verdicts) Restore() error {
+	if v.StateDir == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(v.StateDir, "verdict.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read original verdict: %w", err)
+	}
+	var p protocol.VerdictPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("decode original verdict: %w", err)
+	}
+	if !p.Verdict.Valid() {
+		return fmt.Errorf("original verdict is invalid")
+	}
+	v.mu.Lock()
+	v.verdict = &p
+	v.mu.Unlock()
+	return nil
 }
 
 // Verdict is the recorded verdict, nil when there is none.

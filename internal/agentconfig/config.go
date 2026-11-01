@@ -15,6 +15,7 @@ type Purpose string
 type SourceKind string
 
 const (
+	CentralWorker   RuntimeKind = "central-traex-worker"
 	AppServerWorker RuntimeKind = "appserver-worker"
 	OrcaWorker      RuntimeKind = "orca-worker"
 	HostedManager   RuntimeKind = "hosted-manager"
@@ -135,6 +136,10 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 			return nil, invalid("required", path+".executable_ref")
 		}
 		switch r.Kind {
+		case CentralWorker:
+			if cfg.FormatVersion != 2 || r.CLI != "traex" {
+				return nil, invalid("unsupported_cli", path+".cli")
+			}
 		case OrcaWorker:
 			if r.CLI != "codex" && r.CLI != "traex" {
 				return nil, invalid("unsupported_cli", path+".cli")

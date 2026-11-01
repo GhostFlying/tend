@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness/orca"
@@ -15,7 +18,7 @@ import (
 	"github.com/GhostFlying/tend/internal/runner/gitws"
 )
 
-func assembleAgentExecutions(ctx context.Context, cfg config, source *agentcontrol.Control, workspaces *gitws.Workspaces, ids protocol.IDGen, now func() time.Time, log *slog.Logger) (runner.ExecutionResolver, error) {
+func assembleAgentExecutions(ctx context.Context, cfg config, source *agentcontrol.Control, workspaces *gitws.Workspaces, ids protocol.IDGen, now func() time.Time, log *slog.Logger, clients ...*http.Client) (runner.ExecutionResolver, error) {
 	if cfg.Agents == nil || cfg.Agents.Execution == nil {
 		return nil, nil
 	}
@@ -51,5 +54,28 @@ func assembleAgentExecutions(ctx context.Context, cfg config, source *agentcontr
 	if err != nil {
 		return nil, err
 	}
-	return agentexec.New(agentexec.Options{Source: source, BackendID: backend, Workspaces: view, BridgeCommand: self, IDs: ids, Now: now, Log: log})
+	return agentexec.New(agentexec.Options{CentralOrca: client, ProbeCentral: func(ctx context.Context) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.ServerURL, "/")+"/runner/v1/native/status", nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("X-Tend-Host", cfg.HostID)
+		req.Header.Set("Authorization", "Bearer "+os.Getenv("TEND_HOST_TOKEN"))
+		client := http.DefaultClient
+		if len(clients) > 0 && clients[0] != nil {
+			client = clients[0]
+		}
+		response, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		var status struct {
+			Enabled bool `json:"enabled"`
+		}
+		if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&status) != nil || !status.Enabled {
+			return errors.New("central native workers are not enabled")
+		}
+		return nil
+	}, Source: source, BackendID: backend, Workspaces: view, BridgeCommand: self, IDs: ids, Now: now, Log: log})
 }

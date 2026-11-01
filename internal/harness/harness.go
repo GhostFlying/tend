@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -20,6 +21,11 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
+	// Lifetime is the run authority, which survives a held worker attempt.
+	Lifetime context.Context
+	// NativeDial opens only this run's authenticated native execution transport.
+	NativeDial func(context.Context, string) (io.ReadWriteCloser, error)
+
 	FrozenExecution  *protocol.ExecutionProfile
 	RoleInstructions string
 	Execution        *protocol.ExecutionProfile
@@ -67,6 +73,9 @@ type WorkerSpec struct {
 	OnThread func(threadID string) error
 	// OnStartupEvent persists startup facts before Start returns.
 	OnStartupEvent func(context.Context, WorkerEvent) error
+	// OnRetainedEvent persists facts produced while the run's native session
+	// remains alive after its worker attempt has paused or been held.
+	OnRetainedEvent func(context.Context, WorkerEvent) error
 	// OnTakeover, when set, is called when the worker notices that the
 	// owner works in its agent (D67). The worker then neither judges nor
 	// touches the agent until it is stopped, normally with ErrHeld.

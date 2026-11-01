@@ -24,6 +24,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/bridge"
 	"github.com/GhostFlying/tend/internal/harness/orca"
+	"github.com/GhostFlying/tend/internal/harness/remote"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -93,6 +94,21 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "native-tui" {
+		fs := flag.NewFlagSet("native-tui", flag.ContinueOnError)
+		state := fs.String("state", "", "private run capability file")
+		if fs.Parse(os.Args[2:]) != nil || *state == "" || fs.NArg() != 0 {
+			os.Exit(2)
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := remote.RunTUI(ctx, *state, os.Stdin, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "native terminal connection ended")
+			os.Exit(1)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "agents" {
 		os.Exit(runAgentsCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
@@ -309,9 +325,12 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	executions, err := assembleAgentExecutions(ctx, cfg, agents, workspaces, ids, time.Now, log)
+	executions, err := assembleAgentExecutions(ctx, cfg, agents, workspaces, ids, time.Now, log, client)
 	if err != nil {
 		return err
+	}
+	if closer, ok := executions.(interface{ Close() }); ok {
+		defer closer.Close()
 	}
 	r := runner.New(runner.Config{
 		Executions: executions, AgentInventory: agentInventory, AgentChanges: agentChanges, RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,

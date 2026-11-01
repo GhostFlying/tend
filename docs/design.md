@@ -143,6 +143,7 @@
 | D137 | Server 统一调度持久观察、有限 cron 和单 Issue webhook；事件来源、分发及消费只读可追踪，完整 Issue/自动化 CLI 共用原业务用例与请求身份；独立接收入口及私有凭据，不改变 runner wire 2/1。见 docs/plans/unified-issue-triggers.md。 | 已实现，未发布 |
 | D138 | TraeX 流内限流的 `other` 终态仅通过绑定原 session/turn 的完整原始记录和精确 provider 诊断补足分类；原生根必须已失败且操作收敛。限流等待 30 秒再沿同 run/会话续接，截止时间与既有一次预算持久化；未知发送先对账，耗尽后交由 Issue owner。wire 保持 2/1。见 docs/plans/traex-terminal-rate-limit.md。 | 已实现 |
 | D139 | 复用目录的 commit 任务缺少继承改动授权时，由 runner 上报明确未启动的有界结构化诊断；当前 Issue owner 修正同一任务合同，保留历史 run，不自动吸收改动或生成用户重试决定。独立 preparation_required 阻塞不能被主机健康扫描清除；旧协议、未知及旧责任仍走原围栏。见 docs/plans/workspace-preparation-recovery.md。 | 已实现，未发布 |
+| D140 | 可选集中 TraeX worker loop：中心持有模型认证及原生会话，runner 保留 exec-server、工作区和 Orca 原生 TUI。按冻结 runtime 选择，原 run/thread 绑定、人工接管与停止证明沿既有生命周期；本地模式继续可用，wire 保持 2/1。见 docs/plans/central-traex.md。 | 已实现，未发布 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -508,3 +509,9 @@ Runner 在实际工作目录适配器中构造有类型的准备失败，记录 
 只有当前普通 Agent owner、有效责任代次与当前执行合同、活动 Issue/托管任务下的确定准备缺项，进入 `preparation_required`。任务阻塞但不排队重试、不打开面向用户的 retry 决定；持久事件仅路由到该 Issue 的现有负责人。该阻塞与主机不可用独立，健康检查不能自动解除。旧 spec/代次、取消、暂停及 unknown 保持既有控制和对账规则，不自动转交主 Agent。
 
 `tasks_read` 的 run 投影携带诊断，owner API/CLI 共用同一事实。具名负责人的实际工具 schema 与常驻指令均说明复用和提交授权；创建受理不宣称 worker 已启动。Runner 承载的负责人可在当前准入会话和责任代次中读取本 Issue 的 run 消息，不能跨 Issue、伪造其他 run 或沿用旧 assignment；不增加发送和执行权限。前端只补充新阻塞标签及生成类型，不改变页面交互。
+
+## D140：集中 TraeX loop 与 runner 原生 TUI
+
+本地与集中 Agent 长期共存，按冻结的具体 Agent/runtime 配置显式选择。集中模式由中心运行 app-server，复用中心用户的模型认证、全局配置与 session；真实代码、Git/工具认证、exec-server 和 Orca TUI 留在 runner。原生 TUI 是同一 thread 的远程客户端，不启动第二个 loop。Cove 后续复用该会话和控制权边界。
+
+执行连接沿现有 run 与节点鉴权由 runner 主动建立，不开放无鉴权的执行端口。冷恢复固定中心、run、工作区和 Environment，缺失绑定时明确阻断，不回退中心本机执行。执行资源仍由 runner 对租约、fencing、取消和未知结果负责。中心会话持有与 worker attempt 分离，人工 held 不销毁会话、不自动完成；TUI 断线或退出不交还控制权。首次人工写入须先完成既有 takeover，显式 resume 才恢复自动驱动。业务动态工具由 Tend 控制连接唯一回答，TUI 入口限定原 thread。参见 [实施计划](plans/central-traex.md)。
