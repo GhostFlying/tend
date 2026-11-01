@@ -17,6 +17,7 @@ function viewport() {
     querySelectorAll: () =>
       rows.map((row) => ({
         dataset: { scrollId: row.id },
+        closest: () => null,
         getBoundingClientRect: () => ({
           top: 52 + row.top - root.scrollTop,
           bottom: 52 + row.top + row.height - root.scrollTop,
@@ -82,4 +83,26 @@ test("a tall earlier row does not eclipse the later visible reading anchor", () 
   rows[2]!.top += 1020;
   restoreAnchor(root, anchor);
   expect(top("owner-55")).toBe(before);
+});
+
+test("a background event newly merged into a closed group restores the visible group", () => {
+  let open = false;
+  const group = { hasAttribute: () => open, getBoundingClientRect: () => ({ top: 250 }) };
+  const item = {
+    dataset: { scrollId: "event" },
+    closest: () => group,
+    getBoundingClientRect: () => ({ top: 180 }),
+  };
+  const root = {
+    scrollTop: 100,
+    getBoundingClientRect: () => ({ top: 50 }),
+    querySelectorAll: () => [item],
+  } as unknown as HTMLElement;
+  const anchor = { items: [{ id: "event", offset: 30 }] };
+  restoreAnchor(root, anchor);
+  expect(root.scrollTop).toBe(270);
+  open = true;
+  root.scrollTop = 100;
+  restoreAnchor(root, anchor);
+  expect(root.scrollTop).toBe(200);
 });

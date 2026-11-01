@@ -114,3 +114,45 @@
   color: var(--label-3);
   font-size: var(--text-caption);
 }
+
+.traceTrigger,
+.background summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--label-3);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  text-align: left;
+  cursor: pointer;
+}
+.traceTrigger svg,
+.background summary svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 150ms;
+}
+.traceTrigger[aria-expanded="true"] svg,
+.background[open] > summary svg {
+  transform: rotate(90deg);
+}
+.trace[hidden] {
+  display: none;
+}
+.trace {
+  font-size: var(--text-caption);
+}
+.background summary {
+  list-style: none;
+}
+.background summary::-webkit-details-marker {
+  display: none;
+}
+
+.traceTrigger[data-trace-trigger]::before {
+  content: "·";
+}
+
+.agent:has([data-issue-context="true"]) {
+  gap: var(--space-1);
+}

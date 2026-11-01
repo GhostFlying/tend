@@ -44,14 +44,23 @@ export function IssueResultCard({
       void read.open(`/api/v1/artifacts/${encodeURIComponent(result.artifact.artifact_id)}`);
   };
   return (
-    <article className={styles.delivery} data-artifact={result.artifact.artifact_id}>
+    <article
+      className={styles.delivery}
+      data-artifact={result.artifact.artifact_id}
+      data-tone={result.acceptances?.at(-1)?.verdict === "changes_required" ? "error" : undefined}
+    >
       <div className={styles.sectionHead}>
         <strong>{result.title}</strong>
         <small data-verdict={result.acceptances?.at(-1)?.verdict}>{resultStatus(result)}</small>
       </div>
-      <ArtifactDelivery
-        value={expanded ? (state.value?.artifact.ref ?? result.artifact.ref) : result.artifact.ref}
-      />
+      <div className={styles.deliveryFull}>
+        <ArtifactDelivery
+          compact={!expanded}
+          value={
+            expanded ? (state.value?.artifact.ref ?? result.artifact.ref) : result.artifact.ref
+          }
+        />
+      </div>
       {expanded && state.loading && !state.value && <p role="status">正在读取完整交付…</p>}
       {expanded && state.value && <ArtifactRef value={state.value.artifact.ref} />}
       {state.error && (

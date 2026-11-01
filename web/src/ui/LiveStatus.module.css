@@ -53,3 +53,7 @@
     animation: none;
   }
 }
+
+.line[data-disclosure="true"] {
+  gap: var(--space-1);
+}

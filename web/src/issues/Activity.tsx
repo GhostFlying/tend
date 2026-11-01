@@ -22,6 +22,9 @@ import { conversationStatus } from "../ui/activityStatus.ts";
 import { AgentTurn, OwnerMessage, OutgoingRow, SystemMessage } from "../conversation/Messages.tsx";
 import { buildTranscriptEntries, type TranscriptEntry } from "../conversation/transcriptBlocks.ts";
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "../conversation/scrollAnchor.ts";
+import { Chevron } from "../shell/icons.tsx";
+import { clock } from "../conversation/model.ts";
+import { groupActivityEvents } from "./activity.ts";
 import { IssueTurnRead } from "./turn.ts";
 import { IssueResultCard, HistoricalResultCard } from "./Results.tsx";
 import type { IssueReadingState } from "./reading.ts";
@@ -284,7 +287,9 @@ export function IssueActivity({
               control
                 .getAttribute("aria-controls")
                 ?.split(" ")
-                .includes(row?.id ?? ""),
+                .some(
+                  (id) => id === row?.id || !!document.getElementById(id)?.contains(row ?? null),
+                ),
           );
           const item = row?.checkVisibility() ? row : group?.checkVisibility() ? group : null;
           if (!item) continue;
@@ -377,8 +382,9 @@ export function IssueActivity({
       {state.value && !rows.length && (
         <p className={styles.muted}>暂无讨论记录。可以在下方补充要求。</p>
       )}
-      {visible.map((entry) =>
-        entry.block ? (
+      {groupActivityEvents(visible).map((group) => {
+        const entry = group[0]!;
+        return entry.block ? (
           <ActivityBlock
             key={entry.id}
             entry={entry}
@@ -386,6 +392,15 @@ export function IssueActivity({
             onContinuation={rememberContinuation}
             onPagination={beginContinuation}
             onPaginationCancel={cancelContinuation}
+            currentIssueId={issue.issue_id}
+          />
+        ) : group.length > 1 ? (
+          <EventGroup
+            key={group.at(-1)!.id}
+            entries={group}
+            results={results}
+            onIssue={onIssue}
+            onTask={onTask}
           />
         ) : (
           <Milestone
@@ -395,8 +410,8 @@ export function IssueActivity({
             onIssue={onIssue}
             onTask={onTask}
           />
-        ),
-      )}
+        );
+      })}
       {outgoing.map((message) => (
         <OutgoingRow key={message.requestId} message={message} queue={queue} />
       ))}
@@ -415,8 +430,10 @@ function ActivityBlock({
   onContinuation,
   onPagination,
   onPaginationCancel,
+  currentIssueId,
 }: {
   entry: IssueActivityEntry;
+  currentIssueId: string;
   rows: TranscriptEntry[];
   onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
   onPagination(trigger: string, control: HTMLButtonElement, ids: string[]): void;
@@ -475,8 +492,11 @@ function ActivityBlock({
             return (
               <div key={row.key} className={styles.owner}>
                 <div className={styles.author}>
-                  你{" "}
-                  <time>
+                  <span className={styles.avatar} aria-hidden="true">
+                    你
+                  </span>
+                  你 <small>用户</small>{" "}
+                  <time dateTime={row.item.created_at} title={row.item.created_at}>
                     {new Date(row.item.created_at).toLocaleTimeString("zh-CN", {
                       hour: "2-digit",
                       minute: "2-digit",
@@ -488,12 +508,28 @@ function ActivityBlock({
             );
           case "agent":
             return (
-              <div key={row.key}>
+              <div
+                key={row.key}
+                className={styles.reply}
+                data-tone={
+                  row.state === "failed" ||
+                  row.items.some((item) => item.assistant_state === "failed")
+                    ? "error"
+                    : undefined
+                }
+              >
                 <div className={styles.author}>
+                  <span className={styles.avatar} aria-hidden="true">
+                    {Array.from(entry.author || "Agent")[0]}
+                  </span>
                   {entry.author} <small>负责人</small>
+                  <time dateTime={row.items[0]?.created_at} title={row.items[0]?.created_at}>
+                    {clock(Date.parse(row.items[0]?.created_at ?? block.trigger.created_at))}
+                  </time>
                 </div>
                 <AgentTurn
                   entry={row}
+                  currentIssueId={currentIssueId}
                   proseClassName={!expanded && long ? styles.replyClamp : undefined}
                 />
                 {long && (
@@ -546,8 +582,10 @@ function Milestone({
   results,
   onIssue,
   onTask,
+  groupedFirst = false,
 }: {
   entry: IssueActivityEntry;
+  groupedFirst?: boolean;
   results: IssueResult[];
   onIssue(id: string): void;
   onTask(id: string): void;
@@ -555,7 +593,7 @@ function Milestone({
   const result = results.find((result) => result.artifact.artifact_id === entry.artifact_id);
   if (entry.artifact_id)
     return (
-      <div data-scroll-id={entry.id}>
+      <div data-scroll-id={groupedFirst ? undefined : entry.id}>
         <p className={styles.muted}>
           {entry.author || "tend"} {entry.title} ·{" "}
           {new Date(entry.created_at).toLocaleString("zh-CN")}
@@ -568,13 +606,17 @@ function Milestone({
       </div>
     );
   return (
-    <div className={styles.milestone} data-scroll-id={entry.id}>
+    <div
+      className={styles.milestone}
+      data-tone={/failed|failure/.test(entry.kind) ? "error" : undefined}
+      data-scroll-id={groupedFirst ? undefined : entry.id}
+    >
       <span className={styles.milestoneDot} aria-hidden="true">
-        {Array.from(entry.author || "tend")[0]}
+        ·
       </span>
       <span>
-        <strong>{entry.author || "tend"}</strong> {entry.title}
-        <time> · {new Date(entry.created_at).toLocaleString("zh-CN")}</time>
+        <span>{entry.author || "tend"}</span> <span>{entry.title}</span>
+        <time title={new Date(entry.created_at).toISOString()}> · {clock(entry.created_at)}</time>
       </span>
       {entry.task_id ? (
         <button className={styles.textLink} onClick={() => onTask(entry.task_id!)}>
@@ -586,5 +628,43 @@ function Milestone({
         </button>
       ) : null}
     </div>
+  );
+}
+
+function EventGroup({
+  entries,
+  results,
+  onIssue,
+  onTask,
+}: {
+  entries: IssueActivityEntry[];
+  results: IssueResult[];
+  onIssue(id: string): void;
+  onTask(id: string): void;
+}) {
+  const first = entries[0]!;
+  return (
+    <details className={styles.eventGroup} data-event-group data-scroll-id={first.id}>
+      <summary>
+        <span className={styles.milestoneDot} aria-hidden="true">
+          ·
+        </span>
+        <span>
+          {first.author || "tend"} {[...new Set(entries.map((entry) => entry.title))].join("、")}
+          <time title={new Date(first.created_at).toISOString()}> · {clock(first.created_at)}</time>
+        </span>
+        <Chevron />
+      </summary>
+      {entries.map((entry) => (
+        <Milestone
+          key={entry.id}
+          entry={entry}
+          groupedFirst={entry.id === first.id}
+          results={results}
+          onIssue={onIssue}
+          onTask={onTask}
+        />
+      ))}
+    </details>
   );
 }

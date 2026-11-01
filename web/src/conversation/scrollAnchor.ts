@@ -33,7 +33,10 @@ export function restoreAnchor(root: HTMLElement, anchor: ScrollAnchor): void {
   for (const saved of anchor.items) {
     const item = nodes.find((node) => node.dataset.scrollId === saved.id);
     if (item) {
-      root.scrollTop += item.getBoundingClientRect().top - top - saved.offset;
+      // A merged background event may now live inside a closed disclosure.
+      const group = item.closest<HTMLElement>("[data-event-group]");
+      const visible = group && !group.hasAttribute("open") ? group : item;
+      root.scrollTop += visible.getBoundingClientRect().top - top - saved.offset;
       return;
     }
   }

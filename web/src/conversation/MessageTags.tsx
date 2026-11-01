@@ -11,7 +11,13 @@ import { useDurableOp } from "../app/useDurableOp.ts";
 import { Tag, ExternalLink } from "../shell/icons.tsx";
 import styles from "./Agents.module.css";
 
-export function MessageTags({ item }: { item: ConversationItem }) {
+export function MessageTags({
+  item,
+  currentIssueId,
+}: {
+  item: ConversationItem;
+  currentIssueId?: string | undefined;
+}) {
   const { client, live, openIssue, selectConversation } = useServices();
   const [savedValue, setValue] = useState(item.associations);
   const value =
@@ -106,10 +112,10 @@ export function MessageTags({ item }: { item: ConversationItem }) {
       setError(String(e));
     }
   };
-  const links = value?.items ?? [];
+  const links = (value?.items ?? []).filter((link) => link.issue_id !== currentIssueId);
   return (
     <>
-      <div className={styles.tags}>
+      <div className={styles.tags} data-issue-context={!!currentIssueId}>
         {value?.processing &&
           value.processing.status !== "completed" &&
           value.processing.status !== "processing" && (
@@ -159,7 +165,7 @@ export function MessageTags({ item }: { item: ConversationItem }) {
           (item.author === "owner" || !!value?.processing) && (
             <span className={styles.tag}>关联处理中</span>
           )}
-        {value?.disposition === "linked" && links.length === 0 && (
+        {value?.disposition === "linked" && !value.items?.length && (
           <span className={styles.tag}>历史分类</span>
         )}
         {(expanded ? links : links.slice(0, 2)).map((link) => (
