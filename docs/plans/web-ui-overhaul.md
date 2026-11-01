@@ -81,6 +81,8 @@ Refs: D132（修订 D70、D121 UI r5、D127 的展示部分）。业务合同、
 - **S10 Issue 对话面向负责 Agent**：默认类别、待领取消息队列、owner 一键交接、待领取负责人显示与真实沙盒领取（D140）。见 docs/plans/web-ui-overhaul-s10.md。
 - **S9 活动归属与多轮故事**：所有活动行及当前进展展示作者；沙盒以真实工具和 runner 构建多轮讨论、决定、失败与独立验收的故事（D133）。见 docs/plans/web-ui-overhaul-s9.md。
 
+- **S11 Issue 讨论层级**：头像与讨论细线、重点结果卡、合并系统事件、单行折叠过程及手机首屏压缩。见 docs/plans/web-ui-overhaul-s11.md。
+
 ## 验收
 
 - `pnpm --dir web check`、全部 `test:*` 布局脚本、新 `test:ui-tour`、`go test ./internal/webui/...` 通过；最终完整 `make check`。

@@ -81,3 +81,14 @@
     border-radius: 0;
   }
 }
+
+.file[data-row="true"] {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-caption);
+}
+.file[data-row="true"] strong {
+  font-weight: 500;
+}

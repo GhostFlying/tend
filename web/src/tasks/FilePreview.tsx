@@ -15,10 +15,12 @@ export function FilePreview({
   file,
   scope = "files",
   compact = false,
+  row = false,
 }: {
   file: PreviewFile;
   scope?: Scope;
   compact?: boolean;
+  row?: boolean;
 }) {
   const { client } = useServices();
   const tile = useRef<HTMLSpanElement>(null);
@@ -57,8 +59,9 @@ export function FilePreview({
     return () => controller.abort();
   }, [client, path, visible, image, attempt]);
   return (
-    <span ref={tile} className={styles.file} data-compact={compact}>
+    <span ref={tile} className={styles.file} data-compact={compact} data-row={row}>
       {image &&
+        !row &&
         (source && !failed ? (
           <ImageTile
             source={source}

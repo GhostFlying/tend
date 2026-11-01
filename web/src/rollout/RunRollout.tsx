@@ -24,7 +24,7 @@ import { buildSteps, type Step } from "./model.ts";
 import { useRunWindow } from "./useRunWindow.ts";
 import styles from "./RunRollout.module.css";
 
-export function TaskRunStatus({ id }: { id: string }) {
+export function TaskRunStatus({ id, compact = false }: { id: string; compact?: boolean }) {
   const { client, live } = useServices();
   const read = useMemo(() => new WorkItemRead<TaskDetail>(client), [client]);
   const state = useStore(read.state);
@@ -37,7 +37,7 @@ export function TaskRunStatus({ id }: { id: string }) {
     };
   }, [id, read, live]);
   const runs = state.value?.runs;
-  return runs?.length ? <RunRollout runs={runs} /> : null;
+  return runs?.length ? <RunRollout runs={runs} compact={compact} /> : null;
 }
 
 export function RunStatusLine({ id, observed }: { id: string; observed: string }) {
@@ -49,11 +49,17 @@ function RunStatusWindow({ id, observed }: { id: string; observed: string }) {
   return <LiveStatus status={runActivityStatus(window.page?.logs ?? [], observed)} />;
 }
 
-export function RunRollout({ runs }: { runs: readonly RunView[] }) {
+export function RunRollout({
+  runs,
+  compact = false,
+}: {
+  runs: readonly RunView[];
+  compact?: boolean;
+}) {
   const [selected, setSelected] = useState<string | null>(null);
   const run = runs.find((candidate) => candidate.run_id === selected) ?? runs.at(-1);
   return (
-    <section className={styles.root} aria-label="执行过程与用量">
+    <section className={styles.root} data-compact={compact} aria-label="执行过程与用量">
       <div className={styles.cardHeading}>
         <span>执行过程</span>
         {run && (
