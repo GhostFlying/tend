@@ -3207,6 +3207,9 @@
         "condition": {
           "$ref": "#/definitions/FollowupCondition"
         },
+        "cron": {
+          "type": "string"
+        },
         "every_seconds": {
           "type": "integer"
         },
@@ -4781,6 +4784,9 @@
         },
         "created_at": {
           "type": "integer"
+        },
+        "cron": {
+          "type": "string"
         },
         "deadline_id": {
           "type": "string"
@@ -9933,6 +9939,267 @@
       "title": "ToolUseView",
       "type": "object"
     },
+    "TriggerEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "issue_state": {
+          "type": "string"
+        },
+        "issue_title": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "planned_at": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "schedule_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TriggerStep"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "issue_id",
+        "issue_title",
+        "issue_state",
+        "title",
+        "source",
+        "status",
+        "request_id",
+        "created_at",
+        "updated_at",
+        "steps"
+      ],
+      "title": "TriggerEvent",
+      "type": "object"
+    },
+    "TriggerEventPage": {
+      "additionalProperties": false,
+      "properties": {
+        "data_at": {
+          "type": "integer"
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TriggerEvent"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more",
+        "event_seq",
+        "data_at"
+      ],
+      "title": "TriggerEventPage",
+      "type": "object"
+    },
+    "TriggerQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "schedule_id": {
+          "type": "string"
+        },
+        "search": {
+          "type": "string"
+        },
+        "since": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "until": {
+          "type": "integer"
+        }
+      },
+      "title": "TriggerQuery",
+      "type": "object"
+    },
+    "TriggerSchedule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "issue_title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "next_at": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "rule": {
+          "$ref": "#/definitions/IssueFollowupRule"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "issue_id",
+        "issue_title",
+        "title",
+        "source",
+        "kind",
+        "status",
+        "updated_at",
+        "revision"
+      ],
+      "title": "TriggerSchedule",
+      "type": "object"
+    },
+    "TriggerSchedulePage": {
+      "additionalProperties": false,
+      "properties": {
+        "data_at": {
+          "type": "integer"
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TriggerSchedule"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more",
+        "event_seq",
+        "data_at"
+      ],
+      "title": "TriggerSchedulePage",
+      "type": "object"
+    },
+    "TriggerStep": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "type": "integer"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "TriggerStep",
+      "type": "object"
+    },
     "UpdateAttentionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -10311,6 +10578,131 @@
       ],
       "title": "Verdict",
       "type": "string"
+    },
+    "WebhookReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_id": {
+          "type": "string"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "subscription_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subscription_id",
+        "delivery_id",
+        "event_id",
+        "status"
+      ],
+      "title": "WebhookReceipt",
+      "type": "object"
+    },
+    "WebhookSubscription": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "key_ref": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "issue_id",
+        "title",
+        "instruction",
+        "key_ref",
+        "revision",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "WebhookSubscription",
+      "type": "object"
+    },
+    "WebhookSubscriptionPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/WebhookSubscription"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "WebhookSubscriptionPage",
+      "type": "object"
+    },
+    "WebhookSubscriptionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "key_ref": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch"
+      ],
+      "title": "WebhookSubscriptionPayload",
+      "type": "object"
     },
     "WithdrawMessagePayload": {
       "additionalProperties": false,
@@ -10960,6 +11352,15 @@
     "ToolSpec": {
       "$ref": "#/definitions/ToolSpec"
     },
+    "TriggerEventPage": {
+      "$ref": "#/definitions/TriggerEventPage"
+    },
+    "TriggerQuery": {
+      "$ref": "#/definitions/TriggerQuery"
+    },
+    "TriggerSchedulePage": {
+      "$ref": "#/definitions/TriggerSchedulePage"
+    },
     "UpdateAttentionPayload": {
       "$ref": "#/definitions/UpdateAttentionPayload"
     },
@@ -10974,6 +11375,18 @@
     },
     "UpdateWorkItemChoicePayload": {
       "$ref": "#/definitions/UpdateWorkItemChoicePayload"
+    },
+    "WebhookReceipt": {
+      "$ref": "#/definitions/WebhookReceipt"
+    },
+    "WebhookSubscription": {
+      "$ref": "#/definitions/WebhookSubscription"
+    },
+    "WebhookSubscriptionPage": {
+      "$ref": "#/definitions/WebhookSubscriptionPage"
+    },
+    "WebhookSubscriptionPayload": {
+      "$ref": "#/definitions/WebhookSubscriptionPayload"
     },
     "WithdrawMessagePayload": {
       "$ref": "#/definitions/WithdrawMessagePayload"

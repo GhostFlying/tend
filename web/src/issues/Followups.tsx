@@ -34,6 +34,7 @@ const labels: Record<string, string> = {
   delivered: "已投递",
   at: "到时检查",
   every: "固定间隔",
+  cron: "日历定时",
   condition: "条件满足时检查",
   manual: "手动检查",
   expired: "等待期限已到",
@@ -308,14 +309,18 @@ function Rule({
       <dl>
         <dt>等待</dt>
         <dd>
-          {rule.kind === "condition" ? conditionText(rule) : (labels[rule.kind] ?? rule.kind)}
+          {rule.kind === "condition"
+            ? conditionText(rule)
+            : rule.kind === "cron"
+              ? `${rule.cron} · ${rule.timezone}`
+              : (labels[rule.kind] ?? rule.kind)}
         </dd>
         <dt>{rule.kind === "condition" ? "最晚核对" : "下次核对"}</dt>
         <dd>{rule.status === "active" ? followupDate(rule.next_at, rule.timezone) : "—"}</dd>
         <dt>期限 / 次数</dt>
         <dd>
           {followupDate(rule.expires_at, rule.timezone)} · 已触发 {rule.trigger_count}
-          {rule.kind === "every" ? ` / ${rule.max_triggers}` : ""}
+          {rule.kind === "every" || rule.kind === "cron" ? ` / ${rule.max_triggers}` : ""}
         </dd>
       </dl>
       {rule.reason && <p className={styles.muted}>{rule.reason}</p>}
@@ -324,7 +329,8 @@ function Rule({
       ) : (
         <div className={styles.actions}>
           <button
-            disabled={!writable || blocked || rule.status === "cancelled"}
+            disabled={!writable || blocked || rule.status === "cancelled" || rule.kind === "cron"}
+            title={rule.kind === "cron" ? "日历定时安排请通过 CLI 编辑" : undefined}
             onClick={() => {
               setEditingEpoch(issue.assignment_epoch);
               setEditing(rule);

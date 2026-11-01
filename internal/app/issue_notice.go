@@ -62,6 +62,11 @@ func recordIssueNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, even
 	if err != nil {
 		return err
 	}
+	if e.Kind == "work_item.delivery_changed" {
+		if _, err := tx.Exec(ctx, `UPDATE trigger_events SET message_id=? WHERE id=(SELECT event_id FROM observation_jobs WHERE issue_id=? AND delivery_id=?)`, id, item.WorkItemID, e.Body["delivery_id"]); err != nil {
+			return err
+		}
+	}
 	if x.Principal.Kind == protocol.PrincipalMainAgent {
 		return nil
 	}

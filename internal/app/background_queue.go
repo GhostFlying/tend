@@ -111,6 +111,15 @@ func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, i
 			return fmt.Errorf("app: followup source: %w", err)
 		}
 	}
+	if kind == "webhook.received" {
+		var meta struct {
+			SubscriptionID string `json:"subscription_id"`
+		}
+		if err := json.Unmarshal(data, &meta); err != nil {
+			return err
+		}
+		occurrence.RuleID = meta.SubscriptionID
+	}
 	if message == "" {
 		return nil
 	}
@@ -122,9 +131,20 @@ func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, i
 	if len(data) == 0 {
 		data = json.RawMessage(`{}`)
 	}
-	_, err = tx.Exec(ctx, `INSERT OR IGNORE INTO background_sources(batch_id,message_id,event_id,kind,rule_id,occurrence_id,data_json) VALUES(?,?,?,?,?,?,?)`, batch, message, event, kind, occurrence.RuleID, occurrence.OccurrenceID, string(data))
+	result, err := tx.Exec(ctx, `INSERT OR IGNORE INTO background_sources(batch_id,message_id,event_id,kind,rule_id,occurrence_id,data_json) VALUES(?,?,?,?,?,?,?)`, batch, message, event, kind, occurrence.RuleID, occurrence.OccurrenceID, string(data))
 	if err != nil {
 		return err
+	}
+	added, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if added > 0 {
+		// A source can join a batch created earlier. Record this admission,
+		// rather than presenting the batch's creation as this event's queue time.
+		if _, err = tx.Exec(ctx, `INSERT INTO trigger_steps(event_id,kind,at,detail) SELECT id,'queued',?,? FROM trigger_events WHERE message_id=?`, now, batch, message); err != nil {
+			return err
+		}
 	}
 	return tx.BindMessage(ctx, message, "background_batch", batch, "source")
 }

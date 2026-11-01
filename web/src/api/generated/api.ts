@@ -366,11 +366,18 @@ export interface TendAPI {
   TokenUsageSample?: TokenUsageSample;
   TokenUsageView?: TokenUsageView;
   ToolSpec?: ToolSpec;
+  TriggerEventPage?: TriggerEventPage;
+  TriggerQuery?: TriggerQuery;
+  TriggerSchedulePage?: TriggerSchedulePage;
   UpdateAttentionPayload?: UpdateAttentionPayload;
   UpdateIssuePayload?: UpdateIssuePayload;
   UpdateIssueProgressPayload?: UpdateIssueProgressPayload;
   UpdateIssueTaskPayload?: UpdateIssueTaskPayload;
   UpdateWorkItemChoicePayload?: UpdateWorkItemChoicePayload;
+  WebhookReceipt?: WebhookReceipt;
+  WebhookSubscription?: WebhookSubscription;
+  WebhookSubscriptionPage?: WebhookSubscriptionPage;
+  WebhookSubscriptionPayload?: WebhookSubscriptionPayload;
   WithdrawMessagePayload?: WithdrawMessagePayload;
   WithdrawMessageResult?: WithdrawMessageResult;
   WorkItemChoice?: WorkItemChoice;
@@ -1930,6 +1937,7 @@ export interface FinishIssueAssignmentPayload {
 export interface FollowupSpec {
   at?: number;
   condition?: FollowupCondition;
+  cron?: string;
   every_seconds?: number;
   expires_at?: number;
   expiry_silent?: boolean;
@@ -2492,6 +2500,7 @@ export interface IssueFollowupRule {
   at?: number;
   condition?: FollowupCondition;
   created_at: number;
+  cron?: string;
   deadline_id?: string;
   every_seconds?: number;
   expires_at?: number;
@@ -3732,6 +3741,92 @@ export interface ToolSpec {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TriggerEventPage".
+ */
+export interface TriggerEventPage {
+  data_at: number;
+  event_seq: number;
+  items: TriggerEvent[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TriggerEvent".
+ */
+export interface TriggerEvent {
+  batch_id?: string;
+  created_at: number;
+  id: string;
+  issue_id: string;
+  issue_state: string;
+  issue_title: string;
+  message_id?: string;
+  planned_at?: number;
+  reason?: string;
+  request_id: string;
+  schedule_id?: string;
+  source: string;
+  status: string;
+  steps: TriggerStep[] | null;
+  title: string;
+  updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TriggerStep".
+ */
+export interface TriggerStep {
+  at?: number;
+  detail?: string;
+  kind: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TriggerQuery".
+ */
+export interface TriggerQuery {
+  after?: string;
+  issue_id?: string;
+  limit?: number;
+  schedule_id?: string;
+  search?: string;
+  since?: number;
+  source?: string;
+  status?: string;
+  until?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TriggerSchedulePage".
+ */
+export interface TriggerSchedulePage {
+  data_at: number;
+  event_seq: number;
+  items: TriggerSchedule[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TriggerSchedule".
+ */
+export interface TriggerSchedule {
+  id: string;
+  issue_id: string;
+  issue_title: string;
+  kind: string;
+  next_at?: number;
+  reason?: string;
+  revision: number;
+  rule?: IssueFollowupRule;
+  source: string;
+  status: string;
+  title: string;
+  updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "UpdateAttentionPayload".
  */
 export interface UpdateAttentionPayload {
@@ -3803,6 +3898,51 @@ export interface CreateWorkItemChoicePayload {
   recommendation?: string;
   source_id: string;
   task_ids?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WebhookReceipt".
+ */
+export interface WebhookReceipt {
+  delivery_id: string;
+  event_id: string;
+  status: string;
+  subscription_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WebhookSubscription".
+ */
+export interface WebhookSubscription {
+  created_at: number;
+  id: string;
+  instruction: string;
+  issue_id: string;
+  key_ref: string;
+  revision: number;
+  status: string;
+  title: string;
+  updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WebhookSubscriptionPage".
+ */
+export interface WebhookSubscriptionPage {
+  items: WebhookSubscription[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WebhookSubscriptionPayload".
+ */
+export interface WebhookSubscriptionPayload {
+  expected_assignment_epoch: number;
+  instruction?: string;
+  issue_id?: string;
+  key_ref?: string;
+  title?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

@@ -38,6 +38,11 @@ const (
 const usage = `usage: tend <command> [arguments]
 
 Owner commands:
+  schedule list|show|create|update|pause|resume|cancel|trigger|history
+  webhook list|show|create|update|pause|resume|cancel|rotate|receipts
+  event list|show|trace|sources|watch read-only event diagnosis (--issue, --json)
+  observation list|show|refresh    delivery queries without worker slots
+  request show|replay             reconcile or replay the original owner Envelope
   channel list|show|telegram bind|unbind  communication channels
   message send|reply|notify|list|show|receipts|trace|read|watch
   login --server <url>             get an owner token for this machine
@@ -45,7 +50,8 @@ Owner commands:
   attention list|show|create|respond|confirm  original questions and human actions
   next-action list|put                    personal action / Issue planning order
   issue deadline list|show|put|cancel     sourced time and bounded reminders
-  issue list|show|create|update|<control>  canonical issues; JSON input/output
+  issue [list]|show|create|update|<control>  full Issue lifecycle; --json for structured reads
+  issue events|schedules|webhooks|activity|results  Issue facts and diagnosis
   issue assign|finish-assignment        transfer concrete responsibility with epoch/CAS
   issue create-task|update-task          owner task contracts, independent workers
   issue request|replay                   inspect/replay an original request
@@ -84,6 +90,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
+	case "schedule", "event", "webhook", "observation", "request":
+		return report(e, runTriggers(ctx, e, cmd, rest))
 	case "message", "channel":
 		return report(e, runMessaging(ctx, e, cmd, rest))
 	case "login":

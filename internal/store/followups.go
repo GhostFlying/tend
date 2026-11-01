@@ -117,13 +117,18 @@ func FollowupIDs(ctx context.Context, q Querier, query string, args ...any) ([]s
 }
 
 const occurrenceSelect = `SELECT f.occurrence_id,f.rule_id,f.revision,COALESCE(f.work_item_id,''),f.message_id,f.reason,
- CASE WHEN f.status='cancelled' THEN 'cancelled' ELSE COALESCE(
-  (SELECT CASE WHEN o.status IN ('unknown','failed','cancelled') THEN o.status END FROM outbox o WHERE o.destination='main_thread' AND json_extract(o.payload_json,'$.message_id')=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),f.message_id) ORDER BY o.seq DESC LIMIT 1),
-  (SELECT CASE t.status WHEN 'started' THEN 'processing' WHEN 'starting' THEN 'starting' WHEN 'rejected' THEN NULL ELSE t.status END FROM main_turns t WHERE t.message_id=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),f.message_id) ORDER BY t.created_at DESC LIMIT 1),
-  (SELECT CASE o.status WHEN 'pending' THEN 'queued' WHEN 'sending' THEN 'starting' ELSE o.status END FROM outbox o WHERE o.destination='main_thread' AND json_extract(o.payload_json,'$.message_id')=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),f.message_id) ORDER BY o.seq DESC LIMIT 1),'unknown') END,
+ CASE WHEN f.status='cancelled' THEN 'cancelled'
+ WHEN f.status='queued' AND EXISTS(SELECT 1 FROM trigger_events e WHERE e.message_id=f.message_id AND e.status='pending')
+ AND NOT EXISTS(SELECT 1 FROM background_sources s WHERE s.message_id=f.message_id)
+ AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=f.message_id)
+ AND NOT EXISTS(SELECT 1 FROM outbox o WHERE json_extract(o.payload_json,'$.message_id')=f.message_id) THEN 'queued'
+ ELSE COALESCE(
+  (SELECT CASE WHEN o.status IN ('unknown','failed','cancelled') THEN o.status END FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND json_extract(o.payload_json,'$.message_id')=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id ORDER BY s.seq DESC LIMIT 1),f.message_id) ORDER BY o.seq DESC LIMIT 1),
+  (SELECT CASE t.status WHEN 'started' THEN 'processing' WHEN 'starting' THEN 'starting' WHEN 'rejected' THEN NULL ELSE t.status END FROM main_turns t WHERE t.message_id=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id ORDER BY s.seq DESC LIMIT 1),f.message_id) ORDER BY t.created_at DESC LIMIT 1),
+  (SELECT CASE o.status WHEN 'pending' THEN 'queued' WHEN 'sending' THEN 'starting' ELSE o.status END FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND json_extract(o.payload_json,'$.message_id')=COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id ORDER BY s.seq DESC LIMIT 1),f.message_id) ORDER BY o.seq DESC LIMIT 1),'unknown') END,
  f.evidence,f.created_at,
- COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),''),
- COALESCE((SELECT CASE WHEN b.status='completed' AND f.status<>'cancelled' AND s.cancelled_at=0 THEN b.checkin_json ELSE '' END FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id LIMIT 1),'')
+ COALESCE((SELECT b.message_id FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id ORDER BY s.seq DESC LIMIT 1),''),
+ COALESCE((SELECT CASE WHEN b.status='completed' AND f.status<>'cancelled' AND s.cancelled_at=0 THEN b.checkin_json ELSE '' END FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.occurrence_id=f.occurrence_id ORDER BY s.seq DESC LIMIT 1),'')
  FROM followup_occurrences f `
 
 func FollowupOccurrences(ctx context.Context, q Querier, id, after string) ([]protocol.FollowupOccurrence, bool, error) {

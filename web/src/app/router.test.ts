@@ -160,3 +160,21 @@ test("history belongs to this document session; reload and foreign entries use t
   expect(heading.tabIndex).toBe(-1);
   expect(heading.focus).toHaveBeenCalledWith({ preventScroll: true });
 });
+
+test("diagnostic Issue filters are never rewritten as legacy Issue navigation", () => {
+  const route: Route = {
+    page: "diagnosticEvent",
+    id: "event / one",
+    issue: "issue / one",
+    tab: "events",
+    source: "webhook",
+    status: "pending",
+    search: "build",
+    after: "opaque",
+    since: "123",
+  };
+  const url = href(route);
+  expect(parse(url)).toEqual(route);
+  expect(legacyURL(url)).toBeNull();
+  expect(legacyURL("/diagnostics?issue=A&tab=events")).toBeNull();
+});

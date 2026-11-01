@@ -311,7 +311,7 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 		t.Fatal(err)
 	}
 	var currentIssue protocol.IssueView
-	if err := json.Unmarshal([]byte(reviewOwner.run("", "issue", "show", issue.IssueID)), &currentIssue); err != nil {
+	if err := json.Unmarshal([]byte(reviewOwner.run("", "issue", "show", issue.IssueID, "--json")), &currentIssue); err != nil {
 		t.Fatal(err)
 	}
 	followSpec := spec

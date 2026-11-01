@@ -1,12 +1,13 @@
 package protocol
 
 // FollowupSpec is an explicit, bounded wait for existing owner-authorized work.
-// Times use UTC milliseconds; Timezone only controls owner presentation.
+// Times use UTC milliseconds; Timezone controls cron calendar slots and owner presentation.
 type FollowupSpec struct {
 	Purpose      string             `json:"purpose"`
 	Instruction  string             `json:"instruction"`
 	SourceID     string             `json:"source_id,omitempty"`
 	FollowOnID   string             `json:"follow_on_id,omitempty"`
+	Cron         string             `json:"cron,omitempty"`
 	Kind         string             `json:"kind"`
 	At           int64              `json:"at,omitempty"`
 	EverySeconds int64              `json:"every_seconds,omitempty"`

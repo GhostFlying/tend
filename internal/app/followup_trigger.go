@@ -99,8 +99,8 @@ func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.Fo
 				if manual {
 					return false, protocol.Errorf(protocol.CodeInvalidTransition, "a followup check is already pending or running")
 				}
-				if r.Kind == "every" {
-					r.NextAt = now + r.EverySeconds*1000
+				if r.Kind == "every" || r.Kind == "cron" {
+					scheduleFollowup(r, now)
 					return save("coalesced into existing occurrence")
 				}
 				_, err := tx.Exec(ctx, `UPDATE followup_rules SET next_due=? WHERE rule_id=?`, now+30000, r.RuleID)
@@ -117,7 +117,7 @@ func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.Fo
 		return save("condition observed in current main turn")
 	}
 	key := fmt.Sprintf("revision:%d", r.Revision)
-	if r.Kind == "every" {
+	if r.Kind == "every" || r.Kind == "cron" {
 		key = fmt.Sprintf("at:%d", r.NextAt)
 		if !manual {
 			var exists bool
@@ -125,7 +125,7 @@ func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.Fo
 				return false, err
 			}
 			if exists {
-				r.NextAt = now + r.EverySeconds*1000
+				scheduleFollowup(r, now)
 				return save("coalesced previously recorded planned slot after clock change")
 			}
 		}
@@ -140,7 +140,7 @@ func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.Fo
 		return false, err
 	}
 	o := protocol.FollowupOccurrence{OccurrenceID: x.IDs.New(protocol.Prefix("occurrence")), RuleID: r.RuleID, Revision: r.Revision, WorkItemID: r.WorkItemID, MessageID: message, Status: "queued", Reason: reason, Evidence: evidence, CreatedAt: now}
-	if err := tx.InsertFollowupOccurrence(ctx, o, key); err != nil {
+	if err := recordFollowupOccurrence(ctx, x, tx, *r, o, key); err != nil {
 		return false, err
 	}
 	for _, b := range []struct{ kind, id string }{{"work_item", r.WorkItemID}, {"followup", r.RuleID}, {"followup_occurrence", o.OccurrenceID}} {
@@ -159,15 +159,16 @@ func evaluateFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *protocol.Fo
 	if err := queueEventTurn(ctx, x, tx, message, eventID, "followup.triggered", fact); err != nil {
 		return false, err
 	}
+
 	r.TriggerCount++
 	if manual && r.TriggerCount >= r.MaxTriggers {
 		r.Status = "finished"
 	}
 	if !manual {
-		if r.Kind != "every" || r.TriggerCount >= r.MaxTriggers {
+		if (r.Kind != "every" && r.Kind != "cron") || r.TriggerCount >= r.MaxTriggers {
 			r.Status = "finished"
 		} else {
-			r.NextAt = now + r.EverySeconds*1000
+			scheduleFollowup(r, now)
 		}
 	}
 	return save(reason)
@@ -308,7 +309,7 @@ func (a *App) RunFollowups(ctx context.Context, log *slog.Logger) {
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
 	for {
-		cmd := SweepFollowups{}
+		cmd := SweepTriggers{}
 		env := protocol.Envelope{RequestID: a.ids.New(protocol.PrefixRequest), Operation: cmd.Operation(), Target: protocol.Target{Type: "followups"}, Payload: json.RawMessage(`{}`)}
 		op, err := a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &env, cmd)
 		if err != nil && ctx.Err() == nil {

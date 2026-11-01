@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"slices"
@@ -32,6 +33,9 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if rt.Mode != protocol.RunnerNormal {
 		return Outcome{Result: result, NoEffect: true}, nil
 	}
+	if _, err := stageDeliveryObservations(ctx, x, tx); err != nil {
+		return Outcome{}, err
+	}
 	items, err := store.ListIssues(ctx, tx.Q(), "", "")
 	if err != nil {
 		return Outcome{}, err
@@ -43,6 +47,13 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	for _, item := range items {
 		for _, delivery := range item.Deliveries {
 			if delivery.HostID != "" && delivery.HostID != x.Principal.Subject || !slices.Contains(rt.Capabilities, deliveryCapability(delivery.Provider)) {
+				continue
+			}
+			var ready bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM observation_jobs WHERE issue_id=? AND delivery_id=? AND status='pending')`, item.WorkItemID, delivery.DeliveryID).Scan(&ready); err != nil {
+				return Outcome{}, err
+			}
+			if !ready {
 				continue
 			}
 			row, err := observationRow(ctx, tx.Q(), item.WorkItemID, delivery.DeliveryID)
@@ -65,6 +76,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if selected == nil {
 		return Outcome{Result: result, NoEffect: true}, nil
 	}
+	plannedAt := selected.NextCheckAt
 	selected.Observation.Generation++
 	selected.Nonce = x.IDs.New(protocol.PrefixRequest)
 	selected.HostID = x.Principal.Subject
@@ -75,6 +87,13 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	// preceding untouched references. A completed report sets the next interval.
 	selected.NextCheckAt = now
 	if err := tx.PutDeliveryObservation(ctx, *selected); err != nil {
+		return Outcome{}, err
+	}
+	eventID := x.IDs.New(protocol.Prefix("trigger"))
+	if err := tx.InsertTrigger(ctx, protocol.TriggerEvent{ID: eventID, IssueID: selectedItem.WorkItemID, ScheduleID: "observation:" + selectedItem.WorkItemID + ":" + selectedDelivery.DeliveryID, Title: selectedItem.Title, Source: "observation", Status: "processing", RequestID: x.Env.RequestID, PlannedAt: plannedAt, CreatedAt: now, UpdatedAt: now, Steps: []protocol.TriggerStep{{Kind: "claimed", At: now, Detail: x.Principal.Subject}}}); err != nil {
+		return Outcome{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE observation_jobs SET status='claimed',event_id=?,updated_at=? WHERE issue_id=? AND delivery_id=?`, eventID, now, selectedItem.WorkItemID, selectedDelivery.DeliveryID); err != nil {
 		return Outcome{}, err
 	}
 	result.Assignments = append(result.Assignments, protocol.DeliveryAssignment{WorkItemID: selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce})
@@ -115,6 +134,9 @@ func observationRow(ctx context.Context, q store.Querier, item, id string) (stor
 // The last provider facts remain intact; a later explicit refresh gets a new
 // query identity even when the work item stays closed.
 func cancelDeliveryQueries(ctx context.Context, tx *store.Tx, item protocol.WorkItem) error {
+	if _, err := settleObservationJobs(ctx, tx, item, item.UpdatedAt, false); err != nil {
+		return err
+	}
 	for _, delivery := range item.Deliveries {
 		row, err := store.GetDeliveryObservation(ctx, tx.Q(), item.WorkItemID, delivery.DeliveryID)
 		if errors.Is(err, store.ErrNotFound) {
@@ -186,6 +208,10 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if !slices.Contains(rt.Runtime.Capabilities, deliveryCapability(delivery.Provider)) {
 		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "observer capability is not available")
 	}
+	var triggerID string
+	if err := tx.Q().QueryRowContext(ctx, `SELECT event_id FROM observation_jobs WHERE issue_id=? AND delivery_id=?`, p.WorkItemID, p.DeliveryID).Scan(&triggerID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Outcome{}, err
+	}
 	previous := row.Observation
 	manualRefresh := row.RefreshRequested
 	row.Observation.AttemptedAt = x.Now.UnixMilli()
@@ -204,6 +230,18 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	row.NextCheckAt = x.Now.Add(interval).UnixMilli()
 	if err := tx.PutDeliveryObservation(ctx, row); err != nil {
+		return Outcome{}, err
+	}
+	status, reason := "completed", "observation changed"
+	if p.ErrorKind != "" {
+		status, reason = "failed", p.ErrorKind
+	} else if reflect.DeepEqual(previous.DeliverySnapshot, row.Observation.DeliverySnapshot) {
+		status, reason = "not_dispatched", "observation unchanged"
+	}
+	if err := tx.FinishTrigger(ctx, triggerID, status, reason, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE observation_jobs SET status='finished',updated_at=? WHERE issue_id=? AND delivery_id=?`, x.Now.UnixMilli(), p.WorkItemID, p.DeliveryID); err != nil {
 		return Outcome{}, err
 	}
 	events := []Event{}

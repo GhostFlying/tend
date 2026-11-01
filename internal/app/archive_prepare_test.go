@@ -289,6 +289,25 @@ func TestArchivePrepareRetainsResultWithoutEventFollowupUntilCancel(t *testing.T
 	// delivery identity. Cancel must not use it as a retry channel.
 	original := h.followup(w, protocol.FollowupSpec{Kind: "at", At: h.clock.Now().UnixMilli(), ExpiresAt: h.clock.Now().Add(time.Second).UnixMilli()})
 	originalOccurrences := h.occurrences(original.RuleID)
+	if len(originalOccurrences) != 1 {
+		t.Fatal("expected one original occurrence", originalOccurrences)
+	}
+	// Explicitly retain an uncertain background delivery. Its destination is
+	// distinct from the main thread, but the delivery state is still known.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		result, err := tx.Exec(t.Context(), `UPDATE outbox SET status='unknown' WHERE json_extract(payload_json,'$.message_id')=?`, originalOccurrences[0].BackgroundMessageID)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err == nil && n != 1 {
+			t.Fatalf("expected one existing background delivery, got %d", n)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	originalOccurrences = h.occurrences(original.RuleID)
 	if len(originalOccurrences) != 1 || originalOccurrences[0].Status != "unknown" {
 		t.Fatal("expected the existing unconfirmed delivery", originalOccurrences)
 	}

@@ -2,6 +2,9 @@ import { Component, lazy, Suspense, useLayoutEffect, useRef, type ReactNode } fr
 import type { Connection } from "../api/client.ts";
 import { back, href, navigate, restorePage, type Route } from "../app/router.ts";
 import { useServices } from "../app/services.tsx";
+const Diagnostics = lazy(() =>
+  import("../diagnostics/Diagnostics.tsx").then((m) => ({ default: m.Diagnostics })),
+);
 const ArchiveBrowser = lazy(() =>
   import("../archive/Archive.tsx").then((m) => ({ default: m.ArchiveBrowser })),
 );
@@ -90,6 +93,15 @@ export function RoutePage({
   const inbox = (id?: string) => navigate(id ? { page: "attention", id } : { page: "inbox" });
   let content;
   switch (route.page) {
+    case "diagnostics":
+    case "diagnosticEvent":
+      content = (
+        <Diagnostics
+          filters={route}
+          eventID={route.page === "diagnosticEvent" ? route.id : undefined}
+        />
+      );
+      break;
     case "im":
     case "chat":
     case "conversation":

@@ -25,6 +25,19 @@ var issueOperations = map[string]string{
 func runIssue(ctx context.Context, e *Env, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "events", "schedules", "webhooks":
+			if len(args) < 2 {
+				return usagef("issue diagnostics requires an Issue ID")
+			}
+			noun := map[string]string{"events": "event", "schedules": "schedule", "webhooks": "webhook"}[args[0]]
+			return runTriggers(ctx, e, noun, append([]string{"list", "--issue", args[1]}, args[2:]...))
+		case "activity", "results":
+			return runIssueReadDetail(ctx, e, args)
+		}
+	}
+
+	if len(args) > 0 {
+		switch args[0] {
 		case "context", "followups", "followup-history", "deliveries", "refresh-delivery", "followup":
 			return runIssueCaller(ctx, e, args)
 		}
@@ -34,10 +47,12 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		return runPlanningRecord(ctx, e, args[1:], true)
 	}
 	if len(args) == 0 {
-		return usagef("issue expects list|show|context|followups|followup-history|followup|deliveries|refresh-delivery|create|update|pause|resume|cancel|finish-cancel|close|reopen|reparent|dependencies|migrate-manager|request-owner|request-manager|assign|finish-assignment|review-sources|review-completions|create-task|update-task|request|replay")
+		args = []string{"list"}
 	}
+
 	action := args[0]
 	fs := newFlags(e, "issue "+action)
+	asJSON := fs.Bool("json", false, "print the complete structured result")
 	data := fs.String("data", "", "inline JSON payload (or original Envelope for replay)")
 	file := fs.String("file", "", "JSON payload file; - reads stdin")
 	request := fs.String("request-id", "", "reuse the original request identity with its original revision, epoch and payload")
@@ -49,6 +64,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	roots := fs.Bool("roots", false, "list root issues")
 	state := fs.String("state", "", "issue state filter")
 	all := fs.Bool("all", false, "include closed and cancelled issues")
+	includeClosed := fs.Bool("include-closed", false, "include closed and cancelled issues")
 	after := fs.String("after", "", "list cursor from the preceding page")
 	limit := fs.Int("limit", 50, "page size, up to 100")
 	pos, err := parse(fs, args[1:])
@@ -75,7 +91,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		if *state != "" {
 			query.Set("state", *state)
 		}
-		if *all {
+		if *all || *includeClosed {
 			query.Set("include_closed", "true")
 		}
 		if *after != "" {
@@ -88,7 +104,10 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		if err := c.do(ctx, "GET", "/api/v1/issues?"+query.Encode(), nil, &page); err != nil {
 			return err
 		}
-		return o.printJSON(page)
+		if *asJSON {
+			return o.printJSON(page)
+		}
+		return printIssuePage(e, page)
 	case "show":
 		if len(pos) != 1 {
 			return usagef("issue show takes one issue ID")
@@ -101,7 +120,10 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		if err := c.do(ctx, "GET", path, nil, &view); err != nil {
 			return err
 		}
-		return o.printJSON(view)
+		if *asJSON {
+			return o.printJSON(view)
+		}
+		return printIssueView(e, view)
 	case "request":
 		if len(pos) != 1 {
 			return usagef("issue request takes one original request ID")

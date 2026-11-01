@@ -1480,7 +1480,11 @@ async function checkNavigation() {
     assert.equal(await tabs.isVisible(), mobile);
     if (!mobile) {
       assert.equal(width, viewport.width < 1024 ? 64 : 288);
-      assert.equal(await sidebar.getByRole("link").count(), 9);
+      assert.equal(await sidebar.getByRole("link").count(), 10);
+      assert.equal(
+        await sidebar.getByRole("link", { name: "诊断", exact: true }).getAttribute("href"),
+        "/diagnostics",
+      );
       assert.equal(await sidebar.getByRole("region", { name: "需要你处理" }).count(), 0);
       assert.equal(await sidebar.getByRole("region", { name: "持续跟进" }).count(), 0);
       assert.equal(await sidebar.getByRole("region", { name: "执行主机占用" }).count(), 0);
@@ -1584,7 +1588,7 @@ async function checkNavigation() {
       if (path === "/more" && mobile) {
         const more = page.getByRole("navigation", { name: "更多导航", exact: true });
         await more.waitFor();
-        assert.equal(await more.getByRole("link").count(), 6);
+        assert.equal(await more.getByRole("link").count(), 7);
         await more.getByRole("link", { name: "设置", exact: true }).click();
         await page.getByRole("radiogroup", { name: "主题", exact: true }).waitFor();
       }

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"strings"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -16,6 +17,9 @@ func NormalizeFollowup(p protocol.FollowupSpec, now int64) (protocol.FollowupSpe
 	if strings.TrimSpace(p.Purpose) == "" || len(p.Purpose) > 500 || strings.TrimSpace(p.Instruction) == "" || len(p.Instruction) > 8000 || p.SourceID == "" || p.Timezone == "" || p.Timezone == "Local" {
 		return bad()
 	}
+	if p.Kind != "cron" && p.Cron != "" {
+		return bad()
+	}
 	switch p.Kind {
 	case "at":
 		if p.At <= 0 || p.EverySeconds != 0 || p.Condition != nil || p.ExpirySilent || (p.ExpiresAt != 0 && p.ExpiresAt < p.At) {
@@ -24,6 +28,24 @@ func NormalizeFollowup(p protocol.FollowupSpec, now int64) (protocol.FollowupSpe
 		p.MaxTriggers = 1
 	case "every":
 		if p.EverySeconds < 300 || p.EverySeconds > 31536000 || p.ExpiresAt <= now || p.At != 0 || p.Condition != nil || p.ExpirySilent {
+			return bad()
+		}
+		if p.MaxTriggers == 0 {
+			p.MaxTriggers = 20
+		}
+		if p.MaxTriggers < 1 || p.MaxTriggers > 1000 {
+			return bad()
+		}
+	case "cron":
+		if p.ExpiresAt <= now || p.At != 0 || p.EverySeconds != 0 || p.Condition != nil || p.ExpirySilent {
+			return bad()
+		}
+		c, err := ParseCron(p.Cron, p.Timezone)
+		if err != nil {
+			return bad()
+		}
+		next, err := c.Next(time.UnixMilli(now))
+		if err != nil || next.UnixMilli() >= p.ExpiresAt {
 			return bad()
 		}
 		if p.MaxTriggers == 0 {
@@ -86,7 +108,7 @@ func FollowupDue(r protocol.FollowupRule, itemStatus string, satisfied bool, now
 		return "condition", false
 	}
 	if r.ExpiresAt > 0 && now >= r.ExpiresAt {
-		if r.Kind == "every" {
+		if r.Kind == "every" || r.Kind == "cron" {
 			return "expired", true
 		}
 		return "expired", r.ExpirySilent
@@ -94,7 +116,7 @@ func FollowupDue(r protocol.FollowupRule, itemStatus string, satisfied bool, now
 	if r.Kind == "at" && now >= r.At {
 		return "at", false
 	}
-	if r.Kind == "every" && now >= r.NextAt {
+	if (r.Kind == "every" || r.Kind == "cron") && now >= r.NextAt {
 		return "every", false
 	}
 	return "", false

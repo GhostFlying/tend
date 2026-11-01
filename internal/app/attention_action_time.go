@@ -194,7 +194,7 @@ func evaluateAttentionFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *pr
 		return true, false, err
 	}
 	occurrence := protocol.FollowupOccurrence{OccurrenceID: x.IDs.New(protocol.Prefix("occurrence")), RuleID: r.RuleID, Revision: r.Revision, WorkItemID: a.IssueID, MessageID: message, Status: "queued", Reason: "attention." + window, CreatedAt: now}
-	if err := tx.InsertFollowupOccurrence(ctx, occurrence, "revision:1"); err != nil {
+	if err := recordFollowupOccurrence(ctx, x, tx, *r, occurrence, "revision:1"); err != nil {
 		return true, false, err
 	}
 	for _, binding := range []struct{ kind, id string }{{"attention", id}, {"followup", r.RuleID}, {"followup_occurrence", occurrence.OccurrenceID}} {

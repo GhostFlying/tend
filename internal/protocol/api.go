@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		TriggerQuery{}, TriggerEventPage{}, TriggerSchedulePage{}, WebhookSubscription{}, WebhookSubscriptionPage{}, WebhookSubscriptionPayload{}, WebhookReceipt{},
 		MessagingEvent{}, MessagingChannel{}, MessagingInput{}, MessagingPublication{}, BindTelegram{}, MessagingReadPayload{}, MessagingMessage{}, MessagingPage{}, MessagingRead{}, MessagingDelivery{}, MessagingReceipts{}, MessagingTrace{}, MessagingInteraction{}, RespondInteraction{},
 		IssueBlocker{}, SetIssueStatusPayload{}, IssueNotificationSettings{}, SetIssueNotificationSettingsPayload{},
 		ManagerMigrationPayload{}, RequestIssueManagerPayload{}, IssueManagerView{}, InjectSourcePayload{}, CreateConsultationPayload{}, PromoteConsultationPayload{}, ManualSource{}, NativeEntry{}, SendRunMessagePayload{}, RunMessagePage{},

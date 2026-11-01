@@ -9,6 +9,8 @@ declare global {
 }
 
 export const paths = {
+  diagnostics: "/diagnostics",
+  diagnosticEvent: "/diagnostics/events/:id",
   im: "/",
   chat: "/diagnostics/main",
   more: "/more",
@@ -33,7 +35,18 @@ export type IssueFilters = {
   assignee?: string;
   closed?: boolean;
 };
+export type DiagnosticFilters = {
+  tab?: "schedules" | "events";
+  issue?: string;
+  source?: string;
+  status?: string;
+  search?: string;
+  after?: string;
+  since?: string;
+};
 export type Route =
+  | ({ page: "diagnostics" } & DiagnosticFilters)
+  | ({ page: "diagnosticEvent"; id: string } & DiagnosticFilters)
   | {
       page:
         | "im"
@@ -56,6 +69,25 @@ export type Route =
 export function parse(input: string | URL): Route {
   const url = new URL(input, "https://tend.invalid");
   const query = url.searchParams;
+  if (url.pathname === "/diagnostics" || /^\/diagnostics\/events\/[^/]+$/.test(url.pathname)) {
+    const filters: DiagnosticFilters = {};
+    for (const field of ["issue", "source", "status", "search", "after", "since"] as const) {
+      const v = query.get(field);
+      if (v) filters[field] = v;
+    }
+    if (query.get("tab") === "events") filters.tab = "events";
+    if (url.pathname === "/diagnostics") return { page: "diagnostics", ...filters };
+    try {
+      return {
+        page: "diagnosticEvent",
+        id: decodeURIComponent(url.pathname.slice("/diagnostics/events/".length)),
+        ...filters,
+      };
+    } catch {
+      return { page: "missing" };
+    }
+  }
+
   for (const [page, path] of Object.entries(paths)) {
     const pattern = path.split(":id");
     if (pattern.length === 2) {
@@ -93,6 +125,11 @@ export function href(route: Route): string {
   if (route.page === "missing") return "/404";
   const path = paths[route.page];
   const query = new URLSearchParams();
+  if (route.page === "diagnostics" || route.page === "diagnosticEvent") {
+    for (const field of ["tab", "issue", "source", "status", "search", "after", "since"] as const) {
+      if (route[field]) query.set(field, route[field]!);
+    }
+  }
   if (route.page === "task" && route.from) query.set("from", route.from);
   if (route.page === "issues") {
     for (const key of ["view", "project", "assignee", "closed"] as const) {
@@ -107,6 +144,8 @@ export function href(route: Route): string {
 
 export function legacyURL(input: string | URL): string | null {
   const url = new URL(input, "https://tend.invalid");
+  if (url.pathname === "/diagnostics" || url.pathname.startsWith("/diagnostics/events/"))
+    return null;
   const issue = url.searchParams.get("issue");
   const task = url.searchParams.get("task");
   if (task) return href({ page: "task", id: task, ...(issue ? { from: issue } : {}) });
