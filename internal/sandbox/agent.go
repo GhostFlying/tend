@@ -195,6 +195,10 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 		case create || dispatch && !manager:
 			title := shortTitle(text)
 			p := protocol.CreateIssuePayload{Plan: plan(title, "demo-web"), IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source, ExpectedSourceRevision: &sourceRevision}, Assignee: &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "sandbox-hosted/manager"}}
+			if manager && issue.OwnershipPolicy == protocol.IssueOwnerPolicy {
+				p.Assignee = nil
+				p.Owner = &protocol.IssueOwnerRequest{CategoryID: protocol.DefaultIssueManagerCategory, AgentID: issue.Assignee.Ref, Reason: "Retain child responsibility with the current sandbox Agent"}
+			}
 			if manager {
 				p.ParentIssueID = issue.IssueID
 				p.ExpectedParentRevision = &issue.Revision
@@ -211,6 +215,9 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			}
 		case dispatch && manager:
 			payload := taskPayload(text, issue.AssignmentEpoch)
+			if issue.OwnershipPolicy == protocol.IssueOwnerPolicy {
+				payload.Spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: protocol.DefaultIssueManagerCategory}, Acceptance: protocol.AgentRequirement{CategoryID: "sandbox-reviewer"}}
+			}
 			if strings.Contains(text, "首次失败") {
 				payload.Spec.Observation = &protocol.ObservationScope{WorkItemIDs: []string{issue.IssueID}}
 			}
