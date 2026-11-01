@@ -127,6 +127,33 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	if c.session.Token == "" {
 		t.Fatal("missing session token")
 	}
+	// Default-category creation must reach a runner-managed scripted session.
+	var created protocol.APIResponse
+	payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: plan("负责人领取测试", "demo-web"), Owner: &protocol.IssueOwnerRequest{CategoryID: protocol.DefaultIssueManagerCategory, Reason: "Delegate to sandbox owner"}})
+	c.call(http.MethodPost, "/api/v1/ops", protocol.Envelope{RequestID: seedRequest("test-runner-manager-create"), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}, &created)
+	if created.Operation == nil || created.Operation.Status != protocol.OpSucceeded {
+		t.Fatal(created)
+	}
+	var managed protocol.Issue
+	if err := json.Unmarshal(created.Operation.Result, &managed); err != nil {
+		t.Fatal(err)
+	}
+	conversation := "issue:" + managed.IssueID
+	c.operation("test-runner-manager-message", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "请确认负责人已接手"})
+	waitFor(t, ctx, "runner manager reply", func() bool {
+		var view protocol.IssueView
+		c.call(http.MethodGet, "/api/v1/issues/"+managed.IssueID, nil, &view)
+		if view.Manager == nil || view.Manager.HostID != hostID || view.Manager.ConversationID != conversation {
+			return false
+		}
+		var count int
+		if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, `SELECT count(*) FROM conversation_messages WHERE conversation_id=? AND author='main_agent' AND kind='message' AND body<>''`, conversation).Scan(&count)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return count == 1
+	})
 	var board protocol.IssuePage
 	c.call(http.MethodGet, "/api/v1/issues?board=true&include_closed=true&limit=100", nil, &board)
 	ownerAssigned := 0
