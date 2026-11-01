@@ -52,6 +52,8 @@ type InitializeCapabilities struct {
 
 // ThreadStartParams creates a thread.
 type ThreadStartParams struct {
+	Environments []ThreadEnvironment `json:"environments,omitempty"`
+
 	ExperimentalRawEvents bool              `json:"experimentalRawEvents"`
 	Ephemeral             bool              `json:"ephemeral,omitempty"`
 	Model                 string            `json:"model,omitempty"`
@@ -89,7 +91,15 @@ type ThreadStartResponse struct {
 }
 
 // Thread is the harness's thread record.
+type ThreadEnvironment struct {
+	EnvironmentID string `json:"environmentId"`
+	Cwd           string `json:"cwd"`
+}
+
+// Thread is the native thread record.
 type Thread struct {
+	Environments []ThreadEnvironment `json:"environments,omitempty"`
+
 	ID   string  `json:"id"`
 	Path *string `json:"path"`
 }

@@ -79,3 +79,18 @@ func ListAgentCategories(ctx context.Context, q Querier, state, after string, li
 	}
 	return page, nil
 }
+
+// GetAgentInventorySnapshot returns the immutable inventory frozen by a run.
+func GetAgentInventorySnapshot(ctx context.Context, q Querier, host, snapshot, hash string) (AgentInventoryRow, error) {
+	var row AgentInventoryRow
+	var receipt string
+	err := q.QueryRowContext(ctx, `SELECT receipt_json,projection_json FROM agent_inventory_versions WHERE host_id=? AND snapshot_id=? AND public_sha256=? ORDER BY server_revision DESC LIMIT 1`, host, snapshot, hash).Scan(&receipt, &row.CanonicalJSON)
+	if err != nil {
+		return row, notFound(err, "agent inventory snapshot")
+	}
+	if err = json.Unmarshal([]byte(receipt), &row.Receipt); err != nil {
+		return row, err
+	}
+	err = json.Unmarshal([]byte(row.CanonicalJSON), &row.Projection)
+	return row, err
+}

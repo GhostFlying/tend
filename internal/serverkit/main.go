@@ -25,6 +25,7 @@ import (
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/dispatch"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/remote"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/mainthread"
@@ -42,6 +43,8 @@ import (
 
 // Config is the server's configuration file.
 type Config struct {
+	NativeWorkers *remote.BrokerConfig `json:"native_workers,omitempty"`
+
 	Webhooks *struct {
 		Listen string `json:"listen"`
 	} `json:"webhooks,omitempty"`
@@ -352,7 +355,30 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	if cfg.Upgrades != nil {
 		releaseDir = cfg.Upgrades.ReleaseDir
 	}
-	runners := runnerapi.New(a, whois, secret, runnerapi.Config{ReleaseDir: releaseDir}, log)
+	var native *remote.Broker
+	if cfg.NativeWorkers != nil {
+		nativeConfig := *cfg.NativeWorkers
+		if nativeConfig.Cwd == "" {
+			nativeConfig.Cwd = filepath.Join(dataDir, "native-workers")
+		}
+		var err error
+		nativeConfig.Cwd, err = cfgfile.Path(nativeConfig.Cwd)
+		if err != nil {
+			return err
+		}
+		if err = os.MkdirAll(nativeConfig.Cwd, 0o700); err != nil {
+			return err
+		}
+		if nativeConfig.Home != "" {
+			nativeConfig.Home, err = cfgfile.Path(nativeConfig.Home)
+			if err != nil {
+				return err
+			}
+		}
+		native = remote.NewBroker(ctx, nativeConfig, log)
+		defer native.Close()
+	}
+	runners := runnerapi.New(a, whois, secret, runnerapi.Config{ReleaseDir: releaseDir, NativeWorkers: native}, log)
 	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, background, ids, log)
 	if err != nil {
 		return err

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"os/exec"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/orca"
+	"github.com/GhostFlying/tend/internal/harness/remote"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
@@ -30,6 +32,9 @@ type BuildInput struct {
 }
 
 type Options struct {
+	CentralOrca  *orca.Client
+	ProbeCentral func(context.Context) error
+
 	Source        *agentcontrol.Control
 	BackendID     string
 	Workspaces    runner.Workspaces
@@ -108,7 +113,7 @@ func (p *Pool) load(ctx context.Context, id string) (map[string]*entry, error) {
 			e.reason = "definition_disabled"
 		case r.Kind == agentconfig.HostedManager:
 			e.reason = "hosted_runtime_not_supported"
-		case r.Kind == agentconfig.OrcaWorker && p.options.BackendID != "orca":
+		case (r.Kind == agentconfig.OrcaWorker || r.Kind == agentconfig.CentralWorker) && p.options.BackendID != "orca":
 			e.reason = "workspace_backend_not_supported"
 		default:
 			e.reason = "adapter_not_loaded"
@@ -141,7 +146,7 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 			continue
 		}
 		worker := protocol.WorkerAppServer
-		if e.input.Runtime.Kind == agentconfig.OrcaWorker {
+		if e.input.Runtime.Kind == agentconfig.OrcaWorker || e.input.Runtime.Kind == agentconfig.CentralWorker {
 			worker = protocol.WorkerOrca
 		}
 		pin := protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: int64(status.Revision), SnapshotID: status.SnapshotID, PublicSHA256: status.PublicSHA256, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: worker, BackendID: p.options.BackendID}
@@ -199,7 +204,7 @@ func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runne
 	}
 	a, r := e.input.Agent, e.input.Runtime
 	worker := protocol.WorkerAppServer
-	if r.Kind == agentconfig.OrcaWorker {
+	if r.Kind == agentconfig.OrcaWorker || r.Kind == agentconfig.CentralWorker {
 		worker = protocol.WorkerOrca
 	}
 	if a.Revision != pin.AgentRevision || r.ID != pin.Runtime.RuntimeID || r.Revision != pin.Runtime.Revision || a.Model != pin.Profile.Model || a.Effort != pin.Profile.Effort || worker != pin.Worker {
@@ -225,6 +230,15 @@ func (p *Pool) probe(ctx context.Context, input BuildInput) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if input.Runtime.Kind == agentconfig.CentralWorker {
+		if runtime.GOOS == "windows" {
+			return errors.New("central native terminal needs a supported shell adapter")
+		}
+		if p.options.CentralOrca == nil || p.options.ProbeCentral == nil {
+			return errors.New("central native runtime is not configured")
+		}
+		return p.options.ProbeCentral(ctx)
+	}
 	if input.Runtime.Kind == agentconfig.OrcaWorker {
 		client := &orca.Client{Bin: input.Runtime.ExecutableRef}
 		if err := client.CheckWorkspaceProtocol(ctx); err != nil {
@@ -243,6 +257,11 @@ func (p *Pool) probe(ctx context.Context, input BuildInput) error {
 }
 func (p *Pool) build(input BuildInput) (harness.Workers, error) {
 	switch input.Runtime.Kind {
+	case agentconfig.CentralWorker:
+		if p.options.CentralOrca == nil {
+			return nil, errors.New("central worker needs its native terminal client")
+		}
+		return remote.NewWorkers(remote.WorkerOptions{Bin: input.Runtime.ExecutableRef, Helper: p.options.BridgeCommand, Orca: p.options.CentralOrca, Model: input.Agent.Model, Effort: input.Agent.Effort, Log: p.options.Log}), nil
 	case agentconfig.AppServerWorker:
 		return traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log}, Model: input.Agent.Model, Effort: input.Agent.Effort}), nil
 	case agentconfig.OrcaWorker:
@@ -305,4 +324,17 @@ func (p *Pool) Refresh(ctx context.Context) error {
 
 func canProbe(reason string) bool {
 	return reason == "adapter_not_loaded" || reason == "adapter_unavailable" || reason == "orca_trae_model_selection_not_supported"
+}
+
+// Close stops only the factories owned by this process, including held loops.
+func (p *Pool) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, entries := range p.snapshots {
+		for _, e := range entries {
+			if closer, ok := e.workers.(interface{ Close() }); ok {
+				closer.Close()
+			}
+		}
+	}
 }

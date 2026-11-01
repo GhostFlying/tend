@@ -79,6 +79,8 @@ cmd/tend → cli → protocol（cli 只用标准库，不 import 服务端的任
 sandbox → serverkit, runner, testkit（仅沙盒入口使用）
 messaging, messaging/telegram → app, protocol
 harness/traex, harness/orca, harness/bridge → harness, protocol
+harness/remote → harness, harness/traex, harness/orca, protocol, procx
+runnerapi, serverkit → harness/remote（可选原生执行传输，不新增业务写入入口）
 serverkit → webui（webui 只用标准库，不 import 其他包）
 ```
 
