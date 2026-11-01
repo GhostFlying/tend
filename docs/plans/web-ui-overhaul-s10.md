@@ -44,3 +44,7 @@ Issue 详情的输入区当前只在负责人是已领取的 Agent 时可用。�
 
 - owner 合同下的脚本子项使用 owner 类别及同身份约束；派发明确 implementation / acceptance 类别，历史脚本保持原合同。
 - 冻结脚本库存包含同身份执行适配与独立 reviewer，通过真实 API 验证 owner 子项创建、执行领取与验收。
+
+## 交接恢复修正计划
+
+- 交接恢复解码同时接受 request_owner 与历史 request_manager，保留持久的自定义类别；单元验证原请求类别不被默认覆盖。

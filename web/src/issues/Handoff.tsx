@@ -4,14 +4,12 @@ import type {
   IssueView,
   IssueAssignmentPayload,
   FinishIssueAssignmentPayload,
-  RequestIssueManagerPayload,
-  ManagerMigrationPayload,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useDurableOp } from "../app/useDurableOp.ts";
 import type { OpOutcome } from "../app/ops.ts";
 import { useStore } from "../state/store.ts";
-import { issueHandoffCommand } from "./actions.ts";
+import { issueHandoffCategoryTarget, issueHandoffCommand } from "./actions.ts";
 import styles from "./Issues.module.css";
 import form from "../attention/Inbox.module.css";
 import layout from "./Handoff.module.css";
@@ -50,14 +48,7 @@ export function IssueHandoff({
     original?.operation === "issues.assign"
       ? (original.payload as IssueAssignmentPayload).assignee
       : undefined;
-  const categoryTarget =
-    original?.operation === "issues.manager_migration" &&
-    (original.payload as ManagerMigrationPayload).phase === "cancel"
-      ? "owner"
-      : original?.operation === "issues.request_manager" ||
-          original?.operation === "issues.manager_migration"
-        ? `category:${(original.payload as RequestIssueManagerPayload | ManagerMigrationPayload).category_id ?? "issue-manager"}`
-        : undefined;
+  const categoryTarget = issueHandoffCategoryTarget(original);
   const shownTarget =
     categoryTarget ??
     (originalAssignee
