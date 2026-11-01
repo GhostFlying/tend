@@ -29,6 +29,19 @@ export const Send = (p: IconProps) => (
   </svg>
 );
 
+export const Paperclip = (p: IconProps) => (
+  <svg
+    viewBox="0 0 24 24"
+    {...line}
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...p}
+  >
+    <path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+  </svg>
+);
+
 export const Chat = (p: IconProps) => (
   <svg viewBox="0 0 24 24" {...line} strokeWidth={1.8} {...p}>
     <path d="M4 5h16v11H9l-5 4z" />
