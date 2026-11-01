@@ -28,7 +28,7 @@ const specSchema = `{
       "type": "object",
       "description": "Choose new repository worktrees, reuse of a same-primary-work-item managed resource identified by source_task_id, or an independent temporary directory for report/file work. A task relation alone does not reuse a workspace.",
       "properties": {
-        "mode": {"type": "string", "enum": ["new", "reuse", "temporary"], "description": "Omitted means new. reuse preserves the managed directory and dirty state; temporary is an independent directory, not a repository worktree."},
+        "mode": {"type": "string", "enum": ["new", "reuse", "temporary"], "description": "Omitted means new, so a source_task_id requires explicit mode=reuse. reuse preserves the managed directory and dirty state but does not authorize committing inherited edits: a commit task also needs include_existing_changes after scope review. temporary is an independent directory, not a repository worktree."},
         "source_task_id": {"type": "string", "description": "For reuse, resolve the owner's referenced task and read its resource first; do not guess an unrelated task or use a relation as implicit inheritance."},
         "include_existing_changes": {"type": "boolean", "description": "Reuse only: explicitly include inherited dirty workspace changes in the task's commit scope. Set only when the owner's requested scope carries those changes forward; otherwise leave false and ask about any blocked inherited changes."},
         "template": {"type": "string"},

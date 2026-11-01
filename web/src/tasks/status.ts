@@ -41,6 +41,7 @@ export const blockLabels: Record<BlockReason, string> = {
   acceptance_env_unavailable: "验收环境不可用",
   budget_exhausted: "实现次数用完",
   workspace_unavailable: "工作区不可用",
+  preparation_required: "待负责人修正执行配置",
 };
 
 export const ratingLabels: Record<Rating, string> = {

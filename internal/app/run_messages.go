@@ -262,7 +262,8 @@ func (a *App) RunMessages(ctx context.Context, p protocol.Principal, run string,
 	if p.Validate() != nil {
 		return protocol.RunMessagePage{}, protocol.Errorf(protocol.CodeForbidden, "valid control or run identity is required")
 	}
-	if p.Kind != protocol.PrincipalOwner && p.Kind != protocol.PrincipalBackgroundAgent && p.Kind != protocol.PrincipalMainAgent && (p.Kind != protocol.PrincipalRun || p.Subject != run) {
+	managerRun := p.Kind == protocol.PrincipalRun && p.Role == protocol.RoleIssueManager
+	if p.Kind != protocol.PrincipalOwner && p.Kind != protocol.PrincipalBackgroundAgent && p.Kind != protocol.PrincipalMainAgent && !managerRun && (p.Kind != protocol.PrincipalRun || p.Subject != run) {
 		return protocol.RunMessagePage{}, protocol.Errorf(protocol.CodeForbidden, "main agent or target run identity is required")
 	}
 	if after < 0 || limit < 1 || limit > 100 {
@@ -274,12 +275,12 @@ func (a *App) RunMessages(ctx context.Context, p protocol.Principal, run string,
 		if err != nil {
 			return errNotFound(err, "run does not exist")
 		}
-		if p.Kind == protocol.PrincipalBackgroundAgent {
-			if err := authorizeRunMessageManagerRead(ctx, tx.Q(), p, rc.task.TaskID); err != nil {
+		if p.Kind == protocol.PrincipalBackgroundAgent || managerRun {
+			if err := authorizeRunMessageManagerRead(ctx, tx.Q(), p, rc.task.TaskID, a.now().UnixMilli()); err != nil {
 				return err
 			}
 		}
-		if p.Kind == protocol.PrincipalRun && p.Role != rc.run.Role {
+		if p.Kind == protocol.PrincipalRun && !managerRun && p.Role != rc.run.Role {
 			return protocol.Errorf(protocol.CodeForbidden, "run role does not match")
 		}
 		out, err = store.ListRunMessages(ctx, tx.Q(), run, after, limit, pending)
@@ -351,12 +352,15 @@ func settleObsoleteRunMessages(ctx context.Context, x *Exec, tx *store.Tx, out *
 	return nil
 }
 
-func authorizeRunMessageManagerRead(ctx context.Context, q store.Querier, p protocol.Principal, task string) error {
+func authorizeRunMessageManagerRead(ctx context.Context, q store.Querier, p protocol.Principal, task string, now int64) error {
 	conversation, err := store.AgentConversation(ctx, q, p.ConversationID)
 	if err != nil {
 		return err
 	}
 	primary, err := store.GetTaskIssueOwner(ctx, q, task)
+	if errors.Is(err, store.ErrNotFound) {
+		return protocol.Errorf(protocol.CodeForbidden, "run messages are outside this manager's primary Issue")
+	}
 	if err != nil {
 		return err
 	}
@@ -375,6 +379,14 @@ func authorizeRunMessageManagerRead(ctx context.Context, q store.Querier, p prot
 	execution, err := store.GetHostedExecution(ctx, q, executionID)
 	if err != nil {
 		return err
+	}
+	if p.Kind == protocol.PrincipalRun {
+		if !execution.Selection.RunnerManaged {
+			return protocol.Errorf(protocol.CodeForbidden, "run cannot impersonate a hosted coordinator")
+		}
+		if err := authorizeRunnerCoordination(ctx, q, p, execution, false, now); err != nil {
+			return err
+		}
 	}
 	if issue.AssignmentState != "active" || issue.Assignee.Kind != protocol.IssueAssigneeAgent || issue.Assignee.Ref != hostedconfig.IdentityRef(execution.Selection.Identity) {
 		return protocol.Errorf(protocol.CodeForbidden, "manager assignment has changed")

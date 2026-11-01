@@ -116,7 +116,11 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 				reason = se.reason
 			}
 			r.cfg.Log.WarnContext(ctx, "run failed", "run_id", runID, "reason", reason, "err", err)
-			err = r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: reason})
+			payload := protocol.ReleasePayload{Reason: reason}
+			if diagnosis, ok := errors.AsType[*PreparationError](err); ok && as.PreparationDiagnostics && run.Phase == journal.PhaseClaimed && run.Attempts == 0 && run.Thread == "" {
+				payload.Preparation = &diagnosis.Failure
+			}
+			err = r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsRelease, payload)
 		}
 		if err != nil {
 			return err

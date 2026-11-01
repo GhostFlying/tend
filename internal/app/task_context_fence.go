@@ -84,6 +84,9 @@ func fenceChangedTaskContext(ctx context.Context, q store.Querier, rc runContext
 func recordTaskContextWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eventID string) error {
 	id := x.IDs.New(protocol.PrefixMessage)
 	body := fmt.Sprintf("Task %s received a result whose source context changed or requires native reconciliation. The result is retained as historical evidence; it does not complete the current responsibility. Reconcile current source facts and explicitly revise the task agreement or keep it paused. Do not replay the old run. Source event: %s.", e.ObjectID, eventID)
+	if e.Kind == "task.preparation_blocked" {
+		body = fmt.Sprintf("Task %s stopped during workspace preparation before its worker started. Read tasks_read runs[].preparation for the exact frozen run/spec, inherited file statuses and missing contract field. Reconcile whether inherited changes belong to the existing authorized goal, then explicitly update this task contract with issues_update_task. Reuse retains files; it does not include them in commit scope. Do not blindly retry the unchanged spec or create another task. Unknown authorship or additional scope requires investigation or clarification. This is a technical blocker for the current Issue owner, not a new human retry decision. Source event: %s.", e.ObjectID, eventID)
+	}
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "system", Body: body, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
 		return err

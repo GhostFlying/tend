@@ -185,8 +185,9 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		return protocol.Assignment{}, err
 	}
 	as := protocol.Assignment{
-		MountDirectories: true,
-		Relations:        relations, Protocol: run.Protocol,
+		PreparationDiagnostics: true,
+		MountDirectories:       true,
+		Relations:              relations, Protocol: run.Protocol,
 		RunID: run.RunID, LeaseID: lease.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: run.TaskID,
 		ActionID: run.ActionID, Role: run.Role, Desired: desiredFor(run, action, task), Generation: run.Generation,
 		SpecVersion: action.TargetSpecVersion,
@@ -778,6 +779,19 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := validatePreparationFailure(ctx, tx.Q(), rc, p); err != nil {
+		return Outcome{}, err
+	}
+	preparationOwner := false
+	if p.Preparation != nil {
+		if err := tx.InsertRunPreparationFailure(ctx, rc.run.RunID, *p.Preparation, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
+		preparationOwner, err = preparationOwnerCurrent(ctx, tx.Q(), rc)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
 	if err := endRun(ctx, x, tx, rc.run, protocol.RunFailed); err != nil {
 		return Outcome{}, err
 	}
@@ -797,7 +811,11 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 		return Outcome{}, err
 	}
 	if !fenced {
-		d = domain.RunFailed(toDomain(rc.task, rc.spec.Budget()), rc.fact(), p.Reason)
+		if preparationOwner {
+			d = domain.RunPreparationFailed(toDomain(rc.task, rc.spec.Budget()), rc.fact())
+		} else {
+			d = domain.RunFailed(toDomain(rc.task, rc.spec.Budget()), rc.fact(), p.Reason)
+		}
 	}
 	_, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "run.failed", "run_id": rc.run.RunID})
 	if err != nil {

@@ -194,6 +194,18 @@ func RunFailed(t Task, r RunFact, reason string) Decision {
 	return Decision{Task: t, Events: []EventDraft{staleEvent("run.failed", body)}}
 }
 
+// RunPreparationFailed blocks an unstarted implementation for its current Issue
+// owner to explicitly revise the contract. It never queues a retry.
+func RunPreparationFailed(t Task, r RunFact) Decision {
+	d := RunFailed(t, r, "workspace_prepare_failed")
+	if currentImplement(t, r) && (t.Lifecycle == protocol.TaskQueued || t.Lifecycle == protocol.TaskRunning || t.Lifecycle == protocol.TaskChangesRequired) {
+		d.Task.Block = protocol.BlockPreparationRequired
+		d.OpenDecisions = nil
+		d.Events = append(d.Events, EventDraft{Kind: "task.preparation_blocked", Body: map[string]any{"run_id": r.RunID, "spec_version": r.SpecVersion, "generation": r.Generation}})
+	}
+	return d
+}
+
 // failureReasonLabel describes runner facts without rewriting their reason codes.
 func failureReasonLabel(reason string) string {
 	switch reason {
@@ -201,6 +213,8 @@ func failureReasonLabel(reason string) string {
 		return "执行 Agent 异常退出"
 	case "worker_start_failed":
 		return "执行 Agent 启动失败"
+	case "workspace_prepare_failed":
+		return "工作目录准备失败"
 	case "runner_error":
 		return "执行主机发生错误"
 	case "no_changes":

@@ -265,6 +265,11 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		}
 		return v, nil
 	}
+	if t.BlockReason == protocol.BlockPreparationRequired {
+		v.State, v.Role = protocol.ExecutionQueued, protocol.RoleImplement
+		v.QueueReason = &protocol.QueueWaitReason{Code: protocol.QueueTaskBlocked, TaskID: t.TaskID, Message: "等待 Issue 负责人核对继承改动并修正执行合同"}
+		return v, nil
+	}
 	c, pending := f.candidates[t.TaskID]
 	if !pending {
 		return v, nil

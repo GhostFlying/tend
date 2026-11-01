@@ -82,11 +82,14 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
-	Responsibility      *ExecutionResponsibility `json:"responsibility,omitempty"`
-	Manager             *IssueManagerAssignment  `json:"manager,omitempty"`
-	Execution           *RunExecutionPin         `json:"execution,omitempty"`
-	AcceptanceExecution *ExecutionProfile        `json:"acceptance_execution,omitempty"`
-	QuestionContext     bool                     `json:"question_context,omitempty"`
+	// PreparationDiagnostics permits the optional release diagnosis. Older
+	// servers omit it, so new runners retain the original release payload.
+	PreparationDiagnostics bool                     `json:"preparation_diagnostics,omitempty"`
+	Responsibility         *ExecutionResponsibility `json:"responsibility,omitempty"`
+	Manager                *IssueManagerAssignment  `json:"manager,omitempty"`
+	Execution              *RunExecutionPin         `json:"execution,omitempty"`
+	AcceptanceExecution    *ExecutionProfile        `json:"acceptance_execution,omitempty"`
+	QuestionContext        bool                     `json:"question_context,omitempty"`
 	// RunMessages enables the additive, run-scoped supplement delivery protocol.
 	RunMessages bool `json:"run_messages,omitempty"`
 	// WorkerQuestions is negotiated before exposing ask_owner to the worker.
@@ -284,7 +287,8 @@ type VerdictPayload struct {
 
 // ReleasePayload explains why a run is given up.
 type ReleasePayload struct {
-	Reason string `json:"reason"`
+	Reason      string                 `json:"reason"`
+	Preparation *RunPreparationFailure `json:"preparation,omitempty"`
 }
 
 // ResultReport is a durable Markdown investigation or operation report.

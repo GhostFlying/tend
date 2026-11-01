@@ -142,6 +142,7 @@
 | D136 | Issue owner 是普通 Agent 在具体 Issue 上的持续责任；同一身份可以协调与执行。跨 Agent 委派必须经过子 Issue，独立验收具有自己的子 Issue 与运行关联；保留人工控制及历史合同，不改 Issue 交互。见 docs/plans/issue-owner-responsibility.md。 | 已实现 |
 | D137 | Server 统一调度持久观察、有限 cron 和单 Issue webhook；事件来源、分发及消费只读可追踪，完整 Issue/自动化 CLI 共用原业务用例与请求身份；独立接收入口及私有凭据，不改变 runner wire 2/1。见 docs/plans/unified-issue-triggers.md。 | 已实现，未发布 |
 | D138 | TraeX 流内限流的 `other` 终态仅通过绑定原 session/turn 的完整原始记录和精确 provider 诊断补足分类；原生根必须已失败且操作收敛。限流等待 30 秒再沿同 run/会话续接，截止时间与既有一次预算持久化；未知发送先对账，耗尽后交由 Issue owner。wire 保持 2/1。见 docs/plans/traex-terminal-rate-limit.md。 | 已实现 |
+| D139 | 复用目录的 commit 任务缺少继承改动授权时，由 runner 上报明确未启动的有界结构化诊断；当前 Issue owner 修正同一任务合同，保留历史 run，不自动吸收改动或生成用户重试决定。独立 preparation_required 阻塞不能被主机健康扫描清除；旧协议、未知及旧责任仍走原围栏。见 docs/plans/workspace-preparation-recovery.md。 | 已实现，未发布 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -495,3 +496,15 @@ Webhook 订阅绑定一个已有 Issue，owner 创建、修改、暂停、恢复
 诊断投影复用规则、触发、观察、来源、批次和原生处理事实，增加每次实际触发/观察的关联记录与阶段，不记录空轮询。分开表达已接收、待分发、已入队、处理中、处理结束、未分发、失败、未知和取消；业务完成仍由 Issue 收尾约束决定。历史没有时间证据的阶段显示未记录，不猜测。owner 认证的只读 API 提供按 Issue、来源、状态、时间、关联身份筛选及稳定游标，返回同一读取快照的水位。事件通知仅用于重新读取。
 
 Web 提供全局调度/事件及 Issue 过滤视图，页面只读。CLI 复用现有完整 Issue 生命周期，提供完整 schedule、webhook、event、observation、request 管理/诊断与 JSON 输出、原信封 dry-run/replay，不创建第二份客户端请求账本。新增内部存储及 owner API 不改变 runner 协议 2/1。详见 `docs/plans/unified-issue-triggers.md`。
+
+## D139：启动前合同错误的负责人修正
+
+工作目录复用与继承改动的提交范围是两个独立约定。`workspace.mode=reuse` 保留目录和未提交状态；只有负责人核对目标与改动归属后，才能显式设置 `include_existing_changes`。`follow_up` 不继承资源或附件；跨责任代次的执行合同仍须新建，当前代次的准备缺项通过 `issues_update_task` 更新同一任务并产生新 spec/run。相同 spec 的重写保持无效果，不触发重复执行。证据不足时可先保存原实现目标及冻结 spec 引用，将同任务显式修订为有界报告调查，避免争用现场；调查经独立验收完成后，以同 Issue 的后续任务恢复原实现/验收要求，并在占用与原生执行结清后复用调查资源。报告任务完成不代表原修复或 Issue 完成，也不重开已完成任务。
+
+Runner 在实际工作目录适配器中构造有类型的准备失败，记录 `inherited_changes_not_included`、准备阶段、未启动事实、来源任务、工作区及所缺字段；文件证据仅含有界的仓库相对路径、暂存/未暂存状态及 HEAD，不携带内容、原生目录或 stderr。状态不证明作者或授权，截断和总数显式保留，归属不清时仍需有界调查或澄清。诊断在既有 release journal 内持久化，以同一请求重试上报。
+
+新 server 在 Assignment 中提供可选 `preparation_diagnostics`，runner 只有收到许可且 journal 证明没有线程或启动尝试时，才附加可选的 release 诊断。旧 server 不收到新字段，旧 runner 不提供诊断，均保留原有失败处理；runner wire 保持 2/1。Server 按原 run 的冻结 spec/workspace 校验诊断；当前合同已修订或租约对账改变了 run 投影时，仍接纳迟到的最终失败事实并结清原执行，不拒绝 journal 中的回执，也不自动进入负责人修正流程。负责人修正准入额外要求 run 仍处于 starting。失败、诊断、事件与必要唤醒在同一事务保存。历史记录不补造启动证据。
+
+只有当前普通 Agent owner、有效责任代次与当前执行合同、活动 Issue/托管任务下的确定准备缺项，进入 `preparation_required`。任务阻塞但不排队重试、不打开面向用户的 retry 决定；持久事件仅路由到该 Issue 的现有负责人。该阻塞与主机不可用独立，健康检查不能自动解除。旧 spec/代次、取消、暂停及 unknown 保持既有控制和对账规则，不自动转交主 Agent。
+
+`tasks_read` 的 run 投影携带诊断，owner API/CLI 共用同一事实。具名负责人的实际工具 schema 与常驻指令均说明复用和提交授权；创建受理不宣称 worker 已启动。Runner 承载的负责人可在当前准入会话和责任代次中读取本 Issue 的 run 消息，不能跨 Issue、伪造其他 run 或沿用旧 assignment；不增加发送和执行权限。前端只补充新阻塞标签及生成类型，不改变页面交互。

@@ -16,7 +16,7 @@ import (
 // itself for a decision it just opened or answered in its current turn.
 func wakesMain(p protocol.Principal, kind string) bool {
 	switch kind {
-	case "task.completed", "task.context_changed":
+	case "task.completed", "task.context_changed", "task.preparation_blocked":
 		return true
 	case "decision.opened", "decision.answered", "work_item_choice.answered":
 		return p.Kind != protocol.PrincipalMainAgent

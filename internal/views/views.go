@@ -94,7 +94,11 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		return d, err
 	}
 	for _, r := range runs {
-		d.Runs = append(d.Runs, protocol.RunView{RunID: r.RunID, Role: r.Role, Generation: r.Generation, SpecVersion: versions[r.ActionID], Host: r.HostID, Observed: r.ObservedState})
+		failure, err := store.RunPreparationFailure(ctx, q, r.RunID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return d, err
+		}
+		d.Runs = append(d.Runs, protocol.RunView{Preparation: failure, RunID: r.RunID, Role: r.Role, Generation: r.Generation, SpecVersion: versions[r.ActionID], Host: r.HostID, Observed: r.ObservedState})
 	}
 	arts, err := store.ListArtifactsByTask(ctx, q, row.TaskID)
 	if err != nil {
