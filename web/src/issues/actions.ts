@@ -151,3 +151,21 @@ export function issueFollowupCommand(
     payload: { ...payload, expected_assignment_epoch: issue.assignment_epoch },
   };
 }
+
+/** Decode the frozen category choice before reconciling a retained handoff. */
+export function issueHandoffCategoryTarget(
+  original: Pick<OwnerCommand, "operation" | "payload"> | null | undefined,
+): string | undefined {
+  if (
+    original?.operation === "issues.manager_migration" &&
+    (original.payload as ManagerMigrationPayload).phase === "cancel"
+  )
+    return "owner";
+  if (
+    original?.operation === "issues.request_owner" ||
+    original?.operation === "issues.request_manager" ||
+    original?.operation === "issues.manager_migration"
+  )
+    return `category:${(original.payload as RequestIssueManagerPayload | ManagerMigrationPayload).category_id ?? "issue-manager"}`;
+  return undefined;
+}

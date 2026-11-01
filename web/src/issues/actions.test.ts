@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 import { pendingManagerDisplay } from "./assigneeDisplay.ts";
-import { createIssueResponsibility, issueHandoffCommand } from "./actions.ts";
+import {
+  createIssueResponsibility,
+  issueHandoffCategoryTarget,
+  issueHandoffCommand,
+} from "./actions.ts";
 
 test("pending category changes replace responsibility and owner takeback cancels its task", () => {
   const pending = {
@@ -79,4 +83,29 @@ test("a fresh create after rejection replaces restored responsibility but retain
   expect(categoryCreate.manager).toBeUndefined();
   expect(categoryCreate.owner?.category_id).toBe("issue-manager");
   expect(restored.manager.category_id).toBe("custom-coordinator");
+});
+
+test("retained owner handoff restores its custom category alongside historical requests", () => {
+  for (const operation of [
+    "issues.request_owner",
+    "issues.request_manager",
+    "issues.manager_migration",
+  ]) {
+    expect(
+      issueHandoffCategoryTarget({
+        operation,
+        payload: {
+          category_id: "custom-owner",
+          reason: "Retained request",
+          expected_assignment_epoch: 3,
+        },
+      }),
+    ).toBe("category:custom-owner");
+  }
+  expect(
+    issueHandoffCategoryTarget({
+      operation: "issues.manager_migration",
+      payload: { phase: "cancel" },
+    }),
+  ).toBe("owner");
 });
