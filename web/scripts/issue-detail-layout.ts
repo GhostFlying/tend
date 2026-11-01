@@ -641,6 +641,23 @@ try {
       await trigger.click();
       assert.equal(await detail.locator("[data-tool-item]:visible").count(), 0);
       assert(await trigger.evaluate((node) => document.activeElement === node));
+      const savedTools = [...block.items!];
+      block.items = block.items!.slice(0, 13);
+      publish();
+      await trigger.getByText("查看过程 · 12 步", { exact: false }).waitFor();
+      await trigger.click();
+      const firstTool = detail.locator('[data-tool-item="hierarchy-tool-0"] button');
+      if ((await firstTool.getAttribute("aria-expanded")) !== "true") await firstTool.click();
+      await firstTool.focus();
+      block.items.push({ ...savedTools[13]!, message_id: "hierarchy-appended-tool", seq: 16 });
+      publish();
+      await detail.locator('[data-tool-item="hierarchy-appended-tool"]').waitFor();
+      assert(await firstTool.isVisible(), "open first tool remains visible after thirteenth tool");
+      assert.equal(await firstTool.getAttribute("aria-expanded"), "true");
+      assert(await firstTool.evaluate((node) => document.activeElement === node));
+      await trigger.click();
+      block.items = savedTools;
+      publish();
       const events = detail.locator("[data-event-group]");
       assert.equal(await events.count(), 1);
       const scrollIds = await detail
@@ -655,6 +672,32 @@ try {
       await events.locator("summary").click();
       assert.equal(await events.getByText("更新了当前进展", { exact: true }).count(), 1);
       await events.getByRole("button", { name: "查看 →", exact: true }).waitFor();
+      const eventSummary = events.locator("summary");
+      await eventSummary.focus();
+      activity.items!.push({
+        ...activity.items!.at(-1)!,
+        id: "hierarchy-event-appended",
+        position: 1005,
+        title: "追加进展",
+      });
+      publish();
+      await events.getByText("追加进展", { exact: true }).waitFor();
+      assert.equal(await events.getAttribute("open"), "", "live append keeps merged events open");
+      assert(
+        await eventSummary.evaluate((node) => document.activeElement === node),
+        "live append keeps summary focus",
+      );
+      activity.items!.splice(activity.items!.length - 3, 0, {
+        ...activity.items!.at(-1)!,
+        id: "hierarchy-event-earlier",
+        created_at: now - 1,
+        position: 1002.5,
+        title: "前插进展",
+      });
+      publish();
+      await events.getByText("前插进展", { exact: true }).waitFor();
+      assert.equal(await events.getAttribute("open"), "", "earlier event keeps merged group open");
+      assert(await eventSummary.evaluate((node) => document.activeElement === node));
       console.log(
         `PASS S11 hierarchy ${width}: single collapsed trigger, flat tail, event links, no self chip or main deliverables`,
       );

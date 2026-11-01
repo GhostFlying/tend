@@ -424,11 +424,18 @@ export function IssueDetails({
                 <PageHeader className={styles.titleHeader} title={issue.plan.title} />
                 <p className={styles.metadata}>
                   <span className={styles.dot} />
-                  {statusLabel}
-                  <span>·</span>
-                  <AssigneeName assignee={issue.assignee} manager={issue.manager} />
-                  负责<span>·</span>
-                  <time>{new Date(issue.updated_at).toLocaleString("zh-CN")}</time>
+                  <span>{statusLabel}</span>
+                  <span>
+                    <AssigneeName assignee={issue.assignee} manager={issue.manager} /> 负责
+                  </span>
+                  <time title={new Date(issue.updated_at).toLocaleString("zh-CN")}>
+                    {new Date(issue.updated_at).toLocaleString("zh-CN", {
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </time>
                 </p>
                 <p className={styles.intent}>{issue.plan.intent}</p>
                 {actionable[0] && (

@@ -155,6 +155,7 @@ export function IssueActivity({
     };
   }, [reads, issue.issue_id, reading]);
   const rows = state.value?.items ?? emptyEntries;
+  const [eventIdentities] = useState(() => new Map<string, string>());
   const visible = useMemo(() => {
     if (all) return rows;
     const blocks = rows.filter((row) => row.block);
@@ -162,6 +163,16 @@ export function IssueActivity({
     const first = blocks.at(-3)!.position;
     return rows.filter((row) => row.position >= first);
   }, [rows, all]);
+  const activityGroups = useMemo(
+    () =>
+      groupActivityEvents(visible).map((entries) => {
+        const key =
+          entries.map((entry) => eventIdentities.get(entry.id)).find(Boolean) ?? entries[0]!.id;
+        for (const entry of entries) eventIdentities.set(entry.id, key);
+        return { entries, key };
+      }),
+    [visible, eventIdentities],
+  );
   const beginContinuation = useCallback(
     (trigger: string, control: HTMLButtonElement, ids: string[]) => {
       cancelAnimationFrame(dataFrame.current);
@@ -382,7 +393,7 @@ export function IssueActivity({
       {state.value && !rows.length && (
         <p className={styles.muted}>暂无讨论记录。可以在下方补充要求。</p>
       )}
-      {groupActivityEvents(visible).map((group) => {
+      {activityGroups.map(({ entries: group, key }) => {
         const entry = group[0]!;
         return entry.block ? (
           <ActivityBlock
@@ -396,7 +407,7 @@ export function IssueActivity({
           />
         ) : group.length > 1 ? (
           <EventGroup
-            key={group.at(-1)!.id}
+            key={key}
             entries={group}
             results={results}
             onIssue={onIssue}
@@ -495,7 +506,7 @@ function ActivityBlock({
                   <span className={styles.avatar} aria-hidden="true">
                     你
                   </span>
-                  你 <small>用户</small>{" "}
+                  你{" "}
                   <time dateTime={row.item.created_at} title={row.item.created_at}>
                     {new Date(row.item.created_at).toLocaleTimeString("zh-CN", {
                       hour: "2-digit",

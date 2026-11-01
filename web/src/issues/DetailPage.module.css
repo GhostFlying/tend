@@ -754,3 +754,30 @@
 .runEntry [data-compact="true"] > button {
   padding-block: var(--space-1);
 }
+
+.metadata > span:not(.dot),
+.metadata > time {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+.metadata > span:not(.dot):not(:nth-child(2))::before,
+.metadata > time::before {
+  content: "·";
+}
+.sideEntry {
+  min-height: var(--control-l);
+  padding-block: var(--space-2);
+}
+.sidebar section,
+.drawer section {
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.runEntry {
+  padding: 0;
+}
+.runEntry .resultLink {
+  min-height: var(--control-m);
+}

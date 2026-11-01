@@ -166,7 +166,7 @@ export function AgentTurn({
     wasActive.current = status.active;
   }, [status.active]);
   const prefix = useId();
-  const [visibleCount, setVisibleCount] = useState(12);
+  const [visibleStart, setVisibleStart] = useState(Math.max(0, tools.length - 12));
   return (
     <div ref={root} className={styles.agent}>
       <LiveStatus status={status}>
@@ -179,6 +179,7 @@ export function AgentTurn({
             aria-controls={`${prefix}-trace`}
             onClick={(event) => {
               event.currentTarget.focus();
+              if (!traceOpen) setVisibleStart(Math.max(0, tools.length - 12));
               setTraceOpen(!traceOpen);
             }}
           >
@@ -193,20 +194,20 @@ export function AgentTurn({
         ))}
       {!!tools.length && (
         <div data-trace id={`${prefix}-trace`} hidden={!traceOpen} className={styles.trace}>
-          {tools.length > visibleCount && (
+          {visibleStart > 0 && (
             <button
               type="button"
               className={styles.traceTrigger}
-              onClick={() => setVisibleCount((count) => count + 12)}
+              onClick={() => setVisibleStart((start) => Math.max(0, start - 12))}
             >
-              显示更早 {tools.length - visibleCount} 步
+              显示更早 {visibleStart} 步
             </button>
           )}
           {tools.map((item, index) => (
             <AgentItem
               key={item.message_id}
               item={item}
-              hidden={index < tools.length - visibleCount}
+              hidden={index < visibleStart}
               hideChoices
               id={`${prefix}-item-${item.message_id}`}
               onToolOpenChange={() => {}}
