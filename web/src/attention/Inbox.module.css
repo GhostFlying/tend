@@ -258,6 +258,10 @@
     overflow: auto;
     flex: none;
   }
+  .tabs > button {
+    flex: none;
+    min-width: var(--control-touch);
+  }
   .split {
     display: block;
     overflow: auto;
