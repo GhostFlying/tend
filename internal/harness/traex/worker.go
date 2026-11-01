@@ -13,6 +13,15 @@ import (
 
 // WorkerOptions configure the workers a runner starts.
 type WorkerOptions struct {
+	BeforeStart func(context.Context, harness.WorkerSpec, harness.Thread, string) (string, error)
+
+	// Acquire retains a run session independently of a worker attempt. The release
+	// callback must prove execution stopped unless the attempt is held or paused.
+	Acquire        func(context.Context, harness.WorkerSpec) (*Session, func(error), error)
+	EnvironmentID  string
+	StrictResume   bool
+	ReuseUnstarted bool
+
 	// Session starts the app-server. Workers use the machine's own traex
 	// installation and configuration (D38); leave Env without TRAE_HOME.
 	Session Options
@@ -25,6 +34,9 @@ type WorkerOptions struct {
 	Sandbox        string
 	ApprovalPolicy string
 }
+
+// ErrInterruptUnconfirmed marks a retained session whose stop request failed.
+var ErrInterruptUnconfirmed = errors.New("traex: native interrupt was not confirmed")
 
 // Workers implements harness.Workers with one app-server per run.
 type Workers struct {
@@ -100,19 +112,38 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	// The worker may inherit the owner's tend hooks and MCP server from
 	// the user-level configuration; it is not the owner's agent (D45).
 	opts.Env = append(append([]string(nil), opts.Env...), "TEND_SCRATCH="+spec.ScratchDir, protocol.AddonEnv+"=off")
-	s, err := ws.start(ctx, opts)
+	var s *Session
+	var release func(error)
+	var err error
+	if ws.opts.Acquire != nil {
+		s, release, err = ws.opts.Acquire(ctx, spec)
+	} else {
+		s, err = ws.start(ctx, opts)
+		release = func(error) {
+			if s != nil {
+				_ = s.Close()
+			}
+		}
+	}
+
 	if err != nil {
 		return nil, err
 	}
 	instructions, input := harness.Brief(spec)
-	var verdicts harness.Verdicts
+	verdicts := harness.Verdicts{StateDir: spec.StateDir}
+	if spec.Role == protocol.RoleAccept {
+		if err := verdicts.Restore(); err != nil {
+			release(err)
+			return nil, err
+		}
+	}
 	results := harness.Results{Spec: spec}
 	if err := results.Restore(); err != nil {
-		_ = s.Close()
+		release(err)
 		return nil, err
 	}
 	cfg := harness.ThreadConfig{
-		Cwd: spec.Dir, Model: profile.Model, Sandbox: ws.opts.Sandbox, ApprovalPolicy: ws.opts.ApprovalPolicy,
+		EnvironmentID: ws.opts.EnvironmentID, Cwd: spec.Dir, Model: profile.Model, Sandbox: ws.opts.Sandbox, ApprovalPolicy: ws.opts.ApprovalPolicy,
 		DeveloperInstructions: instructions,
 		Tools:                 []harness.ToolSpec{harness.ResultToolSpec}, OnToolCall: results.Handle,
 	}
@@ -136,28 +167,38 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	}
 	th, err := ws.thread(ctx, s, spec, cfg)
 	if err != nil {
-		_ = s.Close()
+		release(err)
 		return nil, err
 	}
 	if spec.OnThread != nil {
 		if err := spec.OnThread(th.ID()); err != nil {
-			_ = s.Close()
+			release(err)
 			return nil, err
 		}
 	}
 	if th.ID() == spec.Thread {
 		input = harness.Continuation(spec)
+		if spec.HandBack {
+			input = harness.HandBack(spec)
+		}
+	}
+	if ws.opts.BeforeStart != nil {
+		input, err = ws.opts.BeforeStart(ctx, spec, th, input)
+		if err != nil {
+			release(err)
+			return nil, err
+		}
 	}
 	turnID, err := th.StartTurn(ctx, harness.TurnInput{Text: input, Model: profile.Model, Effort: profile.Effort})
 	if err != nil {
-		_ = s.Close()
+		release(err)
 		return nil, err
 	}
 	w := &worker{thread: th.(*thread), turnID: turnID, events: make(chan harness.WorkerEvent), done: make(chan struct{})}
 	go func() {
 		defer close(w.done)
 		defer close(w.events)
-		defer s.Close()
+		defer func() { release(w.err) }()
 		var summary string
 		for {
 			select {
@@ -165,9 +206,15 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 				// Stop the turn, then the process with everything it
 				// started (procx), before reporting.
 				stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-				_ = th.Interrupt(stopCtx, turnID)
+				var interruptErr error
+				if ws.opts.Acquire == nil || !errors.Is(context.Cause(ctx), harness.ErrHeld) {
+					interruptErr = th.Interrupt(stopCtx, turnID)
+				}
 				cancel()
 				w.err = context.Cause(ctx)
+				if ws.opts.Acquire != nil && errors.Is(w.err, harness.ErrPaused) && interruptErr != nil {
+					w.err = errors.Join(w.err, ErrInterruptUnconfirmed, interruptErr)
+				}
 				return
 			case ev, ok := <-th.Events():
 				if !ok {
@@ -278,11 +325,14 @@ func childRolloutEvent(ev harness.Event) harness.WorkerEvent {
 // because its rollout is gone (D61).
 func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSpec, cfg harness.ThreadConfig) (harness.Thread, error) {
 	if spec.Thread != "" {
+		if ws.opts.ReuseUnstarted {
+			return s.AttachUnstartedThread(ctx, spec.Thread, cfg.OnToolCall)
+		}
 		th, err := s.ResumeThread(ctx, spec.Thread, cfg)
 		if err == nil {
 			return th, nil
 		}
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || ws.opts.StrictResume {
 			return nil, err
 		}
 		if log := ws.opts.Session.Log; log != nil {

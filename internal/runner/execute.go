@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/orca"
+	"github.com/GhostFlying/tend/internal/harness/remote"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
@@ -186,6 +188,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}
 	// Each attempt can be stopped on its own, so a pause interrupts the
 	// worker without giving up the run.
+	nativeLifetime := runCtx
 	attemptCtx, stopAttempt := context.WithCancelCause(runCtx)
 	defer stopAttempt(nil)
 	r.mu.Lock()
@@ -241,11 +244,16 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	var questions []protocol.WorkerQuestion
 	var receiveMessages func(context.Context) (*protocol.RunMessage, error)
 	var ackMessage func(context.Context, string) error
-	if as.RunMessages && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerOrca {
+	_, nativeMessages := execution.Workers.(interface{ NativeLiveMessages() })
+	toolLifetime := runCtx
+	if nativeMessages {
+		toolLifetime = nativeLifetime
+	}
+	if as.RunMessages && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerOrca && !nativeMessages {
 		messages := &workerMessages{r: r, as: as, receiver: r.cfg.IDs.New(protocol.PrefixRequest)}
 		withRun := func(call context.Context) (context.Context, func()) {
 			callCtx, cancel := context.WithCancel(call)
-			stop := context.AfterFunc(runCtx, cancel)
+			stop := context.AfterFunc(toolLifetime, cancel)
 			return callCtx, func() { stop(); cancel() }
 		}
 		receiveMessages = func(ctx context.Context) (*protocol.RunMessage, error) {
@@ -268,7 +276,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		askOwner = func(ctx context.Context, payload protocol.AskOwnerPayload) (protocol.WorkerQuestion, error) {
 			callCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
-			stop := context.AfterFunc(runCtx, cancel)
+			stop := context.AfterFunc(toolLifetime, cancel)
 			defer stop()
 			return owner.ask(callCtx, payload)
 		}
@@ -276,12 +284,30 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if as.Responsibility != nil {
 		p.Guide += fmt.Sprintf("\nYou are executing as owner of Issue %s at assignment epoch %d, role %s. Fulfill the frozen task agreement and submit its result through the existing role-specific tools. Do not launch or delegate to another Agent outside Tend: another Agent requires its own child Issue. Preserve independent acceptance isolation. Report any need for further delegation as a blocker to this Issue's coordination turn.\n", as.Responsibility.IssueID, as.Responsibility.AssignmentEpoch, as.Role)
 	}
+	persistEvent := func(eventCtx context.Context, ev harness.WorkerEvent) error {
+		if err := r.cfg.Journal.AppendEvent(eventCtx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: boundedBody(ev.Body)}); err != nil {
+			return err
+		}
+		flushCtx, cancel := context.WithTimeout(eventCtx, stopFlush)
+		defer cancel()
+		// The durable outbox survives transport failure. Persisted facts must
+		// not cause startup or owner input to be replayed.
+		_ = r.flushEvents(flushCtx, as)
+		return nil
+	}
+	var startupObserved time.Time
+	if nativeMessages {
+		startupObserved = r.cfg.Now()
+	}
 	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{
+		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
+			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
+		},
 		FrozenExecution: execution.Profile, RoleInstructions: execution.Instructions,
 		Execution: as.AcceptanceExecution, QuestionContext: as.QuestionContext, RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
 		AskOwner: askOwner, Questions: questions,
 		ReceiveMessages: receiveMessages, AckMessage: ackMessage,
-		ReadObservation: r.observationReader(runCtx, as),
+		ReadObservation: r.observationReader(toolLifetime, as),
 		UploadFile: func(ctx context.Context, path, name string) (protocol.ArtifactFile, error) {
 			return r.uploadFile(ctx, as, p, path, name)
 		},
@@ -297,21 +323,21 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			run.Thread = thread
 			return r.cfg.Journal.SetThread(context.WithoutCancel(ctx), as.RunID, thread)
 		},
-		OnStartupEvent: func(eventCtx context.Context, ev harness.WorkerEvent) error {
-			if err := r.cfg.Journal.AppendEvent(eventCtx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: boundedBody(ev.Body)}); err != nil {
-				return err
-			}
-			flushCtx, cancel := context.WithTimeout(eventCtx, stopFlush)
-			defer cancel()
-			// The durable outbox survives transport failure. Startup must not be replayed
-			// merely because a diagnostic upload failed.
-			_ = r.flushEvents(flushCtx, as)
-			return nil
-		},
-		OnTakeover: func(reason string) error { return r.reportTakeover(runCtx, as, a, reason) },
+		OnStartupEvent: persistEvent, OnRetainedEvent: persistEvent,
+		OnTakeover: func(reason string) error { return r.reportTakeover(nativeLifetime, as, a, reason) },
 		HandBack:   run.Held,
 	})
 	if err != nil {
+		if nativeMessages {
+			switch {
+			case errors.Is(err, harness.ErrHeld):
+				r.applyDesired(ctx, a, protocol.DesiredHeld, startupObserved)
+				return stopped(errHeld)
+			case errors.Is(err, harness.ErrPaused):
+				r.applyDesired(ctx, a, protocol.DesiredPaused, startupObserved)
+				return stopped(errPaused)
+			}
+		}
 		if native, ok := errors.AsType[*orca.Error](err); ok && as.Execution != nil && (native.Code == "invalid_argument" || native.Code == "capability_unsupported" || native.Code == "incompatible_runtime") {
 			if rejected, ok := r.cfg.Executions.(interface {
 				Reject(protocol.RunExecutionPin, string)

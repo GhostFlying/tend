@@ -562,3 +562,24 @@ func (c *Client) Agents(ctx context.Context, worktreeID string) ([]Agent, error)
 	}
 	return nil, nil
 }
+
+// CreateTerminal opens a native frontend in an existing workspace. A failed or
+// lost reply is not permission to repeat the creation.
+func (c *Client) CreateTerminal(ctx context.Context, dir, worktree, title, command string) (Terminal, error) {
+	var out struct {
+		Terminal Terminal `json:"terminal"`
+	}
+	err := c.call(ctx, dir, &out, "terminal", "create", "--worktree", worktree, "--title", title, "--command", command)
+	return out.Terminal, err
+}
+
+// ReadTerminalScreen reads the current native terminal image as text.
+func (c *Client) ReadTerminalScreen(ctx context.Context, terminal string) (string, error) {
+	var out struct {
+		Terminal struct {
+			Tail []string `json:"tail"`
+		} `json:"terminal"`
+	}
+	err := c.call(ctx, "", &out, "terminal", "read", "--terminal", terminal, "--screen")
+	return strings.Join(out.Terminal.Tail, "\n"), err
+}
