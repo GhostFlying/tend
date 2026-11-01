@@ -698,6 +698,91 @@ try {
       await events.getByText("前插进展", { exact: true }).waitFor();
       assert.equal(await events.getAttribute("open"), "", "earlier event keeps merged group open");
       assert(await eventSummary.evaluate((node) => document.activeElement === node));
+      let earlierStage = 0;
+      const boundaryEvents = [50, 60, 130, 150].map((second) => ({
+        id: `boundary-${second}`,
+        position: 2000 + second,
+        kind: "issue.progress_updated",
+        author: "青竹",
+        issue_id: issue.issue_id,
+        title: `边界进展 ${second}`,
+        created_at: now + second * 1000,
+      }));
+      await page.route("**/api/v1/issues/*/activity?*", async (route) => {
+        const cursor = new URL(route.request().url()).searchParams.get("before");
+        if (cursor) earlierStage = cursor === "2050" ? 1 : 2;
+        const rows = [...boundaryEvents];
+        if (earlierStage >= 1)
+          rows.unshift({
+            ...boundaryEvents[0]!,
+            id: "boundary-0",
+            position: 2000,
+            title: "边界进展 0",
+            created_at: now,
+          });
+        if (earlierStage >= 2)
+          rows.unshift({
+            ...boundaryEvents[0]!,
+            id: "boundary-negative",
+            position: 1950,
+            title: "边界进展 更早",
+            created_at: now - 50000,
+          });
+        await route.fulfill({
+          json: {
+            event_seq: seq,
+            items: rows,
+            more: earlierStage < 2,
+            next_before: earlierStage ? 2000 : 2050,
+          },
+        });
+      });
+      await page.route("**/api/v1/issues/*/activity", async (route) => {
+        const rows = [...boundaryEvents];
+        if (earlierStage >= 1)
+          rows.unshift({
+            ...boundaryEvents[0]!,
+            id: "boundary-0",
+            position: 2000,
+            title: "边界进展 0",
+            created_at: now,
+          });
+        if (earlierStage >= 2)
+          rows.unshift({
+            ...boundaryEvents[0]!,
+            id: "boundary-negative",
+            position: 1950,
+            title: "边界进展 更早",
+            created_at: now - 50000,
+          });
+        await route.fulfill({
+          json: {
+            event_seq: seq,
+            items: rows,
+            more: earlierStage < 2,
+            next_before: earlierStage ? 2000 : 2050,
+          },
+        });
+      });
+      await page.reload();
+      await events.locator("summary").filter({ hasText: "边界进展 50" }).waitFor();
+      for (const count of [5, 6]) {
+        await detail.getByRole("button", { name: "查看更早记录", exact: true }).click();
+        await events
+          .locator("summary")
+          .filter({ hasText: count === 5 ? "边界进展 0" : "边界进展 更早" })
+          .waitFor();
+        assert.equal(await events.count(), 1, "earlier pages do not split gap-based event group");
+        const ids = await detail
+          .locator('[data-scroll-id^="boundary-"]')
+          .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-scroll-id")));
+        assert.equal(ids.length, count, "each earlier event rendered once");
+        assert.equal(
+          new Set(ids).size,
+          count,
+          "successive earlier loads keep unique scroll identities",
+        );
+      }
       console.log(
         `PASS S11 hierarchy ${width}: single collapsed trigger, flat tail, event links, no self chip or main deliverables`,
       );
