@@ -58,6 +58,43 @@ type MessagingMessage struct {
 	Attachments      []ConversationAttachment `json:"attachments"`
 	IssueIDs         []string                 `json:"issue_ids"`
 	Processing       string                   `json:"processing"`
+	Interaction      *MessagingInteraction    `json:"interaction,omitempty"`
+	AgentReadAt      int64                    `json:"agent_read_at,omitempty"`
+	DeliveryState    string                   `json:"delivery_state,omitempty"`
+}
+
+// MessagingInteraction is a presentation of a versioned business question.
+// State is derived from that object; it does not grant separate authority.
+type MessagingInteraction struct {
+	ID             string            `json:"interaction_id"`
+	ObjectType     string            `json:"object_type"`
+	ObjectID       string            `json:"object_id"`
+	Version        int64             `json:"version"`
+	Question       string            `json:"question"`
+	Context        string            `json:"context,omitempty"`
+	Options        []MessagingOption `json:"options"`
+	TextAllowed    bool              `json:"text_allowed"`
+	State          string            `json:"state"`
+	IssueID        string            `json:"issue_id,omitempty"`
+	TaskID         string            `json:"task_id,omitempty"`
+	HandledChannel string            `json:"handled_channel,omitempty"`
+	HandledAt      int64             `json:"handled_at,omitempty"`
+	AnswerSummary  string            `json:"answer_summary,omitempty"`
+	Effect         *EffectResult     `json:"effect,omitempty"`
+}
+
+type MessagingOption struct {
+	ID     string         `json:"option_id"`
+	Label  string         `json:"label"`
+	Effect DecisionEffect `json:"effect,omitempty"`
+}
+
+// RespondInteraction never accepts addresses, channels or arbitrary operations.
+type RespondInteraction struct {
+	Confirm bool   `json:"confirm,omitempty"`
+	Version int64  `json:"version"`
+	Option  string `json:"option,omitempty"`
+	Text    string `json:"text,omitempty"`
 }
 
 type MessagingPage struct {

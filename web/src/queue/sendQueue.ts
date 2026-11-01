@@ -34,7 +34,7 @@ export interface Sender {
 export interface QueueOptions {
   conversationID?: string;
   /** Source workflows reuse durable transfers without becoming owner instructions. */
-  operation?: "conversation.submit_message" | "conversation.inject_source";
+  operation?: "conversation.submit_message" | "conversation.inject_source" | "messaging.send";
   scope?: string;
   outbox: Outbox;
   sender: Sender;
@@ -50,6 +50,7 @@ export interface QueueOptions {
 }
 
 export interface Draft {
+  interaction?: { id: string; version: number; option?: string; confirm?: boolean };
   body: string;
   images?: ConversationImageInput[];
   files?: File[];
@@ -82,7 +83,8 @@ export class SendQueue {
   private readonly outbox: Outbox;
   private readonly conversationID: string;
   private readonly sender: Sender;
-  private readonly operation: "conversation.submit_message" | "conversation.inject_source";
+  private readonly operation:
+    "conversation.submit_message" | "conversation.inject_source" | "messaging.send";
   private readonly scope: string | undefined;
   private readonly now: () => number;
   private readonly newId: (now: number) => string;
@@ -120,7 +122,7 @@ export class SendQueue {
     for (const m of await q.outbox.all()) {
       if (!q.belongs(m)) continue;
       q.nextOrder = Math.max(q.nextOrder, m.order + 1);
-      if (m.state === "sent" && m.updatedAt < cutoff) {
+      if (m.state === "sent" && (q.keepSentMs === 0 || m.updatedAt < cutoff)) {
         await q.outbox.delete(m.requestId);
       } else {
         kept.push(m);
@@ -140,7 +142,9 @@ export class SendQueue {
    * outbox, before tend answers.
    */
   async enqueue(draft: Draft): Promise<OutgoingMessage> {
-    if (this.operation !== "conversation.submit_message") throw new Error("此入口只保存手动来源");
+    if (this.operation === "conversation.inject_source") throw new Error("此入口只保存手动来源");
+    if (draft.interaction && (draft.files?.length || draft.attachments?.length))
+      throw new Error("此确认不支持附件，请先作为普通消息发送附件");
     return this.enqueueDraft(draft);
   }
 
@@ -154,7 +158,8 @@ export class SendQueue {
 
   private belongs(m: OutgoingMessage): boolean {
     return (
-      m.envelope.operation === this.operation &&
+      (m.envelope.operation === this.operation ||
+        (this.operation === "messaging.send" && m.envelope.operation === "messaging.respond")) &&
       m.queueScope === this.scope &&
       ((m.envelope.payload as SubmitMessagePayload).conversation_id ?? "main") ===
         this.conversationID
@@ -194,18 +199,30 @@ export class SendQueue {
       references: draft.attachments ?? [],
       envelope: {
         request_id: requestId,
-        operation: this.operation,
+        operation: draft.interaction ? "messaging.respond" : this.operation,
         target: {
-          type: this.operation === "conversation.inject_source" ? "message" : "conversation",
+          type: draft.interaction
+            ? "interaction"
+            : this.operation === "conversation.submit_message"
+              ? "conversation"
+              : "message",
+          ...(draft.interaction ? { id: draft.interaction.id } : {}),
         },
-        payload: metadata
-          ? ({
-              text: draft.body,
-              metadata: { ...metadata },
-              ...(payload.attachments ? { attachments: payload.attachments } : {}),
-              ...(payload.conversation_id ? { conversation_id: payload.conversation_id } : {}),
-            } satisfies InjectSourcePayload)
-          : payload,
+        payload: draft.interaction
+          ? {
+              version: draft.interaction.version,
+              ...(draft.interaction.confirm ? { confirm: true } : {}),
+              ...(draft.interaction.option ? { option: draft.interaction.option } : {}),
+              ...(!draft.interaction.option && draft.body ? { text: draft.body } : {}),
+            }
+          : metadata
+            ? ({
+                text: draft.body,
+                metadata: { ...metadata },
+                ...(payload.attachments ? { attachments: payload.attachments } : {}),
+                ...(payload.conversation_id ? { conversation_id: payload.conversation_id } : {}),
+              } satisfies InjectSourcePayload)
+            : payload,
       },
       body: draft.body,
       createdAt: now,
@@ -618,7 +635,18 @@ function settle(status: OpStatus, result: unknown, error: string | undefined): O
     case "accepted":
     case "succeeded": {
       // conversation.submit_message answers with the message's ID and place.
-      const r = (result ?? {}) as { message_id?: unknown; seq?: unknown };
+      const r = (result ?? {}) as {
+        message_id?: unknown;
+        seq?: unknown;
+        already_handled?: boolean;
+        interaction?: { handled_channel?: string };
+      };
+      if (r.already_handled)
+        return {
+          kind: "settled",
+          state: "failed",
+          error: `此请求已在 ${r.interaction?.handled_channel === "telegram" ? "Telegram" : "Web"} 处理，文字已保留，可恢复后继续讨论`,
+        };
       return {
         kind: "settled",
         state: "sent",

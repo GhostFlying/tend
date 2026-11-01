@@ -208,6 +208,7 @@ func (a *App) InFlightDeliveries(ctx context.Context) ([]Delivery, error) {
 // FinishDelivery records the result of a delivery attempt. Failed and
 // unknown outcomes also produce an event so they surface to the owner.
 func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) error {
+	communicationQueued := false
 	now := a.now()
 	tr := store.OutboxTransition{
 		OutboxID: d.OutboxID, From: store.OutboxSending, FromAttempts: d.Attempt, Attempts: d.Attempt, Now: now.UnixMilli(),
@@ -240,7 +241,7 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		if err := tx.TransitionOutbox(ctx, tr); err != nil {
 			return err
 		}
-		if d.Destination == MessagingDestination || d.Destination == MessagingReadDestination {
+		if d.Destination == MessagingDestination || d.Destination == MessagingReadDestination || d.Destination == MessagingInteractionDestination {
 			state := string(tr.To)
 			if r.Outcome == Delivered {
 				state = "accepted"
@@ -258,6 +259,36 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 			}
 			if err := communicationEvent(ctx, x, tx, id, "messaging.delivery"); err != nil {
 				return err
+			}
+			var deliveredPart MessagingPart
+			_ = json.Unmarshal(d.Payload, &deliveredPart)
+			if d.Destination == MessagingDestination && r.Outcome == Delivered && deliveredPart.Kind == "text" && deliveredPart.Part == 0 {
+				if i, err := interactionForMessage(ctx, tx.Q(), id); err != nil {
+					return err
+				} else if i != nil && i.State != "open" {
+					if err := queueInteractionUpdates(ctx, x, tx, id); err != nil {
+						return err
+					}
+					communicationQueued = true
+				}
+			}
+			if d.Destination == MessagingInteractionDestination && r.Outcome == Failed && r.Reason == "interaction_edit_unavailable" {
+				var part MessagingPart
+				if err := json.Unmarshal(d.Payload, &part); err != nil {
+					return err
+				}
+				i, err := interactionForMessage(ctx, tx.Q(), id)
+				if err != nil {
+					return err
+				}
+				if i != nil {
+					part.Body = boundedInteractionNotice(*i)
+					part.Kind, part.ReplyExternalID = "text", 0
+					if err := queueInteractionPart(ctx, x, tx, part, MessagingDestination); err != nil {
+						return err
+					}
+					communicationQueued = true
+				}
 			}
 		}
 		if (d.Destination == MainThreadDestination || strings.HasPrefix(d.Destination, "background_thread:")) && d.Operation == "conversation.repair_turn" && r.Outcome == Failed {
@@ -334,6 +365,9 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		return err
 	})
 	if err == nil {
+		if communicationQueued && a.notifier != nil {
+			a.notifier.Notify()
+		}
 		a.notifyChange()
 	}
 	return err

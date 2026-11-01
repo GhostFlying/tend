@@ -1,4 +1,4 @@
-import { fixtureRoot } from "./navigation.ts";
+import { fixtureRoot, navigate } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 /// <reference lib="dom" />
 // Unknown writes reconcile only against later facts for the same delivery.
@@ -371,10 +371,7 @@ try {
   const taskDrawer = mobilePage.getByRole("region", { name: "任务详情", exact: true });
   await taskDrawer.getByText("Linked task", { exact: true }).first().waitFor();
   await taskDrawer.getByRole("button", { name: /← 返回/ }).click();
-  await mobilePage
-    .getByRole("navigation", { name: "视图" })
-    .getByRole("link", { name: "对话", exact: true })
-    .click();
+  await navigate(mobilePage, "/diagnostics/main");
   const composer = mobilePage.getByRole("textbox", { name: "消息", exact: true });
   await composer.fill("Existing unsent constraint");
   await mobilePage.locator('input[type="file"]').setInputFiles({

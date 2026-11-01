@@ -8,6 +8,7 @@ import { IssueReadingStates } from "../issues/reading.ts";
 import { ConversationSessions, ConversationSessionsContext } from "../conversation/session.tsx";
 import type { LiveData } from "../live/data.ts";
 import type { SendQueue } from "../queue/sendQueue.ts";
+import { Messaging } from "../messaging/Messaging.tsx";
 import { AgentWorkspace } from "../conversation/AgentWorkspace.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { TabBar } from "./TabBar.tsx";
@@ -27,6 +28,8 @@ export function Shell({
   queue: SendQueue | null;
 }) {
   const route = useRoute();
+  const [imVisited, setImVisited] = useState(route.page === "im");
+  if (route.page === "im" && !imVisited) setImVisited(true);
   const [reading] = useState(() => new IssueReadingStates());
   const sessions = useMemo(() => new ConversationSessions(client), [client]);
   const sessionCleanup = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -102,6 +105,9 @@ export function Shell({
           sidebar={<Sidebar connection={connection} summary={mainAttention.value ?? undefined} />}
           tabs={<TabBar summary={mainAttention.value ?? undefined} />}
         >
+          <div className={styles.content} hidden={route.page !== "im"}>
+            {imVisited && <Messaging visible={route.page === "im"} connection={connection} />}
+          </div>
           <div className={styles.content} hidden={!chat}>
             <AgentWorkspace
               connection={connection}

@@ -150,9 +150,10 @@ type communicationOrigin struct {
 	Channel                   string
 	BotID, ChatID, ExternalID int64
 	ReplyTo, CorrectionOf     string
+	RawBody                   string
 }
 
-func submitCommunication(ctx context.Context, x *Exec, tx *store.Tx, p protocol.MessagingInput, channel string, bot, chat, external int64, externalEvidence bool) (Outcome, error) {
+func submitCommunicationInput(ctx context.Context, x *Exec, tx *store.Tx, p protocol.MessagingInput, channel string, bot, chat, external int64, externalEvidence bool) (Outcome, error) {
 	conversation, err := communicationRoute(ctx, x, tx, p.ReplyTo)
 	if err != nil {
 		return Outcome{}, err
@@ -327,6 +328,8 @@ func registerCommunicationPublication(ctx context.Context, x *Exec, tx *store.Tx
 
 // MessagingPart is a frozen transport request. It never accepts agent addresses.
 type MessagingPart struct {
+	Part            int64  `json:"part,omitempty"`
+	ForceReply      bool   `json:"force_reply,omitempty"`
 	BindingRevision int64  `json:"binding_revision"`
 	DeliveryID      string `json:"delivery_id"`
 	MessageID       string `json:"message_id"`
@@ -348,6 +351,8 @@ func queueCommunication(ctx context.Context, x *Exec, tx *store.Tx, id, channel 
 		parts = append(parts, MessagingPart{FileID: file, Kind: "file"})
 	}
 	for pos, part := range parts {
+		part.Part = int64(pos)
+		part.ForceReply = p.Purpose == "interaction_prompt"
 		if channel == "telegram" {
 			if err := tx.Q().QueryRowContext(ctx, `SELECT revision FROM messaging_channels WHERE channel_id='telegram'`).Scan(&part.BindingRevision); err != nil {
 				return err
@@ -662,6 +667,9 @@ func registerSystemCommunication(ctx context.Context, x *Exec, tx *store.Tx, id,
 	}
 	if exists {
 		return nil
+	}
+	if err := bindMessagingInteraction(ctx, x, tx, id); err != nil {
+		return err
 	}
 	message, err := store.GetMessage(ctx, tx.Q(), id)
 	if err != nil {

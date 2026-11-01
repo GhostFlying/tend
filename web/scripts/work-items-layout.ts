@@ -463,7 +463,7 @@ try {
     page.setDefaultTimeout(10000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     const openBoard = async () => {
       if (width <= 760)
         await page
@@ -639,7 +639,7 @@ try {
     );
     await context.setOffline(false);
     await page.evaluate(() => window.dispatchEvent(new Event("online")));
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     // Preserve the actual historical Choice question/version/answer effect, not an Attention surrogate.
     const choice = page.getByRole("region", { name: "下一步安排" });
     await choice.getByRole("heading", { name: planChoice.question }).waitFor();

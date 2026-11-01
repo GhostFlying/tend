@@ -304,7 +304,7 @@ try {
     page.setDefaultTimeout(10000);
     const errors: string[] = [];
     page.on("pageerror", (err) => errors.push(err.message));
-    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     const mobile = viewport.width < 761;
     if (mobile)
       await page
@@ -692,7 +692,7 @@ try {
         await route.fulfill({ json: { tasks: [] } });
       else await route.continue();
     });
-    await navigate(page, "/");
+    await navigate(page, "/diagnostics/main");
     await navigate(page, "/tasks");
     await executions.getByRole("tab", { name: /^已结束(?: · \d+\+?)?$/ }).waitFor();
     await page.waitForFunction(() =>

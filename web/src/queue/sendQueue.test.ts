@@ -816,3 +816,62 @@ test("source files recover original upload and source request without entering a
   expect(sourceEffects).toBe(1);
   expect(sender.submitted).toHaveLength(1);
 });
+
+describe("IM durable queue", () => {
+  test("reopened IM keeps pending inputs but leaves acknowledged history to the feed", async () => {
+    const q = await open({ operation: "messaging.send", scope: "im" });
+    await q.enqueue({ body: "previously acknowledged" });
+    await q.idle();
+    expect(q.list.get()[0]?.state).toBe("sent");
+    online = false;
+    await q.enqueue({ body: "still awaiting delivery" });
+    await q.idle();
+    const reopened = await open({ operation: "messaging.send", scope: "im", keepSentMs: 0 });
+    expect(reopened.list.get().map((m) => m.body)).toEqual(["still awaiting delivery"]);
+  });
+
+  test("reload preserves the question version and request identity, isolated from legacy chat", async () => {
+    online = false;
+    const q = await open({ operation: "messaging.send", scope: "im" });
+    const message = await q.enqueue({
+      body: "重新实现",
+      interaction: { id: "int_question", version: 7, option: "retry the implementation" },
+    });
+    expect((await open()).list.get()).toEqual([]);
+    const restored = await open({ operation: "messaging.send", scope: "im" });
+    expect(restored.list.get()[0]?.envelope).toMatchObject({
+      request_id: message.requestId,
+      operation: "messaging.respond",
+      target: { type: "interaction", id: "int_question" },
+      payload: { version: 7, option: "retry the implementation" },
+    });
+    online = true;
+    await restored.resume();
+    expect(sender.submitted[0]?.request_id).toBe(message.requestId);
+    expect(sender.submitted[0]?.payload).not.toHaveProperty("channel");
+  });
+  test("an answer already handled elsewhere retains the unsent words for recovery", async () => {
+    sender.answers.push({
+      operation: {
+        request_id: "known",
+        status: "succeeded",
+        result: { already_handled: true, interaction: { handled_channel: "telegram" } },
+      },
+    });
+    const q = await open({ operation: "messaging.send", scope: "im" });
+    await q.enqueue({ body: "保留我的补充", replyTo: "msg_question" });
+    await q.idle();
+    expect(q.list.get()[0]).toMatchObject({ body: "保留我的补充", state: "failed" });
+    expect(q.list.get()[0]?.error).toContain("Telegram");
+  });
+  test("ordinary IM input retains its quote and attachment identities", async () => {
+    const q = await open({ operation: "messaging.send", scope: "im" });
+    await q.enqueue({ body: "补充要求", replyTo: "msg_question" });
+    await q.idle();
+    expect(sender.submitted[0]).toMatchObject({
+      operation: "messaging.send",
+      target: { type: "message" },
+      payload: { body: "补充要求", reply_to: "msg_question" },
+    });
+  });
+});

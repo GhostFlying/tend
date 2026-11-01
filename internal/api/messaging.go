@@ -30,6 +30,15 @@ func (s *Server) messaging(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/v1/messaging/channels":
 		result, err = s.app.MessagingChannels(r.Context())
 	case id == "":
+		if r.URL.Query().Get("latest") == "1" || r.URL.Query().Has("before") {
+			before, e := intParam(r.URL.Query().Get("before"))
+			if e != nil || before < 0 {
+				s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "before must be a nonnegative cursor"))
+				return
+			}
+			result, err = s.app.MessagingRecentMessages(r.Context(), before)
+			break
+		}
 		after, e := intParam(r.URL.Query().Get("after"))
 		if e != nil || after < 0 {
 			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "after must be a nonnegative cursor"))

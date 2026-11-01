@@ -9,7 +9,8 @@ declare global {
 }
 
 export const paths = {
-  chat: "/",
+  im: "/",
+  chat: "/diagnostics/main",
   more: "/more",
   conversation: "/chat/:id",
   inbox: "/inbox",
@@ -35,6 +36,7 @@ export type IssueFilters = {
 export type Route =
   | {
       page:
+        | "im"
         | "chat"
         | "more"
         | "inbox"
@@ -124,7 +126,7 @@ type SavedPage = {
   focusPath?: string;
   focusText?: string;
 };
-const state = new Store<Route>({ page: "chat" });
+const state = new Store<Route>({ page: "im" });
 const saved = new Map<number, SavedPage>();
 let session = "";
 let sequence = 0;

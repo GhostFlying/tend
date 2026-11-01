@@ -6177,9 +6177,84 @@
       "title": "MessagingInput",
       "type": "object"
     },
+    "MessagingInteraction": {
+      "additionalProperties": false,
+      "properties": {
+        "answer_summary": {
+          "type": "string"
+        },
+        "context": {
+          "type": "string"
+        },
+        "effect": {
+          "$ref": "#/definitions/EffectResult"
+        },
+        "handled_at": {
+          "type": "integer"
+        },
+        "handled_channel": {
+          "type": "string"
+        },
+        "interaction_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "object_type": {
+          "type": "string"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MessagingOption"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "text_allowed": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "object_type",
+        "object_id",
+        "version",
+        "question",
+        "options",
+        "text_allowed",
+        "state"
+      ],
+      "title": "MessagingInteraction",
+      "type": "object"
+    },
     "MessagingMessage": {
       "additionalProperties": false,
       "properties": {
+        "agent_read_at": {
+          "type": "integer"
+        },
         "attachments": {
           "anyOf": [
             {
@@ -6214,11 +6289,17 @@
         "created_at": {
           "type": "integer"
         },
+        "delivery_state": {
+          "type": "string"
+        },
         "direction": {
           "type": "string"
         },
         "execution_id": {
           "type": "string"
+        },
+        "interaction": {
+          "$ref": "#/definitions/MessagingInteraction"
         },
         "issue_ids": {
           "anyOf": [
@@ -6281,6 +6362,26 @@
         "processing"
       ],
       "title": "MessagingMessage",
+      "type": "object"
+    },
+    "MessagingOption": {
+      "additionalProperties": false,
+      "properties": {
+        "effect": {
+          "$ref": "#/definitions/DecisionEffect"
+        },
+        "label": {
+          "type": "string"
+        },
+        "option_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "option_id",
+        "label"
+      ],
+      "title": "MessagingOption",
       "type": "object"
     },
     "MessagingPage": {
@@ -7563,6 +7664,28 @@
         "version"
       ],
       "title": "RespondAttentionPayload",
+      "type": "object"
+    },
+    "RespondInteraction": {
+      "additionalProperties": false,
+      "properties": {
+        "confirm": {
+          "type": "boolean"
+        },
+        "option": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "RespondInteraction",
       "type": "object"
     },
     "ResultReport": {
@@ -10603,6 +10726,9 @@
     "MessagingInput": {
       "$ref": "#/definitions/MessagingInput"
     },
+    "MessagingInteraction": {
+      "$ref": "#/definitions/MessagingInteraction"
+    },
     "MessagingMessage": {
       "$ref": "#/definitions/MessagingMessage"
     },
@@ -10671,6 +10797,9 @@
     },
     "RespondAttentionPayload": {
       "$ref": "#/definitions/RespondAttentionPayload"
+    },
+    "RespondInteraction": {
+      "$ref": "#/definitions/RespondInteraction"
     },
     "ReviewIssueCompletionsPayload": {
       "$ref": "#/definitions/ReviewIssueCompletionsPayload"

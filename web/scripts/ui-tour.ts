@@ -7,7 +7,12 @@ import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import { fixtureRoot, navigate } from "./navigation.ts";
 import { issueBoardFixture, issueView } from "./issue-fixture.ts";
-import type { IssueView, TaskDetail, AttentionView } from "../src/api/generated/api.ts";
+import type {
+  IssueView,
+  TaskDetail,
+  AttentionView,
+  MessagingMessage,
+} from "../src/api/generated/api.ts";
 
 const output = process.env.TEND_LAYOUT_OUTPUT ?? "/tmp/tend-ui-tour";
 await mkdir(output, { recursive: true });
@@ -188,6 +193,44 @@ const totals = {
   cache_write: 0,
   cache_write_known: 2,
 };
+const imQuestion: MessagingMessage = {
+  message_id: "message-im-question",
+  sequence: 1,
+  conversation_id: "",
+  content_revision: 1,
+  author: "system",
+  body: "先验收手机还是桌面？",
+  channel_id: "",
+  direction: "publication",
+  processing: "processed",
+  created_at: now,
+  attachments: [],
+  issue_ids: [],
+  source_message_ids: [],
+  interaction: {
+    interaction_id: "interaction-tour",
+    object_id: "decision-tour",
+    object_type: "decision",
+    version: 1,
+    question: "先验收手机还是桌面？",
+    text_allowed: true,
+    state: "open",
+    options: [
+      { option_id: "mobile", label: "手机优先" },
+      { option_id: "desktop", label: "桌面优先" },
+    ],
+  },
+};
+const imStreams = new Set<ServerResponse>();
+let imSequence = 1;
+let imHideQuestion = false;
+function imChanged() {
+  imSequence++;
+  for (const stream of imStreams)
+    stream.write(
+      `event: ledger\ndata: ${JSON.stringify({ event_seq: imSequence, object_type: "message", object_id: imQuestion.message_id, kind: "messaging.interaction_changed" })}\n\n`,
+    );
+}
 const streams = new Set<ServerResponse>();
 const unexpected: string[] = [];
 const server = createServer(async (req, res) => {
@@ -197,9 +240,11 @@ const server = createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify(issueBoardFixture(req.url, value)));
   };
-  if (p === "/api/v1/events") {
+  if (p === "/api/v1/events" || p === "/api/v1/messaging/events") {
     res.setHeader("Content-Type", "text/event-stream");
     res.write('event: start\ndata: {"event_seq":1}\n\n');
+    if (p.includes("/messaging/")) imStreams.add(res);
+    res.on("close", () => imStreams.delete(res));
     streams.add(res);
     res.on("close", () => streams.delete(res));
     return;
@@ -222,6 +267,9 @@ const server = createServer(async (req, res) => {
       decisions: [],
       upgrade,
     });
+  if (p === "/api/v1/messaging/messages")
+    return json({ items: imHideQuestion ? [] : [imQuestion], next: 1, more: false });
+  if (p === "/api/v1/messaging/messages/message-im-question") return json(imQuestion);
   if (p === "/api/v1/conversation") return json({ items: [trigger, reply], more: false });
   if (p.endsWith("/transcript"))
     return json({
@@ -547,6 +595,7 @@ const origin = `http://127.0.0.1:${address.port}`;
 const browser = await chromium.launch();
 const routes = [
   "/",
+  "/diagnostics/main",
   "/chat/consultation-tour",
   "/issues",
   "/issues?view=tree",
@@ -590,7 +639,7 @@ try {
       page.on("console", (message) => {
         if (message.type() === "error") errors.push(message.text());
       });
-      await page.goto(origin);
+      await page.goto(`${origin}/diagnostics/main`);
       await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
       let sidebarWidth: number | undefined;
       for (const [index, path] of routes.entries()) {
@@ -833,7 +882,7 @@ try {
         assert.deepEqual(errors, [], `${name}: console errors`);
       }
       if (viewport.width <= 760) {
-        await navigate(page, "/");
+        await navigate(page, "/diagnostics/main");
         await page.getByRole("heading", { level: 1 }).getByRole("button").click();
         await page.getByRole("dialog").waitFor();
         assert.equal(
@@ -867,6 +916,91 @@ try {
     }
   }
   assert.deepEqual(unexpected, [], "fixture must implement every requested API");
+  // Another channel resolves the same original question while this browser is composing.
+  for (const width of [1440, 390]) {
+    const reset = { ...imQuestion.interaction!, state: "open" };
+    delete reset.handled_channel;
+    delete reset.handled_at;
+    delete reset.answer_summary;
+    imQuestion.interaction = reset;
+    const context = await browser.newContext({
+      viewport: { width, height: 900 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    await page.goto(origin);
+    const question = page.getByRole("region", { name: imQuestion.body, exact: true });
+    await question.getByRole("button", { name: "手机优先", exact: true }).waitFor();
+    await question.getByRole("button", { name: "文字回答", exact: true }).click();
+    const composer = page.getByRole("textbox", { name: "发消息给 Tend", exact: true });
+    await composer.fill("请先核对窄屏，这份补充说明不要丢失");
+    imQuestion.interaction = {
+      ...imQuestion.interaction!,
+      state: "answered",
+      handled_channel: "telegram",
+      handled_at: now,
+      answer_summary: "手机优先",
+    };
+    imChanged();
+    await question.getByText("已在 Telegram 处理", { exact: true }).waitFor();
+    assert.equal(await question.getByRole("button").count(), 0, "old question controls disappear");
+    assert.equal(await composer.inputValue(), "请先核对窄屏，这份补充说明不要丢失");
+    assert(
+      await page.getByRole("button", { name: "发送", exact: true }).isDisabled(),
+      "stale quote cannot submit",
+    );
+    // A persisted quote may be older than the latest window after reloading.
+    imHideQuestion = true;
+    await page.waitForTimeout(350);
+    await page.reload();
+    await page
+      .getByText("此问题已不再接受回答。文字已保留，取消引用后可以作为新消息发送。", {
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(await composer.inputValue(), "请先核对窄屏，这份补充说明不要丢失");
+    assert(await page.getByRole("button", { name: "发送", exact: true }).isDisabled());
+    imHideQuestion = false;
+    imChanged();
+    await page.getByRole("button", { name: "取消引用，保留文字", exact: true }).click();
+    assert.equal(await composer.inputValue(), "请先核对窄屏，这份补充说明不要丢失");
+    assert(await page.getByRole("button", { name: "发送", exact: true }).isEnabled());
+    await page.screenshot({ path: join(output, `${width}-im-answered-elsewhere.png`) });
+    await navigate(page, "/diagnostics/main");
+    await page.getByRole("textbox", { name: "消息", exact: true }).fill("单独的诊断草稿");
+    await navigate(page, "/");
+    assert.equal(
+      await composer.inputValue(),
+      "请先核对窄屏，这份补充说明不要丢失",
+      "IM and diagnostic drafts are isolated",
+    );
+    await page.reload();
+    await composer.waitFor();
+    await page.waitForFunction(
+      () =>
+        document.querySelector<HTMLTextAreaElement>('textarea[aria-label="发消息给 Tend"]')
+          ?.value === "请先核对窄屏，这份补充说明不要丢失",
+    );
+    await page.close();
+    const fresh = await context.newPage();
+    await fresh.goto(origin);
+    await fresh
+      .locator('[aria-label="Tend 对话"]')
+      .getByText(/暂存草稿 ·/)
+      .click();
+    await fresh
+      .getByRole("button", { name: "请先核对窄屏，这份补充说明不要丢失 · 恢复", exact: true })
+      .click();
+    assert.equal(
+      await fresh.getByRole("textbox", { name: "发消息给 Tend", exact: true }).inputValue(),
+      "请先核对窄屏，这份补充说明不要丢失",
+      "saved drafts remain recoverable after losing tab identity",
+    );
+    await context.close();
+  }
+  console.log(
+    "PASS IM: cross-channel invalidation, retained draft, isolated diagnostics and reload",
+  );
   // A stale route chunk must not unmount the chat, navigation or its draft.
   for (const viewport of [
     { width: 1440, height: 900 },
@@ -888,7 +1022,7 @@ try {
       });
     });
     try {
-      await page.goto(origin);
+      await page.goto(`${origin}/diagnostics/main`);
       const composer = page.getByRole("textbox", { name: "消息", exact: true });
       await composer.fill("路由加载失败仍保留这份草稿");
       const originalComposer = await composer.elementHandle();
@@ -919,7 +1053,7 @@ try {
         0,
         "changing routes resets the boundary",
       );
-      await navigate(page, "/");
+      await navigate(page, "/diagnostics/main");
       await composer.waitFor();
       assert(
         await originalComposer.evaluate(
@@ -937,7 +1071,7 @@ try {
       ]);
       if (viewport.width <= 760)
         await page.getByRole("navigation", { name: "更多导航", exact: true }).waitFor();
-      else await page.getByRole("heading", { name: "主 Agent", exact: true }).waitFor();
+      else await page.getByRole("heading", { name: "Tend", exact: true }).waitFor();
       assert.equal(
         await page.getByRole("heading", { name: "页面已更新", exact: true }).count(),
         0,
@@ -955,7 +1089,7 @@ try {
   // Prove every emitted lazy chunk is in this build's offline shell cache.
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
-  await page.goto(origin);
+  await page.goto(`${origin}/diagnostics/main`);
   console.log("Tour geometry complete; verifying offline shell");
   await page.evaluate(async () => {
     await navigator.serviceWorker.register("/sw.js");

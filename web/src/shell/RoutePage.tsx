@@ -90,6 +90,7 @@ export function RoutePage({
   const inbox = (id?: string) => navigate(id ? { page: "attention", id } : { page: "inbox" });
   let content;
   switch (route.page) {
+    case "im":
     case "chat":
     case "conversation":
       return <div ref={outlet} hidden />;

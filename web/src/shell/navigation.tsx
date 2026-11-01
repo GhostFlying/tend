@@ -7,7 +7,7 @@ export const groups: { label: string; items: NavItem[] }[] = [
   {
     label: "对话",
     items: [
-      { path: "/", label: "主对话", Icon: Chat },
+      { path: "/", label: "对话", Icon: Chat },
       { path: "/inbox", label: "收件箱", Icon: Pending },
     ],
   },
@@ -27,6 +27,11 @@ export const groups: { label: string; items: NavItem[] }[] = [
     ],
   },
 ];
+export const diagnostics: NavItem = {
+  path: "/diagnostics/main",
+  label: "主 Agent 诊断",
+  Icon: Run,
+};
 export const settings: NavItem = { path: "/settings", label: "设置", Icon: Gear };
 export const phoneTabs: NavItem[] = [
   { path: "/", label: "对话", Icon: Chat },
@@ -34,11 +39,12 @@ export const phoneTabs: NavItem[] = [
   groups[0]!.items[1]!,
   { path: "/more", label: "更多", Icon: More },
 ];
-export const moreItems = [groups[1]!.items[1]!, ...groups[2]!.items, settings];
+export const moreItems = [groups[1]!.items[1]!, ...groups[2]!.items, diagnostics, settings];
 
 export function navActive(route: Route, path: string): boolean {
   const pages: Record<string, string[]> = {
-    "/": ["chat", "conversation"],
+    "/": ["im"],
+    "/diagnostics/main": ["chat", "conversation"],
     "/inbox": ["inbox", "attention"],
     "/issues": ["issues", "issue"],
     "/tasks": ["tasks", "task"],

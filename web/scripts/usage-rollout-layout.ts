@@ -313,7 +313,7 @@ try {
     page.setDefaultTimeout(10_000);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
-    await page.goto(`http://127.0.0.1:${address.port}/`);
+    await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     if (process.env.TEND_LAYOUT_FONT)
       await page.addStyleTag({
         content:

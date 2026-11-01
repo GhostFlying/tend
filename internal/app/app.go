@@ -38,6 +38,7 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	interactionOrigin     *communicationOrigin
 	coordinationExecution *store.HostedExecution
 	coordinationEffectSeq int64
 	coordinationID        string
@@ -442,6 +443,9 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 				return err
 			}
 		}
+	}
+	if err := syncMessagingInteractions(ctx, x, tx, out.Events); err != nil {
+		return err
 	}
 	matched, err := followupEvents(ctx, x, tx, out.Events)
 	if err != nil {

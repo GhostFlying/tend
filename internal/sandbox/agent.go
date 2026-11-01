@@ -116,6 +116,7 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 	// Repair turns review metadata only; they never repeat business operations.
 	respond := false
 	createdIssue := ""
+	replySource := ""
 	response := "已收到。这是交互沙盒，所有消息与操作保存在独立账本中。可以试试“创建”“派发”或“问我”。也可以点击停止回复，随后继续对话。"
 	if !input.Repair {
 		text := input.Text
@@ -254,8 +255,24 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 				response = "已查看 Issue 的最新来源与执行进展，继续等待你的下一条消息。"
 			}
 		}
+		replySource = source
 	}
-	if respond && !input.Repair {
+	formalReply := false
+	if replySource != "" {
+		err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m JOIN request_records r ON r.request_id=m.request_id WHERE m.message_id=? AND r.operation LIKE 'messaging.%')`, replySource).Scan(&formalReply)
+		})
+		if err != nil {
+			return "failed"
+		}
+		if formalReply && !c.invoke("conversation_input_read", map[string]string{"message_id": replySource}, nil) {
+			return "failed"
+		}
+	}
+	if formalReply {
+		response = strings.ReplaceAll(response, "也可以点击停止回复，随后继续对话。", "可以继续发消息讨论，或引用原问题回答。")
+	}
+	if respond && !input.Repair && !formalReply {
 		if !streamReply(ctx, th, turn, response, pace.reply, func() {
 			if onReplyDelta != nil {
 				onReplyDelta(ctx, input)
@@ -313,6 +330,38 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			return "failed"
 		}
 	}
+	if respond && formalReply && !input.Repair {
+		publication := protocol.CoordinationReply{ReplyTo: replySource, Body: response, Purpose: "final", Disposition: "unassigned", WorkItemIDs: []string{}, Contexts: []protocol.LogicalContextReview{}, Facts: []protocol.ContextFact{}, ReviewedKinds: []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}}
+		for _, message := range state.Messages {
+			if message.MessageID == replySource {
+				for _, item := range message.Items {
+					if item.WorkItemID != "" {
+						publication.WorkItemIDs = append(publication.WorkItemIDs, item.WorkItemID)
+					}
+				}
+			}
+		}
+		if manager {
+			publication.WorkItemIDs = []string{issue.IssueID}
+		}
+		if len(publication.WorkItemIDs) > 0 {
+			publication.Disposition = "linked"
+		}
+		for _, review := range state.Contexts {
+			for _, id := range publication.WorkItemIDs {
+				if review.WorkItemID == id {
+					publication.Contexts = append(publication.Contexts, review)
+				}
+			}
+		}
+		if !c.mutate("conversation_reply", "", nil, publication, nil) {
+			return "failed"
+		}
+		if !c.invoke(read, struct{}{}, &state) {
+			return "failed"
+		}
+	}
+
 	commit := protocol.LogicalTurnCommit{Contexts: state.Contexts}
 	for _, message := range state.Messages {
 		commit.Messages = append(commit.Messages, protocol.LogicalTurnReview{MessageID: message.MessageID, ContentRevision: message.ContentRevision, AssociationRevision: message.Revision})

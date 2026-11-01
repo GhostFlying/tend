@@ -314,6 +314,7 @@ export interface TendAPI {
   MessagingDelivery?: MessagingDelivery;
   MessagingEvent?: MessagingEvent;
   MessagingInput?: MessagingInput;
+  MessagingInteraction?: MessagingInteraction;
   MessagingMessage?: MessagingMessage;
   MessagingPage?: MessagingPage;
   MessagingPublication?: MessagingPublication;
@@ -337,6 +338,7 @@ export interface TendAPI {
   RequestIssueManagerPayload?: RequestIssueManagerPayload;
   RequestView?: RequestView;
   RespondAttentionPayload?: RespondAttentionPayload;
+  RespondInteraction?: RespondInteraction;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
   ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
   RunExecutionPin?: RunExecutionPin;
@@ -2745,9 +2747,40 @@ export interface MessagingInput {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingInteraction".
+ */
+export interface MessagingInteraction {
+  answer_summary?: string;
+  context?: string;
+  effect?: EffectResult;
+  handled_at?: number;
+  handled_channel?: string;
+  interaction_id: string;
+  issue_id?: string;
+  object_id: string;
+  object_type: string;
+  options: MessagingOption[] | null;
+  question: string;
+  state: string;
+  task_id?: string;
+  text_allowed: boolean;
+  version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingOption".
+ */
+export interface MessagingOption {
+  effect?: DecisionEffect;
+  label: string;
+  option_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "MessagingMessage".
  */
 export interface MessagingMessage {
+  agent_read_at?: number;
   attachments: ConversationAttachment[] | null;
   author: string;
   body: string;
@@ -2756,8 +2789,10 @@ export interface MessagingMessage {
   conversation_id: string;
   correction_of?: string;
   created_at: number;
+  delivery_state?: string;
   direction: string;
   execution_id?: string;
+  interaction?: MessagingInteraction;
   issue_ids: string[] | null;
   message_id: string;
   processing: string;
@@ -3059,6 +3094,16 @@ export interface RequestView {
 export interface RespondAttentionPayload {
   option?: string;
   source_message_id?: string;
+  text?: string;
+  version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RespondInteraction".
+ */
+export interface RespondInteraction {
+  confirm?: boolean;
+  option?: string;
   text?: string;
   version: number;
 }
