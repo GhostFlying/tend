@@ -950,6 +950,38 @@ try {
       const node = document.querySelector("[data-issue-scroll]")!;
       return node.scrollHeight - node.scrollTop - node.clientHeight < 2;
     });
+
+    // Paused intent survives viewport growth even when the new remaining
+    // distance is inside the automatic follow threshold.
+    await page.setViewportSize({ width, height: 800 });
+    await page.waitForTimeout(150);
+    await scroller.evaluate((node) => {
+      node.scrollTop = node.scrollHeight - node.clientHeight - 220;
+    });
+    await page.waitForTimeout(150);
+    const pausedTop = await scroller.evaluate((node) => node.scrollTop);
+    await page.setViewportSize({ width, height: 950 });
+    await page.waitForTimeout(200);
+    assert(
+      Math.abs((await scroller.evaluate((node) => node.scrollTop)) - pausedTop) <= 2,
+      "viewport growth resumed paused Issue following",
+    );
+    const pausedHeight = await scroller.evaluate((node) => node.scrollHeight);
+    reply.body += "窗口增高后仍保持暂停阅读。\n\n".repeat(30);
+    reply.assistant_revision!++;
+    publish();
+    await page.waitForFunction((height) => {
+      const node = document.querySelector("[data-issue-scroll]")!;
+      return node.scrollHeight > height;
+    }, pausedHeight);
+    await page.waitForTimeout(150);
+    assert(
+      (await scroller.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)) >=
+        50,
+      "content growth after resize resumed paused Issue following",
+    );
+    await page.setViewportSize({ width, height: 1000 });
+    await page.waitForTimeout(100);
     const laterEntry = detail.locator('[data-scroll-id="result:artifact-one"]');
     await laterEntry.scrollIntoViewIfNeeded();
     await scroller.evaluate((node) => {
