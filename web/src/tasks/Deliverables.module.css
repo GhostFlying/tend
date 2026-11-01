@@ -94,3 +94,13 @@
 .compactFiles li strong {
   flex-basis: auto;
 }
+
+.compactReport {
+  margin-bottom: 0;
+}
+.compactReport h4 {
+  margin: 0;
+}
+.compactReport > div {
+  gap: var(--space-1);
+}

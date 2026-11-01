@@ -49,7 +49,7 @@ export function ArtifactDelivery({
           className={compact ? `${styles.report} ${styles.compactReport}` : styles.report}
           aria-label="交付报告"
         >
-          <h3>报告</h3>
+          {!compact && <h3>报告</h3>}
           {typeof report.body === "string" && (
             <Markdown text={report.body} files={files} demoteHeadings={compact} />
           )}
