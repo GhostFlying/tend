@@ -51,25 +51,38 @@ export type AgentFilters = {
   environment?: string;
   selected?: string;
 };
+export type UsageFilters = {
+  group_by?: "issue" | "session";
+  window?: string;
+  offset?: string;
+  model?: string;
+  agent?: string;
+  role?: string;
+  issue?: string;
+  session?: string;
+  sort?: string;
+};
+const usageKeys = [
+  "group_by",
+  "window",
+  "offset",
+  "model",
+  "agent",
+  "role",
+  "issue",
+  "session",
+  "sort",
+] as const;
 export type Route =
   | ({ page: "agents" } & AgentFilters)
   | ({ page: "diagnostics" } & DiagnosticFilters)
   | ({ page: "diagnosticEvent"; id: string } & DiagnosticFilters)
   | {
-      page:
-        | "im"
-        | "chat"
-        | "more"
-        | "inbox"
-        | "tasks"
-        | "repos"
-        | "usage"
-        | "hosts"
-        | "settings"
-        | "archive";
+      page: "im" | "chat" | "more" | "inbox" | "tasks" | "repos" | "hosts" | "settings" | "archive";
     }
   | { page: "conversation" | "attention" | "issue" | "upgrade"; id: string }
   | { page: "task"; id: string; from?: string }
+  | ({ page: "usage" } & UsageFilters)
   | ({ page: "issues" } & IssueFilters)
   | { page: "missing" };
 
@@ -122,6 +135,15 @@ export function parse(input: string | URL): Route {
       return { page: page as "conversation" | "attention" | "issue" | "upgrade", id };
     }
     if (url.pathname !== path) continue;
+    if (page === "usage") {
+      const filters: UsageFilters = {};
+      for (const field of usageKeys) {
+        const value = query.get(field);
+        if (value && field !== "group_by") filters[field] = value;
+      }
+      if (query.get("group_by") === "session") filters.group_by = "session";
+      return { page: "usage", ...filters };
+    }
     if (page === "issues")
       return {
         page,
@@ -151,6 +173,11 @@ export function href(route: Route): string {
       if (route[field]) query.set(field, route[field]!);
     }
   }
+  if (route.page === "usage") {
+    for (const field of usageKeys) {
+      if (route[field]) query.set(field, route[field]!);
+    }
+  }
   if (route.page === "task" && route.from) query.set("from", route.from);
   if (route.page === "issues") {
     for (const key of ["view", "project", "assignee", "closed"] as const) {
@@ -166,7 +193,11 @@ export function href(route: Route): string {
 export function legacyURL(input: string | URL): string | null {
   const url = new URL(input, "https://tend.invalid");
   if (url.pathname === "/settings/agents") return "/agents" + url.search + url.hash;
-  if (url.pathname === "/diagnostics" || url.pathname.startsWith("/diagnostics/events/"))
+  if (
+    url.pathname === "/usage" ||
+    url.pathname === "/diagnostics" ||
+    url.pathname.startsWith("/diagnostics/events/")
+  )
     return null;
   const issue = url.searchParams.get("issue");
   const task = url.searchParams.get("task");

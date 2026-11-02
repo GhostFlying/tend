@@ -56,6 +56,19 @@ test("legacy links replace identities and discard retired work item references",
   expect(legacyURL("/?issue=A%2FB")).toBe("/issues/A%2FB");
   expect(legacyURL("/issues?work_item=old&view=tree")).toBe("/issues?view=tree");
   expect(legacyURL("/inbox")).toBeNull();
+  const usage: Route = {
+    page: "usage",
+    group_by: "session",
+    issue: "parent / leaf",
+    agent: "小林",
+    model: "provider/model",
+    role: "implement",
+    window: "month",
+    offset: "-1",
+    sort: "total",
+  };
+  expect(parse(href(usage))).toEqual(usage);
+  expect(legacyURL(href(usage))).toBeNull();
 });
 
 test("links retain real hrefs and leave modified clicks to the browser", () => {

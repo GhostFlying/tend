@@ -62,3 +62,7 @@ test("summary distinguishes no requests, missing total, known zero and partial c
   expect(partial).toContain("3/4");
   expect(partial).toContain("部分");
 });
+
+test("large coverage counts use thousands separators", () => {
+  expect(field(1234567, 9000, 10000)).toBe("1,234,567（部分，9,000/10,000 个请求）");
+});

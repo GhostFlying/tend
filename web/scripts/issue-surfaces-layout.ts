@@ -1366,7 +1366,11 @@ async function captureS4() {
             "top-level pages have no back controls",
           );
         }
-        if (name === "usage") await page.getByText("9,000", { exact: true }).first().waitFor();
+        if (name === "usage")
+          await page
+            .getByText(/已记录\s+9,000\s+Token/)
+            .first()
+            .waitFor();
         if (name === "repos") await page.getByText("已读取登记。", { exact: true }).waitFor();
         if (name === "settings") await page.getByLabel("空闲分钟", { exact: true }).waitFor();
         if (name === "agents") await page.getByRole("button", { name: /青竹/ }).waitFor();
