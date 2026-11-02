@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,11 +18,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go
+        id: go
         with:
-          go-version-file: go.mod
+          role: quality
       - name: static checks and capability coverage
-        run: make capability-check protocol-check fmt-check vet staticcheck
+        run: make ci-check capability-check protocol-check fmt-check vet staticcheck
+      - name: publish main build snapshot
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.go.outputs.build-path }}
+          key: ${{ steps.go.outputs.build-key }}
 
   race:
     name: race (${{ matrix.group }})
@@ -32,23 +40,26 @@ jobs:
         group: [app, api, mainthread, e2e, other]
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go
+        id: go
         with:
-          go-version-file: go.mod
+          role: ${{ matrix.group }}
       - name: race tests
         env:
           APP_TEST_SHARDS: 4
           TEST_GROUP: ${{ matrix.group }}
         run: make test
+      - name: publish main build snapshot
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.go.outputs.build-path }}
+          key: ${{ steps.go.outputs.build-key }}
 
   web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      # The web client's toolchain; pnpm's version comes from web/package.json.
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
@@ -59,56 +70,92 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - name: web checks and build
         run: make web-check
-      - name: mobile layout regression
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-app
+          path: internal/webui/dist/app
+          if-no-files-found: error
+          retention-days: 1
+
+  layout:
+    name: layout (${{ matrix.group }})
+    needs: web
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-app
+          path: ${{ runner.temp }}/web-app
+      - name: install browser dependencies
         run: |
+          pnpm --dir web install --frozen-lockfile
           pnpm --dir web exec playwright install --with-deps chromium
-          pnpm --dir web test:layout
-      - name: mobile decision layout regression
-        run: pnpm --dir web test:decision-layout
-      - name: repository layout regression
-        run: pnpm --dir web test:repos-layout
-      - name: work item progress regression
-        run: pnpm --dir web test:work-items-layout
-      - name: delivery refresh reconciliation
-        run: pnpm --dir web test:delivery-refresh
-      - name: followup lifecycle and recovery
-        run: pnpm --dir web test:followups
-      - name: agent directory read-only and environment regression
+      - name: browser regressions
         env:
-          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-agent-directory
-        run: pnpm --dir web test:agent-directory
-      - name: agent conversation routing and layout
-        run: pnpm --dir web test:agents
-      - name: Issue source, notifications and first-run regression
-        env:
-          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-issue-surfaces
-        run: pnpm --dir web test:issue-surfaces-layout
-      - name: Issue detail conversation regression
-        env:
-          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-issue-detail
-        run: pnpm --dir web test:issue-detail-layout
-      - name: token usage and rollout regression
-        run: pnpm --dir web test:usage
-      - name: navigation layout regression
-        env:
-          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-navigation
-        run: pnpm --dir web test:navigation-layout
-      - name: all-route UI tour
-        env:
-          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/tend-ui-tour
-        run: pnpm --dir web test:ui-tour
-      - name: cross-compile
+          TEND_LAYOUT_BUILD_ROOT: ${{ runner.temp }}/web-app
+          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/layout
+          LAYOUT_GROUP: ${{ matrix.group }}
+        run: pnpm --dir web exec node scripts/layout-groups.ts "$LAYOUT_GROUP"
+
+  cross:
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-go
+        id: go
+        with:
+          role: cross
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-app
+          path: internal/webui/dist/app
+      - name: cross-compile with the actual web app
         run: |
           GOOS=windows GOARCH=amd64 go build ./...
           GOOS=darwin GOARCH=arm64 go build ./...
+      - name: publish main build snapshot
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.go.outputs.build-path }}
+          key: ${{ steps.go.outputs.build-key }}
 
   # Keep the existing required check name while rejecting every incomplete job.
   check:
     if: ${{ always() }}
-    needs: [quality, race, web]
+    needs: [quality, race, web, layout, cross]
     runs-on: ubuntu-latest
     steps:
       - name: require all checks
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
+
+  cache-maintenance:
+    needs: check
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const { prune } = require('./.github/scripts/go-cache.cjs');
+            await prune({ github, context, core });

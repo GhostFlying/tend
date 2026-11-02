@@ -26,6 +26,10 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
+// Retain a small read burst without repeatedly initializing SQLite's schema
+// state. This bounds idle resources without limiting concurrent readers.
+const readIdleConnections = 8
+
 // Store holds a single-connection pool for writes and a pool for reads.
 // SQLite allows one writer at a time; funnelling writes through one
 // connection with BEGIN IMMEDIATE avoids lock upgrade deadlocks and makes
@@ -51,6 +55,7 @@ func Open(ctx context.Context, dbPath string, now func() time.Time) (*Store, err
 		write.Close()
 		return nil, fmt.Errorf("store: open reader: %w", err)
 	}
+	read.SetMaxIdleConns(readIdleConnections)
 	files, err := blobstore.New(dbPath + ".files")
 	if err != nil {
 		write.Close()
