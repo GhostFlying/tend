@@ -19,6 +19,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -92,6 +93,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+remote.Path+"{channel}", s.nativeExecution)
 	mux.HandleFunc("POST "+Path, s.serve)
+	mux.HandleFunc("GET /runner/v1/rollout-preview", s.rolloutPreview)
+	mux.HandleFunc("POST /runner/v1/rollout-preview", s.rolloutPreview)
 	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/manifest", s.releaseFile)
 	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/artifacts/{sha}", s.releaseFile)
 	mux.HandleFunc("POST /runner/v1/files", s.uploadFile)
@@ -335,6 +338,14 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 		var res protocol.HelloResult
 		if err := json.Unmarshal(op.Result, &res); err != nil {
 			return op, err
+		}
+		var hello protocol.HelloPayload
+		if json.Unmarshal(env.Payload, &hello) == nil && hello.Runtime != nil && slices.Contains(hello.Runtime.Capabilities, protocol.CapabilityRolloutPreview) {
+			res.DeploymentID, err = s.app.DeploymentID(ctx)
+			if err != nil {
+				return op, err
+			}
+			res.RolloutPreview = true
 		}
 		for i := range res.Reassigned {
 			res.Reassigned[i].RunToken = RunToken(s.secret, res.Reassigned[i].LeaseID)

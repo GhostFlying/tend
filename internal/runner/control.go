@@ -160,6 +160,9 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	}
 	capabilities := []string{protocol.CapabilityNativeUsage, protocol.CapabilityProtocolNegotiation, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
 	capabilities = append(capabilities, protocol.CapabilityRunMessages)
+	if len(r.cfg.RolloutRoots) > 0 {
+		capabilities = append(capabilities, protocol.CapabilityRolloutPreview)
+	}
 	if r.cfg.Executions != nil {
 		capabilities = append(capabilities, protocol.CapabilityAgentExecution)
 		if _, ok := r.cfg.Executions.(ContinuationResolver); ok {

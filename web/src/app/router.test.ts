@@ -30,7 +30,12 @@ test("a dialog autofocus target cannot become its own navigation opener", () => 
 
 test("every planned route round trips, including encoded identities and filters", () => {
   for (const page of Object.keys(paths)) {
-    const route = { page, id: "identity / 中文?#", from: "parent / issue" } as Route;
+    const route = {
+      page,
+      id: "identity / 中文?#",
+      run: "run / 中文?#",
+      from: "parent / issue",
+    } as Route;
     const parsed = parse(href(route));
     expect(parsed.page).toBe(page);
     if ("id" in parsed) expect(parsed.id).toBe("identity / 中文?#");
@@ -205,4 +210,28 @@ test("Agent directory filters and selection round trip and old settings route ca
   expect(href(parse("/settings/agents?selected=host%2Fcedar"))).toBe(
     "/agents?selected=host%2Fcedar",
   );
+});
+
+test("execution monitor routes preserve native identities and the Issue return context", () => {
+  const route: Route = {
+    page: "rollout",
+    id: "task / one",
+    run: "run / two",
+    from: "issue / one",
+    record: "42",
+  };
+  expect(parse(href(route))).toEqual(route);
+  expect(parse("/tasks/one/runs/%ZZ")).toEqual({ page: "missing" });
+  expect(parse("/tasks/one/runs/two/extra")).toEqual({ page: "missing" });
+});
+
+test("compact collected-log selections preserve their source", () => {
+  const route = {
+    page: "rollout" as const,
+    id: "task",
+    run: "run",
+    record: "17",
+    source: "logs" as const,
+  };
+  expect(parse(href(route))).toEqual(route);
 });

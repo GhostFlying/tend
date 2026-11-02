@@ -51,6 +51,7 @@ export function firstLine(text: string): string {
 }
 
 const titles: Record<string, string> = {
+  unknownFormat: "未知格式",
   agentMessage: "Agent 回复",
   commandExecution: "执行命令",
   mcpToolCall: "调用工具",
@@ -107,6 +108,7 @@ export function buildSteps(logs: readonly RunLogView[]): Step[] {
     const tool = string(data.tool);
     const title =
       tool ||
+      (type === "dynamicToolCall" ? prior?.title : "") ||
       titles[type] ||
       (/turn[._]started$/.test(event)
         ? "开始执行"
@@ -146,7 +148,7 @@ export function buildSteps(logs: readonly RunLogView[]): Step[] {
           ? "text"
           : type === "reasoning"
             ? "reasoning"
-            : titles[type] && !["userMessage", "contextCompaction"].includes(type)
+            : titles[type] && !["userMessage", "contextCompaction", "unknownFormat"].includes(type)
               ? "tool"
               : "event",
       title,
@@ -173,7 +175,7 @@ export function buildSteps(logs: readonly RunLogView[]): Step[] {
           : (prior?.durationMs ?? null),
       pending,
       failed,
-      truncated: data.truncated === true || prior?.truncated === true,
+      truncated: data.preview_more === true || data.truncated === true || prior?.truncated === true,
       thread,
       turn,
       nativeID,
@@ -230,4 +232,49 @@ export function statusLabel(status: string): string {
       } as Record<string, string>
     )[status] ?? "等待执行"
   );
+}
+
+/** A merged native step can keep its input and output in different records. */
+export function fieldRecord(step: Step, field: "raw" | "text" | "input" | "output"): number {
+  if (field === "raw") return step.lastSeq;
+  if (field === "input") {
+    const linked = step.rows.findLast((row) => {
+      const envelope = object(row.body);
+      const data = object(envelope.data ?? envelope);
+      return (
+        typeof data.preview_input_record === "number" &&
+        Number.isSafeInteger(data.preview_input_record) &&
+        data.preview_input_record > 0
+      );
+    });
+    if (linked) {
+      const envelope = object(linked.body);
+      return object(envelope.data ?? envelope).preview_input_record as number;
+    }
+  }
+  const keys =
+    field === "input"
+      ? ["command", "arguments", "query", "path", "prompt", "changes", "action"]
+      : field === "output"
+        ? ["aggregatedOutput", "result", "contentItems", "error", "preview_references"]
+        : ["text", "summary"];
+  const row = step.rows.findLast((row) => {
+    const envelope = object(row.body);
+    const data = object(envelope.data ?? envelope);
+    return keys.some((key) => data[key] !== null && data[key] !== undefined && data[key] !== "");
+  });
+  return row?.seq ?? step.lastSeq;
+}
+
+/** A routed record can be a later frame of a merged step. */
+export function stepForRecord(
+  steps: readonly Step[],
+  record: string | undefined,
+): Step | undefined {
+  return record
+    ? steps.find(
+        (step) =>
+          String(step.seq) === record || step.rows.some((row) => String(row.seq) === record),
+      )
+    : undefined;
 }

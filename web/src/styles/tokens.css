@@ -29,6 +29,14 @@
   --diagnostic-accent: #4176e6;
   --diagnostic-selection: #edf4ff;
 
+  /* Read-only execution monitor: neutral events, purple model and blue tool tracks. */
+  --rollout-accent: #5669ce;
+  --rollout-selection: #e8edff;
+  --rollout-input: #9ca5b3;
+  --rollout-model: #8755d8;
+  --rollout-tool: #278ed4;
+  --rollout-error: #c74760;
+
   /* accent and states */
   --accent: rgb(18, 20, 23);
   --accent-soft: rgba(18, 20, 23, 0.06);
@@ -135,6 +143,12 @@
 body[data-dark] {
   --diagnostic-accent: #8ab4ff;
   --diagnostic-selection: #202d44;
+  --rollout-accent: #97a8ff;
+  --rollout-selection: #2a365c;
+  --rollout-input: #7b8596;
+  --rollout-model: #a981f2;
+  --rollout-tool: #53b5f3;
+  --rollout-error: #f28a9b;
   --bg: rgb(21, 21, 23);
   --bg-l1: rgb(27, 27, 28);
   --bg-l2: rgb(36, 36, 38);

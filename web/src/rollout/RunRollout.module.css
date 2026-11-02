@@ -7,25 +7,20 @@
   overflow-wrap: anywhere;
 }
 .root button,
-.reader button,
 .root select {
   font: inherit;
   color: inherit;
 }
-.root button,
-.reader button {
+.root button {
   cursor: pointer;
 }
 .root button:focus-visible,
-.reader button:focus-visible,
 .root summary:focus-visible,
-.reader summary:focus-visible,
 .root select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
-.root button:disabled,
-.reader button:disabled {
+.root button:disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -63,11 +58,6 @@
   flex: 1;
   align-items: baseline;
   gap: 9px;
-}
-.state {
-  flex: none;
-  font-size: var(--text-caption);
-  color: var(--label-3);
 }
 .summary {
   overflow: hidden;
@@ -245,14 +235,12 @@
   font-size: var(--text-caption);
   padding: var(--space-2) 14px;
 }
-.error,
-.readerError {
+.error {
   font-size: var(--text-caption);
   padding: var(--space-2) 14px;
   color: var(--danger);
 }
-.error button,
-.readerError button {
+.error button {
   margin-left: var(--space-2);
   background: none;
   border: 0;
@@ -264,213 +252,6 @@
   border-left: 2px solid var(--border);
   padding-left: 10px;
 }
-.reader {
-  width: min(1040px, calc(100vw - 48px));
-  height: calc(100dvh - 48px);
-  max-height: none;
-  max-width: none;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--bg);
-  color: var(--label);
-  box-shadow: var(--shadow-2);
-  overflow: hidden;
-}
-.reader[open] {
-  display: flex;
-  flex-direction: column;
-}
-.reader::backdrop {
-  background: var(--backdrop-strong);
-}
-.readerHeader {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
-  border-bottom: 1px solid var(--border-soft);
-  flex: none;
-}
-.back,
-.close {
-  flex: none;
-  border: 0;
-  background: transparent;
-  color: var(--label-2) !important;
-  padding: 6px 0;
-  font-size: var(--text-caption) !important;
-}
-.close {
-  font-size: var(--text-title-lg) !important;
-  min-width: 28px;
-}
-.readerTitle {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  min-width: 0;
-  flex: 1;
-  font-size: var(--text-body);
-}
-.readerTitle > strong,
-.readerTitle > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.readerTitle > span {
-  color: var(--label-3);
-  font-size: var(--text-caption);
-}
-.readerState {
-  min-width: 0;
-  max-width: 40%;
-  overflow: hidden;
-  display: inline-flex;
-  gap: var(--space-1);
-  align-items: center;
-  white-space: nowrap;
-  color: var(--label-3);
-  font-size: var(--text-caption);
-}
-.readerTools {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: var(--space-2) var(--space-5);
-  border-bottom: 1px solid var(--border-soft);
-  flex: none;
-  font-size: var(--text-caption);
-}
-.readerTools > button {
-  background: none;
-  border: 0;
-  padding: 6px 0;
-  color: var(--label-3);
-}
-.followState {
-  margin-right: auto;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  color: var(--label-3);
-  white-space: nowrap;
-}
-.followState i {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--label-3);
-}
-.followState i[data-live="true"] {
-  background: var(--accent);
-}
-.more {
-  position: relative;
-  color: var(--label-3);
-}
-.more > summary {
-  cursor: pointer;
-  list-style: none;
-}
-.more > div {
-  position: absolute;
-  right: 0;
-  top: 25px;
-  z-index: var(--z-raised);
-  width: min(340px, calc(100vw - 40px));
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--bg);
-  box-shadow: var(--shadow-2);
-  overflow-wrap: anywhere;
-}
-.more button {
-  border: 0;
-  background: transparent;
-  color: var(--accent);
-  padding: 0 0 10px;
-}
-.more small {
-  display: block;
-}
-.more p {
-  line-height: 1.6;
-}
-.reading {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  overflow-anchor: none;
-}
-.readingColumn {
-  max-width: 780px;
-  padding: var(--space-6) var(--space-7) 80px;
-  margin: 0 auto;
-}
-.reading .steps > li {
-  margin: var(--space-3) 0;
-  scroll-margin-top: var(--space-4);
-}
-.reading .steps > li[data-target="true"] {
-  border-radius: var(--radius-s);
-}
-.reading .prose {
-  margin: 22px 0 var(--space-2);
-  line-height: 1.75;
-}
-.reading .disclosure > summary {
-  gap: var(--space-2);
-}
-.reading .toolTitle {
-  font-size: var(--text-label);
-}
-.reading .stepSummary {
-  font-size: var(--text-label);
-}
-.reading .diagnostics {
-  opacity: 0.65;
-}
-.reading .diagnostics:hover,
-.reading .diagnostics[open] {
-  opacity: 1;
-}
-.pageButton {
-  display: block;
-  margin: var(--space-3) auto;
-  background: var(--input);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-bubble);
-  padding: 6px 14px;
-  font-size: var(--text-caption) !important;
-  color: var(--label-3) !important;
-}
-.working {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--accent);
-  font-size: var(--text-label);
-}
-.toLatest {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-bubble);
-  padding: 9px var(--space-4);
-  background: var(--bg);
-  color: var(--label-2);
-  font-size: var(--text-caption) !important;
-  box-shadow: var(--shadow-2);
-}
 @media (prefers-reduced-motion: reduce) {
   .mark[data-active="true"] {
     animation: none;
@@ -480,48 +261,6 @@
   }
 }
 @media (max-width: 760px) {
-  .reader {
-    width: 100%;
-    height: 100dvh;
-    margin: 0;
-    border: 0;
-    border-radius: 0;
-  }
-  .readerHeader {
-    padding: calc(var(--space-1) + env(safe-area-inset-top)) 14px var(--space-1);
-    gap: 10px;
-  }
-  .readerTitle {
-    display: block;
-    font-size: var(--text-label);
-  }
-  .readerTitle > span {
-    display: block;
-    font-size: var(--text-micro);
-  }
-  .readerState {
-    max-width: 30%;
-    font-size: var(--text-micro);
-  }
-  .readerTools {
-    padding: 0 14px;
-    gap: var(--space-3);
-  }
-  .readerTools > button,
-  .more > summary,
-  .readerHeader button {
-    min-height: 44px;
-  }
-  .more > summary {
-    display: flex;
-    align-items: center;
-  }
-  .more > div {
-    top: 44px;
-  }
-  .readingColumn {
-    padding: var(--space-4) 18px 80px;
-  }
   .activityText {
     gap: 6px;
   }
@@ -529,9 +268,6 @@
     min-height: 48px;
     padding: 10px;
     gap: 6px;
-  }
-  .activity .state {
-    font-size: var(--text-micro);
   }
   .compact {
     padding: 0 10px var(--space-2);
@@ -541,13 +277,8 @@
   }
   .root summary,
   .root .textButton,
-  .inspect,
-  .pageButton,
-  .toLatest {
+  .inspect {
     min-height: 36px;
-  }
-  .reader .disclosure > summary {
-    min-height: 44px;
   }
   .io {
     grid-template-columns: 24px minmax(0, 1fr);
@@ -557,34 +288,7 @@
   .stepBody {
     margin-left: var(--space-5);
   }
-  .toLatest {
-    bottom: calc(16px + env(safe-area-inset-bottom));
-  }
 }
-
-.reading .prose + .diagnostics:not([open]) {
-  position: absolute;
-  top: 0;
-  right: 0;
-  opacity: 0;
-}
-.reading .prose + .diagnostics > summary {
-  min-height: 20px;
-  min-width: 20px;
-  text-align: center;
-  font-size: var(--text-title);
-  list-style: none;
-}
-.reading .step:hover > .diagnostics,
-.reading .step:focus-within > .diagnostics {
-  opacity: 0.8;
-}
-@media (hover: none) {
-  .reading .prose + .diagnostics:not([open]) {
-    opacity: 0.5;
-  }
-}
-
 .stepState {
   font-size: var(--text-micro);
   color: var(--label-3);
@@ -592,4 +296,52 @@
 }
 .step[data-failed="true"] .stepState {
   color: var(--danger);
+}
+.entryOnly {
+  display: contents;
+}
+.shortcut {
+  display: inline-flex;
+}
+.cardActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 14px 0;
+  font-size: var(--text-caption);
+  color: var(--label-3);
+}
+.shortcut button,
+.cardActions button {
+  color: var(--diagnostic-accent);
+}
+.mark {
+  width: 18px;
+  height: 18px;
+}
+.mark svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.toolSeparator {
+  flex: none;
+  color: var(--caption);
+  font-size: var(--text-label);
+}
+@media (max-width: 760px) {
+  .cardActions {
+    flex-wrap: wrap;
+    padding: var(--space-3) 10px 0;
+  }
+}
+
+.prose {
+  margin: var(--space-3) 0;
+  line-height: 1.75;
 }

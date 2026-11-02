@@ -81,6 +81,7 @@ func (s *Server) ownerRoutes() []ownerRoute {
 		{"GET /api/v1/files/{id}/metadata", s.fileMetadata},
 		{"GET /api/v1/runs/{id}/logs", s.runLogs},
 		{"GET /api/v1/runs/{id}/rollout", s.runRollout},
+		{"GET /api/v1/runs/{id}/preview", s.rolloutPreview},
 		{"GET /api/v1/requests/{id}", s.request},
 		{"GET /api/v1/conversation", s.conversation},
 		{"GET /api/v1/agent-conversations", s.agentConversations},

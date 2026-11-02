@@ -152,6 +152,7 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
       {tab === "supplement" && <RunConversation task={t} controls={<TaskControls task={t} />} />}
       <div hidden={tab !== "execution"}>
         <TaskExecution task={t} />
+        <LogSection task={t} />
       </div>
       {!!t.issue_ids?.length && (
         <Section title="所属 Issue">
@@ -275,7 +276,6 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
               </div>
             ))}
         </Section>
-        <LogSection task={t} />
       </div>
       <div hidden={tab !== "inputs"}>
         <Fold title={`完整目标与验收条件（第 ${t.spec_version} 版要求）`}>
@@ -485,7 +485,7 @@ function TaskControls({ task: t }: { task: TaskDetail }) {
 }
 
 function LogSection({ task }: { task: TaskDetail }) {
-  return <RunRollout runs={task.runs ?? []} />;
+  return <RunRollout runs={task.runs ?? []} taskID={task.task_id} />;
 }
 
 function Artifacts({

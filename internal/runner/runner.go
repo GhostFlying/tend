@@ -90,6 +90,8 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
+	RolloutRoots []string
+
 	Executions          ExecutionResolver
 	AgentInventory      func(context.Context) (protocol.LocalAgentConfiguration, error)
 	AgentChanges        <-chan struct{}
@@ -160,6 +162,10 @@ type active struct {
 
 // Runner pulls and executes runs for one host.
 type Runner struct {
+	previewSupported  bool
+	previewDeployment string
+	previewWake       chan struct{}
+
 	runnerProtocol int64
 	cfg            Config
 	c              *client
@@ -229,7 +235,7 @@ func New(cfg Config) *Runner {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
-	return &Runner{
+	return &Runner{previewWake: make(chan struct{}, 1),
 		cfg:                  cfg,
 		runnerProtocol:       protocol.PreviousRunnerProtocol,
 		bootstrapMaintenance: cfg.InitialMaintenance,
@@ -276,6 +282,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil {
 		return err
+	}
+	if len(r.cfg.RolloutRoots) > 0 {
+		r.wg.Go(func() { r.rolloutPreviews(ctx) })
 	}
 	if r.cfg.Executions != nil {
 		r.requestReconcile()
@@ -532,6 +541,12 @@ func (r *Runner) hello(ctx context.Context) error {
 		return r.hello(ctx)
 	}
 	r.nativeUsageSupported = res.NativeUsage
+	r.previewSupported = res.RolloutPreview && res.DeploymentID != "" && len(r.cfg.RolloutRoots) > 0
+	r.previewDeployment = res.DeploymentID
+	select {
+	case r.previewWake <- struct{}{}:
+	default:
+	}
 	r.repositoryBindingsSupported = res.RepositoryBindings
 	r.agentInventorySupported = res.AgentInventory && r.cfg.AgentInventory != nil
 	r.agentExecutionSupported = res.AgentExecution && r.cfg.Executions != nil

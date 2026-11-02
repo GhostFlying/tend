@@ -95,7 +95,7 @@ export function Shell({
     [client, live, queue, draft, route],
   );
   const chat = route.page === "chat" || route.page === "conversation";
-  const detail = ["issue", "task", "attention", "upgrade"].includes(route.page);
+  const detail = ["issue", "task", "rollout", "attention", "upgrade"].includes(route.page);
   const openInbox = (id?: string) => navigate(id ? { page: "attention", id } : { page: "inbox" });
   return (
     <ServicesContext value={services}>

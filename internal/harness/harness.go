@@ -22,6 +22,9 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
+	// OnNativeSource records a local locator without publishing native content.
+	OnNativeSource func(context.Context, protocol.RolloutPreviewSource) error
+
 	// Lifetime is the run authority, which survives a held worker attempt.
 	Lifetime context.Context
 	// NativeDial opens only this run's authenticated native execution transport.

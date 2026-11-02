@@ -7030,6 +7030,9 @@
         },
         "terminal": {
           "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
         }
       },
       "required": [
@@ -8108,6 +8111,78 @@
         "expected_context_revision"
       ],
       "title": "ReviewIssueSourcesPayload",
+      "type": "object"
+    },
+    "RolloutPreview": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "$ref": "#/definitions/RolloutPreviewContent"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "page": {
+          "$ref": "#/definitions/RunRolloutPage"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "RolloutPreview",
+      "type": "object"
+    },
+    "RolloutPreviewContent": {
+      "additionalProperties": false,
+      "properties": {
+        "more": {
+          "type": "boolean"
+        },
+        "next_offset": {
+          "type": "integer"
+        },
+        "references": {
+          "items": {
+            "$ref": "#/definitions/RolloutPreviewReference"
+          },
+          "type": "array"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "next_offset",
+        "more"
+      ],
+      "title": "RolloutPreviewContent",
+      "type": "object"
+    },
+    "RolloutPreviewReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "missing": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "RolloutPreviewReference",
       "type": "object"
     },
     "RunExecutionPin": {
@@ -12278,6 +12353,9 @@
     },
     "ReviewIssueSourcesPayload": {
       "$ref": "#/definitions/ReviewIssueSourcesPayload"
+    },
+    "RolloutPreview": {
+      "$ref": "#/definitions/RolloutPreview"
     },
     "RunExecutionPin": {
       "$ref": "#/definitions/RunExecutionPin"

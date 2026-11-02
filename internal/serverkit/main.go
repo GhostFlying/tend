@@ -27,6 +27,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/harness/remote"
+	"github.com/GhostFlying/tend/internal/harness/rollout"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/mainthread"
@@ -218,6 +219,49 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			return err
 		}
 		opts = append(opts, app.WithHostedConfiguration(named))
+	}
+	if cfg.NativeWorkers != nil {
+		home := cfg.NativeWorkers.Home
+		if home == "" {
+			home = os.Getenv("TRAE_HOME")
+		}
+		if home == "" {
+			userHome, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			home = filepath.Join(userHome, ".trae", "cli")
+		}
+		home, err = cfgfile.Path(home)
+		if err != nil {
+			return err
+		}
+		roots := []string{filepath.Join(home, "sessions")}
+		reader := rollout.New(ids.New(protocol.PrefixRequest), roots...)
+		opts = append(opts, app.WithLocalRolloutPreview(func(ctx context.Context, run string, sources []protocol.RolloutPreviewSource, query protocol.RolloutPreviewQuery) protocol.RolloutPreview {
+			exact := map[string]bool{}
+			for _, source := range sources {
+				if source.TurnID != "" {
+					exact[source.SessionID] = true
+				}
+			}
+			selected := []protocol.RolloutPreviewSource{}
+			for _, source := range sources {
+				if source.TurnID == "" && exact[source.SessionID] {
+					continue
+				}
+				path, err := rollout.Locate(ctx, roots, source.SessionID)
+				if err != nil {
+					return protocol.RolloutPreview{State: "timeout"}
+				}
+				if path == "" {
+					return protocol.RolloutPreview{State: "source_unknown"}
+				}
+				source.Path = path
+				selected = append(selected, source)
+			}
+			return reader.Read(ctx, run, selected, query)
+		}))
 	}
 	a := app.New(s, ids, now, opts...)
 	if err := syncConfig(ctx, a, ids, cfg); err != nil {

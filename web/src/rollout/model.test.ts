@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { RunLogView, RunRolloutPage } from "../api/generated/api.ts";
-import { buildSteps, mergePage, statusLabel } from "./model.ts";
+import { buildSteps, fieldRecord, mergePage, statusLabel, stepForRecord } from "./model.ts";
 
 function record(
   seq: number,
@@ -226,4 +226,43 @@ test("server receipt timestamps never become execution durations", () => {
     buildSteps([start, record(2, "item.completed", "parent", "turn", { durationMs: 1234 })])[0]!
       .durationMs,
   ).toBe(1234);
+});
+
+test("merged native function calls fetch each field from its originating record", () => {
+  const call = record(1, "item.completed", "parent", "turn", {
+    type: "dynamicToolCall",
+    tool: "apply_patch",
+    command: null,
+    arguments: "*** Begin Patch",
+  });
+  const result = record(2, "item.completed", "parent", "turn", {
+    type: "dynamicToolCall",
+    command: null,
+    result: "ok",
+  });
+  const [step] = buildSteps([call, result]);
+  expect(step?.title).toBe("apply_patch");
+  expect(fieldRecord(step!, "input")).toBe(1);
+  expect(fieldRecord(step!, "output")).toBe(2);
+  expect(fieldRecord(step!, "raw")).toBe(2);
+});
+
+test("an indexed input remains addressable outside the visible output window", () => {
+  const [step] = buildSteps([
+    record(300, "item.completed", "parent", "turn", {
+      type: "dynamicToolCall",
+      command: null,
+      result: "complete",
+      preview_input_record: 1,
+    }),
+  ]);
+  expect(fieldRecord(step!, "input")).toBe(1);
+});
+test("a deep link to a completed frame finds its merged step", () => {
+  const steps = buildSteps([
+    record(17, "native.item_started"),
+    record(19, "item.completed", "parent", "turn", { aggregatedOutput: "done" }),
+  ]);
+  expect(stepForRecord(steps, "19")?.seq).toBe(17);
+  expect(stepForRecord(steps, "invalid")).toBeUndefined();
 });

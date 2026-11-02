@@ -7,6 +7,7 @@ const EventNativeIdentity = "worker.native_identity"
 // NativeIdentity contains recorded Orca navigation facts, never credentials,
 // private instructions or authority to control the provider session.
 type NativeIdentity struct {
+	TurnID                string `json:"turn_id,omitempty"`
 	Provider              string `json:"provider"`
 	ProviderID            string `json:"provider_id,omitempty"`
 	Terminal              string `json:"terminal,omitempty"`

@@ -60,6 +60,8 @@ type Repo struct {
 
 // Config configures the workspaces of one runner.
 type Config struct {
+	// ProtectPath rejects cleanup containing retained native rollout originals.
+	ProtectPath func(context.Context, string) error
 	// Home is TEND_HOME.
 	Home      string
 	ServerURL string
@@ -826,7 +828,13 @@ func (w *Workspaces) Finish(ctx context.Context, as protocol.Assignment) error {
 	if as.Role != protocol.RoleAccept {
 		return nil
 	}
-	if err := os.RemoveAll(filepath.Join(w.cfg.Home, "scratch", ".accept", as.RunID)); err != nil {
+	path := filepath.Join(w.cfg.Home, "scratch", ".accept", as.RunID)
+	if w.cfg.ProtectPath != nil {
+		if err := w.cfg.ProtectPath(ctx, path); err != nil {
+			return err
+		}
+	}
+	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("gitws: remove scratch: %w", err)
 	}
 	return nil

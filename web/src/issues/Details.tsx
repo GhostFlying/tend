@@ -290,7 +290,7 @@ export function IssueDetails({
                   {taskLook(task).label}
                 </small>
               </Button>
-              <TaskRunStatus id={task.task_id} />
+              <TaskRunStatus id={task.task_id} entryOnly />
             </div>
           ))}
         {!issue.tasks?.length && <p className={styles.muted}>暂无任务</p>}

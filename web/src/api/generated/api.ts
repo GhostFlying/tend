@@ -347,6 +347,7 @@ export interface TendAPI {
   RespondInteraction?: RespondInteraction;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
   ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
+  RolloutPreview?: RolloutPreview;
   RunExecutionPin?: RunExecutionPin;
   RunLogPage?: RunLogPage;
   RunMessagePage?: RunMessagePage;
@@ -3030,6 +3031,7 @@ export interface NativeIdentity {
   session_id?: string;
   state: string;
   terminal?: string;
+  turn_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3247,13 +3249,47 @@ export interface ReviewIssueSourcesPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunLogPage".
+ * via the `definition` "RolloutPreview".
  */
-export interface RunLogPage {
+export interface RolloutPreview {
+  content?: RolloutPreviewContent;
+  generation?: string;
+  origin?: string;
+  page?: RunRolloutPage;
+  state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RolloutPreviewContent".
+ */
+export interface RolloutPreviewContent {
+  more: boolean;
+  next_offset: number;
+  references?: RolloutPreviewReference[];
+  text: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RolloutPreviewReference".
+ */
+export interface RolloutPreviewReference {
+  id: number;
+  missing?: boolean;
+  name: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunRolloutPage".
+ */
+export interface RunRolloutPage {
+  after: number;
+  before: number;
   logs: RunLogView[] | null;
-  next: number;
+  more_after: boolean;
+  more_before: boolean;
   observed: RunObserved;
   run_id: string;
+  watermark: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3265,6 +3301,16 @@ export interface RunLogView {
   kind: string;
   native_id?: string;
   seq: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunLogPage".
+ */
+export interface RunLogPage {
+  logs: RunLogView[] | null;
+  next: number;
+  observed: RunObserved;
+  run_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3309,20 +3355,6 @@ export interface RunMessageHistory {
   created_at: number;
   reason?: string;
   status: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunRolloutPage".
- */
-export interface RunRolloutPage {
-  after: number;
-  before: number;
-  logs: RunLogView[] | null;
-  more_after: boolean;
-  more_before: boolean;
-  observed: RunObserved;
-  run_id: string;
-  watermark: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

@@ -30,6 +30,11 @@ func (w *Workspaces) Cleanup(ctx context.Context, p protocol.WorkspaceCleanup) e
 	if p.Path != home {
 		return errors.New("gitws: cleanup path does not match owned resource")
 	}
+	if w.cfg.ProtectPath != nil {
+		if err := w.cfg.ProtectPath(ctx, home); err != nil {
+			return err
+		}
+	}
 	unlock, err := w.lock(ctx, "ws:"+home)
 	if err != nil {
 		return err

@@ -329,6 +329,7 @@ func (t *thread) FindTurn(ctx context.Context, message, id string) (harness.Turn
 // Driver runs operations against the runner-local native process. The caller
 // journals request admission/results and serializes lifecycle operations.
 type Driver struct {
+	OnSource func(context.Context, protocol.RolloutPreviewSource) error
 	// LegacyRawUsage preserves the existing event path for servers without ledger capability.
 	LegacyRawUsage bool
 	OnUsageSource  func(context.Context, nativeusage.Source) error
@@ -418,6 +419,15 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 				if err := d.OnUsageSource(ctx, d.privateUsageSource(native.UsageSource(), cfg, r.ThreadID)); err != nil {
 					return nil, err
 				}
+			}
+		}
+		if d.OnSource != nil {
+			source := protocol.RolloutPreviewSource{SessionID: t.ID()}
+			if location, ok := t.(harness.ThreadLocation); ok {
+				source.Path = location.RolloutPath()
+			}
+			if err := d.OnSource(ctx, source); err != nil {
+				return nil, err
 			}
 		}
 		info := ThreadInfo{ID: t.ID()}

@@ -12,7 +12,7 @@ func TestTokenUsageAndRolloutReadsRequireOwnerAndValidateWindows(t *testing.T) {
 	owner := e.login(protocol.ScopeOwner)
 	agent := e.retiredAgentToken(clientID)
 	for _, token := range []string{"", agent} {
-		for _, path := range []string{"/api/v1/token-usage", "/api/v1/runs/missing/rollout"} {
+		for _, path := range []string{"/api/v1/token-usage", "/api/v1/runs/missing/rollout", "/api/v1/runs/missing/preview"} {
 			status := e.do("GET", path, token, nil, nil)
 			if status != 401 && status != 403 {
 				t.Fatalf("%s: %d", path, status)
@@ -53,5 +53,18 @@ func TestUsageIssueOrderingHonorsAPIAndCLIQuery(t *testing.T) {
 		if status != http.StatusOK || len(view.Issues) != 2 || view.Issues[0].ID != test.first || view.Totals.Total != 600 {
 			t.Fatal(test.query, status, view)
 		}
+	}
+}
+
+func TestRolloutPreviewRejectsPathsAndUnboundContentCursors(t *testing.T) {
+	e := newEnv(t)
+	token := e.login(protocol.ScopeOwner)
+	for _, query := range []string{"path=secret", "record=1", "offset=1", "reference=1", "field=raw", "after=-1", "before=1&after=2", "record=1&generation=g&field=path", "record=1&generation=g&offset=-1"} {
+		if status := e.do("GET", "/api/v1/runs/missing/preview?"+query, token, nil, nil); status != http.StatusBadRequest {
+			t.Fatal(query, status)
+		}
+	}
+	if status := e.do("GET", "/api/v1/runs/missing/preview", token, nil, nil); status != http.StatusNotFound {
+		t.Fatal(status)
 	}
 }
