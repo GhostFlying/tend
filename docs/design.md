@@ -596,3 +596,5 @@ owner API/CLI/Web 的 reopen 与 named main 的合法 owner 来源共用事务�
 D152 验收修正：GitHub 的 `baseRefOid` 仅为 PR base，不能当作当前目标 tip。观测独立读取 `baseRef.target.oid`；merged PR 按 merge 与 target 的不可变 SHA 查询 compare，只有 identical/ahead 且 merge-base 等于该 merge 才记录包含关系。确认候选和问题同时冻结 base 与 target；open 候选合入后仅允许当前目标恰为其 merge 的部署，merged 候选可确认包含该 merge 的当前目标。所有候选/领取/start 校验使用该独立身份，旧事实不得猜测。owner defer 始终保留 deferred 状态，prepare、validation 更新及 provider/baseline 失效不能清除；只有 owner 显式 resume 或当前合法 owner 来源可重新创建确认，原 defer 及更早的 owner 来源不得作为 resume。
 
 D152 执行合同修正：实际 `issues.create_task` 冻结的交付约束与 source guard 使用相同身份。provider_state=merged 时核验 merge_sha 是冻结 target_sha 的祖先并构建 target_sha；base_sha 保留历史 PR base 身份，不能构建为部署来源。open 候选实际合入后核对历史 base 不变、当前目标恰为本次 merge，构建该 merge_sha。最终 spec 由真实版本化答复与创建任务回归读取验证。owner 选择 defer 时可附说明文字，文字不取消延期语义；带说明的答复同样持久阻止 prepare 或观测刷新重新提问，只有合法当前 resume 来源可继续。
+
+D152 结清修正：merge-only 与部署结清共用当前 provider 的 base/target/merge 整合校验。结清还必须保有 executing 状态、原执行绑定的 duty 修订及仍有效的原版本化批准；独立 passed 仅证明冻结产物，不能覆盖后续 provider 回退、未整合、base 漂移或持久候选失效。失效后即使相同快照恢复也不复活旧批准，原 duty、执行与验收历史及 close blocker 继续保留，通过当前责任协调或合法 owner disposition 处理。

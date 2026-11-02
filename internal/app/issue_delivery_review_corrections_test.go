@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,6 +13,191 @@ import (
 	"github.com/GhostFlying/tend/internal/reviewwatch"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+func TestDeliveryMergeOnlyCompletionRequiresCurrentIntegratedCandidate(t *testing.T) {
+	for _, change := range []string{"valid", "target-rollback", "not-integrated", "base-drift", "advanced-target", "restored-snapshot", "running-base-drift"} {
+		t.Run(change, func(t *testing.T) {
+			h, i, source, c := deliveryFixture(t)
+			// Keep GitHub's historical PR base distinct from its merged target.
+			c.BaseSHA = "6683ad911185022de67e0ad6c070736afd1f1feb"
+			c.TargetSHA = c.BaseSHA
+			reportGitHubCandidate(t, h, i.IssueID, c, true)
+			d := prepareDeliveryForTest(t, h, i.IssueID, source, c)
+			answerDeliveryForTest(t, h, d, "approve", "")
+			op := createDeliveryExecutionForTest(t, h, i.IssueID, d)
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			var created taskResult
+			if err := json.Unmarshal(op.Result, &created); err != nil {
+				t.Fatal(err)
+			}
+			merged := c
+			merged.ProviderState = "merged"
+			merged.MergeSHA = "faa0888fce6975e19cba7fa853faec413de66181"
+			merged.TargetSHA = merged.MergeSHA
+			drift := merged
+			contains := true
+			switch change {
+			case "target-rollback", "restored-snapshot":
+				drift.TargetSHA, contains = c.BaseSHA, false
+			case "not-integrated":
+				contains = false
+			case "base-drift", "running-base-drift":
+				drift.BaseSHA = strings.Repeat("d", 40)
+			case "advanced-target":
+				drift.TargetSHA = strings.Repeat("e", 40)
+			}
+			// The running execution observes a valid merge before submitting its
+			// artifact; the independent acceptance remains about that artifact.
+			executeAcceptedDeliveryTaskForTest(t, h, created.TaskID, func() protocol.ArtifactPayload {
+				reportGitHubCandidate(t, h, i.IssueID, merged, true)
+				if change == "running-base-drift" {
+					reportGitHubCandidate(t, h, i.IssueID, drift, contains)
+				}
+				artifact := testArtifact(h.task(created.TaskID).WorkspaceName)
+				artifact.Report = &protocol.ResultReport{Body: "Verified merge of approved head; deployment was not authorized"}
+				return artifact
+			})
+			acceptedTask := h.task(created.TaskID)
+			if acceptedTask.Lifecycle != protocol.TaskCompleted || acceptedTask.CurrentArtifactID == "" {
+				t.Fatal(acceptedTask)
+			}
+			if change != "valid" && change != "running-base-drift" {
+				// Each helper call obtains a new generation/nonce and reports through
+				// the actual provider report admission, including unchanged head/merge.
+				reportGitHubCandidate(t, h, i.IssueID, drift, contains)
+				if change == "restored-snapshot" {
+					reportGitHubCandidate(t, h, i.IssueID, merged, true)
+				}
+			}
+			before := deliveryDutyForTest(t, h, i.IssueID, source)
+			acceptances, artifacts, runs := h.count("acceptances"), h.count("artifacts"), h.count("runs")
+			op = updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: source, Action: "complete", IssueControlPayload: protocol.IssueControlPayload{Reason: "Check current merge-only delivery endpoint after independent acceptance"}})
+			if change == "valid" {
+				if op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+				settled := deliveryDutyForTest(t, h, i.IssueID, source)
+				if settled.Status != "complete" || len(settled.Evidence) != 2 || settled.Evidence[1].Observation == nil || !settled.Evidence[1].Observation.TargetContainsMerge || settled.Evidence[1].Observation.BaseSHA != c.BaseSHA {
+					t.Fatal(settled)
+				}
+			} else {
+				if before.Status != "preparing" || before.Revision <= d.Revision || before.ExecutionTaskID != created.TaskID {
+					t.Fatal("fresh report did not retain the expired duty", before)
+				}
+				expectWorkCode(t, op, protocol.CodeStaleRevision)
+				if got := deliveryDutyForTest(t, h, i.IssueID, source); !reflect.DeepEqual(got, before) {
+					t.Fatal("rejected completion changed the original duty", before, got)
+				}
+				current := canonicalTaskIssue(t, h, i.IssueID)
+				expectWorkCode(t, canonicalLifecycleControl(t, h, current, "close", canonicalLifecycleClosure(current, protocol.WorkItemClosureCompleted)), protocol.CodeInvalidTransition)
+			}
+			current := canonicalTaskIssue(t, h, i.IssueID)
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				facts, err := canonicalOwnerEndpointFacts(t.Context(), tx.Q(), current)
+				if err != nil {
+					return err
+				}
+				blocked := slices.ContainsFunc(facts.OpenAttention, func(b protocol.IssueBlocker) bool { return b.Code == "delivery_responsibility" && b.ObjectID == source })
+				if blocked != (change != "valid") {
+					t.Fatal("wrong durable close blocker", facts.OpenAttention)
+				}
+				passed, err := store.ListAcceptances(t.Context(), tx.Q(), created.TaskID, acceptedTask.CurrentArtifactID)
+				if err == nil && !slices.ContainsFunc(passed, func(a store.AcceptanceRow) bool {
+					return a.SpecVersion == acceptedTask.SpecVersion && a.Verdict == protocol.VerdictPassed
+				}) {
+					t.Fatal("lost independent acceptance", passed)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if h.task(created.TaskID).CurrentArtifactID != acceptedTask.CurrentArtifactID || h.task(source).Lifecycle != protocol.TaskCompleted || h.count("acceptances") != acceptances || h.count("artifacts") != artifacts || h.count("runs") != runs || h.count("issue_delivery_executions") != 1 || h.count("issue_delivery_duties") != 1 {
+				t.Fatal("completion rewrote or revived delivery history")
+			}
+			if change == "restored-snapshot" {
+				// Current explicit owner disposition is supported; old approval and
+				// acceptance could not substitute for it after provider invalidation.
+				endDeliveryForTest(t, h, i.IssueID, source)
+				ended := deliveryDutyForTest(t, h, i.IssueID, source)
+				if ended.Status != "ended" || ended.EventID != before.EventID || ended.AcceptanceID != before.AcceptanceID || ended.ExecutionTaskID != created.TaskID || ended.Evidence[0].Kind != protocol.WorkItemEvidenceOwnerDecision {
+					t.Fatal(ended)
+				}
+			}
+		})
+	}
+}
+
+func TestDeliveryMergeOnlyCompletionRechecksPersistedFactsAndAuthorization(t *testing.T) {
+	for _, change := range []string{"base", "target", "lineage", "revision", "owner-source"} {
+		t.Run(change, func(t *testing.T) {
+			h, i, source, c := deliveryFixture(t)
+			d := prepareDeliveryForTest(t, h, i.IssueID, source, c)
+			answerDeliveryForTest(t, h, d, "approve", "")
+			op := createDeliveryExecutionForTest(t, h, i.IssueID, d)
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			var created taskResult
+			if err := json.Unmarshal(op.Result, &created); err != nil {
+				t.Fatal(err)
+			}
+			acceptDeliveryTaskForTest(t, h, created.TaskID)
+			// Historical persisted rows may predate candidate invalidation. A current
+			// executing status alone is insufficient proof of integration or approval.
+			c.TargetSHA = strings.Repeat("c", 40)
+			observeDeliveryForTest(t, h, i.IssueID, c, "merged", c.TargetSHA)
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				switch change {
+				case "revision":
+					duty, err := store.GetIssueDeliveryDuty(t.Context(), tx.Q(), i.IssueID, source)
+					if err != nil {
+						return err
+					}
+					duty.Revision++
+					return tx.PutIssueDeliveryDuty(t.Context(), i.IssueID, duty)
+				case "owner-source":
+					_, err := tx.Exec(t.Context(), `UPDATE conversation_message_controls SET withdrawn_at=1 WHERE message_id IN (SELECT message_id FROM issue_delivery_answers)`)
+					return err
+				}
+				row, err := store.GetDeliveryObservation(t.Context(), tx.Q(), i.IssueID, c.DeliveryID)
+				if err != nil {
+					return err
+				}
+				switch change {
+				case "base":
+					row.Observation.BaseSHA = strings.Repeat("d", 40)
+				case "target":
+					row.Observation.TargetSHA = c.BaseSHA
+				case "lineage":
+					row.Observation.TargetContainsMerge = false
+				}
+				return tx.PutDeliveryObservation(t.Context(), row)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before := deliveryDutyForTest(t, h, i.IssueID, source)
+			current := canonicalTaskIssue(t, h, i.IssueID)
+			p := protocol.UpdateIssueDeliveryPayload{TaskID: source, Action: "complete", IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, Reason: "Verify the current persisted endpoint, not a historical artifact"}}
+			op, err := h.app.Execute(t.Context(), owner, h.env("issues.update_delivery", protocol.Target{Type: "issue", ID: i.IssueID}, p, rev(current.Revision)), UpdateIssueDelivery{})
+			want := protocol.CodeStaleRevision
+			if change == "owner-source" {
+				want = protocol.CodeForbidden
+			}
+			if err != nil {
+				if protocol.CodeOf(err) != want {
+					t.Fatal(err)
+				}
+			} else {
+				expectWorkCode(t, op, want)
+			}
+			if got := deliveryDutyForTest(t, h, i.IssueID, source); !reflect.DeepEqual(got, before) {
+				t.Fatal("completion erased an unsettled historical duty", got)
+			}
+		})
+	}
+}
 
 // Exercise provider parsing and the normal nonce/generation report admission.
 func reportGitHubCandidate(t *testing.T, h *harness, issue string, c protocol.IssueDeliveryCandidate, ancestor bool) {
