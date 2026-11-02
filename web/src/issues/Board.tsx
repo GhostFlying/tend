@@ -578,18 +578,6 @@ const BoardCard = memo(function BoardCard({
       <Button variant="ghost" className={styles.cardTitle} onClick={() => onSelect(item.issue_id)}>
         {item.title}
       </Button>
-      {!!b?.stages_total && (
-        <p className={styles.stage}>
-          {b.stage_title || "阶段计划"} · {b.stages_done}/{b.stages_total} 已完成
-        </p>
-      )}
-      {!!b?.stages_total && (
-        <div className={styles.progress} aria-label={`阶段完成 ${b.stages_done}/${b.stages_total}`}>
-          {Array.from({ length: b.stages_total }, (_, index) => (
-            <span key={index} data-complete={index < b.stages_done} />
-          ))}
-        </div>
-      )}
       <div className={styles.cardFooter}>
         <span className={styles.assignee}>
           <span className={styles.avatar} aria-hidden>

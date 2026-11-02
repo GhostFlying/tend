@@ -161,29 +161,6 @@
   line-height: 22px;
   overflow-wrap: anywhere;
 }
-.stage {
-  margin: 0 0 var(--space-2);
-  color: var(--label-3);
-  font-size: var(--text-caption);
-  line-height: 19px;
-}
-.progress {
-  display: flex;
-  gap: 3px;
-  height: 4px;
-  overflow: hidden;
-  margin-bottom: var(--space-3);
-  border-radius: var(--radius-xs);
-}
-.progress span {
-  flex: 1;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--bg-l2);
-}
-.progress span[data-complete="true"] {
-  background: var(--ok);
-}
 .cardFooter {
   display: flex;
   align-items: center;
