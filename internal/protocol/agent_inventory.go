@@ -146,7 +146,7 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 		if r.Kind == "central-traex-worker" && (p.FormatVersion != 2 || r.CLI != "traex") {
 			return bad()
 		}
-		if (r.Kind == "orca-worker" && r.CLI != "codex" && r.CLI != "traex") || (r.Kind != "orca-worker" && r.Kind != "central-traex-worker" && r.CLI != "" && !(p.FormatVersion == 2 && r.Kind == "appserver-worker" && (r.CLI == "codex" || r.CLI == "traex"))) {
+		if (r.Kind == "orca-worker" && r.CLI != "codex" && r.CLI != "traex") || (r.Kind != "orca-worker" && r.Kind != "central-traex-worker" && r.CLI != "" && !(p.FormatVersion == 2 && (r.CLI == "codex" || r.CLI == "traex"))) {
 			return bad()
 		}
 		if p.FormatVersion == 2 && r.Kind == "appserver-worker" && slices.Contains(r.DeclaredPurposes, "issue_manager") && r.CLI == "" {

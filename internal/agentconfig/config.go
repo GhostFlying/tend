@@ -149,7 +149,7 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 				return nil, invalid("unsupported_cli", path+".cli")
 			}
 		case AppServerWorker, HostedManager:
-			if r.CLI != "" && !(cfg.FormatVersion == 2 && r.Kind == AppServerWorker && (r.CLI == "codex" || r.CLI == "traex")) {
+			if r.CLI != "" && !(cfg.FormatVersion == 2 && (r.CLI == "codex" || r.CLI == "traex")) {
 				return nil, invalid("unsupported_cli", path+".cli")
 			}
 		default:

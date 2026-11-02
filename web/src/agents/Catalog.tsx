@@ -1,58 +1,40 @@
-import { Fragment, useEffect } from "react";
-import type {
-  AgentCategory,
-  AgentInventoryDefinition,
-  AgentInventoryProjection,
-  AgentInventoryRuntime,
-  RunnerAgentCatalog,
-  RetainedAgentDefinition,
-} from "../api/generated/api.ts";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { AgentCategory } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { navigate, useRoute, type AgentFilters } from "../app/router.ts";
 import { useStore } from "../state/store.ts";
 import { Button, Input, Select, EmptyState } from "../ui/index.ts";
-import { runtimeLabel } from "./runtimeLabel.ts";
+import { Back, Chevron } from "../shell/icons.tsx";
+import { PageHeader } from "../shell/PageHeader.tsx";
 import { StatusDot } from "../shell/StatusDot.tsx";
-import { agentKey, currentObservation } from "./facts.ts";
+import { agentKey } from "./facts.ts";
+import {
+  directoryEntry,
+  entryKey,
+  observation,
+  purposeLabel,
+  type Entry,
+  type Group,
+} from "./entries.ts";
+import { cliLabel, runtimeLabel, runtimeMethod } from "./runtimeLabel.ts";
+import { AgentDetails } from "./Details.tsx";
 import styles from "./Directory.module.css";
 
-type Group = {
-  id: string;
-  projection: AgentInventoryProjection;
-  catalog?: RunnerAgentCatalog | undefined;
-};
-type Entry = {
-  group: Group;
-  agent: AgentInventoryDefinition;
-  runtime: AgentInventoryRuntime | undefined;
-  history?: RetainedAgentDefinition | undefined;
-};
-
-function entryKey(entry: Entry): string {
-  const pin = entry.history?.pin;
-  return pin
-    ? `${agentKey(entry.agent)}@${pin.snapshot_id}:${pin.public_sha256}`
-    : agentKey(entry.agent);
-}
-
-function directoryEntry(
-  group: Group,
-  agent: AgentInventoryDefinition,
-  history?: RetainedAgentDefinition,
-): Entry {
-  return {
-    group,
-    agent,
-    history,
-    runtime: (history?.runtimes ?? group.projection.runtimes ?? []).find(
-      (runtime) =>
-        runtime.runtime_id === agent.runtime_binding_ref.runtime_id &&
-        runtime.revision === agent.runtime_binding_ref.revision,
-    ),
-  };
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <path d="M20 5v6h-6M4 19v-6h6" />
+      <path d="M19.3 10a7.5 7.5 0 0 0-12.7-4L4 9m16 6-2.6 3A7.5 7.5 0 0 1 4.7 14" />
+    </svg>
+  );
 }
 
 export function AgentCatalogView() {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const root = useRef<HTMLElement>(null);
+  const listPosition = useRef(0);
+  const returnRow = useRef<HTMLButtonElement | null>(null);
+  const wasStandaloneDetail = useRef(false);
   const { live } = useServices();
   const route = useRoute();
   const filters: AgentFilters = route.page === "agents" ? route : {};
@@ -72,12 +54,16 @@ export function AgentCatalogView() {
     navigate({ page: "agents", ...filters, ...patch }, { replace: true });
   const groups: Group[] = [];
   if (hosted.value?.state !== "unconfigured" && hosted.value?.projection)
-    groups.push({ id: "托管环境", projection: hosted.value.projection });
+    groups.push({
+      id: "服务端",
+      projection: hosted.value.projection,
+      configurationRevision: hosted.value.configuration_revision,
+    });
   for (const id of hostIDs.split("\n").filter(Boolean)) {
     const c = catalogs.get(id)?.value;
     if (c?.projection) groups.push({ id, projection: c.projection, catalog: c });
   }
-  const entries: Entry[] = groups.flatMap((group) => [
+  const entries = groups.flatMap((group) => [
     ...(group.projection.agents ?? []).map((agent) => directoryEntry(group, agent)),
     ...(group.catalog?.retained_definitions ?? [])
       .filter(
@@ -85,26 +71,36 @@ export function AgentCatalogView() {
           !(
             history.pin.snapshot_id === group.catalog?.current?.snapshot_id &&
             history.pin.public_sha256 === group.catalog?.current?.public_sha256 &&
-            group.projection.agents?.some(
-              (current) => agentKey(current) === agentKey(history.definition),
-            )
+            group.projection.agents?.some((a) => agentKey(a) === agentKey(history.definition))
           ),
       )
       .map((history) => directoryEntry(group, history.definition, history)),
   ]);
+  // Hosted roles have a useful reading order independent of their stable slugs.
+  const roleOrder = (entry: Entry) =>
+    entry.agent.purposes?.includes("main")
+      ? 0
+      : entry.agent.purposes?.includes("issue_manager")
+        ? 1
+        : 2;
+  const current = entries
+    .filter((e) => !e.history)
+    .sort((a, b) => (a.group === b.group && !a.group.catalog ? roleOrder(a) - roleOrder(b) : 0));
   const query = (filters.search ?? "").trim().toLocaleLowerCase();
-  const visible = entries.filter(
-    ({ agent, runtime, group }) =>
-      (!query ||
-        `${agent.display_name} ${agent.identity.local_id} ${group.id}`
-          .toLocaleLowerCase()
-          .includes(query)) &&
-      (!filters.category || agent.categories?.includes(filters.category)) &&
-      (!filters.environment || runtimeLabel(runtime) === filters.environment),
-  );
+  const matches = ({ agent, runtime, group }: Entry) =>
+    (!query ||
+      `${agent.display_name} ${agent.identity.local_id} ${group.id}`
+        .toLocaleLowerCase()
+        .includes(query)) &&
+    (!filters.category || agent.categories?.includes(filters.category)) &&
+    (!filters.location || group.projection.execution_environment_id === filters.location) &&
+    (!filters.environment || runtimeLabel(runtime) === filters.environment);
+  const visible = current.filter(matches);
+  const historical = entries.filter((e) => e.history && matches(e));
+  const selectable = [...visible, ...historical];
   const selected =
-    visible.find((e) => entryKey(e) === filters.selected) ??
-    visible
+    selectable.find((e) => entryKey(e) === filters.selected) ??
+    selectable
       .filter((e) => agentKey(e.agent) === filters.selected)
       .sort(
         (a, b) =>
@@ -112,260 +108,376 @@ export function AgentCatalogView() {
       )[0];
   const allCategories = categories.value?.items ?? [];
   const environments = [...new Set(entries.map((e) => runtimeLabel(e.runtime)))].sort();
+  const methods = environments.map((value) => {
+    const runtime = entries.find((entry) => runtimeLabel(entry.runtime) === value)?.runtime;
+    return {
+      value,
+      title: runtimeMethod(runtime),
+      scope: runtime?.kind === "hosted-manager" ? "服务端" : "主机",
+    };
+  });
   const errors = hosted.error || categories.error || [...catalogs.values()].some((c) => c.error);
   const title = (id: string) => allCategories.find((c) => c.category_id === id)?.title || id;
-  const pick = (entry: Entry) => update({ selected: selected === entry ? "" : entryKey(entry) });
-  return (
-    <section className={styles.root}>
-      <div
-        className={styles.tabs}
-        role="tablist"
-        aria-label="目录内容"
-        onKeyDown={(event) => {
-          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-          event.preventDefault();
-          const categories = event.key === "End" || (event.key !== "Home" && !filters.tab);
-          update({ tab: categories ? "categories" : undefined, search: "" });
-          const tabs = event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-          tabs.item(categories ? 1 : 0)?.focus();
-        }}
-      >
-        <Button
-          variant="ghost"
-          role="tab"
-          aria-selected={!filters.tab}
-          tabIndex={filters.tab ? -1 : 0}
-          onClick={() => update({ tab: undefined, search: "" })}
+  const detailKey = !filters.tab && selected ? entryKey(selected) : "";
+  useLayoutEffect(() => {
+    const scroller = root.current?.closest<HTMLElement>('[aria-label="Agents"]');
+    if (!scroller || !window.matchMedia("(max-width: 1399px)").matches) return;
+    if (detailKey) {
+      scroller.scrollTop = 0;
+      root.current
+        ?.querySelector<HTMLElement>(`.${styles.mobileDetails} h2`)
+        ?.focus({ preventScroll: true });
+    } else if (wasStandaloneDetail.current) {
+      scroller.scrollTop = listPosition.current;
+      returnRow.current?.focus({ preventScroll: true });
+    }
+    wasStandaloneDetail.current = !!detailKey;
+  }, [detailKey]);
+  const pick = (entry: Entry, button: HTMLButtonElement) => {
+    listPosition.current =
+      root.current?.closest<HTMLElement>('[aria-label="Agents"]')?.scrollTop ?? 0;
+    returnRow.current = button;
+    update({ selected: selected === entry ? "" : entryKey(entry) });
+  };
+  const refresh = (
+    <Button variant="ghost" icon aria-label="重新读取" onClick={() => live.agents.refresh()}>
+      <RefreshIcon />
+    </Button>
+  );
+  const toolbar = (
+    <div className={styles.toolbar}>
+      <label className={styles.search}>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          aria-hidden="true"
         >
-          Agents
-        </Button>
-        <Button
-          variant="ghost"
-          role="tab"
-          aria-selected={filters.tab === "categories"}
-          tabIndex={filters.tab === "categories" ? 0 : -1}
-          onClick={() => update({ tab: "categories", search: "" })}
-        >
-          Categories
-        </Button>
-      </div>
-      <div className={styles.toolbar}>
+          <circle cx="10.5" cy="10.5" r="6.5" />
+          <path d="m16 16 4 4" />
+        </svg>
         <Input
-          aria-label={filters.tab ? "搜索类别" : "搜索名称或 slug"}
-          placeholder={filters.tab ? "搜索类别" : "搜索名称或 slug"}
+          aria-label={filters.tab ? "搜索类别" : "搜索名称或 ID"}
+          placeholder={filters.tab ? "搜索类别" : "搜索名称或 ID"}
           value={filters.search ?? ""}
           onChange={(e) => update({ search: e.target.value })}
         />
-        {!filters.tab && (
-          <>
-            <Select
-              aria-label="类别筛选"
-              value={filters.category ?? ""}
-              onChange={(e) => update({ category: e.target.value })}
-            >
-              <option value="">全部类别</option>
-              {allCategories.map((c) => (
-                <option key={c.category_id} value={c.category_id}>
-                  {c.title}
+      </label>
+      {!filters.tab && (
+        <>
+          <Select
+            aria-label="类别筛选"
+            value={filters.category ?? ""}
+            onChange={(e) => update({ category: e.target.value })}
+          >
+            <option value="">全部类别</option>
+            {allCategories.map((c) => (
+              <option key={c.category_id} value={c.category_id}>
+                {c.title}
+              </option>
+            ))}
+          </Select>
+          <Select
+            aria-label="运行位置或方式筛选"
+            value={
+              filters.environment
+                ? `method:${filters.environment}`
+                : filters.location
+                  ? `location:${filters.location}`
+                  : ""
+            }
+            onChange={(e) => {
+              const value = e.target.value;
+              update({
+                location: value.startsWith("location:") ? value.slice(9) : "",
+                environment: value.startsWith("method:") ? value.slice(7) : "",
+              });
+            }}
+          >
+            <option value="">全部位置</option>
+            <optgroup label="运行位置">
+              {groups.map((g) => (
+                <option
+                  key={g.projection.execution_environment_id}
+                  value={`location:${g.projection.execution_environment_id}`}
+                >
+                  {g.id}
                 </option>
               ))}
-            </Select>
-            <Select
-              aria-label="运行环境筛选"
-              value={filters.environment ?? ""}
-              onChange={(e) => update({ environment: e.target.value })}
-            >
-              <option value="">全部运行环境</option>
-              {environments.map((e) => (
-                <option key={e}>{e}</option>
+            </optgroup>
+            <optgroup label="运行方式">
+              {methods.map((method) => (
+                <option key={method.value} value={`method:${method.value}`}>
+                  {method.title}
+                  {methods.some(
+                    (other) => other.value !== method.value && other.title === method.title,
+                  )
+                    ? `（${method.scope}）`
+                    : ""}
+                </option>
               ))}
-            </Select>
-          </>
+            </optgroup>
+          </Select>
+        </>
+      )}
+      <span className={styles.toolbarRefresh}>{refresh}</span>
+    </div>
+  );
+  return (
+    <>
+      <PageHeader
+        className={styles.pageHeader}
+        title="Agents"
+        actions={<span className={styles.headerRefresh}>{refresh}</span>}
+      />
+      <section
+        ref={root}
+        className={`${styles.root} ${selected && !filters.tab ? styles.hasSelection : ""}`}
+      >
+        {hosted.value?.state === "unconfigured" && (
+          <p className={styles.muted}>尚未配置服务端 Agent</p>
         )}
-        <Button variant="secondary" onClick={() => live.agents.refresh()}>
-          重新读取
-        </Button>
-      </div>
-      {hosted.value?.state === "unconfigured" && <p className={styles.muted}>尚未配置托管 Agent</p>}
-      {errors && (
-        <p role="status" className={styles.warning}>
-          部分目录暂时无法读取，保留上次结果。
-        </p>
-      )}
-      {filters.tab === "categories" ? (
-        <div className={styles.categoryList}>
-          <div className={styles.categoryHead}>
-            <span>类别</span>
-            <span>说明</span>
-            <span>状态</span>
-            <span>已登记 Agent</span>
-          </div>
-          {allCategories
-            .filter(
-              (c) =>
-                !query ||
-                `${c.title} ${c.category_id} ${c.description}`.toLocaleLowerCase().includes(query),
-            )
-            .map((c) => (
-              <CategoryRow
-                key={c.category_id}
-                category={c}
-                entries={entries.filter((e) =>
-                  e.group.projection.agents?.some((a) => agentKey(a) === agentKey(e.agent)),
-                )}
-                onSelect={(entry) =>
-                  update({
-                    tab: undefined,
-                    search: "",
-                    category: c.category_id,
-                    environment: "",
-                    selected: entryKey(entry),
-                  })
-                }
-              />
-            ))}
-          {!allCategories.length && (
-            <EmptyState>{categories.loading ? "正在读取类别…" : "暂无类别。"}</EmptyState>
-          )}
-          {categories.value?.more && (
+        {errors && (
+          <p role="status" className={styles.warning}>
+            部分目录暂时无法读取，保留上次结果。
+          </p>
+        )}
+        <div className={styles.catalogContent}>
+          <div
+            className={styles.tabs}
+            role="tablist"
+            aria-label="目录内容"
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const categories = event.key === "End" || (event.key !== "Home" && !filters.tab);
+              update({ tab: categories ? "categories" : undefined, search: "" });
+              event.currentTarget
+                .querySelectorAll<HTMLButtonElement>('[role="tab"]')
+                .item(categories ? 1 : 0)
+                ?.focus();
+            }}
+          >
             <Button
-              disabled={categories.loading}
-              onClick={() => void live.agents.openCategories("all", categories.value?.next)}
+              variant="ghost"
+              role="tab"
+              aria-selected={!filters.tab}
+              tabIndex={filters.tab ? -1 : 0}
+              onClick={() => update({ tab: undefined, search: "" })}
             >
-              加载更多类别
+              Agents
             </Button>
-          )}
-        </div>
-      ) : (
-        <div className={`${styles.layout} ${selected ? styles.withDetails : ""}`}>
-          <div className={styles.list}>
-            {groups.map((group) => {
-              const rows = visible.filter((e) => e.group.id === group.id);
-              if (!rows.length && (query || filters.category || filters.environment)) return null;
-              const environments = [...new Set(rows.map((e) => runtimeLabel(e.runtime)))].sort();
-              return (
-                <section key={group.id} className={styles.group} aria-label={group.id}>
-                  <h2>
-                    {group.id}
-                    <span className={styles.presence}>
-                      {group.catalog && <StatusDot tone={group.catalog.online ? "ok" : "idle"} />}
-                      {group.catalog
-                        ? group.catalog.online
-                          ? "在线"
-                          : "离线 · 上次观察"
-                        : "托管定义"}
-                    </span>
-                  </h2>
-                  <div className={styles.head}>
-                    <span>名称</span>
-                    <span>类别</span>
-                    <span>执行配置</span>
-                    <span>最近上报</span>
-                  </div>
-                  {environments.map((environment) => (
-                    <Fragment key={environment}>
-                      <div className={styles.environment}>{environment}</div>
-                      {rows
-                        .filter((e) => runtimeLabel(e.runtime) === environment)
-                        .map((entry) => {
-                          const { agent } = entry;
-                          const worker = entry.history
-                            ? undefined
-                            : currentObservation(group.catalog, agent, "");
-                          const manager = entry.history
-                            ? undefined
-                            : currentObservation(group.catalog, agent, "issue_manager");
-                          const observation = worker ?? manager;
-                          const retainedOnly = !!entry.history;
-                          const selectedRow = selected === entry;
-                          return (
-                            <Fragment key={entryKey(entry)}>
-                              <Button
-                                variant="ghost"
-                                className={`${styles.row} ${selectedRow ? styles.selected : ""}`}
-                                aria-expanded={selectedRow}
-                                onClick={() => pick(entry)}
-                              >
-                                <span className={styles.identity}>
-                                  <strong>{agent.display_name}</strong>
-                                  <small>
-                                    {agent.identity.local_id}
-                                    {entry.history &&
-                                      ` · v${agent.revision} · r${entry.history.pin.inventory_revision}`}
-                                  </small>
-                                </span>
-                                <span>{agent.categories?.map(title).join("、")}</span>
-                                <span>
-                                  {environment} · {agent.requested_model} ·{" "}
-                                  {agent.requested_effort || "默认"}
-                                </span>
-                                <span
-                                  className={
-                                    observation?.available && group.catalog?.online
-                                      ? styles.available
-                                      : styles.muted
-                                  }
-                                >
-                                  {retainedOnly
-                                    ? "仅续接旧责任"
-                                    : !agent.enabled
-                                      ? "已停用"
-                                      : group.catalog && !group.catalog.online
-                                        ? "离线"
-                                        : observation
-                                          ? observation.available
-                                            ? "最近上报可用"
-                                            : "最近上报不可用"
-                                          : "等待本版观测"}
-                                </span>
-                              </Button>
-                              {selectedRow && (
-                                <div className={styles.inlineDetails}>
-                                  <CompactDetails entry={entry} />
-                                </div>
-                              )}
-                            </Fragment>
-                          );
-                        })}
-                    </Fragment>
-                  ))}
-                  {!rows.length && <EmptyState>此环境暂无 Agent 定义。</EmptyState>}
-                </section>
-              );
-            })}
-            {hostIDs
-              .split("\n")
-              .filter((id) => id && !catalogs.get(id)?.value?.projection)
-              .map((id) => (
-                <div key={id} className={styles.emptyHost}>
-                  <strong>{id}</strong>
-                  <p>
-                    {catalogs.get(id)?.error
-                      ? "暂时无法读取登记。"
-                      : catalogs.get(id)?.value
-                        ? "此主机尚未登记 Agent。"
-                        : "正在读取…"}
-                  </p>
-                </div>
-              ))}
-            {!entries.length && !hosted.loading && snapshot && !hostIDs && (
-              <EmptyState>暂无已登记的 Agent。</EmptyState>
-            )}
-            {!!entries.length && !visible.length && (
-              <EmptyState>没有符合筛选条件的 Agent。</EmptyState>
-            )}
+            <Button
+              variant="ghost"
+              role="tab"
+              aria-selected={filters.tab === "categories"}
+              tabIndex={filters.tab === "categories" ? 0 : -1}
+              onClick={() => update({ tab: "categories", search: "" })}
+            >
+              Categories
+            </Button>
           </div>
-          {selected && (
-            <aside className={styles.inspector} aria-label={`${selected.agent.display_name} 详情`}>
-              <AgentDetails entry={selected} />
-            </aside>
+          {filters.tab === "categories" ? (
+            <>
+              {toolbar}
+              <div className={styles.categoryList}>
+                <div className={styles.categoryHead}>
+                  <span>类别</span>
+                  <span>说明</span>
+                  <span>状态</span>
+                  <span>已登记 Agent</span>
+                </div>
+                {allCategories
+                  .filter(
+                    (c) =>
+                      !query ||
+                      `${c.title} ${c.category_id} ${c.description}`
+                        .toLocaleLowerCase()
+                        .includes(query),
+                  )
+                  .map((c) => (
+                    <CategoryRow
+                      key={c.category_id}
+                      category={c}
+                      entries={current}
+                      onSelect={(entry) =>
+                        update({
+                          tab: undefined,
+                          search: "",
+                          category: c.category_id,
+                          environment: "",
+                          location: "",
+                          selected: entryKey(entry),
+                        })
+                      }
+                    />
+                  ))}
+                {!allCategories.length && (
+                  <EmptyState>{categories.loading ? "正在读取类别…" : "暂无类别。"}</EmptyState>
+                )}
+                {categories.value?.more && (
+                  <Button
+                    disabled={categories.loading}
+                    onClick={() => void live.agents.openCategories("all", categories.value?.next)}
+                  >
+                    加载更多类别
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className={`${styles.layout} ${selected ? styles.withDetails : ""}`}>
+              <div className={styles.list}>
+                {toolbar}
+                <div className={styles.head}>
+                  <span>Agent</span>
+                  <span>类别</span>
+                  <span>运行位置</span>
+                  <span>运行方式</span>
+                  <span>模型 / 推理</span>
+                  <span>观测</span>
+                </div>
+                {visible.map((entry) => (
+                  <AgentRow
+                    key={entryKey(entry)}
+                    entry={entry}
+                    selected={selected === entry}
+                    title={title}
+                    onPick={(button) => pick(entry, button)}
+                  />
+                ))}
+                {!!historical.length && (
+                  <details
+                    className={styles.history}
+                    open={historyOpen || !!selected?.history}
+                    onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+                  >
+                    <summary>历史定义（{historical.length}）</summary>
+                    {historical.map((entry) => (
+                      <AgentRow
+                        key={entryKey(entry)}
+                        entry={entry}
+                        selected={selected === entry}
+                        title={title}
+                        onPick={(button) => pick(entry, button)}
+                      />
+                    ))}
+                  </details>
+                )}
+                {hostIDs
+                  .split("\n")
+                  .filter((id) => id && !catalogs.get(id)?.value?.projection)
+                  .map((id) => (
+                    <div key={id} className={styles.emptyHost}>
+                      <strong>{id}</strong>
+                      <p>
+                        {catalogs.get(id)?.error
+                          ? "暂时无法读取登记。"
+                          : catalogs.get(id)?.value
+                            ? "此主机尚未登记 Agent。"
+                            : "正在读取…"}
+                      </p>
+                    </div>
+                  ))}
+                {!entries.length && (
+                  <EmptyState>
+                    {hosted.loading || !snapshot ? "正在读取 Agent…" : "暂无已登记的 Agent。"}
+                  </EmptyState>
+                )}
+                {!!entries.length && !selectable.length && (
+                  <EmptyState>没有符合筛选条件的 Agent。</EmptyState>
+                )}
+              </div>
+              {selected && (
+                <aside
+                  className={styles.inspector}
+                  aria-label={`${selected.agent.display_name} 详情`}
+                >
+                  <AgentDetails
+                    key={entryKey(selected)}
+                    entry={selected}
+                    categories={allCategories}
+                  />
+                </aside>
+              )}
+            </div>
           )}
+          <p className={styles.footer}>
+            定义由对应环境维护，此页只读。类别用于选择，不授予执行或验收权限。
+          </p>
         </div>
-      )}
-      <p className={styles.footer}>
-        定义由对应环境维护，此页只读。类别用于选择，不授予执行或验收权限。
-      </p>
-    </section>
+        {selected && !filters.tab && (
+          <div className={styles.mobileDetails}>
+            <Button
+              variant="ghost"
+              className={styles.back}
+              onClick={() => update({ selected: "" })}
+            >
+              <Back />
+              返回列表
+            </Button>
+            <AgentDetails key={entryKey(selected)} entry={selected} categories={allCategories} />
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function AgentRow({
+  entry,
+  selected,
+  title,
+  onPick,
+}: {
+  entry: Entry;
+  selected: boolean;
+  title(id: string): string;
+  onPick(button: HTMLButtonElement): void;
+}) {
+  const { agent, group, runtime } = entry;
+  const state = observation(entry);
+  const purpose = !group.catalog ? agent.purposes?.map(purposeLabel).join("、") : "";
+  const category = agent.categories?.map(title).join("、");
+  const status = (
+    <span className={styles.presence}>
+      {state.available && <StatusDot tone="ok" />}
+      {state.label}
+    </span>
+  );
+  return (
+    <Button
+      variant="ghost"
+      className={`${styles.row} ${selected ? styles.selected : ""}`}
+      aria-expanded={selected}
+      onClick={(event) => onPick(event.currentTarget)}
+    >
+      <span className={styles.identity}>
+        <strong>{agent.display_name}</strong>
+        <small>
+          {purpose && `${purpose} · `}
+          {agent.identity.local_id}
+          {entry.history && ` · v${agent.revision} · r${entry.history.pin.inventory_revision}`}
+        </small>
+      </span>
+      <span className={styles.category}>{category}</span>
+      <span className={styles.location}>{group.id}</span>
+      <span className={styles.method}>{runtimeMethod(runtime)}</span>
+      <span className={styles.model}>
+        {agent.requested_model} · {agent.requested_effort || "默认"}
+      </span>
+      <span className={styles.status}>{status}</span>
+      <span className={styles.mobileInfo}>
+        {purpose ? `${purpose} · ${category}` : `${category} · ${group.id}`}
+        <small>
+          {purpose
+            ? `${group.id} · ${cliLabel(runtime?.cli) || runtimeMethod(runtime)} · ${agent.requested_model}`
+            : `${runtimeMethod(runtime)} · ${agent.requested_model} · ${agent.requested_effort || "默认"}`}
+        </small>
+      </span>
+      <Chevron className={styles.chevron} />
+    </Button>
   );
 }
 
@@ -394,162 +506,9 @@ function CategoryRow({
           .map((e) => (
             <Button key={entryKey(e)} variant="link" onClick={() => onSelect(e)}>
               {e.agent.display_name} · {e.group.id}
-              {e.history && ` · v${e.agent.revision}/r${e.history.pin.inventory_revision}`}
             </Button>
           ))}
       </div>
-    </div>
-  );
-}
-function registration(entry: Entry): string {
-  const { group } = entry;
-  if (!group.catalog) return "已声明";
-  if (entry.history) return "历史登记 · 仅续接旧责任";
-  return group.catalog.current ? `已登记 · v${group.catalog.current.local_revision}` : "未登记";
-}
-
-function AgentDetails({ entry }: { entry: Entry }) {
-  const { agent, group, runtime } = entry;
-  const catalog = group.catalog;
-  const worker = entry.history ? undefined : currentObservation(catalog, agent, "");
-  const manager = entry.history ? undefined : currentObservation(catalog, agent, "issue_manager");
-  const owner = (entry.history?.runtimes ?? group.projection.runtimes ?? []).find(
-    (r) =>
-      r.runtime_id === (agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).runtime_id &&
-      r.revision === (agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).revision,
-  );
-  const retained =
-    catalog?.retained_executions?.filter(
-      (p) =>
-        p.identity.local_id === agent.identity.local_id &&
-        p.identity.execution_environment_id === agent.identity.execution_environment_id &&
-        (!entry.history ||
-          (p.snapshot_id === entry.history.pin.snapshot_id &&
-            p.public_sha256 === entry.history.pin.public_sha256)),
-    ) ?? [];
-  const observed = (value: typeof worker) =>
-    value ? (value.available ? "可用" : value.reason || "不可用") : "未观测";
-  return (
-    <div className={styles.details}>
-      <h2>{agent.display_name}</h2>
-      <p className={styles.muted}>slug：{agent.identity.local_id}</p>
-      <h3>定义</h3>
-      <dl>
-        <dt>类别</dt>
-        <dd>{agent.categories?.join("、")}</dd>
-        <dt>用途</dt>
-        <dd>
-          {agent.purposes
-            ?.map((p) =>
-              p === "worker_run"
-                ? "执行"
-                : p === "issue_manager"
-                  ? "Issue 负责人"
-                  : p === "consultation"
-                    ? "咨询"
-                    : p,
-            )
-            .join("、")}
-        </dd>
-        <dt>定义版本</dt>
-        <dd>v{agent.revision}</dd>
-        {entry.history && (
-          <>
-            <dt>原登记</dt>
-            <dd>r{entry.history.pin.inventory_revision}</dd>
-            <dt>快照</dt>
-            <dd>{entry.history.pin.snapshot_id}</dd>
-          </>
-        )}
-        <dt>执行环境</dt>
-        <dd>
-          {runtimeLabel(runtime)} · {agent.runtime_binding_ref.runtime_id} · v
-          {agent.runtime_binding_ref.revision}
-        </dd>
-        <dt>协调环境</dt>
-        <dd>
-          {runtimeLabel(owner)} ·{" "}
-          {(agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).runtime_id} · v
-          {(agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).revision}
-        </dd>
-        <dt>模型</dt>
-        <dd>{agent.requested_model}</dd>
-        <dt>推理强度</dt>
-        <dd>{agent.requested_effort || "默认"}</dd>
-        <dt>配置</dt>
-        <dd>{agent.enabled ? "已启用" : "已停用"}</dd>
-      </dl>
-      <h3>最近观测</h3>
-      <dl>
-        <dt>登记</dt>
-        <dd>{registration(entry)}</dd>
-        <dt>执行</dt>
-        <dd>{entry.history ? "见下方原版本观测" : observed(worker)}</dd>
-        <dt>协调</dt>
-        <dd>{entry.history ? "见下方原版本观测" : observed(manager)}</dd>
-        <dt>主机</dt>
-        <dd>{catalog ? (catalog.online ? "在线" : "离线 · 上次观察") : "托管环境"}</dd>
-        <dt>更新时间</dt>
-        <dd>
-          {catalog?.last_heartbeat_at_ms
-            ? new Date(catalog.last_heartbeat_at_ms).toLocaleString("zh-CN")
-            : "未记录"}
-        </dd>
-      </dl>
-      {catalog && !catalog.continuation_supported && (
-        <p className={styles.muted}>此 runner 尚未支持旧版本续接观测。</p>
-      )}
-      {!!retained.length && (
-        <>
-          <h3>既有责任</h3>
-          <p className={styles.muted}>既有责任继续使用原版本，切换版本需显式交接。</p>
-          {retained.map((p) => {
-            const observation = catalog?.continuations?.find(
-              (e) => JSON.stringify(e.pin) === JSON.stringify(p),
-            );
-            return (
-              <p key={JSON.stringify(p)}>
-                v{p.agent_revision} · {p.purpose === "issue_manager" ? "协调" : "执行"} · r
-                {p.inventory_revision} · {p.backend_id || "原生"} · {observed(observation)}
-              </p>
-            );
-          })}
-        </>
-      )}
-    </div>
-  );
-}
-
-function CompactDetails({ entry }: { entry: Entry }) {
-  const { agent, group, runtime } = entry;
-  const worker = entry.history ? undefined : currentObservation(group.catalog, agent, "");
-  const manager = entry.history
-    ? undefined
-    : currentObservation(group.catalog, agent, "issue_manager");
-  const available = (value: typeof worker) =>
-    value ? (value.available ? "可用" : "不可用") : "未观测";
-  return (
-    <div className={styles.compact}>
-      <dl>
-        <dt>定义</dt>
-        <dd>
-          v{agent.revision} · {agent.enabled ? "已启用" : "已停用"}
-        </dd>
-        <dt>运行环境</dt>
-        <dd>{runtimeLabel(runtime)}</dd>
-        <dt>登记</dt>
-        <dd>{registration(entry)}</dd>
-        <dt>最近上报</dt>
-        <dd>
-          {entry.history
-            ? "见完整定义中的原版本观测"
-            : `执行 ${available(worker)} · 协调 ${available(manager)}`}
-        </dd>
-      </dl>
-      <details>
-        <summary>完整定义与观测</summary>
-        <AgentDetails entry={entry} />
-      </details>
     </div>
   );
 }

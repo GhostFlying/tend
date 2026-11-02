@@ -50,6 +50,7 @@ export type AgentFilters = {
   search?: string;
   category?: string;
   environment?: string;
+  location?: string;
   selected?: string;
 };
 export type UsageFilters = {
@@ -128,7 +129,7 @@ export function parse(input: string | URL): Route {
   if (url.pathname === "/settings/agents" || url.pathname === "/agents") {
     const filters: AgentFilters = {};
     if (query.get("tab") === "categories") filters.tab = "categories";
-    for (const field of ["search", "category", "environment", "selected"] as const) {
+    for (const field of ["search", "category", "environment", "location", "selected"] as const) {
       const value = query.get(field);
       if (value) filters[field] = value;
     }
@@ -181,7 +182,14 @@ export function href(route: Route): string {
   const path = paths[route.page];
   const query = new URLSearchParams();
   if (route.page === "agents")
-    for (const field of ["tab", "search", "category", "environment", "selected"] as const) {
+    for (const field of [
+      "tab",
+      "search",
+      "category",
+      "environment",
+      "location",
+      "selected",
+    ] as const) {
       const value = route[field];
       if (value) query.set(field, value);
     }
