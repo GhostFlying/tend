@@ -428,7 +428,7 @@ func TestCanonicalTaskParentDependsOnChildDoesNotBlockChildClaim(t *testing.T) {
 	}
 }
 
-func TestCanonicalTaskSourceCorrectionGatesNextClaimNotRunningResult(t *testing.T) {
+func TestCanonicalTaskSourceCorrectionPreservesFrozenAcceptance(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	legacy := h.createWork(workPlan())
@@ -458,6 +458,8 @@ func TestCanonicalTaskSourceCorrectionGatesNextClaimNotRunningResult(t *testing.
 		t.Fatal("owner-approved source did not claim")
 	}
 	h.runAs(run, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	waitingIssue := createCanonicalOwnerTestIssue(t, h)
+	waitingTask := createCanonicalTaskForTest(t, h, waitingIssue)
 	report.Body = "Corrected global API constraint"
 	report.Status = protocol.AssistantCompleted
 	if op := h.exec(mainAgent, h.env("conversation.record_agent_message", protocol.Target{Type: "conversation"}, report, nil), RecordAgentMessage{}); op.Status != protocol.OpSucceeded {
@@ -469,44 +471,34 @@ func TestCanonicalTaskSourceCorrectionGatesNextClaimNotRunningResult(t *testing.
 	if current := h.task(task); current.Lifecycle != protocol.TaskAwaitingAcceptance || current.ControlRevision != 1 || current.ControlMode != protocol.ControlManaged {
 		t.Fatalf("source change rewrote running agreement: %+v", current)
 	}
-	if _, ok, _ := h.claim("linux-1"); ok {
-		t.Fatal("stale source snapshot admitted a new acceptance")
-	}
 	oldArtifact := h.task(task).CurrentArtifactID
-	next := testSpec
-	current := h.task(task)
-	updated := h.exec(owner, h.env("tasks.update_intent", taskTarget(task), updateIntentPayload{Spec: &next}, rev(current.ControlRevision)), UpdateIntent{})
-	if updated.Status != protocol.OpSucceeded {
-		t.Fatal(updated)
-	}
-	run, ok, _ = h.claim("linux-1")
-	if !ok || run.TaskID != task || run.SpecVersion != 2 || run.Role != protocol.RoleImplement {
-		t.Fatalf("explicit owner revision did not admit fresh agreement: %+v", run)
-	}
-	if h.task(task).CurrentArtifactID != "" {
-		t.Fatal("new spec reused the old artifact")
-	}
-	h.runAs(run, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
-	if op := h.runAs(run, protocol.OpRunsSubmitArtifact, testArtifact(h.task(task).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	if current := h.task(task); current.CurrentArtifactID == oldArtifact || current.CurrentArtifactID == "" || current.SpecVersion != 2 {
-		t.Fatal("spec2 did not get its own implementation artifact", current)
-	}
 	accept, ok, _ := h.claim("linux-1")
-	if !ok || accept.Role != protocol.RoleAccept || accept.SpecVersion != 2 {
-		t.Fatalf("fresh acceptance=%+v", accept)
+	if !ok || accept.TaskID != task || accept.Role != protocol.RoleAccept || accept.SpecVersion != 1 {
+		t.Fatalf("frozen acceptance=%+v", accept)
+	}
+	if !strings.Contains(string(accept.Spec), "Preserve the public API") || strings.Contains(string(accept.Spec), report.Body) {
+		t.Fatal("acceptance did not retain its original source inputs", string(accept.Spec))
 	}
 	if op := h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if current := h.task(task); current.Lifecycle != protocol.TaskCompleted || current.SpecVersion != 2 || current.CurrentArtifactID == oldArtifact {
-		t.Fatal("fresh agreement did not complete independently", current)
+	if current := h.task(task); current.Lifecycle != protocol.TaskCompleted || current.SpecVersion != 1 || current.CurrentArtifactID != oldArtifact {
+		t.Fatal("original artifact did not complete independently", current)
+	}
+	if _, ok, _ := h.claim("linux-1"); ok || h.task(waitingTask).Lifecycle != protocol.TaskQueued {
+		t.Fatal("the same source correction failed to fence unstarted implementation")
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var needsReview bool
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT needs_review FROM work_item_context_facts WHERE source_message_id=? AND superseded=0`, message.MessageID).Scan(&needsReview); err != nil {
+			return err
+		}
+		if !needsReview {
+			t.Fatal("acceptance silently reviewed the corrected source")
+		}
 		reviews, err := store.ListPendingCompletionReviews(t.Context(), tx.Q(), issue.IssueID)
 		if len(reviews) != 1 {
-			t.Fatalf("old stale result produced completion review: %+v", reviews)
+			t.Fatalf("accepted result has no unique completion review: %+v", reviews)
 		}
 		return err
 	}); err != nil {
@@ -783,15 +775,15 @@ func TestCanonicalTaskCannotAttachNewWorkToCompletedStage(t *testing.T) {
 	}
 }
 
-func TestCanonicalTaskAncestorSemanticEditsRequireExplicitContractRefresh(t *testing.T) {
-	for _, kind := range []string{"title", "intent", "background", "scope", "completion_criteria", "active_intent"} {
+func TestCanonicalTaskAncestorEditsFenceImplementationNotFrozenAcceptance(t *testing.T) {
+	for _, kind := range []string{"title", "intent", "background", "scope", "completion_criteria", "active_intent", "active_background", "active_scope", "active_completion_criteria"} {
 		t.Run(kind, func(t *testing.T) {
 			h := newHarness(t)
 			parent := createCanonicalOwnerTestIssue(t, h)
 			child := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, canonicalOwnerIssueCreate{Plan: parent.Plan, ParentIssueID: parent.IssueID}, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 			task := createCanonicalTaskForTest(t, h, child)
 			var active protocol.Assignment
-			if kind == "active_intent" {
+			if strings.HasPrefix(kind, "active_") {
 				run, ok, _ := h.claim("linux-1")
 				if !ok {
 					t.Fatal("no original run")
@@ -801,7 +793,7 @@ func TestCanonicalTaskAncestorSemanticEditsRequireExplicitContractRefresh(t *tes
 				parent = canonicalTaskIssue(t, h, parent.IssueID)
 			}
 			plan := parent.Plan
-			switch kind {
+			switch strings.TrimPrefix(kind, "active_") {
 			case "title":
 				plan.Title = "Metadata-only parent title"
 			case "scope":
@@ -814,7 +806,7 @@ func TestCanonicalTaskAncestorSemanticEditsRequireExplicitContractRefresh(t *tes
 				plan.Intent = "NEW_PARENT_GOAL"
 			}
 			parent = canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: parent.IssueID}, canonicalOwnerIssueUpdate{Plan: plan, ExpectedAssignmentEpoch: parent.AssignmentEpoch}, rev(parent.Revision)), CanonicalOwnerIssueCommand{Action: "update"}))
-			if kind == "active_intent" {
+			if strings.HasPrefix(kind, "active_") {
 				if op := h.runAs(active, protocol.OpRunsSubmitArtifact, testArtifact(h.task(task).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
@@ -823,6 +815,22 @@ func TestCanonicalTaskAncestorSemanticEditsRequireExplicitContractRefresh(t *tes
 				}
 			}
 			run, ok, _ := h.claim("linux-1")
+			if strings.HasPrefix(kind, "active_") {
+				artifact := h.task(task).CurrentArtifactID
+				if !ok || run.TaskID != task || run.SpecVersion != 1 || run.Role != protocol.RoleAccept || strings.Contains(string(run.Spec), "NEW_PARENT_") {
+					t.Fatalf("ancestor edit blocked or rewrote frozen acceptance: %+v", run)
+				}
+				if op := h.runAs(run, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+				if current := h.task(task); current.Lifecycle != protocol.TaskCompleted || current.SpecVersion != 1 || current.CurrentArtifactID != artifact {
+					t.Fatal("acceptance replaced the original task agreement", current)
+				}
+				if current := canonicalTaskIssue(t, h, parent.IssueID); current.State != protocol.IssueActive || current.Revision != parent.Revision {
+					t.Fatal("old artifact settled the expanded parent responsibility", current)
+				}
+				return
+			}
 			if kind == "title" {
 				if !ok || run.TaskID != task || run.SpecVersion != 1 {
 					t.Fatalf("parent title blocked original contract: %+v", run)
