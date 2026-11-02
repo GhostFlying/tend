@@ -248,6 +248,20 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if d.ExecutionTaskID == "" || d.Candidate == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "accepted delivery execution is required")
 		}
+		var executionRevision int64
+		if err := tx.Q().QueryRowContext(ctx, `SELECT duty_revision FROM issue_delivery_executions WHERE task_id=? AND issue_id=? AND source_task_id=?`, d.ExecutionTaskID, issue.IssueID, d.TaskID).Scan(&executionRevision); err != nil {
+			return Outcome{}, errNotFound(err, "bound delivery execution does not exist")
+		}
+		if d.Status != "executing" || d.Revision != executionRevision {
+			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "delivery candidate expired; reconcile the original execution before settling responsibility")
+		}
+		option, err := deliveryOwnerOption(ctx, tx.Q(), d)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if option != "approve" {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "completion requires the current original owner approval")
+		}
 		task, err := store.GetTask(ctx, tx.Q(), d.ExecutionTaskID)
 		if err != nil {
 			return Outcome{}, err
@@ -261,6 +275,12 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		if obs.Observation.ErrorKind != "" || obs.Observation.RefreshPending || obs.Observation.State != "merged" || obs.Observation.HeadSHA != d.Candidate.HeadSHA || obs.Observation.MergeSHA == "" || (d.Candidate.MergeSHA != "" && obs.Observation.MergeSHA != d.Candidate.MergeSHA) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "verified matching provider merge is required")
+		}
+		// Acceptance verifies the frozen artifact, not the provider's current
+		// integration. Merge-only delivery must retain the same base/target and
+		// lineage guarantees as deployment, including for historical observations.
+		if _, err := deliveryDeploymentSource(*d.Candidate, obs.Observation); err != nil {
+			return Outcome{}, err
 		}
 		accs, err := store.ListAcceptances(ctx, tx.Q(), task.TaskID, task.CurrentArtifactID)
 		if err != nil {

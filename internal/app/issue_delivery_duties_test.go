@@ -193,7 +193,8 @@ func TestDeliveryApprovalScopesExecutionAndIndependentAcceptedEndpoint(t *testin
 		t.Fatal("recursive approval obligation")
 	}
 	expectWorkCode(t, updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: task, Action: "complete", IssueControlPayload: protocol.IssueControlPayload{Reason: "Verify delivery"}}), protocol.CodeInvalidTransition)
-	observeDeliveryForTest(t, h, i.IssueID, c, "merged", strings.Repeat("c", 40))
+	c.TargetSHA = strings.Repeat("c", 40)
+	observeDeliveryForTest(t, h, i.IssueID, c, "merged", c.TargetSHA)
 	op = updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: task, Action: "complete", IssueControlPayload: protocol.IssueControlPayload{Reason: "Independently accepted provider receipt"}})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
