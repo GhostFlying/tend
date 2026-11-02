@@ -11,6 +11,7 @@ type IssueDeliveryCandidate struct {
 	DeliveryID      string                   `json:"delivery_id"`
 	URL             string                   `json:"url"`
 	HeadSHA         string                   `json:"head_sha"`
+	MergeSHA        string                   `json:"merge_sha,omitempty"`
 	BaseSHA         string                   `json:"base_sha"`
 	ProviderState   string                   `json:"provider_state"`
 	Validation      string                   `json:"validation"`

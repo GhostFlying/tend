@@ -939,6 +939,7 @@ export interface IssueDeliveryCandidate {
   deployment?: IssueDeliveryDeployment;
   deployment_scope: string;
   head_sha: string;
+  merge_sha?: string;
   provider_state: string;
   url: string;
   validation: string;

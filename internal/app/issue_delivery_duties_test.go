@@ -122,7 +122,7 @@ func answerDeliveryForTest(t *testing.T, h *harness, d protocol.IssueDeliveryDut
 func createDeliveryExecutionForTest(t *testing.T, h *harness, issue string, d protocol.IssueDeliveryDuty) protocol.Operation {
 	t.Helper()
 	i := canonicalTaskIssue(t, h, issue)
-	spec := protocol.OwnerTaskSpec{Goal: "Merge the approved candidate and verify only its authorized scope", Acceptance: []string{"Verify provider merge receipt and all approved post-deployment checks"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}
+	spec := protocol.OwnerTaskSpec{Goal: "Execute and verify only the approved candidate and scope", Acceptance: []string{"Verify provider merge receipt and all approved post-deployment checks"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}
 	p := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Title: "Execute approved delivery", Spec: spec, DeliveryAuthorization: &protocol.IssueDeliveryAuthorization{TaskID: d.TaskID, Revision: d.Revision}}
 	op, err := h.app.Execute(t.Context(), owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue}, p, rev(i.Revision)), CanonicalOwnerTaskCreate{})
 	if err != nil {
@@ -446,14 +446,29 @@ func TestDeliveryDeferralRetainsResponsibilityAndExplicitEndUsesOwnerEvidence(t 
 }
 
 func TestDeliveryObservedDriftCannotReviveOldApprovalAfterProviderReturns(t *testing.T) {
-	for _, change := range []string{"head", "base", "closed", "unknown"} {
+	for _, change := range []string{"head", "base", "closed", "unknown", "merge"} {
 		t.Run(change, func(t *testing.T) {
 			h, i, task, c := deliveryFixture(t)
+			if change == "merge" {
+				c.ProviderState = "merged"
+				c.MergeSHA = strings.Repeat("c", 40)
+				c.Deploy = true
+				c.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: []string{"linux-1"}}
+				c.DeploymentScope = "controlled deployment of the verified merge"
+				observeDeliveryForTest(t, h, i.IssueID, c, "merged", c.MergeSHA)
+			}
 			d := prepareDeliveryForTest(t, h, i.IssueID, task, c)
 			answerDeliveryForTest(t, h, d, "approve", "")
 			observerHello(t, h, "linux-1", "candidate-observer")
 			report := func(snapshot *protocol.DeliverySnapshot, failure string) {
 				t.Helper()
+				if change == "merge" {
+					current := canonicalTaskIssue(t, h, i.IssueID)
+					op := h.exec(owner, h.env("issues.refresh_delivery", protocol.Target{Type: "issue", ID: i.IssueID}, protocol.IssueRefreshDeliveryPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, DeliveryID: c.DeliveryID}, rev(current.Revision)), IssueRefreshDelivery{})
+					if op.Status != protocol.OpSucceeded {
+						t.Fatal(op)
+					}
+				}
 				h.clock.Advance(5 * time.Minute)
 				assignments := pollDelivery(t, h, "linux-1", "candidate-observer")
 				if len(assignments) != 1 || !assignments[0].CandidateIdentity {
@@ -466,11 +481,13 @@ func TestDeliveryObservedDriftCannotReviveOldApprovalAfterProviderReturns(t *tes
 					t.Fatal(op)
 				}
 			}
-			snapshot := protocol.DeliverySnapshot{State: "open", HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, URL: c.URL}
+			snapshot := protocol.DeliverySnapshot{State: c.ProviderState, HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, MergeSHA: c.MergeSHA, URL: c.URL}
 			changed := snapshot
 			failure := ""
 			var facts *protocol.DeliverySnapshot = &changed
 			switch change {
+			case "merge":
+				changed.MergeSHA = strings.Repeat("e", 40)
 			case "head":
 				changed.HeadSHA = strings.Repeat("e", 40)
 			case "base":
