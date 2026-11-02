@@ -240,6 +240,26 @@ func TestAuthentication(t *testing.T) {
 
 func TestRunLifecycleOverHTTP(t *testing.T) {
 	e := newEnv(t, 10*time.Millisecond)
+	// An unchanged server configuration keeps native workers disabled without
+	// adding a prerequisite to the existing runner RPC lifecycle below.
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, e.server.URL+"/runner/v1/native/status", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+hostToken)
+	request.Header.Set(HeaderHost, "linux-1")
+	reply, err := e.server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var native struct {
+		Enabled bool `json:"enabled"`
+	}
+	err = json.NewDecoder(reply.Body).Decode(&native)
+	reply.Body.Close()
+	if reply.StatusCode != http.StatusOK || err != nil || native.Enabled {
+		t.Fatalf("default native status = %d, %+v, %v", reply.StatusCode, native, err)
+	}
 	e.createTask()
 	claimEnv := e.envelope(protocol.OpRunnerClaim, "", map[string]any{})
 	as := e.claim(claimEnv)

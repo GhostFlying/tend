@@ -88,7 +88,9 @@ func (ws *Workers) gateway(ex *execution) error {
 						} `json:"thread"`
 					}
 					if json.Unmarshal(frame.Result, &response) == nil && response.Thread.ID == thread {
+						ex.mu.Lock()
 						ex.frontendOnce.Do(func() { close(ex.frontendReady) })
+						ex.mu.Unlock()
 					}
 				}
 				if client.Write(proxyCtx, websocket.MessageText, line[:len(line)-1]) != nil {
@@ -219,6 +221,15 @@ func (ws *Workers) attachTUI(ctx context.Context, ex *execution) error {
 	ex.mu.Lock()
 	state := ex.state
 	ex.mu.Unlock()
+	// An exited frontend leaves a connected shell behind. Its token-bound
+	// receipt is independent of the capability that cold resume rotates below.
+	exited := frontendExited(ex.stateFile, state.Thread, state.Cwd)
+	if exited && state.Terminal != "" {
+		state.Terminal, state.Pane = "", ""
+		if err := ex.save(state); err != nil {
+			return err
+		}
+	}
 	if err := writePrivate(ex.stateFile, PrivateTUI{URL: "ws://" + ex.listener.Addr().String(), Token: ex.token, Thread: state.Thread, Cwd: state.Cwd, Bin: ws.opts.Bin, Model: ws.opts.Model}); err != nil {
 		return err
 	}
@@ -229,13 +240,20 @@ func (ws *Workers) attachTUI(ctx context.Context, ex *execution) error {
 		}
 		for _, t := range terms {
 			if t.Handle == state.Terminal && t.Connected {
-				return nil
+				if t.TabID != "" && t.LeafID != "" {
+					state.Pane = t.PaneKey()
+					if err := ex.save(state); err != nil {
+						return err
+					}
+				}
+				return ex.reportNativeIdentity(ctx)
 			}
 		}
 		// A successful listing proves that the old view is no longer connected.
 		// Explicit resume can create a fresh view of the same central thread;
 		// this does not restart its loop or resend any prior owner input.
 		state.Terminal = ""
+		state.Pane = ""
 	}
 	if state.LaunchPending {
 		return errors.New("native terminal creation outcome is unknown; do not relaunch")
@@ -244,6 +262,13 @@ func (ws *Workers) attachTUI(ctx context.Context, ex *execution) error {
 	if err := ex.save(state); err != nil {
 		return err
 	}
+	if err := os.Remove(ex.stateFile + ".exited"); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	ex.mu.Lock()
+	ex.frontendReady = make(chan struct{})
+	ex.frontendOnce = sync.Once{}
+	ex.mu.Unlock()
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 	command := quote(ws.opts.Helper) + " native-tui --state " + quote(ex.stateFile)
 	terminal, err := ws.opts.Orca.CreateTerminal(ctx, state.Cwd, "id:"+state.ProviderID, "Tend · "+ex.spec.RunID, command)
@@ -254,8 +279,14 @@ func (ws *Workers) attachTUI(ctx context.Context, ex *execution) error {
 		return errors.New("native terminal identity is missing")
 	}
 	state.Terminal = terminal.Handle
+	if terminal.TabID != "" && terminal.LeafID != "" {
+		state.Pane = terminal.PaneKey()
+	}
 	state.LaunchPending = false
-	return ex.save(state)
+	if err := ex.save(state); err != nil {
+		return err
+	}
+	return ex.reportNativeIdentity(ctx)
 }
 func (ex *execution) save(state workerState) error {
 	ex.persistMu.Lock()
@@ -290,6 +321,9 @@ func RunTUI(ctx context.Context, path string, stdin io.Reader, stdout, stderr io
 	if json.Unmarshal(raw, &cfg) != nil || cfg.Token == "" || cfg.URL == "" || cfg.Thread == "" || cfg.Cwd == "" {
 		return errors.New("invalid native TUI capability")
 	}
+	if err := os.Remove(path + ".exited"); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	for {
 		bin := cfg.Bin
 		if bin == "" {
@@ -306,7 +340,7 @@ func RunTUI(ctx context.Context, path string, stdin io.Reader, stdout, stderr io
 			return ctx.Err()
 		}
 		if err == nil && frontendAvailable(ctx, cfg) {
-			return nil
+			return writePrivate(path+".exited", cfg)
 		}
 		// Reconnecting the same view never resends user input. Also accept a
 		// rotated capability for the original thread/workspace after cold resume.
@@ -334,6 +368,20 @@ func RunTUI(ctx context.Context, path string, stdin io.Reader, stdout, stderr io
 			}
 		}
 	}
+}
+
+func frontendExited(path, thread, cwd string) bool {
+	previous, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	receipt, err := os.ReadFile(path + ".exited")
+	if err != nil {
+		return false
+	}
+	var original, exited PrivateTUI
+	return json.Unmarshal(previous, &original) == nil && json.Unmarshal(receipt, &exited) == nil &&
+		exited.Thread == thread && exited.Cwd == cwd && exited.Token != "" && exited.Token == original.Token
 }
 
 func frontendAvailable(ctx context.Context, cfg PrivateTUI) bool {
