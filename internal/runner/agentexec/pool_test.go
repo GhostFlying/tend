@@ -334,3 +334,28 @@ func TestRetainedExecutionAfterDefinitionRemovalAndColdRestart(t *testing.T) {
 		t.Fatal("missing snapshot fell back to current", retained, err)
 	}
 }
+
+func TestRetainedNativeRefusalWithdrawsSelection(t *testing.T) {
+	f := newSource(t)
+	f.reload(t)
+	p := newPool(t, f, func(context.Context, agentexec.BuildInput) error { return nil })
+	if err := p.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	original := observed(t, p)
+	p.SetRetained([]protocol.RunExecutionPin{original.Pin})
+	if err := p.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	p.Reject(original.Pin, "adapter_rejected_configuration")
+	if observed(t, p).Available {
+		t.Fatal("fresh observation did not revoke rejection")
+	}
+	retained, err := p.ObserveRetained(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retained) != 1 || retained[0].Available {
+		t.Fatalf("native-rejected pin remains selectable for retained owner work: %+v", retained)
+	}
+}
