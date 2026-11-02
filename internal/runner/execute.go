@@ -286,6 +286,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		p.Guide += fmt.Sprintf("\nYou are executing as owner of Issue %s at assignment epoch %d, role %s. Fulfill the frozen task agreement and submit its result through the existing role-specific tools. Do not launch or delegate to another Agent outside Tend: another Agent requires its own child Issue. Preserve independent acceptance isolation. Report any need for further delegation as a blocker to this Issue's coordination turn.\n", as.Responsibility.IssueID, as.Responsibility.AssignmentEpoch, as.Role)
 	}
 	persistEvent := func(eventCtx context.Context, ev harness.WorkerEvent) error {
+		if err := r.recordRolloutEvent(eventCtx, as.RunID, ev); err != nil {
+			return err
+		}
 		if err := r.cfg.Journal.AppendEvent(eventCtx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: boundedBody(ev.Body)}); err != nil {
 			return err
 		}
@@ -317,6 +320,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		},
 		DownloadFile: func(ctx context.Context, id string) (string, error) { return r.downloadFile(ctx, as, p, id) }, Guide: p.Guide, ScratchDir: p.ScratchDir, Spec: as.Spec, Artifact: as.Artifact, Relations: as.Relations,
 		Feedback: as.Feedback, Attempt: attempt, Thread: run.Thread,
+		OnNativeSource: func(sourceCtx context.Context, source protocol.RolloutPreviewSource) error {
+			return r.registerRollout(sourceCtx, as.RunID, source)
+		},
 		OnThread: func(thread string) error {
 			if thread == run.Thread {
 				return nil
@@ -388,7 +394,10 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}()
 	for ev := range w.Events() {
 		if appendErr == nil {
-			appendErr = r.cfg.Journal.AppendEvent(ctx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: boundedBody(ev.Body)})
+			appendErr = r.recordRolloutEvent(ctx, as.RunID, ev)
+			if appendErr == nil {
+				appendErr = r.cfg.Journal.AppendEvent(ctx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: boundedBody(ev.Body)})
+			}
 		}
 	}
 	res, werr := w.Wait()

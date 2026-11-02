@@ -21,6 +21,7 @@ export const paths = {
   issue: "/issues/:id",
   tasks: "/tasks",
   task: "/tasks/:id",
+  rollout: "/tasks/:id/runs/:run",
   repos: "/repos",
   usage: "/usage",
   hosts: "/hosts",
@@ -83,12 +84,28 @@ export type Route =
   | { page: "conversation" | "attention" | "issue" | "upgrade"; id: string }
   | { page: "task"; id: string; from?: string }
   | ({ page: "usage" } & UsageFilters)
+  | { page: "rollout"; id: string; run: string; from?: string; record?: string; source?: "logs" }
   | ({ page: "issues" } & IssueFilters)
   | { page: "missing" };
 
 export function parse(input: string | URL): Route {
   const url = new URL(input, "https://tend.invalid");
   const query = url.searchParams;
+  const rollout = /^\/tasks\/([^/]+)\/runs\/([^/]+)$/.exec(url.pathname);
+  if (rollout) {
+    try {
+      return {
+        page: "rollout",
+        id: decodeURIComponent(rollout[1]!),
+        run: decodeURIComponent(rollout[2]!),
+        ...(query.get("from") ? { from: query.get("from")! } : {}),
+        ...(query.get("record") ? { record: query.get("record")! } : {}),
+        ...(query.get("source") === "logs" ? { source: "logs" as const } : {}),
+      };
+    } catch {
+      return { page: "missing" };
+    }
+  }
   if (url.pathname === "/diagnostics" || /^\/diagnostics\/events\/[^/]+$/.test(url.pathname)) {
     const filters: DiagnosticFilters = {};
     for (const field of ["issue", "source", "status", "search", "after", "since"] as const) {
@@ -178,14 +195,19 @@ export function href(route: Route): string {
       if (route[field]) query.set(field, route[field]!);
     }
   }
-  if (route.page === "task" && route.from) query.set("from", route.from);
+  if ((route.page === "task" || route.page === "rollout") && route.from)
+    query.set("from", route.from);
+  if (route.page === "rollout" && route.source) query.set("source", route.source);
+  if (route.page === "rollout" && route.record) query.set("record", route.record);
   if (route.page === "issues") {
     for (const key of ["view", "project", "assignee", "closed"] as const) {
       if (route[key] !== undefined && route[key] !== "") query.set(key, String(route[key]));
     }
   }
   return (
-    path.replace(":id", "id" in route ? encodeURIComponent(route.id) : "") +
+    path
+      .replace(":id", "id" in route ? encodeURIComponent(route.id) : "")
+      .replace(":run", route.page === "rollout" ? encodeURIComponent(route.run) : "") +
     (query.size ? `?${query}` : "")
   );
 }

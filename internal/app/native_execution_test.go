@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -54,6 +55,17 @@ func TestNativeExecutionRequiresFrozenCentralRuntimeAndLiveLease(t *testing.T) {
 	h.clock.Advance(10 * time.Minute)
 	if _, err := h.app.NativeExecutionControl(t.Context(), p); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal("expired lease remained usable", err)
+	}
+	if _, err := h.app.DeploymentID(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	h.app.localRolloutPreview = func(_ context.Context, run string, _ []protocol.RolloutPreviewSource, _ protocol.RolloutPreviewQuery) protocol.RolloutPreview {
+		called = run == as.RunID
+		return protocol.RolloutPreview{State: "empty"}
+	}
+	if result, err := h.app.ReadRolloutPreview(t.Context(), owner, as.RunID, protocol.RolloutPreviewQuery{}); err != nil || result.State != "empty" || result.Origin != "central" || !called {
+		t.Fatal(result, err, called)
 	}
 	_ = task
 }

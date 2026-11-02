@@ -70,6 +70,8 @@ type RunVerdict struct {
 // them over as if it had just claimed them.
 type HelloResult struct {
 	NativeUsage        bool              `json:"native_usage,omitempty"`
+	RolloutPreview     bool              `json:"rollout_preview,omitempty"`
+	DeploymentID       string            `json:"deployment_id,omitempty"`
 	AgentContinuation  bool              `json:"agent_continuation,omitempty"`
 	RetainedExecutions []RunExecutionPin `json:"retained_executions,omitempty"`
 	ProtocolMax        int64             `json:"protocol_max,omitempty"`

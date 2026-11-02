@@ -33,6 +33,9 @@ const UsagePanel = lazy(() =>
   import("../usage/Usage.tsx").then((m) => ({ default: m.UsagePanel })),
 );
 const Hosts = lazy(() => import("../hosts/Hosts.tsx").then((m) => ({ default: m.Hosts })));
+const RolloutMonitor = lazy(() =>
+  import("../rollout/Monitor.tsx").then((m) => ({ default: m.RolloutMonitor })),
+);
 const Details = lazy(() => import("./Details.tsx").then((m) => ({ default: m.Details })));
 const MorePage = lazy(() => import("./More.tsx").then((m) => ({ default: m.MorePage })));
 import { Button } from "../ui/Button.tsx";
@@ -124,6 +127,9 @@ export function RoutePage({
       break;
     case "tasks":
       content = <TaskBoard active connection={connection} />;
+      break;
+    case "rollout":
+      content = <RolloutMonitor route={route} />;
       break;
     case "task":
       content = (

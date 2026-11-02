@@ -105,6 +105,8 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
+	preview              rolloutPreviewBroker
+	localRolloutPreview  func(context.Context, string, []protocol.RolloutPreviewSource, protocol.RolloutPreviewQuery) protocol.RolloutPreview
 	webhookKeys          WebhookKeys
 	archiveAdmission     sync.Mutex
 	archiveOwnerRequests int64

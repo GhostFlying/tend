@@ -160,6 +160,8 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		return r.cfg.Journal.StopUsageSource(stopCtx, as.RunID, thread)
 	}, LegacyRawUsage: !r.supportsNativeUsage(), OnUsageSource: func(sourceCtx context.Context, source nativeusage.Source) error {
 		return r.registerUsage(sourceCtx, as, source)
+	}, OnSource: func(sourceCtx context.Context, source protocol.RolloutPreviewSource) error {
+		return r.registerRollout(sourceCtx, as.RunID, source)
 	}, Session: session, Directory: dir, Instructions: resolved.Instructions, Profile: resolved.Profile}
 	driver.Download = func(ctx context.Context, file protocol.ArtifactFile) (string, error) {
 		return r.downloadRetainedFile(ctx, as, filepath.Join(dir, "attachments"), file)
@@ -368,6 +370,15 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 						return err
 					}
 					if err = r.cfg.Journal.SetThread(ctx, as.RunID, info.ID); err != nil {
+						return err
+					}
+				}
+			}
+			if command.Method == "turn" && reply.Error == "" {
+				var request coordination.Request
+				var turn string
+				if json.Unmarshal(command.Payload, &request) == nil && json.Unmarshal(reply.Result, &turn) == nil && turn != "" {
+					if err = r.registerRollout(ctx, as.RunID, protocol.RolloutPreviewSource{SessionID: request.ThreadID, TurnID: turn}); err != nil {
 						return err
 					}
 				}

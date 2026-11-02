@@ -57,8 +57,9 @@ type config struct {
 	UpdaterBundleDir     string `json:"updater_bundle_dir"`
 	// Home is TEND_HOME: repositories, workspaces and the journal live
 	// there. Default ~/.tend.
-	Home    string `json:"home"`
-	Tailnet *struct {
+	Home         string   `json:"home"`
+	RolloutRoots []string `json:"rollout_roots"`
+	Tailnet      *struct {
 		Hostname  string `json:"hostname"`
 		Ephemeral bool   `json:"ephemeral"`
 	} `json:"tailnet"`
@@ -247,7 +248,22 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		profiles[pn] = p.gitws()
 	}
 	ids := protocol.NewULIDGen(time.Now, nil)
-	wsCfg := gitws.Config{Home: home, ServerURL: cfg.ServerURL, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
+	if cfg.RolloutRoots == nil {
+		for _, cli := range []struct{ env, fallback string }{{"TRAE_HOME", "~/.trae/cli"}, {"CODEX_HOME", "~/.codex"}} {
+			root := os.Getenv(cli.env)
+			if root == "" {
+				root = cli.fallback
+			}
+			cfg.RolloutRoots = append(cfg.RolloutRoots, filepath.Join(root, "sessions"))
+		}
+	}
+	for i, root := range cfg.RolloutRoots {
+		cfg.RolloutRoots[i], err = cfgfile.Path(root)
+		if err != nil {
+			return err
+		}
+	}
+	wsCfg := gitws.Config{ProtectPath: j.ProtectRollouts, Home: home, ServerURL: cfg.ServerURL, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
 	var (
 		workers    harness.Workers
 		workspaces *gitws.Workspaces
@@ -342,7 +358,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	r := runner.New(runner.Config{
 		Executions: executions, AgentInventory: agentInventory, AgentChanges: agentChanges, RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
-		InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: controlSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
+		RolloutRoots: cfg.RolloutRoots, InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: controlSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,
 	})
 	if runtime.GOOS != "windows" {

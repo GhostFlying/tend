@@ -62,7 +62,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 	if options.Scenario == "" {
 		options.Scenario = "demo"
 	}
-	if options.Scenario != "demo" && options.Scenario != "inbox" {
+	if options.Scenario != "demo" && options.Scenario != "inbox" && options.Scenario != "rollout" {
 		return fmt.Errorf("unknown sandbox scenario %q", options.Scenario)
 	}
 	root, release, err := prepareData(options.Data, options.Reset)
@@ -145,7 +145,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			}
 			instance := runtime.IDs.New(protocol.Prefix("rni"))
 			executions := &scriptedExecutions{sessions: sessions, spaces: workspaces{root: filepath.Join(root, "workspaces")}}
-			executions.workers = &scriptedWorkers{pacing: pacing(options.FastPacing), fastSeed: seeding.Load, generation: func(ctx context.Context, id string) (int64, error) {
+			executions.workers = &scriptedWorkers{nativeRoot: filepath.Join(root, "native", "sessions"), pacing: pacing(options.FastPacing), fastSeed: seeding.Load, generation: func(ctx context.Context, id string) (int64, error) {
 				var generation int64
 				err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
 					return tx.Q().QueryRowContext(ctx, `SELECT generation FROM runs WHERE run_id=?`, id).Scan(&generation)
@@ -154,7 +154,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			}}
 			r := runner.New(runner.Config{InstanceID: instance, ServerURL: "http://" + runnerListener.Addr().String(), HostID: hostID, HostToken: hostToken, Version: "sandbox",
 				Executions: executions, AgentInventory: executions.configuration,
-				Journal: j, HTTPClient: &http.Client{Transport: clientTransport}, Worker: protocol.WorkerAppServer,
+				RolloutRoots: []string{filepath.Join(root, "native", "sessions")}, Journal: j, HTTPClient: &http.Client{Transport: clientTransport}, Worker: protocol.WorkerAppServer,
 				Workers: executions.workers, Workspaces: executions.spaces,
 				Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: log,
 				RetryDelay: 50 * time.Millisecond, EventFlush: 50 * time.Millisecond, HeartbeatInterval: time.Second,
@@ -213,6 +213,8 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			var demo Demo
 			if options.Scenario == "inbox" {
 				demo, err = seedInbox(ctx, runtime, root)
+			} else if options.Scenario == "rollout" {
+				demo, err = seedRolloutDemo(ctx, runtime, root)
 			} else {
 				demo, err = seedDemo(ctx, runtime, root, options.skipStory, options.storyOnly)
 			}

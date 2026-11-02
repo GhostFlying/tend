@@ -61,11 +61,22 @@ export function navActive(route: Route, path: string): boolean {
     "/diagnostics/main": ["chat", "conversation"],
     "/inbox": ["inbox", "attention"],
     "/issues": ["issues", "issue"],
-    "/tasks": ["tasks", "task"],
+    "/tasks": ["tasks", "task", "rollout"],
     "/hosts": ["hosts", "upgrade"],
     "/agents": ["agents"],
     "/settings": ["settings", "archive"],
-    "/more": ["more", "tasks", "task", "repos", "usage", "hosts", "settings", "agents", "archive"],
+    "/more": [
+      "more",
+      "tasks",
+      "task",
+      "rollout",
+      "repos",
+      "usage",
+      "hosts",
+      "settings",
+      "agents",
+      "archive",
+    ],
   };
   return (pages[path] ?? [path.slice(1)]).includes(route.page);
 }

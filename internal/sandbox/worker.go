@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -16,6 +17,7 @@ import (
 )
 
 type scriptedWorkers struct {
+	nativeRoot string
 	pacing     scriptPacing
 	fastSeed   func() bool
 	generation func(context.Context, string) (int64, error)
@@ -39,6 +41,27 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 			return nil, fmt.Errorf("script thread: %w", err)
 		}
 	}
+	var native *os.File
+	if workers.nativeRoot != "" {
+		if err := os.MkdirAll(workers.nativeRoot, 0700); err != nil {
+			return nil, err
+		}
+		path := filepath.Join(workers.nativeRoot, "rollout-sandbox-"+spec.RunID+".jsonl")
+		var err error
+		native, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			return nil, err
+		}
+		if info, err := native.Stat(); err == nil && info.Size() == 0 {
+			_ = json.NewEncoder(native).Encode(map[string]any{"type": "session_meta", "payload": map[string]any{"id": "sandbox-" + spec.RunID}})
+		}
+		if spec.OnNativeSource != nil {
+			if err := spec.OnNativeSource(ctx, protocol.RolloutPreviewSource{SessionID: "sandbox-" + spec.RunID, TurnID: spec.RunID, Path: path}); err != nil {
+				_ = native.Close()
+				return nil, err
+			}
+		}
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	w := &scriptedWorker{events: make(chan harness.WorkerEvent), done: make(chan struct{}), cancel: cancel}
 	workers.mu.Lock()
@@ -48,6 +71,9 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 	workers.active[spec.RunID] = w
 	workers.mu.Unlock()
 	go func() {
+		if native != nil {
+			defer native.Close()
+		}
 		defer cancel()
 		defer func() {
 			workers.mu.Lock()
@@ -71,7 +97,24 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 			}
 			fail = spec.Role == protocol.RoleImplement && generation == 1
 		}
+		appendNative := func(payload any) bool {
+			if native == nil {
+				return true
+			}
+			if err := json.NewEncoder(native).Encode(map[string]any{"type": "event_msg", "timestamp": time.Now().UTC(), "payload": payload}); err != nil {
+				w.err = err
+				return false
+			}
+			return true
+		}
 		lifecycle := func(kind, status string) bool {
+			typ := "task_complete"
+			if kind == "turn.started" {
+				typ = "task_started"
+			}
+			if !appendNative(map[string]any{"type": typ, "turn_id": spec.RunID, "status": status}) {
+				return false
+			}
 			raw, _ := json.Marshal(map[string]any{"kind": kind, "thread_id": "sandbox-" + spec.RunID, "turn_id": spec.RunID, "data": map[string]string{"status": status}})
 			select {
 			case w.events <- harness.WorkerEvent{NativeID: "sandbox-" + kind, Kind: kind, Body: raw}:
@@ -85,7 +128,7 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 			return
 		}
 		pace := workers.pacing
-		if workers.fastSeed != nil && workers.fastSeed() {
+		if workers.fastSeed != nil && workers.fastSeed() || strings.Contains(contract.Goal, "长输出") {
 			pace = pacing(true)
 		}
 		steps := []map[string]any{
@@ -93,6 +136,9 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 			{"type": "mcpToolCall", "tool": "files_read", "arguments": map[string]string{"path": "示例输入"}, "result": "已核对示例输入与界面要求"},
 			{"type": "commandExecution", "command": "sandbox-check", "aggregatedOutput": "已生成报告并核对交付；仅模拟命令，没有启动外部进程", "exitCode": 0},
 			{"type": "agentMessage", "text": "示例检查已结束，正在保存交付报告。"},
+		}
+		if strings.Contains(contract.Goal, "移动端 PWA") {
+			steps = rolloutSampleSteps(spec.Role, contract.Goal)
 		}
 		for n, step := range steps {
 			id := fmt.Sprintf("sandbox-progress-%d", n)
@@ -106,6 +152,14 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 					delete(data, "result")
 					delete(data, "aggregatedOutput")
 					delete(data, "exitCode")
+				}
+				data["id"] = id
+				typ := "item_completed"
+				if kind == "item.started" {
+					typ = "item_started"
+				}
+				if !appendNative(map[string]any{"type": typ, "turn_id": spec.RunID, "item": data}) {
+					return false
 				}
 				raw, _ := json.Marshal(map[string]any{"kind": kind, "thread_id": "sandbox-" + spec.RunID, "turn_id": spec.RunID, "item_id": id, "data": data})
 				select {

@@ -40,6 +40,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "task list", Route: "/api/v1/tasks", Queries: "all finished project lifecycle sort before limit"},
 	{Name: "task show", Route: "/api/v1/tasks/{id}"},
 	{Name: "run logs", Route: "/api/v1/runs/{id}/logs", Queries: "after wait"},
+	{Name: "run preview", Route: "/api/v1/runs/{id}/preview", Queries: "before after generation record field reference offset", JSONDefault: true},
 	{Name: "run rollout", Route: "/api/v1/runs/{id}/rollout", Queries: "after before"},
 	{Name: "artifact show", Route: "/api/v1/artifacts/{id}"},
 	{Name: "choice show", Route: "/api/v1/work-item-choices/{id}"},
@@ -253,6 +254,11 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		if cmd.Name == "task list" {
 			if err := normalizeTaskListQuery(query); err != nil {
 				return err
+			}
+		}
+		if cmd.Name == "run preview" {
+			if _, err := protocol.ParseRolloutPreviewQuery(query); err != nil {
+				return usagef("%s", err)
 			}
 		}
 		u.RawQuery = query.Encode()

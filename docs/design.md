@@ -147,6 +147,7 @@
 | D141 | 可选集中 TraeX worker loop：中心持有模型认证及原生会话，runner 保留 exec-server、工作区和 Orca 原生 TUI。按冻结 runtime 选择，原 run/thread 绑定、人工接管与停止证明沿既有生命周期；本地模式继续可用，wire 保持 2/1。见 docs/plans/central-traex.md。 | 已实现，未发布 |
 | D142 | CLI 覆盖全部用户业务、管理与诊断能力，Web/Telegram 为子集；公开接口登记、完整输入输出、请求恢复、帮助及真实入口验证随能力在同一 PR 完成，覆盖门禁进入 make check。见 docs/plans/cli-capability-parity.md。 | 已实现，未发布 |
 | D143 | Agents 只读目录按主机及执行方式/CLI 组合展示；显式定义热更新保留旧责任完整 pin，双方协商后核验续接候选，新分配仍仅使用当前定义。协议保持 2/1。见 docs/plans/agent-directory-continuation.md。 | 已实现，待验收 |
+| D144 | Runner 原生 rollout 按需预览：原生目录保留原件，runner 持久索引与原生格式 reader，server 仅在内存按需转发；central worker 按冻结 inventory 读取 server 已有原件而不新建正文归档。步骤级 live 与历史共用只读 Web monitor（三轨概览、事件表与记录详情联动）。能力协商后启用独立诊断长轮询，不依赖执行 slot/租约，不启动模型或重复计量。会话/turn 归属、来源缺失与格式缺口显式可见，支持可确认历史，不提供原件副本及打包下载；现有日志与业务事实不变，runner wire 保持 2/1。见 docs/plans/runner-rollout-preview.md。 | 已实现，未发布 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

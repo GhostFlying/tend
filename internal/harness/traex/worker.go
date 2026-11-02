@@ -184,6 +184,16 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 			return nil, err
 		}
 	}
+	if spec.OnNativeSource != nil {
+		source := protocol.RolloutPreviewSource{SessionID: th.ID()}
+		if location, ok := th.(harness.ThreadLocation); ok {
+			source.Path = location.RolloutPath()
+		}
+		if err := spec.OnNativeSource(ctx, source); err != nil {
+			release(err)
+			return nil, err
+		}
+	}
 	if th.ID() == spec.Thread {
 		input = harness.Continuation(spec)
 		if spec.HandBack {

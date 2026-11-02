@@ -13,6 +13,9 @@ import (
 // locator never opens a provider session, sends input or changes its controller.
 func (w *worker) reportNativeIdentity(ctx context.Context, uncertain bool) error {
 	identity := protocol.NativeIdentity{Provider: "orca", ProviderID: w.wt, Terminal: w.st.Terminal, Pane: w.st.Pane, SessionID: w.st.SessionID, RuntimeID: w.st.RootRuntimeID, LaunchID: w.st.RootLaunchID, State: "known", ControllerObservation: "unknown"}
+	if w.st.RootObservedForTurn == w.st.Turn {
+		identity.TurnID = w.st.RootObservedTurnID
+	}
 	if identity.RuntimeID == "" {
 		identity.RuntimeID = w.st.RootLegacyRuntimeID
 	}
