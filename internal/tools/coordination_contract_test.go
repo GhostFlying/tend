@@ -77,3 +77,34 @@ func TestNamedOwnerSchemasCarryWorkspaceRecoveryInstructions(t *testing.T) {
 		t.Fatal("named execution tools missing", found)
 	}
 }
+
+func TestNamedDeliveryAndReopenContractsUseCanonicalVersionedTools(t *testing.T) {
+	mainReopen, ownerDelivery := false, false
+	for _, spec := range NamedSpecs(agentconfig.Main) {
+		if spec.Name != "issues_reopen" {
+			continue
+		}
+		mainReopen = true
+		var root map[string]any
+		if err := json.Unmarshal(spec.InputSchema, &root); err != nil {
+			t.Fatal(err)
+		}
+		required := planningSchemaAt(t, root, "payload")["required"].([]any)
+		for _, field := range []string{"source_message_id", "expected_source_revision", "expected_assignment_epoch"} {
+			if !slices.Contains(required, any(field)) {
+				t.Fatal("reopen loses original source/epoch", field)
+			}
+		}
+	}
+	for _, spec := range NamedSpecs(agentconfig.IssueManager) {
+		if strings.Contains(spec.Name, "work_item_choices") {
+			t.Fatal("legacy choice advertised")
+		}
+		if spec.Name == "issues_update_delivery" {
+			ownerDelivery = true
+		}
+	}
+	if !mainReopen || !ownerDelivery {
+		t.Fatal("canonical recovery or delivery tool absent")
+	}
+}

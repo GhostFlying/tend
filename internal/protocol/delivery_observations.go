@@ -1,11 +1,12 @@
 package protocol
 
 const (
-	OpDeliveriesPoll           = "runner.deliveries_poll"
-	OpDeliveriesReport         = "runner.deliveries_report"
-	OpRefreshDelivery          = "work_items.refresh_delivery"
-	CapabilityDeliveryGitHub   = "delivery-observer-github-v1"
-	CapabilityDeliveryCodebase = "delivery-observer-codebase-v1"
+	OpDeliveriesPoll                    = "runner.deliveries_poll"
+	OpDeliveriesReport                  = "runner.deliveries_report"
+	OpRefreshDelivery                   = "work_items.refresh_delivery"
+	CapabilityDeliveryCandidateIdentity = "delivery-candidate-identity-v1"
+	CapabilityDeliveryGitHub            = "delivery-observer-github-v1"
+	CapabilityDeliveryCodebase          = "delivery-observer-codebase-v1"
 )
 
 type DeliveryActor struct {
@@ -15,6 +16,7 @@ type DeliveryActor struct {
 
 // DeliverySnapshot contains provider facts; missing identities remain unknown.
 type DeliverySnapshot struct {
+	BaseSHA           string         `json:"base_sha,omitempty"`
 	State             string         `json:"state"`
 	HeadSHA           string         `json:"head_sha,omitempty"`
 	MergeSHA          string         `json:"merge_sha,omitempty"`
@@ -42,10 +44,11 @@ type DeliveryPollPayload struct {
 	InstanceID string `json:"instance_id"`
 }
 type DeliveryAssignment struct {
-	WorkItemID string        `json:"work_item_id"`
-	Delivery   IssueDelivery `json:"delivery"`
-	Generation int64         `json:"generation"`
-	Nonce      string        `json:"nonce"`
+	CandidateIdentity bool          `json:"candidate_identity,omitempty"`
+	WorkItemID        string        `json:"work_item_id"`
+	Delivery          IssueDelivery `json:"delivery"`
+	Generation        int64         `json:"generation"`
+	Nonce             string        `json:"nonce"`
 }
 type DeliveryPollResult struct {
 	Assignments []DeliveryAssignment `json:"assignments"`

@@ -25,14 +25,14 @@ func TestGitHubObservationAndCloseAttribution(t *testing.T) {
 				if bin != "gh" || !reflect.DeepEqual(args, []string{"api", "graphql", "-f", "query=" + githubQuery, "-f", "owner=example", "-f", "repo=project", "-F", "number=9"}) {
 					t.Fatalf("unexpected command: %s %v", bin, args)
 				}
-				pr := map[string]any{"number": 9, "state": test.state, "url": "https://example.invalid/review/9", "headRefOid": "head", "mergeCommit": map[string]any{"oid": "merge"}, "mergedBy": map[string]any{"id": "actor-id", "login": "merger"}, "closedAt": test.closedAt, "timelineItems": map[string]any{"nodes": []any{map[string]any{"createdAt": test.eventAt, "actor": map[string]any{"id": "closer-id", "login": "closer"}}}}}
+				pr := map[string]any{"number": 9, "state": test.state, "url": "https://example.invalid/review/9", "headRefOid": "head", "baseRefOid": "base", "mergeCommit": map[string]any{"oid": "merge"}, "mergedBy": map[string]any{"id": "actor-id", "login": "merger"}, "closedAt": test.closedAt, "timelineItems": map[string]any{"nodes": []any{map[string]any{"createdAt": test.eventAt, "actor": map[string]any{"id": "closer-id", "login": "closer"}}}}}
 				return json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": pr}}})
 			}})
 			got, err := cli.Observe(t.Context(), Ref{Provider: GitHub, Repository: "example/project", Number: 9})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.State != strings.ToLower(test.state) || got.HeadSHA != "head" || got.MergeSHA != "merge" || got.MergedBy.Login != "merger" {
+			if got.State != strings.ToLower(test.state) || got.HeadSHA != "head" || got.BaseSHA != "base" || got.MergeSHA != "merge" || got.MergedBy.Login != "merger" {
 				t.Fatalf("lost facts: %+v", got)
 			}
 			if (got.ClosedBy != nil) != test.actor {

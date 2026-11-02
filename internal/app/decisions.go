@@ -210,6 +210,18 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err := resumeAnsweredQuestion(ctx, x, tx, d.DecisionID); err != nil {
 		return Outcome{}, err
 	}
+
+	if _, err := tx.Exec(ctx, `INSERT INTO issue_delivery_answers(decision_id,message_id,content_revision)
+ SELECT ?,m.message_id,COALESCE(md.content_revision,1) FROM conversation_messages m LEFT JOIN message_dispositions md USING(message_id)
+ WHERE m.message_id=? AND m.author='owner' AND EXISTS(SELECT 1 FROM issue_delivery_duties duty JOIN attentions a ON a.attention_id=json_extract(duty.body_json,'$.attention_id') WHERE a.decision_id=?)
+ ON CONFLICT DO NOTHING`, d.DecisionID, p.SourceMessageID, d.DecisionID); err != nil {
+		return Outcome{}, err
+	}
+	if p.Option == "defer" && p.Text == "" {
+		if _, err := tx.Exec(ctx, `UPDATE issue_delivery_duties SET status='deferred',revision=revision+1 WHERE status='awaiting_owner' AND json_extract(body_json,'$.attention_id') IN (SELECT attention_id FROM attentions WHERE decision_id=?)`, d.DecisionID); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if err := bindSource(ctx, tx, p.SourceMessageID, "decision", d.DecisionID); err != nil {
 		return Outcome{}, err
 	}

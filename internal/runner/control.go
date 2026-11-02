@@ -176,6 +176,9 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	if r.cfg.AgentInventory != nil {
 		capabilities = append(capabilities, protocol.CapabilityAgentInventory)
 	}
+	if r.cfg.DeliveryObserver != nil && len(r.cfg.DeliveryProviders) > 0 {
+		capabilities = append(capabilities, protocol.CapabilityDeliveryCandidateIdentity)
+	}
 	for _, provider := range r.cfg.DeliveryProviders {
 		if r.cfg.DeliveryObserver != nil {
 			switch provider {

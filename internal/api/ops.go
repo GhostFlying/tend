@@ -21,7 +21,7 @@ var ownerCommands = commandMap(app.HandleAttention{}, app.HandleAttention{Escala
 	app.SendRunMessage{}, app.InjectSource{}, app.CreateConsultation{}, app.PromoteConsultation{},
 	app.IssueDeadlineCommand{}, app.IssueDeadlineCommand{Cancel: true}, app.PutPlannerEntry{},
 	app.AttentionCommand{Action: "create"}, app.AttentionCommand{Action: "update"}, app.AttentionCommand{Action: "respond"}, app.AttentionCommand{Action: "confirm"}, app.AttentionCommand{Action: "withdraw"}, app.AttentionCommand{Action: "present"},
-	app.UpdateIssueProgress{}, app.CanonicalOwnerIssueCommand{Action: "create"}, app.CanonicalOwnerIssueCommand{Action: "update"},
+	app.UpdateIssueDelivery{}, app.UpdateIssueProgress{}, app.CanonicalOwnerIssueCommand{Action: "create"}, app.CanonicalOwnerIssueCommand{Action: "update"},
 	app.CanonicalOwnerIssueCommand{Action: "pause"}, app.CanonicalOwnerIssueCommand{Action: "resume"},
 	app.CanonicalOwnerIssueCommand{Action: "cancel"}, app.CanonicalOwnerIssueCommand{Action: "finish_cancel"},
 	app.CanonicalOwnerIssueCommand{Action: "close"}, app.CanonicalOwnerIssueCommand{Action: "reopen"},

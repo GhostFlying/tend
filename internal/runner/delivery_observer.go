@@ -63,6 +63,9 @@ func (r *Runner) observeDelivery(ctx context.Context) error {
 		report := protocol.DeliveryReportPayload{InstanceID: r.instanceID, WorkItemID: assignment.WorkItemID, DeliveryID: assignment.Delivery.DeliveryID, Generation: assignment.Generation, Nonce: assignment.Nonce}
 		if observeErr == nil {
 			report.Snapshot = &protocol.DeliverySnapshot{State: observed.State, HeadSHA: observed.HeadSHA, MergeSHA: observed.MergeSHA, URL: observed.URL, ProviderUpdatedAt: observed.UpdatedAt, MergedAt: observed.MergedAt, ClosedAt: observed.ClosedAt, MergedBy: deliveryActor(observed.MergedBy), ClosedBy: deliveryActor(observed.ClosedBy)}
+			if assignment.CandidateIdentity {
+				report.Snapshot.BaseSHA = observed.BaseSHA
+			}
 		} else {
 			report.ErrorKind = "query_failed"
 			var failure *reviewwatch.Error

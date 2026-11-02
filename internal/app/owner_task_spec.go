@@ -55,6 +55,13 @@ func (CanonicalOwnerTaskUpdate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	}
 	payload := updateIntentPayload{Rating: p.Rating, Relations: p.Relations}
 	if p.Spec != nil {
+		var delivery bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_delivery_executions WHERE task_id=?)`, x.Env.Target.ID).Scan(&delivery); err != nil {
+			return Outcome{}, err
+		}
+		if delivery {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "approved delivery execution scope is frozen; reconcile its original task")
+		}
 		spec := domainSpecFromOwner(*p.Spec)
 		payload.Spec = &spec
 	}

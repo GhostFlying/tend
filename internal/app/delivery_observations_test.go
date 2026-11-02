@@ -23,7 +23,7 @@ func observerItem(t *testing.T, h *harness) protocol.WorkItem {
 func observerHello(t *testing.T, h *harness, host, instance string) {
 	t.Helper()
 	rt := testRuntime(instance)
-	rt.Capabilities = append(rt.Capabilities, protocol.CapabilityDeliveryGitHub)
+	rt.Capabilities = append(rt.Capabilities, protocol.CapabilityDeliveryGitHub, protocol.CapabilityDeliveryCandidateIdentity)
 	if op := h.versionedHello(host, rt); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

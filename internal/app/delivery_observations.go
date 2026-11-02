@@ -96,7 +96,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if _, err := tx.Exec(ctx, `UPDATE observation_jobs SET status='claimed',event_id=?,updated_at=? WHERE issue_id=? AND delivery_id=?`, eventID, now, selectedItem.WorkItemID, selectedDelivery.DeliveryID); err != nil {
 		return Outcome{}, err
 	}
-	result.Assignments = append(result.Assignments, protocol.DeliveryAssignment{WorkItemID: selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce})
+	result.Assignments = append(result.Assignments, protocol.DeliveryAssignment{CandidateIdentity: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryCandidateIdentity), WorkItemID: selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce})
 	event := deliveryChanged(selectedItem, selected.Observation)
 	event.Kind = "work_item.delivery_query_started"
 	return Outcome{Result: result, Events: []Event{event}}, nil
@@ -232,6 +232,10 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := tx.PutDeliveryObservation(ctx, row); err != nil {
 		return Outcome{}, err
 	}
+	candidateEvents, err := invalidateIssueDeliveryCandidates(ctx, x, tx, row.Observation)
+	if err != nil {
+		return Outcome{}, err
+	}
 	status, reason := "completed", "observation changed"
 	if p.ErrorKind != "" {
 		status, reason = "failed", p.ErrorKind
@@ -257,7 +261,7 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		event.Kind = "work_item.delivery_checked"
 		events = append(events, event)
 	}
-	return Outcome{Result: protocol.DeliveryReportResult{Accepted: true}, Events: events}, nil
+	return Outcome{Result: protocol.DeliveryReportResult{Accepted: true}, Events: append(events, candidateEvents...)}, nil
 }
 func findDelivery(item protocol.WorkItem, id string) (protocol.IssueDelivery, bool) {
 	for _, d := range item.Deliveries {

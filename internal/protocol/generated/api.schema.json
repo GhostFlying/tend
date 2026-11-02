@@ -2714,6 +2714,9 @@
     "CreateIssueTaskPayload": {
       "additionalProperties": false,
       "properties": {
+        "delivery_authorization": {
+          "$ref": "#/definitions/IssueDeliveryAuthorization"
+        },
         "expected_assignment_epoch": {
           "type": "integer"
         },
@@ -2984,6 +2987,9 @@
       "properties": {
         "attempted_at": {
           "type": "integer"
+        },
+        "base_sha": {
+          "type": "string"
         },
         "checked_at": {
           "type": "integer"
@@ -4630,11 +4636,149 @@
       "title": "IssueDelivery",
       "type": "object"
     },
+    "IssueDeliveryAuthorization": {
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "revision"
+      ],
+      "title": "IssueDeliveryAuthorization",
+      "type": "object"
+    },
+    "IssueDeliveryCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "deploy": {
+          "type": "boolean"
+        },
+        "deployment": {
+          "$ref": "#/definitions/IssueDeliveryDeployment"
+        },
+        "deployment_scope": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "provider_state": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "validation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "delivery_id",
+        "url",
+        "head_sha",
+        "base_sha",
+        "provider_state",
+        "validation",
+        "deployment_scope",
+        "deploy"
+      ],
+      "title": "IssueDeliveryCandidate",
+      "type": "object"
+    },
+    "IssueDeliveryDeployment": {
+      "additionalProperties": false,
+      "properties": {
+        "host_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "server_instance": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_instance",
+        "host_ids"
+      ],
+      "title": "IssueDeliveryDeployment",
+      "type": "object"
+    },
+    "IssueDeliveryDuty": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
+        "attention_id": {
+          "type": "string"
+        },
+        "candidate": {
+          "$ref": "#/definitions/IssueDeliveryCandidate"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/IssueEvidence"
+          },
+          "type": "array"
+        },
+        "execution_task_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "event_id",
+        "acceptance_id",
+        "revision",
+        "status"
+      ],
+      "title": "IssueDeliveryDuty",
+      "type": "object"
+    },
     "IssueDeliveryObservation": {
       "additionalProperties": false,
       "properties": {
         "attempted_at": {
           "type": "integer"
+        },
+        "base_sha": {
+          "type": "string"
         },
         "checked_at": {
           "type": "integer"
@@ -5985,6 +6129,12 @@
         "deadlines": {
           "items": {
             "$ref": "#/definitions/IssueDeadline"
+          },
+          "type": "array"
+        },
+        "delivery_duties": {
+          "items": {
+            "$ref": "#/definitions/IssueDeliveryDuty"
           },
           "type": "array"
         },
@@ -10979,6 +11129,42 @@
       "title": "UpdateAttentionPayload",
       "type": "object"
     },
+    "UpdateIssueDeliveryPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "candidate": {
+          "$ref": "#/definitions/IssueDeliveryCandidate"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "task_id",
+        "action"
+      ],
+      "title": "UpdateIssueDeliveryPayload",
+      "type": "object"
+    },
     "UpdateIssuePayload": {
       "additionalProperties": false,
       "properties": {
@@ -11179,6 +11365,12 @@
         },
         "revision": {
           "type": "integer"
+        },
+        "server_instance": {
+          "type": "string"
+        },
+        "server_process_instance_id": {
+          "type": "string"
         },
         "server_sha256": {
           "type": "string"
@@ -12665,6 +12857,9 @@
     },
     "UpdateAttentionPayload": {
       "$ref": "#/definitions/UpdateAttentionPayload"
+    },
+    "UpdateIssueDeliveryPayload": {
+      "$ref": "#/definitions/UpdateIssueDeliveryPayload"
     },
     "UpdateIssuePayload": {
       "$ref": "#/definitions/UpdateIssuePayload"

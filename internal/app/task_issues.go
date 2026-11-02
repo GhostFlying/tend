@@ -18,7 +18,28 @@ func freezeIssueContext(item protocol.WorkItem) protocol.TaskWorkContext {
 }
 
 func applyIssueDependencies(ctx context.Context, q store.Querier, candidates []scheduler.Candidate) error {
-	return views.ApplyIssueDependencies(ctx, q, candidates)
+	if err := views.ApplyIssueDependencies(ctx, q, candidates); err != nil {
+		return err
+	}
+	for i := range candidates {
+		var current bool
+		var err error
+		switch candidates[i].Kind {
+		case protocol.ActionImplement:
+			current, err = deliveryTaskCurrent(ctx, q, candidates[i].TaskID)
+		case protocol.ActionAccept:
+			current, err = deliveryAcceptanceReady(ctx, q, candidates[i].TaskID)
+		default:
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !current {
+			candidates[i].Control = protocol.ControlPaused
+		}
+	}
+	return nil
 }
 
 // taskIssue resolves the explicit concern or creates one for a standalone

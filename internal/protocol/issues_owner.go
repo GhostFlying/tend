@@ -131,6 +131,7 @@ type OwnerTaskRequirements struct {
 }
 
 type CreateIssueTaskPayload struct {
+	DeliveryAuthorization *IssueDeliveryAuthorization `json:"delivery_authorization,omitempty"`
 	IssueSourceReference
 	ExpectedAssignmentEpoch int64          `json:"expected_assignment_epoch"`
 	Title                   string         `json:"title"`

@@ -46,6 +46,7 @@ type IssueSourceReview struct {
 
 type IssueView struct {
 	Children           *IssueChildProgress       `json:"children,omitempty"`
+	DeliveryDuties     []IssueDeliveryDuty       `json:"delivery_duties,omitempty"`
 	OwnershipPolicy    string                    `json:"ownership_policy,omitempty"`
 	ResponsibilityRuns []ExecutionResponsibility `json:"responsibility_runs,omitempty"`
 	Manager            *IssueManagerView         `json:"manager,omitempty"`
