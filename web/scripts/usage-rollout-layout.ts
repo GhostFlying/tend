@@ -213,6 +213,7 @@ const server = createServer(async (req, res) => {
           }
         : { ...totals, total: correction ? 13000 : 14000, output: correction ? 1000 : 2000 };
     const priced = { ...t, estimated_usd: "0.012", estimated_requests: 1 };
+    const models = unknown ? ["model-fixture", "实际模型未提供"] : ["model-fixture"];
     const path = [
       { id: "wi_parent", title: "移动端体验改进" },
       { id: "wi_child", title: task.title },
@@ -230,7 +231,7 @@ const server = createServer(async (req, res) => {
     const session = {
       id: "018d0000-0000-7000-8000-000000000001",
       parent_session_id: "",
-      models: ["model-fixture"],
+      models,
       first_at: 1793066400000,
       last_at: 1793066400000,
       totals: priced,
@@ -262,7 +263,7 @@ const server = createServer(async (req, res) => {
           id: "wi_parent",
           title: "移动端体验改进",
           parent_id: "",
-          models: ["model-fixture"],
+          models,
           path: path.slice(0, 1),
           direct: { ...totals, requests: 0 },
           totals: priced,
@@ -272,7 +273,7 @@ const server = createServer(async (req, res) => {
           id: "wi_child",
           title: task.title,
           parent_id: "wi_parent",
-          models: ["model-fixture"],
+          models,
           path,
           totals: priced,
           direct: priced,
@@ -297,8 +298,36 @@ const server = createServer(async (req, res) => {
       view.sessions = Array.from({ length: 51 }, (_, i) => ({
         ...session,
         id: `session-page-${i}`,
+        executions: [0, 1].map((part) => {
+          const partial = {
+            ...priced,
+            requests: 1,
+            input: 6000,
+            input_known: 1,
+            cache_read: 3000,
+            cache_read_known: 1,
+            cache_write: part === 0 ? 500 : 0,
+            cache_write_known: part === 0 ? 1 : 0,
+            output: 500,
+            output_known: 1,
+            total: 6500,
+            total_known: 1,
+            final: part === 0 ? 1 : 0,
+            estimated_requests: part === 0 ? 1 : 0,
+            estimated_usd: part === 0 ? "0.012" : "",
+          };
+          return {
+            ...session.executions[0]!,
+            attribution: { ...attribution, run_id: `${runID}-${part}` },
+            totals: partial,
+            measurements: [{ ...session.executions[0]!.measurements[0]!, totals: partial }],
+          };
+        }),
       }));
     }
+    const selectedSession = url.searchParams.get("session");
+    if (selectedSession)
+      view.sessions = (view.sessions ?? []).filter((s) => s.id === selectedSession);
     return json(view);
   }
   if (path === `/api/v1/runs/${runID}/logs`)
@@ -530,6 +559,11 @@ try {
       await page.keyboard.press("Enter");
       const keyboardDetail = page.getByRole("dialog", { name: "session-page-0", exact: true });
       await keyboardDetail.getByText("Codex CLI · 0.163.0", { exact: true }).first().waitFor();
+      assert.equal(await keyboardDetail.getByText(/6,500 Token/).count(), 2);
+      assert.equal(
+        await keyboardDetail.getByText("6,500", { exact: true }).filter({ visible: true }).count(),
+        0,
+      );
       await page.keyboard.press("Escape");
       await keyboardDetail.waitFor({ state: "hidden" });
       usageMany = false;
@@ -543,6 +577,10 @@ try {
       .locator('[class*="tokens"]')
       .first()
       .getByText("未提供", { exact: true })
+      .first()
+      .waitFor();
+    await panel
+      .getByRole("button", { name: "1 个已知模型 · 含未记录", exact: true })
       .first()
       .waitFor();
     assert(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));

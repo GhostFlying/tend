@@ -430,6 +430,8 @@ Runner 在 journal 中将批次与游标原子持久化，host 身份通过增�
 
 内部摘要 fork 与合并使用私有持久会话，关联来源并计量，不增加普通会话入口。无法恢复的临时历史保留覆盖缺口。普通页面隐藏原生 request/thread/turn，仅展示 Session；默认按 Issue，Session 为第二个 Tab，两者及全局、单执行共享有效请求贡献与筛选。列表展示 Issue、执行模型、同格紧凑 Token 细分与 OpenRouter 美元估算价格；逐请求按当前报价计算、缓存不重复计价，并标明报价时间及覆盖。详情展示任务、历史 Agent 名称、执行模型、CLI 名称及版本、职责和 Session；category 通过 Agent 名称浮层提供。页面信息层级按设计图 review 后实施。实施、历史样本与发布顺序见 `docs/plans/token-usage-repair.md`。
 
+OpenRouter 报价中的日历条件按原始 JSON 保存其存在性；暂不支持的星期或时段仅使对应模型未报价，不能因星期名称的表示方式拒绝其他模型的整个目录。来源未取得最终结束证明时显示待对账，避免将覆盖未确认误标为上传待同步。
+
 ## D134：IM 内交互与跨渠道处理来源
 
 通信消息可携带引用既有 decision、attention 或 worker 问题的交互投影，冻结用户看到的业务版本及允许选项。Web 消息内控件、Telegram inline keyboard 与引用文本使用同一回答准入和原业务用例；明确选项可直接处理，包含新条件或含糊的文字交给当前负责人继续在 IM 内澄清。Agent 不提供渠道地址或任意卡片命令。

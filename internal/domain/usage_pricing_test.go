@@ -1,12 +1,36 @@
 package domain
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func priceNumber(n int64) *int64 { return &n }
+
+func TestUsagePricingCalendarConditionsDoNotRejectCatalog(t *testing.T) {
+	for _, days := range []string{`["saturday","sunday"]`, `[6,0]`} {
+		t.Run(days, func(t *testing.T) {
+			raw := []byte(fmt.Sprintf(`{"data":[
+				{"id":"vendor/calendar","pricing":{"prompt":"0.01","completion":"0.02","overrides":[{"utc_days":%s,"prompt":"0.005"}]}},
+				{"id":"vendor/ordinary","pricing":{"prompt":"0.01","completion":"0.02"}}
+			]}`, days))
+			catalog, err := ParseUsagePrices(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sample := protocol.TokenUsageSample{Model: "ordinary", Input: priceNumber(1), Output: priceNumber(1), CacheRead: priceNumber(0), CacheWrite: priceNumber(0)}
+			if usd, id, ok := catalog.EstimateUsagePrice(sample); !ok || usd != "0.03" || id != "vendor/ordinary" {
+				t.Fatal(usd, id, ok)
+			}
+			sample.Model = "calendar"
+			if _, _, ok := catalog.EstimateUsagePrice(sample); ok {
+				t.Fatal("unsupported calendar condition was priced")
+			}
+		})
+	}
+}
 
 func TestUsagePricingSubtractsCacheAndUsesRequestTier(t *testing.T) {
 	catalog := UsagePrices{Data: []UsagePriceModel{{ID: "openai/model", Pricing: UsageRates{Prompt: "0.000002", Completion: "0.00001", CacheRead: "0.0000001", CacheWrite: "0.0000025", Overrides: []UsageRateOverride{{MinPrompt: priceNumber(272000), Prompt: "0.000004", Completion: "0.000015", CacheRead: "0.0000002", CacheWrite: "0.000005"}}}}}}

@@ -32,7 +32,9 @@ type UsageRateOverride struct {
 	MinPrompt  *int64 `json:"min_prompt_tokens"`
 	UTCStart   *int   `json:"utc_start"`
 	UTCEnd     *int   `json:"utc_end"`
-	UTCDays    []int  `json:"utc_days"`
+	// Calendar conditions are unsupported; preserve their presence without
+	// imposing a weekday representation on the rest of the public catalog.
+	UTCDays []json.RawMessage `json:"utc_days"`
 }
 
 func ParseUsagePrices(raw []byte) (UsagePrices, error) {
