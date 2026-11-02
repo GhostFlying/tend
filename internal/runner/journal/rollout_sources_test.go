@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -62,5 +63,34 @@ func TestCleanupPreservesRegisteredOriginalAndArtifacts(t *testing.T) {
 	}
 	if err := j.ProtectRollouts(t.Context(), filepath.Join(root, "unrelated")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRolloutMigrationPreservesVersion14NativeUsage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.db")
+	j := open(t, path)
+	source := UsageSource{ID: "usage", RunID: "run", Coverage: "registered", Cursors: map[string]nativeusage.Cursor{"original": {Offset: 42}}}
+	if err := j.RegisterUsageSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	// Recreate the committed v14 schema before the rollout locator table existed.
+	if _, err := j.db.ExecContext(t.Context(), "DROP TABLE rollout_sources; PRAGMA user_version=14"); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j = open(t, path)
+	defer j.Close()
+	sources, err := j.UsageSources(t.Context())
+	if err != nil || len(sources) != 1 || sources[0].Cursors["original"].Offset != 42 {
+		t.Fatal(sources, err)
+	}
+	if err := j.RegisterRollout(t.Context(), "deployment", "run", protocol.RolloutPreviewSource{SessionID: "session", TurnID: "turn"}); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := j.RolloutSources(t.Context(), "deployment", "run")
+	if err != nil || len(retained) != 1 || retained[0].SessionID != "session" {
+		t.Fatal(retained, err)
 	}
 }

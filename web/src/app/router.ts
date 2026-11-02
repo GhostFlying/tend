@@ -363,6 +363,8 @@ function savePage() {
       .filter((el) => el.getClientRects().length)
       .map(elementPath),
     scroll: Array.from(document.querySelectorAll<HTMLElement>("body *"))
+      // Paged readers restore semantic anchors against a reconstructed window.
+      .filter((el) => !el.closest('[data-scroll-restoration="manual"]'))
       .filter((el) => el.getClientRects().length && (el.scrollTop || el.scrollLeft))
       .map((el) => ({ path: elementPath(el), top: el.scrollTop, left: el.scrollLeft })),
     focus,

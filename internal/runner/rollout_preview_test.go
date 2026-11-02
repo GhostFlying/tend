@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,8 +14,10 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/harness/rollout"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runner/journal"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
@@ -182,5 +185,146 @@ func TestRolloutPreviewOrcaLocatorProtectsCleanupBeforeAnyOwnerRead(t *testing.T
 	}
 	if err := r.cfg.Journal.ProtectRollouts(t.Context(), root); err == nil {
 		t.Fatal("native originals were deletable before first preview")
+	}
+}
+
+func TestRolloutPreviewQueuesDeliveredWorkAndCancelsWaitingReads(t *testing.T) {
+	for _, cancelWaiting := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancel=%t", cancelWaiting), func(t *testing.T) {
+			r := controlRunner(t)
+			nativeFixture(t, r)
+			r.previewSupported = true
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			jobs := make(chan protocol.RolloutPreviewWork, 6)
+			posted := make(chan protocol.RolloutPreviewReply, 8)
+			polls := make(chan struct{}, 16)
+			release := make(chan struct{})
+			for i := range 4 {
+				jobs <- protocol.RolloutPreviewWork{RequestID: fmt.Sprintf("read-%d", i), DeploymentID: "deployment", InstanceID: r.instanceID, RunID: "run", DeadlineMillis: time.Now().Add(4 * time.Second).UnixMilli(), Sources: []protocol.RolloutPreviewSource{{SessionID: "session", TurnID: "first"}}}
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+				if q.Method == http.MethodGet {
+					select {
+					case polls <- struct{}{}:
+					case <-q.Context().Done():
+						return
+					}
+					select {
+					case work := <-jobs:
+						_ = json.NewEncoder(w).Encode(work)
+					case <-q.Context().Done():
+					}
+					return
+				}
+				var reply protocol.RolloutPreviewReply
+				if err := json.NewDecoder(q.Body).Decode(&reply); err != nil {
+					t.Error(err)
+					return
+				}
+				select {
+				case posted <- reply:
+				case <-q.Context().Done():
+					return
+				}
+				if reply.RequestID != "read-4" {
+					select {
+					case <-release:
+					case <-q.Context().Done():
+						return
+					}
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			r.c.base, r.c.http = server.URL, server.Client()
+			done := make(chan struct{})
+			go func() { defer close(done); r.rolloutPreviews(ctx) }()
+			defer func() {
+				cancel()
+				select {
+				case <-done:
+				case <-time.After(time.Second):
+					t.Error("diagnostic queue did not stop")
+				}
+				server.Close()
+			}()
+			// All four slots remain occupied by reply uploads before delivering a fifth job.
+			for range 4 {
+				select {
+				case reply := <-posted:
+					if reply.Result.State != "ready" {
+						t.Fatal(reply)
+					}
+				case <-ctx.Done():
+					t.Fatal("initial reads did not fill the slots")
+				}
+			}
+			jobs <- protocol.RolloutPreviewWork{RequestID: "read-4", DeploymentID: "deployment", InstanceID: r.instanceID, RunID: "run", DeadlineMillis: time.Now().Add(4 * time.Second).UnixMilli(), Sources: []protocol.RolloutPreviewSource{{SessionID: "session", TurnID: "first"}}}
+			expectedPolls := 6
+			if cancelWaiting {
+				jobs <- protocol.RolloutPreviewWork{RequestID: "read-4", Cancelled: true}
+				expectedPolls++
+			}
+			// The next long poll proves the delivered fifth job (and optional cancellation) was processed.
+			for range expectedPolls {
+				select {
+				case <-polls:
+				case <-ctx.Done():
+					t.Fatal("diagnostic poll stopped while reads were occupied")
+				}
+			}
+			close(release)
+			if cancelWaiting {
+				select {
+				case reply := <-posted:
+					t.Fatal("cancelled queued read replied", reply)
+				case <-time.After(50 * time.Millisecond):
+				}
+			} else {
+				select {
+				case reply := <-posted:
+					if reply.RequestID != "read-4" || reply.Result.State != "ready" {
+						t.Fatal(reply)
+					}
+				case <-ctx.Done():
+					t.Fatal("delivered fifth read was dropped instead of queued")
+				}
+			}
+		})
+	}
+}
+
+func TestRolloutPreviewDoesNotAdvanceNativeUsageState(t *testing.T) {
+	r := controlRunner(t)
+	root := nativeFixture(t, r)
+	source := journal.UsageSource{ID: "usage", RunID: "run", RegistrationQueued: true, Coverage: "registered", Source: nativeusage.Source{Provider: "traex", SessionID: "session", ThreadID: "session", Path: filepath.Join(root, "rollout-session.jsonl")}, Cursors: map[string]nativeusage.Cursor{"original": {Offset: 42, Prefix: "retained"}}}
+	if err := r.cfg.Journal.RegisterUsageSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	before, err := r.cfg.Journal.UsageSources(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests, err := r.cfg.Journal.Requests(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := protocol.RolloutPreviewWork{DeploymentID: "deployment", RunID: "run", Sources: []protocol.RolloutPreviewSource{{SessionID: "session", TurnID: "first"}}}
+	for range 2 {
+		if got := r.readRollout(t.Context(), rollout.New("preview", root), work); got.State != "ready" {
+			t.Fatal(got)
+		}
+	}
+	after, err := r.cfg.Journal.UsageSources(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextRequests, err := r.cfg.Journal.Requests(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, _ := json.Marshal(before)
+	current, _ := json.Marshal(after)
+	if string(original) != string(current) || len(nextRequests) != len(requests) {
+		t.Fatalf("preview changed usage state or queued an upload: %s -> %s", original, current)
 	}
 }
