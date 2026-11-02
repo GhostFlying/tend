@@ -226,7 +226,7 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
  ON CONFLICT DO NOTHING`, d.DecisionID, p.SourceMessageID, d.DecisionID); err != nil {
 		return Outcome{}, err
 	}
-	if p.Option == "defer" && p.Text == "" {
+	if p.Option == "defer" {
 		if _, err := tx.Exec(ctx, `UPDATE issue_delivery_duties SET status='deferred',revision=revision+1 WHERE status='awaiting_owner' AND json_extract(body_json,'$.attention_id') IN (SELECT attention_id FROM attentions WHERE decision_id=?)`, d.DecisionID); err != nil {
 			return Outcome{}, err
 		}
