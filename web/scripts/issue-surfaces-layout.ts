@@ -1892,7 +1892,7 @@ try {
       .getByRole("button", { name: "Agent 与类别", exact: true })
       .click();
     const emptyCatalog = page.getByRole("region", { name: "Agents", exact: true });
-    await emptyCatalog.getByText("尚未配置托管 Agent", { exact: true }).waitFor();
+    await emptyCatalog.getByText("尚未配置服务端 Agent", { exact: true }).waitFor();
     assert.equal(await emptyCatalog.getByText(/部分登记暂时无法读取/).count(), 0);
     await page.screenshot({ path: join(output, `catalog-unconfigured-${viewport.width}.png`) });
     await navigate(page, "/settings");
@@ -1922,7 +1922,7 @@ try {
       .getByRole("button", { name: "Agent 与类别", exact: true })
       .click();
     await emptyCatalog.getByRole("button", { name: /青竹/ }).first().waitFor();
-    assert.equal(await emptyCatalog.getByText("尚未配置托管 Agent", { exact: true }).count(), 0);
+    assert.equal(await emptyCatalog.getByText("尚未配置服务端 Agent", { exact: true }).count(), 0);
     await page.screenshot({ path: join(output, `catalog-configured-${viewport.width}.png`) });
     await navigate(page, "/settings");
     if (mobile)
@@ -2654,15 +2654,13 @@ try {
     await navigate(page, "/agents");
     const catalogDialog = page.getByRole("region", { name: "Agents", exact: true });
     await catalogDialog.getByRole("button", { name: /松风/ }).first().click();
-    if (viewport.width <= 1200)
-      await catalogDialog.getByText("完整定义与观测", { exact: true }).click();
     await catalogDialog
-      .getByText("slug：songfeng", { exact: true })
+      .getByRole("heading", { name: "松风", exact: true })
       .filter({ visible: true })
       .first()
       .waitFor();
     await catalogDialog
-      .getByText("未观测", { exact: true })
+      .getByText("未上报", { exact: true })
       .filter({ visible: true })
       .first()
       .waitFor();
@@ -2671,6 +2669,8 @@ try {
       0,
     );
     await page.screenshot({ path: join(output, `catalog-${viewport.width}.png`) });
+    if (viewport.width <= 1399)
+      await catalogDialog.getByRole("button", { name: "返回列表", exact: true }).click();
     await catalogDialog.getByRole("tab", { name: "Categories", exact: true }).click();
     await catalogDialog.getByText("实施", { exact: true }).first().waitFor();
     assert.equal(

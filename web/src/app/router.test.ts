@@ -204,6 +204,7 @@ test("Agent directory filters and selection round trip and old settings route ca
     search: "青杉",
     category: "implementation",
     environment: "orca/codex",
+    location: "host",
     selected: "host/cedar",
   };
   expect(parse(href(route))).toEqual(route);

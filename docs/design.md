@@ -548,4 +548,6 @@ Owner HTTP 路由统一登记，实际 owner/hosted operation 与 CLI 命令绑�
 
 ## D143：Agents 只读目录与版本续接
 
-主机与运行环境组合分层展示，运行环境由执行方式和 CLI 共同确定；保留 runtime 绑定和 Agent 稳定身份。目录只读，定义经原本机显式 reload 接受。新分配使用当前定义，已有责任继续冻结快照；续接候选由账本引用和 runner 实际核验共同限定，不能用于新分配。能力双向协商后追加 hello/heartbeat 字段，协议仍为 2/1；未协商时原行为不变。原指令、路径和凭据不进入公共目录，历史保留不预占进程或槽位。见 [实施计划](plans/agent-directory-continuation.md)。
+当前 Agent 平铺展示，运行位置与运行方式分列；运行方式由执行适配器与显式 CLI 声明确定，不从 runtime ID 推断。页面及详情标题 16px、名称 14px，历史定义折叠保留，手机使用独立详情；保留 runtime 绑定和 Agent 稳定身份。目录只读，定义经原本机显式 reload 接受。新分配使用当前定义，已有责任继续冻结快照；续接候选由账本引用和 runner 实际核验共同限定，不能用于新分配。能力双向协商后追加 hello/heartbeat 字段，协议仍为 2/1；未协商时原行为不变。原指令、路径和凭据不进入公共目录，历史保留不预占进程或槽位。见 [实施计划](plans/agent-directory-continuation.md)。
+
+D143 排版与元数据修正：format 2 的 hosted runtime 可显式声明 codex/traex，旧配置省略字段仍有效；缺声明只显示已知适配器，缺运行观测显示“未上报”。既有 `tend agents hosted/show --json` 同步输出原安全投影，无新增 API 或 runner wire 变更。见[实施计划](plans/agent-directory-presentation.md)。

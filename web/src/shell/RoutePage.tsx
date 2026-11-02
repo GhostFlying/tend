@@ -158,7 +158,6 @@ export function RoutePage({
     case "agents":
       content = (
         <section className={styles.page} aria-label="Agents">
-          <PageHeader title="Agents" />
           <AgentCatalogView />
         </section>
       );

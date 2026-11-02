@@ -62,6 +62,10 @@ slug 在同一执行环境内唯一，换 runtime 也不能复用为另一个 Ag
 
 ## 更新与历史
 
+服务端具名定义的 format 2 `hosted-manager` runtime 可显式填写 `cli: "codex"` 或 `cli: "traex"`，表示所配置启动程序的实际 CLI。旧配置仍可省略；目录只展示已知的 app-server 适配器，不从 runtime ID、路径或程序文件名猜测 CLI。更正声明时递增配置及 runtime 版本，原责任继续冻结的旧快照。声明不代表运行就绪，观测仍需独立上报。
+
+`tend agents hosted --json` 与 `tend agents show --host <host-id> --json` 返回相同安全投影中的 `runtimes[].cli`、适配器和精确版本；不会公开 executable 或私有指令。Web 目录将运行位置和运行方式分列，原绑定、版本及观测在详情中查看。
+
 启动、reload、登记、重启恢复及模型升级都不重新生成名字，不从显示名、Category 或模型推导 `local_id`。配置仍明确要求填写 ID 和非空显示名，系统校验格式和同环境内的重复 ID。
 
 只修改显示名时保留 `local_id`，按既有定义版本与本机显式接受、登记流程发布。显示名不参与身份键，但属于定义和公共投影；修改它会形成新的配置快照，已固定的任务和运行继续使用原身份、版本与快照。修改名称不会自动交接现有 Issue owner 或刷新它的执行 pin。

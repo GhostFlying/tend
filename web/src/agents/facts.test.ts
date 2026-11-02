@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { currentObservation } from "./facts.ts";
-import { runtimeLabel } from "./runtimeLabel.ts";
+import { runtimeLabel, runtimeMethod } from "./runtimeLabel.ts";
 import type {
   AgentExecutor,
   AgentInventoryDefinition,
@@ -87,4 +87,7 @@ test("environment labels retain adapter and CLI and never invent missing CLI ide
   expect(runtimeLabel({ kind: "appserver-worker", cli: "codex" })).toBe("app-server/codex");
   expect(runtimeLabel({ kind: "appserver-worker" })).toBe("app-server/CLI 未记录");
   expect(runtimeLabel({ kind: "central-traex-worker", cli: "traex" })).toBe("central/traex");
+  expect(runtimeMethod({ kind: "hosted-manager", cli: "codex" })).toBe("Codex · app-server");
+  expect(runtimeMethod({ kind: "hosted-manager" })).toBe("app-server");
+  expect(runtimeMethod({ kind: "orca-worker", cli: "traex" })).toBe("TraeX · Orca");
 });
