@@ -200,7 +200,10 @@ export function AgentCatalogView() {
             <EmptyState>{categories.loading ? "正在读取类别…" : "暂无类别。"}</EmptyState>
           )}
           {categories.value?.more && (
-            <Button onClick={() => void live.agents.openCategories("all", categories.value?.next)}>
+            <Button
+              disabled={categories.loading}
+              onClick={() => void live.agents.openCategories("all", categories.value?.next)}
+            >
               加载更多类别
             </Button>
           )}
@@ -363,7 +366,16 @@ function CategoryRow({
     </div>
   );
 }
-function AgentDetails({ entry: { agent, group, runtime } }: { entry: Entry }) {
+function registration(entry: Entry): string {
+  const { agent, group } = entry;
+  if (!group.catalog) return "已声明";
+  if (!group.projection.agents?.some((current) => agentKey(current) === agentKey(agent)))
+    return "历史登记 · 仅续接旧责任";
+  return group.catalog.current ? `已登记 · v${group.catalog.current.local_revision}` : "未登记";
+}
+
+function AgentDetails({ entry }: { entry: Entry }) {
+  const { agent, group, runtime } = entry;
   const catalog = group.catalog;
   const worker = currentObservation(catalog, agent, "");
   const manager = currentObservation(catalog, agent, "issue_manager");
@@ -405,9 +417,16 @@ function AgentDetails({ entry: { agent, group, runtime } }: { entry: Entry }) {
         <dt>定义版本</dt>
         <dd>v{agent.revision}</dd>
         <dt>执行环境</dt>
-        <dd>{runtimeLabel(runtime)}</dd>
+        <dd>
+          {runtimeLabel(runtime)} · {agent.runtime_binding_ref.runtime_id} · v
+          {agent.runtime_binding_ref.revision}
+        </dd>
         <dt>协调环境</dt>
-        <dd>{runtimeLabel(owner)}</dd>
+        <dd>
+          {runtimeLabel(owner)} ·{" "}
+          {(agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).runtime_id} · v
+          {(agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).revision}
+        </dd>
         <dt>模型</dt>
         <dd>{agent.requested_model}</dd>
         <dt>推理强度</dt>
@@ -418,13 +437,7 @@ function AgentDetails({ entry: { agent, group, runtime } }: { entry: Entry }) {
       <h3>最近观测</h3>
       <dl>
         <dt>登记</dt>
-        <dd>
-          {catalog?.current
-            ? `已登记 · v${catalog.current.local_revision}`
-            : catalog
-              ? "未登记"
-              : "已声明"}
-        </dd>
+        <dd>{registration(entry)}</dd>
         <dt>执行</dt>
         <dd>{observed(worker)}</dd>
         <dt>协调</dt>
@@ -478,7 +491,7 @@ function CompactDetails({ entry }: { entry: Entry }) {
         <dt>运行环境</dt>
         <dd>{runtimeLabel(runtime)}</dd>
         <dt>登记</dt>
-        <dd>{group.catalog?.current ? "已登记" : "已声明"}</dd>
+        <dd>{registration(entry)}</dd>
         <dt>最近上报</dt>
         <dd>
           执行 {available(worker)} · 协调 {available(manager)}

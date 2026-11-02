@@ -15,26 +15,14 @@ export class AgentCatalog {
   readonly runner: WorkItemRead<RunnerAgentCatalog>;
   readonly names = new Store<ReadonlyMap<string, string>>(new Map());
   readonly catalogs = new Store<ReadonlyMap<string, ReadState<RunnerAgentCatalog>>>(new Map());
-  private categoryAfter = "";
-  private categoryEpoch = 0;
-  private categoryState: "active" | "retired" | "all" = "active";
   private categoryCursors: string[] = [];
-  private refreshingCategories: Promise<void> | null = null;
-  private categoryItems: NonNullable<AgentCategoryPage["items"]> = [];
+  private categoryState: "active" | "retired" | "all" = "active";
   private readonly runners = new Map<string, WorkItemRead<RunnerAgentCatalog>>();
 
   constructor(private api: Reader) {
-    this.categories = new WorkItemRead(api, (page) => {
-      if (!this.categoryAfter) {
-        this.categoryItems = page.items ?? [];
-        return page;
-      }
-      const items = new Map(this.categoryItems.map((c) => [c.category_id, c]));
-      for (const category of page.items ?? []) items.set(category.category_id, category);
-      this.categoryItems = [...items.values()].sort((a, b) =>
-        a.category_id.localeCompare(b.category_id),
-      );
-      return { ...page, items: this.categoryItems };
+    this.categories = new WorkItemRead({
+      get: async <T>(path: string, signal?: AbortSignal): Promise<T> =>
+        (await this.readCategoryPages(path, signal)) as T,
     });
     this.hosted = new WorkItemRead(api);
     this.runner = new WorkItemRead(api);
@@ -42,18 +30,29 @@ export class AgentCatalog {
   }
 
   openCategories(state: "active" | "retired" | "all" = "active", after?: string): Promise<void> {
-    this.categoryEpoch++;
-    return this.openCategoryPage(state, after);
-  }
-
-  private openCategoryPage(state: "active" | "retired" | "all", after?: string): Promise<void> {
     if (!after || state !== this.categoryState) this.categoryCursors = [];
     if (after && !this.categoryCursors.includes(after)) this.categoryCursors.push(after);
     this.categoryState = state;
-    this.categoryAfter = after ?? "";
-    const query = new URLSearchParams({ state });
-    if (after) query.set("after", after);
-    return this.categories.open(`/api/v1/categories?${query}`);
+    return this.categories.open(`/api/v1/categories?${new URLSearchParams({ state })}`);
+  }
+
+  private async readCategoryPages(path: string, signal?: AbortSignal): Promise<AgentCategoryPage> {
+    const pages = this.categoryCursors.length + 1;
+    const cursors: string[] = [];
+    const items = new Map<string, NonNullable<AgentCategoryPage["items"]>[number]>();
+    let nextPath = path;
+    let result: AgentCategoryPage;
+    for (let page = 0; ; page++) {
+      signal?.throwIfAborted();
+      result = await this.api.get<AgentCategoryPage>(nextPath, signal);
+      signal?.throwIfAborted();
+      for (const category of result.items ?? []) items.set(category.category_id, category);
+      if (page + 1 >= pages || !result.more || !result.next) break;
+      cursors.push(result.next);
+      nextPath = `${path}&after=${encodeURIComponent(result.next)}`;
+    }
+    if (pages === this.categoryCursors.length + 1) this.categoryCursors = cursors;
+    return { ...result, items: [...items.values()] };
   }
 
   openHosted(): Promise<void> {
@@ -109,30 +108,12 @@ export class AgentCatalog {
   }
 
   refresh(): void {
-    if (this.categoryCursors.length && !this.refreshingCategories) {
-      const pages = this.categoryCursors.length + 1,
-        state = this.categoryState;
-      const epoch = ++this.categoryEpoch;
-      this.refreshingCategories = (async () => {
-        await this.openCategoryPage(state);
-        for (let page = 1; page < pages; page++) {
-          if (this.categoryEpoch !== epoch || this.categories.state.get().error) break;
-          const current = this.categories.state.get().value;
-          if (!current?.more || !current.next) break;
-          await this.openCategoryPage(state, current.next);
-        }
-      })().finally(() => {
-        this.refreshingCategories = null;
-      });
-    } else if (!this.refreshingCategories) void this.categories.refresh();
+    void this.categories.refresh();
     for (const read of [this.hosted, this.runner, ...this.runners.values()]) void read.refresh();
   }
 
   stop(): void {
-    this.categoryEpoch++;
     this.categoryCursors = [];
-    this.categoryItems = [];
-    this.categoryAfter = "";
     for (const read of [this.categories, this.hosted, this.runner, ...this.runners.values()])
       read.close();
   }
