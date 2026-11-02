@@ -540,7 +540,7 @@ func invalidateIssueDeliveryCandidates(ctx context.Context, x *Exec, tx *store.T
 			// still needs the original approval and completed installation proof.
 			baselineCurrent = bound == o.BaselineUpgradeID
 		}
-		if baselineCurrent && o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA) && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA && o.TargetSHA == c.TargetSHA && (c.ProviderState != "merged" || o.TargetContainsMerge)) || (d.Status == "executing" && c.ProviderState == "open" && o.State == "merged" && o.TargetContainsMerge && o.TargetSHA == o.MergeSHA)) {
+		if baselineCurrent && o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA) && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA && o.TargetSHA == c.TargetSHA && (c.ProviderState != "merged" || o.TargetContainsMerge)) || (d.Status == "executing" && c.ProviderState == "open" && o.State == "merged" && o.BaseSHA == c.BaseSHA && o.TargetContainsMerge && o.TargetSHA == o.MergeSHA)) {
 			continue
 		}
 		if d.AttentionID != "" {
