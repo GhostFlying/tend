@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
@@ -172,6 +173,9 @@ type Runner struct {
 	wg      sync.WaitGroup
 
 	inventoryMu                 sync.Mutex
+	usageDiscovery              *nativeusage.Discovery
+	nativeUsageSupported        bool
+	usageWake                   chan struct{}
 	agentExecutionSupported     bool
 	retainedExecutions          []protocol.RunExecutionPin
 	agentContinuationSupported  bool
@@ -233,6 +237,7 @@ func New(cfg Config) *Runner {
 			timeout: cfg.RequestTimeout},
 		reconcile:      make(chan struct{}, 1),
 		workspaceWake:  make(chan struct{}, 1),
+		usageWake:      make(chan struct{}, 1),
 		ttl:            time.Minute,
 		ttlWake:        make(chan struct{}),
 		active:         map[string]*active{},
@@ -265,6 +270,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.wg.Go(func() { r.watchdog(ctx) })
 	r.wg.Go(func() { r.reconciler(ctx) })
 	r.wg.Go(func() { r.finalMessageReceipts(ctx) })
+	r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 	if err := r.resendClaims(ctx); err != nil {
 		return err
 	}
@@ -525,6 +531,7 @@ func (r *Runner) hello(ctx context.Context) error {
 		r.controlMu.Unlock()
 		return r.hello(ctx)
 	}
+	r.nativeUsageSupported = res.NativeUsage
 	r.repositoryBindingsSupported = res.RepositoryBindings
 	r.agentInventorySupported = res.AgentInventory && r.cfg.AgentInventory != nil
 	r.agentExecutionSupported = res.AgentExecution && r.cfg.Executions != nil

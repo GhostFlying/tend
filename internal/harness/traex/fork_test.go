@@ -28,7 +28,7 @@ func TestIsolatedForkUsesOwnHandlerAndReleasesOnlyFork(t *testing.T) {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			t.Fatal(err)
 		}
-		if p.ThreadID != "source" || !p.Ephemeral || !p.ExcludeTurns || p.DeveloperInstructions != "summary only" {
+		if p.ThreadID != "source" || p.Ephemeral || p.ExperimentalRawEvents || !p.ExcludeTurns || p.DeveloperInstructions != "summary only" {
 			t.Errorf("fork params %+v", p)
 		}
 		return ThreadStartResponse{Thread: Thread{ID: "summary"}, Model: "summary-model"}
@@ -128,6 +128,43 @@ func TestForkDoesNotRegisterInvalidSourceIdentity(t *testing.T) {
 }
 
 func forkPath(s string) *string { return &s }
+
+func TestPersistentCleanSummaryCanReleaseWithoutReleasingParent(t *testing.T) {
+	f, s := newFake(t)
+	ctx := t.Context()
+	parent := s.register("parent", nil)
+	f.on(methodThreadStart, func(raw json.RawMessage) any {
+		var input ThreadStartParams
+		if err := json.Unmarshal(raw, &input); err != nil {
+			t.Fatal(err)
+		}
+		if input.Ephemeral || input.ExperimentalRawEvents {
+			t.Fatal("summary lost persistent accounting", input)
+		}
+		return ThreadStartResponse{Thread: Thread{ID: "clean-summary", Path: forkPath("retained-history")}}
+	})
+	th, err := s.StartThread(ctx, harness.ThreadConfig{Purpose: "internal_summary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.on(methodThreadUnsubscribe, func(raw json.RawMessage) any {
+		var input ThreadUnsubscribeParams
+		_ = json.Unmarshal(raw, &input)
+		if input.ThreadID != th.ID() {
+			t.Error("released parent", input)
+		}
+		return ThreadUnsubscribeResponse{Status: "unsubscribed"}
+	})
+	if err = s.ReleaseThread(ctx, th.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ReleaseThread(ctx, parent.ID()); !errors.Is(err, harness.ErrRejected) {
+		t.Fatal("parent became releasable", err)
+	}
+	if th.(harness.ThreadLocation).RolloutPath() != "retained-history" {
+		t.Fatal("release discarded accounting history")
+	}
+}
 
 func TestReleaseForkRetainsRetryAfterRejectedUnsubscribe(t *testing.T) {
 	f, s := newFake(t)

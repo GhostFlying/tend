@@ -328,6 +328,7 @@ export interface TendAPI {
   MessagingReceipts?: MessagingReceipts;
   MessagingTrace?: MessagingTrace;
   NativeEntry?: NativeEntry;
+  NativeUsageRegistration?: NativeUsageRegistration;
   NextActionPage?: NextActionPage;
   PlannerEntry?: PlannerEntry;
   PresentAttentionPayload?: PresentAttentionPayload;
@@ -380,6 +381,10 @@ export interface TendAPI {
   UpdateIssueTaskPayload?: UpdateIssueTaskPayload;
   UpdateWorkItemChoicePayload?: UpdateWorkItemChoicePayload;
   UpgradeControlPayload?: UpgradeControlPayload;
+  UsagePreview?: UsagePreview;
+  UsageReconcile?: UsageReconcile;
+  UsageTarget?: UsageTarget;
+  UsageUpload?: UsageUpload;
   WebhookReceipt?: WebhookReceipt;
   WebhookSubscription?: WebhookSubscription;
   WebhookSubscriptionPage?: WebhookSubscriptionPage;
@@ -3028,6 +3033,18 @@ export interface NativeIdentity {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "NativeUsageRegistration".
+ */
+export interface NativeUsageRegistration {
+  parent_session_id?: string;
+  provider: string;
+  purpose?: string;
+  run_id: string;
+  session_id: string;
+  thread_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "NextActionPage".
  */
 export interface NextActionPage {
@@ -3712,17 +3729,29 @@ export interface TaskPage {
 export interface TokenUsageSample {
   cache_read: number | null;
   cache_write: number | null;
+  counter_source?: string;
   input: number | null;
   model: string;
+  model_source?: string;
+  native_content_hash?: string;
+  native_version?: string;
   occurred_at: number | null;
+  ordinal?: number;
   output: number | null;
+  parent_session_id?: string;
   parent_thread_id?: string;
   profile: string;
+  provider?: string;
+  purpose?: string;
+  record_id?: string;
   request_id: string;
   revision: number;
+  root_turn_id?: string;
+  session_id?: string;
   settlement: string;
   source: string;
   thread_id: string;
+  time_source?: string;
   total: number | null;
   turn_id: string;
 }
@@ -3732,21 +3761,127 @@ export interface TokenUsageSample {
  */
 export interface TokenUsageView {
   as_of: number;
+  collection: UsageCoverage;
   conflicts: number;
   coverage: string;
   end: number;
+  issues: UsageIssue[] | null;
   models: TokenUsageGroup[] | null;
   more: boolean;
   next: number;
+  pricing: UsagePricing;
   records: TokenUsageRecord[] | null;
   revision: number;
   roles: TokenUsageGroup[] | null;
+  sessions: UsageSession[] | null;
   start: number | null;
   timezone: string;
   totals: TokenUsageTotals;
   trend: TokenUsageBucket[] | null;
   unattributed: TokenUsageTotals;
   window: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageCoverage".
+ */
+export interface UsageCoverage {
+  last_synced_at: number | null;
+  legacy_requests: number;
+  pending: number;
+  sources: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageIssue".
+ */
+export interface UsageIssue {
+  direct: TokenUsageTotals;
+  id: string;
+  last_at?: number;
+  models: string[] | null;
+  parent_id: string;
+  path: UsageIssueRef[] | null;
+  sessions: UsageSession[] | null;
+  title: string;
+  totals: TokenUsageTotals;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TokenUsageTotals".
+ */
+export interface TokenUsageTotals {
+  cache_read: number;
+  cache_read_known: number;
+  cache_write: number;
+  cache_write_known: number;
+  estimated_requests?: number;
+  estimated_usd?: string;
+  final: number;
+  input: number;
+  input_known: number;
+  output: number;
+  output_known: number;
+  requests: number;
+  total: number;
+  total_known: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageIssueRef".
+ */
+export interface UsageIssueRef {
+  id: string;
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageSession".
+ */
+export interface UsageSession {
+  attributions: UsageAttribution[] | null;
+  executions: UsageExecution[] | null;
+  first_at: number | null;
+  id: string;
+  last_at: number | null;
+  metering_status?: string;
+  models: string[] | null;
+  parent_session_id: string;
+  totals: TokenUsageTotals;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageAttribution".
+ */
+export interface UsageAttribution {
+  agent: string;
+  agent_id: string;
+  categories: string[] | null;
+  execution_state?: string;
+  issue_path: UsageIssueRef[] | null;
+  role: string;
+  run_id: string;
+  task_id: string;
+  task_title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageExecution".
+ */
+export interface UsageExecution {
+  attribution: UsageAttribution;
+  measurements: UsageMeasurement[] | null;
+  totals: TokenUsageTotals;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageMeasurement".
+ */
+export interface UsageMeasurement {
+  cli: string;
+  cli_version: string;
+  model: string;
+  totals: TokenUsageTotals;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3757,6 +3892,8 @@ export interface TokenUsageGroup {
   cache_read_known: number;
   cache_write: number;
   cache_write_known: number;
+  estimated_requests?: number;
+  estimated_usd?: string;
   final: number;
   input: number;
   input_known: number;
@@ -3769,47 +3906,60 @@ export interface TokenUsageGroup {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsagePricing".
+ */
+export interface UsagePricing {
+  currency: string;
+  quoted_at: number | null;
+  source: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "TokenUsageRecord".
  */
 export interface TokenUsageRecord {
+  attribution: UsageAttribution;
   cache_read: number | null;
   cache_write: number | null;
   conflict: boolean;
+  counter_source?: string;
+  estimate?: UsageEstimate;
   input: number | null;
   model: string;
+  model_source?: string;
+  native_content_hash?: string;
+  native_version?: string;
   occurred_at: number | null;
+  ordinal?: number;
   output: number | null;
+  parent_session_id?: string;
   parent_thread_id?: string;
   profile: string;
+  provider?: string;
+  purpose?: string;
   received_at: number;
+  record_id?: string;
   request_id: string;
   revision: number;
   role: string;
+  root_turn_id?: string;
   seq: number;
+  session_id?: string;
   settlement: string;
   source: string;
   subject: string;
   thread_id: string;
+  time_source?: string;
   total: number | null;
   turn_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "TokenUsageTotals".
+ * via the `definition` "UsageEstimate".
  */
-export interface TokenUsageTotals {
-  cache_read: number;
-  cache_read_known: number;
-  cache_write: number;
-  cache_write_known: number;
-  final: number;
-  input: number;
-  input_known: number;
-  output: number;
-  output_known: number;
-  requests: number;
-  total: number;
-  total_known: number;
+export interface UsageEstimate {
+  model_id: string;
+  usd: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3821,6 +3971,8 @@ export interface TokenUsageBucket {
   cache_write: number;
   cache_write_known: number;
   end: number;
+  estimated_requests?: number;
+  estimated_usd?: string;
   final: number;
   input: number;
   input_known: number;
@@ -4006,6 +4158,55 @@ export interface CreateWorkItemChoicePayload {
  */
 export interface UpgradeControlPayload {
   action: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsagePreview".
+ */
+export interface UsagePreview {
+  conflicts: number;
+  existing: number;
+  linked_legacy: number;
+  new: number;
+  records: number;
+  token_delta: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageReconcile".
+ */
+export interface UsageReconcile {
+  conversation_id: string;
+  coverage?: string;
+  root_thread_id: string;
+  run_id?: string;
+  samples: TokenUsageSample[] | null;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageTarget".
+ */
+export interface UsageTarget {
+  conversation_id: string;
+  parent_session_id?: string;
+  provider?: string;
+  purpose?: string;
+  run_id: string;
+  stopped?: boolean;
+  thread_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageUpload".
+ */
+export interface UsageUpload {
+  conversation_id?: string;
+  coverage: string;
+  root_thread_id: string;
+  run_id: string;
+  samples: TokenUsageSample[] | null;
+  session_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

@@ -27,6 +27,26 @@ func (s *Server) tokenUsage(w http.ResponseWriter, r *http.Request) {
 		if err != nil || before < 0 {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid usage cursor")
 		}
-		return views.TokenUsage(r.Context(), q, kind, offset, params.Get("model"), params.Get("subject"), before, s.cfg.Now())
+		if group := params.Get("group_by"); group != "" && group != "session" && group != "issue" {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid usage grouping")
+		}
+		if order := params.Get("sort"); order != "" && order != "recent" && order != "total" {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid usage order")
+		}
+		v, err := views.TokenUsageFiltered(r.Context(), q, kind, offset, params.Get("model"), params.Get("subject"), before, s.cfg.Now(), views.UsageFilter{Agent: params.Get("agent"), Role: params.Get("role"), Issue: params.Get("issue"), Session: params.Get("session"), Sort: params.Get("sort")})
+		if err != nil {
+			return nil, err
+		}
+		if params.Get("group_by") != "" && params.Get("details") != "1" {
+			v.Records = []protocol.TokenUsageRecord{}
+			v.Trend = []protocol.TokenUsageBucket{}
+			for i := range v.Sessions {
+				v.Sessions[i].Executions = []protocol.UsageExecution{}
+			}
+			for i := range v.Issues {
+				v.Issues[i].Sessions = []protocol.UsageSession{}
+			}
+		}
+		return v, nil
 	})
 }

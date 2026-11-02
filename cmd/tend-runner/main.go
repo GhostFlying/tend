@@ -109,6 +109,9 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "usage" {
+		os.Exit(runUsageCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "agents" {
 		os.Exit(runAgentsCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
@@ -321,6 +324,10 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if (cfg.UpdaterSocket != "" || cfg.UpdaterControlSocket != "" || cfg.UpdaterBundleDir != "") && (cfg.UpdaterSocket == "" || cfg.UpdaterControlSocket == "" || cfg.UpdaterBundleDir == "") {
 		return errors.New("updater bridge, control socket and bundle directory must be configured together")
 	}
+	controlSocket := cfg.UpdaterSocket
+	if controlSocket == "" && cfg.Tailnet != nil {
+		controlSocket = filepath.Join(state, "usage-control", "usage.sock")
+	}
 	observer, providers, err := cfg.DeliveryObserver.build()
 	if err != nil {
 		return err
@@ -335,7 +342,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	r := runner.New(runner.Config{
 		Executions: executions, AgentInventory: agentInventory, AgentChanges: agentChanges, RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
-		InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: cfg.UpdaterSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
+		InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: controlSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,
 	})
 	if runtime.GOOS != "windows" {

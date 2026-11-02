@@ -479,6 +479,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 	res := protocol.HelloResult{LeaseTTLMillis: x.LeaseTTL.Milliseconds(), Runs: []protocol.RunVerdict{}, Reassigned: []protocol.Assignment{}}
+	res.NativeUsage = p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityNativeUsage)
 	changed, err := observeRuntime(ctx, tx, host.HostID, p.Runtime, now, true)
 	if err != nil {
 		return Outcome{}, err
@@ -991,6 +992,11 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 				}
 				changed = changed || queued
 				wakeQueued = wakeQueued || queued
+			}
+			if e.Kind == "usage.source" {
+				if err := registerUsageSource(ctx, tx, run, e.Body, now); err != nil {
+					return err
+				}
 			}
 			if e.Kind == "usage.request" {
 				var usage protocol.TokenUsageSample

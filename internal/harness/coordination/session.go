@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -107,6 +108,15 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 }
 func (s *Session) ResumeThread(ctx context.Context, id string, cfg harness.ThreadConfig) (harness.Thread, error) {
 	return s.open(ctx, "resume", id, cfg)
+}
+func (s *Session) ForkThread(ctx context.Context, id string, cfg harness.ThreadConfig) (harness.Thread, error) {
+	if cfg.Purpose != "internal_summary" || cfg.Ephemeral {
+		return nil, fmt.Errorf("%w: only persistent private summaries may fork", harness.ErrRejected)
+	}
+	return s.open(ctx, "fork", id, cfg)
+}
+func (s *Session) ReleaseThread(ctx context.Context, id string) error {
+	return s.transport.Call(ctx, "release", Request{ThreadID: id}, nil)
 }
 func (s *Session) open(ctx context.Context, method, id string, cfg harness.ThreadConfig) (harness.Thread, error) {
 	// Native working directories belong to the runner, never the server.
@@ -319,17 +329,22 @@ func (t *thread) FindTurn(ctx context.Context, message, id string) (harness.Turn
 // Driver runs operations against the runner-local native process. The caller
 // journals request admission/results and serializes lifecycle operations.
 type Driver struct {
-	Session      harness.Session
-	Directory    string
-	Instructions string
-	Profile      protocol.ExecutionProfile
-	Emit         func(context.Context, Event) error
-	Download     func(context.Context, protocol.ArtifactFile) (string, error)
-	mu           sync.Mutex
-	threads      map[string]harness.Thread
-	tools        map[string]chan harness.ToolResult
-	wg           sync.WaitGroup
-	closing      bool
+	// LegacyRawUsage preserves the existing event path for servers without ledger capability.
+	LegacyRawUsage bool
+	OnUsageSource  func(context.Context, nativeusage.Source) error
+	OnUsageStopped func(context.Context, string) error
+	Session        harness.Session
+	Directory      string
+	Instructions   string
+	Profile        protocol.ExecutionProfile
+	Emit           func(context.Context, Event) error
+	Download       func(context.Context, protocol.ArtifactFile) (string, error)
+	mu             sync.Mutex
+	threads        map[string]harness.Thread
+	private        map[string]bool
+	tools          map[string]chan harness.ToolResult
+	wg             sync.WaitGroup
+	closing        bool
 }
 
 func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage) (any, error) {
@@ -343,7 +358,7 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			return catalog.Models(ctx)
 		}
 		return nil, fmt.Errorf("%w: model catalog is unavailable", harness.ErrRejected)
-	case "start", "resume":
+	case "start", "resume", "fork":
 		cfg := r.Config
 		if cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never" {
 			return nil, fmt.Errorf("%w: manager requires read-only/never", harness.ErrRejected)
@@ -377,16 +392,33 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			cfg.Config["model_reasoning_effort"] = d.Profile.Effort
 		}
 		cfg.DeveloperInstructions += "\n" + d.Instructions
+		cfg.LegacyRawUsage = d.LegacyRawUsage
 		cfg.OnToolCall = d.tool
 		var t harness.Thread
 		var err error
 		if method == "start" {
 			t, err = d.Session.StartThread(ctx, cfg)
+		} else if method == "fork" {
+			d.mu.Lock()
+			parent := d.threads[r.ThreadID]
+			d.mu.Unlock()
+			forker, ok := d.Session.(harness.ThreadForker)
+			if !ok || parent == nil || cfg.Purpose != "internal_summary" || cfg.Ephemeral {
+				return nil, fmt.Errorf("%w: private summary fork is unavailable", harness.ErrRejected)
+			}
+			t, err = forker.ForkThread(ctx, r.ThreadID, cfg)
 		} else {
 			t, err = d.Session.ResumeThread(ctx, r.ThreadID, cfg)
 		}
 		if err != nil {
 			return nil, err
+		}
+		if d.OnUsageSource != nil {
+			if native, ok := t.(harness.NativeUsageThread); ok {
+				if err := d.OnUsageSource(ctx, d.privateUsageSource(native.UsageSource(), cfg, r.ThreadID)); err != nil {
+					return nil, err
+				}
+			}
 		}
 		info := ThreadInfo{ID: t.ID()}
 		if m, ok := t.(harness.ConfiguredThread); ok {
@@ -407,6 +439,12 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		}
 		_, exists := d.threads[t.ID()]
 		d.threads[t.ID()] = t
+		if d.private == nil {
+			d.private = map[string]bool{}
+		}
+		if cfg.Purpose == "internal_summary" {
+			d.private[t.ID()] = true
+		}
 		d.mu.Unlock()
 		if !exists {
 			d.wg.Add(1)
@@ -419,7 +457,7 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 					case e, ok := <-t.Events():
 						if !ok {
 							d.mu.Lock()
-							closing := d.closing
+							closing := d.closing || d.private[t.ID()]
 							d.mu.Unlock()
 							if !closing {
 								_ = d.Emit(ctx, Event{ThreadID: t.ID(), Disconnected: true})
@@ -434,6 +472,21 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			}()
 		}
 		return info, nil
+	case "release":
+		d.mu.Lock()
+		private := d.private[r.ThreadID]
+		d.mu.Unlock()
+		forker, ok := d.Session.(harness.ThreadForker)
+		if !private || !ok {
+			return nil, fmt.Errorf("%w: cannot release an owning thread", harness.ErrRejected)
+		}
+		if err := forker.ReleaseThread(ctx, r.ThreadID); err != nil {
+			return nil, err
+		}
+		if d.OnUsageStopped != nil {
+			return nil, d.OnUsageStopped(ctx, r.ThreadID)
+		}
+		return nil, nil
 	case "tool_result":
 		d.mu.Lock()
 		ch := d.tools[r.ThreadID+"/"+r.TurnID+"/"+r.CallID]
@@ -529,4 +582,32 @@ func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolRe
 	case <-d.Session.Done():
 		return harness.ToolResult{Text: "Coordinator native process closed before tool result"}
 	}
+}
+
+func (d *Driver) privateUsageSource(src nativeusage.Source, cfg harness.ThreadConfig, parent string) nativeusage.Source {
+	src.Purpose = cfg.Purpose
+	if cfg.Purpose == "internal_summary" {
+		src.ParentSessionID = parent
+		d.mu.Lock()
+		var origin harness.Thread
+		if parent != "" {
+			origin = d.threads[parent]
+		} else {
+			for id, thread := range d.threads {
+				if !d.private[id] {
+					origin = thread
+					break
+				}
+			}
+		}
+		d.mu.Unlock()
+		if native, ok := origin.(harness.NativeUsageThread); ok {
+			source := native.UsageSource()
+			src.ParentSessionID = source.SessionID
+			if src.ParentSessionID == "" {
+				src.ParentSessionID = source.ThreadID
+			}
+		}
+	}
+	return src
 }

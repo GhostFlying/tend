@@ -289,6 +289,29 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 		}
 	}
 	switch env.Operation {
+	case protocol.OpRunnerUsageSources:
+		if p.Kind != protocol.PrincipalRunner {
+			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "host source inventory required")
+		}
+		value, err := s.app.UsageTargets(ctx, p)
+		if err != nil {
+			return protocol.Operation{}, err
+		}
+		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, value)
+	case protocol.OpRunnerUsagePreview:
+		var input protocol.UsageUpload
+		if err := decodeStrict(env.Payload, &input); err != nil {
+			return protocol.Operation{}, err
+		}
+		value, err := s.app.PreviewUsage(ctx, p, input)
+		if err != nil {
+			return protocol.Operation{}, err
+		}
+		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, value)
+	case protocol.OpRunnerUsageRegister:
+		return s.app.Execute(ctx, p, env, app.RegisterNativeUsage{})
+	case protocol.OpRunnerUsageUpload:
+		return s.app.Execute(ctx, p, env, app.UploadNativeUsage{})
 	case protocol.OpRunnerInventoryRegister:
 		return s.app.Execute(ctx, p, env, app.RegisterAgentInventory{})
 	case protocol.OpRunnerInventoryStatus:

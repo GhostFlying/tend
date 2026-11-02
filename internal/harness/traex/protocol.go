@@ -99,9 +99,9 @@ type ThreadEnvironment struct {
 // Thread is the native thread record.
 type Thread struct {
 	Environments []ThreadEnvironment `json:"environments,omitempty"`
-
-	ID   string  `json:"id"`
-	Path *string `json:"path"`
+	SessionID    string              `json:"sessionId"`
+	ID           string              `json:"id"`
+	Path         *string             `json:"path"`
 }
 
 // DynamicToolSpec registers a tool tend implements (the function variant).

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/procx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/coder/websocket"
@@ -21,9 +22,11 @@ import (
 
 // BrokerConfig enables center-side native processes, using the center user's home.
 type BrokerConfig struct {
-	Bin  string `json:"traex_bin"`
-	Home string `json:"traex_home,omitempty"`
-	Cwd  string `json:"cwd,omitempty"`
+	RegisteredUsageRuns func(context.Context) ([]string, error)                       `json:"-"`
+	UsageSource         func(context.Context, string, nativeusage.Source, bool) error `json:"-"`
+	Bin                 string                                                        `json:"traex_bin"`
+	Home                string                                                        `json:"traex_home,omitempty"`
+	Cwd                 string                                                        `json:"cwd,omitempty"`
 	// Args supplies native configuration to isolated integration fixtures.
 	Args []string `json:"-"`
 }
@@ -31,13 +34,16 @@ type BrokerConfig struct {
 // Authorize rechecks the original credential and the live lease/control state.
 type Authorize func(context.Context) (protocol.RunDesired, error)
 type Broker struct {
-	cfg    BrokerConfig
-	log    *slog.Logger
-	ctx    context.Context
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	runs   map[string]*nativeRun
-	wg     sync.WaitGroup
+	usageMu      sync.Mutex
+	usageFlushMu sync.Mutex
+	pendingUsage map[string]nativeBinding
+	cfg          BrokerConfig
+	log          *slog.Logger
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	runs         map[string]*nativeRun
+	wg           sync.WaitGroup
 }
 type nativeRun struct {
 	ctx             context.Context
@@ -60,7 +66,13 @@ func NewBroker(ctx context.Context, cfg BrokerConfig, log *slog.Logger) *Broker 
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Broker{cfg: cfg, log: log, ctx: ctx, cancel: cancel, runs: map[string]*nativeRun{}}
+	b := &Broker{cfg: cfg, log: log, ctx: ctx, cancel: cancel, runs: map[string]*nativeRun{}, pendingUsage: map[string]nativeBinding{}}
+	if cfg.UsageSource != nil {
+		b.restoreUsage()
+		b.wg.Add(1)
+		go func() { defer b.wg.Done(); b.usageLoop() }()
+	}
+	return b
 }
 func (b *Broker) Close() {
 	b.cancel()
@@ -153,7 +165,7 @@ func (b *Broker) Serve(w http.ResponseWriter, r *http.Request, runID, channel st
 						} `json:"thread"`
 					}
 					_ = json.Unmarshal(frame.Result, &result)
-					if result.Thread.ID == "" && frame.Error == nil || b.saveBinding(runID, nativeBinding{Cwd: run.cwd, Thread: result.Thread.ID}) != nil {
+					if result.Thread.ID == "" && frame.Error == nil || b.saveThreadBinding(runID, nativeBinding{Cwd: run.cwd, Thread: result.Thread.ID}) != nil {
 						run.mu.Unlock()
 						run.cancel()
 						return
@@ -166,7 +178,9 @@ func (b *Broker) Serve(w http.ResponseWriter, r *http.Request, runID, channel st
 			if frame.Result != nil {
 				var result struct {
 					Thread struct {
-						ID string `json:"id"`
+						ID        string  `json:"id"`
+						Path      *string `json:"path"`
+						SessionID string  `json:"sessionId"`
 					} `json:"thread"`
 				}
 				if json.Unmarshal(frame.Result, &result) == nil && result.Thread.ID != "" {
@@ -189,6 +203,9 @@ func (b *Broker) Serve(w http.ResponseWriter, r *http.Request, runID, channel st
 						run.tuiResumed = true
 					}
 					run.mu.Unlock()
+					if channel == "control" && result.Thread.Path != nil {
+						b.trackUsage(runID, nativeusage.Source{Path: *result.Thread.Path, Provider: "traex", ThreadID: result.Thread.ID, SessionID: result.Thread.SessionID}, false)
+					}
 				}
 			}
 			if err := client.Write(bridgeCtx, kind, data); err != nil {
@@ -217,7 +234,7 @@ func (b *Broker) Serve(w http.ResponseWriter, r *http.Request, runID, channel st
 			data = normalized
 			var frame nativeFrame
 			_ = json.Unmarshal(data, &frame)
-			if frame.Method == "thread/start" && b.saveBinding(runID, nativeBinding{Cwd: run.cwd, Pending: true}) != nil {
+			if frame.Method == "thread/start" && b.saveThreadBinding(runID, nativeBinding{Cwd: run.cwd, Pending: true}) != nil {
 				run.cancel()
 				break
 			}
@@ -410,7 +427,7 @@ func (b *Broker) serveExec(w http.ResponseWriter, r *http.Request, runID string,
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait(); cancel() }()
-	defer func() { cancel(); procx.KillGroup(cmd); <-exited }()
+	defer func() { cancel(); procx.KillGroup(cmd); <-exited; b.stopUsage(runID) }()
 	startupCtx, stopStartup := context.WithTimeout(ctx, 30*time.Second)
 	defer stopStartup()
 	// A native handshake is a readiness probe; no thread or model turn is started.

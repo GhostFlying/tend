@@ -2,6 +2,7 @@ package serverkit
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net"
 	"time"
@@ -41,13 +42,14 @@ type TelegramOpener func(*app.App, string, *slog.Logger) (TelegramClient, error)
 // Dependencies leaves production defaults intact when empty. Injected listeners
 // transfer serving ownership to Run; WhoIs must describe their peer identity.
 type Dependencies struct {
-	Listeners    []net.Listener
-	WhoIs        netx.WhoIs
-	Secure       bool
-	OpenSession  SessionOpener
-	OpenTelegram TelegramOpener
-	Now          func() time.Time
-	IDs          protocol.IDGen
+	FetchUsagePrices func(context.Context) (json.RawMessage, error)
+	Listeners        []net.Listener
+	WhoIs            netx.WhoIs
+	Secure           bool
+	OpenSession      SessionOpener
+	OpenTelegram     TelegramOpener
+	Now              func() time.Time
+	IDs              protocol.IDGen
 	// Configure runs after static resource sync and before hosted admission.
 	Configure  func(context.Context, *app.App, protocol.IDGen) error
 	Initialize func(context.Context, *Runtime) error

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -40,6 +41,10 @@ type ThreadForker interface {
 type ThreadLocation interface {
 	RolloutPath() string
 }
+
+// NativeUsageThread identifies executor-local durable history for measurement.
+// Remote proxies deliberately do not expose an executor path to the server.
+type NativeUsageThread interface{ UsageSource() nativeusage.Source }
 
 // Model is a selectable entry from a harness's live model catalog.
 type Model struct {
@@ -80,6 +85,10 @@ type ThreadConfig struct {
 	// EnvironmentID is explicit for remote execution; an empty value retains native defaults.
 	EnvironmentID string
 
+	// LegacyRawUsage preserves the existing event path for servers without ledger capability.
+	LegacyRawUsage bool
+	// Purpose identifies private auxiliary work independently of persistence.
+	Purpose string
 	// NetworkAccess explicitly enables networking without widening filesystem access.
 	NetworkAccess bool
 	Ephemeral     bool

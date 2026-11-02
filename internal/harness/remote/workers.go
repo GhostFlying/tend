@@ -197,6 +197,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 	reuseUnstarted := !ex.state.BriefRecorded
 	ex.mu.Unlock()
 	spec.Thread = nativeThread
+	// Native paths in responses belong to the central broker's filesystem.
+	// The server persists and collects them; the runner never opens those paths.
+	spec.OnUsageSource = nil
 	spec.OnThread = func(id string) error {
 		ex.mu.Lock()
 		ex.state.Thread = id

@@ -421,6 +421,14 @@ Issue 默认作为应用内完整详情页，保留全局导航与原 query 链�
 
 全局用量默认全部已采集历史，主摘要直接使用当前响应 totals；时间未知摘要在全部历史下是其中子集，在所选时段下是未计入时段的历史数据，始终受同一模型与 subject 筛选。未知时间不进入趋势，缺失总量不由输入输出合成，缓存不重复加总。摘要、统一筛选、时间分布、分类、明细与覆盖说明依次呈现；分类以已知总量和请求覆盖数为主，各组保留输入、输出及缓存的折叠详情；同筛选更新失败显示带截止时间的上次读数，新筛选失败不借用旧读数。模型名称只为选单累积，不混合数值快照。实施与验证见 `docs/plans/token-usage-integration.md`。
 
+### D117 补充：可恢复原生计量
+
+Codex 与 TraeX 以原生持久化 `token_usage_record.usage` 为唯一新增消费贡献，通知只触发读取；持久执行不依赖 `experimentalRawEvents`。分页账本使用 provider/thread/ordinal 身份，旧格式使用 provider/thread/turn/response/原生时间；同一原生 Session 合并 thread，显式 fork 保留独立 Session。缓存包含在输入，推理包含在输出，不累加累计数，不由上下文占用推算消费。执行模型使用请求当时的 turn 上下文或冻结执行配置，原生完成记录时间与采集时间分别保留。
+
+Runner 在 journal 中将批次与游标原子持久化，host 身份通过增量能力 `native-usage-ledger-v1` 上报当前或历史执行；租约过期不阻止合法测量，也不授予业务执行权。服务端继续接受旧用量事件，旧事实以关联映射排除重复贡献并保留审计证据。此变更为可协商增量，通信协议继续支持 2/1；服务端迁移追加至 74，journal 追加至 14，回退构建必须能读取新增表，不能通过删账或降库回退。维护 CLI 默认只预览，应用复用读取器、journal 与 host/owner 上报通路，不创建业务执行。来源以 host 身份经 `runner.usage_register` 登记，和消费批次一样先持久化再确认，不占用业务原生事件序列或依赖执行租约；central-native 历史由服务端读取，Broker 持久保存来源及停止证明，Runner 不读取服务端路径。
+
+内部摘要 fork 与合并使用私有持久会话，关联来源并计量，不增加普通会话入口。无法恢复的临时历史保留覆盖缺口。普通页面隐藏原生 request/thread/turn，仅展示 Session；默认按 Issue，Session 为第二个 Tab，两者及全局、单执行共享有效请求贡献与筛选。列表展示 Issue、执行模型、同格紧凑 Token 细分与 OpenRouter 美元估算价格；逐请求按当前报价计算、缓存不重复计价，并标明报价时间及覆盖。详情展示任务、历史 Agent 名称、执行模型、CLI 名称及版本、职责和 Session；category 通过 Agent 名称浮层提供。页面信息层级按设计图 review 后实施。实施、历史样本与发布顺序见 `docs/plans/token-usage-repair.md`。
+
 ## D134：IM 内交互与跨渠道处理来源
 
 通信消息可携带引用既有 decision、attention 或 worker 问题的交互投影，冻结用户看到的业务版本及允许选项。Web 消息内控件、Telegram inline keyboard 与引用文本使用同一回答准入和原业务用例；明确选项可直接处理，包含新条件或含糊的文字交给当前负责人继续在 IM 内澄清。Agent 不提供渠道地址或任意卡片命令。

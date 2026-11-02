@@ -15,7 +15,7 @@ const (
 	methodThreadUnsubscribe = "thread/unsubscribe"
 )
 
-// ThreadForkParams creates a non-persisted fork. Paginated ephemeral forks
+// ThreadForkParams creates an isolated fork. Paginated forks
 // require excludeTurns; their inherited history is still model-visible.
 type ThreadForkParams struct {
 	ExperimentalRawEvents bool           `json:"experimentalRawEvents"`
@@ -47,7 +47,7 @@ type ThreadUnsubscribeResponse struct {
 func (s *Session) ForkThread(ctx context.Context, sourceThreadID string, cfg harness.ThreadConfig) (harness.Thread, error) {
 	var res ThreadStartResponse
 	if err := s.conn.call(ctx, methodThreadFork, ThreadForkParams{
-		ThreadID: sourceThreadID, Ephemeral: true, ExcludeTurns: true, ExperimentalRawEvents: true,
+		ThreadID: sourceThreadID, Ephemeral: cfg.Ephemeral, ExcludeTurns: true, ExperimentalRawEvents: false,
 		Model: cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy,
 		ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
 		DeveloperInstructions: cfg.DeveloperInstructions, Config: cfg.Config,
@@ -65,11 +65,14 @@ func (s *Session) ForkThread(ctx context.Context, sourceThreadID string, cfg har
 	t.setPermissionDefaults(res)
 	t.setNetworkPolicy(cfg, res)
 	t.setRolloutPath(res.Thread.Path)
+	t.mu.Lock()
+	t.nativeSessionID = res.Thread.SessionID
+	t.mu.Unlock()
 	return t, nil
 }
 
 // ReleaseThread implements harness.ThreadForker. It deliberately never issues
-// archive/delete: those APIs reject ephemeral threads and must not touch parents.
+// archive/delete: retention is independent and must not touch parents.
 func (s *Session) ReleaseThread(ctx context.Context, threadID string) error {
 	unlock, err := s.lockThreadLifecycle(ctx)
 	if err != nil {

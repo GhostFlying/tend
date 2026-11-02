@@ -36,6 +36,10 @@ func CapabilityBindings() []CapabilityBinding {
 			}
 		}
 		capability := "GET " + strings.Split(cmd.Route, "?")[0]
+		if cmd.Post {
+			capability = "POST " + cmd.Route
+			args = append(args, "--data", `{"conversation_id":"sample","root_thread_id":"native-root","samples":[]}`)
+		}
 		if cmd.Operation != "" {
 			capability = cmd.Operation
 			args = append(args, "--data", `{}`)
@@ -90,6 +94,9 @@ func CapabilityBindings() []CapabilityBinding {
 
 func legacyBindings() []CapabilityBinding {
 	return []CapabilityBinding{
+		binding("local POST /runner/v1/rpc", "usage host-sources", "sample", "--socket", "{socket}"),
+		binding("local POST /runner/v1/rpc", "usage host-preview", "sample", "--socket", "{socket}", "--data", `{"run_id":"run","root_thread_id":"native-root","samples":[]}`),
+		binding("local POST /runner/v1/rpc", "usage host-upload", "sample", "--socket", "{socket}", "--data", `{"run_id":"run","root_thread_id":"native-root","samples":[]}`),
 		binding("POST /api/v1/session", "login", "--server", "{server}"),
 		binding("POST /api/v1/ops", "issue create", "--data", `{}`),
 		binding("GET /api/v1/snapshot", "status", "--json"),
@@ -217,6 +224,9 @@ func commandUsage(prefix []string) string {
 				continue
 			}
 			fmt.Fprintf(&out, "\nArguments: %s\n", strings.Join(commandVariables(cmd.Route), " "))
+			if cmd.Post {
+				out.WriteString("  --data <json> | --file <json-file|->  native usage preview; no changes are committed\n")
+			}
 			if cmd.Operation != "" {
 				fmt.Fprintf(&out, "Operation: %s; target: %s\n  --data <json> | --file <json-file|->\n  --request-id <original-id> --dry-run --reason <text>\n", cmd.Operation, cmd.Target)
 				if cmd.Target != "issue_settings" && cmd.Name != "conversation settings set" && cmd.Name != "conversation handoff-settings set" {

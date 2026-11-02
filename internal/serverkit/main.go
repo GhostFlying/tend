@@ -25,6 +25,7 @@ import (
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/dispatch"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/harness/remote"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
@@ -148,7 +149,7 @@ func RunFile(ctx context.Context, path string, log *slog.Logger) error {
 	if err != nil || len(secret) < 32 {
 		return errors.New("TEND_SERVER_SECRET must hold at least 32 bytes, hex-encoded")
 	}
-	return Run(ctx, cfg, secret, Dependencies{}, log)
+	return Run(ctx, cfg, secret, Dependencies{FetchUsagePrices: fetchUsagePrices}, log)
 }
 
 // Run assembles and serves the control service with explicit outer boundaries.
@@ -356,6 +357,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		releaseDir = cfg.Upgrades.ReleaseDir
 	}
 	var native *remote.Broker
+	nativeUsage := &centralUsage{app: a, now: now, log: log, discovery: nativeusage.NewDiscovery()}
 	if cfg.NativeWorkers != nil {
 		nativeConfig := *cfg.NativeWorkers
 		if nativeConfig.Cwd == "" {
@@ -375,8 +377,15 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 				return err
 			}
 		}
+		nativeConfig.UsageSource = nativeUsage.register
+		nativeConfig.RegisteredUsageRuns = a.RegisteredNativeUsageRuns
 		native = remote.NewBroker(ctx, nativeConfig, log)
-		defer native.Close()
+		defer func() {
+			native.Close()
+			final, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			_ = nativeUsage.sync(final)
+		}()
 	}
 	runners := runnerapi.New(a, whois, secret, runnerapi.Config{ReleaseDir: releaseDir, NativeWorkers: native}, log)
 	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, background, ids, log)
@@ -439,7 +448,11 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	var wg sync.WaitGroup
+	wg.Go(func() { nativeUsage.run(runCtx) })
 	backgroundErrors := make(chan error, 2)
+	if deps.FetchUsagePrices != nil {
+		wg.Go(func() { runUsagePrices(runCtx, a, deps.FetchUsagePrices, log) })
+	}
 	if hookServer != nil {
 		wg.Go(func() {
 			if err := hookServer.Serve(hookListener); err != nil && !errors.Is(err, http.ErrServerClosed) {

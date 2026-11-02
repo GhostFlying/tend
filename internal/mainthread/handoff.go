@@ -156,6 +156,8 @@ func (m *Manager) summaryFork(ctx context.Context, s harness.Session, th harness
 	if selection.Effort != "" {
 		cfg.Config["model_reasoning_effort"] = selection.Effort
 	}
+	cfg.Purpose = "internal_summary"
+	cfg.Ephemeral = false
 	cfg.DeveloperInstructions = summaryInstructions
 	cfg.Tools = nil
 	cfg.Sandbox = "read-only"
@@ -177,6 +179,7 @@ func (m *Manager) summaryFork(ctx context.Context, s harness.Session, th harness
 func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forker harness.ThreadForker, snap store.HandoffSnapshot, prompt string, selection harness.ModelSelection) (result store.HandoffSummary, err error) {
 	ctx, cancel := context.WithTimeout(ctx, m.cfg.SummaryTimeout)
 	defer cancel()
+	m.registerNativeUsage(ctx, fork, "internal_summary")
 	identity := "tend-summary:" + fork.ID()
 	turnID := ""
 	completed := false
@@ -196,10 +199,14 @@ func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forke
 		if !completed {
 			_ = fork.Interrupt(cleanup, turnID)
 		}
+		m.syncNativeUsage(cleanup)
 		if releaseErr := forker.ReleaseThread(cleanup, fork.ID()); releaseErr != nil {
 			m.cfg.Log.WarnContext(cleanup, "could not release private summary branch", "err", releaseErr)
 			err = errors.Join(err, fmt.Errorf("mainthread: release private summary branch: %w", releaseErr))
+		} else if stopErr := m.app.StopLocalUsage(cleanup, m.cfg.ConversationID, fork.ID()); stopErr != nil {
+			m.cfg.Log.WarnContext(cleanup, "private summary usage stop pending", "err", stopErr)
 		}
+		m.syncNativeUsage(cleanup)
 	}()
 	input := prompt
 	// All stages use the model selected when the history fork was frozen.

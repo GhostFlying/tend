@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -60,6 +61,12 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		if r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manager native process already stopped")
+		}
+		if p.Method == "fork" || p.Method == "release" {
+			runtime, e := store.GetHostRuntime(ctx, tx.Q(), r.HostID)
+			if e != nil || !slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityNativeUsage) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "runner does not support persistent private summaries")
+			}
 		}
 		allowed, err := managerNativeBusinessAllowed(ctx, tx.Q(), r)
 		if err != nil {
@@ -487,7 +494,7 @@ func settleStoppedManagerRequests(ctx context.Context, tx *store.Tx, run string)
 
 func managerNativeReceiptMethod(method string) bool {
 	switch method {
-	case "models", "resume", "find", "usage", "interrupt", "close", "tool_result":
+	case "models", "resume", "find", "usage", "interrupt", "close", "tool_result", "release":
 		return true
 	}
 	return false

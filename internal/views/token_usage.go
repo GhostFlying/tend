@@ -2,8 +2,12 @@ package views
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"github.com/GhostFlying/tend/internal/domain"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -61,31 +65,84 @@ func addTokens(t *protocol.TokenUsageTotals, s protocol.TokenUsageSample) {
 
 // TokenUsage uses one read transaction for facts, contributions and watermark.
 // Unknown occurrence times stay outside exact calendar/rolling totals.
+type UsageFilter struct{ Agent, Role, Issue, Session, Sort string }
+
 func TokenUsage(ctx context.Context, q store.Querier, kind string, offset int, model, subject string, before int64, now time.Time) (protocol.TokenUsageView, error) {
+	return TokenUsageFiltered(ctx, q, kind, offset, model, subject, before, now, UsageFilter{})
+}
+func TokenUsageFiltered(ctx context.Context, q store.Querier, kind string, offset int, model, subject string, before int64, now time.Time, filter UsageFilter) (protocol.TokenUsageView, error) {
 	start, end, err := UsageWindow(kind, offset, now)
-	v := protocol.TokenUsageView{AsOf: now.UnixMilli(), Timezone: "Asia/Shanghai", Window: kind, Start: start, End: end, Trend: []protocol.TokenUsageBucket{}, Models: []protocol.TokenUsageGroup{}, Roles: []protocol.TokenUsageGroup{}, Records: []protocol.TokenUsageRecord{}, Coverage: "仅已识别的原生请求；当前已验证 TraeX 新建会话请求；恢复会话与 Orca 未提供该请求通路。子 Agent 仅计有明确来源链的独立请求；未观测来源和采集前历史不在覆盖范围。未知时点不计入精确时间窗口；执行器的缓存数值不证明上游字段存在性。"}
+	v := protocol.TokenUsageView{AsOf: now.UnixMilli(), Timezone: "Asia/Shanghai", Window: kind, Start: start, End: end, Trend: []protocol.TokenUsageBucket{}, Models: []protocol.TokenUsageGroup{}, Roles: []protocol.TokenUsageGroup{}, Records: []protocol.TokenUsageRecord{}, Coverage: "原生持久化请求用量，包含已归属的续接、压缩与子 Agent。仅已采集来源；缺失的历史不代表零消费。时间为原生请求完成记录时间；缓存及推理不重复累加。执行器归一化字段不证明供应商原始字段存在性。"}
 	if err != nil {
 		return v, err
 	}
 	if err = q.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM token_usage_facts`).Scan(&v.Revision); err != nil {
 		return v, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT f.seq,f.subject,f.role,f.received_at,c.conflict,f.payload_json FROM token_usage_current c JOIN token_usage_facts f ON f.seq=c.fact_seq WHERE (?='' OR f.subject=?) ORDER BY f.seq DESC`, subject, subject)
+	v.Pricing = protocol.UsagePricing{Source: "OpenRouter", Currency: "USD"}
+	var priceRaw string
+	prices := domain.UsagePrices{}
+	quoteErr := q.QueryRowContext(ctx, `SELECT collected_at,catalog_json FROM token_usage_price_catalogs ORDER BY collected_at DESC LIMIT 1`).Scan(&v.Pricing.QuotedAt, &priceRaw)
+	if quoteErr != nil && !errors.Is(quoteErr, sql.ErrNoRows) {
+		return v, quoteErr
+	}
+	if quoteErr == nil {
+		prices, err = domain.ParseUsagePrices([]byte(priceRaw))
+		if err != nil {
+			return v, err
+		}
+	}
+	rows, err := q.QueryContext(ctx, `SELECT f.seq,f.subject,f.role,f.received_at,(c.conflict OR `+store.UsagePendingOverlapSQLFor("f")+`),f.payload_json,COALESCE(b.run_id||'/'||b.conversation_id||'/'||b.proof||'/'||b.attribution_conflict,''),COALESCE((?='' OR f.subject=? OR (b.attribution_conflict=0 AND ('conversation:'||b.conversation_id=? OR 'run:'||b.run_id=?))),0) FROM token_usage_current c JOIN token_usage_facts f ON f.seq=c.fact_seq LEFT JOIN token_usage_bindings b ON b.source=f.source AND b.request_id=f.request_id WHERE (?='' OR f.subject=? OR json_extract(f.payload_json,'$.record_id') IS NOT NULL OR EXISTS(SELECT 1 FROM token_usage_bindings b WHERE b.source=f.source AND b.request_id=f.request_id AND b.attribution_conflict=0 AND ('conversation:'||b.conversation_id=? OR 'run:'||b.run_id=?))) AND NOT `+store.UsageLegacyLinkedSQL("f.seq")+` ORDER BY f.seq DESC`, subject, subject, subject, subject, subject, subject, subject, subject)
 	if err != nil {
 		return v, err
 	}
 	defer rows.Close()
+	grouping := newUsageGrouping()
+	attributions := map[string]protocol.UsageAttribution{}
 	models := map[string]*protocol.TokenUsageGroup{}
 	roles := map[string]*protocol.TokenUsageGroup{}
 	buckets := map[int64]*protocol.TokenUsageBucket{}
 	for rows.Next() {
 		var r protocol.TokenUsageRecord
-		var raw string
-		if err = rows.Scan(&r.Seq, &r.Subject, &r.Role, &r.ReceivedAt, &r.Conflict, &raw); err != nil {
+		var raw, binding string
+		var matchesSubject bool
+		if err = rows.Scan(&r.Seq, &r.Subject, &r.Role, &r.ReceivedAt, &r.Conflict, &raw, &binding, &matchesSubject); err != nil {
 			return v, err
 		}
 		if err = json.Unmarshal([]byte(raw), &r.TokenUsageSample); err != nil {
 			return v, err
+		}
+		key := r.Subject + "/" + r.Purpose + "/" + binding
+		if len(r.Subject) < 4 || r.Subject[:4] != "run:" {
+			key += "/" + r.ThreadID + "/" + r.TurnID
+		}
+		attribution, exists := attributions[key]
+		if !exists {
+			attribution = usageAttribution(ctx, q, r)
+			attributions[key] = attribution
+		}
+		r.Attribution = attribution
+		if subject != "" && r.RecordID != "" {
+			if strings.HasPrefix(subject, "run:") {
+				if r.Attribution.RunID != strings.TrimPrefix(subject, "run:") {
+					continue
+				}
+			} else if !matchesSubject {
+				continue
+			}
+		}
+		r.Role = r.Attribution.Role
+		if (filter.Agent != "" && r.Attribution.Agent != filter.Agent && r.Attribution.AgentID != filter.Agent) || (filter.Role != "" && r.Attribution.Role != filter.Role) || (filter.Session != "" && sessionID(r) != filter.Session) {
+			continue
+		}
+		if filter.Issue != "" {
+			found := filter.Issue == "_unassigned" && len(r.Attribution.IssuePath) == 0
+			for _, issue := range r.Attribution.IssuePath {
+				found = found || issue.ID == filter.Issue
+			}
+			if !found {
+				continue
+			}
 		}
 		name := r.Model
 		if name == "" {
@@ -98,15 +155,22 @@ func TokenUsage(ctx context.Context, q store.Querier, kind string, offset int, m
 			v.Conflicts++
 			continue
 		}
+		if r.RecordID != "" && r.OccurredAt != nil && *r.OccurredAt >= v.AsOf {
+			r.OccurredAt = nil
+		}
+		if usd, id, ok := prices.EstimateUsagePrice(r.TokenUsageSample); ok {
+			r.Estimate = &protocol.UsageEstimate{USD: usd, ModelID: id}
+		}
 		if r.OccurredAt == nil {
-			addTokens(&v.Unattributed, r.TokenUsageSample)
+			addUsageRecord(&v.Unattributed, r)
 			if kind != "total" {
 				continue
 			}
 		} else if *r.OccurredAt >= v.AsOf || *r.OccurredAt >= end || (start != nil && *r.OccurredAt < *start) {
 			continue
 		}
-		addTokens(&v.Totals, r.TokenUsageSample)
+		grouping.add(r)
+		addUsageRecord(&v.Totals, r)
 		if r.OccurredAt != nil {
 			step := int64(24 * time.Hour / time.Millisecond)
 			if kind == "day" || kind == "24h" {
@@ -121,16 +185,16 @@ func TokenUsage(ctx context.Context, q store.Querier, kind string, offset int, m
 				}
 				buckets[at] = &protocol.TokenUsageBucket{Start: begin, End: min(at+step, end, v.AsOf)}
 			}
-			addTokens(&buckets[at].TokenUsageTotals, r.TokenUsageSample)
+			addUsageRecord(&buckets[at].TokenUsageTotals, r)
 		}
 		if models[name] == nil {
 			models[name] = &protocol.TokenUsageGroup{Name: name}
 		}
-		addTokens(&models[name].TokenUsageTotals, r.TokenUsageSample)
-		if roles[r.Role] == nil {
-			roles[r.Role] = &protocol.TokenUsageGroup{Name: r.Role}
+		addUsageRecord(&models[name].TokenUsageTotals, r)
+		if roles[r.Attribution.Role] == nil {
+			roles[r.Attribution.Role] = &protocol.TokenUsageGroup{Name: r.Attribution.Role}
 		}
-		addTokens(&roles[r.Role].TokenUsageTotals, r.TokenUsageSample)
+		addUsageRecord(&roles[r.Attribution.Role].TokenUsageTotals, r)
 		if before == 0 || r.Seq < before {
 			if len(v.Records) < 50 {
 				v.Records = append(v.Records, r)
@@ -152,5 +216,57 @@ func TokenUsage(ctx context.Context, q store.Querier, kind string, offset int, m
 		v.Trend = append(v.Trend, *b)
 	}
 	sort.Slice(v.Trend, func(i, j int) bool { return v.Trend[i].Start < v.Trend[j].Start })
+	grouping.finish(&v)
+	metering, err := usageMetering(ctx, q)
+	if err != nil {
+		return v, err
+	}
+	for i := range v.Sessions {
+		v.Sessions[i].MeteringStatus = metering[v.Sessions[i].ID]
+	}
+	for i := range v.Issues {
+		for j := range v.Issues[i].Sessions {
+			v.Issues[i].Sessions[j].MeteringStatus = metering[v.Issues[i].Sessions[j].ID]
+		}
+	}
+	if filter.Sort == "total" {
+		sort.SliceStable(v.Sessions, func(i, j int) bool { return v.Sessions[i].Totals.Total > v.Sessions[j].Totals.Total })
+		sort.SliceStable(v.Issues, func(i, j int) bool { return v.Issues[i].Totals.Total > v.Issues[j].Totals.Total })
+	}
+	if err = q.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(coverage<>'caught_up'),0),MAX(updated_at) FROM (SELECT coverage,updated_at FROM token_usage_sources UNION ALL SELECT coverage,updated_at FROM token_usage_local_sources)`).Scan(&v.Collection.Sources, &v.Collection.Pending, &v.Collection.LastSyncedAt); err != nil {
+		return v, err
+	}
+	if err = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM token_usage_current c JOIN token_usage_facts f ON f.seq=c.fact_seq WHERE json_extract(f.payload_json,'$.record_id') IS NULL AND NOT `+store.UsageLegacyLinkedSQL("f.seq")+``).Scan(&v.Collection.LegacyRequests); err != nil {
+		return v, err
+	}
 	return v, rows.Err()
+}
+
+func addUsageRecord(t *protocol.TokenUsageTotals, r protocol.TokenUsageRecord) {
+	addTokens(t, r.TokenUsageSample)
+	if r.Estimate != nil {
+		t.EstimatedUSD = domain.AddUsagePrice(t.EstimatedUSD, r.Estimate.USD)
+		t.EstimatedRequests++
+	}
+}
+
+func usageMetering(ctx context.Context, q store.Querier) (map[string]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT session_id,MAX(coverage<>'caught_up') FROM (SELECT session_id,coverage FROM token_usage_sources UNION ALL SELECT COALESCE(NULLIF(json_extract(source_json,'$.session_id'),''),json_extract(source_json,'$.thread_id')),coverage FROM token_usage_local_sources) GROUP BY session_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string]string{}
+	for rows.Next() {
+		var session string
+		var pending bool
+		if err = rows.Scan(&session, &pending); err != nil {
+			return nil, err
+		}
+		result[session] = "caught_up"
+		if pending {
+			result[session] = "syncing"
+		}
+	}
+	return result, rows.Err()
 }
