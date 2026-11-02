@@ -817,6 +817,8 @@ export interface DeliveryObservation {
   provider_updated_at?: string;
   refresh_pending?: boolean;
   state: string;
+  target_contains_merge?: boolean;
+  target_sha?: string;
   url?: string;
   work_item_id: string;
 }
@@ -946,6 +948,7 @@ export interface IssueDeliveryCandidate {
   merge_sha?: string;
   provider_state: string;
   reconciliation?: IssueDeliveryReconciliation;
+  target_sha: string;
   url: string;
   validation: string;
 }
@@ -2620,6 +2623,8 @@ export interface IssueDeliveryObservation {
   provider_updated_at?: string;
   refresh_pending?: boolean;
   state: string;
+  target_contains_merge?: boolean;
+  target_sha?: string;
   url?: string;
 }
 /**

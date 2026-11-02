@@ -73,6 +73,11 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	var evidence []protocol.IssueEvidence
 	switch p.Action {
 	case "prepare", "resume":
+		// Deferral is an owner disposition independent of candidate freshness.
+		// Preparing or observing a different candidate cannot reopen confirmation.
+		if p.Action == "prepare" && d.Status == "deferred" {
+			return Outcome{Result: d}, nil
+		}
 		if p.Action == "resume" {
 			if d.Status != "deferred" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "resume requires an existing owner deferral")
@@ -83,6 +88,23 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				}
 				if err := validateAttentionOwnerRelay(ctx, tx.Q(), x, issue.IssueID, p.SourceMessageID); err != nil {
 					return Outcome{}, err
+				}
+			}
+			if p.SourceMessageID != "" && d.AttentionID != "" {
+				a, err := store.GetAttention(ctx, tx.Q(), d.AttentionID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				decision, err := store.GetDecision(ctx, tx.Q(), a.DecisionID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				var later bool
+				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages source JOIN conversation_messages answer ON answer.message_id=? WHERE source.message_id=? AND source.seq>answer.seq)`, decision.AnsweredMessageID, p.SourceMessageID).Scan(&later); err != nil {
+					return Outcome{}, err
+				}
+				if !later {
+					return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "resume requires a new owner source after the defer answer")
 				}
 			}
 			if p.Candidate == nil {
@@ -281,9 +303,9 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil {
 				return Outcome{}, err
 			}
-			target := obs.Observation.MergeSHA
-			if d.Candidate.ProviderState == "merged" {
-				target = d.Candidate.BaseSHA
+			target, err := deliveryDeploymentSource(*d.Candidate, obs.Observation)
+			if err != nil {
+				return Outcome{}, err
 			}
 			if d.Candidate.Reconciliation != nil {
 				target = d.Candidate.Reconciliation.SourceCommit
@@ -318,17 +340,17 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 func deliveryCandidateQuestion(c protocol.IssueDeliveryCandidate) string {
 	mergeScope := "merge authorized on approve"
 	if c.ProviderState == "merged" {
-		mergeScope = "existing merge " + c.MergeSHA + "; deployment only from current target " + c.BaseSHA + "; never merge again"
+		mergeScope = "existing merge " + c.MergeSHA + "; deployment only from current target " + c.TargetSHA + "; never merge again"
 	}
 	if c.Reconciliation != nil {
 		mergeScope = fmt.Sprintf("verification only: existing merge %s; accepted evidence task %s; completed upgrade %s; installed source %s; no merge/deploy mutations authorized", c.MergeSHA, c.Reconciliation.EvidenceTaskID, c.Reconciliation.UpgradeID, c.Reconciliation.SourceCommit)
 	}
-	return fmt.Sprintf("Approve this delivery candidate and scope? PR %s; head %s; base %s; provider %s; validation %s; %s; deploy=%t; deployment scope: %s. Defer retains responsibility without merge/deploy; end_delivery explicitly ends remaining delivery responsibility without integration. A changed candidate needs a new question.", c.URL, c.HeadSHA, c.BaseSHA, c.ProviderState, c.Validation, mergeScope, c.Deploy, c.DeploymentScope) + deliveryDeploymentQuestion(c)
+	return fmt.Sprintf("Approve this delivery candidate and scope? PR %s; head %s; base %s; target %s; provider %s; validation %s; %s; deploy=%t; deployment scope: %s. Defer retains responsibility without merge/deploy; end_delivery explicitly ends remaining delivery responsibility without integration. A changed candidate needs a new question.", c.URL, c.HeadSHA, c.BaseSHA, c.TargetSHA, c.ProviderState, c.Validation, mergeScope, c.Deploy, c.DeploymentScope) + deliveryDeploymentQuestion(c)
 }
 func validateDeliveryCandidate(ctx context.Context, q store.Querier, issue protocol.Issue, c protocol.IssueDeliveryCandidate) error {
 	u, err := url.Parse(c.URL)
-	if err != nil || u.Scheme != "https" || u.Host == "" || !validDeliverySHA(c.HeadSHA) || !validDeliverySHA(c.BaseSHA) || strings.TrimSpace(c.Validation) == "" || strings.TrimSpace(c.DeploymentScope) == "" || (c.ProviderState != "open" && !(c.ProviderState == "merged" && c.Deploy && validDeliverySHA(c.MergeSHA))) || (c.ProviderState == "open" && c.MergeSHA != "") {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "candidate requires a real HTTPS PR, head/base SHA, validation, known open candidate or verified merged deployment-only candidate and explicit deployment scope (including none)")
+	if err != nil || u.Scheme != "https" || u.Host == "" || !validDeliverySHA(c.HeadSHA) || !validDeliverySHA(c.BaseSHA) || !validDeliverySHA(c.TargetSHA) || strings.TrimSpace(c.Validation) == "" || strings.TrimSpace(c.DeploymentScope) == "" || (c.ProviderState != "open" && !(c.ProviderState == "merged" && c.Deploy && validDeliverySHA(c.MergeSHA))) || (c.ProviderState == "open" && c.MergeSHA != "") {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "candidate requires a real HTTPS PR, head/base/target SHA, validation, known open candidate or verified merged deployment-only candidate and explicit deployment scope (including none)")
 	}
 	if c.Deploy {
 		if c.Deployment == nil || strings.TrimSpace(c.Deployment.ServerInstance) == "" || c.Deployment.HostIDs == nil {
@@ -363,7 +385,7 @@ func validateDeliveryCandidate(ctx context.Context, q store.Querier, issue proto
 	if err != nil {
 		return err
 	}
-	if obs.Observation.ErrorKind != "" || obs.Observation.RefreshPending || obs.Observation.CheckedAt == 0 || obs.Observation.State != c.ProviderState || obs.Observation.HeadSHA != c.HeadSHA || obs.Observation.BaseSHA != c.BaseSHA || (c.ProviderState == "merged" && obs.Observation.MergeSHA != c.MergeSHA) {
+	if obs.Observation.ErrorKind != "" || obs.Observation.RefreshPending || obs.Observation.CheckedAt == 0 || obs.Observation.State != c.ProviderState || obs.Observation.HeadSHA != c.HeadSHA || obs.Observation.BaseSHA != c.BaseSHA || obs.Observation.TargetSHA != c.TargetSHA || (c.ProviderState == "merged" && (obs.Observation.MergeSHA != c.MergeSHA || !obs.Observation.TargetContainsMerge)) {
 		return protocol.Errorf(protocol.CodeStaleRevision, "provider candidate is unknown or changed; refresh and prepare the current candidate")
 	}
 	return nil
@@ -518,7 +540,7 @@ func invalidateIssueDeliveryCandidates(ctx context.Context, x *Exec, tx *store.T
 			// still needs the original approval and completed installation proof.
 			baselineCurrent = bound == o.BaselineUpgradeID
 		}
-		if baselineCurrent && o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA) && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA) || (d.Status == "executing" && o.State == "merged")) {
+		if baselineCurrent && o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA) && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA && o.TargetSHA == c.TargetSHA && (c.ProviderState != "merged" || o.TargetContainsMerge)) || (d.Status == "executing" && c.ProviderState == "open" && o.State == "merged" && o.TargetContainsMerge && o.TargetSHA == o.MergeSHA)) {
 			continue
 		}
 		if d.AttentionID != "" {
@@ -533,9 +555,14 @@ func invalidateIssueDeliveryCandidates(ctx context.Context, x *Exec, tx *store.T
 				events = append(events, attentionEvent(a))
 			}
 		}
-		d.Status = "preparing"
+		if d.Status != "deferred" {
+			d.Status = "preparing"
+		}
 		d.Revision++
 		d.Reason = "Provider identity, outcome or deployment baseline changed; reconcile and prepare a current versioned candidate"
+		if d.Status == "deferred" {
+			d.Reason = "Owner deferral remains in force despite changed provider or baseline facts; only an actual owner resume may reopen confirmation"
+		}
 		if err := tx.PutIssueDeliveryDuty(ctx, o.WorkItemID, d); err != nil {
 			return nil, err
 		}
@@ -599,7 +626,7 @@ func recordDeliveryCandidateExpiry(ctx context.Context, x *Exec, tx *store.Tx, i
 		return err
 	}
 	message := x.IDs.New(protocol.PrefixMessage)
-	if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: conversation, Author: "system", Body: "The delivery candidate or deployment baseline expired for Issue " + issue + ". Reconcile the original queued/running execution, refresh the actual provider and installation facts, and prepare a current versioned candidate. Do not reuse the old approval, revive a terminal task, or replay an uncertain merge/installation.", CreatedAt: x.Now.UnixMilli()}); err != nil {
+	if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: conversation, Author: "system", Body: "The delivery candidate or deployment baseline expired for Issue " + issue + ". Reconcile the original queued/running execution, refresh the actual provider and installation facts, and prepare a current versioned candidate. A deferred delivery remains deferred until an actual owner resume source; do not open another confirmation just because validation or provider facts changed. Do not reuse the old approval, revive a terminal task, or replay an uncertain merge/installation.", CreatedAt: x.Now.UnixMilli()}); err != nil {
 		return err
 	}
 	if err := tx.BindMessage(ctx, message, "work_item", issue, "delivery_candidate_expired"); err != nil {

@@ -3036,6 +3036,12 @@
         "state": {
           "type": "string"
         },
+        "target_contains_merge": {
+          "type": "boolean"
+        },
+        "target_sha": {
+          "type": "string"
+        },
         "url": {
           "type": "string"
         },
@@ -4689,6 +4695,9 @@
         "reconciliation": {
           "$ref": "#/definitions/IssueDeliveryReconciliation"
         },
+        "target_sha": {
+          "type": "string"
+        },
         "url": {
           "type": "string"
         },
@@ -4697,6 +4706,7 @@
         }
       },
       "required": [
+        "target_sha",
         "delivery_id",
         "url",
         "head_sha",
@@ -4841,6 +4851,12 @@
           "type": "boolean"
         },
         "state": {
+          "type": "string"
+        },
+        "target_contains_merge": {
+          "type": "boolean"
+        },
+        "target_sha": {
           "type": "string"
         },
         "url": {

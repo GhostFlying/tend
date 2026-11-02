@@ -148,7 +148,7 @@ func TestDeliveryTargetBindsOneStartRejectsOldSourceAndFencesNextBaseline(t *tes
 	}
 	merged := strings.Repeat("c", 40)
 	observed := selected.candidate
-	observed.BaseSHA = merged
+	observed.TargetSHA = merged
 	observeDeliveryForTest(t, h, selected.issue.IssueID, observed, "merged", merged)
 	upgrade.DeliveryTaskID = first.TaskID
 	upgrade.ArtifactSources = map[string]release.SourceIdentity{}
@@ -273,7 +273,7 @@ func TestDeliveryTargetRejectsProviderQueryIssuedBeforeAnotherInstallation(t *te
 		t.Fatal("baseline refresh did not issue a new query", assignments)
 	}
 	a := assignments[0]
-	payload := protocol.DeliveryReportPayload{InstanceID: rt.InstanceID, WorkItemID: i.IssueID, DeliveryID: c.DeliveryID, Generation: a.Generation, Nonce: a.Nonce, Snapshot: &protocol.DeliverySnapshot{State: "open", HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, URL: c.URL}}
+	payload := protocol.DeliveryReportPayload{InstanceID: rt.InstanceID, WorkItemID: i.IssueID, DeliveryID: c.DeliveryID, Generation: a.Generation, Nonce: a.Nonce, Snapshot: &protocol.DeliverySnapshot{State: "open", HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, TargetSHA: c.TargetSHA, URL: c.URL}}
 	if !accepted(t, h.exec(runner("linux-2"), h.env(protocol.OpDeliveriesReport, protocol.Target{Type: "host", ID: "linux-2"}, payload, nil), ReportDelivery{})) {
 		t.Fatal("fresh baseline facts rejected")
 	}

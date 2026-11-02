@@ -38,16 +38,18 @@ type Actor struct {
 
 // Observation records provider facts. Missing actors/times remain unknown.
 type Observation struct {
-	BaseSHA   string `json:"base_sha,omitempty"`
-	State     string `json:"state"`
-	HeadSHA   string `json:"head_sha,omitempty"`
-	MergeSHA  string `json:"merge_sha,omitempty"`
-	URL       string `json:"url,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-	MergedAt  string `json:"merged_at,omitempty"`
-	ClosedAt  string `json:"closed_at,omitempty"`
-	MergedBy  *Actor `json:"merged_by,omitempty"`
-	ClosedBy  *Actor `json:"closed_by,omitempty"`
+	TargetSHA           string `json:"target_sha,omitempty"`
+	TargetContainsMerge bool   `json:"target_contains_merge,omitempty"`
+	BaseSHA             string `json:"base_sha,omitempty"`
+	State               string `json:"state"`
+	HeadSHA             string `json:"head_sha,omitempty"`
+	MergeSHA            string `json:"merge_sha,omitempty"`
+	URL                 string `json:"url,omitempty"`
+	UpdatedAt           string `json:"updated_at,omitempty"`
+	MergedAt            string `json:"merged_at,omitempty"`
+	ClosedAt            string `json:"closed_at,omitempty"`
+	MergedBy            *Actor `json:"merged_by,omitempty"`
+	ClosedBy            *Actor `json:"closed_by,omitempty"`
 }
 
 // Exec returns stdout even for a nonzero CLI exit so structured errors can be
@@ -129,7 +131,7 @@ func commandError(err error) error {
 	return &Error{Kind: "query_failed"}
 }
 
-const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state headRefOid baseRefOid updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
+const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state headRefOid baseRefOid baseRef{target{oid}} updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
 
 func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 	parts := strings.Split(ref.Repository, "/")
@@ -143,6 +145,7 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 				PullRequest *struct {
 					Number                                                            int64 `json:"number"`
 					URL, State, HeadRefOid, BaseRefOid, UpdatedAt, ClosedAt, MergedAt string
+					BaseRef                                                           *struct{ Target *struct{ OID string } }
 					MergeCommit                                                       *struct {
 						OID string `json:"oid"`
 					}
@@ -191,8 +194,29 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 		return Observation{}, &Error{Kind: "unknown_state"}
 	}
 	out := Observation{BaseSHA: pr.BaseRefOid, State: state, HeadSHA: pr.HeadRefOid, URL: pr.URL, UpdatedAt: pr.UpdatedAt, MergedAt: pr.MergedAt, ClosedAt: pr.ClosedAt, MergedBy: identity(pr.MergedBy)}
+	if pr.BaseRef != nil && pr.BaseRef.Target != nil {
+		out.TargetSHA = pr.BaseRef.Target.OID
+	}
 	if pr.MergeCommit != nil {
 		out.MergeSHA = pr.MergeCommit.OID
+	}
+	if state == Merged && out.MergeSHA != "" && out.TargetSHA != "" {
+		// Compare immutable commits: a later branch move cannot change the
+		// lineage proof for the target observed in the GraphQL snapshot.
+		body, err := c.cfg.Exec(ctx, c.cfg.GitHubBin, []string{"api", "repos/" + ref.Repository + "/compare/" + out.MergeSHA + "..." + out.TargetSHA})
+		if err != nil {
+			return Observation{}, commandError(err)
+		}
+		var comparison struct {
+			Status          string
+			MergeBaseCommit struct {
+				SHA string `json:"sha"`
+			} `json:"merge_base_commit"`
+		}
+		if json.Unmarshal(body, &comparison) != nil {
+			return Observation{}, &Error{Kind: "invalid_response"}
+		}
+		out.TargetContainsMerge = (comparison.Status == "ahead" || comparison.Status == "identical") && comparison.MergeBaseCommit.SHA == out.MergeSHA
 	}
 	// A merged review is distinct from an explicit close. Never attribute it to
 	// an earlier close/reopen cycle or substitute its merger as the closing user.

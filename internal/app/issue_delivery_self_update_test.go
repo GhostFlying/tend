@@ -52,7 +52,7 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 	git("checkout", "-q", "main")
 	h, upgrade := upgradeHarness(t)
 	_, i, original, candidate := deliveryFixtureOnHarness(t, h)
-	candidate.HeadSHA, candidate.BaseSHA = head, base
+	candidate.HeadSHA, candidate.BaseSHA, candidate.TargetSHA = head, base, base
 	candidate.Deploy = true
 	candidate.DeploymentScope = "controlled self-update of server and complete isolated fleet; verify original behavior"
 	candidate.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: []string{"linux-2", "linux-1"}}
@@ -86,7 +86,7 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 		t.Fatal("unexpected merge identity")
 	}
 	mergedCandidate := candidate
-	mergedCandidate.BaseSHA = merged
+	mergedCandidate.TargetSHA = merged
 	observeDeliveryForTest(t, h, i.IssueID, mergedCandidate, "merged", merged)
 	body, err := os.ReadFile(filepath.Join(dir, "behavior.txt"))
 	if err != nil || string(body) != "fixed\n" {
@@ -312,6 +312,7 @@ func TestDeliveryDeploymentCannotSettleFromUnrelatedOrUnverifiedUpgrade(t *testi
 		}
 		return protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Controlled update receipt", Evidence: []string{"upgrade:batch"}}}
 	})
+	c.TargetSHA = strings.Repeat("c", 40)
 	observeDeliveryForTest(t, h, i.IssueID, c, "merged", strings.Repeat("c", 40))
 	expectWorkCode(t, updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: original, Action: "complete", UpgradeID: "unrelated-batch", IssueControlPayload: protocol.IssueControlPayload{Reason: "Try to substitute another installation"}}), protocol.CodeInvalidTransition)
 	for _, invalid := range []string{"old-batch", "running", "unknown", "server-instance", "server-health", "server-process", "host-set", "installation", "valid"} {
@@ -427,7 +428,7 @@ func TestDeliveryKnownMergedFailureRequiresFreshDeploymentCandidate(t *testing.T
 	})
 	c.ProviderState = "merged"
 	c.MergeSHA = strings.Repeat("c", 40)
-	c.BaseSHA = c.MergeSHA
+	c.TargetSHA = c.MergeSHA
 	c.Validation = "original checks plus reconciliation of the prior installation"
 	observeDeliveryForTest(t, h, i.IssueID, c, "merged", c.MergeSHA)
 	batch.View.Status = "attention"
@@ -468,7 +469,7 @@ func TestDeliveryKnownMergedFailureRequiresFreshDeploymentCandidate(t *testing.T
 		t.Fatal(err)
 	}
 	frozen := h.storedSpec(successor.TaskID, 1)
-	if !strings.Contains(strings.Join(frozen.Constraints, "\n"), "existing merge "+c.MergeSHA+"; deployment only from current target "+c.BaseSHA+"; never merge again") {
+	if !strings.Contains(strings.Join(frozen.Constraints, "\n"), "existing merge "+c.MergeSHA+"; deployment only from current target "+c.TargetSHA+"; never merge again") {
 		t.Fatal("recovery authorized another merge")
 	}
 	assignment, ok, claimEnv := h.claim("linux-1")

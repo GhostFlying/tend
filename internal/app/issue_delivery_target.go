@@ -171,18 +171,9 @@ func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c 
 	if err != nil {
 		return nil, err
 	}
-	o := observation.Observation
-	if o.ErrorKind != "" || o.RefreshPending || o.State != "merged" || o.HeadSHA != frozen.HeadSHA || o.MergeSHA == "" {
-		return nil, protocol.Errorf(protocol.CodeStaleRevision, "verify the approved head's merge before installation")
-	}
-	target := o.MergeSHA
-	if frozen.ProviderState == "merged" {
-		if o.MergeSHA != frozen.MergeSHA || o.BaseSHA != frozen.BaseSHA {
-			return nil, protocol.Errorf(protocol.CodeStaleRevision, "merged deployment source changed")
-		}
-		target = frozen.BaseSHA
-	} else if o.BaseSHA != o.MergeSHA {
-		return nil, protocol.Errorf(protocol.CodeStaleRevision, "main advanced beyond this merge; confirm a current deployment source")
+	target, err := deliveryDeploymentSource(frozen.IssueDeliveryCandidate, observation.Observation)
+	if err != nil {
+		return nil, err
 	}
 	sourceBuild, ok := c.ArtifactSources[c.ServerHash]
 	if !ok || sourceBuild.Modified || !validDeliverySHA(sourceBuild.Commit) || sourceBuild.Commit != target {
@@ -237,4 +228,22 @@ func refreshDeliveryBaselineQueries(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 	}
 	return nil
+}
+
+// BaseSHA is the PR base. Installation always uses the independently observed
+// target, proven to contain the merge, never that historical base commit.
+func deliveryDeploymentSource(candidate protocol.IssueDeliveryCandidate, o protocol.DeliveryObservation) (string, error) {
+	if o.ErrorKind != "" || o.RefreshPending || o.State != "merged" || o.HeadSHA != candidate.HeadSHA || o.MergeSHA == "" {
+		return "", protocol.Errorf(protocol.CodeStaleRevision, "verify the approved head's merge before installation")
+	}
+	target := o.MergeSHA
+	if candidate.ProviderState == "merged" {
+		if o.MergeSHA != candidate.MergeSHA || o.BaseSHA != candidate.BaseSHA || o.TargetSHA != candidate.TargetSHA || !o.TargetContainsMerge {
+			return "", protocol.Errorf(protocol.CodeStaleRevision, "merged deployment source changed")
+		}
+		target = candidate.TargetSHA
+	} else if o.TargetSHA != o.MergeSHA || !o.TargetContainsMerge {
+		return "", protocol.Errorf(protocol.CodeStaleRevision, "main advanced beyond this merge; confirm a current deployment source")
+	}
+	return target, nil
 }

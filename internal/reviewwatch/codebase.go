@@ -73,6 +73,8 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 	out := Observation{State: mr.Status, URL: mr.URL, UpdatedAt: mr.UpdatedAt, MergedAt: mr.MergedAt, ClosedAt: mr.ClosedAt, MergeSHA: mr.MergeCommitId, MergedBy: mr.MergedBy.actor()}
 	if mr.TargetBranch != nil && mr.TargetBranch.Commit != nil {
 		out.BaseSHA = mr.TargetBranch.Commit.ID
+		out.TargetSHA = mr.TargetBranch.Commit.ID
+		out.TargetContainsMerge = mr.Status == Merged && out.MergeSHA != "" && out.TargetSHA == out.MergeSHA
 	}
 	// The source branch can advance after the review has ended. Its live head
 	// must not replace the commit recorded in the latest review version.

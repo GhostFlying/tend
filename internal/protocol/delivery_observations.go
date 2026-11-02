@@ -4,6 +4,7 @@ const (
 	OpDeliveriesPoll                    = "runner.deliveries_poll"
 	OpDeliveriesReport                  = "runner.deliveries_report"
 	OpRefreshDelivery                   = "work_items.refresh_delivery"
+	CapabilityDeliveryTargetLineage     = "delivery-target-lineage-v1"
 	CapabilityDeliveryCandidateIdentity = "delivery-candidate-identity-v1"
 	CapabilityDeliveryGitHub            = "delivery-observer-github-v1"
 	CapabilityDeliveryCodebase          = "delivery-observer-codebase-v1"
@@ -16,16 +17,18 @@ type DeliveryActor struct {
 
 // DeliverySnapshot contains provider facts; missing identities remain unknown.
 type DeliverySnapshot struct {
-	BaseSHA           string         `json:"base_sha,omitempty"`
-	State             string         `json:"state"`
-	HeadSHA           string         `json:"head_sha,omitempty"`
-	MergeSHA          string         `json:"merge_sha,omitempty"`
-	URL               string         `json:"url,omitempty"`
-	ProviderUpdatedAt string         `json:"provider_updated_at,omitempty"`
-	MergedAt          string         `json:"merged_at,omitempty"`
-	ClosedAt          string         `json:"closed_at,omitempty"`
-	MergedBy          *DeliveryActor `json:"merged_by,omitempty"`
-	ClosedBy          *DeliveryActor `json:"closed_by,omitempty"`
+	TargetSHA           string         `json:"target_sha,omitempty"`
+	TargetContainsMerge bool           `json:"target_contains_merge,omitempty"`
+	BaseSHA             string         `json:"base_sha,omitempty"`
+	State               string         `json:"state"`
+	HeadSHA             string         `json:"head_sha,omitempty"`
+	MergeSHA            string         `json:"merge_sha,omitempty"`
+	URL                 string         `json:"url,omitempty"`
+	ProviderUpdatedAt   string         `json:"provider_updated_at,omitempty"`
+	MergedAt            string         `json:"merged_at,omitempty"`
+	ClosedAt            string         `json:"closed_at,omitempty"`
+	MergedBy            *DeliveryActor `json:"merged_by,omitempty"`
+	ClosedBy            *DeliveryActor `json:"closed_by,omitempty"`
 }
 
 // DeliveryObservation is independent of the work item's planning revision.
@@ -46,6 +49,7 @@ type DeliveryPollPayload struct {
 	InstanceID string `json:"instance_id"`
 }
 type DeliveryAssignment struct {
+	TargetLineage     bool          `json:"target_lineage,omitempty"`
 	CandidateIdentity bool          `json:"candidate_identity,omitempty"`
 	WorkItemID        string        `json:"work_item_id"`
 	Delivery          IssueDelivery `json:"delivery"`

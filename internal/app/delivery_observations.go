@@ -102,7 +102,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if _, err := tx.Exec(ctx, `UPDATE observation_jobs SET status='claimed',event_id=?,updated_at=? WHERE issue_id=? AND delivery_id=?`, eventID, now, selectedItem.WorkItemID, selectedDelivery.DeliveryID); err != nil {
 		return Outcome{}, err
 	}
-	result.Assignments = append(result.Assignments, protocol.DeliveryAssignment{CandidateIdentity: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryCandidateIdentity), WorkItemID: selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce})
+	result.Assignments = append(result.Assignments, protocol.DeliveryAssignment{TargetLineage: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryTargetLineage), CandidateIdentity: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryCandidateIdentity), WorkItemID: selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce})
 	event := deliveryChanged(selectedItem, selected.Observation)
 	event.Kind = "work_item.delivery_query_started"
 	return Outcome{Result: result, Events: []Event{event}}, nil
