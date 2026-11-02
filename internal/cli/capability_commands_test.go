@@ -190,6 +190,8 @@ func TestCapabilityQueriesPreserveCompleteFiltersAndCursors(t *testing.T) {
 		{[]string{"task", "list", "--all", "--lifecycle", "completed", "--sort", "completed_at", "--before", "1:task", "--limit", "10"}, "/api/v1/tasks", url.Values{"all": {"1"}, "lifecycle": {"completed"}, "sort": {"completed_at"}, "before": {"1:task"}, "limit": {"10"}}},
 		{[]string{"usage", "--window", "month", "--offset", "-1", "--model", "model name", "--subject", "main", "--before", "45"}, "/api/v1/token-usage", url.Values{"window": {"month"}, "offset": {"-1"}, "model": {"model name"}, "subject": {"main"}, "before": {"45"}}},
 		{[]string{"inbox", "list", "--include-archived", "--kind", "action", "--after", "cursor", "--limit", "10"}, "/api/v1/inbox", url.Values{"include_archived": {"true"}, "kind": {"action"}, "after": {"cursor"}, "limit": {"10"}}},
+		{[]string{"inbox", "list", "--actionable-only", "--status", "open"}, "/api/v1/inbox", url.Values{"actionable_only": {"true"}, "status": {"open"}}},
+		{[]string{"inbox", "list", "--actionable-only=false"}, "/api/v1/inbox", url.Values{}},
 		{[]string{"archive", "records", "ledger", "messages", "--after", "cursor", "--limit", "2"}, "/api/v1/archives/ledger/records/messages", url.Values{"after": {"cursor"}, "limit": {"2"}}},
 	}
 	for _, tc := range cases {

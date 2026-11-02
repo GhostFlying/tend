@@ -67,7 +67,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `GET /api/v1/files/{id}/metadata` | `file metadata` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/hosted-agents` | `agents hosted` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/hosts/{id}/agents` | `agents show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
-| `GET /api/v1/inbox` | `inbox list` | issue=issue_id kind status include-archived=include_archived after limit | Web | CLI/HTTP；读取无写入 |
+| `GET /api/v1/inbox` | `inbox list` | issue=issue_id kind status actionable-only=actionable_only include-archived=include_archived after limit | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issue-notification-settings` | `issue notifications show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues` | `issue list` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}` | `issue show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
@@ -277,3 +277,5 @@ tend agents local reload --socket "$RUNNER_CONTROL_SOCKET" --dry-run
 本轮不统一进程 bootstrap/restart/stage-config 等额外运维（用户已选择诊断与已有维护层级），既有 tend-updater 专用 CLI 保留；updater authorize/health 是内部执行回调，明确分类，不转成 owner 操作。请求接收、租约、worker MCP 和执行上报同样保留原角色边界。
 
 补充 stdin 取消回归：HTTP 上传和请求前 JSON 读取均在 context 取消时关闭可中断输入，避免等待未结束的生产者；不把中断或丢失响应判为业务成功。
+
+合入前对齐最新 main：保留新增设计决策，CLI 决策编号改为 D142。补齐 main 新增的 actionable_only 筛选，inbox list 与 attention list 均提供 --actionable-only，向既有 API 编码 true；真实 CLI/HTTP 回归核对开放 action 与 notification 的筛选差异，不新增服务端语义。

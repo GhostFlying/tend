@@ -23,6 +23,7 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 	issue := fs.String("issue", "", "Issue filter")
 	status := fs.String("status", "", "business state filter")
 	kind := fs.String("kind", "", "attention kind filter")
+	actionable := fs.Bool("actionable-only", false, "only decisions and actions requiring a response")
 	limit := fs.Int("limit", 50, "page size, 1..100")
 	fs.Bool("json", true, "print structured response")
 	all := fs.Bool("all", false, "include archived")
@@ -46,6 +47,9 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 		}
 		if *all {
 			q.Set("include_archived", "true")
+		}
+		if *actionable {
+			q.Set("actionable_only", "true")
 		}
 		return readOwnerJSON(ctx, o, "/api/v1/attentions?"+q.Encode())
 	}

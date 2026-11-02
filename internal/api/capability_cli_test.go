@@ -86,6 +86,30 @@ func TestCapabilityCLIRealOwnerWorkflow(t *testing.T) {
 	if err := json.Unmarshal(created.Operation.Result, &attention); err != nil {
 		t.Fatal(err)
 	}
+	var notified protocol.APIResponse
+	if err := json.Unmarshal(c.run("attention", "create", "--data", `{"kind":"information","title":"Informational update"}`), &notified); err != nil {
+		t.Fatal(err)
+	}
+	var notification protocol.Attention
+	if err := json.Unmarshal(notified.Operation.Result, &notification); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"attention", "inbox"} {
+		for _, actionable := range []bool{false, true} {
+			var inbox protocol.AttentionPage
+			if err := json.Unmarshal(c.run(command, "list", "--status", "open", "--actionable-only="+strconv.FormatBool(actionable), "--json"), &inbox); err != nil {
+				t.Fatal(err)
+			}
+			var hasAction, hasNotification bool
+			for _, item := range inbox.Items {
+				hasAction = hasAction || item.AttentionID == attention.AttentionID
+				hasNotification = hasNotification || item.AttentionID == notification.AttentionID
+			}
+			if !hasAction || hasNotification == actionable {
+				t.Fatalf("%s actionable=%t: action=%t notification=%t", command, actionable, hasAction, hasNotification)
+			}
+		}
+	}
 	var messages protocol.MessagingPage
 	if err := json.Unmarshal(c.run("message", "list"), &messages); err != nil {
 		t.Fatal(err)
