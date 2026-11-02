@@ -4,6 +4,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"net/http"
 	"testing"
+	"time"
 )
 
 func TestTokenUsageAndRolloutReadsRequireOwnerAndValidateWindows(t *testing.T) {
@@ -29,5 +30,28 @@ func TestTokenUsageAndRolloutReadsRequireOwnerAndValidateWindows(t *testing.T) {
 	}
 	if status := e.do("GET", "/api/v1/runs/missing/rollout", owner, nil, nil); status != 404 {
 		t.Fatal(status)
+	}
+}
+
+func TestUsageIssueOrderingHonorsAPIAndCLIQuery(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	larger := createOwnerIssueHTTP(t, e, token, "")
+	recent := createOwnerIssueHTTP(t, e, token, "")
+	for i, issue := range []protocol.Issue{larger, recent} {
+		total := int64(500 - i*400)
+		at := e.clock.Now().Add(time.Duration(i-2) * time.Hour).UnixMilli()
+		sample := protocol.TokenUsageSample{Source: "test-native", RequestID: issue.IssueID, ThreadID: issue.IssueID, SessionID: issue.IssueID, Revision: 1, Settlement: "final", OccurredAt: &at, Total: &total}
+		if err := e.app.RecordTokenUsage(t.Context(), "issue:"+issue.IssueID, sample); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct{ query, first string }{{"recent", recent.IssueID}, {"total", larger.IssueID}} {
+		var view protocol.TokenUsageView
+		status := e.do("GET", "/api/v1/token-usage?window=total&group_by=issue&sort="+test.query, token, nil, &view)
+		if status != http.StatusOK || len(view.Issues) != 2 || view.Issues[0].ID != test.first || view.Totals.Total != 600 {
+			t.Fatal(test.query, status, view)
+		}
 	}
 }

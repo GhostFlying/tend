@@ -27,6 +27,7 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -83,6 +84,10 @@ type Manager struct {
 	summaryActive      bool
 	lastActivity       time.Time
 	toolSourceMu       sync.Mutex // serializes callback source binding with visible tool records
+	usageIndex         *nativeusage.Discovery
+	usageMu            sync.Mutex
+	usageFiles         map[string]usageDiscovery
+	usageWake          chan struct{}
 	archiveStarting    bool
 	archiveTeardown    bool
 	workMu             sync.Mutex        // serializes deliveries with fork snapshot acquisition
@@ -218,7 +223,12 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer func() {
+		_ = s.Close()
+		flush, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		m.syncNativeUsageState(flush, true)
+	}()
 	if named {
 		var models []harness.Model
 		if selected.AppliedModel == "" {
@@ -250,6 +260,8 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	if err := m.app.RegisterAgentThread(ctx, m.cfg.ConversationID, th.ID()); err != nil {
 		return err
 	}
+	stopUsage := m.startNativeUsage(ctx, th)
+	defer stopUsage()
 	readStartup := func(readCtx context.Context) error {
 		receiptReadCtx, cancelReceiptRead := context.WithTimeout(readCtx, 20*time.Second)
 		defer cancelReceiptRead()
@@ -357,6 +369,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			return nil
 		}
 		if ev.ContextUsage != nil {
+			m.wakeNativeUsage()
 			if err := m.app.RecordAgentUsage(ctx, m.cfg.ConversationID, *ev.ContextUsage); err != nil {
 				return err
 			}

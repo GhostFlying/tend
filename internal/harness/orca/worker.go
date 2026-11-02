@@ -13,6 +13,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/bridge"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -785,6 +786,15 @@ func (w *worker) agent(ctx context.Context) (Agent, bool, error) {
 			}
 			if err := w.bindRootObservation(&a); err != nil {
 				return a, true, err
+			}
+			if w.spec.OnUsageSource != nil && a.ProviderSession != nil && a.ProviderSession.TranscriptPath != "" && w.st.SessionID == a.ProviderSession.ID {
+				provider := "codex"
+				if w.ws.opts.Agent == protocol.AgentTraex {
+					provider = "traex"
+				}
+				if err := w.spec.OnUsageSource(ctx, nativeusage.Source{Path: a.ProviderSession.TranscriptPath, ThreadID: a.ProviderSession.ID, Provider: provider}); err != nil {
+					return a, true, err
+				}
 			}
 			return a, true, nil
 		}

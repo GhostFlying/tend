@@ -78,6 +78,9 @@ func Main(ctx context.Context, e *Env, args []string) int {
 		helpEnv.Stderr = e.Stdout
 		e = &helpEnv
 	}
+	if len(args) >= 2 && args[0] == "usage" && slices.Contains([]string{"host-sources", "host-preview", "host-upload"}, args[1]) {
+		return report(e, runHostUsage(ctx, e, args[1], args[2:]))
+	}
 	if command, tail, ok := findCapabilityCommand(args); ok {
 		return report(e, runCapabilityCommand(ctx, e, command, tail))
 	}

@@ -142,7 +142,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		release(err)
 		return nil, err
 	}
-	cfg := harness.ThreadConfig{
+	cfg := harness.ThreadConfig{LegacyRawUsage: spec.LegacyRawUsage,
 		EnvironmentID: ws.opts.EnvironmentID, Cwd: spec.Dir, Model: profile.Model, Sandbox: ws.opts.Sandbox, ApprovalPolicy: ws.opts.ApprovalPolicy,
 		DeveloperInstructions: instructions,
 		Tools:                 []harness.ToolSpec{harness.ResultToolSpec}, OnToolCall: results.Handle,
@@ -169,6 +169,14 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	if err != nil {
 		release(err)
 		return nil, err
+	}
+	if spec.OnUsageSource != nil {
+		if native, ok := th.(harness.NativeUsageThread); ok {
+			if err := spec.OnUsageSource(ctx, native.UsageSource()); err != nil {
+				release(err)
+				return nil, err
+			}
+		}
 	}
 	if spec.OnThread != nil {
 		if err := spec.OnThread(th.ID()); err != nil {

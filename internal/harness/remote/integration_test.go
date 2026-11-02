@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/coder/websocket"
@@ -27,6 +28,10 @@ import (
 
 func TestNativeRemoteLifecycle(t *testing.T) {
 	nativeRemoteLifecycle(t, nativeScenario{role: protocol.RoleImplement})
+}
+
+func TestNativeRemoteLedgerOwnedByServer(t *testing.T) {
+	nativeRemoteLifecycle(t, nativeScenario{role: protocol.RoleImplement, nativeLedger: true})
 }
 
 func TestNativeRemoteHeldVerdict(t *testing.T) {
@@ -74,6 +79,7 @@ func TestNativeRemotePauseDuringHandback(t *testing.T) {
 }
 
 type nativeScenario struct {
+	nativeLedger        bool
 	role                protocol.RunRole
 	closeView           bool
 	pauseBeforeBrief    bool
@@ -173,7 +179,17 @@ func nativeRemoteLifecycle(t *testing.T, scenario nativeScenario) {
 	for _, feature := range []string{"hooks", "plugins", "apps", "memories", "browser_use", "browser_use_external", "computer_use", "image_generation", "code_mode_host", "in_app_updates"} {
 		args = append(args, "-c", "features."+feature+"=false")
 	}
-	broker := NewBroker(ctx, BrokerConfig{Bin: bin, Home: home, Cwd: root, Args: args}, nil)
+	var sourceMu sync.Mutex
+	var centralSource nativeusage.Source
+	broker := NewBroker(ctx, BrokerConfig{Bin: bin, Home: home, Cwd: root, Args: args, UsageSource: func(_ context.Context, run string, source nativeusage.Source, _ bool) error {
+		if run != "run-a" {
+			return fmt.Errorf("wrong central usage run")
+		}
+		sourceMu.Lock()
+		centralSource = source
+		sourceMu.Unlock()
+		return nil
+	}}, nil)
 	defer broker.Close()
 	var held atomic.Bool
 	var paused atomic.Bool
@@ -241,7 +257,10 @@ func nativeRemoteLifecycle(t *testing.T, scenario nativeScenario) {
 	retainedUsage := make(chan harness.WorkerEvent, 32)
 	attemptCtx, stopAttempt := context.WithCancelCause(ctx)
 	defer stopAttempt(nil)
-	spec := harness.WorkerSpec{Lifetime: ctx, RunID: "run-a", Dir: workspace, ProviderID: providerID, StateDir: stateDir, ScratchDir: workspace, Role: role, Spec: json.RawMessage(`{"goal":"original_remote_task_goal","title":"remote lifecycle","deliverables":["report"]}`), OnThread: save, NativeDial: func(c context.Context, ch string) (io.ReadWriteCloser, error) {
+	spec := harness.WorkerSpec{LegacyRawUsage: !scenario.nativeLedger, OnUsageSource: func(context.Context, nativeusage.Source) error {
+		t.Error("central path was sent to runner collector")
+		return nil
+	}, Lifetime: ctx, RunID: "run-a", Dir: workspace, ProviderID: providerID, StateDir: stateDir, ScratchDir: workspace, Role: role, Spec: json.RawMessage(`{"goal":"original_remote_task_goal","title":"remote lifecycle","deliverables":["report"]}`), OnThread: save, NativeDial: func(c context.Context, ch string) (io.ReadWriteCloser, error) {
 		transport, err := Dial(c, server.Client(), server.URL, "run-a", "run-secret", ch)
 		if err == nil && ch == "control" && scenario.rejectInterrupt {
 			return interruptRefusingTransport{transport}, nil
@@ -577,6 +596,26 @@ func nativeRemoteLifecycle(t *testing.T, scenario nativeScenario) {
 	phaseMu.Unlock()
 	closedView.Store(closeView)
 	ownerUsage := false
+	if scenario.nativeLedger {
+		sourceMu.Lock()
+		source := centralSource
+		sourceMu.Unlock()
+		if source.Path == "" || !strings.HasPrefix(source.Path, home+string(os.PathSeparator)) {
+			t.Fatal("missing server-local source", source)
+		}
+		page, err := nativeusage.Read(ctx, source, nativeusage.Cursor{}, 256)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sample := range page.Samples {
+			if sample.TurnID != turnID && sample.Total != nil {
+				ownerUsage = true
+			}
+		}
+		if !ownerUsage {
+			t.Fatal("owner-held usage absent from durable server ledger")
+		}
+	}
 	for !ownerUsage {
 		select {
 		case ev := <-retainedUsage:

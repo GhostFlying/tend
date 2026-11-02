@@ -219,7 +219,7 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	var res ThreadStartResponse
 	err := s.conn.call(ctx, methodThreadStart, ThreadStartParams{
 		Environments:          threadEnvironments(cfg),
-		ExperimentalRawEvents: true,
+		ExperimentalRawEvents: cfg.LegacyRawUsage,
 		Ephemeral:             cfg.Ephemeral,
 		Model:                 cfg.Model, Cwd: cfg.Cwd, ApprovalPolicy: cfg.ApprovalPolicy, ApprovalsReviewer: cfg.ApprovalsReviewer, Sandbox: cfg.Sandbox,
 		DeveloperInstructions: cfg.DeveloperInstructions, Config: cfg.Config, DynamicTools: dynamicTools(cfg.Tools),
@@ -231,7 +231,7 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 		return nil, err
 	}
 	t := s.register(res.Thread.ID, cfg.OnToolCall)
-	if cfg.Ephemeral {
+	if cfg.Ephemeral || cfg.Purpose == "internal_summary" {
 		t.mu.Lock()
 		t.fork = true
 		t.mu.Unlock()
@@ -240,6 +240,9 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	t.setPermissionDefaults(res)
 	t.setNetworkPolicy(cfg, res)
 	t.setRolloutPath(res.Thread.Path)
+	t.mu.Lock()
+	t.nativeSessionID = res.Thread.SessionID
+	t.mu.Unlock()
 	return t, nil
 }
 
@@ -283,6 +286,12 @@ func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness
 	t.setPermissionDefaults(res)
 	t.setNetworkPolicy(cfg, res)
 	t.setRolloutPath(res.Thread.Path)
+	t.mu.Lock()
+	t.nativeSessionID = res.Thread.SessionID
+	if cfg.Purpose == "internal_summary" {
+		t.fork = true
+	}
+	t.mu.Unlock()
 	return t, nil
 }
 
@@ -554,6 +563,7 @@ type thread struct {
 	permissions                      harness.PermissionSettings
 	networkPolicy                    map[string]any
 	defaults                         harness.ModelSelection
+	nativeSessionID                  string
 	rolloutPath                      string
 	fork                             bool
 	released                         bool

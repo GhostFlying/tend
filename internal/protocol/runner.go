@@ -69,6 +69,7 @@ type RunVerdict struct {
 // that the runner did not report; they never started, so the runner takes
 // them over as if it had just claimed them.
 type HelloResult struct {
+	NativeUsage        bool              `json:"native_usage,omitempty"`
 	AgentContinuation  bool              `json:"agent_continuation,omitempty"`
 	RetainedExecutions []RunExecutionPin `json:"retained_executions,omitempty"`
 	ProtocolMax        int64             `json:"protocol_max,omitempty"`

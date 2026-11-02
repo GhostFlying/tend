@@ -103,7 +103,8 @@ func (m *Manager) generateSummary(ctx context.Context, s harness.Session, fork h
 				return final, fmt.Errorf("summary merge prompt exceeds model input budget")
 			}
 			cfg := m.cfg.Thread
-			cfg.Ephemeral = true
+			cfg.Ephemeral = false
+			cfg.Purpose = "internal_summary"
 			cfg.Model = selection.Model
 			cfg.Config = maps.Clone(cfg.Config)
 			if cfg.Config == nil {

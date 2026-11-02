@@ -69,7 +69,7 @@ func (t *handoffTestThread) InjectDeveloper(ctx context.Context, texts ...string
 	return t.Thread.InjectDeveloper(ctx, texts...)
 }
 func (s *handoffTestSession) StartThread(ctx context.Context, cfg harness.ThreadConfig) (harness.Thread, error) {
-	if cfg.Ephemeral {
+	if cfg.Purpose == "internal_summary" {
 		return s.ForkThread(ctx, "", cfg)
 	}
 	s.mu.Lock()

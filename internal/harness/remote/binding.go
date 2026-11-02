@@ -8,14 +8,19 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 )
 
 // nativeBinding records transport identity, not a second work or control ledger.
 // An unanswered thread/start is retained as pending and requires reconciliation.
 type nativeBinding struct {
-	Cwd     string `json:"cwd"`
-	Thread  string `json:"thread,omitempty"`
-	Pending bool   `json:"pending,omitempty"`
+	RunID        string              `json:"run_id,omitempty"`
+	Usage        *nativeusage.Source `json:"usage,omitempty"`
+	UsageStopped bool                `json:"usage_stopped,omitempty"`
+	Cwd          string              `json:"cwd"`
+	Thread       string              `json:"thread,omitempty"`
+	Pending      bool                `json:"pending,omitempty"`
 }
 
 func (b *Broker) bindingPath(runID string) string {
@@ -24,6 +29,8 @@ func (b *Broker) bindingPath(runID string) string {
 }
 
 func (b *Broker) bindHello(runID string, hello Hello) error {
+	b.usageMu.Lock()
+	defer b.usageMu.Unlock()
 	if b.cfg.Cwd == "" {
 		return errors.New("native binding directory is unavailable")
 	}
@@ -38,10 +45,15 @@ func (b *Broker) bindHello(runID string, hello Hello) error {
 	if err != nil || json.Unmarshal(raw, &pin) != nil || pin.Pending || pin.Cwd != hello.Cwd || pin.Thread != hello.ThreadID {
 		return errors.New("native session binding requires reconciliation")
 	}
+	if pin.UsageStopped {
+		pin.UsageStopped = false
+		return b.saveBinding(runID, pin)
+	}
 	return nil
 }
 
 func (b *Broker) saveBinding(runID string, pin nativeBinding) error {
+	pin.RunID = runID
 	path := b.bindingPath(runID)
 	if err := writePrivate(path, pin); err != nil {
 		return err
@@ -68,4 +80,25 @@ func (b *Broker) saveBinding(runID string, pin nativeBinding) error {
 		err = closeErr
 	}
 	return err
+}
+
+// saveThreadBinding updates native thread identity without replacing the
+// independently recorded source or process-stop evidence.
+func (b *Broker) saveThreadBinding(runID string, pin nativeBinding) error {
+	b.usageMu.Lock()
+	defer b.usageMu.Unlock()
+	raw, err := os.ReadFile(b.bindingPath(runID))
+	if err == nil {
+		var prior nativeBinding
+		if err := json.Unmarshal(raw, &prior); err != nil {
+			return err
+		}
+		if prior.Cwd != pin.Cwd || (prior.Thread != "" && pin.Thread != "" && prior.Thread != pin.Thread) {
+			return errors.New("native thread binding changed")
+		}
+		pin.Usage, pin.UsageStopped = prior.Usage, prior.UsageStopped
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return b.saveBinding(runID, pin)
 }

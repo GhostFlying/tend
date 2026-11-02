@@ -114,7 +114,12 @@ logs[147] = {
     arguments: { path: "web/src/rollout/RunRollout.tsx" },
     status: "completed",
     result: {
-      content: [{ type: "text", text: "读取执行过程组件，检查卡片与完整视图的状态共享。" }],
+      content: [
+        {
+          type: "text",
+          text: "读取执行过程组件，检查卡片与完整视图的状态共享。",
+        },
+      ],
     },
   },
 };
@@ -139,7 +144,9 @@ const server = createServer(async (req, res) => {
   if (req.method !== "GET" && !path.endsWith("/session")) {
     writes.push(path);
     res.statusCode = 405;
-    return json({ error: { code: "forbidden", message: "Fixture rejects writes" } });
+    return json({
+      error: { code: "forbidden", message: "Fixture rejects writes" },
+    });
   }
   if (path === "/fixture-font" && process.env.TEND_LAYOUT_FONT) {
     res.setHeader("Content-Type", "font/ttf");
@@ -202,8 +209,21 @@ const server = createServer(async (req, res) => {
             cache_read_known: 0,
             cache_write_known: 0,
           }
-        : { ...totals, total: correction ? 13000 : 14000, output: correction ? 1000 : 2000 };
+        : {
+            ...totals,
+            total: correction ? 13000 : 14000,
+            output: correction ? 1000 : 2000,
+          };
     const view: TokenUsageView = {
+      pricing: { source: "", currency: "USD", quoted_at: null },
+      collection: {
+        sources: 0,
+        pending: 0,
+        legacy_requests: 0,
+        last_synced_at: null,
+      },
+      sessions: [],
+      issues: [],
       trend: [],
       revision: correction ? 2 : 1,
       as_of: 1793066400000,
@@ -224,12 +244,19 @@ const server = createServer(async (req, res) => {
     return json(view);
   }
   if (path === `/api/v1/runs/${runID}/logs`)
-    return json({ run_id: runID, observed: "running", logs: logs.slice(0, 100), next: 100 });
+    return json({
+      run_id: runID,
+      observed: "running",
+      logs: logs.slice(0, 100),
+      next: 100,
+    });
   if (/^\/api\/v1\/runs\/[^/]+\/rollout$/.test(path)) {
     const requestedRun = path.split("/")[4]!;
     if (rolloutFailure) {
       res.statusCode = 503;
-      return json({ error: { code: "unavailable", message: "Fixture failure" } });
+      return json({
+        error: { code: "unavailable", message: "Fixture failure" },
+      });
     }
     if (rolloutEmpty)
       return json({
@@ -281,7 +308,9 @@ const server = createServer(async (req, res) => {
   }
   if (path.startsWith("/api/")) {
     res.statusCode = 404;
-    return json({ error: { code: "not_found", message: "Fixture route absent" } });
+    return json({
+      error: { code: "not_found", message: "Fixture route absent" },
+    });
   }
   try {
     const file = resolve(root, path.split("/").at(-1)?.includes(".") ? `.${path}` : "index.html");
@@ -308,7 +337,10 @@ try {
   ]) {
     correction = false;
     unknown = false;
-    const context = await browser.newContext({ viewport, serviceWorkers: "block" });
+    const context = await browser.newContext({
+      viewport,
+      serviceWorkers: "block",
+    });
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
     const errors: string[] = [];
@@ -353,7 +385,9 @@ try {
         width: viewport.width,
         height: viewport.width === 1440 ? 900 : 844,
       });
-      await page.screenshot({ path: join(output, `s2-usage-${viewport.width}.png`) });
+      await page.screenshot({
+        path: join(output, `s2-usage-${viewport.width}.png`),
+      });
       await page.setViewportSize(viewport);
     }
     await page.screenshot({
@@ -364,7 +398,10 @@ try {
     await panel.getByRole("button", { name: "刷新", exact: true }).click();
     await panel.locator('[class*="hero"]').getByText("—", { exact: true }).waitFor();
     assert(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
-    await page.screenshot({ path: join(output, `usage-${viewport.width}.png`), fullPage: true });
+    await page.screenshot({
+      path: join(output, `usage-${viewport.width}.png`),
+      fullPage: true,
+    });
     await page.goBack();
     runsAvailable = false;
     await page.goto(`http://127.0.0.1:${address.port}/?task=${taskID}`);
@@ -381,7 +418,9 @@ try {
       .first()
       .waitFor();
     assert.equal(await card.locator("article").count(), 0);
-    await card.screenshot({ path: join(output, `rollout-card-${viewport.width}.png`) });
+    await card.screenshot({
+      path: join(output, `rollout-card-${viewport.width}.png`),
+    });
     await card.getByRole("button", { name: "展开执行步骤" }).click();
     await card.getByText("隔离记录 150", { exact: true }).first().waitFor();
     assert.equal(await card.locator("article").count(), 6);
@@ -397,21 +436,32 @@ try {
       ),
     );
     assert(!/14,000/.test(await runUsage.innerText()));
-    await runUsage.screenshot({ path: join(output, `single-run-usage-${viewport.width}.png`) });
+    await runUsage.screenshot({
+      path: join(output, `single-run-usage-${viewport.width}.png`),
+    });
     await card.getByRole("button", { name: "本次用量", exact: true }).click();
     await card.locator("article").last().locator("summary").first().click();
-    await card.screenshot({ path: join(output, `rollout-expanded-${viewport.width}.png`) });
+    await card.screenshot({
+      path: join(output, `rollout-expanded-${viewport.width}.png`),
+    });
     const position = await card.evaluate((el) => el.closest("[data-task-scroll]")?.scrollTop ?? 0);
     await card
       .getByRole("button", { name: /查看完整过程/ })
       .evaluate((el) => (el as HTMLButtonElement).click());
-    const rollout = page.getByRole("dialog", { name: "完整执行过程", exact: true });
+    const rollout = page.getByRole("dialog", {
+      name: "完整执行过程",
+      exact: true,
+    });
     const reader = rollout.getByLabel("执行过程正文", { exact: true });
     await rollout.getByText("实时跟随", { exact: true }).waitFor();
     await rollout.getByRole("button", { name: "本次用量", exact: true }).click();
-    const readerUsage = rollout.getByRole("region", { name: "本次执行 Token 用量" });
+    const readerUsage = rollout.getByRole("region", {
+      name: "本次执行 Token 用量",
+    });
     await readerUsage.locator('[class*="hero"]').getByText("42", { exact: true }).waitFor();
-    await readerUsage.screenshot({ path: join(output, `reader-usage-${viewport.width}.png`) });
+    await readerUsage.screenshot({
+      path: join(output, `reader-usage-${viewport.width}.png`),
+    });
     await rollout.getByRole("button", { name: "本次用量", exact: true }).click();
     // Capturing the panel scrolls into history; explicitly resume the reader afterward.
     if (await rollout.getByRole("button", { name: "恢复跟随", exact: true }).count())
@@ -438,7 +488,10 @@ try {
     const readerTop = (await reader.boundingBox())!.y;
     const anchor = await reader.locator("[data-step-key]").evaluateAll((nodes, top) => {
       const row = nodes.find((node) => node.getBoundingClientRect().bottom > top)!;
-      return { key: (row as HTMLElement).dataset.stepKey, top: row.getBoundingClientRect().top };
+      return {
+        key: (row as HTMLElement).dataset.stepKey,
+        top: row.getBoundingClientRect().top,
+      };
     }, readerTop);
     // Invoke without scrolling the reader to its top pagination button.
     await rollout
@@ -517,7 +570,10 @@ try {
     const anchorY = await anchorRow.evaluate((node) => node.getBoundingClientRect().top);
     const olderLog = logs[99]!;
     const oldBody = olderLog.body;
-    olderLog.body = { type: "agentMessage", text: "较早执行回复继续生成。\n\n".repeat(60) };
+    olderLog.body = {
+      type: "agentMessage",
+      text: "较早执行回复继续生成。\n\n".repeat(60),
+    };
     await rollout.getByText("更多", { exact: true }).click();
     await rollout.getByRole("button", { name: "重新连接", exact: true }).click();
     await rollout
@@ -767,7 +823,10 @@ try {
       "completed run must remove the original compact opener",
     );
     await page.setViewportSize(viewport);
-    await page.screenshot({ path: join(output, `rollout-${viewport.width}.png`), fullPage: true });
+    await page.screenshot({
+      path: join(output, `rollout-${viewport.width}.png`),
+      fullPage: true,
+    });
     await rollout.getByRole("button", { name: "关闭完整过程" }).click();
     await rollout.waitFor({ state: "detached" });
     assert(
@@ -798,7 +857,10 @@ try {
     const card = backlog.getByRole("region", { name: "执行过程与用量" });
     await card.getByRole("button", { name: "展开执行步骤" }).click();
     await card.getByRole("button", { name: /查看完整过程/ }).click();
-    const reader = backlog.getByRole("dialog", { name: "完整执行过程", exact: true });
+    const reader = backlog.getByRole("dialog", {
+      name: "完整执行过程",
+      exact: true,
+    });
     await reader.getByText("尚无已采集记录。", { exact: true }).waitFor();
     rolloutEmpty = false;
     await reader.getByText("隔离记录 150", { exact: true }).waitFor();
@@ -892,7 +954,10 @@ try {
   await shortCard.getByRole("button", { name: "展开执行步骤" }).click();
   await shortCard.getByText("隔离记录 10", { exact: true }).first().waitFor();
   await shortCard.getByRole("button", { name: /查看完整过程/ }).click();
-  const short = boundary.getByRole("dialog", { name: "完整执行过程", exact: true });
+  const short = boundary.getByRole("dialog", {
+    name: "完整执行过程",
+    exact: true,
+  });
   const earlier = short.getByRole("button", { name: "加载更早记录" });
   assert.equal(await earlier.count(), 0);
   logs.push({

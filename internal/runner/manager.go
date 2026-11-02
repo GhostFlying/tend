@@ -15,6 +15,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/coordination"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
@@ -155,7 +156,11 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	opened = true
 	nativeClosed := false
 	var emitMu sync.Mutex
-	driver := coordination.Driver{Session: session, Directory: dir, Instructions: resolved.Instructions, Profile: resolved.Profile}
+	driver := coordination.Driver{OnUsageStopped: func(stopCtx context.Context, thread string) error {
+		return r.cfg.Journal.StopUsageSource(stopCtx, as.RunID, thread)
+	}, LegacyRawUsage: !r.supportsNativeUsage(), OnUsageSource: func(sourceCtx context.Context, source nativeusage.Source) error {
+		return r.registerUsage(sourceCtx, as, source)
+	}, Session: session, Directory: dir, Instructions: resolved.Instructions, Profile: resolved.Profile}
 	driver.Download = func(ctx context.Context, file protocol.ArtifactFile) (string, error) {
 		return r.downloadRetainedFile(ctx, as, filepath.Join(dir, "attachments"), file)
 	}
@@ -164,6 +169,9 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		defer emitMu.Unlock()
 		if event.Native != nil {
 			native := *event.Native
+			if native.ContextUsage != nil || native.Kind == harness.EventTurnCompleted {
+				r.wakeNativeUsage()
+			}
 			var err error
 			native.Raw, err = coordination.CompactNativeImages(native.Raw)
 			if err != nil {
@@ -347,7 +355,13 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 					return err
 				}
 			}
+			var original coordination.Request
 			if command.Method == "start" || command.Method == "resume" {
+				if err = json.Unmarshal(command.Payload, &original); err != nil {
+					return err
+				}
+			}
+			if (command.Method == "start" || command.Method == "resume") && original.Config.Purpose != "internal_summary" {
 				if reply.Error == "" {
 					var info coordination.ThreadInfo
 					if err = json.Unmarshal(reply.Result, &info); err != nil {

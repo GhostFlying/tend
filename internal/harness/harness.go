@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"io"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -26,6 +27,9 @@ type WorkerSpec struct {
 	// NativeDial opens only this run's authenticated native execution transport.
 	NativeDial func(context.Context, string) (io.ReadWriteCloser, error)
 
+	// LegacyRawUsage preserves the existing event path for servers without ledger capability.
+	LegacyRawUsage   bool
+	OnUsageSource    func(context.Context, nativeusage.Source) error
 	FrozenExecution  *protocol.ExecutionProfile
 	RoleInstructions string
 	Execution        *protocol.ExecutionProfile

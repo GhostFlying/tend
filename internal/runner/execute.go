@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/harness/remote"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -299,11 +300,14 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if nativeMessages {
 		startupObserved = r.cfg.Now()
 	}
-	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{
+	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},
 		FrozenExecution: execution.Profile, RoleInstructions: execution.Instructions,
+		OnUsageSource: func(sourceCtx context.Context, source nativeusage.Source) error {
+			return r.registerUsage(sourceCtx, as, source)
+		},
 		Execution: as.AcceptanceExecution, QuestionContext: as.QuestionContext, RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
 		AskOwner: askOwner, Questions: questions,
 		ReceiveMessages: receiveMessages, AckMessage: ackMessage,

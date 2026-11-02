@@ -17,7 +17,7 @@ func TestIntegration_RequestUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	th, err := s.StartThread(ctx, harness.ThreadConfig{Cwd: t.TempDir(), Model: model(), Sandbox: "read-only", ApprovalPolicy: "never", DeveloperInstructions: "This is an isolated protocol test. Reply with exactly READY. Do not use tools."})
+	th, err := s.StartThread(ctx, harness.ThreadConfig{LegacyRawUsage: true, Cwd: t.TempDir(), Model: model(), Sandbox: "read-only", ApprovalPolicy: "never", DeveloperInstructions: "This is an isolated protocol test. Reply with exactly READY. Do not use tools."})
 	if err != nil {
 		t.Fatal(err)
 	}

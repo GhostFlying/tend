@@ -7040,6 +7040,37 @@
       "title": "NativeIdentity",
       "type": "object"
     },
+    "NativeUsageRegistration": {
+      "additionalProperties": false,
+      "properties": {
+        "parent_session_id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "thread_id",
+        "session_id",
+        "provider"
+      ],
+      "title": "NativeUsageRegistration",
+      "type": "object"
+    },
     "NextActionPage": {
       "additionalProperties": false,
       "properties": {
@@ -9640,6 +9671,12 @@
         "end": {
           "type": "integer"
         },
+        "estimated_requests": {
+          "type": "integer"
+        },
+        "estimated_usd": {
+          "type": "string"
+        },
         "final": {
           "type": "integer"
         },
@@ -9702,6 +9739,12 @@
         "cache_write_known": {
           "type": "integer"
         },
+        "estimated_requests": {
+          "type": "integer"
+        },
+        "estimated_usd": {
+          "type": "string"
+        },
         "final": {
           "type": "integer"
         },
@@ -9751,6 +9794,9 @@
     "TokenUsageRecord": {
       "additionalProperties": false,
       "properties": {
+        "attribution": {
+          "$ref": "#/definitions/UsageAttribution"
+        },
         "cache_read": {
           "anyOf": [
             {
@@ -9774,6 +9820,12 @@
         "conflict": {
           "type": "boolean"
         },
+        "counter_source": {
+          "type": "string"
+        },
+        "estimate": {
+          "$ref": "#/definitions/UsageEstimate"
+        },
         "input": {
           "anyOf": [
             {
@@ -9787,6 +9839,15 @@
         "model": {
           "type": "string"
         },
+        "model_source": {
+          "type": "string"
+        },
+        "native_content_hash": {
+          "type": "string"
+        },
+        "native_version": {
+          "type": "string"
+        },
         "occurred_at": {
           "anyOf": [
             {
@@ -9796,6 +9857,9 @@
               "type": "null"
             }
           ]
+        },
+        "ordinal": {
+          "type": "integer"
         },
         "output": {
           "anyOf": [
@@ -9807,14 +9871,26 @@
             }
           ]
         },
+        "parent_session_id": {
+          "type": "string"
+        },
         "parent_thread_id": {
           "type": "string"
         },
         "profile": {
           "type": "string"
         },
+        "provider": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
         "received_at": {
           "type": "integer"
+        },
+        "record_id": {
+          "type": "string"
         },
         "request_id": {
           "type": "string"
@@ -9825,8 +9901,14 @@
         "role": {
           "type": "string"
         },
+        "root_turn_id": {
+          "type": "string"
+        },
         "seq": {
           "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
         },
         "settlement": {
           "type": "string"
@@ -9838,6 +9920,9 @@
           "type": "string"
         },
         "thread_id": {
+          "type": "string"
+        },
+        "time_source": {
           "type": "string"
         },
         "total": {
@@ -9873,7 +9958,8 @@
         "cache_read",
         "cache_write",
         "output",
-        "total"
+        "total",
+        "attribution"
       ],
       "title": "TokenUsageRecord",
       "type": "object"
@@ -9901,6 +9987,9 @@
             }
           ]
         },
+        "counter_source": {
+          "type": "string"
+        },
         "input": {
           "anyOf": [
             {
@@ -9914,6 +10003,15 @@
         "model": {
           "type": "string"
         },
+        "model_source": {
+          "type": "string"
+        },
+        "native_content_hash": {
+          "type": "string"
+        },
+        "native_version": {
+          "type": "string"
+        },
         "occurred_at": {
           "anyOf": [
             {
@@ -9923,6 +10021,9 @@
               "type": "null"
             }
           ]
+        },
+        "ordinal": {
+          "type": "integer"
         },
         "output": {
           "anyOf": [
@@ -9934,10 +10035,22 @@
             }
           ]
         },
+        "parent_session_id": {
+          "type": "string"
+        },
         "parent_thread_id": {
           "type": "string"
         },
         "profile": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "record_id": {
           "type": "string"
         },
         "request_id": {
@@ -9946,6 +10059,12 @@
         "revision": {
           "type": "integer"
         },
+        "root_turn_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
         "settlement": {
           "type": "string"
         },
@@ -9953,6 +10072,9 @@
           "type": "string"
         },
         "thread_id": {
+          "type": "string"
+        },
+        "time_source": {
           "type": "string"
         },
         "total": {
@@ -10003,6 +10125,12 @@
         "cache_write_known": {
           "type": "integer"
         },
+        "estimated_requests": {
+          "type": "integer"
+        },
+        "estimated_usd": {
+          "type": "string"
+        },
         "final": {
           "type": "integer"
         },
@@ -10051,6 +10179,9 @@
         "as_of": {
           "type": "integer"
         },
+        "collection": {
+          "$ref": "#/definitions/UsageCoverage"
+        },
         "conflicts": {
           "type": "integer"
         },
@@ -10059,6 +10190,19 @@
         },
         "end": {
           "type": "integer"
+        },
+        "issues": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageIssue"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "models": {
           "anyOf": [
@@ -10078,6 +10222,9 @@
         },
         "next": {
           "type": "integer"
+        },
+        "pricing": {
+          "$ref": "#/definitions/UsagePricing"
         },
         "records": {
           "anyOf": [
@@ -10100,6 +10247,19 @@
             {
               "items": {
                 "$ref": "#/definitions/TokenUsageGroup"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageSession"
               },
               "type": "array"
             },
@@ -10145,6 +10305,10 @@
         }
       },
       "required": [
+        "pricing",
+        "collection",
+        "sessions",
+        "issues",
         "trend",
         "revision",
         "as_of",
@@ -10869,6 +11033,529 @@
       "title": "UpgradeView",
       "type": "object"
     },
+    "UsageAttribution": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "agent_id": {
+          "type": "string"
+        },
+        "categories": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_state": {
+          "type": "string"
+        },
+        "issue_path": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageIssueRef"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "task_title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_path",
+        "task_id",
+        "task_title",
+        "run_id",
+        "agent",
+        "agent_id",
+        "categories",
+        "role"
+      ],
+      "title": "UsageAttribution",
+      "type": "object"
+    },
+    "UsageCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "last_synced_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "legacy_requests": {
+          "type": "integer"
+        },
+        "pending": {
+          "type": "integer"
+        },
+        "sources": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sources",
+        "pending",
+        "legacy_requests",
+        "last_synced_at"
+      ],
+      "title": "UsageCoverage",
+      "type": "object"
+    },
+    "UsageEstimate": {
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "type": "string"
+        },
+        "usd": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "usd",
+        "model_id"
+      ],
+      "title": "UsageEstimate",
+      "type": "object"
+    },
+    "UsageExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "$ref": "#/definitions/UsageAttribution"
+        },
+        "measurements": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageMeasurement"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totals": {
+          "$ref": "#/definitions/TokenUsageTotals"
+        }
+      },
+      "required": [
+        "measurements",
+        "attribution",
+        "totals"
+      ],
+      "title": "UsageExecution",
+      "type": "object"
+    },
+    "UsageIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "direct": {
+          "$ref": "#/definitions/TokenUsageTotals"
+        },
+        "id": {
+          "type": "string"
+        },
+        "last_at": {
+          "type": "integer"
+        },
+        "models": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parent_id": {
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageIssueRef"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageSession"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "totals": {
+          "$ref": "#/definitions/TokenUsageTotals"
+        }
+      },
+      "required": [
+        "models",
+        "path",
+        "id",
+        "title",
+        "parent_id",
+        "direct",
+        "totals",
+        "sessions"
+      ],
+      "title": "UsageIssue",
+      "type": "object"
+    },
+    "UsageIssueRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "UsageIssueRef",
+      "type": "object"
+    },
+    "UsageMeasurement": {
+      "additionalProperties": false,
+      "properties": {
+        "cli": {
+          "type": "string"
+        },
+        "cli_version": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "totals": {
+          "$ref": "#/definitions/TokenUsageTotals"
+        }
+      },
+      "required": [
+        "model",
+        "cli",
+        "cli_version",
+        "totals"
+      ],
+      "title": "UsageMeasurement",
+      "type": "object"
+    },
+    "UsagePreview": {
+      "additionalProperties": false,
+      "properties": {
+        "conflicts": {
+          "type": "integer"
+        },
+        "existing": {
+          "type": "integer"
+        },
+        "linked_legacy": {
+          "type": "integer"
+        },
+        "new": {
+          "type": "integer"
+        },
+        "records": {
+          "type": "integer"
+        },
+        "token_delta": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "records",
+        "new",
+        "existing",
+        "linked_legacy",
+        "conflicts",
+        "token_delta"
+      ],
+      "title": "UsagePreview",
+      "type": "object"
+    },
+    "UsagePricing": {
+      "additionalProperties": false,
+      "properties": {
+        "currency": {
+          "type": "string"
+        },
+        "quoted_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "currency",
+        "quoted_at"
+      ],
+      "title": "UsagePricing",
+      "type": "object"
+    },
+    "UsageReconcile": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "coverage": {
+          "type": "string"
+        },
+        "root_thread_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "samples": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TokenUsageSample"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "root_thread_id",
+        "samples"
+      ],
+      "title": "UsageReconcile",
+      "type": "object"
+    },
+    "UsageSession": {
+      "additionalProperties": false,
+      "properties": {
+        "attributions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageAttribution"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "executions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageExecution"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "first_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "last_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metering_status": {
+          "type": "string"
+        },
+        "models": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parent_session_id": {
+          "type": "string"
+        },
+        "totals": {
+          "$ref": "#/definitions/TokenUsageTotals"
+        }
+      },
+      "required": [
+        "parent_session_id",
+        "executions",
+        "id",
+        "models",
+        "first_at",
+        "last_at",
+        "attributions",
+        "totals"
+      ],
+      "title": "UsageSession",
+      "type": "object"
+    },
+    "UsageTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "parent_session_id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "stopped": {
+          "type": "boolean"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "conversation_id",
+        "thread_id"
+      ],
+      "title": "UsageTarget",
+      "type": "object"
+    },
+    "UsageUpload": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "coverage": {
+          "type": "string"
+        },
+        "root_thread_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "samples": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TokenUsageSample"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "root_thread_id",
+        "samples",
+        "coverage"
+      ],
+      "title": "UsageUpload",
+      "type": "object"
+    },
     "Verdict": {
       "enum": [
         "passed",
@@ -11535,6 +12222,9 @@
     "NativeEntry": {
       "$ref": "#/definitions/NativeEntry"
     },
+    "NativeUsageRegistration": {
+      "$ref": "#/definitions/NativeUsageRegistration"
+    },
     "NextActionPage": {
       "$ref": "#/definitions/NextActionPage"
     },
@@ -11690,6 +12380,18 @@
     },
     "UpgradeControlPayload": {
       "$ref": "#/definitions/UpgradeControlPayload"
+    },
+    "UsagePreview": {
+      "$ref": "#/definitions/UsagePreview"
+    },
+    "UsageReconcile": {
+      "$ref": "#/definitions/UsageReconcile"
+    },
+    "UsageTarget": {
+      "$ref": "#/definitions/UsageTarget"
+    },
+    "UsageUpload": {
+      "$ref": "#/definitions/UsageUpload"
     },
     "WebhookReceipt": {
       "$ref": "#/definitions/WebhookReceipt"

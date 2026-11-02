@@ -76,6 +76,14 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
 			return
 		}
+		if r.Method == "POST" && r.URL.Path == "/runner/v1/rpc" {
+			var env protocol.Envelope
+			if err := json.Unmarshal(body, &env); err != nil {
+				t.Error(err)
+			}
+			json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+			return
+		}
 		if r.URL.Path == "/api/v1/conversation/attachments" {
 			json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
 			return

@@ -29,6 +29,7 @@ type capabilityCommand struct {
 	JSONDefault   bool
 	Download      bool
 	Stream        bool
+	Post          bool
 }
 
 var capabilityCommands = []capabilityCommand{
@@ -68,7 +69,11 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "image show", Route: "/api/v1/conversation/images/{id}"},
 	{Name: "image url", Route: "/api/v1/conversation/images/{id}/download-url", Queries: "inline"},
 	{Name: "image download", Route: "/api/v1/conversation/images/{id}/content", Download: true},
-	{Name: "usage", Route: "/api/v1/token-usage", Queries: "window offset model subject before"},
+	{Name: "usage", Route: "/api/v1/token-usage", Queries: "window offset model subject before group-by=group_by agent role issue session sort details"},
+	{Name: "usage sources", Route: "/api/v1/token-usage/sources"},
+	{Name: "usage preview", Route: "/api/v1/token-usage/preview", Post: true},
+	{Name: "usage reconcile-run", Operation: "token_usage.reconcile", Target: "run"},
+	{Name: "usage reconcile", Operation: "token_usage.reconcile", Target: "conversation"},
 	{Name: "coordination metrics", Route: "/api/v1/coordination/metrics"},
 	{Name: "ledger watch", Route: "/api/v1/events", Queries: "after", Stream: true},
 	{Name: "archive list", Route: "/api/v1/archives"},
@@ -183,6 +188,24 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	if err != nil {
 		return err
 	}
+	if cmd.Post {
+		if *out != "" || *request != "" || *revision != -1 || *dry || *reason != "" {
+			return usagef("preview accepts only --data or --file and --json")
+		}
+		body, err := issueInput(e, *data, *file)
+		if err != nil {
+			return err
+		}
+		var input protocol.UsageUpload
+		if len(body) == 0 || json.Unmarshal(body, &input) != nil || input.RootThreadID == "" || (input.ConversationID == "" && input.RunID == "") {
+			return usagef("preview requires conversation_id, root_thread_id and native samples")
+		}
+		var value json.RawMessage
+		if err := c.do(ctx, "POST", cmd.Route, input, &value); err != nil {
+			return err
+		}
+		return printCapabilityValue(e, value, *asJSON)
+	}
 	if cmd.Operation == "" {
 		if *data != "" || *file != "" || *request != "" || *revision != -1 || *dry || *reason != "" {
 			return usagef("read commands take no mutation input")
@@ -273,6 +296,21 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	target := protocol.Target{Type: cmd.Target}
 	if len(pos) > 0 {
 		target.ID = pos[0]
+	}
+	if cmd.Name == "usage reconcile-run" {
+		var supplied string
+		if raw := fields["run_id"]; raw != nil && (json.Unmarshal(raw, &supplied) != nil || supplied != target.ID) {
+			return usagef("run_id differs from explicit run")
+		}
+		fields["run_id"], _ = json.Marshal(target.ID)
+		fields["conversation_id"] = json.RawMessage(`""`)
+	}
+	if cmd.Name == "usage reconcile" {
+		var supplied string
+		if raw := fields["conversation_id"]; raw != nil && (json.Unmarshal(raw, &supplied) != nil || supplied != target.ID) {
+			return usagef("conversation_id differs from explicit conversation")
+		}
+		fields["conversation_id"], _ = json.Marshal(target.ID)
 	}
 	if cmd.Name == "conversation settings set" {
 		var supplied string

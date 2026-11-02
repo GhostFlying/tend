@@ -1,0 +1,43 @@
+# Token 计量与用量页面完整修复
+
+依据 D117。先完成计量与存储，再接入运行和历史对账，最后实施经设计图 review 的页面及受控发布。
+
+## 验收目标
+
+- Codex、TraeX 统一读取原生 `token_usage_record.usage`，首次、恢复、压缩、子 Agent、续接文件都可追读；不累加 thread/turn 累计计数。
+- Session 合并内部 thread，显式 fork 按原生 Session 身份区分；请求关联历史执行模型、具体 Agent、职责、Task、Run 和顶层至 leaf 的 Issue 路径。
+- 保留现有账本，补齐可证明归属 Tend 的历史；内部摘要改为私有持久化会话。
+- Session 列表与 Issue 层级共享筛选和有效贡献；所有数字统一千分位，未知与未覆盖不冒充零。
+
+## 实施顺序
+
+1. 共享原生读取器：分页格式使用 provider/thread/ordinal；旧格式使用 provider/thread/turn/response/原生时间。内容哈希检测冲突，完整行才推进游标；模型从对应 turn 上下文读取，时间注明原生完成记录来源，保存字段归一化来源。
+2. 追加服务端与 runner journal 迁移：规范事实、来源绑定、可靠上传、归属和旧事实映射。能力协商后启用 host 范围的 `runner.usage_upload`；批次先入 journal，确认后释放，旧契约继续有效，不升级通信协议。
+3. 接入本地托管会话、runner Issue 负责人、实施/验收和已验证 Orca 原生会话。执行中每两秒同步、恢复追读、停止后对账；失败不重放模型或业务动作，不持有执行槽。摘要 fork/合并使用私有持久化历史，清理前先入账。
+4. 历史维护 CLI 提供预览和应用；仅登记来源及可证明的续接/子会话。原生事实与旧事件匹配后只贡献一次；保留原始事实与前后证据，歧义和缺失单列。
+5. 扩展只读 API 的 Session/Issue 分组及共享筛选；归属使用历史执行冻结身份，跨 Issue Session 按请求拆分，父 Issue 按请求集合汇总。内部 request/thread/turn 不出现在普通详情中。
+6. 页面先通过 frontend-app-builder 产出桌面、手机和展开状态设计图，经 review 后实施。路由保留筛选；Session/Issue 两视角、执行分布与业务跳转；紧凑覆盖提示及明确的失败/空态。
+
+## 页面 review 修订
+
+默认第一个 Tab 为「按 Issue」，「按 Session」作为第二个 Tab。列表显示 Issue、执行模型、紧凑 Token 细分和 OpenRouter 估算价格。Token 总量及输入、缓存、输出在同一格中紧凑展示，不拆成数值列；任务、Agent、CLI 名称及版本、职责和 Session 放到详情。Agent 使用历史名称，category 通过悬浮或聚焦浮层提供。桌面使用详情抽屉，手机使用全屏详情，避免表格套表格。最终设计图已通过 review：四组列表信息为 Issue、模型、同格 Token 细分和估算价格；金额前不加约等号。页面按已确认的信息层级实施。
+
+## 测试与发布
+
+读取器覆盖部分行、重扫、截断、替换、重复 Response ID、续接、fork、子 Agent、模型切换及异常时间。存储覆盖重传、确认丢失、旧新重叠、伪造归属、历史执行、事务回滚。真实 CLI 使用本地模拟模型，普通测试不联网。
+
+历史样本验收包括缺失 20 条共 3,500,540 Token，以及脱敏跨文件样本 139,627,052、多次压缩样本 154,617,034 的精确对账。两种视角与全局/单执行贡献守恒；桌面、390px、320px 及键盘、筛选/分页、错误状态接受浏览器验证。
+
+提交前通过 make check 和独立 review；PR CI 通过后线性合入。服务端先升级、runner 后升级，再预览/应用历史补采，核验后发布页面。回退仅使用兼容新增 schema 的构建，不降库、不删事实、不重新执行模型。无法恢复的历史明确披露。依据最新 review 增加 OpenRouter Token 费用估算（见下节），不导入个人会话，不将 CLI 观测用量声明为供应商账单。
+
+## OpenRouter 估算价格（review 追加）
+
+以公开 Models API 当前报价提供美元 Token 消费估算，明确标注报价时间和估算覆盖请求数。保持原生 Token 事实不变；报价是独立、可刷新快照，不宣称供应商账单或历史成交价。精确匹配 catalog ID，允许唯一的原生模型 slug 匹配；不能通过大小写折叠、猜测模型家族或把多个 SKU 混为一体。不能匹配及未知字段显示无报价或部分估算，不冒充零。
+
+逐请求扣除输入中已有的缓存读取/写入，再分别乘 prompt、input_cache_read、input_cache_write、completion 单价，避免输入与缓存重复计价。按请求输入长度处理报价覆盖条件，不能在 Issue/Session 聚合后判断长上下文费率。推理已包含在输出；本轮只估算 Token，不计算搜索、图片、请求附加费等未记录项目。价格精度在合计后格式化，不逐请求四舍五入。模型、Issue、Session、执行、全局沿用同一请求集合，使价格与 Token 口径一致。
+
+官方依据：https://openrouter.ai/docs/guides/overview/models 与 https://openrouter.ai/docs/guides/best-practices/prompt-caching 。
+
+## 跨主机执行器的计量边界
+
+来源登记和用量批次均先持久化。所有 Runner 来源（包括 Issue 负责人与私有摘要）通过 host 范围的 `runner.usage_register` 登记，和批次一样原子入 journal 并沿原 request_id 重传；来源登记独立于业务原生事件序列、Agent 槽位和执行租约，不放宽负责人执行工具的权限。旧服务器未协商能力时仅保留本地来源；升级后自动补发登记，不丢失已有游标。central-native 的原生文件位于服务端，由服务端复用相同读取器及原子事实/游标提交采集，Runner 不打开服务端路径。Broker 私有绑定持久保存来源及停止证明，恢复时只遍历已登记 Run 的绑定与可证明归属的历史；不为统计启动模型或远程环境。服务端与 Runner 的历史目录发现共享索引，并将新登记的确切文件立即纳入读取。
