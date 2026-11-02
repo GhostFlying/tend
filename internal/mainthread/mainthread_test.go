@@ -22,11 +22,14 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 	"github.com/GhostFlying/tend/internal/tools"
 	"github.com/GhostFlying/tend/internal/views"
 )
 
 var owner = protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "me", Client: "phone"}
+
+var mainFixtureTemplate storefixture.Template
 
 type env struct {
 	t       *testing.T
@@ -45,7 +48,7 @@ func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)
 
 func newEnv(t *testing.T, h *testkit.Harness, opts ...func(*Config)) *env {
 	t.Helper()
-	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), time.Now)
+	s, err := mainFixtureTemplate.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

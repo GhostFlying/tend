@@ -17,6 +17,42 @@ import (
 const appPackage = "github.com/GhostFlying/tend/internal/app"
 const e2ePackage = "github.com/GhostFlying/tend/internal/e2e"
 
+// CI groups partition go list output; new packages belong to other by default.
+func packageGroup(pkg string) string {
+	switch pkg {
+	case appPackage:
+		return "app"
+	case e2ePackage:
+		return "e2e"
+	case "github.com/GhostFlying/tend/internal/api":
+		return "api"
+	case "github.com/GhostFlying/tend/internal/mainthread":
+		return "mainthread"
+	default:
+		return "other"
+	}
+}
+
+func selectGroup(packages []string, group string) ([]string, error) {
+	switch group {
+	case "all":
+		return packages, nil
+	case "app", "api", "mainthread", "e2e", "other":
+	default:
+		return nil, fmt.Errorf("unknown race group %q", group)
+	}
+	var result []string
+	for _, pkg := range packages {
+		if packageGroup(pkg) == group {
+			result = append(result, pkg)
+		}
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("race group %q contains no selected packages", group)
+	}
+	return result, nil
+}
+
 func packagePhases(packages []string) (others, isolated []string, app bool) {
 	for _, pkg := range packages {
 		switch pkg {
@@ -66,12 +102,16 @@ func patterns(names []string, count int) []string {
 	return result
 }
 
-func check(ctx context.Context, shards int, timeout string, packages []string) error {
+func check(ctx context.Context, shards int, timeout, group string, packages []string) error {
 	listed, err := output(ctx, "go", append([]string{"list"}, packages...)...)
 	if err != nil {
 		return fmt.Errorf("list packages: %w", err)
 	}
-	others, isolated, app := packagePhases(strings.Fields(string(listed)))
+	selected, err := selectGroup(strings.Fields(string(listed)), group)
+	if err != nil {
+		return err
+	}
+	others, isolated, app := packagePhases(selected)
 	var commands [][]string
 	if app {
 		list, err := output(ctx, "go", "test", "-race", "-list", ".", appPackage)
@@ -120,6 +160,7 @@ func check(ctx context.Context, shards int, timeout string, packages []string) e
 func main() {
 	shards := flag.Int("shards", 1, "number of isolated app race processes (1-16)")
 	timeout := flag.String("timeout", "60m", "timeout per test process")
+	group := flag.String("group", "all", "package group: all, app, api, mainthread, e2e, other")
 	flag.Parse()
 	if *shards < 1 || *shards > 16 {
 		fmt.Fprintln(os.Stderr, "shards must be 1-16")
@@ -131,7 +172,7 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if err := check(ctx, *shards, *timeout, packages); err != nil {
+	if err := check(ctx, *shards, *timeout, *group, packages); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

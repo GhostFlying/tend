@@ -19,6 +19,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
@@ -47,6 +48,8 @@ func (p *peer) set(id netx.Identity) {
 	p.id = id
 }
 
+var apiFixtureTemplate storefixture.Template
+
 type env struct {
 	t       *testing.T
 	clock   *testkit.Clock
@@ -65,7 +68,7 @@ func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	clock := testkit.NewClock()
-	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
+	s, err := apiFixtureTemplate.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

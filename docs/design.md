@@ -132,7 +132,7 @@
 | D126 | 旧账本一致性只读离线归档加新空业务账本，取代 D113 及 mandatory-message-context 部署计划中删除历史、不保留归档/恢复材料的安排。历史迁移不改写，archive reader 不走正常 store.Open 或服务循环；manifest 与原件独立校验，unknown 阻止切换。仅显式导入静态设置，新 deployment identity、runner journal/凭据隔离；已有新副作用后回退先对账。UI 先 Image Gen 设计、独立 xhigh review、用户确认再编码；分批 PR 不中途部署，完整后受控发布与真实 E2E。见 docs/issue-agent-design.md、docs/plans/issue-agent-refactor.md、docs/plans/offline-ledger-archive.md、docs/plans/archive-owner-api.md。 | P8 旧固定完整检查和交叉编译通过；正式 CLI 两项实际准入 finding 已修复并通过真实 red/green、定向 race/vet。最终修正组合检查/CI、线上归档切换及生产部署待完成 |
 | D128 | Issue manager 改为真实的 issue_manager task，由 main/owner 按 category 发布，runner 首次领取时原子更新具体负责人。每轮共用 claim/租约/槽位/journal，等待释放槽位；责任按 Issue 收尾/交接结束，不独立验收管理任务。Codex/Traex app-server 承载，main/consultation 保留 host。协议 2/1、配置格式 2、保留账本受控迁移，unknown 先对账。修订 D122 的本机 manager 执行位置及 D123 的 manager 库存/领取方式。详见 docs/plans/runner-issue-managers.md。 | 实施中，未发布 |
 | D129 | Issue 完整详情页统一负责人对话、当前进展、子项与交付，原执行及验收会话保持独立；摘要按 Issue revision 留存，活动／结果只读投影沿原账本。见 docs/plans/issue-detail-conversation.md。 | 已实现 |
-| D130 | App 业务测试每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移及历史库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md。 | 已实现 |
+| D130 | App、API 和 mainthread 通用业务测试经独立测试辅助子包，每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录的新文件，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移、历史及重开库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md、docs/plans/ci-parallel-fixtures.md。 | 已实现 |
 | D131 | 通信模型独立于原生 Agent 会话：Web IM/CLI 使用正式发布、来源端点、投递与阅读回执；legacy conversation/rollout 保留诊断。Agent 仅选回复输入，Tend 固定渠道地址；主动通知默认 Web 与已绑定 Telegram。Telegram 单 owner 私聊，先持久化后确认更新，unknown 不重发；消费证据即时推送，渠道 MarkRead 为可选能力。PR/CI 仅预留领域更新与按需唤醒接点，协议仍为 2/1。见 docs/plans/messaging-web-telegram.md。 | 已实现 |
 | D132 | Web 界面改版（修订 D70 的单对话加覆盖层布局与 D121 UI r5 的侧栏摘要）：路由驱动的页面与可分享路径，旧 query 链接改写；侧栏只做分组导航，手机四标签；角色化 token 与共享基础组件，由检查脚本约束；界面使用用户术语，不默认显示内部标识；路由级拆包与全页面巡检。不引入路由或 UI 依赖，History API 与原生 dialog/popover 已满足需求。业务合同、owner API 与 runner wire 不变。见 docs/plans/web-ui-overhaul.md。 | 已实现 |
 
@@ -148,6 +148,7 @@
 | D142 | CLI 覆盖全部用户业务、管理与诊断能力，Web/Telegram 为子集；公开接口登记、完整输入输出、请求恢复、帮助及真实入口验证随能力在同一 PR 完成，覆盖门禁进入 make check。见 docs/plans/cli-capability-parity.md。 | 已实现，未发布 |
 | D143 | Agents 只读目录按主机及执行方式/CLI 组合展示；显式定义热更新保留旧责任完整 pin，双方协商后核验续接候选，新分配仍仅使用当前定义。协议保持 2/1。见 docs/plans/agent-directory-continuation.md。 | 已实现，待验收 |
 | D144 | Runner 原生 rollout 按需预览：原生目录保留原件，runner 持久索引与原生格式 reader，server 仅在内存按需转发；central worker 按冻结 inventory 读取 server 已有原件而不新建正文归档。步骤级 live 与历史共用只读 Web monitor（三轨概览、事件表与记录详情联动）。能力协商后启用独立诊断长轮询，不依赖执行 slot/租约，不启动模型或重复计量。会话/turn 归属、来源缺失与格式缺口显式可见，支持可确认历史，不提供原件副本及打包下载；现有日志与业务事实不变，runner wire 保持 2/1。见 docs/plans/runner-rollout-preview.md。 | 已实现，未发布 |
+| D145 | CI 将静态检查、App/API/mainthread/E2E/其他包的完整 race 分组、Web/全部浏览器回归分配到独立 runner 并行执行；交叉编译仍包含真实 Web 构建。最终同名 check 汇总门禁要求全部依赖成功，失败、取消和跳过均不放行。同一 PR 的旧候选自动取消，main 各次检查独立；本地 make check 仍覆盖同一全集并保持传输隔离。见 docs/plans/ci-parallel-fixtures.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
