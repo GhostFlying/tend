@@ -35,6 +35,8 @@ let runsAvailable = true;
 let eventSeq = 1;
 let rolloutFailure = false;
 let rolloutEmpty = false;
+let historyGate: Promise<void> | undefined;
+let releaseHistory: (() => void) | undefined;
 const taskID = "task_01M5YH00000000000000000000";
 const runID = "run_fixture";
 const task = {
@@ -301,14 +303,49 @@ const server = createServer(async (req, res) => {
   }
   if (path === `/api/v1/runs/${runID}/logs`)
     return json({ run_id: runID, observed: "running", logs: logs.slice(0, 100), next: 100 });
-  if (/^\/api\/v1\/runs\/[^/]+\/rollout$/.test(path)) {
+  if (/^\/api\/v1\/runs\/[^/]+\/(rollout|preview)$/.test(path)) {
+    const native = path.endsWith("/preview");
     const requestedRun = path.split("/")[4]!;
     if (rolloutFailure) {
+      if (native) return json({ state: "runner_unreachable", origin: "runner" });
       res.statusCode = 503;
       return json({ error: { code: "unavailable", message: "Fixture failure" } });
     }
-    if (rolloutEmpty)
+    const reply = (page: unknown) =>
+      json(
+        native
+          ? {
+              state: rolloutEmpty ? "empty" : "ready",
+              origin: "runner",
+              generation: "fixture-generation",
+              page,
+            }
+          : page,
+      );
+    if (native && url.searchParams.has("record")) {
+      const row = logs.find((r) => r.seq === Number(url.searchParams.get("record")));
+      const body = row?.body as Record<string, unknown> | undefined;
+      const field = url.searchParams.get("field");
       return json({
+        state: "ready",
+        origin: "runner",
+        generation: "fixture-generation",
+        content: {
+          text:
+            field === "raw"
+              ? JSON.stringify(row)
+              : field === "output"
+                ? (body?.aggregatedOutput ?? "")
+                : field === "input"
+                  ? (body?.command ?? "")
+                  : (body?.text ?? ""),
+          next_offset: 0,
+          more: false,
+        },
+      });
+    }
+    if (rolloutEmpty)
+      return reply({
         run_id: requestedRun,
         observed: "running",
         logs: [],
@@ -320,6 +357,7 @@ const server = createServer(async (req, res) => {
       });
     const before = Number(url.searchParams.get("before"));
     const after = Number(url.searchParams.get("after"));
+    if (before) await historyGate;
     const selected = before
       ? logs.filter((r) => r.seq < before).slice(-100)
       : after
@@ -333,9 +371,9 @@ const server = createServer(async (req, res) => {
         : logs.slice(-100);
     const first = selected[0]?.seq ?? before;
     const last = selected.at(-1)?.seq ?? after;
-    return json({
+    return reply({
       run_id: requestedRun,
-      observed: "running",
+      observed: task.runs.find((run) => run.run_id === requestedRun)?.observed ?? "running",
       logs: selected,
       before: first,
       after: last,
@@ -548,210 +586,89 @@ try {
     await card.getByRole("button", { name: "本次用量", exact: true }).click();
     await card.locator("article").last().locator("summary").first().click();
     await card.screenshot({ path: join(output, `rollout-expanded-${viewport.width}.png`) });
-    const position = await card.evaluate((el) => el.closest("[data-task-scroll]")?.scrollTop ?? 0);
-    await card
-      .getByRole("button", { name: /查看完整过程/ })
-      .evaluate((el) => (el as HTMLButtonElement).click());
-    const rollout = page.getByRole("dialog", { name: "完整执行过程", exact: true });
-    const reader = rollout.getByLabel("执行过程正文", { exact: true });
-    await rollout.getByText("实时跟随", { exact: true }).waitFor();
-    await rollout.getByRole("button", { name: "本次用量", exact: true }).click();
-    const readerUsage = rollout.getByRole("region", { name: "本次执行 Token 用量" });
-    await readerUsage.getByText("42", { exact: true }).waitFor();
-    await readerUsage.screenshot({ path: join(output, `reader-usage-${viewport.width}.png`) });
-    await rollout.getByRole("button", { name: "本次用量", exact: true }).click();
-    // Capturing the panel scrolls into history; explicitly resume the reader afterward.
-    if (await rollout.getByRole("button", { name: "恢复跟随", exact: true }).count())
-      await rollout.getByRole("button", { name: "恢复跟随", exact: true }).click();
-    await rollout.getByText("隔离记录 150", { exact: true }).waitFor();
-    await rollout.getByText("实时跟随", { exact: true }).waitFor();
-    assert.equal(await rollout.locator("article").count(), 99);
-    assert.equal(
-      await rollout
-        .locator("article > details > summary")
-        .filter({ hasText: "go test ./internal/domain" })
-        .count(),
-      1,
-      "start and result became duplicate steps",
+    await card.getByRole("button", { name: /查看完整过程/ }).click();
+    const rollout = page.getByRole("region", { name: "执行过程监控", exact: true });
+    const reader = rollout.locator("[data-trace-scroll]");
+    const rows = rollout
+      .getByRole("table", { name: "执行记录", exact: true })
+      .locator("[data-seq]");
+    await rollout.getByText("跟随最新", { exact: true }).waitFor();
+    assert(page.url().includes(`/tasks/${taskID}/runs/${runID}`));
+    assert.equal(await page.getByRole("dialog", { name: "完整执行过程" }).count(), 0);
+    assert.match(
+      await rollout.getByRole("button", { name: "记录来源", exact: true }).innerText(),
+      /runner 原生记录/,
     );
-    await page.waitForTimeout(2200);
-    assert(await rollout.getByRole("button", { name: "加载更早记录" }).isEnabled());
-    const beforePause = await rollout.locator("article").allTextContents();
-    await rollout.getByRole("button", { name: "暂停跟随" }).click();
-    assert.deepEqual(await rollout.locator("article").allTextContents(), beforePause);
-    await reader.evaluate((el) => {
-      el.scrollTop = el.scrollHeight / 2;
-    });
-    const readerTop = (await reader.boundingBox())!.y;
-    const anchor = await reader.locator("[data-step-key]").evaluateAll((nodes, top) => {
-      const row = nodes.find((node) => node.getBoundingClientRect().bottom > top)!;
-      return { key: (row as HTMLElement).dataset.stepKey, top: row.getBoundingClientRect().top };
-    }, readerTop);
-    // Invoke without scrolling the reader to its top pagination button.
+    await rows.filter({ hasText: "隔离记录 150" }).waitFor();
+    assert.equal(await rows.count(), 99);
+    const command = rows.filter({ hasText: "go test ./internal/domain" });
+    assert.equal(await command.count(), 1, "start and result became duplicate steps");
+    await command.click();
+    await rollout.getByRole("tab", { name: "输出", exact: true }).click();
     await rollout
-      .getByRole("button", { name: "加载更早记录" })
-      .evaluate((el) => (el as HTMLButtonElement).click());
-    await rollout.getByText("隔离记录 1", { exact: true }).waitFor();
-    const anchored = await reader.locator(`[data-step-key="${anchor.key}"]`).boundingBox();
-    assert(anchored && Math.abs(anchored.y - anchor.top) < 3, "prepend moved the reading anchor");
-    assert.equal(await rollout.getByText("隔离记录 150", { exact: true }).count(), 1);
-    assert(await rollout.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
-    await rollout.getByRole("button", { name: "← 返回", exact: true }).click();
-    await rollout.waitFor({ state: "detached" });
-    assert.equal(
-      await card.getByRole("button", { name: "展开执行步骤" }).getAttribute("aria-expanded"),
-      "true",
-    );
-    assert(
-      (await card.locator("article").last().locator("details").first().getAttribute("open")) !==
-        null,
-    );
-    assert(
-      Math.abs(
-        (await card.evaluate((el) => el.closest("[data-task-scroll]")?.scrollTop ?? 0)) - position,
-      ) < 3,
-      "return moved the card",
-    );
-    await card
-      .getByRole("button", { name: /查看完整过程/ })
-      .evaluate((el) => (el as HTMLButtonElement).click());
-    await rollout.waitFor();
-    await rollout.getByText("历史阅读", { exact: true }).waitFor();
-    const reopenedAnchor = await reader.locator(`[data-step-key="${anchor.key}"]`).boundingBox();
-    assert(
-      reopenedAnchor && Math.abs(reopenedAnchor.y - anchor.top) < 3,
-      "reopening lost the detailed reading position",
-    );
-    await rollout.getByRole("button", { name: "← 返回", exact: true }).click();
-    await rollout.waitFor({ state: "detached" });
-    await card
-      .locator("article")
-      .filter({ hasText: "go test ./internal/domain" })
-      .getByRole("button", { name: /在完整过程中查看/ })
-      .click();
-    await rollout.waitFor();
-    await rollout.getByText("历史阅读", { exact: true }).waitFor();
-    await rollout
-      .locator('pre[data-scroll="output"]')
-      .filter({ hasText: "ok   example/internal/domain" })
+      .getByRole("tabpanel")
+      .getByText(/ok {3}example\/internal\/domain/)
       .waitFor();
-    const targetBounds = await rollout.locator('[data-target="true"]').boundingBox();
-    const readerBounds = await reader.boundingBox();
-    assert(
-      targetBounds &&
-        readerBounds &&
-        targetBounds.y >= readerBounds.y - 2 &&
-        targetBounds.y < readerBounds.y + readerBounds.height,
-    );
-    const expandedTool = rollout
-      .locator("article")
-      .filter({ hasText: "go test ./internal/domain" });
-    const toolOutput = expandedTool.locator('pre[data-scroll="output"]');
-    await toolOutput.evaluate((el) => {
-      el.scrollTop = 80;
-    });
-    await reader.evaluate((el) => {
-      el.scrollTop += 150;
-    });
-    const anchorRow = reader
-      .locator("[data-step-key]")
-      .filter({ has: page.getByText("隔离记录 140", { exact: true }) });
-    await anchorRow.scrollIntoViewIfNeeded();
-    await reader.evaluate((node) => {
-      node.scrollTop -= 100;
-    });
-    await page.waitForTimeout(100);
-    const anchorY = await anchorRow.evaluate((node) => node.getBoundingClientRect().top);
-    const olderLog = logs[99]!;
-    const oldBody = olderLog.body;
-    olderLog.body = { type: "agentMessage", text: "较早执行回复继续生成。\n\n".repeat(60) };
-    await rollout.getByText("更多", { exact: true }).click();
-    await rollout.getByRole("button", { name: "重新连接", exact: true }).click();
+    await rollout.getByRole("tab", { name: "原始记录", exact: true }).click();
     await rollout
-      .getByText(/较早执行回复继续生成/)
-      .first()
-      .waitFor({ state: "attached" });
-    assert(
-      Math.abs((await anchorRow.evaluate((node) => node.getBoundingClientRect().top)) - anchorY) <=
-        2,
-      "earlier run output displaced paused reader anchor",
-    );
-    olderLog.body = oldBody;
-    await rollout.getByText("更多", { exact: true }).click();
-    await expandedTool.scrollIntoViewIfNeeded();
-    await reader.evaluate((node) => {
-      node.scrollTop += 150;
+      .getByRole("tabpanel")
+      .getByText(/aggregatedOutput/)
+      .waitFor();
+    await page.screenshot({ path: join(output, `rollout-details-${viewport.width}.png`) });
+    await rollout.getByRole("button", { name: "关闭记录详情", exact: true }).click();
+    // A real wheel gesture enables boundary loading; prepending retains the visible row.
+    historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
     });
-    const expandedTop = (await expandedTool.boundingBox())!.y;
-    const outputTop = await toolOutput.evaluate((el) => el.scrollTop);
-    assert(outputTop > 0, "fixture did not exercise an output scroller");
-    await rollout.getByRole("button", { name: "← 返回", exact: true }).click();
-    await rollout.waitFor({ state: "detached" });
-    await card
-      .getByRole("button", { name: /查看完整过程/ })
-      .evaluate((el) => (el as HTMLButtonElement).click());
-    await rollout.waitFor();
-    assert(
-      (await expandedTool.locator("details").first().getAttribute("open")) !== null,
-      "reopening collapsed the reading step",
-    );
-    assert(
-      Math.abs((await expandedTool.boundingBox())!.y - expandedTop) < 3,
-      "reopening moved the expanded reading anchor",
-    );
-    assert(
-      Math.abs((await toolOutput.evaluate((el) => el.scrollTop)) - outputTop) < 3,
-      "reopening lost the tool output scroll position",
-    );
-    await page.keyboard.press("Escape");
-    await rollout.waitFor({ state: "detached" });
-    await card.getByRole("button", { name: /查看完整过程/ }).click();
-    await rollout.waitFor();
-    await page.goBack();
-    await rollout.waitFor({ state: "detached" });
-    assert(await card.isVisible(), "browser back left the task");
-    await card.getByRole("button", { name: /查看完整过程/ }).click();
-    await rollout.waitFor();
-    await rollout.getByRole("button", { name: /回到最新/ }).click();
-    await rollout.getByText("实时跟随", { exact: true }).waitFor();
+    await reader.hover();
+    await page.mouse.wheel(0, -1);
     await reader.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
+      el.scrollTop = 32;
     });
-    await page.waitForTimeout(100);
-    await page.setViewportSize({
-      width: viewport.width > 760 ? 390 : 1440,
-      height: viewport.width > 760 ? 568 : 900,
+    await page.waitForTimeout(50);
+    const anchor = await rows.evaluateAll((nodes) => {
+      const top = document.querySelector("[data-trace-scroll]")!.getBoundingClientRect().top + 36;
+      const row = nodes.find((node) => node.getBoundingClientRect().top > top)!;
+      return { seq: (row as HTMLElement).dataset.seq, top: row.getBoundingClientRect().top };
     });
-    await page.waitForFunction(() => {
-      const el = document.querySelector<HTMLElement>('[aria-label="执行过程正文"]')!;
-      return el.scrollHeight - el.scrollTop - el.clientHeight < 2;
-    });
-    assert.equal(
-      await rollout.getByText("实时跟随", { exact: true }).count(),
-      1,
-      "reader resize changed latest follow intent",
+    releaseHistory!();
+    historyGate = undefined;
+    await reader.locator('[data-seq="1"]').waitFor({ state: "attached" });
+    const anchorRow = reader.locator(`[data-seq="${anchor.seq}"]`);
+    assert(
+      Math.abs((await anchorRow.boundingBox())!.y - anchor.top) < 3,
+      "prepend moved the reading anchor",
     );
-    // Rapidly returning to the same size can coalesce ResizeObserver entries
-    // after an intermediate layout has already clamped the scroll position.
-    for (let resize = 0; resize < 12; resize++) {
-      for (const size of [
-        {
-          width: viewport.width > 760 ? 390 : 1440,
-          height: viewport.width > 760 ? 568 : 900,
-        },
-        viewport,
-      ]) {
-        await page.setViewportSize(size);
-        await page.waitForFunction(() => {
-          const el = document.querySelector<HTMLElement>('[aria-label="执行过程正文"]')!;
-          return el.scrollHeight - el.scrollTop - el.clientHeight < 2;
-        });
-        assert.equal(
-          await rollout.getByText("实时跟随", { exact: true }).count(),
-          1,
-          "repeated resize changed latest follow intent",
-        );
-      }
+    assert.equal(await rows.count(), 149);
+    assert.equal(await rows.filter({ hasText: "隔离记录 150" }).count(), 1);
+    assert.equal(await rollout.getByRole("button", { name: "加载更早记录" }).count(), 0);
+    await rollout.getByText("阅读历史", { exact: true }).waitFor();
+    const historyTop = await reader.evaluate((el) => el.scrollTop);
+    await page.waitForTimeout(2200);
+    assert(Math.abs((await reader.evaluate((el) => el.scrollTop)) - historyTop) < 3);
+    await rollout.getByRole("button", { name: "返回任务", exact: true }).click();
+    await rollout.waitFor({ state: "detached" });
+    await page.goForward();
+    await anchorRow.waitFor();
+    await rollout.getByText("阅读历史", { exact: true }).waitFor();
+    assert(
+      Math.abs((await anchorRow.boundingBox())!.y - anchor.top) < 3,
+      `browser forward lost the historical reading position: ${JSON.stringify({ anchor, restored: await anchorRow.boundingBox(), scroll: await reader.evaluate((el) => el.scrollTop), reads: reads.filter((path) => path.includes("/preview?")).slice(-4) })}`,
+    );
+    assert.equal(
+      await rows.filter({ hasText: "隔离记录 150" }).count(),
+      0,
+      "history restoration unexpectedly fetched the newest page",
+    );
+    await rollout.getByRole("button", { name: "回到最新", exact: true }).click();
+    await rollout.getByText("跟随最新", { exact: true }).waitFor();
+    for (const size of [{ width: 390, height: 568 }, { width: 1440, height: 900 }, viewport]) {
+      await page.setViewportSize(size);
+      await page.waitForFunction(() => {
+        const el = document.querySelector<HTMLElement>("[data-trace-scroll]")!;
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 4;
+      });
+      await rollout.getByText("跟随最新", { exact: true }).waitFor();
     }
     const newSeq = logs.at(-1)!.seq + 1;
     logs.push({
@@ -761,170 +678,92 @@ try {
       body: { type: "agentMessage", text: "新到达的执行记录" },
       created_at: "2026-10-27T03:01:00Z",
     });
-    await rollout.getByText("新到达的执行记录", { exact: true }).waitFor();
+    await rows.filter({ hasText: "新到达的执行记录" }).waitFor();
     assert(
       await reader.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 4),
       "live did not follow the bottom",
     );
-    await reader.evaluate((el) => {
-      el.scrollTop = 200;
-    });
-    await rollout.getByText("历史阅读", { exact: true }).waitFor();
-    const historyTop = await reader.evaluate((el) => el.scrollTop);
-    task.runs[0]!.observed = "finished";
-    eventSeq++;
-    for (const stream of streams)
-      stream.write(
-        `event: ledger\ndata: ${JSON.stringify({ event_seq: eventSeq, object_type: "task", object_id: taskID, kind: "task.changed", created_at: "2026-10-27T03:01:00Z" })}\n\n`,
-      );
-    await rollout.locator('header [data-active="false"]').filter({ hasText: "已完成" }).waitFor();
-    assert.equal(
-      await rollout.getByText("正在执行…", { exact: true }).count(),
-      0,
-      "paused rollout masked formal completion",
-    );
-    // Explicit navigation must work on a completed run with no arriving records.
-    await rollout.getByRole("button", { name: "恢复跟随", exact: true }).click();
-    await page.waitForFunction(() => {
-      const el = document.querySelector<HTMLElement>('[aria-label="执行过程正文"]')!;
-      return el.scrollHeight - el.scrollTop - el.clientHeight < 4;
-    });
-    await reader.evaluate((el) => {
-      el.scrollTop = 200;
-    });
-    await rollout.getByText("历史阅读", { exact: true }).waitFor();
-    await rollout.getByRole("button", { name: /回到最新/ }).click();
-    await page.waitForTimeout(2200);
-    assert(
-      await reader.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 4),
-      "completed quiet run ignored explicit latest request",
-    );
-    await reader.evaluate((el, top) => {
-      el.scrollTop = top;
-    }, historyTop);
-    await rollout.getByText("历史阅读", { exact: true }).waitFor();
-    task.runs[0]!.observed = "running";
-    eventSeq++;
-    for (const stream of streams)
-      stream.write(
-        `event: ledger\ndata: ${JSON.stringify({ event_seq: eventSeq, object_type: "task", object_id: taskID, kind: "task.changed", created_at: "2026-10-27T03:01:00Z" })}\n\n`,
-      );
-    await rollout.locator('header [data-active="true"]').waitFor();
-
-    await page.waitForTimeout(2200);
-    assert(Math.abs((await reader.evaluate((el) => el.scrollTop)) - historyTop) < 3);
-    await rollout.getByRole("button", { name: /回到最新/ }).click();
-    await rollout.getByText("实时跟随", { exact: true }).waitFor();
-    rolloutFailure = true;
-    await rollout.getByText("更多", { exact: true }).click();
-    await rollout.getByRole("button", { name: "重新连接", exact: true }).click();
-    await rollout.getByRole("alert").waitFor();
-    assert.equal(
-      await rollout.getByText("新到达的执行记录", { exact: true }).count(),
-      1,
-      "failure discarded read content",
-    );
-    rolloutFailure = false;
-    await rollout.getByRole("alert").getByRole("button", { name: "重新连接" }).click();
-    await rollout.getByRole("alert").waitFor({ state: "detached" });
-    if (await rollout.locator("nav details[open]").count())
-      await rollout.getByText("更多", { exact: true }).click();
-    const commandRow = rollout.locator("article").filter({ hasText: "go test ./internal/domain" });
-    if ((await commandRow.locator("details").first().getAttribute("open")) === null) {
-      await commandRow.locator("summary").first().click();
-    }
-    await commandRow
-      .locator('pre[data-scroll="output"]')
-      .filter({ hasText: "ok   example/internal/domain" })
-      .waitFor();
-    if (await rollout.getByRole("button", { name: /回到最新/ }).count())
-      await rollout.getByRole("button", { name: /回到最新/ }).click();
-    const disclosureSeq = logs.at(-1)!.seq + 1;
-    logs.push({
-      seq: disclosureSeq,
-      native_id: "last-tool",
-      kind: "item.completed",
-      created_at: "2026-10-27T03:02:00Z",
-      body: {
-        type: "commandExecution",
-        command: "last-tool-command",
-        status: "completed",
-        aggregatedOutput: "最后一个工具的完整输出。\n".repeat(80),
-      },
-    });
-    const lastTool = rollout.locator("article").filter({ hasText: "last-tool-command" });
-    const lastToggle = lastTool.locator("summary").first();
-    await lastToggle.waitFor();
-    await reader.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    await page.waitForTimeout(100);
-    const toolY = await lastToggle.evaluate((el) => el.getBoundingClientRect().top);
-    await lastToggle.evaluate((el) => (el as HTMLElement).click());
-    await page.waitForTimeout(100);
-    await rollout.getByText("历史阅读", { exact: true }).waitFor();
-    assert(
-      Math.abs((await lastToggle.evaluate((el) => el.getBoundingClientRect().top)) - toolY) <= 2,
-      "last-tool disclosure moved its control",
-    );
-    const toolReadingTop = await reader.evaluate((el) => el.scrollTop);
-    logs.push({
-      seq: disclosureSeq + 1,
-      native_id: "after-last-tool",
-      kind: "item.completed",
-      created_at: "2026-10-27T03:02:01Z",
-      body: { type: "agentMessage", text: "新记录不得抢走工具阅读位置" },
-    });
-    await page.waitForTimeout(2300);
-    assert(
-      Math.abs((await reader.evaluate((el) => el.scrollTop)) - toolReadingTop) <= 2,
-      "new record displaced expanded last-tool output",
-    );
-    await rollout.getByRole("button", { name: /回到最新/ }).click();
-    await rollout.getByText("新记录不得抢走工具阅读位置", { exact: true }).waitFor();
+    await reader.hover();
+    await page.mouse.wheel(0, -100);
+    await rollout.getByText("阅读历史", { exact: true }).waitFor();
     task.runs[0]!.observed = "finished";
     eventSeq++;
     for (const stream of streams)
       stream.write(
         `event: ledger\ndata: ${JSON.stringify({ event_seq: eventSeq, object_type: "task", object_id: taskID, kind: "task.changed" })}\n\n`,
       );
-    await rollout.locator('header [data-active="false"]').filter({ hasText: "已完成" }).waitFor();
-    if (viewport.width <= 390) await page.setViewportSize({ width: viewport.width, height: 568 });
-    const headerSize = await rollout.locator("header").evaluate((header) => {
-      const title = header.querySelector<HTMLElement>("strong")!;
-      return {
-        height: header.getBoundingClientRect().height,
-        titleWidth: title.getBoundingClientRect().width,
-        titleHeight: title.getBoundingClientRect().height,
-      };
+    await rollout.locator("header").getByText("已结束", { exact: true }).waitFor();
+    await rollout.getByText("阅读历史", { exact: true }).waitFor();
+    await rollout.getByRole("button", { name: "回到最新", exact: true }).click();
+    await page.waitForFunction(() => {
+      const el = document.querySelector<HTMLElement>("[data-trace-scroll]")!;
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 4;
     });
-    if (viewport.width <= 390) {
-      assert(
-        headerSize.height <= 96,
-        `completed reader header too tall: ${JSON.stringify(headerSize)}`,
-      );
-      assert(
-        headerSize.titleWidth >= 48 && headerSize.titleHeight <= 28,
-        `completed reader title squeezed: ${JSON.stringify(headerSize)}`,
-      );
-    }
+    rolloutFailure = true;
+    await rollout.getByRole("alert").waitFor();
     assert.equal(
-      await card.getByRole("button", { name: /查看完整过程/ }).count(),
-      0,
-      "completed run must remove the original compact opener",
+      await rows.filter({ hasText: "新到达的执行记录" }).count(),
+      1,
+      "failure discarded read content",
     );
-    await page.setViewportSize(viewport);
-    await page.screenshot({ path: join(output, `rollout-${viewport.width}.png`), fullPage: true });
-    await rollout.getByRole("button", { name: "关闭完整过程" }).click();
+    rolloutFailure = false;
+    await rollout.getByRole("alert").getByRole("button", { name: "重新读取", exact: true }).click();
+    await rollout.getByRole("alert").waitFor({ state: "detached" });
+    await rollout.getByRole("button", { name: "记录来源", exact: true }).click();
+    await page.getByRole("menuitem", { name: "服务端已采集日志", exact: true }).click();
+    await rows.filter({ hasText: "新到达的执行记录" }).waitFor();
+    assert.match(page.url(), /source=logs/);
+    assert.match(
+      await rollout.getByRole("button", { name: "记录来源", exact: true }).innerText(),
+      /已采集日志/,
+    );
+    await reader.hover();
+    await page.mouse.wheel(0, -100);
+    await rollout.getByText("阅读历史", { exact: true }).waitFor();
+    const logAnchor = await rows.evaluateAll((nodes) => {
+      const top = document.querySelector("[data-trace-scroll]")!.getBoundingClientRect().top + 36;
+      const row = nodes.find((node) => node.getBoundingClientRect().top > top)!;
+      return { seq: (row as HTMLElement).dataset.seq, top: row.getBoundingClientRect().top };
+    });
+    await rollout.getByRole("button", { name: "返回任务", exact: true }).click();
     await rollout.waitFor({ state: "detached" });
-    assert(
-      await card
-        .getByRole("button", { name: "展开执行步骤" })
-        .evaluate((el) => document.activeElement === el),
-      "closing a completed run reader lost focus instead of using the persistent toggle",
+    await page.goForward();
+    await reader.locator(`[data-seq="${logAnchor.seq}"]`).waitFor();
+    await rollout.getByText("阅读历史", { exact: true }).waitFor();
+    assert.match(
+      await rollout.getByRole("button", { name: "记录来源", exact: true }).innerText(),
+      /已采集日志/,
     );
+    assert(
+      Math.abs(
+        (await reader.locator(`[data-seq="${logAnchor.seq}"]`).boundingBox())!.y - logAnchor.top,
+      ) < 3,
+      "browser forward lost the collected-log reading position",
+    );
+    assert(await rollout.evaluate((el) => el.scrollWidth <= el.clientWidth + 1));
+    await page.screenshot({ path: join(output, `rollout-${viewport.width}.png`), fullPage: true });
+    await rollout.getByRole("button", { name: "返回任务", exact: true }).click();
+    await rollout.waitFor({ state: "detached" });
+    await card.getByRole("button", { name: "展开执行步骤" }).waitFor();
     task.runs[0]!.observed = "running";
-    logs.splice(-2);
+    await card.getByRole("button", { name: "展开执行步骤" }).click();
+    await card
+      .locator("article")
+      .filter({ hasText: "go test ./internal/domain" })
+      .getByRole("button", { name: /在完整过程中查看/ })
+      .click();
+    await rollout.waitFor();
+    assert.match(page.url(), /source=logs/);
+    await rollout.getByRole("tab", { name: "输出", exact: true }).click();
+    await rollout
+      .getByRole("tabpanel")
+      .getByText(/ok {3}example\/internal\/domain/)
+      .waitFor();
+    await rollout.getByRole("button", { name: "关闭记录详情", exact: true }).click();
+    await rollout.getByText("阅读历史", { exact: true }).waitFor();
+    await page.goBack();
+    await rollout.waitFor({ state: "detached" });
+    assert(await card.isVisible(), "browser back left the task");
     logs.pop();
     assert.deepEqual(errors, []);
     await context.close();
@@ -945,12 +784,13 @@ try {
     const card = backlog.getByRole("region", { name: "执行过程与用量" });
     await card.getByRole("button", { name: "展开执行步骤" }).click();
     await card.getByRole("button", { name: /查看完整过程/ }).click();
-    const reader = backlog.getByRole("dialog", { name: "完整执行过程", exact: true });
-    await reader.getByText("尚无已采集记录。", { exact: true }).waitFor();
+    const reader = backlog.getByRole("region", { name: "执行过程监控", exact: true });
+    await reader.getByText("尚无原生过程记录。", { exact: true }).waitFor();
     rolloutEmpty = false;
     await reader.getByText("隔离记录 150", { exact: true }).waitFor();
-    await reader.getByRole("button", { name: "加载更早记录", exact: true }).click();
-    await reader.getByText("隔离记录 1", { exact: true }).waitFor();
+    await reader.locator("[data-trace-scroll]").hover();
+    await backlog.mouse.wheel(0, -100000);
+    await reader.getByText("隔离记录 1", { exact: true }).waitFor({ state: "attached" });
     assert.equal(await reader.getByText("隔离记录 150", { exact: true }).count(), 1);
     assert.deepEqual(errors, []);
     await backlog.screenshot({ path: join(output, "empty-backlog-390.png") });
@@ -970,9 +810,9 @@ try {
     await page.goto(`http://127.0.0.1:${address.port}/?task=${taskID}`);
     const select = page
       .getByRole("region", { name: "执行过程与用量" })
-      .getByRole("combobox", { name: "执行记录" });
+      .getByRole("button", { name: "执行记录", exact: true });
     await select.waitFor();
-    assert.equal(await select.inputValue(), runID);
+    assert.match(await select.innerText(), /实施/);
     const appendRun = (id: string, role: string, generation: number) => {
       task.runs.push({ ...task.runs[0]!, run_id: id, role, generation });
       eventSeq++;
@@ -985,35 +825,39 @@ try {
       (r) => new URL(r.url()).pathname === "/api/v1/runs/run_accept/rollout",
     );
     appendRun("run_accept", "accept", 1);
-    await select.locator('option[value="run_accept"]').waitFor({ state: "attached" });
+
     await acceptance;
     assert.equal(
-      await select.inputValue(),
-      "run_accept",
+      await select.innerText().then((text) => text.includes("验收")),
+      true,
       "default reader failed to follow acceptance",
     );
-    await select.selectOption(runID);
+    await select.click();
+    await page.getByRole("menuitem", { name: /实施/ }).click();
     appendRun("run_retry", "implement", 2);
-    await select.locator('option[value="run_retry"]').waitFor({ state: "attached" });
+    await select.click();
+    await page.getByRole("menuitem", { name: /第 3 次/ }).waitFor();
+    await page.keyboard.press("Escape");
     assert.equal(
-      await select.inputValue(),
-      runID,
+      await select.innerText().then((text) => text.includes("实施")),
+      true,
       "explicit history selection changed on a newer run",
     );
     assert(
       !reads.some((p) => p.startsWith("/api/v1/runs/run_retry/rollout")),
       "historical reader fetched the unselected new run",
     );
-    await select.selectOption("run_retry");
+    await select.click();
+    await page.getByRole("menuitem", { name: /第 3 次/ }).click();
     const next = page.waitForResponse(
       (r) => new URL(r.url()).pathname === "/api/v1/runs/run_accept_next/rollout",
     );
     appendRun("run_accept_next", "accept", 2);
-    await select.locator('option[value="run_accept_next"]').waitFor({ state: "attached" });
+
     await next;
     assert.equal(
-      await select.inputValue(),
-      "run_accept_next",
+      await select.innerText().then((text) => text.includes("验收")),
+      true,
       "selecting latest did not restore following",
     );
     console.log("PASS reader follows new runs, pins selected history, and resumes following");
@@ -1021,6 +865,266 @@ try {
     task.runs.splice(1);
     await selectionContext.close();
   }
+
+  // The inspector can remain on a record outside the newly reconstructed ledger page.
+  for (const source of ["native", "logs"] as const) {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      serviceWorkers: "block",
+    });
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(`http://127.0.0.1:${address.port}/tasks/${taskID}`);
+      await page
+        .getByRole("region", { name: "执行过程与用量", exact: true })
+        .getByRole("button", { name: /查看完整过程/ })
+        .waitFor();
+      await navigate(
+        page,
+        `/tasks/${taskID}/runs/${runID}${source === "logs" ? "?source=logs" : ""}`,
+      );
+      const monitor = page.getByRole("region", { name: "执行过程监控", exact: true });
+      const pane = monitor.locator("[data-trace-scroll]");
+      await pane.locator('[data-seq="145"]').click();
+      await monitor.getByRole("tab", { name: "原始记录", exact: true }).click();
+      await monitor
+        .getByRole("tabpanel")
+        .getByText(/aggregatedOutput/)
+        .waitFor();
+      await pane.hover();
+      await page.mouse.wheel(0, -1);
+      await monitor.getByText("阅读历史", { exact: true }).waitFor();
+      await pane.locator('[data-seq="60"]').scrollIntoViewIfNeeded();
+      await pane.evaluate((el) => {
+        el.scrollTop +=
+          el.querySelector('[data-seq="60"]')!.getBoundingClientRect().top -
+          el.getBoundingClientRect().top -
+          40;
+      });
+      await page.waitForTimeout(80);
+      const anchorY = (await pane.locator('[data-seq="60"]').boundingBox())!.y;
+      await monitor.getByRole("button", { name: "返回任务", exact: true }).click();
+      await monitor.waitFor({ state: "detached" });
+      await page.goForward();
+      await pane.locator('[data-seq="60"]').waitFor();
+      await monitor
+        .getByRole("tabpanel")
+        .getByText(/aggregatedOutput/)
+        .waitFor();
+      assert.equal(
+        await pane.locator('[data-seq="145"]').count(),
+        0,
+        "fixture did not put the selection outside the restored page",
+      );
+      assert.equal(
+        await monitor
+          .getByRole("tab", { name: "原始记录", exact: true })
+          .getAttribute("aria-selected"),
+        "true",
+      );
+      assert(
+        Math.abs((await pane.locator('[data-seq="60"]').boundingBox())!.y - anchorY) < 3,
+        "retained inspector displaced the historical anchor",
+      );
+      assert.deepEqual(errors, []);
+      console.log(
+        `PASS ${source}: inspector outside restored window retains selection and raw tab`,
+      );
+    } finally {
+      await context.close();
+    }
+  }
+  // An explicit latest request supersedes a record-specific entry on later Forward navigation.
+  for (const source of ["native", "logs"] as const) {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      serviceWorkers: "block",
+    });
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(`http://127.0.0.1:${address.port}/tasks/${taskID}`);
+      await page
+        .getByRole("region", { name: "执行过程与用量", exact: true })
+        .getByRole("button", { name: /查看完整过程/ })
+        .waitFor();
+      await navigate(
+        page,
+        `/tasks/${taskID}/runs/${runID}?record=60${source === "logs" ? "&source=logs" : ""}`,
+      );
+      const monitor = page.getByRole("region", { name: "执行过程监控", exact: true });
+      const pane = monitor.locator("[data-trace-scroll]");
+      await monitor.getByRole("button", { name: "关闭记录详情", exact: true }).click();
+      await monitor.getByRole("button", { name: "回到最新", exact: true }).click();
+      await pane.locator('[data-seq="150"]').waitFor();
+      assert.equal(new URL(page.url()).searchParams.get("record"), null);
+      await monitor.getByRole("button", { name: "返回任务", exact: true }).click();
+      await monitor.waitFor({ state: "detached" });
+      await page.goForward();
+      await pane.locator('[data-seq="150"]').waitFor();
+      await monitor.getByText("跟随最新", { exact: true }).waitFor();
+      assert.deepEqual(errors, []);
+      console.log(`PASS ${source}: explicit latest survives Forward from a record-specific entry`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  const originalLogs = [...logs];
+  // Repeated parent/child turn identities are distinct contiguous table groups.
+  for (const source of ["native", "logs"] as const) {
+    logs.splice(
+      0,
+      logs.length,
+      ...Array.from({ length: 150 }, (_, i) => ({
+        seq: i + 1,
+        native_id: `interleaved_${i + 1}`,
+        kind: "item.completed",
+        body: {
+          thread_id: Math.floor(i / 30) % 2 ? "child" : "parent",
+          turn_id: "turn",
+          data: { type: "agentMessage", text: `交错记录 ${i + 1}` },
+        },
+        created_at: "2026-10-27T03:00:00Z",
+      })),
+    );
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      serviceWorkers: "block",
+    });
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(
+        `http://127.0.0.1:${address.port}/tasks/${taskID}/runs/${runID}${source === "logs" ? "?source=logs" : ""}`,
+      );
+      const pane = page
+        .getByRole("region", { name: "执行过程监控", exact: true })
+        .locator("[data-trace-scroll]");
+      await pane.locator('[data-seq="150"]').waitFor();
+      await pane.hover();
+      await page.mouse.wheel(0, -100000);
+      await pane.locator('[data-seq="1"]').waitFor({ state: "attached" });
+      const sequences = await pane
+        .locator("[data-seq]")
+        .evaluateAll((rows) => rows.map((row) => Number((row as HTMLElement).dataset.seq)));
+      assert.deepEqual(
+        sequences,
+        Array.from({ length: 150 }, (_, i) => i + 1),
+        "interleaved history created duplicated or misordered table rows",
+      );
+      assert.deepEqual(errors, []);
+      console.log(`PASS ${source}: interleaved turn pagination has unique ordered rows`);
+    } finally {
+      await context.close();
+    }
+  }
+  // Following a busy run retains an inspected row after the bounded ledger evicts it.
+  for (const source of ["native", "logs"] as const) {
+    for (const tool of [false, true]) {
+      logs.splice(
+        0,
+        logs.length,
+        ...Array.from({ length: 150 }, (_, i) => ({
+          seq: i + 1,
+          native_id: `stream_${i + 1}`,
+          kind: "item.completed",
+          body: { type: "agentMessage", text: `流式记录 ${i + 1}` },
+          created_at: "2026-10-27T03:00:00Z",
+        })),
+      );
+      if (tool)
+        logs[149] = {
+          ...logs[149]!,
+          kind: "native.item_started",
+          body: {
+            thread_id: "stream-session",
+            turn_id: "stream-turn",
+            type: "commandExecution",
+            command: "retained command",
+            status: "inProgress",
+          },
+        };
+      const width = tool ? 390 : 1440;
+      const context = await browser.newContext({
+        viewport: { width, height: 900 },
+        serviceWorkers: "block",
+      });
+      try {
+        const page = await context.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        await page.goto(
+          `http://127.0.0.1:${address.port}/tasks/${taskID}/runs/${runID}${source === "logs" ? "?source=logs" : ""}`,
+        );
+        const monitor = page.getByRole("region", { name: "执行过程监控", exact: true });
+        const pane = monitor.locator("[data-trace-scroll]");
+        await pane.locator('[data-seq="150"]').press("Enter");
+        await monitor.getByRole("tab", { name: "原始记录", exact: true }).click();
+        await monitor
+          .getByRole("tabpanel")
+          .getByText(/stream_150/)
+          .waitFor();
+        assert.equal(await monitor.getByText("跟随最新", { exact: true }).count(), 1);
+        for (let seq = 151; seq <= 550; seq++)
+          logs.push({
+            seq,
+            native_id: `stream_${seq}`,
+            kind: "item.completed",
+            body: { type: "agentMessage", text: `流式记录 ${seq}` },
+            created_at: "2026-10-27T03:01:00Z",
+          });
+        await pane.locator('[data-seq="550"]').waitFor({ state: "attached" });
+        assert.equal(
+          await pane.locator('[data-seq="150"]').count(),
+          0,
+          "fixture did not evict the selected row",
+        );
+        assert.equal(await pane.locator("[data-seq]").count(), 400);
+        await monitor
+          .getByRole("tabpanel")
+          .getByText(/stream_150/)
+          .waitFor();
+        assert.equal(
+          await monitor
+            .getByRole("tab", { name: "原始记录", exact: true })
+            .getAttribute("aria-selected"),
+          "true",
+        );
+        if (tool) {
+          logs.push({
+            seq: 551,
+            native_id: "stream_150",
+            kind: "item.completed",
+            body: {
+              thread_id: "stream-session",
+              turn_id: "stream-turn",
+              type: "commandExecution",
+              command: "retained command",
+              status: "completed",
+              aggregatedOutput: "retained command completed",
+            },
+            created_at: "2026-10-27T03:01:01Z",
+          });
+          await monitor
+            .getByRole("tabpanel")
+            .getByText(/retained command completed/)
+            .waitFor();
+        }
+        assert.deepEqual(errors, []);
+        console.log(
+          `PASS ${source} ${width}: live eviction retains inspector${tool ? " and later tool result" : ""}`,
+        );
+      } finally {
+        await context.close();
+      }
+    }
+  }
+  logs.splice(0, logs.length, ...originalLogs);
 
   // A complete short history must not acquire a false "older" boundary when
   // the next live row arrives; the merge already contains that earlier page.
@@ -1039,7 +1143,7 @@ try {
   await shortCard.getByRole("button", { name: "展开执行步骤" }).click();
   await shortCard.getByText("隔离记录 10", { exact: true }).first().waitFor();
   await shortCard.getByRole("button", { name: /查看完整过程/ }).click();
-  const short = boundary.getByRole("dialog", { name: "完整执行过程", exact: true });
+  const short = boundary.getByRole("region", { name: "执行过程监控", exact: true });
   const earlier = short.getByRole("button", { name: "加载更早记录" });
   assert.equal(await earlier.count(), 0);
   logs.push({
@@ -1051,7 +1155,8 @@ try {
   });
   await short.getByText("隔离记录 11", { exact: true }).waitFor();
   assert.equal(await earlier.count(), 0, "live append fabricated an older history page");
-  assert.equal(await short.locator("article").count(), 11);
+  assert.equal(await short.locator("[data-seq]").count(), 11);
+  assert.equal(await short.getByText("向上滚动读取更早记录", { exact: true }).count(), 0);
   await boundaryContext.close();
   assert.equal(writes.length, 0);
   assert(
@@ -1062,6 +1167,7 @@ try {
   assert(reads.some((path) => path.includes("window=total")));
   console.log(`Browser ${browser.version()}; screenshots ${output}`);
 } finally {
+  releaseHistory?.();
   await browser.close();
   for (const stream of streams) stream.end();
   await new Promise<void>((done) => server.close(() => done()));

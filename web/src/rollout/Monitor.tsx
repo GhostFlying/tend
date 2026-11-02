@@ -34,6 +34,21 @@ import styles from "./Monitor.module.css";
 
 type MonitorRoute = Extract<Route, { page: "rollout" }>;
 type Tab = "overview" | "input" | "output" | "raw";
+type SelectionContext = {
+  native: boolean;
+  generation: string;
+  sourceChanged: boolean;
+  record: string;
+  step: Step;
+};
+type ReadingPosition = {
+  live: boolean;
+  selection?: Step | undefined;
+  native: boolean;
+  generation: string;
+  after: number;
+  anchor: ScrollAnchor;
+};
 const tabs: readonly { id: Tab; label: string }[] = [
   { id: "overview", label: "概览" },
   { id: "input", label: "输入" },
@@ -149,27 +164,50 @@ function MonitorWindow({
   task: TaskDetail;
   run: RunView;
 }) {
-  const window = useRunWindow(run.run_id, route.source !== "logs", route.record);
+  const [position, rememberPosition] = useEntryState<ReadingPosition | null>(
+    `monitor-position-${run.run_id}`,
+    null,
+  );
+  const [initialPosition, setInitialPosition] = useState(() =>
+    position?.native === (route.source !== "logs") ? position : null,
+  );
+  const window = useRunWindow(
+    run.run_id,
+    route.source !== "logs",
+    route.record,
+    initialPosition && !initialPosition.live ? initialPosition : undefined,
+  );
   const [prefs, save] = useEntryState(`monitor-${run.run_id}`, {
     selected: route.record ?? "",
     query: "",
     foldedTurns: false,
     foldedCalls: false,
     showEvents: false,
+    inspector: !!route.record || !matchMedia("(max-width: 760px)").matches,
   });
-  const [tab, setTab] = useState<Tab>("overview");
+  const [heldSelection, holdSelection] = useEntryState<SelectionContext | null>(
+    `monitor-selection-${run.run_id}`,
+    initialPosition?.selection
+      ? {
+          native: initialPosition.native,
+          generation: initialPosition.generation,
+          sourceChanged: false,
+          record: prefs.selected || String(initialPosition.selection.seq),
+          step: initialPosition.selection,
+        }
+      : null,
+  );
+  const [tab, setTab] = useEntryState<Tab>(`monitor-tab-${run.run_id}`, "overview");
   const [range, setRange] = useState<SequenceRange | null>(null);
   const overviewTarget = useRef<number | null>(null);
-  const [inspector, setInspector] = useState(
-    () => !!route.record || !matchMedia("(max-width: 760px)").matches,
-  );
+  const inspector = prefs.inspector;
   const [width, setWidth] = useState(384);
   const resize = useRef<{ x: number; width: number } | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const pane = useRef<HTMLDivElement>(null);
   const loaded = useRef(false);
   const latestRequested = useRef(false);
-  const reading = useRef<ScrollAnchor | null>(null);
+  const reading = useRef<ScrollAnchor | null>(initialPosition?.anchor ?? null);
   const paging = useRef<{ page: typeof window.page; anchor: ScrollAnchor } | null>(null);
   const requestedCursor = useRef("");
   const allowPaging = useRef(false);
@@ -200,10 +238,71 @@ function MonitorWindow({
     }
     return result;
   }, [visible]);
+  const held =
+    window.page &&
+    heldSelection?.native === window.native &&
+    heldSelection.generation === window.generation &&
+    (heldSelection.sourceChanged === window.sourceChanged ||
+      (!window.sourceChanged &&
+        initialPosition?.native === window.native &&
+        initialPosition.generation === window.generation))
+      ? heldSelection
+      : null;
+  const retainedSelection = held?.step;
+  const retainedStep = retainedSelection
+    ? (steps.find((step) => step.key === retainedSelection.key) ?? retainedSelection)
+    : undefined;
   const selected = prefs.selected
-    ? stepForRecord(steps, prefs.selected)
-    : (steps.findLast((step) => step.failed && !!(step.text || step.input || step.output)) ??
+    ? (stepForRecord(steps, prefs.selected) ??
+      (held?.record === prefs.selected ? retainedStep : undefined))
+    : ((initialPosition ? retainedStep : undefined) ??
+      steps.findLast((step) => step.failed && !!(step.text || step.input || step.output)) ??
       steps.findLast((step) => step.kind === "tool"));
+  useEffect(() => {
+    if (!window.page || !selected) return;
+    const record = prefs.selected || String(selected.seq);
+    if (held?.step === selected && held.record === record) return;
+    holdSelection({
+      native: window.native,
+      generation: window.generation,
+      sourceChanged: window.sourceChanged,
+      record,
+      step: selected,
+    });
+  }, [
+    window.page,
+    window.native,
+    window.generation,
+    window.sourceChanged,
+    selected,
+    prefs.selected,
+    held,
+    holdSelection,
+  ]);
+  const savePosition = useRef(() => {});
+  useEffect(() => {
+    savePosition.current = () => {
+      if (!window.page) {
+        rememberPosition(initialPosition?.native === window.native ? initialPosition : null);
+        return;
+      }
+      const anchor = reading.current;
+      const row = anchor?.items.flatMap((item) => steps.filter((step) => step.key === item.id))[0];
+      rememberPosition(
+        anchor && row
+          ? {
+              live: window.live,
+              selection: selected,
+              native: window.native,
+              generation: window.generation,
+              after: Math.max(0, row.seq - 21),
+              anchor,
+            }
+          : null,
+      );
+    };
+  }, [window, initialPosition, steps, selected, rememberPosition]);
+  useEffect(() => () => savePosition.current(), []);
   const returnTask = {
     page: "task" as const,
     id: route.id,
@@ -211,9 +310,8 @@ function MonitorWindow({
   };
   const pick = (step: Step, focus = false) => {
     if (range && (step.seq < range.start || step.seq > range.end)) setRange(null);
-    save({ ...prefs, selected: String(step.seq) });
+    save({ ...prefs, selected: String(step.seq), inspector: true });
     setTab("overview");
-    setInspector(true);
     if (focus && matchMedia("(max-width: 760px)").matches)
       requestAnimationFrame(() => closeRef.current?.focus());
   };
@@ -224,13 +322,13 @@ function MonitorWindow({
     save({
       ...prefs,
       selected: String(step.seq),
+      inspector: true,
       foldedTurns: false,
       foldedCalls: false,
       showEvents: prefs.showEvents || step.kind === "event",
       query: "",
     });
     setTab("overview");
-    setInspector(true);
     if (matchMedia("(max-width: 760px)").matches)
       requestAnimationFrame(() => closeRef.current?.focus());
   };
@@ -243,7 +341,7 @@ function MonitorWindow({
       visible.find((step) => step.seq >= next.start && step.seq <= next.end)?.seq ?? null;
   };
   const closeInspector = () => {
-    setInspector(false);
+    save({ ...prefs, inspector: false });
     requestAnimationFrame(() =>
       pane.current
         ?.querySelector<HTMLElement>(`[data-seq="${selected?.seq ?? prefs.selected}"]`)
@@ -254,6 +352,7 @@ function MonitorWindow({
     const el = pane.current;
     if (
       !el ||
+      !el.clientHeight ||
       !window.page ||
       window.loading ||
       window.error ||
@@ -272,8 +371,12 @@ function MonitorWindow({
   };
   useLayoutEffect(() => {
     const el = pane.current;
-    if (!el || !window.page || window.loading) return;
-    if (overviewTarget.current !== null) {
+    if (!el || !el.clientHeight || !window.page || window.loading) return;
+    if (latestRequested.current) {
+      loaded.current = true;
+      el.scrollTop = el.scrollHeight;
+      latestRequested.current = false;
+    } else if (overviewTarget.current !== null) {
       const target = el.querySelector<HTMLElement>(`[data-seq="${overviewTarget.current}"]`);
       target?.scrollIntoView({ block: "center" });
       overviewTarget.current = null;
@@ -282,24 +385,36 @@ function MonitorWindow({
       loaded.current = true;
       const routedStep = stepForRecord(steps, route.record);
       const target = routedStep && el.querySelector<HTMLElement>(`[data-seq="${routedStep.seq}"]`);
-      if (target) {
+      if (
+        initialPosition &&
+        !initialPosition.live &&
+        !window.sourceChanged &&
+        initialPosition.anchor.items.some((item) =>
+          [...el.querySelectorAll<HTMLElement>("[data-scroll-id]")].some(
+            (node) => node.dataset.scrollId === item.id,
+          ),
+        )
+      ) {
+        restoreAnchor(el, initialPosition.anchor);
+      } else if (target) {
         target.scrollIntoView({ block: "center" });
         window.setLive(false);
       } else el.scrollTop = el.scrollHeight;
     } else if (paging.current && paging.current.page !== window.page) {
       restoreAnchor(el, paging.current.anchor);
       paging.current = null;
-    } else if (latestRequested.current || window.live) {
+    } else if (window.live) {
       el.scrollTop = el.scrollHeight;
-      latestRequested.current = false;
     } else if (reading.current) restoreAnchor(el, reading.current);
-    reading.current = captureAnchor(el);
+    const anchor = captureAnchor(el);
+    if (anchor.items.length) reading.current = anchor;
     // A poll can return the same cursor. Only an explicit read retry clears it.
-  }, [window, route.record]);
+  }, [window, route.record, steps, initialPosition]);
   useEffect(() => {
     const el = pane.current;
     if (!el) return;
     const observer = new ResizeObserver(() => {
+      if (!el.clientHeight) return;
       if (window.live) el.scrollTop = el.scrollHeight;
       else if (reading.current) restoreAnchor(el, reading.current);
     });
@@ -307,16 +422,22 @@ function MonitorWindow({
     return () => observer.disconnect();
   }, [window.live]);
   const resume = () => {
+    setInitialPosition(null);
     setRange(null);
     paging.current = null;
     requestedCursor.current = "";
     latestRequested.current = true;
+    allowPaging.current = false;
     pane.current?.scrollTo({ top: pane.current.scrollHeight });
     window.latest();
+    if (route.record) navigate({ ...route, record: "" }, { replace: true });
   };
   const selectSource = (native: boolean) => {
     if (native === window.native) return;
+    setInitialPosition(null);
+    holdSelection(null);
     loaded.current = false;
+    allowPaging.current = false;
     reading.current = null;
     paging.current = null;
     requestedCursor.current = "";
@@ -483,29 +604,40 @@ function MonitorWindow({
             className={styles.scroller}
             ref={pane}
             data-trace-scroll
+            data-scroll-restoration="manual"
             onPointerDown={() => {
               allowPaging.current = true;
             }}
             onWheel={(event) => {
-              allowPaging.current = true;
+              allowPaging.current = event.deltaY < 0 || !window.live;
+              if (event.deltaY < 0) window.setLive(false);
               if (event.deltaY < 0 && event.currentTarget.scrollTop < 64) {
-                window.setLive(false);
                 fetchEdge("before");
               }
             }}
             onTouchMove={() => {
               allowPaging.current = true;
+              window.setLive(false);
             }}
             onScroll={(event) => {
               const el = event.currentTarget;
-              reading.current = captureAnchor(el);
+              if (!el.clientHeight) return;
+              const anchor = captureAnchor(el);
+              if (anchor.items.length) reading.current = anchor;
               if (!loaded.current || paging.current || !allowPaging.current) return;
               if (el.scrollHeight - el.scrollTop - el.clientHeight > 48) window.setLive(false);
               if (el.scrollTop < 64) fetchEdge("before");
               else if (el.scrollHeight - el.scrollTop - el.clientHeight < 64) fetchEdge("after");
             }}
-            onKeyDown={() => {
-              allowPaging.current = true;
+            onKeyDown={(event) => {
+              if (
+                ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(
+                  event.key,
+                )
+              ) {
+                allowPaging.current = true;
+                window.setLive(false);
+              }
             }}
           >
             <table className={styles.table} aria-label="执行记录">
@@ -534,7 +666,7 @@ function MonitorWindow({
                   </tr>
                 )}
                 {groups.map((group, index) => (
-                  <Fragment key={group.key}>
+                  <Fragment key={group.steps[0]!.key}>
                     {(group.turn || groups.length > 1) && (
                       <tr className={styles.group}>
                         <td colSpan={3}>

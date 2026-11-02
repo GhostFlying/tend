@@ -37,7 +37,7 @@ func TestRolloutPreviewIsAnEphemeralReadOutsideMaintenanceAndLeases(t *testing.T
 		t.Fatal(op)
 	}
 	counts := map[string]int{}
-	for _, table := range []string{"request_records", "events", "outbox", "runs", "run_logs", "token_usage_facts", "token_usage_current"} {
+	for _, table := range []string{"request_records", "events", "outbox", "runs", "run_logs", "token_usage_facts", "token_usage_current", "token_usage_bindings", "token_usage_sources", "token_usage_local_sources", "token_usage_binding_revisions"} {
 		counts[table] = h.count(table)
 	}
 	prior := h.run(as.RunID)

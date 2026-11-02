@@ -382,6 +382,8 @@ const server = createServer(async (req, res) => {
   if (p === "/api/v1/tasks/task-completed") return json(completedTask);
   if (p.startsWith("/api/v1/runs/") && p.endsWith("/messages"))
     return json({ run_id: "run-tour", messages: [], more: false });
+  if (p.startsWith("/api/v1/runs/") && p.endsWith("/preview"))
+    return json({ state: "unsupported" });
   if (p.startsWith("/api/v1/runs/") && p.endsWith("/rollout"))
     return json({
       run_id: p.split("/")[4],
@@ -726,11 +728,18 @@ try {
             const open = page.getByRole("button", { name: "展开执行步骤" });
             await open.click();
             await page.getByRole("button", { name: /查看完整过程/ }).click();
-            const reader = page.getByRole("dialog", { name: "完整执行过程" });
+            const reader = page.getByRole("region", { name: "执行过程监控", exact: true });
+            await reader.getByRole("button", { name: "记录来源", exact: true }).click();
+            await page.getByRole("menuitem", { name: "服务端已采集日志", exact: true }).click();
+            await reader.getByRole("table", { name: "执行记录", exact: true }).waitFor();
+            await reader.locator("[data-seq]").first().click();
+            await reader.getByRole("complementary", { name: "记录详情", exact: true }).waitFor();
+            await reader.getByRole("tab", { name: "原始记录", exact: true }).click();
+            await reader.getByRole("tabpanel").waitFor();
             for (const summary of await reader.locator("summary:visible").elementHandles())
               await probe(summary);
-            await page.getByRole("button", { name: "关闭完整过程" }).click();
-            await open.click();
+            await reader.getByRole("button", { name: "返回任务", exact: true }).click();
+            await open.waitFor();
           }
           if (path === "/issues/issue-in_progress") {
             const summary = page.getByText("目标与完成条件", { exact: true });

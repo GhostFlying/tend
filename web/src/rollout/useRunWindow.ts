@@ -5,24 +5,30 @@ import { useServices } from "../app/services.tsx";
 import { mergePage } from "./model.ts";
 
 /** Compact status reads collected logs; the full monitor requests native originals explicitly. */
-export function useRunWindow(id: string, preferNative = false, record?: string) {
+export function useRunWindow(
+  id: string,
+  preferNative = false,
+  record?: string,
+  resume?: { after: number; generation: string },
+) {
   const target = Number(record);
   const focus = Number.isSafeInteger(target) && target > 0 && target < Number.MAX_SAFE_INTEGER;
   const { client } = useServices();
+  const resumeCursor = resume ? (resume.after ? `after=${resume.after}` : "before=101") : "";
   const [native, setNative] = useState(preferNative);
   const [request, setRequest] = useState({
-    cursor: focus ? `before=${target + 1}` : "",
+    cursor: resume ? resumeCursor : focus ? `before=${target + 1}` : "",
     mode: "replace" as "replace" | "before" | "after",
     version: 0,
   });
-  const [live, setLive] = useState(!focus);
+  const [live, setLive] = useState(!focus && !resume);
   const [page, setPage] = useState<RunRolloutPage | null>(null);
   const [preview, setPreview] = useState<RolloutPreview | null>(null);
   const [error, setError] = useState(false);
   const [sourceChanged, setSourceChanged] = useState(false);
   const [loading, setLoading] = useState(true);
   const current = useRef<RunRolloutPage | null>(null);
-  const generation = useRef("");
+  const generation = useRef(resume?.generation ?? "");
   const loaded = useRef(-1);
   useEffect(() => {
     const abort = new AbortController();
@@ -129,7 +135,7 @@ export function useRunWindow(id: string, preferNative = false, record?: string) 
     later: () => load("after"),
     reconnect: () =>
       setRequest((old) => ({
-        cursor: current.current ? `after=${current.current.after}` : "",
+        cursor: current.current ? `after=${current.current.after}` : resumeCursor,
         mode: current.current ? "after" : "replace",
         version: old.version + 1,
       })),

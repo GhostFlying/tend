@@ -63,7 +63,8 @@ export function RunRollout({
               items={runs.map((item) => ({
                 id: item.run_id,
                 label: runLabel(runs, item),
-                onSelect: () => setSelected(item.run_id),
+                onSelect: () =>
+                  setSelected(item.run_id === runs.at(-1)?.run_id ? null : item.run_id),
               }))}
             >
               {runLabel(runs, run)}{" "}
@@ -119,7 +120,7 @@ function RunWindow({
       id: taskID,
       run: run.run_id,
       ...(from ? { from } : {}),
-      ...(step ? { record: String(step.seq), source: "logs" as const } : {}),
+      ...(step ? { record: String(step.lastSeq), source: "logs" as const } : {}),
     });
   };
   return (

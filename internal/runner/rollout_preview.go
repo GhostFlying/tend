@@ -110,6 +110,8 @@ func (r *Runner) previewHTTP(ctx context.Context, method string, query url.Value
 
 // rolloutPreviews neither claims work nor uses an execution lease or model process.
 func (r *Runner) rolloutPreviews(ctx context.Context) {
+	const pendingLimit = 32
+	slots := make(chan struct{}, 4)
 	reader := rollout.New(r.instanceID, r.cfg.RolloutRoots...)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -157,8 +159,18 @@ func (r *Runner) rolloutPreviews(ctx context.Context) {
 			mu.Unlock()
 			continue
 		}
-		if work.DeploymentID != deployment || work.InstanceID != r.instanceID || work.RunID == "" || active[work.RequestID] != nil || len(active) >= 4 {
+		if work.DeploymentID != deployment || work.InstanceID != r.instanceID || work.RunID == "" || active[work.RequestID] != nil {
 			mu.Unlock()
+			continue
+		}
+		if len(active) >= pendingLimit {
+			mu.Unlock()
+			replyCtx, stop := context.WithDeadline(ctx, time.UnixMilli(work.DeadlineMillis))
+			_ = r.previewHTTP(replyCtx, http.MethodPost, nil, protocol.RolloutPreviewReply{
+				RequestID: work.RequestID, InstanceID: r.instanceID,
+				Result: protocol.RolloutPreview{State: "unavailable"},
+			}, nil)
+			stop()
 			continue
 		}
 		readCtx, stop := context.WithDeadline(ctx, time.UnixMilli(work.DeadlineMillis))
@@ -167,6 +179,12 @@ func (r *Runner) rolloutPreviews(ctx context.Context) {
 		wg.Go(func() {
 			defer stop()
 			defer func() { mu.Lock(); delete(active, work.RequestID); mu.Unlock() }()
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-readCtx.Done():
+				return
+			}
 			result := r.readRollout(readCtx, reader, *work)
 			if readCtx.Err() != nil {
 				return
