@@ -82,7 +82,9 @@ export class AgentCatalog {
     for (const read of this.runners.values()) {
       const catalog = read.state.get().value;
       for (const agent of [
-        ...(catalog?.retained_definitions ?? []),
+        ...[...(catalog?.retained_definitions ?? [])]
+          .sort((a, b) => a.pin.inventory_revision - b.pin.inventory_revision)
+          .map((history) => history.definition),
         ...(catalog?.projection?.agents ?? []),
       ])
         names.set(

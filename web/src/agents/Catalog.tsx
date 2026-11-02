@@ -5,6 +5,7 @@ import type {
   AgentInventoryProjection,
   AgentInventoryRuntime,
   RunnerAgentCatalog,
+  RetainedAgentDefinition,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { navigate, useRoute, type AgentFilters } from "../app/router.ts";
@@ -24,7 +25,32 @@ type Entry = {
   group: Group;
   agent: AgentInventoryDefinition;
   runtime: AgentInventoryRuntime | undefined;
+  history?: RetainedAgentDefinition | undefined;
 };
+
+function entryKey(entry: Entry): string {
+  const pin = entry.history?.pin;
+  return pin
+    ? `${agentKey(entry.agent)}@${pin.snapshot_id}:${pin.public_sha256}`
+    : agentKey(entry.agent);
+}
+
+function directoryEntry(
+  group: Group,
+  agent: AgentInventoryDefinition,
+  history?: RetainedAgentDefinition,
+): Entry {
+  return {
+    group,
+    agent,
+    history,
+    runtime: (history?.runtimes ?? group.projection.runtimes ?? []).find(
+      (runtime) =>
+        runtime.runtime_id === agent.runtime_binding_ref.runtime_id &&
+        runtime.revision === agent.runtime_binding_ref.revision,
+    ),
+  };
+}
 
 export function AgentCatalogView() {
   const { live } = useServices();
@@ -51,25 +77,21 @@ export function AgentCatalogView() {
     const c = catalogs.get(id)?.value;
     if (c?.projection) groups.push({ id, projection: c.projection, catalog: c });
   }
-  const entries: Entry[] = groups.flatMap((group) =>
-    [
-      ...(group.projection.agents ?? []),
-      ...(group.catalog?.retained_definitions ?? []).filter(
-        (a) => !group.projection.agents?.some((current) => agentKey(current) === agentKey(a)),
-      ),
-    ].map((agent) => ({
-      group,
-      agent,
-      runtime: [
-        ...(group.projection.runtimes ?? []),
-        ...(group.catalog?.retained_runtimes ?? []),
-      ].find(
-        (r) =>
-          r.runtime_id === agent.runtime_binding_ref.runtime_id &&
-          r.revision === agent.runtime_binding_ref.revision,
-      ),
-    })),
-  );
+  const entries: Entry[] = groups.flatMap((group) => [
+    ...(group.projection.agents ?? []).map((agent) => directoryEntry(group, agent)),
+    ...(group.catalog?.retained_definitions ?? [])
+      .filter(
+        (history) =>
+          !(
+            history.pin.snapshot_id === group.catalog?.current?.snapshot_id &&
+            history.pin.public_sha256 === group.catalog?.current?.public_sha256 &&
+            group.projection.agents?.some(
+              (current) => agentKey(current) === agentKey(history.definition),
+            )
+          ),
+      )
+      .map((history) => directoryEntry(group, history.definition, history)),
+  ]);
   const query = (filters.search ?? "").trim().toLocaleLowerCase();
   const visible = entries.filter(
     ({ agent, runtime, group }) =>
@@ -80,13 +102,19 @@ export function AgentCatalogView() {
       (!filters.category || agent.categories?.includes(filters.category)) &&
       (!filters.environment || runtimeLabel(runtime) === filters.environment),
   );
-  const selected = visible.find((e) => agentKey(e.agent) === filters.selected);
+  const selected =
+    visible.find((e) => entryKey(e) === filters.selected) ??
+    visible
+      .filter((e) => agentKey(e.agent) === filters.selected)
+      .sort(
+        (a, b) =>
+          (b.history?.pin.inventory_revision ?? 0) - (a.history?.pin.inventory_revision ?? 0),
+      )[0];
   const allCategories = categories.value?.items ?? [];
   const environments = [...new Set(entries.map((e) => runtimeLabel(e.runtime)))].sort();
   const errors = hosted.error || categories.error || [...catalogs.values()].some((c) => c.error);
   const title = (id: string) => allCategories.find((c) => c.category_id === id)?.title || id;
-  const pick = (entry: Entry) =>
-    update({ selected: filters.selected === agentKey(entry.agent) ? "" : agentKey(entry.agent) });
+  const pick = (entry: Entry) => update({ selected: selected === entry ? "" : entryKey(entry) });
   return (
     <section className={styles.root}>
       <div
@@ -191,7 +219,7 @@ export function AgentCatalogView() {
                     search: "",
                     category: c.category_id,
                     environment: "",
-                    selected: agentKey(entry.agent),
+                    selected: entryKey(entry),
                   })
                 }
               />
@@ -241,15 +269,17 @@ export function AgentCatalogView() {
                         .filter((e) => runtimeLabel(e.runtime) === environment)
                         .map((entry) => {
                           const { agent } = entry;
-                          const worker = currentObservation(group.catalog, agent, "");
-                          const manager = currentObservation(group.catalog, agent, "issue_manager");
+                          const worker = entry.history
+                            ? undefined
+                            : currentObservation(group.catalog, agent, "");
+                          const manager = entry.history
+                            ? undefined
+                            : currentObservation(group.catalog, agent, "issue_manager");
                           const observation = worker ?? manager;
-                          const retainedOnly = !group.projection.agents?.some(
-                            (a) => agentKey(a) === agentKey(agent),
-                          );
+                          const retainedOnly = !!entry.history;
                           const selectedRow = selected === entry;
                           return (
-                            <Fragment key={agentKey(agent)}>
+                            <Fragment key={entryKey(entry)}>
                               <Button
                                 variant="ghost"
                                 className={`${styles.row} ${selectedRow ? styles.selected : ""}`}
@@ -258,7 +288,11 @@ export function AgentCatalogView() {
                               >
                                 <span className={styles.identity}>
                                   <strong>{agent.display_name}</strong>
-                                  <small>{agent.identity.local_id}</small>
+                                  <small>
+                                    {agent.identity.local_id}
+                                    {entry.history &&
+                                      ` · v${agent.revision} · r${entry.history.pin.inventory_revision}`}
+                                  </small>
                                 </span>
                                 <span>{agent.categories?.map(title).join("、")}</span>
                                 <span>
@@ -358,8 +392,9 @@ function CategoryRow({
         {entries
           .filter((e) => e.agent.categories?.includes(c.category_id))
           .map((e) => (
-            <Button key={agentKey(e.agent)} variant="link" onClick={() => onSelect(e)}>
+            <Button key={entryKey(e)} variant="link" onClick={() => onSelect(e)}>
               {e.agent.display_name} · {e.group.id}
+              {e.history && ` · v${e.agent.revision}/r${e.history.pin.inventory_revision}`}
             </Button>
           ))}
       </div>
@@ -367,19 +402,18 @@ function CategoryRow({
   );
 }
 function registration(entry: Entry): string {
-  const { agent, group } = entry;
+  const { group } = entry;
   if (!group.catalog) return "已声明";
-  if (!group.projection.agents?.some((current) => agentKey(current) === agentKey(agent)))
-    return "历史登记 · 仅续接旧责任";
+  if (entry.history) return "历史登记 · 仅续接旧责任";
   return group.catalog.current ? `已登记 · v${group.catalog.current.local_revision}` : "未登记";
 }
 
 function AgentDetails({ entry }: { entry: Entry }) {
   const { agent, group, runtime } = entry;
   const catalog = group.catalog;
-  const worker = currentObservation(catalog, agent, "");
-  const manager = currentObservation(catalog, agent, "issue_manager");
-  const owner = [...(group.projection.runtimes ?? []), ...(catalog?.retained_runtimes ?? [])].find(
+  const worker = entry.history ? undefined : currentObservation(catalog, agent, "");
+  const manager = entry.history ? undefined : currentObservation(catalog, agent, "issue_manager");
+  const owner = (entry.history?.runtimes ?? group.projection.runtimes ?? []).find(
     (r) =>
       r.runtime_id === (agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).runtime_id &&
       r.revision === (agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).revision,
@@ -388,7 +422,10 @@ function AgentDetails({ entry }: { entry: Entry }) {
     catalog?.retained_executions?.filter(
       (p) =>
         p.identity.local_id === agent.identity.local_id &&
-        p.identity.execution_environment_id === agent.identity.execution_environment_id,
+        p.identity.execution_environment_id === agent.identity.execution_environment_id &&
+        (!entry.history ||
+          (p.snapshot_id === entry.history.pin.snapshot_id &&
+            p.public_sha256 === entry.history.pin.public_sha256)),
     ) ?? [];
   const observed = (value: typeof worker) =>
     value ? (value.available ? "可用" : value.reason || "不可用") : "未观测";
@@ -416,6 +453,14 @@ function AgentDetails({ entry }: { entry: Entry }) {
         </dd>
         <dt>定义版本</dt>
         <dd>v{agent.revision}</dd>
+        {entry.history && (
+          <>
+            <dt>原登记</dt>
+            <dd>r{entry.history.pin.inventory_revision}</dd>
+            <dt>快照</dt>
+            <dd>{entry.history.pin.snapshot_id}</dd>
+          </>
+        )}
         <dt>执行环境</dt>
         <dd>
           {runtimeLabel(runtime)} · {agent.runtime_binding_ref.runtime_id} · v
@@ -439,9 +484,9 @@ function AgentDetails({ entry }: { entry: Entry }) {
         <dt>登记</dt>
         <dd>{registration(entry)}</dd>
         <dt>执行</dt>
-        <dd>{observed(worker)}</dd>
+        <dd>{entry.history ? "见下方原版本观测" : observed(worker)}</dd>
         <dt>协调</dt>
-        <dd>{observed(manager)}</dd>
+        <dd>{entry.history ? "见下方原版本观测" : observed(manager)}</dd>
         <dt>主机</dt>
         <dd>{catalog ? (catalog.online ? "在线" : "离线 · 上次观察") : "托管环境"}</dd>
         <dt>更新时间</dt>
@@ -464,8 +509,8 @@ function AgentDetails({ entry }: { entry: Entry }) {
             );
             return (
               <p key={JSON.stringify(p)}>
-                v{p.agent_revision} · {p.purpose === "issue_manager" ? "协调" : "执行"} ·{" "}
-                {observed(observation)}
+                v{p.agent_revision} · {p.purpose === "issue_manager" ? "协调" : "执行"} · r
+                {p.inventory_revision} · {p.backend_id || "原生"} · {observed(observation)}
               </p>
             );
           })}
@@ -477,8 +522,10 @@ function AgentDetails({ entry }: { entry: Entry }) {
 
 function CompactDetails({ entry }: { entry: Entry }) {
   const { agent, group, runtime } = entry;
-  const worker = currentObservation(group.catalog, agent, "");
-  const manager = currentObservation(group.catalog, agent, "issue_manager");
+  const worker = entry.history ? undefined : currentObservation(group.catalog, agent, "");
+  const manager = entry.history
+    ? undefined
+    : currentObservation(group.catalog, agent, "issue_manager");
   const available = (value: typeof worker) =>
     value ? (value.available ? "可用" : "不可用") : "未观测";
   return (
@@ -494,7 +541,9 @@ function CompactDetails({ entry }: { entry: Entry }) {
         <dd>{registration(entry)}</dd>
         <dt>最近上报</dt>
         <dd>
-          执行 {available(worker)} · 协调 {available(manager)}
+          {entry.history
+            ? "见完整定义中的原版本观测"
+            : `执行 ${available(worker)} · 协调 ${available(manager)}`}
         </dd>
       </dl>
       <details>

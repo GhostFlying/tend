@@ -105,25 +105,38 @@ function catalog(host: string): RunnerAgentCatalog {
         reason: id === "maple" ? "definition_disabled" : "runtime_not_verified",
       },
     }));
-  const historical: AgentInventoryDefinition = {
-    ...agents[0]!,
-    identity: { execution_environment_id: host, local_id: "elm" },
-    display_name: "Elm",
-    revision: 2,
-  };
-  const retained =
+  const histories =
     host === "host-a"
-      ? [2, 3].map((revision) => ({
-          identity: historical.identity,
-          agent_revision: historical.revision,
-          runtime: historical.runtime_binding_ref,
-          inventory_revision: revision,
-          snapshot_id: "historical",
-          public_sha256: hash,
-          profile: { model: historical.requested_model, effort: historical.requested_effort },
-          worker: "orca" as const,
-          backend_id: "orca",
-        }))
+      ? [2, 3].map((version) => {
+          const historical: AgentInventoryDefinition = {
+            ...agents[0]!,
+            identity: { execution_environment_id: host, local_id: "elm" },
+            display_name: `Elm v${version}`,
+            revision: version,
+            categories: [version === 2 ? "implementation" : "investigation"],
+            requested_model: version === 2 ? "GPT-6.1-Sol" : "DeepSeek V4.1 Flash",
+            runtime_binding_ref: { runtime_id: "codex", revision: version - 1 },
+          };
+          return {
+            definition: historical,
+            pin: {
+              identity: historical.identity,
+              agent_revision: version,
+              runtime: historical.runtime_binding_ref,
+              inventory_revision: version,
+              snapshot_id: `historical-v${version}`,
+              public_sha256: `sha256:${String(version).repeat(64)}`,
+              profile: { model: historical.requested_model, effort: historical.requested_effort },
+              worker: "orca" as const,
+              backend_id: "orca",
+            },
+            runtimes: runtimes.map((runtime) =>
+              runtime.runtime_id === "codex"
+                ? { ...runtime, revision: version - 1, cli: version === 2 ? "codex" : "traex" }
+                : runtime,
+            ),
+          };
+        })
       : [];
   return {
     host_id: host,
@@ -164,9 +177,12 @@ function catalog(host: string): RunnerAgentCatalog {
         },
       })),
     ),
-    retained_definitions: host === "host-a" ? [historical] : [],
-    retained_executions: retained,
-    continuations: retained.map((pin, index) => ({ pin, available: index === 0 })),
+    retained_definitions: histories,
+    retained_executions: histories.map((history) => history.pin),
+    continuations: histories.map((history, index) => ({
+      pin: history.pin,
+      available: index === 0,
+    })),
   };
 }
 const streams = new Set<ServerResponse>();
@@ -319,13 +335,40 @@ try {
         .getByText("app-server/codex · native · v1", { exact: true })
         .filter({ visible: true })
         .waitFor();
-      await directory.getByRole("button", { name: /Elm elm/ }).click();
+      await directory.getByRole("combobox", { name: "类别筛选", exact: true }).selectOption("");
+      await directory.getByRole("button", { name: /Elm v2 elm/ }).click();
       if (viewport.width <= 1200)
         await directory.getByText("完整定义与观测", { exact: true }).click();
       await directory
         .getByText("历史登记 · 仅续接旧责任", { exact: true })
         .filter({ visible: true })
         .first()
+        .waitFor();
+      await directory
+        .getByText("historical-v2", { exact: true })
+        .filter({ visible: true })
+        .waitFor();
+      await directory
+        .getByText("orca/codex · codex · v1", { exact: true })
+        .filter({ visible: true })
+        .waitFor();
+      await directory.getByRole("button", { name: /Elm v3 elm/ }).click();
+      if (viewport.width <= 1200)
+        await directory.getByText("完整定义与观测", { exact: true }).click();
+      await directory
+        .getByText("historical-v3", { exact: true })
+        .filter({ visible: true })
+        .waitFor();
+      await directory
+        .getByText("orca/traex · codex · v2", { exact: true })
+        .filter({ visible: true })
+        .waitFor();
+      await page.reload();
+      if (viewport.width <= 1200)
+        await directory.getByText("完整定义与观测", { exact: true }).click();
+      await directory
+        .getByText("historical-v3", { exact: true })
+        .filter({ visible: true })
         .waitFor();
       assert.deepEqual(errors, []);
       assert.deepEqual(writes, []);

@@ -32,3 +32,11 @@ Agent 定义继续显式 validate/reload/登记，不要求维护。新分配使
 ## CI 重启派发验收
 
 保留数据重启的沙盒验收出现派发等待超时。脚本当前只检查最近 50 条聊天，工具记录和后台消息可将原 owner 来源挤出窗口。先用跨页来源定位用例复现，再让脚本沿真实分页游标读取并只匹配原 message ID/owner 作者；不重放业务写入，不通过延长超时掩盖。同步验证普通对话、子 Issue 来源边界及重启回归。
+
+## 与 D142 的同步
+
+目录复用 `tend agents show --host ... --json`、`tend agents hosted --json`、`tend category list --state all` 及既有本机 Agent 管理命令。CLI 完整 JSON 包含续接定义、runtime 绑定、原 pin 和核验观测；为这些新增输出增加真实 CLI 分发回归，并通过能力覆盖门禁。搜索与环境分组是同一目录投影的客户端展示，不增加 HTTP/RPC 旁路。
+
+## 历史定义完整性
+
+历史目录按身份及不可变 snapshot/public hash 保留每份仍被引用的定义，携带代表性原 pin 与该快照的安全 runtime 投影；同一快照的多用途/重复登记不复制定义，完整执行 pin 仍单独返回。同一 Agent 的不同历史快照在 UI/CLI 中均可检查，详情不从当前 runtime 猜测旧绑定。当前名称优先，已移除身份回退到最新被引用登记的名称。此为本 PR 尚未发布的新 owner 只读字段调整，不改 runner wire 或持久化格式。

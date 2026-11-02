@@ -3320,9 +3320,8 @@ export interface RunnerAgentCatalog {
   last_heartbeat_at_ms: number;
   online: boolean;
   projection?: AgentInventoryProjection;
-  retained_definitions?: AgentInventoryDefinition[];
+  retained_definitions?: RetainedAgentDefinition[];
   retained_executions?: RunExecutionPin[];
-  retained_runtimes?: AgentInventoryRuntime[];
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3337,6 +3336,15 @@ export interface AgentInventoryReceipt {
   server_revision: number;
   snapshot_id: string;
   state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RetainedAgentDefinition".
+ */
+export interface RetainedAgentDefinition {
+  definition: AgentInventoryDefinition;
+  pin: RunExecutionPin;
+  runtimes: AgentInventoryRuntime[] | null;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

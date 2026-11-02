@@ -74,7 +74,11 @@ func readRunnerAgentCatalog(ctx context.Context, q store.Querier, host string, n
 	if err != nil {
 		return result, err
 	}
-	seen := map[protocol.AgentIdentity]bool{}
+	type snapshotKey struct {
+		Identity             protocol.AgentIdentity
+		Snapshot, PublicHash string
+	}
+	seen := map[snapshotKey]int{}
 	for _, pin := range result.RetainedExecutions {
 		inv, e := store.GetAgentInventoryAt(ctx, q, pin)
 		if errors.Is(e, store.ErrNotFound) {
@@ -83,18 +87,19 @@ func readRunnerAgentCatalog(ctx context.Context, q store.Querier, host string, n
 		if e != nil {
 			return result, e
 		}
-		for _, r := range inv.Projection.Runtimes {
-			if !slices.ContainsFunc(result.RetainedRuntimes, func(previous protocol.AgentInventoryRuntime) bool {
-				return previous.RuntimeID == r.RuntimeID && previous.Revision == r.Revision
-			}) {
-				result.RetainedRuntimes = append(result.RetainedRuntimes, r)
-			}
-		}
 		for _, a := range inv.Projection.Agents {
-			if a.Identity == pin.Identity && a.Revision == pin.AgentRevision && !seen[a.Identity] {
-				result.RetainedDefinitions = append(result.RetainedDefinitions, a)
-				seen[a.Identity] = true
+			if a.Identity != pin.Identity || a.Revision != pin.AgentRevision {
+				continue
 			}
+			key := snapshotKey{a.Identity, pin.SnapshotID, pin.PublicSHA256}
+			if index, ok := seen[key]; ok {
+				if pin.InventoryRevision > result.RetainedDefinitions[index].Pin.InventoryRevision {
+					result.RetainedDefinitions[index].Pin = pin
+				}
+				continue
+			}
+			seen[key] = len(result.RetainedDefinitions)
+			result.RetainedDefinitions = append(result.RetainedDefinitions, protocol.RetainedAgentDefinition{Pin: pin, Definition: a, Runtimes: slices.Clone(inv.Projection.Runtimes)})
 		}
 	}
 	return result, nil
