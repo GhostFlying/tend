@@ -13,26 +13,51 @@ export const longChildTitles = [
   "Review 混合标题：核对 child Issue、owner 确认与交付证据，".repeat(6),
 ];
 
-async function rowGeometry(rows: Locator) {
-  return rows.evaluateAll((buttons) => {
+// Read every compared box in one browser task. Expanding the focused show-all
+// control can trigger scroll anchoring between separate Playwright round trips.
+async function childGeometry(root: Locator, board = false) {
+  return root.evaluate((root, board) => {
     const box = (element: Element) => {
       const r = element.getBoundingClientRect();
-      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, height: r.height };
+      return {
+        x: r.x,
+        y: r.y,
+        width: r.width,
+        left: r.left,
+        top: r.top,
+        right: r.right,
+        bottom: r.bottom,
+        height: r.height,
+      };
     };
-    return buttons.map((button) => ({
-      title:
-        button.children[
-          button.children.length === 3 && button.firstElementChild?.hasAttribute("aria-hidden")
-            ? 1
-            : 0
-        ]!.textContent,
-      button: box(button),
-      parts: Array.from(button.children, box),
-      height: getComputedStyle(button).height,
-      scrollWidth: button.scrollWidth,
-      clientWidth: button.clientWidth,
-    }));
-  });
+    const buttons = Array.from(root.querySelectorAll("button"));
+    const rows = buttons.filter((button) => button.querySelector(board ? "small" : "span"));
+    const more = buttons.find((button) => /查看全部|收起子 Issue/.test(button.textContent ?? ""));
+    const next = board
+      ? root.ownerDocument.querySelector('[data-issue-id="issue-next-card"]')
+      : null;
+    return {
+      cardBox: box(root),
+      nextBox: next ? box(next) : null,
+      moreBox: more ? box(more) : null,
+      scrolls: Array.from(root.ownerDocument.querySelectorAll("*"))
+        .filter((element) => element.scrollTop || element.scrollLeft)
+        .map((element) => ({ top: element.scrollTop, left: element.scrollLeft })),
+      rows: rows.map((button) => ({
+        title:
+          button.children[
+            button.children.length === 3 && button.firstElementChild?.hasAttribute("aria-hidden")
+              ? 1
+              : 0
+          ]!.textContent,
+        button: box(button),
+        parts: Array.from(button.children, box),
+        height: getComputedStyle(button).height,
+        scrollWidth: button.scrollWidth,
+        clientWidth: button.clientWidth,
+      })),
+    };
+  }, board);
 }
 
 export async function captureChildTitleLayout(browser: Browser, origin: string, output: string) {
@@ -64,50 +89,65 @@ export async function captureChildTitleLayout(browser: Browser, origin: string, 
           await region.getByRole("button", { name: "查看全部 4 个子 Issue ↓" }).click();
           await rows.nth(3).waitFor();
         }
-        const geometry = await rowGeometry(rows);
-        const cardBox = (await card.boundingBox())!;
-        const nextBox = (await page.locator('[data-issue-id="issue-next-card"]').boundingBox())!;
-        const moreBox = (await region
-          .getByRole("button", { name: expanded ? "收起子 Issue ↑" : "查看全部 4 个子 Issue ↓" })
-          .boundingBox())!;
-        observations.push({ expanded, cardBox, nextBox, moreBox, rows: geometry });
-        for (const [index, row] of geometry.entries()) {
-          const label = `${width}/${expanded ? "expanded" : "collapsed"}/${index}`;
-          for (const part of row.parts)
+        for (const scrolled of expanded ? [false, true] : [false]) {
+          if (scrolled)
+            await page.locator('[data-issue-id="issue-next-card"]').scrollIntoViewIfNeeded();
+          const snapshot = await childGeometry(card, true);
+          const { rows: geometry, cardBox } = snapshot;
+          assert(snapshot.nextBox && snapshot.moreBox, "next card and show-all must exist");
+          const { nextBox, moreBox } = snapshot;
+          observations.push({ expanded, scrolled, ...snapshot });
+          assert.deepEqual(
+            geometry.map((row) => row.title),
+            expanded ? longChildTitles : longChildTitles.slice(0, 2),
+          );
+          for (const [index, row] of geometry.entries()) {
+            const label = `${width}/${expanded ? "expanded" : "collapsed"}/${scrolled ? "scrolled/" : ""}${index}`;
+            for (const part of row.parts)
+              check(
+                part.left >= row.button.left - 1 &&
+                  part.right <= row.button.right + 1 &&
+                  part.top >= row.button.top - 1 &&
+                  part.bottom <= row.button.bottom + 1,
+                `${label}: title/status outside child button`,
+              );
+            check(row.button.bottom <= cardBox.y + cardBox.height, `${label}: child outside card`);
             check(
-              part.left >= row.button.left - 1 &&
-                part.right <= row.button.right + 1 &&
-                part.top >= row.button.top - 1 &&
-                part.bottom <= row.button.bottom + 1,
-              `${label}: title/status outside child button`,
+              row.button.left >= cardBox.left &&
+                row.button.right <= cardBox.right &&
+                row.button.top >= cardBox.top,
+              `${label}: child outside card edges`,
             );
-          check(row.button.bottom <= cardBox.y + cardBox.height, `${label}: child outside card`);
-          check(row.scrollWidth <= row.clientWidth + 1, `${label}: child horizontal overflow`);
-          if (index > 0)
-            check(geometry[index - 1]!.button.bottom <= row.button.top, `${label}: rows overlap`);
-        }
-        check(geometry.at(-1)!.button.bottom <= moreBox.y, `${width}: child overlaps show-all`);
-        check(
-          moreBox.y + moreBox.height <= cardBox.y + cardBox.height,
-          `${width}: show-all outside card`,
-        );
-        check(cardBox.y + cardBox.height <= nextBox.y, `${width}: cards overlap`);
-        check(
-          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-          `${width}: page horizontal overflow`,
-        );
-        await page.screenshot({
-          path: join(output, `child-title-${width}-${expanded ? "expanded" : "collapsed"}.png`),
-          fullPage: true,
-        });
-        if (expanded) {
-          await page.locator('[data-issue-id="issue-next-card"]').scrollIntoViewIfNeeded();
+            check(row.scrollWidth <= row.clientWidth + 1, `${label}: child horizontal overflow`);
+            if (index > 0)
+              check(geometry[index - 1]!.button.bottom <= row.button.top, `${label}: rows overlap`);
+          }
+          check(geometry.at(-1)!.button.bottom <= moreBox.y, `${width}: child overlaps show-all`);
+          check(
+            moreBox.y + moreBox.height <= cardBox.y + cardBox.height,
+            `${width}: show-all outside card`,
+          );
+          check(
+            moreBox.left >= cardBox.left &&
+              moreBox.right <= cardBox.right &&
+              moreBox.top >= cardBox.top,
+            `${width}: show-all outside card edges`,
+          );
+          check(cardBox.y + cardBox.height <= nextBox.y, `${width}: cards overlap`);
+          check(
+            await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+            `${width}: page horizontal overflow`,
+          );
           await page.screenshot({
-            path: join(output, `child-title-${width}-expanded-bottom.png`),
+            path: join(
+              output,
+              `child-title-${width}-${expanded ? "expanded" : "collapsed"}${scrolled ? "-bottom" : ""}.png`,
+            ),
             fullPage: true,
           });
         }
       }
+
       assert.deepEqual(await rows.locator("span:nth-child(2)").allTextContents(), longChildTitles);
       // Refresh must keep the same direct-child collection and count.
       await page.reload();
@@ -132,7 +172,7 @@ export async function captureChildTitleLayout(browser: Browser, origin: string, 
         await detailRows.locator(":scope > span:first-child").allTextContents(),
         longChildTitles,
       );
-      const detailGeometry = await rowGeometry(detailRows);
+      const { rows: detailGeometry } = await childGeometry(children);
       for (const row of detailGeometry)
         for (const part of row.parts)
           check(
