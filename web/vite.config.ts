@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [react(), shellManifest("sw.js")],
   build: {
     // Embedded into tend-server by internal/webui.
-    outDir: path("../internal/webui/dist/app"),
+    outDir: process.env.TEND_WEB_BUILD_OUT_DIR || path("../internal/webui/dist/app"),
     emptyOutDir: true,
     rollupOptions: {
       input: { index: path("index.html"), sw: path("src/sw/sw.ts") },

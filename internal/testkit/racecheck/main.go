@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -102,8 +104,16 @@ func patterns(names []string, count int) []string {
 	return result
 }
 
-func check(ctx context.Context, shards int, timeout, group string, packages []string) error {
-	listed, err := output(ctx, "go", append([]string{"list"}, packages...)...)
+func testArgs(timeout string, count int) []string {
+	args := []string{"test", "-race", "-timeout", timeout}
+	if count > 0 {
+		args = append(args, "-count", strconv.Itoa(count))
+	}
+	return args
+}
+
+func check(ctx context.Context, goTool string, shards, count int, timeout, group string, packages []string) error {
+	listed, err := output(ctx, goTool, append([]string{"list"}, packages...)...)
 	if err != nil {
 		return fmt.Errorf("list packages: %w", err)
 	}
@@ -114,7 +124,7 @@ func check(ctx context.Context, shards int, timeout, group string, packages []st
 	others, isolated, app := packagePhases(selected)
 	var commands [][]string
 	if app {
-		list, err := output(ctx, "go", "test", "-race", "-list", ".", appPackage)
+		list, err := output(ctx, goTool, "test", "-race", "-list", ".", appPackage)
 		if err != nil {
 			return fmt.Errorf("list app test roots: %w", err)
 		}
@@ -125,19 +135,19 @@ func check(ctx context.Context, shards int, timeout, group string, packages []st
 		groups := patterns(names, shards)
 		fmt.Printf("app race: %d root targets across %d isolated shards\n", len(names), len(groups))
 		for _, pattern := range groups {
-			commands = append(commands, []string{"go", "test", "-race", "-timeout", timeout, "-run", pattern, appPackage})
+			commands = append(commands, append(append([]string{goTool}, testArgs(timeout, count)...), "-run", pattern, appPackage))
 		}
 	}
 	// Keep timing-sensitive transport suites out of the CPU-bound app phase.
 	var failures []error
 	if len(others) > 0 {
-		failures = append(failures, run(ctx, "go", append([]string{"test", "-race", "-timeout", timeout}, others...)...))
+		failures = append(failures, run(ctx, goTool, append(testArgs(timeout, count), others...)...))
 	}
 	// These suites exercise real transport and lease timing. Keep their CPU
 	// and filesystem budgets independent of the bulk store/API test processes.
 	for _, pkg := range isolated {
 		fmt.Printf("isolated race package %s started\n", pkg)
-		failures = append(failures, run(ctx, "go", "test", "-race", "-timeout", timeout, pkg))
+		failures = append(failures, run(ctx, goTool, append(testArgs(timeout, count), pkg)...))
 	}
 	var wg sync.WaitGroup
 	results := make(chan error, len(commands))
@@ -158,12 +168,17 @@ func check(ctx context.Context, shards int, timeout, group string, packages []st
 }
 
 func main() {
-	shards := flag.Int("shards", 1, "number of isolated app race processes (1-16)")
+	goTool := flag.String("go", "go", "Go executable used for package discovery and tests")
+	shards := flag.Int("shards", 1, "number of isolated app race processes (0 selects by CPU, 1-16 explicit)")
+	count := flag.Int("count", 0, "repeat tests explicitly; 0 keeps Go native caching")
 	timeout := flag.String("timeout", "60m", "timeout per test process")
 	group := flag.String("group", "all", "package group: all, app, api, mainthread, e2e, other")
 	flag.Parse()
-	if *shards < 1 || *shards > 16 {
-		fmt.Fprintln(os.Stderr, "shards must be 1-16")
+	if *shards == 0 {
+		*shards = max(1, min(4, runtime.GOMAXPROCS(0)/8))
+	}
+	if *shards < 1 || *shards > 16 || *count < 0 {
+		fmt.Fprintln(os.Stderr, "shards must be 0-16 and count must be nonnegative")
 		os.Exit(2)
 	}
 	packages := flag.Args()
@@ -172,7 +187,7 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if err := check(ctx, *shards, *timeout, *group, packages); err != nil {
+	if err := check(ctx, *goTool, *shards, *count, *timeout, *group, packages); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

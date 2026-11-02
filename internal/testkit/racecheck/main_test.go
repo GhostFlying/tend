@@ -82,3 +82,12 @@ func TestShardPatternsCoverEveryRootExactlyOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestCountPreservesRaceTimeoutAndNativeCachingByDefault(t *testing.T) {
+	if got := testArgs("2m", 0); !slices.Equal(got, []string{"test", "-race", "-timeout", "2m"}) {
+		t.Fatal(got)
+	}
+	if got := testArgs("2m", 1); !slices.Equal(got, []string{"test", "-race", "-timeout", "2m", "-count", "1"}) {
+		t.Fatal(got)
+	}
+}
