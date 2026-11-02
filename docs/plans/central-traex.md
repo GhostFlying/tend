@@ -55,3 +55,14 @@ runner 已确认执行进程停止后，将停止事实与原 thread、工作区
 真实集成测试默认使用模型替身和实际 TraeX/exec-server；设置 `TEND_NATIVE_ORCA_BIN`、`TEND_NATIVE_RUNNER_BIN` 可进一步使用独立 Orca runtime 和新编译的 runner。测试 runtime 必须独立于日常 workspace。测试不导出或复制现有模型凭据，模型响应由替身提供。
 
 原生空 thread、明确拒绝及请求计量在冷恢复后的限制见 [验证记录](../findings/central-traex.md)。
+
+## 合入前默认关闭回归
+
+- 保持服务端 `native_workers` 缺省为空、现有本地 runtime 不迁移，发布与生产启用另行安排。
+- 用真实服务端组装验证省略配置时不创建中央工作目录、中央执行通道不可用，既有 owner API 正常响应；示例配置也保持关闭。
+- 用 runner HTTP 合同验证关闭状态的鉴权及通道拒绝，并沿原 RPC 完成任务领取、运行和结果提交。
+- 用本地 CLI 协议替身验证 app-server 与 Orca 的真实探测及工厂仍可使用，不调用中央状态探测、不要求中央连接；既有配置版本与原快照恢复继续由完整回归覆盖。
+- 同步最新 main 后运行完整 `make check`、独立 review 及 PR CI；仅线性合入代码，不修改部署或启用配置。
+- 历史协调回调测试若在异步结果返回前断言，使用明确完成信号消除时序误报，不修改协调器行为。
+- 事件输出遇到回压时的取消统一走正常中断与原因传递，覆盖本地及保留会话的暂停/接管；中央模式恢复前核实原终端状态。
+- 原生前端正常退出时保存绑定原 capability 的退出证明；恢复区分可重连 helper 与已退回 shell 的 PTY，后者只创建同一 thread 的新视图。已确认的终端、pane、provider 和中心 thread 经既有持久 native identity 事件上报，恢复及重建均更新导航事实。

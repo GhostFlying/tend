@@ -49,6 +49,7 @@ type workerState struct {
 	Cwd             string `json:"cwd"`
 	Thread          string `json:"thread_id"`
 	Terminal        string `json:"terminal,omitempty"`
+	Pane            string `json:"pane,omitempty"`
 	LaunchPending   bool   `json:"launch_pending,omitempty"`
 	ExecutorStopped bool   `json:"executor_stopped,omitempty"`
 	BriefRecorded   bool   `json:"brief_recorded,omitempty"`
@@ -272,8 +273,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 			}
 			timer := time.NewTimer(ws.opts.FrontendWait)
 			defer timer.Stop()
+			ex.mu.Lock()
+			frontendReady := ex.frontendReady
+			ex.mu.Unlock()
 			select {
-			case <-ex.frontendReady:
+			case <-frontendReady:
 				return input, nil
 			case <-ctx.Done():
 				return "", ctx.Err()

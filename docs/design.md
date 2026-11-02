@@ -521,3 +521,5 @@ Runner 在实际工作目录适配器中构造有类型的准备失败，记录 
 本地与集中 Agent 长期共存，按冻结的具体 Agent/runtime 配置显式选择。集中模式由中心运行 app-server，复用中心用户的模型认证、全局配置与 session；真实代码、Git/工具认证、exec-server 和 Orca TUI 留在 runner。原生 TUI 是同一 thread 的远程客户端，不启动第二个 loop。Cove 后续复用该会话和控制权边界。
 
 执行连接沿现有 run 与节点鉴权由 runner 主动建立，不开放无鉴权的执行端口。冷恢复固定中心、run、工作区和 Environment，缺失绑定时明确阻断，不回退中心本机执行。执行资源仍由 runner 对租约、fencing、取消和未知结果负责。中心会话持有与 worker attempt 分离，人工 held 不销毁会话、不自动完成；TUI 断线或退出不交还控制权。首次人工写入须先完成既有 takeover，显式 resume 才恢复自动驱动。业务动态工具由 Tend 控制连接唯一回答，TUI 入口限定原 thread。参见 [实施计划](plans/central-traex.md)。
+
+原生前端正常退出保存绑定原 capability 的本机证明，区别于仍可重连的 helper；连接中的 Orca PTY 不单独证明原生前端存活。恢复只重建同一 thread 的视图，保留 owner 已退回的 shell。确认的 provider、终端、pane 和 thread 通过既有 native identity 事件记入账本，供原生会话入口读取；导航事实不授予控制权限。默认及示例服务端配置不启用中央 worker，本地 runtime 不自动迁移。

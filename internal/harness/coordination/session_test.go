@@ -23,7 +23,8 @@ func (t permissionThread) PermissionDefaults() harness.PermissionSettings {
 
 type retainedMemoryTransport struct {
 	*memoryTransport
-	replayed atomic.Int64
+	replayed   atomic.Int64
+	replayDone chan struct{}
 }
 
 func (t *retainedMemoryTransport) ReplayToolResult(_ context.Context, e Event) (harness.ToolResult, error) {
@@ -31,6 +32,7 @@ func (t *retainedMemoryTransport) ReplayToolResult(_ context.Context, e Event) (
 		return harness.ToolResult{}, errors.New("wrong original run")
 	}
 	t.replayed.Add(1)
+	close(t.replayDone)
 	return harness.ToolResult{Success: true, Text: "ORIGINAL_RESULT"}, nil
 }
 
@@ -42,7 +44,7 @@ func TestHistoricalCallbacksUseRetainedResultsAndDoNotDisconnectNewAttachment(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	transport := &retainedMemoryTransport{memoryTransport: &memoryTransport{events: make(chan Event, 16)}}
+	transport := &retainedMemoryTransport{memoryTransport: &memoryTransport{events: make(chan Event, 16)}, replayDone: make(chan struct{})}
 	transport.driver = &Driver{Session: permissionSession{native.(*testkit.FakeSession)}, Profile: protocol.ExecutionProfile{Model: "model"}, Emit: transport.emit}
 	if err := transport.emit(ctx, Event{Historical: true, SourceRunID: "original-run", ThreadID: "th_1", Call: &harness.ToolCall{ThreadID: "th_1", TurnID: "original-turn", CallID: "old-call", Tool: "must_not_execute"}}); err != nil {
 		t.Fatal(err)
@@ -75,6 +77,11 @@ func TestHistoricalCallbacksUseRetainedResultsAndDoNotDisconnectNewAttachment(t 
 		select {
 		case event := <-thread.Events():
 			if event.Kind == harness.EventTurnCompleted && event.TurnID == turn {
+				select {
+				case <-transport.replayDone:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
 				if transport.replayed.Load() != 1 {
 					t.Fatal("original result was not read", transport.replayed.Load())
 				}

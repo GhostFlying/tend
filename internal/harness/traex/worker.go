@@ -200,22 +200,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		defer close(w.events)
 		defer func() { release(w.err) }()
 		var summary string
+	events:
 		for {
 			select {
 			case <-ctx.Done():
-				// Stop the turn, then the process with everything it
-				// started (procx), before reporting.
-				stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-				var interruptErr error
-				if ws.opts.Acquire == nil || !errors.Is(context.Cause(ctx), harness.ErrHeld) {
-					interruptErr = th.Interrupt(stopCtx, turnID)
-				}
-				cancel()
-				w.err = context.Cause(ctx)
-				if ws.opts.Acquire != nil && errors.Is(w.err, harness.ErrPaused) && interruptErr != nil {
-					w.err = errors.Join(w.err, ErrInterruptUnconfirmed, interruptErr)
-				}
-				return
+				break events
 			case ev, ok := <-th.Events():
 				if !ok {
 					w.err = errors.New("traex: the worker's app-server exited")
@@ -230,7 +219,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					select {
 					case w.events <- harness.WorkerEvent{NativeID: ev.RequestUsage.RequestID, Kind: "usage.request", Body: body}:
 					case <-ctx.Done():
-						return
+						break events
 					}
 					continue
 				}
@@ -238,7 +227,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					select {
 					case w.events <- childRolloutEvent(ev):
 					case <-ctx.Done():
-						return
+						break events
 					}
 					continue
 				}
@@ -251,7 +240,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					select {
 					case w.events <- nativeRolloutEvent(th.ID(), ev):
 					case <-ctx.Done():
-						return
+						break events
 					}
 				case harness.EventItemCompleted:
 					if ev.ItemType == harness.ItemAgentMessage && ev.Text != "" {
@@ -261,12 +250,13 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					select {
 					case w.events <- completed:
 					case <-ctx.Done():
+						break events
 					}
 				case harness.EventTurnCompleted:
 					select {
 					case w.events <- nativeRolloutEvent(th.ID(), ev):
 					case <-ctx.Done():
-						return
+						break events
 					}
 					w.res = harness.WorkerResult{Verdict: verdicts.Verdict(), Result: results.Result(), Summary: summary}
 					if ev.TurnStatus != "completed" {
@@ -275,6 +265,18 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					return
 				}
 			}
+		}
+		// Stop the turn, then the process with everything it
+		// started (procx), before reporting.
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		var interruptErr error
+		if ws.opts.Acquire == nil || !errors.Is(context.Cause(ctx), harness.ErrHeld) {
+			interruptErr = th.Interrupt(stopCtx, turnID)
+		}
+		cancel()
+		w.err = context.Cause(ctx)
+		if ws.opts.Acquire != nil && errors.Is(w.err, harness.ErrPaused) && interruptErr != nil {
+			w.err = errors.Join(w.err, ErrInterruptUnconfirmed, interruptErr)
 		}
 	}()
 	return w, nil

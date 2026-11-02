@@ -51,6 +51,10 @@ func TestNativeRemoteConfirmedPause(t *testing.T) {
 	nativeRemoteLifecycle(t, nativeScenario{role: protocol.RoleImplement, pauseTurn: true})
 }
 
+func TestNativeRemoteBackpressuredPause(t *testing.T) {
+	nativeRemoteLifecycle(t, nativeScenario{role: protocol.RoleImplement, pauseTurn: true, eventBackpressure: true})
+}
+
 func TestNativeRemoteUnconfirmedPause(t *testing.T) {
 	nativeRemoteLifecycle(t, nativeScenario{role: protocol.RoleImplement, pauseTurn: true, rejectInterrupt: true})
 }
@@ -74,6 +78,7 @@ type nativeScenario struct {
 	closeView           bool
 	pauseBeforeBrief    bool
 	pauseTurn           bool
+	eventBackpressure   bool
 	rejectInterrupt     bool
 	pauseAtBrief        bool
 	pauseDuringHandback bool
@@ -306,8 +311,15 @@ func nativeRemoteLifecycle(t *testing.T, scenario nativeScenario) {
 		t.Fatal("a second native control writer was accepted")
 	}
 	eventsDone := make(chan struct{})
+	eventsReady := make(chan struct{})
+	releaseEvents := sync.OnceFunc(func() { close(eventsReady) })
+	defer releaseEvents()
+	if !scenario.eventBackpressure {
+		releaseEvents()
+	}
 	go func() {
 		defer close(eventsDone)
+		<-eventsReady
 		for range worker.Events() {
 		}
 	}()
@@ -321,6 +333,7 @@ func nativeRemoteLifecycle(t *testing.T, scenario nativeScenario) {
 		if _, err := worker.Wait(); !errors.Is(err, harness.ErrPaused) {
 			t.Fatal("pause result", err)
 		}
+		releaseEvents()
 		<-eventsDone
 		pinMu.Lock()
 		spec.Thread = pin
