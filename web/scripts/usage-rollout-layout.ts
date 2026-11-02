@@ -633,11 +633,11 @@ try {
     await rollout.getByText("跟随最新", { exact: true }).waitFor();
     assert(page.url().includes(`/tasks/${taskID}/runs/${runID}`));
     assert.equal(await page.getByRole("dialog", { name: "完整执行过程" }).count(), 0);
+    await rows.filter({ hasText: "隔离记录 150" }).waitFor();
     assert.match(
       await rollout.getByRole("button", { name: "记录来源", exact: true }).innerText(),
       /runner 原生记录/,
     );
-    await rows.filter({ hasText: "隔离记录 150" }).waitFor();
     assert.equal(await rows.count(), 99);
     const command = rows.filter({ hasText: "go test ./internal/domain" });
     assert.equal(await command.count(), 1, "start and result became duplicate steps");

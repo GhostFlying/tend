@@ -689,6 +689,16 @@ try {
       assert.equal(await trigger.getAttribute("aria-expanded"), "false");
       assert.equal(await detail.locator("[data-tool-item]:visible").count(), 0);
       assert.equal(await detail.getByRole("button", { name: "当前 Issue 自引用" }).count(), 0);
+      const tags = detail.locator('[data-issue-context="true"]').first();
+      const tagBounds = await tags.boundingBox();
+      const associationBounds = await tags
+        .getByRole("button", { name: "修改 Issue 关联", exact: true })
+        .boundingBox();
+      assert(tagBounds && associationBounds);
+      assert(
+        associationBounds.y + associationBounds.height <= tagBounds.y + tagBounds.height + 1,
+        "association control stays in flow after filtering the current Issue",
+      );
       assert.equal(await detail.getByRole("region", { name: "交付物", exact: true }).count(), 0);
       await trigger.click();
       assert.equal(await detail.locator("[data-tool-item]:visible").count(), 12);
@@ -757,6 +767,75 @@ try {
       await events.getByText("前插进展", { exact: true }).waitFor();
       assert.equal(await events.getAttribute("open"), "", "earlier event keeps merged group open");
       assert(await eventSummary.evaluate((node) => document.activeElement === node));
+      activity.items!.push({
+        id: "hierarchy-singleton",
+        position: 1006,
+        kind: "issue.updated",
+        created_at: now + 2,
+        author: "实时事件作者",
+        title: "单条事件",
+        issue_id: issue.issue_id,
+      });
+      publish();
+      const singleton = detail.locator('[data-scroll-id="hierarchy-singleton"]');
+      await singleton.getByRole("button", { name: "查看 →", exact: true }).focus();
+      activity.items!.push({
+        ...activity.items!.at(-1)!,
+        id: "hierarchy-singleton-appended",
+        position: 1007,
+        title: "实时成组",
+      });
+      publish();
+      const groupedSummary = singleton.locator("summary");
+      await groupedSummary.waitFor();
+      assert(
+        await groupedSummary.evaluate((node) => document.activeElement === node),
+        "singleton focus moves to the new event group summary",
+      );
+      activity.items!.splice(activity.items!.length - 1, 0, {
+        id: "hierarchy-split-event",
+        position: 1006.5,
+        kind: "issue.updated",
+        created_at: now + 2,
+        author: "后补事件作者",
+        title: "后补事件拆开原分组",
+        issue_id: issue.issue_id,
+      });
+      publish();
+      const restoredEvent = singleton.getByRole("button", { name: "查看 →", exact: true });
+      await restoredEvent.waitFor();
+      assert(
+        await restoredEvent.evaluate((node) => document.activeElement === node),
+        "split group focus moves back to its visible event control",
+      );
+      activity.items!.push(
+        ...[0, 2].map((offset) => ({
+          id: `hierarchy-progress-${offset}`,
+          position: 1008 + offset,
+          kind: "issue.progress_updated",
+          created_at: now + 3 + offset,
+          author: "纯进展作者",
+          title: `纯进展 ${offset}`,
+          issue_id: issue.issue_id,
+        })),
+      );
+      publish();
+      const progressGroup = detail.locator('[data-scroll-id="hierarchy-progress-0"]');
+      await progressGroup.locator("summary").focus();
+      activity.items!.splice(activity.items!.length - 1, 0, {
+        id: "hierarchy-progress-interleaved",
+        position: 1009,
+        kind: "issue.updated",
+        created_at: now + 4,
+        author: "后补事件作者",
+        title: "后补活动拆开纯进展组",
+      });
+      publish();
+      await progressGroup.locator("summary").waitFor({ state: "detached" });
+      assert(
+        await progressGroup.evaluate((node) => document.activeElement === node),
+        "progress-only group restores focus to its standalone event row",
+      );
       let earlierStage = 0;
       let boundaryEnabled = false;
       let releaseSecondHistory = () => {};
@@ -882,6 +961,36 @@ try {
       await more.click();
       await detail.getByRole("heading", { name: "讨论与进展", exact: true }).click();
       await menu.waitFor({ state: "hidden" });
+      const longName = "这是一个有较长显示名称的负责人用于核对手机端属性布局是否仍可正常阅读";
+      await page.route("**/api/v1/hosted-agents", async (route) => {
+        await route.fulfill({
+          json: {
+            configured: true,
+            projection: {
+              agents: [
+                {
+                  identity: { execution_environment_id: "hosted", local_id: "qingzhu" },
+                  display_name: longName,
+                  purposes: ["issue_manager"],
+                  enabled: true,
+                },
+              ],
+              runtimes: [],
+            },
+          },
+        });
+      });
+      await page.reload();
+      await detail
+        .getByRole("button", { name: "更改负责人", exact: true })
+        .getByText(longName)
+        .waitFor();
+      assert(
+        await detail
+          .locator("[data-issue-scroll]")
+          .evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
+        "long assignee metadata stays inside the content lane",
+      );
       await more.click();
       await page.screenshot({ path: join(output, `issue-menu-${width}.png`) });
       await menu.getByRole("menuitem", { name: "调度与事件诊断", exact: true }).click();
