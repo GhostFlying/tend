@@ -128,16 +128,13 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			}
 		}
 		if !manager {
-			var page protocol.ConversationPage
-			if !c.invoke("conversation_read", map[string]any{"limit": 50}, &page) {
+			message, ok := c.ownerMessage(source)
+			if !ok {
 				return "failed"
 			}
 			text = ""
-			for _, item := range page.Items {
-				if item.MessageID == source && item.Author == "owner" {
-					text = item.Body
-					respond = true
-				}
+			if message != nil {
+				text, respond = message.Body, true
 			}
 		}
 		// Background delivery text includes system envelopes. Only persisted owner
@@ -157,17 +154,11 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			// A root creation source is inherited by its new manager. Only an owner
 			// message physically sent to this Issue can request another child, so a
 			// delegated creation cannot recursively reproduce its own source.
-			var page protocol.ConversationPage
-			if !c.invoke("conversation_read", map[string]any{"limit": 50}, &page) {
+			message, ok := c.ownerMessage(source)
+			if !ok {
 				return "failed"
 			}
-			direct := false
-			for _, item := range page.Items {
-				if item.MessageID == source && item.Author == "owner" {
-					direct = true
-				}
-			}
-			create = direct
+			create = message != nil
 		}
 		if manager && respond {
 			next := "继续澄清范围与验收条件"
@@ -383,6 +374,37 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 	inputTokens, outputTokens := int64(240), int64(80)
 	th.Emit(harness.Event{Kind: harness.EventRequestUsage, TurnID: turn, RequestUsage: &protocol.TokenUsageSample{Source: "sandbox-script", RequestID: turn, ThreadID: th.ID(), Revision: 1, Settlement: "final", Model: model, Input: &inputTokens, Output: &outputTokens}})
 	return "completed"
+}
+
+// ownerMessage follows the persisted source ID even when tool/status records
+// have moved it outside the latest page. Older history is context, not a new request.
+func (c *toolCaller) ownerMessage(source string) (*protocol.ConversationItem, bool) {
+	before := int64(0)
+	for {
+		var page struct {
+			protocol.ConversationPage
+			NextBeforeSeq int64 `json:"next_before_seq"`
+		}
+		args := map[string]any{"limit": 50}
+		if before > 0 {
+			args["before_seq"] = before
+		}
+		if !c.invoke("conversation_read", args, &page) {
+			return nil, false
+		}
+		for _, item := range page.Items {
+			if item.MessageID == source && item.Author == "owner" {
+				return &item, true
+			}
+		}
+		if source == "" || !page.More {
+			return nil, true
+		}
+		if page.NextBeforeSeq <= 0 || before > 0 && page.NextBeforeSeq >= before {
+			return nil, false
+		}
+		before = page.NextBeforeSeq
+	}
 }
 
 // Review retries only a stale read/CAS, never a business mutation. Every retry
