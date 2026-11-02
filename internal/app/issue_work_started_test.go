@@ -223,7 +223,7 @@ func TestIssueBlockedAcceptanceStaysWithReviewChild(t *testing.T) {
 			return err
 		}
 		b := page.Items[0].Board
-		if b.Children.Items[0].Execution.WaitingOwner != 1 || b.Execution.WaitingOwner != 0 {
+		if b.Children.Items[0].Execution.WaitingSupervisor != 1 || b.Children.Items[0].Execution.WaitingOwner != 0 || b.Execution.WaitingSupervisor != 0 || b.Execution.WaitingOwner != 0 {
 			t.Error("blocked acceptance moved from explicit review responsibility to parent")
 		}
 		return nil

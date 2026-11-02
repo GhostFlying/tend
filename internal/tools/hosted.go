@@ -71,6 +71,8 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"attentions_resolve", "Handle an original problem assigned to this responsibility, preserving its exact question version. Use responsibility.revision as expected_control_revision and its assignment_epoch. Explain evidence/reason; this is an Agent answer, never user authorization. Keep task effects and independent acceptance intact.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{}, true},
+	{"attentions_escalate", "Escalate an unresolved problem exactly one supervisor step: parent Issue, then main coordinator, then human. Use responsibility.revision and assignment_epoch. State attempted remedies and why they cannot work. Never notify the user directly for an internal problem, create duplicate problems, or reset task budgets.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{Escalate: true}, true},
 	{"conversation_reply", "Reply to one admitted input. Tend selects its source endpoint; never repeat the body as native text.", "logical_turn", protocol.CoordinationReply{}, app.CoordinationReply{}, true},
 	{"conversation_notify", "Publish a sourced proactive notification. Tend selects Web and Telegram; no recipient addresses are accepted.", "logical_turn", protocol.MessagingPublication{}, app.PublishCommunication{Notify: true}, true},
 
@@ -87,7 +89,7 @@ var hostedMutations = []hostedMutation{
 	{"issues_deadline_put", "Record a sourced deadline or estimate, with known/unknown time and default 24h/due reminders; never silently change a user commitment.", "deadline", protocol.PutIssueDeadlinePayload{}, app.IssueDeadlineCommand{}, true},
 	{"issues_deadline_cancel", "Cancel a deadline with an explicit reason, preserving already claimed/unknown reminder facts.", "deadline", protocol.CancelIssueDeadlinePayload{}, app.IssueDeadlineCommand{Cancel: true}, true},
 	{"planner_entry_put", "Record a user_action or issue_priority. Omit target_id when creating; on update provide target_id and expected_control_revision. The server assigns identity, revision and timestamps. This does not schedule an agent retry; task execution priority remains tasks_rate.", "planner_entry", protocol.PutPlannerEntryInput{}, app.PutPlannerEntry{}, true},
-	{"attentions_create", "Ask the owner a distinct decision or human action, or record nonblocking information. Optional latest_action_at gives its true deadline with 24h/due reminders to main, even without an Issue. Assignment stays unchanged.", "attention", protocol.CreateAttentionPayload{}, app.AttentionCommand{Action: "create"}, true},
+	{"attentions_create", "Submit a distinct question/action to your supervisor, or record nonblocking information. Agent-owned Issue questions follow the responsibility chain; only human-targeted problems enter user Inbox. Optional latest_action_at gives its true deadline with 24h/due reminders to main, even without an Issue. Assignment stays unchanged.", "attention", protocol.CreateAttentionPayload{}, app.AttentionCommand{Action: "create"}, true},
 	{"attentions_update", "Revise this stable attention without replacing or answering its original decision. Omit latest_action_at to retain it, set 0 to clear; timezone only changes display.", "attention", protocol.UpdateAttentionPayload{}, app.AttentionCommand{Action: "update"}, true},
 	{"attentions_respond", "Relay the owner's actual message to the original decision/version. Never answer on the owner's behalf.", "attention", protocol.RespondAttentionPayload{}, app.AttentionCommand{Action: "respond", FromMessage: true}, true},
 	{"attentions_confirm", "Relay an actual owner's confirmation of a human action; agent narration is insufficient.", "attention", protocol.ConfirmAttentionPayload{}, app.AttentionCommand{Action: "confirm", FromMessage: true}, true},
@@ -376,7 +378,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			var err error
 			switch c.Tool {
 			case "attentions_list":
-				value, err = views.Attentions(ctx, tx.Q(), views.AttentionFilter{IssueID: p.IssueID, Kind: p.Kind, Status: p.Status, After: p.After})
+				value, err = views.Attentions(ctx, tx.Q(), views.AttentionFilter{ResponsibleIssueID: p.IssueID, Recipient: responsibilityReadRecipient(execution.Selection.Purpose), Kind: p.Kind, Status: p.Status, After: p.After})
 			case "planner_read":
 				value, err = views.NextActions(ctx, tx.Q(), p.Kind, p.IssueID)
 			case "deadlines_list":
@@ -400,7 +402,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 			var err error
 			value, err = views.Attention(ctx, tx.Q(), p.AttentionID)
-			if err == nil && execution.IssueID != "" && value.IssueID != execution.IssueID {
+			if err == nil && execution.IssueID != "" && value.IssueID != execution.IssueID && (value.Responsibility == nil || value.Responsibility.IssueID != execution.IssueID && value.Responsibility.OriginIssueID != execution.IssueID) {
 				return protocol.Errorf(protocol.CodeForbidden, "attention is outside this Issue")
 			}
 			return err
@@ -579,4 +581,11 @@ func hostedTaskResultReadable(ctx context.Context, q store.Querier, taskID, issu
  UNION ALL SELECT c.issue_id FROM issue_controls c JOIN descendants d ON c.parent_issue_id=d.id)
  SELECT EXISTS(SELECT 1 FROM task_work_item_owners o JOIN descendants d ON d.id=o.work_item_id WHERE o.task_id=?)`, issueID, taskID).Scan(&descendant)
 	return descendant, err
+}
+
+func responsibilityReadRecipient(purpose agentconfig.Purpose) string {
+	if purpose == agentconfig.Main {
+		return "all"
+	}
+	return "agent"
 }

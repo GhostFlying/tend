@@ -39,7 +39,7 @@ func Deadlines(ctx context.Context, q store.Querier, issue string) ([]protocol.I
 }
 func NextActions(ctx context.Context, q store.Querier, kind, issue string) (protocol.NextActionPage, error) {
 	out := protocol.NextActionPage{Items: []protocol.PlannerEntry{}, Deadlines: []protocol.IssueDeadline{}}
-	rows, err := q.QueryContext(ctx, `SELECT body_json FROM planner_entries WHERE (?='' OR kind=?) AND (?='' OR issue_id=?) ORDER BY kind,rank=0,rank,entry_id`, kind, kind, issue, issue)
+	rows, err := q.QueryContext(ctx, `SELECT body_json FROM planner_entries WHERE (?='' OR kind=?) AND (?='' OR issue_id=?) AND NOT EXISTS(SELECT 1 FROM attention_responsibilities r WHERE r.attention_id=json_extract(planner_entries.body_json,'$.attention_id') AND r.recipient_kind<>'owner' AND planner_entries.kind='user_action') ORDER BY kind,rank=0,rank,entry_id`, kind, kind, issue, issue)
 	if err != nil {
 		return out, err
 	}

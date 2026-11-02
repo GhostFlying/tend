@@ -28,6 +28,11 @@ type stepError struct {
 func (e *stepError) Error() string { return e.reason + ": " + e.err.Error() }
 func (e *stepError) Unwrap() error { return e.err }
 
+// questionYield is emitted only after the question's durable receipt is read.
+type questionYield struct{ decision string }
+
+func (e *questionYield) Error() string { return "yield execution for question " + e.decision }
+
 // completionPending keeps a successful result while external stop proof is unknown.
 type completionPending struct{ err error }
 
@@ -36,6 +41,8 @@ func (e *completionPending) Error() string {
 }
 func (e *completionPending) Unwrap() error { return e.err }
 func isCompletionPending(err error) bool   { _, ok := errors.AsType[*completionPending](err); return ok }
+
+func isQuestionYield(err error) bool { _, ok := errors.AsType[*questionYield](err); return ok }
 
 func failed(reason string, err error) error { return &stepError{reason: reason, err: err} }
 
@@ -93,6 +100,16 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			// A stop arriving during completion takes precedence over a
 			// pending stop check. Final phases retain their existing request.
 			err = r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "stopped by tend"})
+		case isQuestionYield(err):
+			question, _ := errors.AsType[*questionYield](err)
+			if err := r.stopAgent(ctx, as); err != nil {
+				return &completionPending{err}
+			}
+			saved, readErr := r.cfg.Journal.Run(ctx, as.RunID)
+			if readErr != nil {
+				return readErr
+			}
+			err = r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsYieldQuestion, protocol.YieldQuestionPayload{DecisionID: question.decision, ThreadID: saved.Thread})
 		case errors.Is(err, errPaused), errors.Is(err, errHeld):
 			// The worker was stopped for a pause or a takeover; the next
 			// attempt waits until tend wants the run again.
@@ -227,19 +244,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if err != nil {
 		return stopped(failed(reasonFor(err, "workspace_prepare_failed"), err))
 	}
-	attempt, err := r.cfg.Journal.NextAttempt(ctx, as.RunID)
-	if err != nil {
-		return err
-	}
 	run, err := r.cfg.Journal.Run(ctx, as.RunID)
 	if err != nil {
 		return err
-	}
-	if attempt > 1 {
-		// The run resumes after a fence or a restart.
-		if err := r.cfg.Journal.AppendEvent(ctx, as.RunID, protocol.RunEvent{Kind: protocol.EventRunRunning}); err != nil {
-			return err
-		}
 	}
 	var askOwner func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
 	var questions []protocol.WorkerQuestion
@@ -274,12 +281,24 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		if err != nil {
 			return stopped(failed("owner_question_recovery_failed", err))
 		}
+		if as.QuestionHandoffs && len(questions) > 0 {
+			// A prior create may have committed before its receipt or local stop.
+			// Never restart the source model merely to recover that same question.
+			return &questionYield{decision: questions[len(questions)-1].DecisionID}
+		}
+		questions = append(append([]protocol.WorkerQuestion{}, as.Questions...), questions...)
 		askOwner = func(ctx context.Context, payload protocol.AskOwnerPayload) (protocol.WorkerQuestion, error) {
 			callCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			stop := context.AfterFunc(toolLifetime, cancel)
 			defer stop()
-			return owner.ask(callCtx, payload)
+			question, err := owner.ask(callCtx, payload)
+			if err == nil && as.QuestionHandoffs {
+				cause := &questionYield{decision: question.DecisionID}
+				stopAttempt(cause)
+				return question, cause
+			}
+			return question, err
 		}
 	}
 	if as.Responsibility != nil {
@@ -299,9 +318,27 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		_ = r.flushEvents(flushCtx, as)
 		return nil
 	}
+	// Reset stop proof only when another native attempt is actually about to
+	// start. Recovering a durable question must preserve the predecessor exit.
+	attempt, err := r.cfg.Journal.NextAttempt(ctx, as.RunID)
+	if err != nil {
+		return err
+	}
+	if attempt > 1 {
+		// The run resumes after a fence or a restart.
+		if err := r.cfg.Journal.AppendEvent(ctx, as.RunID, protocol.RunEvent{Kind: protocol.EventRunRunning}); err != nil {
+			return err
+		}
+	}
 	var startupObserved time.Time
 	if nativeMessages {
 		startupObserved = r.cfg.Now()
+	}
+	if run.Thread == "" && as.QuestionContinuation != nil && as.Role == protocol.RoleImplement && (assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer || nativeMessages) {
+		run.Thread = as.QuestionContinuation.ThreadID
+		if err := r.cfg.Journal.SetThread(ctx, as.RunID, run.Thread); err != nil {
+			return err
+		}
 	}
 	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
@@ -311,7 +348,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		OnUsageSource: func(sourceCtx context.Context, source nativeusage.Source) error {
 			return r.registerUsage(sourceCtx, as, source)
 		},
-		Execution: as.AcceptanceExecution, QuestionContext: as.QuestionContext, RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
+		Execution: as.AcceptanceExecution, QuestionContext: as.QuestionContext, QuestionHandoffs: as.QuestionHandoffs, QuestionContinuation: as.QuestionContinuation, SupervisorQuestions: as.SupervisorQuestions, RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
 		AskOwner: askOwner, Questions: questions,
 		ReceiveMessages: receiveMessages, AckMessage: ackMessage,
 		ReadObservation: r.observationReader(toolLifetime, as),
@@ -881,7 +918,12 @@ func (r *Runner) awaitCompletedStop(ctx, runCtx context.Context, as protocol.Ass
 	if err := r.settleTakeover(stopCtx, as, a); err != nil {
 		return &completionPending{err}
 	}
-	if !r.stopRequested(runCtx, a) {
+	req, final, err := r.cfg.Journal.RequestForRun(ctx, as.RunID)
+	if err != nil {
+		return &completionPending{err}
+	}
+	yielding := final && req.Envelope.Operation == protocol.OpRunsYieldQuestion
+	if !yielding && !r.stopRequested(runCtx, a) {
 		if err := r.waitUntilWanted(stopCtx, as, a); err != nil {
 			return err
 		}

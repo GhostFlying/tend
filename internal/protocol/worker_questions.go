@@ -3,8 +3,11 @@ package protocol
 import "encoding/json"
 
 const (
-	CapabilityWorkerQuestions = "worker-questions-v1"
-	OpRunsAskOwner            = "runs.ask_owner"
+	CapabilityWorkerQuestions     = "worker-questions-v1"
+	CapabilitySupervisorQuestions = "supervisor-questions-v1"
+	CapabilityQuestionHandoffs    = "issue-question-handoffs-v1"
+	OpRunsYieldQuestion           = "runs.yield_question"
+	OpRunsAskOwner                = "runs.ask_owner"
 )
 
 // AskOwnerPayload identifies a question durably within its current run.
@@ -43,4 +46,16 @@ type WorkerQuestion struct {
 	Status            string          `json:"status"`
 	Answer            json.RawMessage `json:"answer,omitempty"`
 	QuestionMessageID string          `json:"question_message_id"`
+}
+
+// YieldQuestionPayload confirms that the original execution no longer runs.
+type YieldQuestionPayload struct {
+	DecisionID string `json:"decision_id"`
+	ThreadID   string `json:"thread_id,omitempty"`
+}
+
+// QuestionContinuation relates a new execution to its stopped predecessor.
+type QuestionContinuation struct {
+	RunID    string `json:"run_id"`
+	ThreadID string `json:"thread_id,omitempty"`
 }

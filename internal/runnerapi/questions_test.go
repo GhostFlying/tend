@@ -11,10 +11,10 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func httpQuestionRun(t *testing.T) (*env, *protocol.Assignment) {
+func httpQuestionRun(t *testing.T, capabilities ...string) (*env, *protocol.Assignment) {
 	t.Helper()
 	e := newEnv(t, 10*time.Millisecond)
-	rt := &protocol.RunnerRuntime{InstanceID: "questions", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityWorkerQuestions}}
+	rt := &protocol.RunnerRuntime{InstanceID: "questions", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: append([]string{protocol.CapabilityWorkerQuestions}, capabilities...)}
 	e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "", protocol.HelloPayload{Runtime: rt, WorkspaceProtocol: 1}))
 	e.createTask()
 	as := e.claim(e.envelope(protocol.OpRunnerClaim, "", protocol.ClaimPayload{Runtime: rt, WorkspaceProtocol: 1}))
@@ -161,5 +161,46 @@ func TestWorkerQuestionHTTPScopeAndCancelledWait(t *testing.T) {
 	res.Body.Close()
 	if err != nil || got.Status != "open" {
 		t.Fatal(got, err)
+	}
+}
+
+func TestQuestionHandoffHTTPReplaysOnlyCommittedExit(t *testing.T) {
+	e, as := httpQuestionRun(t, protocol.CapabilityQuestionHandoffs)
+	if !as.QuestionHandoffs {
+		t.Fatal("handoff capability not frozen")
+	}
+	var question protocol.WorkerQuestion
+	if err := json.Unmarshal(e.mustOK(asRun(*as), e.envelope(protocol.OpRunsAskOwner, as.RunID, protocol.AskOwnerPayload{QuestionKey: "scope", Question: "Which scope?"})), &question); err != nil {
+		t.Fatal(err)
+	}
+	exit := e.envelope(protocol.OpRunsYieldQuestion, as.RunID, protocol.YieldQuestionPayload{DecisionID: question.DecisionID, ThreadID: "original-thread"})
+	first := e.mustOK(asRun(*as), exit)
+	replay := e.mustOK(asRun(*as), exit)
+	if string(first) != string(replay) {
+		t.Fatal("lost exit receipt did not replay exactly")
+	}
+	changed := *exit
+	changed.Payload, _ = json.Marshal(protocol.YieldQuestionPayload{DecisionID: question.DecisionID, ThreadID: "different-thread"})
+	fresh := *exit
+	fresh.RequestID = e.envelope(protocol.OpRunsYieldQuestion, as.RunID, nil).RequestID
+	wrongRun := *exit
+	wrongRun.Target.ID = "run_other"
+	for _, env := range []*protocol.Envelope{&changed, &fresh, &wrongRun, e.envelope(protocol.OpRunsReportStarted, as.RunID, nil), e.envelope(protocol.OpRunsAskOwner, as.RunID, protocol.AskOwnerPayload{QuestionKey: "new", Question: "New authority?"})} {
+		if status, response := e.call(asRun(*as), env); status != http.StatusForbidden || response.Error == nil || response.Error.Code != protocol.CodeForbidden {
+			t.Fatalf("historical credential admitted %s: %d %+v", env.Operation, status, response)
+		}
+	}
+	bad := asRun(*as)
+	bad.token += "invalid"
+	if status, _ := e.call(bad, exit); status != http.StatusForbidden {
+		t.Fatalf("invalid original token admitted: %d", status)
+	}
+	response, err := questionGET(t.Context(), e, asRun(*as), "/"+question.DecisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("historical credential granted question reads: %d", response.StatusCode)
 	}
 }

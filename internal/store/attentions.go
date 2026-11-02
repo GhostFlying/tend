@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -13,9 +14,13 @@ func GetAttention(ctx context.Context, q Querier, id string) (protocol.Attention
 	}
 	var a protocol.Attention
 	err := json.Unmarshal([]byte(raw), &a)
+	if err == nil {
+		a.Responsibility, err = GetAttentionResponsibility(ctx, q, id)
+	}
 	return a, err
 }
 func (tx *Tx) SaveAttention(ctx context.Context, a protocol.Attention, expected int64, request string) error {
+	a.Responsibility = nil // The independently versioned route has one authority.
 	raw, err := json.Marshal(a)
 	if err != nil {
 		return err

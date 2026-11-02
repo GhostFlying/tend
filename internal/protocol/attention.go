@@ -1,33 +1,75 @@
 package protocol
 
-// Attention is a request for a person's attention, never an assignment or lease.
+// Attention is an original question or action, never an assignment or lease.
+// Responsibility determines whether an Agent or a human must handle it.
 // Decision answers stay in their original decision/choice, not in this record.
 type Attention struct {
-	LatestActionAt         *int64    `json:"latest_action_at,omitempty"`
-	LatestActionTimezone   string    `json:"latest_action_timezone,omitempty"`
-	LatestActionReminders  bool      `json:"latest_action_reminders"`
-	LatestActionNearRuleID string    `json:"latest_action_near_rule_id,omitempty"`
-	LatestActionDueRuleID  string    `json:"latest_action_due_rule_id,omitempty"`
-	QuestionVersion        int64     `json:"question_version,omitempty"`
-	QuestionOptions        []string  `json:"question_options,omitempty"`
-	AttentionID            string    `json:"attention_id"`
-	IssueID                string    `json:"issue_id,omitempty"`
-	TaskID                 string    `json:"task_id,omitempty"`
-	Kind                   string    `json:"kind"`
-	Title                  string    `json:"title"`
-	Revision               int64     `json:"revision"`
-	Status                 string    `json:"status"`
-	DecisionID             string    `json:"decision_id,omitempty"`
-	ChoiceID               string    `json:"choice_id,omitempty"`
-	SourceMessageID        string    `json:"source_message_id,omitempty"`
-	RaisedBy               Principal `json:"raised_by"`
-	BlocksClose            bool      `json:"blocks_close,omitempty"`
-	Resolution             string    `json:"resolution,omitempty"`
-	ResolutionSourceID     string    `json:"resolution_source_id,omitempty"`
-	ReadAt                 int64     `json:"read_at,omitempty"`
-	ArchivedAt             int64     `json:"archived_at,omitempty"`
-	CreatedAt              int64     `json:"created_at"`
-	UpdatedAt              int64     `json:"updated_at"`
+	ResolutionActor        *Principal               `json:"resolution_actor,omitempty"`
+	Responsibility         *AttentionResponsibility `json:"responsibility,omitempty"`
+	LatestActionAt         *int64                   `json:"latest_action_at,omitempty"`
+	LatestActionTimezone   string                   `json:"latest_action_timezone,omitempty"`
+	LatestActionReminders  bool                     `json:"latest_action_reminders"`
+	LatestActionNearRuleID string                   `json:"latest_action_near_rule_id,omitempty"`
+	LatestActionDueRuleID  string                   `json:"latest_action_due_rule_id,omitempty"`
+	QuestionVersion        int64                    `json:"question_version,omitempty"`
+	QuestionOptions        []string                 `json:"question_options,omitempty"`
+	AttentionID            string                   `json:"attention_id"`
+	IssueID                string                   `json:"issue_id,omitempty"`
+	TaskID                 string                   `json:"task_id,omitempty"`
+	Kind                   string                   `json:"kind"`
+	Title                  string                   `json:"title"`
+	Revision               int64                    `json:"revision"`
+	Status                 string                   `json:"status"`
+	DecisionID             string                   `json:"decision_id,omitempty"`
+	ChoiceID               string                   `json:"choice_id,omitempty"`
+	SourceMessageID        string                   `json:"source_message_id,omitempty"`
+	RaisedBy               Principal                `json:"raised_by"`
+	BlocksClose            bool                     `json:"blocks_close,omitempty"`
+	Resolution             string                   `json:"resolution,omitempty"`
+	ResolutionSourceID     string                   `json:"resolution_source_id,omitempty"`
+	ReadAt                 int64                    `json:"read_at,omitempty"`
+	ArchivedAt             int64                    `json:"archived_at,omitempty"`
+	CreatedAt              int64                    `json:"created_at"`
+	UpdatedAt              int64                    `json:"updated_at"`
+}
+
+// AttentionResponsibility identifies who must handle an original question.
+// It never changes the Issue assignee or grants general access to child tasks.
+type AttentionResponsibility struct {
+	Ancestry              []AttentionResponsibilityAncestor `json:"ancestry"`
+	OriginAssignmentEpoch int64                             `json:"origin_assignment_epoch"`
+	OriginIssueID         string                            `json:"origin_issue_id"`
+	IssueID               string                            `json:"issue_id,omitempty"`
+	RecipientKind         string                            `json:"recipient_kind"`
+	RecipientRef          string                            `json:"recipient_ref,omitempty"`
+	AssignmentEpoch       int64                             `json:"assignment_epoch"`
+	Revision              int64                             `json:"revision"`
+	History               []AttentionResponsibilityHop      `json:"history"`
+}
+
+// AttentionResponsibilityAncestor freezes each responsibility along the path.
+type AttentionResponsibilityAncestor struct {
+	IssueID         string `json:"issue_id"`
+	AssignmentEpoch int64  `json:"assignment_epoch"`
+}
+
+type AttentionResponsibilityHop struct {
+	IssueID         string `json:"issue_id,omitempty"`
+	RecipientKind   string `json:"recipient_kind"`
+	RecipientRef    string `json:"recipient_ref,omitempty"`
+	AssignmentEpoch int64  `json:"assignment_epoch"`
+	Reason          string `json:"reason"`
+	RequestID       string `json:"request_id,omitempty"`
+}
+
+// HandleAttentionPayload preserves the original question version and routes.
+// Resolution answers it; escalation only changes the responsible recipient.
+type HandleAttentionPayload struct {
+	ExpectedAssignmentEpoch int64  `json:"expected_assignment_epoch"`
+	Version                 int64  `json:"version,omitempty"`
+	Option                  string `json:"option,omitempty"`
+	Text                    string `json:"text,omitempty"`
+	Reason                  string `json:"reason"`
 }
 type AttentionView struct {
 	Attention

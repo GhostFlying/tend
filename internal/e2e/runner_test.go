@@ -552,7 +552,8 @@ func TestFault_HeartbeatLostRunnerAlive_Runner(t *testing.T) {
 			if fenceBeforeStart {
 				n.net.before = func(req *http.Request) error {
 					if req.URL.Path == "/runner/v1/questions" && questionReads.Add(1) == 2 {
-						// NextAttempt is durable before owner-question recovery and worker Start.
+						// Recovery precedes NextAttempt, so fencing here must not
+						// count or start another native execution attempt.
 						close(entered)
 						<-req.Context().Done()
 						return req.Context().Err()
@@ -590,15 +591,14 @@ func TestFault_HeartbeatLostRunnerAlive_Runner(t *testing.T) {
 				}
 				n.net.disconnect(t)
 				clock.Advance(time.Second)
-				eventually(t, "the unstarted second attempt is durably fenced", func() bool {
+				eventually(t, "the unstarted recovery is durably fenced", func() bool {
 					run, err := j.Run(t.Context(), first.RunID)
-					return err == nil && run.Attempts == 2 && run.Fenced
+					return err == nil && run.Attempts == 1 && run.Fenced
 				})
 				if len(n.workers.Started()) != 1 {
 					t.Fatal("fenced preparation launched a worker")
 				}
 				eventually(t, "the second lease expires", func() bool { return srv.runState(protocol.RoleImplement) == protocol.RunUnknown })
-				expectedAttempt = 3
 				n.net.set(false)
 			}
 			eventually(t, "the task completes after reconciliation", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })

@@ -661,6 +661,13 @@ func insertMessagingOutbox(ctx context.Context, x *Exec, tx *store.Tx, part Mess
 // registerSystemCommunication promotes only an explicitly user-facing program
 // notice. Machine wake inputs remain internal unless their handler calls this.
 func registerSystemCommunication(ctx context.Context, x *Exec, tx *store.Tx, id, reason string) error {
+	var internal bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_bindings b JOIN attentions a ON (b.object_type='attention' AND b.object_id=a.attention_id) OR (b.object_type='decision' AND b.object_id=a.decision_id) JOIN attention_responsibilities r ON r.attention_id=a.attention_id WHERE b.message_id=? AND r.recipient_kind<>'owner')`, id).Scan(&internal); err != nil {
+		return err
+	}
+	if internal {
+		return nil
+	}
 	var exists bool
 	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messaging_messages WHERE message_id=?)`, id).Scan(&exists); err != nil {
 		return err

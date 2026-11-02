@@ -10,7 +10,7 @@ import {
 import type { AttentionView } from "../api/generated/api.ts";
 import { expect, it } from "vitest";
 import type { AttentionPage, NextActionPage } from "../api/generated/api.ts";
-import { inboxCount } from "./useInboxCount.ts";
+import { inboxCount, isHumanAction } from "./useInboxCount.ts";
 
 it("counts open owner actions once and excludes information and resolved entries", () => {
   const summary = {
@@ -143,4 +143,33 @@ it("reads the source summary instead of repeating a decision title", () => {
       decision: { question: "请选择需要发布的模块\n补充说明" },
     } as AttentionView),
   ).toBe("请选择需要发布的模块");
+});
+
+it("excludes internal Issue responsibility from human action counts", () => {
+  const page = {
+    items: [
+      {
+        attention_id: "internal",
+        status: "open",
+        kind: "decision",
+        responsibility: { recipient_kind: "agent" },
+      },
+      {
+        attention_id: "top",
+        status: "open",
+        kind: "action",
+        responsibility: { recipient_kind: "main" },
+      },
+      {
+        attention_id: "human",
+        status: "open",
+        kind: "decision",
+        responsibility: { recipient_kind: "owner" },
+      },
+    ],
+  } as AttentionPage;
+  expect(inboxCount(page)).toBe(1);
+  expect((page.items ?? []).filter(isHumanAction).map((item) => item.attention_id)).toEqual([
+    "human",
+  ]);
 });

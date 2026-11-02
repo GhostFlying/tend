@@ -134,6 +134,9 @@ func (q *ownerQuestions) ask(ctx context.Context, payload protocol.AskOwnerPaylo
 	if err := json.Unmarshal(op.Result, &question); err != nil {
 		return question, fmt.Errorf("decode owner question: %w", err)
 	}
+	if q.as.QuestionHandoffs {
+		return question, nil
+	}
 	for question.Status == "open" {
 		if question.DecisionID == "" {
 			return question, errors.New("owner question has no decision identity")

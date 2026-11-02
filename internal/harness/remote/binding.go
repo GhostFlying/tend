@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,32 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 )
+
+// A new run may resume history only through a server-authorized stopped edge.
+func (b *Broker) bindQuestionHello(ctx context.Context, runID string, hello Hello) error {
+	if hello.ThreadID == "" || b.cfg.QuestionPredecessor == nil {
+		return b.bindHello(runID, hello)
+	}
+	if _, err := os.Stat(b.bindingPath(runID)); !errors.Is(err, os.ErrNotExist) {
+		return b.bindHello(runID, hello)
+	}
+	parent, err := b.cfg.QuestionPredecessor(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if parent == "" || parent == runID {
+		return b.bindHello(runID, hello)
+	}
+	b.usageMu.Lock()
+	defer b.usageMu.Unlock()
+	raw, err := os.ReadFile(b.bindingPath(parent))
+	var pin nativeBinding
+	if err != nil || json.Unmarshal(raw, &pin) != nil || pin.Pending || pin.RunID != parent || pin.Cwd != hello.Cwd || pin.Thread != hello.ThreadID {
+		return errors.New("question predecessor native binding requires reconciliation")
+	}
+	// Usage ownership is registered anew from the resumed native response.
+	return b.saveBinding(runID, nativeBinding{Cwd: pin.Cwd, Thread: pin.Thread})
+}
 
 // nativeBinding records transport identity, not a second work or control ledger.
 // An unanswered thread/start is retained as pending and requires reconciliation.

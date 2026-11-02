@@ -22,6 +22,7 @@ import (
 
 // BrokerConfig enables center-side native processes, using the center user's home.
 type BrokerConfig struct {
+	QuestionPredecessor func(context.Context, string) (string, error)                 `json:"-"`
 	RegisteredUsageRuns func(context.Context) ([]string, error)                       `json:"-"`
 	UsageSource         func(context.Context, string, nativeusage.Source, bool) error `json:"-"`
 	Bin                 string                                                        `json:"traex_bin"`
@@ -313,7 +314,7 @@ func (b *Broker) serveExec(w http.ResponseWriter, r *http.Request, runID string,
 	if err != nil || json.Unmarshal(data, &hello) != nil || strings.TrimSpace(hello.Cwd) == "" {
 		return
 	}
-	if err := b.bindHello(runID, hello); err != nil {
+	if err := b.bindQuestionHello(ctx, runID, hello); err != nil {
 		return
 	}
 	run.cwd = hello.Cwd

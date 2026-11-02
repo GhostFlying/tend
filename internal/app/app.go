@@ -467,6 +467,9 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 			}
 		}
 	}
+	if err := reconcileAttentionResponsibilities(ctx, x, tx); err != nil {
+		return err
+	}
 	if err := syncMessagingInteractions(ctx, x, tx, out.Events); err != nil {
 		return err
 	}

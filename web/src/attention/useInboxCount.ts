@@ -1,12 +1,20 @@
-import type { AttentionPage, NextActionPage } from "../api/generated/api.ts";
+import type { AttentionPage, AttentionView, NextActionPage } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
+
+export function isHumanAction(item: AttentionView) {
+  return (
+    item.status === "open" &&
+    item.kind !== "information" &&
+    (!item.responsibility || item.responsibility.recipient_kind === "owner")
+  );
+}
 
 /** Share the same owner-action count between desktop and phone navigation. */
 export function inboxCount(summary?: AttentionPage, next?: NextActionPage) {
   const items = summary?.items ?? [];
   return (
-    items.filter((item) => item.status === "open" && item.kind !== "information").length +
+    items.filter(isHumanAction).length +
     (next?.items ?? []).filter(
       (item) =>
         item.kind === "user_action" &&

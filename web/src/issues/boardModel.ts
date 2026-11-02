@@ -26,6 +26,7 @@ export function executionLabel(counts?: ExecutionCounts): string {
   if (!counts) return "暂无执行";
   if (counts.unknown) return "执行待核对";
   if (counts.waiting_owner) return "等待你处理";
+  if (counts.waiting_supervisor) return "等待负责人";
   if (counts.running) return `${counts.running} 项运行中`;
   if (counts.accepting) return "独立验收中";
   if (counts.recovering || counts.starting) return "执行准备中";

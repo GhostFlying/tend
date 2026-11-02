@@ -98,6 +98,13 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 	if spec.NativeDial == nil || spec.Lifetime == nil {
 		return nil, fmt.Errorf("%w: native run transport unavailable", harness.ErrWorkerNotStarted)
 	}
+	if spec.QuestionContinuation != nil && spec.Thread != "" {
+		var e error
+		spec.Thread, e = rebindQuestionThread(spec)
+		if e != nil {
+			return nil, e
+		}
+	}
 	ws.mu.Lock()
 	ex := ws.runs[spec.RunID]
 	ws.mu.Unlock()
@@ -656,3 +663,23 @@ func writePrivate(path string, value any) error {
 
 // NativeLiveMessages identifies direct native steering, rather than MCP polling.
 func (*Workers) NativeLiveMessages() {}
+
+// Rebinding is allowed only for the stopped predecessor named by the server.
+func rebindQuestionThread(spec harness.WorkerSpec) (string, error) {
+	var state workerState
+	if json.Unmarshal([]byte(spec.Thread), &state) != nil || state.Kind != "central-traex" {
+		return "", errors.New("question predecessor has no native session binding")
+	}
+	if state.RunID == spec.RunID {
+		return spec.Thread, nil
+	}
+	if state.RunID != spec.QuestionContinuation.RunID || !state.ExecutorStopped || state.BriefPending || state.Reconcile || state.Thread == "" || state.Cwd != spec.Dir || state.ProviderID != spec.ProviderID {
+		return "", errors.New("question predecessor is not safely stopped in the original environment")
+	}
+	state.RunID = spec.RunID
+	state.StateDir = spec.StateDir
+	state.Terminal, state.Pane = "", ""
+	state.LaunchPending = false
+	raw, err := json.Marshal(state)
+	return string(raw), err
+}

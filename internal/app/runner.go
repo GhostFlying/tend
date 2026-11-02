@@ -332,10 +332,12 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+
 	schedulingHost := scheduler.Host{
-		IssueOwners:   p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueOwner),
-		IssueManagers: p.Runtime != nil && p.Runtime.Protocol >= protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),
-		ID:            host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
+		QuestionHandoffs: p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
+		IssueOwners:      p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueOwner),
+		IssueManagers:    p.Runtime != nil && p.Runtime.Protocol >= protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),
+		ID:               host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
 		AcceptanceExecution: runtimeSupportsAcceptanceExecution(p.Runtime), TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
 		ContinuationsSupported: runtimeSupportsAgentContinuation(p.Runtime), Continuations: continuations, Executors: executors,
@@ -351,11 +353,23 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		Role: roleOf(pick.Kind), HostID: host.HostID, DesiredState: protocol.DesiredRun,
 		ObservedState: protocol.RunStarting, CreatedAt: now,
 	}
+	handoff, err := store.PendingQuestionHandoff(ctx, q, pick.ActionID)
+	if err != nil {
+		return Outcome{}, err
+	}
 	if p.Runtime != nil {
 		run.Protocol = p.Runtime.Protocol
 	}
 	if err := tx.InsertRun(ctx, run); err != nil {
 		return Outcome{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO run_question_contracts(run_id,supervisor_allowed,handoff_allowed) VALUES(?,?,?)`, run.RunID, p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilitySupervisorQuestions), p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs)); err != nil {
+		return Outcome{}, err
+	}
+	if handoff != nil {
+		if _, err := tx.Exec(ctx, `UPDATE run_question_handoffs SET successor_run_id=? WHERE run_id=? AND successor_run_id IS NULL`, run.RunID, handoff.RunID); err != nil {
+			return Outcome{}, err
+		}
 	}
 	execution, reason := scheduler.SelectExecution(schedulingHost, pick)
 	if reason != "" {

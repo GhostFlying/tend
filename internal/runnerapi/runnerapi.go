@@ -154,7 +154,13 @@ func (s *Server) authenticate(r *http.Request) (protocol.Principal, error) {
 	return s.authenticateCredential(r, nil)
 }
 
-func (s *Server) authenticateCredential(r *http.Request, delivery *protocol.RunMessageDelivery, managerReceipt ...bool) (protocol.Principal, error) {
+type runReceiptCredential struct {
+	delivery       *protocol.RunMessageDelivery
+	manager        bool
+	questionReplay *protocol.Envelope
+}
+
+func (s *Server) authenticateCredential(r *http.Request, receipt *runReceiptCredential) (protocol.Principal, error) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || token == "" {
 		return protocol.Principal{}, errUnauthenticated
@@ -172,11 +178,14 @@ func (s *Server) authenticateCredential(r *http.Request, delivery *protocol.RunM
 	switch runID, hostHeader := r.Header.Get(HeaderRun), r.Header.Get(HeaderHost); {
 	case runID != "" && hostHeader == "":
 		leaseID, host, role, err := s.app.RunCredential(ctx, runID)
-		if len(managerReceipt) == 1 && managerReceipt[0] {
+		if receipt != nil && receipt.manager {
 			leaseID, host, role, err = s.app.ManagerReceiptCredential(ctx, runID)
 		}
-		if delivery != nil {
-			leaseID, host, role, err = s.app.RunMessageReceiptCredential(ctx, runID, *delivery)
+		if receipt != nil && receipt.delivery != nil {
+			leaseID, host, role, err = s.app.RunMessageReceiptCredential(ctx, runID, *receipt.delivery)
+		}
+		if receipt != nil && receipt.questionReplay != nil {
+			leaseID, host, role, err = s.app.QuestionHandoffReplayCredential(ctx, runID, receipt.questionReplay)
 		}
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
@@ -189,7 +198,7 @@ func (s *Server) authenticateCredential(r *http.Request, delivery *protocol.RunM
 		}
 		p, hostID = protocol.Principal{Kind: protocol.PrincipalRun, Subject: runID, Role: role}, host
 	case hostHeader != "" && runID == "":
-		if delivery != nil {
+		if receipt != nil {
 			return protocol.Principal{}, errUnauthenticated
 		}
 		p, hostID = protocol.Principal{Kind: protocol.PrincipalRunner, Subject: hostHeader}, hostHeader
@@ -242,11 +251,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		// GETs and every other operation retain ordinary lease authentication.
 		var receipt protocol.RunMessageReceipt
 		if env.Operation == protocol.OpRunsReportMessage && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) && json.Unmarshal(env.Payload, &receipt) == nil {
-			p, authErr = s.authenticateCredential(r, &receipt.RunMessageDelivery)
+			p, authErr = s.authenticateCredential(r, &runReceiptCredential{delivery: &receipt.RunMessageDelivery})
 		}
 		if authErr != nil && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) && (env.Operation == protocol.OpManagerNativeReply || env.Operation == protocol.OpManagerNativeEvent || env.Operation == protocol.OpManagerNativeStopped) {
-			p, authErr = s.authenticateCredential(r, nil, true)
+			p, authErr = s.authenticateCredential(r, &runReceiptCredential{manager: true})
 		}
+		if authErr != nil && env.Operation == protocol.OpRunsYieldQuestion && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) {
+			p, authErr = s.authenticateCredential(r, &runReceiptCredential{questionReplay: &env})
+		}
+
 		if authErr != nil {
 			s.writeError(w, r, &env, authErr)
 			return
@@ -269,6 +282,7 @@ var runCommands = map[string]app.Command{
 	protocol.OpDeliveriesPoll:       app.PollDeliveries{},
 	protocol.OpDeliveriesReport:     app.ReportDelivery{},
 	protocol.OpRunsAskOwner:         app.AskOwner{},
+	protocol.OpRunsYieldQuestion:    app.YieldQuestion{},
 	protocol.OpRunsClaimMessage:     app.ClaimRunMessage{},
 	protocol.OpRunsReportMessage:    app.ReportRunMessage{},
 	protocol.OpWorkspaceReconcile:   app.ReconcileWorkspaces{},

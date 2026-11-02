@@ -113,6 +113,15 @@ func (AskOwner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, erro
 	if err := tx.InsertWorkerQuestion(ctx, store.WorkerQuestionRow{DecisionID: id, RunID: rc.run.RunID, ActionID: rc.action.ActionID, SpecVersion: rc.action.TargetSpecVersion, QuestionKey: p.QuestionKey, PayloadHash: hash, Evidence: p.Evidence, Issues: p.Issues}); err != nil {
 		return Outcome{}, err
 	}
+	var handoff bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT handoff_allowed FROM run_question_contracts WHERE run_id=?`, rc.run.RunID).Scan(&handoff); err != nil {
+		return Outcome{}, err
+	}
+	if handoff {
+		if _, err := tx.Exec(ctx, `INSERT INTO run_question_handoffs(run_id,decision_id) VALUES(?,?)`, rc.run.RunID, id); err != nil {
+			return Outcome{}, err
+		}
+	}
 	// The notification is materialized by persistOutcome in this same transaction.
 	if err := tx.SetDecisionAskedMessage(ctx, id, message); err != nil {
 		return Outcome{}, err
@@ -178,7 +187,9 @@ func (a *App) WorkerQuestion(ctx context.Context, p protocol.Principal, id strin
 func checkQuestionRunRecovery(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) error {
 	supportsQuestions := runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityWorkerQuestions)
 	supportsContext := runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityWorkerQuestionContext)
-	if supportsQuestions && supportsContext {
+	supportsSupervisor := runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilitySupervisorQuestions)
+	supportsHandoffs := runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityQuestionHandoffs)
+	if supportsQuestions && supportsContext && supportsSupervisor && supportsHandoffs {
 		return nil
 	}
 	runs, err := store.ListOpenRunsOnHost(ctx, q, host)
@@ -192,6 +203,24 @@ func checkQuestionRunRecovery(ctx context.Context, q store.Querier, host string,
 		}
 		if desiredFor(run, rc.action, rc.task) == protocol.DesiredStopped {
 			continue
+		}
+		if !supportsHandoffs {
+			var enabled bool
+			if err := q.QueryRowContext(ctx, `SELECT handoff_allowed FROM run_question_contracts WHERE run_id=?`, run.RunID).Scan(&enabled); err != nil {
+				return err
+			}
+			if enabled {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "runner requires issue-question-handoffs-v1 to recover this run")
+			}
+		}
+		if !supportsSupervisor {
+			var supervisor bool
+			if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT supervisor_allowed FROM run_question_contracts WHERE run_id=?),0)`, run.RunID).Scan(&supervisor); err != nil {
+				return err
+			}
+			if supervisor {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "runner requires supervisor-questions-v1 to recover this run's frozen answer contract")
+			}
 		}
 		questions, err := store.ListWorkerQuestions(ctx, q, run.RunID)
 		if err != nil {
@@ -237,7 +266,11 @@ func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d st
 		if err != nil {
 			return nil, err
 		}
-		if desiredFor(rc.run, rc.action, rc.task) == protocol.DesiredStopped {
+		handoff, err := store.QuestionHandoffCurrent(ctx, tx.Q(), rc.run.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if desiredFor(rc.run, rc.action, rc.task) == protocol.DesiredStopped && !handoff {
 			return nil, protocol.Errorf(protocol.CodeStaleRevision, "the question's run no longer applies")
 		}
 	}
@@ -295,6 +328,18 @@ func assignmentQuestions(ctx context.Context, q store.Querier, as *protocol.Assi
 		return err
 	}
 	as.WorkerQuestions = err == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityWorkerQuestions)
+	if err = q.QueryRowContext(ctx, `SELECT COALESCE((SELECT supervisor_allowed FROM run_question_contracts WHERE run_id=?),0)`, as.RunID).Scan(&as.SupervisorQuestions); err != nil {
+		return err
+	}
+	if as.SupervisorQuestions && as.Desired != protocol.DesiredStopped && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilitySupervisorQuestions) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "runner cannot recover the frozen supervisor-question contract without supervisor-questions-v1")
+	}
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT handoff_allowed FROM run_question_contracts WHERE run_id=?),0)`, as.RunID).Scan(&as.QuestionHandoffs); err != nil {
+		return err
+	}
+	if as.QuestionHandoffs && as.Desired != protocol.DesiredStopped && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "runner cannot recover the frozen question handoff contract")
+	}
 	as.QuestionContext = err == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityWorkerQuestionContext)
 	enabled, e := store.RunMessagesEnabled(ctx, q, as.RunID)
 	if e != nil {
@@ -307,5 +352,12 @@ func assignmentQuestions(ctx context.Context, q store.Querier, as *protocol.Assi
 			return fmt.Errorf("app: assignment questions: %w", err)
 		}
 	}
+	continuation, questions, e := store.QuestionContinuationForRun(ctx, q, as.RunID)
+	if e != nil {
+		return e
+	}
+	as.QuestionContinuation = continuation
+	as.Questions = append(questions, as.Questions...)
+
 	return nil
 }

@@ -136,7 +136,9 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 		if err != nil {
 			return facts, err
 		}
+
 		facts.hosts = append(facts.hosts, executionHost{Host: scheduler.Host{
+			QuestionHandoffs:       slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
 			IssueOwners:            slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwner),
 			ContinuationsSupported: slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentContinuation), Continuations: continuations, Executors: executors, IssueManagers: runtime.Runtime.Protocol >= 2 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueManager),
 			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots, Busy: busy,
@@ -153,6 +155,12 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 	v := &protocol.TaskExecutionView{State: protocol.ExecutionIdle}
 	ownerBlocked := t.BlockReason == protocol.BlockWaitingDecision || t.BlockReason == protocol.BlockWaitingApproval ||
 		t.BlockReason == protocol.BlockBudgetExhausted || t.BlockReason == protocol.BlockAcceptanceEnvUnavailable || t.BlockReason == protocol.BlockWorkspaceUnavailable
+	var supervisorBlocked bool
+	if ownerBlocked {
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM decisions d JOIN attentions a ON a.decision_id=d.decision_id JOIN attention_responsibilities r USING(attention_id) WHERE d.task_id=? AND d.status='open' AND d.asked_revision=? AND a.status='open' AND r.recipient_kind<>'owner') AND NOT EXISTS(SELECT 1 FROM decisions d LEFT JOIN attentions a ON a.decision_id=d.decision_id LEFT JOIN attention_responsibilities r USING(attention_id) WHERE d.task_id=? AND d.status='open' AND d.asked_revision=? AND COALESCE(r.recipient_kind,'owner')='owner')`, t.TaskID, t.ControlRevision, t.TaskID, t.ControlRevision).Scan(&supervisorBlocked); err != nil {
+			return nil, err
+		}
+	}
 	runs, err := store.ListRunsByTask(ctx, q, t.TaskID)
 	if err != nil {
 		return nil, err
@@ -198,7 +206,8 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		// Questions from unrelated or historical runs are not execution blockers.
 		if run.ObservedState != protocol.RunUnknown && run.ObservedState != protocol.RunInterrupted {
 			waiting := ownerBlocked && current[run.ActionID]
-			if !waiting && current[run.ActionID] && run.DesiredState != protocol.DesiredStopped {
+			humanBlocked := waiting && !supervisorBlocked
+			if current[run.ActionID] && run.DesiredState != protocol.DesiredStopped {
 				questions, err := store.ListWorkerQuestions(ctx, q, run.RunID)
 				if err != nil {
 					return nil, err
@@ -206,12 +215,19 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 				for _, question := range questions {
 					if question.Status == store.DecisionOpen && question.ActionID == run.ActionID && question.SpecVersion == t.SpecVersion {
 						waiting = true
-						break
+						human, err := store.HumanProblem(ctx, q, "decision", question.DecisionID)
+						if err != nil {
+							return nil, err
+						}
+						humanBlocked = humanBlocked || human
 					}
 				}
 			}
 			if waiting {
 				v.State = protocol.ExecutionWaitingOwner
+				if !humanBlocked {
+					v.State = protocol.ExecutionWaitingSupervisor
+				}
 				return v, nil
 			}
 		}
@@ -257,8 +273,44 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		v.State = protocol.ExecutionPaused
 		return v, nil
 	}
+	for i := len(runs) - 1; i >= 0; i-- {
+		handoff, err := store.GetQuestionHandoff(ctx, q, runs[i].RunID)
+		if err != nil {
+			return nil, err
+		}
+		if handoff == nil || !handoff.Stopped || handoff.SuccessorRunID != "" {
+			continue
+		}
+		valid, err := store.QuestionHandoffCurrent(ctx, q, runs[i].RunID)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			continue
+		}
+		question, err := store.WorkerQuestion(ctx, q, handoff.DecisionID)
+		if err != nil {
+			return nil, err
+		}
+		if question.Status != store.DecisionOpen {
+			continue
+		}
+		human, err := store.HumanProblem(ctx, q, "decision", question.DecisionID)
+		if err != nil {
+			return nil, err
+		}
+		v.State = protocol.ExecutionWaitingSupervisor
+		if human {
+			v.State = protocol.ExecutionWaitingOwner
+		}
+		v.RunID, v.Role = runs[i].RunID, runs[i].Role
+		return v, nil
+	}
 	if ownerBlocked {
 		v.State = protocol.ExecutionWaitingOwner
+		if supervisorBlocked {
+			v.State = protocol.ExecutionWaitingSupervisor
+		}
 		// The failed run explains its unresolved owner decision, but must not
 		// override a later action's scheduling state after retry or spec revision.
 		if len(runs) > 0 && runs[len(runs)-1].ActionID == latestExecutionAction {
@@ -383,6 +435,8 @@ func countExecution(counts *protocol.ExecutionCounts, execution *protocol.TaskEx
 		counts.Accepting++
 	case protocol.ExecutionStarting:
 		counts.Starting++
+	case protocol.ExecutionWaitingSupervisor:
+		counts.WaitingSupervisor++
 	case protocol.ExecutionWaitingOwner:
 		counts.WaitingOwner++
 	case protocol.ExecutionPaused:

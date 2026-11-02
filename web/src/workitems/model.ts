@@ -185,6 +185,7 @@ export function stageProgressLabel(
     counts.running +
     counts.accepting +
     counts.waiting_owner +
+    (counts.waiting_supervisor ?? 0) +
     counts.paused +
     counts.unknown +
     counts.idle;

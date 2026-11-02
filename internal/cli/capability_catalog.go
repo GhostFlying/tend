@@ -69,10 +69,13 @@ func CapabilityBindings() []CapabilityBinding {
 		}
 		out = append(out, binding("issues.followups_"+action, "issue followup "+action, args...))
 	}
-	for _, action := range []string{"create", "update", "respond", "confirm", "withdraw", "present"} {
+	for _, action := range []string{"create", "update", "respond", "confirm", "withdraw", "present", "resolve", "escalate"} {
 		args := []string{"--data", `{}`}
 		if action != "create" {
 			args = append([]string{"sample", "--revision", "2"}, args...)
+		}
+		if action == "resolve" || action == "escalate" {
+			args = append(args, "--epoch", "3", "--reason", "Review original problem")
 		}
 		out = append(out, binding("attentions."+action, "attention "+action, args...))
 	}

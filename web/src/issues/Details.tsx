@@ -1,3 +1,4 @@
+import { isHumanAction } from "../attention/useInboxCount.ts";
 import type { IssueReadingState } from "./reading.ts";
 import { Button, Badge, Menu } from "../ui/index.ts";
 import { useDurableOp } from "../app/useDurableOp.ts";
@@ -175,8 +176,7 @@ export function IssueDetails({
       ?.querySelector("[data-activity-end]")
       ?.scrollIntoView({ block: "end", behavior: "smooth" });
   };
-  const actionable =
-    issue?.attentions?.items?.filter((a) => a.status === "open" && a.kind !== "information") ?? [];
+  const actionable = issue?.attentions?.items?.filter(isHumanAction) ?? [];
   const execution = executionSummary(issue);
   const ended = !!issue && ["closed", "cancelled"].includes(issue.state);
   const statusLabel =
@@ -804,6 +804,7 @@ function executionSummary(issue: IssueView | null): string {
           recovering: "恢复中",
           accepting: "独立验收中",
           waiting_owner: "等待你处理",
+          waiting_supervisor: "等待负责人",
           paused: "已暂停执行",
         } as Record<string, string>
       )[state] ?? (task.execution?.role === "accept" ? "独立验收中" : "实施中");

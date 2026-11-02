@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -41,6 +42,31 @@ func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []s
 		c := &candidates[i]
 		if c.Manager != nil {
 			continue
+		}
+		h, err := store.PendingQuestionHandoff(ctx, q, c.ActionID)
+		if err != nil {
+			return err
+		}
+		if h != nil {
+			c.QuestionHandoff = true
+			run, err := store.GetRun(ctx, q, h.RunID)
+			if err != nil {
+				return err
+			}
+			c.Requirements.HostID = run.HostID
+			current, err := store.RunIssueResponsibilityCurrent(ctx, q, h.RunID)
+			if err != nil {
+				return err
+			}
+			// Matching the same Agent identity cannot revive an answer from an
+			// earlier assignment epoch, including independent review ownership.
+			c.OwnerResponsibilityChanged = !current
+			pin, err := store.GetRunExecution(ctx, q, h.RunID)
+			if err == nil {
+				c.HandoffPin = pin
+			} else if !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
 		}
 		scope, err := store.ResolveTaskIssueScope(ctx, q, c.TaskID)
 		if err != nil {

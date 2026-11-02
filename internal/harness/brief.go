@@ -172,7 +172,13 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 	_ = json.Unmarshal(spec.Spec, &s)
 	var b strings.Builder
 	if spec.AskOwner != nil {
-		b.WriteString("When owner judgment is required, use ask_owner with investigation evidence and a stable question_key. Wait for its answer in this same task; asking does not complete your work. Do not use an implementation result or acceptance verdict just to ask a question.\n\n")
+		if spec.QuestionHandoffs {
+			b.WriteString("Use ask_owner to persist a blocking problem and hand it to the automatically selected upper Issue owner. This ends the current run and releases its slot. Do not continue working or submit a result/verdict after handing off. The responsible answer schedules a new run with the original agreement, question, evidence and answer; it grants no new user authorization.\n\n")
+		} else if spec.SupervisorQuestions {
+			b.WriteString("Submit blocking problems only to your immediate Issue supervisor through ask_owner, using evidence and a stable question_key. That supervisor can be an Agent and escalates unresolved problems through the responsibility chain. Never choose a human recipient or directly request human intervention. An answer stays within the frozen task and grants no new user authorization. Wait in this run; asking is not a result or acceptance verdict.\n\n")
+		} else {
+			b.WriteString("When owner judgment is required, use ask_owner with investigation evidence and a stable question_key. Wait for its answer in this same task; asking does not complete your work. Do not use an implementation result or acceptance verdict just to ask a question.\n\n")
+		}
 	}
 	b.WriteString(observationBrief(spec))
 	b.WriteString(messageBrief(spec))

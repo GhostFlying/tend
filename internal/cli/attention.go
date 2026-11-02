@@ -3,24 +3,29 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"github.com/GhostFlying/tend/internal/protocol"
 	"net/url"
 	"strconv"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func runAttention(ctx context.Context, e *Env, args []string) error {
 	if len(args) == 0 {
-		return usagef("attention expects list|show|create|update|respond|confirm|withdraw|read|archive|replay")
+		return usagef("attention expects list|show|create|update|respond|resolve|escalate|confirm|withdraw|read|archive|replay")
 	}
 	action := args[0]
 	fs := newFlags(e, "attention "+action)
 	data := fs.String("data", "", "inline JSON payload or original Envelope; latest_action_at omitted preserves, 0 clears the deadline")
 	file := fs.String("file", "", "JSON file; - reads stdin")
 	req := fs.String("request-id", "", "original request identity for retry")
-	revision := fs.Int64("revision", -1, "original expected attention revision")
+	revision := fs.Int64("revision", -1, "attention revision; resolve/escalate use responsibility.revision")
+	epoch := fs.Int64("epoch", -1, "resolve/escalate expected responsibility assignment epoch")
+	inferredEpoch := false
 	reason := fs.String("reason", "", "explicit control reason")
 	dry := fs.Bool("dry-run", false, "print the complete request without sending")
-	issue := fs.String("issue", "", "Issue filter")
+	issue := fs.String("issue", "", "origin Issue filter")
+	recipient := fs.String("recipient", "owner", "owner, agent, main or all")
+	responsibleIssue := fs.String("responsible-issue", "", "current handling Issue filter")
 	status := fs.String("status", "", "business state filter")
 	kind := fs.String("kind", "", "attention kind filter")
 	actionable := fs.Bool("actionable-only", false, "only decisions and actions requiring a response")
@@ -41,7 +46,7 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 		if len(pos) != 0 {
 			return usagef("attention list takes no ID")
 		}
-		q := url.Values{"issue_id": {*issue}, "status": {*status}, "kind": {*kind}, "limit": {strconv.Itoa(*limit)}}
+		q := url.Values{"issue_id": {*issue}, "status": {*status}, "kind": {*kind}, "limit": {strconv.Itoa(*limit)}, "recipient": {*recipient}, "responsible_issue_id": {*responsibleIssue}}
 		if *after != "" {
 			q.Set("after", *after)
 		}
@@ -109,6 +114,16 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 				return err
 			}
 			*revision = current.Revision
+			if action == "resolve" || action == "escalate" {
+				if current.Responsibility == nil {
+					return usagef("attention has no delegated responsibility")
+				}
+				*revision = current.Responsibility.Revision
+				if *epoch < 0 && *req == "" {
+					*epoch = current.Responsibility.AssignmentEpoch
+					inferredEpoch = true
+				}
+			}
 		}
 	}
 	if len(body) == 0 {
@@ -116,6 +131,26 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 	}
 	if !json.Valid(body) {
 		return usagef("payload must be JSON")
+	}
+	if action == "resolve" || action == "escalate" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+			return usagef("handling payload must be a JSON object")
+		}
+		if *epoch >= 0 {
+			if _, explicit := fields["expected_assignment_epoch"]; !explicit || !inferredEpoch {
+				fields["expected_assignment_epoch"], _ = json.Marshal(*epoch)
+			}
+		}
+		if *reason != "" {
+			if _, found := fields["reason"]; !found {
+				fields["reason"], _ = json.Marshal(*reason)
+			}
+		}
+		if _, ok := fields["expected_assignment_epoch"]; !ok {
+			return usagef("resolve/escalate require the original --epoch or expected_assignment_epoch with an explicit --revision")
+		}
+		body, _ = json.Marshal(fields)
 	}
 	if *req == "" {
 		*req = e.IDs.New(protocol.PrefixRequest)
@@ -133,7 +168,7 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 }
 func attentionOperation(op string) bool {
 	switch op {
-	case "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "attentions.present":
+	case "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "attentions.present", "attentions.resolve", "attentions.escalate":
 		return true
 	}
 	return false
