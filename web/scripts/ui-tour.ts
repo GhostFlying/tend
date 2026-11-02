@@ -12,6 +12,7 @@ import type {
   TaskDetail,
   AttentionView,
   MessagingMessage,
+  HostedAgentInventory,
 } from "../src/api/generated/api.ts";
 
 const output = process.env.TEND_LAYOUT_OUTPUT ?? "/tmp/tend-ui-tour";
@@ -326,14 +327,27 @@ const server = createServer(async (req, res) => {
     });
   if (p === "/api/v1/hosted-agents")
     return json({
+      accepted_request_id: "tour-hosted-agents",
+      public_sha256: "a".repeat(64),
       configuration_revision: 1,
       state: "registered_staged",
       main_agent_id: "example",
       projection: {
         execution_environment_id: "hosted",
-        format_version: 1,
-        source_kind: "local_file",
-        runtimes: [{ runtime_id: "hosted", revision: 1, kind: "hosted-manager", cli: "traex" }],
+        format_version: 2,
+        source_kind: "inline",
+        runtimes: [
+          {
+            runtime_id: "hosted",
+            revision: 1,
+            kind: "hosted-manager",
+            cli: "traex",
+            declared_purposes: ["main", "issue_manager", "consultation"],
+            enabled: true,
+            registration: "staged",
+            availability: { available: false, reason: "isolation_not_verified" },
+          },
+        ],
         agents: [
           {
             identity: { execution_environment_id: "hosted", local_id: "example" },
@@ -342,12 +356,15 @@ const server = createServer(async (req, res) => {
             runtime_binding_ref: { runtime_id: "hosted", revision: 1 },
             categories: ["planner"],
             purposes: ["main", "issue_manager", "consultation"],
+            requested_model: "GPT-6.1-Sol",
+            requested_effort: "high",
+            registration: "staged",
             enabled: true,
-            availability: { available: false, reason: "not_observed" },
+            availability: { available: false, reason: "isolation_not_verified" },
           },
         ],
       },
-    });
+    } satisfies HostedAgentInventory);
   if (/\/hosts\/[^/]+\/agents$/.test(p))
     return json({
       host_id: host.host_id,
@@ -724,6 +741,28 @@ try {
             }
           };
           for (const control of handles) await probe(control);
+          if (path === "/agents") {
+            const directory = page.getByRole("region", { name: "Agents", exact: true });
+            const row = directory.getByRole("button", { name: /示例负责人/ });
+            assert.equal(await row.getAttribute("aria-pressed"), "false");
+            await row.click();
+            assert.equal(new URL(page.url()).searchParams.get("selected"), "hosted/example");
+            const details =
+              viewport.width <= 1399
+                ? directory.locator('[class*="mobileDetails"]')
+                : directory.getByRole("complementary", { name: "示例负责人 详情", exact: true });
+            await details.getByRole("heading", { name: "示例负责人", exact: true }).waitFor();
+            for (const summary of await details.locator("summary:visible").elementHandles())
+              await probe(summary);
+            if (viewport.width <= 1399) {
+              await directory.getByRole("button", { name: "返回列表", exact: true }).click();
+            } else {
+              assert.equal(await row.getAttribute("aria-pressed"), "true");
+              await row.click();
+            }
+            assert.equal(await row.getAttribute("aria-pressed"), "false");
+            assert.equal(new URL(page.url()).searchParams.has("selected"), false);
+          }
           if (path === "/tasks/task-tour") {
             const open = page.getByRole("button", { name: "展开执行步骤" });
             await open.click();

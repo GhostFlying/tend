@@ -127,10 +127,10 @@ function catalog(host: string): RunnerAgentCatalog {
           const historical: AgentInventoryDefinition = {
             ...agents[0]!,
             identity: { execution_environment_id: host, local_id: "elm" },
-            display_name: `Elm v${version}`,
+            display_name: "Elm",
             revision: version,
-            categories: [version === 2 ? "implementation" : "investigation"],
-            requested_model: version === 2 ? "GPT-6.1-Sol" : "DeepSeek V4.1 Flash",
+            categories: ["implementation"],
+            requested_model: "GPT-6.1-Sol",
             runtime_binding_ref: { runtime_id: "codex", revision: version - 1 },
           };
           return {
@@ -148,7 +148,7 @@ function catalog(host: string): RunnerAgentCatalog {
             },
             runtimes: runtimes.map((runtime) =>
               runtime.runtime_id === "codex"
-                ? { ...runtime, revision: version - 1, cli: version === 2 ? "codex" : "traex" }
+                ? { ...runtime, revision: version - 1, cli: "traex" }
                 : runtime,
             ),
           };
@@ -454,7 +454,7 @@ try {
       await filter.selectOption("");
       await directory.getByRole("tab", { name: "Categories", exact: true }).click();
       await directory.getByRole("button", { name: "Cedar · host-a", exact: true }).waitFor();
-      assert.equal(await directory.getByRole("button", { name: /Elm v/ }).count(), 0);
+      assert.equal(await directory.getByRole("button", { name: /elm · v/ }).count(), 0);
       await page.screenshot({
         path: join(output, `categories-${viewport.width}-${theme}.png`),
         fullPage: false,
@@ -463,19 +463,32 @@ try {
       await detail().getByRole("heading", { name: "Cedar", exact: true }).waitFor();
       await backToList();
       await directory.getByRole("combobox", { name: "类别筛选", exact: true }).selectOption("");
-      assert.equal(await directory.getByRole("button", { name: /Elm v2 elm/ }).isVisible(), false);
+      const historyRow = (version: number) =>
+        directory.getByRole("button", { name: new RegExp(`Elm elm · v${version} · r${version}`) });
+      assert.equal(await historyRow(2).isVisible(), false);
       await directory.getByText("历史定义（2）", { exact: true }).click();
-      await directory.getByRole("button", { name: /Elm v2 elm|Elm v2.*Implementation/ }).click();
+      for (const version of [2, 3])
+        assert(
+          await historyRow(version)
+            .getByText(`elm · v${version} · r${version}`, { exact: true })
+            .isVisible(),
+        );
+      await historyRow(3).scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: join(output, `history-${viewport.width}-${theme}.png`),
+        fullPage: false,
+      });
+      await historyRow(2).click();
       await detail().getByText("绑定与版本", { exact: true }).click();
       await detail().getByText("historical-v2", { exact: true }).waitFor();
-      await detail().getByText("Codex · Orca · codex · v1", { exact: true }).waitFor();
+      await detail().getByText("TraeX · Orca · codex · v1", { exact: true }).waitFor();
       await backToList();
-      await directory.getByRole("button", { name: /Elm v3 elm|Elm v3.*Investigation/ }).click();
+      await historyRow(3).click();
       await detail().getByText("绑定与版本", { exact: true }).click();
       await detail().getByText("historical-v3", { exact: true }).waitFor();
       await detail().getByText("TraeX · Orca · codex · v2", { exact: true }).waitFor();
       await page.reload();
-      await detail().getByRole("heading", { name: "Elm v3", exact: true }).waitFor();
+      await detail().getByRole("heading", { name: "Elm", exact: true }).waitFor();
       await detail().getByText("绑定与版本", { exact: true }).click();
       await detail().getByText("historical-v3", { exact: true }).waitFor();
       await backToList();
