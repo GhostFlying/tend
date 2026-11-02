@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"text/tabwriter"
@@ -14,7 +15,10 @@ func printIssuePage(e *Env, p protocol.IssuePage) error {
 	w := tabwriter.NewWriter(e.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "ISSUE\tTITLE\tSTATE\tOWNER")
 	for _, v := range p.Items {
-		fmt.Fprintf(w, "%s\t%s\t%s / %s\t%s\n", v.IssueID, v.Title, v.State, v.WorkStatus, v.Assignee.Ref)
+		fmt.Fprintf(w, "%s\t%s\t%s / %s\t%s\n", v.IssueID, v.Title, v.State, v.BoardStatus(), v.Assignee.Ref)
+		if v.Board != nil && v.Board.Children != nil {
+			printIssueChildren(w, v.IssueID, v.Board.Children)
+		}
 	}
 	if len(p.Items) == 0 {
 		fmt.Fprintln(w, "No matching Issues.")
@@ -26,7 +30,13 @@ func printIssuePage(e *Env, p protocol.IssuePage) error {
 }
 func printIssueView(e *Env, v protocol.IssueView) error {
 	out := e.Stdout
-	fmt.Fprintf(out, "%s  %s\nState: %s / %s; owner: %s; revision: %d; epoch: %d\n\nGoal: %s\n", v.IssueID, v.Plan.Title, v.State, v.WorkStatus, v.Assignee.Ref, v.Revision, v.AssignmentEpoch, v.Plan.Intent)
+	fmt.Fprintf(out, "%s  %s\nState: %s / %s; owner: %s; revision: %d; epoch: %d\n\nGoal: %s\n", v.IssueID, v.Plan.Title, v.State, v.BoardStatus(), v.Assignee.Ref, v.Revision, v.AssignmentEpoch, v.Plan.Intent)
+	if v.Manager != nil {
+		fmt.Fprintf(out, "Owner session: %s; task: %s\n", v.Manager.State, v.Manager.TaskID)
+	}
+	if v.Children != nil {
+		printIssueChildren(out, v.IssueID, v.Children)
+	}
 	if v.Progress != nil {
 		fmt.Fprintf(out, "Current result: %s\nNext step: %s\n", v.Progress.Summary, v.Progress.NextStep)
 		if v.Progress.IssueRevision != v.Revision {
@@ -45,6 +55,14 @@ func printIssueView(e *Env, v protocol.IssueView) error {
 	}
 	fmt.Fprintln(out, "\nUse --json for the full plan, evidence, history links and execution facts.")
 	return nil
+}
+
+func printIssueChildren(out io.Writer, id string, children *protocol.IssueChildProgress) {
+	fmt.Fprintf(out, "  Children: %d/%d done; %d cancelled; %d executing\n", children.Done, children.Total, children.Cancelled, children.Running)
+	for _, child := range children.Items {
+		fmt.Fprintf(out, "    %s  %s  [%s; %d running; %d accepting; %d unknown; %d waiting_owner]\n", child.IssueID, child.Title, child.Status, child.Execution.Running, child.Execution.Accepting, child.Execution.Unknown, child.Execution.WaitingOwner)
+	}
+	fmt.Fprintf(out, "  All children: tend issue list --parent %s --include-closed (use --limit / --after for pages; --json for full execution facts)\n", id)
 }
 
 func runIssueReadDetail(ctx context.Context, e *Env, args []string) error {

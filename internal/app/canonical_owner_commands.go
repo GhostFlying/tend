@@ -221,6 +221,14 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 			return Outcome{}, err
 		}
 	}
+	if x.coordinationExecution != nil && next.ParentIssueID != "" {
+		events, err := markIssueWorkStarted(ctx, x, tx, next.ParentIssueID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		out.Events = append(out.Events, events...)
+		out.Notify = out.Notify || len(events) > 0
+	}
 	return out, nil
 }
 

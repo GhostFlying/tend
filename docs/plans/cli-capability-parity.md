@@ -13,6 +13,10 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 
 新读取提供可读输出和 --json，既有输出兼容。复杂输入支持 --data / --file / stdin。写入发送前显示 request_id，适用 CAS/epoch 不静默更新；dry-run 导出原 Envelope，重放保留身份和 payload。unknown 明确返回失败并查询原请求。文件经认证流式下载、校验后原子落盘。能力检查核对真实注册表和 CLI 分发，行为测试验证参数与结果。
 
+## Issue 子责任进展（D146）
+
+`issue list --board` 和 `issue show <id>` 提供直接子 Issue 总数、完成数、取消数、实际执行数和最多两项活动优先预览；`--json` 保留完整结构。没有子 Issue 时省略摘要。`issue list --parent <id> --include-closed --limit 50 --after <cursor>` 查看全部直接子 Issue 与各自的执行事实；父自身的 execution 不包含子 Issue 或负责人协调任务。读取不写状态。`issue set-status` 的 request_id、revision、epoch、dry-run 与原请求重放语义保持不变。
+
 ## 能力对照表
 
 下表登记候选全部实际 owner 路由、操作和纳入的本机管理入口。各行的具体 CLI 绑定、游标和输入由命令登记及对应入口测试进一步约束。Web/Telegram 按其实际使用情况覆盖子集；Telegram 消息、附件和 interaction 均复用 owner 业务能力。

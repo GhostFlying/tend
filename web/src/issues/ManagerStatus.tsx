@@ -16,17 +16,13 @@ export function ManagerStatus({
       : manager.state === "waiting"
         ? "等待新进展"
         : manager.state === "running"
-          ? "正在处理本 Issue"
+          ? "负责人会话运行中"
           : manager.state === "queued"
             ? "等待执行资源"
             : lifecycleLabels[manager.state];
   return (
-    <section aria-label="负责人运行状态">
-      <h2>负责人运行</h2>
-      <button className={styles.textLink} onClick={() => onTask(manager.task_id)}>
-        负责人 Agent
-      </button>
-      <p>{phase}</p>
+    <div className={styles.managerStatus} aria-label="负责人运行状态">
+      <span>{phase}</span>
       {manager.control_mode && manager.control_mode !== "managed" && (
         <p>{controlLabels[manager.control_mode]}</p>
       )}
@@ -48,6 +44,9 @@ export function ManagerStatus({
           })}
         </p>
       )}
-    </section>
+      <button className={styles.textLink} onClick={() => onTask(manager.task_id)}>
+        查看运行详情
+      </button>
+    </div>
   );
 }

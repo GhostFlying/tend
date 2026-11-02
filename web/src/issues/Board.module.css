@@ -236,6 +236,55 @@
   font-size: var(--text-caption);
   color: var(--warn-text);
 }
+.children {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+}
+.childrenHead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+.childrenHead > span + span {
+  color: var(--accent);
+}
+.child {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-2);
+  margin-top: var(--space-1);
+  text-align: left;
+  font-size: var(--text-caption);
+}
+.child[data-active="true"] {
+  background: var(--accent-soft);
+}
+.child > span:first-child {
+  flex: none;
+  color: var(--accent);
+}
+.child > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.child small {
+  flex: none;
+  color: var(--label-3);
+  font-size: inherit;
+}
+.childMore {
+  margin-top: var(--space-2);
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
 .flags span {
   padding: 2px 5px;
   border-radius: var(--radius-xs);

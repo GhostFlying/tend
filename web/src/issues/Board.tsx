@@ -24,6 +24,7 @@ import { Close } from "../shell/icons.tsx";
 import { IssueDefinition } from "./Definition.tsx";
 import { IssueHierarchy } from "./Hierarchy.tsx";
 import { AssigneeName } from "./AssigneeName.tsx";
+import { ChildProgress } from "./ChildProgress.tsx";
 import {
   boardColumns,
   blockerLabels,
@@ -577,11 +578,11 @@ const BoardCard = memo(function BoardCard({
       <Button variant="ghost" className={styles.cardTitle} onClick={() => onSelect(item.issue_id)}>
         {item.title}
       </Button>
-      <p className={styles.stage}>
-        {b?.stages_total
-          ? `${b.stage_title || "阶段计划"} · ${b.stages_done}/${b.stages_total} 已完成`
-          : "尚未制定阶段"}
-      </p>
+      {!!b?.stages_total && (
+        <p className={styles.stage}>
+          {b.stage_title || "阶段计划"} · {b.stages_done}/{b.stages_total} 已完成
+        </p>
+      )}
       {!!b?.stages_total && (
         <div className={styles.progress} aria-label={`阶段完成 ${b.stages_done}/${b.stages_total}`}>
           {Array.from({ length: b.stages_total }, (_, index) => (
@@ -603,13 +604,20 @@ const BoardCard = memo(function BoardCard({
             pendingCategoryID={item.board?.pending_manager_category_id}
           />
         </span>
-        <Badge
-          className={styles.execution}
-          tone={b?.execution.unknown || b?.execution.waiting_owner ? "warn" : "neutral"}
-        >
-          {executionLabel(b?.execution)}
-        </Badge>
+        {(!b?.children?.total || executionLabel(b?.execution) !== "暂无执行") && (
+          <Badge
+            className={styles.execution}
+            tone={b?.execution.unknown || b?.execution.waiting_owner ? "warn" : "neutral"}
+          >
+            {b?.children?.total
+              ? `本 Issue · ${executionLabel(b?.execution)}`
+              : executionLabel(b?.execution)}
+          </Badge>
+        )}
       </div>
+      {!!b?.children?.total && (
+        <ChildProgress id={item.issue_id} summary={b.children} onSelect={onSelect} />
+      )}
       {(item.state === "paused" || item.state === "cancelling" || !!b?.attention_count) && (
         <div className={styles.flags}>
           {item.state === "paused" && <Badge tone="warn">暂停新执行</Badge>}

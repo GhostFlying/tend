@@ -191,12 +191,20 @@ func CanonicalIssues(ctx context.Context, q store.Querier, f CanonicalIssueFilte
 		out.More = true
 		ids = ids[:f.Limit]
 	}
+	facts, err := readExecutionFacts(ctx, q)
+	if err != nil {
+		return out, err
+	}
 	for _, id := range ids {
 		issue, err := store.GetCanonicalIssue(ctx, q, id)
 		if err != nil {
 			return out, err
 		}
-		out.Items = append(out.Items, protocol.IssueSummary{IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project})
+		counts, err := facts.issueCounts(ctx, q, id)
+		if err != nil {
+			return out, err
+		}
+		out.Items = append(out.Items, protocol.IssueSummary{IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Execution: &counts})
 	}
 	if out.More && len(ids) > 0 {
 		out.Next = ids[len(ids)-1]

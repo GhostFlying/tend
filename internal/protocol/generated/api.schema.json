@@ -3802,6 +3802,9 @@
         "attention_count": {
           "type": "integer"
         },
+        "children": {
+          "$ref": "#/definitions/IssueChildProgress"
+        },
         "execution": {
           "$ref": "#/definitions/ExecutionCounts"
         },
@@ -3832,6 +3835,70 @@
         "attention_count"
       ],
       "title": "IssueBoardCard",
+      "type": "object"
+    },
+    "IssueChildProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "cancelled": {
+          "type": "integer"
+        },
+        "done": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueChildSummary"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "running": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "done",
+        "cancelled",
+        "running",
+        "items"
+      ],
+      "title": "IssueChildProgress",
+      "type": "object"
+    },
+    "IssueChildSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "$ref": "#/definitions/ExecutionCounts"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/IssueWorkStatus"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "title",
+        "status",
+        "execution"
+      ],
+      "title": "IssueChildSummary",
       "type": "object"
     },
     "IssueClosure": {
@@ -5536,6 +5603,9 @@
         "board": {
           "$ref": "#/definitions/IssueBoardCard"
         },
+        "execution": {
+          "$ref": "#/definitions/ExecutionCounts"
+        },
         "issue_id": {
           "type": "string"
         },
@@ -5750,6 +5820,9 @@
         },
         "attentions": {
           "$ref": "#/definitions/AttentionPage"
+        },
+        "children": {
+          "$ref": "#/definitions/IssueChildProgress"
         },
         "closure": {
           "$ref": "#/definitions/IssueClosure"

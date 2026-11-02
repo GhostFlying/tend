@@ -337,6 +337,20 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+.managerStatus {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+.managerStatus p {
+  margin: 0;
+}
+.managerStatus button {
+  justify-self: start;
+  text-align: left;
+}
 .resultLink {
   display: flex;
   flex-direction: column;

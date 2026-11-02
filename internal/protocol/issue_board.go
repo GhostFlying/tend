@@ -32,19 +32,38 @@ func (c IssueControl) BoardStatus() IssueWorkStatus {
 }
 
 type IssueBoardCard struct {
-	PendingManagerCategoryID string          `json:"pending_manager_category_id,omitempty"`
-	Status                   IssueWorkStatus `json:"status"`
-	StageTitle               string          `json:"stage_title,omitempty"`
-	StagesTotal              int             `json:"stages_total"`
-	StagesDone               int             `json:"stages_done"`
-	Execution                ExecutionCounts `json:"execution"`
-	AttentionCount           int             `json:"attention_count"`
-	NotificationDueAt        int64           `json:"notification_due_at,omitempty"`
+	Children                 *IssueChildProgress `json:"children,omitempty"`
+	PendingManagerCategoryID string              `json:"pending_manager_category_id,omitempty"`
+	Status                   IssueWorkStatus     `json:"status"`
+	StageTitle               string              `json:"stage_title,omitempty"`
+	StagesTotal              int                 `json:"stages_total"`
+	StagesDone               int                 `json:"stages_done"`
+	Execution                ExecutionCounts     `json:"execution"`
+	AttentionCount           int                 `json:"attention_count"`
+	NotificationDueAt        int64               `json:"notification_due_at,omitempty"`
 }
 
 type SetIssueStatusPayload struct {
 	ExpectedAssignmentEpoch int64           `json:"expected_assignment_epoch"`
 	Status                  IssueWorkStatus `json:"status"`
+}
+
+// IssueChildProgress summarizes direct responsibilities, not execution sessions.
+// Items is an activity-prioritized preview; the parent-filtered Issue listing
+// provides the complete, paginated set.
+type IssueChildProgress struct {
+	Total     int                 `json:"total"`
+	Done      int                 `json:"done"`
+	Cancelled int                 `json:"cancelled"`
+	Running   int                 `json:"running"`
+	Items     []IssueChildSummary `json:"items"`
+}
+
+type IssueChildSummary struct {
+	IssueID   string          `json:"issue_id"`
+	Title     string          `json:"title"`
+	Status    IssueWorkStatus `json:"status"`
+	Execution ExecutionCounts `json:"execution"`
 }
 
 type IssueNotificationSettings struct {

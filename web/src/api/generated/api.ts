@@ -96,6 +96,12 @@ export type IssueState = "active" | "paused" | "cancelling" | "cancelled" | "clo
 export type IssueAssigneeKind = "owner" | "agent";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueWorkStatus".
+ */
+export type IssueWorkStatus =
+  "backlog" | "todo" | "in_progress" | "in_review" | "done" | "cancelled";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueEvidenceKind".
  */
 export type IssueEvidenceKind = "acceptance" | "delivery" | "owner_decision" | "upgrade";
@@ -135,12 +141,6 @@ export type IssueFollowOnStatus = "open" | "resolved" | "transferred";
  * via the `definition` "IssueStageStatus".
  */
 export type IssueStageStatus = "planned" | "active" | "done" | "cancelled" | "retired";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueWorkStatus".
- */
-export type IssueWorkStatus =
-  "backlog" | "todo" | "in_progress" | "in_review" | "done" | "cancelled";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "Code".
@@ -644,6 +644,7 @@ export interface IssueView {
   assignment_epoch: number;
   assignment_state: string;
   attentions?: AttentionPage;
+  children?: IssueChildProgress;
   closure?: IssueClosure;
   context_revision?: number;
   conversation?: IssueConversationBinding;
@@ -693,6 +694,44 @@ export interface AttentionPage {
   items: AttentionView[] | null;
   more: boolean;
   next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueChildProgress".
+ */
+export interface IssueChildProgress {
+  cancelled: number;
+  done: number;
+  items: IssueChildSummary[] | null;
+  running: number;
+  total: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueChildSummary".
+ */
+export interface IssueChildSummary {
+  execution: ExecutionCounts;
+  issue_id: string;
+  status: IssueWorkStatus;
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutionCounts".
+ */
+export interface ExecutionCounts {
+  accepting: number;
+  cancelled: number;
+  completed: number;
+  idle: number;
+  paused: number;
+  queued: number;
+  recovering?: number;
+  running: number;
+  starting?: number;
+  unknown: number;
+  waiting_owner: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1945,23 +1984,6 @@ export interface Target {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "ExecutionCounts".
- */
-export interface ExecutionCounts {
-  accepting: number;
-  cancelled: number;
-  completed: number;
-  idle: number;
-  paused: number;
-  queued: number;
-  recovering?: number;
-  running: number;
-  starting?: number;
-  unknown: number;
-  waiting_owner: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ExplainDecisionPayload".
  */
 export interface ExplainDecisionPayload {
@@ -2632,6 +2654,7 @@ export interface IssueSummary {
   assignment_epoch: number;
   assignment_state: string;
   board?: IssueBoardCard;
+  execution?: ExecutionCounts;
   issue_id: string;
   parent_issue_id?: string;
   pending_assignee?: IssueAssignee;
@@ -2648,6 +2671,7 @@ export interface IssueSummary {
  */
 export interface IssueBoardCard {
   attention_count: number;
+  children?: IssueChildProgress;
   execution: ExecutionCounts;
   notification_due_at?: number;
   pending_manager_category_id?: string;

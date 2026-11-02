@@ -155,7 +155,11 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 func claimOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, run store.RunRow, pin *protocol.RunExecutionPin) ([]Event, error) {
 	contract, err := store.GetTaskOwnerContract(ctx, tx.Q(), run.TaskID)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil
+		ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT c.issue_id FROM issue_controls c JOIN task_work_item_owners o ON o.work_item_id=c.issue_id WHERE o.task_id=?`, run.TaskID)
+		if err != nil || len(ids) == 0 {
+			return nil, err
+		}
+		return markIssueWorkStarted(ctx, x, tx, ids[0])
 	}
 	if err != nil {
 		return nil, err
@@ -204,6 +208,15 @@ func claimOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, run store.R
 			}
 			events = out.Events
 		}
+	}
+	started, err := markIssueWorkStarted(ctx, x, tx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	events = append(events, started...)
+	issue, err = store.GetCanonicalIssue(ctx, tx.Q(), issueID)
+	if err != nil {
+		return nil, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO run_issue_responsibilities(run_id,issue_id,assignment_epoch,issue_revision,agent_ref,created_at) VALUES(?,?,?,?,?,?)`, run.RunID, issueID, issue.AssignmentEpoch, issue.Revision, ref, x.Now.UnixMilli())
 	return events, err
