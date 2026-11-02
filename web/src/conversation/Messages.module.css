@@ -148,6 +148,21 @@
 .background summary::-webkit-details-marker {
   display: none;
 }
+.backgroundIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.background[data-layout="issue"] > summary {
+  display: flex;
+  gap: 10px;
+  min-height: 25px;
+}
+.background[data-layout="issue"] .backgroundIcon {
+  width: 25px;
+  height: 25px;
+}
 
 .traceTrigger[data-trace-trigger]::before {
   content: "·";

@@ -549,7 +549,7 @@ function ActivityBlock({
               </div>
             );
           case "system":
-            return <SystemMessage key={row.key} item={row.item} />;
+            return <SystemMessage key={row.key} item={row.item} presentation="issue" />;
           case "block-more":
             return (
               <button key={row.key} onClick={(event) => void more(event.currentTarget)}>

@@ -610,6 +610,28 @@ try {
           issue_id: issue.issue_id,
         })),
       );
+      activity.items!.unshift({
+        id: "hierarchy-background",
+        position: 1000,
+        kind: "conversation",
+        created_at: now - 1,
+        author: "tend",
+        block: {
+          position: 0,
+          more: false,
+          trigger: {
+            message_id: "hierarchy-background-source",
+            seq: 0,
+            kind: "message",
+            author: "system",
+            conversation_id: issue.conversation!.conversation_id!,
+            notice_type: "background_batch",
+            body: "后台来源内容保持可读取。",
+            created_at: new Date(now - 1).toISOString(),
+          },
+          items: [],
+        },
+      });
       await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
       const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
       const trigger = detail.locator("[data-trace-trigger]");
@@ -627,6 +649,40 @@ try {
         await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
         0,
       );
+      assert.equal(
+        await detail.getByRole("button", { name: "查看调度与事件诊断 →", exact: true }).count(),
+        0,
+        "diagnostics does not occupy a standalone page header",
+      );
+      const source = detail.locator('[data-scroll-id="hierarchy-background-source"]');
+      const owner = detail.locator('[data-scroll-id="owner-one"]');
+      const reply = detail.locator('[data-scroll-id="reply-one"]');
+      const alignment = await detail.evaluate((node) => {
+        const x = (selector: string) => node.querySelector(selector)!.getBoundingClientRect().left;
+        return {
+          source: x('[data-scroll-id="hierarchy-background-source"] summary > span:last-child'),
+          owner: x('[data-scroll-id="owner-one"]'),
+          reply: x('[data-scroll-id="reply-one"]'),
+          event: x("[data-event-group] summary > span:nth-child(2)"),
+          icon: x('[data-scroll-id="conversation-one"] [aria-hidden="true"]'),
+          eventIcon: x("[data-event-group] summary > span:first-child"),
+        };
+      });
+      assert(Math.abs(alignment.owner - heading!.x) < 1, "owner body has no history indent");
+      assert(Math.abs(alignment.reply - alignment.owner) < 1, "agent body has no history indent");
+      assert(Math.abs(alignment.icon - alignment.owner) < 1, "avatar stays inside content lane");
+      assert(Math.abs(alignment.eventIcon - alignment.icon) < 1, "event and avatar icons align");
+      assert(Math.abs(alignment.source - alignment.event) < 1, "source and event text align");
+      assert(Math.abs(alignment.source - alignment.icon - 35) < 1, "shared icon and text spacing");
+      assert.equal(await source.getAttribute("open"), null);
+      await source.locator("summary").click();
+      await source.getByText("后台来源内容保持可读取。", { exact: true }).waitFor();
+      await source.locator("summary").click();
+      assert.equal(await source.getAttribute("open"), null);
+      await owner.scrollIntoViewIfNeeded();
+      assert(Math.abs((await owner.boundingBox())!.x - (await reply.boundingBox())!.x) < 1);
+      await detail.locator("[data-issue-scroll]").evaluate((node) => (node.scrollTop = 0));
+      await page.screenshot({ path: join(output, `issue-alignment-${width}.png`) });
       assert.equal(await trigger.getAttribute("aria-expanded"), "false");
       assert.equal(await detail.locator("[data-tool-item]:visible").count(), 0);
       assert.equal(await detail.getByRole("button", { name: "当前 Issue 自引用" }).count(), 0);
@@ -783,8 +839,13 @@ try {
           "successive earlier loads keep unique scroll identities",
         );
       }
+      await detail.getByLabel("更多 Issue 操作").click();
+      await detail.getByRole("button", { name: "调度与事件诊断", exact: true }).click();
+      await page.waitForURL((url) => url.pathname === "/diagnostics");
+      assert.equal(new URL(page.url()).searchParams.get("issue"), issue.issue_id);
+      assert.equal(new URL(page.url()).searchParams.get("tab"), "events");
       console.log(
-        `PASS S11 hierarchy ${width}: single collapsed trigger, flat tail, event links, no self chip or main deliverables`,
+        `PASS S11 hierarchy ${width}: aligned full-width discussion, background disclosure, scoped diagnostics, collapsed trace and stable event history`,
       );
     } finally {
       await context.close();
