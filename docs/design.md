@@ -148,10 +148,11 @@
 | D142 | CLI 覆盖全部用户业务、管理与诊断能力，Web/Telegram 为子集；公开接口登记、完整输入输出、请求恢复、帮助及真实入口验证随能力在同一 PR 完成，覆盖门禁进入 make check。见 docs/plans/cli-capability-parity.md。 | 已实现，未发布 |
 | D143 | Agents 只读目录按主机及执行方式/CLI 组合展示；显式定义热更新保留旧责任完整 pin，双方协商后核验续接候选，新分配仍仅使用当前定义。协议保持 2/1。见 docs/plans/agent-directory-continuation.md。 | 已实现，待验收 |
 | D144 | Runner 原生 rollout 按需预览：原生目录保留原件，runner 持久索引与原生格式 reader，server 仅在内存按需转发；central worker 按冻结 inventory 读取 server 已有原件而不新建正文归档。步骤级 live 与历史共用只读 Web monitor（三轨概览、事件表与记录详情联动）。能力协商后启用独立诊断长轮询，不依赖执行 slot/租约，不启动模型或重复计量。会话/turn 归属、来源缺失与格式缺口显式可见，支持可确认历史，不提供原件副本及打包下载；现有日志与业务事实不变，runner wire 保持 2/1。见 docs/plans/runner-rollout-preview.md。 | 已实现，未发布 |
-| D145 | CI 将静态检查、App/API/mainthread/E2E/其他包的完整 race 分组、Web/全部浏览器回归分配到独立 runner 并行执行；交叉编译仍包含真实 Web 构建。最终同名 check 汇总门禁要求全部依赖成功，失败、取消和跳过均不放行。同一 PR 的旧候选自动取消，main 各次检查独立；本地 make check 仍覆盖同一全集并保持传输隔离。见 docs/plans/ci-parallel-fixtures.md。 | 已实现 |
+| D145 | CI 将静态检查、App/API/mainthread/E2E/其他包的完整 race 分组、Web/全部浏览器回归分配到独立 runner 并行执行；交叉编译仍包含真实 Web 构建。最终同名 check 汇总门禁要求全部依赖成功，失败、取消和跳过均不放行。同一 PR 的旧候选自动取消，main 各次检查独立；本地 make check 覆盖同一全集，调度由 D149 细化。见 docs/plans/ci-parallel-fixtures.md。 | 已实现 |
 | D146 | Issue 工作状态与执行会话分离：实际执行领取、负责人派发子责任时，在原事务内将 active/有效责任下的 todo 及符合条件的父链提升为进行中，普通会话领取不触发，backlog/待检查/人工暂停/交接/终态形成边界。看板与详情追加可选的直接子 Issue 摘要、实际执行数与最多两项预览，完整列表沿既有父筛选分页；无子项不显示空区块，负责人运行事实归入属性。CLI 同步完整读取，runner wire 保持 2/1。见 docs/plans/issue-progress-visibility.md。 | 已实现，未发布 |
 | D147 | SQLite 读池保留最多 8 个空闲连接，复用初始化后的连接；最大读并发、写池单连接、query_only、事务快照及关闭释放保持原合同。见 docs/plans/ci-cache-read-pool.md。 | 已实现 |
 | D148 | CI 分离共享 Go 模块缓存与按职责、工具链和依赖分区的滚动构建缓存，PR 只恢复 main 构建快照，main 成功后发布候选快照并有界保留。Web 构建经本轮 artifact 供两组互斥且完整的浏览器回归与真实产物交叉编译使用，各 fixture 保留独立资产副本和缓存。最终 check 拒绝任一失败、跳过或取消。见 docs/plans/ci-cache-read-pool.md。 | 已实现 |
+| D149 | 本地 make check 按有效 CPU 选择有界组并发、Go 包并行与 App 分片，复用质量、五个完整 race 分组和 Web 检查；低容量机器保持 E2E 独立阶段，显式顺序模式可回退。Web 在每次检查私有临时目录构建，Go embed 目录在整个检查期间保持稳定；失败汇总保留全部检查，取消清理本次拥有的进程组。CI 原有分组与门禁保持。见 docs/plans/local-check-scheduler.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

@@ -5,14 +5,21 @@ PNPM ?= pnpm
 STATICCHECK_VERSION ?= v0.8.2
 PKGS := ./...
 TEST_TIMEOUT ?= 60m
-APP_TEST_SHARDS ?= 1
+APP_TEST_SHARDS ?= 0
+CHECK_JOBS ?= 0
+TEST_COUNT ?= 0
 TEST_GROUP ?= all
 WEB := web
 
 .PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check
 
 ## check: everything that must pass before a commit is merged
-check: ci-check capability-check protocol-check fmt-check vet staticcheck test web-check
+check:
+	$(GO) run ./internal/testkit/check -jobs $(CHECK_JOBS) -shards $(APP_TEST_SHARDS) -count $(TEST_COUNT) -go "$(GO)" -pnpm "$(PNPM)"
+
+.PHONY: go-check
+## go-check: static Go checks and executable interface coverage
+go-check: ci-check capability-check protocol-check fmt-check vet staticcheck
 
 fmt-check:
 	@out="$$(gofmt -l $$(git ls-files '*.go'))"; \
@@ -28,11 +35,7 @@ staticcheck:
 	GOTOOLCHAIN=$$($(GO) env GOVERSION) $(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(PKGS)
 
 test:
-ifeq ($(APP_TEST_SHARDS):$(TEST_GROUP),1:all)
-	$(GO) test -race -timeout $(TEST_TIMEOUT) $(PKGS)
-else
-	$(GO) run ./internal/testkit/racecheck -shards $(APP_TEST_SHARDS) -timeout $(TEST_TIMEOUT) -group $(TEST_GROUP) $(PKGS)
-endif
+	$(GO) run ./internal/testkit/racecheck -go "$(GO)" -shards $(APP_TEST_SHARDS) -count $(TEST_COUNT) -timeout $(TEST_TIMEOUT) -group $(TEST_GROUP) $(PKGS)
 
 ## it: integration tests that need a real harness or tailnet
 it:
