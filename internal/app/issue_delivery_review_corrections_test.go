@@ -90,6 +90,28 @@ func TestDeliveryGitHubMergedSourceRejectsPreMergeBaseBuild(t *testing.T) {
 			if err := json.Unmarshal(op.Result, &created); err != nil {
 				t.Fatal(err)
 			}
+			// Check the final executable contract, not only the typed upgrade gate.
+			// GitHub keeps the historical PR base distinct from the integrated target.
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				_, spec, err := loadTask(t.Context(), tx.Q(), created.TaskID)
+				if err != nil {
+					return err
+				}
+				contract := strings.Join(spec.Constraints, "\n")
+				for _, required := range []string{"merge_sha is an ancestor of target_sha", "build the frozen target_sha", "target " + c.TargetSHA, "base " + c.BaseSHA} {
+					if !strings.Contains(contract, required) {
+						t.Errorf("merged delivery contract lacks %q: %s", required, contract)
+					}
+				}
+				for _, forbidden := range []string{"merge_sha is an ancestor of base_sha", "build the approved current base_sha"} {
+					if strings.Contains(contract, forbidden) {
+						t.Errorf("merged delivery contract directs a pre-merge source: %q", forbidden)
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
 			worker, ok, env := h.claim("linux-1")
 			if !ok || worker.TaskID != created.TaskID {
 				t.Fatal(worker, env)
@@ -191,79 +213,89 @@ func TestDeliveryOpenTargetDriftFencesAnswerTaskClaimAndStart(t *testing.T) {
 }
 
 func TestDeliveryDeferSurvivesPrepareProviderAndBaselineDrift(t *testing.T) {
-	for _, drift := range []string{"validation", "provider", "baseline", "failure"} {
-		t.Run(drift, func(t *testing.T) {
-			h, upgrade := upgradeHarness(t)
-			_, i, source, c := deliveryFixtureOnHarness(t, h)
-			if drift == "baseline" {
-				c.Deploy = true
-				c.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: []string{"linux-1", "linux-2"}}
-				c.DeploymentScope = "controlled deployment, deferred by owner"
-			}
-			reportGitHubCandidate(t, h, i.IssueID, c, true)
-			d := prepareDeliveryForTest(t, h, i.IssueID, source, c)
-			answerDeliveryForTest(t, h, d, "defer", "")
-			c.Validation = "fresh checks on unchanged head"
-			switch drift {
-			case "provider":
-				c.TargetSHA = strings.Repeat("e", 40)
-				reportGitHubCandidate(t, h, i.IssueID, c, true)
-			case "baseline":
-				if op := startTestUpgrade(h, "another-installation", upgrade); op.Status != protocol.OpSucceeded {
-					t.Fatal(op)
+	for _, explanation := range []string{"", "Wait until I explicitly resume this delivery"} {
+		for _, drift := range []string{"validation", "provider", "baseline", "failure"} {
+			t.Run(drift+"/text="+explanation, func(t *testing.T) {
+				h, upgrade := upgradeHarness(t)
+				_, i, source, c := deliveryFixtureOnHarness(t, h)
+				if drift == "baseline" {
+					c.Deploy = true
+					c.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: []string{"linux-1", "linux-2"}}
+					c.DeploymentScope = "controlled deployment, deferred by owner"
 				}
-				batch := upgradeRead(h)
-				op := h.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: batch.View.UpgradeID}, map[string]string{"action": "cancel"}, rev(batch.View.Revision)), ControlUpgrade{})
+				reportGitHubCandidate(t, h, i.IssueID, c, true)
+				d := prepareDeliveryForTest(t, h, i.IssueID, source, c)
+				answerDeliveryForTest(t, h, d, "defer", explanation)
+				deferred := deliveryDutyForTest(t, h, i.IssueID, source)
+				if deferred.Status != "deferred" || deferred.Revision <= d.Revision {
+					t.Fatal("owner deferral was not persisted", deferred)
+				}
+				unchanged := prepareDeliveryForTest(t, h, i.IssueID, source, c)
+				if unchanged.Status != "deferred" || unchanged.Revision != deferred.Revision || unchanged.AttentionID != d.AttentionID {
+					t.Fatal("unchanged prepare erased owner deferral", unchanged)
+				}
+				c.Validation = "fresh checks on unchanged head"
+				switch drift {
+				case "provider":
+					c.TargetSHA = strings.Repeat("e", 40)
+					reportGitHubCandidate(t, h, i.IssueID, c, true)
+				case "baseline":
+					if op := startTestUpgrade(h, "another-installation", upgrade); op.Status != protocol.OpSucceeded {
+						t.Fatal(op)
+					}
+					batch := upgradeRead(h)
+					op := h.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: batch.View.UpgradeID}, map[string]string{"action": "cancel"}, rev(batch.View.Revision)), ControlUpgrade{})
+					if op.Status != protocol.OpSucceeded {
+						t.Fatal(op)
+					}
+					for _, host := range []string{"linux-1", "linux-2"} {
+						upgradeAck(h, host, protocol.RunnerNormal)
+					}
+					reportGitHubCandidate(t, h, i.IssueID, c, true)
+				case "failure":
+					current := canonicalTaskIssue(t, h, i.IssueID)
+					op := h.exec(owner, h.env("issues.refresh_delivery", protocol.Target{Type: "issue", ID: i.IssueID}, protocol.IssueRefreshDeliveryPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, DeliveryID: c.DeliveryID}, rev(current.Revision)), IssueRefreshDelivery{})
+					if op.Status != protocol.OpSucceeded {
+						t.Fatal(op)
+					}
+					var rt protocol.RunnerRuntime
+					if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+						r, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-1")
+						rt = r.Runtime
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+					a := pollDelivery(t, h, "linux-1", rt.InstanceID)
+					if len(a) != 1 {
+						t.Fatal(a)
+					}
+					if op := reportDelivery(t, h, "linux-1", rt.InstanceID, a[0], "", "timeout"); !accepted(t, op) {
+						t.Fatal(op)
+					}
+				}
+				// Both identical and changed prepare requests retain the original deferral.
+				next := prepareDeliveryForTest(t, h, i.IssueID, source, c)
+				if next.Status != "deferred" || next.AttentionID != d.AttentionID || h.count("attentions") != 1 || h.count("issue_delivery_executions") != 0 {
+					t.Fatal(next)
+				}
+				expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), protocol.CodeStaleRevision)
+				reportGitHubCandidate(t, h, i.IssueID, c, true)
+				// This is a new explicit owner command, not an agent's prepare operation.
+				op := updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: source, Action: "resume", Candidate: &c, IssueControlPayload: protocol.IssueControlPayload{Reason: "Owner explicitly resumes after current validation"}})
 				if op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
-				for _, host := range []string{"linux-1", "linux-2"} {
-					upgradeAck(h, host, protocol.RunnerNormal)
+				resumed := deliveryDutyForTest(t, h, i.IssueID, source)
+				if resumed.Status != "awaiting_owner" || resumed.AttentionID == d.AttentionID || h.count("attentions") != 2 {
+					t.Fatal(resumed)
 				}
-				reportGitHubCandidate(t, h, i.IssueID, c, true)
-			case "failure":
-				current := canonicalTaskIssue(t, h, i.IssueID)
-				op := h.exec(owner, h.env("issues.refresh_delivery", protocol.Target{Type: "issue", ID: i.IssueID}, protocol.IssueRefreshDeliveryPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, DeliveryID: c.DeliveryID}, rev(current.Revision)), IssueRefreshDelivery{})
-				if op.Status != protocol.OpSucceeded {
-					t.Fatal(op)
+				expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, resumed), protocol.CodeForbidden)
+				if h.task(source).Lifecycle != protocol.TaskCompleted {
+					t.Fatal("original completed task changed")
 				}
-				var rt protocol.RunnerRuntime
-				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-					r, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-1")
-					rt = r.Runtime
-					return err
-				}); err != nil {
-					t.Fatal(err)
-				}
-				a := pollDelivery(t, h, "linux-1", rt.InstanceID)
-				if len(a) != 1 {
-					t.Fatal(a)
-				}
-				if op := reportDelivery(t, h, "linux-1", rt.InstanceID, a[0], "", "timeout"); !accepted(t, op) {
-					t.Fatal(op)
-				}
-			}
-			// Both identical and changed prepare requests retain the original deferral.
-			next := prepareDeliveryForTest(t, h, i.IssueID, source, c)
-			if next.Status != "deferred" || next.AttentionID != d.AttentionID || h.count("attentions") != 1 || h.count("issue_delivery_executions") != 0 {
-				t.Fatal(next)
-			}
-			expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), protocol.CodeStaleRevision)
-			reportGitHubCandidate(t, h, i.IssueID, c, true)
-			// This is a new explicit owner command, not an agent's prepare operation.
-			op := updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: source, Action: "resume", Candidate: &c, IssueControlPayload: protocol.IssueControlPayload{Reason: "Owner explicitly resumes after current validation"}})
-			if op.Status != protocol.OpSucceeded {
-				t.Fatal(op)
-			}
-			resumed := deliveryDutyForTest(t, h, i.IssueID, source)
-			if resumed.Status != "awaiting_owner" || resumed.AttentionID == d.AttentionID || h.count("attentions") != 2 {
-				t.Fatal(resumed)
-			}
-			expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, resumed), protocol.CodeForbidden)
-			if h.task(source).Lifecycle != protocol.TaskCompleted {
-				t.Fatal("original completed task changed")
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -298,7 +330,7 @@ func TestDeliveryDeferredManagerNeedsCurrentOwnerResumeSource(t *testing.T) {
 	i = canonicalTaskIssue(t, h, i.IssueID)
 
 	d := prepareDeliveryForTest(t, h, i.IssueID, source, c)
-	answerDeliveryForTest(t, h, d, "defer", "")
+	answerDeliveryForTest(t, h, d, "defer", "Wait until I explicitly resume this delivery")
 	var deferMessage string
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		return tx.Q().QueryRowContext(t.Context(), `SELECT d.answered_message_id FROM decisions d JOIN attentions a USING(decision_id) WHERE a.attention_id=?`, d.AttentionID).Scan(&deferMessage)

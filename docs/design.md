@@ -155,7 +155,6 @@
 | D149 | 本地 make check 按有效 CPU 选择有界组并发、Go 包并行与 App 分片，复用质量、五个完整 race 分组和 Web 检查；低容量机器保持 E2E 独立阶段，显式顺序模式可回退。Web 在每次检查私有临时目录构建，Go embed 目录在整个检查期间保持稳定；失败汇总保留全部检查，取消清理本次拥有的进程组。CI 原有分组与门禁保持。见 docs/plans/local-check-scheduler.md。 | 已实现 |
 | D150 | 问题沿 Issue 责任链处理：执行问题先交所属 Issue owner，负责 Agent 无法解决时逐级交父 Issue owner、唯一主协调 Agent；只有人工 owner 或主协调无法解决时形成用户待办。沿原 Attention/Decision 记录版本、assignment epoch、逐跳原因和 Agent 回答来源，不伪造用户授权，不改变独立验收及 unknown 对账。新执行协商 supervisor-questions-v1，历史执行保留原答复合同，wire 保持 2/1。CLI 与具名工具支持原问题读取、回答、上报及恢复；新协商执行提问后结束本轮、释放 slot，父 Issue owner 答复后创建保持原尝试代次的接续 Run，无额外协调容量。见 docs/plans/issue-responsibility-routing.md 与 docs/plans/issue-run-handoffs.md。 | 已实现，未发布 |
 | D151 | 完整 race 检查继续以 Go 动态发现的所有根测试、Example 和 Fuzz seed 为覆盖来源，固定实测成本仅用于分片放置和重包优先调度，新测试自动纳入。高容量本地机器按总测试进程预算选择最多八个 App 分片、每包最多四个 API/mainthread/E2E 分片及最多六个其他包并行；小机器保留 E2E 独立阶段和顺序回退，CI 保持原分组与容量约束。可选 TEST_REPORT_DIR 输出本轮私有原生 JSON 耗时报告，默认保留 Go 原生缓存。E2E、handoff、contextbuilder、runnerapi、tools 的普通空库 fixture 复用不可变模板，显式路径重开及迁移测试保留真实 Open。见 docs/plans/race-tail-latency.md。 | 已实现 |
-
 | D152 | 验收后持久保留独立交付核对责任，具体 PR/head/base/验证/部署范围通过原 taskless versioned Attention 确认，候选或观测失效持久撤销旧授权；owner 重开原子恢复新协调代次，保留 terminal task 和 unknown。API/CLI 同步，runner 2/1。见 docs/plans/delivery-responsibility.md。 | 已实现，待验收 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
@@ -595,3 +594,5 @@ Task 的 completed 仅表示冻结产物通过独立验收。canonical Issue 在
 owner API/CLI/Web 的 reopen 与 named main 的合法 owner 来源共用事务：检查原修订与责任代次、来源版本及祖先，先核对旧协调运行和回执，再建立新协调任务/代次，沿用稳定会话和消息队列。旧协调未结清或 unknown 返回明确对账阻塞，不启动第二个协调者，不修改 finished/failed/unknown implementation。已关闭修订和 closure 历史保留。原请求重放返回原结果，旧 revision 的并发请求不能再次提升代次。重开仅恢复责任，不授予 merge/deploy 权限。详见[实施计划](plans/delivery-responsibility.md)。
 
 D152 验收修正：GitHub 的 `baseRefOid` 仅为 PR base，不能当作当前目标 tip。观测独立读取 `baseRef.target.oid`；merged PR 按 merge 与 target 的不可变 SHA 查询 compare，只有 identical/ahead 且 merge-base 等于该 merge 才记录包含关系。确认候选和问题同时冻结 base 与 target；open 候选合入后仅允许当前目标恰为其 merge 的部署，merged 候选可确认包含该 merge 的当前目标。所有候选/领取/start 校验使用该独立身份，旧事实不得猜测。owner defer 始终保留 deferred 状态，prepare、validation 更新及 provider/baseline 失效不能清除；只有 owner 显式 resume 或当前合法 owner 来源可重新创建确认，原 defer 及更早的 owner 来源不得作为 resume。
+
+D152 执行合同修正：实际 `issues.create_task` 冻结的交付约束与 source guard 使用相同身份。provider_state=merged 时核验 merge_sha 是冻结 target_sha 的祖先并构建 target_sha；base_sha 保留历史 PR base 身份，不能构建为部署来源。open 候选实际合入后核对历史 base 不变、当前目标恰为本次 merge，构建该 merge_sha。最终 spec 由真实版本化答复与创建任务回归读取验证。owner 选择 defer 时可附说明文字，文字不取消延期语义；带说明的答复同样持久阻止 prepare 或观测刷新重新提问，只有合法当前 resume 来源可继续。
