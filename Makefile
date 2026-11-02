@@ -12,7 +12,7 @@ WEB := web
 .PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check
 
 ## check: everything that must pass before a commit is merged
-check: capability-check protocol-check fmt-check vet staticcheck test web-check
+check: ci-check capability-check protocol-check fmt-check vet staticcheck test web-check
 
 fmt-check:
 	@out="$$(gofmt -l $$(git ls-files '*.go'))"; \
@@ -77,3 +77,8 @@ sandbox: web
 capability-check:
 	$(GO) test ./internal/api -run '^TestPublicCapability' -count=1
 	$(GO) test ./internal/cli -run '^TestCapability' -count=1
+
+.PHONY: ci-check
+## ci-check: verify bounded CI cache retention
+ci-check:
+	node --test .github/scripts/*.test.cjs

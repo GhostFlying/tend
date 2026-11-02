@@ -1,0 +1,40 @@
+name: Go with rolling build cache
+description: Restore shared modules and a recent build snapshot for one CI role
+inputs:
+  role:
+    description: Stable CI role that owns the build snapshot
+    required: true
+outputs:
+  build-path:
+    value: ${{ steps.paths.outputs.build }}
+    description: Go build and test cache directory
+  build-key:
+    value: ${{ steps.build.outputs.cache-primary-key }}
+    description: Immutable key for this candidate
+  build-hit:
+    value: ${{ steps.build.outputs.cache-hit }}
+    description: Whether this exact candidate was restored
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      id: go
+      with:
+        go-version-file: go.mod
+        cache: false
+    - id: paths
+      shell: bash
+      run: |
+        echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      with:
+        path: ${{ steps.paths.outputs.modules }}
+        key: go-modules-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+    - uses: actions/cache/restore@v4
+      id: build
+      with:
+        path: ${{ steps.paths.outputs.build }}
+        key: go-build-v2-${{ inputs.role }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          go-build-v2-${{ inputs.role }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,6 +18,13 @@ export function fixtureEnvironment(
     TEND_LAYOUT_APP_ROOT: join(directory, "app"),
     TEND_LAYOUT_CACHE_DIR: join(directory, "cache"),
   };
+}
+
+// CI supplies the artifact built by this workflow. Each fixture still owns a
+// separate copy, so no script can modify another fixture's assets or cache.
+export async function copyFixtureBuild(source: string, destination: string): Promise<void> {
+  await access(join(source, "index.html"));
+  await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
 }
 
 async function run(script: string, args: string[]): Promise<number> {
@@ -50,11 +57,15 @@ async function run(script: string, args: string[]): Promise<number> {
   process.on("SIGINT", interrupt);
   process.on("SIGTERM", terminate);
   try {
-    await build({
-      root,
-      configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
-      build: { outDir: environment.TEND_LAYOUT_APP_ROOT! },
-    });
+    if (process.env.TEND_LAYOUT_BUILD_ROOT) {
+      await copyFixtureBuild(process.env.TEND_LAYOUT_BUILD_ROOT, environment.TEND_LAYOUT_APP_ROOT!);
+    } else {
+      await build({
+        root,
+        configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
+        build: { outDir: environment.TEND_LAYOUT_APP_ROOT! },
+      });
+    }
     if (stopped !== undefined) return stopped;
     return await new Promise<number>((done, reject) => {
       child = spawn(process.execPath, [resolve(root, script), ...args], {
