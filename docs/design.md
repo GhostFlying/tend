@@ -154,6 +154,7 @@
 | D148 | CI 分离共享 Go 模块缓存与按职责、工具链和依赖分区的滚动构建缓存，PR 只恢复 main 构建快照，main 成功后发布候选快照并有界保留。Web 构建经本轮 artifact 供两组互斥且完整的浏览器回归与真实产物交叉编译使用，各 fixture 保留独立资产副本和缓存。最终 check 拒绝任一失败、跳过或取消。见 docs/plans/ci-cache-read-pool.md。 | 已实现 |
 | D149 | 本地 make check 按有效 CPU 选择有界组并发、Go 包并行与 App 分片，复用质量、五个完整 race 分组和 Web 检查；低容量机器保持 E2E 独立阶段，显式顺序模式可回退。Web 在每次检查私有临时目录构建，Go embed 目录在整个检查期间保持稳定；失败汇总保留全部检查，取消清理本次拥有的进程组。CI 原有分组与门禁保持。见 docs/plans/local-check-scheduler.md。 | 已实现 |
 | D150 | 问题沿 Issue 责任链处理：执行问题先交所属 Issue owner，负责 Agent 无法解决时逐级交父 Issue owner、唯一主协调 Agent；只有人工 owner 或主协调无法解决时形成用户待办。沿原 Attention/Decision 记录版本、assignment epoch、逐跳原因和 Agent 回答来源，不伪造用户授权，不改变独立验收及 unknown 对账。新执行协商 supervisor-questions-v1，历史执行保留原答复合同，wire 保持 2/1。CLI 与具名工具支持原问题读取、回答、上报及恢复；新协商执行提问后结束本轮、释放 slot，父 Issue owner 答复后创建保持原尝试代次的接续 Run，无额外协调容量。见 docs/plans/issue-responsibility-routing.md 与 docs/plans/issue-run-handoffs.md。 | 已实现，未发布 |
+| D151 | 完整 race 检查继续以 Go 动态发现的所有根测试、Example 和 Fuzz seed 为覆盖来源，固定实测成本仅用于分片放置和重包优先调度，新测试自动纳入。高容量本地机器按总测试进程预算选择最多八个 App 分片、每包最多四个 API/mainthread/E2E 分片及最多六个其他包并行；小机器保留 E2E 独立阶段和顺序回退，CI 保持原分组与容量约束。可选 TEST_REPORT_DIR 输出本轮私有原生 JSON 耗时报告，默认保留 Go 原生缓存。E2E、handoff、contextbuilder、runnerapi、tools 的普通空库 fixture 复用不可变模板，显式路径重开及迁移测试保留真实 Open。见 docs/plans/race-tail-latency.md。 | 已实现 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 

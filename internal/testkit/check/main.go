@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,14 +22,14 @@ import (
 )
 
 type budget struct {
-	jobs, shards, packages, procs int
-	exclusiveE2E                  bool
+	jobs, shards, suiteShards, packages, procs int
+	exclusiveE2E                               bool
 }
 
-func capacity(cpus, jobs, shards int) (budget, error) {
+func capacity(cpus, jobs, shards, suiteShards int) (budget, error) {
 	cpus = max(1, cpus)
-	if jobs < 0 || jobs > 7 || shards < 0 || shards > 16 {
-		return budget{}, fmt.Errorf("jobs must be 0-7 and shards must be 0-16 (0 selects automatically)")
+	if jobs < 0 || jobs > 7 || shards < 0 || shards > 16 || suiteShards < 0 || suiteShards > 4 {
+		return budget{}, fmt.Errorf("jobs must be 0-7, App shards 0-16 and suite shards 0-4 (0 selects automatically)")
 	}
 	if jobs == 0 {
 		switch {
@@ -43,12 +44,31 @@ func capacity(cpus, jobs, shards int) (budget, error) {
 		}
 	}
 	if shards == 0 {
-		shards = max(1, min(4, cpus/8, jobs))
+		shards = max(1, min(8, cpus/8, 2*jobs))
+		if jobs == 1 {
+			shards = 1
+		}
+	}
+	if suiteShards == 0 {
+		suiteShards = max(1, min(4, cpus/16, jobs))
+		if jobs == 1 {
+			suiteShards = 1
+		}
+	}
+	packages := max(1, min(6, cpus/10))
+	// Budget the largest simultaneously active test-process sets, rather than
+	// treating a four-shard group as one Go process. Static checks and Web each
+	// reserve one slot; their own build/worker parallelism remains bounded.
+	slots := []int{shards, suiteShards, suiteShards, suiteShards, packages, 1, 1}
+	slices.Sort(slots)
+	processes := 0
+	for _, n := range slots[len(slots)-jobs:] {
+		processes += n
 	}
 	return budget{
-		jobs: jobs, shards: shards,
-		packages:     max(1, min(4, cpus/(2*jobs+shards))),
-		procs:        max(1, min(4, cpus/jobs)),
+		jobs: jobs, shards: shards, suiteShards: suiteShards,
+		packages:     packages,
+		procs:        max(1, min(4, cpus/processes)),
 		exclusiveE2E: cpus < 32 || jobs == 1,
 	}, nil
 }
@@ -80,6 +100,7 @@ func tasks(b budget, directory, goTool, pnpm string, count int) (parallel, isola
 		"GOFLAGS":         strings.TrimSpace(os.Getenv("GOFLAGS") + " -p=" + strconv.Itoa(b.packages)),
 		"GOMAXPROCS":      strconv.Itoa(b.procs),
 		"APP_TEST_SHARDS": strconv.Itoa(b.shards),
+		"TEST_SHARDS":     strconv.Itoa(b.suiteShards),
 		"TEST_COUNT":      strconv.Itoa(count),
 	})
 	parallel = append(parallel,
@@ -153,19 +174,20 @@ func check(ctx context.Context, b budget, goTool, pnpm string, count int) error 
 	}
 	defer os.RemoveAll(directory)
 	parallel, isolated := tasks(b, directory, goTool, pnpm, count)
-	fmt.Printf("[check] jobs=%d app-shards=%d Go-package-parallel=%d GOMAXPROCS=%d isolated-e2e=%t\n",
-		b.jobs, b.shards, b.packages, b.procs, b.exclusiveE2E)
+	fmt.Printf("[check] jobs=%d app-shards=%d suite-shards=%d Go-package-parallel=%d GOMAXPROCS=%d isolated-e2e=%t\n",
+		b.jobs, b.shards, b.suiteShards, b.packages, b.procs, b.exclusiveE2E)
 	return schedule(ctx, b.jobs, parallel, isolated, runTask)
 }
 
 func main() {
 	jobs := flag.Int("jobs", 0, "concurrent check groups (0 selects by CPU, 1 selects sequential checks)")
 	shards := flag.Int("shards", 0, "App test shards (0 selects by CPU)")
+	suiteShards := flag.Int("suite-shards", 0, "API, mainthread and E2E shards (0 selects by CPU)")
 	goTool := flag.String("go", "go", "Go executable")
 	pnpm := flag.String("pnpm", "pnpm", "pnpm executable")
 	count := flag.Int("count", 0, "repeat race tests explicitly; 0 keeps Go native caching")
 	flag.Parse()
-	b, err := capacity(runtime.GOMAXPROCS(0), *jobs, *shards)
+	b, err := capacity(runtime.GOMAXPROCS(0), *jobs, *shards, *suiteShards)
 	if err == nil && *count < 0 {
 		err = fmt.Errorf("count must be nonnegative")
 	}

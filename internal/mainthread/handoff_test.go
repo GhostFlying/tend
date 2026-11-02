@@ -173,7 +173,7 @@ func newHandoffFixture(t *testing.T) *handoffFixture {
 	t.Helper()
 	ctx := context.Background()
 	clock := testkit.NewClock()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "tend.db"), clock.Now)
+	db, err := mainFixtureTemplate.Open(ctx, filepath.Join(t.TempDir(), "tend.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

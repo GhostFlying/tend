@@ -31,6 +31,7 @@ import (
 	"github.com/GhostFlying/tend/internal/runnerapi"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 )
 
 const (
@@ -62,9 +63,20 @@ type server struct {
 	ended sync.Once
 }
 
+var serverFixtureTemplate storefixture.Template
+
 func newServer(t *testing.T, ttl time.Duration, clock ...func() time.Time) *server {
 	t.Helper()
-	return openServer(t, ttl, filepath.Join(t.TempDir(), "tend.db"), clock...)
+	now := time.Now
+	if len(clock) > 0 {
+		now = clock[0]
+	}
+	return newServerWithOptions(t, ttl, now)
+}
+
+func newServerWithOptions(t *testing.T, ttl time.Duration, now func() time.Time, options ...app.Option) *server {
+	t.Helper()
+	return startServer(t, ttl, filepath.Join(t.TempDir(), "tend.db"), now, serverFixtureTemplate.Open, options...)
 }
 
 // openServer starts a server on the ledger at path.
@@ -79,8 +91,15 @@ func openServer(t *testing.T, ttl time.Duration, path string, clock ...func() ti
 
 func openServerWithOptions(t *testing.T, ttl time.Duration, path string, now func() time.Time, options ...app.Option) *server {
 	t.Helper()
+	return startServer(t, ttl, path, now, store.Open, options...)
+}
+
+// Fresh fixtures copy immutable bytes; explicit paths and restarts use real Open.
+func startServer(t *testing.T, ttl time.Duration, path string, now func() time.Time,
+	open func(context.Context, string, func() time.Time) (*store.Store, error), options ...app.Option) *server {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	s, err := store.Open(ctx, path, now)
+	s, err := open(ctx, path, now)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
