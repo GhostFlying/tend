@@ -242,8 +242,8 @@ func deliveryDeploymentSource(candidate protocol.IssueDeliveryCandidate, o proto
 			return "", protocol.Errorf(protocol.CodeStaleRevision, "merged deployment source changed")
 		}
 		target = candidate.TargetSHA
-	} else if o.TargetSHA != o.MergeSHA || !o.TargetContainsMerge {
-		return "", protocol.Errorf(protocol.CodeStaleRevision, "main advanced beyond this merge; confirm a current deployment source")
+	} else if o.BaseSHA != candidate.BaseSHA || o.TargetSHA != o.MergeSHA || !o.TargetContainsMerge {
+		return "", protocol.Errorf(protocol.CodeStaleRevision, "approved base or current target changed; confirm a current deployment source")
 	}
 	return target, nil
 }

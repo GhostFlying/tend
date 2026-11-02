@@ -116,7 +116,7 @@ func TestDeliveryGitHubMergedSourceRejectsPreMergeBaseBuild(t *testing.T) {
 }
 
 func TestDeliveryOpenTargetDriftFencesAnswerTaskClaimAndStart(t *testing.T) {
-	for _, boundary := range []string{"answer", "task", "claim", "start"} {
+	for _, boundary := range []string{"answer", "task", "claim", "start", "merge-base"} {
 		t.Run(boundary, func(t *testing.T) {
 			h, upgrade := upgradeHarness(t)
 			_, i, source, c := deliveryFixtureOnHarness(t, h)
@@ -129,7 +129,7 @@ func TestDeliveryOpenTargetDriftFencesAnswerTaskClaimAndStart(t *testing.T) {
 				answerDeliveryForTest(t, h, d, "approve", "")
 			}
 			var task string
-			if boundary == "claim" || boundary == "start" {
+			if boundary == "claim" || boundary == "start" || boundary == "merge-base" {
 				op := createDeliveryExecutionForTest(t, h, i.IssueID, d)
 				if op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
@@ -140,7 +140,7 @@ func TestDeliveryOpenTargetDriftFencesAnswerTaskClaimAndStart(t *testing.T) {
 				}
 				task = created.TaskID
 			}
-			if boundary == "start" {
+			if boundary == "start" || boundary == "merge-base" {
 				worker, ok, env := h.claim("linux-1")
 				if !ok || worker.TaskID != task {
 					t.Fatal(worker, env)
@@ -149,6 +149,10 @@ func TestDeliveryOpenTargetDriftFencesAnswerTaskClaimAndStart(t *testing.T) {
 			}
 			// baseRefOid and head stay fixed while the live target advances.
 			c.TargetSHA = strings.Repeat("e", 40)
+			if boundary == "merge-base" {
+				c.ProviderState, c.MergeSHA = "merged", strings.Repeat("c", 40)
+				c.BaseSHA, c.TargetSHA = strings.Repeat("e", 40), c.MergeSHA
+			}
 			reportGitHubCandidate(t, h, i.IssueID, c, true)
 			expired := deliveryDutyForTest(t, h, i.IssueID, source)
 			if expired.Status != "preparing" || expired.Revision <= d.Revision {
@@ -174,7 +178,7 @@ func TestDeliveryOpenTargetDriftFencesAnswerTaskClaimAndStart(t *testing.T) {
 				if worker, ok, _ := h.claim("linux-1"); ok {
 					t.Fatal("drift acquired run", worker)
 				}
-			case "start":
+			case "start", "merge-base":
 				upgrade.DeliveryTaskID = task
 				upgrade.ArtifactSources = map[string]release.SourceIdentity{upgrade.ServerHash: {Commit: c.TargetSHA}}
 				expectWorkCode(t, startTestUpgrade(h, "drifted-start", upgrade), protocol.CodeStaleRevision)
