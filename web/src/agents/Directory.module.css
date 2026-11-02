@@ -292,7 +292,7 @@
   .location,
   .method,
   .model,
-  .identity small {
+  .identity small:not(.historicalIdentity) {
     display: none;
   }
   .row {

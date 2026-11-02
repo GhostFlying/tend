@@ -450,12 +450,12 @@ function AgentRow({
     <Button
       variant="ghost"
       className={`${styles.row} ${selected ? styles.selected : ""}`}
-      aria-expanded={selected}
+      aria-pressed={selected}
       onClick={(event) => onPick(event.currentTarget)}
     >
       <span className={styles.identity}>
         <strong>{agent.display_name}</strong>
-        <small>
+        <small className={entry.history ? styles.historicalIdentity : undefined}>
           {purpose && `${purpose} · `}
           {agent.identity.local_id}
           {entry.history && ` · v${agent.revision} · r${entry.history.pin.inventory_revision}`}
