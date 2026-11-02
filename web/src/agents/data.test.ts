@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { RunnerAgentCatalog } from "../api/generated/api.ts";
 import type { Reader } from "../live/data.ts";
 import { AgentCatalog } from "./data.ts";
@@ -88,5 +88,95 @@ test("host switch cancels the old inventory and preserves registration, last ava
   calls[0]!.answer({ host_id: "old/host", online: true });
   await old;
   expect(data.runner.state.get().value).toEqual(observation);
+  data.stop();
+});
+
+test("runner names are shared across consumers and current names override retained labels", async () => {
+  const api: Reader = {
+    async get<T>() {
+      return {
+        host_id: "host",
+        online: false,
+        last_heartbeat_at_ms: 1,
+        retained_definitions: [
+          {
+            identity: { execution_environment_id: "host", local_id: "cedar" },
+            display_name: "Old Cedar",
+          },
+        ],
+        projection: {
+          agents: [
+            {
+              identity: { execution_environment_id: "host", local_id: "cedar" },
+              display_name: "青杉",
+            },
+          ],
+        },
+      } as T;
+    },
+  };
+  const data = new AgentCatalog(api);
+  expect(data.runnerFor("host")).toBe(data.runnerFor("host"));
+  data.ensureRunner("host");
+  await data.runnerFor("host").refresh();
+  expect(data.names.get().get("host/cedar")).toBe("青杉");
+  expect(data.catalogs.get().get("host")?.value?.online).toBe(false);
+  data.stop();
+  expect(data.names.get().size).toBe(0);
+});
+
+test("category pagination accumulates earlier pages without duplicating identities", async () => {
+  const api: Reader = {
+    async get<T>(path: string) {
+      return {
+        items: [
+          {
+            category_id: path.includes("after") ? "b" : "a",
+            title: "Category",
+            description: "",
+            state: "active",
+            revision: 1,
+          },
+        ],
+        more: !path.includes("after"),
+        next: "a",
+      } as T;
+    },
+  };
+  const data = new AgentCatalog(api);
+  await data.openCategories("all");
+  await data.openCategories("all", "a");
+  expect(data.categories.state.get().value?.items?.map((c) => c.category_id)).toEqual(["a", "b"]);
+  await data.categories.refresh();
+  expect(data.categories.state.get().value?.items).toHaveLength(2);
+  data.stop();
+});
+
+test("refresh follows fresh category boundaries after insertion", async () => {
+  let ids = ["a", "b"];
+  const api: Reader = {
+    async get<T>(path: string) {
+      const after = new URL(path, "https://fixture.invalid").searchParams.get("after") ?? "";
+      const remaining = ids.filter((id) => id > after);
+      const id = remaining[0];
+      return {
+        items: id
+          ? [{ category_id: id, title: id, description: "", state: "active", revision: 1 }]
+          : [],
+        more: remaining.length > 1,
+        next: id,
+      } as T;
+    },
+  };
+  const data = new AgentCatalog(api);
+  await data.openCategories("all");
+  await data.openCategories("all", "a");
+  ids = ["0", "a", "b"];
+  data.refresh();
+  await vi.waitFor(() =>
+    expect(data.categories.state.get().value?.items?.map((c) => c.category_id)).toEqual(["0", "a"]),
+  );
+  expect(data.categories.state.get().value?.next).toBe("a");
+  expect(data.categories.state.get().value?.more).toBe(true);
   data.stop();
 });

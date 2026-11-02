@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -53,6 +54,10 @@ func readRunnerAgentCatalog(ctx context.Context, q store.Querier, host string, n
 	if err == nil {
 		if runtimeSupportsAgentExecution(&runtime.Runtime) {
 			result.Executors = runtime.Runtime.AgentExecutors
+			result.ContinuationSupported = slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentContinuation)
+			if result.ContinuationSupported {
+				result.Continuations = runtime.Runtime.AgentContinuations
+			}
 		}
 		result.Online = h.Status == store.HostActive && runtime.Online && now-runtime.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds()
 		result.LastHeartbeatAtMillis = runtime.LastHeartbeatAt
@@ -64,6 +69,33 @@ func readRunnerAgentCatalog(ctx context.Context, q store.Querier, host string, n
 		result.Current, result.Projection = &current.Receipt, &current.Projection
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return result, err
+	}
+	result.RetainedExecutions, err = store.RequiredAgentExecutions(ctx, q, host)
+	if err != nil {
+		return result, err
+	}
+	seen := map[protocol.AgentIdentity]bool{}
+	for _, pin := range result.RetainedExecutions {
+		inv, e := store.GetAgentInventoryAt(ctx, q, pin)
+		if errors.Is(e, store.ErrNotFound) {
+			continue
+		}
+		if e != nil {
+			return result, e
+		}
+		for _, r := range inv.Projection.Runtimes {
+			if !slices.ContainsFunc(result.RetainedRuntimes, func(previous protocol.AgentInventoryRuntime) bool {
+				return previous.RuntimeID == r.RuntimeID && previous.Revision == r.Revision
+			}) {
+				result.RetainedRuntimes = append(result.RetainedRuntimes, r)
+			}
+		}
+		for _, a := range inv.Projection.Agents {
+			if a.Identity == pin.Identity && a.Revision == pin.AgentRevision && !seen[a.Identity] {
+				result.RetainedDefinitions = append(result.RetainedDefinitions, a)
+				seen[a.Identity] = true
+			}
+		}
 	}
 	return result, nil
 }

@@ -132,9 +132,13 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 		if err != nil {
 			return facts, err
 		}
+		continuations, err := HostContinuations(ctx, q, h.HostID, 0)
+		if err != nil {
+			return facts, err
+		}
 		facts.hosts = append(facts.hosts, executionHost{Host: scheduler.Host{
-			IssueOwners: slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwner),
-			Executors:   executors, IssueManagers: runtime.Runtime.Protocol >= 2 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueManager),
+			IssueOwners:            slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwner),
+			ContinuationsSupported: slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentContinuation), Continuations: continuations, Executors: executors, IssueManagers: runtime.Runtime.Protocol >= 2 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueManager),
 			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots, Busy: busy,
 			Worker: h.Worker.Capabilities(), WorkspaceProtocol: h.WorkspaceProtocol,
 			TaskInputs:          slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityTaskInputs),

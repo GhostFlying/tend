@@ -56,7 +56,7 @@ export function IssueBoard({
   const { live, client, openTask } = useServices();
   const connection = useStore(client.connection);
   const snapshot = useStore(live.snapshot);
-  const catalog = useStore(live.agents.hosted.state);
+  const agentNames = useStore(live.agents.names);
   const board = live.issues.board;
   const summary = useStore(board.summary);
   useEffect(() => {
@@ -152,12 +152,7 @@ export function IssueBoard({
   );
   const blockedItem = actions.feedback?.item;
   const name = (a: IssueAssignee) =>
-    a.kind === "owner"
-      ? "你 / 待领取"
-      : (catalog.value?.projection.agents?.find(
-          (agent) =>
-            `${agent.identity.execution_environment_id}/${agent.identity.local_id}` === a.ref,
-        )?.display_name ?? "负责人 Agent");
+    a.kind === "owner" ? "你 / 待领取" : (agentNames.get(a.ref) ?? "负责人 Agent");
   const openBlocker = (blocker: IssueBlocker) => {
     actions.setFeedback(null);
     if (blocker.code === "attention" && onInbox) onInbox(blocker.object_id);

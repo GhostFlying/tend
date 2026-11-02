@@ -69,11 +69,13 @@ type RunVerdict struct {
 // that the runner did not report; they never started, so the runner takes
 // them over as if it had just claimed them.
 type HelloResult struct {
-	ProtocolMax        int64          `json:"protocol_max,omitempty"`
-	AgentExecution     bool           `json:"agent_execution,omitempty"`
-	AgentInventory     bool           `json:"agent_inventory,omitempty"`
-	RepositoryBindings bool           `json:"repository_bindings,omitempty"`
-	Control            *RunnerControl `json:"control,omitempty"`
+	AgentContinuation  bool              `json:"agent_continuation,omitempty"`
+	RetainedExecutions []RunExecutionPin `json:"retained_executions,omitempty"`
+	ProtocolMax        int64             `json:"protocol_max,omitempty"`
+	AgentExecution     bool              `json:"agent_execution,omitempty"`
+	AgentInventory     bool              `json:"agent_inventory,omitempty"`
+	RepositoryBindings bool              `json:"repository_bindings,omitempty"`
+	Control            *RunnerControl    `json:"control,omitempty"`
 	// LeaseTTLMillis is the lease duration tend currently grants.
 	LeaseTTLMillis int64        `json:"lease_ttl_ms"`
 	Runs           []RunVerdict `json:"runs"`
@@ -177,9 +179,10 @@ type LeaseRef struct {
 // HeartbeatResult reports, per run, whether the lease was renewed and what
 // tend wants the run to do.
 type HeartbeatResult struct {
-	Control        *RunnerControl `json:"control,omitempty"`
-	LeaseTTLMillis int64          `json:"lease_ttl_ms"`
-	Runs           []LeaseState   `json:"runs"`
+	RetainedExecutions []RunExecutionPin `json:"retained_executions,omitempty"`
+	Control            *RunnerControl    `json:"control,omitempty"`
+	LeaseTTLMillis     int64             `json:"lease_ttl_ms"`
+	Runs               []LeaseState      `json:"runs"`
 }
 
 // LeaseState is the outcome of renewing one lease. A lease that is no

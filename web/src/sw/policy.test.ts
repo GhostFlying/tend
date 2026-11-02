@@ -21,6 +21,7 @@ test("navigations get the page, the network first", () => {
     "/inbox/example",
     "/settings",
     "/settings/agents",
+    "/agents",
     "/chat/example",
     "/repos",
     "/usage",

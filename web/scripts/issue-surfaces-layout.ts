@@ -1338,7 +1338,7 @@ async function captureS4() {
         ["repos", "/repos"],
         ["hosts", "/hosts"],
         ["archive", "/archive"],
-        ["agents", "/settings/agents"],
+        ["agents", "/agents"],
       ]) {
         issue.state = name === "issue-closed" ? "closed" : "active";
         if (name === "issue-closed") await navigate(page, "/issues");
@@ -1369,7 +1369,7 @@ async function captureS4() {
         if (name === "usage") await page.getByText("9,000", { exact: true }).first().waitFor();
         if (name === "repos") await page.getByText("已读取登记。", { exact: true }).waitFor();
         if (name === "settings") await page.getByLabel("空闲分钟", { exact: true }).waitFor();
-        if (name === "agents") await page.getByRole("button", { name: /青竹 planner/ }).waitFor();
+        if (name === "agents") await page.getByRole("button", { name: /青竹/ }).waitFor();
         // Wait for actual fixture content rather than a title-only loading commit.
         if (name!.startsWith("issue-"))
           await page.getByRole("heading", { name: issue.plan.title, exact: true }).waitFor();
@@ -1509,7 +1509,7 @@ async function checkNavigation() {
     assert.equal(await tabs.isVisible(), mobile);
     if (!mobile) {
       assert.equal(width, viewport.width < 1024 ? 64 : 288);
-      assert.equal(await sidebar.getByRole("link").count(), 10);
+      assert.equal(await sidebar.getByRole("link").count(), 11);
       assert.equal(
         await sidebar.getByRole("link", { name: "诊断", exact: true }).getAttribute("href"),
         "/diagnostics",
@@ -1617,7 +1617,7 @@ async function checkNavigation() {
       if (path === "/more" && mobile) {
         const more = page.getByRole("navigation", { name: "更多导航", exact: true });
         await more.waitFor();
-        assert.equal(await more.getByRole("link").count(), 7);
+        assert.equal(await more.getByRole("link").count(), 8);
         await more.getByRole("link", { name: "设置", exact: true }).click();
         await page.getByRole("radiogroup", { name: "主题", exact: true }).waitFor();
       }
@@ -1887,11 +1887,11 @@ try {
       .getByRole("dialog", { name: "会话", exact: true })
       .getByRole("button", { name: "Agent 与类别", exact: true })
       .click();
-    const emptyCatalog = page.getByRole("region", { name: "Agent 与类别", exact: true });
+    const emptyCatalog = page.getByRole("region", { name: "Agents", exact: true });
     await emptyCatalog.getByText("尚未配置托管 Agent", { exact: true }).waitFor();
     assert.equal(await emptyCatalog.getByText(/部分登记暂时无法读取/).count(), 0);
     await page.screenshot({ path: join(output, `catalog-unconfigured-${viewport.width}.png`) });
-    await emptyCatalog.getByRole("button", { name: "← 返回", exact: true }).click();
+    await navigate(page, "/settings");
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -1917,10 +1917,10 @@ try {
       .getByRole("dialog", { name: "会话", exact: true })
       .getByRole("button", { name: "Agent 与类别", exact: true })
       .click();
-    await emptyCatalog.getByRole("button", { name: /青竹 planner/ }).waitFor();
+    await emptyCatalog.getByRole("button", { name: /青竹/ }).first().waitFor();
     assert.equal(await emptyCatalog.getByText("尚未配置托管 Agent", { exact: true }).count(), 0);
     await page.screenshot({ path: join(output, `catalog-configured-${viewport.width}.png`) });
-    await emptyCatalog.getByRole("button", { name: "← 返回", exact: true }).click();
+    await navigate(page, "/settings");
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })
@@ -2217,6 +2217,18 @@ try {
     );
     await page.screenshot({ path: join(output, `issue-followups-${viewport.width}.png`) });
     await openIssueAux(page, "创建任务");
+    const taskForm = detail.getByRole("region", { name: "创建任务", exact: true });
+    const titleStyle = await taskForm
+      .getByRole("textbox", { name: "标题", exact: true })
+      .evaluate((input) => ({
+        labelDisplay: getComputedStyle(input.parentElement!).display,
+        borderWidth: getComputedStyle(input).borderTopWidth,
+      }));
+    assert.deepEqual(titleStyle, { labelDisplay: "grid", borderWidth: "1px" });
+    const createHeight = await taskForm
+      .getByRole("button", { name: "创建任务", exact: true })
+      .evaluate((button) => button.getBoundingClientRect().height);
+    assert(createHeight >= 40, `task form button height: ${createHeight}`);
     await detail.getByRole("textbox", { name: "标题", exact: true }).fill("补齐回滚入口");
     await detail.getByRole("textbox", { name: "目标", exact: true }).fill("记录可核对的回滚步骤。");
     await detail
@@ -2635,27 +2647,34 @@ try {
       rejectedRequest,
     );
     await rejected.getByRole("button", { name: "返回会话", exact: true }).click();
-    await navigate(page, "/settings/agents");
-    const catalogDialog = page.getByRole("region", { name: "Agent 与类别", exact: true });
+    await navigate(page, "/agents");
+    const catalogDialog = page.getByRole("region", { name: "Agents", exact: true });
+    await catalogDialog.getByRole("button", { name: /松风/ }).first().click();
+    if (viewport.width <= 1200)
+      await catalogDialog.getByText("完整定义与观测", { exact: true }).click();
     await catalogDialog
-      .getByRole("button", { name: /松风 implementer/ })
+      .getByText("slug：songfeng", { exact: true })
+      .filter({ visible: true })
       .first()
-      .click();
-    await catalogDialog.getByText("本地 ID：songfeng", { exact: true }).waitFor();
-    await catalogDialog.getByText("未观测", { exact: true }).waitFor();
-    assert.equal(await catalogDialog.getByText("最近上报可用", { exact: true }).count(), 2);
-    assert.equal(await catalogDialog.getByText("离线", { exact: true }).count(), 1);
-    await page.screenshot({ path: join(output, `catalog-${viewport.width}.png`) });
-    await catalogDialog.getByRole("button", { name: "实施 · implementer", exact: true }).click();
+      .waitFor();
     await catalogDialog
-      .getByRole("textbox", { name: "类别说明", exact: true })
-      .fill("按任务冻结约定实施");
-    await catalogDialog.getByRole("button", { name: "保存类别", exact: true }).click();
-    await catalogDialog.getByText("类别已保存。", { exact: true }).waitFor();
-    const categoryWrite = writes.find((w) => w.operation === "categories.put")!;
-    assert.equal(categoryWrite.target.id, "implementer");
-    assert.equal(categoryWrite.expected_control_revision, 1);
-    await catalogDialog.getByRole("button", { name: "← 返回", exact: true }).click();
+      .getByText("未观测", { exact: true })
+      .filter({ visible: true })
+      .first()
+      .waitFor();
+    assert.equal(
+      await catalogDialog.getByRole("button", { name: "新增类别", exact: true }).count(),
+      0,
+    );
+    await page.screenshot({ path: join(output, `catalog-${viewport.width}.png`) });
+    await catalogDialog.getByRole("tab", { name: "Categories", exact: true }).click();
+    await catalogDialog.getByText("实施", { exact: true }).first().waitFor();
+    assert.equal(
+      writes.filter((w) => w.operation === "categories.put").length,
+      0,
+      "catalog is read only",
+    );
+    await navigate(page, "/settings");
     if (mobile)
       await page
         .getByRole("navigation", { name: "视图" })

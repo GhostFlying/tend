@@ -1291,6 +1291,7 @@ export interface RunnerConfiguration {
  * via the `definition` "RunnerRuntime".
  */
 export interface RunnerRuntime {
+  agent_continuations?: AgentExecutor[];
   agent_executors?: AgentExecutor[];
   applied_control_revision: number;
   authorization_deadline_ms?: number;
@@ -1300,6 +1301,7 @@ export interface RunnerRuntime {
   capabilities: string[] | null;
   configuration_sha256?: string;
   confirmed_cancelled_upgrade_id?: string;
+  continuation_backend?: string;
   downloaded_bytes?: number;
   generation: number;
   instance_id: string;
@@ -3310,12 +3312,17 @@ export interface RunRolloutPage {
  * via the `definition` "RunnerAgentCatalog".
  */
 export interface RunnerAgentCatalog {
+  continuation_supported?: boolean;
+  continuations?: AgentExecutor[];
   current?: AgentInventoryReceipt;
   executors?: AgentExecutor[];
   host_id: string;
   last_heartbeat_at_ms: number;
   online: boolean;
   projection?: AgentInventoryProjection;
+  retained_definitions?: AgentInventoryDefinition[];
+  retained_executions?: RunExecutionPin[];
+  retained_runtimes?: AgentInventoryRuntime[];
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

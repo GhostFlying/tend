@@ -48,3 +48,7 @@ func checkNamedRunRecovery(ctx context.Context, q store.Querier, host string, ru
 	}
 	return nil
 }
+
+func runtimeSupportsAgentContinuation(r *protocol.RunnerRuntime) bool {
+	return runtimeSupportsAgentExecution(r) && slices.Contains(r.Capabilities, protocol.CapabilityAgentContinuation)
+}

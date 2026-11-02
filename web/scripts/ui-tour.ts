@@ -612,7 +612,7 @@ const routes = [
   "/usage",
   "/hosts",
   "/settings",
-  "/settings/agents",
+  "/agents",
   "/archive",
   "/upgrades/upgrade-tour",
   "/more",

@@ -178,3 +178,18 @@ test("diagnostic Issue filters are never rewritten as legacy Issue navigation", 
   expect(legacyURL(url)).toBeNull();
   expect(legacyURL("/diagnostics?issue=A&tab=events")).toBeNull();
 });
+
+test("Agent directory filters and selection round trip and old settings route canonicalizes", () => {
+  const route: Route = {
+    page: "agents",
+    tab: "categories",
+    search: "青杉",
+    category: "implementation",
+    environment: "orca/codex",
+    selected: "host/cedar",
+  };
+  expect(parse(href(route))).toEqual(route);
+  expect(href(parse("/settings/agents?selected=host%2Fcedar"))).toBe(
+    "/agents?selected=host%2Fcedar",
+  );
+});

@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 type TaskOwnerContract struct {
+	Execution                                                          *protocol.RunExecutionPin
 	TaskID, IssueID, AgentRef, RuntimeID, Model, Effort, ReviewIssueID string
 	ReviewPlanJSON                                                     string
 	AssignmentEpoch, AgentRevision, RuntimeRevision                    int64
@@ -14,9 +17,31 @@ type TaskOwnerContract struct {
 
 func GetTaskOwnerContract(ctx context.Context, q Querier, task string) (TaskOwnerContract, error) {
 	var c TaskOwnerContract
-	err := q.QueryRowContext(ctx, `SELECT task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json FROM task_owner_contracts WHERE task_id=?`, task).Scan(&c.TaskID, &c.IssueID, &c.AssignmentEpoch, &c.AgentRef, &c.AgentRevision, &c.RuntimeID, &c.RuntimeRevision, &c.Model, &c.Effort, &c.ReviewIssueID, &c.ReviewPlanJSON)
+	var raw string
+	err := q.QueryRowContext(ctx, `SELECT task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,COALESCE(execution_pin_json,'') FROM task_owner_contracts WHERE task_id=?`, task).Scan(&c.TaskID, &c.IssueID, &c.AssignmentEpoch, &c.AgentRef, &c.AgentRevision, &c.RuntimeID, &c.RuntimeRevision, &c.Model, &c.Effort, &c.ReviewIssueID, &c.ReviewPlanJSON, &raw)
 	if err != nil {
 		return c, notFound(err, "task owner contract")
+	}
+	if raw != "" {
+		c.Execution = new(protocol.RunExecutionPin)
+		if err := json.Unmarshal([]byte(raw), c.Execution); err != nil {
+			return c, err
+		}
+	}
+	if c.Execution == nil {
+		m, err := CurrentIssueManagerTask(ctx, q, c.IssueID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return c, err
+		}
+		if err == nil && m.AssignmentEpoch == c.AssignmentEpoch && m.Pin != nil {
+			pin, err := WorkerPinForManager(ctx, q, *m.Pin)
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				return c, err
+			}
+			if err == nil && pin.Identity.ExecutionEnvironmentID+"/"+pin.Identity.LocalID == c.AgentRef && int64(pin.AgentRevision) == c.AgentRevision && pin.Runtime.RuntimeID == c.RuntimeID && int64(pin.Runtime.Revision) == c.RuntimeRevision && pin.Profile.Model == c.Model && pin.Profile.Effort == c.Effort {
+				c.Execution = &pin
+			}
+		}
 	}
 	return c, nil
 }

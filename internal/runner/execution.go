@@ -15,6 +15,14 @@ type ExecutionResolver interface {
 	Resolve(context.Context, protocol.RunExecutionPin) (ResolvedExecution, error)
 }
 
+// ContinuationResolver probes only the pins the server still references. It
+// keeps these observations separate from current selection candidates.
+type ContinuationResolver interface {
+	ContinuationBackend() string
+	SetRetained([]protocol.RunExecutionPin)
+	ObserveRetained(context.Context) ([]protocol.AgentExecutor, error)
+}
+
 type ResolvedExecution struct {
 	Workers      harness.Workers
 	Workspaces   Workspaces

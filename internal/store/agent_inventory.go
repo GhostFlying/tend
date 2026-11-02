@@ -94,3 +94,18 @@ func GetAgentInventorySnapshot(ctx context.Context, q Querier, host, snapshot, h
 	err = json.Unmarshal([]byte(row.CanonicalJSON), &row.Projection)
 	return row, err
 }
+
+// GetAgentInventoryAt reads an immutable historical registration by its full receipt.
+func GetAgentInventoryAt(ctx context.Context, q Querier, p protocol.RunExecutionPin) (AgentInventoryRow, error) {
+	var r AgentInventoryRow
+	var receipt string
+	err := q.QueryRowContext(ctx, `SELECT receipt_json,projection_json FROM agent_inventory_versions WHERE host_id=? AND local_revision=? AND snapshot_id=? AND public_sha256=?`, p.Identity.ExecutionEnvironmentID, p.InventoryRevision, p.SnapshotID, p.PublicSHA256).Scan(&receipt, &r.CanonicalJSON)
+	if err != nil {
+		return r, notFound(err, "retained inventory")
+	}
+	if err = json.Unmarshal([]byte(receipt), &r.Receipt); err != nil {
+		return r, err
+	}
+	err = json.Unmarshal([]byte(r.CanonicalJSON), &r.Projection)
+	return r, err
+}

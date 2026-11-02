@@ -2,6 +2,8 @@ package protocol
 
 import "strings"
 
+const CapabilityAgentContinuation = "runner-agent-continuation-v1"
+
 const CapabilityAgentExecution = "runner-agent-execution-v1"
 
 // AgentRequirement selects metadata; the run role remains separately authorized.

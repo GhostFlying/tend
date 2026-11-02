@@ -145,8 +145,8 @@
 | D139 | 复用目录的 commit 任务缺少继承改动授权时，由 runner 上报明确未启动的有界结构化诊断；当前 Issue owner 修正同一任务合同，保留历史 run，不自动吸收改动或生成用户重试决定。独立 preparation_required 阻塞不能被主机健康扫描清除；旧协议、未知及旧责任仍走原围栏。见 docs/plans/workspace-preparation-recovery.md。 | 已实现，未发布 |
 | D140 | 在 D136 的 owner 责任之上，Issue 对话始终面向负责 Agent：默认请求 issue-manager 类别；同事务建立待领取对话，owner 消息保留原队列，领取后投递；退回 owner 不转发或重发已提交的 owner 消息。看板追加可选只读待领取类别字段，Web 明示待领取及一键委派，沙盒经真实 runner 协议领取负责人。见 docs/plans/web-ui-overhaul-s10.md。 | 已实现 |
 | D141 | 可选集中 TraeX worker loop：中心持有模型认证及原生会话，runner 保留 exec-server、工作区和 Orca 原生 TUI。按冻结 runtime 选择，原 run/thread 绑定、人工接管与停止证明沿既有生命周期；本地模式继续可用，wire 保持 2/1。见 docs/plans/central-traex.md。 | 已实现，未发布 |
-
 | D142 | CLI 覆盖全部用户业务、管理与诊断能力，Web/Telegram 为子集；公开接口登记、完整输入输出、请求恢复、帮助及真实入口验证随能力在同一 PR 完成，覆盖门禁进入 make check。见 docs/plans/cli-capability-parity.md。 | 已实现，未发布 |
+| D143 | Agents 只读目录按主机及执行方式/CLI 组合展示；显式定义热更新保留旧责任完整 pin，双方协商后核验续接候选，新分配仍仅使用当前定义。协议保持 2/1。见 docs/plans/agent-directory-continuation.md。 | 已实现，待验收 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -534,3 +534,7 @@ CLI 是全部用户业务、管理与诊断能力的完整入口；Web、Telegra
 Owner HTTP 路由统一登记，实际 owner/hosted operation 与 CLI 命令绑定在 make check 中核对。别名归并到已有能力，未覆盖的公开入口拒绝通过；入口测试执行真实 CLI 分发并核对 HTTP/socket 与 Envelope。CLI 仍只依赖标准库和 protocol，服务端业务规则、去重、CAS/assignment epoch 及 unknown 对账继续由 app 负责。请求重放保留原身份和输入，不产生第二账本。
 
 本轮补齐会话、消息交互、Issue 状态与通知、决策、任务/运行/交付、归档、用量与目录，并增加只读 doctor 及已有维护入口。本机 Agent 管理只连接原私有 socket。Artifact 详情使用 owner 认证的只读 API 与现有视图，修复 Web 已有调用。新增 owner 能力不改变 runner wire 2/1，不新增存储迁移。实施与验收见 [计划](plans/cli-capability-parity.md)。
+
+## D143：Agents 只读目录与版本续接
+
+主机与运行环境组合分层展示，运行环境由执行方式和 CLI 共同确定；保留 runtime 绑定和 Agent 稳定身份。目录只读，定义经原本机显式 reload 接受。新分配使用当前定义，已有责任继续冻结快照；续接候选由账本引用和 runner 实际核验共同限定，不能用于新分配。能力双向协商后追加 hello/heartbeat 字段，协议仍为 2/1；未协商时原行为不变。原指令、路径和凭据不进入公共目录，历史保留不预占进程或槽位。见 [实施计划](plans/agent-directory-continuation.md)。

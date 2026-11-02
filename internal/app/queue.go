@@ -69,9 +69,13 @@ func schedulingHosts(ctx context.Context, q store.Querier, now int64) ([]schedul
 		if err != nil {
 			return nil, err
 		}
+		continuations, err := views.HostContinuations(ctx, q, h.HostID, now)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, scheduler.Host{
-			Executors: executors,
-			ID:        h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots,
+			ContinuationsSupported: runtimeSupportsAgentContinuation(&runtime.Runtime), Continuations: continuations, Executors: executors,
+			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots,
 			Worker: h.Worker.Capabilities(), WorkspaceProtocol: h.WorkspaceProtocol, TaskInputs: runtimeSupportsTaskInputs(&runtime.Runtime), WorkerObservation: runtimeSupportsObservation(&runtime.Runtime), AcceptanceExecution: slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAcceptanceExecution),
 		})
 	}

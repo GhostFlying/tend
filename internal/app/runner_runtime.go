@@ -22,6 +22,12 @@ func validateRuntime(r *protocol.RunnerRuntime) error {
 	if r == nil {
 		return nil
 	}
+	if r.ContinuationBackend != "" && (!slices.Contains(r.Capabilities, protocol.CapabilityAgentContinuation) || r.ContinuationBackend != "git" && r.ContinuationBackend != "orca") {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid continuation backend")
+	}
+	if len(r.AgentContinuations) > 0 && !slices.Contains(r.Capabilities, protocol.CapabilityAgentContinuation) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "continuation observations require capability")
+	}
 	if len(r.AgentExecutors) > 0 && !slices.Contains(r.Capabilities, protocol.CapabilityAgentExecution) {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "execution observations require capability")
 	}
@@ -108,7 +114,7 @@ func observeRuntime(ctx context.Context, tx *store.Tx, host string, r *protocol.
 			return false, err
 		}
 	}
-	changed := fresh || !old.Online || old.Runtime.InstanceID != r.InstanceID || old.Runtime.Mode != r.Mode || old.Runtime.AppliedControlRevision != r.AppliedControlRevision || old.Runtime.AuthorizationID != r.AuthorizationID || old.Runtime.UpgradeID != r.UpgradeID || old.Runtime.UpgradePhase != r.UpgradePhase || old.Runtime.UpgradeError != r.UpgradeError || old.Runtime.DownloadedBytes != r.DownloadedBytes || old.Runtime.Build != r.Build || !slices.Equal(old.Runtime.Repositories, r.Repositories) || !slices.Equal(old.Runtime.Capabilities, r.Capabilities) || !slices.Equal(old.Runtime.AgentExecutors, r.AgentExecutors)
+	changed := fresh || !old.Online || old.Runtime.InstanceID != r.InstanceID || old.Runtime.Mode != r.Mode || old.Runtime.AppliedControlRevision != r.AppliedControlRevision || old.Runtime.AuthorizationID != r.AuthorizationID || old.Runtime.UpgradeID != r.UpgradeID || old.Runtime.UpgradePhase != r.UpgradePhase || old.Runtime.UpgradeError != r.UpgradeError || old.Runtime.DownloadedBytes != r.DownloadedBytes || old.Runtime.Build != r.Build || !slices.Equal(old.Runtime.Repositories, r.Repositories) || !slices.Equal(old.Runtime.Capabilities, r.Capabilities) || !slices.Equal(old.Runtime.AgentExecutors, r.AgentExecutors) || !slices.Equal(old.Runtime.AgentContinuations, r.AgentContinuations) || old.Runtime.ContinuationBackend != r.ContinuationBackend
 	if err := tx.PutHostRuntime(ctx, host, store.HostRuntimeRow{Runtime: *r, LastHeartbeatAt: now, Online: true}); err != nil {
 		return false, err
 	}
