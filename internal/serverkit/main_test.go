@@ -188,8 +188,6 @@ func TestInjectedTelegramPreparationAndLifecycle(t *testing.T) {
 	t.Setenv("TEND_TEST_TELEGRAM_TOKEN", "isolated-token")
 	for _, preparationFails := range []bool{false, true} {
 		t.Run(fmt.Sprint(preparationFails), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-			defer cancel()
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
@@ -201,7 +199,7 @@ func TestInjectedTelegramPreparationAndLifecycle(t *testing.T) {
 				client.prepareErr = sentinel
 			}
 			initialized := false
-			err = Run(ctx, Config{DataDir: t.TempDir(), Telegram: &TelegramConfig{TokenEnv: "TEND_TEST_TELEGRAM_TOKEN"}}, []byte("isolated-test-secret"), Dependencies{
+			err = Run(t.Context(), Config{DataDir: t.TempDir(), Telegram: &TelegramConfig{TokenEnv: "TEND_TEST_TELEGRAM_TOKEN"}}, []byte("isolated-test-secret"), Dependencies{
 				Listeners: []net.Listener{listener},
 				OpenTelegram: func(a *app.App, token string, log *slog.Logger) (TelegramClient, error) {
 					if a == nil || token != "isolated-token" || log == nil {
@@ -217,6 +215,8 @@ func TestInjectedTelegramPreparationAndLifecycle(t *testing.T) {
 					return nil
 				},
 				Background: func(ctx context.Context, _ *Runtime) error {
+					ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+					defer cancel()
 					select {
 					case <-client.started:
 						return sentinel

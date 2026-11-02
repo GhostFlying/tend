@@ -40,3 +40,7 @@ Agent 定义继续显式 validate/reload/登记，不要求维护。新分配使
 ## 历史定义完整性
 
 历史目录按身份及不可变 snapshot/public hash 保留每份仍被引用的定义，携带代表性原 pin 与该快照的安全 runtime 投影；同一快照的多用途/重复登记不复制定义，完整执行 pin 仍单独返回。同一 Agent 的不同历史快照在 UI/CLI 中均可检查，详情不从当前 runtime 猜测旧绑定。当前名称优先，已移除身份回退到最新被引用登记的名称。此为本 PR 尚未发布的新 owner 只读字段调整，不改 runner wire 或持久化格式。
+
+## CI 生命周期测试的时间边界
+
+完整 CI 中，Telegram 组装测试的 10 秒总 deadline 在数据库迁移阶段耗尽，两个分支均未进入被测的 transport preparation。数据库准备使用测试上下文，10 秒限制仅覆盖组装完成后等待 transport 启动的阶段；继续验证生产 preparation 的独立 deadline、准备失败不初始化及返回前完成 shutdown。不改生产超时或业务行为。
