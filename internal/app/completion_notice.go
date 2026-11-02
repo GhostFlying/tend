@@ -54,7 +54,10 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 			}
 		}
 		if scope.Canonical {
-			fmt.Fprintf(&body, "\n\n事项：%s（%s）。独立验收已通过，等待 owner 核对本事项剩余范围并记录完成核对。任务完成不会自动关闭事项。", item.WorkItemID, item.Title)
+			if err := recordIssueDeliveryDuty(ctx, tx, item.WorkItemID, taskID, sourceEventID, acceptanceID); err != nil {
+				return err
+			}
+			fmt.Fprintf(&body, "\n\n事项：%s（%s）。独立验收已通过，负责人须核对真实交付终点；delivery_duties 独立保留交付责任。准备可审阅 PR/diff 与验证后，用 issues_update_delivery 提出绑定候选及范围的版本化 Attention，在当前 IM 请求 owner 确认。未批准不得合入或部署；批准后按范围继续并验证。任务完成和完成通知核对都不会消除交付责任。", item.WorkItemID, item.Title)
 			continue
 		}
 		fmt.Fprintf(&body, "\n\n工作项：%s（%s）。本轮执行完成不代表后续跟进结束；请核对已有承诺、交付状态和下一步安排；完成阶段后更新计划，仍有阶段责任时用 completion_reviews 明确记录核对结论。若已授权上线则继续；否则在核对现有选择后通过工作项选择卡询问下一步，明确尚需提交、PR、合入或部署的哪些步骤，已决定稍后处理的不要重复问。", item.WorkItemID, item.Title)

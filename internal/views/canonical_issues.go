@@ -95,6 +95,10 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 		out.Tasks = append(out.Tasks, protocol.IssueTaskSummary{TaskID: task.TaskID, Title: task.Title, Lifecycle: task.Lifecycle, ControlMode: task.ControlMode, ControlRevision: task.ControlRevision, SpecVersion: task.SpecVersion, Rating: task.Rating, BlockReason: task.BlockReason, Execution: task.Execution})
 	}
 	out.PendingReviews = current.PendingReviews
+	out.DeliveryDuties, err = store.ListIssueDeliveryDuties(ctx, q, id)
+	if err != nil {
+		return out, err
+	}
 	if err := q.QueryRowContext(ctx, `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, id).Scan(&out.ContextRevision); err != nil {
 		return out, err
 	}

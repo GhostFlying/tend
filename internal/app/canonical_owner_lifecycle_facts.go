@@ -74,6 +74,24 @@ func canonicalOwnerEndpointFacts(ctx context.Context, q store.Querier, current p
 	if err != nil {
 		return facts, err
 	}
+	duties, err := store.ListIssueDeliveryDuties(ctx, q, current.IssueID)
+	if err != nil {
+		return facts, err
+	}
+	for _, d := range duties {
+		if d.Status != "complete" && d.Status != "report" && d.Status != "ended" {
+			facts.OpenAttention = append(facts.OpenAttention, protocol.IssueBlocker{Code: "delivery_responsibility", ObjectID: d.TaskID, Revision: d.Revision})
+		}
+	}
+	descendantDuties, err := store.FollowupIDs(ctx, q, `WITH RECURSIVE descendants(id) AS (
+ SELECT issue_id FROM issue_controls WHERE parent_issue_id=? UNION ALL SELECT c.issue_id FROM issue_controls c JOIN descendants d ON c.parent_issue_id=d.id)
+ SELECT DISTINCT d.issue_id FROM issue_delivery_duties d JOIN descendants s ON s.id=d.issue_id WHERE d.status NOT IN ('complete','report','ended') ORDER BY d.issue_id`, current.IssueID)
+	if err != nil {
+		return facts, err
+	}
+	for _, id := range descendantDuties {
+		facts.OpenAttention = append(facts.OpenAttention, protocol.IssueBlocker{Code: "child_delivery_responsibility", ObjectID: id})
+	}
 	attentionIDs, err := store.FollowupIDs(ctx, q, `SELECT attention_id FROM attentions WHERE issue_id=? AND status='open' AND kind IN ('decision','action') AND json_extract(body_json,'$.blocks_close')=1 ORDER BY attention_id`, current.IssueID)
 	if err != nil {
 		return facts, err

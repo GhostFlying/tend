@@ -30,7 +30,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 				Number                                                    int64
 				Status, URL, UpdatedAt, MergedAt, ClosedAt, MergeCommitId string
 				MergedBy, ClosedBy                                        *codebaseActor
-				SourceBranch                                              *struct {
+				SourceBranch, TargetBranch                                *struct {
 					Commit *struct {
 						ID string `json:"Id"`
 					}
@@ -71,6 +71,9 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 		return Observation{}, &Error{Kind: "unknown_state"}
 	}
 	out := Observation{State: mr.Status, URL: mr.URL, UpdatedAt: mr.UpdatedAt, MergedAt: mr.MergedAt, ClosedAt: mr.ClosedAt, MergeSHA: mr.MergeCommitId, MergedBy: mr.MergedBy.actor()}
+	if mr.TargetBranch != nil && mr.TargetBranch.Commit != nil {
+		out.BaseSHA = mr.TargetBranch.Commit.ID
+	}
 	// The source branch can advance after the review has ended. Its live head
 	// must not replace the commit recorded in the latest review version.
 	var latest int64

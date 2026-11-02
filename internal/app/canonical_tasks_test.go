@@ -188,6 +188,8 @@ func TestCanonicalTaskOwnerExecutionAcceptanceReviewAndClosure(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	endDeliveryForTest(t, h, issue.IssueID, task)
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "close", canonicalLifecycleClosure(issue, protocol.WorkItemClosureCompleted)))
 	beforeReplayEvents, beforeReplayPlan, beforeReplayControl := len(h.events("issue.completions_reviewed")), h.count("work_item_revisions"), h.count("issue_control_revisions")
 	replay := h.exec(owner, env, CanonicalOwnerIssueCommand{Action: "review_completions"})
@@ -419,6 +421,8 @@ func TestCanonicalTaskParentDependsOnChildDoesNotBlockChildClaim(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	endDeliveryForTest(t, h, child.IssueID, ct)
+	child = canonicalTaskIssue(t, h, child.IssueID)
 	close := canonicalLifecycleClosure(child, protocol.WorkItemClosureCompleted)
 	close.CompletionReviews = []protocol.CompletionReviewAcknowledgement{{EventID: reviews[0].EventID, Reason: "Child accepted result verified"}}
 	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "close", close))

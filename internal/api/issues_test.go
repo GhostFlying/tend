@@ -284,6 +284,12 @@ func TestIssueOwnerHTTPNoStageWorkerAcceptanceReviewAndContractRecovery(t *testi
 	if issue.Revision != view.Revision+1 {
 		t.Fatal("completion review lost revision")
 	}
+	var disposition protocol.APIResponse
+	end := e.envelope("issues.update_delivery", review.Target, &issue.Revision, protocol.UpdateIssueDeliveryPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner explicitly ends the remaining delivery responsibility"}, TaskID: task.TaskID, Action: "end"})
+	if status := e.do("POST", "/api/v1/ops", token, end, &disposition); status != http.StatusOK || disposition.Operation == nil || disposition.Operation.Status != protocol.OpSucceeded {
+		t.Fatal(status, disposition)
+	}
+	issue.Revision++
 	closed := issueHTTP(t, e, token, e.envelope("issues.close", review.Target, &issue.Revision, protocol.IssueEndpointPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, Closure: &protocol.IssueClosure{Kind: protocol.WorkItemClosureCompleted, Reason: "Scope achieved", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Owner confirms accepted result and scope"}}}}))
 	if closed.State != protocol.IssueClosed {
 		t.Fatal(closed)

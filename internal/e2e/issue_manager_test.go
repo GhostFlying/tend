@@ -267,6 +267,20 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool) {
 			if !invoke("issues_read", map[string]any{}, &item) {
 				return "failed"
 			}
+			// This task's frozen output is a bounded report, not code integration.
+			// Settle its actual accepted endpoint before closing responsibility.
+			for _, duty := range item.DeliveryDuties {
+				if duty.Status != "preparing" {
+					continue
+				}
+				payload := protocol.UpdateIssueDeliveryPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: item.AssignmentEpoch, Reason: "Read the independently accepted bounded report; no integration scope remains"}, TaskID: duty.TaskID, Action: "report"}
+				if !mutate("issues_update_delivery", payload, &item.Revision, nil) {
+					return "failed"
+				}
+				if !invoke("issues_read", map[string]any{}, &item) {
+					return "failed"
+				}
+			}
 			acknowledgements := []protocol.CompletionReviewAcknowledgement{}
 			for _, pending := range item.PendingReviews {
 				acknowledgements = append(acknowledgements, protocol.CompletionReviewAcknowledgement{EventID: pending.EventID, Reason: "Read the passed independent acceptance and checked remaining scope"})

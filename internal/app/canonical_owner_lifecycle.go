@@ -49,6 +49,7 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 	activation := false
 	var completionReviews []protocol.CompletionReviewAcknowledgement
 	var taskEvents []Event
+	var reopenManager *protocol.RequestIssueManagerPayload
 	switch action {
 	case "pause", "resume", "cancel", "reopen":
 		if err := decodePayload(x.Env, &common); err != nil {
@@ -156,6 +157,10 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 			taskEvents, err = cancelCanonicalPrimaryTasks(ctx, x, tx, current.IssueID)
 		}
 	case "reopen":
+		reopenManager, err = prepareIssueReopen(ctx, x, tx, current, common.canonicalOwnerIssueSource)
+		if err != nil {
+			return Outcome{}, err
+		}
 		next.IssueControl, err = domain.ReopenIssueControl(current.IssueControl)
 		next.Closure = nil
 		activation = true
@@ -263,6 +268,14 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		return Outcome{}, err
 	}
 	out.Events = append(out.Events, taskEvents...)
+	if action == "reopen" {
+		restored, err := restoreReopenedIssueManager(ctx, x, tx, next, reopenManager)
+		if err != nil {
+			return Outcome{}, err
+		}
+		out.Result = restored.Result
+		out.Events = append(out.Events, restored.Events...)
+	}
 	// Canonical save increments context revision through 0043. Review the ended C
 	// share at that final revision; do not mark a shared logical/native turn done.
 	if endpoint != nil {

@@ -380,6 +380,7 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 		t.Fatal("worker workspace did not release")
 	}
 	if unavailable {
+		endDeliveryForTest(t, h, child.IssueID, created.TaskID)
 		original := canonicalTaskIssue(t, h, child.IssueID)
 		var pending []protocol.WorkItemCompletionReview
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -448,6 +449,8 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 	}
 	review := protocol.ReviewIssueCompletionsPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch}, Reviews: []protocol.CompletionReviewAcknowledgement{{EventID: pending[0].EventID, Reason: "Read independent passed acceptance and checked remaining child scope"}}}
 	child = canonicalLifecycleIssue(t, hostedEffect(t, h, manager, turn, 1, protocol.Target{Type: "issue", ID: child.IssueID}, rev(child.Revision), review, CanonicalOwnerIssueCommand{Action: "review_completions"}))
+	endDeliveryForTest(t, h, child.IssueID, created.TaskID)
+	child = canonicalTaskIssue(t, h, child.IssueID)
 	fake := canonicalLifecycleClosure(child, protocol.WorkItemClosureCompleted)
 	forbidden := HostedCoordinationCommand{Command: CanonicalOwnerIssueCommand{Action: "close"}, ExecutionID: turn.RequestID, EffectSeq: 2}
 	if _, err := h.app.Execute(t.Context(), manager, h.env(forbidden.Operation(), protocol.Target{Type: "issue", ID: child.IssueID}, fake, rev(child.Revision)), forbidden); protocol.CodeOf(err) != protocol.CodeForbidden {

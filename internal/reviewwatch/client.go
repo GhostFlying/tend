@@ -38,6 +38,7 @@ type Actor struct {
 
 // Observation records provider facts. Missing actors/times remain unknown.
 type Observation struct {
+	BaseSHA   string `json:"base_sha,omitempty"`
 	State     string `json:"state"`
 	HeadSHA   string `json:"head_sha,omitempty"`
 	MergeSHA  string `json:"merge_sha,omitempty"`
@@ -128,7 +129,7 @@ func commandError(err error) error {
 	return &Error{Kind: "query_failed"}
 }
 
-const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state headRefOid updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
+const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state headRefOid baseRefOid updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
 
 func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 	parts := strings.Split(ref.Repository, "/")
@@ -140,9 +141,9 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 		Data struct {
 			Repository *struct {
 				PullRequest *struct {
-					Number                                                int64 `json:"number"`
-					URL, State, HeadRefOid, UpdatedAt, ClosedAt, MergedAt string
-					MergeCommit                                           *struct {
+					Number                                                            int64 `json:"number"`
+					URL, State, HeadRefOid, BaseRefOid, UpdatedAt, ClosedAt, MergedAt string
+					MergeCommit                                                       *struct {
 						OID string `json:"oid"`
 					}
 					MergedBy      *Actor
@@ -189,7 +190,7 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 	if state != Open && state != Merged && state != Closed {
 		return Observation{}, &Error{Kind: "unknown_state"}
 	}
-	out := Observation{State: state, HeadSHA: pr.HeadRefOid, URL: pr.URL, UpdatedAt: pr.UpdatedAt, MergedAt: pr.MergedAt, ClosedAt: pr.ClosedAt, MergedBy: identity(pr.MergedBy)}
+	out := Observation{BaseSHA: pr.BaseRefOid, State: state, HeadSHA: pr.HeadRefOid, URL: pr.URL, UpdatedAt: pr.UpdatedAt, MergedAt: pr.MergedAt, ClosedAt: pr.ClosedAt, MergedBy: identity(pr.MergedBy)}
 	if pr.MergeCommit != nil {
 		out.MergeSHA = pr.MergeCommit.OID
 	}

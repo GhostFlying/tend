@@ -15,6 +15,7 @@ import (
 )
 
 var issueOperations = map[string]string{
+	"update-delivery":  "issues.update_delivery",
 	"set-status":       "issues.set_status",
 	"request-owner":    protocol.OpIssueRequestOwner,
 	"refresh-delivery": "issues.refresh_delivery", "followups-create": "issues.followups_create", "followups-update": "issues.followups_update", "followups-pause": "issues.followups_pause", "followups-resume": "issues.followups_resume", "followups-cancel": "issues.followups_cancel", "followups-trigger": "issues.followups_trigger",

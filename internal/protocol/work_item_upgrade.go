@@ -2,14 +2,16 @@ package protocol
 
 // UpgradeEvidence freezes verified batch facts, not a product acceptance.
 type UpgradeEvidence struct {
-	UpgradeID      string                `json:"upgrade_id"`
-	Revision       int64                 `json:"revision"`
-	ReleaseID      string                `json:"release_id"`
-	ManifestSHA256 string                `json:"manifest_sha256"`
-	ServerSHA256   string                `json:"server_sha256"`
-	CheckedAt      int64                 `json:"checked_at"`
-	CompletedAt    int64                 `json:"completed_at"`
-	Hosts          []UpgradeEvidenceHost `json:"hosts"`
+	ServerInstance          string                `json:"server_instance,omitempty"`
+	ServerProcessInstanceID string                `json:"server_process_instance_id,omitempty"`
+	UpgradeID               string                `json:"upgrade_id"`
+	Revision                int64                 `json:"revision"`
+	ReleaseID               string                `json:"release_id"`
+	ManifestSHA256          string                `json:"manifest_sha256"`
+	ServerSHA256            string                `json:"server_sha256"`
+	CheckedAt               int64                 `json:"checked_at"`
+	CompletedAt             int64                 `json:"completed_at"`
+	Hosts                   []UpgradeEvidenceHost `json:"hosts"`
 }
 type UpgradeEvidenceHost struct {
 	HostID         string          `json:"host_id"`

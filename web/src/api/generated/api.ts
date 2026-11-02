@@ -379,6 +379,7 @@ export interface TendAPI {
   TriggerQuery?: TriggerQuery;
   TriggerSchedulePage?: TriggerSchedulePage;
   UpdateAttentionPayload?: UpdateAttentionPayload;
+  UpdateIssueDeliveryPayload?: UpdateIssueDeliveryPayload;
   UpdateIssuePayload?: UpdateIssuePayload;
   UpdateIssueProgressPayload?: UpdateIssueProgressPayload;
   UpdateIssueTaskPayload?: UpdateIssueTaskPayload;
@@ -689,6 +690,7 @@ export interface IssueView {
   conversation?: IssueConversationBinding;
   created_at: number;
   deadlines?: IssueDeadline[];
+  delivery_duties?: IssueDeliveryDuty[];
   depends_on: string[] | null;
   historical?: boolean;
   issue_id: string;
@@ -799,6 +801,7 @@ export interface IssueEvidence {
  */
 export interface DeliveryObservation {
   attempted_at?: number;
+  base_sha?: string;
   checked_at?: number;
   closed_at?: string;
   closed_by?: DeliveryActor;
@@ -834,6 +837,8 @@ export interface UpgradeEvidence {
   manifest_sha256: string;
   release_id: string;
   revision: number;
+  server_instance?: string;
+  server_process_instance_id?: string;
   server_sha256: string;
   upgrade_id: string;
 }
@@ -906,6 +911,45 @@ export interface IssueDeadline {
   timezone: string;
   title: string;
   updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryDuty".
+ */
+export interface IssueDeliveryDuty {
+  acceptance_id: string;
+  attention_id?: string;
+  candidate?: IssueDeliveryCandidate;
+  event_id: string;
+  evidence?: IssueEvidence[];
+  execution_task_id?: string;
+  reason?: string;
+  revision: number;
+  status: string;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryCandidate".
+ */
+export interface IssueDeliveryCandidate {
+  base_sha: string;
+  delivery_id: string;
+  deploy: boolean;
+  deployment?: IssueDeliveryDeployment;
+  deployment_scope: string;
+  head_sha: string;
+  provider_state: string;
+  url: string;
+  validation: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryDeployment".
+ */
+export interface IssueDeliveryDeployment {
+  host_ids: string[] | null;
+  server_instance: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1881,6 +1925,7 @@ export interface IssueOwnerRequest {
  * via the `definition` "CreateIssueTaskPayload".
  */
 export interface CreateIssueTaskPayload {
+  delivery_authorization?: IssueDeliveryAuthorization;
   expected_assignment_epoch: number;
   expected_source_revision?: number;
   rating?: Rating;
@@ -1891,6 +1936,14 @@ export interface CreateIssueTaskPayload {
   title: string;
   use_default_workspace?: boolean;
   workspace_name?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryAuthorization".
+ */
+export interface IssueDeliveryAuthorization {
+  revision: number;
+  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2535,6 +2588,7 @@ export interface IssueDeliveryView {
  */
 export interface IssueDeliveryObservation {
   attempted_at?: number;
+  base_sha?: string;
   checked_at?: number;
   closed_at?: string;
   closed_by?: DeliveryActor;
@@ -4197,6 +4251,20 @@ export interface UpdateAttentionPayload {
   latest_action_timezone?: string;
   options?: string[];
   title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdateIssueDeliveryPayload".
+ */
+export interface UpdateIssueDeliveryPayload {
+  action: string;
+  candidate?: IssueDeliveryCandidate;
+  expected_assignment_epoch: number;
+  expected_source_revision?: number;
+  reason?: string;
+  source_message_id?: string;
+  task_id: string;
+  upgrade_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
