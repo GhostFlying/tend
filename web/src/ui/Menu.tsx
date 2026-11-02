@@ -1,19 +1,27 @@
-import { useId, useRef, useEffect, useContext, type ReactNode } from "react";
+import { Fragment, useId, useRef, useEffect, useContext, type ReactNode } from "react";
 import { OverlayVisibility, useOverlayState } from "./focus.ts";
 import { Button, type ButtonProps } from "./Button.tsx";
 import { choiceIndex } from "./Choices.tsx";
 import styles from "./Menu.module.css";
 
-type MenuItem = { id: string; label: ReactNode; disabled?: boolean; onSelect(): void };
+type MenuItem = {
+  id: string;
+  label: ReactNode;
+  disabled?: boolean;
+  separatorBefore?: boolean;
+  onSelect(): void;
+};
 export function Menu({
   label,
   items,
   children,
+  align = "start",
   ...props
 }: Omit<ButtonProps, "children" | "onClick"> & {
   label: string;
   items: readonly MenuItem[];
   children?: ReactNode;
+  align?: "start" | "end";
 }) {
   const id = useId();
   const anchor = `--menu-${id.replace(/[^a-zA-Z0-9-]/g, "")}`;
@@ -70,6 +78,7 @@ export function Menu({
         ref={menu}
         id={id}
         className={styles.menu}
+        data-align={align}
         style={{ positionAnchor: anchor }}
         role="menu"
         aria-label={label}
@@ -101,22 +110,24 @@ export function Menu({
         }}
       >
         {items.map((item, index) => (
-          <button
-            key={item.id}
-            type="button"
-            ref={(entry) => {
-              entries.current[index] = entry;
-            }}
-            role="menuitem"
-            tabIndex={-1}
-            disabled={item.disabled}
-            onClick={() => {
-              close();
-              item.onSelect();
-            }}
-          >
-            {item.label}
-          </button>
+          <Fragment key={item.id}>
+            {item.separatorBefore && <div role="separator" className={styles.separator} />}
+            <button
+              type="button"
+              ref={(entry) => {
+                entries.current[index] = entry;
+              }}
+              role="menuitem"
+              tabIndex={-1}
+              disabled={item.disabled}
+              onClick={() => {
+                close();
+                item.onSelect();
+              }}
+            >
+              {item.label}
+            </button>
+          </Fragment>
         ))}
       </div>
     </>

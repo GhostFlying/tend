@@ -227,21 +227,12 @@
   font-size: var(--text-caption);
   min-height: 36px;
 }
-.milestone > span:nth-child(2) {
+.milestone > span {
   flex: 1;
 }
 .milestone time {
   color: var(--label-3);
   font-size: var(--text-micro);
-}
-.milestoneDot {
-  display: grid;
-  place-items: center;
-  background: var(--bg-l2);
-  border-radius: 50%;
-  height: 24px;
-  width: 24px;
-  flex: none;
 }
 .delivery {
   border: 1px solid var(--border);
@@ -422,36 +413,6 @@
 .loading {
   padding: var(--space-7);
 }
-.menu {
-  position: relative;
-}
-.menu summary {
-  cursor: pointer;
-  list-style: none;
-  padding: var(--space-1) var(--space-2);
-}
-.menu > div {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: var(--z-dropdown);
-  width: 180px;
-  padding: 6px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-2);
-  border-radius: var(--radius-m);
-}
-.menu button {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 9px;
-  border-radius: var(--radius-xs);
-}
-.menu button:hover {
-  background: var(--hover);
-}
 .newItems {
   align-self: center;
   position: sticky;
@@ -609,12 +570,6 @@
   color: var(--label-3);
   font-size: var(--text-caption);
 }
-.milestoneDot {
-  width: 25px;
-  height: 25px;
-  background: var(--bg);
-  color: var(--label-3);
-}
 .eventGroup summary,
 .runList summary {
   display: flex;
@@ -634,7 +589,7 @@
 .eventGroup summary {
   gap: 10px;
 }
-.eventGroup summary > span:not(.milestoneDot) {
+.eventGroup summary > span {
   flex: 1;
 }
 .eventGroup svg,
@@ -645,9 +600,6 @@
 .eventGroup[open] > summary svg,
 .runList[open] > summary svg {
   transform: rotate(90deg);
-}
-.eventGroup > .milestone .milestoneDot {
-  visibility: hidden;
 }
 .delivery {
   border-left: 3px solid var(--ok);
@@ -710,9 +662,6 @@
   color: var(--label);
   font-size: var(--text-body);
 }
-.milestone[data-tone="error"] .milestoneDot {
-  color: var(--danger);
-}
 
 @media (min-width: 761px) {
   .progressExpand[data-clipped="false"] {
@@ -773,4 +722,22 @@
 }
 .runEntry .resultLink {
   min-height: var(--control-m);
+}
+
+.childCreate {
+  margin-block: var(--space-4);
+}
+.historyBoundary {
+  min-height: 1px;
+  position: relative;
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+.historyBoundary > span {
+  position: absolute;
+  bottom: 0;
+}
+.sidebar .sectionHead h2,
+.drawer .sectionHead h2 {
+  margin: 0;
 }

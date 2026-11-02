@@ -660,20 +660,23 @@ try {
       const alignment = await detail.evaluate((node) => {
         const x = (selector: string) => node.querySelector(selector)!.getBoundingClientRect().left;
         return {
-          source: x('[data-scroll-id="hierarchy-background-source"] summary > span:last-child'),
+          source: x('[data-scroll-id="hierarchy-background-source"] summary > span:first-child'),
           owner: x('[data-scroll-id="owner-one"]'),
           reply: x('[data-scroll-id="reply-one"]'),
-          event: x("[data-event-group] summary > span:nth-child(2)"),
+          event: x("[data-event-group] summary > span:first-child"),
           icon: x('[data-scroll-id="conversation-one"] [aria-hidden="true"]'),
-          eventIcon: x("[data-event-group] summary > span:first-child"),
         };
       });
       assert(Math.abs(alignment.owner - heading!.x) < 1, "owner body has no history indent");
       assert(Math.abs(alignment.reply - alignment.owner) < 1, "agent body has no history indent");
       assert(Math.abs(alignment.icon - alignment.owner) < 1, "avatar stays inside content lane");
-      assert(Math.abs(alignment.eventIcon - alignment.icon) < 1, "event and avatar icons align");
       assert(Math.abs(alignment.source - alignment.event) < 1, "source and event text align");
-      assert(Math.abs(alignment.source - alignment.icon - 35) < 1, "shared icon and text spacing");
+      assert(Math.abs(alignment.source - alignment.owner) < 1, "background text aligns with prose");
+      assert(Math.abs(alignment.event - alignment.reply) < 1, "event text aligns with agent prose");
+      assert.equal(
+        await detail.getByRole("button", { name: "查看更早记录", exact: true }).count(),
+        0,
+      );
       assert.equal(await source.getAttribute("open"), null);
       await source.locator("summary").click();
       await source.getByText("后台来源内容保持可读取。", { exact: true }).waitFor();
@@ -755,6 +758,11 @@ try {
       assert.equal(await events.getAttribute("open"), "", "earlier event keeps merged group open");
       assert(await eventSummary.evaluate((node) => document.activeElement === node));
       let earlierStage = 0;
+      let boundaryEnabled = false;
+      let releaseSecondHistory = () => {};
+      const secondHistory = new Promise<void>((resolve) => {
+        releaseSecondHistory = resolve;
+      });
       const boundaryEvents = [50, 60, 130, 150].map((second) => ({
         id: `boundary-${second}`,
         position: 2000 + second,
@@ -766,6 +774,7 @@ try {
       }));
       await page.route("**/api/v1/issues/*/activity?*", async (route) => {
         const cursor = new URL(route.request().url()).searchParams.get("before");
+        if (cursor === "2000") await secondHistory;
         if (cursor) earlierStage = cursor === "2050" ? 1 : 2;
         const rows = [...boundaryEvents];
         if (earlierStage >= 1)
@@ -788,7 +797,7 @@ try {
           json: {
             event_seq: seq,
             items: rows,
-            more: earlierStage < 2,
+            more: boundaryEnabled && earlierStage < 2,
             next_before: earlierStage ? 2000 : 2050,
           },
         });
@@ -815,15 +824,21 @@ try {
           json: {
             event_seq: seq,
             items: rows,
-            more: earlierStage < 2,
+            more: boundaryEnabled && earlierStage < 2,
             next_before: earlierStage ? 2000 : 2050,
           },
         });
       });
       await page.reload();
-      await events.locator("summary").filter({ hasText: "边界进展 50" }).waitFor();
+      await detail.getByRole("textbox", { name: "消息", exact: true }).waitFor();
+      boundaryEnabled = true;
+      publish();
+      await detail.locator("[data-history-boundary]").waitFor({ state: "attached" });
+      await detail.locator("[data-issue-scroll]").evaluate((node) => {
+        node.querySelector("[data-history-boundary]")?.scrollIntoView({ block: "start" });
+      });
       for (const count of [5, 6]) {
-        await detail.getByRole("button", { name: "查看更早记录", exact: true }).click();
+        if (count === 6) releaseSecondHistory();
         await events
           .locator("summary")
           .filter({ hasText: count === 5 ? "边界进展 0" : "边界进展 更早" })
@@ -839,8 +854,37 @@ try {
           "successive earlier loads keep unique scroll identities",
         );
       }
-      await detail.getByLabel("更多 Issue 操作").click();
-      await detail.getByRole("button", { name: "调度与事件诊断", exact: true }).click();
+      const more = detail.getByRole("button", { name: "更多 Issue 操作", exact: true });
+      await more.click();
+      const menu = detail.getByRole("menu", { name: "更多 Issue 操作", exact: true });
+      await menu.waitFor();
+      assert.equal(await menu.getByRole("menuitem").count(), 4);
+      assert.equal(await menu.getByRole("separator").count(), 2);
+      assert.equal(
+        await menu.getByRole("button").count(),
+        0,
+        "menu entries are actions, not bordered buttons",
+      );
+      assert(
+        await menu
+          .getByRole("menuitem", { name: "编辑定义", exact: true })
+          .evaluate((node) => document.activeElement === node),
+      );
+      await page.keyboard.press("ArrowDown");
+      assert(
+        await menu
+          .getByRole("menuitem", { name: "新增子 Issue", exact: true })
+          .evaluate((node) => document.activeElement === node),
+      );
+      await page.keyboard.press("Escape");
+      await menu.waitFor({ state: "hidden" });
+      assert(await more.evaluate((node) => document.activeElement === node));
+      await more.click();
+      await detail.getByRole("heading", { name: "讨论与进展", exact: true }).click();
+      await menu.waitFor({ state: "hidden" });
+      await more.click();
+      await page.screenshot({ path: join(output, `issue-menu-${width}.png`) });
+      await menu.getByRole("menuitem", { name: "调度与事件诊断", exact: true }).click();
       await page.waitForURL((url) => url.pathname === "/diagnostics");
       assert.equal(new URL(page.url()).searchParams.get("issue"), issue.issue_id);
       assert.equal(new URL(page.url()).searchParams.get("tab"), "events");
@@ -852,6 +896,89 @@ try {
       activity.items = original;
       issue.plan = originalPlan;
       issue.progress!.summary = originalProgress;
+    }
+  }
+  {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    let historyAttempts = 0;
+    let allowHistory = false;
+    let historyEnabled = false;
+    const historyEntries = Array.from({ length: 6 }, (_, index) => ({
+      id: `complete-history-${index}`,
+      position: index + 1,
+      kind: "conversation",
+      created_at: now + index,
+      author: "你",
+      block: {
+        position: index + 1,
+        more: false,
+        trigger: {
+          message_id: `complete-owner-${index}`,
+          seq: index + 1,
+          kind: "message",
+          author: "owner",
+          body: `完整历史输入 ${index + 1}`,
+          state: "replied",
+          created_at: new Date(now + index).toISOString(),
+        },
+        items: [],
+      },
+    }));
+    await page.route("**/api/v1/issues/*/activity**", async (route) => {
+      const before = new URL(route.request().url()).searchParams.get("before");
+      if (before) {
+        historyAttempts++;
+        if (!allowHistory) {
+          await route.fulfill({ status: 503, json: { error: { code: "unavailable" } } });
+          return;
+        }
+      }
+      await route.fulfill({
+        json: {
+          items: before ? historyEntries.slice(0, 1) : historyEntries.slice(1),
+          more: !before && historyEnabled,
+          ...(before ? {} : { next_before: 2 }),
+          event_seq: seq,
+        },
+      });
+    });
+    try {
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+      await detail.locator('[data-scroll-id="complete-owner-1"]').waitFor();
+      assert.equal(
+        await detail.locator('[data-scroll-id^="complete-owner-"]').count(),
+        5,
+        "all five loaded rounds render without a three-round fold",
+      );
+      await detail.getByRole("textbox", { name: "消息", exact: true }).waitFor();
+      historyEnabled = true;
+      publish();
+      await detail.locator("[data-history-boundary]").waitFor({ state: "attached" });
+      await detail.locator("[data-issue-scroll]").evaluate((node) => {
+        node.querySelector("[data-history-boundary]")?.scrollIntoView({ block: "start" });
+      });
+      const retry = detail.getByRole("button", { name: "重试读取更早记录", exact: true });
+      await retry.waitFor();
+      assert.equal(
+        await detail.getByRole("button", { name: "查看更早记录", exact: true }).count(),
+        0,
+      );
+      assert.equal(historyAttempts, 1);
+      await page.waitForTimeout(250);
+      assert.equal(historyAttempts, 1, "failed automatic history does not loop");
+      allowHistory = true;
+      await retry.click();
+      await detail.locator('[data-scroll-id="complete-owner-0"]').waitFor();
+      assert.equal(await detail.locator('[data-scroll-id^="complete-owner-"]').count(), 6);
+      assert.equal(await retry.count(), 0);
+      assert.equal(await detail.locator("[data-history-boundary]").count(), 0);
+      console.log(
+        "PASS complete history: five rounds stay visible, automatic pagination stops on error and retries explicitly",
+      );
+    } finally {
+      await context.close();
     }
   }
   for (const width of [1440, 390]) {
@@ -1713,7 +1840,6 @@ try {
     ),
   );
   pagedActivity = true;
-  await isolation.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
   const quietContext = await browser.newContext({ viewport: { width: 390, height: 1000 } });
   const quietPage = await quietContext.newPage();
   await quietPage.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
@@ -1724,7 +1850,9 @@ try {
     exact: true,
   });
   if (await previousPrompt.count()) await previousPrompt.click();
-  await quietIssue.getByRole("button", { name: "查看更早记录", exact: true }).click();
+  await quietIssue.locator("[data-issue-scroll]").evaluate((node) => {
+    node.scrollTop = 0;
+  });
   await quietIssue.locator('[data-scroll-id="earlier-fact"]').waitFor();
   assert.equal(
     await quietIssue.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
@@ -1741,10 +1869,22 @@ try {
     notifyEarlier = resolve;
   });
   earlierStarted = notifyEarlier;
-  // Keep the event history open so this paused-reader scenario still has overflow.
+  await isolation.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
   await isolatedIssue.locator("[data-event-group] > summary").click();
-  await isolatedIssue.getByRole("button", { name: "查看更早记录", exact: true }).click();
+  await isolatedIssue.locator("[data-history-boundary]").waitFor({ state: "attached" });
+  await isolatedIssue.locator("[data-issue-scroll]").evaluate((node) => {
+    node.querySelector("[data-history-boundary]")?.scrollIntoView({ block: "start" });
+  });
   await startedEarlier;
+  await isolatedIssue.locator("[data-issue-scroll]").evaluate((node) => {
+    node.scrollTop = 0;
+  });
+  assert(
+    (await isolatedIssue
+      .locator("[data-issue-scroll]")
+      .evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)) > 100,
+    "the delayed-history reader remains above the latest activity",
+  );
   pagedRevision++;
   publish();
   await isolatedIssue.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).waitFor();
@@ -1768,7 +1908,7 @@ try {
 
   await isolationContext.close();
   console.log(
-    "PASS 390: missing binding never leaks main's outbox; one click reads the earlier activity page",
+    "PASS 390: missing binding never leaks main's outbox; scrolling reads earlier activity automatically",
   );
   pagedActivity = false;
   activityDelay = 0;

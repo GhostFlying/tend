@@ -58,8 +58,10 @@ export function IssueActivity({
       ? (queue?.list ?? noOutbox)
       : noOutbox,
   );
-  const [all, setAll] = useState(reading.activityExpanded);
   const [error, setError] = useState("");
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const historyBoundary = useRef<HTMLDivElement>(null);
+  const historyFetching = useRef(false);
   const [newItems, setNewItems] = useState(false);
   const following = useRef(reading.followsLatest());
   const readingAnchor = useRef<ScrollAnchor | null>(null);
@@ -156,16 +158,9 @@ export function IssueActivity({
   }, [reads, issue.issue_id, reading]);
   const rows = state.value?.items ?? emptyEntries;
   const [eventIdentities] = useState(() => new Map<string, string>());
-  const visible = useMemo(() => {
-    if (all) return rows;
-    const blocks = rows.filter((row) => row.block);
-    if (blocks.length <= 3) return rows;
-    const first = blocks.at(-3)!.position;
-    return rows.filter((row) => row.position >= first);
-  }, [rows, all]);
   const activityGroups = useMemo(
-    () => identifyActivityGroups(groupActivityEvents(visible), eventIdentities),
-    [visible, eventIdentities],
+    () => identifyActivityGroups(groupActivityEvents(rows), eventIdentities),
+    [rows, eventIdentities],
   );
   const beginContinuation = useCallback(
     (trigger: string, control: HTMLButtonElement, ids: string[]) => {
@@ -206,11 +201,11 @@ export function IssueActivity({
   const transcript = useMemo(
     () =>
       buildTranscriptEntries(
-        visible.flatMap((entry) =>
+        rows.flatMap((entry) =>
           entry.block ? [continuations[entry.block.trigger.message_id] ?? entry.block] : [],
         ),
       ),
-    [visible, continuations],
+    [rows, continuations],
   );
   const ids = new Set(
     rows.flatMap((row) =>
@@ -342,22 +337,41 @@ export function IssueActivity({
     continuations,
     correctScroll,
   ]);
-  const earlier = async () => {
-    const node = scroll.current;
-    const anchor = node ? captureAnchor(node) : null;
-
+  const earlier = useCallback(async () => {
+    if (historyFetching.current) return;
+    historyFetching.current = true;
+    setLoadingEarlier(true);
+    setError("");
     try {
-      if (!all) {
-        setAll(true);
-        reading.expandActivity();
-        if (visible.length === rows.length) await reads.activity.earlier();
-      } else await reads.activity.earlier();
-      if (node && anchor)
-        requestAnimationFrame(() => correctScroll(node, () => restoreAnchor(node, anchor)));
+      await reads.activity.earlier();
     } catch {
-      setError("更早记录读取失败，请重试。");
+      setError("更早记录读取失败，已有讨论仍保留。");
+    } finally {
+      historyFetching.current = false;
+      setLoadingEarlier(false);
     }
-  };
+  }, [reads]);
+  useEffect(() => {
+    const root = scroll.current;
+    const boundary = historyBoundary.current;
+    if (!root || !boundary || !state.value?.more || state.error || error || loadingEarlier) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) void earlier();
+      },
+      { root, rootMargin: "100px 0px" },
+    );
+    observer.observe(boundary);
+    return () => observer.disconnect();
+  }, [
+    scroll,
+    state.value?.more,
+    state.value?.next_before,
+    state.error,
+    error,
+    loadingEarlier,
+    earlier,
+  ]);
   const jump = () => {
     reading.followLatest();
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" });
@@ -365,22 +379,26 @@ export function IssueActivity({
   };
   return (
     <div className={styles.activity}>
-      {(state.value?.more || visible.length < rows.length) && (
-        <button className={styles.textLink} onClick={() => void earlier()}>
-          查看更早记录
-        </button>
+      {state.value?.more && (
+        <div
+          ref={historyBoundary}
+          className={styles.historyBoundary}
+          data-history-boundary
+          aria-busy={loadingEarlier}
+        >
+          {loadingEarlier && <span role="status">正在读取更早记录…</span>}
+        </div>
       )}
-      {(state.error || error) && (
+      {error && (
         <p role="status" className={styles.error}>
-          {error || "活动读取失败，已有记录仍保留。"}
-          <button
-            onClick={() => {
-              setError("");
-              void reads.activity.refresh();
-            }}
-          >
-            重新读取
-          </button>
+          {error}
+          <button onClick={() => void earlier()}>重试读取更早记录</button>
+        </p>
+      )}
+      {state.error && (
+        <p role="status" className={styles.error}>
+          活动读取失败，已有记录仍保留。
+          <button onClick={() => void reads.activity.refresh()}>重新读取</button>
         </p>
       )}
       {!state.value && !state.error && <p role="status">正在读取讨论与进展…</p>}
@@ -616,9 +634,6 @@ function Milestone({
       data-tone={/failed|failure/.test(entry.kind) ? "error" : undefined}
       data-scroll-id={groupedFirst ? undefined : entry.id}
     >
-      <span className={styles.milestoneDot} aria-hidden="true">
-        ·
-      </span>
       <span>
         <span>{entry.author || "tend"}</span> <span>{entry.title}</span>
         <time title={new Date(entry.created_at).toISOString()}> · {clock(entry.created_at)}</time>
@@ -651,9 +666,6 @@ function EventGroup({
   return (
     <details className={styles.eventGroup} data-event-group data-scroll-id={first.id}>
       <summary>
-        <span className={styles.milestoneDot} aria-hidden="true">
-          ·
-        </span>
         <span>
           {first.author || "tend"} {[...new Set(entries.map((entry) => entry.title))].join("、")}
           <time title={new Date(first.created_at).toISOString()}> · {clock(first.created_at)}</time>

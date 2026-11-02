@@ -315,6 +315,11 @@ export function SystemMessage({
 }) {
   const { openUpgrade } = useServices();
   const title = noticeTitle(item.notice_type);
+  const backgroundIcon = (
+    <span className={styles.backgroundIcon} aria-hidden="true">
+      <Chevron />
+    </span>
+  );
   if (item.notice_type === "background_batch" && item.conversation_id !== "main")
     return (
       <details
@@ -323,12 +328,11 @@ export function SystemMessage({
         data-scroll-id={scrollID ?? item.message_id}
       >
         <summary>
-          <span className={styles.backgroundIcon} aria-hidden="true">
-            <Chevron />
-          </span>
+          {presentation === "chat" && backgroundIcon}
           <span>
             后台核对来源 <time title={item.created_at}>· {clock(Date.parse(item.created_at))}</time>
           </span>
+          {presentation === "issue" && backgroundIcon}
         </summary>
         <Markdown text={systemMessageBody(item)} />
         {item.recovery && <div role="status">{recoveryNotice(item.recovery)}</div>}

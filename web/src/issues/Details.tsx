@@ -1,9 +1,9 @@
 import type { IssueReadingState } from "./reading.ts";
-import { Button, Badge } from "../ui/index.ts";
+import { Button, Badge, Menu } from "../ui/index.ts";
 import { useDurableOp } from "../app/useDurableOp.ts";
 import { issueHandoffCommand } from "./actions.ts";
 import { navigate } from "../app/router.ts";
-import { Chevron } from "../shell/icons.tsx";
+import { Chevron, More } from "../shell/icons.tsx";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
@@ -189,7 +189,16 @@ export function IssueDetails({
         <dl>
           <dt>负责人</dt>
           <dd>
-            <AssigneeName assignee={issue.assignee} manager={issue.manager} />
+            <Button
+              variant="link"
+              aria-label="交接负责人"
+              onClick={() => {
+                setSide(false);
+                setPanel("handoff");
+              }}
+            >
+              <AssigneeName assignee={issue.assignee} manager={issue.manager} />
+            </Button>
             {issue.manager &&
               (issue.assignee.kind === "agent" ||
                 (!issue.manager.host_id &&
@@ -251,7 +260,19 @@ export function IssueDetails({
         </Button>
       </section>
       <section>
-        <h2>执行记录</h2>
+        <div className={styles.sectionHead}>
+          <h2>执行记录</h2>
+          <Button
+            variant="link"
+            disabled={!editable || issue.assignment_state !== "active"}
+            onClick={() => {
+              setSide(false);
+              setPanel("task");
+            }}
+          >
+            创建任务
+          </Button>
+        </div>
         {[...(issue.tasks ?? [])]
           .sort((a, b) => taskPriority(a) - taskPriority(b))
           .slice(0, 3)
@@ -359,39 +380,64 @@ export function IssueDetails({
           详情
         </Button>
         {issue && (
-          <details className={styles.menu}>
-            <summary aria-label="更多 Issue 操作">•••</summary>
-            <div onClick={(event) => event.currentTarget.parentElement?.removeAttribute("open")}>
-              <Button disabled={!editable} onClick={() => setPanel("progress")}>
-                编辑当前进展
-              </Button>
-              <Button disabled={!editable} onClick={() => setPanel("definition")}>
-                编辑定义
-              </Button>
-              <Button disabled={!editable} onClick={() => setPanel("child")}>
-                新增子 Issue
-              </Button>
-              <Button
-                disabled={!editable || issue.assignment_state !== "active"}
-                onClick={() => setPanel("task")}
-              >
-                创建任务
-              </Button>
-              <Button onClick={() => setPanel("handoff")}>交接负责人</Button>
-              {issue.state === "active" && (
-                <Button onClick={() => setPanel("pause")}>暂停 Issue</Button>
-              )}
-              {issue.state === "paused" && (
-                <Button onClick={() => setPanel("resume")}>恢复 Issue</Button>
-              )}
-              {["closed", "cancelled"].includes(issue.state) && (
-                <Button onClick={() => setPanel("reopen")}>重新打开 Issue</Button>
-              )}
-              <Button onClick={() => navigate({ page: "diagnostics", issue: id, tab: "events" })}>
-                调度与事件诊断
-              </Button>
-            </div>
-          </details>
+          <Menu
+            label="更多 Issue 操作"
+            variant="ghost"
+            icon
+            align="end"
+            items={[
+              {
+                id: "definition",
+                label: "编辑定义",
+                disabled: !editable,
+                onSelect: () => setPanel("definition"),
+              },
+              {
+                id: "child",
+                label: "新增子 Issue",
+                disabled: !editable,
+                onSelect: () => setPanel("child"),
+              },
+              ...(issue.state === "active"
+                ? [
+                    {
+                      id: "pause",
+                      label: "暂停 Issue",
+                      separatorBefore: true,
+                      onSelect: () => setPanel("pause"),
+                    },
+                  ]
+                : []),
+              ...(issue.state === "paused"
+                ? [
+                    {
+                      id: "resume",
+                      label: "恢复 Issue",
+                      separatorBefore: true,
+                      onSelect: () => setPanel("resume"),
+                    },
+                  ]
+                : []),
+              ...(["closed", "cancelled"].includes(issue.state)
+                ? [
+                    {
+                      id: "reopen",
+                      label: "重新打开 Issue",
+                      separatorBefore: true,
+                      onSelect: () => setPanel("reopen"),
+                    },
+                  ]
+                : []),
+              {
+                id: "diagnostics",
+                label: "调度与事件诊断",
+                separatorBefore: true,
+                onSelect: () => navigate({ page: "diagnostics", issue: id, tab: "events" }),
+              },
+            ]}
+          >
+            <More />
+          </Menu>
         )}
       </header>
       {!issue ? (
@@ -426,7 +472,14 @@ export function IssueDetails({
                   <span className={styles.dot} />
                   <span>{statusLabel}</span>
                   <span>
-                    <AssigneeName assignee={issue.assignee} manager={issue.manager} /> 负责
+                    <Button
+                      variant="link"
+                      aria-label="更改负责人"
+                      onClick={() => setPanel("handoff")}
+                    >
+                      <AssigneeName assignee={issue.assignee} manager={issue.manager} />
+                    </Button>{" "}
+                    负责
                   </span>
                   <time title={new Date(issue.updated_at).toLocaleString("zh-CN")}>
                     {new Date(issue.updated_at).toLocaleString("zh-CN", {
@@ -508,6 +561,13 @@ export function IssueDetails({
                 <details className={styles.definition}>
                   <summary>目标与完成条件</summary>
                   <IssuePlanRead issue={issue} />
+                  <Button
+                    variant="link"
+                    disabled={!editable}
+                    onClick={() => setPanel("definition")}
+                  >
+                    编辑定义
+                  </Button>
                 </details>
                 <ChildIssues
                   issue={issue}
@@ -825,7 +885,13 @@ function ChildIssues({
   if (!state.value.items?.length && cursors.length === 1)
     return state.error ? (
       <ReadError label="子 Issue 读取失败" retry={() => void read.refresh()} />
-    ) : null;
+    ) : (
+      <div className={styles.childCreate}>
+        <Button variant="link" disabled={!editable} onClick={onCreate}>
+          ＋ 新增子 Issue
+        </Button>
+      </div>
+    );
   return (
     <section className={styles.children}>
       {state.error && (

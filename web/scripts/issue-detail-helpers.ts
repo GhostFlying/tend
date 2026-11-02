@@ -12,10 +12,15 @@ export async function openIssueAux(page: Page, label: string): Promise<Locator> 
     await last.waitFor({ state: "hidden" });
   }
   const region = page.getByRole("region", { name: "Issue 详情", exact: true });
-  if (["编辑定义", "交接负责人", "创建任务"].includes(name)) {
-    const more = region.getByLabel("更多 Issue 操作");
-    if ((await more.locator("..").getAttribute("open")) === null) await more.click();
-    await region.getByRole("button", { name, exact: true }).click();
+  if (name === "编辑定义") {
+    const more = region.getByRole("button", { name: "更多 Issue 操作", exact: true });
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await region.getByRole("menuitem", { name, exact: true }).click();
+  } else if (name === "交接负责人") {
+    await region.getByRole("button", { name: "更改负责人", exact: true }).click();
+  } else if (name === "创建任务") {
+    const side = await issueSidebar(page);
+    await side.getByRole("button", { name, exact: true }).click();
   } else {
     const side = await issueSidebar(page);
     await side
