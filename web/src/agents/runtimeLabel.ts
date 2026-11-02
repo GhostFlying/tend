@@ -10,8 +10,10 @@ export function runtimeLabel(
       ? "orca"
       : runtime.kind === "appserver-worker"
         ? "app-server"
-        : runtime.kind === "hosted-manager"
-          ? "hosted"
-          : runtime.kind;
+        : runtime.kind === "central-traex-worker"
+          ? "central"
+          : runtime.kind === "hosted-manager"
+            ? "hosted"
+            : runtime.kind;
   return `${kind}/${runtime.cli || "CLI 未记录"}`;
 }

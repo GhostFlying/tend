@@ -86,4 +86,5 @@ test("environment labels retain adapter and CLI and never invent missing CLI ide
   expect(runtimeLabel({ kind: "orca-worker", cli: "traex" })).toBe("orca/traex");
   expect(runtimeLabel({ kind: "appserver-worker", cli: "codex" })).toBe("app-server/codex");
   expect(runtimeLabel({ kind: "appserver-worker" })).toBe("app-server/CLI 未记录");
+  expect(runtimeLabel({ kind: "central-traex-worker", cli: "traex" })).toBe("central/traex");
 });

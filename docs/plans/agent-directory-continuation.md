@@ -24,3 +24,7 @@ Agent 定义继续显式 validate/reload/登记，不要求维护。新分配使
 ## 交付边界
 
 使用仓库命名指南的现有字段语义，不增加 slug 或自动命名服务，不修改部署身份。程序升级和定义 reload 分开验收；不自动重试历史失败任务或交接已有负责人。线上发布必须在 CI 和 review 通过后保留账本受控执行。
+
+## 与 D141 的同步
+
+集中 TraeX runtime 单独显示为 `central/traex`，沿原快照派生的 worker pin 保留 Orca 工作区 backend；不会把集中适配器当作本机 app-server。集中执行仍按 D141 显式启用，本计划不改变部署配置。

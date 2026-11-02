@@ -370,3 +370,57 @@ func TestAgentContinuationReviewerCategoryRefreshUsesFrozenInventory(t *testing.
 		})
 	}
 }
+
+func TestAgentContinuationDerivesCentralWorkerFromFrozenOwnerInventory(t *testing.T) {
+	h, r, _ := issueOwnerHarness(t)
+	var inventory store.AgentInventoryRow
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		inventory, err = store.GetAgentInventory(t.Context(), tx.Q(), "linux-1")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	central := inventory.Projection.Runtimes[0]
+	central.RuntimeID = "central"
+	central.Kind = "central-traex-worker"
+	central.CLI = "traex"
+	central.DeclaredPurposes = []string{"worker_run"}
+	inventory.Projection.Runtimes = append(inventory.Projection.Runtimes, central)
+	for i := range inventory.Projection.Agents {
+		a := &inventory.Projection.Agents[i]
+		if a.Identity.LocalID == "alpha" {
+			ownerBinding := a.Binding
+			a.OwnerBinding = &ownerBinding
+			a.Binding = protocol.AgentRuntimeReference{RuntimeID: central.RuntimeID, Revision: central.Revision}
+		}
+	}
+	_, hash, err := protocol.CanonicalAgentInventory(inventory.Projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := h.exec(runner("linux-1"), inventoryRequest(h, r, inventory.Projection, hash, 2, 1, "central-owner"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var manager protocol.RunExecutionPin
+	for _, e := range r.AgentExecutors {
+		if e.Pin.Identity.LocalID == "alpha" && e.Pin.Purpose == "issue_manager" {
+			manager = e.Pin
+		}
+	}
+	manager.InventoryRevision = 2
+	manager.SnapshotID = "central-owner"
+	manager.PublicSHA256 = hash
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		worker, err := store.WorkerPinForManager(t.Context(), tx.Q(), manager)
+		if err != nil {
+			return err
+		}
+		if worker.Runtime.RuntimeID != "central" || worker.Worker != protocol.WorkerOrca || worker.BackendID != "orca" || worker.InventoryRevision != 2 {
+			t.Fatal("central worker did not retain its original adapter and receipt", worker)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
