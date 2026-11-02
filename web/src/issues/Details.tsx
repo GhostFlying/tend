@@ -334,12 +334,6 @@ export function IssueDetails({
   );
   return (
     <section className={styles.page} aria-label="Issue 详情">
-      <Button
-        variant="link"
-        onClick={() => navigate({ page: "diagnostics", issue: id, tab: "events" })}
-      >
-        查看调度与事件诊断 →
-      </Button>
       <header className={styles.toolbar}>
         <Button
           variant="ghost"
@@ -393,6 +387,9 @@ export function IssueDetails({
               {["closed", "cancelled"].includes(issue.state) && (
                 <Button onClick={() => setPanel("reopen")}>重新打开 Issue</Button>
               )}
+              <Button onClick={() => navigate({ page: "diagnostics", issue: id, tab: "events" })}>
+                调度与事件诊断
+              </Button>
             </div>
           </details>
         )}

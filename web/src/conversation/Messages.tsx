@@ -304,15 +304,31 @@ const AgentItem = memo(function AgentItem({
   );
 });
 
-export function SystemMessage({ item, scrollID }: { item: ConversationItem; scrollID?: string }) {
+export function SystemMessage({
+  item,
+  scrollID,
+  presentation = "chat",
+}: {
+  item: ConversationItem;
+  scrollID?: string;
+  presentation?: "chat" | "issue";
+}) {
   const { openUpgrade } = useServices();
   const title = noticeTitle(item.notice_type);
   if (item.notice_type === "background_batch" && item.conversation_id !== "main")
     return (
-      <details className={styles.background} data-scroll-id={scrollID ?? item.message_id}>
+      <details
+        className={styles.background}
+        data-layout={presentation}
+        data-scroll-id={scrollID ?? item.message_id}
+      >
         <summary>
-          <Chevron /> 后台核对来源{" "}
-          <time title={item.created_at}>· {clock(Date.parse(item.created_at))}</time>
+          <span className={styles.backgroundIcon} aria-hidden="true">
+            <Chevron />
+          </span>
+          <span>
+            后台核对来源 <time title={item.created_at}>· {clock(Date.parse(item.created_at))}</time>
+          </span>
         </summary>
         <Markdown text={systemMessageBody(item)} />
         {item.recovery && <div role="status">{recoveryNotice(item.recovery)}</div>}

@@ -566,20 +566,7 @@
   }
 }
 
-/* Main dialogue carries identity; background events share the same thread. */
-.activity {
-  position: relative;
-  padding-left: var(--space-7);
-}
-.activity::before {
-  content: "";
-  position: absolute;
-  left: 12px;
-  top: var(--space-4);
-  bottom: var(--space-4);
-  width: 1px;
-  background: var(--border-soft);
-}
+/* Identities stay in the header; dialogue uses the full content width. */
 .discussion {
   border-bottom: 0;
   padding-bottom: var(--space-2);
@@ -592,11 +579,9 @@
 .avatar {
   display: grid;
   place-items: center;
-  position: absolute;
-  left: calc(-1 * var(--space-7));
-  top: 0;
   width: 25px;
   height: 25px;
+  flex: none;
   background: var(--bg-l2);
   border: 1px solid var(--border-soft);
   border-radius: 50%;
@@ -611,13 +596,12 @@
   font-size: var(--text-body);
   line-height: var(--leading-body);
 }
-.reply[data-tone="error"],
 .attention {
   border-left: 3px solid var(--accent);
 }
-.reply[data-tone="error"] {
-  border-left-color: var(--danger);
-  padding-left: var(--space-3);
+.reply[data-tone="error"] .avatar {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 .milestone,
 .eventGroup {
@@ -626,8 +610,6 @@
   font-size: var(--text-caption);
 }
 .milestoneDot {
-  position: absolute;
-  left: calc(-1 * var(--space-7));
   width: 25px;
   height: 25px;
   background: var(--bg);
@@ -648,6 +630,10 @@
 .runList summary::-webkit-details-marker {
   display: none;
 }
+.milestone,
+.eventGroup summary {
+  gap: 10px;
+}
 .eventGroup summary > span:not(.milestoneDot) {
   flex: 1;
 }
@@ -661,7 +647,7 @@
   transform: rotate(90deg);
 }
 .eventGroup > .milestone .milestoneDot {
-  display: none;
+  visibility: hidden;
 }
 .delivery {
   border-left: 3px solid var(--ok);
@@ -718,12 +704,14 @@
 }
 
 .milestone[data-tone="error"] {
-  border-left: 3px solid var(--danger);
   background: var(--bg-l1);
   border-radius: var(--radius-s);
-  padding: var(--space-3);
+  padding-block: var(--space-3);
   color: var(--label);
   font-size: var(--text-body);
+}
+.milestone[data-tone="error"] .milestoneDot {
+  color: var(--danger);
 }
 
 @media (min-width: 761px) {
@@ -741,15 +729,6 @@
 }
 .replyClamp:empty {
   display: none;
-}
-.milestoneDot {
-  top: 50%;
-  transform: translateY(-50%);
-}
-.eventGroup > summary > .milestoneDot {
-  top: var(--space-2);
-  transform: none;
-  height: 16px;
 }
 .runEntry {
   padding-block: var(--space-1);
