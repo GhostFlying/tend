@@ -85,7 +85,7 @@ func deliveryFixtureOnHarness(t *testing.T, h *harness) (*harness, protocol.Issu
 	task := createCanonicalTaskForTest(t, h, i)
 	acceptDeliveryTaskForTest(t, h, task)
 	i = canonicalTaskIssue(t, h, i.IssueID)
-	c := protocol.IssueDeliveryCandidate{DeliveryID: "pr", URL: i.Plan.Deliveries[0].URL, HeadSHA: strings.Repeat("a", 40), BaseSHA: strings.Repeat("b", 40), ProviderState: "open", Validation: "checks and independent review on this head", DeploymentScope: "none; merge only"}
+	c := protocol.IssueDeliveryCandidate{DeliveryID: "pr", URL: i.Plan.Deliveries[0].URL, HeadSHA: strings.Repeat("a", 40), BaseSHA: strings.Repeat("b", 40), TargetSHA: strings.Repeat("b", 40), ProviderState: "open", Validation: "checks and independent review on this head", DeploymentScope: "none; merge only"}
 	observeDeliveryForTest(t, h, i.IssueID, c, "open", "")
 	return h, i, task, c
 }
@@ -96,7 +96,7 @@ func observeDeliveryForTest(t *testing.T, h *harness, issue string, c protocol.I
 		if err != nil {
 			return err
 		}
-		return tx.PutDeliveryObservation(t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{BaselineUpgradeID: baseline.View.UpgradeID, BaselineUpgradeRevision: baseline.View.Revision, WorkItemID: issue, DeliveryID: c.DeliveryID, CheckedAt: h.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{URL: c.URL, HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, State: state, MergeSHA: merge}}})
+		return tx.PutDeliveryObservation(t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{BaselineUpgradeID: baseline.View.UpgradeID, BaselineUpgradeRevision: baseline.View.Revision, WorkItemID: issue, DeliveryID: c.DeliveryID, CheckedAt: h.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{URL: c.URL, HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, TargetSHA: c.TargetSHA, TargetContainsMerge: state == "merged", State: state, MergeSHA: merge}}})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func TestDeliveryObservedDriftCannotReviveOldApprovalAfterProviderReturns(t *tes
 					t.Fatal(op)
 				}
 			}
-			snapshot := protocol.DeliverySnapshot{State: c.ProviderState, HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, MergeSHA: c.MergeSHA, URL: c.URL}
+			snapshot := protocol.DeliverySnapshot{State: c.ProviderState, HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, TargetSHA: c.TargetSHA, TargetContainsMerge: c.ProviderState == "merged", MergeSHA: c.MergeSHA, URL: c.URL}
 			changed := snapshot
 			failure := ""
 			var facts *protocol.DeliverySnapshot = &changed

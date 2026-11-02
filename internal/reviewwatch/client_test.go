@@ -130,3 +130,41 @@ func TestObservationCancellationAndInvalidReference(t *testing.T) {
 		t.Fatalf("invalid reference executed CLI: %d", calls)
 	}
 }
+
+// This is GitHub's merged PR shape: baseRefOid remains pre-merge while
+// baseRef.target.oid follows the live branch. They are different facts.
+func TestGitHubTargetTipAndIntegratedLineage(t *testing.T) {
+	const base = "6683ad911185022de67e0ad6c070736afd1f1feb"
+	const merge = "faa0888fce6975e19cba7fa853faec413de66181"
+	for _, tc := range []struct {
+		name, state, tip, status, ancestor string
+		integrated                         bool
+	}{
+		{"merged", "MERGED", merge, "identical", merge, true},
+		{"advanced", "MERGED", strings.Repeat("e", 40), "ahead", merge, true},
+		{"rewritten", "MERGED", base, "behind", base, false},
+		{"diverged", "MERGED", strings.Repeat("e", 40), "diverged", base, false},
+		{"open target drift", "OPEN", strings.Repeat("e", 40), "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			client := New(Config{Exec: func(_ context.Context, _ string, args []string) ([]byte, error) {
+				calls++
+				if calls == 1 {
+					return json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"number": 203, "state": tc.state, "headRefOid": "d9de43492c08a956525fbc9758c65af8eba82f09", "baseRefOid": base, "baseRef": map[string]any{"target": map[string]any{"oid": tc.tip}}, "mergeCommit": map[string]any{"oid": merge}}}}})
+				}
+				if !reflect.DeepEqual(args, []string{"api", "repos/example/project/compare/" + merge + "..." + tc.tip}) {
+					t.Fatal(args)
+				}
+				return json.Marshal(map[string]any{"status": tc.status, "merge_base_commit": map[string]any{"sha": tc.ancestor}})
+			}})
+			got, err := client.Observe(t.Context(), Ref{Provider: GitHub, Repository: "example/project", Number: 203})
+			if err != nil || got.BaseSHA != base || got.TargetSHA != tc.tip || got.TargetContainsMerge != tc.integrated {
+				t.Fatal(got, err)
+			}
+			if (calls == 2) != (tc.state == "MERGED") {
+				t.Fatal(calls)
+			}
+		})
+	}
+}

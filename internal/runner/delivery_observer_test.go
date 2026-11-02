@@ -145,15 +145,19 @@ func TestDeliveryObserverCancellationDoesNotReportFalseFailure(t *testing.T) {
 }
 
 func TestDeliveryObserverSendsCandidateBaseOnlyWhenRequested(t *testing.T) {
-	for _, requested := range []bool{false, true} {
-		t.Run(map[bool]string{false: "old-server", true: "candidate-aware-server"}[requested], func(t *testing.T) {
+	for _, mode := range []struct {
+		name         string
+		base, target bool
+	}{{"old-server", false, false}, {"base-only-server", true, false}, {"target-aware-server", true, true}} {
+		requested, targetRequested := mode.base, mode.target
+		t.Run(mode.name, func(t *testing.T) {
 			r := controlRunner(t)
 			r.cfg.IDs = testkit.NewIDGen(testkit.NewClock(), 7)
 			r.cfg.Log = slog.New(slog.DiscardHandler)
 			r.c.log = r.cfg.Log
 			r.cfg.DeliveryProviders = []string{"github"}
 			r.cfg.DeliveryObserver = observationFunc(func(context.Context, reviewwatch.Ref) (reviewwatch.Observation, error) {
-				return reviewwatch.Observation{State: "open", HeadSHA: "head", BaseSHA: "base"}, nil
+				return reviewwatch.Observation{State: "open", HeadSHA: "head", BaseSHA: "base", TargetSHA: "tip", TargetContainsMerge: true}, nil
 			})
 			reported := false
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -164,17 +168,17 @@ func TestDeliveryObserverSendsCandidateBaseOnlyWhenRequested(t *testing.T) {
 				}
 				var result any
 				if env.Operation == protocol.OpDeliveriesPoll {
-					result = protocol.DeliveryPollResult{Assignments: []protocol.DeliveryAssignment{{CandidateIdentity: requested, WorkItemID: "issue", Delivery: protocol.IssueDelivery{DeliveryID: "pr", Provider: "github", Repository: "example/repo", Number: 1}, Generation: 1, Nonce: "query"}}}
+					result = protocol.DeliveryPollResult{Assignments: []protocol.DeliveryAssignment{{TargetLineage: targetRequested, CandidateIdentity: requested, WorkItemID: "issue", Delivery: protocol.IssueDelivery{DeliveryID: "pr", Provider: "github", Repository: "example/repo", Number: 1}, Generation: 1, Nonce: "query"}}}
 				} else {
 					reported = true
 					var report protocol.DeliveryReportPayload
 					if err := json.Unmarshal(env.Payload, &report); err != nil {
 						t.Error(err)
 					}
-					if report.Snapshot == nil || (report.Snapshot.BaseSHA != "") != requested {
+					if report.Snapshot == nil || (report.Snapshot.BaseSHA != "") != requested || (report.Snapshot.TargetSHA != "") != targetRequested || report.Snapshot.TargetContainsMerge != targetRequested {
 						t.Error("base identity negotiation failed", string(env.Payload))
 					}
-					if !requested && strings.Contains(string(env.Payload), "base_sha") {
+					if !requested && strings.Contains(string(env.Payload), "base_sha") || (!targetRequested && strings.Contains(string(env.Payload), "target_sha")) {
 						t.Error("new field sent to older server")
 					}
 					result = protocol.DeliveryReportResult{Accepted: true}

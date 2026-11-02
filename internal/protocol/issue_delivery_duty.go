@@ -16,6 +16,7 @@ type IssueDeliveryReconciliation struct {
 }
 
 type IssueDeliveryCandidate struct {
+	TargetSHA       string                       `json:"target_sha"`
 	DeliveryID      string                       `json:"delivery_id"`
 	URL             string                       `json:"url"`
 	HeadSHA         string                       `json:"head_sha"`
