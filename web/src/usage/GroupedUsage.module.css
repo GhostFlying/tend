@@ -240,7 +240,8 @@
   font-weight: 400;
   color: var(--label-2);
 }
-.drawer > .tokens > strong {
+.drawer > .tokens > strong,
+.execution > .tokens > strong {
   display: none;
 }
 .executions {

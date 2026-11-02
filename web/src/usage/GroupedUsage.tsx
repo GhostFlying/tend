@@ -374,7 +374,7 @@ export function GroupedUsage({ subject }: { subject: string }) {
             <span>
               采集截止 {time(main.data.collection?.last_synced_at ?? main.data.as_of)}
               {main.data.collection?.pending
-                ? ` · ${number.format(main.data.collection.pending)} 个来源待同步`
+                ? ` · ${number.format(main.data.collection.pending)} 个来源待对账`
                 : ""}
               {main.data.unattributed.requests > 0
                 ? ` · ${number.format(main.data.unattributed.requests)} 个请求时间未知`
@@ -501,6 +501,8 @@ function UsageRow({
   onExpand?(): void;
   onOpen(): void;
 }) {
+  const knownModels = models.filter((model) => model && model !== "实际模型未提供");
+  const hasUnknownModel = knownModels.length !== models.length;
   return (
     <div role="row" className={styles.usageRow} style={{ "--depth": depth } as CSSProperties}>
       <div role="cell" className={styles.identity}>
@@ -524,12 +526,13 @@ function UsageRow({
         </Button>
       </div>
       <div role="cell" className={styles.model}>
-        {models.length > 1 ? (
+        {knownModels.length > 1 || (knownModels.length > 0 && hasUnknownModel) ? (
           <Button variant="link" onClick={onOpen}>
-            {number.format(models.length)} 个模型
+            {number.format(knownModels.length)} 个{hasUnknownModel ? "已知" : ""}模型
+            {hasUnknownModel && " · 含未记录"}
           </Button>
         ) : (
-          modelLabel(models[0] ?? "实际模型未提供")
+          modelLabel(knownModels[0] ?? "实际模型未提供")
         )}
       </div>
       <div role="cell" className={styles.consumption}>
@@ -680,7 +683,7 @@ function ExecutionDetail({
           {session.metering_status === "caught_up"
             ? "计量已对账"
             : session.metering_status === "syncing"
-              ? "计量同步中"
+              ? "计量待对账"
               : "计量覆盖未确认"}
         </dd>
         <dt>完成记录时间</dt>
