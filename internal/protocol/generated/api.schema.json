@@ -2991,6 +2991,12 @@
         "base_sha": {
           "type": "string"
         },
+        "baseline_upgrade_id": {
+          "type": "string"
+        },
+        "baseline_upgrade_revision": {
+          "type": "integer"
+        },
         "checked_at": {
           "type": "integer"
         },
@@ -4680,6 +4686,9 @@
         "provider_state": {
           "type": "string"
         },
+        "reconciliation": {
+          "$ref": "#/definitions/IssueDeliveryReconciliation"
+        },
         "url": {
           "type": "string"
         },
@@ -4703,6 +4712,12 @@
     "IssueDeliveryDeployment": {
       "additionalProperties": false,
       "properties": {
+        "baseline_upgrade_id": {
+          "type": "string"
+        },
+        "baseline_upgrade_revision": {
+          "type": "integer"
+        },
         "host_ids": {
           "anyOf": [
             {
@@ -4732,6 +4747,9 @@
       "properties": {
         "acceptance_id": {
           "type": "string"
+        },
+        "assignment_epoch": {
+          "type": "integer"
         },
         "attention_id": {
           "type": "string"
@@ -4872,6 +4890,26 @@
       ],
       "title": "IssueDeliveryProvider",
       "type": "string"
+    },
+    "IssueDeliveryReconciliation": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_task_id": {
+          "type": "string"
+        },
+        "source_commit": {
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_task_id",
+        "upgrade_id"
+      ],
+      "title": "IssueDeliveryReconciliation",
+      "type": "object"
     },
     "IssueDeliveryView": {
       "additionalProperties": false,
@@ -11378,6 +11416,9 @@
         "server_sha256": {
           "type": "string"
         },
+        "source_commit": {
+          "type": "string"
+        },
         "upgrade_id": {
           "type": "string"
         }
@@ -11497,6 +11538,9 @@
         },
         "revision": {
           "type": "integer"
+        },
+        "source_commit": {
+          "type": "string"
         },
         "status": {
           "type": "string"

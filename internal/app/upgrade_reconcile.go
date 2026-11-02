@@ -41,6 +41,12 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		r.ServerHealthy = 0
 		return "", nil
 	}
+	if validDeliverySHA(o.Commit) && !o.Modified {
+		if r.View.SourceCommit != "" && r.View.SourceCommit != o.Commit {
+			return "Installed server source differs from the pinned release", nil
+		}
+		r.View.SourceCommit = o.Commit
+	}
 	matches, err := installedServerMatches(ctx, tx.Q(), r.Manifest)
 	if err != nil {
 		return "", err

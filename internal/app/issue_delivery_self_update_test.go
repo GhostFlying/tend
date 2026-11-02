@@ -85,7 +85,9 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 	if merged != head || git("rev-list", "--count", "main") != "2" {
 		t.Fatal("unexpected merge identity")
 	}
-	observeDeliveryForTest(t, h, i.IssueID, candidate, "merged", merged)
+	mergedCandidate := candidate
+	mergedCandidate.BaseSHA = merged
+	observeDeliveryForTest(t, h, i.IssueID, mergedCandidate, "merged", merged)
 	body, err := os.ReadFile(filepath.Join(dir, "behavior.txt"))
 	if err != nil || string(body) != "fixed\n" {
 		t.Fatal("original behavior readback", err)
@@ -98,6 +100,11 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 		if a.Role == "server" {
 			a.SHA256 = upgrade.ServerHash
 		}
+	}
+	upgrade.DeliveryTaskID = created.TaskID
+	upgrade.ArtifactSources = map[string]release.SourceIdentity{}
+	for _, a := range upgrade.Manifest.Artifacts {
+		upgrade.ArtifactSources[a.SHA256] = release.SourceIdentity{Commit: merged}
 	}
 	env := h.env(upgrade.Operation(), protocol.Target{Type: "upgrade", ID: "delivery-self-update"}, map[string]string{"release_id": upgrade.Manifest.ReleaseID}, rev(0))
 	system := protocol.Principal{Kind: protocol.PrincipalSystem}
@@ -174,7 +181,7 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 	if upgradeRead(h).ServerHealthy != 0 || h.count("upgrades") != 1 {
 		t.Fatal("unknown replacement was treated as success/retry")
 	}
-	current := ServerObservation{InstanceID: "server", ProcessInstanceID: binding.ProcessInstanceID, BinarySHA256: upgrade.ServerHash, Healthy: true, MainDrained: true}
+	current := ServerObservation{InstanceID: "server", ProcessInstanceID: binding.ProcessInstanceID, BinarySHA256: upgrade.ServerHash, Commit: merged, Healthy: true, MainDrained: true}
 	upgradeTick(h, current)
 	h.clock.Advance(5 * time.Second)
 	upgradeTick(h, current)
@@ -201,6 +208,8 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 		next.Capabilities = append(next.Capabilities, capabilityUpdater)
 		next.Build.BinarySHA256 = runnerBinding.ArtifactSHA256
 		next.Build.Version = upgrade.Manifest.ReleaseID
+		next.Build.Commit = merged
+		next.Capabilities = append(next.Capabilities, protocol.CapabilityWorkerObservation)
 		next.Mode = protocol.RunnerReady
 		next.UpgradeID = runnerBinding.UpgradeID
 		next.AppliedControlRevision = ctl.Revision
@@ -227,6 +236,7 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 			t.Fatal("host installation not read back", host)
 		}
 	}
+	observeDeliveryForTest(t, h, i.IssueID, mergedCandidate, "merged", merged)
 	health, err := h.app.ServerUpgradeHealth(t.Context(), binding)
 	if err != nil || !health.Healthy || !health.ServerConfirmed {
 		t.Fatal(health, err)
@@ -294,12 +304,12 @@ func TestDeliveryDeploymentCannotSettleFromUnrelatedOrUnverifiedUpgrade(t *testi
 	}
 	hash := strings.Repeat("e", 64)
 	fixture := func() store.UpgradeRow {
-		return store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "batch", ReleaseID: "release", Revision: 5, Status: "completed", Phase: "completed", CreatedAt: h.clock.Now(), UpdatedAt: h.clock.Now(), Hosts: []protocol.UpgradeHostView{{HostID: "linux-1", Status: "skipped"}}}, Manifest: release.Manifest{ReleaseID: "release"}, ManifestSHA256: hash, ServerHash: hash, ServerInstance: "server", ServerProcess: "installed-server", ServerHealthy: 2, Hosts: []store.UpgradeHost{{HostID: "linux-1", PreviousHash: hash, TargetHash: hash}}}
-	}
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), fixture()) }); err != nil {
-		t.Fatal(err)
+		return store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "batch", ReleaseID: "release", SourceCommit: strings.Repeat("c", 40), Revision: 5, Status: "completed", Phase: "completed", CreatedAt: h.clock.Now(), UpdatedAt: h.clock.Now(), Hosts: []protocol.UpgradeHostView{{HostID: "linux-1", Status: "skipped"}}}, Manifest: release.Manifest{ReleaseID: "release"}, ManifestSHA256: hash, ServerHash: hash, ServerInstance: "server", ServerProcess: "installed-server", ServerHealthy: 2, Hosts: []store.UpgradeHost{{HostID: "linux-1", PreviousHash: hash, TargetHash: hash}}}
 	}
 	executeAcceptedDeliveryTaskForTest(t, h, created.TaskID, func() protocol.ArtifactPayload {
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), fixture()) }); err != nil {
+			t.Fatal(err)
+		}
 		return protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Controlled update receipt", Evidence: []string{"upgrade:batch"}}}
 	})
 	observeDeliveryForTest(t, h, i.IssueID, c, "merged", strings.Repeat("c", 40))
@@ -314,6 +324,7 @@ func TestDeliveryDeploymentCannotSettleFromUnrelatedOrUnverifiedUpgrade(t *testi
 				batch.View.Status = "running"
 			case "unknown":
 				batch.View.Status = "attention"
+				batch.View.Revision++
 				batch.View.Reason = "replacement result unknown"
 			case "server-instance":
 				batch.ServerInstance = "other"
@@ -407,11 +418,11 @@ func TestDeliveryKnownMergedFailureRequiresFreshDeploymentCandidate(t *testing.T
 		t.Fatal(err)
 	}
 	hash := strings.Repeat("d", 64)
-	batch := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "prior-batch", ReleaseID: "prior-release", Status: "completed", Phase: "completed", CreatedAt: h.clock.Now(), UpdatedAt: h.clock.Now(), Hosts: []protocol.UpgradeHostView{{HostID: "linux-1", Status: "skipped"}}}, Manifest: release.Manifest{ReleaseID: "prior-release"}, ManifestSHA256: hash, ServerHash: hash, ServerInstance: "server", ServerProcess: "server-process", ServerHealthy: 2, Hosts: []store.UpgradeHost{{HostID: "linux-1", PreviousHash: hash, TargetHash: hash}}}
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), batch) }); err != nil {
-		t.Fatal(err)
-	}
+	batch := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "prior-batch", ReleaseID: "prior-release", SourceCommit: strings.Repeat("c", 40), Revision: 5, Status: "completed", Phase: "completed", CreatedAt: h.clock.Now(), UpdatedAt: h.clock.Now(), Hosts: []protocol.UpgradeHostView{{HostID: "linux-1", Status: "skipped"}}}, Manifest: release.Manifest{ReleaseID: "prior-release"}, ManifestSHA256: hash, ServerHash: hash, ServerInstance: "server", ServerProcess: "server-process", ServerHealthy: 2, Hosts: []store.UpgradeHost{{HostID: "linux-1", PreviousHash: hash, TargetHash: hash}}}
 	executeAcceptedDeliveryTaskForTest(t, h, prior.TaskID, func() protocol.ArtifactPayload {
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), batch) }); err != nil {
+			t.Fatal(err)
+		}
 		return protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Prior started batch retained", Evidence: []string{"upgrade:prior-batch"}}}
 	})
 	c.ProviderState = "merged"
@@ -433,9 +444,11 @@ func TestDeliveryKnownMergedFailureRequiresFreshDeploymentCandidate(t *testing.T
 		t.Fatal("unknown original was replaced", blocked, err)
 	}
 	batch.View.Status = "cancelled"
+	batch.View.Revision++
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), batch) }); err != nil {
 		t.Fatal(err)
 	}
+	observeDeliveryForTest(t, h, i.IssueID, c, "merged", c.MergeSHA)
 	missingMerge := c
 	missingMerge.MergeSHA = ""
 	expectWorkCode(t, updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: original, Action: "prepare", Candidate: &missingMerge, IssueControlPayload: protocol.IssueControlPayload{Reason: "Missing merge identity"}}), protocol.CodeInvalidRequest)
@@ -455,7 +468,7 @@ func TestDeliveryKnownMergedFailureRequiresFreshDeploymentCandidate(t *testing.T
 		t.Fatal(err)
 	}
 	frozen := h.storedSpec(successor.TaskID, 1)
-	if !strings.Contains(strings.Join(frozen.Constraints, "\n"), "existing merge "+c.MergeSHA+"; deployment only; never merge again") {
+	if !strings.Contains(strings.Join(frozen.Constraints, "\n"), "existing merge "+c.MergeSHA+"; deployment only from current target "+c.BaseSHA+"; never merge again") {
 		t.Fatal("recovery authorized another merge")
 	}
 	assignment, ok, claimEnv := h.claim("linux-1")

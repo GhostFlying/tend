@@ -802,6 +802,8 @@ export interface IssueEvidence {
 export interface DeliveryObservation {
   attempted_at?: number;
   base_sha?: string;
+  baseline_upgrade_id?: string;
+  baseline_upgrade_revision?: number;
   checked_at?: number;
   closed_at?: string;
   closed_by?: DeliveryActor;
@@ -840,6 +842,7 @@ export interface UpgradeEvidence {
   server_instance?: string;
   server_process_instance_id?: string;
   server_sha256: string;
+  source_commit?: string;
   upgrade_id: string;
 }
 /**
@@ -918,6 +921,7 @@ export interface IssueDeadline {
  */
 export interface IssueDeliveryDuty {
   acceptance_id: string;
+  assignment_epoch?: number;
   attention_id?: string;
   candidate?: IssueDeliveryCandidate;
   event_id: string;
@@ -941,6 +945,7 @@ export interface IssueDeliveryCandidate {
   head_sha: string;
   merge_sha?: string;
   provider_state: string;
+  reconciliation?: IssueDeliveryReconciliation;
   url: string;
   validation: string;
 }
@@ -949,8 +954,19 @@ export interface IssueDeliveryCandidate {
  * via the `definition` "IssueDeliveryDeployment".
  */
 export interface IssueDeliveryDeployment {
+  baseline_upgrade_id?: string;
+  baseline_upgrade_revision?: number;
   host_ids: string[] | null;
   server_instance: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryReconciliation".
+ */
+export interface IssueDeliveryReconciliation {
+  evidence_task_id: string;
+  source_commit?: string;
+  upgrade_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3700,6 +3716,7 @@ export interface UpgradeView {
   reason?: string;
   release_id: string;
   revision: number;
+  source_commit?: string;
   status: string;
   updated_at: string;
   upgrade_id: string;

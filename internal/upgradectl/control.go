@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -35,6 +36,8 @@ type Config struct {
 	Instance        string
 	ProcessInstance string
 	BinarySHA256    string
+	SourceCommit    string
+	SourceModified  bool
 	ControlSocket   string
 	UpdaterSocket   string
 	ReleaseDir      string
@@ -54,6 +57,18 @@ type Controller struct {
 func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context) (app.ServerObservation, error), log *slog.Logger) (*Controller, error) {
 	if cfg.Instance == "" || cfg.ProcessInstance == "" || !release.ValidSHA(cfg.BinarySHA256) || !filepath.IsAbs(cfg.ControlSocket) || !filepath.IsAbs(cfg.UpdaterSocket) || !filepath.IsAbs(cfg.ReleaseDir) || ids == nil || a == nil || observe == nil {
 		return nil, errors.New("upgradectl: invalid fixed upgrade configuration")
+	}
+	if cfg.SourceCommit == "" {
+		if build, ok := debug.ReadBuildInfo(); ok {
+			for _, setting := range build.Settings {
+				switch setting.Key {
+				case "vcs.revision":
+					cfg.SourceCommit = setting.Value
+				case "vcs.modified":
+					cfg.SourceModified = setting.Value == "true"
+				}
+			}
+		}
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -92,17 +107,31 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
+	sources := map[string]release.SourceIdentity{}
+	for _, artifact := range bundle.Manifest.Artifacts {
+		path, err := release.RegularPath(bundle.Dir, artifact.Path)
+		if err != nil {
+			return protocol.UpgradeView{}, err
+		}
+		source, err := release.ExecutableSource(path)
+		if err == nil {
+			sources[artifact.SHA256] = source
+		} else if r.DeliveryTaskID != "" {
+			return protocol.UpgradeView{}, errors.New("upgradectl: delivery artifacts require verifiable Go source identity")
+		}
+	}
 	payload, err := json.Marshal(struct {
+		DeliveryTaskID string                                  `json:"delivery_task_id,omitempty"`
 		ReleaseID      string                                  `json:"release_id"`
 		ManifestSHA256 string                                  `json:"manifest_sha256"`
 		Configurations map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
-	}{bundle.Manifest.ReleaseID, bundle.ManifestSHA256, r.RunnerConfigurations})
+	}{r.DeliveryTaskID, bundle.Manifest.ReleaseID, bundle.ManifestSHA256, r.RunnerConfigurations})
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
 	zero := int64(0)
 	env := &protocol.Envelope{RequestID: r.RequestID, Operation: "upgrades.start", Target: protocol.Target{Type: "upgrade", ID: r.UpgradeID}, ExpectedControlRevision: &zero, Payload: payload, Reason: "Start the verified immutable local release through the service updater."}
-	op, err := c.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, app.StartUpgrade{RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis})
+	op, err := c.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, app.StartUpgrade{DeliveryTaskID: r.DeliveryTaskID, ArtifactSources: sources, RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis})
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
@@ -141,6 +170,7 @@ func (c *Controller) tick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	observed.Commit, observed.Modified = c.cfg.SourceCommit, c.cfg.SourceModified
 	observed.InstanceID = c.cfg.Instance
 	observed.ProcessInstanceID = c.cfg.ProcessInstance
 	observed.BinarySHA256 = c.cfg.BinarySHA256

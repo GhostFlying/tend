@@ -19,6 +19,8 @@ const capabilityUpdater = "runner-updater-v1"
 // StartUpgrade receives an already verified immutable local bundle from the
 // local control service. The remotely supplied payload cannot choose binaries.
 type StartUpgrade struct {
+	DeliveryTaskID       string
+	ArtifactSources      map[string]release.SourceIdentity
 	RunnerConfigurations map[string]protocol.RunnerConfiguration
 	CurrentServerHash    string
 	Manifest             release.Manifest
@@ -65,6 +67,10 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err == nil && (previous.View.Status == "running" || previous.View.Status == "attention") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "an unfinished upgrade already exists")
 	}
+	approved, err := checkDeliveryUpgradeStart(ctx, x, tx.Q(), c)
+	if err != nil {
+		return Outcome{}, err
+	}
 	var schema int64
 	if err := tx.Q().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&schema); err != nil {
 		return Outcome{}, err
@@ -107,7 +113,11 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if len(hosts) < 2 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "rolling upgrades require another online execution host")
 	}
-	r := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, Hosts: []protocol.UpgradeHostView{}}, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
+	sourceCommit := ""
+	if source, ok := c.ArtifactSources[c.ServerHash]; ok && !source.Modified && validDeliverySHA(source.Commit) {
+		sourceCommit = source.Commit
+	}
+	r := store.UpgradeRow{View: protocol.UpgradeView{SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
 	if len(c.RunnerConfigurations) > 0 {
 		if len(c.RunnerConfigurations) != 1 || c.ServerHash != c.CurrentServerHash {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration maintenance requires one host and the current server binary")
@@ -193,6 +203,27 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration host is not active")
 		}
 	}
+	if approved != nil {
+		hosts := make([]string, 0, len(r.Hosts))
+		for _, host := range r.Hosts {
+			hosts = append(hosts, host.HostID)
+			if host.TargetHash != host.PreviousHash {
+				source, ok := c.ArtifactSources[host.TargetHash]
+				if !ok || source.Modified || source.Commit != r.View.SourceCommit {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "changed runner artifact does not match the approved server source")
+				}
+			}
+		}
+		want := slices.Clone(approved.Deployment.HostIDs)
+		slices.Sort(hosts)
+		slices.Sort(want)
+		if !slices.Equal(hosts, want) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "upgrade host set differs from the approved complete target set")
+		}
+		if _, err := tx.Exec(ctx, `UPDATE issue_delivery_executions SET upgrade_id=? WHERE task_id=? AND upgrade_id=''`, r.View.UpgradeID, c.DeliveryTaskID); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if err := tx.PutUpgrade(ctx, r); err != nil {
 		return Outcome{}, err
 	}
@@ -234,9 +265,9 @@ func upgradeNotice(ctx context.Context, x *Exec, tx *store.Tx, r store.UpgradeRo
 
 // ServerObservation is supplied by the local controller, never by remote peers.
 type ServerObservation struct {
-	UpdaterReceipt                              *protocol.UpdaterReceipt
-	InstanceID, ProcessInstanceID, BinarySHA256 string
-	Healthy, MainDrained                        bool
+	UpdaterReceipt                                      *protocol.UpdaterReceipt
+	InstanceID, ProcessInstanceID, BinarySHA256, Commit string
+	Healthy, MainDrained, Modified                      bool
 }
 
 // TickUpgrade advances only durable, observed prerequisites. It does no network
@@ -321,6 +352,17 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 						}
 						break
 					}
+					if r.DeliveryTaskID != "" {
+						if c.Observation.ProcessInstanceID == "" {
+							return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "current server identity is required for delivery readback")
+						}
+						r.ServerProcess = c.Observation.ProcessInstanceID
+						_, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
+						if err != nil {
+							return Outcome{}, err
+						}
+						break
+					}
 					r.View.Phase = "runners"
 					r.Deadline = now + r.DrainMillis
 					break
@@ -388,6 +430,11 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	r.View.UpdatedAt = x.Now
 	if err := tx.PutUpgrade(ctx, r); err != nil {
 		return Outcome{}, err
+	}
+	if r.View.Status == "completed" {
+		if err := refreshDeliveryBaselineQueries(ctx, x, tx); err != nil {
+			return Outcome{}, err
+		}
 	}
 	return Outcome{Result: r.View, Events: []Event{upgradeEvent(r)}}, nil
 }

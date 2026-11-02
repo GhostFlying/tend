@@ -380,6 +380,11 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := tx.PutUpgrade(ctx, r); err != nil {
 		return Outcome{}, err
 	}
+	if r.View.Status == "cancelled" {
+		if err := refreshDeliveryBaselineQueries(ctx, x, tx); err != nil {
+			return Outcome{}, err
+		}
+	}
 	return Outcome{Result: r.View, Events: []Event{upgradeEvent(r)}}, nil
 }
 

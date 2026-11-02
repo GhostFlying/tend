@@ -77,6 +77,12 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{Result: result, NoEffect: true}, nil
 	}
 	plannedAt := selected.NextCheckAt
+	baseline, err := deliveryBaseline(ctx, tx.Q())
+	if err != nil {
+		return Outcome{}, err
+	}
+	selected.Observation.BaselineUpgradeID = baseline.View.UpgradeID
+	selected.Observation.BaselineUpgradeRevision = baseline.View.Revision
 	selected.Observation.Generation++
 	selected.Nonce = x.IDs.New(protocol.PrefixRequest)
 	selected.HostID = x.Principal.Subject

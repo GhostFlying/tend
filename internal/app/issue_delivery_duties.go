@@ -92,6 +92,12 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if p.Candidate == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "exact reviewable candidate is required")
 		}
+		if err := normalizeDeliveryBaseline(ctx, tx.Q(), p.Candidate); err != nil {
+			return Outcome{}, err
+		}
+		if _, _, err := checkDeliveryReconciliation(ctx, tx.Q(), issue.IssueID, p.Candidate); err != nil {
+			return Outcome{}, err
+		}
 		if err := validateDeliveryCandidate(ctx, tx.Q(), issue, *p.Candidate); err != nil {
 			return Outcome{}, err
 		}
@@ -136,7 +142,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil {
 				return Outcome{}, err
 			}
-			if p.Action != "resume" && d.Status != "preparing" && reflect.DeepEqual(d.Candidate, p.Candidate) && decision.Question == deliveryCandidateQuestion(*p.Candidate) && ((decision.Status == store.DecisionOpen && decision.Version == 1) || (decision.Status == store.DecisionAnswered && decision.Version == 2)) {
+			if p.Action != "resume" && d.AssignmentEpoch == issue.AssignmentEpoch && d.Status != "preparing" && reflect.DeepEqual(d.Candidate, p.Candidate) && decision.Question == deliveryCandidateQuestion(*p.Candidate) && ((decision.Status == store.DecisionOpen && decision.Version == 1) || (decision.Status == store.DecisionAnswered && decision.Version == 2)) {
 				return Outcome{Result: d}, nil
 			}
 			if err := withdrawDeliveryQuestion(ctx, x, tx, &old); err != nil {
@@ -156,7 +162,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, err
 		}
 		a := out.Result.(protocol.Attention)
-		d.Candidate, d.AttentionID, d.Status = p.Candidate, a.AttentionID, "awaiting_owner"
+		d.Candidate, d.AttentionID, d.Status, d.AssignmentEpoch = p.Candidate, a.AttentionID, "awaiting_owner", issue.AssignmentEpoch
 		evidence = nil
 		events = append(events, out.Events...)
 	case "report":
@@ -214,6 +220,9 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		evidence = []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: reference, Summary: p.Reason}}
 		d.Status = "ended"
 	case "complete":
+		if d.AssignmentEpoch != issue.AssignmentEpoch {
+			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "delivery owner epoch changed; reconcile the original facts under a fresh candidate")
+		}
 		if d.ExecutionTaskID == "" || d.Candidate == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "accepted delivery execution is required")
 		}
@@ -256,11 +265,33 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if bound == "" || bound != p.UpgradeID {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "completion must verify the upgrade batch bound by this execution's artifact")
 			}
-			proof, err := deliveryUpgradeEvidence(ctx, x, tx.Q(), *d.Candidate.Deployment, p.UpgradeID, task.CreatedAt)
+			started := task.CreatedAt
+			if d.Candidate.Reconciliation != nil {
+				if p.UpgradeID != d.Candidate.Reconciliation.UpgradeID {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "verification must retain its original upgrade")
+				}
+				accepted, at, err := checkDeliveryReconciliation(ctx, tx.Q(), issue.IssueID, d.Candidate)
+				if err != nil {
+					return Outcome{}, err
+				}
+				started = at
+				evidence = append(evidence, protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceAcceptance, Reference: accepted, Summary: "Original accepted report of the completed delivery; no old execution was relabeled"})
+			}
+			proof, err := deliveryUpgradeEvidence(ctx, x, tx.Q(), *d.Candidate.Deployment, p.UpgradeID, started)
 			if err != nil {
 				return Outcome{}, err
 			}
-			evidence = append(evidence, protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceUpgrade, Reference: p.UpgradeID, Summary: "Verified controlled self-update and target installations after the approved execution began", Upgrade: proof})
+			target := obs.Observation.MergeSHA
+			if d.Candidate.ProviderState == "merged" {
+				target = d.Candidate.BaseSHA
+			}
+			if d.Candidate.Reconciliation != nil {
+				target = d.Candidate.Reconciliation.SourceCommit
+			}
+			if proof.SourceCommit != target {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "installed source does not match the approved deployment lineage")
+			}
+			evidence = append(evidence, protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceUpgrade, Reference: p.UpgradeID, Summary: "Verified the referenced completed controlled self-update and target installations", Upgrade: proof})
 		} else if p.UpgradeID != "" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "merge-only approval does not authorize deployment")
 		}
@@ -287,7 +318,10 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 func deliveryCandidateQuestion(c protocol.IssueDeliveryCandidate) string {
 	mergeScope := "merge authorized on approve"
 	if c.ProviderState == "merged" {
-		mergeScope = "existing merge " + c.MergeSHA + "; deployment only; never merge again"
+		mergeScope = "existing merge " + c.MergeSHA + "; deployment only from current target " + c.BaseSHA + "; never merge again"
+	}
+	if c.Reconciliation != nil {
+		mergeScope = fmt.Sprintf("verification only: existing merge %s; accepted evidence task %s; completed upgrade %s; installed source %s; no merge/deploy mutations authorized", c.MergeSHA, c.Reconciliation.EvidenceTaskID, c.Reconciliation.UpgradeID, c.Reconciliation.SourceCommit)
 	}
 	return fmt.Sprintf("Approve this delivery candidate and scope? PR %s; head %s; base %s; provider %s; validation %s; %s; deploy=%t; deployment scope: %s. Defer retains responsibility without merge/deploy; end_delivery explicitly ends remaining delivery responsibility without integration. A changed candidate needs a new question.", c.URL, c.HeadSHA, c.BaseSHA, c.ProviderState, c.Validation, mergeScope, c.Deploy, c.DeploymentScope) + deliveryDeploymentQuestion(c)
 }
@@ -309,6 +343,12 @@ func validateDeliveryCandidate(ctx context.Context, q store.Querier, issue proto
 		}
 	} else if c.Deployment != nil {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "merge-only candidate cannot include deployment targets")
+	}
+	if err := deliveryObservationBaseline(ctx, q, issue.IssueID, c); err != nil {
+		return err
+	}
+	if _, _, err := checkDeliveryReconciliation(ctx, q, issue.IssueID, &c); err != nil {
+		return err
 	}
 	found := false
 	for _, ref := range issue.Plan.Deliveries {
@@ -377,7 +417,7 @@ func deliveryExecutionAuthorized(ctx context.Context, q store.Querier, issue pro
 	if err != nil {
 		return d, err
 	}
-	if d.Revision != auth.Revision || (d.Status != "awaiting_owner" && d.Status != "executing") {
+	if d.AssignmentEpoch != issue.AssignmentEpoch || d.Revision != auth.Revision || (d.Status != "awaiting_owner" && d.Status != "executing") {
 		return d, protocol.Errorf(protocol.CodeStaleRevision, "delivery candidate changed")
 	}
 	option, err := deliveryOwnerOption(ctx, q, d)
@@ -408,8 +448,36 @@ func deliveryTaskCurrent(ctx context.Context, q store.Querier, task string) (boo
 	if err != nil {
 		return false, err
 	}
+	d, err := store.GetIssueDeliveryDuty(ctx, q, issue, source)
+	if err != nil {
+		return false, err
+	}
+	if d.AssignmentEpoch != i.AssignmentEpoch {
+		return false, nil
+	}
+	if d.Candidate != nil && d.Candidate.Deploy {
+		available, err := deliveryTargetAvailable(ctx, q, task)
+		if err != nil || !available {
+			return false, err
+		}
+		var bound string
+		if err := q.QueryRowContext(ctx, `SELECT upgrade_id FROM issue_delivery_executions WHERE task_id=?`, task).Scan(&bound); err != nil {
+			return false, err
+		}
+		if bound != "" && d.ExecutionTaskID == task && d.Revision == revision && d.Status == "executing" {
+			batch, err := store.GetUpgrade(ctx, q, bound)
+			if err != nil {
+				return false, err
+			}
+			option, err := deliveryOwnerOption(ctx, q, d)
+			if err != nil {
+				return false, err
+			}
+			return batch.View.Status == "completed" && option == "approve", nil
+		}
+	}
 	_, err = deliveryExecutionAuthorized(ctx, q, i, protocol.IssueDeliveryAuthorization{TaskID: source, Revision: revision})
-	if err != nil && (protocol.CodeOf(err) == protocol.CodeForbidden || protocol.CodeOf(err) == protocol.CodeStaleRevision || protocol.CodeOf(err) == protocol.CodeInvalidRequest || errors.Is(err, store.ErrNotFound)) {
+	if err != nil && (protocol.CodeOf(err) == protocol.CodeForbidden || protocol.CodeOf(err) == protocol.CodeStaleRevision || protocol.CodeOf(err) == protocol.CodeInvalidRequest || protocol.CodeOf(err) == protocol.CodeUnknownOutcome || protocol.CodeOf(err) == protocol.CodeInvalidTransition || errors.Is(err, store.ErrNotFound)) {
 		return false, nil
 	}
 	return err == nil, err
@@ -440,7 +508,17 @@ func invalidateIssueDeliveryCandidates(ctx context.Context, x *Exec, tx *store.T
 		if c == nil || c.DeliveryID != o.DeliveryID || (d.Status != "awaiting_owner" && d.Status != "deferred" && d.Status != "executing") {
 			continue
 		}
-		if o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA) && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA) || (d.Status == "executing" && o.State == "merged")) {
+		baselineCurrent := !c.Deploy || c.Deployment == nil || (o.BaselineUpgradeID == c.Deployment.BaselineUpgradeID && o.BaselineUpgradeRevision == c.Deployment.BaselineUpgradeRevision)
+		if !baselineCurrent && d.ExecutionTaskID != "" && o.BaselineUpgradeID != "" {
+			var bound string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT upgrade_id FROM issue_delivery_executions WHERE task_id=?`, d.ExecutionTaskID).Scan(&bound); err != nil {
+				return nil, err
+			}
+			// The execution's own batch naturally advances its baseline. It
+			// still needs the original approval and completed installation proof.
+			baselineCurrent = bound == o.BaselineUpgradeID
+		}
+		if baselineCurrent && o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA) && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA) || (d.Status == "executing" && o.State == "merged")) {
 			continue
 		}
 		if d.AttentionID != "" {
@@ -457,7 +535,7 @@ func invalidateIssueDeliveryCandidates(ctx context.Context, x *Exec, tx *store.T
 		}
 		d.Status = "preparing"
 		d.Revision++
-		d.Reason = "Provider identity or outcome changed; reconcile and prepare a current versioned candidate"
+		d.Reason = "Provider identity, outcome or deployment baseline changed; reconcile and prepare a current versioned candidate"
 		if err := tx.PutIssueDeliveryDuty(ctx, o.WorkItemID, d); err != nil {
 			return nil, err
 		}
@@ -470,7 +548,10 @@ func deliveryDeploymentQuestion(c protocol.IssueDeliveryCandidate) string {
 	if c.Deployment == nil {
 		return ""
 	}
-	return fmt.Sprintf(" Tend executes the controlled self-update itself: server instance %s; complete host set %v; build from the verified merge and read back installed server/hosts and this original Issue before independent acceptance.", c.Deployment.ServerInstance, c.Deployment.HostIDs)
+	if c.Reconciliation != nil {
+		return fmt.Sprintf(" Verify existing installation only: server instance %s; complete host set %v; read back the referenced completed upgrade and original Issue before independent acceptance; no build, merge or installation is authorized. Baseline upgrade %s revision %d.", c.Deployment.ServerInstance, c.Deployment.HostIDs, c.Deployment.BaselineUpgradeID, c.Deployment.BaselineUpgradeRevision)
+	}
+	return fmt.Sprintf(" Tend executes the controlled self-update itself: server instance %s; complete host set %v; build from the verified merge and read back installed server/hosts and this original Issue before independent acceptance.", c.Deployment.ServerInstance, c.Deployment.HostIDs) + fmt.Sprintf(" Baseline upgrade %s revision %d.", c.Deployment.BaselineUpgradeID, c.Deployment.BaselineUpgradeRevision)
 }
 
 func deliveryUpgradeBinding(ctx context.Context, q store.Querier, target protocol.IssueDeliveryDeployment, id string, executionStarted int64) (store.UpgradeRow, error) {
@@ -508,4 +589,21 @@ func deliveryUpgradeEvidence(ctx context.Context, x *Exec, q store.Querier, targ
 	}
 	proof.ServerInstance, proof.ServerProcessInstanceID = r.ServerInstance, r.ServerProcess
 	return proof, nil
+}
+
+// Candidate expiry is a responsibility input, including when provider text is
+// unchanged after another deployment. It is not another human approval request.
+func recordDeliveryCandidateExpiry(ctx context.Context, x *Exec, tx *store.Tx, issue, event string) error {
+	conversation, err := ensureCanonicalManagerConversationForWake(ctx, x, tx, issue)
+	if err != nil || conversation == "" {
+		return err
+	}
+	message := x.IDs.New(protocol.PrefixMessage)
+	if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: conversation, Author: "system", Body: "The delivery candidate or deployment baseline expired for Issue " + issue + ". Reconcile the original queued/running execution, refresh the actual provider and installation facts, and prepare a current versioned candidate. Do not reuse the old approval, revive a terminal task, or replay an uncertain merge/installation.", CreatedAt: x.Now.UnixMilli()}); err != nil {
+		return err
+	}
+	if err := tx.BindMessage(ctx, message, "work_item", issue, "delivery_candidate_expired"); err != nil {
+		return err
+	}
+	return appendBackgroundSource(ctx, x, tx, "work_item:"+issue, issue, message, event, "issue.delivery_candidate_expired", nil)
 }

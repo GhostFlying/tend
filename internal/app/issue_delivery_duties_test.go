@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -91,7 +92,11 @@ func deliveryFixtureOnHarness(t *testing.T, h *harness) (*harness, protocol.Issu
 func observeDeliveryForTest(t *testing.T, h *harness, issue string, c protocol.IssueDeliveryCandidate, state, merge string) {
 	t.Helper()
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		return tx.PutDeliveryObservation(t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: issue, DeliveryID: c.DeliveryID, CheckedAt: h.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{URL: c.URL, HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, State: state, MergeSHA: merge}}})
+		baseline, err := deliveryBaseline(t.Context(), tx.Q())
+		if err != nil {
+			return err
+		}
+		return tx.PutDeliveryObservation(t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{BaselineUpgradeID: baseline.View.UpgradeID, BaselineUpgradeRevision: baseline.View.Revision, WorkItemID: issue, DeliveryID: c.DeliveryID, CheckedAt: h.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{URL: c.URL, HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, State: state, MergeSHA: merge}}})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +127,9 @@ func answerDeliveryForTest(t *testing.T, h *harness, d protocol.IssueDeliveryDut
 func createDeliveryExecutionForTest(t *testing.T, h *harness, issue string, d protocol.IssueDeliveryDuty) protocol.Operation {
 	t.Helper()
 	i := canonicalTaskIssue(t, h, issue)
+	if d.Candidate.Deploy {
+		enableDeliveryObservationForTest(t, h)
+	}
 	spec := protocol.OwnerTaskSpec{Goal: "Execute and verify only the approved candidate and scope", Acceptance: []string{"Verify provider merge receipt and all approved post-deployment checks"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}
 	p := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Title: "Execute approved delivery", Spec: spec, DeliveryAuthorization: &protocol.IssueDeliveryAuthorization{TaskID: d.TaskID, Revision: d.Revision}}
 	op, err := h.app.Execute(t.Context(), owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue}, p, rev(i.Revision)), CanonicalOwnerTaskCreate{})
@@ -519,5 +527,34 @@ func TestDeliveryObservedDriftCannotReviveOldApprovalAfterProviderReturns(t *tes
 			}
 			expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), protocol.CodeForbidden)
 		})
+	}
+}
+
+func enableDeliveryObservationForTest(t *testing.T, h *harness) {
+	t.Helper()
+	var hosts []store.HostRow
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		hosts, err = store.ListActiveHosts(t.Context(), tx.Q())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range hosts {
+		var runtime protocol.RunnerRuntime
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			r, err := store.GetHostRuntime(t.Context(), tx.Q(), host.HostID)
+			runtime = r.Runtime
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(runtime.Capabilities, protocol.CapabilityWorkerObservation) {
+			runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityWorkerObservation)
+			runtime.Sequence++
+			if op := h.versionedHello(host.HostID, &runtime); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+		}
 	}
 }

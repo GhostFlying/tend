@@ -32,6 +32,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	bundle := fs.String("release", "", "verified local release directory")
 	upgradeID := fs.String("upgrade-id", "", "stable upgrade batch ID")
 	requestID := fs.String("request-id", "", "reuse this ID only when retrying the identical request")
+	deliveryTask := fs.String("delivery-task", "", "approved delivery execution task; binds candidate, target and source")
 	revision := fs.Int64("revision", 0, "current upgrade control revision")
 	socket := fs.String("socket", e.Getenv("TEND_UPGRADE_SOCKET"), "server local upgrade control socket")
 	asJSON := fs.Bool("json", false, "print the release state as JSON")
@@ -39,8 +40,8 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *configPlan != "" && action != "start" {
-		return usagef("runner-configurations is only valid for start")
+	if (*configPlan != "" || *deliveryTask != "") && action != "start" {
+		return usagef("runner-configurations and delivery-task are only valid for start")
 	}
 	if len(positional) > 0 {
 		return usagef("upgrade takes no positional arguments")
@@ -84,7 +85,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 				return usagef("configuration metadata must select exactly one host")
 			}
 		}
-		input = protocol.UpgradeStartRequest{RequestID: *requestID, UpgradeID: *upgradeID, Release: absolute, RunnerConfigurations: configurations}
+		input = protocol.UpgradeStartRequest{DeliveryTaskID: *deliveryTask, RequestID: *requestID, UpgradeID: *upgradeID, Release: absolute, RunnerConfigurations: configurations}
 	case "status":
 		if *bundle != "" || *upgradeID != "" || *requestID != "" || *revision != 0 {
 			return usagef("upgrade status takes no release, ID or revision")
