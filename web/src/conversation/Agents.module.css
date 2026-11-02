@@ -267,11 +267,8 @@
 }
 
 .tags[data-issue-context="true"] {
-  position: relative;
   margin-top: 0;
 }
 .tags[data-issue-context="true"] .menu {
-  position: absolute;
-  right: 0;
-  top: 0;
+  margin-left: auto;
 }

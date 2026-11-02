@@ -157,11 +157,26 @@ export function IssueActivity({
     };
   }, [reads, issue.issue_id, reading]);
   const rows = state.value?.items ?? emptyEntries;
+  const activityRoot = useRef<HTMLDivElement>(null);
+  const focusedActivity = useRef<{ node: HTMLElement; id: string } | null>(null);
   const [eventIdentities] = useState(() => new Map<string, string>());
   const activityGroups = useMemo(
     () => identifyActivityGroups(groupActivityEvents(rows), eventIdentities),
     [rows, eventIdentities],
   );
+  useLayoutEffect(() => {
+    const focused = focusedActivity.current;
+    if (!focused || focused.node.isConnected) return;
+    const row = Array.from(
+      activityRoot.current?.querySelectorAll<HTMLElement>("[data-scroll-id]") ?? [],
+    ).find((node) => node.dataset.scrollId === focused.id);
+    focusedActivity.current = null;
+    const control =
+      row?.closest("details[data-event-group]")?.querySelector<HTMLElement>("summary") ??
+      row?.querySelector<HTMLElement>("button, a[href], [tabindex]") ??
+      row;
+    control?.focus({ preventScroll: true });
+  }, [activityGroups]);
   const beginContinuation = useCallback(
     (trigger: string, control: HTMLButtonElement, ids: string[]) => {
       cancelAnimationFrame(dataFrame.current);
@@ -378,7 +393,19 @@ export function IssueActivity({
     setNewItems(false);
   };
   return (
-    <div className={styles.activity}>
+    <div
+      ref={activityRoot}
+      className={styles.activity}
+      onFocusCapture={(event) => {
+        const row = event.target.closest<HTMLElement>("[data-scroll-id]");
+        focusedActivity.current = row?.dataset.scrollId
+          ? { node: event.target, id: row.dataset.scrollId }
+          : null;
+      }}
+      onBlurCapture={() => {
+        focusedActivity.current = null;
+      }}
+    >
       {state.value?.more && (
         <div
           ref={historyBoundary}
@@ -631,6 +658,7 @@ function Milestone({
   return (
     <div
       className={styles.milestone}
+      tabIndex={-1}
       data-tone={/failed|failure/.test(entry.kind) ? "error" : undefined}
       data-scroll-id={groupedFirst ? undefined : entry.id}
     >
