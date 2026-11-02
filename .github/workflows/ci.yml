@@ -8,8 +8,40 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  check:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: static checks and capability coverage
+        run: make capability-check protocol-check fmt-check vet staticcheck
+
+  race:
+    name: race (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [app, api, mainthread, e2e, other]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: race tests
+        env:
+          APP_TEST_SHARDS: 4
+          TEST_GROUP: ${{ matrix.group }}
+        run: make test
+
+  web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -25,10 +57,8 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - name: make check
-        env:
-          APP_TEST_SHARDS: 4
-        run: make check
+      - name: web checks and build
+        run: make web-check
       - name: mobile layout regression
         run: |
           pnpm --dir web exec playwright install --with-deps chromium
@@ -71,3 +101,14 @@ jobs:
         run: |
           GOOS=windows GOARCH=amd64 go build ./...
           GOOS=darwin GOARCH=arm64 go build ./...
+
+  # Keep the existing required check name while rejecting every incomplete job.
+  check:
+    if: ${{ always() }}
+    needs: [quality, race, web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: require all checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'

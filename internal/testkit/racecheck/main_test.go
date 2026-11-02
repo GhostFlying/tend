@@ -6,6 +6,38 @@ import (
 	"testing"
 )
 
+func TestCIGroupsPartitionPackagesExactlyOnce(t *testing.T) {
+	packages := []string{appPackage, e2ePackage,
+		"github.com/GhostFlying/tend/internal/api",
+		"github.com/GhostFlying/tend/internal/mainthread",
+		"github.com/GhostFlying/tend/internal/store",
+		"example/new-package"}
+	var combined []string
+	for _, group := range []string{"app", "api", "mainthread", "e2e", "other"} {
+		selected, err := selectGroup(packages, group)
+		if err != nil {
+			t.Fatal(err)
+		}
+		combined = append(combined, selected...)
+	}
+	slices.Sort(combined)
+	want := slices.Clone(packages)
+	slices.Sort(want)
+	if !slices.Equal(combined, want) {
+		t.Fatalf("CI groups omit or repeat packages: %v, want %v", combined, want)
+	}
+	all, err := selectGroup(packages, "all")
+	if err != nil || !slices.Equal(all, packages) {
+		t.Fatal(all, err)
+	}
+	if _, err := selectGroup(packages, "typo"); err == nil {
+		t.Fatal("unknown CI group accepted")
+	}
+	if _, err := selectGroup([]string{appPackage}, "e2e"); err == nil {
+		t.Fatal("empty CI group accepted")
+	}
+}
+
 func TestPackagePhasesIsolateTransportWithoutLosingCoverage(t *testing.T) {
 	input := []string{"example/api", e2ePackage, appPackage, "example/store"}
 	others, isolated, app := packagePhases(input)
