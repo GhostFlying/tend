@@ -22,3 +22,19 @@ layout (1) 的正常 Issue surfaces 调用链，在隔离副本记录展开期�
 核对最新 main 及 child-only 候选的组合边界，按实际差异串行检查，更新同一
 PR 的实际 head 与 fresh CI。完整检查历史不能替代新 head 的检查，独立正式
 验收仍由协调方安排；本实施任务不合入、不部署。
+
+## 正式验收后的实际交付
+
+本节仅适用于后续交付合同，不改写前次实施及验收历史。
+
+1. 核实干净工作区、已验收 head、原图、实际 PR、live main、受测 merge
+   parents、mandatory CI 与分支保护；只读核对相关 PR 的 head 和合入关系。
+2. 同一候选全部门槛仍有效时，按本轮授权执行受保护的 rebase merge 并回读。
+   若仓库要求或实际组合需要更新候选，只在本分支最小整合，保留两套测试
+   入口及几何、重叠、末行点击断言；提交新 head、实际 diff 和 fresh CI，
+   等待独立增量验收，不继承旧 head 的 passed。
+3. 更新前核实 active batch、server、updater、hosts 与 merged lineage。
+   仅在受支持的排他及 fencing 入口证明无其他 writer 时启动受控更新；
+   已有批次时不竞争、不占排空资源，交付精确阻塞供协调方排队。
+4. 保留原失败、范围外 source-recovery 观察和未执行项；通过任务产物交付
+   操作记录、候选身份、必要验证和版本回读，实施者不代替独立验收结论。
