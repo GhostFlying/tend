@@ -92,7 +92,9 @@ func TestOnlineRepositoryRunsAlongsideExistingTaskWithoutRestart(t *testing.T) {
 }
 
 func TestSlowBindingPreservesExistingWorkerLease(t *testing.T) {
-	srv := newServer(t, 800*time.Millisecond)
+	clock := testkit.NewClock()
+	const ttl = 800 * time.Millisecond
+	srv := newServer(t, ttl, clock.Now)
 	workerGate := make(chan struct{})
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		script := passing(spec)
@@ -110,6 +112,7 @@ func TestSlowBindingPreservesExistingWorkerLease(t *testing.T) {
 	}})
 	n.repositories = bindings.RepositoryBindings
 	n.heartbeat = 30 * time.Millisecond
+	n.log = runnerTestLog(t)
 	n.start()
 	srv.createTask()
 	eventually(t, "existing worker starts", func() bool { return len(n.workers.Started()) > 0 })
@@ -127,7 +130,27 @@ func TestSlowBindingPreservesExistingWorkerLease(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("binding did not start")
 	}
-	time.Sleep(1200 * time.Millisecond)
+	// Advance beyond the original lease while the provider lookup is blocked.
+	// Wait for durable heartbeat renewals before advancing again:
+	// host scheduling delays must not masquerade as the binding blocking RPCs.
+	runID := n.workers.Started()[0].RunID
+	for range 12 {
+		clock.Advance(ttl / 8)
+		eventually(t, "heartbeats renew the active run while binding is blocked", func() bool {
+			if len(n.workers.Stopped()) > 0 {
+				t.Fatal("binding an unrelated repo fenced the active worker")
+			}
+			var lease store.LeaseRow
+			if err := srv.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var err error
+				lease, err = store.GetLeaseByRun(t.Context(), tx.Q(), runID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			return lease.Status == "active" && lease.ExpiresAt >= clock.Now().Add(ttl).UnixMilli()
+		})
+	}
 	if len(n.workers.Stopped()) > 0 {
 		t.Fatal("binding an unrelated repo blocked heartbeat and fenced the active worker")
 	}

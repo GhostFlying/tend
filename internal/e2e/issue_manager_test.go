@@ -133,7 +133,7 @@ func TestFault_ManagerUnknownStartReconcilesAfterClosingItsProcess(t *testing.T)
 	runRunnerManager(t, false, false, true)
 }
 func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool) {
-	s := openServerWithOptions(t, time.Second*10, filepath.Join(t.TempDir(), "server.db"), time.Now, app.WithFollowups(true))
+	s := newServerWithOptions(t, time.Second*10, time.Now, app.WithFollowups(true))
 	if delivery {
 		s.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}}, Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Slots: 1, Repos: []string{"tend"}, TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}}}, app.SyncConfig{})
 	}

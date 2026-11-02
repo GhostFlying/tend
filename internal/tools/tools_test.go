@@ -17,10 +17,13 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 )
 
 // hosted is the hosted main agent's principal.
 var hosted = protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "harness-1", Thread: "th_1"}
+
+var fixtureTemplate storefixture.Template
 
 type env struct {
 	t     *testing.T
@@ -32,7 +35,7 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	clock := testkit.NewClock()
-	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
+	s, err := fixtureTemplate.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

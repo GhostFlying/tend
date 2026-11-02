@@ -19,6 +19,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 )
 
 const (
@@ -28,6 +29,8 @@ const (
 )
 
 var secret = []byte("server-secret")
+
+var fixtureTemplate storefixture.Template
 
 // peers answers WhoIs with whatever identity the test set last.
 type peers struct {
@@ -80,7 +83,7 @@ func (b *syncBuffer) String() string {
 func newEnv(t *testing.T, claimWait time.Duration) *env {
 	t.Helper()
 	clock := testkit.NewClock()
-	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
+	s, err := fixtureTemplate.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

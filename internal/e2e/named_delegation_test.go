@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -256,7 +255,7 @@ func newNamedFixtureServer(t *testing.T, model, executable string) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := openServerWithOptions(t, time.Minute, filepath.Join(t.TempDir(), "tend.db"), time.Now, app.WithHostedConfiguration(prepared))
+	srv := newServerWithOptions(t, time.Minute, time.Now, app.WithHostedConfiguration(prepared))
 	zero := int64(0)
 	execute := func(principal protocol.Principal, operation string, target protocol.Target, payload any, command app.Command) {
 		t.Helper()

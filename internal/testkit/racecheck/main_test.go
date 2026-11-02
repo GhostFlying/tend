@@ -83,6 +83,45 @@ func TestShardPatternsCoverEveryRootExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestWeightedShardsSeparateLongRootsAndRemainStableForNewTargets(t *testing.T) {
+	names := []string{"TestLongA", "TestLongB", "TestSmallA", "TestSmallB", "ExampleNew", "FuzzNew"}
+	costs := map[string]int{"TestLongA": 20, "TestLongB": 18, "TestSmallA": 2, "TestSmallB": 2, "TestRemoved": 1000}
+	groups := weightedPatterns(names, 2, costs)
+	if len(groups) != 2 {
+		t.Fatal(groups)
+	}
+	for _, pattern := range groups {
+		compiled := regexp.MustCompile(pattern)
+		if compiled.MatchString("TestLongA") && compiled.MatchString("TestLongB") {
+			t.Fatal("long roots assigned to the same shard", groups)
+		}
+	}
+	for _, name := range names {
+		matches := 0
+		for _, pattern := range groups {
+			if regexp.MustCompile(pattern).MatchString(name) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			t.Fatal("target omitted or repeated", name, groups)
+		}
+	}
+	slices.Reverse(names)
+	if !slices.Equal(groups, weightedPatterns(names, 2, costs)) {
+		t.Fatal("discovery order changed cache identities")
+	}
+}
+
+func TestPackageOrderStartsHeavySuitesWithoutOmittingUnknownPackages(t *testing.T) {
+	input := []string{"new/package", "light", "heavy", "another/new"}
+	original := slices.Clone(input)
+	got := orderPackages(input, map[string]int{"heavy": 300, "light": 20, "removed": 1000})
+	if !slices.Equal(got, []string{"heavy", "light", "another/new", "new/package"}) || !slices.Equal(input, original) {
+		t.Fatal(got, input)
+	}
+}
+
 func TestCountPreservesRaceTimeoutAndNativeCachingByDefault(t *testing.T) {
 	if got := testArgs("2m", 0); !slices.Equal(got, []string{"test", "-race", "-timeout", "2m"}) {
 		t.Fatal(got)

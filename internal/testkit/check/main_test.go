@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -15,39 +16,65 @@ func TestCapacityAdaptsToEffectiveCPUsAndSupportsSequentialRecovery(t *testing.T
 		cpus int
 		want budget
 	}{
-		{64, budget{7, 4, 3, 4, false}},
-		{32, budget{7, 4, 1, 4, false}},
-		{16, budget{4, 2, 1, 4, true}},
-		{8, budget{2, 1, 1, 4, true}},
-		{2, budget{1, 1, 1, 2, true}},
+		{64, budget{7, 8, 4, 6, 2, false}},
+		{32, budget{7, 4, 2, 3, 2, false}},
+		{16, budget{4, 2, 1, 1, 3, true}},
+		{8, budget{2, 1, 1, 1, 4, true}},
+		{2, budget{1, 1, 1, 1, 2, true}},
 	} {
-		got, err := capacity(tc.cpus, 0, 0)
+		got, err := capacity(tc.cpus, 0, 0, 0)
 		if err != nil || got != tc.want {
 			t.Errorf("capacity(%d) = %+v, %v; want %+v", tc.cpus, got, err, tc.want)
 		}
 	}
-	b, err := capacity(64, 1, 0)
+	b, err := capacity(64, 1, 0, 0)
 	if err != nil || b.jobs != 1 || b.shards != 1 || !b.exclusiveE2E {
 		t.Fatal(b, err)
 	}
-	if _, err := capacity(64, 8, 0); err == nil {
+	if _, err := capacity(64, 8, 0, 0); err == nil {
 		t.Fatal("unbounded group count accepted")
 	}
-	if _, err := capacity(64, 0, 17); err == nil {
+	if _, err := capacity(64, 0, 17, 0); err == nil {
 		t.Fatal("unsupported shard count accepted")
+	}
+	if _, err := capacity(64, 0, 0, 5); err == nil {
+		t.Fatal("unsupported suite shard count accepted")
+	}
+}
+
+func TestAutomaticBudgetBoundsAllConcurrentTestProcesses(t *testing.T) {
+	for cpus := 1; cpus <= 128; cpus++ {
+		for jobs := 1; jobs <= 7; jobs++ {
+			b, err := capacity(cpus, jobs, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			slots := []int{b.shards, b.suiteShards, b.suiteShards, b.suiteShards, b.packages, 1, 1}
+			slices.Sort(slots)
+			total := 0
+			for _, n := range slots[len(slots)-jobs:] {
+				total += n
+			}
+			// Explicitly requesting more groups than CPUs can still require one
+			// thread per group. Automatic budgets must fit available CPUs.
+			if jobs <= cpus && total*b.procs > cpus {
+				t.Fatalf("cpus=%d jobs=%d overcommitted: %+v slots=%d", cpus, jobs, b, total)
+			}
+		}
 	}
 }
 
 func TestTasksCoverAllChecksWithPrivateWebAssets(t *testing.T) {
 	for _, cpus := range []int{2, 16, 64} {
-		b, _ := capacity(cpus, 0, 0)
+		b, _ := capacity(cpus, 0, 0, 0)
 		directory := t.TempDir()
 		parallel, isolated := tasks(b, directory, "selected-go", "selected-pnpm", 1)
 		all := append(slices.Clone(parallel), isolated...)
 		names := make([]string, 0, len(all))
 		for _, task := range all {
 			names = append(names, task.name)
-			if !slices.Contains(task.env, "GO=selected-go") || !slices.Contains(task.env, "TEST_COUNT=1") {
+			if !slices.Contains(task.env, "GO=selected-go") || !slices.Contains(task.env, "TEST_COUNT=1") ||
+				!slices.Contains(task.env, "TEST_SHARDS="+strconv.Itoa(b.suiteShards)) {
 				t.Fatalf("toolchain or uncached verification lost for %s", task.name)
 			}
 			if task.name == "web" {
