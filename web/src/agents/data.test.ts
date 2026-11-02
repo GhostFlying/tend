@@ -180,3 +180,150 @@ test("refresh follows fresh category boundaries after insertion", async () => {
   expect(data.categories.state.get().value?.more).toBe(true);
   data.stop();
 });
+
+test.each(["first", "later"])(
+  "failed %s-page refresh retains all cached categories",
+  async (failed) => {
+    let offline = false;
+    const api: Reader = {
+      async get<T>(path: string) {
+        const later = path.includes("after=");
+        if (offline && (failed === "first" || later)) throw new Error("offline");
+        const id = later ? "b" : "a";
+        return {
+          items: [{ category_id: id, title: id, revision: 1, state: "active", description: "" }],
+          more: !later,
+          next: id,
+        } as T;
+      },
+    };
+    const data = new AgentCatalog(api);
+    await data.openCategories("all");
+    await data.openCategories("all", "a");
+    const cached = data.categories.state.get().value;
+    offline = true;
+    data.refresh();
+    await vi.waitFor(() => expect(data.categories.state.get().error).toBe("offline"));
+    expect(data.categories.state.get().value).toEqual(cached);
+    expect(data.categories.state.get().value?.items).toHaveLength(2);
+    data.stop();
+  },
+);
+
+test("category invalidation during a paginated refresh is read again", async () => {
+  let revision = 1,
+    hold = false,
+    blocked = false;
+  let release!: () => void;
+  const api: Reader = {
+    async get<T>(path: string) {
+      const later = path.includes("after="),
+        observed = revision;
+      if (hold && later) {
+        hold = false;
+        blocked = true;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      const id = later ? "b" : "a";
+      return {
+        items: [
+          {
+            category_id: id,
+            title: `${id}-${observed}`,
+            revision: observed,
+            state: "active",
+            description: "",
+          },
+        ],
+        more: !later,
+        next: id,
+      } as T;
+    },
+  };
+  const data = new AgentCatalog(api);
+  await data.openCategories("all");
+  await data.openCategories("all", "a");
+  hold = true;
+  data.refresh();
+  await vi.waitFor(() => expect(blocked).toBe(true));
+  revision = 2;
+  data.refresh();
+  release();
+  await vi.waitFor(() =>
+    expect(data.categories.state.get().value?.items?.map((c) => c.title)).toEqual(["a-2", "b-2"]),
+  );
+  data.stop();
+});
+
+test("stopping an aggregate category refresh prevents the next page read", async () => {
+  let hold = false,
+    calls = 0;
+  let release!: () => void;
+  const api: Reader = {
+    async get<T>(path: string) {
+      calls++;
+      if (hold)
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      const later = path.includes("after="),
+        id = later ? "b" : "a";
+      return {
+        items: [{ category_id: id, title: id, revision: 1, state: "active", description: "" }],
+        more: !later,
+        next: id,
+      } as T;
+    },
+  };
+  const data = new AgentCatalog(api);
+  await data.openCategories("all");
+  await data.openCategories("all", "a");
+  hold = true;
+  data.refresh();
+  const before = calls;
+  data.stop();
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(calls).toBe(before);
+  expect(data.categories.state.get().value).toBeNull();
+});
+
+test("load-more intent survives a background category refresh", async () => {
+  let hold = false,
+    blocked = false;
+  let release!: () => void;
+  const calls: string[] = [];
+  const api: Reader = {
+    async get<T>(path: string) {
+      calls.push(path);
+      if (hold) {
+        hold = false;
+        blocked = true;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      const later = path.includes("after="),
+        id = later ? "b" : "a";
+      return {
+        items: [{ category_id: id, title: id, revision: 1, state: "active", description: "" }],
+        more: true,
+        next: id,
+      } as T;
+    },
+  };
+  const data = new AgentCatalog(api);
+  await data.openCategories("all");
+  hold = true;
+  data.refresh();
+  await vi.waitFor(() => expect(blocked).toBe(true));
+  const more = data.openCategories("all", "a");
+  const duplicate = data.openCategories("all", "a");
+  release();
+  await Promise.all([more, duplicate]);
+  expect(data.categories.state.get().value?.items?.map((c) => c.category_id)).toEqual(["a", "b"]);
+  expect(calls.some((path) => path.includes("after=b"))).toBe(false);
+  data.stop();
+});

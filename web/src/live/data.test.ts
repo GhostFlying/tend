@@ -1010,15 +1010,21 @@ test("public agent catalogs stay lazy and follow existing fact and reload lifecy
     live = new LiveData(api);
   try {
     expect(api.calls).toEqual([]);
-    const categories = live.agents.openCategories("all", "last category");
+    const categories = live.agents.openCategories("all");
     const runner = live.agents.openRunner("runner-one");
     const hosted = live.agents.openHosted();
     await api.answer("/api/v1/categories", { items: [], more: true, next: "next-page" });
     await api.answer("/api/v1/hosts/runner-one/agents", { host_id: "runner-one", online: false });
     await api.answer("/api/v1/hosted-agents", { configuration_revision: 1 });
     await Promise.all([categories, runner, hosted]);
+    const moreCategories = live.agents.openCategories("all", "next-page");
+    await api.answer("/api/v1/categories", { items: [], more: true, next: "last category" });
+    await api.answer("/api/v1/categories", { items: [], more: true, next: "next-page" });
+    await moreCategories;
     expect(live.agents.categories.state.get().value?.next).toBe("next-page");
-    expect(new URL(api.calls[0]!, "https://tend.invalid").searchParams.get("after")).toBe(
+    const categoryCalls = api.calls.filter((path) => path.startsWith("/api/v1/categories"));
+    expect(new URL(categoryCalls[0]!, "https://tend.invalid").searchParams.get("after")).toBeNull();
+    expect(new URL(categoryCalls.at(-1)!, "https://tend.invalid").searchParams.get("after")).toBe(
       "last category",
     );
     live.apply({
