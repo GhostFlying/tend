@@ -543,6 +543,256 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
 try {
+  // S11 hierarchy uses the same real read, pagination and tool controls as other scenarios.
+  for (const width of [1440, 390]) {
+    const original = structuredClone(activity.items);
+    const originalPlan = { ...issue.plan };
+    const originalProgress = issue.progress!.summary;
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    try {
+      issue.plan.title = "创建 多轮故事：手机布局从需求澄清到独立验收";
+      issue.plan.intent = "使用独立沙盒数据验证真实界面与交互";
+      issue.progress!.summary =
+        "已核对最新要求：手机布局、长标题、草稿和返回焦点均已完成这轮核对，保留失败与重试历史。";
+      await page.route("**/api/v1/issues?*", async (route) => {
+        const url = new URL(route.request().url());
+        if (url.searchParams.has("parent_id"))
+          await route.fulfill({ json: { items: [], more: false } });
+        else await route.continue();
+      });
+      const block = activity.items![0]!.block!;
+      block.items![0]!.associations = {
+        message_id: block.items![0]!.message_id,
+        facts_reviewed: true,
+        owner_locked: false,
+        revision: 1,
+        content_revision: 1,
+        disposition: "linked",
+        items: [
+          {
+            issue_id: issue.issue_id,
+            title: "当前 Issue 自引用",
+            source: "owner",
+            owner_locked: false,
+          },
+        ],
+      };
+      block.items!.push(
+        ...Array.from({ length: 14 }, (_, index) => ({
+          message_id: `hierarchy-tool-${index}`,
+          seq: index + 3,
+          kind: "message",
+          author: "main_agent",
+          reply_to: block.trigger.message_id,
+          created_at: new Date(now).toISOString(),
+          tool: {
+            name: "issues_read",
+            status: "completed" as const,
+            turn_id: "hierarchy",
+            updated_at: new Date(now).toISOString(),
+            input: "原始参数",
+            output: "原始输出",
+          },
+        })),
+      );
+      activity.items!.push(
+        ...["更新了当前进展", "更新了工作状态"].map((title, index) => ({
+          id: `hierarchy-event-${index}`,
+          position: 1003 + index,
+          kind: index ? "issue.work_status_updated" : "issue.progress_updated",
+          created_at: now + index,
+          author: "青竹",
+          title,
+          issue_id: issue.issue_id,
+        })),
+      );
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+      const trigger = detail.locator("[data-trace-trigger]");
+      await trigger.waitFor();
+      assert.equal(await trigger.count(), 1, "single status-row trace trigger");
+      await detail.locator("[data-issue-scroll]").evaluate((node) => (node.scrollTop = 0));
+      const heading = await detail
+        .getByRole("heading", { name: "讨论与进展", exact: true })
+        .boundingBox();
+      assert(
+        heading && heading.y + heading.height < 844,
+        "story discussion starts in first viewport",
+      );
+      assert.equal(
+        await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),
+        0,
+      );
+      assert.equal(await trigger.getAttribute("aria-expanded"), "false");
+      assert.equal(await detail.locator("[data-tool-item]:visible").count(), 0);
+      assert.equal(await detail.getByRole("button", { name: "当前 Issue 自引用" }).count(), 0);
+      assert.equal(await detail.getByRole("region", { name: "交付物", exact: true }).count(), 0);
+      await trigger.click();
+      assert.equal(await detail.locator("[data-tool-item]:visible").count(), 12);
+      assert.equal(await detail.getByRole("button", { name: /使用了 .* 个工具/ }).count(), 0);
+      await detail.getByRole("button", { name: "显示更早 2 步", exact: true }).click();
+      assert.equal(await detail.locator("[data-tool-item]:visible").count(), 14);
+      await detail.locator('[data-tool-item="hierarchy-tool-0"] button').click();
+      await detail.getByText("原始输出", { exact: true }).waitFor();
+      await trigger.click();
+      assert.equal(await detail.locator("[data-tool-item]:visible").count(), 0);
+      assert(await trigger.evaluate((node) => document.activeElement === node));
+      const savedTools = [...block.items!];
+      block.items = block.items!.slice(0, 13);
+      publish();
+      await trigger.getByText("查看过程 · 12 步", { exact: false }).waitFor();
+      await trigger.click();
+      const firstTool = detail.locator('[data-tool-item="hierarchy-tool-0"] button');
+      if ((await firstTool.getAttribute("aria-expanded")) !== "true") await firstTool.click();
+      await firstTool.focus();
+      block.items.push({ ...savedTools[13]!, message_id: "hierarchy-appended-tool", seq: 16 });
+      publish();
+      await detail.locator('[data-tool-item="hierarchy-appended-tool"]').waitFor();
+      assert(await firstTool.isVisible(), "open first tool remains visible after thirteenth tool");
+      assert.equal(await firstTool.getAttribute("aria-expanded"), "true");
+      assert(await firstTool.evaluate((node) => document.activeElement === node));
+      await trigger.click();
+      block.items = savedTools;
+      publish();
+      const events = detail.locator("[data-event-group]");
+      assert.equal(await events.count(), 1);
+      const scrollIds = await detail
+        .locator("[data-scroll-id]")
+        .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-scroll-id")));
+      assert.equal(
+        new Set(scrollIds).size,
+        scrollIds.length,
+        "merged events keep unique scroll identities",
+      );
+      assert.equal(await events.locator("button:visible").count(), 0);
+      await events.locator("summary").click();
+      assert.equal(await events.getByText("更新了当前进展", { exact: true }).count(), 1);
+      await events.getByRole("button", { name: "查看 →", exact: true }).waitFor();
+      const eventSummary = events.locator("summary");
+      await eventSummary.focus();
+      activity.items!.push({
+        ...activity.items!.at(-1)!,
+        id: "hierarchy-event-appended",
+        position: 1005,
+        title: "追加进展",
+      });
+      publish();
+      await events.getByText("追加进展", { exact: true }).waitFor();
+      assert.equal(await events.getAttribute("open"), "", "live append keeps merged events open");
+      assert(
+        await eventSummary.evaluate((node) => document.activeElement === node),
+        "live append keeps summary focus",
+      );
+      activity.items!.splice(activity.items!.length - 3, 0, {
+        ...activity.items!.at(-1)!,
+        id: "hierarchy-event-earlier",
+        created_at: now - 1,
+        position: 1002.5,
+        title: "前插进展",
+      });
+      publish();
+      await events.getByText("前插进展", { exact: true }).waitFor();
+      assert.equal(await events.getAttribute("open"), "", "earlier event keeps merged group open");
+      assert(await eventSummary.evaluate((node) => document.activeElement === node));
+      let earlierStage = 0;
+      const boundaryEvents = [50, 60, 130, 150].map((second) => ({
+        id: `boundary-${second}`,
+        position: 2000 + second,
+        kind: "issue.progress_updated",
+        author: "青竹",
+        issue_id: issue.issue_id,
+        title: `边界进展 ${second}`,
+        created_at: now + second * 1000,
+      }));
+      await page.route("**/api/v1/issues/*/activity?*", async (route) => {
+        const cursor = new URL(route.request().url()).searchParams.get("before");
+        if (cursor) earlierStage = cursor === "2050" ? 1 : 2;
+        const rows = [...boundaryEvents];
+        if (earlierStage >= 1)
+          rows.unshift({
+            ...boundaryEvents[0]!,
+            id: "boundary-0",
+            position: 2000,
+            title: "边界进展 0",
+            created_at: now,
+          });
+        if (earlierStage >= 2)
+          rows.unshift({
+            ...boundaryEvents[0]!,
+            id: "boundary-negative",
+            position: 1950,
+            title: "边界进展 更早",
+            created_at: now - 50000,
+          });
+        await route.fulfill({
+          json: {
+            event_seq: seq,
+            items: rows,
+            more: earlierStage < 2,
+            next_before: earlierStage ? 2000 : 2050,
+          },
+        });
+      });
+      await page.route("**/api/v1/issues/*/activity", async (route) => {
+        const rows = [...boundaryEvents];
+        if (earlierStage >= 1)
+          rows.unshift({
+            ...boundaryEvents[0]!,
+            id: "boundary-0",
+            position: 2000,
+            title: "边界进展 0",
+            created_at: now,
+          });
+        if (earlierStage >= 2)
+          rows.unshift({
+            ...boundaryEvents[0]!,
+            id: "boundary-negative",
+            position: 1950,
+            title: "边界进展 更早",
+            created_at: now - 50000,
+          });
+        await route.fulfill({
+          json: {
+            event_seq: seq,
+            items: rows,
+            more: earlierStage < 2,
+            next_before: earlierStage ? 2000 : 2050,
+          },
+        });
+      });
+      await page.reload();
+      await events.locator("summary").filter({ hasText: "边界进展 50" }).waitFor();
+      for (const count of [5, 6]) {
+        await detail.getByRole("button", { name: "查看更早记录", exact: true }).click();
+        await events
+          .locator("summary")
+          .filter({ hasText: count === 5 ? "边界进展 0" : "边界进展 更早" })
+          .waitFor();
+        assert.equal(await events.count(), 1, "earlier pages do not split gap-based event group");
+        const ids = await detail
+          .locator('[data-scroll-id^="boundary-"]')
+          .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-scroll-id")));
+        assert.equal(ids.length, count, "each earlier event rendered once");
+        assert.equal(
+          new Set(ids).size,
+          count,
+          "successive earlier loads keep unique scroll identities",
+        );
+      }
+      console.log(
+        `PASS S11 hierarchy ${width}: single collapsed trigger, flat tail, event links, no self chip or main deliverables`,
+      );
+    } finally {
+      await context.close();
+      activity.items = original;
+      issue.plan = originalPlan;
+      issue.progress!.summary = originalProgress;
+    }
+  }
   for (const width of [1440, 390]) {
     conversationFailure = true;
     const context = await browser.newContext({ viewport: { width, height: 900 } });
@@ -618,6 +868,11 @@ try {
     assert.equal(await detail.getByText("旧的已完成消息", { exact: true }).count(), 0);
 
     assert.equal(await page.getByRole("dialog", { name: "Issue 详情" }).count(), 0);
+    if (width < 761)
+      await detail
+        .locator("[data-issue-progress]")
+        .getByRole("button", { name: "展开全文", exact: true })
+        .click();
     await detail.getByText(/暂无活动执行/).waitFor();
     const alignedFooter = async () => {
       const edges = await detail.evaluate((root) => {
@@ -755,8 +1010,11 @@ try {
     await side.getByRole("button", { name: /^查看全部交付 ·/ }).waitFor();
     if (width < 1280) await side.getByRole("button", { name: /^关闭/ }).first().click();
     const summary = detail.getByRole("region", { name: "交付物", exact: true });
-    await summary.getByText("外部观察 · 已合并", { exact: true }).waitFor();
-    await summary.getByRole("button", { name: /发布与回滚清单/ }).waitFor();
+    assert.equal(await summary.count(), 0, "no main-column deliverables block");
+    await openIssueAux(page, "外部交付");
+    const external = page.getByRole("dialog", { name: "跟进与外部交付", exact: true });
+    await external.getByText("已合并", { exact: true }).waitFor();
+    await external.getByRole("button", { name: /^关闭/ }).first().click();
     await detail.locator('[data-artifact="artifact-one"]').waitFor();
     const resultCard = detail.locator('[data-artifact="artifact-one"]');
     await resultCard.getByRole("button", { name: "打开完整交付 →", exact: true }).click();
@@ -836,7 +1094,7 @@ try {
     });
     publish();
     const traceTurn = detail.locator('[data-scroll-id="conversation-one"]');
-    const traceToggle = traceTurn.locator("details[data-trace] > summary");
+    const traceToggle = traceTurn.locator("[data-trace-trigger]");
     await traceToggle.waitFor();
     assert.equal(
       await traceToggle.locator('xpath=ancestor::*[contains(@class,"replyClamp")]').count(),
@@ -1176,7 +1434,9 @@ try {
     await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
     const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
     const summary = detail.getByText(text, { exact: true });
-    const expand = detail.getByRole("button", { name: "展开全文", exact: true });
+    const expand = detail
+      .locator("[data-issue-progress]")
+      .getByRole("button", { name: "展开全文", exact: true });
     await expand.waitFor();
     assert(await summary.evaluate((node) => node.scrollHeight > node.clientHeight + 1));
     await expand.click();
@@ -1199,7 +1459,9 @@ try {
     const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
     const summary = detail.getByText(text, { exact: true });
     await summary.waitFor();
-    const expand = detail.getByRole("button", { name: "展开全文", exact: true });
+    const expand = detail
+      .locator("[data-issue-progress]")
+      .getByRole("button", { name: "展开全文", exact: true });
     assert(await summary.evaluate((node) => node.scrollHeight <= node.clientHeight + 1));
     assert.equal(await expand.count(), 0);
     await page.setViewportSize({ width: 320, height: 1000 });
@@ -1255,7 +1517,10 @@ try {
       ];
     });
     assert(Math.abs(footerEdges[0]! - footerEdges[1]!) <= 1, JSON.stringify(footerEdges));
-    await page.getByRole("button", { name: "展开全文", exact: true }).waitFor();
+    await page
+      .locator("article[data-scroll-id]")
+      .getByRole("button", { name: "展开全文", exact: true })
+      .waitFor();
     await page.evaluate(
       () =>
         new Promise<void>((resolve) =>
@@ -1415,6 +1680,8 @@ try {
     notifyEarlier = resolve;
   });
   earlierStarted = notifyEarlier;
+  // Keep the event history open so this paused-reader scenario still has overflow.
+  await isolatedIssue.locator("[data-event-group] > summary").click();
   await isolatedIssue.getByRole("button", { name: "查看更早记录", exact: true }).click();
   await startedEarlier;
   pagedRevision++;
@@ -1466,7 +1733,11 @@ try {
     try {
       await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
       const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
-      await detail.getByRole("button", { name: "展开全文", exact: true }).first().click();
+      await detail
+        .locator("article[data-scroll-id]")
+        .getByRole("button", { name: "展开全文", exact: true })
+        .first()
+        .click();
       const load = detail.getByRole("button", { name: "继续读取本轮消息", exact: true });
       await load.scrollIntoViewIfNeeded();
       await page.waitForTimeout(100);
@@ -1596,8 +1867,12 @@ try {
       try {
         await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
         const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
-        await detail.getByRole("button", { name: "展开全文", exact: true }).first().click();
-        if (scenario === "group") await detail.locator("details[data-trace] > summary").click();
+        await detail
+          .locator("article[data-scroll-id]")
+          .getByRole("button", { name: "展开全文", exact: true })
+          .first()
+          .click();
+        if (scenario === "group") await detail.locator("[data-trace-trigger]").click();
         const load = detail.getByRole("button", { name: "继续读取本轮消息", exact: true });
         await load.scrollIntoViewIfNeeded();
         await page.waitForTimeout(100);
@@ -1695,12 +1970,12 @@ try {
           issue.progress!.summary = progress;
           issue.revision++;
         } else {
-          const group = detail.getByRole("button", { name: "使用了 50 个工具", exact: true });
+          const group = detail.locator('[data-scroll-id="new-group-tool"]');
           await group.waitFor();
           await page.waitForTimeout(100);
           assert(
             Math.abs((await group.evaluate((node) => node.getBoundingClientRect().top)) - y) <= 2,
-            "pagination anchored a hidden grouped member instead of its visible disclosure",
+            "pagination did not anchor the newly visible flat tool step",
           );
           assert.equal(
             await detail.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),

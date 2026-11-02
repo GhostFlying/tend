@@ -103,3 +103,58 @@ export class IssueActivityRead {
     this.read.close();
   }
 }
+
+/** Merge only adjacent background events from the same actor and Issue within two minutes. */
+export function groupActivityEvents(rows: readonly IssueActivityEntry[]): IssueActivityEntry[][] {
+  const groups: IssueActivityEntry[][] = [];
+  for (const row of rows) {
+    const group = groups.at(-1);
+    const previous = group?.at(-1);
+    const background = (entry: IssueActivityEntry) =>
+      !entry.block &&
+      !entry.artifact_id &&
+      !/attention|decision|failed|failure|acceptance|delivery/.test(entry.kind);
+    if (
+      previous &&
+      background(previous) &&
+      background(row) &&
+      previous.author === row.author &&
+      previous.issue_id === row.issue_id &&
+      row.created_at >= previous.created_at &&
+      row.created_at - previous.created_at <= 120_000
+    )
+      group!.push(row);
+    else groups.push([row]);
+  }
+  return groups;
+}
+
+/** Each retained identity belongs to one group, with its original member taking priority. */
+export function identifyActivityGroups(
+  groups: readonly IssueActivityEntry[][],
+  identities: Map<string, string>,
+) {
+  const owners = new Map<string, number>();
+  const retained = new Set(identities.values());
+  groups.forEach((entries, index) => {
+    for (const entry of entries) if (retained.has(entry.id)) owners.set(entry.id, index);
+  });
+  const claimed = new Set<string>();
+  const result = groups.map((entries, index) => {
+    const candidates = [
+      ...new Set(
+        entries.map((entry) => identities.get(entry.id)).filter((key): key is string => !!key),
+      ),
+    ];
+    const key =
+      candidates.find((key) => owners.get(key) === index && !claimed.has(key)) ??
+      candidates.find((key) => !owners.has(key) && !claimed.has(key)) ??
+      entries
+        .map((entry) => entry.id)
+        .find((key) => !claimed.has(key) && (!owners.has(key) || owners.get(key) === index))!;
+    claimed.add(key);
+    return { entries, key };
+  });
+  for (const { entries, key } of result) for (const entry of entries) identities.set(entry.id, key);
+  return result;
+}

@@ -551,3 +551,233 @@
     min-height: var(--control-touch);
   }
 }
+
+/* Main dialogue carries identity; background events share the same thread. */
+.activity {
+  position: relative;
+  padding-left: var(--space-7);
+}
+.activity::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: var(--space-4);
+  bottom: var(--space-4);
+  width: 1px;
+  background: var(--border-soft);
+}
+.discussion {
+  border-bottom: 0;
+  padding-bottom: var(--space-2);
+}
+.author {
+  position: relative;
+  font-size: var(--text-body);
+  flex-wrap: wrap;
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  position: absolute;
+  left: calc(-1 * var(--space-7));
+  top: 0;
+  width: 25px;
+  height: 25px;
+  background: var(--bg-l2);
+  border: 1px solid var(--border-soft);
+  border-radius: 50%;
+  color: var(--label-2);
+  font-size: var(--text-caption);
+}
+.reply {
+  min-width: 0;
+  font-size: var(--text-body);
+}
+.reply > div:last-of-type {
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+.reply[data-tone="error"],
+.attention {
+  border-left: 3px solid var(--accent);
+}
+.reply[data-tone="error"] {
+  border-left-color: var(--danger);
+  padding-left: var(--space-3);
+}
+.milestone,
+.eventGroup {
+  position: relative;
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+.milestoneDot {
+  position: absolute;
+  left: calc(-1 * var(--space-7));
+  width: 25px;
+  height: 25px;
+  background: var(--bg);
+  color: var(--label-3);
+}
+.eventGroup summary,
+.runList summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--text-caption);
+  color: var(--label-3);
+  padding-block: var(--space-2);
+}
+.eventGroup summary::-webkit-details-marker,
+.runList summary::-webkit-details-marker {
+  display: none;
+}
+.eventGroup summary > span:not(.milestoneDot) {
+  flex: 1;
+}
+.eventGroup svg,
+.runList svg {
+  width: 14px;
+  height: 14px;
+}
+.eventGroup[open] > summary svg,
+.runList[open] > summary svg {
+  transform: rotate(90deg);
+}
+.eventGroup > .milestone .milestoneDot {
+  display: none;
+}
+.delivery {
+  border-left: 3px solid var(--ok);
+}
+.delivery[data-tone="error"] {
+  border-left-color: var(--danger);
+}
+.runEntry {
+  border-bottom: 1px solid var(--border-soft);
+  padding-block: var(--space-2);
+}
+.progress {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-m);
+  padding: var(--space-3) var(--space-4);
+}
+@media (max-width: 760px) {
+  .lane {
+    padding-top: var(--space-4);
+  }
+  .intent {
+    margin-bottom: var(--space-3);
+  }
+  .progress {
+    margin: var(--space-3) 0;
+    padding: var(--space-2) var(--space-3);
+  }
+  .progress .clamp {
+    -webkit-line-clamp: 2;
+  }
+  .progressDetails {
+    display: none;
+  }
+  .progress[data-expanded="true"] .progressDetails {
+    display: block;
+  }
+  .definition {
+    margin: var(--space-3) 0;
+  }
+}
+
+.activity [aria-label="下一步安排"] {
+  border-left: 3px solid var(--accent);
+}
+.deliveryFull h1,
+.deliveryFull h2,
+.deliveryFull h3,
+.deliveryFull h4,
+.deliveryFull h5,
+.deliveryFull h6 {
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  margin: var(--space-2) 0;
+}
+
+.milestone[data-tone="error"] {
+  border-left: 3px solid var(--danger);
+  background: var(--bg-l1);
+  border-radius: var(--radius-s);
+  padding: var(--space-3);
+  color: var(--label);
+  font-size: var(--text-body);
+}
+
+@media (min-width: 761px) {
+  .progressExpand[data-clipped="false"] {
+    display: none;
+  }
+}
+
+.activity {
+  gap: var(--space-3);
+}
+.discussion {
+  gap: var(--space-3);
+  padding-bottom: 0;
+}
+.replyClamp:empty {
+  display: none;
+}
+.milestoneDot {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.eventGroup > summary > .milestoneDot {
+  top: var(--space-2);
+  transform: none;
+  height: 16px;
+}
+.runEntry {
+  padding-block: var(--space-1);
+}
+.runEntry .resultLink {
+  padding-block: var(--space-1);
+}
+.delivery {
+  margin-block: var(--space-1);
+}
+
+.runEntry [data-compact="true"] {
+  margin: 0;
+}
+.runEntry [data-compact="true"] > div,
+.runEntry [data-compact="true"] > button {
+  padding-block: var(--space-1);
+}
+
+.metadata > span:not(.dot),
+.metadata > time {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+.metadata > span:not(.dot):not(:nth-child(2))::before,
+.metadata > time::before {
+  content: "·";
+}
+.sideEntry {
+  min-height: var(--control-l);
+  padding-block: var(--space-2);
+}
+.sidebar section,
+.drawer section {
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.runEntry {
+  padding: 0;
+}
+.runEntry .resultLink {
+  min-height: var(--control-m);
+}

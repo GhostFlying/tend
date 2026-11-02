@@ -226,3 +226,75 @@ test("newly admitted older blocks are discovered even when the head overlaps exh
   expect(read.state.get().value?.more).toBe(false);
   read.close();
 });
+
+test("merges only adjacent background events by actor, Issue and a bounded window", async () => {
+  const { groupActivityEvents } = await import("./activity.ts");
+  const event = (id: string, at: number, author = "负责人", issue = "one") => ({
+    ...entry(id, at),
+    author,
+    issue_id: issue,
+    created_at: at,
+    kind: "issue.progress_updated",
+  });
+  const rows = [
+    event("a", 1000),
+    event("b", 2000),
+    event("c", 3000, "你"),
+    event("d", 4000, "你", "child"),
+    event("e", 200000, "你", "child"),
+    { ...event("f", 201000, "你", "child"), kind: "task.failed" },
+    event("g", 202000, "你", "child"),
+  ];
+  expect(groupActivityEvents(rows).map((group) => group.map((row) => row.id))).toEqual([
+    ["a", "b"],
+    ["c"],
+    ["d"],
+    ["e"],
+    ["f"],
+    ["g"],
+  ]);
+});
+
+test("gap-based groups survive prepend across the original first-event window", async () => {
+  const { groupActivityEvents, identifyActivityGroups } = await import("./activity.ts");
+  const event = (second: number) => ({
+    ...entry(String(second), second),
+    author: "actor",
+    created_at: second * 1000,
+  });
+  const identities = new Map<string, string>();
+  const original = identifyActivityGroups(
+    groupActivityEvents([50, 60, 130, 150].map(event)),
+    identities,
+  );
+  expect(original).toHaveLength(1);
+  const earlier = identifyActivityGroups(
+    groupActivityEvents([0, 50, 60, 130, 150].map(event)),
+    identities,
+  );
+  expect(earlier).toHaveLength(1);
+  expect(earlier[0]!.key).toBe(original[0]!.key);
+});
+
+test("merged and split groups claim unique identities with original-member priority", async () => {
+  const { identifyActivityGroups } = await import("./activity.ts");
+  const identities = new Map<string, string>();
+  const a = entry("a", 1),
+    b = entry("b", 2),
+    c = entry("c", 3),
+    d = entry("d", 4);
+  identifyActivityGroups(
+    [
+      [a, b],
+      [c, d],
+    ],
+    identities,
+  );
+  const merged = identifyActivityGroups([[a, b, c, d]], identities);
+  expect(merged[0]!.key).toBe("a");
+  const split = identifyActivityGroups([[b], [a, c, d]], identities);
+  expect(split[1]!.key).toBe("a");
+  expect(new Set(split.map((group) => group.key)).size).toBe(split.length);
+  const combined = identifyActivityGroups([[a, b, c, d]], identities);
+  expect(new Set(combined.map((group) => group.key)).size).toBe(combined.length);
+});

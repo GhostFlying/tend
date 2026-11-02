@@ -1225,7 +1225,7 @@ async function captureS5() {
     };
     copyTools[1]!.tool.status = "running";
     await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
-    await page.getByText(`${copyTools.length} 个步骤`, { exact: true }).click();
+    await page.locator("[data-trace-trigger]").click();
     const firstTool = page.locator('[data-scroll-id="copy-tool-0"]');
     const firstButton = firstTool.getByRole("button", { includeHidden: true });
     await firstButton.click();
@@ -1240,21 +1240,27 @@ async function captureS5() {
     await firstTool.getByText("原始工具输出保持不变", { exact: true }).waitFor();
     await firstButton.click();
     await page.getByRole("textbox", { name: "消息", exact: true }).focus();
-    const groupButton = page.getByRole("button", { name: "使用了 2 个工具", exact: true });
+    const groupButton = page.locator("[data-trace-trigger]");
+    assert.equal(await page.getByRole("button", { name: /使用了 .* 个工具/ }).count(), 0);
     await groupButton.waitFor();
     if ((await groupButton.getAttribute("aria-expanded")) === "true") await groupButton.click();
     await firstButton.waitFor({ state: "hidden" });
     assert.equal(await firstButton.getAttribute("data-retained-tool"), "true");
-    assert.equal((await groupButton.getAttribute("aria-controls"))?.split(" ").length, 2);
-    assert.equal(await page.getByRole("button", { name: /读取背景来源/ }).count(), 1);
-    assert.equal(await page.getByRole("button", { name: /查看仓库/ }).count(), 1);
+    assert.equal(
+      await page
+        .locator(`[id="${await groupButton.getAttribute("aria-controls")}"] [data-tool-item]`)
+        .count(),
+      copyTools.length,
+    );
+    assert.equal(await page.getByRole("button", { name: /读取背景来源/ }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: /查看仓库/ }).count(), 0);
     assert.equal(await page.getByText(activeTask.task_id, { exact: true }).count(), 0);
     await shot("chat-grouped");
     await page
       .locator('[data-scroll-id="0:copy-system"]')
       .evaluate((element) => element.scrollIntoView({ block: "start" }));
     await shot("upgrade-system-card");
-    await page.getByText("使用了 2 个工具", { exact: true }).click();
+    await groupButton.click();
     await page.getByRole("button", { name: /查看 Issue/ }).click();
     await page.getByText("原始工具输出保持不变", { exact: true }).waitFor();
     await page

@@ -4,10 +4,8 @@ import { notify } from "../app/notice.ts";
 import { ChoiceCard } from "../workitems/Choice.tsx";
 import { useServices } from "../app/services.tsx";
 import { noticeTitle } from "../upgrades/status.ts";
-// The transcript's rows: the owner's messages as right-hand bubbles with
-// their state below, and what the main agent did for each as full-width
-// Markdown with its tool uses.
-import { memo, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+// Shared conversation messages and explicitly disclosed tool traces.
+import { memo, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   AssistantState,
   IssueConversationItem as ConversationItem,
@@ -18,9 +16,7 @@ import { Button } from "../ui/Button.tsx";
 import { Markdown } from "./Markdown.tsx";
 import styles from "./Messages.module.css";
 import { clock, dayLabel, messageStateLabels, systemMessageBody, type Entry } from "./model.ts";
-import { toolGroups, settleToolGroups, flatTurnRows } from "./toolLabels.ts";
 import { Chevron } from "../shell/icons.tsx";
-import toolStyles from "./ToolRow.module.css";
 import { LiveStatus } from "../ui/LiveStatus.tsx";
 import { conversationStatus } from "../ui/activityStatus.ts";
 import { CopyIdentifier } from "../i18n/identifiers.tsx";
@@ -59,8 +55,9 @@ export function OwnerMessage({
         </div>
       )}
       <div className={styles.state} data-state={state}>
-        {item.control?.withdrawn_at ? "已撤回" : messageStateLabels[state]} ·{" "}
-        {clock(Date.parse(item.created_at))}
+        {item.control?.withdrawn_at ? "已撤回" : messageStateLabels[state]}
+        {presentation === "chat" && " · "}
+        {presentation === "chat" && clock(Date.parse(item.created_at))}
         {notice && <span> · {notice}</span>}
       </div>
     </div>
@@ -139,9 +136,11 @@ export function OutgoingRow({
 export function AgentTurn({
   entry,
   proseClassName,
+  currentIssueId,
 }: {
   entry: Extract<Entry, { kind: "agent" }>;
   proseClassName?: string | undefined;
+  currentIssueId?: string;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const status = conversationStatus(
@@ -157,85 +156,64 @@ export function AgentTurn({
   const wasActive = useRef(status.active);
   useLayoutEffect(() => {
     if (wasActive.current && !status.active) {
-      const trace = root.current?.querySelector("details[data-trace]");
+      const trace = root.current?.querySelector("[data-trace]");
       if (trace?.contains(document.activeElement))
-        trace.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+        root.current
+          ?.querySelector<HTMLElement>("[data-trace-trigger]")
+          ?.focus({ preventScroll: true });
       setTraceOpen(false);
     }
     wasActive.current = status.active;
   }, [status.active]);
   const prefix = useId();
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  const [states, setStates] = useState(() =>
-    settleToolGroups(toolGroups(entry.items), new Map(), new Set()),
-  );
-  const onToolOpenChange = useCallback((id: string, open: boolean) => {
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      if (open) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }, []);
-  useLayoutEffect(() => {
-    const focused =
-      root.current
-        ?.querySelector(":focus")
-        ?.closest("[data-tool-item]")
-        ?.getAttribute("data-tool-item") ?? undefined;
-    const next = settleToolGroups(toolGroups(entry.items), states, expanded, focused);
-    if (JSON.stringify([...next]) !== JSON.stringify([...states])) setStates(next);
-  }, [entry.items, states, expanded]);
+  const [visibleStart, setVisibleStart] = useState(Math.max(0, tools.length - 12));
   return (
     <div ref={root} className={styles.agent}>
-      <LiveStatus status={status} />
+      <LiveStatus status={status}>
+        {!!tools.length && (
+          <button
+            type="button"
+            data-trace-trigger
+            className={styles.traceTrigger}
+            aria-expanded={traceOpen}
+            aria-controls={`${prefix}-trace`}
+            onClick={(event) => {
+              event.currentTarget.focus();
+              if (!traceOpen) setVisibleStart(Math.max(0, tools.length - 12));
+              setTraceOpen(!traceOpen);
+            }}
+          >
+            查看过程 · {tools.length} 步 <Chevron />
+          </button>
+        )}
+      </LiveStatus>
       {tools
         .flatMap((item) => item.choices ?? [])
         .map((choice) => (
           <ChoiceCard key={choice.choice_id} choice={choice} />
         ))}
       {!!tools.length && (
-        <details
-          data-trace
-          open={traceOpen}
-          onToggle={(event) => setTraceOpen(event.currentTarget.open)}
-        >
-          <summary>{tools.length} 个步骤</summary>
-          {flatTurnRows(entry.items, states)
-            .filter((row) => row.kind === "group" || row.item.tool)
-            .map((row) =>
-              row.kind === "group" ? (
-                <button
-                  key={row.key}
-                  type="button"
-                  className={`${toolStyles.row} ${toolStyles.groupToggle}`}
-                  aria-expanded={row.open}
-                  aria-controls={row.group.ids.map((id) => `${prefix}-item-${id}`).join(" ")}
-                  onClick={(event) => {
-                    event.currentTarget.focus();
-                    setStates((previous) =>
-                      new Map(previous).set(row.group.first, {
-                        ids: row.group.ids,
-                        open: !row.open,
-                      }),
-                    );
-                  }}
-                >
-                  <Chevron className={toolStyles.chevron} />
-                  <span className={toolStyles.name}>使用了 {row.group.ids.length} 个工具</span>
-                </button>
-              ) : (
-                <AgentItem
-                  key={row.key}
-                  item={row.item}
-                  hidden={row.hidden}
-                  hideChoices
-                  id={`${prefix}-item-${row.item.message_id}`}
-                  onToolOpenChange={onToolOpenChange}
-                />
-              ),
-            )}
-        </details>
+        <div data-trace id={`${prefix}-trace`} hidden={!traceOpen} className={styles.trace}>
+          {visibleStart > 0 && (
+            <button
+              type="button"
+              className={styles.traceTrigger}
+              onClick={() => setVisibleStart((start) => Math.max(0, start - 12))}
+            >
+              显示更早 {visibleStart} 步
+            </button>
+          )}
+          {tools.map((item, index) => (
+            <AgentItem
+              key={item.message_id}
+              item={item}
+              hidden={index < visibleStart}
+              hideChoices
+              id={`${prefix}-item-${item.message_id}`}
+              onToolOpenChange={() => {}}
+            />
+          ))}
+        </div>
       )}
       {entry.items
         .filter((item) => !item.tool)
@@ -243,13 +221,18 @@ export function AgentTurn({
           <AgentItem
             key={item.message_id}
             item={item}
+            currentIssueId={currentIssueId}
             proseClassName={proseClassName}
             hidden={false}
             id={`${prefix}-item-${item.message_id}`}
             onToolOpenChange={() => {}}
           />
         ))}
-      {entry.done && <div className={styles.foot}>{clock(entry.done.at)}</div>}
+      {!currentIssueId && entry.done && (
+        <div className={styles.foot} title={new Date(entry.done.at).toISOString()}>
+          {clock(entry.done.at)}
+        </div>
+      )}
     </div>
   );
 }
@@ -268,9 +251,11 @@ const AgentItem = memo(function AgentItem({
   onToolOpenChange,
   hideChoices = false,
   proseClassName,
+  currentIssueId,
 }: {
   item: ConversationItem;
   hidden: boolean;
+  currentIssueId?: string | undefined;
   hideChoices?: boolean;
   proseClassName?: string | undefined;
   id: string;
@@ -307,7 +292,7 @@ const AgentItem = memo(function AgentItem({
           <div className={proseClassName}>
             <Markdown text={item.body ?? ""} />
           </div>
-          <MessageTags item={item} />
+          <MessageTags item={item} currentIssueId={currentIssueId} />
           {status && status !== "completed" && status !== "streaming" && (
             <div className={styles.assistantState} data-state={status} role="status">
               {assistantLabels[status]}
@@ -324,8 +309,11 @@ export function SystemMessage({ item, scrollID }: { item: ConversationItem; scro
   const title = noticeTitle(item.notice_type);
   if (item.notice_type === "background_batch" && item.conversation_id !== "main")
     return (
-      <details data-scroll-id={scrollID ?? item.message_id}>
-        <summary>后台核对来源 · {clock(Date.parse(item.created_at))}</summary>
+      <details className={styles.background} data-scroll-id={scrollID ?? item.message_id}>
+        <summary>
+          <Chevron /> 后台核对来源{" "}
+          <time title={item.created_at}>· {clock(Date.parse(item.created_at))}</time>
+        </summary>
         <Markdown text={systemMessageBody(item)} />
         {item.recovery && <div role="status">{recoveryNotice(item.recovery)}</div>}
       </details>

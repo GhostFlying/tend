@@ -593,3 +593,14 @@
 .step[data-failed="true"] .stepState {
   color: var(--danger);
 }
+
+.root[data-compact="true"] {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  margin: var(--space-2) 0;
+}
+.root[data-compact="true"] .cardHeading,
+.root[data-compact="true"] .activity {
+  padding-inline: 0;
+}

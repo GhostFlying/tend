@@ -8,9 +8,11 @@ import styles from "./Deliverables.module.css";
 export function ArtifactDelivery({
   value,
   showFiles = true,
+  compact = false,
 }: {
   value: unknown;
   showFiles?: boolean;
+  compact?: boolean;
 }) {
   if (!value || typeof value !== "object") return null;
   const payload = value as Record<string, unknown>;
@@ -22,25 +24,35 @@ export function ArtifactDelivery({
   return (
     <>
       {showFiles && files.length > 0 && (
-        <section className={styles.section} aria-label="交付文件">
-          <h3>文件</h3>
+        <section
+          className={compact ? `${styles.section} ${styles.compactFiles}` : styles.section}
+          aria-label="交付文件"
+        >
+          {!compact && <h3>文件</h3>}
           <ul className={styles.files}>
             {files.map((file) => (
               <li key={file.file_id}>
-                <FilePreview file={file} />
-                <details>
-                  <summary>文件校验</summary>
-                  <code>SHA-256 {file.sha256}</code>
-                </details>
+                <FilePreview file={file} row={compact} />
+                {!compact && (
+                  <details>
+                    <summary>文件校验</summary>
+                    <code>SHA-256 {file.sha256}</code>
+                  </details>
+                )}
               </li>
             ))}
           </ul>
         </section>
       )}
       {report && (
-        <section className={styles.report} aria-label="交付报告">
-          <h3>报告</h3>
-          {typeof report.body === "string" && <Markdown text={report.body} files={files} />}
+        <section
+          className={compact ? `${styles.report} ${styles.compactReport}` : styles.report}
+          aria-label="交付报告"
+        >
+          {!compact && <h3>报告</h3>}
+          {typeof report.body === "string" && (
+            <Markdown text={report.body} files={files} demoteHeadings={compact} />
+          )}
           {Array.isArray(report.evidence) && report.evidence.length > 0 && (
             <>
               <h4>证据</h4>
