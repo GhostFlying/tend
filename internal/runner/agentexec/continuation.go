@@ -25,9 +25,25 @@ func (p *Pool) ObserveRetained(ctx context.Context) ([]protocol.AgentExecutor, e
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if !p.mu.TryLock() {
+		return nil, nil
+	}
+	defer p.mu.Unlock()
 	p.retainedMu.Lock()
 	defer p.retainedMu.Unlock()
-	return slices.Clone(p.retainedObserved), nil
+	out := slices.Clone(p.retainedObserved)
+	for i := range out {
+		if out[i].Pin.Purpose == "issue_manager" {
+			continue
+		}
+		// Resolve retains the factory for native stop/recovery after a refusal.
+		// Selection must reflect the live refusal even before the next refresh.
+		if e := p.snapshots[out[i].Pin.SnapshotID][out[i].Pin.Identity.LocalID]; e != nil && e.reason != "" {
+			out[i].Available = false
+			out[i].Reason = e.reason
+		}
+	}
+	return out, nil
 }
 
 // refreshRetained runs outside heartbeats. Probes create no model turn or leased
