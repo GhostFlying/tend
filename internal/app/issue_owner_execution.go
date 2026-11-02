@@ -70,7 +70,16 @@ func validateRetainedReviewer(ctx context.Context, q store.Querier, contract sto
 	compatible := (requirement.AgentID == "" || requirement.AgentID == ref) && (requirement.RuntimeID == "" || requirement.RuntimeID == pin.Runtime.RuntimeID) && requirement.MatchesProfile(pin.Profile) && (next.AcceptanceExecution == nil || *next.AcceptanceExecution == pin.Profile)
 	if compatible && requirement.CategoryID != previous.AgentSelection.Acceptance.CategoryID {
 		compatible = false
-		inventory, err := store.GetAgentInventory(ctx, q, pin.Identity.ExecutionEnvironmentID)
+		runtime, err := store.GetHostRuntime(ctx, q, pin.Identity.ExecutionEnvironmentID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		var inventory store.AgentInventoryRow
+		if err == nil && runtimeSupportsAgentContinuation(&runtime.Runtime) {
+			inventory, err = store.GetAgentInventoryAt(ctx, q, *pin)
+		} else {
+			inventory, err = store.GetAgentInventory(ctx, q, pin.Identity.ExecutionEnvironmentID)
+		}
 		if err != nil {
 			return err
 		}

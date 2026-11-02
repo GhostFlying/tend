@@ -251,3 +251,122 @@ func TestAgentContinuationReviewerSupportsRefreshedSpecAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAgentContinuationReviewerCategoryRefreshUsesFrozenInventory(t *testing.T) {
+	for _, supported := range []bool{true, false} {
+		name := "legacy"
+		if supported {
+			name = "negotiated"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, r, issue := issueOwnerHarness(t)
+			if supported {
+				r.ContinuationBackend = "git"
+				r.Capabilities = append(r.Capabilities, protocol.CapabilityAgentContinuation)
+			}
+			r.Sequence++
+			if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			task := ownerArtifact(t, h, r, issue)
+			accept := ownerWorkerClaim(t, h, r, protocol.RoleAccept)
+			if op := h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictChangesRequired, Issues: json.RawMessage(`["Revise implementation"]`)}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			var inv store.AgentInventoryRow
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var err error
+				inv, err = store.GetAgentInventory(t.Context(), tx.Q(), "linux-1")
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			inventoryCategory(t, h, "new-review", 0, "active")
+			for i := range inv.Projection.Agents {
+				if inv.Projection.Agents[i].Identity.LocalID == "beta" {
+					inv.Projection.Agents[i].Categories = append(inv.Projection.Agents[i].Categories, "new-review")
+				}
+			}
+			_, hash, err := protocol.CanonicalAgentInventory(inv.Projection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if op := h.exec(runner("linux-1"), inventoryRequest(h, r, inv.Projection, hash, 2, 1, "new-category"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			for i := range r.AgentExecutors {
+				r.AgentExecutors[i].Pin.InventoryRevision = 2
+				r.AgentExecutors[i].Pin.SnapshotID = "new-category"
+				r.AgentExecutors[i].Pin.PublicSHA256 = hash
+			}
+			spec := h.storedSpec(task.TaskID, 1)
+			spec.Goal += " revised"
+			spec.AgentSelection.Acceptance.CategoryID = "new-review"
+			before := h.task(task.TaskID).ControlRevision
+			op := h.exec(owner, h.env("tasks.update_intent", taskTarget(task.TaskID), updateIntentPayload{Spec: &spec}, rev(before)), UpdateIntent{})
+			if supported {
+				if op.Status != protocol.OpFailed || op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
+					t.Fatal("incompatible category refresh was accepted", op)
+				}
+				if h.task(task.TaskID).ControlRevision != before || h.storedSpec(task.TaskID, 1).AgentSelection.Acceptance.CategoryID != "reviewer" {
+					t.Fatal("rejected refresh changed the contract")
+				}
+				spec.AgentSelection.Acceptance.CategoryID = "reviewer"
+				op = h.exec(owner, h.env("tasks.update_intent", taskTarget(task.TaskID), updateIntentPayload{Spec: &spec}, rev(before)), UpdateIntent{})
+			}
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal("compatible refresh was rejected", op)
+			}
+			r.Sequence++
+			hb, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: r})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, pin := range hb.RetainedExecutions {
+				r.AgentContinuations = append(r.AgentContinuations, protocol.AgentExecutor{Pin: pin, Available: true})
+			}
+			r.Sequence++
+			if _, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: r}); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				rows, err := store.ListClaimCandidates(t.Context(), tx.Q())
+				if err != nil {
+					return err
+				}
+				cs, err := candidatesOf(rows)
+				if err != nil {
+					return err
+				}
+				if err := applyIssueDependencies(t.Context(), tx.Q(), cs); err != nil {
+					return err
+				}
+				retained, err := views.HostContinuations(t.Context(), tx.Q(), "linux-1", h.clock.Now().UnixMilli())
+				if err != nil {
+					return err
+				}
+				fresh, err := views.HostExecutors(t.Context(), tx.Q(), "linux-1", h.clock.Now().UnixMilli())
+				if err != nil {
+					return err
+				}
+				matched := false
+				for _, c := range cs {
+					if c.TaskID == task.TaskID {
+						matched = true
+						pin, reason := scheduler.SelectExecution(scheduler.Host{ID: "linux-1", IssueOwners: true, ContinuationsSupported: supported, Continuations: retained, Executors: fresh}, c)
+						if pin == nil {
+							t.Fatalf("successful refresh created an unschedulable contract: %s; reviewer=%+v fresh=%+v retained=%+v", reason, c.ReviewOwnerPin, fresh, retained)
+						}
+					}
+				}
+				if !matched {
+					t.Fatal("refreshed task was not queued")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+		})
+	}
+}
