@@ -57,7 +57,8 @@ export function IssuePlanRead({
       ))}
       {!plan.background?.length && <p className={styles.muted}>该版本未记录背景与约束。</p>}
       <details>
-        <summary>阶段与关联任务（{plan.stages?.length ?? 0}）</summary>
+        <summary>计划阶段与关联任务（{plan.stages?.length ?? 0}）</summary>
+        <p className={styles.muted}>计划阶段说明工作安排；卡片进度只统计直接子 Issue。</p>
         {(plan.stages ?? []).map((stage) => (
           <section key={stage.stage_id}>
             <h4>

@@ -18,6 +18,7 @@ import type {
 } from "../src/api/generated/api.ts";
 const copyOnly = process.argv.includes("--s5-copy-only");
 const catalogOnly = process.argv.includes("--catalog-only");
+const childProgressOnly = process.argv.includes("--child-progress-only");
 let hostedUnconfigured = false;
 let holdTaskFeed = false;
 let childProgressFixture = false;
@@ -577,7 +578,11 @@ const server = createServer(async (req, res) => {
     return json(
       u.searchParams.get("after")
         ? { items: items.slice(2), more: false }
-        : { items: items.slice(0, 2), more: true, next: "child-page-2" },
+        : {
+            items: items.slice(0, 2),
+            more: items.length > 2,
+            ...(items.length > 2 ? { next: "child-page-2" } : {}),
+          },
     );
   }
   if (p === "/api/v1/issues")
@@ -1334,6 +1339,22 @@ async function captureS4() {
   assert(address && typeof address !== "string");
   const parent = issueRows[0]!;
   const previousChildren = parent.board!.children;
+  const previousStages = issue.plan.stages;
+  const previousStageSummary = {
+    stage_title: parent.board!.stage_title,
+    stages_total: parent.board!.stages_total,
+    stages_done: parent.board!.stages_done,
+  };
+  issue.plan.stages = Array.from({ length: 4 }, (_, index) => ({
+    stage_id: `stage-${index}`,
+    title: `计划阶段 ${index + 1}`,
+    status: "planned",
+  }));
+  Object.assign(parent.board!, {
+    stage_title: "四阶段计划",
+    stages_total: 4,
+    stages_done: 2,
+  });
   parent.board!.children = {
     total: 3,
     done: 0,
@@ -1361,6 +1382,9 @@ async function captureS4() {
     summary("issue-no-children", "没有子 Issue 的独立工作"),
   );
   issueRows[1]!.execution = { ...parent.board!.execution, running: 1 };
+  const allRows = [...issueRows];
+  const directChildren = allRows.filter((row) => row.parent_issue_id === parent.issue_id);
+  const defaultChildren = parent.board!.children;
   childProgressFixture = true;
   try {
     for (const viewport of [
@@ -1371,6 +1395,74 @@ async function captureS4() {
       const page = await context.newPage();
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.message));
+      for (const { total, done } of [
+        { total: 0, done: 0 },
+        { total: 1, done: 0 },
+        { total: 3, done: 1 },
+        { total: 3, done: 3 },
+      ]) {
+        const selected = directChildren.slice(0, total);
+        selected.forEach((row, index) => {
+          row.state = index < done ? "closed" : "active";
+        });
+        issueRows.splice(
+          0,
+          issueRows.length,
+          ...allRows.filter(
+            (row) => row.parent_issue_id !== parent.issue_id || selected.includes(row),
+          ),
+        );
+        if (total) {
+          parent.board!.children = {
+            total,
+            done,
+            cancelled: 0,
+            running: 0,
+            items: selected.slice(0, 2).map((row, index) => ({
+              issue_id: row.issue_id,
+              title: row.title,
+              status: index < done ? "done" : "todo",
+              execution: { ...parent.board!.execution },
+            })),
+          };
+        } else delete parent.board!.children;
+        await page.goto(`http://127.0.0.1:${address.port}/issues`);
+        for (const refreshed of [false, true]) {
+          if (refreshed) await page.reload();
+          const card = page.locator('[data-issue-id="issue-root"]');
+          await card.getByRole("button", { name: parent.title, exact: true }).waitFor();
+          if (total)
+            await card.getByText(`子 Issue · ${done}/${total} 已完成`, { exact: true }).waitFor();
+          else assert.equal(await card.getByRole("region", { name: "子 Issue 进展" }).count(), 0);
+          assert.equal(await card.getByText("四阶段计划", { exact: false }).count(), 0);
+          assert.equal(await card.locator('[aria-label^="阶段完成"]').count(), 0);
+          assert.equal(await card.getByText("0/0", { exact: false }).count(), 0);
+        }
+        if (total === 1) {
+          await page
+            .locator('[data-issue-id="issue-root"]')
+            .getByRole("button", { name: parent.title, exact: true })
+            .click();
+          const children = page.getByRole("heading", { name: "子 Issue", exact: true });
+          await children.waitFor();
+          const section = children.locator("..").locator("..");
+          assert.equal(await section.getByText(selected[0]!.title, { exact: true }).count(), 1);
+          assert.equal(
+            await section.getByText(directChildren[1]!.title, { exact: true }).count(),
+            0,
+          );
+          await page.getByText("目标与完成条件", { exact: true }).click();
+          await page.getByText("计划阶段与关联任务（4）", { exact: true }).click();
+          await page.getByRole("heading", { name: "计划阶段 1 · 待推进", exact: true }).waitFor();
+        }
+        if (total === 3 && done === 1)
+          await page.screenshot({
+            path: join(output, `child-only-local-candidate-${viewport.width}.png`),
+          });
+      }
+      directChildren.forEach((row) => (row.state = "active"));
+      issueRows.splice(0, issueRows.length, ...allRows);
+      parent.board!.children = defaultChildren;
       await page.goto(`http://127.0.0.1:${address.port}/issues`);
       const card = page.locator('[data-issue-id="issue-root"]');
       await card.getByText("子 Issue · 0/3 已完成", { exact: true }).waitFor();
@@ -1401,9 +1493,12 @@ async function captureS4() {
     childProgressFixture = false;
     if (previousChildren) parent.board!.children = previousChildren;
     else delete parent.board!.children;
+    issue.plan.stages = previousStages;
+    Object.assign(parent.board!, previousStageSummary);
     issueRows.length = originalLength;
     delete issueRows[1]!.execution;
   }
+  if (childProgressOnly) return;
   for (const viewport of [
     { width: 1440, height: 900 },
     { width: 390, height: 844 },
@@ -1823,7 +1918,7 @@ async function checkNavigation() {
 }
 
 try {
-  const tourOnly = process.argv.includes("--s4-tour-only");
+  const tourOnly = childProgressOnly || process.argv.includes("--s4-tour-only");
   if (copyOnly) await captureS5();
   else if (tourOnly || !process.argv.includes("--navigation-only")) await captureS4();
   const navigationOnly = process.argv.includes("--navigation-only");
