@@ -144,6 +144,7 @@ func TestDirectManagerRunMessageUsesCurrentExecutionAndPrimaryScope(t *testing.T
 	if _, err := h.app.RunMessages(t.Context(), other, as.RunID, 0, 100, false); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal("cross Issue read permitted", err)
 	}
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	handoff := protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: owner.Subject}, Reason: "Owner assumes responsibility"}
 	next := h.exec(owner, h.env("issues.assign", protocol.Target{Type: "issue", ID: issue.IssueID}, handoff, rev(issue.Revision)), HostedIssueAssignment{})
 	if next.Status != protocol.OpSucceeded {

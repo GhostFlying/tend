@@ -62,7 +62,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	reason := fs.String("reason", "", "reason retained in the operation record")
 	dry := fs.Bool("dry-run", false, "print the complete original Envelope without sending it")
 	project := fs.String("project", "", "issue project filter")
-	board := fs.Bool("board", false, "use the global board projection")
+	board := fs.Bool("board", false, "use the global board projection, including direct child progress and activity previews")
 	boardStatus := fs.String("board-status", "", "board work status")
 	assigneeKind := fs.String("assignee-kind", "", "owner or agent filter")
 	assigneeRef := fs.String("assignee-ref", "", "exact assignee identity")

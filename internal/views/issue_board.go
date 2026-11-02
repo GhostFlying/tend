@@ -148,29 +148,11 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 			return card, err
 		}
 	}
-	// Primary execution ownership is authoritative. Evidence links to another
-	// Issue's task are not this card's live execution.
-	ids, err := store.FollowupIDs(ctx, q, `SELECT task_id FROM task_work_item_owners WHERE work_item_id=? ORDER BY task_id`, issue.IssueID)
+	var err error
+	card.Execution, err = facts.issueCounts(ctx, q, issue.IssueID)
 	if err != nil {
 		return card, err
 	}
-	var tasks []store.TaskRow
-	for _, id := range ids {
-		task, err := store.GetTask(ctx, q, id)
-		if err != nil {
-			return card, err
-		}
-		if task.Kind == protocol.TaskKindIssueManager {
-			continue
-		}
-		tasks = append(tasks, task)
-	}
-	summaries, err := facts.summaries(ctx, q, tasks)
-	if err != nil {
-		return card, err
-	}
-	for _, task := range summaries {
-		countExecution(&card.Execution, task.Execution)
-	}
-	return card, nil
+	card.Children, err = issueChildren(ctx, q, issue.IssueID, facts)
+	return card, err
 }

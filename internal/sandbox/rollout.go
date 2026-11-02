@@ -28,6 +28,10 @@ func seedRolloutDemo(ctx context.Context, runtime *serverkit.Runtime, root strin
 	}
 	demo.Parent = issue.IssueID
 	demo.Issues = []string{issue.IssueID}
+	// Set work intent before a concurrent runner claim can advance revisions.
+	if err := s.execute(ctx, "rollout-issue-start-status", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInProgress}, app.CanonicalOwnerIssueCommand{Action: "set_status"}, &issue); err != nil {
+		return demo, err
+	}
 	for n, title := range []string{"移动端 PWA 三项体验修复（沙箱）", "移动端 PWA：失败过程排查（沙箱）", "移动端 PWA：长输出与历史分页（沙箱）"} {
 		var task struct {
 			TaskID string `json:"task_id"`
@@ -38,9 +42,7 @@ func seedRolloutDemo(ctx context.Context, runtime *serverkit.Runtime, root strin
 		demo.Tasks = append(demo.Tasks, task.TaskID)
 		issue.Revision++
 	}
-	if err := s.execute(ctx, "rollout-issue-status", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInProgress}, app.CanonicalOwnerIssueCommand{Action: "set_status"}, nil); err != nil {
-		return demo, err
-	}
+
 	return demo, writeDemoReceipt(receipt, demo)
 }
 

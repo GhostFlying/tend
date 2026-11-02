@@ -20,6 +20,7 @@ const copyOnly = process.argv.includes("--s5-copy-only");
 const catalogOnly = process.argv.includes("--catalog-only");
 let hostedUnconfigured = false;
 let holdTaskFeed = false;
+let childProgressFixture = false;
 const output = process.env.TEND_LAYOUT_OUTPUT;
 assert(output, "Set an isolated screenshot output directory");
 await mkdir(output, { recursive: true });
@@ -567,6 +568,18 @@ const server = createServer(async (req, res) => {
       },
     });
   if (p === "/api/v1/work-items") return json({ items: [], more: false });
+  if (
+    p === "/api/v1/issues" &&
+    childProgressFixture &&
+    u.searchParams.get("parent_id") === "issue-root"
+  ) {
+    const items = issueRows.filter((row) => row.parent_issue_id === "issue-root");
+    return json(
+      u.searchParams.get("after")
+        ? { items: items.slice(2), more: false }
+        : { items: items.slice(0, 2), more: true, next: "child-page-2" },
+    );
+  }
   if (p === "/api/v1/issues")
     return json({
       items: issueRows.filter(
@@ -1313,6 +1326,78 @@ async function captureS5() {
 async function captureS4() {
   assert(output);
   assert(address && typeof address !== "string");
+  const parent = issueRows[0]!;
+  const previousChildren = parent.board!.children;
+  parent.board!.children = {
+    total: 3,
+    done: 0,
+    cancelled: 0,
+    running: 1,
+    items: [
+      {
+        issue_id: "issue-child",
+        title: "补齐回滚文档",
+        status: "in_progress",
+        execution: { ...parent.board!.execution, running: 1 },
+      },
+      {
+        issue_id: "issue-child-next",
+        title: "核对发布步骤",
+        status: "todo",
+        execution: { ...parent.board!.execution },
+      },
+    ],
+  };
+  const originalLength = issueRows.length;
+  issueRows.push(
+    summary("issue-child-next", "核对发布步骤", "issue-root"),
+    summary("issue-child-last", "核对独立验收", "issue-root"),
+    summary("issue-no-children", "没有子 Issue 的独立工作"),
+  );
+  issueRows[1]!.execution = { ...parent.board!.execution, running: 1 };
+  childProgressFixture = true;
+  try {
+    for (const viewport of [
+      { width: 1440, height: 1000 },
+      { width: 390, height: 844 },
+    ]) {
+      const context = await browser.newContext({ viewport, serviceWorkers: "block" });
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(`http://127.0.0.1:${address.port}/issues`);
+      const card = page.locator('[data-issue-id="issue-root"]');
+      await card.getByText("子 Issue · 0/3 已完成", { exact: true }).waitFor();
+      await card.getByText("1 项执行中", { exact: true }).waitFor();
+      assert.equal(
+        await page
+          .locator('[data-issue-id="issue-no-children"]')
+          .getByRole("region", { name: "子 Issue 进展" })
+          .count(),
+        0,
+      );
+      await page.screenshot({ path: join(output, `child-progress-${viewport.width}.png`) });
+      await card.getByRole("button", { name: "查看全部 3 个子 Issue ↓", exact: true }).click();
+      await card.getByRole("button", { name: "下一页", exact: true }).click();
+      await card.getByRole("button", { name: /核对独立验收/ }).waitFor();
+      await card.getByRole("button", { name: "上一页", exact: true }).click();
+      await card.getByRole("button", { name: /补齐回滚文档/ }).waitFor();
+      await card.getByRole("button", { name: "收起子 Issue ↑", exact: true }).click();
+      await card.getByRole("button", { name: /补齐回滚文档/ }).click();
+      await page.waitForURL((url) => url.pathname === "/issues/issue-child");
+      await page.getByRole("region", { name: "Issue 详情", exact: true }).waitFor();
+      assert.equal(errors.length, 0, errors.join("\n"));
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await context.close();
+      console.log(`PASS child progress ${viewport.width}`);
+    }
+  } finally {
+    childProgressFixture = false;
+    if (previousChildren) parent.board!.children = previousChildren;
+    else delete parent.board!.children;
+    issueRows.length = originalLength;
+    delete issueRows[1]!.execution;
+  }
   for (const viewport of [
     { width: 1440, height: 900 },
     { width: 390, height: 844 },
@@ -2107,7 +2192,7 @@ try {
     );
     const pendingSide = await issueSidebar(page);
     await pendingSide.getByText(/等待执行主机领取/).waitFor();
-    await pendingSide.getByRole("button", { name: "负责人 Agent", exact: true }).waitFor();
+    await pendingSide.getByRole("button", { name: "查看运行详情", exact: true }).waitFor();
     await page.screenshot({ path: join(output, `manager-queued-${viewport.width}.png`) });
     const pendingManagerDialog = await openIssueAux(page, "交接负责人");
     await pendingManagerDialog
@@ -2123,7 +2208,7 @@ try {
     await (
       await issueSidebar(page)
     )
-      .getByRole("button", { name: "负责人 Agent", exact: true })
+      .getByRole("button", { name: "查看运行详情", exact: true })
       .click();
     const managerDialog = page.getByRole("region", { name: "任务详情", exact: true });
     await managerDialog.getByText(/Issue 协调责任/).waitFor();

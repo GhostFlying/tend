@@ -798,6 +798,7 @@ func TestCanonicalTaskAncestorSemanticEditsRequireExplicitContractRefresh(t *tes
 				}
 				active = run
 				h.runAs(run, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+				parent = canonicalTaskIssue(t, h, parent.IssueID)
 			}
 			plan := parent.Plan
 			switch kind {

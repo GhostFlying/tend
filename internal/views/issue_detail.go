@@ -22,6 +22,14 @@ func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.Iss
 	if out.Historical {
 		return nil
 	}
+	facts, err := readExecutionFacts(ctx, q)
+	if err != nil {
+		return err
+	}
+	out.Children, err = issueChildren(ctx, q, out.IssueID, facts)
+	if err != nil {
+		return err
+	}
 	binding := &protocol.IssueConversationBinding{Reason: "unavailable"}
 	err = q.QueryRowContext(ctx, `SELECT conversation_id FROM agent_conversations WHERE work_item_id=?`, out.IssueID).Scan(&binding.ConversationID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

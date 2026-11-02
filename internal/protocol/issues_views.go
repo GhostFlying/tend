@@ -2,7 +2,8 @@ package protocol
 
 // IssueSummary describes canonical responsibility, never a legacy facade row.
 type IssueSummary struct {
-	Board *IssueBoardCard `json:"board,omitempty"`
+	Board     *IssueBoardCard  `json:"board,omitempty"`
+	Execution *ExecutionCounts `json:"execution,omitempty"`
 	IssueControl
 	Revision int64  `json:"revision"`
 	Title    string `json:"title"`
@@ -44,6 +45,7 @@ type IssueSourceReview struct {
 }
 
 type IssueView struct {
+	Children           *IssueChildProgress       `json:"children,omitempty"`
 	OwnershipPolicy    string                    `json:"ownership_policy,omitempty"`
 	ResponsibilityRuns []ExecutionResponsibility `json:"responsibility_runs,omitempty"`
 	Manager            *IssueManagerView         `json:"manager,omitempty"`

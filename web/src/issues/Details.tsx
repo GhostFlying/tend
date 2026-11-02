@@ -202,21 +202,24 @@ export function IssueDetails({
     .slice(0, 3);
   const sideContent = issue && (
     <>
-      {issue.manager && (
-        <ManagerStatus
-          manager={issue.manager}
-          onTask={(task) => {
-            setSide(false);
-            onTask(task);
-          }}
-        />
-      )}
       <section>
         <h2>属性</h2>
         <dl>
           <dt>负责人</dt>
           <dd>
             <AssigneeName assignee={issue.assignee} manager={issue.manager} />
+            {issue.manager &&
+              (issue.assignee.kind === "agent" ||
+                (!issue.manager.host_id &&
+                  !["completed", "cancelled"].includes(issue.manager.state))) && (
+                <ManagerStatus
+                  manager={issue.manager}
+                  onTask={(task) => {
+                    setSide(false);
+                    onTask(task);
+                  }}
+                />
+              )}
           </dd>
           <dt>状态</dt>
           <dd data-issue-status>{statusLabel}</dd>

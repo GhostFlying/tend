@@ -160,6 +160,10 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 			return demo, err
 		}
 		issue.Revision++
+		// Set work intent before a concurrent runner claim can advance revisions.
+		if err := s.execute(ctx, key+"-start-status", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInProgress}, app.CanonicalOwnerIssueCommand{Action: "set_status"}, &issue); err != nil {
+			return demo, err
+		}
 		var task struct {
 			TaskID string `json:"task_id"`
 		}
@@ -167,10 +171,6 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 			return demo, err
 		}
 		demo.Tasks = append(demo.Tasks, task.TaskID)
-		issue.Revision++
-		if err := s.execute(ctx, key+"-status", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInProgress}, app.CanonicalOwnerIssueCommand{Action: "set_status"}, nil); err != nil {
-			return demo, err
-		}
 	}
 
 	for _, entry := range []struct {
