@@ -107,6 +107,13 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 		if _, current := controls[binding.WorkItemID]; !current {
 			c.ContextPending = true
 		}
+		if c.Kind == protocol.ActionAccept {
+			// Independent acceptance judges the current artifact against its frozen
+			// spec. Later semantic inputs belong to continuing Issue responsibility;
+			// they neither replace that contract nor settle through its verdict.
+			// Keep the current ownership, lifecycle and ancestry checks above/below.
+			continue
+		}
 		if inherited, ok := inheritedPlans[binding.WorkItemID]; ok {
 			// Parent plan edits do not have a disposition of this child's task.
 			// Compare only the inherited semantic inputs frozen at that revision;
