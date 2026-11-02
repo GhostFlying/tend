@@ -801,7 +801,8 @@ try {
     await rollout.getByText("阅读历史", { exact: true }).waitFor();
     await page.goBack();
     await rollout.waitFor({ state: "detached" });
-    assert(await card.isVisible(), "browser back left the task");
+    await card.waitFor({ state: "visible" });
+    assert.equal(new URL(page.url()).pathname, `/tasks/${taskID}`, "browser back left the task");
     logs.pop();
     assert.deepEqual(errors, []);
     await context.close();
