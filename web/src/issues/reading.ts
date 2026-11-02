@@ -11,7 +11,6 @@ export class IssueReadingState {
     this.childCursors = cursors;
   }
   activity: IssueActivityPage | null = null;
-  activityExpanded = false;
   private following = false;
   followLatest(): void {
     this.following = true;
@@ -24,9 +23,6 @@ export class IssueReadingState {
   }
   saveActivity(page: IssueActivityPage | null): void {
     if (page) this.activity = page;
-  }
-  expandActivity(): void {
-    this.activityExpanded = true;
   }
   saveTop(top: number): void {
     this.top = top;

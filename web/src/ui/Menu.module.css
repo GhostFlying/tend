@@ -15,14 +15,31 @@
 .menu:popover-open {
   display: grid;
 }
+.menu[data-align="end"] {
+  position-area: bottom span-left;
+}
+.separator {
+  height: 1px;
+  margin: var(--space-1) calc(-1 * var(--space-1));
+  background: var(--border-soft);
+}
 .menu button {
   text-align: left;
   min-height: var(--control-m);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-m);
   font-size: var(--text-label);
+  border: 0;
+  background: none;
+  color: inherit;
 }
 .menu button:hover,
 .menu button:focus-visible {
   background: var(--hover);
+}
+
+@media (max-width: 760px) {
+  .menu button {
+    min-height: var(--control-touch);
+  }
 }

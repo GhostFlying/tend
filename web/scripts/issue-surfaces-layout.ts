@@ -2332,7 +2332,10 @@ try {
     await detail.getByRole("combobox", { name: /仓库/ }).selectOption("sample");
     await detail.getByRole("heading", { name: "执行要求", exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(output, `task-requirements-${viewport.width}.png`) });
-    await detail.getByRole("button", { name: "创建任务", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "创建任务", exact: true })
+      .getByRole("button", { name: "创建任务", exact: true })
+      .click();
     await detail.getByRole("heading", { name: "任务已创建", exact: true }).waitFor();
     assert.equal(
       await page
