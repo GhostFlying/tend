@@ -23,3 +23,36 @@ func TestManagerKeepsOriginalSnapshotAcrossUnrelatedInventoryRevision(t *testing
 		t.Fatal("a changed definition replaced the original manager", got, reason)
 	}
 }
+
+func TestContinuationKeepsBackendAndIndependentAcceptanceAdmission(t *testing.T) {
+	old := protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "runner", LocalID: "cedar"}, AgentRevision: 1, Runtime: protocol.AgentRuntimeReference{RuntimeID: "native", Revision: 1}, InventoryRevision: 1, SnapshotID: "original", PublicSHA256: "old", Profile: protocol.ExecutionProfile{Model: "model"}, Worker: protocol.WorkerAppServer, BackendID: "git"}
+	current := old
+	current.AgentRevision = 2
+	current.SnapshotID = "current"
+	review := current
+	review.Identity.LocalID = "maple"
+	h := Host{ID: "runner", IssueOwners: true, ContinuationsSupported: true, Executors: []Executor{{Pin: current, Categories: []string{"implementation"}}}, Continuations: []Executor{{Continuation: true, Pin: old, Categories: []string{"implementation"}}}}
+	c := Candidate{Kind: protocol.ActionImplement, OwnerAgentRevision: 1, OwnerRuntimeRevision: 1, OwnerPin: &old, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementation"}, Acceptance: protocol.AgentRequirement{CategoryID: "review"}}}
+	if pin, _ := SelectExecution(h, c); pin != nil {
+		t.Fatal("retention bypassed first-allocation acceptance admission", pin)
+	}
+	h.Executors = append(h.Executors, Executor{Pin: review, Categories: []string{"review"}})
+	if pin, reason := SelectExecution(h, c); pin == nil || *pin != old || reason != "" {
+		t.Fatal("original owner was not selected", pin, reason)
+	}
+	c.WorkspaceBackendID = "orca"
+	if pin, _ := SelectExecution(h, c); pin != nil {
+		t.Fatal("retention bypassed workspace backend", pin)
+	}
+	c.WorkspaceBackendID = ""
+	c.OwnerPin = nil
+	c.OwnerAgentRevision = 0
+	c.OwnerRuntimeRevision = 0
+	if pin, _ := SelectExecution(h, c); pin == nil || *pin != current {
+		t.Fatal("new allocation used a historical candidate", pin)
+	}
+	h.Executors = nil
+	if pin, _ := SelectExecution(h, c); pin != nil {
+		t.Fatal("unbound work selected a continuation", pin)
+	}
+}

@@ -151,8 +151,8 @@ export function RoutePage({
       break;
     case "agents":
       content = (
-        <section className={styles.page} aria-label="Agent 与类别">
-          <PageHeader title="Agent 与类别" onBack={() => back({ page: "settings" })} />
+        <section className={styles.page} aria-label="Agents">
+          <PageHeader title="Agents" />
           <AgentCatalogView />
         </section>
       );

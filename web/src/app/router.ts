@@ -25,7 +25,7 @@ export const paths = {
   usage: "/usage",
   hosts: "/hosts",
   settings: "/settings",
-  agents: "/settings/agents",
+  agents: "/agents",
   archive: "/archive",
   upgrade: "/upgrades/:id",
 } as const;
@@ -44,7 +44,15 @@ export type DiagnosticFilters = {
   after?: string;
   since?: string;
 };
+export type AgentFilters = {
+  tab?: "categories" | undefined;
+  search?: string;
+  category?: string;
+  environment?: string;
+  selected?: string;
+};
 export type Route =
+  | ({ page: "agents" } & AgentFilters)
   | ({ page: "diagnostics" } & DiagnosticFilters)
   | ({ page: "diagnosticEvent"; id: string } & DiagnosticFilters)
   | {
@@ -58,7 +66,6 @@ export type Route =
         | "usage"
         | "hosts"
         | "settings"
-        | "agents"
         | "archive";
     }
   | { page: "conversation" | "attention" | "issue" | "upgrade"; id: string }
@@ -88,6 +95,15 @@ export function parse(input: string | URL): Route {
     }
   }
 
+  if (url.pathname === "/settings/agents" || url.pathname === "/agents") {
+    const filters: AgentFilters = {};
+    if (query.get("tab") === "categories") filters.tab = "categories";
+    for (const field of ["search", "category", "environment", "selected"] as const) {
+      const value = query.get(field);
+      if (value) filters[field] = value;
+    }
+    return { page: "agents", ...filters };
+  }
   for (const [page, path] of Object.entries(paths)) {
     const pattern = path.split(":id");
     if (pattern.length === 2) {
@@ -125,6 +141,11 @@ export function href(route: Route): string {
   if (route.page === "missing") return "/404";
   const path = paths[route.page];
   const query = new URLSearchParams();
+  if (route.page === "agents")
+    for (const field of ["tab", "search", "category", "environment", "selected"] as const) {
+      const value = route[field];
+      if (value) query.set(field, value);
+    }
   if (route.page === "diagnostics" || route.page === "diagnosticEvent") {
     for (const field of ["tab", "issue", "source", "status", "search", "after", "since"] as const) {
       if (route[field]) query.set(field, route[field]!);
@@ -144,6 +165,7 @@ export function href(route: Route): string {
 
 export function legacyURL(input: string | URL): string | null {
   const url = new URL(input, "https://tend.invalid");
+  if (url.pathname === "/settings/agents") return "/agents" + url.search + url.hash;
   if (url.pathname === "/diagnostics" || url.pathname.startsWith("/diagnostics/events/"))
     return null;
   const issue = url.searchParams.get("issue");

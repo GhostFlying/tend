@@ -328,13 +328,17 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			return Outcome{}, err
 		}
 	}
+	continuations, err := views.HostContinuations(ctx, q, host.HostID, x.Now.UnixMilli())
+	if err != nil {
+		return Outcome{}, err
+	}
 	schedulingHost := scheduler.Host{
 		IssueOwners:   p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueOwner),
 		IssueManagers: p.Runtime != nil && p.Runtime.Protocol >= protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),
 		ID:            host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
 		AcceptanceExecution: runtimeSupportsAcceptanceExecution(p.Runtime), TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
-		Executors: executors,
+		ContinuationsSupported: runtimeSupportsAgentContinuation(p.Runtime), Continuations: continuations, Executors: executors,
 	}
 	pick, ok := scheduler.Pick(schedulingHost, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
 	if !ok {
@@ -489,6 +493,13 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			res.ProtocolMax = protocol.CurrentRunnerProtocol
 		}
 		res.RepositoryBindings = slices.Contains(p.Runtime.Capabilities, protocol.CapabilityRepositoryBindings)
+		res.AgentContinuation = runtimeSupportsAgentContinuation(p.Runtime)
+		if res.AgentContinuation {
+			res.RetainedExecutions, err = store.RequiredAgentExecutions(ctx, q, host.HostID)
+			if err != nil {
+				return Outcome{}, err
+			}
+		}
 		res.AgentExecution = runtimeSupportsAgentExecution(p.Runtime)
 		res.AgentInventory = protocol.RunnerProtocolSupported(p.Runtime.Protocol) && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityAgentInventory)
 	}
@@ -889,6 +900,12 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 				return err
 			}
 			res.Control = &c
+			if runtimeSupportsAgentContinuation(payload.Runtime) {
+				res.RetainedExecutions, err = store.RequiredAgentExecutions(ctx, q, host.HostID)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		if changed {
 			if err := a.runtimeEvent(ctx, tx, host.HostID, "host.runtime_changed"); err != nil {

@@ -1,6 +1,17 @@
 import type { ComponentType, SVGProps } from "react";
 import type { Route } from "../app/router.ts";
-import { Chat, Pending, Tasks, Run, Gear, Repository, Usage, Host, More } from "./icons.tsx";
+import {
+  Chat,
+  Pending,
+  Tasks,
+  Run,
+  Gear,
+  Repository,
+  Usage,
+  Host,
+  More,
+  Agents,
+} from "./icons.tsx";
 
 export type NavItem = { path: string; label: string; Icon: ComponentType<SVGProps<SVGSVGElement>> };
 export const groups: { label: string; items: NavItem[] }[] = [
@@ -22,6 +33,7 @@ export const groups: { label: string; items: NavItem[] }[] = [
     label: "资源",
     items: [
       { path: "/repos", label: "仓库", Icon: Repository },
+      { path: "/agents", label: "Agents", Icon: Agents },
       { path: "/usage", label: "Token 用量", Icon: Usage },
       { path: "/hosts", label: "主机", Icon: Host },
       { path: "/diagnostics", label: "诊断", Icon: Run },
@@ -51,7 +63,8 @@ export function navActive(route: Route, path: string): boolean {
     "/issues": ["issues", "issue"],
     "/tasks": ["tasks", "task"],
     "/hosts": ["hosts", "upgrade"],
-    "/settings": ["settings", "agents", "archive"],
+    "/agents": ["agents"],
+    "/settings": ["settings", "archive"],
     "/more": ["more", "tasks", "task", "repos", "usage", "hosts", "settings", "agents", "archive"],
   };
   return (pages[path] ?? [path.slice(1)]).includes(route.page);

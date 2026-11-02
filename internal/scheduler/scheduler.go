@@ -14,15 +14,17 @@ import (
 
 // Host is the claiming host as configured, with its current load.
 type Host struct {
-	IssueManagers bool
-	IssueOwners   bool
-	Executors     []Executor
-	ID            string
-	OS            string
-	Active        bool
-	Labels        []string
-	Repos         []string
-	Slots         int64
+	IssueManagers          bool
+	IssueOwners            bool
+	Executors              []Executor
+	Continuations          []Executor
+	ContinuationsSupported bool
+	ID                     string
+	OS                     string
+	Active                 bool
+	Labels                 []string
+	Repos                  []string
+	Slots                  int64
 	// Busy counts the host's runs that have not finished.
 	WorkspaceProtocol int64
 	Busy              int64
@@ -36,6 +38,7 @@ type Host struct {
 // Candidate is a pending action together with the facts the rules need.
 type Candidate struct {
 	OwnerResponsibilityChanged  bool
+	OwnerPin                    *protocol.RunExecutionPin
 	OwnerAgentRevision          uint64
 	OwnerRuntimeRevision        uint64
 	ReviewOwnerPin              *protocol.RunExecutionPin

@@ -26,7 +26,7 @@ func prepareOwnerExecution(ctx context.Context, x *Exec, q store.Querier, issue 
 	if len(parts) != 2 {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "Issue owner identity is invalid")
 	}
-	inventory, err := store.GetAgentInventory(ctx, q, parts[0])
+	inventory, _, err := store.RetainedOwnerInventory(ctx, q, issue)
 	if err != nil {
 		return nil, errNotFound(err, "owner inventory is unavailable")
 	}
@@ -85,6 +85,47 @@ func validateRetainedReviewer(ctx context.Context, q store.Querier, contract sto
 }
 
 func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue protocol.Issue, task string, agent protocol.AgentInventoryDefinition, spec domain.Spec) ([]Event, error) {
+	inventory, manager, err := store.RetainedOwnerInventory(ctx, tx.Q(), issue)
+	if err != nil {
+		return nil, err
+	}
+	var execution *protocol.RunExecutionPin
+	if manager != nil {
+		pin, err := store.WorkerPinForManager(ctx, tx.Q(), *manager)
+		if err != nil {
+			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "original owner execution snapshot is unavailable")
+		}
+		execution = &pin
+	} else {
+		runtime, err := store.GetHostRuntime(ctx, tx.Q(), agent.Identity.ExecutionEnvironmentID)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range runtime.Runtime.AgentExecutors {
+			if e.Pin.Purpose == "" && e.Pin.Identity == agent.Identity && e.Pin.AgentRevision == agent.Revision && e.Pin.Runtime == agent.Binding && e.Pin.SnapshotID == inventory.Receipt.SnapshotID && e.Pin.PublicSHA256 == inventory.Receipt.PublicSHA256 {
+				pin := e.Pin
+				execution = &pin
+				break
+			}
+		}
+	}
+	if execution == nil {
+		runtime, err := store.GetHostRuntime(ctx, tx.Q(), agent.Identity.ExecutionEnvironmentID)
+		if err != nil {
+			return nil, err
+		}
+		if runtimeSupportsAgentContinuation(&runtime.Runtime) {
+			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "owner execution has no frozen snapshot")
+		}
+	}
+	var rawPin any
+	if execution != nil {
+		body, err := json.Marshal(execution)
+		if err != nil {
+			return nil, err
+		}
+		rawPin = string(body)
+	}
 	now := x.Now.UnixMilli()
 	review := protocol.Issue{IssueControl: protocol.IssueControl{IssueID: x.IDs.New(protocol.PrefixWorkItem), ParentIssueID: issue.IssueID, State: protocol.IssueActive, WorkStatus: protocol.IssueTodo, Assignee: issue.Assignee, AssignmentEpoch: 1, AssignmentState: "active"}, Revision: 1,
 		Plan: protocol.IssuePlan{Title: "Review: " + spec.Goal, Project: issue.Plan.Project, Intent: "Independently evaluate the frozen task agreement and its submitted artifact", Scope: "Acceptance of task " + task, CompletionCriteria: []string{"Record an independent verdict against the exact artifact and task spec"}, Stages: []protocol.IssueStage{}}, DependsOn: []string{}, CreatedAt: now, UpdatedAt: now}
@@ -96,7 +137,7 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 	if err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO task_owner_contracts(task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, task, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, agent.Revision, agent.Binding.RuntimeID, agent.Binding.Revision, agent.RequestedModel, agent.RequestedEffort, review.IssueID, string(reviewPlan), now); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO task_owner_contracts(task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,created_at,execution_pin_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, task, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, agent.Revision, agent.Binding.RuntimeID, agent.Binding.Revision, agent.RequestedModel, agent.RequestedEffort, review.IssueID, string(reviewPlan), now, rawPin); err != nil {
 		return nil, err
 	}
 	return out.Events, nil

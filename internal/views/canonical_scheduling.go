@@ -23,22 +23,25 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 		if !current {
 			c.OwnerResponsibilityChanged = true
 		}
+		c.OwnerPin = contract.Execution
 		c.OwnerAgentRevision, c.OwnerRuntimeRevision = uint64(contract.AgentRevision), uint64(contract.RuntimeRevision)
-		if c.Kind == protocol.ActionAccept {
+		if c.Kind == protocol.ActionAccept || c.OwnerPin != nil {
 			review, err := store.GetCanonicalIssue(ctx, q, contract.ReviewIssueID)
 			if err != nil {
 				return err
 			}
-			if review.State != protocol.IssueActive || review.AssignmentState != "active" {
-				c.DependenciesDone = false
-			}
-			for _, dependency := range review.DependsOn {
-				prerequisite, err := store.GetCanonicalIssue(ctx, q, dependency)
-				if err != nil {
-					return err
-				}
-				if prerequisite.State != protocol.IssueClosed || prerequisite.Closure == nil || prerequisite.Closure.Kind != protocol.WorkItemClosureCompleted {
+			if c.Kind == protocol.ActionAccept {
+				if review.State != protocol.IssueActive || review.AssignmentState != "active" {
 					c.DependenciesDone = false
+				}
+				for _, dependency := range review.DependsOn {
+					prerequisite, err := store.GetCanonicalIssue(ctx, q, dependency)
+					if err != nil {
+						return err
+					}
+					if prerequisite.State != protocol.IssueClosed || prerequisite.Closure == nil || prerequisite.Closure.Kind != protocol.WorkItemClosureCompleted {
+						c.DependenciesDone = false
+					}
 				}
 			}
 			ids, err := store.FollowupIDs(ctx, q, `SELECT run_id FROM run_issue_responsibilities WHERE issue_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1`, review.IssueID)

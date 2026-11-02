@@ -7,7 +7,8 @@ describe("grouped navigation", () => {
     expect(navActive(parse("/issues/one"), "/issues")).toBe(true);
     expect(navActive(parse("/issues/one"), "/tasks")).toBe(false);
     expect(navActive(parse("/inbox/one"), "/inbox")).toBe(true);
-    expect(navActive(parse("/settings/agents"), "/settings")).toBe(true);
+    expect(navActive(parse("/settings/agents"), "/agents")).toBe(true);
+    expect(navActive(parse("/agents"), "/settings")).toBe(false);
     expect(navActive(parse("/chat/one"), "/diagnostics/main")).toBe(true);
     expect(navActive(parse("/repos"), "/more")).toBe(true);
     expect(navActive(parse("/tasks"), "/more")).toBe(true);
@@ -18,6 +19,7 @@ describe("grouped navigation", () => {
     expect(moreItems.map((item) => item.path)).toEqual([
       "/tasks",
       "/repos",
+      "/agents",
       "/usage",
       "/hosts",
       "/diagnostics",

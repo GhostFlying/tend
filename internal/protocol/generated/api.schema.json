@@ -8469,6 +8469,15 @@
     "RunnerAgentCatalog": {
       "additionalProperties": false,
       "properties": {
+        "continuation_supported": {
+          "type": "boolean"
+        },
+        "continuations": {
+          "items": {
+            "$ref": "#/definitions/AgentExecutor"
+          },
+          "type": "array"
+        },
         "current": {
           "$ref": "#/definitions/AgentInventoryReceipt"
         },
@@ -8489,6 +8498,24 @@
         },
         "projection": {
           "$ref": "#/definitions/AgentInventoryProjection"
+        },
+        "retained_definitions": {
+          "items": {
+            "$ref": "#/definitions/AgentInventoryDefinition"
+          },
+          "type": "array"
+        },
+        "retained_executions": {
+          "items": {
+            "$ref": "#/definitions/RunExecutionPin"
+          },
+          "type": "array"
+        },
+        "retained_runtimes": {
+          "items": {
+            "$ref": "#/definitions/AgentInventoryRuntime"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -8610,6 +8637,12 @@
     "RunnerRuntime": {
       "additionalProperties": false,
       "properties": {
+        "agent_continuations": {
+          "items": {
+            "$ref": "#/definitions/AgentExecutor"
+          },
+          "type": "array"
+        },
         "agent_executors": {
           "items": {
             "$ref": "#/definitions/AgentExecutor"
@@ -8651,6 +8684,9 @@
           "type": "string"
         },
         "confirmed_cancelled_upgrade_id": {
+          "type": "string"
+        },
+        "continuation_backend": {
           "type": "string"
         },
         "downloaded_bytes": {

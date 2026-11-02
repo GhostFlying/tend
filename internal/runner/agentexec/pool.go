@@ -58,9 +58,12 @@ type entry struct {
 	managerReady bool
 }
 type Pool struct {
-	options   Options
-	mu        sync.Mutex
-	snapshots map[string]map[string]*entry
+	retainedMu       sync.Mutex
+	retained         []protocol.RunExecutionPin
+	retainedObserved []protocol.AgentExecutor
+	options          Options
+	mu               sync.Mutex
+	snapshots        map[string]map[string]*entry
 }
 
 func New(options Options) (*Pool, error) {
@@ -294,12 +297,13 @@ func (p *Pool) initialize(ctx context.Context, e *entry) error {
 
 // Refresh is called by the existing runner reconciler, never its heartbeat.
 func (p *Pool) Refresh(ctx context.Context) error {
+	retainedErr := p.refreshRetained(ctx)
 	status, err := p.options.Source.Status(ctx)
 	if err != nil {
 		return err
 	}
 	if status.Revision == 0 {
-		return nil
+		return retainedErr
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -319,7 +323,7 @@ func (p *Pool) Refresh(ctx context.Context) error {
 			retry = errors.Join(retry, p.initialize(ctx, e))
 		}
 	}
-	return retry
+	return errors.Join(retainedErr, retry)
 }
 
 func canProbe(reason string) bool {

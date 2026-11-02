@@ -52,14 +52,27 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		return nil, err
 	}
 	var executors []protocol.AgentExecutor
+	var continuations []protocol.AgentExecutor
+	var continuationBackend string
 	r.controlMu.Lock()
 	supported := r.agentExecutionSupported
+	retainedSupported := r.agentContinuationSupported
 	r.controlMu.Unlock()
 	if supported && r.cfg.Executions != nil {
 		var err error
 		executors, err = r.cfg.Executions.Observe(ctx)
 		if err != nil {
 			return nil, err
+		}
+	}
+	if retainedSupported {
+		if resolver, ok := r.cfg.Executions.(ContinuationResolver); ok {
+			var err error
+			continuationBackend = resolver.ContinuationBackend()
+			continuations, err = resolver.ObserveRetained(ctx)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	r.maybeCancelStaged(ctx)
@@ -149,6 +162,9 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	capabilities = append(capabilities, protocol.CapabilityRunMessages)
 	if r.cfg.Executions != nil {
 		capabilities = append(capabilities, protocol.CapabilityAgentExecution)
+		if _, ok := r.cfg.Executions.(ContinuationResolver); ok {
+			capabilities = append(capabilities, protocol.CapabilityAgentContinuation)
+		}
 		if _, ok := r.cfg.Executions.(ManagerExecutionResolver); ok && r.runnerProtocol >= 2 {
 			capabilities = append(capabilities, protocol.CapabilityIssueManager)
 			capabilities = append(capabilities, protocol.CapabilityIssueOwner)
@@ -189,7 +205,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		executors = slices.DeleteFunc(executors, func(e protocol.AgentExecutor) bool { return e.Pin.Purpose == "issue_manager" })
 	}
 	r.sequence++
-	return &protocol.RunnerRuntime{AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
+	return &protocol.RunnerRuntime{ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
 }
 
 func sameGrant(a, b *protocol.MaintenanceAuthorization) bool {

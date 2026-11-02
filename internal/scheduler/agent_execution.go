@@ -8,8 +8,9 @@ import (
 )
 
 type Executor struct {
-	Pin        protocol.RunExecutionPin
-	Categories []string
+	Continuation bool
+	Pin          protocol.RunExecutionPin
+	Categories   []string
 }
 
 // SelectExecution checks both roles on one backend before a first allocation.
@@ -26,6 +27,12 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 			if c.Manager.ReceiptOnly {
 				pin := *c.ManagerPin
 				return &pin, ""
+			}
+			for _, e := range h.Continuations {
+				if e.Pin == *c.ManagerPin {
+					pin := e.Pin
+					return &pin, ""
+				}
 			}
 			for _, e := range h.Executors {
 				original, observed := *c.ManagerPin, e.Pin
@@ -69,6 +76,19 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		role = c.AgentSelection.Acceptance
 	}
 	matches := func(e Executor, r protocol.AgentRequirement, accept bool) bool {
+		retained := c.OwnerPin
+		if accept {
+			retained = c.ReviewOwnerPin
+		}
+		if e.Continuation && (retained == nil || *retained != e.Pin) {
+			return false
+		}
+		if h.ContinuationsSupported && retained != nil && e.Pin != *retained {
+			return false
+		}
+		if h.ContinuationsSupported && !accept && c.OwnerAgentRevision != 0 && c.OwnerPin == nil {
+			return false
+		}
 		if !accept && c.OwnerAgentRevision != 0 && (e.Pin.AgentRevision != c.OwnerAgentRevision || e.Pin.Runtime.Revision != c.OwnerRuntimeRevision) {
 			return false
 		}
@@ -77,7 +97,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		}
 		return e.Pin.Purpose != "issue_manager" && (r.AgentID == "" || r.AgentID == e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID) && r.MatchesProfile(e.Pin.Profile) && e.Pin.Identity.ExecutionEnvironmentID == h.ID && slices.Contains(e.Categories, r.CategoryID) && (r.RuntimeID == "" || r.RuntimeID == e.Pin.Runtime.RuntimeID) && (c.WorkspaceBackendID == "" || c.WorkspaceBackendID == e.Pin.BackendID) && (c.Mounts <= 1 || e.Pin.BackendID == "git") && (!accept || c.AcceptanceProfile == nil || *c.AcceptanceProfile == e.Pin.Profile)
 	}
-	executors := slices.Clone(h.Executors)
+	executors := append(slices.Clone(h.Executors), h.Continuations...)
 	slices.SortFunc(executors, func(a, b Executor) int {
 		if n := cmp.Compare(a.Pin.Identity.LocalID, b.Pin.Identity.LocalID); n != 0 {
 			return n

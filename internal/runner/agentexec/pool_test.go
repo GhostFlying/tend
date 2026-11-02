@@ -294,3 +294,43 @@ func TestOrcaTraeReadinessRequiresCapabilityAndCanReprobe(t *testing.T) {
 		t.Fatal(resolved, err)
 	}
 }
+
+func TestRetainedExecutionAfterDefinitionRemovalAndColdRestart(t *testing.T) {
+	f := newSource(t)
+	f.reload(t)
+	p := newPool(t, f, func(context.Context, agentexec.BuildInput) error { return nil })
+	if err := p.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	original := observed(t, p)
+	f.config.Agents = []agentconfig.AgentDefinition{}
+	f.reload(t)
+	cold := newPool(t, f, func(context.Context, agentexec.BuildInput) error { return nil })
+	cold.SetRetained([]protocol.RunExecutionPin{original.Pin})
+	if err := cold.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	current, err := cold.Observe(t.Context())
+	if err != nil || len(current) != 0 {
+		t.Fatal("removed definition remained selectable", current, err)
+	}
+	retained, err := cold.ObserveRetained(t.Context())
+	if err != nil || len(retained) != 1 || !retained[0].Available || retained[0].Pin != original.Pin {
+		t.Fatal(retained, err)
+	}
+	cold.SetRetained(nil)
+	retained, err = cold.ObserveRetained(t.Context())
+	if err != nil || len(retained) != 0 {
+		t.Fatal("withdrawn responsibility retained availability", retained, err)
+	}
+	missing := original.Pin
+	missing.SnapshotID = "missing-snapshot"
+	cold.SetRetained([]protocol.RunExecutionPin{missing})
+	if err := cold.Refresh(t.Context()); err == nil {
+		t.Fatal("missing snapshot did not request retry")
+	}
+	retained, err = cold.ObserveRetained(t.Context())
+	if err != nil || len(retained) != 1 || retained[0].Available {
+		t.Fatal("missing snapshot fell back to current", retained, err)
+	}
+}

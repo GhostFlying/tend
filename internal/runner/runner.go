@@ -173,6 +173,8 @@ type Runner struct {
 
 	inventoryMu                 sync.Mutex
 	agentExecutionSupported     bool
+	retainedExecutions          []protocol.RunExecutionPin
+	agentContinuationSupported  bool
 	agentInventorySupported     bool
 	controlMu                   sync.Mutex
 	control                     protocol.RunnerControl
@@ -526,7 +528,9 @@ func (r *Runner) hello(ctx context.Context) error {
 	r.repositoryBindingsSupported = res.RepositoryBindings
 	r.agentInventorySupported = res.AgentInventory && r.cfg.AgentInventory != nil
 	r.agentExecutionSupported = res.AgentExecution && r.cfg.Executions != nil
+	r.agentContinuationSupported = res.AgentContinuation && r.agentExecutionSupported
 	r.controlMu.Unlock()
+	r.acceptRetained(res.RetainedExecutions)
 	r.setTTL(res.LeaseTTLMillis)
 	if err := r.applyControl(ctx, res.Control, sent, true); err != nil {
 		return err
@@ -740,6 +744,7 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	if err := json.Unmarshal(op.Result, &res); err != nil {
 		return
 	}
+	r.acceptRetained(res.RetainedExecutions)
 	r.setTTL(res.LeaseTTLMillis)
 	if err := r.applyControl(ctx, res.Control, sent, false); err != nil {
 		r.cfg.Log.WarnContext(ctx, "runner control rejected", "err", err)
