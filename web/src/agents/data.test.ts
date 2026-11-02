@@ -92,25 +92,30 @@ test("host switch cancels the old inventory and preserves registration, last ava
 });
 
 test("runner names are shared across consumers and current names override retained labels", async () => {
+  let current = true;
   const api: Reader = {
     async get<T>() {
       return {
         host_id: "host",
         online: false,
         last_heartbeat_at_ms: 1,
-        retained_definitions: [
-          {
+        retained_definitions: [2, 1].map((revision) => ({
+          pin: { inventory_revision: revision },
+          definition: {
             identity: { execution_environment_id: "host", local_id: "cedar" },
-            display_name: "Old Cedar",
+            display_name: `Old Cedar ${revision}`,
           },
-        ],
+          runtimes: [],
+        })),
         projection: {
-          agents: [
-            {
-              identity: { execution_environment_id: "host", local_id: "cedar" },
-              display_name: "青杉",
-            },
-          ],
+          agents: current
+            ? [
+                {
+                  identity: { execution_environment_id: "host", local_id: "cedar" },
+                  display_name: "青杉",
+                },
+              ]
+            : [],
         },
       } as T;
     },
@@ -120,6 +125,9 @@ test("runner names are shared across consumers and current names override retain
   data.ensureRunner("host");
   await data.runnerFor("host").refresh();
   expect(data.names.get().get("host/cedar")).toBe("青杉");
+  current = false;
+  await data.runnerFor("host").refresh();
+  expect(data.names.get().get("host/cedar")).toBe("Old Cedar 2");
   expect(data.catalogs.get().get("host")?.value?.online).toBe(false);
   data.stop();
   expect(data.names.get().size).toBe(0);
