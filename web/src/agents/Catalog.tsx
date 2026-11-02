@@ -450,7 +450,7 @@ function AgentDetails({ entry: { agent, group, runtime } }: { entry: Entry }) {
               (e) => JSON.stringify(e.pin) === JSON.stringify(p),
             );
             return (
-              <p key={`${p.snapshot_id}/${p.purpose ?? ""}`}>
+              <p key={JSON.stringify(p)}>
                 v{p.agent_revision} · {p.purpose === "issue_manager" ? "协调" : "执行"} ·{" "}
                 {observed(observation)}
               </p>
