@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -91,12 +92,15 @@ func dedupe(s []string) []string {
 type AnswerDecision struct {
 	// FromMessage selects decisions.resolve_from_message.
 	FromMessage bool
+	// Responsible is an internal path after the current supervisor was verified.
+	Responsible bool
 }
 
 type decisionAnswer struct {
 	Option string                 `json:"option,omitempty"`
 	Text   string                 `json:"text,omitempty"`
 	Effect *protocol.EffectResult `json:"effect,omitempty"`
+	Actor  *protocol.Principal    `json:"actor,omitempty"`
 }
 
 // Operation implements Command.
@@ -154,7 +158,18 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		return Outcome{}, pe
 	}
 	newOwnerSource := x.Principal.Kind == protocol.PrincipalOwner && p.SourceMessageID == ""
-	sourceEvents, err := recordDecisionAnswerSource(ctx, x, tx, d, &p)
+	var sourceEvents []Event
+	if c.Responsible {
+		if x.coordinationExecution == nil {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "admitted supervisor execution is required")
+		}
+		message := x.IDs.New(protocol.PrefixMessage)
+		conversation := x.coordinationExecution.ConversationID
+		_, err = tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: conversation, Author: "agent", Body: strings.TrimSpace(p.Option + "\n" + p.Text), CreatedAt: x.Now.UnixMilli(), RequestID: x.Env.RequestID})
+		p.SourceMessageID = message
+	} else {
+		sourceEvents, err = recordDecisionAnswerSource(ctx, x, tx, d, &p)
+	}
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -164,8 +179,10 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 				return Outcome{}, err
 			}
 		}
-		if err := attachReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
-			return Outcome{}, err
+		if !c.Responsible {
+			if err := attachReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
+				return Outcome{}, err
+			}
 		}
 	}
 	effect, effectEvents, err := answerEffect(ctx, x, tx, d, p.Option)
@@ -178,11 +195,19 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		sourceEvents = append(sourceEvents, Event{ObjectType: "message", ObjectID: p.SourceMessageID, Kind: "conversation.turn_reviewed"})
 	}
-	answer, err := json.Marshal(decisionAnswer{Option: p.Option, Text: p.Text, Effect: effect})
+	value := decisionAnswer{Option: p.Option, Text: p.Text, Effect: effect}
+	if c.Responsible {
+		actor := x.Principal
+		value.Actor = &actor
+	}
+	answer, err := json.Marshal(value)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("app: encode answer: %w", err)
 	}
 	if err := tx.AnswerDecision(ctx, d.DecisionID, d.Version, string(answer), p.SourceMessageID, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	if err := resumeAnsweredQuestion(ctx, x, tx, d.DecisionID); err != nil {
 		return Outcome{}, err
 	}
 	if err := bindSource(ctx, tx, p.SourceMessageID, "decision", d.DecisionID); err != nil {

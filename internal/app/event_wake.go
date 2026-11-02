@@ -52,6 +52,14 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 	if err != nil {
 		return err
 	}
+	if a, found, routeErr := attentionForDecision(ctx, tx.Q(), d.DecisionID); routeErr != nil {
+		return routeErr
+	} else if found && a.Responsibility != nil && a.Responsibility.RecipientKind != "owner" {
+		if e.Kind == "decision.answered" {
+			return recordInternalProblemAnswer(ctx, x, tx, a, d, eventID)
+		}
+		return nil
+	}
 	state := "有待决事项"
 	if e.Kind == "decision.answered" {
 		state = "待决事项已有回答"
@@ -155,6 +163,10 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 			return err
 		}
 	}
+	if _, err := tx.Exec(ctx, `UPDATE attention_responsibilities SET notified_revision=revision WHERE attention_id IN (SELECT attention_id FROM attentions WHERE decision_id=?) AND recipient_kind='owner'`, d.DecisionID); err != nil {
+		return err
+	}
+
 	if _, err := tx.InsertEvent(ctx, store.EventRow{
 		EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id,
 		ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"system"}`,

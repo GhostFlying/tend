@@ -34,6 +34,8 @@ export function executionLook(execution: NonNullable<TaskSummary["execution"]>):
       return { label: "执行中", tone: "run" };
     case "accepting":
       return { label: "验收中", tone: "run" };
+    case "waiting_supervisor":
+      return { label: "等待负责人", tone: "idle" };
     case "waiting_owner":
       return { label: "等待用户", tone: "warn" };
     case "paused":
@@ -54,6 +56,7 @@ const countLabels = [
   ["running", "执行中"],
   ["accepting", "验收中"],
   ["queued", "排队中"],
+  ["waiting_supervisor", "等待负责人"],
   ["waiting_owner", "等待用户"],
   ["paused", "已暂停"],
   ["unknown", "执行待核对"],
@@ -117,6 +120,7 @@ export function queueReasonText(task: Pick<TaskSummary, "execution" | "block_rea
   }
   const reason = task.execution?.queue_reason;
   if (!reason) {
+    if (task.execution?.state === "waiting_supervisor") return "等待负责人处理原问题";
     return task.execution?.state === "waiting_owner" && task.block_reason !== "none"
       ? waitLabels[task.block_reason]
       : "";

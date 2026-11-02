@@ -10,7 +10,7 @@ import (
 
 func TestIssueChildProgressCLIReadPathsAndPagination(t *testing.T) {
 	f := newFakeServer(t)
-	children := &protocol.IssueChildProgress{Total: 3, Done: 1, Running: 1, Cancelled: 1, Items: []protocol.IssueChildSummary{{IssueID: "child-active", Title: "Investigate clipboard", Status: protocol.IssueInProgress, Execution: protocol.ExecutionCounts{Running: 1}}}}
+	children := &protocol.IssueChildProgress{Total: 3, Done: 1, Running: 1, Cancelled: 1, Items: []protocol.IssueChildSummary{{IssueID: "child-active", Title: "Investigate clipboard", Status: protocol.IssueInProgress, Execution: protocol.ExecutionCounts{Running: 1, WaitingSupervisor: 2}}}}
 	summary := protocol.IssueSummary{IssueControl: protocol.IssueControl{IssueID: "parent", State: protocol.IssueActive, WorkStatus: protocol.IssueInProgress}, Title: "Clipboard support", Board: &protocol.IssueBoardCard{Status: protocol.IssueInProgress, Children: children}}
 	f.answer("GET /api/v1/issues", protocol.IssuePage{Items: []protocol.IssueSummary{summary}})
 	f.answer("GET /api/v1/issues/parent", protocol.IssueView{Issue: protocol.Issue{IssueControl: summary.IssueControl, Plan: protocol.IssuePlan{Title: summary.Title}}, Children: children})
@@ -19,7 +19,7 @@ func TestIssueChildProgressCLIReadPathsAndPagination(t *testing.T) {
 		if code := e.main(args...); code != exitOK {
 			t.Fatal(args, code, e.errOut.String())
 		}
-		for _, want := range []string{"1/3 done", "1 cancelled", "1 executing", "child-active", "Investigate clipboard", "--parent parent", "--limit / --after"} {
+		for _, want := range []string{"1/3 done", "1 cancelled", "1 executing", "child-active", "Investigate clipboard", "--parent parent", "--limit / --after", "2 waiting_supervisor"} {
 			if !strings.Contains(e.out.String(), want) {
 				t.Fatal("missing child evidence", want, e.out.String())
 			}

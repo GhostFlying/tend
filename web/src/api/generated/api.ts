@@ -47,6 +47,7 @@ export type ExecutionState =
   | "recovering"
   | "accepting"
   | "waiting_owner"
+  | "waiting_supervisor"
   | "paused"
   | "unknown"
   | "completed"
@@ -280,6 +281,7 @@ export interface TendAPI {
   ExplainDecisionPayload?: ExplainDecisionPayload;
   FinishIssueAssignmentPayload?: FinishIssueAssignmentPayload;
   FollowupSpec?: FollowupSpec;
+  HandleAttentionPayload?: HandleAttentionPayload;
   HostMaintenancePayload?: HostMaintenancePayload;
   HostedAgentInventory?: HostedAgentInventory;
   InjectSourcePayload?: InjectSourcePayload;
@@ -514,7 +516,9 @@ export interface AttentionView {
   raised_by: Principal;
   read_at?: number;
   resolution?: string;
+  resolution_actor?: Principal;
   resolution_source_id?: string;
+  responsibility?: AttentionResponsibility;
   revision: number;
   source_message_id?: string;
   status: string;
@@ -619,6 +623,41 @@ export interface Principal {
   role?: RunRole;
   subject?: string;
   thread?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AttentionResponsibility".
+ */
+export interface AttentionResponsibility {
+  ancestry: AttentionResponsibilityAncestor[] | null;
+  assignment_epoch: number;
+  history: AttentionResponsibilityHop[] | null;
+  issue_id?: string;
+  origin_assignment_epoch: number;
+  origin_issue_id: string;
+  recipient_kind: string;
+  recipient_ref?: string;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AttentionResponsibilityAncestor".
+ */
+export interface AttentionResponsibilityAncestor {
+  assignment_epoch: number;
+  issue_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AttentionResponsibilityHop".
+ */
+export interface AttentionResponsibilityHop {
+  assignment_epoch: number;
+  issue_id?: string;
+  reason: string;
+  recipient_kind: string;
+  recipient_ref?: string;
+  request_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -732,6 +771,7 @@ export interface ExecutionCounts {
   starting?: number;
   unknown: number;
   waiting_owner: number;
+  waiting_supervisor?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2032,6 +2072,17 @@ export interface FollowupCondition {
   delivery_state?: string;
   kind: string;
   task_ids?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "HandleAttentionPayload".
+ */
+export interface HandleAttentionPayload {
+  expected_assignment_epoch: number;
+  option?: string;
+  reason: string;
+  text?: string;
+  version?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

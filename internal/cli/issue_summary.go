@@ -60,7 +60,7 @@ func printIssueView(e *Env, v protocol.IssueView) error {
 func printIssueChildren(out io.Writer, id string, children *protocol.IssueChildProgress) {
 	fmt.Fprintf(out, "  Children: %d/%d done; %d cancelled; %d executing\n", children.Done, children.Total, children.Cancelled, children.Running)
 	for _, child := range children.Items {
-		fmt.Fprintf(out, "    %s  %s  [%s; %d running; %d accepting; %d unknown; %d waiting_owner]\n", child.IssueID, child.Title, child.Status, child.Execution.Running, child.Execution.Accepting, child.Execution.Unknown, child.Execution.WaitingOwner)
+		fmt.Fprintf(out, "    %s  %s  [%s; %d running; %d accepting; %d unknown; %d waiting_owner; %d waiting_supervisor]\n", child.IssueID, child.Title, child.Status, child.Execution.Running, child.Execution.Accepting, child.Execution.Unknown, child.Execution.WaitingOwner, child.Execution.WaitingSupervisor)
 	}
 	fmt.Fprintf(out, "  All children: tend issue list --parent %s --include-closed (use --limit / --after for pages; --json for full execution facts)\n", id)
 }

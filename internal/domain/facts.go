@@ -35,7 +35,7 @@ func RunStarted(t Task, r RunFact) Decision {
 	if r.Role != protocol.RoleImplement {
 		return Decision{Task: t, Events: []EventDraft{{Kind: "run.started", Body: body}}}
 	}
-	if !currentImplement(t, r) || (t.Lifecycle != protocol.TaskQueued && t.Lifecycle != protocol.TaskChangesRequired) {
+	if !currentImplement(t, r) || (t.Lifecycle != protocol.TaskQueued && t.Lifecycle != protocol.TaskChangesRequired && t.Lifecycle != protocol.TaskRunning) {
 		return Decision{Task: t, Events: []EventDraft{staleEvent("run.started", body)}}
 	}
 	t.Lifecycle = protocol.TaskRunning

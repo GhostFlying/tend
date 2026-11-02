@@ -153,6 +153,7 @@
 | D147 | SQLite 读池保留最多 8 个空闲连接，复用初始化后的连接；最大读并发、写池单连接、query_only、事务快照及关闭释放保持原合同。见 docs/plans/ci-cache-read-pool.md。 | 已实现 |
 | D148 | CI 分离共享 Go 模块缓存与按职责、工具链和依赖分区的滚动构建缓存，PR 只恢复 main 构建快照，main 成功后发布候选快照并有界保留。Web 构建经本轮 artifact 供两组互斥且完整的浏览器回归与真实产物交叉编译使用，各 fixture 保留独立资产副本和缓存。最终 check 拒绝任一失败、跳过或取消。见 docs/plans/ci-cache-read-pool.md。 | 已实现 |
 | D149 | 本地 make check 按有效 CPU 选择有界组并发、Go 包并行与 App 分片，复用质量、五个完整 race 分组和 Web 检查；低容量机器保持 E2E 独立阶段，显式顺序模式可回退。Web 在每次检查私有临时目录构建，Go embed 目录在整个检查期间保持稳定；失败汇总保留全部检查，取消清理本次拥有的进程组。CI 原有分组与门禁保持。见 docs/plans/local-check-scheduler.md。 | 已实现 |
+| D150 | 问题沿 Issue 责任链处理：执行问题先交所属 Issue owner，负责 Agent 无法解决时逐级交父 Issue owner、唯一主协调 Agent；只有人工 owner 或主协调无法解决时形成用户待办。沿原 Attention/Decision 记录版本、assignment epoch、逐跳原因和 Agent 回答来源，不伪造用户授权，不改变独立验收及 unknown 对账。新执行协商 supervisor-questions-v1，历史执行保留原答复合同，wire 保持 2/1。CLI 与具名工具支持原问题读取、回答、上报及恢复；新协商执行提问后结束本轮、释放 slot，父 Issue owner 答复后创建保持原尝试代次的接续 Run，无额外协调容量。见 docs/plans/issue-responsibility-routing.md 与 docs/plans/issue-run-handoffs.md。 | 已实现，未发布 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -560,3 +561,16 @@ Owner HTTP 路由统一登记，实际 owner/hosted operation 与 CLI 命令绑�
 当前 Agent 平铺展示，运行位置与运行方式分列；运行方式由执行适配器与显式 CLI 声明确定，不从 runtime ID 推断。页面及详情标题 16px、名称 14px，历史定义折叠保留，手机使用独立详情；保留 runtime 绑定和 Agent 稳定身份。目录只读，定义经原本机显式 reload 接受。新分配使用当前定义，已有责任继续冻结快照；续接候选由账本引用和 runner 实际核验共同限定，不能用于新分配。能力双向协商后追加 hello/heartbeat 字段，协议仍为 2/1；未协商时原行为不变。原指令、路径和凭据不进入公共目录，历史保留不预占进程或槽位。见 [实施计划](plans/agent-directory-continuation.md)。
 
 D143 排版与元数据修正：format 2 的 hosted runtime 可显式声明 codex/traex，旧配置省略字段仍有效；缺声明只显示已知适配器，缺运行观测显示“未上报”。既有 `tend agents hosted/show --json` 同步输出原安全投影，无新增 API 或 runner wire 变更。见[实施计划](plans/agent-directory-presentation.md)。
+
+## D150：问题沿 Issue 责任链处理
+
+D136 的责任主体仍为 Issue owner；`worker` 只指 Task/Run 的执行适配器，不另设管理层。另一 Agent 承担独立工作必须拥有子 Issue，包括调查与正式复核。执行中产生的问题归属于实际执行的 Issue（验收为复核子 Issue），负责 Agent 自己提出的问题则提交上级。
+
+原 Attention/Decision 保留业务身份和效果，新增持久责任记录及不可变逐跳历史。当前接收者由来源 Issue、当前祖先关系、owner、assignment epoch 及责任版本共同约束；交接和重挂载使旧责任失效。Agent 可以处理已明确交给自己的原问题，包括有限次数调整和技术恢复，但不会取得任意子任务编辑权或新的用户授权。回答记录真实 Agent 来源；原 task spec、run、租约、独立验收、未知结果对账与请求去重不被绕开。处理不了时只能上报一个父级；根 Issue 上报唯一主协调 Agent，主协调仍不能处理才转用户。人类 owner 出现在链中时直接停在该层。
+
+内部待处理问题通过现有持久 background source 唤醒责任 Agent，不形成用户 Inbox、徽标、渠道交互或个人待办。解决后回到来源 Issue；旧问题在升级时保留原文、ID、历史及回答通道并接续责任。用户仍可直接控制。CLI `attention list --recipient agent|main|owner|all --responsible-issue <id>` 支持责任筛选及分页；`attention resolve|escalate` 使用责任版本、epoch、原问题版本和理由，支持完整 Envelope 的 dry-run/replay。
+
+新 runner 以可选能力 `supervisor-questions-v1` 协商，并在创建 run 时冻结答复合同；新运行的 `ask_owner` 表示提交给 Issue owner，其答复不能扩大原授权。旧运行仍保留真实用户答复语义，但问题先按责任链上报。字段可选，默认关闭；runner wire 继续为 2/1，不改变旧请求的有效性。实施计划见 docs/plans/issue-responsibility-routing.md。
+
+
+交接与容量合同：新执行按 `issue-question-handoffs-v1` 冻结分轮交接能力。提问持久保存原问题并由 runner 确认真正停止后结束本轮、释放 slot；代表 Issue owner 的执行自动提交父 Issue owner，根 Issue 提交唯一主协调 Agent。答复与退出确认均持久后才创建接续 Action/Run，沿用原 spec、artifact 和 generation，不消耗实现尝试额度，不复活旧 Run。固定原主机、执行配置和 workspace 互斥；可恢复的实现会话保留原生 thread，验收与不支持原生接续的适配器通过原问题及完整合同重建上下文。协调与执行均严格使用配置容量，不提供额外名额。新合同仅向明确协商的执行启用，历史 Run 保留原等待合同并受控排空；wire 仍为 2/1。详见 docs/plans/issue-run-handoffs.md。Agent 决策和行动完成不能用作真实人工授权证据。

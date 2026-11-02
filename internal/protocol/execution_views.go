@@ -4,21 +4,22 @@ package protocol
 type ExecutionState string
 
 const (
-	ExecutionIdle         ExecutionState = "idle"
-	ExecutionQueued       ExecutionState = "queued"
-	ExecutionStarting     ExecutionState = "starting"
-	ExecutionRunning      ExecutionState = "running"
-	ExecutionRecovering   ExecutionState = "recovering"
-	ExecutionAccepting    ExecutionState = "accepting"
-	ExecutionWaitingOwner ExecutionState = "waiting_owner"
-	ExecutionPaused       ExecutionState = "paused"
-	ExecutionUnknown      ExecutionState = "unknown"
-	ExecutionCompleted    ExecutionState = "completed"
-	ExecutionCancelled    ExecutionState = "cancelled"
+	ExecutionIdle              ExecutionState = "idle"
+	ExecutionQueued            ExecutionState = "queued"
+	ExecutionStarting          ExecutionState = "starting"
+	ExecutionRunning           ExecutionState = "running"
+	ExecutionRecovering        ExecutionState = "recovering"
+	ExecutionAccepting         ExecutionState = "accepting"
+	ExecutionWaitingOwner      ExecutionState = "waiting_owner"
+	ExecutionWaitingSupervisor ExecutionState = "waiting_supervisor"
+	ExecutionPaused            ExecutionState = "paused"
+	ExecutionUnknown           ExecutionState = "unknown"
+	ExecutionCompleted         ExecutionState = "completed"
+	ExecutionCancelled         ExecutionState = "cancelled"
 )
 
 func ExecutionStateValues() []ExecutionState {
-	return []ExecutionState{ExecutionIdle, ExecutionQueued, ExecutionStarting, ExecutionRunning, ExecutionRecovering, ExecutionAccepting, ExecutionWaitingOwner, ExecutionPaused, ExecutionUnknown, ExecutionCompleted, ExecutionCancelled}
+	return []ExecutionState{ExecutionIdle, ExecutionQueued, ExecutionStarting, ExecutionRunning, ExecutionRecovering, ExecutionAccepting, ExecutionWaitingOwner, ExecutionWaitingSupervisor, ExecutionPaused, ExecutionUnknown, ExecutionCompleted, ExecutionCancelled}
 }
 
 // QueueWaitCode identifies the scheduling constraint without changing BlockReason.

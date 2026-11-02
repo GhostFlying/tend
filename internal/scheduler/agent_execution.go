@@ -16,6 +16,22 @@ type Executor struct {
 // SelectExecution checks both roles on one backend before a first allocation.
 // Only the current run's choice is returned and subsequently frozen by app.
 func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
+	if c.HandoffPin != nil {
+		if c.HandoffPin.Identity.ExecutionEnvironmentID != h.ID {
+			return nil, "handoff belongs to another runner"
+		}
+		for _, e := range append(slices.Clone(h.Executors), h.Continuations...) {
+			original, observed := *c.HandoffPin, e.Pin
+			original.SnapshotID, observed.SnapshotID = "", ""
+			original.InventoryRevision, observed.InventoryRevision = 0, 0
+			original.PublicSHA256, observed.PublicSHA256 = "", ""
+			if observed == original {
+				pin := *c.HandoffPin
+				return &pin, ""
+			}
+		}
+		return nil, "original handoff execution is unavailable"
+	}
 	if c.Manager != nil {
 		if c.Manager.OwnershipPolicy == protocol.IssueOwnerPolicy && !h.IssueOwners && !c.Manager.ReceiptOnly {
 			return nil, "runner does not support Issue owner responsibility"

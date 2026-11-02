@@ -53,9 +53,16 @@ func questionRecovery(spec WorkerSpec) string {
 			break
 		}
 	}
-	return "\n\nOwner questions recorded for this run (original content and answers):\n" + string(body) +
+	heading, answerOwner := "Owner questions", "owner's"
+	if spec.QuestionHandoffs {
+		return "\n\nOriginal Issue question handoffs and answers (preserve their identities):\n" + string(body) + "\nThese are execution handoffs, not implementation attempts. Apply answered decisions within the original agreement. Never repeat an answered problem or continue from a cancelled one. A new blocker must be submitted through ask_owner and ends this run."
+	}
+	if spec.SupervisorQuestions {
+		heading, answerOwner = "Issue supervisor questions", "responsible supervisor's"
+	}
+	return "\n\n" + heading + " recorded for this run (original content and answers):\n" + string(body) +
 		"\nFor an open question, call ask_owner again using exactly its " + fields + ". Do not invent another key for the same question. " +
-		"Answered questions retain the owner's answer; use that answer and do not ask it again. Cancelled questions do not authorize work."
+		"Answered questions retain the " + answerOwner + " answer; use that answer and do not ask it again. Cancelled questions do not authorize work."
 }
 
 // OwnerQuestionTool exposes the extension only after server negotiation.
@@ -75,5 +82,19 @@ func OwnerQuestionTool(contextAvailable bool) ToolSpec {
 	schema["properties"].(map[string]any)["issues"] = map[string]any{"type": "array", "maxItems": 20, "items": issue}
 	tool.InputSchema, _ = json.Marshal(schema)
 	tool.Description += " Include issues for environment faults, evidence gaps and missing authorization, with stable issue_id, exact source, affected operation, status, responsible actor and next action. Keep actual owner choices in question/options."
+	return tool
+}
+
+// SupervisorQuestionTool is selected only for a run's negotiated contract.
+func SupervisorQuestionTool(contextAvailable bool) ToolSpec {
+	tool := OwnerQuestionTool(contextAvailable)
+	tool.Description = "Submit a blocking problem to this run's immediate responsible supervisor. The tool name ask_owner is retained, but owner means the Issue owner, which can be an Agent. Never choose a human recipient or contact the user directly. Explain evidence, affected work and attempted remedies; use the same stable question_key/content after interruption. The call waits for the original problem's answer, without completing this run. An Agent answer can clarify work only within the frozen contract and cannot grant new user authorization. Unsolved problems follow the Issue responsibility chain to a human only when needed."
+	return tool
+}
+
+// HandoffQuestionTool ends the current execution after saving the problem.
+func HandoffQuestionTool(contextAvailable bool) ToolSpec {
+	tool := SupervisorQuestionTool(contextAvailable)
+	tool.Description = "Submit a blocking question with evidence to the automatically selected upper Issue owner, then yield this execution. The platform stops this run and releases its slot; a responsible answer schedules a new run of the same agreement with this question and answer. Do not continue, poll, submit an artifact, or issue an acceptance verdict while handing off. Use a stable question_key and original content after receipt loss. An answer cannot grant new user authorization."
 	return tool
 }

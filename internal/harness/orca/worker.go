@@ -354,7 +354,7 @@ func (w *worker) openBridge(ctx context.Context) error {
 		tools = append(tools, harness.DownloadFileToolSpec)
 	}
 	if w.spec.AskOwner != nil {
-		tools = append(tools, harness.OwnerQuestionTool(w.spec.QuestionContext))
+		tools = append(tools, questionTool(w.spec))
 	}
 	if w.spec.ReceiveMessages != nil && w.spec.AckMessage != nil {
 		tools = append(tools, harness.ReceiveMessagesToolSpec, harness.AckMessageToolSpec)
@@ -1247,4 +1247,14 @@ func sleep(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
+}
+
+func questionTool(spec harness.WorkerSpec) harness.ToolSpec {
+	if spec.QuestionHandoffs {
+		return harness.HandoffQuestionTool(spec.QuestionContext)
+	}
+	if spec.SupervisorQuestions {
+		return harness.SupervisorQuestionTool(spec.QuestionContext)
+	}
+	return harness.OwnerQuestionTool(spec.QuestionContext)
 }

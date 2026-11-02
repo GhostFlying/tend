@@ -39,6 +39,13 @@ func bindMessagingInteraction(ctx context.Context, x *Exec, tx *store.Tx, messag
 	if err != nil {
 		return err
 	}
+	human, e := store.HumanProblem(ctx, tx.Q(), kind, id)
+	if e != nil {
+		return e
+	}
+	if !human {
+		return nil
+	}
 	i := protocol.MessagingInteraction{ObjectType: kind, ObjectID: id, TextAllowed: true, State: "open", Options: []protocol.MessagingOption{}}
 	if kind == "attention" {
 		a, e := store.GetAttention(ctx, tx.Q(), id)
@@ -141,6 +148,18 @@ func bindMessagingInteraction(ctx context.Context, x *Exec, tx *store.Tx, messag
 }
 
 func messagingInteraction(ctx context.Context, q store.Querier, id string) (protocol.MessagingInteraction, error) {
+	i, err := messagingInteractionBusinessState(ctx, q, id)
+	if err != nil {
+		return i, err
+	}
+	human, err := store.HumanProblem(ctx, q, i.ObjectType, i.ObjectID)
+	if err == nil && !human && i.State == "open" {
+		i.State = "superseded"
+	}
+	return i, err
+}
+
+func messagingInteractionBusinessState(ctx context.Context, q store.Querier, id string) (protocol.MessagingInteraction, error) {
 	var i protocol.MessagingInteraction
 	var raw, observed string
 	err := q.QueryRowContext(ctx, `SELECT snapshot_json,handled_channel,handled_at,answer_summary,observed_state FROM messaging_interactions WHERE interaction_id=?`, id).Scan(&raw, &i.HandledChannel, &i.HandledAt, &i.AnswerSummary, &observed)
@@ -482,7 +501,7 @@ func syncMessagingInteractions(ctx context.Context, x *Exec, tx *store.Tx, event
 		}
 	}
 	for id := range ids {
-		i, err := messagingInteraction(ctx, tx.Q(), id)
+		i, err := messagingInteractionBusinessState(ctx, tx.Q(), id)
 		if err != nil {
 			return err
 		}
@@ -490,7 +509,18 @@ func syncMessagingInteractions(ctx context.Context, x *Exec, tx *store.Tx, event
 		if err = tx.Q().QueryRowContext(ctx, `SELECT observed_state FROM messaging_interactions WHERE interaction_id=?`, id).Scan(&observed); err != nil {
 			return err
 		}
-		if observed == i.State {
+		nextObserved := i.State
+		human, err := store.HumanProblem(ctx, tx.Q(), i.ObjectType, i.ObjectID)
+		if err != nil {
+			return err
+		}
+		if !human && i.State == "open" {
+			// Delegation temporarily disables human controls. It does not
+			// permanently supersede the unchanged original question/version.
+			nextObserved = "internal"
+			i.State = "superseded"
+		}
+		if observed == nextObserved {
 			continue
 		}
 		if i.State == "answered" && i.HandledAt == 0 {
@@ -519,7 +549,7 @@ func syncMessagingInteractions(ctx context.Context, x *Exec, tx *store.Tx, event
 				return err
 			}
 		}
-		if _, err = tx.Exec(ctx, `UPDATE messaging_interactions SET observed_state=? WHERE interaction_id=?`, i.State, id); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE messaging_interactions SET observed_state=? WHERE interaction_id=?`, nextObserved, id); err != nil {
 			return err
 		}
 		messages, err := store.FollowupIDs(ctx, tx.Q(), `SELECT message_id FROM messaging_interaction_messages WHERE interaction_id=?`, id)
@@ -683,6 +713,13 @@ func (initializeMessagingInteractions) Apply(ctx context.Context, x *Exec, tx *s
 		return Outcome{NoEffect: true}, nil
 	}
 	for _, q := range questions {
+		human, err := store.HumanProblem(ctx, tx.Q(), q.kind, q.id)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if !human {
+			continue
+		}
 		message := x.IDs.New(protocol.PrefixMessage)
 		if _, err = tx.InsertMessage(ctx, store.MessageRow{MessageID: message, Author: "system", Body: q.body, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
 			return Outcome{}, err

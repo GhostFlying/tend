@@ -98,8 +98,11 @@ type Assignment struct {
 	// RunMessages enables the additive, run-scoped supplement delivery protocol.
 	RunMessages bool `json:"run_messages,omitempty"`
 	// WorkerQuestions is negotiated before exposing ask_owner to the worker.
-	WorkerQuestions bool             `json:"worker_questions,omitempty"`
-	Questions       []WorkerQuestion `json:"questions,omitempty"`
+	WorkerQuestions      bool                  `json:"worker_questions,omitempty"`
+	QuestionHandoffs     bool                  `json:"question_handoffs,omitempty"`
+	QuestionContinuation *QuestionContinuation `json:"question_continuation,omitempty"`
+	SupervisorQuestions  bool                  `json:"supervisor_questions,omitempty"`
+	Questions            []WorkerQuestion      `json:"questions,omitempty"`
 	// MountDirectories permits the optional physical-directory report field.
 	// Older servers omit this, so new runners retain their older request shape.
 	MountDirectories bool   `json:"mount_directories,omitempty"`

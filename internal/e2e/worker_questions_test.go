@@ -1,20 +1,26 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
-func TestEndToEnd_WorkerQuestionsKeepRunAndLease(t *testing.T) {
+func TestEndToEnd_LegacyWorkerQuestionsKeepRunAndLease(t *testing.T) {
 	clock := testkit.NewClock()
 	const ttl = time.Minute
 	srv := newServer(t, ttl, clock.Now)
@@ -40,6 +46,7 @@ func TestEndToEnd_WorkerQuestionsKeepRunAndLease(t *testing.T) {
 	})
 	n.heartbeat = 20 * time.Millisecond
 	n.log = runnerTestLog(t)
+	legacyQuestionContract(n)
 	n.start()
 	task := srv.createTask()
 	n.diagnoseFailure(task)
@@ -124,7 +131,7 @@ func workerQuestionLease(t *testing.T, srv *server, runID string) store.LeaseRow
 	return lease
 }
 
-func TestFault_WorkerQuestionSurvivesHeartbeatLoss(t *testing.T) {
+func TestFault_LegacyWorkerQuestionSurvivesHeartbeatLoss(t *testing.T) {
 	clock := testkit.NewClock()
 	const ttl = time.Minute
 	srv := newServer(t, ttl, clock.Now)
@@ -148,6 +155,7 @@ func TestFault_WorkerQuestionSurvivesHeartbeatLoss(t *testing.T) {
 	})
 	n.heartbeat = 20 * time.Millisecond
 	n.log = runnerTestLog(t)
+	legacyQuestionContract(n)
 	n.start()
 	task := srv.createTask()
 	n.diagnoseFailure(task)
@@ -214,7 +222,7 @@ func TestFault_WorkerQuestionSurvivesHeartbeatLoss(t *testing.T) {
 	}
 }
 
-func TestEndToEnd_MainRelaysOwnerAnswerToWaitingWorker(t *testing.T) {
+func TestEndToEnd_LegacyMainRelaysOwnerAnswerToWaitingWorker(t *testing.T) {
 	srv := newServer(t, time.Minute)
 	agent := testkit.NewHarness()
 	toolResults := make(chan harness.ToolResult, 1)
@@ -243,6 +251,7 @@ func TestEndToEnd_MainRelaysOwnerAnswerToWaitingWorker(t *testing.T) {
 		}
 		return script
 	})
+	legacyQuestionContract(n)
 	n.start()
 	task := srv.createTask()
 	var question protocol.DecisionView
@@ -274,7 +283,7 @@ func TestEndToEnd_MainRelaysOwnerAnswerToWaitingWorker(t *testing.T) {
 	}
 }
 
-func TestFault_WorkerQuestionSurvivesRunnerRestartAndLostReceipt(t *testing.T) {
+func TestFault_LegacyWorkerQuestionSurvivesRunnerRestartAndLostReceipt(t *testing.T) {
 	srv := newServer(t, time.Minute)
 	srv.startHistoricalMainThread(testkit.NewHarness())
 	web := srv.webLogin(srv.startWeb().URL)
@@ -300,6 +309,7 @@ func TestFault_WorkerQuestionSurvivesRunnerRestartAndLostReceipt(t *testing.T) {
 		return script
 	})
 	n.net.lose = map[string]int{protocol.OpRunsAskOwner: 1}
+	legacyQuestionContract(n)
 	n.start()
 	task := srv.createTask()
 	var decision protocol.DecisionView
@@ -334,5 +344,137 @@ func TestFault_WorkerQuestionSurvivesRunnerRestartAndLostReceipt(t *testing.T) {
 	eventually(t, "resumed task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
 	if got := srv.count(`SELECT COUNT(*) FROM worker_questions WHERE run_id=?`, first.RunID); got != 1 {
 		t.Fatalf("recovery duplicated question: %d", got)
+	}
+}
+
+// Exercise the retained waiting contract by omitting the optional new capability
+// on every runtime observation, including claim and heartbeat after a restart.
+func legacyQuestionContract(n *node) {
+	n.net.before = func(req *http.Request) error {
+		if req.Body == nil || req.URL.Path != "/runner/v1/rpc" {
+			return nil
+		}
+		raw, err := io.ReadAll(req.Body)
+		if err != nil {
+			return err
+		}
+		req.Body.Close()
+		var env protocol.Envelope
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return err
+		}
+		var payload map[string]json.RawMessage
+		if len(env.Payload) > 0 {
+			if err := json.Unmarshal(env.Payload, &payload); err != nil {
+				return err
+			}
+		}
+		if runtimeJSON := payload["runtime"]; len(runtimeJSON) > 0 {
+			var runtime protocol.RunnerRuntime
+			if err := json.Unmarshal(runtimeJSON, &runtime); err != nil {
+				return err
+			}
+			runtime.Capabilities = slices.DeleteFunc(runtime.Capabilities, func(capability string) bool { return capability == protocol.CapabilityQuestionHandoffs })
+			payload["runtime"], err = json.Marshal(runtime)
+			if err != nil {
+				return err
+			}
+			env.Payload, err = json.Marshal(payload)
+			if err != nil {
+				return err
+			}
+			raw, err = json.Marshal(env)
+			if err != nil {
+				return err
+			}
+		}
+		req.Body = io.NopCloser(bytes.NewReader(raw))
+		req.ContentLength = int64(len(raw))
+		return nil
+	}
+}
+
+func TestFault_QuestionHandoffResumesAfterRestartAndLostReceipts(t *testing.T) {
+	srv := newServer(t, time.Minute)
+	srv.startHistoricalMainThread(testkit.NewHarness())
+	web := srv.webLogin(srv.startWeb().URL)
+	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
+		script := passing(spec)
+		for _, question := range spec.Questions {
+			if question.Role == spec.Role && question.Status == "answered" {
+				return script
+			}
+		}
+		script.Act = func(ctx context.Context) error {
+			_, err := spec.AskOwner(ctx, protocol.AskOwnerPayload{QuestionKey: "scope", Question: "Keep the current scope?", Evidence: "Continuation must retain the frozen agreement.", Options: []string{"keep", "change"}})
+			return err
+		}
+		return script
+	})
+	n.net.lose = map[string]int{protocol.OpRunsAskOwner: 1, protocol.OpRunsYieldQuestion: 1}
+	n.log = runnerTestLog(t)
+	created := srv.exec(owner, "issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Question handoff", Project: "default", Intent: "Resume the same agreement after a responsible answer"}}, app.CanonicalOwnerIssueCommand{Action: "create"})
+	var issue protocol.Issue
+	if err := json.Unmarshal(created.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Question handoff", Spec: protocol.OwnerTaskSpec{Goal: "fix it", Acceptance: []string{"tests pass"}, Delivery: domain.DeliveryCommit, Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := &protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: "issues.create_task", Target: protocol.Target{Type: "issue", ID: issue.IssueID}, ExpectedControlRevision: &issue.Revision, Payload: payload}
+	result, err := srv.app.Execute(t.Context(), owner, env, app.CanonicalOwnerTaskCreate{})
+	if err != nil || result.Status != protocol.OpSucceeded {
+		t.Fatal(result, err)
+	}
+	var task struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(result.Result, &task); err != nil {
+		t.Fatal(err)
+	}
+	n.start()
+	n.diagnoseFailure(task.TaskID)
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		var question protocol.DecisionView
+		eventually(t, "question exits and releases its slot", func() bool {
+			for _, decision := range web.decisions() {
+				if decision.Worker != nil && decision.Worker.Role == role && srv.count(`SELECT COUNT(*) FROM run_question_handoffs h JOIN leases l USING(run_id) WHERE h.run_id=? AND h.stopped=1 AND l.status='released'`, decision.Worker.RunID) == 1 {
+					question = decision
+					return true
+				}
+			}
+			return false
+		})
+		starts := len(n.workers.Started())
+		n.stop()
+		n.start()
+		if got := len(n.workers.Started()); got != starts {
+			t.Fatalf("unanswered question restarted a worker: %d -> %d", starts, got)
+		}
+		web.op(srv.ids.New(protocol.PrefixRequest), "decisions.respond", protocol.Target{Type: "decision", ID: question.DecisionID}, protocol.AnswerDecisionPayload{Version: question.Version, Option: "keep"})
+		eventually(t, "answered question starts a successor with the original context", func() bool {
+			for _, spec := range n.workers.Started() {
+				if spec.Role != role || spec.RunID == question.Worker.RunID {
+					continue
+				}
+				for _, answer := range spec.Questions {
+					if answer.DecisionID == question.DecisionID && answer.Status == "answered" {
+						return true
+					}
+				}
+			}
+			return false
+		})
+	}
+	eventually(t, "handoff task completes with independent acceptance", func() bool { return srv.task(task.TaskID).Lifecycle == protocol.TaskCompleted })
+	if got := srv.count(`SELECT COUNT(*) FROM runs WHERE task_id=?`, task.TaskID); got != 4 {
+		t.Fatalf("runs=%d, want two source and two successor runs", got)
+	}
+	if got := srv.count(`SELECT COUNT(*) FROM worker_questions w JOIN runs r USING(run_id) WHERE r.task_id=?`, task.TaskID); got != 2 {
+		t.Fatalf("questions=%d, want one per execution role", got)
+	}
+	if generation := srv.task(task.TaskID).ImplementGeneration; generation != 1 {
+		t.Fatalf("handoff consumed implementation budget: generation=%d", generation)
 	}
 }

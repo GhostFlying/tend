@@ -34,6 +34,7 @@
 .badge[data-state="recovering"],
 .badge[data-state="queued"],
 .badge[data-state="waiting_owner"],
+.badge[data-state="waiting_supervisor"],
 .badge[data-state="unknown"] {
   color: var(--warn-text);
   background: var(--warn-soft);

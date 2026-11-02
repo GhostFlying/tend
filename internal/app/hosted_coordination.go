@@ -51,7 +51,7 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		}
 	}
 	if execution.Selection.Purpose == agentconfig.Main {
-		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{protocol.OpIssueRequestOwner, protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
+		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{protocol.OpIssueRequestOwner, protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "attentions.resolve", "attentions.escalate", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "the personal planner must delegate issue work, not execute its task planning")
 		}
 	} else if execution.Selection.Purpose != agentconfig.Consultation {
@@ -105,6 +105,12 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			}
 			if p.IssueID != current.IssueID {
 				return protocol.Errorf(protocol.CodeForbidden, "raise attention only in this Issue")
+			}
+		case "attentions.resolve", "attentions.escalate":
+			// The original request remains replayable after its route changes.
+			// Apply verifies the live recipient before any new effect.
+			if x.Env.Target.Type != "attention" {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "attention target is required")
 			}
 		case "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw":
 			a, err := store.GetAttention(ctx, q, x.Env.Target.ID)
@@ -341,7 +347,7 @@ func validateHostedIssueEvidence(ctx context.Context, x *Exec, q store.Querier, 
 				return protocol.Errorf(protocol.CodeInvalidRequest, "owner_decision attention evidence must be a resolved decision or action for this issue")
 			}
 			var answered bool
-			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM decisions d JOIN task_work_item_owners o ON o.task_id=d.task_id WHERE d.decision_id=? AND d.status='answered' AND o.work_item_id=?) OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, w.WorkItemID, e.Reference, w.WorkItemID).Scan(&answered); err != nil {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM decisions d JOIN task_work_item_owners o ON o.task_id=d.task_id JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=? AND d.status='answered' AND o.work_item_id=? AND m.author='owner' AND COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner') OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, w.WorkItemID, e.Reference, w.WorkItemID).Scan(&answered); err != nil {
 				return err
 			}
 			if !answered {

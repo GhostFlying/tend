@@ -8,10 +8,11 @@ import (
 )
 
 type AttentionFilter struct {
-	IssueID, Kind, Status, After string
-	IncludeArchived              bool
-	ActionableOnly               bool
-	Limit                        int
+	IssueID, Kind, Status, After  string
+	Recipient, ResponsibleIssueID string
+	IncludeArchived               bool
+	ActionableOnly                bool
+	Limit                         int
 }
 
 func Attention(ctx context.Context, q store.Querier, id string) (protocol.AttentionView, error) {
@@ -103,7 +104,7 @@ func Attentions(ctx context.Context, q store.Querier, f AttentionFilter) (protoc
 	if f.Limit < 1 || f.Limit > 100 {
 		f.Limit = 50
 	}
-	rows, err := q.QueryContext(ctx, `SELECT body_json FROM attentions WHERE (?='' OR issue_id=?) AND (?='' OR kind=?) AND (?='' OR status=?) AND attention_id>? AND (? OR COALESCE(json_extract(body_json,'$.archived_at'),0)=0) AND (NOT ? OR kind IN ('decision','action')) ORDER BY attention_id LIMIT ?`, f.IssueID, f.IssueID, f.Kind, f.Kind, f.Status, f.Status, f.After, f.IncludeArchived, f.ActionableOnly, f.Limit+1)
+	rows, err := q.QueryContext(ctx, `SELECT body_json FROM attentions WHERE (?='' OR issue_id=?) AND (?='' OR kind=?) AND (?='' OR status=?) AND attention_id>? AND (? OR COALESCE(json_extract(body_json,'$.archived_at'),0)=0) AND (NOT ? OR kind IN ('decision','action')) AND (?='' OR ?='all' OR COALESCE((SELECT recipient_kind FROM attention_responsibilities r WHERE r.attention_id=attentions.attention_id),'owner')=?) AND (?='' OR EXISTS(SELECT 1 FROM attention_responsibilities r WHERE r.attention_id=attentions.attention_id AND r.issue_id=?)) ORDER BY attention_id LIMIT ?`, f.IssueID, f.IssueID, f.Kind, f.Kind, f.Status, f.Status, f.After, f.IncludeArchived, f.ActionableOnly, f.Recipient, f.Recipient, f.Recipient, f.ResponsibleIssueID, f.ResponsibleIssueID, f.Limit+1)
 	if err != nil {
 		return protocol.AttentionPage{}, err
 	}

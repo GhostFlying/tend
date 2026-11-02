@@ -111,6 +111,13 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "information does not block Issue closure")
 		}
 		a.Title, a.BlocksClose = p.Title, p.BlocksClose
+		if r := a.Responsibility; r != nil {
+			previous := r.Revision
+			r.History = append(r.History, responsibilityHop(r, "Original problem was revised; reread before handling", x.Env.RequestID))
+			if err := tx.SaveAttentionResponsibility(ctx, a.AttentionID, r, previous, x.Env.RequestID); err != nil {
+				return Outcome{}, err
+			}
+		}
 	case "respond":
 		if a.Kind != "decision" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "answer the original decision")
@@ -244,7 +251,10 @@ func saveAttention(ctx context.Context, x *Exec, tx *store.Tx, a *protocol.Atten
 	}
 	a.Revision = old + 1
 	a.UpdatedAt = x.Now.UnixMilli()
-	return tx.SaveAttention(ctx, *a, old, x.Env.RequestID)
+	if err := tx.SaveAttention(ctx, *a, old, x.Env.RequestID); err != nil {
+		return err
+	}
+	return initializeAttentionResponsibility(ctx, x, tx, a)
 }
 func attentionEvent(a protocol.Attention) Event {
 	return Event{ObjectType: "attention", ObjectID: a.AttentionID, ObjectVersion: a.Revision, Kind: "attention.changed", Body: map[string]any{"issue_id": a.IssueID, "status": a.Status}}
@@ -405,6 +415,20 @@ func syncAttentionDecision(ctx context.Context, x *Exec, tx *store.Tx, e Event) 
 				if !canonical {
 					issue = ""
 				}
+			}
+		}
+		var reviewIssue string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT review_issue_id FROM task_owner_contracts WHERE task_id=? AND EXISTS(SELECT 1 FROM json_each(?) WHERE value=?)),'')`, d.TaskID, d.EffectsJSON, protocol.EffectAccept).Scan(&reviewIssue); err != nil {
+			return "", err
+		}
+		if reviewIssue != "" {
+			issue = reviewIssue
+		}
+		if d.Worker != nil {
+			if responsibility, e := store.RunIssueResponsibility(ctx, tx.Q(), d.Worker.RunID); e == nil {
+				issue = responsibility.IssueID
+			} else if !errors.Is(e, store.ErrNotFound) {
+				return "", e
 			}
 		}
 		a := protocol.Attention{AttentionID: x.IDs.New(protocol.Prefix("attn")), IssueID: issue, TaskID: d.TaskID, Kind: "decision", Title: d.Question, Status: "open", DecisionID: d.DecisionID, SourceMessageID: d.AskedMessageID, RaisedBy: x.Principal, CreatedAt: x.Now.UnixMilli()}

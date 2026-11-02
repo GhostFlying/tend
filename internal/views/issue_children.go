@@ -116,7 +116,7 @@ func issueChildren(ctx context.Context, q store.Querier, parent string, facts ex
 
 func childActivityRank(item protocol.IssueChildSummary) int {
 	switch {
-	case item.Execution.Unknown+item.Execution.WaitingOwner > 0:
+	case item.Execution.Unknown+item.Execution.WaitingOwner+item.Execution.WaitingSupervisor > 0:
 		return 0
 	case item.Execution.Running+item.Execution.Accepting > 0:
 		return 1

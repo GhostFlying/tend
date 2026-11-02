@@ -12,6 +12,7 @@ export function childExecutionLabel(counts?: ExecutionCounts): string | undefine
   if (!counts) return undefined;
   if (counts.unknown) return "待核对";
   if (counts.waiting_owner) return "等你处理";
+  if (counts.waiting_supervisor) return "等待负责人";
   if (counts.accepting) return "验收中";
   if (counts.running) return "执行中";
   if (counts.recovering) return "恢复中";

@@ -14,6 +14,7 @@ import (
 
 // Host is the claiming host as configured, with its current load.
 type Host struct {
+	QuestionHandoffs       bool
 	IssueManagers          bool
 	IssueOwners            bool
 	Executors              []Executor
@@ -37,6 +38,8 @@ type Host struct {
 
 // Candidate is a pending action together with the facts the rules need.
 type Candidate struct {
+	QuestionHandoff             bool
+	HandoffPin                  *protocol.RunExecutionPin
 	OwnerResponsibilityChanged  bool
 	OwnerPin                    *protocol.RunExecutionPin
 	OwnerAgentRevision          uint64
@@ -138,6 +141,8 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 		return nil
 	}
 	switch {
+	case c.QuestionHandoff && !h.QuestionHandoffs:
+		return waitReason(protocol.QueueHostRequirements, "runner lacks the frozen question handoff contract")
 	case c.Requirements.HostID != "" && c.Requirements.HostID != h.ID:
 		return waitReason(protocol.QueueHostRequirements, "task requires another host")
 	case c.Requirements.OS != "" && c.Requirements.OS != h.OS:

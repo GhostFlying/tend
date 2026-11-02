@@ -12,6 +12,45 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
+func TestQuestionHandoffRebindsOnlyItsStoppedPredecessor(t *testing.T) {
+	state := workerState{Kind: "central-traex", RunID: "old", Thread: "native-session", Cwd: "/workspace", ProviderID: "folder:original", StateDir: "old-state", ExecutorStopped: true, BriefRecorded: true}
+	spec := harness.WorkerSpec{RunID: "new", Dir: state.Cwd, ProviderID: state.ProviderID, StateDir: "new-state", QuestionContinuation: &protocol.QuestionContinuation{RunID: "old"}}
+	for _, invalid := range []string{"", "running", "other-run", "other-cwd", "pending-brief", "unknown"} {
+		pin := state
+		switch invalid {
+		case "running":
+			pin.ExecutorStopped = false
+		case "other-run":
+			pin.RunID = "unrelated"
+		case "other-cwd":
+			pin.Cwd = "/different"
+		case "pending-brief":
+			pin.BriefPending = true
+		case "unknown":
+			pin.Reconcile = true
+		}
+		raw, _ := json.Marshal(pin)
+		spec.Thread = string(raw)
+		rebound, err := rebindQuestionThread(spec)
+		if invalid != "" {
+			if err == nil {
+				t.Fatal("unsafe handoff resumed", invalid)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var next workerState
+		if err := json.Unmarshal([]byte(rebound), &next); err != nil {
+			t.Fatal(err)
+		}
+		if next.RunID != spec.RunID || next.StateDir != spec.StateDir || next.Thread != state.Thread || next.Cwd != state.Cwd || !next.ExecutorStopped {
+			t.Fatal("handoff lost binding", next)
+		}
+	}
+}
+
 type retainedThread struct {
 	harness.Thread
 	events chan harness.Event

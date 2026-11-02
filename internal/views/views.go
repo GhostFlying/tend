@@ -245,6 +245,13 @@ func Snapshot(ctx context.Context, q store.Querier, queue []protocol.QueueEntry,
 	projectOf := map[string]string{}
 	asking := map[string]bool{} // projects with open decisions
 	for _, x := range decs {
+		human, e := store.HumanProblem(ctx, q, "decision", x.DecisionID)
+		if e != nil {
+			return v, e
+		}
+		if !human {
+			continue
+		}
 		d := Decision(x)
 		if x.TaskID != "" {
 			p, ok := projectOf[x.TaskID]

@@ -46,6 +46,19 @@ describe("server execution facts", () => {
       expect(withoutQueueReason.execution).not.toHaveProperty("queue_reason");
     }
   });
+  test("internal problems name the responsible supervisor instead of requesting human input", () => {
+    const task = {
+      lifecycle: "changes_required",
+      block_reason: "budget_exhausted",
+      control_mode: "managed",
+      execution: { state: "waiting_supervisor" },
+    } satisfies Pick<TaskSummary, "lifecycle" | "control_mode" | "block_reason" | "execution">;
+    expect(taskLook(task).label).toBe("等待负责人");
+    expect(queueReasonText(task)).toBe("等待负责人处理原问题");
+    expect(executionCounts({ ...counts, waiting_supervisor: 1 })).toEqual([
+      { state: "waiting_supervisor", text: "1 等待负责人" },
+    ]);
+  });
   test("a lifecycle marked running can still be queued without a worker", () => {
     const task = {
       lifecycle: "running",

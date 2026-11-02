@@ -158,7 +158,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	if r.bootstrapMaintenance {
 		upgradeID = r.cfg.UpgradeID
 	}
-	capabilities := []string{protocol.CapabilityNativeUsage, protocol.CapabilityProtocolNegotiation, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
+	capabilities := []string{protocol.CapabilityNativeUsage, protocol.CapabilityProtocolNegotiation, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilitySupervisorQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
 	capabilities = append(capabilities, protocol.CapabilityRunMessages)
 	if len(r.cfg.RolloutRoots) > 0 {
 		capabilities = append(capabilities, protocol.CapabilityRolloutPreview)

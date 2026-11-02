@@ -163,7 +163,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
 	}
 	if spec.AskOwner != nil {
-		cfg.Tools = append(cfg.Tools, harness.OwnerQuestionTool(spec.QuestionContext))
+		cfg.Tools = append(cfg.Tools, questionTool(spec))
 	}
 	th, err := ws.thread(ctx, s, spec, cfg)
 	if err != nil {
@@ -388,4 +388,14 @@ func completedRolloutEvent(threadID string, ev harness.Event) harness.WorkerEven
 	}
 	raw, _ := json.Marshal(body)
 	return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "item.completed", Body: raw}
+}
+
+func questionTool(spec harness.WorkerSpec) harness.ToolSpec {
+	if spec.QuestionHandoffs {
+		return harness.HandoffQuestionTool(spec.QuestionContext)
+	}
+	if spec.SupervisorQuestions {
+		return harness.SupervisorQuestionTool(spec.QuestionContext)
+	}
+	return harness.OwnerQuestionTool(spec.QuestionContext)
 }

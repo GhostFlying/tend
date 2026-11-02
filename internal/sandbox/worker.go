@@ -174,7 +174,11 @@ func (workers *scriptedWorkers) Start(ctx context.Context, spec harness.WorkerSp
 				w.err = ctx.Err()
 				return
 			}
-			if n == 0 && spec.Role == protocol.RoleImplement && strings.Contains(contract.Goal, "问我") {
+			answeredLayout := false
+			for _, question := range spec.Questions {
+				answeredLayout = answeredLayout || question.QuestionKey == "sandbox-layout" && question.Status == "answered"
+			}
+			if n == 0 && spec.Role == protocol.RoleImplement && strings.Contains(contract.Goal, "问我") && !answeredLayout {
 				if spec.AskOwner == nil {
 					w.err = errors.New("sandbox owner questions unavailable")
 					return

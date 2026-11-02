@@ -391,6 +391,15 @@ func TestIMForceReplyAttachmentUsesCurrentResponsibility(t *testing.T) {
 	bindIMTelegram(t, h)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	a := attentionForTest(t, h, protocol.CreateAttentionPayload{Kind: "decision", Title: "Which evidence?", IssueID: issue.IssueID, Options: []string{"A", "B"}})
+	// Only an explicitly escalated human question exposes ForceReply controls.
+	for a.Responsibility.RecipientKind != "owner" {
+		r := a.Responsibility
+		p := protocol.HandleAttentionPayload{ExpectedAssignmentEpoch: r.AssignmentEpoch, Reason: "Existing evidence cannot resolve this; human evidence is required"}
+		if op := h.exec(owner, h.env("attentions.escalate", protocol.Target{Type: "attention", ID: a.AttentionID}, p, rev(r.Revision)), HandleAttention{Escalate: true}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		a = readAttentionForTest(t, h, a.AttentionID)
+	}
 	m := imQuestion(t, h, a.DecisionID)
 	deliver, _, ok, err := h.app.NextDelivery(t.Context(), MessagingDestination)
 	if err != nil || !ok {

@@ -189,7 +189,16 @@ func evaluateAttentionFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *pr
 		window = "near"
 	}
 	message := x.IDs.New(protocol.PrefixMessage)
-	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, Author: "system", Body: "Attention " + window + ": " + a.Title + ". Review the latest action time; reading or archiving does not answer this request.", CreatedAt: now})
+	conversation, group, targetIssue := "main", "attention:"+id, ""
+	if a.Responsibility != nil && a.Responsibility.RecipientKind == "agent" {
+		targetIssue = a.Responsibility.IssueID
+		group = "work_item:" + targetIssue
+		conversation, err = ensureCanonicalManagerConversationForWake(ctx, x, tx, targetIssue)
+		if err != nil {
+			return true, false, err
+		}
+	}
+	seq, err := tx.InsertMessage(ctx, store.MessageRow{ConversationID: conversation, MessageID: message, Author: "system", Body: "Attention " + window + ": " + a.Title + ". Review the latest action time; reading or archiving does not answer this request.", CreatedAt: now})
 	if err != nil {
 		return true, false, err
 	}
@@ -210,7 +219,7 @@ func evaluateAttentionFollowup(ctx context.Context, x *Exec, tx *store.Tx, r *pr
 		return true, false, err
 	}
 	raw, _ := json.Marshal(occurrence)
-	if err := appendBackgroundSource(ctx, x, tx, "attention:"+id, "", message, event, "followup.triggered", raw); err != nil {
+	if err := appendBackgroundSource(ctx, x, tx, group, targetIssue, message, event, "followup.triggered", raw); err != nil {
 		return true, false, err
 	}
 	x.FollowupQueued = true

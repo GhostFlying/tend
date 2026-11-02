@@ -56,3 +56,17 @@ func TestContinuationKeepsBackendAndIndependentAcceptanceAdmission(t *testing.T)
 		t.Fatal("unbound work selected a continuation", pin)
 	}
 }
+
+func TestManagersRespectConfiguredCapacity(t *testing.T) {
+	pin := protocol.RunExecutionPin{Purpose: "issue_manager", Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "runner", LocalID: "manager"}, AgentRevision: 1}
+	c := implement()
+	c.Kind = protocol.ActionCoordinate
+	c.Manager = &protocol.IssueManagerSpec{IssueID: "issue", CategoryID: "issue-manager"}
+	c.ManagerPin = &pin
+	for _, slots := range []int64{0, 1} {
+		h := Host{ID: "runner", Active: true, Slots: slots, Busy: slots, IssueManagers: true}
+		if reason := SkipReason(h, c); reason == nil || reason.Code != protocol.QueueHostCapacity {
+			t.Fatal("manager exceeded configured capacity", slots, reason)
+		}
+	}
+}

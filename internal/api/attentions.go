@@ -11,6 +11,15 @@ import (
 func (s *Server) attentions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := views.AttentionFilter{IssueID: q.Get("issue_id"), Kind: q.Get("kind"), Status: q.Get("status"), After: q.Get("after"), IncludeArchived: q.Get("include_archived") == "true", Limit: 50}
+	f.Recipient = q.Get("recipient")
+	if f.Recipient == "" {
+		f.Recipient = "owner"
+	}
+	f.ResponsibleIssueID = q.Get("responsible_issue_id")
+	if f.Recipient != "all" && f.Recipient != "owner" && f.Recipient != "agent" && f.Recipient != "main" {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "recipient must be owner, agent, main or all"))
+		return
+	}
 	f.ActionableOnly = q.Get("actionable_only") == "true"
 	if q.Has("limit") {
 		n, err := strconv.Atoi(q.Get("limit"))

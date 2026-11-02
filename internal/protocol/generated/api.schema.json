@@ -1506,6 +1506,116 @@
       "title": "AttentionPage",
       "type": "object"
     },
+    "AttentionResponsibility": {
+      "additionalProperties": false,
+      "properties": {
+        "ancestry": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AttentionResponsibilityAncestor"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "history": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AttentionResponsibilityHop"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "origin_assignment_epoch": {
+          "type": "integer"
+        },
+        "origin_issue_id": {
+          "type": "string"
+        },
+        "recipient_kind": {
+          "type": "string"
+        },
+        "recipient_ref": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ancestry",
+        "origin_assignment_epoch",
+        "origin_issue_id",
+        "recipient_kind",
+        "assignment_epoch",
+        "revision",
+        "history"
+      ],
+      "title": "AttentionResponsibility",
+      "type": "object"
+    },
+    "AttentionResponsibilityAncestor": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "assignment_epoch"
+      ],
+      "title": "AttentionResponsibilityAncestor",
+      "type": "object"
+    },
+    "AttentionResponsibilityHop": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "recipient_kind": {
+          "type": "string"
+        },
+        "recipient_ref": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "recipient_kind",
+        "assignment_epoch",
+        "reason"
+      ],
+      "title": "AttentionResponsibilityHop",
+      "type": "object"
+    },
     "AttentionTaskContext": {
       "additionalProperties": false,
       "properties": {
@@ -1618,8 +1728,14 @@
         "resolution": {
           "type": "string"
         },
+        "resolution_actor": {
+          "$ref": "#/definitions/Principal"
+        },
         "resolution_source_id": {
           "type": "string"
+        },
+        "responsibility": {
+          "$ref": "#/definitions/AttentionResponsibility"
         },
         "revision": {
           "type": "integer"
@@ -3044,6 +3160,9 @@
         },
         "waiting_owner": {
           "type": "integer"
+        },
+        "waiting_supervisor": {
+          "type": "integer"
         }
       },
       "required": [
@@ -3173,6 +3292,7 @@
         "recovering",
         "accepting",
         "waiting_owner",
+        "waiting_supervisor",
         "paused",
         "unknown",
         "completed",
@@ -3322,6 +3442,32 @@
         "timezone"
       ],
       "title": "FollowupSpec",
+      "type": "object"
+    },
+    "HandleAttentionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "option": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "reason"
+      ],
+      "title": "HandleAttentionPayload",
       "type": "object"
     },
     "HostMaintenancePayload": {
@@ -12225,6 +12371,9 @@
     },
     "FollowupSpec": {
       "$ref": "#/definitions/FollowupSpec"
+    },
+    "HandleAttentionPayload": {
+      "$ref": "#/definitions/HandleAttentionPayload"
     },
     "HostMaintenancePayload": {
       "$ref": "#/definitions/HostMaintenancePayload"

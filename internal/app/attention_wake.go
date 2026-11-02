@@ -19,7 +19,7 @@ func questionAttentionIssue(ctx context.Context, q store.Querier, e Event) (stri
 		column = "choice_id"
 	}
 	var issue sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT issue_id FROM attentions WHERE `+column+`=?`, e.ObjectID).Scan(&issue)
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(r.origin_issue_id,a.issue_id) FROM attentions a LEFT JOIN attention_responsibilities r USING(attention_id) WHERE a.`+column+`=?`, e.ObjectID).Scan(&issue)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -54,6 +54,16 @@ func recordAttentionNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, 
 	a, err := store.GetAttention(ctx, tx.Q(), e.ObjectID)
 	if err != nil {
 		return err
+	}
+	if a.Responsibility != nil {
+		if a.Status == "withdrawn" || a.Kind == "action" && a.Status == "resolved" {
+			answer, err := json.Marshal(map[string]string{"status": a.Status, "resolution": a.Resolution})
+			if err != nil {
+				return err
+			}
+			return recordResponsibilityResolution(ctx, x, tx, a, answer, eventID, e.Kind)
+		}
+		return nil
 	}
 	if a.Kind == "decision" && x.Env.Operation == "attentions.create" {
 		return nil
