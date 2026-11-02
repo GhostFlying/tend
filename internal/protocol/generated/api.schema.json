@@ -4674,6 +4674,9 @@
         "head_sha": {
           "type": "string"
         },
+        "merge_sha": {
+          "type": "string"
+        },
         "provider_state": {
           "type": "string"
         },

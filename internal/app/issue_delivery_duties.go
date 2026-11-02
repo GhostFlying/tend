@@ -107,6 +107,19 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if !task.Lifecycle.Terminal() || busy {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reconcile the existing delivery execution and resource before changing its candidate")
 			}
+			var previousUpgrade string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT upgrade_id FROM issue_delivery_executions WHERE task_id=?`, task.TaskID).Scan(&previousUpgrade); err != nil {
+				return Outcome{}, err
+			}
+			if previousUpgrade != "" {
+				batch, err := store.GetUpgrade(ctx, tx.Q(), previousUpgrade)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if batch.View.Status == "running" || batch.View.Status == "attention" {
+					return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "reconcile the original controlled upgrade before preparing another execution")
+				}
+			}
 			// Explicit prepare is a new reviewed candidate after the old execution
 			// settled. Keep its task/spec/run and authorization rows immutable.
 			if reflect.DeepEqual(d.Candidate, p.Candidate) {
@@ -215,7 +228,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if err != nil {
 			return Outcome{}, err
 		}
-		if obs.Observation.ErrorKind != "" || obs.Observation.RefreshPending || obs.Observation.State != "merged" || obs.Observation.HeadSHA != d.Candidate.HeadSHA || obs.Observation.MergeSHA == "" {
+		if obs.Observation.ErrorKind != "" || obs.Observation.RefreshPending || obs.Observation.State != "merged" || obs.Observation.HeadSHA != d.Candidate.HeadSHA || obs.Observation.MergeSHA == "" || (d.Candidate.MergeSHA != "" && obs.Observation.MergeSHA != d.Candidate.MergeSHA) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "verified matching provider merge is required")
 		}
 		accs, err := store.ListAcceptances(ctx, tx.Q(), task.TaskID, task.CurrentArtifactID)
@@ -272,12 +285,16 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 }
 
 func deliveryCandidateQuestion(c protocol.IssueDeliveryCandidate) string {
-	return fmt.Sprintf("Approve this delivery candidate and scope? PR %s; head %s; base %s; provider %s; validation %s; merge authorized on approve; deploy=%t; deployment scope: %s. Defer retains responsibility without merge/deploy; end_delivery explicitly ends remaining delivery responsibility without integration. A changed candidate needs a new question.", c.URL, c.HeadSHA, c.BaseSHA, c.ProviderState, c.Validation, c.Deploy, c.DeploymentScope) + deliveryDeploymentQuestion(c)
+	mergeScope := "merge authorized on approve"
+	if c.ProviderState == "merged" {
+		mergeScope = "existing merge " + c.MergeSHA + "; deployment only; never merge again"
+	}
+	return fmt.Sprintf("Approve this delivery candidate and scope? PR %s; head %s; base %s; provider %s; validation %s; %s; deploy=%t; deployment scope: %s. Defer retains responsibility without merge/deploy; end_delivery explicitly ends remaining delivery responsibility without integration. A changed candidate needs a new question.", c.URL, c.HeadSHA, c.BaseSHA, c.ProviderState, c.Validation, mergeScope, c.Deploy, c.DeploymentScope) + deliveryDeploymentQuestion(c)
 }
 func validateDeliveryCandidate(ctx context.Context, q store.Querier, issue protocol.Issue, c protocol.IssueDeliveryCandidate) error {
 	u, err := url.Parse(c.URL)
-	if err != nil || u.Scheme != "https" || u.Host == "" || !validDeliverySHA(c.HeadSHA) || !validDeliverySHA(c.BaseSHA) || strings.TrimSpace(c.Validation) == "" || strings.TrimSpace(c.DeploymentScope) == "" || c.ProviderState != "open" {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "candidate requires a real HTTPS PR, head/base SHA, validation, known open provider state and explicit deployment scope (including none)")
+	if err != nil || u.Scheme != "https" || u.Host == "" || !validDeliverySHA(c.HeadSHA) || !validDeliverySHA(c.BaseSHA) || strings.TrimSpace(c.Validation) == "" || strings.TrimSpace(c.DeploymentScope) == "" || (c.ProviderState != "open" && !(c.ProviderState == "merged" && c.Deploy && validDeliverySHA(c.MergeSHA))) || (c.ProviderState == "open" && c.MergeSHA != "") {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "candidate requires a real HTTPS PR, head/base SHA, validation, known open candidate or verified merged deployment-only candidate and explicit deployment scope (including none)")
 	}
 	if c.Deploy {
 		if c.Deployment == nil || strings.TrimSpace(c.Deployment.ServerInstance) == "" || c.Deployment.HostIDs == nil {
@@ -306,7 +323,7 @@ func validateDeliveryCandidate(ctx context.Context, q store.Querier, issue proto
 	if err != nil {
 		return err
 	}
-	if obs.Observation.ErrorKind != "" || obs.Observation.RefreshPending || obs.Observation.CheckedAt == 0 || obs.Observation.State != c.ProviderState || obs.Observation.HeadSHA != c.HeadSHA || obs.Observation.BaseSHA != c.BaseSHA {
+	if obs.Observation.ErrorKind != "" || obs.Observation.RefreshPending || obs.Observation.CheckedAt == 0 || obs.Observation.State != c.ProviderState || obs.Observation.HeadSHA != c.HeadSHA || obs.Observation.BaseSHA != c.BaseSHA || (c.ProviderState == "merged" && obs.Observation.MergeSHA != c.MergeSHA) {
 		return protocol.Errorf(protocol.CodeStaleRevision, "provider candidate is unknown or changed; refresh and prepare the current candidate")
 	}
 	return nil
@@ -423,7 +440,7 @@ func invalidateIssueDeliveryCandidates(ctx context.Context, x *Exec, tx *store.T
 		if c == nil || c.DeliveryID != o.DeliveryID || (d.Status != "awaiting_owner" && d.Status != "deferred" && d.Status != "executing") {
 			continue
 		}
-		if o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA) || (d.Status == "executing" && o.State == "merged")) {
+		if o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA) && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA) || (d.Status == "executing" && o.State == "merged")) {
 			continue
 		}
 		if d.AttentionID != "" {

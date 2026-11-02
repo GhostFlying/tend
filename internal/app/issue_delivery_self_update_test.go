@@ -390,3 +390,122 @@ func TestDeliveryExecutionReportIsRequiredAndVisibleToIndependentAcceptance(t *t
 		t.Fatal("required evidence absent from independent assignment", err)
 	}
 }
+
+func TestDeliveryKnownMergedFailureRequiresFreshDeploymentCandidate(t *testing.T) {
+	h, i, original, c := deliveryFixture(t)
+	c.Deploy = true
+	c.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: []string{"linux-1"}}
+	c.DeploymentScope = "controlled recovery deployment"
+	d := prepareDeliveryForTest(t, h, i.IssueID, original, c)
+	answerDeliveryForTest(t, h, d, "approve", "")
+	op := createDeliveryExecutionForTest(t, h, i.IssueID, d)
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var prior taskResult
+	if err := json.Unmarshal(op.Result, &prior); err != nil {
+		t.Fatal(err)
+	}
+	hash := strings.Repeat("d", 64)
+	batch := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "prior-batch", ReleaseID: "prior-release", Status: "completed", Phase: "completed", CreatedAt: h.clock.Now(), UpdatedAt: h.clock.Now(), Hosts: []protocol.UpgradeHostView{{HostID: "linux-1", Status: "skipped"}}}, Manifest: release.Manifest{ReleaseID: "prior-release"}, ManifestSHA256: hash, ServerHash: hash, ServerInstance: "server", ServerProcess: "server-process", ServerHealthy: 2, Hosts: []store.UpgradeHost{{HostID: "linux-1", PreviousHash: hash, TargetHash: hash}}}
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), batch) }); err != nil {
+		t.Fatal(err)
+	}
+	executeAcceptedDeliveryTaskForTest(t, h, prior.TaskID, func() protocol.ArtifactPayload {
+		return protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Prior started batch retained", Evidence: []string{"upgrade:prior-batch"}}}
+	})
+	c.ProviderState = "merged"
+	c.MergeSHA = strings.Repeat("c", 40)
+	c.BaseSHA = c.MergeSHA
+	c.Validation = "original checks plus reconciliation of the prior installation"
+	observeDeliveryForTest(t, h, i.IssueID, c, "merged", c.MergeSHA)
+	batch.View.Status = "attention"
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), batch) }); err != nil {
+		t.Fatal(err)
+	}
+	current := canonicalTaskIssue(t, h, i.IssueID)
+	payload := protocol.UpdateIssueDeliveryPayload{TaskID: original, Action: "prepare", Candidate: &c, IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, Reason: "Prepare recovery only after original execution and upgrade are settled"}}
+	blocked, err := h.app.Execute(t.Context(), owner, h.env("issues.update_delivery", protocol.Target{Type: "issue", ID: i.IssueID}, payload, rev(current.Revision)), UpdateIssueDelivery{})
+	if err == nil {
+		err = blocked.Error
+	}
+	if protocol.CodeOf(err) != protocol.CodeUnknownOutcome || deliveryDutyForTest(t, h, i.IssueID, original).ExecutionTaskID != prior.TaskID {
+		t.Fatal("unknown original was replaced", blocked, err)
+	}
+	batch.View.Status = "cancelled"
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), batch) }); err != nil {
+		t.Fatal(err)
+	}
+	missingMerge := c
+	missingMerge.MergeSHA = ""
+	expectWorkCode(t, updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: original, Action: "prepare", Candidate: &missingMerge, IssueControlPayload: protocol.IssueControlPayload{Reason: "Missing merge identity"}}), protocol.CodeInvalidRequest)
+	next := prepareDeliveryForTest(t, h, i.IssueID, original, c)
+	if next.AttentionID == d.AttentionID || next.ExecutionTaskID != "" {
+		t.Fatal(next)
+	}
+	expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, d), protocol.CodeStaleRevision)
+	expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), protocol.CodeForbidden)
+	answerDeliveryForTest(t, h, next, "approve", "")
+	op = createDeliveryExecutionForTest(t, h, i.IssueID, next)
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var successor taskResult
+	if err := json.Unmarshal(op.Result, &successor); err != nil {
+		t.Fatal(err)
+	}
+	frozen := h.storedSpec(successor.TaskID, 1)
+	if !strings.Contains(strings.Join(frozen.Constraints, "\n"), "existing merge "+c.MergeSHA+"; deployment only; never merge again") {
+		t.Fatal("recovery authorized another merge")
+	}
+	assignment, ok, claimEnv := h.claim("linux-1")
+	if !ok || assignment.TaskID != successor.TaskID || assignment.Role != protocol.RoleImplement {
+		t.Fatal(assignment, claimEnv)
+	}
+	if h.task(prior.TaskID).Lifecycle != protocol.TaskCompleted || h.task(original).Lifecycle != protocol.TaskCompleted || h.count("issue_delivery_executions") != 2 {
+		t.Fatal("terminal execution history changed")
+	}
+	if got := upgradeRead(h); got.View.UpgradeID != "prior-batch" || got.View.Status != "cancelled" {
+		t.Fatal("recovery replayed installation before its worker executed", got)
+	}
+	h.runAs(assignment, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	recovered := batch
+	recovered.View.UpgradeID = "successor-batch"
+	recovered.View.ReleaseID = "recovery-release"
+	recovered.Manifest.ReleaseID = "recovery-release"
+	recovered.View.Status = "completed"
+	recovered.View.Phase = "completed"
+	recovered.View.CreatedAt = h.clock.Now()
+	recovered.View.UpdatedAt = h.clock.Now()
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), recovered) }); err != nil {
+		t.Fatal(err)
+	}
+	artifact := protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Verified the frozen existing merge without another merge; completed recovery installations", Evidence: []string{"upgrade:successor-batch"}}}
+	if op := h.runAs(assignment, protocol.OpRunsSubmitArtifact, artifact, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	review, ok, claimEnv := h.claim("linux-1")
+	if !ok || review.TaskID != successor.TaskID || review.Role != protocol.RoleAccept {
+		t.Fatal(review, claimEnv)
+	}
+	if op := h.submitVerdict(review.RunID, protocol.VerdictPassed); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	op = updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: original, Action: "complete", UpgradeID: "successor-batch", IssueControlPayload: protocol.IssueControlPayload{Reason: "Independently verified recovery of the exact existing merge and authorized installations"}})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	settled := deliveryDutyForTest(t, h, i.IssueID, original)
+	if settled.Status != "complete" || settled.ExecutionTaskID != successor.TaskID || settled.Evidence[2].Upgrade.UpgradeID != "successor-batch" || h.count("upgrades") != 2 {
+		t.Fatal(settled)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		old, err := store.GetUpgrade(t.Context(), tx.Q(), "prior-batch")
+		if err == nil && old.View.Status != "cancelled" {
+			t.Fatal("old failed upgrade was replaced", old)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
