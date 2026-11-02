@@ -32,7 +32,7 @@ type capabilityCommand struct {
 }
 
 var capabilityCommands = []capabilityCommand{
-	{Name: "inbox list", Route: "/api/v1/inbox", Queries: "issue=issue_id kind status include-archived=include_archived after limit"},
+	{Name: "inbox list", Route: "/api/v1/inbox", Queries: "issue=issue_id kind status actionable-only=actionable_only include-archived=include_archived after limit"},
 	{Name: "session show", Route: "/api/v1/session"},
 	{Name: "deployment show", Route: "/api/v1/deployment"},
 	{Name: "repo list", Route: "/api/v1/repos"},
@@ -149,7 +149,7 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		if !ok {
 			param = flag
 		}
-		if slices.Contains([]string{"all", "finished", "latest", "inline", "include_archived"}, param) {
+		if slices.Contains([]string{"all", "finished", "latest", "inline", "include_archived", "actionable_only"}, param) {
 			qbools[param] = fs.Bool(flag, false, "enable "+param)
 		} else {
 			qstrings[param] = fs.String(flag, "", "server query parameter "+param)
@@ -216,7 +216,7 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		for k, v := range qbools {
 			if *v {
 				value := "1"
-				if k == "include_archived" {
+				if k == "include_archived" || k == "actionable_only" {
 					value = "true"
 				}
 				query.Set(k, value)
