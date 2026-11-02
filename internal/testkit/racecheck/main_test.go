@@ -2,8 +2,28 @@ package main
 
 import (
 	"regexp"
+	"slices"
 	"testing"
 )
+
+func TestPackagePhasesIsolateTransportWithoutLosingCoverage(t *testing.T) {
+	input := []string{"example/api", e2ePackage, appPackage, "example/store"}
+	others, isolated, app := packagePhases(input)
+	if !app || !slices.Equal(others, []string{"example/api", "example/store"}) || !slices.Equal(isolated, []string{e2ePackage}) {
+		t.Fatal(others, isolated, app)
+	}
+	seen := append(append(slices.Clone(others), isolated...), appPackage)
+	slices.Sort(seen)
+	want := slices.Clone(input)
+	slices.Sort(want)
+	if !slices.Equal(seen, want) {
+		t.Fatal(seen, want)
+	}
+	others, isolated, app = packagePhases([]string{e2ePackage})
+	if app || len(others) != 0 || !slices.Equal(isolated, []string{e2ePackage}) {
+		t.Fatal(others, isolated, app)
+	}
+}
 
 func TestShardPatternsCoverEveryRootExactlyOnce(t *testing.T) {
 	names := roots("TestA\nTestAB\nExample\nExampleOutput\nFuzzPayload\nBenchmarkSlow\nok package\n")

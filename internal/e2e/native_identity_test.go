@@ -227,13 +227,20 @@ func TestNativeIdentityOrcaJournalRestartAndOwnerCLI(t *testing.T) {
 	cli := newOwnerCLI(t, filepath.Join(t.TempDir(), "config"))
 	cli.run("", "login", "--server", srv.startAPI())
 	launched, sends := native.counts()
-	requests := srv.count(`SELECT COUNT(*) FROM request_records`)
-	outbox := srv.count(`SELECT COUNT(*) FROM outbox`)
+	// Runner journal retries remain active during navigation. Only this CLI
+	// owner's commands and their outbox effects belong to the read-only check.
+	ownerRequests := func() int {
+		return srv.count(`SELECT COUNT(*) FROM request_records WHERE json_extract(principal_json,'$.kind')='owner' AND json_extract(principal_json,'$.subject')=?`, ownerLogin)
+	}
+	ownerOutbox := func() int {
+		return srv.count(`SELECT COUNT(*) FROM outbox o JOIN request_records r ON r.request_id=o.parent_request_id WHERE json_extract(r.principal_json,'$.kind')='owner' AND json_extract(r.principal_json,'$.subject')=?`, ownerLogin)
+	}
+	requests, outbox := ownerRequests(), ownerOutbox()
 	var read protocol.NativeEntry
 	if err := json.Unmarshal([]byte(cli.run("", "run", "native-entry", runID)), &read); err != nil || read.Identity == nil || *read.Identity != *original.Identity {
 		t.Fatal(read, err)
 	}
-	if afterLaunch, afterSend := native.counts(); afterLaunch != launched || afterSend != sends || srv.count(`SELECT COUNT(*) FROM request_records`) != requests || srv.count(`SELECT COUNT(*) FROM outbox`) != outbox {
+	if afterLaunch, afterSend := native.counts(); afterLaunch != launched || afterSend != sends || ownerRequests() != requests || ownerOutbox() != outbox {
 		t.Fatal("owner navigation sent input/control or launched a session")
 	}
 	stop() // closes the real local journal before opening a new runner instance.

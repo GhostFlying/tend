@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +15,21 @@ import (
 )
 
 const appPackage = "github.com/GhostFlying/tend/internal/app"
+const e2ePackage = "github.com/GhostFlying/tend/internal/e2e"
+
+func packagePhases(packages []string) (others, isolated []string, app bool) {
+	for _, pkg := range packages {
+		switch pkg {
+		case appPackage:
+			app = true
+		case e2ePackage:
+			isolated = append(isolated, pkg)
+		default:
+			others = append(others, pkg)
+		}
+	}
+	return others, isolated, app
+}
 
 func run(ctx context.Context, command string, args ...string) error {
 	cmd := exec.CommandContext(ctx, command, args...)
@@ -55,15 +71,7 @@ func check(ctx context.Context, shards int, timeout string, packages []string) e
 	if err != nil {
 		return fmt.Errorf("list packages: %w", err)
 	}
-	var others []string
-	app := false
-	for _, pkg := range strings.Fields(string(listed)) {
-		if pkg == appPackage {
-			app = true
-		} else {
-			others = append(others, pkg)
-		}
-	}
+	others, isolated, app := packagePhases(strings.Fields(string(listed)))
 	var commands [][]string
 	if app {
 		list, err := output(ctx, "go", "test", "-race", "-list", ".", appPackage)
@@ -81,9 +89,15 @@ func check(ctx context.Context, shards int, timeout string, packages []string) e
 		}
 	}
 	// Keep timing-sensitive transport suites out of the CPU-bound app phase.
-	var otherError error
+	var failures []error
 	if len(others) > 0 {
-		otherError = run(ctx, "go", append([]string{"test", "-race", "-timeout", timeout}, others...)...)
+		failures = append(failures, run(ctx, "go", append([]string{"test", "-race", "-timeout", timeout}, others...)...))
+	}
+	// These suites exercise real transport and lease timing. Keep their CPU
+	// and filesystem budgets independent of the bulk store/API test processes.
+	for _, pkg := range isolated {
+		fmt.Printf("isolated race package %s started\n", pkg)
+		failures = append(failures, run(ctx, "go", "test", "-race", "-timeout", timeout, pkg))
 	}
 	var wg sync.WaitGroup
 	results := make(chan error, len(commands))
@@ -98,11 +112,9 @@ func check(ctx context.Context, shards int, timeout string, packages []string) e
 	wg.Wait()
 	close(results)
 	for err := range results {
-		if err != nil {
-			return err
-		}
+		failures = append(failures, err)
 	}
-	return otherError
+	return errors.Join(failures...)
 }
 
 func main() {
