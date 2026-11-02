@@ -254,3 +254,72 @@ func TestServerReadinessCannotBeReplacedByHistoricalHealth(t *testing.T) {
 		t.Fatal("historical health bypassed current native readiness")
 	}
 }
+
+func TestDeliveryStartReadsOnlyPinnedExecutableSourceAndRetainsTaskIdentity(t *testing.T) {
+	c, f := testController(t)
+	dir := testBundle(t)
+	request := protocol.UpgradeStartRequest{RequestID: c.ids.New(protocol.PrefixRequest), UpgradeID: "batch", Release: dir, DeliveryTaskID: "approved-delivery"}
+	if _, err := c.Start(t.Context(), request); err == nil {
+		t.Fatal("non-executable delivery bundle reached application")
+	}
+	if len(f.commands) != 0 {
+		t.Fatal("invalid source was admitted")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := release.ExecutableSource(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	hash := hex.EncodeToString(sum[:])
+	// Use a separate batch: immutable staging from the rejected request remains
+	// evidence and is not overwritten by another release under its old identity.
+	request.UpgradeID = "verifiable-batch"
+	var manifest release.Manifest
+	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for index := range manifest.Artifacts {
+		a := &manifest.Artifacts[index]
+		a.Size = int64(len(body))
+		a.SHA256 = hash
+		if err := os.WriteFile(filepath.Join(dir, a.Path), body, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Start(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.commands) != 1 {
+		t.Fatal("verifiable bundle not forwarded")
+	}
+	start := f.commands[0].(app.StartUpgrade)
+	if start.DeliveryTaskID != request.DeliveryTaskID || start.ArtifactSources[hash] != source || start.ServerHash != hash {
+		t.Fatal("pinned source/task identity lost", start)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(f.envelopes[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["delivery_task_id"] != request.DeliveryTaskID {
+		t.Fatal("dedup identity omits delivery authority", payload)
+	}
+}

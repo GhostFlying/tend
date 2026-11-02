@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -33,21 +32,29 @@ func bindDeliveryUpgradeArtifact(ctx context.Context, tx *store.Tx, task store.T
 	if artifact.Report == nil || candidate.Deployment == nil {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "delivery requires its deployment report and approved target")
 	}
-	id := ""
-	references := 0
-	for _, evidence := range artifact.Report.Evidence {
-		if strings.HasPrefix(evidence, "upgrade:") {
-			references++
-			if references > 1 {
-				return protocol.Errorf(protocol.CodeInvalidRequest, "report must identify exactly one controlled upgrade batch")
-			}
-			id = strings.TrimPrefix(evidence, "upgrade:")
+	id, err := deliveryUpgradeReference(artifact.Report)
+	if err != nil {
+		return err
+	}
+	if bound != "" && bound != id {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "report must retain the original controlled upgrade")
+	}
+	started := task.CreatedAt
+	if candidate.Reconciliation != nil {
+		if id != candidate.Reconciliation.UpgradeID {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "verification must retain the completed upgrade")
 		}
+		var issue string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT issue_id FROM issue_delivery_executions WHERE task_id=?`, task.TaskID).Scan(&issue); err != nil {
+			return err
+		}
+		_, at, err := checkDeliveryReconciliation(ctx, tx.Q(), issue, &candidate)
+		if err != nil {
+			return err
+		}
+		started = at
 	}
-	if id == "" || bound != "" && bound != id {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "report requires its original upgrade:<id> evidence reference")
-	}
-	if _, err := deliveryUpgradeBinding(ctx, tx.Q(), *candidate.Deployment, id, task.CreatedAt); err != nil {
+	if _, err := deliveryUpgradeBinding(ctx, tx.Q(), *candidate.Deployment, id, started); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `UPDATE issue_delivery_executions SET upgrade_id=? WHERE task_id=?`, id, task.TaskID)
@@ -72,6 +79,10 @@ func deliveryAcceptanceReady(ctx context.Context, q store.Querier, task string) 
 	}
 	if !candidate.Deploy {
 		return true, nil
+	}
+	available, err := deliveryTargetAvailable(ctx, q, task)
+	if err != nil || !available {
+		return false, err
 	}
 	if id == "" {
 		return false, nil

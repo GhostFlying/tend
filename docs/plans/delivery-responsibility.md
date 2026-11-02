@@ -1,8 +1,8 @@
-# 验收后交付责任与重开恢复（D151）
+# 验收后交付责任与重开恢复（D152）
 
 ## 已核实根因
 
-当前基准的完成事件只结束执行任务，原案例材料记录的是负责人显式关闭；不能称为 TaskCompleted 自动关闭。当前 canonical endpoint 仅保护已登记的 stages、follow-ons、Attention 和 completion review，通用 review reason 可结清验收通知，却没有独立持久的真实交付核对义务。named owner 合同也没有完整继承交付确认规则。现有 reopen 只激活 Issue；named main 不具备该入口，terminal manager 又不在 current manager 查询中，因而恢复责任没有闭环。绑定调查和选定转交记录是调查证据，尚非正式验收结论；缺完整历史运行合同和原始 close receipt。
+当前基准的完成事件只结束执行任务，原案例材料记录的是负责人显式关闭；不能称为 TaskCompleted 自动关闭。当前 canonical endpoint 仅保护已登记的 stages、follow-ons、Attention 和 completion review，通用 review reason 可结清验收通知，却没有独立持久的真实交付核对义务。named owner 合同也没有完整继承交付确认规则。现有 reopen 只激活 Issue；named main 不具备该入口，terminal manager 又不在 current manager 查询中，因而恢复责任没有闭环。绑定调查和选定转交记录支持该因果链；原调查报告后来通过独立验收，其通过不代表本机制实现已验收。完整历史运行合同和原始 close receipt 仍未提供。
 
 ## 实施顺序
 
@@ -11,7 +11,7 @@
 3. 已批准只允许冻结范围内的后续交付执行；原实现 task 保持 completed。新候选/不确定 provider 状态阻止旧批准推进，交付结果仍需具体证据和后续验收。未批准不产生交付执行。
 4. reopen 共用 owner/API/CLI 与 named main 合法 owner 来源入口，在同一事务恢复新一代负责人协调。保留历史任务、会话和消息；旧 manager 未结清/unknown 时明确阻断，不能复活 terminal implementation，也不因重开获得合入批准。
 5. 补根因回归、并发/CAS/重放/unknown/历史测试，更新实际 named 合同、能力目录及生成 API 类型。UI 卡片属于另一个 Issue，本计划不改其实现。
-6. 执行针对测试与 make check、核对最新 main、用户身份提交并准备 draft PR。独立正式验收由 Tend 的原责任链执行，不能从本执行器私自启动另一个 Agent。提交实际代码、diff、验证记录和未决项，停在 owner 合入确认前。
+6. 执行针对测试与 make check、核对最新 main、用户身份提交并准备 draft PR。独立正式验收由 Tend 的原责任链执行，不能从本执行器私自启动另一个 Agent。提交实际代码、diff、验证记录和未决项，原计划停在 owner 合入确认前。后续本次 dogfood 的实际 owner standing 授权允许在独立验收、CI 及既有保护满足后由父协调推进合入和自更新；本实现运行只提交候选，不重复请求已给授权，不冒充原独立验收或生产执行。
 
 ## owner 对自修执行责任的补充核对
 
@@ -20,3 +20,15 @@
 ## 验证边界
 
 只用隔离测试中的真实 owner 答复入口验证授权，不对生产伪造答复，不修改原图片案例、不合入/部署/联系他人。保持 server/runner 已有协议 2/1；新增 owner 输入及服务端存储不改变旧 runner 必填条件。若实际实施需收紧旧 runner 通信，则先重新评估版本兼容，不能隐式改变默认语义。
+
+## 首发事实对账及同目标并发核对
+
+已核实新主库的 supervisor question handoff 能在真正停止执行后释放 slot，再按原问题恢复；首发等待优先复用该机制，不增加另一套 actor/调度系统。首发前须确认实际 runner 已协商该能力；旧运行不改合同、不强行重启。既有同目标升级必须先结清，不竞争 start。兼容只允许新候选确认真实已完成 PR/merge、原批次、目标和已独立验收的报告证据；新任务只核验已有交付，不回填旧 typed 执行、不重放 merge/deploy，独立验收后才结清原责任。
+
+同一服务的受控 updater 已只有一个未结束批次，但两个 deployment worker 可以先占运行再等待批次，仍会阻塞彼此排空。因此在领取前按该固定目标串行：已开始且未结清的 typed deployment 执行保留逻辑所有权，第二条 Issue 只保留 pending action、不领取 run/slot/执行环境；原升级 running/attention 或旧 run unknown 时不释放。成功验收、失败/取消及确认退出后按事实释放，不改原 Issue 身份/epoch、任务/问题/批次历史。验收同样不得抢占另一条部署的排空资源。
+
+候选冻结最近已结清升级的 ID/revision；新批次开始前再次校验当前授权、epoch、控制和 baseline，并用显式 delivery task 绑定实际 start。控制入口从已校验二进制读取真实 Go VCS 身份，拒绝 modified/未知或不匹配当前批准目标的产物；开放 PR 仅部署其实际 merge，已 merged 的部署使用确认时的当前目标 base 并验证原 merge 仍包含其中。升级终点使待部署观测重新查询，服务端记录查询发起时的 baseline，迟到报告不能充当新 baseline 的事实。不得用旧 main 产物覆盖上一条已交付版本。只扩展本机 owner 控制与 owner 只读事实，保留 runner 2/1 及原 manifest 格式。
+
+隔离回归覆盖两条无关 Issue 同时领取、唯一 start/逻辑所有权、第二条零 run 等待、执行自身排空、失败/取消/重启/unknown 保留、旧 baseline/旧批准/旧产物拒绝、已完成事实核验不重复安装，以及新主库 Agent 技术答复不能冒充人类合入授权。迁移使用新主库 75/76 之后的 77，保留已合入迁移和 D150，本文使用 D152。
+
+基线整合补充：保留最新 main 的 D151 检查调度与 fixture 优化，本机制顺延 D152。部署 baseline 或 provider 候选过期持久撤销原答复，并经原 Issue background source 唤醒当前负责人；自己的已绑定批次推进 baseline 不误撤销该执行，未知或其他批次仍需重新核对。

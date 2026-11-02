@@ -18,7 +18,7 @@ func GetIssueDeliveryDuty(ctx context.Context, q Querier, issue, task string) (p
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		return d, err
 	}
-	d.Candidate, d.AttentionID, d.ExecutionTaskID, d.Reason, d.Evidence = body.Candidate, body.AttentionID, body.ExecutionTaskID, body.Reason, body.Evidence
+	d.Candidate, d.AttentionID, d.ExecutionTaskID, d.Reason, d.Evidence, d.AssignmentEpoch = body.Candidate, body.AttentionID, body.ExecutionTaskID, body.Reason, body.Evidence, body.AssignmentEpoch
 	return d, nil
 }
 

@@ -156,8 +156,9 @@
 | D150 | 问题沿 Issue 责任链处理：执行问题先交所属 Issue owner，负责 Agent 无法解决时逐级交父 Issue owner、唯一主协调 Agent；只有人工 owner 或主协调无法解决时形成用户待办。沿原 Attention/Decision 记录版本、assignment epoch、逐跳原因和 Agent 回答来源，不伪造用户授权，不改变独立验收及 unknown 对账。新执行协商 supervisor-questions-v1，历史执行保留原答复合同，wire 保持 2/1。CLI 与具名工具支持原问题读取、回答、上报及恢复；新协商执行提问后结束本轮、释放 slot，父 Issue owner 答复后创建保持原尝试代次的接续 Run，无额外协调容量。见 docs/plans/issue-responsibility-routing.md 与 docs/plans/issue-run-handoffs.md。 | 已实现，未发布 |
 | D151 | 完整 race 检查继续以 Go 动态发现的所有根测试、Example 和 Fuzz seed 为覆盖来源，固定实测成本仅用于分片放置和重包优先调度，新测试自动纳入。高容量本地机器按总测试进程预算选择最多八个 App 分片、每包最多四个 API/mainthread/E2E 分片及最多六个其他包并行；小机器保留 E2E 独立阶段和顺序回退，CI 保持原分组与容量约束。可选 TEST_REPORT_DIR 输出本轮私有原生 JSON 耗时报告，默认保留 Go 原生缓存。E2E、handoff、contextbuilder、runnerapi、tools 的普通空库 fixture 复用不可变模板，显式路径重开及迁移测试保留真实 Open。见 docs/plans/race-tail-latency.md。 | 已实现 |
 
+| D152 | 验收后持久保留独立交付核对责任，具体 PR/head/base/验证/部署范围通过原 taskless versioned Attention 确认，候选或观测失效持久撤销旧授权；owner 重开原子恢复新协调代次，保留 terminal task 和 unknown。API/CLI 同步，runner 2/1。见 docs/plans/delivery-responsibility.md。 | 已实现，待验收 |
+
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
-| D151 | 验收后持久保留独立交付核对责任，具体 PR/head/base/验证/部署范围通过原 taskless versioned Attention 确认，候选或观测失效持久撤销旧授权；owner 重开原子恢复新协调代次，保留 terminal task 和 unknown。API/CLI 同步，runner 2/1。见 docs/plans/delivery-responsibility.md。 | 已实现，待验收 |
 
 ## 2. 上下文注入（修订 v0.1 §7）
 
@@ -579,11 +580,15 @@ D136 的责任主体仍为 Issue owner；`worker` 只指 Task/Run 的执行适�
 
 交接与容量合同：新执行按 `issue-question-handoffs-v1` 冻结分轮交接能力。提问持久保存原问题并由 runner 确认真正停止后结束本轮、释放 slot；代表 Issue owner 的执行自动提交父 Issue owner，根 Issue 提交唯一主协调 Agent。答复与退出确认均持久后才创建接续 Action/Run，沿用原 spec、artifact 和 generation，不消耗实现尝试额度，不复活旧 Run。固定原主机、执行配置和 workspace 互斥；可恢复的实现会话保留原生 thread，验收与不支持原生接续的适配器通过原问题及完整合同重建上下文。协调与执行均严格使用配置容量，不提供额外名额。新合同仅向明确协商的执行启用，历史 Run 保留原等待合同并受控排空；wire 仍为 2/1。详见 docs/plans/issue-run-handoffs.md。Agent 决策和行动完成不能用作真实人工授权证据。
 
-## D151：验收后交付责任与 owner 重开恢复
+## D152：验收后交付责任与 owner 重开恢复
 
 Task 的 completed 仅表示冻结产物通过独立验收。canonical Issue 在同一完成事务中按原完成事件建立独立交付核对义务，保存 task、acceptance、候选版本、问题、后续执行和结清证据；计划阶段为空或完成通知被确认均不能消除该责任。关闭与取消终点同时校验这条账本。历史已完成任务仅补待核对事实，不补 owner 批准、不批量提问、不重开历史事项或重放执行。
 
 负责人先准备实际 PR、head/base SHA、验证引用、已知 provider 状态及明确部署范围，再通过 `issues.update_delivery` 创建 taskless versioned Attention。在当前 IM 提供其原问题，复用已有答复入口；旧问题、条件性文本、变更/撤回的 owner 来源不能授权新候选。仅原问题精确批准后，`issues.create_task.delivery_authorization` 才能创建冻结范围的后续交付执行；提交前和领取前均核对候选。原实现任务保持 completed。真正合入与已授权受控自更新由 Tend 的后续执行任务负责，不交给外部操作者代做；使用已有本机 upgrade CLI、固定请求及批次身份，unknown 先对账。部署候选同时冻结 server 实例与完整 host 集合，合入前 rebase 改变 head 须重新确认。结清要求匹配 head 的 provider merged 事实及后续执行的 passed acceptance；deploy=true 还须提供本次执行开始后创建的 completed upgrade_id，校验其 server 实例/健康、完整 host 集合及已核验安装回执，冻结升级证据。执行报告的 upgrade:<id> 证据引用在 artifact 同事务绑定到该执行，running/attention 批次不领取其验收，避免验收抢占待更新主机；原 context admission 检查不变，终态失败仍可独立审查。已合入后已知终态失败的部署恢复须重新确认 provider_state=merged/实际merge_sha/部署范围，创建新交付执行，不再次merge；原批次running/attention或原执行未结清时不允许另起批次。独立验收核对 merged-source 发布来源、实际 server 版本/hash、主机安装及原 Issue 行为回读。批准或 task completed 不自动声明部署成功。延期答复保留责任并阻止关闭，不反复询问同一问题；后续真实 owner 继续请求通过 action=resume 新建候选确认，保留原延期答复，不将其解释为批准；只有明确结束剩余交付的 owner 决定才可结清未交付代码；负责人可引用当前已准入、未撤回且内容版本一致的 owner 结束来源，不要求先做已被取消的 PR 准备，也不能把原 defer/approve 答复改写成结束。报告/调查以明确的 accepted report 终点结清；结束尚未交付的代码责任需要实际 owner disposition。交付事实不从可编辑 stage 名称或自然语言任务名推断。
+
+部署目标按本服务的固定 updater 串行。已开始的 deployment 执行保留持久逻辑所有权；另一个 Issue 只有 pending action，没有 run/slot/执行环境，因而不会持有排空资源等待第一批。取消不能猜测 unknown run 已退出；确认终态及真实退出后才释放，原任务/批次/问题不替换。确认问题冻结最近已结清升级的 ID/revision，provider 观测记录查询发起时的 baseline；升级完成或取消使旧查询失效并被动刷新。领取和本机 start 再核验 owner epoch、答复、当前 baseline 和活动执行租约。`tend upgrade start --delivery-task` 从已校验的实际二进制读取 Go VCS 身份，拒绝 modified、未知或不符批准目标的产物；已 merged 的候选冻结当前 base_sha、核验原 merge 包含于该目标，不能安装旧 main 覆盖前一项交付。Agent 的技术 resolve 不能代答交付批准；已有真实 standing owner 授权仍可经原版本化来源通道准确记录，不能伪称用户逐项审阅。
+
+首发兼容仅核验既有事实：候选的 reconciliation 绑定同一 Issue 下原已独立验收的报告任务、原 completed upgrade_id、实际 merge 及已观测的 installed source。新任务只核验、不合入/安装；保留旧任务和批次身份，不回填 typed 执行。新独立验收及完整安装证据通过后结清。首发等待复用 D150 已部署且实际协商的 question handoff：原交付任务启动唯一批次后以原升级 ID 提问并停止本轮，协调者待批次实际完成后答复原问题，原任务接续只读核验再提交，避免在旧版本上提前生成验收占住排空资源。旧运行无 handoff 能力或上一批次未结清时明确等待，不强制改旧合同。该兼容入口不把外部 bootstrap 包装成 Tend 自行交付。
 
 新增 owner 输入、只读字段和服务端迁移不收紧原 runner 请求。runner 先声明 `delivery-candidate-identity-v1`，server 才在交付查询中请求可选 `candidate_identity`；只有收到请求的新 runner 才发送可选 base SHA；旧 server 不接收新字段、旧 runner 仍可报告原事实。缺 base 的历史观测保留为未知，不能给新候选合入授权。通信仍支持 runner 2/1。
 

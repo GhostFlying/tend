@@ -2,6 +2,7 @@ package protocol
 
 // UpgradeEvidence freezes verified batch facts, not a product acceptance.
 type UpgradeEvidence struct {
+	SourceCommit            string                `json:"source_commit,omitempty"`
 	ServerInstance          string                `json:"server_instance,omitempty"`
 	ServerProcessInstanceID string                `json:"server_process_instance_id,omitempty"`
 	UpgradeID               string                `json:"upgrade_id"`

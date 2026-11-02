@@ -31,13 +31,15 @@ type DeliverySnapshot struct {
 // DeliveryObservation is independent of the work item's planning revision.
 type DeliveryObservation struct {
 	DeliverySnapshot
-	WorkItemID     string `json:"work_item_id"`
-	DeliveryID     string `json:"delivery_id"`
-	Generation     int64  `json:"generation"`
-	CheckedAt      int64  `json:"checked_at,omitempty"`
-	AttemptedAt    int64  `json:"attempted_at,omitempty"`
-	ErrorKind      string `json:"error_kind,omitempty"`
-	RefreshPending bool   `json:"refresh_pending,omitempty"`
+	BaselineUpgradeID       string `json:"baseline_upgrade_id,omitempty"`
+	BaselineUpgradeRevision int64  `json:"baseline_upgrade_revision,omitempty"`
+	WorkItemID              string `json:"work_item_id"`
+	DeliveryID              string `json:"delivery_id"`
+	Generation              int64  `json:"generation"`
+	CheckedAt               int64  `json:"checked_at,omitempty"`
+	AttemptedAt             int64  `json:"attempted_at,omitempty"`
+	ErrorKind               string `json:"error_kind,omitempty"`
+	RefreshPending          bool   `json:"refresh_pending,omitempty"`
 }
 
 type DeliveryPollPayload struct {

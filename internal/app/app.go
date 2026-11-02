@@ -420,6 +420,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 				}
 			}
 		}
+		if e.Kind == "issue.delivery_candidate_expired" {
+			if err := recordDeliveryCandidateExpiry(ctx, x, tx, e.ObjectID, eventID); err != nil {
+				return err
+			}
+		}
 		if e.Kind == "task.completed" {
 			if err := recordCompletionNotice(ctx, x, tx, e.ObjectID, eventID); err != nil {
 				return err

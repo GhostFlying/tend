@@ -57,11 +57,11 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 	go func() { _ = server.Serve(listener) }()
 	te := newTestEnv(t, "http://unused.invalid")
 	req := te.IDs.New(protocol.PrefixRequest)
-	if code := te.main("upgrade", "--socket", socket, "--release", dir, "--upgrade-id", "batch", "--request-id", req, "--json"); code != exitOK {
+	if code := te.main("upgrade", "--socket", socket, "--release", dir, "--upgrade-id", "batch", "--delivery-task", "approved-task", "--request-id", req, "--json"); code != exitOK {
 		t.Fatalf("start=%d %s", code, te.errOut)
 	}
 	mu.Lock()
-	if start.RequestID != req || start.UpgradeID != "batch" || start.Release != dir {
+	if start.RequestID != req || start.UpgradeID != "batch" || start.Release != dir || start.DeliveryTaskID != "approved-task" {
 		t.Fatalf("identity lost: %+v", start)
 	}
 	mu.Unlock()
@@ -78,6 +78,9 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	if code := te.main("upgrade", "cancel", "--socket", socket, "--upgrade-id", "batch", "--revision", "4", "--delivery-task", "approved-task"); code != exitUsage {
+		t.Fatalf("delivery task accepted on non-start: %d %s", code, te.errOut)
+	}
 	if calls != 3 {
 		t.Fatal("unexpected automatic operation replay")
 	}

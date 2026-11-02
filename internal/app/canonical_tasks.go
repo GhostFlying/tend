@@ -95,12 +95,24 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		if d.ExecutionTaskID != "" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "delivery already has a frozen execution; reconcile it rather than starting another")
 		}
+		if d.Candidate.Deploy {
+			observed := protocol.ObservationScope{Deployment: true, WorkItemIDs: []string{current.IssueID}}
+			if spec.Observation != nil {
+				observed = *spec.Observation
+				observed.Deployment = true
+				observed.WorkItemIDs = slices.Clone(spec.Observation.WorkItemIDs)
+				if !slices.Contains(observed.WorkItemIDs, current.IssueID) {
+					observed.WorkItemIDs = append(observed.WorkItemIDs, current.IssueID)
+				}
+			}
+			spec.Observation = &observed
+		}
 		if !spec.RequiresDelivery(domain.DeliveryReport) {
 			spec.Deliverables = append(spec.RequiredDeliverables(), domain.DeliveryReport)
 		}
 		spec.Acceptance = append(slices.Clone(spec.Acceptance), "Independently verify the approved candidate merge and, when deploy=true, its merged-source release provenance, completed controlled upgrade ID, actual server/host installation readbacks and the original Issue behavior. A report or provider merged flag alone cannot establish successful deployment.")
 		deliveryDuty = &d
-		spec.Constraints = append(slices.Clone(spec.Constraints), deliveryCandidateQuestion(*d.Candidate), "Execute only the approved candidate and scope. Recheck provider head/base before the first mutation. An unknown provider result requires reconciliation, never repeat merge/deploy. Tend must execute the approved merge only when provider_state=open. For provider_state=merged verify the frozen existing merge_sha and never merge again. Only when deploy=true, build that verified merged source, start the existing controlled upgrade through its local CLI, and verify installed server version/hash, the complete approved host set, and the original Issue behavior. Do not leave merge or deployment to an external operator. A rebase changing the head needs a new candidate and owner answer. Keep a stable upgrade/request identity across retries; reconcile unknown outcomes through upgrade status and installed receipts before another mutation. Persist provider merge receipt, release provenance and the exact upgrade:<id> reference in required report.evidence; the server binds that started batch before scheduling independent acceptance. If this worker runs on a deployment target, submit that durable started-batch report and release its run instead of waiting while holding its own drain lease; retain responsibility until independent acceptance reads the completed batch, actual server/host installations and original Issue behavior. Do not claim started means deployed.")
+		spec.Constraints = append(slices.Clone(spec.Constraints), deliveryCandidateQuestion(*d.Candidate), "Execute only the approved candidate and scope. Recheck provider head/base before the first mutation. An unknown provider result requires reconciliation, never repeat merge/deploy. If reconciliation is present, this task only verifies the referenced existing completed delivery and must never merge, start or retry an installation. Otherwise Tend must execute the approved merge only when provider_state=open. For provider_state=merged verify the frozen existing merge_sha is an ancestor of base_sha and never merge again; build the approved current base_sha. Only when deploy=true, build that verified merged source, start the existing controlled upgrade through its local CLI with --delivery-task set to this task ID, and verify installed server version/hash, the complete approved host set, and the original Issue behavior. Do not leave merge or deployment to an external operator. A rebase changing the head needs a new candidate and owner answer. Keep a stable upgrade/request identity across retries; reconcile unknown outcomes through upgrade status and installed receipts before another mutation. Persist provider merge receipt, release provenance and the exact upgrade:<id> reference in required report.evidence; the server binds that started batch before scheduling independent acceptance. If this worker runs on a deployment target, submit that durable started-batch report and release its run instead of waiting while holding its own drain lease; retain responsibility until independent acceptance reads the completed batch, actual server/host installations and original Issue behavior. Do not claim started means deployed.")
 	}
 	if p.UseDefaultWorkspace {
 		if current.Plan.DefaultWorkspaceTaskID == "" {
@@ -121,7 +133,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	}
 	if deliveryDuty != nil {
 		task := out.Result.(taskResult).TaskID
-		raw, err := json.Marshal(deliveryDuty.Candidate)
+		raw, err := json.Marshal(deliveryExecutionSnapshot{IssueDeliveryCandidate: *deliveryDuty.Candidate, AssignmentEpoch: current.AssignmentEpoch})
 		if err != nil {
 			return Outcome{}, err
 		}

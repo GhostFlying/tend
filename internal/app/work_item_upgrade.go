@@ -18,7 +18,7 @@ func workItemUpgradeEvidence(ctx context.Context, x *Exec, q store.Querier, id s
 	if r.View.Status != "completed" || r.View.Phase != "completed" || r.ManifestSHA256 == "" || r.ServerHash == "" || r.View.ReleaseID != r.Manifest.ReleaseID || len(r.Hosts) != len(r.View.Hosts) {
 		return invalid()
 	}
-	v := &protocol.UpgradeEvidence{UpgradeID: id, Revision: r.View.Revision, ReleaseID: r.View.ReleaseID, ManifestSHA256: r.ManifestSHA256, ServerSHA256: r.ServerHash, CheckedAt: x.Now.UnixMilli(), CompletedAt: r.View.UpdatedAt.UnixMilli(), Hosts: []protocol.UpgradeEvidenceHost{}}
+	v := &protocol.UpgradeEvidence{SourceCommit: r.View.SourceCommit, UpgradeID: id, Revision: r.View.Revision, ReleaseID: r.View.ReleaseID, ManifestSHA256: r.ManifestSHA256, ServerSHA256: r.ServerHash, CheckedAt: x.Now.UnixMilli(), CompletedAt: r.View.UpdatedAt.UnixMilli(), Hosts: []protocol.UpgradeEvidenceHost{}}
 	seen := map[string]bool{}
 	for i, h := range r.Hosts {
 		view := r.View.Hosts[i]

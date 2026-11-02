@@ -12,6 +12,7 @@ import (
 // UpgradeRow keeps transition inputs and receipts alongside the public view.
 // Restoration receipts use phase rolled_back or cancelled (replacement never started).
 type UpgradeRow struct {
+	DeliveryTaskID      string                   `json:"delivery_task_id,omitempty"`
 	View                protocol.UpgradeView     `json:"view"`
 	Manifest            release.Manifest         `json:"manifest"`
 	ManifestSHA256      string                   `json:"manifest_sha256"`

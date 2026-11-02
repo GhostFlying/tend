@@ -137,6 +137,15 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err != nil {
 		return Outcome{}, errNotFound(err, "decision %s does not exist", x.Env.Target.ID)
 	}
+	if c.Responsible {
+		var delivery bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_delivery_duties duty JOIN attentions a ON a.attention_id=json_extract(duty.body_json,'$.attention_id') WHERE a.decision_id=?)`, d.DecisionID).Scan(&delivery); err != nil {
+			return Outcome{}, err
+		}
+		if delivery {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "delivery confirmation requires an actual owner source; escalate the original question or relay its standing owner authorization")
+		}
+	}
 	var options []string
 	if err := json.Unmarshal([]byte(d.OptionsJSON), &options); err != nil {
 		return Outcome{}, fmt.Errorf("app: decode options of %s: %w", d.DecisionID, err)
