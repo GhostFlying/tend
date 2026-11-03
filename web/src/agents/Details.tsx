@@ -1,3 +1,4 @@
+import { AgentIssues } from "./Issues.tsx";
 import { href } from "../app/router.ts";
 import type { AgentCategory } from "../api/generated/api.ts";
 import { currentObservation } from "./facts.ts";
@@ -32,14 +33,20 @@ export function AgentDetails({ entry, categories }: { entry: Entry; categories: 
             p.public_sha256 === entry.history.pin.public_sha256)),
     ) ?? [];
   const observed = (value: typeof worker) =>
-    value ? (value.available ? "可用" : value.reason || "不可用") : "未上报";
+    value
+      ? value.available
+        ? "可用"
+        : value.reason || "不可用"
+      : catalog
+        ? "未上报"
+        : "未接入运行观测";
   return (
     <div className={styles.details}>
       <h2 tabIndex={-1}>{agent.display_name}</h2>
-      <p className={styles.muted}>
-        {agent.purposes?.map(purposeLabel).join("、")} · {agent.identity.local_id}
-      </p>
+      <p className={styles.muted}>{agent.identity.local_id}</p>
       <dl>
+        <dt>用途</dt>
+        <dd>{agent.purposes?.map(purposeLabel).join("、") || "未声明"}</dd>
         <dt>类别</dt>
         <dd>
           {agent.categories
@@ -98,6 +105,11 @@ export function AgentDetails({ entry, categories }: { entry: Entry; categories: 
         <dt>最近观测</dt>
         <dd>{observation(entry).label}</dd>
       </dl>
+      {!catalog && (
+        <p className={styles.muted}>
+          服务端定义不使用 runner 心跳；本目录未提供执行健康观测，用途也不代表能力类别。
+        </p>
+      )}
       <details className={styles.disclosure}>
         <summary>绑定与版本</summary>
         <dl>
@@ -165,6 +177,10 @@ export function AgentDetails({ entry, categories }: { entry: Entry; categories: 
           </>
         )}
       </details>
+      <AgentIssues
+        key={`${agent.identity.execution_environment_id}/${agent.identity.local_id}/${entry.history?.pin.snapshot_id ?? "current"}`}
+        entry={entry}
+      />
     </div>
   );
 }

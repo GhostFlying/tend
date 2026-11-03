@@ -559,6 +559,112 @@
       "title": "AgentInventoryRuntime",
       "type": "object"
     },
+    "AgentIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "type": "boolean"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "runs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentIssueRun"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/IssueState"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "title",
+        "state",
+        "current",
+        "runs"
+      ],
+      "title": "AgentIssue",
+      "type": "object"
+    },
+    "AgentIssuePage": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/definitions/AgentIdentity"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentIssue"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "coverage",
+        "items",
+        "more"
+      ],
+      "title": "AgentIssuePage",
+      "type": "object"
+    },
+    "AgentIssueRun": {
+      "additionalProperties": false,
+      "properties": {
+        "pending_decision": {
+          "type": "boolean"
+        },
+        "pin": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "run": {
+          "$ref": "#/definitions/RunView"
+        },
+        "source": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "run",
+        "pin",
+        "source",
+        "pending_decision"
+      ],
+      "title": "AgentIssueRun",
+      "type": "object"
+    },
     "AgentKind": {
       "enum": [
         "claude",
@@ -13096,6 +13202,9 @@
     },
     "AgentExecutor": {
       "$ref": "#/definitions/AgentExecutor"
+    },
+    "AgentIssuePage": {
+      "$ref": "#/definitions/AgentIssuePage"
     },
     "AgentRolloutPage": {
       "$ref": "#/definitions/AgentRolloutPage"

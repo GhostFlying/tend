@@ -162,6 +162,7 @@
 | D157 | Manager delivery 先去重旧 logical responsibility 再查未决投递；Token 重叠查询按 native identity 与 current fact 索引关联。只改善查询规模，不改变 blocker、冲突、未知或计量语义，追加迁移83。 | 已实现，待验证 |
 | D158 | Token 归属在同一只读事务内按请求批量解析日志与本地 actor，保留原 SQL 的歧义、NULL、优先级与错误回退，不使用跨请求缓存或新增迁移。 | 已实现，待验证 |
 | D159 | 明确协商 retain 能力的 runner 可逐 Run 保留原维护未知，不令整 host Hello 失败；持久 fence 阻止重放，未知责任、原 lease/pin 与容量继续保留。旧 peer 保持原拒绝路径。 | 已实现，待验证 |
+| D160 | Agent Issue 关联依据冻结 Run pin 与创建时责任来源，按 canonical identity 展示当前/历史及原版本；API、CLI、Web 同步提供有界分页与筛选，缺少权威关联和执行观测时明确保留缺口。 | 已实现，待验证 |
 | D163 | 终态任务的未答规则问题在原事务撤销并收敛 Attention；拒绝迟到新答复，保留已答历史与暂停语义。 | 已实现，待验证 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
@@ -784,6 +785,22 @@ runner 才接收逐运行 retain。无该能力或不受支持的代际不得收
 这一批只扩展执行器内部协议，不新增用户控制能力，CLI 已有 runtime 读取可见该能力。
 原运行的独立业务对账/退役入口另批实现，并须同步 CLI/主工具面；主机成功登记不证明
 原运行恢复，也不证明升级排空或未知外部结果已确定。见[实施计划](plans/retained-run-reconciliation.md)。
+
+## D160：Agent 运行关联与观测来源
+
+Agent 详情的 Issue 关联只读冻结的 run_agent_executions 身份与历史 pin，关联依次采用
+原 Run responsibility、manager task 合同或任务创建时的主 Issue；可变 task links 与
+显示名称不构成历史归属证据。同 Issue 多 Run 去重但保留各自角色、状态、定义版本、
+runtime、快照与来源。当前表示仍有 starting/running/waiting/interrupted/unknown Run
+或真实任务未决决定，不声明正在调用模型；Issue 生命周期独立显示。
+
+独立 owner API、命名 CLI 与 Web 同步支持范围、Issue 状态、标题/ID、原版本和稳定
+Issue 游标分页。没有冻结 Run 关联时返回明确覆盖范围，主会话或咨询缺少记录不推断
+从未工作。服务端 Agent 没有 runner executor 观测入口时显示未接入运行观测，区别于
+runner 的未上报与离线；用途与类别分列说明，不把类别当作执行权限或健康证明。
+
+无迁移或 runner wire 变更，不修改配置 revision、原 pin 或未结束执行。见
+[实施计划](plans/agent-issue-history.md)。
 
 ## D162：飞书文本 channel 的来源身份与不确定结果
 
