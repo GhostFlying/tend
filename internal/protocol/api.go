@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		HandoffAuditPage{},
 		BindFeishu{}, FeishuBindingView{}, FeishuInputPage{},
 		ConcurrencyGroupPage{}, ConcurrencyHistoryPage{}, ConfigureConcurrencyPayload{}, ConcurrencyQuery{},
 		HostMaintenancePayload{}, UpgradeControlPayload{}, LocalRepositoryBinding{}, BindLocalRepositoryRequest{}, LocalRepositoryStatus{},

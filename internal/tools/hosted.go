@@ -227,7 +227,7 @@ func namedLegacyRead(purpose agentconfig.Purpose, name string) bool {
 	}
 	if purpose == agentconfig.Main {
 		switch name {
-		case "tend_context", "repos_list", "tasks_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "decisions_list", "decisions_read", "decisions_resolve", "decisions_explain", "conversation_read", "conversation_turn_read", "conversation_turn_commit", "conversation_turn_wait", "conversation_turn_adopt", "agent_conversations_list", "agent_rollout_read", "background_sources", "background_checkin":
+		case "conversation_handoff_audit", "tend_context", "repos_list", "tasks_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "decisions_list", "decisions_read", "decisions_resolve", "decisions_explain", "conversation_read", "conversation_turn_read", "conversation_turn_commit", "conversation_turn_wait", "conversation_turn_adopt", "agent_conversations_list", "agent_rollout_read", "background_sources", "background_checkin":
 			return true
 		}
 	}

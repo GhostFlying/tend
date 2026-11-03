@@ -61,6 +61,7 @@ const relationsSchema = `{
 }`
 
 var schemas = map[string]string{
+	"conversation_handoff_audit":   argumentSchema(handoffAuditArgs{}),
 	"decisions_explain":            argumentSchema(explainDecisionArgs{}),
 	"conversation_reply":           argumentSchema(protocol.CoordinationReply{}),
 	"conversation_turn_adopt":      argumentSchema(protocol.AdoptClarificationPayload{}),

@@ -111,6 +111,7 @@ func (s *Server) ownerRoutes() []ownerRoute {
 		{"GET /api/v1/files/{id}/download-url", s.deliverableDownloadURL},
 		{"GET /api/v1/conversation/settings", s.conversationSettings},
 		{"GET /api/v1/conversation/handoff", s.conversationHandoff},
+		{"GET /api/v1/conversation/handoff-audit", s.handoffAudit},
 		{"GET /api/v1/events", s.events},
 		{"GET /api/v1/artifacts/{id}", s.artifact},
 	}

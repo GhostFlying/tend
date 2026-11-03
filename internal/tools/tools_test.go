@@ -280,11 +280,12 @@ func tags(v any) []string {
 
 func TestSchemasMatchArgs(t *testing.T) {
 	args := map[string]any{
-		"decisions_explain":        explainDecisionArgs{},
-		"conversation_reply":       protocol.CoordinationReply{},
-		"background_evidence_read": evidenceArgs{},
-		"conversation_turn_adopt":  protocol.AdoptClarificationPayload{},
-		"conversation_turn_wait":   protocol.TurnClarification{}, "conversation_turn_read": turnReadArgs{}, "conversation_turn_commit": protocol.LogicalTurnCommit{},
+		"conversation_handoff_audit": handoffAuditArgs{},
+		"decisions_explain":          explainDecisionArgs{},
+		"conversation_reply":         protocol.CoordinationReply{},
+		"background_evidence_read":   evidenceArgs{},
+		"conversation_turn_adopt":    protocol.AdoptClarificationPayload{},
+		"conversation_turn_wait":     protocol.TurnClarification{}, "conversation_turn_read": turnReadArgs{}, "conversation_turn_commit": protocol.LogicalTurnCommit{},
 		"conversation_associate": associateArgs{}, "agent_conversations_list": agentListArgs{}, "agent_rollout_read": rolloutArgs{}, "background_item_read": contextReadArgs{}, "background_submit": protocol.BackgroundAssessmentPayload{},
 		"background_sources": backgroundSourceArgs{}, "background_checkin": backgroundCheckinArgs{},
 

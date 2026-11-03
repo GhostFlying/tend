@@ -851,3 +851,9 @@ admitted main 工具都提供显式选项，仍通过固定本机 controller 和
 入口在配置、数据库和 listener 之前退出，旧程序不支持时拒绝，不回退普通启动。
 既有 manifest 不增字段，默认 false 不探测；CLI 提供对应 typed 能力诊断。
 见[实施计划](plans/manager-upgrade-park.md)。
+
+## D170：摘要与交接的有界事实审计
+
+原 attempt 行按 snapshot 复用，不作为完整历史计数。只读审计按稳定事件水位分页，未来事件在原事务冻结 instance/source/target 的当时已知身份，旧空 payload 保留不可观察；不借当前 binding 回填、不输出摘要正文或本地路径。CLI 与主 Agent 只读工具同批提供，无执行策略或 runner wire 改动。见[计划](plans/handoff-attempt-audit.md)。
+
+D170 的恢复路径 RefreshHandoff（包括 injected→created）和已确定未创建的 RetargetPreparedHandoff 也在实际变更同事务记录新审计身份；相同参数重试不重复，旧无来源历史不回填。
