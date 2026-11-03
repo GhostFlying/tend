@@ -495,6 +495,9 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := checkMaintenanceHello(ctx, q, host.HostID); err != nil {
+		return Outcome{}, err
+	}
 	if p.WorkspaceProtocol < 0 || p.WorkspaceProtocol > 1 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported workspace_protocol")
 	}
@@ -821,6 +824,11 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	}
 	if err := validatePreparationFailure(ctx, tx.Q(), rc, p); err != nil {
 		return Outcome{}, err
+	}
+	if preserved, err := preserveMaintenanceGiveUp(ctx, x, tx, rc.run.RunID); err != nil {
+		return Outcome{}, err
+	} else if preserved {
+		return Outcome{Accepted: true, Result: map[string]any{"run_id": rc.run.RunID, "business_outcome": "pending_reconciliation", "give_up_classification": "unclassified"}, Events: []Event{{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.maintenance_give_up_retained", Body: map[string]any{"reason": p.Reason, "classification": "unclassified"}}}}, nil
 	}
 	preparationOwner := false
 	if p.Preparation != nil {

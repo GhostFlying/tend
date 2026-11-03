@@ -171,6 +171,13 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			if err := settleStoppedManagerRequests(ctx, tx, run); err != nil {
 				return Outcome{}, err
 			}
+			preserved, err := preserveMaintenancePhysicalStop(ctx, x, tx, run, p.LastSequence)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if preserved {
+				return Outcome{Result: p, Events: []Event{{ObjectType: "run", ObjectID: run, Kind: "run.maintenance_physical_stop", Body: map[string]any{"last_sequence": p.LastSequence}}}}, nil
+			}
 			uncertain, err := managerBusinessReceiptsPending(ctx, tx.Q(), run)
 			if err != nil {
 				return Outcome{}, err
@@ -472,6 +479,16 @@ func (a *App) AcknowledgeManagerEvent(ctx context.Context, run string, seq int64
 // finishStoppedManager releases physical capacity while retaining uncertain
 // business receipts for a new, read-only reconciliation run.
 func finishStoppedManager(ctx context.Context, x *Exec, tx *store.Tx, run, reason string, lastSequence int64) (Outcome, error) {
+	preserved, err := preserveMaintenancePhysicalStop(ctx, x, tx, run, lastSequence)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if preserved {
+		if err := settleStoppedManagerRequests(ctx, tx, run); err != nil {
+			return Outcome{}, err
+		}
+		return Outcome{Result: map[string]any{"run_id": run}, Events: []Event{{ObjectType: "run", ObjectID: run, Kind: "run.maintenance_physical_stop", Body: map[string]any{"reason": reason, "last_sequence": lastSequence}}}}, nil
+	}
 	r, err := store.GetRun(ctx, tx.Q(), run)
 	if err != nil {
 		return Outcome{}, err
@@ -529,6 +546,9 @@ func managerNativeReceiptMethod(method string) bool {
 	return false
 }
 func managerNativeBusinessAllowed(ctx context.Context, q store.Querier, r store.RunRow) (bool, error) {
+	if fenced, err := maintenanceNativeBusinessFenced(ctx, q, r); err != nil || fenced {
+		return false, err
+	}
 	var current bool
 	err := q.QueryRowContext(ctx, `SELECT m.state='assigned' AND i.assignment_epoch=m.assignment_epoch AND i.state IN ('active','cancelling') AND i.assignment_state='active' AND t.control_mode='managed' AND t.lifecycle NOT IN ('completed','cancelled') AND a.status='dispatched' AND COALESCE(json_extract(a.trigger_json,'$.receipt_only'),0)=0 AND r.desired_state='run' AND r.observed_state IN ('starting','running','waiting') FROM runs r JOIN issue_manager_tasks m USING(task_id) JOIN tasks t USING(task_id) JOIN plan_actions a ON a.action_id=r.action_id JOIN issue_controls i ON i.issue_id=m.issue_id WHERE r.run_id=?`, r.RunID).Scan(&current)
 	if err != nil || !current {

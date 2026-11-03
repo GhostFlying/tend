@@ -22,11 +22,12 @@ import (
 var mode = "successor"
 
 type fixtureConfig struct {
-	DB            string `json:"db"`
-	Socket        string `json:"socket"`
-	Updater       string `json:"updater"`
-	Releases      string `json:"releases"`
-	HostedDrained *bool  `json:"hosted_drained,omitempty"`
+	DB              string `json:"db"`
+	Socket          string `json:"socket"`
+	Updater         string `json:"updater"`
+	Releases        string `json:"releases"`
+	HostedDrained   *bool  `json:"hosted_drained,omitempty"`
+	ReceiptRecovery bool   `json:"receipt_recovery,omitempty"`
 }
 
 func main() {
@@ -60,6 +61,28 @@ func run() error {
 	}
 	defer db.Close()
 	ids := protocol.NewULIDGen(time.Now, nil)
+	if mode == "legacy" && cfg.ReceiptRecovery {
+		if err := db.Write(ctx, func(tx *store.Tx) error {
+			var count int
+			if err := tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM native_turn_receipts_pending`).Scan(&count); err != nil {
+				return err
+			}
+			if count != 0 {
+				return nil
+			}
+			message, request := ids.New(protocol.PrefixMessage), ids.New(protocol.PrefixRequest)
+			if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: "main", Author: "owner", Body: "Retained native receipt fixture."}); err != nil {
+				return err
+			}
+			if err := tx.PutMainTurn(ctx, store.MainTurn{RequestID: request, MessageID: message, ThreadID: "fixture-original-native", TurnID: "fixture-original-turn", Status: store.TurnInterrupted}, 0); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO native_turn_receipts_pending(request_id) VALUES(?)`, request)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
 	opts := []app.Option{}
 	recovery := os.Getenv("TEND_FORWARD_RECOVERY_ID")
 	if mode == "successor" && recovery != "" {
@@ -95,6 +118,11 @@ func run() error {
 			return err
 		}
 	}
-	archive := upgradectl.ArchiveControl{App: a, ObserveHosted: func(context.Context) (bool, error) { return cfg.HostedDrained == nil || *cfg.HostedDrained, nil }}
+	archive := upgradectl.ArchiveControl{App: a, ObserveHosted: func(context.Context) (bool, error) {
+		if cfg.ReceiptRecovery {
+			return false, nil
+		}
+		return cfg.HostedDrained == nil || *cfg.HostedDrained, nil
+	}}
 	return c.RunWith(ctx, archive.Handler())
 }

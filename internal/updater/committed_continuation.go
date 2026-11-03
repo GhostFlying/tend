@@ -37,7 +37,7 @@ func (s *Supervisor) ContinueCommittedMaintenance(ctx context.Context, p protoco
 		}
 		return nil
 	}
-	if !protocol.ValidID(protocol.PrefixRequest, c.RequestID) || c.RequestID == p.RequestID || c.RequestID == p.LinkRequestID || c.RequestID == p.PreparationRequestID || c.RequestID == p.PreparationCancelRequestID || c.WindowClaim == "" || c.ExpectedGeneration != s.state.Generation || c.ExpiresAtMillis <= s.opts.Now().UnixMilli() || c.ExpiresAtMillis > s.opts.Now().Add(30*time.Minute).UnixMilli() {
+	if !protocol.ValidID(protocol.PrefixRequest, c.RequestID) || c.RequestID == p.RequestID || c.RequestID == p.LinkRequestID || c.RequestID == p.PreparationRequestID || c.RequestID == p.PreparationCancelRequestID || c.RequestID == m.ReceiptRecoveryRequestID || c.WindowClaim == "" || c.ExpectedGeneration != s.state.Generation || c.ExpiresAtMillis <= s.opts.Now().UnixMilli() || c.ExpiresAtMillis > s.opts.Now().Add(30*time.Minute).UnixMilli() {
 		return errors.New("updater: invalid or stale maintenance continuation")
 	}
 	for _, h := range p.HostControls {
@@ -56,8 +56,14 @@ func (s *Supervisor) ContinueCommittedMaintenance(ctx context.Context, p protoco
 	if m.ArchiveAuthorization == nil {
 		return errors.New("updater: original admission proof missing")
 	}
-	if err := maintenanceDrain(p, *m.ArchiveAuthorization); err != nil {
-		return err
+	var admissionErr error
+	if m.ReceiptRecoveryAuthorized {
+		admissionErr = ValidateReceiptRecoveryArchive(p, *m.ArchiveAuthorization)
+	} else {
+		admissionErr = maintenanceDrain(p, *m.ArchiveAuthorization)
+	}
+	if admissionErr != nil {
+		return admissionErr
 	}
 	if err := s.maintenanceOldGone(ctx, m); err != nil {
 		return err

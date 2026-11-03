@@ -33,7 +33,11 @@ func TestCommittedHandoffActualLinkedUpdaterInterruptedBeforeStart(t *testing.T)
 func TestCommittedHandoffActualFailedCandidateForward(t *testing.T) {
 	runCommittedHandoffFixture(t, false, true)
 }
-func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
+func TestCommittedHandoffActualCancelledUpdaterReceiptRecovery(t *testing.T) {
+	runCommittedHandoffFixture(t, false, false, true)
+}
+func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool, recovery ...bool) {
+	receiptRecovery := len(recovery) > 0 && recovery[0]
 	if os.Getenv("TEND_TEST_SYSTEMD_USER") != "1" {
 		t.Skip("opt-in isolated systemd fixture")
 	}
@@ -47,7 +51,7 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 			t.Fatal("explicit private artifact paths required")
 		}
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 	defer cancel()
 	root, err := os.MkdirTemp("", "tend-cm-")
 	if err != nil {
@@ -68,7 +72,11 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 	if err := writeJSON(configFile, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSON(serverFile, map[string]string{"db": filepath.Join(root, "ledger.db"), "socket": socket, "updater": SocketPath(cfg), "releases": filepath.Join(root, "releases")}); err != nil {
+	serverConfig := map[string]any{"db": filepath.Join(root, "ledger.db"), "socket": socket, "updater": SocketPath(cfg), "releases": filepath.Join(root, "releases")}
+	if receiptRecovery {
+		serverConfig["receipt_recovery"] = true
+	}
+	if err := writeJSON(serverFile, serverConfig); err != nil {
 		t.Fatal(err)
 	}
 	oldServerSHA, err := hashFile(oldServer)
@@ -236,7 +244,7 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 	_ = json.Unmarshal(manifestRaw, &manifest)
 	manifest.Artifacts[0].Role = "server"
 	manifest.Protocol = release.Range{Min: 1, Max: 2}
-	manifest.Storage.ServerSchema = release.Range{Min: 62, Max: 81}
+	manifest.Storage.ServerSchema = release.Range{Min: 62, Max: 82}
 	if err := writeJSON(filepath.Join(dir, "manifest.json"), manifest); err != nil {
 		t.Fatal(err)
 	}
@@ -253,6 +261,54 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 	resourceRaw, _ := os.ReadFile(resourceFile)
 	evidenceRaw, _ := os.ReadFile(evidence)
 	p := CommittedHandoffPlan{Unit: unit, UpdaterBinary: fixed, ConfigFile: configFile, Candidate: newUpdater, OldUpdaterEvidence: evidence, OldUpdaterEvidenceSHA256: bytesDigest(evidenceRaw), Maintenance: protocol.CommittedMaintenancePlan{MaintenanceID: "fixture-committed-window", PreparationRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEX", PreparationCancelRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEY", RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEV", LinkRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEW", ReleaseDir: dir, Successor: Binding{ProcessInstanceID: unit + "-successor"}, OperatorUID: os.Getuid(), WindowClaim: "fixture-committed-window", ExpiresAtMillis: expires, ResourceEvidence: resourceFile, ResourceSHA256: bytesDigest(resourceRaw), PreparationRevision: 1}}
+	if receiptRecovery {
+		cancelledUpdater := os.Getenv("TEND_TEST_CANCELLED_UPDATER")
+		if !filepath.IsAbs(cancelledUpdater) {
+			t.Fatal("exact prior cancelled-scope updater artifact is required")
+		}
+		prior := p
+		prior.Candidate = cancelledUpdater
+		prior.Maintenance.MaintenanceID = "fixture-prior-cancelled"
+		prior.Maintenance.Successor.ProcessInstanceID = unit + "-prior-cancelled"
+		prior, err = PrepareCommittedHandoffPlan(ctx, cfg, prior)
+		if err != nil {
+			t.Fatal("prepare actual previous updater hop", err)
+		}
+		priorFile := filepath.Join(root, "prior-cancelled-plan.json")
+		if err := writeJSON(priorFile, prior); err != nil {
+			t.Fatal(err)
+		}
+		sum, _ := hashFile(cancelledUpdater)
+		command := exec.CommandContext(ctx, cli, "updater", "maintenance", "apply", "--installer", cancelledUpdater, "--installer-sha256", sum, "--config", configFile, "--plan", priorFile, "--json")
+		_, _ = command.CombinedOutput()
+		wait("actual previous updater adoption", func() bool {
+			st, e := Call(ctx, cfg, "status", ControlRequest{})
+			return e == nil && st.Format == 3 && st.Maintenance != nil && st.Maintenance.Phase == "updater_adopted"
+		})
+		if err := callMaintenanceFixtureCLI(ctx, cli, prior, priorFile, cfg, "prepare"); err != nil {
+			t.Fatal(err)
+		}
+		if err := callMaintenanceFixtureCLI(ctx, cli, prior, priorFile, cfg, "cancel"); err != nil {
+			t.Fatal(err)
+		}
+		priorState, e := Call(ctx, cfg, "status", ControlRequest{})
+		if e != nil || priorState.Maintenance.Phase != "cancelled" || priorState.Process != child || priorState.Current != actual.Current {
+			t.Fatal("prior cancellation changed committed child", e)
+		}
+		t.Logf("actual previous updater reached Format3 cancelled scope with original child retained")
+		// The new immutable root starts from the genuine prior cancellation;
+		// neither its journal nor its committed state is hand-rewritten.
+		for field, value := range map[*string]string{&p.Maintenance.RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF5", &p.Maintenance.LinkRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF6", &p.Maintenance.PreparationRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF7", &p.Maintenance.PreparationCancelRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF8"} {
+			*field = value
+		}
+		p.Maintenance.PreparationRevision = 3
+		p.Maintenance.ReceiptRecoveryStop = &protocol.CommittedReceiptRecoveryStop{Runs: []protocol.CommittedRetainedRun{}}
+		if err := writeJSON(evidence, UpdaterExitEvidence{OperatorUID: os.Getuid(), ArtifactSHA256: sum, Source: "exact supplied previous cancelled-scope updater", ReviewArtifact: "actual isolated adoption and safe cancellation", ExitPolicy: "retains-managed-child", ExpiresAtMillis: expires}); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := os.ReadFile(evidence)
+		p.OldUpdaterEvidenceSHA256 = bytesDigest(raw)
+	}
 	if os.Getenv("TEND_TEST_FLOCK_BTRFS") == "1" {
 		dev, ino, e := lockIdentity(stateDir)
 		if e != nil {
@@ -322,7 +378,12 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 	if err := callMaintenanceFixtureCLI(ctx, cli, p, planFile, cfg, "prepare"); err != nil {
 		t.Fatal(err)
 	}
-	if err := callMaintenanceFixtureCLI(ctx, cli, p, planFile, cfg, "authorize"); err != nil {
+	if receiptRecovery {
+		err = callReceiptRecoveryFixtureCLI(ctx, cli, p, planFile, cfg, "req_01M6F01JSS6Q9BFV6DJNSSBHF9")
+	} else {
+		err = callMaintenanceFixtureCLI(ctx, cli, p, planFile, cfg, "authorize")
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	var committed State
@@ -395,7 +456,7 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 	}
 	secondManifest.Artifacts[0].Role = "server"
 	secondManifest.Protocol = release.Range{Min: 1, Max: 2}
-	secondManifest.Storage.ServerSchema = release.Range{Min: 62, Max: 81}
+	secondManifest.Storage.ServerSchema = release.Range{Min: 62, Max: 82}
 	if e := writeJSON(filepath.Join(secondDir, "manifest.json"), secondManifest); e != nil {
 		t.Fatal(e)
 	}
@@ -420,6 +481,10 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 	next.OldUpdaterEvidence = secondEvidence
 	next.OldUpdaterEvidenceSHA256 = bytesDigest(secondEvidenceRaw)
 	next.Maintenance = protocol.CommittedMaintenancePlan{MaintenanceID: "fixture-second-window", RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", LinkRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF2", PreparationRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF3", PreparationCancelRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF4", ReleaseDir: secondDir, Successor: Binding{ProcessInstanceID: unit + "-second-successor"}, OperatorUID: os.Getuid(), WindowClaim: resource.WindowClaim, ResourceEvidence: secondResource, ResourceSHA256: bytesDigest(resourceRaw), ExpiresAtMillis: expires, PreparationRevision: 3}
+	if receiptRecovery {
+		next.Maintenance.ReceiptRecoveryStop = p.Maintenance.ReceiptRecoveryStop
+		next.Maintenance.PreparationRevision = 5
+	}
 	if failed {
 		next.Maintenance.ParentMaintenanceID = p.Maintenance.MaintenanceID
 		next.Maintenance.PreparationRevision = p.Maintenance.PreparationRevision
@@ -445,7 +510,12 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 	if e := callMaintenanceFixtureCLI(ctx, cli, next, nextFile, cfg, "prepare"); e != nil {
 		t.Fatal(e)
 	}
-	if e := callMaintenanceFixtureCLI(ctx, cli, next, nextFile, cfg, "authorize"); e != nil {
+	if receiptRecovery {
+		e = callReceiptRecoveryFixtureCLI(ctx, cli, next, nextFile, cfg, "req_01M6F01JSS6Q9BFV6DJNSSBHFA")
+	} else {
+		e = callMaintenanceFixtureCLI(ctx, cli, next, nextFile, cfg, "authorize")
+	}
+	if e != nil {
 		t.Fatal(e)
 	}
 	wait("second successor independently linked", func() bool {
@@ -486,6 +556,25 @@ func callMaintenanceFixtureCLI(ctx context.Context, cli string, p CommittedHando
 	cmd := exec.CommandContext(ctx, cli, "updater", "maintenance", action, "--socket", SocketPath(cfg), "--plan", planFile, "--expected-generation", strconv.FormatUint(st.Generation, 10), "--json")
 	if raw, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("fixture maintenance %s: %w %s", action, err, raw)
+	}
+	return nil
+}
+
+func callReceiptRecoveryFixtureCLI(ctx context.Context, cli string, p CommittedHandoffPlan, planFile string, cfg Config, request string) error {
+	st, err := Call(ctx, cfg, "status", ControlRequest{})
+	if err != nil {
+		return err
+	}
+	first, second := planFile+".capture1.json", planFile+".capture2.json"
+	for _, path := range []string{first, second} {
+		if err := writeJSON(path, p.Maintenance.ReceiptRecoveryStop.Runs); err != nil {
+			return err
+		}
+	}
+	command := exec.CommandContext(ctx, cli, "updater", "maintenance", "recover-stop", "--socket", SocketPath(cfg), "--plan", planFile, "--expected-generation", strconv.FormatUint(st.Generation, 10), "--request-id", request, "--first-capture", first, "--second-capture", second, "--json")
+	raw, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("explicit receipt recovery command: %w: %s", err, raw)
 	}
 	return nil
 }

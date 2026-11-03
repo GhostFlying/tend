@@ -101,3 +101,38 @@ launch 查证，不能借 resume 再起一次。候选可能已接单时只能�
 完整原 state 只在本窗口不可变 journal 保存；持久维护记录用 SHA 引用，避免状态及历史
 递归复制。父数据库已 link 而 updater 确认丢失时，新子窗口还钉精确 `parent_receipt`，
 保留父 Linked 的真实成功事实，子窗口仍独立 fence、提交和 link。
+
+
+## 收据未知且旧服务不能排空时的显式恢复停止
+
+正常 `authorize` 仍要求 HostedDrained 为真。只有固定计划预先提供
+`receipt_recovery_stop: {"runs": [...]}` 时，才能选择 D156 恢复：`runs` 每项包含
+`task_id` 与完整 owner `RunView`。先遍历所有 task（`--all`、不筛选 lifecycle 或 project，
+沿每页 next cursor 继续 `--before`），逐 task 读取全部 runs，包括已终态 task 上的 open
+Run；只取 starting/running/waiting/interrupted/unknown。不得只取最新 execution。
+准备完成且所有 host 已确认维护后，以相同方法做两次完整捕获，按稳定身份顺序保存两个
+独立私有 JSON 数组；它们必须彼此相同、匹配固定计划库存及 archive 的逐 host count。
+库存变动时取消并建立新计划，不修改同 ID 的 payload。新 server 仍会在同一事务核验
+实际全量 Run 与 lease；客户端双读不是数据库串行化证明。
+
+```sh
+tend updater maintenance recover-stop --socket "$UPDATER_SOCKET" \
+  --plan "$PRIVATE_PLAN" --expected-generation "$STATE_GENERATION" \
+  --request-id "$RECOVERY_STOP_REQUEST_ID" \
+  --first-capture "$FIRST_PREPARED_CAPTURE" \
+  --second-capture "$SECOND_PREPARED_CAPTURE" --json
+```
+
+这一步明确保存 false drain 及原未知，绑定旧进程后仅 crash-stop 原 server；不发送 native
+business close。旧 API 的其他 hosted effects、owner 或 host ACK 不满足时拒绝。原请求
+重放只返回既有事实，改变捕获或 generation 必须使用新的合法动作。结果未知先 status，
+不能换 ID 重复 stop/start。新 candidate 在开放入口前登记全部库存与持久物理停止保护，
+prelink 不启动原生收据/模型。健康失败沿同窗口 status/reconcile 或 D155 父窗口前滚；
+既有 Run、pin、decision 和未分类物理失败事实不因部署被宣称完成。该能力不保证历史
+unknown 立即收敛，也不替代原业务的独立处理决定。
+
+受保护原 lease 尚未有独立业务处理时，旧 runner 的 Hello 会明确保持整台 host 的对账
+pending，避免收到 Continue 后自动重启原执行；这不表示 host 已排空。普通 give-up 的
+真实事实先持久保存，再以既有 UnknownOutcome 沿原请求等待，不伪装网络失败。新的
+owner stop/cancel 能利用已保存物理事实结算原 Run；原回执不修改。新控制释放原 lease
+后，旧客户端会按认证拒绝收尾。未作这种独立处理前，不保证 runner 升级可继续。

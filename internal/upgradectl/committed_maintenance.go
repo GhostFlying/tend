@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"sync"
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
@@ -57,6 +59,9 @@ func (c *Controller) InitializeCommittedMaintenance(ctx context.Context, id stri
 	}
 	if r.Process.PID != 0 && r.Process != process {
 		return errors.New("upgradectl: successor kernel identity changed")
+	}
+	if err := verifyReceiptRecoveryAuthorization(*r); err != nil {
+		return err
 	}
 	if err := verifyMaintenanceParent(state, r.Plan); err != nil {
 		return err
@@ -159,6 +164,12 @@ func verifyMaintenanceParent(state updater.State, p protocol.CommittedMaintenanc
 	if !ok || p.ParentPlan == nil || p.ParentMaintenanceID == p.MaintenanceID || parent.Plan.MaintenanceID != p.ParentMaintenanceID || !reflect.DeepEqual(parent.Plan, *p.ParentPlan) || !reflect.DeepEqual(parent.Receipt, p.ParentReceipt) || !parent.Irreversible || (parent.Phase != "checking_successor" && parent.Phase != "successor_committed") || parent.Process != p.PreviousProcess || parent.Plan.Successor != p.Previous || parent.ArchiveAuthorization == nil {
 		return errors.New("upgradectl: independent failed maintenance history is not established")
 	}
+	if !reflect.DeepEqual(p.ReceiptRecoveryStop, parent.Plan.ReceiptRecoveryStop) {
+		return errors.New("upgradectl: failed maintenance receipt recovery scope changed")
+	}
+	if err := verifyReceiptRecoveryAuthorization(parent); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(parent.Plan)
 	if err != nil {
 		return err
@@ -173,8 +184,35 @@ func verifyMaintenanceParent(state updater.State, p protocol.CommittedMaintenanc
 	}
 	hash = sha256.Sum256(raw)
 	prepared := parent.ArchiveAuthorization
-	if p.ParentArchiveSHA256 != hex.EncodeToString(hash[:]) || !prepared.Preparation.Prepared || prepared.Preparation.Revision != p.PreparationRevision || prepared.ActiveOwnerRequests != 0 || !prepared.HostedDrained {
+	if p.ParentArchiveSHA256 != hex.EncodeToString(hash[:]) || !prepared.Preparation.Prepared || prepared.Preparation.Revision != p.PreparationRevision || prepared.ActiveOwnerRequests != 0 {
 		return errors.New("upgradectl: failed maintenance admission provenance changed")
+	}
+	if parent.Plan.ReceiptRecoveryStop == nil && !prepared.HostedDrained {
+		return errors.New("upgradectl: failed maintenance hosted drain is not confirmed")
+	}
+	return nil
+}
+
+func verifyReceiptRecoveryAuthorization(m updater.CommittedMaintenance) error {
+	if m.Plan.ReceiptRecoveryStop == nil {
+		if m.ReceiptRecoveryAuthorized || m.ReceiptRecoveryRequestID != "" {
+			return errors.New("upgradectl: ordinary maintenance has receipt recovery authority")
+		}
+		return nil
+	}
+	if !m.ReceiptRecoveryAuthorized || !protocol.ValidID(protocol.PrefixRequest, m.ReceiptRecoveryRequestID) || m.ReceiptRecoveryRequestID == m.Plan.RequestID || m.ReceiptRecoveryRequestID == m.Plan.LinkRequestID || m.ArchiveAuthorization == nil || !release.ValidSHA(m.ReceiptRecoveryFirstSHA256) || m.ReceiptRecoveryFirstSHA256 != m.ReceiptRecoverySecondSHA256 {
+		return errors.New("upgradectl: explicit receipt recovery authorization is incomplete")
+	}
+	raw, err := json.Marshal(m.Plan.ReceiptRecoveryStop.Runs)
+	if err != nil {
+		return err
+	}
+	hash := sha256.Sum256(raw)
+	if m.ReceiptRecoveryFirstSHA256 != hex.EncodeToString(hash[:]) || m.ReceiptRecoveryAuthorization == nil || m.ReceiptRecoveryAuthorization.RequestID != m.ReceiptRecoveryRequestID || !reflect.DeepEqual(m.ReceiptRecoveryAuthorization.FirstCapture, m.Plan.ReceiptRecoveryStop.Runs) || !reflect.DeepEqual(m.ReceiptRecoveryAuthorization.SecondCapture, m.Plan.ReceiptRecoveryStop.Runs) {
+		return errors.New("upgradectl: original receipt recovery inventory authorization changed")
+	}
+	if err := updater.ValidateReceiptRecoveryArchive(m.Plan, *m.ArchiveAuthorization); err != nil {
+		return fmt.Errorf("upgradectl: receipt recovery archive authorization: %w", err)
 	}
 	return nil
 }

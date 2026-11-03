@@ -158,6 +158,7 @@
 | D152 | 验收后持久保留独立交付核对责任，具体 PR/head/base/验证/部署范围通过原 taskless versioned Attention 确认，候选或观测失效持久撤销旧授权；owner 重开原子恢复新协调代次，保留 terminal task 和 unknown。API/CLI 同步，runner 2/1。见 docs/plans/delivery-responsibility.md。 | 已实现，待验收 |
 | D153 | runtime 通过 CLI 绑定服务端自适应并发分组，所有托管执行共享预算；明确拥塞减 1，30 秒合并/冷却，30 分钟稳定且累计满载 15 分钟、有成功 turn 和等待需求才加 1。Web 只读，CLI 全能力；七天历史保留 Issue/session 归因和升档依据，unknown 保留占用。见 docs/plans/adaptive-concurrency.md。 | 已实现，待验收 |
 | D155 | 已提交 server 通过独立本机窗口引导 updater，再以实际归档/host 维护确认前滚；保留 unknown run、旧收据及父失败，限定失败候选可独立后继，CLI 提供完整引导、取消、对账及释放。 | 已实现，待验收 |
+| D156 | 正常维护之外提供显式 receipt-recovery crash stop：真实未知生命周期不冒充排空，完整 Run 库存及原 lease 持久保护先于新服务入口，保留物理停止事实与业务未知，prelink 延迟原生执行。 | 已确认 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
 
@@ -679,3 +680,37 @@ D155 锁观测补充：维护计划从精确 updater 的 fd/fdinfo 验证原 flo
 完整 stat device/inode 必须匹配计划。Btrfs 子卷 stat device 与 flock superblock device
 不同的情况，通过同 fd 的 mount ID 和 Btrfs mount device 精确核对；进程及 fd 前后
 身份不变且确有该 PID 的独占 flock 才通过，不以相同 inode 省略设备或所有者校验。
+
+
+## D156：原收据未知时的显式崩溃恢复维护
+
+旧版本可能在 archive prepare 下持续恢复只读收据，无法报告 HostedDrained。普通 D155
+仍要求真实排空；新的 `receipt_recovery_stop` 计划与独立 `recover-stop` 请求明确承担
+未知托管生命周期，不把 false 观测改成 true。只接受准备修订匹配、owner 在途为零、全部
+host 新鲜确认维护、领取为零，且旧 API 已知 hosted-effect blocker 仅有 native receipt
+reads 与托管生命周期未知。未知 blocker 拒绝。准备下两次完整 task/run 库存须相同并匹配
+固定计划和逐 host open count；task 已终态也不能漏掉其尚未终态 Run。
+
+固定 updater 以精确 pidfd 仅 crash-stop 原 server 父进程，持久意图并确认实际退出，不
+发送 graceful native close、不信号 runner 或共享执行组。外部结果不因连接断开变成成功
+或失败；未知执行保持原 pin，不重发旧业务动作。SQLite WAL 与后续备份保留提交事实。
+候选在任何业务监听、runner RPC、dispatcher 或 hosted 启动前，以同事务核对完整原 Run
+集合、原 lease 和原 hosted request 身份；遗漏或换绑拒绝，已终态不复活。
+
+原 manager 的 unknown 收据资格在注册时冻结。同 lease 的物理 close/Stopped 保存原请求、
+sequence 和停止事实，不自动终结原业务 Run；晚到收据、重启或 link 都不清除此保护。
+旧协议不能区分维护断连与普通物理 give-up；captured 普通 Run 的同 lease release 因而只
+保留未分类原事实，正式业务结果仍走原规则。明确用户 stop/cancel/pause、角色或 lease
+变化优先正常控制，不把新独立业务完成伪装成旧 physical close。原请求永久幂等。
+
+prelink 真实延后 front/background/native 收据与模型启动，并禁止新的 native business
+claim；健康仍核验实际组件静止、DB 可读和已登记 scope。两次递增真实 health 与独立
+DBlink 后恢复原身份的收据对账，archive/host CAS 仍由显式 finish 释放。保护不因 link
+消失；新业务动作须独立接管，不沿物理已停止的原 runner journal 自动重启。追加迁移
+0082，不改历史迁移或 runner wire 2/1。受保护原 lease 的旧 Hello 不返回 Continue，明确让整台 host 的对账保持 pending，
+不自造旧 runner 不支持的 hold 或 retain。独立 owner stop/cancel 可用已持久物理事实结算
+该原 Run，原物理回执不改；普通 release 的待对账状态通过既有 UnknownOutcome 让旧客户端
+保留原请求。新控制实际释放原 lease 后，原客户端按认证拒绝收尾。
+本范围不宣称历史 unknown 或 runner drain 清零。
+
+Refs: D142、D154、D155。见[实施计划](plans/receipt-recovery-stop.md)。

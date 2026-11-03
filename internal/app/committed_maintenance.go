@@ -84,6 +84,9 @@ func (c registerCommittedMaintenance) Apply(ctx context.Context, x *Exec, tx *st
 	if err := tx.PutCommittedMaintenance(ctx, row, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
+	if err := captureMaintenanceRunProtection(ctx, x, tx, p); err != nil {
+		return Outcome{}, err
+	}
 	return Outcome{Result: row, Events: []Event{{ObjectType: "maintenance", ObjectID: p.MaintenanceID, ObjectVersion: 1, Kind: "committed_maintenance_registered", Body: map[string]any{"admission_fenced": true}}}}, nil
 }
 
@@ -198,7 +201,7 @@ func validateCommittedMaintenanceParent(ctx context.Context, q store.Querier, p 
 	if parent != nil && (p.RequestID == parent.RequestID || p.RequestID == parent.LinkRequestID || p.LinkRequestID == parent.RequestID || p.LinkRequestID == parent.LinkRequestID) {
 		return protocol.Errorf(protocol.CodeConflictPayload, "failed maintenance successor requires independent request identities")
 	}
-	if parent == nil || parent.MaintenanceID != p.ParentMaintenanceID || p.ParentMaintenanceID == p.MaintenanceID || p.ParentGeneration == 0 || p.ParentGeneration != p.ExpectedGeneration || !release.ValidSHA(p.ParentArchiveSHA256) || parent.Successor != p.Previous || parent.PreparationRevision != p.PreparationRevision || parent.PreparationRequestID != p.PreparationRequestID || parent.PreparationCancelRequestID != p.PreparationCancelRequestID || !reflect.DeepEqual(parent.HostControls, p.HostControls) {
+	if parent == nil || parent.MaintenanceID != p.ParentMaintenanceID || p.ParentMaintenanceID == p.MaintenanceID || p.ParentGeneration == 0 || p.ParentGeneration != p.ExpectedGeneration || !release.ValidSHA(p.ParentArchiveSHA256) || parent.Successor != p.Previous || parent.PreparationRevision != p.PreparationRevision || parent.PreparationRequestID != p.PreparationRequestID || parent.PreparationCancelRequestID != p.PreparationCancelRequestID || !reflect.DeepEqual(parent.HostControls, p.HostControls) || !reflect.DeepEqual(parent.ReceiptRecoveryStop, p.ReceiptRecoveryStop) {
 		return protocol.Errorf(protocol.CodeConflictPayload, "independent failed maintenance provenance changed")
 	}
 	raw, err := json.Marshal(parent)

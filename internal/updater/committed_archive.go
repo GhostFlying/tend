@@ -44,8 +44,15 @@ func validateMaintenanceRequests(p protocol.CommittedMaintenancePlan) error {
 // runs are intentionally preserved; OnlineReady includes a different run-zero
 // condition and cannot authorize this local committed service replacement.
 func maintenanceDrain(p protocol.CommittedMaintenancePlan, v protocol.ArchiveOnlineStatus) error {
-	if !v.Preparation.Prepared || v.Preparation.Revision != p.PreparationRevision || v.ActiveOwnerRequests != 0 || !v.HostedDrained {
+	if !v.HostedDrained {
 		return errors.New("updater: prepared service has not drained hosted operations")
+	}
+	return maintenanceAdmission(p, v)
+}
+
+func maintenanceAdmission(p protocol.CommittedMaintenancePlan, v protocol.ArchiveOnlineStatus) error {
+	if !v.Preparation.Prepared || v.Preparation.Revision != p.PreparationRevision || v.ActiveOwnerRequests != 0 {
+		return errors.New("updater: prepared service admission is not confirmed")
 	}
 	if len(v.Hosts) != len(p.HostControls) {
 		return errors.New("updater: maintenance host set changed")

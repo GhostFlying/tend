@@ -16,25 +16,30 @@ import (
 // CommittedMaintenance is separate from upgrade and forward-recovery history.
 // Neither an old terminal receipt nor an unknown business run is rewritten.
 type CommittedMaintenance struct {
-	ArchiveAuthorization        *protocol.ArchiveOnlineStatus               `json:"archive_authorization,omitempty"`
-	Plan                        protocol.CommittedMaintenancePlan           `json:"plan"`
-	OriginalStateSHA256         string                                      `json:"original_state_sha256"`
-	ActiveContinuation          *protocol.MaintenanceContinuation           `json:"active_continuation,omitempty"`
-	Continuations               map[string]protocol.MaintenanceContinuation `json:"continuations,omitempty"`
-	OriginalProof               CommittedProof                              `json:"original_proof"`
-	Target                      Version                                     `json:"target"`
-	Phase                       string                                      `json:"phase"`
-	Process                     Identity                                    `json:"process"`
-	AuthorizationBootID         string                                      `json:"authorization_boot_id,omitempty"`
-	AuthorizationDeadlineMillis int64                                       `json:"authorization_deadline_millis,omitempty"`
-	Backups                     []BackupFile                                `json:"backups,omitempty"`
-	Irreversible                bool                                        `json:"irreversible"`
-	Epoch                       string                                      `json:"epoch,omitempty"`
-	FirstSequence               uint64                                      `json:"first_sequence,omitempty"`
-	LastSequence                uint64                                      `json:"last_sequence,omitempty"`
-	HealthCount                 int                                         `json:"health_count"`
-	Receipt                     *protocol.CommittedMaintenanceReceipt       `json:"receipt,omitempty"`
-	LastError                   string                                      `json:"last_error,omitempty"`
+	ReceiptRecoveryAuthorization *protocol.MaintenanceReceiptRecoveryRequest `json:"receipt_recovery_authorization,omitempty"`
+	ReceiptRecoveryAuthorized    bool                                        `json:"receipt_recovery_authorized,omitempty"`
+	ReceiptRecoveryRequestID     string                                      `json:"receipt_recovery_request_id,omitempty"`
+	ReceiptRecoveryFirstSHA256   string                                      `json:"receipt_recovery_first_sha256,omitempty"`
+	ReceiptRecoverySecondSHA256  string                                      `json:"receipt_recovery_second_sha256,omitempty"`
+	ArchiveAuthorization         *protocol.ArchiveOnlineStatus               `json:"archive_authorization,omitempty"`
+	Plan                         protocol.CommittedMaintenancePlan           `json:"plan"`
+	OriginalStateSHA256          string                                      `json:"original_state_sha256"`
+	ActiveContinuation           *protocol.MaintenanceContinuation           `json:"active_continuation,omitempty"`
+	Continuations                map[string]protocol.MaintenanceContinuation `json:"continuations,omitempty"`
+	OriginalProof                CommittedProof                              `json:"original_proof"`
+	Target                       Version                                     `json:"target"`
+	Phase                        string                                      `json:"phase"`
+	Process                      Identity                                    `json:"process"`
+	AuthorizationBootID          string                                      `json:"authorization_boot_id,omitempty"`
+	AuthorizationDeadlineMillis  int64                                       `json:"authorization_deadline_millis,omitempty"`
+	Backups                      []BackupFile                                `json:"backups,omitempty"`
+	Irreversible                 bool                                        `json:"irreversible"`
+	Epoch                        string                                      `json:"epoch,omitempty"`
+	FirstSequence                uint64                                      `json:"first_sequence,omitempty"`
+	LastSequence                 uint64                                      `json:"last_sequence,omitempty"`
+	HealthCount                  int                                         `json:"health_count"`
+	Receipt                      *protocol.CommittedMaintenanceReceipt       `json:"receipt,omitempty"`
+	LastError                    string                                      `json:"last_error,omitempty"`
 }
 
 type MaintenanceAuthority interface {
@@ -170,6 +175,14 @@ func (s *Supervisor) AdoptCommittedMaintenance(ctx context.Context, p protocol.C
 		s.state.MaintenanceHistory[s.state.Maintenance.Plan.MaintenanceID] = *s.state.Maintenance
 	}
 	s.state.Maintenance = &CommittedMaintenance{Plan: p, OriginalStateSHA256: p.StateSHA256, OriginalProof: *s.state.CommittedProof, Target: target, Phase: "updater_adopted"}
+	if p.ParentMaintenanceID != "" && p.ReceiptRecoveryStop != nil {
+		parent := s.state.MaintenanceHistory[p.ParentMaintenanceID]
+		s.state.Maintenance.ReceiptRecoveryAuthorized = parent.ReceiptRecoveryAuthorized
+		s.state.Maintenance.ReceiptRecoveryRequestID = parent.ReceiptRecoveryRequestID
+		s.state.Maintenance.ReceiptRecoveryAuthorization = parent.ReceiptRecoveryAuthorization
+		s.state.Maintenance.ReceiptRecoveryFirstSHA256 = parent.ReceiptRecoveryFirstSHA256
+		s.state.Maintenance.ReceiptRecoverySecondSHA256 = parent.ReceiptRecoverySecondSHA256
+	}
 	if s.state.UpdaterEpoch == "" {
 		epoch, err := s.opts.NewID()
 		if err != nil {
@@ -201,6 +214,9 @@ func (s *Supervisor) AuthorizeCommittedMaintenance(ctx context.Context, p protoc
 	}
 	if generation != s.state.Generation {
 		return errors.New("updater: stale maintenance generation")
+	}
+	if p.ReceiptRecoveryStop != nil && p.ParentMaintenanceID == "" {
+		return errors.New("updater: explicit receipt recovery stop authorization required")
 	}
 	if err := verifyResourceEvidence(maintenanceResources(p), s.opts.Now()); err != nil {
 		return err
@@ -318,8 +334,14 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if err := maintenanceDrain(m.Plan, v); err != nil {
-				return err
+			var admissionErr error
+			if m.ReceiptRecoveryAuthorized {
+				admissionErr = ValidateReceiptRecoveryArchive(m.Plan, v)
+			} else {
+				admissionErr = maintenanceDrain(m.Plan, v)
+			}
+			if admissionErr != nil {
+				return admissionErr
 			}
 			m.ArchiveAuthorization = &v
 		} else {
@@ -336,8 +358,18 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 			return err
 		}
 		if !m.Plan.FailedProcessExited {
-			if err := s.opts.Process.Stop(ctx, id, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second); err != nil {
-				return err
+			var stopErr error
+			if m.ReceiptRecoveryAuthorized {
+				crash, ok := s.opts.Process.(receiptRecoveryProcess)
+				if !ok {
+					return errors.New("updater: exact crash recovery process support unavailable")
+				}
+				stopErr = crash.Crash(ctx, id, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second)
+			} else {
+				stopErr = s.opts.Process.Stop(ctx, id, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second)
+			}
+			if stopErr != nil {
+				return stopErr
 			}
 		}
 		return s.maintenanceRecordOldExit(ctx, m)

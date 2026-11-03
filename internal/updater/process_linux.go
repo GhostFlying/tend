@@ -271,6 +271,16 @@ func (p LinuxProcess) Start(ctx context.Context, binary string, cfg Config, extr
 	return id, nil
 }
 func (p LinuxProcess) Stop(ctx context.Context, id Identity, timeout time.Duration) error {
+	return p.signalExact(ctx, id, timeout, syscall.SIGTERM)
+}
+
+// Crash is limited to the exact reviewed parent process. It never signals a
+// process group or invokes a graceful native/business close path.
+func (p LinuxProcess) Crash(ctx context.Context, id Identity, timeout time.Duration) error {
+	return p.signalExact(ctx, id, timeout, syscall.SIGKILL)
+}
+
+func (p LinuxProcess) signalExact(ctx context.Context, id Identity, timeout time.Duration, signal syscall.Signal) error {
 	current, err := p.Inspect(ctx, id.PID)
 	if errors.Is(err, ErrNotRunning) {
 		return nil
@@ -282,7 +292,7 @@ func (p LinuxProcess) Stop(ctx context.Context, id Identity, timeout time.Durati
 		return errors.New("updater: refusing to signal reused process identity")
 	}
 	// pidfd pins the inspected process: recheck after opening so PID reuse cannot
-	// turn SIGTERM into a signal to a different process.
+	// turn the requested signal into a signal to a different process.
 	fd, _, errno := syscall.Syscall(434, uintptr(id.PID), 0, 0) // pidfd_open, Linux >= 5.3.
 	if errno != 0 {
 		return fmt.Errorf("updater: pin process identity: %w", errno)
@@ -298,7 +308,7 @@ func (p LinuxProcess) Stop(ctx context.Context, id Identity, timeout time.Durati
 	if current != id {
 		return ErrUnknown
 	}
-	_, _, errno = syscall.Syscall6(424, fd, uintptr(syscall.SIGTERM), 0, 0, 0, 0) // pidfd_send_signal.
+	_, _, errno = syscall.Syscall6(424, fd, uintptr(signal), 0, 0, 0, 0) // pidfd_send_signal.
 	if errno != 0 && errno != syscall.ESRCH {
 		return fmt.Errorf("updater: stop process: %w", errno)
 	}
