@@ -17,3 +17,5 @@ Refs: D162。复用已有条件能力与飞书范围报告，保留其未验证�
 10. 第三轮审查修复：URL verification 按官方协议允许无事件签名，经解密和 verification token 鉴权；普通事件仍验证原始 body 签名。父输入只有未提交或 accepted/unknown 才等待，明确 failed 父项不能使子输入永久 pending。官方 SDK 私有 cache cleaner 的退出缺口单独以正常依赖补丁解决，不用 unsafe 访问或虚报 worker 已全部退出。
 
 11. 上游 v3.12.2 核验仍无 cache cleaner 显式释放，使用基于 v3.12.1 的最小 SDK fork，固定合入 commit `16ab071ae1eb786f9d8843b933c067e80917d8b4`（保留上游许可/协议与原 Start/CloseAndWait 行为）。构造后立即 defer terminal Dispose，覆盖未启动、预取消、鉴权失败与正常重连关闭。fork 只新增 cache Close 与 terminal Dispose，经独立审查和 Go 1.17/stable 生命周期检查；Tend 另核真实本地网关及 cleaner 数不增长，不访问真实应用。
+
+12. 第四轮复查发现选择题只冻结原始 question，遗漏交互选项与引用回复说明。复用现有 MessagingInteractionText，在同事务、分片与 outbox 冻结前渲染文本；保留原额外通知正文，普通非交互消息不改变。验证多段通知完整、原消息引用与数字选项回复去重，不新增交互卡片或权限入口。

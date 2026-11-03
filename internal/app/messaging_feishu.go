@@ -227,7 +227,18 @@ func queueFeishuCommunication(ctx context.Context, x *Exec, tx *store.Tx, id str
 		original.AppID, original.TenantKey, original.ChatID, original.SenderID = source.AppID, source.TenantKey, source.ChatID, source.SenderID
 	}
 	sourceCurrent := b.Owner == original.Owner && b.Revision == original.Revision && b.AppID == original.AppID && b.TenantKey == original.TenantKey && b.ChatID == original.ChatID && b.SenderID == original.SenderID
-	parts := splitCommunication(p.Body, 1000)
+	body := p.Body
+	interaction, err := interactionForMessage(ctx, tx.Q(), id)
+	if err != nil {
+		return err
+	}
+	if interaction != nil {
+		body = MessagingInteractionText(*interaction)
+		if p.Body != interaction.Question {
+			body = p.Body + "\n\n" + body
+		}
+	}
+	parts := splitCommunication(body, 1000)
 	for n, body := range parts {
 		state := "queued"
 		if !b.Enabled || b.RuntimeHealth == "disabled" || !sourceCurrent {
