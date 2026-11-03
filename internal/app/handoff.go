@@ -141,8 +141,12 @@ func (a *App) handoffWrite(ctx context.Context, f func(*store.Tx) error) error {
 	}
 	return err
 }
-func (a *App) handoffEvent(ctx context.Context, tx *store.Tx, id, kind string) error {
-	_, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "conversation", ObjectID: id, Kind: kind, BodyJSON: `{}`, CreatedAt: a.now().UnixMilli()})
+func (a *App) handoffEvent(ctx context.Context, tx *store.Tx, id, kind string, identity protocol.HandoffAuditIdentity) error {
+	body, err := json.Marshal(identity)
+	if err != nil {
+		return err
+	}
+	_, err = tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "conversation", ObjectID: id, Kind: kind, BodyJSON: string(body), CreatedAt: a.now().UnixMilli()})
 	return err
 }
 
@@ -206,7 +210,7 @@ func (a *App) SaveHandoffSummary(ctx context.Context, v store.HandoffSummary) (s
 		if err != nil || rows == 0 {
 			return err
 		}
-		return a.handoffEvent(ctx, tx, v.ID, "conversation.summary")
+		return a.handoffEvent(ctx, tx, v.ID, "conversation.summary", summaryAuditIdentity(v.Snapshot))
 	})
 	return v, err
 }
@@ -242,7 +246,10 @@ func (a *App) PrepareHandoff(ctx context.Context, v store.ThreadHandoff) (store.
 		v.CreatedAtMillis = a.now().UnixMilli()
 		v.UpdatedAtMillis = v.CreatedAtMillis
 		_, err = tx.Exec(ctx, `INSERT INTO main_thread_handoffs(handoff_id,instance,source_thread_id,source_generation,source_version,toolset_hash,prompt,phase,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, v.ID, v.Instance, v.SourceThreadID, v.SourceGeneration, v.SourceVersion, v.ToolsetHash, v.Prompt, v.Phase, v.CreatedAtMillis, v.UpdatedAtMillis)
-		return err
+		if err != nil {
+			return err
+		}
+		return a.handoffEvent(ctx, tx, v.ID, "conversation.handoff_prepared", handoffAuditIdentity(v))
 	})
 	return v, err
 }
@@ -265,7 +272,11 @@ func (a *App) AdvanceHandoff(ctx context.Context, id, from, to string) error {
 			return protocol.Errorf(protocol.CodeStaleRevision, "handoff phase changed")
 		}
 		_, err = tx.Exec(ctx, `UPDATE main_thread_handoffs SET phase=?,updated_at=? WHERE handoff_id=? AND phase=?`, to, a.now().UnixMilli(), id, from)
-		return err
+		if err != nil {
+			return err
+		}
+		v.Phase = to
+		return a.handoffEvent(ctx, tx, id, "conversation.handoff_advanced", handoffAuditIdentity(v))
 	})
 }
 
@@ -289,7 +300,11 @@ func (a *App) RecordHandoffTarget(ctx context.Context, id, threadID, path string
 			return protocol.Errorf(protocol.CodeInvalidTransition, "handoff is not creating a fresh target")
 		}
 		_, err = tx.Exec(ctx, `UPDATE main_thread_handoffs SET target_thread_id=?,target_path=?,phase='created',updated_at=? WHERE handoff_id=?`, threadID, path, a.now().UnixMilli(), id)
-		return err
+		if err != nil {
+			return err
+		}
+		v.TargetThreadID, v.Phase = threadID, "created"
+		return a.handoffEvent(ctx, tx, id, "conversation.handoff_target", handoffAuditIdentity(v))
 	})
 }
 
@@ -337,7 +352,8 @@ func (a *App) CommitHandoff(ctx context.Context, id string) (v store.MainThreadB
 		if _, err := tx.Exec(ctx, `UPDATE main_thread_handoffs SET phase='committed',updated_at=? WHERE handoff_id=?`, a.now().UnixMilli(), id); err != nil {
 			return err
 		}
-		return a.handoffEvent(ctx, tx, id, "conversation.handoff_completed")
+		h.Phase = "committed"
+		return a.handoffEvent(ctx, tx, id, "conversation.handoff_completed", handoffAuditIdentity(h))
 	})
 	return
 }
@@ -374,7 +390,7 @@ func (a *App) ClaimSummaryAttempt(ctx context.Context, snap store.HandoffSnapsho
 		n, err := result.RowsAffected()
 		claimed = n == 1
 		if err == nil && claimed {
-			return a.handoffEvent(ctx, tx, snap.Instance, "conversation.summary_started")
+			return a.handoffEvent(ctx, tx, snap.Instance, "conversation.summary_started", summaryAuditIdentity(snap))
 		}
 		return err
 	})
@@ -396,8 +412,12 @@ func (a *App) FinishSummaryAttempt(ctx context.Context, snap store.HandoffSnapsh
 		if err != nil {
 			return err
 		}
-		if !success && n > 0 {
-			return a.handoffEvent(ctx, tx, snap.Instance, "conversation.summary_failed")
+		if n > 0 {
+			kind := "conversation.summary_failed"
+			if success {
+				kind = "conversation.summary_succeeded"
+			}
+			return a.handoffEvent(ctx, tx, snap.Instance, kind, summaryAuditIdentity(snap))
 		}
 		return nil
 	})
@@ -454,7 +474,11 @@ func (a *App) RefreshHandoff(ctx context.Context, id string, sourceVersion int64
 			phase = "created"
 		}
 		_, err = tx.Exec(ctx, `UPDATE main_thread_handoffs SET source_version=?,prompt=?,phase=?,updated_at=? WHERE handoff_id=?`, sourceVersion, prompt, phase, a.now().UnixMilli(), id)
-		return err
+		if err != nil {
+			return err
+		}
+		job.SourceVersion, job.Phase = sourceVersion, phase
+		return a.handoffEvent(ctx, tx, id, "conversation.handoff_refreshed", handoffAuditIdentity(job))
 	})
 }
 
@@ -504,6 +528,10 @@ func (a *App) RetargetPreparedHandoff(ctx context.Context, id, newHash string, n
 			return nil
 		}
 		_, err = tx.Exec(ctx, `UPDATE main_thread_handoffs SET toolset_hash=?,source_version=?,prompt=?,updated_at=? WHERE handoff_id=?`, newHash, newSourceVersion, prompt, a.now().UnixMilli(), id)
-		return err
+		if err != nil {
+			return err
+		}
+		job.ToolsetHash, job.SourceVersion = newHash, newSourceVersion
+		return a.handoffEvent(ctx, tx, id, "conversation.handoff_retargeted", handoffAuditIdentity(job))
 	})
 }

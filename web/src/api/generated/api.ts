@@ -290,6 +290,7 @@ export interface TendAPI {
   FinishIssueAssignmentPayload?: FinishIssueAssignmentPayload;
   FollowupSpec?: FollowupSpec;
   HandleAttentionPayload?: HandleAttentionPayload;
+  HandoffAuditPage?: HandoffAuditPage;
   HostMaintenancePayload?: HostMaintenancePayload;
   HostedAgentInventory?: HostedAgentInventory;
   InjectSourcePayload?: InjectSourcePayload;
@@ -2419,6 +2420,44 @@ export interface HandleAttentionPayload {
   reason: string;
   text?: string;
   version?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "HandoffAuditPage".
+ */
+export interface HandoffAuditPage {
+  history_complete: boolean;
+  instance: string;
+  items: HandoffAuditEvent[] | null;
+  more: boolean;
+  next_after: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "HandoffAuditEvent".
+ */
+export interface HandoffAuditEvent {
+  created_at_millis: number;
+  event_id: string;
+  identity?: HandoffAuditIdentity;
+  identity_observation: string;
+  kind: string;
+  object_id: string;
+  sequence: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "HandoffAuditIdentity".
+ */
+export interface HandoffAuditIdentity {
+  format: number;
+  handoff_id?: string;
+  instance: string;
+  phase?: string;
+  source_generation: number;
+  source_thread_id: string;
+  source_version: number;
+  target_thread_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

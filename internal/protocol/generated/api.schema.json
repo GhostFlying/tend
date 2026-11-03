@@ -4176,6 +4176,119 @@
       "title": "HandleAttentionPayload",
       "type": "object"
     },
+    "HandoffAuditEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at_millis": {
+          "type": "integer"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/definitions/HandoffAuditIdentity"
+        },
+        "identity_observation": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sequence",
+        "event_id",
+        "object_id",
+        "kind",
+        "created_at_millis",
+        "identity_observation"
+      ],
+      "title": "HandoffAuditEvent",
+      "type": "object"
+    },
+    "HandoffAuditIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "integer"
+        },
+        "handoff_id": {
+          "type": "string"
+        },
+        "instance": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "source_generation": {
+          "type": "integer"
+        },
+        "source_thread_id": {
+          "type": "string"
+        },
+        "source_version": {
+          "type": "integer"
+        },
+        "target_thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "instance",
+        "source_thread_id",
+        "source_version",
+        "source_generation"
+      ],
+      "title": "HandoffAuditIdentity",
+      "type": "object"
+    },
+    "HandoffAuditPage": {
+      "additionalProperties": false,
+      "properties": {
+        "history_complete": {
+          "type": "boolean"
+        },
+        "instance": {
+          "type": "string"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/HandoffAuditEvent"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_after": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "instance",
+        "items",
+        "next_after",
+        "more",
+        "history_complete"
+      ],
+      "title": "HandoffAuditPage",
+      "type": "object"
+    },
     "HostMaintenancePayload": {
       "additionalProperties": false,
       "properties": {
@@ -13389,6 +13502,9 @@
     },
     "HandleAttentionPayload": {
       "$ref": "#/definitions/HandleAttentionPayload"
+    },
+    "HandoffAuditPage": {
+      "$ref": "#/definitions/HandoffAuditPage"
     },
     "HostMaintenancePayload": {
       "$ref": "#/definitions/HostMaintenancePayload"
