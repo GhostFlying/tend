@@ -524,3 +524,29 @@ func TestCreatorPolicyAgentQuestionViewKeepsPauseAndRejectsReplacedEpoch(t *test
 		t.Fatal(err)
 	}
 }
+
+func TestCreatorPolicyHistoricalClassificationDoesNotAuthorizeWaivedIssue(t *testing.T) {
+	h := hostedManagerHarness(t)
+	source, previousDelivery := h.say("Historical material may be read, not reused as a new owner instruction")
+	previous := startHostedReview(t, h, "main", previousDelivery)
+	finishHostedReview(t, h, previous)
+	_, currentDelivery := h.say("Read the existing ledger only")
+	current := startHostedReview(t, h, "main", currentDelivery)
+	association := h.associations(source)
+	classified := hostedEffect(t, h, mainAgent, current, 1, protocol.Target{Type: "message", ID: source}, rev(association.Revision), protocol.SetIssueMessageAssociationsPayload{Disposition: "unassigned", ContentRevision: association.ContentRevision}, SetIssueMessageAssociations{})
+	if classified.Status != protocol.OpSucceeded {
+		t.Fatal(classified)
+	}
+	payload := delegationPayload(source)
+	payload.ExpectedSourceRevision = rev(association.ContentRevision)
+	payload.IndependentAcceptance = &protocol.IndependentAcceptanceRequest{Required: false, Reason: "A legal durable report does not need a separate reviewer"}
+	beforeIssues, beforePolicies, beforeTasks := h.count("issue_controls"), h.count("issue_acceptance_policies"), h.count("tasks")
+	cmd := HostedCoordinationCommand{Command: CanonicalOwnerIssueCommand{Action: "create"}, ExecutionID: current.RequestID, EffectSeq: 2}
+	op, err := h.app.Execute(t.Context(), mainAgent, h.env(cmd.Operation(), protocol.Target{Type: "issue"}, payload, nil), cmd)
+	if protocol.CodeOf(err) != protocol.CodeForbidden && (op.Error == nil || op.Error.Code != protocol.CodeForbidden) {
+		t.Fatal("historical review membership authorized a waived Issue", op, err)
+	}
+	if h.count("issue_controls") != beforeIssues || h.count("issue_acceptance_policies") != beforePolicies || h.count("tasks") != beforeTasks {
+		t.Fatal("source rejection leaked an Issue, creator policy or Task")
+	}
+}

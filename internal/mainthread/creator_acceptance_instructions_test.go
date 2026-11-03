@@ -24,7 +24,7 @@ func TestCreatorAcceptanceInstructionsReachNamedThreadConfiguration(t *testing.T
 		},
 		{
 			name: "Issue owner", role: agentconfig.IssueManager, policy: protocol.IssueOwnerPolicy,
-			want:   []string{"decide its independent_acceptance.required", "investigations and read-only reports may waive", "being its current owner or worker does not authorize self-exemption", "pending reviews stay frozen", "exact current completed artifact_id as result evidence", "real passed acceptance_id", "Repository PR review, CI, merge and deployment obligations remain unchanged"},
+			want:   []string{"decide its independent_acceptance.required", "investigations and read-only reports may waive", "being its current owner or worker does not authorize self-exemption", "pending reviews stay frozen", "exact current completed artifact_id as result evidence", "real passed acceptance_id", "Repository PR review, CI, merge and deployment obligations remain unchanged", "Task acceptance described below follows the same frozen policy", "Never waive actual provider, release-provenance, installation or controlled-upgrade evidence"},
 			absent: []string{"and an explicit independent acceptance category", "Tend creates the bounded review child for a self-execution task", "preserve immutable execution evidence and independent acceptance"},
 		},
 		{
