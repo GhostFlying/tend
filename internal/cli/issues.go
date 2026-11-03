@@ -15,6 +15,7 @@ import (
 )
 
 var issueOperations = map[string]string{
+	"reuse":            "issues.reuse",
 	"update-delivery":  "issues.update_delivery",
 	"set-status":       "issues.set_status",
 	"request-owner":    protocol.OpIssueRequestOwner,
@@ -138,6 +139,15 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 			return o.printJSON(page)
 		}
 		return printIssuePage(e, page)
+	case "reuse-status":
+		if len(pos) != 1 {
+			return usagef("issue reuse-status takes one original Issue ID")
+		}
+		var status protocol.IssueReuseStatus
+		if err := c.do(ctx, "GET", "/api/v1/issues/"+url.PathEscape(pos[0])+"/reuse-status", nil, &status); err != nil {
+			return err
+		}
+		return o.printJSON(status)
 	case "show":
 		if len(pos) != 1 {
 			return usagef("issue show takes one issue ID")

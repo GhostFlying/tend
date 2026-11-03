@@ -28,6 +28,11 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 }
 
 func applyMessageAssociations(ctx context.Context, x *Exec, tx *store.Tx, p protocol.SetMessageAssociationsPayload, canonical bool) (Outcome, error) {
+	return applyMessageAssociationsWithRetainedLinks(ctx, x, tx, p, canonical, false)
+}
+
+// Explicit reuse preserves existing display links without granting them control authority.
+func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx *store.Tx, p protocol.SetMessageAssociationsPayload, canonical, preserveRetained bool) (Outcome, error) {
 	if len(p.WorkItemIDs) > 50 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "at most 50 associations")
 	}
@@ -51,7 +56,7 @@ func applyMessageAssociations(ctx context.Context, x *Exec, tx *store.Tx, p prot
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "duplicate work item")
 		}
 		desired[id] = true
-		if canonical {
+		if canonical && !(preserveRetained && slices.ContainsFunc(old.Items, func(item protocol.MessageWorkItem) bool { return item.WorkItemID == id })) {
 			if _, err := store.GetCanonicalIssue(ctx, tx.Q(), id); err != nil {
 				return Outcome{}, errNotFound(err, "issue does not exist")
 			}
@@ -107,7 +112,7 @@ func applyMessageAssociations(ctx context.Context, x *Exec, tx *store.Tx, p prot
 		if !owner && locked && active != desired[id] {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "owner association correction cannot be overridden")
 		}
-		if active == desired[id] && !owner {
+		if active == desired[id] && (!owner || preserveRetained) {
 			continue
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO message_work_items(message_id,work_item_id,active,owner_locked,source,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(message_id,work_item_id) DO UPDATE SET active=excluded.active,owner_locked=MAX(owner_locked,excluded.owner_locked),source=excluded.source,updated_at=excluded.updated_at`, old.MessageID, id, desired[id], owner, source, x.Now.UnixMilli()); err != nil {

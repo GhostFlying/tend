@@ -51,7 +51,7 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		}
 	}
 	if execution.Selection.Purpose == agentconfig.Main {
-		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{"issues.reopen", protocol.OpIssueRequestOwner, protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "attentions.resolve", "attentions.escalate", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
+		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{"issues.reuse", "issues.reopen", protocol.OpIssueRequestOwner, protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "attentions.resolve", "attentions.escalate", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "the personal planner must delegate issue work, not execute its task planning")
 		}
 	} else if execution.Selection.Purpose != agentconfig.Consultation {
@@ -240,11 +240,17 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 			delegationSources = append(delegationSources, create.Manager.SourceMessageID)
 		}
 	}
-	if execution.Selection.Purpose == agentconfig.Main && (c.Operation() == "issues.reopen" || c.Operation() == "issues.create" || c.Operation() == protocol.OpIssueRequestManager || c.Operation() == protocol.OpIssueRequestOwner) {
+	if execution.Selection.Purpose == agentconfig.Main && (c.Operation() == "issues.reuse" || c.Operation() == "issues.reopen" || c.Operation() == "issues.create" || c.Operation() == protocol.OpIssueRequestManager || c.Operation() == protocol.OpIssueRequestOwner) {
 		for _, source := range delegationSources {
-			var admitted bool
-			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN logical_turn_messages m USING(logical_turn_id) WHERE e.request_id=? AND m.message_id=?) OR EXISTS(SELECT 1 FROM main_steers s JOIN main_turns t ON t.thread_id=s.thread_id AND t.turn_id=s.turn_id WHERE t.request_id=? AND s.message_id=? AND s.native_item_id<>'')`, execution.ID, source, execution.ID, source).Scan(&admitted); err != nil {
+			admitted, err := mainExecutionSourceAdmitted(ctx, tx.Q(), execution.ID, source)
+			if err != nil {
 				return Outcome{}, err
+			}
+			if !admitted {
+				admitted, err = inheritedDelegationCorrectionAdmitted(ctx, x, tx.Q(), execution.ID, source, c.Operation())
+				if err != nil {
+					return Outcome{}, err
+				}
 			}
 			if !admitted {
 				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "delegate only admitted source material from the current planner turn")

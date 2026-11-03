@@ -162,3 +162,51 @@ func delegationBlockReason(ctx context.Context, q store.Querier, logical string)
 	}
 	return fmt.Sprintf("%d delegation attempts remain unresolved; review the original failed requests before continuing business work", failed), nil
 }
+
+// inheritedDelegationCorrectionAdmitted preserves an exact, rejected delegation
+// across a real clarification handoff. Adoption does not grant general source
+// authority, and uncertain original requests cannot be retried as corrections.
+func inheritedDelegationCorrectionAdmitted(ctx context.Context, x *Exec, q store.Querier, execution, source, operation string) (bool, error) {
+	if operation != "issues.create" && operation != protocol.OpIssueRequestManager && operation != protocol.OpIssueRequestOwner {
+		return false, nil
+	}
+	if source != hostedPayloadSource(x.Env.Payload) {
+		return false, nil
+	}
+	intent := delegationIntent(ctx, x, q, operation)
+	rows, err := q.QueryContext(ctx, `WITH RECURSIVE responsibility(id) AS (
+ SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?
+ UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility p ON l.resumed_by=p.id WHERE l.status='awaiting_completion')
+ SELECT DISTINCT f.execution_id FROM coordination_delegation_attempts f
+ JOIN request_records r ON r.domain=f.domain AND r.request_id=f.request_id
+ WHERE f.logical_turn_id IN responsibility AND f.logical_turn_id<>(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?)
+ AND f.domain=? AND f.operation=? AND f.target_id=? AND f.source_message_id=? AND f.intent_key=? AND f.succeeded=0
+ AND r.operation=f.operation AND r.status='failed' AND json_valid(f.error_json) AND json_extract(f.error_json,'$.code') IN ('invalid_request','stale_revision')
+ AND NOT EXISTS(SELECT 1 FROM coordination_delegation_attempts s WHERE s.logical_turn_id IN responsibility AND s.source_message_id=f.source_message_id AND s.operation=f.operation AND s.target_id=f.target_id AND s.intent_key=f.intent_key AND s.succeeded=1 AND s.seq>f.seq)`, execution, execution, x.Principal.DedupDomain(), operation, x.Env.Target.ID, source, intent)
+	if err != nil {
+		return false, err
+	}
+	var originals []string
+	for rows.Next() {
+		var original string
+		if err := rows.Scan(&original); err != nil {
+			rows.Close()
+			return false, err
+		}
+		originals = append(originals, original)
+	}
+	err = rows.Err()
+	if closeErr := rows.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, original := range originals {
+		admitted, err := mainExecutionSourceAdmitted(ctx, q, original, source)
+		if err != nil || admitted {
+			return admitted, err
+		}
+	}
+	return false, nil
+}

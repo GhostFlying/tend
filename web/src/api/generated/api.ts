@@ -318,6 +318,8 @@ export interface TendAPI {
   IssuePage?: IssuePage;
   IssueRefreshDeliveryPayload?: IssueRefreshDeliveryPayload;
   IssueResultPage?: IssueResultPage;
+  IssueReuseResult?: IssueReuseResult;
+  IssueReuseStatus?: IssueReuseStatus;
   IssueTranscriptBlock?: IssueTranscriptBlock;
   IssueTranscriptPage?: IssueTranscriptPage;
   IssueView?: IssueView;
@@ -356,6 +358,7 @@ export interface TendAPI {
   RequestView?: RequestView;
   RespondAttentionPayload?: RespondAttentionPayload;
   RespondInteraction?: RespondInteraction;
+  ReuseIssuePayload?: ReuseIssuePayload;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
   ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
   RolloutPreview?: RolloutPreview;
@@ -3143,6 +3146,72 @@ export interface IssueResult {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueReuseResult".
+ */
+export interface IssueReuseResult {
+  issue: Issue;
+  next_step: string;
+  original_request_id: string;
+  reused: boolean;
+  source: MessageAssociations;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "Issue".
+ */
+export interface Issue {
+  assignee: IssueAssignee;
+  assignment_epoch: number;
+  assignment_state: string;
+  closure?: IssueClosure;
+  created_at: number;
+  depends_on: string[] | null;
+  issue_id: string;
+  parent_issue_id?: string;
+  pending_assignee?: IssueAssignee;
+  pending_handoff_id?: string;
+  plan: IssuePlan;
+  revision: number;
+  state: IssueState;
+  updated_at: number;
+  work_status?: IssueWorkStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessageAssociations".
+ */
+export interface MessageAssociations {
+  content_revision: number;
+  disposition: string;
+  facts_reviewed: boolean;
+  items: MessageWorkItem[] | null;
+  message_id: string;
+  owner_locked: boolean;
+  processing?: MessageProcessingState;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessageWorkItem".
+ */
+export interface MessageWorkItem {
+  owner_locked: boolean;
+  source: string;
+  title: string;
+  work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueReuseStatus".
+ */
+export interface IssueReuseStatus {
+  issue: Issue;
+  next_step: string;
+  origin_observation: string;
+  original_request_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueTranscriptPage".
  */
 export interface IssueTranscriptPage {
@@ -3194,30 +3263,6 @@ export interface ConversationItem {
   steer?: MainSteerView;
   tool?: ToolUseView;
   upgrade_id?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "MessageAssociations".
- */
-export interface MessageAssociations {
-  content_revision: number;
-  disposition: string;
-  facts_reviewed: boolean;
-  items: MessageWorkItem[] | null;
-  message_id: string;
-  owner_locked: boolean;
-  processing?: MessageProcessingState;
-  revision: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "MessageWorkItem".
- */
-export interface MessageWorkItem {
-  owner_locked: boolean;
-  source: string;
-  title: string;
-  work_item_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3678,6 +3723,18 @@ export interface RespondInteraction {
   option?: string;
   text?: string;
   version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ReuseIssuePayload".
+ */
+export interface ReuseIssuePayload {
+  expected_assignment_epoch: number;
+  expected_association_revision: number | null;
+  expected_source_revision?: number;
+  original_request_id: string;
+  reason?: string;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
