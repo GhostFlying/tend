@@ -9,6 +9,7 @@ import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import styles from "./Handoff.module.css";
+import { handoffStatus } from "./handoffStatus.ts";
 import { IssueNotificationSettings } from "../issues/NotificationSettings.tsx";
 
 export function Handoff({
@@ -54,32 +55,7 @@ export function Handoff({
     !!view?.preparing ||
     ["pending", "sending"].includes(maintenance?.status ?? "");
   const warning = !!state.readError || !!state.error || !!state.pendingId || maintenanceFailed;
-  const status =
-    view?.enabled === false
-      ? "未启用托管主会话"
-      : !view && !state.readError
-        ? "正在读取…"
-        : state.saving
-          ? "保存中"
-          : state.pendingId
-            ? "待核对"
-            : state.readError
-              ? "读取失败"
-              : state.error
-                ? "设置失败"
-                : preparing
-                  ? view?.preparing
-                    ? "正在生成预备摘要"
-                    : "请求已排队"
-                  : maintenanceFailed
-                    ? maintenance?.status === "unknown"
-                      ? "上次请求结果待确认"
-                      : "上次请求未完成"
-                    : view?.summary?.current
-                      ? "预备摘要已就绪"
-                      : view?.summary
-                        ? "预备摘要已过期"
-                        : "尚无预备摘要";
+  const status = handoffStatus(state);
   return (
     <section className={styles.panel} aria-label="设置">
       <PageHeader className={styles.pageHead} title="设置" />
@@ -107,13 +83,14 @@ export function Handoff({
         </p>
         {view?.summary && (
           <p className={styles.note}>
-            生成于{" "}
+            最近已保存摘要：{" "}
             {new Date(view.summary.created_at_millis).toLocaleString([], {
               month: "numeric",
               day: "numeric",
               hour: "2-digit",
               minute: "2-digit",
             })}
+            {view.summary.current ? " · 覆盖当前内容" : " · 未覆盖当前内容"}
           </p>
         )}
         <form
@@ -196,6 +173,9 @@ export function Handoff({
         >
           立即生成预备摘要
         </Button>
+        {maintenanceFailed && view?.pending && !view.preparing && (
+          <p className={styles.note}>另有主会话工作尚未结束，不表示新摘要正在生成。</p>
+        )}
         {maintenanceFailed && (
           <p className={styles.feedback} role="status">
             {maintenance?.reason ||

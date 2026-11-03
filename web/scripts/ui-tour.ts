@@ -13,6 +13,7 @@ import type {
   AttentionView,
   MessagingMessage,
   HostedAgentInventory,
+  ConversationHandoffView,
 } from "../src/api/generated/api.ts";
 
 const output = process.env.TEND_LAYOUT_OUTPUT ?? "/tmp/tend-ui-tour";
@@ -234,6 +235,17 @@ function imChanged() {
 }
 const streams = new Set<ServerResponse>();
 const unexpected: string[] = [];
+const defaultHandoff: ConversationHandoffView = {
+  enabled: false,
+  revision: 1,
+  idle_minutes: 30,
+  generation: 1,
+  pending: false,
+  preparing: false,
+  last_activity_millis: now,
+};
+let handoffView = defaultHandoff;
+let handoffUnavailable = false;
 const server = createServer(async (req, res) => {
   const url = new URL(req.url!, "http://localhost");
   const p = url.pathname;
@@ -278,7 +290,7 @@ const server = createServer(async (req, res) => {
       event_seq: 1,
       more: false,
     });
-  if (p.endsWith("/settings"))
+  if (p.startsWith("/api/v1/") && p.endsWith("/settings"))
     return json({
       enabled: true,
       available: true,
@@ -294,8 +306,13 @@ const server = createServer(async (req, res) => {
         },
       ],
     });
-  if (p === "/api/v1/conversation/handoff")
-    return json({ enabled: false, revision: 1, idle_minutes: 30 });
+  if (p === "/api/v1/conversation/handoff") {
+    if (handoffUnavailable) {
+      res.statusCode = 503;
+      return json({ error: { code: "internal", message: "observation_unavailable" } });
+    }
+    return json(handoffView);
+  }
   if (p === "/api/v1/conversation/queue")
     return json({ items: [], enabled: true, event_seq: 1, total: 0 });
   if (p.endsWith("/usage"))
@@ -1075,6 +1092,106 @@ try {
       await context.close();
     }
   }
+  for (const width of [1440, 390]) {
+    const context = await browser.newContext({
+      viewport: { width, height: 900 },
+      serviceWorkers: "block",
+    });
+    const saved: NonNullable<ConversationHandoffView["summary"]> = {
+      format_version: 3,
+      method: "bounded",
+      ledger_bytes: 1,
+      correction_bytes: 0,
+      batches: 1,
+      complete: true,
+      id: "previous-saved-summary",
+      source_thread_id: "original-thread",
+      version: 1,
+      max_seq: 1,
+      created_at_millis: now - 86_400_000,
+      current: false,
+    };
+    const cases: {
+      key: string;
+      label: string;
+      patch: Partial<ConversationHandoffView>;
+      unavailable?: boolean;
+    }[] = [
+      { key: "main-pending", label: "主会话仍有未结工作", patch: { pending: true } },
+      { key: "preparing", label: "正在生成预备摘要", patch: { pending: true, preparing: true } },
+      {
+        key: "maintenance-pending",
+        label: "摘要或交接请求尚未完成",
+        patch: {
+          pending: true,
+          maintenance: {
+            request_id: "original",
+            operation: "conversation.handoff",
+            status: "pending",
+          },
+        },
+      },
+      {
+        key: "failed-with-main-work",
+        label: "上次请求未完成",
+        patch: {
+          pending: true,
+          maintenance: {
+            request_id: "original",
+            operation: "conversation.handoff",
+            status: "failed",
+            reason: "失败原因未记录",
+          },
+        },
+      },
+      {
+        key: "unknown",
+        label: "上次请求结果待确认",
+        patch: {
+          maintenance: {
+            request_id: "original",
+            operation: "conversation.handoff",
+            status: "unknown",
+          },
+        },
+      },
+      { key: "stale", label: "预备摘要已过期", patch: {} },
+      { key: "ready", label: "预备摘要已就绪", patch: { summary: { ...saved, current: true } } },
+      { key: "observation-unavailable", label: "摘要状态暂不可读取", patch: {}, unavailable: true },
+    ];
+    for (const item of cases) {
+      handoffView = { ...defaultHandoff, enabled: true, summary: saved, ...item.patch };
+      handoffUnavailable = !!item.unavailable;
+      const page = await context.newPage();
+      await page.goto(`${origin}/settings`);
+      const section = page.getByRole("region", { name: "主 Agent", exact: true });
+      try {
+        await section.getByText(item.label, { exact: true }).first().waitFor();
+      } catch (error) {
+        await writeFile(join(output, `${width}-${item.key}-failure.html`), await page.content());
+        await page.screenshot({ path: join(output, `${width}-${item.key}-failure.png`) });
+        console.error((await page.locator("body").innerText()).slice(0, 2000));
+        throw error;
+      }
+      assert.equal(await section.getByText("请求已排队", { exact: true }).count(), 0);
+      if (!item.unavailable) {
+        await section.getByText(/^最近已保存摘要：/).waitFor();
+        await section
+          .getByText(item.key === "ready" ? /覆盖当前内容$/ : /未覆盖当前内容$/)
+          .waitFor();
+      }
+      if (item.key === "failed-with-main-work")
+        await section
+          .getByText("另有主会话工作尚未结束，不表示新摘要正在生成。", { exact: true })
+          .waitFor();
+      await page.screenshot({ path: join(output, `${width}-handoff-${item.key}.png`) });
+      await page.close();
+    }
+    await context.close();
+    console.log(`PASS truthful handoff status and prior summary ${width}`);
+  }
+  handoffView = defaultHandoff;
+  handoffUnavailable = false;
   assert.deepEqual(unexpected, [], "fixture must implement every requested API");
   // Another channel resolves the same original question while this browser is composing.
   for (const width of [1440, 390]) {
@@ -1261,7 +1378,9 @@ try {
     ]);
     if (!navigator.serviceWorker.controller)
       await new Promise<void>((done) =>
-        navigator.serviceWorker.addEventListener("controllerchange", () => done(), { once: true }),
+        navigator.serviceWorker.addEventListener("controllerchange", () => done(), {
+          once: true,
+        }),
       );
   });
   const cached = await page.evaluate(async () => {
