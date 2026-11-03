@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -153,10 +154,16 @@ func maintenanceNativeBusinessFenced(ctx context.Context, q store.Querier, r sto
 	return p != nil, err
 }
 
-// CheckMaintenanceHello refuses an entire legacy reconciliation rather than
-// issuing a Continue that could restart an unresolved original execution. Old
-// runners have no retain verdict, so this host honestly remains unreconciled.
-func checkMaintenanceHello(ctx context.Context, q store.Querier, host string) error {
+// Old runners have no retain verdict: keep their original fail-closed response.
+// Negotiated peers are checked per run by Hello without restarting uncertainty.
+func runtimeSupportsRetainedReconciliation(runtime *protocol.RunnerRuntime) bool {
+	return runtime != nil && protocol.RunnerProtocolSupported(runtime.Protocol) && slices.Contains(runtime.Capabilities, protocol.CapabilityRetainedReconciliation)
+}
+
+func checkMaintenanceHello(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) error {
+	if runtimeSupportsRetainedReconciliation(runtime) {
+		return nil
+	}
 	runs, err := store.ListOpenRunsOnHost(ctx, q, host)
 	if err != nil {
 		return err

@@ -158,6 +158,11 @@ type active struct {
 	// reporting marks a run that only sends its final report. It no
 	// longer writes to the workspace, so it is not fenced.
 	reporting bool
+	// retained prevents local settlement from discarding reconciliation facts.
+	retained bool
+	// reconcileOnExit follows an authoritative control that superseded retention.
+	reconcileOnExit bool
+	settlement      chan struct{}
 }
 
 // Runner pulls and executes runs for one host.
@@ -171,6 +176,7 @@ type Runner struct {
 	c              *client
 	reconcile      chan struct{}
 	workspaceWake  chan struct{}
+	helloGate      chan struct{}
 
 	mu      sync.Mutex
 	ttl     time.Duration
@@ -243,6 +249,7 @@ func New(cfg Config) *Runner {
 			timeout: cfg.RequestTimeout},
 		reconcile:      make(chan struct{}, 1),
 		workspaceWake:  make(chan struct{}, 1),
+		helloGate:      make(chan struct{}, 1),
 		usageWake:      make(chan struct{}, 1),
 		ttl:            time.Minute,
 		ttlWake:        make(chan struct{}),
@@ -500,6 +507,18 @@ func (r *Runner) claimOnce(ctx context.Context, env *protocol.Envelope, sentAt t
 
 // hello reconciles every run the journal holds with tend.
 func (r *Runner) hello(ctx context.Context) error {
+	// Startup and the reconciler can both request hello. Order their complete
+	// applications so an older Continue cannot arrive after a durable retain.
+	select {
+	case r.helloGate <- struct{}{}:
+		defer func() { <-r.helloGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return r.helloLocked(ctx)
+}
+
+func (r *Runner) helloLocked(ctx context.Context) error {
 	// Keep the last confirmed capability receipt while reconciling. A pending
 	// hello is not evidence that the server withdrew its previous support.
 	runs, err := r.cfg.Journal.Runs(ctx)
@@ -538,7 +557,7 @@ func (r *Runner) hello(ctx context.Context) error {
 	if res.ProtocolMax >= protocol.CurrentRunnerProtocol && r.runnerProtocol < protocol.CurrentRunnerProtocol {
 		r.runnerProtocol = protocol.CurrentRunnerProtocol
 		r.controlMu.Unlock()
-		return r.hello(ctx)
+		return r.helloLocked(ctx)
 	}
 	r.nativeUsageSupported = res.NativeUsage
 	r.previewSupported = res.RolloutPreview && res.DeploymentID != "" && len(r.cfg.RolloutRoots) > 0
@@ -566,11 +585,34 @@ func (r *Runner) hello(ctx context.Context) error {
 		as := run.Assignment
 		as.Desired = v.Desired
 		switch {
+		case v.Verdict == protocol.VerdictRetain:
+			if _, exists := byID[v.RunID]; !exists {
+				return errors.New("runner: retain verdict does not match a held run")
+			}
+			// Serialize the durable fence with every start entrance, including
+			// a late claim replay. Retain neither releases nor resumes work.
+			if err := r.retainRun(ctx, v.RunID); err != nil {
+				if !errors.Is(err, journal.ErrNotFound) || !r.settledHeldRun(ctx, run) {
+					return err
+				}
+				r.requestReconcile()
+			}
 		case v.Verdict == protocol.VerdictContinue:
-			if err := r.cfg.Journal.SetFenced(ctx, v.RunID, false); err != nil {
+			if err := r.authorizeRetainedSettlement(ctx, v.RunID, true); err != nil {
 				return err
 			}
 			r.start(ctx, as, sent)
+		case v.Verdict == protocol.VerdictStop:
+			if err := r.authorizeRetainedSettlement(ctx, v.RunID, false); err != nil {
+				return err
+			}
+			if run.Phase == journal.PhaseWorkerDone || run.Phase == journal.PhaseSubmitting || run.Phase == journal.PhaseReleasing {
+				r.start(ctx, as, sent)
+			} else if a := r.lookup(v.RunID); a != nil {
+				a.cancel(errStopped)
+			} else if err := r.dropOrRelease(ctx, run, "stopped by tend: "+v.Reason); err != nil {
+				return err
+			}
 		case run.Phase == journal.PhaseWorkerDone || run.Phase == journal.PhaseSubmitting || run.Phase == journal.PhaseReleasing:
 			// The final report is a fact either way; let it go out.
 			r.start(ctx, as, sent)
@@ -646,6 +688,15 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 		return
 	}
 	r.mu.Lock()
+	journaled, err := r.cfg.Journal.Run(ctx, runID)
+	if err != nil || journaled.Fenced && as.Desired != protocol.DesiredStopped {
+		r.mu.Unlock()
+		if err != nil {
+			r.cfg.Log.WarnContext(ctx, "could not inspect run start fence", "run_id", runID, "err", err)
+			r.requestReconcile()
+		}
+		return
+	}
 	if a, ok := r.active[runID]; ok {
 		a.deadline = deadline
 		r.mu.Unlock()
@@ -667,7 +718,11 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 			cancel(nil)
 			r.mu.Lock()
 			delete(r.active, runID)
+			reconcile := a.reconcileOnExit
 			r.mu.Unlock()
+			if reconcile {
+				r.requestReconcile()
+			}
 			select {
 			case r.workspaceWake <- struct{}{}:
 			default:
@@ -741,7 +796,9 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	r.mu.Lock()
 	refs := make([]protocol.LeaseRef, 0, len(r.active))
 	for id, a := range r.active {
-		refs = append(refs, protocol.LeaseRef{RunID: id, LeaseID: a.as.LeaseID})
+		if !a.retained {
+			refs = append(refs, protocol.LeaseRef{RunID: id, LeaseID: a.as.LeaseID})
+		}
 	}
 	r.mu.Unlock()
 	runtime, err := r.runtimeObservation(ctx)
@@ -776,6 +833,16 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	r.confirmedRuntime = *runtime
 	r.mu.Unlock()
 	r.maybeUpgrade(ctx)
+	// Retained journals have no active lease renewal. Keep their control path
+	// reachable through Hello even after the original executor has exited.
+	if held, err := r.cfg.Journal.Runs(ctx); err == nil {
+		for _, run := range held {
+			if run.Fenced {
+				r.requestReconcile()
+				break
+			}
+		}
+	}
 	deadline := r.fenceDeadline(sent)
 	for _, s := range res.Runs {
 		a := r.lookup(s.RunID)

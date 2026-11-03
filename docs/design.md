@@ -161,6 +161,7 @@
 | D156 | 正常维护之外提供显式 receipt-recovery crash stop：真实未知生命周期不冒充排空，完整 Run 库存及原 lease 持久保护先于新服务入口，保留物理停止事实与业务未知，prelink 延迟原生执行。 | 已确认 |
 | D157 | Manager delivery 先去重旧 logical responsibility 再查未决投递；Token 重叠查询按 native identity 与 current fact 索引关联。只改善查询规模，不改变 blocker、冲突、未知或计量语义，追加迁移83。 | 已实现，待验证 |
 | D158 | Token 归属在同一只读事务内按请求批量解析日志与本地 actor，保留原 SQL 的歧义、NULL、优先级与错误回退，不使用跨请求缓存或新增迁移。 | 已实现，待验证 |
+| D159 | 明确协商 retain 能力的 runner 可逐 Run 保留原维护未知，不令整 host Hello 失败；持久 fence 阻止重放，未知责任、原 lease/pin 与容量继续保留。旧 peer 保持原拒绝路径。 | 已实现，待验证 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
 
@@ -761,3 +762,24 @@ false 高于 NULL；最高 rank 的 actor 投影冲突时按完整参数执行�
 原逐项 SQL；失败不缓存为确定归属。无需协议、存储 schema 或归属事实变更。完整输出
 等价与同 thread/独立 thread 两种布局的规模收益分别验证，离线收益不替代生产读回。
 见[实施计划](plans/token-attribution-resolver.md)。
+
+## D159：保留未知运行而不阻塞整个主机对账
+
+旧 runner 只理解 Continue/Stop，不能把未知运行冒充已停止或授权继续。因此保留原错误
+路径，同时增加显式 opt-in `runner-retained-reconciliation-v1`：支持 N/N−1 且声明能力的
+runner 才接收逐运行 retain。无该能力或不受支持的代际不得收到新 verdict。这是可选
+协商扩展，旧请求/响应默认语义与协议代际不变；不是放宽未知身份检查。
+
+新 Hello 可登记实际 incarnation 和控制，并按原 host/run/lease/业务控制核每个运行。
+维护保护中的原运行不续租、不把 unknown 改 running、不重新分配；它仍计入原容量，
+原 pin/request 事实不变。无关运行独立对账。原 journal 缺失不能创建新 worker；旧 lease、
+跨 host 和明确 Stop 不被 retain 吞掉。runner 把 retain 保存为本地 fence，不释放 journal
+或重放 worker。启动与 fence 序列化，多个 Hello 完整处理也串行，防止旧 Continue 迟到
+后覆盖 retain。合法的新 Continue 同时解除 journal 与 active 的保留标记；已经取消的
+执行器退出后再请求对账，报告沿原请求结算。明确 Stop 经相同结算门授权真实收尾。
+快照后已完成的 journal 仅凭原身份和 Done 事实局部忽略迟到 retain，不能中断其它
+运行的 verdict；迟到的本地 fenced 写入不能覆盖较新的权威控制。
+
+这一批只扩展执行器内部协议，不新增用户控制能力，CLI 已有 runtime 读取可见该能力。
+原运行的独立业务对账/退役入口另批实现，并须同步 CLI/主工具面；主机成功登记不证明
+原运行恢复，也不证明升级排空或未知外部结果已确定。见[实施计划](plans/retained-run-reconciliation.md)。
