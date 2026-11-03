@@ -105,25 +105,26 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
-	forwardRecoveryID    string
-	preview              rolloutPreviewBroker
-	localRolloutPreview  func(context.Context, string, []protocol.RolloutPreviewSource, protocol.RolloutPreviewQuery) protocol.RolloutPreview
-	webhookKeys          WebhookKeys
-	archiveAdmission     sync.Mutex
-	archiveOwnerRequests int64
-	hostedConfiguration  *hostedconfig.Prepared
-	agentRecoveryPolicy  domain.AgentRecoveryPolicy
-	followupsEnabled     bool
-	observeDeployment    func(context.Context) (protocol.ObservedDeployment, error)
-	store                *store.Store
-	ids                  protocol.IDGen
-	now                  func() time.Time
-	notifier             Notifier
-	changes              *Broadcast
-	logs                 *Broadcast
-	leaseTTL             time.Duration
-	waitPer              float64
-	hostLost             time.Duration
+	forwardRecoveryID      string
+	committedMaintenanceID string
+	preview                rolloutPreviewBroker
+	localRolloutPreview    func(context.Context, string, []protocol.RolloutPreviewSource, protocol.RolloutPreviewQuery) protocol.RolloutPreview
+	webhookKeys            WebhookKeys
+	archiveAdmission       sync.Mutex
+	archiveOwnerRequests   int64
+	hostedConfiguration    *hostedconfig.Prepared
+	agentRecoveryPolicy    domain.AgentRecoveryPolicy
+	followupsEnabled       bool
+	observeDeployment      func(context.Context) (protocol.ObservedDeployment, error)
+	store                  *store.Store
+	ids                    protocol.IDGen
+	now                    func() time.Time
+	notifier               Notifier
+	changes                *Broadcast
+	logs                   *Broadcast
+	leaseTTL               time.Duration
+	waitPer                float64
+	hostLost               time.Duration
 }
 
 // Option configures an App.

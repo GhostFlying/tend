@@ -48,12 +48,13 @@ type Config struct {
 	Interval        time.Duration
 }
 type Controller struct {
-	recovery *recoveryRuntime
-	cfg      Config
-	app      Backend
-	ids      protocol.IDGen
-	observe  func(context.Context) (app.ServerObservation, error)
-	log      *slog.Logger
+	recovery    *recoveryRuntime
+	maintenance *maintenanceRuntime
+	cfg         Config
+	app         Backend
+	ids         protocol.IDGen
+	observe     func(context.Context) (app.ServerObservation, error)
+	log         *slog.Logger
 }
 
 func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context) (app.ServerObservation, error), log *slog.Logger) (*Controller, error) {
@@ -165,6 +166,9 @@ func (c *Controller) Change(ctx context.Context, action string, r protocol.Upgra
 	return v, err
 }
 func (c *Controller) tick(ctx context.Context) error {
+	if handled, err := c.maintenanceTick(ctx); handled || err != nil {
+		return err
+	}
 	if handled, err := c.recoveryTick(ctx); handled || err != nil {
 		return err
 	}
@@ -208,7 +212,16 @@ func (c *Controller) Handler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		var value any
 		var err error
-		if r.URL.Path == "/upgrades/recovery/status" && r.Method == http.MethodGet {
+		if r.URL.Path == "/upgrades/maintenance/status" && r.Method == http.MethodGet {
+			backend, ok := c.app.(maintenanceBackend)
+			if !ok {
+				err = errors.New("upgradectl: maintenance ledger unavailable")
+			} else {
+				var row protocol.CommittedMaintenanceLedger
+				row, _, err = backend.CommittedMaintenanceReadiness(r.Context(), r.URL.Query().Get("maintenance_id"))
+				value = row
+			}
+		} else if r.URL.Path == "/upgrades/recovery/status" && r.Method == http.MethodGet {
 			backend, ok := c.app.(recoveryBackend)
 			if !ok {
 				err = errors.New("upgradectl: recovery ledger unavailable")
@@ -239,6 +252,11 @@ func (c *Controller) Handler() http.Handler {
 				var binding protocol.UpgradeBinding
 				if err = decode(r, &binding); err == nil {
 					value, err = c.app.ServerUpgradeAuthorize(r.Context(), binding)
+				}
+			case "/updater/maintenance/health":
+				var plan protocol.CommittedMaintenancePlan
+				if err = decode(r, &plan); err == nil {
+					value, err = c.maintenanceHealth(r.Context(), plan)
 				}
 			case "/updater/recovery/health":
 				var plan protocol.ForwardRecoveryPlan

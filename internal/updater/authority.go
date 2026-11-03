@@ -48,11 +48,14 @@ func NewHTTPAuthority(cfg Config) (*HTTPAuthority, error) {
 	}}}, nil
 }
 func (a *HTTPAuthority) request(ctx context.Context, path string, b any, out any) error {
+	return a.requestMethod(ctx, http.MethodPost, path, b, out)
+}
+func (a *HTTPAuthority) requestMethod(ctx context.Context, method, path string, b, out any) error {
 	raw, err := json.Marshal(b)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, method, path, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}
@@ -104,4 +107,28 @@ func (a *HTTPAuthority) RecoveryHealth(ctx context.Context, p protocol.ForwardRe
 	}
 	err := a.request(ctx, "http://localhost/updater/recovery/health", p, &h)
 	return h, err
+}
+
+func (a *HTTPAuthority) MaintenanceHealth(ctx context.Context, p protocol.CommittedMaintenancePlan) (protocol.CommittedMaintenanceHealth, error) {
+	var h protocol.CommittedMaintenanceHealth
+	if a.cfg.AuthoritySocket == "" {
+		return h, errors.New("updater: maintenance requires private authority socket")
+	}
+	err := a.request(ctx, "http://localhost/updater/maintenance/health", p, &h)
+	return h, err
+}
+func (a *HTTPAuthority) MaintenanceArchiveStatus(ctx context.Context) (protocol.ArchiveOnlineStatus, error) {
+	var v protocol.ArchiveOnlineStatus
+	if a.cfg.AuthoritySocket == "" {
+		return v, errors.New("updater: maintenance requires private authority socket")
+	}
+	err := a.requestMethod(ctx, http.MethodGet, "http://localhost/archive/status", nil, &v)
+	return v, err
+}
+func (a *HTTPAuthority) MaintenanceArchiveControl(ctx context.Context, path string, input any) error {
+	var result json.RawMessage
+	if a.cfg.AuthoritySocket == "" {
+		return errors.New("updater: maintenance requires private authority socket")
+	}
+	return a.request(ctx, "http://localhost/archive/"+path, input, &result)
 }

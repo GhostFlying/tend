@@ -149,6 +149,11 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	installerSum := sha256.Sum256(installerBytes)
+	maintenancePath := filepath.Join(dir, "maintenance.json")
+	maintenanceJSON, _ := json.Marshal(map[string]any{"maintenance": protocol.CommittedMaintenancePlan{MaintenanceID: "maintenance", RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEV"}})
+	if err := os.WriteFile(maintenancePath, maintenanceJSON, 0600); err != nil {
+		t.Fatal(err)
+	}
 	recoveryPath := filepath.Join(dir, "recovery.json")
 	for _, entry := range CapabilityBindings() {
 		t.Run(entry.Capability+"/"+entry.Command, func(t *testing.T) {
@@ -162,7 +167,7 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			_ = os.Remove(output)
 			args := append([]string(nil), entry.Example...)
 			for i, arg := range args {
-				args[i] = strings.NewReplacer("{server}", remote.URL, "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
+				args[i] = strings.NewReplacer("{server}", remote.URL, "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{maintenance}", maintenancePath, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
 			}
 			mu.Lock()
 			calls = nil
@@ -178,6 +183,10 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			if strings.HasPrefix(entry.Capability, "local EXEC updater handoff ") {
 				action := strings.TrimPrefix(entry.Capability, "local EXEC updater handoff ")
 				matched = strings.Contains(env.out.String(), "handoff\n"+action+"\n--config\n")
+			}
+			if strings.HasPrefix(entry.Capability, "local EXEC updater maintenance ") {
+				action := strings.TrimPrefix(entry.Capability, "local EXEC updater maintenance ")
+				matched = strings.Contains(env.out.String(), "maintenance\n"+action+"\n--config\n")
 			}
 			for _, call := range seen {
 				if method, path, ok := strings.Cut(expected, " "); ok {

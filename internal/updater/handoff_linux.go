@@ -479,6 +479,9 @@ func HandoffStatus(ctx context.Context, cfg Config) (HandoffJournal, error) {
 // AdoptPendingHandoff runs before Serve can poll. The journal is mandatory for
 // migration and pins the exact candidate, config, lock and original child.
 func AdoptPendingHandoff(ctx context.Context, s *Supervisor) error {
+	if handled, err := AdoptCommittedHandoff(ctx, s); handled {
+		return err
+	}
 	raw, err := privateFile(handoffPath(s.cfg))
 	if os.IsNotExist(err) {
 		if s.state.Format == 2 {

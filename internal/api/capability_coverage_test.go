@@ -66,11 +66,14 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 		expected["local EXEC updater handoff "+action] = true
 	}
 
+	for _, action := range protocol.CommittedHandoffActions() {
+		expected["local EXEC updater maintenance "+action] = true
+	}
 	// Scan every operator-handler source, not a hand-maintained file subset.
 	// Runner execution HTTP lives in runnerapi; the updater callbacks below
 	// remain explicitly classified as internal machine-authority operations.
-	internal := map[string]string{"/updater/authorize": "updater authority binding", "/updater/health": "updater health receipt", "/updater/recovery/health": "successor readiness callback", "/recovery/link": "server ledger linkage callback", "/bootstrap": "fixed updater installation bootstrap", "/upgrade": "coordinator executor action", "/stage-config": "coordinator configuration action", "/restart": "disabled direct restart", "/retry": "coordinator retry", "/cancel": "coordinator cancellation"}
-	get := map[string]bool{"/agents/status": true, "/agents/registration": true, "/repositories": true, "/archive/status": true, "/upgrades/status": true, "/upgrades/recovery/status": true, "/status": true}
+	internal := map[string]string{"/updater/authorize": "updater authority binding", "/updater/health": "updater health receipt", "/updater/recovery/health": "successor readiness callback", "/recovery/link": "server ledger linkage callback", "/maintenance/link": "server committed maintenance linkage callback", "/bootstrap": "fixed updater installation bootstrap", "/upgrade": "coordinator executor action", "/stage-config": "coordinator configuration action", "/restart": "disabled direct restart", "/retry": "coordinator retry", "/cancel": "coordinator cancellation"}
+	get := map[string]bool{"/agents/status": true, "/agents/registration": true, "/repositories": true, "/archive/status": true, "/upgrades/status": true, "/upgrades/recovery/status": true, "/upgrades/maintenance/status": true, "/status": true}
 	for _, root := range []string{"../runner", "../../cmd/tend-runner", "../upgradectl", "../updater"} {
 		err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {

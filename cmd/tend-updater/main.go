@@ -54,7 +54,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	}
 	command := args[0]
 	action := ""
-	if command == "handoff" {
+	if command == "handoff" || command == "maintenance" {
 		if len(args) < 2 {
 			return errors.New("usage: tend-updater handoff plan|apply|status --config <file> --plan <file>")
 		}
@@ -93,6 +93,52 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	}
 	cfg, err := load(*config)
 	if err != nil {
+		return err
+	}
+	if command == "maintenance" {
+
+		if action == "status" {
+			j, err := updater.CommittedHandoffStatus(ctx, cfg)
+			_ = json.NewEncoder(out).Encode(j)
+			return err
+		}
+		if action != "plan" && action != "apply" && action != "prepare" && action != "authorize" && action != "cancel" && action != "finish" {
+			return errors.New("updater: maintenance expects plan, apply, status, prepare, authorize, cancel or finish")
+		}
+		p, err := updater.ReadCommittedHandoffPlan(*planFile)
+		if err != nil {
+			return err
+		}
+		if *resumeID != "" {
+			if action != "apply" || *journalGeneration == 0 {
+				return errors.New("updater: committed continuation requires apply and expected-generation")
+			}
+			j, err := updater.ResumeCommittedHandoff(ctx, cfg, p, *resumeID, *journalGeneration)
+			_ = json.NewEncoder(out).Encode(j)
+			return err
+		}
+		if action == "prepare" || action == "authorize" || action == "cancel" || action == "finish" {
+			if *journalGeneration == 0 {
+				return errors.New("updater: expected-generation is required")
+			}
+			op := action
+			if op == "authorize" {
+				op = "apply"
+			}
+			st, err := updater.Call(ctx, cfg, "maintenance/"+op, updater.ControlRequest{Maintenance: &p.Maintenance, ExpectedGeneration: *journalGeneration})
+			_ = json.NewEncoder(out).Encode(st)
+			return err
+		}
+		if *journalGeneration != 0 {
+			return errors.New("updater: unexpected generation without continuation")
+		}
+		if action == "plan" {
+			p, err = updater.PrepareCommittedHandoffPlan(ctx, cfg, p)
+			_ = json.NewEncoder(out).Encode(map[string]any{"allowed": err == nil, "plan": p})
+			return err
+		}
+		j, err := updater.ApplyCommittedHandoff(ctx, cfg, p)
+		_ = json.NewEncoder(out).Encode(j)
 		return err
 	}
 	if command == "handoff" {
