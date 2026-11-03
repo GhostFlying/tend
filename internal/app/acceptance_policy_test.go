@@ -550,3 +550,83 @@ func TestCreatorPolicyHistoricalClassificationDoesNotAuthorizeWaivedIssue(t *tes
 		t.Fatal("source rejection leaked an Issue, creator policy or Task")
 	}
 }
+
+func TestCreatorPolicyWaiverDoesNotRestoreRevokedInputAuthority(t *testing.T) {
+	h := hostedManagerHarness(t)
+	source := createCanonicalOwnerTestIssue(t, h)
+	task := createCanonicalTaskForTest(t, h, source)
+	producer, ok, op := h.claim("linux-1")
+	if !ok || producer.TaskID != task {
+		t.Fatal(producer, op)
+	}
+	file, _ := h.uploadResultFile(producer, "evidence.txt", []byte("original immutable evidence"))
+	artifactPayload := testArtifact(h.task(task).WorkspaceName)
+	artifactPayload.Files = []protocol.ArtifactFile{file}
+	if op := h.runAs(producer, protocol.OpRunsSubmitArtifact, artifactPayload, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	artifactID := h.task(task).CurrentArtifactID
+	accept, ok, op := h.claim("linux-1")
+	if !ok || accept.Role != protocol.RoleAccept {
+		t.Fatal(accept, op)
+	}
+	if op := h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	target := assignHostedManager(t, h, policyIssue(t, h, false))
+	var artifact store.ArtifactRow
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		artifact, err = store.GetArtifact(t.Context(), tx.Q(), artifactID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	granted := h.exec(owner, h.env(protocol.OpGrantArtifactShare, protocol.Target{Type: "issue", ID: target.IssueID}, protocol.GrantArtifactSharePayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: target.AssignmentEpoch, Reason: "Allow exact report input"}, ArtifactID: artifactID, RefSHA256: store.ArtifactRefSHA256(artifact.RefJSON)}, rev(target.Revision)), ArtifactShareCommand{})
+	var share protocol.ArtifactShare
+	if granted.Status != protocol.OpSucceeded || json.Unmarshal(granted.Result, &share) != nil {
+		t.Fatal(granted)
+	}
+	target = canonicalTaskIssue(t, h, target.IssueID)
+	revoked := h.exec(owner, h.env(protocol.OpRevokeArtifactShare, protocol.Target{Type: "issue", ID: target.IssueID}, protocol.RevokeArtifactSharePayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: target.AssignmentEpoch, Reason: "Revoke new original input access"}, ShareID: share.ShareID, ExpectedShareRevision: share.Revision}, rev(target.Revision)), ArtifactShareCommand{Revoke: true})
+	if revoked.Status != protocol.OpSucceeded {
+		t.Fatal(revoked)
+	}
+	target = canonicalTaskIssue(t, h, target.IssueID)
+	turn, manager := startHostedIssueReview(t, h, target)
+	spec := testSpec
+	spec.Inputs = []protocol.TaskInput{{FileID: file.FileID}}
+	command := HostedCoordinationCommand{Command: CanonicalOwnerTaskCreate{}, ExecutionID: turn.RequestID, EffectSeq: 1}
+	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: target.AssignmentEpoch, Title: "Waiver does not grant source access", Spec: spec, Rating: protocol.RatingP1}
+	request := h.env(command.Operation(), protocol.Target{Type: "issue", ID: target.IssueID}, payload, rev(target.Revision))
+	tasks, specs, contracts := h.count("tasks"), h.count("task_specs"), h.count("creator_task_owner_contracts")
+	denied := h.exec(manager, request, command)
+	expectWorkCode(t, denied, protocol.CodeInvalidRequest)
+	if replay := h.exec(manager, request, command); !reflect.DeepEqual(denied, replay) {
+		t.Fatal("waived input rejection replay changed", denied, replay)
+	}
+	if h.count("tasks") != tasks || h.count("task_specs") != specs || h.count("creator_task_owner_contracts") != contracts {
+		t.Fatal("revoked input left a partial waived contract")
+	}
+	payload.Spec.Inputs = nil
+	command.EffectSeq++
+	lawful := h.exec(manager, h.env(command.Operation(), protocol.Target{Type: "issue", ID: target.IssueID}, payload, rev(target.Revision)), command)
+	if lawful.Status != protocol.OpSucceeded {
+		t.Fatal("lawful waived task was rejected", lawful)
+	}
+	var created struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(lawful.Result, &created); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		policy, err := store.TaskAcceptancePolicy(t.Context(), tx.Q(), created.TaskID)
+		if err == nil && (policy == nil || policy.Required) {
+			t.Fatal("waived snapshot was not retained", policy)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
