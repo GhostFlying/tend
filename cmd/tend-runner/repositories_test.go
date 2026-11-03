@@ -21,8 +21,12 @@ func TestLocalRepositoryControlPublishesWithoutRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeControl()
+	socket, err := repositorySocketPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(home, "repositories.sock"))
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}

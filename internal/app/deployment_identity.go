@@ -7,11 +7,23 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// DeploymentID initializes the durable identity once, using the injected ID source.
+// DeploymentID reads the durable identity without acquiring the writer. Only a
+// missing identity requires initialization, using the injected ID source.
 func (a *App) DeploymentID(ctx context.Context) (string, error) {
 	var id string
+	read := func(q store.Querier) error {
+		return q.QueryRowContext(ctx, `SELECT COALESCE((SELECT deployment_id FROM deployment_identity WHERE singleton=1),'')`).Scan(&id)
+	}
+	if err := a.store.Read(ctx, func(tx *store.ReadTx) error { return read(tx.Q()) }); err != nil {
+		return "", err
+	}
+	if id != "" {
+		return id, nil
+	}
+	// The read transaction has ended. Recheck under the writer so concurrent
+	// first callers cannot create or return different identities.
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
-		if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT deployment_id FROM deployment_identity WHERE singleton=1),'')`).Scan(&id); err != nil {
+		if err := read(tx.Q()); err != nil {
 			return err
 		}
 		if id != "" {
@@ -21,5 +33,8 @@ func (a *App) DeploymentID(ctx context.Context) (string, error) {
 		_, err := tx.Exec(ctx, `INSERT INTO deployment_identity(singleton,deployment_id) VALUES(1,?)`, id)
 		return err
 	})
-	return id, err
+	if err != nil {
+		return "", err
+	}
+	return id, nil
 }
