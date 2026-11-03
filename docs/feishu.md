@@ -4,24 +4,28 @@ Refs: D162。
 
 ## 范围与激活
 
-飞书 adapter 默认关闭。配置 `feishu` 后，服务端仅登记 `configured_unverified`，不把本机配置当作飞书鉴权或发送成功。配置示例中的环境变量必须由部署的私有 secret 来源注入；不把值写入配置或仓库。
+飞书 adapter 默认关闭。配置 `feishu` 后，服务端先登记 `configured_unverified`，不把本机配置当作已连接或发送成功。默认接收模式为出站 WebSocket，适合仅有私有网络入口的部署，不需要新增公网地址。配置示例中的环境变量必须由部署的私有 secret 来源注入；不把值写入配置或仓库。
 
 ```json
 {
   "feishu": {
+    "receive_mode": "websocket",
     "app_id": "application-id",
     "tenant_key": "tenant-id",
-    "app_secret_env": "TEND_FEISHU_APP_SECRET",
-    "verification_token_env": "TEND_FEISHU_VERIFICATION_TOKEN",
-    "encrypt_key_env": "TEND_FEISHU_ENCRYPT_KEY",
-    "callback_listen": "localhost:8081"
+    "app_secret_env": "TEND_FEISHU_APP_SECRET"
   }
 }
 ```
 
-回调为 `POST /hooks/feishu`。可选监听只提供经签名鉴权的回调，必须由部署方提供 HTTPS 入口；它不开放 owner API。与已有 webhook 使用同一监听时，地址必须一致。飞书应用需启用消息事件订阅、机器人消息收发权限，并完成租户授权与回调 challenge。实际 app、tenant、owner open_id、私聊 chat_id、回调可达性和权限是联网激活的前置；离线替身通过不代表这些条件已满足。
+WebSocket 模式使用固定官方 Go SDK v3.12.1，应用必须是企业自建应用，服务端只需出站访问飞书。开发者后台选择“使用长连接接收事件”，订阅 `im.message.receive_v1` 并完成应用消息权限与租户授权；保存订阅方式时需要连接已在线。SDK 处理连接鉴权、重连和帧协议，本服务不手写 protobuf。事件处理受 2.5 秒预算限制，失败不确认，平台重推继续使用原 event/message/request 身份。每个应用最多 50 连接且以集群方式随机分发，不将多个连接误认为广播。
 
-只接受绑定 owner 的私聊文本，不根据消息自报内容创建权限。签名校验使用收到的原始 body，之后才解密与解析；校验签名时间、verification token、app、tenant、sender 与 chat。URL challenge 不创建业务消息。附件、群聊和交互卡片未实现，明确拒绝而不冒充已收取；owner 可在 Web/CLI 处理附件。
+`channel feishu show` 的 `runtime_health` 与 `channel list` 的 `health` 区分 `configured_unverified`、`connected`、`reconnecting`、`disconnected`、`connection_failed`。已连接只说明传输握手成功，不表示 owner 绑定、权限或端到端消息验收通过。连接错误不停止 Tend 主服务；服务端 context 负责取消连接和等待 SDK worker 退出，日志不转发 SDK 原始 payload 或错误参数。
+
+需要 HTTP 时显式配置 `receive_mode: "http"`，并额外配置 `verification_token_env`、`encrypt_key_env`；可选 `callback_listen` 只提供签名鉴权的 `POST /hooks/feishu`，仍需部署方提供 HTTPS 公网入口。与已有 webhook 使用同一监听时地址必须一致。WebSocket 模式拒绝配置 callback listener，不开放 HTTP 接收入口。实际 app、tenant、owner open_id、私聊 chat_id、订阅与权限是联网激活前置，离线替身不代表这些条件已满足。
+
+官方说明：[长连接接收事件](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-)；[固定 SDK 生命周期](https://github.com/larksuite/oapi-sdk-go/blob/v3.12.1/ws/client_lifecycle.go)。
+
+只接受绑定 owner 的私聊文本，不根据消息自报内容创建权限。HTTP 模式签名校验使用收到的原始 body，之后才解密与解析；校验签名时间、verification token、app、tenant、sender 与 chat。URL challenge 不创建业务消息。附件、群聊和交互卡片未实现，明确拒绝而不冒充已收取；owner 可在 Web/CLI 处理附件。
 
 ## CLI 与请求恢复
 
@@ -41,4 +45,4 @@ provider event/message 身份先持久化一个稳定 request-id；业务消息�
 
 发送冻结 app、tenant、chat、绑定 revision 和稳定 delivery UUID。回复固定原输入的 owner、chat 和绑定 revision；绑定更改或撤销不向新地址补发旧消息。明确的 429/限流错误码拒绝按受限 x-ogw-ratelimit-reset（兼容 Retry-After） 重试同一 outbox/UUID；网络断开、5xx、缺失或坏 receipt 保持 unknown，没有凭空的 UUID 反查能力，因此 reconcile 不重送。发送前 token 获取的网络/限流/5xx 瞬态失败只重试原 outbox 身份，尚未调用消息发送接口；明确永久鉴权拒绝才失败。成功回执的 opaque message ID 经 owner receipts/trace/CLI 和 Web 展示，成功仅表明 provider 接受消息，不代表用户已读或模型已处理。
 
-本实现使用应用自建 tenant access token，只在内存缓存且不自动重发消息；不新增 OAuth 共享认证。回调/发送测试均使用本地 HTTP 替身，不向真实飞书发送消息。
+本实现使用应用自建 tenant access token，只在内存缓存且不自动重发消息；不新增 OAuth 共享认证。长连接/回调/发送测试均使用本地网关替身，不向真实飞书发送消息。
