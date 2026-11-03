@@ -273,9 +273,16 @@ func PlanCommittedHandoff(ctx context.Context, cfg Config, p CommittedHandoffPla
 	if id != p.Updater {
 		return ErrUnknown
 	}
-	owner, known := flockOwner(p.LockDevice, p.LockInode)
-	if !known || owner != p.Updater.PID {
+	ownsLock, err := processOwnsFlock(ctx, "/proc", p.Updater.PID, p.LockDevice, p.LockInode)
+	if err != nil {
+		return err
+	}
+	if !ownsLock {
 		return errors.New("updater: old supervisor does not own the original lock")
+	}
+	id, err = (LinuxProcess{}).Inspect(ctx, p.Updater.PID)
+	if err != nil || id != p.Updater {
+		return ErrUnknown
 	}
 	return retainedCommittedChild(ctx, p)
 }
