@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
 )
 
-func usageAttribution(ctx context.Context, q store.Querier, r protocol.TokenUsageRecord) protocol.UsageAttribution {
+func (resolver *usageResolver) attribution(ctx context.Context, r protocol.TokenUsageRecord) protocol.UsageAttribution {
+	q := resolver.q
 	a := protocol.UsageAttribution{IssuePath: []protocol.UsageIssueRef{}, Categories: []string{}, Role: r.Role}
 	conversation := strings.TrimPrefix(r.Subject, "conversation:")
 	if r.RecordID != "" {
@@ -38,11 +38,7 @@ func usageAttribution(ctx context.Context, q store.Querier, r protocol.TokenUsag
 		_ = q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(e.private_snapshot,'$.runner_run_id'),'') FROM main_turns t JOIN hosted_executions e ON e.execution_id=t.request_id WHERE t.thread_id=? AND t.turn_id=? LIMIT 1`, r.ThreadID, r.TurnID).Scan(&a.RunID)
 	}
 	if a.RunID == "" {
-		var count int
-		var run string
-		if q.QueryRowContext(ctx, `SELECT COUNT(DISTINCT run_id),COALESCE(MIN(run_id),'') FROM run_logs WHERE kind IN ('native.turn_started','native.turn_completed','item.completed') AND json_extract(body_json,'$.thread_id')=? AND json_extract(body_json,'$.turn_id')=?`, r.ThreadID, r.TurnID).Scan(&count, &run) == nil && count == 1 {
-			a.RunID = run
-		}
+		a.RunID = resolver.runForTurn(ctx, r.ThreadID, r.TurnID)
 	}
 	if a.RunID == "" {
 		var snapshotRaw string
@@ -87,9 +83,9 @@ func usageAttribution(ctx context.Context, q store.Querier, r protocol.TokenUsag
 		}
 	}
 	if a.Agent == "" && r.RecordID != "" {
-		var categories string
-		if q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(source_json,'$.actor_name'),''),COALESCE(json_extract(source_json,'$.actor_id'),''),COALESCE(json_extract(source_json,'$.actor_categories'),'[]') FROM token_usage_local_sources WHERE conversation_id=? AND (json_extract(source_json,'$.thread_id')=? OR json_extract(source_json,'$.thread_id')=? OR json_extract(source_json,'$.session_id')=?) ORDER BY (json_extract(source_json,'$.thread_id')=?) DESC LIMIT 1`, conversation, r.ThreadID, r.ParentThreadID, r.SessionID, r.ThreadID).Scan(&a.Agent, &a.AgentID, &categories) == nil {
-			_ = json.Unmarshal([]byte(categories), &a.Categories)
+		if actor, ok := resolver.actor(ctx, conversation, r.ThreadID, r.ParentThreadID, r.SessionID); ok {
+			a.Agent, a.AgentID = actor.name, actor.id
+			_ = json.Unmarshal([]byte(actor.categories), &a.Categories)
 		}
 	}
 	if issue == "" && strings.HasPrefix(conversation, "issue:") {

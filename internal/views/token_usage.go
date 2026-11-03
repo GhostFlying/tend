@@ -99,6 +99,7 @@ func TokenUsageFiltered(ctx context.Context, q store.Querier, kind string, offse
 	defer rows.Close()
 	grouping := newUsageGrouping()
 	attributions := map[string]protocol.UsageAttribution{}
+	resolver := newUsageResolver(q)
 	models := map[string]*protocol.TokenUsageGroup{}
 	roles := map[string]*protocol.TokenUsageGroup{}
 	buckets := map[int64]*protocol.TokenUsageBucket{}
@@ -118,7 +119,7 @@ func TokenUsageFiltered(ctx context.Context, q store.Querier, kind string, offse
 		}
 		attribution, exists := attributions[key]
 		if !exists {
-			attribution = usageAttribution(ctx, q, r)
+			attribution = resolver.attribution(ctx, r)
 			attributions[key] = attribution
 		}
 		r.Attribution = attribution
