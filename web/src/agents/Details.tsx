@@ -1,4 +1,4 @@
-import { AgentIssues } from "./Issues.tsx";
+import { AgentIssues, type AgentIssueModel } from "./Issues.tsx";
 import { href } from "../app/router.ts";
 import type { AgentCategory } from "../api/generated/api.ts";
 import { currentObservation } from "./facts.ts";
@@ -13,7 +13,15 @@ function registration(entry: Entry): string {
   return group.catalog.current ? `已登记 · v${group.catalog.current.local_revision}` : "未登记";
 }
 
-export function AgentDetails({ entry, categories }: { entry: Entry; categories: AgentCategory[] }) {
+export function AgentDetails({
+  entry,
+  categories,
+  issues,
+}: {
+  entry: Entry;
+  categories: AgentCategory[];
+  issues: AgentIssueModel | null;
+}) {
   const { agent, group, runtime } = entry;
   const catalog = group.catalog;
   const worker = entry.history ? undefined : currentObservation(catalog, agent, "");
@@ -177,10 +185,7 @@ export function AgentDetails({ entry, categories }: { entry: Entry; categories: 
           </>
         )}
       </details>
-      <AgentIssues
-        key={`${agent.identity.execution_environment_id}/${agent.identity.local_id}/${entry.history?.pin.snapshot_id ?? "current"}`}
-        entry={entry}
-      />
+      {issues && <AgentIssues model={issues} />}
     </div>
   );
 }

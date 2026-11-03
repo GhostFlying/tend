@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import type { AgentIssuePage } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { navigate } from "../app/router.ts";
+import type { ApiClient } from "../api/client.ts";
+import { Store } from "../state/store.ts";
 import { useStore } from "../state/store.ts";
 import { WorkItemRead } from "../workitems/live.ts";
 import { Button, Input, Select } from "../ui/index.ts";
@@ -34,33 +36,77 @@ const issueStates: Record<string, string> = {
   cancelled: "已取消",
   closed: "已关闭",
 };
-export function AgentIssues({ entry }: { entry: Entry }) {
-  const { client, openIssue } = useServices();
-  const read = useMemo(() => new WorkItemRead<AgentIssuePage>(client), [client]);
-  const result = useStore(read.state);
-  const [scope, setScope] = useState("current");
-  const [state, setState] = useState("");
-  const [search, setSearch] = useState("");
-  const [cursors, setCursors] = useState<string[]>([]);
-  const identity = entry.agent.identity;
-  const query = new URLSearchParams({
-    environment_id: identity.execution_environment_id,
-    local_id: identity.local_id,
-    scope,
-    state,
-    search,
-    after: cursors.at(-1) ?? "",
-    limit: "20",
-    ...(entry.history ? { snapshot_id: entry.history.pin.snapshot_id } : {}),
-  }).toString();
+type AssociationFilters = { scope: string; state: string; search: string; cursors: string[] };
+
+// The catalog owns one controller, shared by both responsive detail presentations.
+export class AgentIssueModel {
+  readonly read: WorkItemRead<AgentIssuePage>;
+  readonly filters = new Store<AssociationFilters>({
+    scope: "current",
+    state: "",
+    search: "",
+    cursors: [],
+  });
+  constructor(
+    client: ApiClient,
+    private readonly environment: string,
+    private readonly local: string,
+    private readonly snapshot: string,
+  ) {
+    this.read = new WorkItemRead<AgentIssuePage>(client);
+  }
+  open() {
+    const filters = this.filters.get();
+    const query = new URLSearchParams({
+      environment_id: this.environment,
+      local_id: this.local,
+      scope: filters.scope,
+      state: filters.state,
+      search: filters.search,
+      after: filters.cursors.at(-1) ?? "",
+      limit: "20",
+      ...(this.snapshot ? { snapshot_id: this.snapshot } : {}),
+    });
+    return this.read.open(`/api/v1/agent-issues?${query}`);
+  }
+  update(patch: Partial<Pick<AssociationFilters, "scope" | "state" | "search">>) {
+    this.filters.set({ ...this.filters.get(), ...patch, cursors: [] });
+    void this.open();
+  }
+  next(cursor: string) {
+    const state = this.filters.get();
+    this.filters.set({ ...state, cursors: [...state.cursors, cursor] });
+    void this.open();
+  }
+  previous() {
+    const state = this.filters.get();
+    this.filters.set({ ...state, cursors: state.cursors.slice(0, -1) });
+    void this.open();
+  }
+}
+
+export function useAgentIssueModel(entry: Entry | undefined) {
+  const { client } = useServices();
+  const environment = entry?.agent.identity.execution_environment_id ?? "";
+  const local = entry?.agent.identity.local_id ?? "";
+  const snapshot = entry?.history?.pin.snapshot_id ?? "";
+  const model = useMemo(
+    () => (environment && local ? new AgentIssueModel(client, environment, local, snapshot) : null),
+    [client, environment, local, snapshot],
+  );
   useEffect(() => {
-    void read.open(`/api/v1/agent-issues?${query}`);
-    return () => read.close();
-  }, [read, query]);
-  const reset = (change: () => void) => {
-    change();
-    setCursors([]);
-  };
+    if (!model) return;
+    void model.open();
+    return () => model.read.close();
+  }, [model]);
+  return model;
+}
+
+export function AgentIssues({ model }: { model: AgentIssueModel }) {
+  const { openIssue } = useServices();
+  const read = model.read;
+  const result = useStore(read.state);
+  const { scope, state, search, cursors } = useStore(model.filters);
   return (
     <section className={styles.root} aria-label="关联 Issue">
       <h3>关联 Issue</h3>
@@ -72,7 +118,7 @@ export function AgentIssues({ entry }: { entry: Entry }) {
         <Select
           aria-label="Issue 关联范围"
           value={scope}
-          onChange={(e) => reset(() => setScope(e.target.value))}
+          onChange={(e) => model.update({ scope: e.target.value })}
         >
           <option value="current">当前未结执行 / 待决策</option>
           <option value="history">历史执行</option>
@@ -81,7 +127,7 @@ export function AgentIssues({ entry }: { entry: Entry }) {
         <Select
           aria-label="关联 Issue 状态"
           value={state}
-          onChange={(e) => reset(() => setState(e.target.value))}
+          onChange={(e) => model.update({ state: e.target.value })}
         >
           <option value="">全部 Issue 状态</option>
           {Object.entries(issueStates).map(([value, label]) => (
@@ -94,7 +140,7 @@ export function AgentIssues({ entry }: { entry: Entry }) {
           aria-label="搜索关联 Issue"
           placeholder="搜索 Issue 标题或 ID"
           value={search}
-          onChange={(e) => reset(() => setSearch(e.target.value))}
+          onChange={(e) => model.update({ search: e.target.value })}
         />
         <Button disabled={result.loading} onClick={() => void read.refresh()}>
           刷新关联
@@ -102,7 +148,7 @@ export function AgentIssues({ entry }: { entry: Entry }) {
       </div>
       {result.error && <p role="alert">无法读取 Issue 关联：{result.error}</p>}
       {result.loading && <p role="status">正在读取 Issue 关联…</p>}
-      {!result.loading && !result.error && !result.value?.items?.length && (
+      {!result.loading && !result.error && result.value && !result.value.items?.length && (
         <p>此范围暂无已记录关联，不代表从未处理过 Issue。</p>
       )}
       {result.value?.items?.map((item) => (
@@ -147,15 +193,12 @@ export function AgentIssues({ entry }: { entry: Entry }) {
       ))}
       <div className={styles.filters}>
         {!!cursors.length && (
-          <Button disabled={result.loading} onClick={() => setCursors((v) => v.slice(0, -1))}>
+          <Button disabled={result.loading} onClick={() => model.previous()}>
             上一页关联
           </Button>
         )}
         {result.value?.more && (
-          <Button
-            disabled={result.loading}
-            onClick={() => setCursors((v) => [...v, result.value!.next!])}
-          >
+          <Button disabled={result.loading} onClick={() => model.next(result.value!.next!)}>
             下一页关联
           </Button>
         )}
