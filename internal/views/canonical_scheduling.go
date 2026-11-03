@@ -25,7 +25,7 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 		}
 		c.OwnerPin = contract.Execution
 		c.OwnerAgentRevision, c.OwnerRuntimeRevision = uint64(contract.AgentRevision), uint64(contract.RuntimeRevision)
-		if c.Kind == protocol.ActionAccept || c.OwnerPin != nil {
+		if contract.ReviewIssueID != "" && (c.Kind == protocol.ActionAccept || c.OwnerPin != nil) {
 			review, err := store.GetCanonicalIssue(ctx, q, contract.ReviewIssueID)
 			if err != nil {
 				return err

@@ -1,27 +1,15 @@
 import { useEntryState } from "../app/router.ts";
 import { useEffect, useMemo, useState, useRef } from "react";
-import type { ArtifactDetail, IssueResult, IssueResultPage } from "../api/generated/api.ts";
+import type { ArtifactDetail, IssueResultPage } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { WorkItemRead } from "../workitems/live.ts";
 import { ArtifactRef } from "../shell/Details.tsx";
 import { ArtifactDelivery } from "../tasks/ArtifactDelivery.tsx";
+import { resultStatus, type ResultCardValue } from "./resultStatus.ts";
 import styles from "./DetailPage.module.css";
 
-type ResultCardValue = Pick<IssueResult, "artifact" | "task_id" | "title" | "acceptances">;
-
-export function resultStatus(result: ResultCardValue): string {
-  const verdict = result.acceptances?.at(-1)?.verdict;
-  return verdict === "passed"
-    ? "独立验收通过"
-    : verdict === "changes_required"
-      ? "独立验收需修改"
-      : verdict === "blocked"
-        ? "验收受阻"
-        : verdict === "inconclusive"
-          ? "验收结论待定"
-          : "待独立验收";
-}
+export { resultStatus } from "./resultStatus.ts";
 export function IssueResultCard({
   result,
   onTask,
@@ -75,7 +63,7 @@ export function IssueResultCard({
           </button>
         )}
         <button className={styles.textLink} onClick={() => onTask(result.task_id)}>
-          查看任务与验收 →
+          {result.acceptance_policy?.required === false ? "查看任务与结果 →" : "查看任务与验收 →"}
         </button>
       </div>
     </article>

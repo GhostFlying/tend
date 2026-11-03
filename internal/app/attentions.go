@@ -418,7 +418,7 @@ func syncAttentionDecision(ctx context.Context, x *Exec, tx *store.Tx, e Event) 
 			}
 		}
 		var reviewIssue string
-		if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT review_issue_id FROM task_owner_contracts WHERE task_id=? AND EXISTS(SELECT 1 FROM json_each(?) WHERE value=?)),'')`, d.TaskID, d.EffectsJSON, protocol.EffectAccept).Scan(&reviewIssue); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT review_issue_id FROM task_execution_contracts WHERE task_id=? AND EXISTS(SELECT 1 FROM json_each(?) WHERE value=?)),'')`, d.TaskID, d.EffectsJSON, protocol.EffectAccept).Scan(&reviewIssue); err != nil {
 			return "", err
 		}
 		if reviewIssue != "" {

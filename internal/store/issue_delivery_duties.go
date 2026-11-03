@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -10,9 +11,16 @@ import (
 func GetIssueDeliveryDuty(ctx context.Context, q Querier, issue, task string) (protocol.IssueDeliveryDuty, error) {
 	var d protocol.IssueDeliveryDuty
 	var raw string
-	err := q.QueryRowContext(ctx, `SELECT task_id,event_id,acceptance_id,revision,status,body_json FROM issue_delivery_duties WHERE issue_id=? AND task_id=?`, issue, task).Scan(&d.TaskID, &d.EventID, &d.AcceptanceID, &d.Revision, &d.Status, &raw)
+	var accepted sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT task_id,event_id,acceptance_id,revision,status,body_json FROM issue_delivery_duties WHERE issue_id=? AND task_id=?`, issue, task).Scan(&d.TaskID, &d.EventID, &accepted, &d.Revision, &d.Status, &raw)
 	if err != nil {
 		return d, notFound(err, "delivery duty")
+	}
+	d.AcceptanceID = accepted.String
+	if !accepted.Valid {
+		if err := q.QueryRowContext(ctx, `SELECT artifact_id FROM issue_delivery_duties WHERE issue_id=? AND task_id=?`, issue, task).Scan(&d.ArtifactID); err != nil {
+			return d, err
+		}
 	}
 	var body protocol.IssueDeliveryDuty
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {

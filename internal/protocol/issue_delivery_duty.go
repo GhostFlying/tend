@@ -36,7 +36,8 @@ type IssueDeliveryDuty struct {
 	AssignmentEpoch int64                   `json:"assignment_epoch,omitempty"`
 	TaskID          string                  `json:"task_id"`
 	EventID         string                  `json:"event_id"`
-	AcceptanceID    string                  `json:"acceptance_id"`
+	AcceptanceID    string                  `json:"acceptance_id,omitempty"`
+	ArtifactID      string                  `json:"artifact_id,omitempty"`
 	Revision        int64                   `json:"revision"`
 	Status          string                  `json:"status"`
 	Candidate       *IssueDeliveryCandidate `json:"candidate,omitempty"`

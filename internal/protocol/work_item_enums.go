@@ -97,13 +97,14 @@ type IssueEvidenceKind string
 
 const (
 	WorkItemEvidenceAcceptance    IssueEvidenceKind = "acceptance"
+	WorkItemEvidenceResult        IssueEvidenceKind = "result"
 	WorkItemEvidenceUpgrade       IssueEvidenceKind = "upgrade"
 	WorkItemEvidenceDelivery      IssueEvidenceKind = "delivery"
 	WorkItemEvidenceOwnerDecision IssueEvidenceKind = "owner_decision"
 )
 
 func IssueEvidenceKindValues() []IssueEvidenceKind {
-	return []IssueEvidenceKind{WorkItemEvidenceAcceptance, WorkItemEvidenceDelivery, WorkItemEvidenceOwnerDecision, WorkItemEvidenceUpgrade}
+	return []IssueEvidenceKind{WorkItemEvidenceResult, WorkItemEvidenceAcceptance, WorkItemEvidenceDelivery, WorkItemEvidenceOwnerDecision, WorkItemEvidenceUpgrade}
 }
 
 type IssueClosureKind string

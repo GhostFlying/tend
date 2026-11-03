@@ -37,19 +37,32 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 			acceptanceID = acceptance.AcceptanceID
 		}
 	}
-	if acceptanceID == "" {
-		return fmt.Errorf("app: completed task has no passed acceptance")
+	policy, err := store.TaskAcceptancePolicy(ctx, tx.Q(), taskID)
+	if err != nil {
+		return err
+	}
+	waived := policy != nil && !policy.Required
+	if acceptanceID == "" && !waived {
+		return fmt.Errorf("app: completed task has no passed acceptance or creator policy")
 	}
 	var body strings.Builder
-	fmt.Fprintf(&body, "任务已完成：%s\n\n独立验收通过 · spec %d。\n\n产物：`%s`。", taskID, task.SpecVersion, task.CurrentArtifactID)
-	fmt.Fprintf(&body, "\n\n验收证据：`%s`（acceptance_id）。", acceptanceID)
+	fmt.Fprintf(&body, "任务已完成：%s\n\nspec %d · 产物：`%s`。", taskID, task.SpecVersion, task.CurrentArtifactID)
+	if acceptanceID != "" {
+		fmt.Fprintf(&body, "\n\n独立验收通过，验收证据：`%s`（acceptance_id）。", acceptanceID)
+	} else {
+		fmt.Fprintf(&body, "\n\n按 Issue 冻结策略，本轮不要求独立验收（%s）；合法交付结果已保存，不代表 PR、合入或部署完成。", policy.Reason)
+	}
 	scope, err := store.ResolveTaskIssueScope(ctx, tx.Q(), taskID)
 	if err != nil {
 		return err
 	}
 	for _, item := range scope.Responsibilities {
 		if item.Status != "closed" {
-			if err := tx.PutCompletionReview(ctx, item.WorkItemID, protocol.WorkItemCompletionReview{EventID: sourceEventID, TaskID: taskID, AcceptanceID: acceptanceID, CreatedAt: x.Now.UnixMilli()}); err != nil {
+			review := protocol.WorkItemCompletionReview{EventID: sourceEventID, TaskID: taskID, AcceptanceID: acceptanceID, CreatedAt: x.Now.UnixMilli()}
+			if acceptanceID == "" {
+				review.ArtifactID = task.CurrentArtifactID
+			}
+			if err := tx.PutCompletionReview(ctx, item.WorkItemID, review); err != nil {
 				return err
 			}
 		}
@@ -57,7 +70,7 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 			if err := recordIssueDeliveryDuty(ctx, tx, item.WorkItemID, taskID, sourceEventID, acceptanceID); err != nil {
 				return err
 			}
-			fmt.Fprintf(&body, "\n\n事项：%s（%s）。独立验收已通过，负责人须核对真实交付终点；delivery_duties 独立保留交付责任。准备可审阅 PR/diff 与验证后，用 issues_update_delivery 提出绑定候选及范围的版本化 Attention，在当前 IM 请求 owner 确认。未批准不得合入或部署；批准后按范围继续并验证。任务完成和完成通知核对都不会消除交付责任。", item.WorkItemID, item.Title)
+			fmt.Fprintf(&body, "\n\n事项：%s（%s）。本轮结果已按冻结策略完成，负责人须核对真实交付终点；delivery_duties 独立保留交付责任。准备可审阅 PR/diff 与验证后，用 issues_update_delivery 提出绑定候选及范围的版本化 Attention，在当前 IM 请求 owner 确认。未批准不得合入或部署；批准后按范围继续并验证。任务完成和完成通知核对都不会消除交付责任。", item.WorkItemID, item.Title)
 			continue
 		}
 		fmt.Fprintf(&body, "\n\n工作项：%s（%s）。本轮执行完成不代表后续跟进结束；请核对已有承诺、交付状态和下一步安排；完成阶段后更新计划，仍有阶段责任时用 completion_reviews 明确记录核对结论。若已授权上线则继续；否则在核对现有选择后通过工作项选择卡询问下一步，明确尚需提交、PR、合入或部署的哪些步骤，已决定稍后处理的不要重复问。", item.WorkItemID, item.Title)

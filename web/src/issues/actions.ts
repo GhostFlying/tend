@@ -1,4 +1,5 @@
 import type {
+  SetIssueAcceptancePolicyPayload,
   ManagerMigrationPayload,
   RequestIssueManagerPayload,
   CreateIssuePayload,
@@ -21,6 +22,7 @@ import type {
 import type { OwnerCommand } from "../app/ownerCommand.ts";
 
 interface IssuePayloads {
+  set_acceptance_policy: SetIssueAcceptancePolicyPayload;
   manager_migration: ManagerMigrationPayload;
   request_manager: RequestIssueManagerPayload;
   request_owner: RequestIssueManagerPayload;

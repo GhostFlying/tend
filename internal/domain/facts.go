@@ -67,12 +67,23 @@ func TakenOver(t Task, r RunFact, reason string) Decision {
 // it belongs to the current spec version and generation, the task awaits
 // acceptance and an independent acceptance action is derived.
 func ArtifactSubmitted(t Task, r RunFact, artifactID string) Decision {
+	return ArtifactSubmittedWithAcceptance(t, r, artifactID, true)
+}
+
+// ArtifactSubmittedWithAcceptance uses the server-frozen creation policy.
+// A waived review is not a passed independent verdict.
+func ArtifactSubmittedWithAcceptance(t Task, r RunFact, artifactID string, required bool) Decision {
 	body := map[string]any{"run_id": r.RunID, "artifact_id": artifactID, "spec_version": r.SpecVersion, "generation": r.Generation}
 	if !currentImplement(t, r) || t.Lifecycle != protocol.TaskRunning {
 		return Decision{Task: t, Events: []EventDraft{staleEvent("artifact.submitted", body)}}
 	}
-	t.Lifecycle = protocol.TaskAwaitingAcceptance
 	t.CurrentArtifactID = artifactID
+	if !required {
+		t.Lifecycle = protocol.TaskCompleted
+		t.Block = protocol.BlockNone
+		return Decision{Task: t, Events: []EventDraft{{Kind: "artifact.submitted", Body: body}, {Kind: "task.completed", Body: map[string]any{"artifact_id": artifactID, "spec_version": t.SpecVersion, "independent_acceptance_required": false}}}}
+	}
+	t.Lifecycle = protocol.TaskAwaitingAcceptance
 	return Decision{
 		Task:    t,
 		Events:  []EventDraft{{Kind: "artifact.submitted", Body: body}},

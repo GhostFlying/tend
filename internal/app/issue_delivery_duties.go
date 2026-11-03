@@ -18,8 +18,18 @@ import (
 func recordIssueDeliveryDuty(ctx context.Context, tx *store.Tx, issue, task, event, acceptance string) error {
 	// A delivery execution discharges its original obligation after acceptance
 	// and provider verification; it does not manufacture an endless new handoff.
-	_, err := tx.Exec(ctx, `INSERT INTO issue_delivery_duties(issue_id,task_id,event_id,acceptance_id)
- SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM issue_delivery_executions WHERE task_id=?) ON CONFLICT DO NOTHING`, issue, task, event, acceptance, task)
+	var accepted, artifact any
+	if acceptance != "" {
+		accepted = acceptance
+	} else {
+		row, err := store.GetTask(ctx, tx.Q(), task)
+		if err != nil {
+			return err
+		}
+		artifact = row.CurrentArtifactID
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO issue_delivery_duties(issue_id,task_id,event_id,acceptance_id,artifact_id)
+ SELECT ?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM issue_delivery_executions WHERE task_id=?) ON CONFLICT DO NOTHING`, issue, task, event, accepted, artifact, task)
 	return err
 }
 
@@ -197,7 +207,11 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		// Bounded reports/reviews have a valid accepted endpoint, without merge.
 		d.Status = "report"
-		evidence = []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceAcceptance, Reference: d.AcceptanceID, Summary: p.Reason}}
+		basis, err := completedTaskEvidence(ctx, tx.Q(), d.TaskID, p.Reason)
+		if err != nil {
+			return Outcome{}, err
+		}
+		evidence = []protocol.IssueEvidence{basis}
 	case "end":
 		reference := x.Env.RequestID
 		if x.Principal.Kind != protocol.PrincipalOwner {
@@ -267,7 +281,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, err
 		}
 		if task.Lifecycle != protocol.TaskCompleted {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "delivery execution must pass independent acceptance")
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "delivery execution must complete under its frozen acceptance policy")
 		}
 		obs, err := store.GetDeliveryObservation(ctx, tx.Q(), issue.IssueID, d.Candidate.DeliveryID)
 		if err != nil {
@@ -282,19 +296,11 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if _, err := deliveryDeploymentSource(*d.Candidate, obs.Observation); err != nil {
 			return Outcome{}, err
 		}
-		accs, err := store.ListAcceptances(ctx, tx.Q(), task.TaskID, task.CurrentArtifactID)
+		basis, err := completedTaskEvidence(ctx, tx.Q(), task.TaskID, p.Reason)
 		if err != nil {
 			return Outcome{}, err
 		}
-		evidence = nil
-		for _, a := range accs {
-			if a.SpecVersion == task.SpecVersion && a.Verdict == protocol.VerdictPassed {
-				evidence = []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceAcceptance, Reference: a.AcceptanceID, Summary: p.Reason}}
-			}
-		}
-		if len(evidence) == 0 {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "matching delivery acceptance is required")
-		}
+		evidence = []protocol.IssueEvidence{basis}
 		evidence = append(evidence, protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceDelivery, Reference: d.Candidate.DeliveryID, Summary: "Verified provider merge of the approved head", Observation: &obs.Observation})
 		if d.Candidate.Deploy {
 			if d.Candidate.Deployment == nil {
@@ -317,7 +323,8 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 					return Outcome{}, err
 				}
 				started = at
-				evidence = append(evidence, protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceAcceptance, Reference: accepted, Summary: "Original accepted report of the completed delivery; no old execution was relabeled"})
+				accepted.Summary = "Original completed report of the delivery; no old execution was relabeled"
+				evidence = append(evidence, accepted)
 			}
 			proof, err := deliveryUpgradeEvidence(ctx, x, tx.Q(), *d.Candidate.Deployment, p.UpgradeID, started)
 			if err != nil {

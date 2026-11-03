@@ -61,6 +61,9 @@ export function CreateIssueTask({
     if (effectiveHost) void live.agents.openRunner(effectiveHost);
   }, [effectiveHost, live]);
   const original = operation.original?.payload as CreateIssueTaskPayload | undefined;
+  const reviewRequired = original?.spec.agent_selection
+    ? !!original.spec.agent_selection.acceptance
+    : issue.acceptance_policy?.required !== false;
   const submit = async (reconcile = false) => {
     try {
       const payload: Omit<CreateIssueTaskPayload, "expected_assignment_epoch"> = {
@@ -69,7 +72,7 @@ export function CreateIssueTask({
           goal,
           deliverables: [delivery],
           acceptance: acceptance.split("\n").filter((line) => line.trim()),
-          agent_selection: { implementation, acceptance: review },
+          agent_selection: { implementation, ...(reviewRequired ? { acceptance: review } : {}) },
           workspace: reuse
             ? { mode: "reuse", source_task_id: issue.plan.default_workspace_task_id!, mounts: [] }
             : { mounts: [{ repo }] },
@@ -111,6 +114,7 @@ export function CreateIssueTask({
           <div className={layout.roles}>
             {(["implementation", "acceptance"] as const).map((role) => {
               const requirement = submitted?.spec.agent_selection?.[role];
+              if (role === "acceptance" && !requirement) return null;
               return (
                 <div key={role}>
                   <h3>{role === "implementation" ? "实施" : "独立验收"}</h3>
@@ -204,23 +208,25 @@ export function CreateIssueTask({
                 : []
             }
           />
-          <RoleRequirements
-            label="独立验收"
-            value={original?.spec.agent_selection?.acceptance ?? review}
-            onChange={setReview}
-            blocked={blocked}
-            categories={(categories.value?.items ?? [])
-              .filter((c) => c.state === "active")
-              .map((c) => ({ id: c.category_id, title: c.title }))}
-            runtimes={
-              effectiveHost && runner.value?.host_id === effectiveHost
-                ? (runner.value?.projection?.runtimes ?? []).map((r) => ({
-                    id: r.runtime_id,
-                    title: `${runtimeLabel(r)} · ${r.runtime_id}`,
-                  }))
-                : []
-            }
-          />
+          {reviewRequired && (
+            <RoleRequirements
+              label="独立验收"
+              value={original?.spec.agent_selection?.acceptance ?? review}
+              onChange={setReview}
+              blocked={blocked}
+              categories={(categories.value?.items ?? [])
+                .filter((c) => c.state === "active")
+                .map((c) => ({ id: c.category_id, title: c.title }))}
+              runtimes={
+                effectiveHost && runner.value?.host_id === effectiveHost
+                  ? (runner.value?.projection?.runtimes ?? []).map((r) => ({
+                      id: r.runtime_id,
+                      title: `${runtimeLabel(r)} · ${r.runtime_id}`,
+                    }))
+                  : []
+              }
+            />
+          )}
         </div>
         <div className={layout.workspace}>
           <label>
@@ -284,7 +290,9 @@ export function CreateIssueTask({
         </div>
         <p className={styles.muted}>
           {reuse ? "复用工作区固定主机。" : "选择具体主机后仅在该主机运行。"}{" "}
-          实施与独立验收安排在同一主机和工作区，分别使用独立 run；要求仅筛选 Agent，不修改本机配置。
+          {reviewRequired
+            ? "实施与独立验收安排在同一主机和工作区，分别使用独立 run；要求仅筛选 Agent，不修改本机配置。"
+            : "按创建者策略，本任务不另派独立验收；仍须满足完成条件并保存合法报告、文件或代码结果。"}
         </p>
         {reuse && workspace.value && !fixedHost && (
           <p className={styles.warning}>

@@ -418,6 +418,17 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='owner') OR EXISTS(SELECT 1 FROM decisions d JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=? AND d.status='answered' AND m.author='owner' AND COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner') OR EXISTS(SELECT 1 FROM request_records WHERE request_id=? AND domain='owner' AND status='succeeded' AND operation LIKE 'work_items.%') OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, e.Reference, e.Reference, e.Reference, w.WorkItemID).Scan(&valid); err != nil {
 				return err
 			}
+		case "result":
+			var canonical bool
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, w.WorkItemID).Scan(&canonical); err != nil {
+				return err
+			}
+			if canonical {
+				if err := q.QueryRowContext(ctx, `WITH RECURSIVE descendants(id) AS (SELECT ? UNION ALL SELECT c.issue_id FROM issue_controls c JOIN descendants d ON c.parent_issue_id=d.id)
+ SELECT EXISTS(SELECT 1 FROM task_work_item_owners o JOIN descendants d ON d.id=o.work_item_id JOIN tasks t USING(task_id) JOIN artifacts a ON a.artifact_id=t.current_artifact_id JOIN task_acceptance_policies p USING(task_id) JOIN runs r ON r.run_id=a.run_id JOIN plan_actions action ON action.action_id=r.action_id WHERE a.artifact_id=? AND t.lifecycle='completed' AND action.target_spec_version=t.spec_version AND json_extract(p.policy_json,'$.required')=0)`, w.WorkItemID, e.Reference).Scan(&valid); err != nil {
+					return err
+				}
+			}
 		case "acceptance":
 			var acceptedTask string
 			err := q.QueryRowContext(ctx, `SELECT task_id FROM acceptances WHERE acceptance_id=? AND verdict='passed'`, e.Reference).Scan(&acceptedTask)

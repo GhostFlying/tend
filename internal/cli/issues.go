@@ -18,6 +18,7 @@ var issueOperations = map[string]string{
 	"share-artifact":        protocol.OpGrantArtifactShare,
 	"revoke-artifact-share": protocol.OpRevokeArtifactShare,
 	"reuse":                 "issues.reuse",
+	"set-acceptance-policy": "issues.set_acceptance_policy",
 	"update-delivery":       "issues.update_delivery",
 	"set-status":            "issues.set_status",
 	"request-owner":         protocol.OpIssueRequestOwner,
@@ -57,6 +58,9 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 
 	action := args[0]
 	fs := newFlags(e, "issue "+action)
+	if action == "create" || action == "set-acceptance-policy" {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", action})); fs.PrintDefaults() }
+	}
 	asJSON := fs.Bool("json", false, "print the complete structured result")
 	data := fs.String("data", "", "inline JSON payload (or original Envelope for replay)")
 	file := fs.String("file", "", "JSON payload file; - reads stdin")

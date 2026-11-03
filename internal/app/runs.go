@@ -208,7 +208,11 @@ func (SubmitArtifact) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	if !fenced {
-		d = domain.ArtifactSubmitted(task, rc.fact(), artifactID)
+		policy, err := store.TaskAcceptancePolicy(ctx, tx.Q(), rc.task.TaskID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		d = domain.ArtifactSubmittedWithAcceptance(task, rc.fact(), artifactID, policy == nil || policy.Required)
 		d.Events = append(started, d.Events...)
 	}
 	actions, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "artifact.submitted", "artifact_id": artifactID})

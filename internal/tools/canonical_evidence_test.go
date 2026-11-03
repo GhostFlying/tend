@@ -6,6 +6,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func TestCanonicalNoStageArtifactScopeIsBoundedEvidence(t *testing.T) {
@@ -60,6 +61,13 @@ func TestCanonicalNoStageArtifactScopeIsBoundedEvidence(t *testing.T) {
 		t.Fatalf("missing artifact changed rejection: %v", err)
 	}
 	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		detail, err := views.Artifact(t.Context(), tx.Q(), "art_fixture")
+		if err != nil {
+			return err
+		}
+		if detail.CurrentCompletion || detail.AcceptancePolicy != nil {
+			t.Fatal("legacy artifact without current completion or policy gained either fact")
+		}
 		responsible, err := store.TaskIssueResponsible(t.Context(), tx.Q(), "task_fixture", ids[1])
 		if responsible {
 			t.Fatal("readable result became execution authority")

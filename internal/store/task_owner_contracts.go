@@ -18,7 +18,7 @@ type TaskOwnerContract struct {
 func GetTaskOwnerContract(ctx context.Context, q Querier, task string) (TaskOwnerContract, error) {
 	var c TaskOwnerContract
 	var raw string
-	err := q.QueryRowContext(ctx, `SELECT task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,COALESCE(execution_pin_json,'') FROM task_owner_contracts WHERE task_id=?`, task).Scan(&c.TaskID, &c.IssueID, &c.AssignmentEpoch, &c.AgentRef, &c.AgentRevision, &c.RuntimeID, &c.RuntimeRevision, &c.Model, &c.Effort, &c.ReviewIssueID, &c.ReviewPlanJSON, &raw)
+	err := q.QueryRowContext(ctx, `SELECT task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,COALESCE(execution_pin_json,'') FROM task_execution_contracts WHERE task_id=?`, task).Scan(&c.TaskID, &c.IssueID, &c.AssignmentEpoch, &c.AgentRef, &c.AgentRevision, &c.RuntimeID, &c.RuntimeRevision, &c.Model, &c.Effort, &c.ReviewIssueID, &c.ReviewPlanJSON, &raw)
 	if err != nil {
 		return c, notFound(err, "task owner contract")
 	}
@@ -57,7 +57,7 @@ func RunIssueResponsibility(ctx context.Context, q Querier, run string) (protoco
 
 func TaskOwnerContractCurrent(ctx context.Context, q Querier, task string) (bool, error) {
 	var current bool
-	err := q.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM task_owner_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=? AND (i.assignment_epoch<>c.assignment_epoch OR i.assignee_ref<>c.agent_ref OR i.assignment_state<>'active'))`, task).Scan(&current)
+	err := q.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM task_execution_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=? AND (i.assignment_epoch<>c.assignment_epoch OR i.assignee_ref<>c.agent_ref OR i.assignment_state<>'active'))`, task).Scan(&current)
 	return current, err
 }
 

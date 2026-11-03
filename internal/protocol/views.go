@@ -38,6 +38,7 @@ type TaskSummary struct {
 
 // TaskDetail is one task in full.
 type TaskDetail struct {
+	AcceptancePolicy *IssueAcceptancePolicy `json:"acceptance_policy,omitempty"`
 	// IssueIDs contains canonical responsibilities, never secondary result links.
 	IssueIDs    []string `json:"issue_ids,omitempty"`
 	WorkItemIDs []string `json:"work_item_ids,omitempty"`
@@ -145,10 +146,13 @@ type DecisionView struct {
 
 // ArtifactDetail is an artifact with every verdict on it.
 type ArtifactDetail struct {
-	RefSHA256   string           `json:"ref_sha256,omitempty"`
-	Artifact    ArtifactView     `json:"artifact"`
-	TaskID      string           `json:"task_id"`
-	Acceptances []AcceptanceView `json:"acceptances"`
+	AcceptancePolicy *IssueAcceptancePolicy `json:"acceptance_policy,omitempty"`
+	// CurrentCompletion binds completion to this artifact and current task spec.
+	CurrentCompletion bool             `json:"current_completion,omitempty"`
+	RefSHA256         string           `json:"ref_sha256,omitempty"`
+	Artifact          ArtifactView     `json:"artifact"`
+	TaskID            string           `json:"task_id"`
+	Acceptances       []AcceptanceView `json:"acceptances"`
 }
 
 // RequestView is the recorded outcome of a request.

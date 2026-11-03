@@ -73,7 +73,7 @@ func RequiredAgentExecutions(ctx context.Context, q Querier, host string) ([]pro
 	if err != nil {
 		return nil, err
 	}
-	tasks, err := FollowupIDs(ctx, q, `SELECT c.task_id FROM task_owner_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id JOIN tasks t USING(task_id) WHERE c.agent_ref LIKE ? ESCAPE '\' AND c.assignment_epoch=i.assignment_epoch AND c.agent_ref=i.assignee_ref AND i.assignment_state='active' AND i.state IN ('active','paused','cancelling') AND t.lifecycle NOT IN ('completed','cancelled','failed')`, strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(host)+"/%")
+	tasks, err := FollowupIDs(ctx, q, `SELECT c.task_id FROM task_execution_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id JOIN tasks t USING(task_id) WHERE c.agent_ref LIKE ? ESCAPE '\' AND c.assignment_epoch=i.assignment_epoch AND c.agent_ref=i.assignee_ref AND i.assignment_state='active' AND i.state IN ('active','paused','cancelling') AND t.lifecycle NOT IN ('completed','cancelled','failed')`, strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(host)+"/%")
 	if err != nil {
 		return nil, err
 	}

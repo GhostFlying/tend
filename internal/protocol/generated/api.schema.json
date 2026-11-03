@@ -24,6 +24,28 @@
       "title": "APIResponse",
       "type": "object"
     },
+    "AcceptancePolicyCreator": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/definitions/AgentIdentity"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "owner_subject": {
+          "type": "string"
+        },
+        "source_issue_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "AcceptancePolicyCreator",
+      "type": "object"
+    },
     "AcceptanceView": {
       "additionalProperties": false,
       "properties": {
@@ -1435,6 +1457,9 @@
     "ArtifactDetail": {
       "additionalProperties": false,
       "properties": {
+        "acceptance_policy": {
+          "$ref": "#/definitions/IssueAcceptancePolicy"
+        },
         "acceptances": {
           "anyOf": [
             {
@@ -1450,6 +1475,9 @@
         },
         "artifact": {
           "$ref": "#/definitions/ArtifactView"
+        },
+        "current_completion": {
+          "type": "boolean"
         },
         "ref_sha256": {
           "type": "string"
@@ -3382,6 +3410,9 @@
         "expected_source_revision": {
           "type": "integer"
         },
+        "independent_acceptance": {
+          "$ref": "#/definitions/IndependentAcceptanceRequest"
+        },
         "manager": {
           "$ref": "#/definitions/RequestIssueManagerPayload"
         },
@@ -4582,6 +4613,23 @@
       "title": "HostedAgentInventory",
       "type": "object"
     },
+    "IndependentAcceptanceRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "required",
+        "reason"
+      ],
+      "title": "IndependentAcceptanceRequest",
+      "type": "object"
+    },
     "InjectSourcePayload": {
       "additionalProperties": false,
       "properties": {
@@ -4623,6 +4671,9 @@
     "Issue": {
       "additionalProperties": false,
       "properties": {
+        "acceptance_policy": {
+          "$ref": "#/definitions/IssueAcceptancePolicy"
+        },
         "assignee": {
           "$ref": "#/definitions/IssueAssignee"
         },
@@ -4692,6 +4743,39 @@
         "updated_at"
       ],
       "title": "Issue",
+      "type": "object"
+    },
+    "IssueAcceptancePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "creator": {
+          "$ref": "#/definitions/AcceptancePolicyCreator"
+        },
+        "decided_by": {
+          "$ref": "#/definitions/AcceptancePolicyCreator"
+        },
+        "issue_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "required",
+        "reason",
+        "creator",
+        "decided_by",
+        "request_id",
+        "issue_revision"
+      ],
+      "title": "IssueAcceptancePolicy",
       "type": "object"
     },
     "IssueActivityEntry": {
@@ -5786,6 +5870,9 @@
         "acceptance_id": {
           "type": "string"
         },
+        "artifact_id": {
+          "type": "string"
+        },
         "assignment_epoch": {
           "type": "integer"
         },
@@ -5823,7 +5910,6 @@
       "required": [
         "task_id",
         "event_id",
-        "acceptance_id",
         "revision",
         "status"
       ],
@@ -6047,6 +6133,7 @@
     },
     "IssueEvidenceKind": {
       "enum": [
+        "result",
         "acceptance",
         "delivery",
         "owner_decision",
@@ -6747,6 +6834,9 @@
     "IssueResult": {
       "additionalProperties": false,
       "properties": {
+        "acceptance_policy": {
+          "$ref": "#/definitions/IssueAcceptancePolicy"
+        },
         "acceptances": {
           "anyOf": [
             {
@@ -6765,6 +6855,9 @@
         },
         "created_at": {
           "type": "integer"
+        },
+        "current_completion": {
+          "type": "boolean"
         },
         "generation": {
           "type": "integer"
@@ -7234,6 +7327,9 @@
     "IssueView": {
       "additionalProperties": false,
       "properties": {
+        "acceptance_policy": {
+          "$ref": "#/definitions/IssueAcceptancePolicy"
+        },
         "ancestors": {
           "items": {
             "$ref": "#/definitions/IssueAncestor"
@@ -10630,6 +10726,27 @@
       "title": "SetConversationSettingsPayload",
       "type": "object"
     },
+    "SetIssueAcceptancePolicyPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "required",
+        "reason"
+      ],
+      "title": "SetIssueAcceptancePolicyPayload",
+      "type": "object"
+    },
     "SetIssueDependenciesPayload": {
       "additionalProperties": false,
       "properties": {
@@ -10923,8 +11040,7 @@
         }
       },
       "required": [
-        "implementation",
-        "acceptance"
+        "implementation"
       ],
       "title": "TaskAgentSelection",
       "type": "object"
@@ -10932,6 +11048,9 @@
     "TaskDetail": {
       "additionalProperties": false,
       "properties": {
+        "acceptance_policy": {
+          "$ref": "#/definitions/IssueAcceptancePolicy"
+        },
         "acceptances": {
           "anyOf": [
             {
@@ -13551,6 +13670,9 @@
         "acceptance_id": {
           "type": "string"
         },
+        "artifact_id": {
+          "type": "string"
+        },
         "created_at": {
           "type": "integer"
         },
@@ -13564,7 +13686,6 @@
       "required": [
         "event_id",
         "task_id",
-        "acceptance_id",
         "created_at"
       ],
       "title": "WorkItemCompletionReview",
@@ -14107,6 +14228,9 @@
     },
     "SetConversationSettingsPayload": {
       "$ref": "#/definitions/SetConversationSettingsPayload"
+    },
+    "SetIssueAcceptancePolicyPayload": {
+      "$ref": "#/definitions/SetIssueAcceptancePolicyPayload"
     },
     "SetIssueDependenciesPayload": {
       "$ref": "#/definitions/SetIssueDependenciesPayload"

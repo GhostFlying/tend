@@ -105,7 +105,7 @@ export type IssueWorkStatus =
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueEvidenceKind".
  */
-export type IssueEvidenceKind = "acceptance" | "delivery" | "owner_decision" | "upgrade";
+export type IssueEvidenceKind = "result" | "acceptance" | "delivery" | "owner_decision" | "upgrade";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueClosureKind".
@@ -378,6 +378,7 @@ export interface TendAPI {
   SetControlModePayload?: SetControlModePayload;
   SetConversationHandoffSettingsPayload?: SetConversationHandoffSettingsPayload;
   SetConversationSettingsPayload?: SetConversationSettingsPayload;
+  SetIssueAcceptancePolicyPayload?: SetIssueAcceptancePolicyPayload;
   SetIssueDependenciesPayload?: SetIssueDependenciesPayload;
   SetIssueMessageAssociationsPayload?: SetIssueMessageAssociationsPayload;
   SetIssueNotificationSettingsPayload?: SetIssueNotificationSettingsPayload;
@@ -695,6 +696,7 @@ export interface AttentionTaskContext {
  * via the `definition` "IssueView".
  */
 export interface IssueView {
+  acceptance_policy?: IssueAcceptancePolicy;
   ancestors?: IssueAncestor[];
   assignee: IssueAssignee;
   assignment_epoch: number;
@@ -725,6 +727,36 @@ export interface IssueView {
   tasks?: IssueTaskSummary[];
   updated_at: number;
   work_status?: IssueWorkStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueAcceptancePolicy".
+ */
+export interface IssueAcceptancePolicy {
+  creator: AcceptancePolicyCreator;
+  decided_by: AcceptancePolicyCreator;
+  issue_revision: number;
+  reason: string;
+  request_id: string;
+  required: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AcceptancePolicyCreator".
+ */
+export interface AcceptancePolicyCreator {
+  agent?: AgentIdentity;
+  kind: string;
+  owner_subject?: string;
+  source_issue_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentIdentity".
+ */
+export interface AgentIdentity {
+  execution_environment_id: string;
+  local_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -938,7 +970,8 @@ export interface IssueDeadline {
  * via the `definition` "IssueDeliveryDuty".
  */
 export interface IssueDeliveryDuty {
-  acceptance_id: string;
+  acceptance_id?: string;
+  artifact_id?: string;
   assignment_epoch?: number;
   attention_id?: string;
   candidate?: IssueDeliveryCandidate;
@@ -1009,14 +1042,6 @@ export interface IssueManagerView {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "AgentIdentity".
- */
-export interface AgentIdentity {
-  execution_environment_id: string;
-  local_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RunExecutionPin".
  */
 export interface RunExecutionPin {
@@ -1063,7 +1088,8 @@ export interface AgentRecoveryView {
  * via the `definition` "WorkItemCompletionReview".
  */
 export interface WorkItemCompletionReview {
-  acceptance_id: string;
+  acceptance_id?: string;
+  artifact_id?: string;
   created_at: number;
   event_id: string;
   task_id: string;
@@ -1678,8 +1704,10 @@ export interface ArchiveResourcePage {
  * via the `definition` "ArtifactDetail".
  */
 export interface ArtifactDetail {
+  acceptance_policy?: IssueAcceptancePolicy;
   acceptances: AcceptanceView[] | null;
   artifact: ArtifactView;
+  current_completion?: boolean;
   ref_sha256?: string;
   task_id: string;
 }
@@ -2180,11 +2208,20 @@ export interface CreateIssuePayload {
   depends_on?: string[];
   expected_parent_revision?: number;
   expected_source_revision?: number;
+  independent_acceptance?: IndependentAcceptanceRequest;
   manager?: RequestIssueManagerPayload;
   owner?: IssueOwnerRequest;
   parent_issue_id?: string;
   plan: IssuePlan;
   source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IndependentAcceptanceRequest".
+ */
+export interface IndependentAcceptanceRequest {
+  reason: string;
+  required: boolean;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2265,7 +2302,7 @@ export interface OwnerTaskSpec {
  * via the `definition` "TaskAgentSelection".
  */
 export interface TaskAgentSelection {
-  acceptance: AgentRequirement;
+  acceptance?: AgentRequirement;
   implementation: AgentRequirement;
 }
 /**
@@ -3183,9 +3220,11 @@ export interface IssueResultPage {
  * via the `definition` "IssueResult".
  */
 export interface IssueResult {
+  acceptance_policy?: IssueAcceptancePolicy;
   acceptances: AcceptanceView[] | null;
   artifact: ArtifactView;
   created_at: number;
+  current_completion?: boolean;
   generation: number;
   ref_sha256?: string;
   run_id: string;
@@ -3209,6 +3248,7 @@ export interface IssueReuseResult {
  * via the `definition` "Issue".
  */
 export interface Issue {
+  acceptance_policy?: IssueAcceptancePolicy;
   assignee: IssueAssignee;
   assignment_epoch: number;
   assignment_state: string;
@@ -4026,6 +4066,15 @@ export interface SetConversationSettingsPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SetIssueAcceptancePolicyPayload".
+ */
+export interface SetIssueAcceptancePolicyPayload {
+  expected_assignment_epoch: number;
+  reason: string;
+  required: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "SetIssueDependenciesPayload".
  */
 export interface SetIssueDependenciesPayload {
@@ -4210,6 +4259,7 @@ export interface ConversationImageInput {
  * via the `definition` "TaskDetail".
  */
 export interface TaskDetail {
+  acceptance_policy?: IssueAcceptancePolicy;
   acceptances: AcceptanceView[] | null;
   actions: ActionView[] | null;
   artifacts: ArtifactView[] | null;

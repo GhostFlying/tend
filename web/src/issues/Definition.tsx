@@ -13,6 +13,7 @@ import { createIssueCommand, createIssueResponsibility, issueCommand } from "./a
 import type { OpOutcome } from "../app/ops.ts";
 import styles from "../agents/Catalog.module.css";
 import layout from "./Definition.module.css";
+import { IssueAcceptancePolicyEditor } from "./AcceptancePolicy.tsx";
 import { AssigneeName } from "./AssigneeName.tsx";
 
 export function IssueDefinition({
@@ -40,6 +41,8 @@ export function IssueDefinition({
     (category) => category.state === "active",
   );
   const connection = useStore(client.connection);
+  const [independentAcceptance, setIndependentAcceptance] = useState(true);
+  const [acceptanceReason, setAcceptanceReason] = useState("创建者要求独立核对任务结果");
   const [title, setTitle] = useState(baseline?.plan.title ?? "");
   const [project, setProject] = useState(
     baseline?.plan.project ?? parent?.plan.project ?? "default",
@@ -93,7 +96,12 @@ export function IssueDefinition({
     request.request_id !== restored?.request_id
   ) {
     const payload = request.payload as UpdateIssuePayload | CreateIssuePayload;
-    if (request.operation === "issues.create") setAssignee(shownAssignee);
+    if (request.operation === "issues.create") {
+      setAssignee(shownAssignee);
+      const creation = payload as CreateIssuePayload;
+      setIndependentAcceptance(creation.independent_acceptance?.required ?? true);
+      setAcceptanceReason(creation.independent_acceptance?.reason ?? "创建者要求独立核对任务结果");
+    }
     // Capture a newly restored request once, before a later receipt can clear it.
     setRestored(request);
     setTitle(payload.plan.title);
@@ -168,6 +176,10 @@ export function IssueDefinition({
                         ? (restored.payload as CreateIssuePayload)
                         : {}),
                       plan,
+                      independent_acceptance: {
+                        required: independentAcceptance,
+                        reason: acceptanceReason,
+                      },
                       ...(parent
                         ? {
                             parent_issue_id: parent.issue_id,
@@ -246,6 +258,9 @@ export function IssueDefinition({
         {baseline?.plan.title ??
           (parent ? `上级 Issue：${parent.plan.title}` : "定义目标与完成条件，由负责人持续推进。")}
       </p>
+      {issue && (
+        <IssueAcceptancePolicyEditor issue={issue} onSaved={() => onSaved(issue.issue_id)} />
+      )}
       {sourceDescription && <p className={layout.source}>{sourceDescription}</p>}
       {updated && !operation.pending && (
         <div className={layout.conflict} role="status">
@@ -334,6 +349,32 @@ export function IssueDefinition({
             />
           </label>
           {!issue && (
+            <fieldset className={layout.policy} disabled={blocked}>
+              <legend>独立业务验收</legend>
+              <label className={layout.policyChoice}>
+                <input
+                  type="checkbox"
+                  checked={
+                    originalCreate?.independent_acceptance?.required ?? independentAcceptance
+                  }
+                  onChange={(e) => setIndependentAcceptance(e.target.checked)}
+                />
+                要求独立 Agent 验收任务结果
+              </label>
+              <label>
+                策略理由
+                <textarea
+                  required
+                  value={originalCreate?.independent_acceptance?.reason ?? acceptanceReason}
+                  onChange={(e) => setAcceptanceReason(e.target.value)}
+                />
+              </label>
+              <p>
+                调查、只读报告可不强制另派验收，但仍须保存合法结果。创建后新任务冻结此策略；它不代表合入或部署完成。
+              </p>
+            </fieldset>
+          )}
+          {!issue && (
             <>
               <label>
                 负责人
@@ -416,7 +457,9 @@ export function IssueDefinition({
             <p className={styles.muted}>尚未修改定义。</p>
           )}
           <p className={styles.muted}>保存后保留定义变更记录。</p>
-          <p className={styles.muted}>Issue 完成条件用于责任收尾；任务仍独立实施与验收。</p>
+          <p className={styles.muted}>
+            Issue 完成条件用于责任收尾；任务按各自冻结策略保存结果并完成所需验收。
+          </p>
         </aside>
       </div>
       {(operation.storageError || (result && result.kind !== "done")) && (
