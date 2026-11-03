@@ -238,6 +238,7 @@ categories.unshift({
 });
 let hostedCLI: string | undefined = "codex";
 let failAgentIssues = false;
+const associationRequests: string[] = [];
 const streams = new Set<ServerResponse>();
 const writes: string[] = [];
 let hideConcurrencyList = false;
@@ -414,6 +415,7 @@ const server = createServer(async (req, res) => {
     return json(catalog(decodeURIComponent(p.split("/")[4]!)));
   }
   if (p === "/api/v1/agent-issues") {
+    associationRequests.push(req.url!);
     if (failAgentIssues) {
       res.statusCode = 503;
       return json({
@@ -538,6 +540,7 @@ try {
       secondHostOnline = true;
       nativeWorker = false;
       hostedCLI = "codex";
+      associationRequests.length = 0;
       await page.goto(`${origin}/settings/agents?selected=hosted%2Fplanner`);
       await page.waitForURL((url) => url.pathname === "/agents");
       const directory = page.getByRole("region", { name: "Agents", exact: true });
@@ -552,6 +555,14 @@ try {
       };
       await detail().getByRole("heading", { name: "Sequoia", exact: true }).waitFor();
       await detail().getByText("Codex · app-server", { exact: true }).waitFor();
+      await detail()
+        .getByText("此范围暂无已记录关联，不代表从未处理过 Issue。", { exact: true })
+        .waitFor();
+      assert.equal(
+        associationRequests.length,
+        1,
+        "one selected Agent owns one initial association read",
+      );
       assert.equal(
         await detail()
           .getByText("未接入运行观测", { exact: true })
@@ -669,6 +680,29 @@ try {
       await scope.selectOption("history");
       await associations.getByRole("button", { name: "历史冻结关联", exact: true }).waitFor();
       await associations.getByRole("button", { name: "下一页关联", exact: true }).click();
+      await associations.getByRole("button", { name: "下一页历史关联", exact: true }).waitFor();
+      const readsBeforeResize = associationRequests.length;
+      await page.setViewportSize({
+        width: viewport.width >= 1400 ? 1024 : 1536,
+        height: viewport.height,
+      });
+      const resizedAssociations = page
+        .getByRole("region", { name: "关联 Issue", exact: true })
+        .filter({ visible: true });
+      await resizedAssociations
+        .getByRole("button", { name: "下一页历史关联", exact: true })
+        .waitFor();
+      assert.equal(
+        await resizedAssociations.getByRole("combobox", { name: "Issue 关联范围" }).inputValue(),
+        "history",
+      );
+      await page.waitForTimeout(100);
+      assert.equal(
+        associationRequests.length,
+        readsBeforeResize,
+        "responsive presentation must not reopen the shared reader",
+      );
+      await page.setViewportSize(viewport);
       await associations.getByRole("button", { name: "下一页历史关联", exact: true }).waitFor();
       await associations.getByRole("button", { name: "上一页关联", exact: true }).click();
       await associations.getByRole("button", { name: "历史冻结关联", exact: true }).waitFor();

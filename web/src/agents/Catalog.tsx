@@ -18,6 +18,7 @@ import {
 } from "./entries.ts";
 import { cliLabel, runtimeLabel, runtimeMethod } from "./runtimeLabel.ts";
 import { ConcurrencyDirectory } from "./Concurrency.tsx";
+import { useAgentIssueModel } from "./Issues.tsx";
 import { AgentDetails } from "./Details.tsx";
 import styles from "./Directory.module.css";
 
@@ -109,6 +110,7 @@ export function AgentCatalogView() {
         (a, b) =>
           (b.history?.pin.inventory_revision ?? 0) - (a.history?.pin.inventory_revision ?? 0),
       )[0];
+  const issueAssociations = useAgentIssueModel(filters.tab ? undefined : selected);
   const allCategories = categories.value?.items ?? [];
   const environments = [...new Set(entries.map((e) => runtimeLabel(e.runtime)))].sort();
   const methods = environments.map((value) => {
@@ -427,6 +429,7 @@ export function AgentCatalogView() {
                     key={entryKey(selected)}
                     entry={selected}
                     categories={allCategories}
+                    issues={issueAssociations}
                   />
                 </aside>
               )}
@@ -446,7 +449,12 @@ export function AgentCatalogView() {
               <Back />
               返回列表
             </Button>
-            <AgentDetails key={entryKey(selected)} entry={selected} categories={allCategories} />
+            <AgentDetails
+              key={entryKey(selected)}
+              entry={selected}
+              categories={allCategories}
+              issues={issueAssociations}
+            />
           </div>
         )}
       </section>
