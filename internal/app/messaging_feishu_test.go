@@ -2,6 +2,8 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -363,5 +365,73 @@ func TestFeishuFailedParentSettlesChildButUnknownRemainsPending(t *testing.T) {
 				t.Fatal("failed or uncertain parent incorrectly retried", pending, err)
 			}
 		})
+	}
+}
+
+func TestFeishuChoiceTextFreezesOptionsAndQuotedReply(t *testing.T) {
+	h := newHarness(t)
+	bindFeishuFixture(t, h)
+	w := h.createWork(workPlan())
+	p := protocol.CreateWorkItemChoicePayload{Question: strings.Repeat("Question ", 180), Options: []string{"Continue", "Later"}, Recommendation: "Continue", SourceID: h.ownerEvidence().Reference}
+	op := h.exec(mainAgent, h.env("work_item_choices.create", workTarget(w.WorkItemID), p, rev(w.Revision)), CreateWorkItemChoice{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var choice protocol.WorkItemChoice
+	if err := json.Unmarshal(op.Result, &choice); err != nil {
+		t.Fatal(err)
+	}
+	var text strings.Builder
+	parent, parts := "", 0
+	for n := 0; ; n++ {
+		d, _, ready, err := h.app.NextDelivery(t.Context(), FeishuDestination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ready {
+			break
+		}
+		var part FeishuPart
+		if err := json.Unmarshal(d.Payload, &part); err != nil {
+			t.Fatal(err)
+		}
+		external := fmt.Sprintf("external-question-%d", n)
+		if part.MessageID == choice.MessageID {
+			text.WriteString(part.Body)
+			parent = external
+			parts++
+		}
+		if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered, ExternalMessageReference: external}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if parts < 2 || parent == "" {
+		t.Fatalf("parts=%d parent=%q", parts, parent)
+	}
+	for _, want := range []string{p.Question, "1. Continue", "2. Later", "引用本消息"} {
+		if !strings.Contains(text.String(), want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	in := FeishuIncoming{EventID: "choice-answer", MessageID: "external-answer", AppID: "app", TenantKey: "tenant", SenderID: "person", ChatID: "chat", ParentID: parent, Text: "2"}
+	answer, err := h.app.ReceiveFeishu(t.Context(), in)
+	if err != nil || answer.Error != nil {
+		t.Fatal(answer, err)
+	}
+	again, err := h.app.ReceiveFeishu(t.Context(), in)
+	if err != nil || again.RequestID != answer.RequestID || string(again.Result) != string(answer.Result) {
+		t.Fatal(again, err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		actual, err := store.GetWorkItemChoice(t.Context(), tx.Q(), choice.ChoiceID)
+		if err != nil {
+			return err
+		}
+		if actual.Status != "answered" || actual.Answer != "Later" {
+			t.Fatalf("choice=%+v", actual)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
