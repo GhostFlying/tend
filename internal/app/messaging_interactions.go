@@ -444,7 +444,7 @@ func submitCommunication(ctx context.Context, x *Exec, tx *store.Tx, p protocol.
 		}
 		if i != nil {
 			origin := &communicationOrigin{Channel: channel, BotID: bot, ChatID: chat, ExternalID: external, ReplyTo: p.ReplyTo, RawBody: p.Body}
-			if i.State != "open" && channel == "telegram" {
+			if i.State != "open" && (channel == "telegram" || channel == "feishu") {
 				source, err := interactionAnswerSource(ctx, x, tx, p.ReplyTo, p.Body, origin)
 				if err != nil {
 					return Outcome{}, err
@@ -845,5 +845,9 @@ func registerInteractionAnswerInput(ctx context.Context, x *Exec, tx *store.Tx, 
 		reply = o.ReplyTo
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO messaging_messages(message_id,direction,channel_id,reply_to,source_revision,bot_id,chat_id,external_id) SELECT d.message_id,'input',?,?,d.content_revision,?,?,? FROM message_dispositions d WHERE d.message_id=?`, o.Channel, reply, o.BotID, o.ChatID, o.ExternalID, id)
+	if err == nil && o.Channel == "feishu" {
+		// Synchronous answer acknowledgements must already resolve their source.
+		err = bindFeishuInputSource(ctx, x, tx, id)
+	}
 	return err
 }

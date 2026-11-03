@@ -116,8 +116,25 @@ func (c feishuInput) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		return Outcome{}, err
 	}
 	id := out.Result.(map[string]any)["message_id"].(string)
-	_, err = tx.Exec(ctx, `UPDATE feishu_inputs SET message_id=? WHERE event_id=?`, id, m.EventID)
+	err = bindFeishuInputSource(ctx, x, tx, id)
 	return out, err
+}
+
+// bindFeishuInputSource uses the authenticated command's durable request identity.
+// It runs before any synchronous acknowledgement publishes a reply to this input.
+func bindFeishuInputSource(ctx context.Context, x *Exec, tx *store.Tx, id string) error {
+	result, err := tx.Exec(ctx, `UPDATE feishu_inputs SET message_id=? WHERE request_id=? AND owner=? AND (message_id='' OR message_id=?)`, id, x.Env.RequestID, x.Principal.Subject, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return protocol.Errorf(protocol.CodeConflictPayload, "Feishu input source changed")
+	}
+	return nil
 }
 
 // ReceiveFeishu persists the same request identity before invoking the business
