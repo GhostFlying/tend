@@ -2,6 +2,7 @@ package netx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -66,7 +67,23 @@ func (t *Tailnet) Listen(addr string) (net.Listener, error) { return t.srv.Liste
 
 // ListenTLS listens on the node's tailnet addresses with the tailnet's
 // certificate for the node's name, issued on the first handshake.
-func (t *Tailnet) ListenTLS(addr string) (net.Listener, error) { return t.srv.ListenTLS("tcp", addr) }
+func (t *Tailnet) ListenTLS(ctx context.Context, addr string) (net.Listener, error) {
+	status, err := t.srv.Up(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("netx: prepare HTTPS: %w", err)
+	}
+	if status.CurrentTailnet == nil || !status.CurrentTailnet.MagicDNSEnabled {
+		return nil, errors.New("netx: HTTPS requires MagicDNS")
+	}
+	if len(status.CertDomains) == 0 {
+		return nil, errors.New("netx: HTTPS certificates are not enabled")
+	}
+	listener, err := t.Listen(addr)
+	if err != nil {
+		return nil, err
+	}
+	return httpsListener(listener, t.lc.GetCertificate), nil
+}
 
 // FetchCert obtains the node's certificate ahead of the first client. It
 // fails when the tailnet has HTTPS certificates turned off.
