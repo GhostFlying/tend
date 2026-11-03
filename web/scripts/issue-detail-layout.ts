@@ -1627,8 +1627,20 @@ try {
     };
     publish();
     await detail.getByText("正在交接负责人，当前执行事实仍予保留。", { exact: true }).waitFor();
-    await detail.getByRole("textbox", { name: "消息", exact: true }).fill("交接时仍可保存的草稿");
+    const handoffDraft = detail.getByRole("textbox", { name: "消息", exact: true });
+    await handoffDraft.fill("交接时仍可保存的草稿");
+    await handoffDraft.evaluate((element) => {
+      const data = new DataTransfer();
+      data.items.add(new File(["draft only"], "handoff-draft.txt", { type: "text/plain" }));
+      element.dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+      );
+    });
+    const handoffFiles = detail.getByRole("list", { name: "待发送附件", exact: true });
+    await handoffFiles.getByText("handoff-draft.txt", { exact: true }).waitFor();
     assert(await detail.getByRole("button", { name: "发送", exact: true }).isDisabled());
+    assert.equal(await handoffDraft.inputValue(), "交接时仍可保存的草稿");
+    await handoffFiles.getByRole("button", { name: /移除/ }).click();
     issue.assignment_state = "active";
     issue.assignee = { kind: "owner", ref: "owner" };
     issue.conversation!.reason = "owner";

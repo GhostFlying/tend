@@ -157,7 +157,7 @@ export function Composer({
   };
 
   const addFiles = (files: File[]) => {
-    if (!files.length || disabled || blocked || saving.current) return;
+    if (!files.length || blocked || saving.current) return;
     composerDraft.addFiles(files);
   };
 
@@ -264,7 +264,7 @@ export function Composer({
         onKeyDown={onKeyDown}
         onPaste={(event) => {
           pasteAttachments(event, {
-            blocked: disabled || blocked || saving.current,
+            blocked: blocked || saving.current,
             addFiles,
             write: (text) => composerDraft.write(text),
             warn: (message) => notify(message, "warn"),
@@ -273,7 +273,7 @@ export function Composer({
         placeholder={presentation === "issue" ? "补充要求或继续讨论…" : "输入消息…"}
         aria-description={`发给 ${recipient?.title ?? "主 Agent"}`}
         aria-label="消息"
-        disabled={disabled || blocked}
+        disabled={blocked}
         readOnly={persisting}
       />
       <div className={styles.bar}>
@@ -295,7 +295,7 @@ export function Composer({
           aria-label="添加附件"
           title="选择文件或粘贴、拖入附件"
           onClick={() => fileInput.current?.click()}
-          disabled={disabled || blocked || persisting}
+          disabled={blocked || persisting}
         >
           <Paperclip />
         </button>
