@@ -17,3 +17,11 @@ Refs: D23、D70、D165。
 4. 如果本地真实链路不能证明修复效果，则不提交推测性产品改动。若通过，独立小PR
    运行相称传输回归、规定review与既有门槛。真实用户页面恢复仍需fresh部署后的浏览器
    验证，不能把本地条件复现冒作生产因果。
+
+## 必要 CI 回归同步修正
+
+既有 event upload 日志回归在 AckEvents 清空 journal 后立刻制造第二次故障，
+但这不能证明原 flushEvents 已返回并重置内存 outage 标志。原失败保留，不以重跑掩盖。
+用标准库 synctest 与同步 HTTP transport 在每轮结束等到 uploader 真正静止于下一轮
+定时等待，再触发下一次 outage；真实 journal、client 编解码及每次 outage 多次失败仍覆盖。
+仅修测试同步，不改变生产日志、flush、runner 或 TLS 行为。
