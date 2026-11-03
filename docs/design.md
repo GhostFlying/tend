@@ -159,6 +159,7 @@
 | D153 | runtime 通过 CLI 绑定服务端自适应并发分组，所有托管执行共享预算；明确拥塞减 1，30 秒合并/冷却，30 分钟稳定且累计满载 15 分钟、有成功 turn 和等待需求才加 1。Web 只读，CLI 全能力；七天历史保留 Issue/session 归因和升档依据，unknown 保留占用。见 docs/plans/adaptive-concurrency.md。 | 已实现，待验收 |
 | D155 | 已提交 server 通过独立本机窗口引导 updater，再以实际归档/host 维护确认前滚；保留 unknown run、旧收据及父失败，限定失败候选可独立后继，CLI 提供完整引导、取消、对账及释放。 | 已实现，待验收 |
 | D156 | 正常维护之外提供显式 receipt-recovery crash stop：真实未知生命周期不冒充排空，完整 Run 库存及原 lease 持久保护先于新服务入口，保留物理停止事实与业务未知，prelink 延迟原生执行。 | 已确认 |
+| D157 | Manager delivery 先去重旧 logical responsibility 再查未决投递；Token 重叠查询按 native identity 与 current fact 索引关联。只改善查询规模，不改变 blocker、冲突、未知或计量语义，追加迁移83。 | 已实现，待验证 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
 
@@ -725,3 +726,14 @@ SHA/launch/PID 绑定；没有 Wait 证据仍 unknown。新独立窗口在精确
 保留真实快照，以原钉定 cgroup 对比原 policy，其余属性和旧 Format2 规则不改变。
 
 Refs: D142、D154、D155。见[实施计划](plans/receipt-recovery-stop.md)。
+
+
+## D157：原责任与用量重叠查询的有界关联
+
+Manager handoff 的 delivery blocker 只要求存在同 issue/旧 assignment 的原 logical turn。
+先对这些 logical identity 去重，再查其 sending/unknown outbox，避免同 turn 多次续接
+先形成执行数乘积再 DISTINCT；conversation 分支、epoch 边界、操作白名单与排序保持原义。
+Token overlap 保持原 SQL 和原始计量事实，只追加 native candidate 与 current fact 覆盖
+索引，防止相关子查询逐行重扫历史。未知计数、冲突后 legacy 回退和匹配去重不变。
+本地规模/EXPLAIN 与完整结果等价只认证查询实现；生产页面延迟仍需独立有界验证。
+见[Manager 计划](plans/manager-delivery-query-latency.md)和[Token 计划](plans/usage-overlap-query-indexes.md)。
