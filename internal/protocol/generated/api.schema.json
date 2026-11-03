@@ -2014,6 +2014,450 @@
       "title": "CompletionReviewAcknowledgement",
       "type": "object"
     },
+    "ConcurrencyBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_id": {
+          "type": "string"
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "runtime_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "runtime_id",
+        "group_id"
+      ],
+      "title": "ConcurrencyBinding",
+      "type": "object"
+    },
+    "ConcurrencyChange": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer"
+        },
+        "at": {
+          "type": "integer"
+        },
+        "before": {
+          "type": "integer"
+        },
+        "bindings": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConcurrencyBinding"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "congestion_count": {
+          "type": "integer"
+        },
+        "cooldown_until": {
+          "type": "integer"
+        },
+        "feedback_healthy": {
+          "type": "boolean"
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "group_name": {
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "initial": {
+          "type": "integer"
+        },
+        "max": {
+          "type": "integer"
+        },
+        "min": {
+          "type": "integer"
+        },
+        "occupied": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "saturated_ms": {
+          "type": "integer"
+        },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConcurrencySource"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "successful_turns": {
+          "type": "integer"
+        },
+        "waiting": {
+          "type": "integer"
+        },
+        "window_end": {
+          "type": "integer"
+        },
+        "window_start": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "bindings",
+        "id",
+        "group_id",
+        "group_name",
+        "at",
+        "reason",
+        "before",
+        "after",
+        "min",
+        "initial",
+        "max",
+        "occupied",
+        "cooldown_until",
+        "window_start",
+        "window_end",
+        "saturated_ms",
+        "successful_turns",
+        "congestion_count",
+        "feedback_healthy",
+        "waiting",
+        "sources"
+      ],
+      "title": "ConcurrencyChange",
+      "type": "object"
+    },
+    "ConcurrencyGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConcurrencyBinding"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cooldown_until": {
+          "type": "integer"
+        },
+        "current": {
+          "type": "integer"
+        },
+        "feedback_healthy": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "initial": {
+          "type": "integer"
+        },
+        "max": {
+          "type": "integer"
+        },
+        "min": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "observation_since": {
+          "type": "integer"
+        },
+        "occupied": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "running": {
+          "type": "integer"
+        },
+        "saturated_ms": {
+          "type": "integer"
+        },
+        "successful_turns": {
+          "type": "integer"
+        },
+        "waiting": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "revision",
+        "min",
+        "initial",
+        "max",
+        "current",
+        "occupied",
+        "running",
+        "waiting",
+        "cooldown_until",
+        "observation_since",
+        "saturated_ms",
+        "successful_turns",
+        "feedback_healthy",
+        "bindings"
+      ],
+      "title": "ConcurrencyGroup",
+      "type": "object"
+    },
+    "ConcurrencyGroupPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConcurrencyGroup"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "ConcurrencyGroupPage",
+      "type": "object"
+    },
+    "ConcurrencyHistoryPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConcurrencyChange"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        },
+        "since": {
+          "type": "integer"
+        },
+        "until": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "since",
+        "until",
+        "more"
+      ],
+      "title": "ConcurrencyHistoryPage",
+      "type": "object"
+    },
+    "ConcurrencyQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "runtime_id": {
+          "type": "string"
+        },
+        "search": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "since": {
+          "type": "integer"
+        },
+        "until": {
+          "type": "integer"
+        }
+      },
+      "title": "ConcurrencyQuery",
+      "type": "object"
+    },
+    "ConcurrencySource": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "http_status": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "issue_title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "native_session_id": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "type": "integer"
+        },
+        "parent_execution_id": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "received_at": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "runtime_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "environment_id",
+        "runtime_id",
+        "agent_id",
+        "session_id",
+        "attempt",
+        "kind",
+        "occurred_at",
+        "received_at",
+        "event_id"
+      ],
+      "title": "ConcurrencySource",
+      "type": "object"
+    },
+    "ConfigureConcurrencyPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_id": {
+          "type": "string"
+        },
+        "initial": {
+          "type": "integer"
+        },
+        "max": {
+          "type": "integer"
+        },
+        "min": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "runtime_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "min",
+        "initial",
+        "max"
+      ],
+      "title": "ConfigureConcurrencyPayload",
+      "type": "object"
+    },
     "ConfirmAttentionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -3603,6 +4047,12 @@
       "properties": {
         "accepted_request_id": {
           "type": "string"
+        },
+        "concurrency_bindings": {
+          "items": {
+            "$ref": "#/definitions/ConcurrencyBinding"
+          },
+          "type": "array"
         },
         "configuration_revision": {
           "type": "integer"
@@ -9032,6 +9482,12 @@
     "RunnerAgentCatalog": {
       "additionalProperties": false,
       "properties": {
+        "concurrency_bindings": {
+          "items": {
+            "$ref": "#/definitions/ConcurrencyBinding"
+          },
+          "type": "array"
+        },
         "continuation_supported": {
           "type": "boolean"
         },
@@ -12572,6 +13028,18 @@
     },
     "CancelIssueDeadlinePayload": {
       "$ref": "#/definitions/CancelIssueDeadlinePayload"
+    },
+    "ConcurrencyGroupPage": {
+      "$ref": "#/definitions/ConcurrencyGroupPage"
+    },
+    "ConcurrencyHistoryPage": {
+      "$ref": "#/definitions/ConcurrencyHistoryPage"
+    },
+    "ConcurrencyQuery": {
+      "$ref": "#/definitions/ConcurrencyQuery"
+    },
+    "ConfigureConcurrencyPayload": {
+      "$ref": "#/definitions/ConfigureConcurrencyPayload"
     },
     "ConfirmAttentionPayload": {
       "$ref": "#/definitions/ConfirmAttentionPayload"

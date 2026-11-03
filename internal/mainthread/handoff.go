@@ -168,11 +168,24 @@ func (m *Manager) summaryFork(ctx context.Context, s harness.Session, th harness
 	}
 	forkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	permit, owner, err := m.reserveAuxiliary(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
 	fork, err := forker.ForkThread(forkCtx, th.ID(), cfg)
 	if err != nil {
+		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		releaseErr := m.app.ObserveAuxiliaryConcurrency(cleanup, permit, protocol.ConcurrencyFeedback{}, errors.Is(err, harness.ErrRejected))
+		stop()
+		if releaseErr != nil {
+			return nil, nil, errors.Join(err, releaseErr)
+		}
 		return nil, nil, fmt.Errorf("mainthread: fork summary: %w", err)
 	}
 	// A message arriving during the fork makes this summary stale, never current.
+	if permit != "" {
+		forker = concurrencyForker{ThreadForker: forker, app: m.app, permit: permit, owner: owner}
+	}
 	return fork, forker, nil
 }
 
@@ -260,6 +273,19 @@ func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forke
 			}
 			if ev.Kind != harness.EventAgentMessageDelta && ev.ContextUsage == nil {
 				if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, fork.ID(), ev.TurnID, ev.ItemID, string(ev.Kind), ev.Raw); err != nil {
+					return store.HandoffSummary{}, err
+				}
+			}
+			if control, ok := forker.(concurrencyForker); ok && (ev.Kind == harness.EventTurnStarted || ev.Kind == harness.EventTurnError || ev.Kind == harness.EventTurnCompleted) {
+				f := protocol.ConcurrencyFeedback{SessionID: fork.ID(), TurnID: ev.TurnID, Failure: ev.Failure, Attempt: control.permit}
+				if ev.Kind == harness.EventTurnStarted {
+					f.Kind = "running"
+				} else if ev.Kind == harness.EventTurnCompleted && ev.TurnStatus == "completed" {
+					f.Kind = "success"
+				} else {
+					f.Kind = "congestion"
+				}
+				if err := m.app.ObserveAuxiliaryConcurrency(ctx, control.permit, f, false); err != nil {
 					return store.HandoffSummary{}, err
 				}
 			}

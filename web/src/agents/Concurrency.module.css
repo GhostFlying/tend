@@ -1,0 +1,106 @@
+.root {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.root h2 {
+  font-size: var(--text-title-sm);
+  margin: 0;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+.toolbar > input {
+  flex: 1;
+  min-width: 140px;
+}
+.toolbar label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--label-2);
+}
+.muted {
+  color: var(--label-2);
+  margin: 0;
+}
+.groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--space-3);
+}
+.group {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  text-align: left;
+  color: var(--label);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  cursor: pointer;
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.group[aria-pressed="true"] {
+  border-color: var(--label);
+}
+.group strong {
+  font-size: var(--text-label);
+}
+.group > span {
+  color: var(--label-2);
+}
+.details,
+.change {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: var(--space-4);
+  min-width: 0;
+}
+.details dl,
+.source dl {
+  display: grid;
+  grid-template-columns: minmax(100px, 160px) minmax(0, 1fr);
+  gap: var(--space-2);
+}
+.root dt {
+  color: var(--label-2);
+}
+.root dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.change summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  cursor: pointer;
+}
+.change summary time {
+  color: var(--label-2);
+}
+.change p {
+  overflow-wrap: anywhere;
+}
+.source {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+@media (max-width: 600px) {
+  .toolbar > * {
+    width: 100%;
+  }
+  .details dl,
+  .source dl {
+    grid-template-columns: 100px minmax(0, 1fr);
+  }
+}

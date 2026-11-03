@@ -523,6 +523,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		wg.Go(func() { telegramClient.Run(runCtx) })
 	}
 	wg.Go(func() { a.RunFollowups(runCtx, log) })
+	wg.Go(func() { a.RunConcurrency(runCtx, log) })
 	wg.Go(func() { a.RunIssueStatusNotifications(runCtx, log) })
 	if localSocket != "" {
 		wg.Go(func() {

@@ -104,6 +104,10 @@ func (a *App) HostedAgentInventory(ctx context.Context) (protocol.HostedAgentInv
 			return err
 		}
 		result, err = hostedInventoryProjection(row)
+		if err != nil {
+			return err
+		}
+		result.ConcurrencyBindings, err = concurrencyEnvironmentBindings(ctx, tx.Q(), row.Public.ExecutionEnvironmentID)
 		return err
 	})
 	return result, err

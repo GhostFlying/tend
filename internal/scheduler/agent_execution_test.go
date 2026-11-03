@@ -102,3 +102,19 @@ func TestNamedModelEffortRequirementsFilterBothRoles(t *testing.T) {
 		t.Fatal("legacy exact profile became partial", pin, reason)
 	}
 }
+
+func TestConcurrencySkipsBusyRuntimeWithoutReservingReviewerCapacity(t *testing.T) {
+	pin := func(agent, runtime string) protocol.RunExecutionPin {
+		return protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: agent}, Runtime: protocol.AgentRuntimeReference{RuntimeID: runtime}, BackendID: "git"}
+	}
+	h := Host{ID: "host", ConcurrencyBlocked: map[string]bool{"busy": true, "review": true}, Executors: []Executor{{Pin: pin("alpha", "busy"), Categories: []string{"implementer"}}, {Pin: pin("beta", "free"), Categories: []string{"implementer"}}, {Pin: pin("review", "review"), Categories: []string{"reviewer"}}}}
+	c := Candidate{Kind: protocol.ActionImplement, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}}
+	p, reason := SelectExecution(h, c)
+	if reason != "" || p == nil || p.Identity.LocalID != "beta" {
+		t.Fatal(p, reason)
+	}
+	c.Kind = protocol.ActionAccept
+	if p, reason := SelectExecution(h, c); p != nil || reason == "" {
+		t.Fatal("busy reviewer selected", p, reason)
+	}
+}

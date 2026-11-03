@@ -22,6 +22,7 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
+	ConcurrencyFeedback bool
 	// OnNativeSource records a local locator without publishing native content.
 	OnNativeSource func(context.Context, protocol.RolloutPreviewSource) error
 

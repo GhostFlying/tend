@@ -32,6 +32,9 @@ func nativeFailure(raw json.RawMessage, willRetry bool) *protocol.AgentFailure {
 	if code == "rateLimitExceeded" || ((code == "responseTooManyFailedAttempts" || code == "responseStreamDisconnected" || code == "httpConnectionFailed" || code == "responseStreamConnectionFailed") && status == 429) {
 		code = "rate_limit_exceeded"
 	}
+	if code == "serverOverloaded" || code == "serverIsOverloaded" {
+		code = "server_overloaded"
+	}
 	if code == "" {
 		code = "unknown"
 	}

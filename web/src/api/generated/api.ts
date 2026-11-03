@@ -263,6 +263,10 @@ export interface TendAPI {
   BindLocalRepositoryRequest?: BindLocalRepositoryRequest;
   BindTelegram?: BindTelegram;
   CancelIssueDeadlinePayload?: CancelIssueDeadlinePayload;
+  ConcurrencyGroupPage?: ConcurrencyGroupPage;
+  ConcurrencyHistoryPage?: ConcurrencyHistoryPage;
+  ConcurrencyQuery?: ConcurrencyQuery;
+  ConfigureConcurrencyPayload?: ConfigureConcurrencyPayload;
   ConfirmAttentionPayload?: ConfirmAttentionPayload;
   ConversationAttachment?: ConversationAttachment;
   ConversationHandoffPayload?: ConversationHandoffPayload;
@@ -1741,6 +1745,142 @@ export interface CancelIssueDeadlinePayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConcurrencyGroupPage".
+ */
+export interface ConcurrencyGroupPage {
+  items: ConcurrencyGroup[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConcurrencyGroup".
+ */
+export interface ConcurrencyGroup {
+  bindings: ConcurrencyBinding[] | null;
+  cooldown_until: number;
+  current: number;
+  feedback_healthy: boolean;
+  id: string;
+  initial: number;
+  max: number;
+  min: number;
+  name: string;
+  observation_since: number;
+  occupied: number;
+  revision: number;
+  running: number;
+  saturated_ms: number;
+  successful_turns: number;
+  waiting: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConcurrencyBinding".
+ */
+export interface ConcurrencyBinding {
+  environment_id: string;
+  group_id: string;
+  runtime_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConcurrencyHistoryPage".
+ */
+export interface ConcurrencyHistoryPage {
+  items: ConcurrencyChange[] | null;
+  more: boolean;
+  next?: string;
+  since: number;
+  until: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConcurrencyChange".
+ */
+export interface ConcurrencyChange {
+  actor?: string;
+  after: number;
+  at: number;
+  before: number;
+  bindings: ConcurrencyBinding[] | null;
+  congestion_count: number;
+  cooldown_until: number;
+  feedback_healthy: boolean;
+  group_id: string;
+  group_name: string;
+  id: number;
+  initial: number;
+  max: number;
+  min: number;
+  occupied: number;
+  reason: string;
+  request_id?: string;
+  saturated_ms: number;
+  sources: ConcurrencySource[] | null;
+  successful_turns: number;
+  waiting: number;
+  window_end: number;
+  window_start: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConcurrencySource".
+ */
+export interface ConcurrencySource {
+  agent_id: string;
+  attempt: string;
+  code?: string;
+  conversation_id?: string;
+  environment_id: string;
+  event_id: string;
+  execution_id: string;
+  http_status?: number;
+  issue_id?: string;
+  issue_title?: string;
+  kind: string;
+  native_session_id?: string;
+  occurred_at: number;
+  parent_execution_id?: string;
+  purpose?: string;
+  received_at: number;
+  run_id?: string;
+  runtime_id: string;
+  session_id: string;
+  task_id?: string;
+  turn_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConcurrencyQuery".
+ */
+export interface ConcurrencyQuery {
+  after?: string;
+  environment_id?: string;
+  group_id?: string;
+  issue_id?: string;
+  limit?: number;
+  reason?: string;
+  runtime_id?: string;
+  search?: string;
+  session_id?: string;
+  since?: number;
+  until?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConfigureConcurrencyPayload".
+ */
+export interface ConfigureConcurrencyPayload {
+  environment_id?: string;
+  initial: number;
+  max: number;
+  min: number;
+  name: string;
+  runtime_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ConfirmAttentionPayload".
  */
 export interface ConfirmAttentionPayload {
@@ -2170,6 +2310,7 @@ export interface HostMaintenancePayload {
  */
 export interface HostedAgentInventory {
   accepted_request_id: string;
+  concurrency_bindings?: ConcurrencyBinding[];
   configuration_revision: number;
   main_agent_id: string;
   projection: AgentInventoryProjection;
@@ -3512,6 +3653,7 @@ export interface RunMessageHistory {
  * via the `definition` "RunnerAgentCatalog".
  */
 export interface RunnerAgentCatalog {
+  concurrency_bindings?: ConcurrencyBinding[];
   continuation_supported?: boolean;
   continuations?: AgentExecutor[];
   current?: AgentInventoryReceipt;

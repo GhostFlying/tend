@@ -82,6 +82,7 @@ type Manager struct {
 	active             *turn
 	maintenanceBlocked bool
 	summaryActive      bool
+	auxiliaryOwner     *concurrencyOwner
 	lastActivity       time.Time
 	toolSourceMu       sync.Mutex // serializes callback source binding with visible tool records
 	usageIndex         *nativeusage.Discovery
@@ -223,10 +224,28 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	if err != nil {
 		return err
 	}
+	m.mu.Lock()
+	ownedPermits := &concurrencyOwner{permits: map[string]struct{}{}}
+	m.auxiliaryOwner = ownedPermits
+	m.mu.Unlock()
 	defer func() {
-		_ = s.Close()
+		m.mu.Lock()
+		ownedPermits.closed = true
+		m.mu.Unlock()
+		closeErr := s.Close()
 		flush, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
+		if closeErr == nil {
+			m.mu.Lock()
+			ids := make([]string, 0, len(ownedPermits.permits))
+			for id := range ownedPermits.permits {
+				ids = append(ids, id)
+			}
+			m.mu.Unlock()
+			if err := m.app.StopAuxiliaryConcurrency(flush, ids); err != nil {
+				m.cfg.Log.ErrorContext(flush, "settle auxiliary concurrency", "err", err)
+			}
+		}
 		m.syncNativeUsageState(flush, true)
 	}()
 	if named {
@@ -666,7 +685,14 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 		if a := m.active; a != nil && (a.turnID == "" || a.turnID == ev.TurnID) {
 			a.failure = ev.Failure
 		}
+		request := ""
+		if m.active != nil {
+			request = m.active.requestID
+		}
 		m.mu.Unlock()
+		if err := m.app.RecordHostedConcurrencyEvent(ctx, request, protocol.ConcurrencyFeedback{Kind: "congestion", SessionID: th.ID(), TurnID: ev.TurnID, Failure: ev.Failure}); err != nil {
+			return err
+		}
 	case ev.Kind == harness.EventTurnStarted:
 		// One turn at a time: the first turn to start after a turn/start
 		// is that delivery's, even before the start response arrives.

@@ -73,3 +73,40 @@ slug 在同一执行环境内唯一，换 runtime 也不能复用为另一个 Ag
 更换 `local_id` 表示另一个身份，需要显式迁移责任并保留旧引用，不能当作显示名更新原地替换历史记录。当前部署中的岗位式 ID 可以继续保留，先改善显示名；新定义遵循本指南即可。
 
 本机操作沿现有 `tend-runner agents status|validate|reload|reconcile|register|registration --config <runner-config>` 入口。`--config` 指向 runner bootstrap 配置，定义文件由其中固定的 `agents.source_file` 引用；接受、登记与实际可用是不同的观察结果。流程及请求重试语义见 [本机配置与登记计划](plans/agent-inventory-control.md)，身份和不可变快照见 [配置基础](plans/agent-definition-config.md)及[本机 registry](plans/agent-registry.md)。
+
+
+## 自适应并发分组（D153）
+
+并发分组独立于主机 slot，按用户显式指定的共享账号/API 预算归组。
+只通过 CLI 管理，Web Agents 的“并发分组”分类只读；不增加配置文件。
+
+```sh
+tend agents concurrency create shared-codex --name "Shared Codex" --min 1 --initial 4 --max 8
+tend agents concurrency bind shared-codex --environment runner-a --runtime codex
+tend agents concurrency list --environment runner-a --limit 50
+tend agents concurrency show shared-codex
+tend agents concurrency update shared-codex --max 6
+tend agents concurrency history --group shared-codex --limit 50
+tend agents concurrency history --issue issue-example --session native-session-example --cause congestion
+```
+
+绑定使用执行环境与 runtime 的稳定 ID，覆盖其各版本；跨主机或适配器共享账号
+时，显式绑定同一组。直接 bind 到另一组会原子转移活动占用。`unbind` 解除单个
+绑定；`delete` 要求组中已没有绑定。未绑定的 runtime 保持原准入行为。
+
+组内明确的临时 429/overload 每次减一，三十秒内合并降档，最后拥塞后冷却
+三十秒。最近三十分钟的有效观察中无拥塞、累计满载十五分钟、有成功 turn，
+并且仍有执行只因容量不足而等待，才加一。空闲、失联和停机不累计健康证明。
+修改参数保留学习值，仅按新的上下限截断；initial 不用于重置已有学习值。
+
+输出包含当前有效上限、预留/未知占用、确认运行数、观察开始时间、满载毫秒、
+成功 turn 数、等待数和绑定；不能把预留或未知执行算成满载。分组历史保留滚动
+七天，拥塞记录保留确切 Issue 与 Tend/native session/turn 来源，升档保留窗口和
+需求证据。无 Issue、native ID 或执行端发生时间未提供时如实显示。
+
+读取命令支持完整 JSON；list/history 使用 --after/--limit 分页，history 支持
+--since/--until（UTC 毫秒）及 --cause/--issue/--session，实际查询窗口随响应返回。
+写命令支持 --dry-run 输出原信封，--request-id/--revision 重试必须保留原输入。
+部分参数更新只在首次执行时读取当前值补齐；重放 update 应使用原完整 --data
+或 --file，或完整的 name/min/initial/max 标志，不能重读新默认值。
+也可将 dry-run 原信封交给 `tend request replay`，以原 request_id 和版本恢复。

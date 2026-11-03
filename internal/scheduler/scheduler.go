@@ -14,6 +14,8 @@ import (
 
 // Host is the claiming host as configured, with its current load.
 type Host struct {
+	ConcurrencyBlocked map[string]bool
+
 	QuestionHandoffs       bool
 	IssueManagers          bool
 	IssueOwners            bool

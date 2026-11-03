@@ -220,6 +220,7 @@ const (
 const esc = "\x1b"
 
 type worker struct {
+	concurrencyTurn    string
 	observationEmitted int
 	reconciling        bool
 	ws                 *Workers
@@ -868,6 +869,9 @@ func (w *worker) run(ctx context.Context) {
 				}
 				w.emitRecoveryPhase(ctx)
 			}
+			if w.spec.ConcurrencyFeedback && a.ProviderSession != nil && a.RootTurn != nil && validRootTurn(a, w.st.Turn) {
+				w.emitID(ctx, "concurrency/"+a.ProviderSession.ID+"/"+a.RootTurn.TurnID+"/success", "worker.concurrency", protocol.ConcurrencyFeedback{Kind: "success", SessionID: a.ProviderSession.ID, TurnID: a.RootTurn.TurnID})
+			}
 			w.emit(ctx, "turn.completed", map[string]string{"reply": a.LastAssistantMessage})
 			if w.spec.Role == protocol.RoleAccept && w.verdicts.Verdict() == nil && !w.askedVerdict {
 				// The verdict may have gone to an earlier worker, or never
@@ -932,6 +936,10 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 			}
 		} else {
 			w.unseen = time.Time{}
+		}
+		if w.spec.ConcurrencyFeedback && a.ProviderSession != nil && a.RootTurn != nil && validRootTurn(a, w.st.Turn) && a.RootTurn.State == "running" && w.concurrencyTurn != a.ProviderSession.ID+"/"+a.RootTurn.TurnID {
+			w.concurrencyTurn = a.ProviderSession.ID + "/" + a.RootTurn.TurnID
+			w.emitID(ctx, "concurrency/"+w.concurrencyTurn+"/running", "worker.concurrency", protocol.ConcurrencyFeedback{Kind: "running", SessionID: a.ProviderSession.ID, TurnID: a.RootTurn.TurnID})
 		}
 		if a.State != "" && a.State != w.state {
 			w.state = a.State
@@ -1000,6 +1008,9 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 					if !validRootTurn(a, w.st.Turn) && w.ws.opts.Now().UnixMilli()-w.st.Turn < 10000 {
 						body["code"] = "observation_pending"
 					}
+				}
+				if w.spec.ConcurrencyFeedback && a.ProviderSession != nil && a.RootTurn != nil && validRootTurn(a, w.st.Turn) {
+					w.emitID(ctx, "concurrency/"+a.ProviderSession.ID+"/"+a.RootTurn.TurnID+"/congestion", "worker.concurrency", protocol.ConcurrencyFeedback{Kind: "congestion", SessionID: a.ProviderSession.ID, TurnID: a.RootTurn.TurnID, Failure: &protocol.AgentFailure{Code: a.RootTurn.ErrorCode}})
 				}
 				w.emitID(ctx, fmt.Sprintf("%s@%d/root-failure/%d", w.st.Terminal, w.st.Turn, failureStamp), "worker.turn_failed", body)
 			}

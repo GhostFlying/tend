@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 const (
@@ -112,6 +113,9 @@ func (w *worker) recoverFailure(ctx context.Context, a Agent) error {
 	}
 	if err != nil {
 		return fmt.Errorf("orca: root turn failed; recovery evidence unavailable: %w", err)
+	}
+	if w.spec.ConcurrencyFeedback {
+		w.emitID(ctx, "concurrency/"+a.ProviderSession.ID+"/"+fact.TurnID+"/congestion", "worker.concurrency", protocol.ConcurrencyFeedback{Kind: "congestion", SessionID: a.ProviderSession.ID, TurnID: fact.TurnID, Failure: &protocol.AgentFailure{Code: fact.Code}})
 	}
 	if fact.Code != "invalid_encrypted_content" && fact.Code != "http_connection_failed" && fact.Code != "response_stream_connection_failed" && fact.Code != "response_stream_disconnected" && fact.Code != "rate_limit_exceeded" {
 		return fmt.Errorf("orca: root turn failed (%s); not an automatically recoverable error", fact.Code)

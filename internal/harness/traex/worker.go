@@ -253,6 +253,28 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 				if ev.TurnID != turnID {
 					continue
 				}
+
+				if spec.ConcurrencyFeedback && (ev.Kind == harness.EventTurnStarted || ev.Kind == harness.EventTurnError || ev.Kind == harness.EventTurnCompleted) {
+					f := protocol.ConcurrencyFeedback{SessionID: th.ID(), TurnID: ev.TurnID, Failure: ev.Failure}
+					switch ev.Kind {
+					case harness.EventTurnStarted:
+						f.Kind = "running"
+					case harness.EventTurnError:
+						f.Kind = "congestion"
+					case harness.EventTurnCompleted:
+						if ev.TurnStatus == "completed" {
+							f.Kind = "success"
+						} else {
+							f.Kind = "congestion"
+						}
+					}
+					raw, _ := json.Marshal(f)
+					select {
+					case w.events <- harness.WorkerEvent{Kind: "worker.concurrency", Body: raw}:
+					case <-ctx.Done():
+						break events
+					}
+				}
 				switch ev.Kind {
 				case harness.EventTurnStarted, harness.EventItemStarted:
 					select {

@@ -156,6 +156,7 @@
 | D150 | 问题沿 Issue 责任链处理：执行问题先交所属 Issue owner，负责 Agent 无法解决时逐级交父 Issue owner、唯一主协调 Agent；只有人工 owner 或主协调无法解决时形成用户待办。沿原 Attention/Decision 记录版本、assignment epoch、逐跳原因和 Agent 回答来源，不伪造用户授权，不改变独立验收及 unknown 对账。新执行协商 supervisor-questions-v1，历史执行保留原答复合同，wire 保持 2/1。CLI 与具名工具支持原问题读取、回答、上报及恢复；新协商执行提问后结束本轮、释放 slot，父 Issue owner 答复后创建保持原尝试代次的接续 Run，无额外协调容量。见 docs/plans/issue-responsibility-routing.md 与 docs/plans/issue-run-handoffs.md。 | 已实现，未发布 |
 | D151 | 完整 race 检查继续以 Go 动态发现的所有根测试、Example 和 Fuzz seed 为覆盖来源，固定实测成本仅用于分片放置和重包优先调度，新测试自动纳入。高容量本地机器按总测试进程预算选择最多八个 App 分片、每包最多四个 API/mainthread/E2E 分片及最多六个其他包并行；小机器保留 E2E 独立阶段和顺序回退，CI 保持原分组与容量约束。可选 TEST_REPORT_DIR 输出本轮私有原生 JSON 耗时报告，默认保留 Go 原生缓存。E2E、handoff、contextbuilder、runnerapi、tools 的普通空库 fixture 复用不可变模板，显式路径重开及迁移测试保留真实 Open。见 docs/plans/race-tail-latency.md。 | 已实现 |
 | D152 | 验收后持久保留独立交付核对责任，具体 PR/head/base/验证/部署范围通过原 taskless versioned Attention 确认，候选或观测失效持久撤销旧授权；owner 重开原子恢复新协调代次，保留 terminal task 和 unknown。API/CLI 同步，runner 2/1。见 docs/plans/delivery-responsibility.md。 | 已实现，待验收 |
+| D153 | runtime 通过 CLI 绑定服务端自适应并发分组，所有托管执行共享预算；明确拥塞减 1，30 秒合并/冷却，30 分钟稳定且累计满载 15 分钟、有成功 turn 和等待需求才加 1。Web 只读，CLI 全能力；七天历史保留 Issue/session 归因和升档依据，unknown 保留占用。见 docs/plans/adaptive-concurrency.md。 | 已实现，待验收 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
 
@@ -598,3 +599,28 @@ D152 验收修正：GitHub 的 `baseRefOid` 仅为 PR base，不能当作当前�
 D152 执行合同修正：实际 `issues.create_task` 冻结的交付约束与 source guard 使用相同身份。provider_state=merged 时核验 merge_sha 是冻结 target_sha 的祖先并构建 target_sha；base_sha 保留历史 PR base 身份，不能构建为部署来源。open 候选实际合入后核对历史 base 不变、当前目标恰为本次 merge，构建该 merge_sha。最终 spec 由真实版本化答复与创建任务回归读取验证。owner 选择 defer 时可附说明文字，文字不取消延期语义；带说明的答复同样持久阻止 prepare 或观测刷新重新提问，只有合法当前 resume 来源可继续。
 
 D152 结清修正：merge-only 与部署结清共用当前 provider 的 base/target/merge 整合校验。结清还必须保有 executing 状态、原执行绑定的 duty 修订及仍有效的原版本化批准；独立 passed 仅证明冻结产物，不能覆盖后续 provider 回退、未整合、base 漂移或持久候选失效。失效后即使相同快照恢复也不复活旧批准，原 duty、执行与验收历史及 close blocker 继续保留，通过当前责任协调或合法 owner disposition 处理。
+
+
+## D153：自适应并发分组
+
+并发预算与 host slot 独立，由服务端账本统一准入。分组及 runtime 绑定通过完整
+CLI 管理，不增加配置文件；已有执行在绑定变更时转移占用。预留与确认运行分别
+计数：前者防止超额，后者累计满载证据。空闲会话不占额度，额外摘要单独申请，
+负责人代理不重复计数；未知执行沿原 fencing 和对账，不按时间假设释放。
+
+每组 min/initial/max，拥塞每次减一，三十秒内合并，最后拥塞后冷却三十秒。
+升档按同组全部受管 session 的已知反馈判断：完整三十分钟无临时 429/overload、
+累计十五分钟达到当前上限、有成功 turn 且仍有容量等待才加一。升降档、配置或
+成员变化、重启、反馈失联后重建观察，不把停机或无反馈当成成功。原生重试不
+重复触发，同 turn 的故障与最终回执合并；不接管原 session 重试。
+
+最近七天记录保留不可变决策快照，拥塞关联确切 Issue、Tend/native session、turn、
+运行位置和结构化错误；无 Issue、未提供 native ID 或发生时间时如实显示。稳定
+升档保存窗口、满载毫秒、成功 turn、零拥塞与等待需求。历史清理不影响去重与
+当前预算。Agents 第三分类只读展示这些事实，CLI 同步全输入输出、筛选分页、
+原请求恢复与可执行能力覆盖。增量能力协商启用反馈，runner wire 保持 2/1。
+
+D153 串行准备补充：上限为一时，runner 负责人尚无活动 turn 的准备摘要可以借用
+自身已预留的同组额度。借用期间原负责人不能启动新 turn，摘要结束才归还；若
+原负责人正在执行或有未知操作则不能借用。正常可并行的摘要仍独立申请。关闭
+原生 session 只核销该 session 实际创建的摘要额度，不能核销其他进程的未知执行。

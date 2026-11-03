@@ -236,6 +236,35 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if p.Sequence != last+1 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "native events must be contiguous")
 		}
+		var event struct {
+			ThreadID string `json:"thread_id"`
+			Native   *struct {
+				Kind       string
+				TurnID     string
+				TurnStatus string
+				Failure    *protocol.AgentFailure
+			} `json:"native"`
+		}
+		parsed := json.Unmarshal(p.Body, &event) == nil
+		if parsed && event.Native != nil && event.ThreadID != "" {
+			f := protocol.ConcurrencyFeedback{SessionID: event.ThreadID, TurnID: event.Native.TurnID, Attempt: "run", Failure: event.Native.Failure}
+			switch event.Native.Kind {
+			case "turn_error":
+				f.Kind = "congestion"
+			case "turn_completed":
+				if event.Native.TurnStatus == "completed" {
+					f.Kind = "success"
+				}
+			case "turn_started":
+				f.Kind = "running"
+			}
+			if f.Kind != "" {
+				body, _ := json.Marshal(f)
+				if err := concurrencyRunFeedback(ctx, tx, r, protocol.RunEvent{Kind: "worker.concurrency", Body: body}, x.Now.UnixMilli()); err != nil {
+					return Outcome{}, err
+				}
+			}
+		}
 		_, err = tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES(?,?,?)`, run, p.Sequence, string(p.Body))
 		return Outcome{Result: map[string]any{"ack": p.Sequence}}, err
 	}

@@ -234,6 +234,11 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		if !runtimeSupportsAgentExecution(&runtime.Runtime) {
 			return as, protocol.Errorf(protocol.CodeInvalidTransition, "runner cannot recover named execution without its negotiated adapter")
 		}
+		group, err := concurrencyBinding(ctx, q, pin.Identity.ExecutionEnvironmentID, pin.Runtime.RuntimeID)
+		if err != nil {
+			return protocol.Assignment{}, err
+		}
+		as.ConcurrencyFeedback = group != "" && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAdaptiveConcurrency)
 		as.Execution = pin
 		as.Workspace.BackendID = pin.BackendID
 	} else if !errors.Is(e, store.ErrNotFound) {
@@ -342,6 +347,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		AcceptanceExecution: runtimeSupportsAcceptanceExecution(p.Runtime), TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
 		ContinuationsSupported: runtimeSupportsAgentContinuation(p.Runtime), Continuations: continuations, Executors: executors,
 	}
+	if err := concurrencyClaimHost(ctx, tx, &schedulingHost, p.Runtime, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
 	pick, ok := scheduler.Pick(schedulingHost, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
@@ -377,6 +385,16 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	}
 	if execution != nil {
 		if err := tx.InsertRunExecution(ctx, run.RunID, *execution); err != nil {
+			return Outcome{}, err
+		}
+	}
+
+	if execution != nil && !(pick.Manager != nil && pick.Manager.ReceiptOnly) {
+		source, err := concurrencyRunSource(ctx, q, run.RunID, *execution)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if err := putConcurrencyExecution(ctx, tx, source, "reserved", now); err != nil {
 			return Outcome{}, err
 		}
 	}
@@ -995,6 +1013,9 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 				continue
 			}
 			res.Accepted++
+			if err := concurrencyRunFeedback(ctx, tx, run, e, now); err != nil {
+				return err
+			}
 			if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
 				return err
 			}
