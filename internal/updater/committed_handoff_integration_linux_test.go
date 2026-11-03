@@ -253,6 +253,17 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 	resourceRaw, _ := os.ReadFile(resourceFile)
 	evidenceRaw, _ := os.ReadFile(evidence)
 	p := CommittedHandoffPlan{Unit: unit, UpdaterBinary: fixed, ConfigFile: configFile, Candidate: newUpdater, OldUpdaterEvidence: evidence, OldUpdaterEvidenceSHA256: bytesDigest(evidenceRaw), Maintenance: protocol.CommittedMaintenancePlan{MaintenanceID: "fixture-committed-window", PreparationRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEX", PreparationCancelRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEY", RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEV", LinkRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEW", ReleaseDir: dir, Successor: Binding{ProcessInstanceID: unit + "-successor"}, OperatorUID: os.Getuid(), WindowClaim: "fixture-committed-window", ExpiresAtMillis: expires, ResourceEvidence: resourceFile, ResourceSHA256: bytesDigest(resourceRaw), PreparationRevision: 1}}
+	if os.Getenv("TEND_TEST_FLOCK_BTRFS") == "1" {
+		dev, ino, e := lockIdentity(stateDir)
+		if e != nil {
+			t.Fatal(e)
+		}
+		owner, known := flockOwner(dev, ino)
+		if !known || owner != 0 {
+			t.Fatalf("expected legacy device lookup to miss Btrfs subvolume lock, owner=%d known=%v", owner, known)
+		}
+		t.Logf("real Btrfs subvolume legacy ownership lookup rejected: device=%d inode=%d", dev, ino)
+	}
 	p, err = PrepareCommittedHandoffPlan(ctx, cfg, p)
 	if err != nil {
 		t.Fatal("new installer cannot plan from actual linked shape", err)
@@ -300,9 +311,11 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool) {
 	if live, err := (LinuxProcess{}).Inspect(ctx, child.PID); err != nil || live != child {
 		t.Fatal("original child lost across first hop", err)
 	}
-	owner, known := flockOwner(p.LockDevice, p.LockInode)
-	if !known || owner == p.Updater.PID {
-		t.Fatal("new updater did not acquire original flock")
+	manager, _, lockErr := managerSnapshot(ctx, unit)
+	owner, parseErr := strconv.Atoi(manager["MainPID"])
+	ownsLock, lockErr2 := processOwnsFlock(ctx, "/proc", owner, p.LockDevice, p.LockInode)
+	if lockErr != nil || parseErr != nil || lockErr2 != nil || owner == p.Updater.PID || !ownsLock {
+		t.Fatal("new updater did not acquire original flock", lockErr, parseErr, lockErr2)
 	}
 	// Preparing admission uses the existing old-server API. Its retained run
 	// facts are neither cancelled nor rewritten to claim a normal upgrade drain.

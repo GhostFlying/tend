@@ -674,3 +674,8 @@ D155 审查补充：确定 `ErrNotStarted` 不等同于含糊启动，保存未�
 继续同一候选，不调用不存在的旧服务 API。真正 unknown 启动只核原 launch。原始 state
 单次保于不可变 journal，state/history 用 hash 引用，避免递归增长。父 DB 已 link 而本机
 确认丢失时以精确父 receipt 核实成功事实，新后继不将父 Linked 置回 false。
+
+D155 锁观测补充：维护计划从精确 updater 的 fd/fdinfo 验证原 flock，文件描述符的
+完整 stat device/inode 必须匹配计划。Btrfs 子卷 stat device 与 flock superblock device
+不同的情况，通过同 fd 的 mount ID 和 Btrfs mount device 精确核对；进程及 fd 前后
+身份不变且确有该 PID 的独占 flock 才通过，不以相同 inode 省略设备或所有者校验。
