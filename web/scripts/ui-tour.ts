@@ -944,20 +944,34 @@ try {
         const shortName = "pwa-short.png";
         const longName = `${"移动端附件名称".repeat(12)}.txt`;
         await page.locator('input[type="file"][aria-label="添加附件"]').setInputFiles([
-          { name: shortName, mimeType: "image/png", buffer: Buffer.from("local draft") },
+          {
+            name: shortName,
+            mimeType: "image/png",
+            buffer: Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jHhoAAAAASUVORK5CYII=",
+              "base64",
+            ),
+          },
           { name: longName, mimeType: "text/plain", buffer: Buffer.from("local draft") },
         ]);
+        const preview = page.getByRole("img", { name: shortName, exact: true });
+        await preview.waitFor();
+        await preview.evaluate(async (image: HTMLImageElement) => image.decode());
+        assert(await preview.evaluate((image: HTMLImageElement) => image.naturalWidth > 0));
         for (const filename of [shortName, longName]) {
           const row = page.locator("li").filter({ hasText: filename });
           await row.getByRole("button", { name: "移除", exact: true }).waitFor();
-          const geometry = await row.evaluate((element) => {
-            const button = element.querySelector("button")!.getBoundingClientRect();
-            const name = element.querySelector("span") ?? element.firstChild!;
-            const range = document.createRange();
-            range.selectNodeContents(name);
-            const label = range.getBoundingClientRect();
-            return { gap: button.left - label.right, width: button.width, height: button.height };
-          });
+          const geometry = await row
+            .getByRole("button", { name: "移除", exact: true })
+            .evaluate((remove) => {
+              const element = remove.closest("li")!;
+              const button = remove.getBoundingClientRect();
+              const name = element.querySelector("span") ?? element.firstChild!;
+              const range = document.createRange();
+              range.selectNodeContents(name);
+              const label = range.getBoundingClientRect();
+              return { gap: button.left - label.right, width: button.width, height: button.height };
+            });
           assert(geometry.gap >= 8, `attachment name/action gap: ${JSON.stringify(geometry)}`);
           assert(geometry.height >= 44 && geometry.width >= 44, "attachment remove touch target");
         }
@@ -979,21 +993,30 @@ try {
           .click();
         console.log(`PASS attachment spacing/removal ${viewport.width} ${theme}`);
         const safeArea = await context.newCDPSession(page);
-        for (const path of ["/", "/inbox"]) {
-          let baseline: { top: number; height: number } | undefined;
+        for (const path of ["/", "/inbox", "/tasks/task-tour"]) {
+          let baseline: { top: number; height: number; bodyTop?: number | undefined } | undefined;
           for (const top of [0, 47, 0]) {
             await safeArea.send("Emulation.setSafeAreaInsetsOverride", {
               insets: { top, bottom: 0, left: 0, right: 0 },
             });
             await navigate(page, path);
             const title = page.getByRole("heading", {
-              name: path === "/" ? "Tend" : "收件箱",
+              name: path === "/" ? "Tend" : path === "/inbox" ? "收件箱" : "任务详情",
               exact: true,
             });
             await title.waitFor();
+            if (path.startsWith("/tasks/"))
+              await page.locator("[data-task-scroll]").evaluate((element) => {
+                element.scrollTop = 0;
+              });
             const geometry = await title.evaluate((element) => {
               const header = element.closest("header")!.getBoundingClientRect();
-              return { top: element.getBoundingClientRect().top, height: header.height };
+              const taskBody = element.closest("[data-task-scroll]")?.lastElementChild;
+              return {
+                top: element.getBoundingClientRect().top,
+                height: header.height,
+                bodyTop: taskBody?.getBoundingClientRect().top,
+              };
             });
             baseline ??= geometry;
             assert(
@@ -1004,10 +1027,15 @@ try {
               Math.abs(geometry.height - baseline.height - top) <= 1,
               `${path}: header must preserve content height: ${JSON.stringify({ top, baseline, geometry })}`,
             );
+            if (geometry.bodyTop !== undefined && baseline.bodyTop !== undefined)
+              assert(
+                Math.abs(geometry.bodyTop - baseline.bodyTop - top) <= 1,
+                `task body must receive top inset once: ${JSON.stringify({ top, baseline, geometry })}`,
+              );
             await page.screenshot({
               path: join(
                 output,
-                `${viewport.width}-${theme}-${path === "/" ? "chat" : "inbox"}-safe-top-${top}.png`,
+                `${viewport.width}-${theme}-${path === "/" ? "chat" : path === "/inbox" ? "inbox" : "task"}-safe-top-${top}.png`,
               ),
             });
           }
