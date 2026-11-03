@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -26,8 +27,22 @@ export const layoutGroups: Record<string, string[]> = {
 };
 
 function run(group: string): number {
-  const commands = layoutGroups[group];
+  let commands = layoutGroups[group];
   if (!commands) throw new Error(`Unknown layout group: ${group}`);
+  if (process.env.CHECK_MODE === "affected") {
+    if (!process.env.TEND_IMPACT_PLAN) throw new Error("Missing impact plan");
+    const plan = JSON.parse(readFileSync(process.env.TEND_IMPACT_PLAN, "utf8")) as {
+      Format: number;
+      Layout: string[];
+    };
+    if (plan.Format !== 1 || !Array.isArray(plan.Layout)) throw new Error("Invalid layout plan");
+    const known = new Set(Object.values(layoutGroups).flat());
+    if (plan.Layout.some((command) => !known.has(command)))
+      throw new Error("Unregistered planned layout");
+    commands = commands.filter((command) => plan.Layout.includes(command));
+    if (commands.length === 0)
+      process.stdout.write(`[impact] layout group ${group}: no planned targets\n`);
+  }
   for (const command of commands) {
     const result = spawnSync("pnpm", [command], {
       stdio: "inherit",

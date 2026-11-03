@@ -65,6 +65,7 @@ func TestAutomaticBudgetBoundsAllConcurrentTestProcesses(t *testing.T) {
 }
 
 func TestTasksCoverAllChecksWithPrivateWebAssets(t *testing.T) {
+	t.Setenv("TEST_PLAN", "must-not-narrow-full-validation")
 	for _, cpus := range []int{2, 16, 64} {
 		b, _ := capacity(cpus, 0, 0, 0)
 		directory := t.TempDir()
@@ -73,6 +74,9 @@ func TestTasksCoverAllChecksWithPrivateWebAssets(t *testing.T) {
 		names := make([]string, 0, len(all))
 		for _, task := range all {
 			names = append(names, task.name)
+			if !slices.Contains(task.env, "TEST_PLAN=") || slices.Contains(task.env, "TEST_PLAN=must-not-narrow-full-validation") {
+				t.Fatal("full validation inherited a selection", task.env)
+			}
 			if !slices.Contains(task.env, "GO=selected-go") || !slices.Contains(task.env, "TEST_COUNT=1") ||
 				!slices.Contains(task.env, "TEST_SHARDS="+strconv.Itoa(b.suiteShards)) {
 				t.Fatalf("toolchain or uncached verification lost for %s", task.name)

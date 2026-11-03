@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/GhostFlying/tend/internal/testkit/impact"
 )
 
 const appPackage = "github.com/GhostFlying/tend/internal/app"
@@ -159,6 +161,30 @@ func testArgs(timeout string, count int) []string {
 }
 
 func check(ctx context.Context, goTool string, shards, suiteShards, count int, timeout, group, reportDir string, packages []string) error {
+	return checkPlan(ctx, goTool, shards, suiteShards, count, timeout, group, reportDir, "", packages)
+}
+
+func checkPlan(ctx context.Context, goTool string, shards, suiteShards, count int, timeout, group, reportDir, planPath string, packages []string) error {
+	var plan *impact.Plan
+	if planPath != "" {
+		var err error
+		plan, err = impact.ReadPlan(planPath)
+		if err != nil {
+			return err
+		}
+		dir, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := impact.SamePlan(ctx, dir, goTool, *plan); err != nil {
+			if errors.Is(err, impact.ErrConfigurationChanged) {
+				fmt.Println("[impact] build configuration changed: running the complete group")
+				plan = nil
+			} else {
+				return err
+			}
+		}
+	}
 	var reports string
 	if reportDir != "" {
 		if err := os.MkdirAll(reportDir, 0o755); err != nil {
@@ -180,13 +206,26 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 		}
 		return filepath.Join(reports, name+".jsonl")
 	}
-	listed, err := output(ctx, goTool, append([]string{"list"}, packages...)...)
+	listed, err := output(ctx, goTool, append([]string{"list", "-race"}, packages...)...)
 	if err != nil {
 		return fmt.Errorf("list packages: %w", err)
 	}
 	selected, err := selectGroup(strings.Fields(string(listed)), group)
 	if err != nil {
 		return err
+	}
+	if plan != nil {
+		known := strings.Fields(string(listed))
+		for pkg := range plan.Go {
+			if !slices.Contains(known, pkg) {
+				return fmt.Errorf("planned package not discovered: %s", pkg)
+			}
+		}
+		selected = slices.DeleteFunc(selected, func(pkg string) bool { _, ok := plan.Go[pkg]; return !ok })
+		if len(selected) == 0 {
+			fmt.Printf("[impact] %s has no planned targets\n", group)
+			return nil
+		}
 	}
 	others, isolated, app := packagePhases(selected)
 	type command struct {
@@ -195,7 +234,7 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 	}
 	shardCommands := func(pkg string, count int) ([]command, error) {
 		name := pkg[strings.LastIndex(pkg, "/")+1:]
-		if count == 1 {
+		if count == 1 && plan == nil {
 			return []command{{name, append(slices.Clone(args), pkg)}}, nil
 		}
 		list, err := output(ctx, goTool, "test", "-race", "-list", ".", pkg)
@@ -205,6 +244,15 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 		names := roots(string(list))
 		if len(names) == 0 {
 			return nil, fmt.Errorf("%s race binary returned no test roots", pkg)
+		}
+		if plan != nil {
+			wanted := plan.Go[pkg]
+			for _, root := range wanted {
+				if !slices.Contains(names, root) {
+					return nil, fmt.Errorf("planned root not discovered: %s/%s", pkg, root)
+				}
+			}
+			names = slices.Clone(wanted)
 		}
 		groups := weightedPatterns(names, count, rootCosts[pkg])
 		fmt.Printf("%s race: %d root targets across %d isolated shards\n", name, len(names), len(groups))
@@ -217,12 +265,30 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 	runCommands := func(commands []command) error {
 		var wg sync.WaitGroup
 		results := make(chan error, len(commands))
+		limit := len(commands)
+		if plan != nil && (group == "other" || group == "all") {
+			limit = 1
+			for _, flag := range strings.Fields(os.Getenv("GOFLAGS")) {
+				if strings.HasPrefix(flag, "-p=") {
+					if n, err := strconv.Atoi(strings.TrimPrefix(flag, "-p=")); err == nil {
+						limit = max(1, n)
+					}
+				}
+			}
+		}
+		queue := make(chan command, len(commands))
 		for _, command := range commands {
+			queue <- command
+		}
+		close(queue)
+		for range min(limit, len(commands)) {
 			wg.Go(func() {
-				fmt.Printf("race %s started\n", command.name)
-				err := run(ctx, report(command.name), goTool, command.args...)
-				fmt.Printf("race %s finished: %v\n", command.name, err)
-				results <- err
+				for command := range queue {
+					fmt.Printf("race %s started\n", command.name)
+					err := run(ctx, report(command.name), goTool, command.args...)
+					fmt.Printf("race %s finished: %v\n", command.name, err)
+					results <- err
+				}
 			})
 		}
 		wg.Wait()
@@ -237,8 +303,12 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 	var bulk []command
 	var unsharded []string
 	for _, pkg := range others {
-		if suiteShards > 1 && (packageGroup(pkg) == "api" || packageGroup(pkg) == "mainthread") {
-			commands, err := shardCommands(pkg, suiteShards)
+		if plan != nil || (suiteShards > 1 && (packageGroup(pkg) == "api" || packageGroup(pkg) == "mainthread")) {
+			shardCount := suiteShards
+			if packageGroup(pkg) == "other" {
+				shardCount = 1
+			}
+			commands, err := shardCommands(pkg, shardCount)
 			failures = append(failures, err)
 			bulk = append(bulk, commands...)
 		} else {
@@ -272,6 +342,7 @@ func main() {
 	suiteShards := flag.Int("suite-shards", 1, "isolated API, mainthread and E2E processes per package (0 selects by CPU, 1-4 explicit)")
 	count := flag.Int("count", 0, "repeat tests explicitly; 0 keeps Go native caching")
 	reportDir := flag.String("report-dir", "", "optional directory for native Go test JSON reports")
+	planPath := flag.String("plan", "", "validated impact plan; omitted runs the complete selected group")
 	timeout := flag.String("timeout", "60m", "timeout per test process")
 	group := flag.String("group", "all", "package group: all, app, api, mainthread, e2e, other")
 	flag.Parse()
@@ -291,7 +362,7 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if err := check(ctx, *goTool, *shards, *suiteShards, *count, *timeout, *group, *reportDir, packages); err != nil {
+	if err := checkPlan(ctx, *goTool, *shards, *suiteShards, *count, *timeout, *group, *reportDir, *planPath, packages); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

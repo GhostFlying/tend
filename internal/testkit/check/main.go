@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/procx"
+	"github.com/GhostFlying/tend/internal/testkit/impact"
 )
 
 type budget struct {
@@ -102,6 +104,7 @@ func tasks(b budget, directory, goTool, pnpm string, count int) (parallel, isola
 		"APP_TEST_SHARDS": strconv.Itoa(b.shards),
 		"TEST_SHARDS":     strconv.Itoa(b.suiteShards),
 		"TEST_COUNT":      strconv.Itoa(count),
+		"TEST_PLAN":       "",
 	})
 	parallel = append(parallel,
 		task{"quality", []string{"go-check"}, base},
@@ -167,16 +170,46 @@ func schedule(ctx context.Context, jobs int, parallel, isolated []task, run func
 	return errors.Join(failures...)
 }
 
-func check(ctx context.Context, b budget, goTool, pnpm string, count int) error {
+func check(ctx context.Context, b budget, goTool, pnpm string, count int) (map[string]float64, error) {
+	stages := map[string]float64{}
 	directory, err := os.MkdirTemp("", "tend-check-")
 	if err != nil {
-		return err
+		return stages, err
 	}
 	defer os.RemoveAll(directory)
 	parallel, isolated := tasks(b, directory, goTool, pnpm, count)
 	fmt.Printf("[check] jobs=%d app-shards=%d suite-shards=%d Go-package-parallel=%d GOMAXPROCS=%d isolated-e2e=%t\n",
 		b.jobs, b.shards, b.suiteShards, b.packages, b.procs, b.exclusiveE2E)
-	return schedule(ctx, b.jobs, parallel, isolated, runTask)
+	var mu sync.Mutex
+	err = schedule(ctx, b.jobs, parallel, isolated, func(ctx context.Context, t task) error {
+		start := time.Now()
+		err := runTask(ctx, t)
+		mu.Lock()
+		stages[t.name] = time.Since(start).Seconds()
+		mu.Unlock()
+		return err
+	})
+	return stages, err
+}
+
+func complete(ctx context.Context, dir string, b budget, goTool, pnpm string, count int) (impact.Result, error) {
+	start := time.Now()
+	r := impact.Result{Mode: "full", Stages: map[string]float64{}}
+	s, err := impact.Capture(ctx, dir, goTool)
+	if err == nil {
+		r.Commit, r.Fingerprint = s.Commit, s.Fingerprint
+		r.Profile = s.Profile
+		r.Stages, err = check(ctx, b, goTool, pnpm, count)
+		identityErr := impact.SameSnapshot(ctx, dir, goTool, s)
+		r.Valid = identityErr == nil
+		err = errors.Join(err, identityErr)
+	}
+	r.Seconds, r.Passed = time.Since(start).Seconds(), err == nil
+	r.FullVerified = r.Passed && r.Valid
+	if err != nil {
+		r.Error = err.Error()
+	}
+	return r, err
 }
 
 func main() {
@@ -186,6 +219,14 @@ func main() {
 	goTool := flag.String("go", "go", "Go executable")
 	pnpm := flag.String("pnpm", "pnpm", "pnpm executable")
 	count := flag.Int("count", 0, "repeat race tests explicitly; 0 keeps Go native caching")
+	mode := flag.String("mode", "shadow", "full, shadow or affected")
+	indexPath := flag.String("index", ".local/impact/index.json", "trusted coverage index")
+	base := flag.String("base", "", "optional comparison base; index-to-candidate changes always included")
+	report := flag.String("report", ".local/impact/result.json", "result report")
+	planOnly := flag.Bool("plan-only", false, "write plan without executing checks")
+	force := flag.String("force-full", "", "reason to force complete validation")
+	directory := flag.String("dir", ".", "repository directory")
+	raceRunner := flag.String("race-runner", "", "optional compiled racecheck for historical replay")
 	flag.Parse()
 	b, err := capacity(runtime.GOMAXPROCS(0), *jobs, *shards, *suiteShards)
 	if err == nil && *count < 0 {
@@ -197,7 +238,110 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := check(ctx, b, *goTool, *pnpm, *count); err != nil {
+	if *mode != "full" && *mode != "shadow" && *mode != "affected" {
+		fmt.Fprintln(os.Stderr, "mode must be full, shadow or affected")
+		os.Exit(2)
+	}
+	dir, err := filepath.Abs(*directory)
+	if err == nil {
+		err = os.Chdir(dir)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if !*planOnly {
+		pending := impact.Result{Mode: *mode, Error: "validation in progress"}
+		if commit, gitErr := exec.CommandContext(ctx, "git", "rev-parse", "HEAD").Output(); gitErr == nil {
+			pending.Commit = strings.TrimSpace(string(commit))
+		}
+		if err := impact.WriteJSON(*report, pending); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	resolvedFlags, resolveErr := impact.ResolvedGoFlags(ctx, dir, *goTool)
+	if resolveErr == nil {
+		resolveErr = os.Setenv("GOFLAGS", resolvedFlags)
+	}
+	if resolveErr != nil {
+		if !*planOnly {
+			_ = impact.WriteJSON(*report, impact.Result{Mode: *mode, Error: resolveErr.Error()})
+		}
+		fmt.Fprintln(os.Stderr, resolveErr)
+		os.Exit(1)
+	}
+	if *mode == "full" && !*planOnly {
+		var result impact.Result
+		result, err = complete(ctx, dir, b, *goTool, *pnpm, *count)
+		err = errors.Join(err, impact.WriteJSON(*report, result))
+	} else {
+		var plan impact.Plan
+		analysisStart := time.Now()
+		plan, err = impact.PlanChecks(ctx, dir, *goTool, *indexPath, *base, *force)
+		analysisSeconds := time.Since(analysisStart).Seconds()
+		planPath := filepath.Join(filepath.Dir(*report), "plan.json")
+		if err == nil {
+			err = impact.WriteJSON(planPath, plan)
+		}
+		if err == nil {
+			total := 0
+			for _, roots := range plan.Go {
+				total += len(roots)
+			}
+			fmt.Printf("[impact] mode=%s full=%t packages=%d roots=%d web=%t\n", *mode, plan.Full, len(plan.Go), total, plan.Web.Run)
+			for _, reason := range plan.Reasons {
+				fmt.Printf("[impact] %s\n", reason)
+			}
+		}
+		if err == nil && !*planOnly {
+			var full impact.Result
+			if *mode == "shadow" || plan.Full {
+				full, err = complete(ctx, dir, b, *goTool, *pnpm, *count)
+				if full.Fingerprint != plan.Fingerprint {
+					full.Valid, full.Passed, full.FullVerified = false, false, false
+					full.Error = "source changed between planning and full validation"
+					err = errors.Join(err, errors.New(full.Error))
+				}
+				full.Mode = *mode
+				full.Stages["analysis"] = analysisSeconds
+				full.Seconds += analysisSeconds
+				full.SelectionDelegated = plan.Full
+				err = errors.Join(err, impact.WriteJSON(*report, full))
+			}
+			absolute, pathErr := filepath.Abs(planPath)
+			if err != nil {
+				// The full failure remains the gate and its result is retained.
+			} else if pathErr != nil {
+				err = pathErr
+			} else if !plan.Full {
+				var result impact.Result
+				result, err = impact.Run(ctx, impact.RunOptions{Dir: dir, Go: *goTool, PNPM: *pnpm, PlanPath: absolute, RaceRunner: *raceRunner, Jobs: b.jobs, Procs: b.procs, Packages: b.packages, AppShards: b.shards, SuiteShards: b.suiteShards, Count: *count, IsolateE2E: b.exclusiveE2E, Log: os.Stdout}, plan)
+				result.Mode = *mode
+				result.Stages["analysis"] = analysisSeconds
+				result.Seconds += analysisSeconds
+				if *mode == "shadow" {
+					result.FullVerified = full.FullVerified
+					result.Stages["full"] = full.Seconds - analysisSeconds
+					result.Seconds += full.Seconds - analysisSeconds
+				}
+				if writeErr := impact.WriteJSON(*report, result); writeErr != nil {
+					err = errors.Join(err, writeErr)
+				}
+			}
+		}
+	}
+	if err != nil {
+		if !*planOnly {
+			var result impact.Result
+			if body, readErr := os.ReadFile(*report); readErr == nil && json.Unmarshal(body, &result) == nil {
+				result.Passed = false
+				result.Error = err.Error()
+				if writeErr := impact.WriteJSON(*report, result); writeErr != nil {
+					fmt.Fprintln(os.Stderr, writeErr)
+				}
+			}
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

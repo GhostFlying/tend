@@ -1,0 +1,119 @@
+name: impact baseline
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+# Keep a running full refresh; pending requests coalesce to the latest main.
+concurrency:
+  group: impact-baseline-main
+  cancel-in-progress: false
+
+jobs:
+  failed-full:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion != 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: retain failed or incomplete main full validation
+        env:
+          FULL_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          echo "The complete main validation did not succeed at $FULL_SHA; selection stays disabled."
+          exit 1
+
+  refresh:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-go
+        with:
+          role: quality
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: decide refresh against current main
+        id: decision
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { prepareRefresh } = require('./.github/scripts/impact.cjs');
+            await prepareRefresh({ github, context, core, directory: `${process.env.RUNNER_TEMP}/previous-impact` });
+      - name: complete local validation and isolated coverage collection
+        if: steps.decision.outputs.refresh == 'true'
+        env:
+          IMPACT_INDEX: ${{ runner.temp }}/new-impact/index.json
+        run: make check-baseline
+      - name: complete browser and cross-platform validation
+        if: steps.decision.outputs.refresh == 'true'
+        run: |
+          make web
+          pnpm --dir web exec playwright install --with-deps chromium
+          pnpm --dir web exec node scripts/layout-groups.ts 1
+          pnpm --dir web exec node scripts/layout-groups.ts 2
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=darwin GOARCH=arm64 go build ./...
+          # Restore the Go test input tree; the actual generated client was
+          # validated above and is not the ordinary race baseline's fixture.
+          rm -rf internal/webui/dist/app
+          go run ./internal/testkit/impact/cmd verify-source -index "$RUNNER_TEMP/new-impact/index.json"
+      - name: require immutable clean main baseline
+        if: steps.decision.outputs.refresh == 'true'
+        env:
+          EXPECTED_SHA: ${{ steps.decision.outputs.target }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const { execFileSync } = require('node:child_process');
+          const p = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/new-impact/index.json`, 'utf8'));
+          if (!p.VerifiedFull || !p.Source.Clean || p.Source.Commit !== process.env.EXPECTED_SHA || execFileSync('git', ['status', '--porcelain'], {encoding:'utf8'}).trim()) throw new Error('Baseline source changed');
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: steps.decision.outputs.refresh == 'true'
+        with:
+          name: impact-index-${{ steps.decision.outputs.target }}
+          path: ${{ runner.temp }}/new-impact/index.json
+          if-no-files-found: error
+          retention-days: 90
+
+  retention:
+    needs: refresh
+    if: needs.refresh.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const { pruneIndexes } = require('./.github/scripts/impact.cjs');
+            await pruneIndexes({ github, context });

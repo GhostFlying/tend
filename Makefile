@@ -11,13 +11,34 @@ CHECK_JOBS ?= 0
 TEST_COUNT ?= 0
 TEST_GROUP ?= all
 TEST_REPORT_DIR ?=
+TEST_PLAN ?=
+CHECK_MODE ?= shadow
+IMPACT_INDEX ?= .local/impact/index.json
+IMPACT_REPORT ?= .local/impact/result.json
+BASE ?=
 WEB := web
 
 .PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check
 
 ## check: everything that must pass before a commit is merged
 check:
-	$(GO) run ./internal/testkit/check -jobs $(CHECK_JOBS) -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -go "$(GO)" -pnpm "$(PNPM)"
+	$(GO) run ./internal/testkit/check -jobs $(CHECK_JOBS) -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -go "$(GO)" -pnpm "$(PNPM)" -mode $(CHECK_MODE) -index "$(IMPACT_INDEX)" -report "$(IMPACT_REPORT)" -base "$(BASE)"
+
+.PHONY: check-full check-plan check-baseline check-benefit check-faults
+check-full:
+	$(MAKE) check CHECK_MODE=full
+
+check-plan:
+	$(GO) run ./internal/testkit/check -plan-only -go "$(GO)" -index "$(IMPACT_INDEX)" -report "$(IMPACT_REPORT)" -base "$(BASE)"
+
+check-baseline:
+	$(GO) run ./internal/testkit/impact/cmd baseline -go "$(GO)" -index "$(IMPACT_INDEX)"
+
+check-benefit:
+	$(GO) run ./internal/testkit/impact/cmd benefit -go "$(GO)" -cases .local/impact/cases.json
+
+check-faults:
+	$(GO) run ./internal/testkit/impact/cmd faults -go "$(GO)" -index "$(IMPACT_INDEX)" -report .local/impact/faults.json
 
 .PHONY: go-check
 ## go-check: static Go checks and executable interface coverage
@@ -37,7 +58,7 @@ staticcheck:
 	GOTOOLCHAIN=$$($(GO) env GOVERSION) $(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(PKGS)
 
 test:
-	$(GO) run ./internal/testkit/racecheck -go "$(GO)" -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -timeout $(TEST_TIMEOUT) -group $(TEST_GROUP) -report-dir "$(TEST_REPORT_DIR)" $(PKGS)
+	$(GO) run ./internal/testkit/racecheck -go "$(GO)" -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -timeout $(TEST_TIMEOUT) -group $(TEST_GROUP) -report-dir "$(TEST_REPORT_DIR)" -plan "$(TEST_PLAN)" $(PKGS)
 
 ## it: integration tests that need a real harness or tailnet
 it:

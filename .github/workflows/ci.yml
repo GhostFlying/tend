@@ -5,19 +5,81 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Validation mode (release always runs the complete CI)
+        type: choice
+        options: [shadow, release]
+        default: shadow
+      ref:
+        description: Exact commit SHA; required for release, otherwise empty uses the event candidate
+        type: string
+        default: ""
+
+env:
+  CHECK_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'release' && 'full' || 'shadow' }}
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  quality:
+  plan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-go
+        with:
+          role: quality
+      - name: restore trusted main execution index
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { restoreBaseline } = require('./.github/scripts/impact.cjs');
+            try {
+              const { failed } = await restoreBaseline({ github, context, core, directory: '.local/impact' });
+              if (failed) core.exportVariable('IMPACT_FORCE_FULL', 'latest full validation failed');
+            } catch (error) {
+              core.warning(`No usable shared baseline: ${error.message}`);
+              core.exportVariable('IMPACT_FORCE_FULL', 'baseline download unavailable');
+            }
+      - name: compute immutable candidate plan
+        env:
+          REQUESTED_REF: ${{ inputs.ref }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          node -e 'if (process.env.REQUESTED_REF && !/^[0-9a-f]{40}$/.test(process.env.REQUESTED_REF)) throw Error("validation ref must be an exact commit SHA")'
+          if [ "$CHECK_MODE" = full ]; then
+            node -e 'if (process.env.WORKFLOW_REF !== "refs/heads/main" || !/^[0-9a-f]{40}$/.test(process.env.REQUESTED_REF || "")) throw Error("release requires the trusted main workflow and an exact commit SHA")'
+          fi
+          go run ./internal/testkit/check -plan-only -index .local/impact/index.json -report .local/impact/result.json -force-full "${IMPACT_FORCE_FULL:-}"
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const { execFileSync } = require('node:child_process');
+          require('./.github/scripts/impact.cjs').validatePlan(JSON.parse(fs.readFileSync('.local/impact/plan.json', 'utf8')), execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim());
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: impact-plan
+          path: .local/impact/*.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  quality:
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/setup-go
         id: go
         with:
@@ -32,6 +94,7 @@ jobs:
           key: ${{ steps.go.outputs.build-key }}
 
   race:
+    needs: plan
     name: race (${{ matrix.group }})
     runs-on: ubuntu-latest
     strategy:
@@ -40,6 +103,13 @@ jobs:
         group: [app, api, mainthread, e2e, other]
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: impact-plan
+          path: .local/impact
       - uses: ./.github/actions/setup-go
         id: go
         with:
@@ -48,7 +118,12 @@ jobs:
         env:
           APP_TEST_SHARDS: 4
           TEST_GROUP: ${{ matrix.group }}
-        run: make test
+        run: |
+          if [ "$CHECK_MODE" = affected ]; then
+            make test TEST_PLAN=.local/impact/plan.json
+          else
+            make test
+          fi
       - name: publish main build snapshot
         if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
         uses: actions/cache/save@v4
@@ -57,9 +132,17 @@ jobs:
           key: ${{ steps.go.outputs.build-key }}
 
   web:
+    needs: plan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: impact-plan
+          path: .local/impact
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
@@ -69,7 +152,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: web checks and build
-        run: make web-check
+        run: |
+          if [ "$CHECK_MODE" = affected ]; then
+            node .github/scripts/impact-web.cjs .local/impact/plan.json
+          else
+            make web-check
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: web-app
@@ -79,7 +167,7 @@ jobs:
 
   layout:
     name: layout (${{ matrix.group }})
-    needs: web
+    needs: [plan, web]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -87,6 +175,12 @@ jobs:
         group: [1, 2]
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: impact-plan
+          path: .local/impact
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
@@ -108,6 +202,7 @@ jobs:
           TEND_LAYOUT_BUILD_ROOT: ${{ runner.temp }}/web-app
           TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/layout
           LAYOUT_GROUP: ${{ matrix.group }}
+          TEND_IMPACT_PLAN: ${{ github.workspace }}/.local/impact/plan.json
         run: pnpm --dir web exec node scripts/layout-groups.ts "$LAYOUT_GROUP"
 
   cross:
@@ -115,6 +210,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/setup-go
         id: go
         with:
@@ -134,16 +231,80 @@ jobs:
           path: ${{ steps.go.outputs.build-path }}
           key: ${{ steps.go.outputs.build-key }}
 
-  # Keep the existing required check name while rejecting every incomplete job.
+  shadow:
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-go
+        with:
+          role: other
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: impact-plan
+          path: .local/impact
+      - name: execute selected checks for comparison
+        run: |
+          if [ "$CHECK_MODE" = shadow ] && [ "$(node -p 'require("./.local/impact/plan.json").Full')" = false ]; then
+            make check CHECK_MODE=affected
+          else
+            echo 'The selected workload is covered by the required full CI jobs or the active mode.'
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: impact-shadow
+          path: .local/impact/*.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  # Keep the required name; intentional empty selections are explicit plans,
+  # never skipped jobs. Shadow/full retain every pre-existing full CI check.
   check:
     if: ${{ always() }}
-    needs: [quality, race, web, layout, cross]
+    needs: [plan, quality, race, web, layout, cross, shadow]
     runs-on: ubuntu-latest
     steps:
       - name: require all checks
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
+      - uses: actions/download-artifact@v4
+        with:
+          name: impact-plan
+          path: impact-evidence
+      - name: record exact candidate validation
+        id: evidence
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          RUN_ID: ${{ github.run_id }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync('impact-evidence/plan.json','utf8'));
+          const results = JSON.parse(process.env.RESULTS);
+          if (!/^[0-9a-f]{40}$/.test(p.Commit) || Object.values(results).some(r => r.result !== 'success')) throw Error('Incomplete candidate validation');
+          const evidence = {Format:1, Commit:p.Commit, Fingerprint:p.Fingerprint, Mode:process.env.CHECK_MODE, FullVerified:['full','shadow'].includes(process.env.CHECK_MODE), RunID:process.env.RUN_ID, EventSHA:process.env.EVENT_SHA, Jobs:results};
+          fs.writeFileSync('impact-evidence/validation.json', JSON.stringify(evidence,null,2));
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha=${p.Commit}\n`);
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ steps.evidence.outputs.sha }}
+          path: impact-evidence/validation.json
+          if-no-files-found: error
+          retention-days: 90
 
   cache-maintenance:
     needs: check

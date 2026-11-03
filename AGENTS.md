@@ -123,6 +123,8 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 ## 4. 测试
 
 - `make check` = 格式检查 + vet + staticcheck + `go test -race ./...`，加上 Web 的类型检查、lint、prettier 检查、vitest 和构建。允许本地检查尚未结束时先 commit、push 并创建 PR，让 GitHub CI 与本地检查并行；PR 描述必须如实标注待完成的检查。合入前，本地完整 `make check` 和 PR 所需 CI 都必须通过；CI 在每个 PR 上执行同样的检查，外加 Windows 和 macOS 的交叉编译。
+- D172 的影响分析首版默认 `CHECK_MODE=shadow`，完整检查仍是门禁，同时执行可缩小的选择集合；全量回退复用同一候选的完整结果。`make check-plan BASE=<ref>` 只输出计划，`make check-full` 显式全量，`make check-baseline` 要求干净的已提交源码，`make check-benefit` 回放固定样本。`CHECK_MODE=affected` 仅用于对照和试验，不能代替当前合入门禁。切换默认必须先完成正确性、漏选反例和计入刷新成本的五 PR 收益验收，见 `docs/test-impact.md`。
+- 共享覆盖基线只由 main 的完整成功工作流发布，每累计五个不同 PR 合入后刷新，无夜间定时；失败、损坏、不兼容、非祖先均恢复全量。release 必须取得指定 SHA 的完整 CI 成功记录，不能使用其他 SHA 或普通 skipped 结果代替。
 - 单元测试默认不联网、不调用模型，使用 `testkit` 替身。
 - 需要真实 traex 或 tailnet 的集成测试使用 build tag `integration`，通过 `make it` 显式运行；测试模型使用 `TEND_TRAEX_MODEL`（默认 GPT-5.6-Sol）。
 - v0.1 §17.2 的故障场景对应的测试命名为 `TestFault_*`，便于对照检查。

@@ -33,6 +33,8 @@ runner 配置同时增加 `updater_socket`（自己的 authority socket）、`up
 
 ## 发布与执行
 
+D160 要求发布前为指定的完整提交 SHA 取得完整 CI 成功证据。在 main 的 `ci` 工作流手动选择 `mode=release`，并将 `ref` 设为该 SHA；也可运行 `gh workflow run ci.yml --ref main -f mode=release -f ref="$RELEASE_SHA"`。等待该次工作流完整成功，保存 `validation-<sha>` 产物中的 `validation.json`，核对 `Commit` 与待构建源码一致、`Mode` 为 `full`、`FullVerified` 为 `true`，且所有必需任务均成功，再准备发布包。main 的最近绿色状态、其他 SHA 的结果或普通 skipped 不满足这项要求。操作细节见[测试验证说明](../test-impact.md)；业务升级协议与 manifest 格式保持原样。
+
 发布目录包含 `manifest.json` 和其中列出的 server/runner 二进制。manifest 固定 `format: 1`、`release_id`、`protocol: {min,max}`、`storage.server_schema`、`storage.runner_journal` 以及 `artifacts`；每项产物有 `role`、`os`、`arch`、相对 `path`、`size` 和小写 `sha256`。
 
 `protocol.max` 是发布当前协议，`min` 必须为上一代（首次为 0）；存储范围的 `max` 是该二进制当前迁移版本，`min` 是能升级读取的最旧版本。已提交迁移不可修改。发布目录不得包含符号链接或路径逃逸。实际服务凭据、数据和工作目录不放入 bundle。
