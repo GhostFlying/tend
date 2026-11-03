@@ -5,7 +5,8 @@ import { createServer, type ServerResponse } from "node:http";
 import { mkdir, readFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { chromium } from "playwright";
-import { fixtureRoot } from "./navigation.ts";
+import { issueView } from "./issue-fixture.ts";
+import { fixtureRoot, navigate } from "./navigation.ts";
 import type {
   AgentInventoryDefinition,
   AgentInventoryRuntime,
@@ -236,6 +237,7 @@ categories.unshift({
   state: "active",
 });
 let hostedCLI: string | undefined = "codex";
+let failAgentIssues = false;
 const streams = new Set<ServerResponse>();
 const writes: string[] = [];
 let hideConcurrencyList = false;
@@ -411,6 +413,75 @@ const server = createServer(async (req, res) => {
     }
     return json(catalog(decodeURIComponent(p.split("/")[4]!)));
   }
+  if (p === "/api/v1/agent-issues") {
+    if (failAgentIssues) {
+      res.statusCode = 503;
+      return json({
+        error: { code: "unavailable", message: "Temporary association fixture failure" },
+      });
+    }
+    const query = new URL(req.url!, "http://localhost").searchParams;
+    const identity = {
+      execution_environment_id: query.get("environment_id")!,
+      local_id: query.get("local_id")!,
+    };
+    const history = query.get("scope") === "history";
+    const second = !!query.get("after");
+    const id = history
+      ? second
+        ? "wi_00000000000000000000000003"
+        : "wi_00000000000000000000000002"
+      : "wi_00000000000000000000000001";
+    return json({
+      identity,
+      coverage: "recorded_run_pins",
+      items:
+        identity.local_id !== "cedar" || query.get("search") || query.get("state")
+          ? []
+          : [
+              {
+                issue_id: id,
+                title: history ? (second ? "下一页历史关联" : "历史冻结关联") : "当前冻结关联",
+                state: history ? "closed" : "active",
+                current: !history,
+                runs: (history ? ["finished"] : ["running", "unknown"]).map((observed, n) => ({
+                  task_id: "task_00000000000000000000000001",
+                  source: "run_responsibility",
+                  pending_decision: n === 1,
+                  run: {
+                    run_id: `run_0000000000000000000000000${n + 1}`,
+                    role: "implement",
+                    generation: n + 1,
+                    spec_version: 1,
+                    host: identity.execution_environment_id,
+                    observed,
+                  },
+                  pin: {
+                    identity,
+                    agent_revision: n + 1,
+                    inventory_revision: n + 1,
+                    snapshot_id: `original-snapshot-${n + 1}`,
+                    public_sha256: hash,
+                    runtime: { runtime_id: "original-worker", revision: 1 },
+                    profile: { model: "original-model", effort: "high" },
+                    worker: "appserver",
+                    backend_id: "git",
+                  },
+                })),
+              },
+            ],
+      more: history && !second,
+      next: history && !second ? id : undefined,
+    });
+  }
+  if (p === "/api/v1/issues/wi_00000000000000000000000001") {
+    const issue = issueView();
+    return json({
+      ...issue,
+      issue_id: "wi_00000000000000000000000001",
+      plan: { ...issue.plan, title: "当前冻结关联" },
+    });
+  }
   if (p === "/api/v1/messaging/messages") return json({ items: [], next: 0, more: false });
   if (p === "/api/v1/attention") return json({ items: [], more: false });
   if (p.startsWith("/api/"))
@@ -460,7 +531,7 @@ try {
       const errors: string[] = [];
       page.on("pageerror", (e) => errors.push(e.message));
       page.on("console", (e) => {
-        if (e.type() === "error" && !(failCatalog && e.text().includes("503")))
+        if (e.type() === "error" && !((failCatalog || failAgentIssues) && e.text().includes("503")))
           errors.push(e.text());
       });
       hideConcurrencyList = false;
@@ -482,7 +553,10 @@ try {
       await detail().getByRole("heading", { name: "Sequoia", exact: true }).waitFor();
       await detail().getByText("Codex · app-server", { exact: true }).waitFor();
       assert.equal(
-        await detail().getByText("未上报", { exact: true }).filter({ visible: true }).count(),
+        await detail()
+          .getByText("未接入运行观测", { exact: true })
+          .filter({ visible: true })
+          .count(),
         1,
       );
       if (mobileDetails) {
@@ -584,6 +658,41 @@ try {
         fullPage: false,
       });
       await directory.getByRole("button", { name: "Cedar · host-a", exact: true }).click();
+      await detail().getByRole("heading", { name: "Cedar", exact: true }).waitFor();
+      const associations = detail().getByRole("region", { name: "关联 Issue", exact: true });
+      await associations.getByRole("button", { name: "当前冻结关联", exact: true }).waitFor();
+      await associations.getByText("实际执行（2）", { exact: true }).click();
+      await associations.getByText("实施 · 结果未知，待对账", { exact: true }).waitFor();
+      await associations.getByText("该任务有待处理决策", { exact: true }).waitFor();
+      assert.equal(await associations.getByText(/original-model/).count(), 2);
+      const scope = associations.getByRole("combobox", { name: "Issue 关联范围" });
+      await scope.selectOption("history");
+      await associations.getByRole("button", { name: "历史冻结关联", exact: true }).waitFor();
+      await associations.getByRole("button", { name: "下一页关联", exact: true }).click();
+      await associations.getByRole("button", { name: "下一页历史关联", exact: true }).waitFor();
+      await associations.getByRole("button", { name: "上一页关联", exact: true }).click();
+      await associations.getByRole("button", { name: "历史冻结关联", exact: true }).waitFor();
+      await associations.getByRole("textbox", { name: "搜索关联 Issue" }).fill("none");
+      await associations
+        .getByText("此范围暂无已记录关联，不代表从未处理过 Issue。", { exact: true })
+        .waitFor();
+      await associations.getByRole("textbox", { name: "搜索关联 Issue" }).fill("");
+      await scope.selectOption("current");
+      await associations.getByRole("button", { name: "当前冻结关联", exact: true }).waitFor();
+      failAgentIssues = true;
+      await associations.getByRole("button", { name: "刷新关联", exact: true }).click();
+      await associations.getByRole("alert").waitFor();
+      failAgentIssues = false;
+      await associations.getByRole("button", { name: "刷新关联", exact: true }).click();
+      await associations.getByRole("alert").waitFor({ state: "hidden" });
+      await page.screenshot({
+        path: join(output, `agent-issues-${viewport.width}-${theme}.png`),
+        fullPage: false,
+      });
+      await associations.getByRole("button", { name: "当前冻结关联", exact: true }).click();
+      await page.waitForURL("**/issues/wi_00000000000000000000000001");
+      await page.getByRole("heading", { name: "当前冻结关联", exact: true }).waitFor();
+      await navigate(page, "/agents?selected=host-a%2Fcedar");
       await detail().getByRole("heading", { name: "Cedar", exact: true }).waitFor();
       await backToList();
       await directory.getByRole("combobox", { name: "类别筛选", exact: true }).selectOption("");

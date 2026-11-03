@@ -66,6 +66,7 @@ func (s *Server) ownerRoutes() []ownerRoute {
 		{"GET /api/v1/token-usage/sources", s.usageSources},
 		{"POST /api/v1/token-usage/preview", s.usagePreview},
 		{"GET /api/v1/hosted-agents", s.hostedAgents},
+		{"GET /api/v1/agent-issues", s.agentIssues},
 		{"GET /api/v1/deadlines", s.deadlines},
 		{"GET /api/v1/deadlines/{id}", s.deadline},
 		{"GET /api/v1/next-actions", s.nextActions},

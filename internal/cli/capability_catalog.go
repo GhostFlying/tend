@@ -133,6 +133,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("GET /api/v1/categories", "category list"),
 		binding("GET /api/v1/categories/{id}", "category show", "sample"),
 		binding("GET /api/v1/hosts/{id}/agents", "agents show", "--host", "sample"),
+		binding("GET /api/v1/agent-issues", "agents issues", "--environment", "sample", "--agent", "sample"),
 		binding("GET /api/v1/hosted-agents", "agents hosted"),
 		binding("GET /api/v1/repos/{id}", "repo show", "sample"),
 		binding("GET /api/v1/sources/{id}", "source show", "sample"),
@@ -285,7 +286,7 @@ func commandUsage(prefix []string) string {
 			}
 		}
 	}
-	out.WriteString("\nAgent catalogs: agents show --host <id>; agents hosted.\nReads support --json. JSON inputs use --data or --file (use - for stdin).\nOwner writes retain --request-id and original control values; --dry-run exports the original Envelope.\nUse tend request show <id> to reconcile and tend request replay --file <original.json> for an identical retry.\n")
+	out.WriteString("\nAgent catalogs: agents show --host <id>; agents hosted; agents issues --environment <id> --agent <id> [--scope all|current|history] [--state <state>] [--search <text>] [--snapshot <id>] [--agent-revision <n>] [--after <cursor>] [--limit <n>].\nReads support --json. JSON inputs use --data or --file (use - for stdin).\nOwner writes retain --request-id and original control values; --dry-run exports the original Envelope.\nUse tend request show <id> to reconcile and tend request replay --file <original.json> for an identical retry.\n")
 	return out.String()
 }
 

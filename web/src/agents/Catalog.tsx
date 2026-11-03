@@ -498,7 +498,7 @@ function AgentRow({
       </span>
       <span className={styles.status}>{status}</span>
       <span className={styles.mobileInfo}>
-        {purpose ? `${purpose} · ${category}` : `${category} · ${group.id}`}
+        {purpose ? `用途：${purpose} · 类别：${category || "未分类"}` : `${category} · ${group.id}`}
         <small>
           {purpose
             ? `${group.id} · ${cliLabel(runtime?.cli) || runtimeMethod(runtime)} · ${agent.requested_model}`

@@ -62,6 +62,7 @@ export function observation(entry: Entry): { label: string; available: boolean }
   const { agent, group } = entry;
   if (entry.history) return { label: "仅续接", available: false };
   if (!agent.enabled) return { label: "已停用", available: false };
+  if (!group.catalog) return { label: "未接入运行观测", available: false };
   if (group.catalog && !group.catalog.online) return { label: "离线", available: false };
   const value =
     currentObservation(group.catalog, agent, "") ??

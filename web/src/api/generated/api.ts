@@ -165,6 +165,12 @@ export type Code =
 export type OpStatus = "succeeded" | "failed" | "accepted" | "unknown";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunObserved".
+ */
+export type RunObserved =
+  "starting" | "running" | "waiting" | "finished" | "failed" | "interrupted" | "unknown";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ArchiveState".
  */
 export type ArchiveState = "ready" | "unsupported" | "unavailable";
@@ -208,12 +214,6 @@ export type MessageState =
 export type ToolStatus = "running" | "completed" | "failed" | "interrupted";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunObserved".
- */
-export type RunObserved =
-  "starting" | "running" | "waiting" | "finished" | "failed" | "interrupted" | "unknown";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "TokenScope".
  */
 export type TokenScope = "owner";
@@ -240,6 +240,7 @@ export interface TendAPI {
   AgentCompactionPage?: AgentCompactionPage;
   AgentContextUsage?: AgentContextUsage;
   AgentExecutor?: AgentExecutor;
+  AgentIssuePage?: AgentIssuePage;
   AgentRolloutPage?: AgentRolloutPage;
   AgentRolloutWindow?: AgentRolloutWindow;
   AnswerDecisionPayload?: AnswerDecisionPayload;
@@ -1259,6 +1260,77 @@ export interface AgentExecutor {
   available: boolean;
   pin: RunExecutionPin;
   reason?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentIssuePage".
+ */
+export interface AgentIssuePage {
+  coverage: string;
+  identity: AgentIdentity;
+  items: AgentIssue[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentIssue".
+ */
+export interface AgentIssue {
+  current: boolean;
+  issue_id: string;
+  runs: AgentIssueRun[] | null;
+  state: IssueState;
+  title: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentIssueRun".
+ */
+export interface AgentIssueRun {
+  pending_decision: boolean;
+  pin: RunExecutionPin;
+  run: RunView;
+  source: string;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunView".
+ */
+export interface RunView {
+  generation: number;
+  host: string;
+  observed: RunObserved;
+  preparation?: RunPreparationFailure;
+  role: RunRole;
+  run_id: string;
+  spec_version?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunPreparationFailure".
+ */
+export interface RunPreparationFailure {
+  change_count: number;
+  changes: PreparationChange[] | null;
+  code: string;
+  phase: string;
+  required_field: string;
+  source_task_id: string;
+  truncated: boolean;
+  worker_started: boolean;
+  workspace_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "PreparationChange".
+ */
+export interface PreparationChange {
+  head: string;
+  mount: string;
+  path: string;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4020,44 +4092,6 @@ export interface TaskRelationView {
   direction: RelationDirection;
   kind: TaskRelationKind;
   task: TaskSummary;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunView".
- */
-export interface RunView {
-  generation: number;
-  host: string;
-  observed: RunObserved;
-  preparation?: RunPreparationFailure;
-  role: RunRole;
-  run_id: string;
-  spec_version?: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunPreparationFailure".
- */
-export interface RunPreparationFailure {
-  change_count: number;
-  changes: PreparationChange[] | null;
-  code: string;
-  phase: string;
-  required_field: string;
-  source_task_id: string;
-  truncated: boolean;
-  worker_started: boolean;
-  workspace_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "PreparationChange".
- */
-export interface PreparationChange {
-  head: string;
-  mount: string;
-  path: string;
-  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

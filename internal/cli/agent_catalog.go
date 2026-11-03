@@ -35,6 +35,9 @@ func runAgentCategoryList(ctx context.Context, e *Env, args []string) error {
 }
 
 func runAgentCatalog(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "issues" {
+		return runAgentIssues(ctx, e, args[1:])
+	}
 	if len(args) > 0 && args[0] == "concurrency" {
 		return runConcurrency(ctx, e, args[1:])
 	}
@@ -42,7 +45,7 @@ func runAgentCatalog(ctx context.Context, e *Env, args []string) error {
 		return runHostedAgentCatalog(ctx, e, args[1:])
 	}
 	if len(args) == 0 || args[0] != "show" {
-		return usagef("agents expects show --host <id>|hosted")
+		return usagef("agents expects show --host <id>|hosted|issues")
 	}
 	fs := newFlags(e, "agents show")
 	fs.Bool("json", true, "print complete structured response")
