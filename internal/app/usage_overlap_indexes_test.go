@@ -36,7 +36,7 @@ func TestUsageOverlapIndexesPreserveHistoryAndCompleteViews(t *testing.T) {
 			if err := db.Write(ctx, func(tx *store.Tx) error {
 				// Reconstruct the predecessor schema in this isolated fixture only. Reopen
 				// below applies the real embedded migration and records its history.
-				for _, q := range []string{`DROP INDEX token_usage_legacy_candidates_native`, `DROP INDEX token_usage_current_fact`, `DELETE FROM schema_migrations WHERE version=83`} {
+				for _, q := range []string{`DROP INDEX token_usage_legacy_candidates_native`, `DROP INDEX token_usage_current_fact`, `DROP INDEX request_records_identity_status`, `DELETE FROM schema_migrations WHERE version>=83`} {
 					if _, err := tx.Exec(ctx, q); err != nil {
 						return err
 					}
