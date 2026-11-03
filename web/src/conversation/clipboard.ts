@@ -56,7 +56,11 @@ export function pasteAttachments(
     event.preventDefault();
     if (text) {
       const input = event.currentTarget;
-      input.setRangeText(text, input.selectionStart, input.selectionEnd, "end");
+      // Chromium clears the textarea undo stack on setRangeText. insertText
+      // participates in the native editing history, including selected text.
+      const inserted =
+        document.activeElement === input && document.execCommand?.("insertText", false, text);
+      if (!inserted) input.setRangeText(text, input.selectionStart, input.selectionEnd, "end");
       const caret = input.selectionEnd;
       options.write(input.value);
       requestAnimationFrame(() => {

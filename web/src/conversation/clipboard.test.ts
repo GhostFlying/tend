@@ -103,6 +103,20 @@ describe("attachment paste", () => {
     expect(input.setSelectionRange).not.toHaveBeenCalled();
     expect(options.addFiles).toHaveBeenCalledOnce();
   });
+  it("uses the native editing command without replacing its undo history", () => {
+    const { event, options, input } = setup([image()], "图片说明");
+    const execCommand = vi.fn(() => {
+      input.value = "草稿图片说明尾部";
+      input.selectionStart = input.selectionEnd = 6;
+      return true;
+    });
+    vi.stubGlobal("document", { activeElement: input, execCommand });
+    input.setRangeText = vi.fn();
+    pasteAttachments(event, options);
+    expect(execCommand).toHaveBeenCalledWith("insertText", false, "图片说明");
+    expect(input.setRangeText).not.toHaveBeenCalled();
+    expect(options.write).toHaveBeenCalledWith("草稿图片说明尾部");
+  });
   it("does not consume a paste while disabled or saving", () => {
     const { event, options } = setup([image()], "text");
     pasteAttachments(event, { ...options, blocked: true });

@@ -106,6 +106,11 @@ try {
     await pending.locator("img").waitFor();
     assert.equal(await input.inputValue(), "草稿图片说明尾部");
     assert.equal(await input.evaluate((e) => (e as HTMLTextAreaElement).selectionStart), 6);
+    await input.press("Control+z");
+    assert.equal(await input.inputValue(), "草稿SELECT尾部", "mixed paste must preserve undo");
+    assert.equal(await pending.locator("li").count(), 1, "undo text does not send or drop files");
+    await input.press("Control+y");
+    assert.equal(await input.inputValue(), "草稿图片说明尾部", "mixed paste supports redo");
     assert.equal(
       await pending.locator("li").count(),
       1,
