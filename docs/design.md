@@ -162,6 +162,7 @@
 | D157 | Manager delivery 先去重旧 logical responsibility 再查未决投递；Token 重叠查询按 native identity 与 current fact 索引关联。只改善查询规模，不改变 blocker、冲突、未知或计量语义，追加迁移83。 | 已实现，待验证 |
 | D158 | Token 归属在同一只读事务内按请求批量解析日志与本地 actor，保留原 SQL 的歧义、NULL、优先级与错误回退，不使用跨请求缓存或新增迁移。 | 已实现，待验证 |
 | D159 | 明确协商 retain 能力的 runner 可逐 Run 保留原维护未知，不令整 host Hello 失败；持久 fence 阻止重放，未知责任、原 lease/pin 与容量继续保留。旧 peer 保持原拒绝路径。 | 已实现，待验证 |
+| D163 | 终态任务的未答规则问题在原事务撤销并收敛 Attention；拒绝迟到新答复，保留已答历史与暂停语义。 | 已实现，待验证 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
 
@@ -789,3 +790,13 @@ runner 才接收逐运行 retain。无该能力或不受支持的代际不得收
 飞书作为显式配置、默认关闭的通信 adapter，复用通信消息、ReplyTo/Issue 路由、outbox 与 owner 请求去重。默认出站 WebSocket 接收复用固定 SDK 的连接鉴权与协议，基于官方 v3.12.1 的最小 fork 提供 terminal Dispose，显式等待连接与 cache cleaner 退出，原 Start/CloseAndWait 语义不变。HTTP 回调为可选模式，普通事件仍按原始 body 校验签名与时间；URL challenge 单独解密并校验 token，允许其没有事件签名而不创建业务消息。两模式均核 app/tenant；只有与 owner 管理绑定完全一致的 sender/private-chat 可以形成 owner 输入。连接配置不等已连接或消息已交付，传输错误不停止主服务。绑定以 request_id/CAS 修改，运行配置撤销 owner 权限后不再接收或发送。
 
 provider event_id/message_id 冻结同一请求身份，持久收件恢复只处理尚无 request record 的情况；业务消息/事件/outbox/request record 仍同一事务。发送冻结目的地、revision 和稳定 UUID；确定限流可沿原 UUID 重试，未知结果不重送。状态、输入分页与绑定的完整 CLI 同步实现。附件/群聊/交互卡片和真实应用激活不在本次实现证明范围，详见 `feishu.md` 与 `plans/feishu-channel.md`。
+
+## D163：终态任务的过期待决收敛
+
+普通任务规则产生的问题冻结了 task control revision，但原过期问题清理仅覆盖 worker
+运行问题及 Issue 所有权变更。任务完成或取消后，同事务撤销尚未回答的规则问题，并由
+原 decision.cancelled 事件撤下对应 Attention。迟到答复在写消息和应用 effect 前拒绝；
+原已接纳答复和原请求重放仍保留成功事实。没有冻结任务版本的范围/产品问题保持原义。
+单纯暂停或 revision 变化不足以证明责任已被替代；非终态复查的 action/generation
+来源规则另行处理，不按同一父 Issue 批量清理新预算问题。
+见[实施计划](plans/obsolete-task-decisions.md)。
