@@ -978,6 +978,42 @@ try {
           .getByRole("button", { name: "移除", exact: true })
           .click();
         console.log(`PASS attachment spacing/removal ${viewport.width} ${theme}`);
+        const safeArea = await context.newCDPSession(page);
+        for (const path of ["/", "/inbox"]) {
+          let baseline: { top: number; height: number } | undefined;
+          for (const top of [0, 47, 0]) {
+            await safeArea.send("Emulation.setSafeAreaInsetsOverride", {
+              insets: { top, bottom: 0, left: 0, right: 0 },
+            });
+            await navigate(page, path);
+            const title = page.getByRole("heading", {
+              name: path === "/" ? "Tend" : "收件箱",
+              exact: true,
+            });
+            await title.waitFor();
+            const geometry = await title.evaluate((element) => {
+              const header = element.closest("header")!.getBoundingClientRect();
+              return { top: element.getBoundingClientRect().top, height: header.height };
+            });
+            baseline ??= geometry;
+            assert(
+              Math.abs(geometry.top - baseline.top - top) <= 1,
+              `${path}: title must respect top inset: ${JSON.stringify({ top, baseline, geometry })}`,
+            );
+            assert(
+              Math.abs(geometry.height - baseline.height - top) <= 1,
+              `${path}: header must preserve content height: ${JSON.stringify({ top, baseline, geometry })}`,
+            );
+            await page.screenshot({
+              path: join(
+                output,
+                `${viewport.width}-${theme}-${path === "/" ? "chat" : "inbox"}-safe-top-${top}.png`,
+              ),
+            });
+          }
+        }
+        await safeArea.detach();
+        console.log(`PASS top safe area 0/47/0 ${viewport.width} ${theme}`);
         await navigate(page, "/diagnostics/main");
         await page.getByRole("heading", { level: 1 }).getByRole("button").click();
         await page.getByRole("dialog").waitFor();
