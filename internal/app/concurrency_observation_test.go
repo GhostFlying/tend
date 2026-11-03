@@ -10,6 +10,89 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
+func TestConcurrencyRejectedRetryUsesCurrentBinding(t *testing.T) {
+	h, sel := concurrencyHostedFixture(t)
+	for _, id := range []string{"a", "b"} {
+		concurrencyConfigure(t, h, "create", id, 0, protocol.ConfigureConcurrencyPayload{Name: id, Min: 1, Initial: 3, Max: 4})
+	}
+	binding := protocol.ConfigureConcurrencyPayload{EnvironmentID: sel.Identity.ExecutionEnvironmentID, RuntimeID: sel.Runtime.ID}
+	concurrencyConfigure(t, h, "bind", "a", 1, binding)
+	message := queueMessage(t, h, "Investigate")
+	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	turn := store.MainTurn{RequestID: d.RequestID, MessageID: message, ThreadID: "native", Status: store.TurnStarting, Model: sel.Definition.Model, Effort: sel.Definition.Effort, Hosted: &sel}
+	for _, status := range []string{store.TurnStarting, store.TurnRejected} {
+		turn.Status = status
+		if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	concurrencyConfigure(t, h, "bind", "b", 1, binding)
+	turn.Status = store.TurnStarting
+	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.ObserveNativeStart(t.Context(), d.RequestID, "native", "retry-turn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.RecordHostedConcurrencyEvent(t.Context(), d.RequestID, protocol.ConcurrencyFeedback{Kind: "congestion", SessionID: "native", TurnID: "retry-turn", Failure: &protocol.AgentFailure{Code: "rate_limit_exceeded", HTTPStatus: 429}}); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]int64{"a": 3, "b": 2} {
+		g, err := h.app.ConcurrencyGroup(t.Context(), id)
+		if err != nil || g.Current != want {
+			t.Fatalf("retry feedback group %s: %+v %v", id, g, err)
+		}
+	}
+}
+
+func TestConcurrencyHostedLivenessRequiresNativeActivity(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stale_snapshot", true: "live_events"}[active], func(t *testing.T) {
+			h, sel := concurrencyHostedFixture(t)
+			concurrencyConfigure(t, h, "create", "shared", 0, protocol.ConfigureConcurrencyPayload{Name: "Shared", Min: 1, Initial: 1, Max: 4})
+			concurrencyConfigure(t, h, "bind", "shared", 1, protocol.ConfigureConcurrencyPayload{EnvironmentID: sel.Identity.ExecutionEnvironmentID, RuntimeID: sel.Runtime.ID})
+			message := queueMessage(t, h, "Investigate")
+			d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
+			if err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			turn := store.MainTurn{RequestID: d.RequestID, MessageID: message, ThreadID: "native", Status: store.TurnStarting, Model: sel.Definition.Model, Effort: sel.Definition.Effort, Hosted: &sel}
+			if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.app.ObserveNativeStart(t.Context(), d.RequestID, "native", "turn"); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.app.tickConcurrency(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			for i := 1; i <= int(2*RunnerOfflineAfter/time.Second); i++ {
+				h.clock.Advance(time.Second)
+				// An unrelated thread cannot keep a stale execution healthy.
+				thread := "unrelated"
+				if active {
+					thread = "native"
+				}
+				if i%15 == 0 {
+					if err := h.app.ObserveConcurrencyActivity(t.Context(), "main", thread, "turn"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := h.app.tickConcurrency(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			g, err := h.app.ConcurrencyGroup(t.Context(), "shared")
+			if err != nil || g.FeedbackHealthy != active || g.Occupied != 1 || active && g.SaturatedMillis != (2*RunnerOfflineAfter).Milliseconds() || !active && g.SaturatedMillis != 0 {
+				t.Fatalf("native feedback active=%v: %+v %v", active, g, err)
+			}
+		})
+	}
+}
+
 func TestConcurrencyCompactUnknownAndEarlyCompletion(t *testing.T) {
 	h, sel := concurrencyHostedFixture(t)
 	concurrencyConfigure(t, h, "create", "shared", 0, protocol.ConfigureConcurrencyPayload{Name: "Shared", Min: 1, Initial: 1, Max: 4})
@@ -219,5 +302,42 @@ func TestConcurrencySuccessfulRetryDoesNotInventCongestion(t *testing.T) {
 	}
 	if g.Current != 3 {
 		t.Fatalf("successful completion fabricated congestion from a non-congestion retry: %+v", g)
+	}
+}
+
+func TestConcurrencyWorkerSupportsBindingAfterClaim(t *testing.T) {
+	h, r, p, hash := inventorySetup(t)
+	if op := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 1, 0, "first"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	r.Capabilities = append(r.Capabilities, protocol.CapabilityAgentExecution, protocol.CapabilityAdaptiveConcurrency)
+	r.JournalVersion = 12
+	for _, agent := range p.Agents {
+		r.AgentExecutors = append(r.AgentExecutors, protocol.AgentExecutor{Available: true, Pin: protocol.RunExecutionPin{Identity: agent.Identity, AgentRevision: agent.Revision, Runtime: agent.Binding, InventoryRevision: 1, SnapshotID: "first", PublicSHA256: hash, Profile: protocol.ExecutionProfile{Model: agent.RequestedModel, Effort: agent.RequestedEffort}, Worker: protocol.WorkerAppServer, BackendID: "git"}})
+	}
+	r.Sequence++
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	spec := testSpec
+	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}
+	h.createTask(owner, createTaskPayload{Title: "first", Spec: spec})
+	op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: r}, nil), Claim{})
+	var out claimResult
+	if err := json.Unmarshal(op.Result, &out); err != nil || out.Assignment.RunID == "" {
+		t.Fatal(op, err)
+	}
+	if !out.Assignment.ConcurrencyFeedback {
+		t.Fatal("capable unbound worker must report feedback before a later binding")
+	}
+	concurrencyConfigure(t, h, "create", "shared", 0, protocol.ConfigureConcurrencyPayload{Name: "Shared", Min: 1, Initial: 3, Max: 4})
+	concurrencyConfigure(t, h, "bind", "shared", 1, protocol.ConfigureConcurrencyPayload{EnvironmentID: "linux-1", RuntimeID: "worker"})
+	feedback, _ := json.Marshal(protocol.ConcurrencyFeedback{Kind: "congestion", SessionID: "native", TurnID: "turn", Failure: &protocol.AgentFailure{Code: "rate_limit_exceeded", HTTPStatus: 429}})
+	if _, err := h.app.RecordRunEvents(t.Context(), runPrincipal(out.Assignment.RunID, protocol.RoleImplement), out.Assignment.RunID, []protocol.RunEvent{{Seq: 1, Kind: "worker.concurrency", Body: feedback}}); err != nil {
+		t.Fatal(err)
+	}
+	g, err := h.app.ConcurrencyGroup(t.Context(), "shared")
+	if err != nil || g.Occupied != 1 || g.Current != 2 {
+		t.Fatalf("late-bound worker feedback: %+v %v", g, err)
 	}
 }

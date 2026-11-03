@@ -354,6 +354,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			m.cfg.Log.ErrorContext(ctx, "could not settle interrupted turns", "err", err)
 		}
 	}()
+	lastConcurrencyActivity := int64(0)
 	processEvent := func(ctx context.Context, ev harness.Event) error {
 		ack := func() error {
 			if acknowledger, ok := th.(harness.EventAcknowledger); ok {
@@ -374,6 +375,12 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 				return nil
 			}
 			return errors.New("mainthread: runner native attachment ended")
+		}
+		if now := m.cfg.Now().UnixMilli(); now-lastConcurrencyActivity >= 5000 {
+			if err := m.app.ObserveConcurrencyActivity(ctx, m.cfg.ConversationID, th.ID(), ev.TurnID); err != nil {
+				return err
+			}
+			lastConcurrencyActivity = now
 		}
 		m.mu.Lock()
 		m.lastActivity = m.cfg.Now()

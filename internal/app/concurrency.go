@@ -494,7 +494,7 @@ func putConcurrencyExecutionObserved(ctx context.Context, tx *store.Tx, source p
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO concurrency_executions(execution_id,environment_id,runtime_id,state,source_json,last_seen,group_id,parent_execution_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(execution_id) DO UPDATE SET state=excluded.state,source_json=excluded.source_json,last_seen=excluded.last_seen,parent_execution_id=excluded.parent_execution_id,group_id=CASE WHEN concurrency_executions.state='stopped' OR excluded.state='stopped' THEN concurrency_executions.group_id ELSE excluded.group_id END`, source.ExecutionID, source.EnvironmentID, source.RuntimeID, state, string(raw), lastSeen, group, source.ParentExecutionID)
+	_, err = tx.Exec(ctx, `INSERT INTO concurrency_executions(execution_id,environment_id,runtime_id,state,source_json,last_seen,group_id,parent_execution_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(execution_id) DO UPDATE SET state=excluded.state,source_json=excluded.source_json,last_seen=MAX(concurrency_executions.last_seen,excluded.last_seen),parent_execution_id=excluded.parent_execution_id,group_id=CASE WHEN excluded.state='stopped' THEN concurrency_executions.group_id ELSE excluded.group_id END`, source.ExecutionID, source.EnvironmentID, source.RuntimeID, state, string(raw), lastSeen, group, source.ParentExecutionID)
 	if err != nil {
 		return err
 	}

@@ -32,7 +32,7 @@ func acquireAuxiliaryConcurrency(ctx context.Context, tx *store.Tx, id, conversa
 	if selection == nil {
 		return nil
 	}
-	source := protocol.ConcurrencySource{ExecutionID: id, SessionID: id, ConversationID: conversation, EnvironmentID: selection.Identity.ExecutionEnvironmentID, RuntimeID: selection.Runtime.ID, AgentID: selection.Identity.LocalID, IssueID: selection.IssueID, RunID: selection.RunnerRunID, Attempt: id, Purpose: string(selection.Purpose)}
+	source := protocol.ConcurrencySource{ExecutionID: id, SessionID: id, ConversationID: store.ConversationID(conversation), EnvironmentID: selection.Identity.ExecutionEnvironmentID, RuntimeID: selection.Runtime.ID, AgentID: selection.Identity.LocalID, IssueID: selection.IssueID, RunID: selection.RunnerRunID, Attempt: id, Purpose: string(selection.Purpose)}
 	if source.IssueID != "" {
 		err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(json_extract(body_json,'$.title'),'') FROM work_items WHERE work_item_id=?`, source.IssueID).Scan(&source.IssueTitle)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

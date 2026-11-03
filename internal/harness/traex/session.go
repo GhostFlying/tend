@@ -57,6 +57,7 @@ type Session struct {
 	// went away.
 	stopped        chan struct{}
 	closed         sync.Once
+	closeErr       error
 	hostedBoundary *hostedToolBoundary
 }
 
@@ -195,12 +196,11 @@ func (s *Session) Done() <-chan struct{} { return s.conn.done }
 
 // Close implements harness.Session.
 func (s *Session) Close() error {
-	var err error
 	s.closed.Do(func() {
 		close(s.stopped)
-		err = s.stop()
+		s.closeErr = s.stop()
 	})
-	return err
+	return s.closeErr
 }
 
 func dynamicTools(specs []harness.ToolSpec) []DynamicToolSpec {
