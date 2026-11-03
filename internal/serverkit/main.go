@@ -93,6 +93,7 @@ type Config struct {
 	// works in (D68).
 	Upgrades  *UpgradeConfig       `json:"upgrades"`
 	Telegram  *TelegramConfig      `json:"telegram,omitempty"`
+	Feishu    *FeishuConfig        `json:"feishu,omitempty"`
 	MainAgent *MainAgentConfig     `json:"main_agent"`
 	Hosts     []app.HostConfig     `json:"hosts"`
 	Repos     []app.RepoConfig     `json:"repos"`
@@ -399,6 +400,13 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		return err
 	}
 	readDispatch := dispatch.New(a, map[string]dispatch.Handler{app.MessagingReadDestination: messaging.ReadHandler{App: a}}, readWake, now, dispatch.Config{}, log)
+	feishuClient, err := prepareFeishu(ctx, cfg.Feishu, a, now, cfg.Owners)
+	if err != nil {
+		return err
+	}
+	if feishuClient != nil {
+		handlers[app.FeishuDestination] = feishuClient
+	}
 	interactionHandlers := map[string]dispatch.Handler{}
 	if telegramClient != nil {
 		interactionHandlers[app.MessagingInteractionDestination] = telegramClient
@@ -494,8 +502,17 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	owner := api.New(a, s, whois, secret, ownerConfig, log)
 	var hookListener net.Listener
 	var hookServer *http.Server
-	if cfg.Webhooks != nil {
-		address := cfg.Webhooks.Listen
+	if cfg.Webhooks != nil || cfg.Feishu != nil && cfg.Feishu.CallbackListen != "" {
+		address := ""
+		if cfg.Webhooks != nil {
+			address = cfg.Webhooks.Listen
+		}
+		if cfg.Feishu != nil && cfg.Feishu.CallbackListen != "" {
+			if address != "" && address != cfg.Feishu.CallbackListen {
+				return errors.New("shared webhook and Feishu callback listeners must use the same address")
+			}
+			address = cfg.Feishu.CallbackListen
+		}
 		if address == "" {
 			address = "127.0.0.1:8641"
 		}
@@ -504,9 +521,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			return fmt.Errorf("webhook listener: %w", err)
 		}
 		defer hookListener.Close()
-		hookServer = &http.Server{Handler: owner.WebhookHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute}
+		hookServer = &http.Server{Handler: withFeishuCallback(owner.WebhookHandler(), feishuClient), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute}
 	}
-	server := &http.Server{Handler: serverHandler(runners.Handler(), owner.Handler()), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: withFeishuCallback(serverHandler(runners.Handler(), owner.Handler()), feishuClient), ReadHeaderTimeout: 10 * time.Second}
 	// Shutdown waits for requests to finish; event streams never do.
 	server.RegisterOnShutdown(owner.EndStreams)
 
@@ -549,6 +566,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	}
 	if telegramClient != nil {
 		wg.Go(func() { telegramClient.Run(runCtx) })
+	}
+	if feishuClient != nil {
+		wg.Go(func() { feishuClient.Run(runCtx) })
 	}
 	wg.Go(func() { a.RunFollowups(runCtx, log) })
 	wg.Go(func() { a.RunConcurrency(runCtx, log) })

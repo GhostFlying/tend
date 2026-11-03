@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -17,9 +18,9 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-// Upgrade a genuine schema82 shape instead of mirroring the index SQL here.
-// Small semantic cases retain full view and history equality; the bounded slow
-// reproduction remains outside the ordinary unit suite.
+// Rebuild the real index SQL around populated facts and complete views.
+// Store migration tests separately cover the actual schema82 upgrade; this
+// fixture never rewrites newer migration history or drops unrelated tables.
 func TestUsageOverlapIndexesPreserveHistoryAndCompleteViews(t *testing.T) {
 	for _, state := range []string{"unresolved", "matched", "native_conflict", "unknown_counters"} {
 		t.Run(state, func(t *testing.T) {
@@ -30,13 +31,16 @@ func TestUsageOverlapIndexesPreserveHistoryAndCompleteViews(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = db.Close() })
+			t.Cleanup(func() {
+				if db != nil {
+					_ = db.Close()
+				}
+			})
 			at, total := clock.Now().Add(-time.Hour).UnixMilli(), int64(10)
 			sample := protocol.TokenUsageSample{Source: "legacy", RequestID: "response", ThreadID: "shared-thread", TurnID: "shared-turn", Revision: 1, Settlement: "final", Model: "fixture-model", OccurredAt: &at, Total: &total}
 			if err := db.Write(ctx, func(tx *store.Tx) error {
-				// Reconstruct the predecessor schema in this isolated fixture only. Reopen
-				// below applies the real embedded migration and records its history.
-				for _, q := range []string{`DROP INDEX token_usage_legacy_candidates_native`, `DROP INDEX token_usage_current_fact`, `DROP INDEX request_records_identity_status`, `DELETE FROM schema_migrations WHERE version>=83`} {
+				// Remove only the indexes being compared; preserve every migration record.
+				for _, q := range []string{`DROP INDEX token_usage_legacy_candidates_native`, `DROP INDEX token_usage_current_fact`} {
 					if _, err := tx.Exec(ctx, q); err != nil {
 						return err
 					}
@@ -100,6 +104,13 @@ func TestUsageOverlapIndexesPreserveHistoryAndCompleteViews(t *testing.T) {
 			}
 			before := usageIndexView(t, db, clock.Now())
 			beforeHistory := usageIndexHistory(t, db)
+			migration, err := os.ReadFile(filepath.Join("..", "store", "migrations", "0083_usage_overlap_query_indexes.sql"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = db.Write(ctx, func(tx *store.Tx) error { _, err := tx.Exec(ctx, string(migration)); return err }); err != nil {
+				t.Fatal(err)
+			}
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -185,7 +196,7 @@ func usageIndexHistory(t *testing.T, db *store.Store) string {
 	ctx := context.Background()
 	hash := sha256.New()
 	if err := db.Read(ctx, func(tx *store.ReadTx) error {
-		queries := []string{`SELECT version,name,applied_at FROM schema_migrations WHERE version<=82 ORDER BY version`, `SELECT seq,source,request_id,revision,payload_hash,payload_json,subject,role,received_at FROM token_usage_facts ORDER BY seq`, `SELECT source,request_id,fact_seq,conflict FROM token_usage_current ORDER BY source,request_id`, `SELECT legacy_seq,native_source,native_request_id,created_at FROM token_usage_legacy_links ORDER BY legacy_seq`, `SELECT legacy_seq,native_source,native_request_id,matched FROM token_usage_legacy_candidates ORDER BY legacy_seq,native_source,native_request_id`, `SELECT source,request_id,run_id,conversation_id,host_id,proof,attribution_conflict FROM token_usage_bindings ORDER BY source,request_id`}
+		queries := []string{`SELECT version,name,applied_at FROM schema_migrations ORDER BY version`, `SELECT seq,source,request_id,revision,payload_hash,payload_json,subject,role,received_at FROM token_usage_facts ORDER BY seq`, `SELECT source,request_id,fact_seq,conflict FROM token_usage_current ORDER BY source,request_id`, `SELECT legacy_seq,native_source,native_request_id,created_at FROM token_usage_legacy_links ORDER BY legacy_seq`, `SELECT legacy_seq,native_source,native_request_id,matched FROM token_usage_legacy_candidates ORDER BY legacy_seq,native_source,native_request_id`, `SELECT source,request_id,run_id,conversation_id,host_id,proof,attribution_conflict FROM token_usage_bindings ORDER BY source,request_id`}
 		for _, query := range queries {
 			rows, err := tx.Q().QueryContext(ctx, query)
 			if err != nil {

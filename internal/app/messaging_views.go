@@ -12,7 +12,7 @@ import (
 func (a *App) MessagingChannels(ctx context.Context) ([]protocol.MessagingChannel, error) {
 	result := []protocol.MessagingChannel{}
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		rows, err := tx.Q().QueryContext(ctx, `SELECT c.channel_id,c.status,c.revision,c.mark_read_mode,c.health,c.last_observed_at,(SELECT count(*) FROM telegram_inbox i WHERE i.bot_id=c.bot_id AND i.state='pending') FROM messaging_channels c ORDER BY channel_id`)
+		rows, err := tx.Q().QueryContext(ctx, `SELECT c.channel_id,c.status,c.revision,c.mark_read_mode,c.health,c.last_observed_at,CASE WHEN c.channel_id='feishu' THEN (SELECT count(*) FROM feishu_inputs i LEFT JOIN request_records r ON r.domain='owner' AND r.request_id=i.request_id WHERE i.message_id='' AND (r.status IS NULL OR r.status IN ('accepted','unknown'))) ELSE (SELECT count(*) FROM telegram_inbox i WHERE i.bot_id=c.bot_id AND i.state='pending') END FROM messaging_channels c ORDER BY channel_id`)
 		if err != nil {
 			return err
 		}
@@ -26,6 +26,9 @@ func (a *App) MessagingChannels(ctx context.Context) ([]protocol.MessagingChanne
 			c.BotMarkRead = c.ID == "web" || readMode != ""
 			c.Text = true
 			c.Files = true
+			if c.ID == "feishu" {
+				c.Files = false
+			}
 			c.UserReadReceipts = c.ID == "web"
 			result = append(result, c)
 		}
@@ -212,14 +215,14 @@ func messagingReceipts(ctx context.Context, q store.Querier, id string) (protoco
 	if err != nil {
 		return r, err
 	}
-	rows, err = q.QueryContext(ctx, `SELECT d.delivery_id,d.message_id,d.channel_id,d.part,d.kind,CASE WHEN o.status='sending' THEN 'sending' ELSE d.state END,d.external_id,d.reason,COALESCE(o.attempts,0),d.updated_at FROM messaging_deliveries d LEFT JOIN outbox o ON o.outbox_id=d.delivery_id WHERE d.message_id=? ORDER BY d.channel_id,d.part`, id)
+	rows, err = q.QueryContext(ctx, `SELECT d.delivery_id,d.message_id,d.channel_id,d.part,d.kind,CASE WHEN o.status='sending' THEN 'sending' ELSE d.state END,d.external_id,d.reason,COALESCE(o.attempts,0),d.updated_at,COALESCE(f.external_message_id,'') FROM messaging_deliveries d LEFT JOIN outbox o ON o.outbox_id=d.delivery_id LEFT JOIN feishu_deliveries f ON f.delivery_id=d.delivery_id WHERE d.message_id=? ORDER BY d.channel_id,d.part`, id)
 	if err != nil {
 		return r, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var d protocol.MessagingDelivery
-		if err = rows.Scan(&d.ID, &d.MessageID, &d.ChannelID, &d.Part, &d.Kind, &d.State, &d.ExternalID, &d.Reason, &d.Attempts, &d.UpdatedAt); err != nil {
+		if err = rows.Scan(&d.ID, &d.MessageID, &d.ChannelID, &d.Part, &d.Kind, &d.State, &d.ExternalID, &d.Reason, &d.Attempts, &d.UpdatedAt, &d.ExternalMessageReference); err != nil {
 			return r, err
 		}
 		r.Deliveries = append(r.Deliveries, d)

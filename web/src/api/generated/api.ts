@@ -260,6 +260,7 @@ export interface TendAPI {
   AttentionPage?: AttentionPage;
   AttentionView?: AttentionView;
   BackgroundSourcePage?: BackgroundSourcePage;
+  BindFeishu?: BindFeishu;
   BindLocalRepositoryRequest?: BindLocalRepositoryRequest;
   BindTelegram?: BindTelegram;
   CancelIssueDeadlinePayload?: CancelIssueDeadlinePayload;
@@ -283,6 +284,8 @@ export interface TendAPI {
   Envelope?: Envelope;
   ExecutionCounts?: ExecutionCounts;
   ExplainDecisionPayload?: ExplainDecisionPayload;
+  FeishuBindingView?: FeishuBindingView;
+  FeishuInputPage?: FeishuInputPage;
   FinishIssueAssignmentPayload?: FinishIssueAssignmentPayload;
   FollowupSpec?: FollowupSpec;
   HandleAttentionPayload?: HandleAttentionPayload;
@@ -1711,6 +1714,16 @@ export interface BackgroundSource {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BindFeishu".
+ */
+export interface BindFeishu {
+  app_id: string;
+  chat_id: string;
+  sender_id: string;
+  tenant_key: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "BindLocalRepositoryRequest".
  */
 export interface BindLocalRepositoryRequest {
@@ -2245,6 +2258,42 @@ export interface ExplainDecisionPayload {
   owner_choice: string;
   source_message_id: string;
   summary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FeishuBindingView".
+ */
+export interface FeishuBindingView {
+  app_id: string;
+  chat_id: string;
+  enabled: boolean;
+  owner: string;
+  revision: number;
+  runtime_health: string;
+  sender_id: string;
+  tenant_key: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FeishuInputPage".
+ */
+export interface FeishuInputPage {
+  items: FeishuInputView[] | null;
+  more: boolean;
+  next: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "FeishuInputView".
+ */
+export interface FeishuInputView {
+  binding_revision: number;
+  event_id: string;
+  external_message_id: string;
+  message_id: string;
+  request_id: string;
+  sequence: number;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3114,6 +3163,7 @@ export interface MessagingDelivery {
   channel_id: string;
   delivery_id: string;
   external_id?: number;
+  external_message_reference?: string;
   kind: string;
   message_id: string;
   part: number;

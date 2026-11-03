@@ -2,6 +2,7 @@ package views
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -22,10 +23,14 @@ func TestManagerControlIndexPreservesBlockersAndRequestHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		if db != nil {
+			_ = db.Close()
+		}
+	})
 	issue, other := "wi_00000000000000000000000001", "wi_00000000000000000000000002"
 	if err := db.Write(ctx, func(tx *store.Tx) error {
-		for _, q := range []string{`DROP INDEX request_records_identity_status`, `DELETE FROM schema_migrations WHERE version=84`} {
+		for _, q := range []string{`DROP INDEX request_records_identity_status`} {
 			if _, err := tx.Exec(ctx, q); err != nil {
 				return err
 			}
@@ -75,6 +80,13 @@ func TestManagerControlIndexPreservesBlockersAndRequestHistory(t *testing.T) {
 	before, facts := managerControlIndexState(t, ctx, db, issue)
 	if !reflect.DeepEqual(before, []protocol.IssueBlocker{{Code: "old_manager_control", ObjectID: "accepted"}, {Code: "old_manager_control", ObjectID: "cross-domain"}, {Code: "old_manager_control", ObjectID: "unknown"}}) {
 		t.Fatal("unexpected predecessor blockers", before)
+	}
+	migration, err := os.ReadFile(filepath.Join("..", "store", "migrations", "0084_request_record_identity_index.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Write(ctx, func(tx *store.Tx) error { _, err := tx.Exec(ctx, string(migration)); return err }); err != nil {
+		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
