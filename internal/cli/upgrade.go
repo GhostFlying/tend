@@ -18,6 +18,9 @@ import (
 )
 
 func runUpgrade(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "capabilities" {
+		return runServerCapabilities(ctx, e, args[1:])
+	}
 	if len(args) > 0 && args[0] == "recover" {
 		return runForwardRecovery(ctx, e, args[1:])
 	}
@@ -32,6 +35,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "upgrade "+action)
 	dry := fs.Bool("dry-run", false, "print the local control request without executing it")
 	configPlan := fs.String("runner-configurations", "", "private JSON metadata for a single runner configuration maintenance")
+	park := fs.Bool("park-idle-managers", false, "park idle managers through confirmed native close; preserve logical responsibility for a new run after this window")
 	bundle := fs.String("release", "", "verified local release directory")
 	upgradeID := fs.String("upgrade-id", "", "stable upgrade batch ID")
 	requestID := fs.String("request-id", "", "reuse this ID only when retrying the identical request")
@@ -43,7 +47,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	if (*configPlan != "" || *deliveryTask != "") && action != "start" {
+	if (*configPlan != "" || *deliveryTask != "" || *park) && action != "start" {
 		return usagef("runner-configurations and delivery-task are only valid for start")
 	}
 	if len(positional) > 0 {
@@ -88,7 +92,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 				return usagef("configuration metadata must select exactly one host")
 			}
 		}
-		input = protocol.UpgradeStartRequest{DeliveryTaskID: *deliveryTask, RequestID: *requestID, UpgradeID: *upgradeID, Release: absolute, RunnerConfigurations: configurations}
+		input = protocol.UpgradeStartRequest{ParkIdleManagers: *park, DeliveryTaskID: *deliveryTask, RequestID: *requestID, UpgradeID: *upgradeID, Release: absolute, RunnerConfigurations: configurations}
 	case "status":
 		if *bundle != "" || *upgradeID != "" || *requestID != "" || *revision != 0 {
 			return usagef("upgrade status takes no release, ID or revision")

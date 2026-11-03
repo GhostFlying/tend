@@ -3,6 +3,7 @@ package protocol
 // IssueDeliveryCandidate is the exact reviewable candidate and requested scope.
 // ProviderState must be known; the observation remains independent evidence.
 type IssueDeliveryDeployment struct {
+	ParkIdleManagers        bool     `json:"park_idle_managers,omitempty"`
 	BaselineUpgradeID       string   `json:"baseline_upgrade_id,omitempty"`
 	BaselineUpgradeRevision int64    `json:"baseline_upgrade_revision,omitempty"`
 	ServerInstance          string   `json:"server_instance"`

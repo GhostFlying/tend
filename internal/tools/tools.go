@@ -65,12 +65,21 @@ func (c Call) executionRequest() string {
 }
 
 // Service answers the main agent's tool calls.
+// UpgradeStarter verifies a local immutable bundle through the fixed controller.
+type UpgradeStarter interface {
+	Start(context.Context, protocol.UpgradeStartRequest) (protocol.UpgradeView, error)
+}
+
 type Service struct {
+	upgrades  UpgradeStarter
 	app       *app.App
 	store     *store.Store
 	snapshots Snapshots
 	log       *slog.Logger
 }
+
+// SetUpgradeStarter attaches the service's fixed local release controller before Run.
+func (s *Service) SetUpgradeStarter(starter UpgradeStarter) { s.upgrades = starter }
 
 // New returns a Service. The store is used for reads only.
 func New(a *app.App, s *store.Store, snapshots Snapshots, log *slog.Logger) *Service {

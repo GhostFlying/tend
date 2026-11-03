@@ -24,15 +24,24 @@ import (
 )
 
 type fakeBackend struct {
-	mu          sync.Mutex
-	commands    []app.Command
-	envelopes   []protocol.Envelope
-	view        protocol.UpgradeView
-	batches     map[string]store.UpgradeRow
-	healthCalls int
-	observation app.ServerObservation
+	preflightErr    error
+	preflightResult *protocol.Operation
+	preflights      int
+	mu              sync.Mutex
+	commands        []app.Command
+	envelopes       []protocol.Envelope
+	view            protocol.UpgradeView
+	batches         map[string]store.UpgradeRow
+	healthCalls     int
+	observation     app.ServerObservation
 }
 
+func (f *fakeBackend) CheckUpgradeStart(_ context.Context, _ *protocol.Envelope, _ app.StartUpgrade) (*protocol.Operation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.preflights++
+	return f.preflightResult, f.preflightErr
+}
 func (f *fakeBackend) Execute(_ context.Context, _ protocol.Principal, e *protocol.Envelope, c app.Command) (protocol.Operation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -321,5 +330,95 @@ func TestDeliveryStartReadsOnlyPinnedExecutableSourceAndRetainsTaskIdentity(t *t
 	}
 	if payload["delivery_task_id"] != request.DeliveryTaskID {
 		t.Fatal("dedup identity omits delivery authority", payload)
+	}
+}
+
+func TestUpgradeManagerParkPreservesLegacyAdmissionHash(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("local bundle copy")
+	}
+	c, f := testController(t)
+	req := protocol.UpgradeStartRequest{RequestID: c.ids.New(protocol.PrefixRequest), UpgradeID: "park-hash", Release: testBundle(t)}
+	if _, err := c.Start(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	first := f.envelopes[0]
+	var payload struct {
+		DeliveryTaskID string                                  `json:"delivery_task_id,omitempty"`
+		ReleaseID      string                                  `json:"release_id"`
+		ManifestSHA256 string                                  `json:"manifest_sha256"`
+		Configurations map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
+	}
+	if err := json.Unmarshal(first.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	legacy, _ := json.Marshal(payload)
+	if string(first.Payload) != string(legacy) {
+		t.Fatal("old canonical input changed", string(first.Payload), string(legacy))
+	}
+	expected := first
+	expected.Payload = legacy
+	oldHash, _ := protocol.PayloadHash(&expected)
+	gotHash, _ := protocol.PayloadHash(&first)
+	if oldHash != gotHash {
+		t.Fatal("hash changed")
+	}
+	// The exact old request can be replayed without enabling the opt-in.
+	if _, err := c.Start(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	replayHash, _ := protocol.PayloadHash(&f.envelopes[1])
+	if replayHash != oldHash || f.commands[1].(app.StartUpgrade).ParkIdleManagers {
+		t.Fatal("legacy retry changed intent")
+	}
+	c.cfg.InspectServerCapabilities = func(_ context.Context, _ string, sha string) (release.ServerCapabilities, error) {
+		return release.ServerCapabilities{BinarySHA256: sha, Capabilities: []string{release.ServerCapabilityManagerPark}}, nil
+	}
+	req.ParkIdleManagers = true
+	req.RequestID = c.ids.New(protocol.PrefixRequest)
+	if _, err := c.Start(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if !f.commands[2].(app.StartUpgrade).ParkIdleManagers || !bytes.Contains(f.envelopes[2].Payload, []byte(`"park_idle_managers":true`)) {
+		t.Fatal("opt-in not admitted")
+	}
+}
+
+func TestUpgradeManagerParkRejectsOldCandidateBeforeAdmission(t *testing.T) {
+	c, f := testController(t)
+	req := protocol.UpgradeStartRequest{ParkIdleManagers: true, RequestID: c.ids.New(protocol.PrefixRequest), UpgradeID: "unsupported-park", Release: testBundle(t)}
+	called := 0
+	c.cfg.InspectServerCapabilities = func(_ context.Context, _ string, sha string) (release.ServerCapabilities, error) {
+		called++
+		return release.ServerCapabilities{BinarySHA256: sha}, nil
+	}
+	if _, err := c.Start(t.Context(), req); err == nil || len(f.commands) != 0 || called != 1 {
+		t.Fatal("unsupported candidate admitted", len(f.commands), called, err)
+	}
+	// The exact same old bundle still follows its original non-opt-in path.
+	req.ParkIdleManagers = false
+	if _, err := c.Start(t.Context(), req); err != nil || len(f.commands) != 1 || called != 1 {
+		t.Fatal("legacy start changed", len(f.commands), called, err)
+	}
+}
+
+func TestUpgradeManagerParkRejectsUnauthorizedProbeBeforeExecution(t *testing.T) {
+	c, f := testController(t)
+	f.preflightErr = protocol.Errorf(protocol.CodeForbidden, "delivery not approved")
+	probes := 0
+	c.cfg.InspectServerCapabilities = func(context.Context, string, string) (release.ServerCapabilities, error) {
+		probes++
+		return release.ServerCapabilities{}, nil
+	}
+	req := protocol.UpgradeStartRequest{ParkIdleManagers: true, RequestID: c.ids.New(protocol.PrefixRequest), UpgradeID: "unauthorized-probe", Release: testBundle(t)}
+	if _, err := c.Start(t.Context(), req); protocol.CodeOf(err) != protocol.CodeForbidden || probes != 0 || len(f.commands) != 0 || f.preflights != 1 {
+		t.Fatal("candidate executed before authority", err, probes, len(f.commands), f.preflights)
+	}
+	f.preflightErr = nil
+	raw, _ := json.Marshal(protocol.UpgradeView{UpgradeID: req.UpgradeID, Revision: 2, Status: "running", Phase: "server_draining"})
+	f.preflightResult = &protocol.Operation{RequestID: req.RequestID, Status: protocol.OpSucceeded, Result: raw}
+	view, err := c.Start(t.Context(), req)
+	if err != nil || view.UpgradeID != req.UpgradeID || probes != 0 || len(f.commands) != 0 {
+		t.Fatal("recorded replay probed or admitted again", view, err, probes)
 	}
 }

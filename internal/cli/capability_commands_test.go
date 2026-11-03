@@ -149,6 +149,19 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	installerSum := sha256.Sum256(installerBytes)
+	serverPath := filepath.Join(dir, "server-capabilities")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reuse this Go test executable so the empty-environment fixture needs no
+	// platform-specific digest command, shell PATH, compiler, or network.
+	quoted := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
+	serverBody := []byte("#!/bin/sh\nexec " + quoted + " -test.run='^TestCapabilityServerExecutableFixture$' -- capability-fixture \"$0\"\n")
+	if err := os.WriteFile(serverPath, serverBody, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	serverSum := sha256.Sum256(serverBody)
 	maintenancePath := filepath.Join(dir, "maintenance.json")
 	maintenanceJSON, _ := json.Marshal(map[string]any{"maintenance": protocol.CommittedMaintenancePlan{MaintenanceID: "maintenance", RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEV", ReceiptRecoveryStop: &protocol.CommittedReceiptRecoveryStop{Runs: []protocol.CommittedRetainedRun{}}}})
 	if err := os.WriteFile(maintenancePath, maintenanceJSON, 0600); err != nil {
@@ -173,7 +186,7 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			_ = os.Remove(output)
 			args := append([]string(nil), entry.Example...)
 			for i, arg := range args {
-				args[i] = strings.NewReplacer("{server}", remote.URL, "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{maintenance}", maintenancePath, "{first-capture}", firstCapture, "{second-capture}", secondCapture, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
+				args[i] = strings.NewReplacer("{server}", remote.URL, "{server-binary}", serverPath, "{server-sha256}", hex.EncodeToString(serverSum[:]), "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{maintenance}", maintenancePath, "{first-capture}", firstCapture, "{second-capture}", secondCapture, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
 			}
 			mu.Lock()
 			calls = nil
@@ -185,7 +198,7 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			mu.Lock()
 			seen := append([]recorded(nil), calls...)
 			mu.Unlock()
-			matched := false
+			matched := entry.Capability == protocol.LocalServerCapabilities && strings.Contains(env.out.String(), "manager-upgrade-park-v1")
 			if strings.HasPrefix(entry.Capability, "local EXEC updater handoff ") {
 				action := strings.TrimPrefix(entry.Capability, "local EXEC updater handoff ")
 				matched = strings.Contains(env.out.String(), "handoff\n"+action+"\n--config\n")
@@ -900,4 +913,22 @@ func TestCapabilityJSONStdinCancellationStopsBeforeMutation(t *testing.T) {
 	if len(f.requests) != 0 {
 		t.Fatal("partial JSON input created a mutation", f.requests)
 	}
+}
+
+// TestCapabilityServerExecutableFixture is an opt-in subprocess, not an ordinary
+// test dependency on a shell hash utility. Exit before testing emits a summary.
+func TestCapabilityServerExecutableFixture(t *testing.T) {
+	args := os.Args
+	if len(args) < 3 || args[len(args)-2] != "capability-fixture" {
+		return
+	}
+	raw, err := os.ReadFile(args[len(args)-1])
+	if err != nil {
+		os.Exit(2)
+	}
+	sum := sha256.Sum256(raw)
+	if err := json.NewEncoder(os.Stdout).Encode(protocol.ServerCapabilities{BinarySHA256: hex.EncodeToString(sum[:]), Capabilities: []string{protocol.ServerCapabilityManagerPark}}); err != nil {
+		os.Exit(2)
+	}
+	os.Exit(0)
 }

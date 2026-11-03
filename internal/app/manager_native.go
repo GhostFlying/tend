@@ -59,6 +59,15 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if r.Role != protocol.RoleIssueManager {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "native coordination requires a manager run")
 		}
+		if p.Method == "close" {
+			prior, err := parkTeardownClose(ctx, tx.Q(), run)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if prior != nil {
+				return Outcome{NoEffect: true, Result: *prior}, nil
+			}
+		}
 		if r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manager native process already stopped")
 		}
@@ -66,6 +75,13 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			runtime, e := store.GetHostRuntime(ctx, tx.Q(), r.HostID)
 			if e != nil || !slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityNativeUsage) {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "runner does not support persistent private summaries")
+			}
+		}
+		if !managerNativeReceiptMethod(p.Method) {
+			if parked, err := store.ManagerUpgradeParked(ctx, tx.Q()); err != nil {
+				return Outcome{}, err
+			} else if parked {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "upgrade manager park blocks new native work")
 			}
 		}
 		allowed, err := managerNativeBusinessAllowed(ctx, tx.Q(), r)
@@ -314,6 +330,12 @@ func (a *App) QueueManagerNative(ctx context.Context, run, method string, payloa
 	op, err := a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &protocol.Envelope{RequestID: id, Operation: "manager.native_enqueue", Target: protocol.Target{Type: "run", ID: run}, Payload: raw}, ManagerNativeCommand{OperationName: "manager.native_enqueue"})
 	if err == nil && op.Status != protocol.OpSucceeded {
 		err = op.Error
+	}
+	if err == nil {
+		var request protocol.ManagerNativeRequest
+		if err = json.Unmarshal(op.Result, &request); err == nil {
+			id = request.ID
+		}
 	}
 	return id, err
 }

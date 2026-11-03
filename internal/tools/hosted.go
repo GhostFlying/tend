@@ -184,6 +184,9 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 		}
 		out = append(out, spec)
 	}
+	if purpose == agentconfig.Main {
+		out = append(out, harness.ToolSpec{Name: "upgrades_start", Description: "Start an explicitly approved delivery's verified immutable local release asynchronously. park_idle_managers closes only idle manager processes under this window, preserving logical responsibility for new runs after completion/cancellation. Never wait inside the initiating worker or manager for its own installation. Unknown uses the same request_id/upgrade_id and original payload; read upgrade status through the CLI, never start a second window.", InputSchema: exportSchema(json.RawMessage(argumentSchema(protocol.UpgradeStartRequest{})))})
+	}
 	if purpose == agentconfig.Main || purpose == agentconfig.IssueManager {
 		out = append(out, harness.ToolSpec{Name: "issues_list", Description: "Discover canonical Issues and responsibility hierarchy. Managers see only their Issue and descendants; listing grants no write permission.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueListArgs{})))})
 		for _, name := range []string{"issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read"} {
@@ -283,6 +286,14 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 	}
 	if repair && !namedRepairTool(execution.Selection.Purpose, c.Tool) {
 		return fail(protocol.Errorf(protocol.CodeForbidden, "metadata repair cannot perform business operations"))
+	}
+	if c.Tool == "upgrades_start" {
+		if execution.Selection.Purpose != agentconfig.Main {
+			return fail(protocol.Errorf(protocol.CodeForbidden, "only the admitted main coordinator may start a delivery upgrade"))
+		}
+		c.ExecutionRequestID = execution.ID
+		value, err := s.startHostedUpgrade(ctx, c, native.Status == store.TurnStarting || native.Status == store.TurnStarted)
+		return hostedAnswer(value, err), true
 	}
 	if c.Tool == "conversation_input_read" {
 		var args struct {

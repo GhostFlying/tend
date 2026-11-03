@@ -968,6 +968,7 @@ export interface IssueDeliveryDeployment {
   baseline_upgrade_id?: string;
   baseline_upgrade_revision?: number;
   host_ids: string[] | null;
+  park_idle_managers?: boolean;
   server_instance: string;
 }
 /**
@@ -3982,6 +3983,7 @@ export interface QueueEntry {
 export interface UpgradeView {
   created_at: string;
   hosts: UpgradeHostView[] | null;
+  manager_parks?: UpgradeManagerParkView[];
   phase: string;
   reason?: string;
   release_id: string;
@@ -4006,6 +4008,16 @@ export interface UpgradeHostView {
   status: string;
   target_version?: string;
   total_bytes?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpgradeManagerParkView".
+ */
+export interface UpgradeManagerParkView {
+  phase: string;
+  reason?: string;
+  run_id: string;
+  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

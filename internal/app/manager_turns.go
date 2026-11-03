@@ -78,6 +78,10 @@ func refreshManagerTasks(ctx context.Context, x *Exec, tx *store.Tx) error {
 }
 
 func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue string) error {
+	parked, err := store.ManagerUpgradeParked(ctx, tx.Q())
+	if err != nil {
+		return err
+	}
 	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT task_id FROM issue_manager_tasks WHERE state IN ('pending','assigned','retiring') AND (?='' OR issue_id=?) ORDER BY task_id`, issue, issue)
 	if err != nil {
 		return err
@@ -140,6 +144,11 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 			return err
 		}
 		if busy {
+			continue
+		}
+		// Keep owner pause/retirement propagation above, but never allocate a new
+		// coordinate generation while this window owns manager admission.
+		if parked {
 			continue
 		}
 		receipt, err := views.ManagerReceiptPending(ctx, tx.Q(), m)
