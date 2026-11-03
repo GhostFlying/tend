@@ -24,7 +24,7 @@ func runUpdaterHandoff(ctx context.Context, e *Env, args []string) error {
 		return usagef("updater expects handoff plan|apply|status")
 	}
 	action := args[1]
-	if args[0] == "maintenance" && (action == "prepare" || action == "authorize" || action == "cancel" || action == "finish" || action == "resume" || action == "ledger" || action == "health") {
+	if args[0] == "maintenance" && (action == "recover-stop" || action == "prepare" || action == "authorize" || action == "cancel" || action == "finish" || action == "resume" || action == "ledger" || action == "health") {
 		return runCommittedMaintenanceControl(ctx, e, args[1:])
 	}
 	if !protocol.ValidUpdaterHandoffAction(action) && !(args[0] == "maintenance" && (action == "prepare" || action == "authorize" || action == "cancel" || action == "finish")) {

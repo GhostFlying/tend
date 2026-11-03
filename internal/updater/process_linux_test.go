@@ -165,3 +165,59 @@ func TestSignalledProcessUnreadableIsNotExitProof(t *testing.T) {
 		t.Fatalf("cancel ignored: %v", err)
 	}
 }
+
+func TestLinuxProcessCrashHelper(t *testing.T) {
+	if os.Getenv("TEND_CRASH_HELPER") != "1" {
+		return
+	}
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGTERM)
+	defer signal.Stop(ch)
+	<-ch
+	if err := os.WriteFile(os.Getenv("TEND_CRASH_CLOSE_MARKER"), []byte("graceful close"), 0600); err != nil {
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
+func TestLinuxProcessCrashOnlyExactParentWithoutGracefulClose(t *testing.T) {
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := LinuxProcess{}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "old-close")
+	start := func(name string) Identity {
+		t.Helper()
+		launch, err := newID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := p.Start(t.Context(), binary, Config{Args: []string{"-test.run=^TestLinuxProcessCrashHelper$"}, LogPath: filepath.Join(dir, name+".log")}, map[string]string{"TEND_CRASH_HELPER": "1", "TEND_CRASH_CLOSE_MARKER": filepath.Join(dir, name+"-close"), "TEND_UPDATER_LAUNCH_ID": launch})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = p.Stop(ctx, id, time.Second)
+		})
+		return id
+	}
+	old, sibling := start("old"), start("sibling")
+	forged := old
+	forged.StartTicks++
+	if err := p.Crash(t.Context(), forged, time.Second); err == nil {
+		t.Fatal("reused process identity accepted")
+	}
+	if err := p.Crash(t.Context(), old, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("crash invoked graceful business close", err)
+	}
+	if actual, err := p.Inspect(t.Context(), sibling.PID); err != nil || actual != sibling {
+		t.Fatal("crash signalled another runtime", err)
+	}
+}

@@ -150,9 +150,15 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 	}
 	installerSum := sha256.Sum256(installerBytes)
 	maintenancePath := filepath.Join(dir, "maintenance.json")
-	maintenanceJSON, _ := json.Marshal(map[string]any{"maintenance": protocol.CommittedMaintenancePlan{MaintenanceID: "maintenance", RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEV"}})
+	maintenanceJSON, _ := json.Marshal(map[string]any{"maintenance": protocol.CommittedMaintenancePlan{MaintenanceID: "maintenance", RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEV", ReceiptRecoveryStop: &protocol.CommittedReceiptRecoveryStop{Runs: []protocol.CommittedRetainedRun{}}}})
 	if err := os.WriteFile(maintenancePath, maintenanceJSON, 0600); err != nil {
 		t.Fatal(err)
+	}
+	firstCapture, secondCapture := filepath.Join(dir, "first-capture.json"), filepath.Join(dir, "second-capture.json")
+	for _, path := range []string{firstCapture, secondCapture} {
+		if err := os.WriteFile(path, []byte("[]"), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	recoveryPath := filepath.Join(dir, "recovery.json")
 	for _, entry := range CapabilityBindings() {
@@ -167,7 +173,7 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			_ = os.Remove(output)
 			args := append([]string(nil), entry.Example...)
 			for i, arg := range args {
-				args[i] = strings.NewReplacer("{server}", remote.URL, "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{maintenance}", maintenancePath, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
+				args[i] = strings.NewReplacer("{server}", remote.URL, "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{maintenance}", maintenancePath, "{first-capture}", firstCapture, "{second-capture}", secondCapture, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
 			}
 			mu.Lock()
 			calls = nil

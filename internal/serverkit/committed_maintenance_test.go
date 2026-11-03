@@ -5,6 +5,8 @@ package serverkit
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +47,25 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 		t.Log(string(raw))
 		return
 	}
+	testCommittedMaintenanceProductionAssembly(t, false)
+}
+
+func TestReceiptRecoveryStartupProductionAssembly(t *testing.T) {
+	if os.Getenv("TEND_RECEIPT_RECOVERY_ASSEMBLY_TEST") != "1" {
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestReceiptRecoveryStartupProductionAssembly$", "-test.v")
+		cmd.Env = append(os.Environ(), "TEND_RECEIPT_RECOVERY_ASSEMBLY_TEST=1", "TEND_UPDATER_LAUNCH_ID=maintenance-assembly-process", "TEND_UPDATER_PROCESS_INSTANCE_ID=maintenance-assembly-process", "TEND_FORWARD_RECOVERY_ID=", "TEND_FORWARD_RECOVERY_SOCKET=")
+		raw, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("receipt recovery assembly subprocess: %v\n%s", err, raw)
+		}
+		t.Log(string(raw))
+		return
+	}
+	testCommittedMaintenanceProductionAssembly(t, true)
+}
+
+func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bool) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
 	defer cancel()
 	root, err := os.MkdirTemp("", "tend-ma-")
@@ -68,8 +89,16 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 	}
 	taskID, actionID, runID := ids.New(protocol.PrefixTask), ids.New(protocol.PrefixAction), ids.New(protocol.PrefixRun)
 	retained := store.RunRow{Protocol: protocol.CurrentRunnerProtocol, RunID: runID, TaskID: taskID, ActionID: actionID, Generation: 1, Role: protocol.RoleImplement, DesiredState: protocol.DesiredRun, ObservedState: protocol.RunUnknown}
+	if receiptRecovery {
+		retained.HostID = "retained-host"
+	}
 	pin := protocol.RunExecutionPin{SnapshotID: "retained-snapshot", AgentRevision: 1, Runtime: protocol.AgentRuntimeReference{RuntimeID: "retained-worker", Revision: 1}, Profile: protocol.ExecutionProfile{Model: "retained-model", Effort: "high"}}
 	if err := db.Write(ctx, func(tx *store.Tx) error {
+		if receiptRecovery {
+			if err := tx.UpsertHost(ctx, store.HostRow{HostID: retained.HostID, OS: "linux", Arch: "amd64", Slots: 1}, 0); err != nil {
+				return err
+			}
+		}
 		if err := tx.InsertAgentCategory(ctx, protocol.AgentCategory{CategoryID: "planning", Revision: 1, Title: "Planning", State: "active"}, ids.New(protocol.PrefixRequest)); err != nil {
 			return err
 		}
@@ -82,6 +111,11 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 		if err := tx.InsertRun(ctx, retained); err != nil {
 			return err
 		}
+		if receiptRecovery {
+			if err := tx.InsertLease(ctx, store.LeaseRow{LeaseID: ids.New(protocol.PrefixLease), RunID: runID, HostID: retained.HostID, ExpiresAt: time.Now().Add(time.Hour).UnixMilli()}, 0); err != nil {
+				return err
+			}
+		}
 		if err := tx.InsertRunExecution(ctx, runID, pin); err != nil {
 			return err
 		}
@@ -92,6 +126,24 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if receiptRecovery {
+		if err := db.Write(ctx, func(tx *store.Tx) error {
+			message, request := ids.New(protocol.PrefixMessage), ids.New(protocol.PrefixRequest)
+			if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: "main", Author: "owner", Body: "retained uncertain native history"}); err != nil {
+				return err
+			}
+			if err := tx.PutMainThread(ctx, "main", "original-main", 0); err != nil {
+				return err
+			}
+			if err := tx.PutMainTurn(ctx, store.MainTurn{RequestID: request, MessageID: message, ThreadID: "original-main", TurnID: "original-turn", Status: store.TurnInterrupted}, 0); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO native_turn_receipts_pending(request_id) VALUES(?)`, request)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var schema int64
 	if err := db.Read(ctx, func(tx *store.ReadTx) error {
@@ -107,8 +159,25 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := protocol.CommittedMaintenancePlan{MaintenanceID: "assembly-maintenance", RequestID: ids.New(protocol.PrefixRequest), LinkRequestID: ids.New(protocol.PrefixRequest), PreparationRevision: prep.Revision, Previous: protocol.UpgradeBinding{UpgradeID: "previous", InstanceID: "server", ProcessInstanceID: "previous-process", ArtifactSHA256: strings.Repeat("a", 64)}, Successor: protocol.UpgradeBinding{UpgradeID: "assembly-maintenance", InstanceID: "server", ProcessInstanceID: actual.LaunchID, ArtifactSHA256: actual.SHA256, ManifestSHA256: strings.Repeat("b", 64), ReleaseID: "assembly-successor"}}
+	if receiptRecovery {
+		plan.ReceiptRecoveryStop = &protocol.CommittedReceiptRecoveryStop{Runs: []protocol.CommittedRetainedRun{{TaskID: taskID, Run: protocol.RunView{RunID: runID, Role: retained.Role, Generation: 1, SpecVersion: 1, Host: retained.HostID, Observed: retained.ObservedState}}}}
+		plan.HostControls = []protocol.MaintenanceHostControl{{HostID: retained.HostID, Revision: 1, PreviousMode: protocol.RunnerMaintenance}}
+	}
 	target := updater.Version{Protocol: protocol.CurrentRunnerProtocol, StorageVersion: schema, ReleaseID: plan.Successor.ReleaseID}
 	state := updater.State{Format: 3, InstanceID: "server", Generation: 7, Maintenance: &updater.CommittedMaintenance{Plan: plan, Process: actual, Phase: "checking_successor", Target: target}}
+	if receiptRecovery {
+		state.Maintenance.ReceiptRecoveryAuthorized = true
+		state.Maintenance.ReceiptRecoveryRequestID = ids.New(protocol.PrefixRequest)
+		raw, err := json.Marshal(plan.ReceiptRecoveryStop.Runs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := sha256.Sum256(raw)
+		state.Maintenance.ReceiptRecoveryFirstSHA256 = hex.EncodeToString(hash[:])
+		state.Maintenance.ReceiptRecoverySecondSHA256 = state.Maintenance.ReceiptRecoveryFirstSHA256
+		state.Maintenance.ReceiptRecoveryAuthorization = &protocol.MaintenanceReceiptRecoveryRequest{RequestID: state.Maintenance.ReceiptRecoveryRequestID, ExpectedGeneration: 6, FirstCapture: plan.ReceiptRecoveryStop.Runs, SecondCapture: plan.ReceiptRecoveryStop.Runs}
+		state.Maintenance.ArchiveAuthorization = &protocol.ArchiveOnlineStatus{Preparation: prep, HostedDrained: false, Blockers: []string{"native receipt reads: 1", "hosted operations are active or uncertain"}, Hosts: []protocol.ArchiveHostStatus{{HostID: retained.HostID, OpenRuns: 1, Fresh: true, Control: protocol.RunnerControl{Mode: protocol.RunnerMaintenance, Revision: 1}, Runtime: &protocol.RunnerRuntime{Mode: protocol.RunnerMaintenance, AppliedControlRevision: 1}}}}
+	}
 	var stateMu sync.Mutex
 	updaterSocket, controlSocket := filepath.Join(root, "updater.sock"), filepath.Join(root, "control.sock")
 	ln, err := net.Listen("unix", updaterSocket)
@@ -244,6 +313,9 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 				return ctx.Err()
 			}
 			first := health
+			if receiptRecovery && opens.Load() != 0 {
+				return errors.New("native receipt process started before maintenance DB link")
+			}
 			if err := request(http.MethodPost, "/updater/maintenance/health", plan, &health); err != nil {
 				return err
 			}
@@ -269,6 +341,14 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 			}
 			if !row.Linked || row.Receipt == nil || *row.Receipt != proof {
 				return errors.New("real controller did not link independent DB receipt")
+			}
+			if receiptRecovery {
+				for ctx.Err() == nil && opens.Load() == 0 {
+					time.Sleep(10 * time.Millisecond)
+				}
+				if ctx.Err() != nil {
+					return errors.New("receipt startup did not resume after DB linkage")
+				}
 			}
 			if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
 				run, err := store.GetRun(ctx, tx.Q(), runID)
@@ -301,7 +381,7 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 			return finished
 		},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if !errors.Is(err, finished) || !configured || !initialized || opens.Load() != 0 {
+	if !errors.Is(err, finished) || !configured || !initialized || (!receiptRecovery && opens.Load() != 0) || (receiptRecovery && opens.Load() == 0) {
 		t.Fatalf("assembly result=%v configure=%v initialize=%v model_opens=%d", err, configured, initialized, opens.Load())
 	}
 }

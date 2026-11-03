@@ -34,6 +34,14 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
+		if pending, err := p.App.ReceiptRecoveryStartupPending(ctx); err != nil || pending {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			continue
+		}
 		ids, err := p.App.PendingAgentConversations(ctx)
 		if err == nil {
 			for _, id := range ids {

@@ -54,6 +54,21 @@ func (m *Manager) RecoveryReadiness(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if pending, err := m.app.ReceiptRecoveryStartupPending(ctx); err != nil {
+		return err
+	} else if pending {
+		drained, err := m.ArchiveDrainStatus(ctx)
+		if err != nil {
+			return err
+		}
+		m.mu.Lock()
+		unopened := m.session == nil && m.thread == nil
+		m.mu.Unlock()
+		if !drained || !unopened {
+			return errors.New("receipt recovery startup has attached native work")
+		}
+		return nil
+	}
 	prepared, err := m.app.ArchivePreparation(ctx)
 	if err != nil {
 		return err
@@ -89,6 +104,14 @@ func (p *BackgroundPool) RecoveryReadiness(ctx context.Context) error {
 	defer p.mu.Unlock()
 	if p.active == nil {
 		return errors.New("background pool not initialized")
+	}
+	if pending, err := p.App.ReceiptRecoveryStartupPending(ctx); err != nil {
+		return err
+	} else if pending {
+		if len(p.active) != 0 {
+			return errors.New("receipt recovery background startup has active native managers")
+		}
+		return nil
 	}
 	for _, m := range p.active {
 		if err := m.RecoveryReadiness(ctx); err != nil {

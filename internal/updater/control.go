@@ -15,12 +15,13 @@ import (
 )
 
 type ControlRequest struct {
-	MaintenanceContinuation *protocol.MaintenanceContinuation     `json:"maintenance_continuation,omitempty"`
-	Maintenance             *protocol.CommittedMaintenancePlan    `json:"maintenance,omitempty"`
-	MaintenanceReceipt      *protocol.CommittedMaintenanceReceipt `json:"maintenance_receipt,omitempty"`
-	Recovery                *protocol.ForwardRecoveryPlan         `json:"recovery,omitempty"`
-	Receipt                 *protocol.RecoveryReceipt             `json:"receipt,omitempty"`
-	ExpectedGeneration      uint64                                `json:"expected_generation,omitempty"`
+	MaintenanceReceiptRecovery *protocol.MaintenanceReceiptRecoveryRequest `json:"maintenance_receipt_recovery,omitempty"`
+	MaintenanceContinuation    *protocol.MaintenanceContinuation           `json:"maintenance_continuation,omitempty"`
+	Maintenance                *protocol.CommittedMaintenancePlan          `json:"maintenance,omitempty"`
+	MaintenanceReceipt         *protocol.CommittedMaintenanceReceipt       `json:"maintenance_receipt,omitempty"`
+	Recovery                   *protocol.ForwardRecoveryPlan               `json:"recovery,omitempty"`
+	Receipt                    *protocol.RecoveryReceipt                   `json:"receipt,omitempty"`
+	ExpectedGeneration         uint64                                      `json:"expected_generation,omitempty"`
 
 	Configuration  *protocol.RunnerConfiguration `json:"configuration,omitempty"`
 	Candidate      string                        `json:"candidate,omitempty"`
@@ -108,6 +109,12 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 				case "/maintenance/cancel":
 					err = s.CancelCommittedMaintenance(r.Context(), *req.Maintenance, req.ExpectedGeneration)
 				}
+			}
+		case "/maintenance/recover-stop":
+			if req.Maintenance == nil || req.MaintenanceReceiptRecovery == nil || req.ExpectedGeneration != req.MaintenanceReceiptRecovery.ExpectedGeneration {
+				err = errors.New("updater: exact receipt recovery request and generation required")
+			} else {
+				err = s.RecoverCommittedMaintenance(r.Context(), *req.Maintenance, *req.MaintenanceReceiptRecovery)
 			}
 		case "/maintenance/resume":
 			if req.Maintenance == nil || req.MaintenanceContinuation == nil || req.ExpectedGeneration != req.MaintenanceContinuation.ExpectedGeneration {

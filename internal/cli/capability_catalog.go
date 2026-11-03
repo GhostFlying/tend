@@ -192,6 +192,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("local POST /maintenance/prepare", "updater maintenance prepare", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--json"),
 		binding("local POST /maintenance/apply", "updater maintenance authorize", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--json"),
 		binding("local POST /maintenance/cancel", "updater maintenance cancel", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--json"),
+		binding("local POST /maintenance/recover-stop", "updater maintenance recover-stop", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--request-id", "req_01M6F01JSS6Q9BFV6DJNSSBHEW", "--first-capture", "{first-capture}", "--second-capture", "{second-capture}", "--json"),
 		binding("local POST /maintenance/resume", "updater maintenance resume", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--request-id", "{request}", "--expires-at-ms", "9999999999999", "--window-claim", "continuation", "--resource-evidence", "{input}", "--resource-sha256", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--json"),
 		binding("local POST /maintenance/finish", "updater maintenance finish", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--json"),
 		binding("local GET /archive/status", "archive status", "--socket", "{socket}", "--json"),

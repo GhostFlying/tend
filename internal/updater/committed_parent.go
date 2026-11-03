@@ -54,8 +54,17 @@ func (s *Supervisor) validateFailedAdmission(ctx context.Context, p protocol.Com
 	// The failed service need not expose any API. This is the original persisted
 	// preparation/owner-drain/host-ack proof from before its predecessor stopped,
 	// combined with a fresh operator resource handoff and exact physical writer.
-	if err := maintenanceDrain(p, *parent.ArchiveAuthorization); err != nil {
-		return err
+	if digest(p.ReceiptRecoveryStop) != digest(parent.Plan.ReceiptRecoveryStop) {
+		return errors.New("updater: failed parent receipt recovery inventory changed")
+	}
+	var admissionErr error
+	if parent.ReceiptRecoveryAuthorized {
+		admissionErr = ValidateReceiptRecoveryArchive(p, *parent.ArchiveAuthorization)
+	} else {
+		admissionErr = maintenanceDrain(p, *parent.ArchiveAuthorization)
+	}
+	if admissionErr != nil {
+		return admissionErr
 	}
 	if err := verifyResourceEvidence(maintenanceResources(p), s.opts.Now()); err != nil {
 		return err

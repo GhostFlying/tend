@@ -302,6 +302,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			if applyErr == nil {
 				applyErr = refreshManagerTasks(ctx, x, tx)
 			}
+			if applyErr == nil {
+				applyErr = settleMaintenanceStopsOnOwnerControl(ctx, x, tx)
+			}
 		}
 		if applyErr != nil {
 			pe, ok := errors.AsType[*protocol.Error](applyErr)

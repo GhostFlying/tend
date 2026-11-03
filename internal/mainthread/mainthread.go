@@ -146,6 +146,20 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 	defer func() { cancel(); background.Wait() }()
 	for ctx.Err() == nil {
+		if pending, err := m.app.ReceiptRecoveryStartupPending(ctx); err != nil {
+			m.notifyStartupExit(err)
+			return err
+		} else if pending {
+			// The exact recovery scope is registered before this component runs.
+			// Do not attach even a receipt-only native process before DB linkage.
+			m.notifyStartupExit(nil)
+			select {
+			case <-ctx.Done():
+			case <-m.app.Changes().Wait():
+			case <-time.After(m.cfg.RestartDelay):
+			}
+			continue
+		}
 
 		preparation, err := m.app.ArchivePreparation(ctx)
 		if err != nil {

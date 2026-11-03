@@ -409,7 +409,14 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, res)
 	}
 	if cmd, ok := runCommands[env.Operation]; ok {
-		return s.app.Execute(ctx, p, env, cmd)
+		op, err := s.app.Execute(ctx, p, env, cmd)
+		if err == nil && env.Operation == protocol.OpRunsRelease && op.Status == protocol.OpAccepted {
+			// The give-up fact committed, but its business meaning remains
+			// unresolved. Legacy runners must retain the original final request;
+			// a successful/accepted HTTP answer would discard their journal.
+			return protocol.Operation{}, protocol.Errorf(protocol.CodeUnknownOutcome, "original give-up retained; independent business reconciliation is pending")
+		}
+		return op, err
 	}
 	return protocol.Operation{}, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not part of the runner protocol", env.Operation)
 }
