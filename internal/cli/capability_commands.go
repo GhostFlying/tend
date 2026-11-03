@@ -34,6 +34,8 @@ type capabilityCommand struct {
 
 var capabilityCommands = []capabilityCommand{
 	{Name: "conversation handoff-audit", Route: "/api/v1/conversation/handoff-audit", Queries: "instance after limit", JSONDefault: true},
+	{Name: "artifact-share list", Route: "/api/v1/issues/{id}/artifact-shares", Queries: "status after limit", JSONDefault: true},
+	{Name: "artifact-share show", Route: "/api/v1/artifact-shares/{id}", JSONDefault: true},
 	{Name: "inbox list", Route: "/api/v1/inbox", Queries: "issue=issue_id kind status actionable-only=actionable_only include-archived=include_archived after limit"},
 	{Name: "session show", Route: "/api/v1/session"},
 	{Name: "deployment show", Route: "/api/v1/deployment"},

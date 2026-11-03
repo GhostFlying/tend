@@ -166,6 +166,7 @@
 | D163 | 终态任务的未答规则问题在原事务撤销并收敛 Attention；拒绝迟到新答复，保留已答历史与暂停语义。 | 已实现，待验证 |
 | D165 | Tailnet HTTPS 显式协商 HTTP/2 与 HTTP/1.1，以标准库复用持久事件流和页面读取；证书源、准入、认证与明文监听保持原合同，条件复现不宣称生产根因。 | 已实现，待验证 |
 | D166 | 显式升级窗口可 park 空闲 manager，经原 close 与物理回执结束旧 Run；同窗口阻止重新领取，完成或取消后以新 Run 承接责任。默认关闭，原协议与请求身份不变。 | 实现中 |
+| D164 | 原不可变 artifact 可经 owner 或主 Agent relay 的精确授权共享给目标责任代次；artifact/file/hash 与原来源冻结，撤销阻止新读，不授予源任务控制或伪造新报告。追加迁移86并提供 CLI/工具全入口。 | 实施中 |
 
 | D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
 
@@ -872,3 +873,18 @@ control revision 就把仍有效的问题标为过期。明确退休的旧问题
 ### D172 显式复用原 Issue 责任
 
 主协调器不能按标题猜测 Issue 相同。新的 reuse 动作识别 issues.create 或 consultation promote 新建分支的精确成功创建回执，指定确切 Issue 及当前 revision/assignment epoch，把当前准入的 owner 新来源按消息双 revision CAS 关联到原责任。保留全部原关联、owner 修正与新来源 review fence，不创建 Issue、不隐式 reopen/转责/复活 Task，不改 plan/完成/交付事实。旧无可证创建来源明确 unknown/refuse；默认 create 与合法相似但不同的 Issue 不变。共享 Main 控制准入依据实际 native delivery/consumed steer 及原 logical execution 的恢复链，不把分类或 adoption 可扩充的复查集合当新授权。旧 active 显示关联原样保留，不因此转成 canonical 控制权限。真实澄清继承仅可更正原 native 已准入、相同 source/operation/target/intent 的确定失败委派；不把 adoption 当一般新授权，不重发未知结果。Refs: docs/plans/explicit-issue-reuse.md。
+
+
+## D164：跨 Issue 的精确不可变证据授权
+
+授权消息的 source/revision 仅作 share 与 revision reason 的审批 provenance，不自动写入可授予一般材料访问的 source_message_id 关联。
+
+共享以 artifact ID、原 ref SHA256 和文件 manifest 为最小对象；目标 Issue CAS/assignment
+epoch 与原请求身份在同事务绑定，share 自身 revision 支持撤销和历史读取。owner 可显式
+授权；主 Agent 必须 relay 当前 turn 准入、版本相符且未撤回的 owner 来源，普通 manager
+不能自授权。仅 artifacts_read 和 exact file download 增加 grant 检查，源 Task、兄弟产物、
+Issue 上下文和业务控制继续使用原权限。换代后的新 manager 不能继承原 grant；撤销
+不追溯删除已经合法冻结的 worker 输入。CLI 读回完整身份、状态和适用性；原报告直接
+复用，不复制内容或重新调查。见[实施计划](plans/scoped-artifact-sharing.md)。
+
+D164 输入冻结补充：首次绑定新 Task input 必须在创建/更新 spec 的同事务校验实际 manager Issue/epoch 的当前精确读权限；不能经 spec.inputs 绕过撤销。旧 spec 已冻结的同一输入保留独立权限；owner 原显式配置输入不降权。角色有规划权限但所选新输入不合法，记录确定 invalid_request 回执，不把失败请求在日后 grant 后赋予新含义。

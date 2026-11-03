@@ -15,11 +15,13 @@ import (
 )
 
 var issueOperations = map[string]string{
-	"reuse":            "issues.reuse",
-	"update-delivery":  "issues.update_delivery",
-	"set-status":       "issues.set_status",
-	"request-owner":    protocol.OpIssueRequestOwner,
-	"refresh-delivery": "issues.refresh_delivery", "followups-create": "issues.followups_create", "followups-update": "issues.followups_update", "followups-pause": "issues.followups_pause", "followups-resume": "issues.followups_resume", "followups-cancel": "issues.followups_cancel", "followups-trigger": "issues.followups_trigger",
+	"share-artifact":        protocol.OpGrantArtifactShare,
+	"revoke-artifact-share": protocol.OpRevokeArtifactShare,
+	"reuse":                 "issues.reuse",
+	"update-delivery":       "issues.update_delivery",
+	"set-status":            "issues.set_status",
+	"request-owner":         protocol.OpIssueRequestOwner,
+	"refresh-delivery":      "issues.refresh_delivery", "followups-create": "issues.followups_create", "followups-update": "issues.followups_update", "followups-pause": "issues.followups_pause", "followups-resume": "issues.followups_resume", "followups-cancel": "issues.followups_cancel", "followups-trigger": "issues.followups_trigger",
 
 	"migrate-manager": "issues.manager_migration", "request-manager": "issues.request_manager", "assign": "issues.assign", "finish-assignment": "issues.finish_assignment",
 	"update-progress": "issues.update_progress", "create": "issues.create", "update": "issues.update", "pause": "issues.pause", "resume": "issues.resume", "cancel": "issues.cancel", "finish-cancel": "issues.finish_cancel", "close": "issues.close", "reopen": "issues.reopen", "reparent": "issues.reparent", "dependencies": "issues.dependencies", "review-sources": "issues.review_sources", "review-completions": "issues.review_completions", "create-task": "issues.create_task", "update-task": "issues.update_task",
@@ -185,7 +187,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		if err := json.Unmarshal(body, &env); err != nil {
 			return usagef("invalid original Envelope: %v", err)
 		}
-		if !protocol.ValidID(protocol.PrefixRequest, env.RequestID) || !strings.HasPrefix(env.Operation, "issues.") || env.ParentRequestID != "" {
+		if !protocol.ValidID(protocol.PrefixRequest, env.RequestID) || (!strings.HasPrefix(env.Operation, "issues.") && env.Operation != protocol.OpGrantArtifactShare && env.Operation != protocol.OpRevokeArtifactShare) || env.ParentRequestID != "" {
 			return usagef("replay requires an independent original Issue owner request")
 		}
 		known := false

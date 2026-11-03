@@ -71,6 +71,8 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"artifact_shares_grant", "Share one immutable artifact and its exact files with a target Issue from an admitted owner authorization. No source task control or delegation of further sharing.", "issue", protocol.GrantArtifactSharePayload{}, app.ArtifactShareCommand{}, true},
+	{"artifact_shares_revoke", "Revoke future reads of an exact artifact share using target Issue and share revisions. Previously frozen task inputs remain historical facts.", "issue", protocol.RevokeArtifactSharePayload{}, app.ArtifactShareCommand{Revoke: true}, true},
 	{"attentions_resolve", "Handle an original problem assigned to this responsibility, preserving its exact question version. Use responsibility.revision as expected_control_revision and its assignment_epoch. Explain evidence/reason; this is an Agent answer, never user authorization. Keep task effects and independent acceptance intact.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{}, true},
 	{"attentions_escalate", "Escalate an unresolved problem exactly one supervisor step: parent Issue, then main coordinator, then human. Use responsibility.revision and assignment_epoch. State attempted remedies and why they cannot work. Never notify the user directly for an internal problem, create duplicate problems, or reset task budgets.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{Escalate: true}, true},
 	{"conversation_reply", "Reply to one admitted input. Tend selects its source endpoint; never repeat the body as native text.", "logical_turn", protocol.CoordinationReply{}, app.CoordinationReply{}, true},
@@ -193,6 +195,7 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 		out = append(out, harness.ToolSpec{Name: "issues_reuse_status", Description: "Read the exact original Issue creation receipt identity and current responsibility before an explicit reuse. Missing legacy evidence is unknown, not permission to recreate.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueResourceArgs{})))})
 	}
 	if purpose == agentconfig.Main || purpose == agentconfig.IssueManager {
+		out = append(out, harness.ToolSpec{Name: "artifact_shares_list", Description: "Read explicit artifact/file grants for the current Issue responsibility. Applicability is distinct from historical grants; reading grants no source Task access.", InputSchema: exportSchema(json.RawMessage(argumentSchema(artifactShareListArgs{})))})
 		out = append(out, harness.ToolSpec{Name: "issues_list", Description: "Discover canonical Issues and responsibility hierarchy. Managers see only their Issue and descendants; listing grants no write permission.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueListArgs{})))})
 		for _, name := range []string{"issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read"} {
 			out = append(out, harness.ToolSpec{Name: name, Description: "Read this canonical Issue's recorded context, followup history or delivery observations. Reading resolves nothing and never probes a provider.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueResourceArgs{})))})
@@ -448,6 +451,9 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		v, err := s.app.RunnerAgentCatalog(ctx, p.HostID)
 		return hostedAnswer(v, err), true
 	}
+	if result, handled := s.hostedArtifactShares(ctx, c, execution); handled {
+		return result, true
+	}
 	if result, handled := s.canonicalIssueRead(ctx, c, execution); handled {
 		return result, true
 	}
@@ -556,6 +562,12 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 				allowed, e := hostedTaskResultReadable(ctx, tx.Q(), task, execution.IssueID)
 				if e != nil {
 					return e
+				}
+				if !allowed && c.Tool == "artifacts_read" && ids.ArtifactID != "" && ids.TaskID == "" && ids.RunID == "" {
+					allowed, e = store.ArtifactShareReadable(ctx, tx.Q(), execution.IssueID, ids.ArtifactID, execution.AssignmentEpoch)
+					if e != nil {
+						return e
+					}
 				}
 				if !allowed {
 					return protocol.Errorf(protocol.CodeForbidden, "task execution facts are outside this Issue")

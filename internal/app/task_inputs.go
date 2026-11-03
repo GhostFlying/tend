@@ -15,7 +15,7 @@ import (
 // freezeTaskInputs resolves caller IDs into server-owned immutable metadata.
 // Existing references keep the metadata frozen by the previous spec, even if
 // the original is attached to a chat message later. Relations never copy inputs.
-func freezeTaskInputs(ctx context.Context, q store.Querier, spec *domain.Spec, previous []protocol.TaskInput) error {
+func freezeTaskInputs(ctx context.Context, x *Exec, q store.Querier, spec *domain.Spec, previous []protocol.TaskInput) error {
 	frozen := make(map[string]protocol.TaskInput, len(previous))
 	for _, input := range previous {
 		frozen[input.FileID] = input
@@ -29,6 +29,24 @@ func freezeTaskInputs(ctx context.Context, q store.Querier, spec *domain.Spec, p
 		if retained, ok := frozen[input.FileID]; ok {
 			spec.Inputs[i] = retained
 			continue
+		}
+		if execution := x.coordinationExecution; execution != nil && execution.IssueID != "" {
+			issue, err := store.GetCanonicalIssue(ctx, q, execution.IssueID)
+			if err != nil {
+				return err
+			}
+			if issue.AssignmentState != "active" || issue.AssignmentEpoch != execution.AssignmentEpoch {
+				return protocol.Errorf(protocol.CodeStaleRevision, "new task inputs require the current Issue responsibility")
+			}
+			if _, err := issueScopedFile(ctx, q, issue.IssueID, issue.AssignmentEpoch, input.FileID); err != nil {
+				if protocol.CodeOf(err) == protocol.CodeForbidden {
+					// The caller may plan this Issue, but this selected input is
+					// not a valid part of its new contract. Persist that exact
+					// rejected request rather than later granting it new meaning.
+					return protocol.Errorf(protocol.CodeInvalidRequest, "new task input lacks current Issue authority; select lawful material or obtain an exact current grant")
+				}
+				return errNotFound(err, "input file is unavailable to the current Issue")
+			}
 		}
 		f, err := store.GetConversationAttachment(ctx, q, input.FileID)
 		if errors.Is(err, store.ErrNotFound) {

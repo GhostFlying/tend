@@ -188,8 +188,9 @@ func Artifact(ctx context.Context, q store.Querier, artifactID string) (protocol
 		return protocol.ArtifactDetail{}, err
 	}
 	return protocol.ArtifactDetail{
-		Artifact: protocol.ArtifactView{ArtifactID: art.ArtifactID, RunID: art.RunID, Ref: json.RawMessage(art.RefJSON)},
-		TaskID:   art.TaskID, Acceptances: Acceptances(accs, true),
+		RefSHA256: store.ArtifactRefSHA256(art.RefJSON),
+		Artifact:  protocol.ArtifactView{ArtifactID: art.ArtifactID, RunID: art.RunID, Ref: json.RawMessage(art.RefJSON)},
+		TaskID:    art.TaskID, Acceptances: Acceptances(accs, true),
 	}, nil
 }
 
