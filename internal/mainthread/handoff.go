@@ -261,6 +261,12 @@ func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forke
 		}
 		return store.HandoffSummary{}, fmt.Errorf("mainthread: start summary: %w", err)
 	}
+	if control, ok := forker.(concurrencyForker); ok {
+		if err := m.app.ObserveAuxiliaryConcurrency(ctx, control.permit, protocol.ConcurrencyFeedback{Kind: "running", SessionID: fork.ID(), TurnID: turnID}, false); err != nil {
+			return store.HandoffSummary{}, err
+		}
+	}
+	lastConcurrencyActivity := int64(0)
 	texts := map[string]string{}
 	order := []string{}
 	total := 0
@@ -271,6 +277,12 @@ func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forke
 		case ev, ok := <-fork.Events():
 			if !ok {
 				return store.HandoffSummary{}, errors.New("mainthread: summary branch ended")
+			}
+			if now := m.cfg.Now().UnixMilli(); now-lastConcurrencyActivity >= 5000 {
+				if err := m.app.ObserveConcurrencyActivity(ctx, m.cfg.ConversationID, fork.ID(), ev.TurnID); err != nil {
+					return store.HandoffSummary{}, err
+				}
+				lastConcurrencyActivity = now
 			}
 			if ev.RequestUsage != nil {
 				sample := *ev.RequestUsage

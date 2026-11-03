@@ -71,6 +71,7 @@ type Session struct {
 	threads   map[string]*thread
 	orphans   map[string][]Event
 	once      sync.Once
+	closeErr  error
 	handlers  sync.WaitGroup
 	cursor    int64
 }
@@ -88,15 +89,14 @@ func NewAt(ctx context.Context, t Transport, cursor int64) *Session {
 }
 func (s *Session) Done() <-chan struct{} { return s.done }
 func (s *Session) Close() error {
-	var err error
 	s.once.Do(func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), 10*time.Second)
 		defer cancel()
-		err = s.transport.Call(ctx, "close", Request{}, nil)
+		s.closeErr = s.transport.Call(ctx, "close", Request{}, nil)
 		s.cancel()
 		<-s.done
 	})
-	return err
+	return s.closeErr
 }
 func (s *Session) Models(ctx context.Context) ([]harness.Model, error) {
 	var models []harness.Model

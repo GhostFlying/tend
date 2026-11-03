@@ -234,11 +234,7 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		if !runtimeSupportsAgentExecution(&runtime.Runtime) {
 			return as, protocol.Errorf(protocol.CodeInvalidTransition, "runner cannot recover named execution without its negotiated adapter")
 		}
-		group, err := concurrencyBinding(ctx, q, pin.Identity.ExecutionEnvironmentID, pin.Runtime.RuntimeID)
-		if err != nil {
-			return protocol.Assignment{}, err
-		}
-		as.ConcurrencyFeedback = group != "" && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAdaptiveConcurrency)
+		as.ConcurrencyFeedback = slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAdaptiveConcurrency)
 		as.Execution = pin
 		as.Workspace.BackendID = pin.BackendID
 	} else if !errors.Is(e, store.ErrNotFound) {

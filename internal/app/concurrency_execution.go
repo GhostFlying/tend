@@ -175,10 +175,9 @@ func syncConcurrencyExecutions(ctx context.Context, tx *store.Tx, now int64) err
 		case "unknown":
 			state = "unknown"
 		}
-		seen := now
+		seen := f.seen
 		if f.status == "unknown" || f.pending {
 			state = "unknown"
-			seen = f.seen
 		}
 		if err := putConcurrencyExecutionObserved(ctx, tx, source, state, seen, now); err != nil {
 			return err
@@ -190,6 +189,18 @@ func syncConcurrencyExecutions(ctx context.Context, tx *store.Tx, now int64) err
 	}
 	_, err = tx.Exec(ctx, `UPDATE concurrency_executions SET group_id=COALESCE((SELECT group_id FROM concurrency_bindings b WHERE b.environment_id=concurrency_executions.environment_id AND b.runtime_id=concurrency_executions.runtime_id),'') WHERE state<>'stopped'`)
 	return err
+}
+
+// ObserveConcurrencyActivity records live native feedback, never a stored snapshot.
+// It cannot restore an unknown execution or release an occupied reservation.
+func (a *App) ObserveConcurrencyActivity(ctx context.Context, conversation, thread, turn string) error {
+	if thread == "" {
+		return nil
+	}
+	return a.store.Write(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE concurrency_executions SET last_seen=MAX(last_seen,?) WHERE state='running' AND json_extract(source_json,'$.conversation_id')=? AND json_extract(source_json,'$.native_session_id')=? AND (?='' OR json_extract(source_json,'$.turn_id')=? OR execution_id LIKE 'aux:compact:%')`, a.now().UnixMilli(), store.ConversationID(conversation), thread, turn, turn)
+		return err
+	})
 }
 func concurrencyClaimHost(ctx context.Context, tx *store.Tx, h *scheduler.Host, r *protocol.RunnerRuntime, now int64) error {
 	if err := syncConcurrencyExecutions(ctx, tx, now); err != nil {
