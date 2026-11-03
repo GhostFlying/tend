@@ -740,5 +740,10 @@ Manager handoff 的 delivery blocker 只要求存在同 issue/旧 assignment 的
 先形成执行数乘积再 DISTINCT；conversation 分支、epoch 边界、操作白名单与排序保持原义。
 Token overlap 保持原 SQL 和原始计量事实，只追加 native candidate 与 current fact 覆盖
 索引，防止相关子查询逐行重扫历史。未知计数、冲突后 legacy 回退和匹配去重不变。
+Manager control blocker 的原 request_records EXISTS 按 request_id/status 查询，原主键的
+domain 前缀不能覆盖此访问。追加0084的反向覆盖索引，保持跨 domain 的原 SQL 与完整
+状态事实，不改变请求去重。精确产物反汇编的 CALL 返回点与 SQL 常量绑定定位这一查询，
+不能仅从邻接行号把热点归到 delivery。
 本地规模/EXPLAIN 与完整结果等价只认证查询实现；生产页面延迟仍需独立有界验证。
 见[Manager 计划](plans/manager-delivery-query-latency.md)和[Token 计划](plans/usage-overlap-query-indexes.md)。
+见[控制回执查询计划](plans/manager-control-query-latency.md)。
