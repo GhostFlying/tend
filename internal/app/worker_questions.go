@@ -253,7 +253,7 @@ func cancelObsoleteQuestions(ctx context.Context, x *Exec, tx *store.Tx, out *Ou
 		return err
 	}
 	for _, id := range ids {
-		out.Events = append(out.Events, Event{ObjectType: "decision", ObjectID: id, Kind: "decision.cancelled", Body: map[string]any{"reason": "the source run no longer applies"}})
+		out.Events = append(out.Events, Event{ObjectType: "decision", ObjectID: id, Kind: "decision.cancelled", Body: map[string]any{"reason": "the source task or run no longer applies"}})
 	}
 	return nil
 }

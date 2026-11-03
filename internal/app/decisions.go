@@ -166,6 +166,18 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		return Outcome{}, pe
 	}
+	// Task-rule questions cannot accept new answers after that responsibility
+	// ends. Previously accepted answers have already returned their stored fact.
+	// A control revision alone is insufficient: pausing retains the question.
+	if d.TaskID != "" && d.AskedRevision.Valid {
+		task, err := store.GetTask(ctx, tx.Q(), d.TaskID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if task.Lifecycle.Terminal() {
+			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "the question's task no longer applies")
+		}
+	}
 	newOwnerSource := x.Principal.Kind == protocol.PrincipalOwner && p.SourceMessageID == ""
 	var sourceEvents []Event
 	if c.Responsible {
