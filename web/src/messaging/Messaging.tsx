@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
-import type { MessagingMessage, MessagingTrace } from "../api/generated/api.ts";
+import type { MessagingDelivery, MessagingMessage, MessagingTrace } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { Link } from "../app/router.ts";
 import { useStore } from "../state/store.ts";
@@ -331,7 +331,7 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
             >
               <div className={styles.author}>
                 {m.author === "owner" ? "你" : m.author === "external" ? "外部来源" : "Tend"}
-                {m.channel_id === "telegram" && <span>Telegram</span>}
+                {m.channel_id !== "web" && <span>{channelName(m.channel_id)}</span>}
               </div>
               {m.interaction ? (
                 <Interaction
@@ -651,7 +651,7 @@ function MessageDetails({ message, onClose }: { message: MessagingMessage; onClo
   return (
     <Sheet open title="消息详情" onClose={onClose}>
       <div className={styles.details}>
-        <p>来源：{message.channel_id === "telegram" ? "Telegram" : "Web"}</p>
+        <p>来源：{channelName(message.channel_id)}</p>
         <p>
           阅读：
           {message.agent_read_at
@@ -660,9 +660,7 @@ function MessageDetails({ message, onClose }: { message: MessagingMessage; onClo
         </p>
         <p>处理：{processing[message.processing] ?? "已发布"}</p>
         {trace?.receipts.deliveries?.map((d) => (
-          <p key={d.delivery_id}>
-            {d.channel_id === "telegram" ? "Telegram" : "Web"}：{delivery[d.state] ?? "状态待核对"}
-          </p>
+          <DeliveryReceipt key={d.delivery_id} receipt={d} />
         ))}
         {message.channel_id === "telegram" && message.author !== "owner" && (
           <p>Telegram 不提供用户阅读回执。</p>
@@ -690,5 +688,19 @@ function MessageDetails({ message, onClose }: { message: MessagingMessage; onClo
         )}
       </div>
     </Sheet>
+  );
+}
+
+function channelName(id: string): string {
+  return id === "telegram" ? "Telegram" : id === "feishu" ? "飞书" : id === "web" ? "Web" : id;
+}
+
+export function DeliveryReceipt({ receipt }: { receipt: MessagingDelivery }) {
+  const reference = receipt.external_message_reference || receipt.external_id;
+  return (
+    <p>
+      {channelName(receipt.channel_id)}：{delivery[receipt.state] ?? "状态待核对"}
+      {reference ? `（回执：${reference}）` : ""}
+    </p>
   );
 }

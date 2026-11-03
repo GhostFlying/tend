@@ -114,16 +114,17 @@ type MessagingRead struct {
 }
 
 type MessagingDelivery struct {
-	ID         string `json:"delivery_id"`
-	MessageID  string `json:"message_id"`
-	ChannelID  string `json:"channel_id"`
-	Part       int64  `json:"part"`
-	Kind       string `json:"kind"`
-	State      string `json:"state"`
-	ExternalID int64  `json:"external_id,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-	Attempts   int64  `json:"attempts"`
-	UpdatedAt  int64  `json:"updated_at"`
+	ID                       string `json:"delivery_id"`
+	MessageID                string `json:"message_id"`
+	ChannelID                string `json:"channel_id"`
+	Part                     int64  `json:"part"`
+	Kind                     string `json:"kind"`
+	State                    string `json:"state"`
+	ExternalID               int64  `json:"external_id,omitempty"`
+	ExternalMessageReference string `json:"external_message_reference,omitempty"`
+	Reason                   string `json:"reason,omitempty"`
+	Attempts                 int64  `json:"attempts"`
+	UpdatedAt                int64  `json:"updated_at"`
 }
 
 type MessagingReceipts struct {

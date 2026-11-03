@@ -1916,6 +1916,31 @@
       "title": "BackgroundSourcePage",
       "type": "object"
     },
+    "BindFeishu": {
+      "additionalProperties": false,
+      "properties": {
+        "app_id": {
+          "type": "string"
+        },
+        "chat_id": {
+          "type": "string"
+        },
+        "sender_id": {
+          "type": "string"
+        },
+        "tenant_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "app_id",
+        "tenant_key",
+        "sender_id",
+        "chat_id"
+      ],
+      "title": "BindFeishu",
+      "type": "object"
+    },
     "BindLocalRepositoryRequest": {
       "additionalProperties": false,
       "properties": {
@@ -3800,6 +3825,115 @@
         "source_message_id"
       ],
       "title": "ExplainDecisionPayload",
+      "type": "object"
+    },
+    "FeishuBindingView": {
+      "additionalProperties": false,
+      "properties": {
+        "app_id": {
+          "type": "string"
+        },
+        "chat_id": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "runtime_health": {
+          "type": "string"
+        },
+        "sender_id": {
+          "type": "string"
+        },
+        "tenant_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "app_id",
+        "tenant_key",
+        "sender_id",
+        "chat_id",
+        "revision",
+        "enabled",
+        "runtime_health"
+      ],
+      "title": "FeishuBindingView",
+      "type": "object"
+    },
+    "FeishuInputPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/FeishuInputView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "next",
+        "more"
+      ],
+      "title": "FeishuInputPage",
+      "type": "object"
+    },
+    "FeishuInputView": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "external_message_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence",
+        "event_id",
+        "external_message_id",
+        "request_id",
+        "binding_revision",
+        "message_id",
+        "status"
+      ],
+      "title": "FeishuInputView",
       "type": "object"
     },
     "FinishIssueAssignmentPayload": {
@@ -7197,6 +7331,9 @@
         },
         "external_id": {
           "type": "integer"
+        },
+        "external_message_reference": {
+          "type": "string"
         },
         "kind": {
           "type": "string"
@@ -13020,6 +13157,9 @@
     "BackgroundSourcePage": {
       "$ref": "#/definitions/BackgroundSourcePage"
     },
+    "BindFeishu": {
+      "$ref": "#/definitions/BindFeishu"
+    },
     "BindLocalRepositoryRequest": {
       "$ref": "#/definitions/BindLocalRepositoryRequest"
     },
@@ -13088,6 +13228,12 @@
     },
     "ExplainDecisionPayload": {
       "$ref": "#/definitions/ExplainDecisionPayload"
+    },
+    "FeishuBindingView": {
+      "$ref": "#/definitions/FeishuBindingView"
+    },
+    "FeishuInputPage": {
+      "$ref": "#/definitions/FeishuInputPage"
     },
     "FinishIssueAssignmentPayload": {
       "$ref": "#/definitions/FinishIssueAssignmentPayload"

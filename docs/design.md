@@ -783,3 +783,9 @@ runner 才接收逐运行 retain。无该能力或不受支持的代际不得收
 这一批只扩展执行器内部协议，不新增用户控制能力，CLI 已有 runtime 读取可见该能力。
 原运行的独立业务对账/退役入口另批实现，并须同步 CLI/主工具面；主机成功登记不证明
 原运行恢复，也不证明升级排空或未知外部结果已确定。见[实施计划](plans/retained-run-reconciliation.md)。
+
+## D162：飞书文本 channel 的来源身份与不确定结果
+
+飞书作为显式配置、默认关闭的通信 adapter，复用通信消息、ReplyTo/Issue 路由、outbox 与 owner 请求去重。回调先按原始 body 校验签名、时间及 token，再解密并核 app/tenant；只有与 owner 管理绑定完全一致的 sender/private-chat 可以形成 owner 输入。绑定以 request_id/CAS 修改，运行配置撤销 owner 权限后不再接收或发送。
+
+provider event_id/message_id 冻结同一请求身份，持久收件恢复只处理尚无 request record 的情况；业务消息/事件/outbox/request record 仍同一事务。发送冻结目的地、revision 和稳定 UUID；确定限流可沿原 UUID 重试，未知结果不重送。状态、输入分页与绑定的完整 CLI 同步实现。附件/群聊/交互卡片和真实应用激活不在本次实现证明范围，详见 `feishu.md` 与 `plans/feishu-channel.md`。

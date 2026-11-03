@@ -51,6 +51,8 @@ const (
 // DeliveryResult is what a delivery attempt or a reconciliation produced.
 type DeliveryResult struct {
 	ExternalMessageID int64
+	// ExternalMessageReference preserves transports whose message IDs are opaque.
+	ExternalMessageReference string
 
 	Outcome DeliveryOutcome
 	// RetryAfter delays the next attempt of a Retry outcome.
@@ -241,7 +243,7 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 		if err := tx.TransitionOutbox(ctx, tr); err != nil {
 			return err
 		}
-		if d.Destination == MessagingDestination || d.Destination == MessagingReadDestination || d.Destination == MessagingInteractionDestination {
+		if d.Destination == MessagingDestination || d.Destination == MessagingReadDestination || d.Destination == MessagingInteractionDestination || d.Destination == FeishuDestination {
 			state := string(tr.To)
 			if r.Outcome == Delivered {
 				state = "accepted"
@@ -251,6 +253,14 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 			}
 			if _, err := tx.Exec(ctx, `UPDATE messaging_deliveries SET state=?,external_id=?,reason=?,updated_at=? WHERE delivery_id=?`, state, r.ExternalMessageID, r.Reason, now.UnixMilli(), d.OutboxID); err != nil {
 				return err
+			}
+			if d.Destination == FeishuDestination && r.Outcome == Delivered {
+				if r.ExternalMessageReference == "" {
+					return protocol.Errorf(protocol.CodeInvalidRequest, "Feishu delivery requires a provider receipt")
+				}
+				if _, err := tx.Exec(ctx, `UPDATE feishu_deliveries SET external_message_id=? WHERE delivery_id=?`, r.ExternalMessageReference, d.OutboxID); err != nil {
+					return err
+				}
 			}
 			x := &Exec{IDs: a.ids, Now: now, Env: &protocol.Envelope{RequestID: d.RequestID}}
 			var id string

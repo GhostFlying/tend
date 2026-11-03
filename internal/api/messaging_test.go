@@ -27,9 +27,28 @@ func TestMessagingCLIAndOwnerAPI(t *testing.T) {
 	command("login", "--server", e.url)
 	command("channel", "list")
 	var channels []protocol.MessagingChannel
-	if err := json.Unmarshal(stdout.Bytes(), &channels); err != nil || len(channels) != 2 {
+	if err := json.Unmarshal(stdout.Bytes(), &channels); err != nil || len(channels) != 3 {
 		t.Fatal(stdout.String(), err)
 	}
+	if channels[0].ID != "feishu" || channels[0].Status != "disabled" || channels[0].Files {
+		t.Fatalf("unexpected default Feishu capability: %+v", channels[0])
+	}
+	command("channel", "feishu", "show")
+	var feishu protocol.FeishuBindingView
+	if err := json.Unmarshal(stdout.Bytes(), &feishu); err != nil || feishu.Enabled || feishu.Revision != 1 {
+		t.Fatal(feishu, err)
+	}
+	command("channel", "feishu", "bind", "--app-id", "application", "--tenant-key", "tenant", "--sender-id", "person", "--chat-id", "private-chat")
+	command("channel", "feishu", "show")
+	if err := json.Unmarshal(stdout.Bytes(), &feishu); err != nil || !feishu.Enabled || feishu.Revision != 2 {
+		t.Fatal(feishu, err)
+	}
+	command("channel", "feishu", "inputs", "--limit", "1", "--status", "pending")
+	var inputs protocol.FeishuInputPage
+	if err := json.Unmarshal(stdout.Bytes(), &inputs); err != nil || len(inputs.Items) != 0 {
+		t.Fatal(inputs, err)
+	}
+	command("channel", "feishu", "unbind", "--revision", "2")
 	command("message", "send", "--data", `{"body":"hello from IM"}`)
 	var response protocol.APIResponse
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil || response.Operation == nil {

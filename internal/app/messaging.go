@@ -322,6 +322,9 @@ func registerCommunicationPublication(ctx context.Context, x *Exec, tx *store.Tx
 		if err = queueCommunication(ctx, x, tx, id, "telegram", bot, chat, 0, p); err != nil {
 			return err
 		}
+		if err = queueFeishuCommunication(ctx, x, tx, id, p); err != nil {
+			return err
+		}
 	}
 	return communicationEvent(ctx, x, tx, id, "messaging.published")
 }
@@ -342,6 +345,9 @@ type MessagingPart struct {
 }
 
 func queueCommunication(ctx context.Context, x *Exec, tx *store.Tx, id, channel string, bot, chat, reply int64, p protocol.MessagingPublication) error {
+	if channel == "feishu" {
+		return queueFeishuCommunication(ctx, x, tx, id, p)
+	}
 	texts := splitCommunication(p.Body, 4000)
 	parts := make([]MessagingPart, 0, len(texts)+len(p.Attachments))
 	for _, body := range texts {
