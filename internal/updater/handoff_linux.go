@@ -98,6 +98,10 @@ func managerSnapshot(ctx context.Context, unit string) (map[string]string, strin
 		}
 		m[k] = v
 	}
+	return m, managerPolicyDigest(m), nil
+}
+
+func managerPolicyDigest(m map[string]string) string {
 	// Process liveness changes during install. The immutable policy digest excludes
 	// only runtime state; a changed unit, command, stop policy or cgroup is fatal.
 	stable := map[string]string{}
@@ -111,7 +115,7 @@ func managerSnapshot(ctx context.Context, unit string) (map[string]string, strin
 			stable[k] = v
 		}
 	}
-	return m, digest(stable), nil
+	return digest(stable)
 }
 func unitDigest(ctx context.Context, unit string) (string, error) {
 	raw, err := (systemdUser{}).call(ctx, "cat", unit)
@@ -157,7 +161,15 @@ type UpdaterExitEvidence struct {
 }
 
 func validateHandoffStatic(cfg Config, p HandoffPlan) error {
-	if cfg.Role != "server" || !filepath.IsAbs(cfg.StateDir) || !strings.HasSuffix(p.Unit, ".service") || strings.ContainsAny(p.Unit, "/ \t\n") || strings.HasPrefix(p.Unit, "-") || !filepath.IsAbs(p.UpdaterBinary) || !filepath.IsAbs(p.Candidate) || !validIdentity(p.Recovery.OriginalProcess) || p.Updater.PID <= 1 || p.Updater.StartTicks == 0 || !release.ValidSHA(p.Updater.SHA256) || !release.ValidSHA(p.CandidateSHA256) || !release.ValidSHA(p.UnitSHA256) || !release.ValidSHA(p.ManagerSHA256) || p.LockInode == 0 || p.LockDevice == 0 {
+	return validateHandoffStaticIdentity(cfg, p, true)
+}
+
+func validateHandoffStaticIdentity(cfg Config, p HandoffPlan, retainedChild bool) error {
+	originalValid := validIdentity(p.Recovery.OriginalProcess)
+	if !retainedChild && p.Recovery.OriginalProcess == p.Updater {
+		originalValid = p.Updater.PID > 1 && p.Updater.StartTicks > 0 && release.ValidSHA(p.Updater.SHA256)
+	}
+	if cfg.Role != "server" || !filepath.IsAbs(cfg.StateDir) || !strings.HasSuffix(p.Unit, ".service") || strings.ContainsAny(p.Unit, "/ \t\n") || strings.HasPrefix(p.Unit, "-") || !filepath.IsAbs(p.UpdaterBinary) || !filepath.IsAbs(p.Candidate) || !originalValid || p.Updater.PID <= 1 || p.Updater.StartTicks == 0 || !release.ValidSHA(p.Updater.SHA256) || !release.ValidSHA(p.CandidateSHA256) || !release.ValidSHA(p.UnitSHA256) || !release.ValidSHA(p.ManagerSHA256) || p.LockInode == 0 || p.LockDevice == 0 {
 		return errors.New("updater: unsupported or incomplete systemd-user handoff plan")
 	}
 	if p.Recovery.ExpiresAtMillis <= time.Now().UnixMilli() {
@@ -232,11 +244,15 @@ func validateManager(ctx context.Context, p HandoffPlan, active bool) error {
 	if err != nil {
 		return err
 	}
+	return validateManagerSnapshot(ctx, p, active, m, sum, "")
+}
+
+func validateManagerSnapshot(ctx context.Context, p HandoffPlan, active bool, m map[string]string, sum, expectedEmptyGroup string) error {
 	unit, err := unitDigest(ctx, p.Unit)
 	if err != nil {
 		return err
 	}
-	if unit != p.UnitSHA256 || sum != p.ManagerSHA256 || m["Id"] != p.Unit || m["LoadState"] != "loaded" || m["KillMode"] != "process" || m["KillSignal"] != "15" || m["FinalKillSignal"] != "9" || m["SendSIGKILL"] != "yes" || m["Restart"] != "on-failure" || m["Type"] != "simple" || m["RemainAfterExit"] != "no" || m["RefuseManualStop"] != "no" || m["RefuseManualStart"] != "no" || m["ControlGroup"] == "" {
+	if unit != p.UnitSHA256 || sum != p.ManagerSHA256 || m["Id"] != p.Unit || m["LoadState"] != "loaded" || m["KillMode"] != "process" || m["KillSignal"] != "15" || m["FinalKillSignal"] != "9" || m["SendSIGKILL"] != "yes" || m["Restart"] != "on-failure" || m["Type"] != "simple" || m["RemainAfterExit"] != "no" || m["RefuseManualStop"] != "no" || m["RefuseManualStart"] != "no" || (m["ControlGroup"] == "" && (active || expectedEmptyGroup == "")) {
 		return errors.New("updater: unreviewed systemd-user policy; handoff refused")
 	}
 	if !strings.Contains(m["ExecStart"], "path="+p.UpdaterBinary+" ;") {
@@ -246,7 +262,11 @@ func validateManager(ctx context.Context, p HandoffPlan, active bool) error {
 	if err != nil {
 		return err
 	}
-	if strings.Contains(string(selfGroup), ":"+m["ControlGroup"]+"\n") {
+	group := m["ControlGroup"]
+	if group == "" {
+		group = expectedEmptyGroup
+	}
+	if strings.Contains(string(selfGroup), ":"+group+"\n") {
 		return errors.New("updater: installer must run outside the managed service cgroup")
 	}
 	if active {

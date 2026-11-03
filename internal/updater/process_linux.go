@@ -237,6 +237,14 @@ func validEnvName(s string) bool {
 	return true
 }
 func (p LinuxProcess) Start(ctx context.Context, binary string, cfg Config, extra map[string]string) (Identity, error) {
+	return p.start(ctx, binary, cfg, extra, false)
+}
+
+// StartMaintenance retains only an owned Wait result as early-exit evidence.
+func (p LinuxProcess) StartMaintenance(ctx context.Context, binary string, cfg Config, extra map[string]string) (Identity, error) {
+	return p.start(ctx, binary, cfg, extra, true)
+}
+func (p LinuxProcess) start(ctx context.Context, binary string, cfg Config, extra map[string]string, maintenance bool) (Identity, error) {
 	if err := ctx.Err(); err != nil {
 		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
@@ -252,7 +260,26 @@ func (p LinuxProcess) Start(ctx context.Context, binary string, cfg Config, extr
 		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
 	defer log.Close()
+	var executable *os.File
+	if maintenance {
+		executable, err = os.Open(binary)
+		if err != nil {
+			return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
+		}
+		defer executable.Close()
+		sha := sha256.New()
+		if _, err := io.Copy(sha, executable); err != nil {
+			return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
+		}
+		if hex.EncodeToString(sha.Sum(nil)) != extra["TEND_RELEASE_SHA256"] {
+			return Identity{}, fmt.Errorf("%w: maintenance executable changed", ErrNotStarted)
+		}
+	}
 	cmd := exec.Command(binary, cfg.Args...)
+	if executable != nil {
+		cmd.Path = "/proc/self/fd/3"
+		cmd.ExtraFiles = []*os.File{executable}
+	}
 	cmd.Env = env
 	cmd.Dir = cfg.Dir
 	cmd.Stdout = log
@@ -263,9 +290,29 @@ func (p LinuxProcess) Start(ctx context.Context, binary string, cfg Config, extr
 	}
 	// Reap children started by this supervisor. Recovered children are reaped by
 	// their adopting init process; their identity is still checked through /proc.
-	go func() { _ = cmd.Wait() }()
+	waited := make(chan *os.ProcessState, 1)
+	go func() { _ = cmd.Wait(); waited <- cmd.ProcessState }()
 	id, err := p.Inspect(context.WithoutCancel(ctx), cmd.Process.Pid)
 	if err != nil {
+		if maintenance {
+			timer := time.NewTimer(250 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case state := <-waited:
+				if state != nil && state.Pid() == cmd.Process.Pid {
+					status, ok := state.Sys().(syscall.WaitStatus)
+					if ok && (status.Exited() || status.Signaled()) {
+						proof := LaunchExitProof{PID: cmd.Process.Pid, LaunchID: extra["TEND_UPDATER_LAUNCH_ID"], ArtifactSHA256: extra["TEND_RELEASE_SHA256"], ExitCode: state.ExitCode()}
+						if status.Signaled() {
+							proof.Signal = int(status.Signal())
+						}
+						return Identity{}, &launchExitedError{proof: proof}
+					}
+				}
+			case <-timer.C:
+			case <-ctx.Done():
+			}
+		}
 		return Identity{}, fmt.Errorf("updater: child started but identity unavailable: %w", ErrUnknown)
 	}
 	return id, nil

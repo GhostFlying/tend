@@ -192,7 +192,7 @@ func (a *App) CommittedMaintenanceReadiness(ctx context.Context, id string) (pro
 
 func validateCommittedMaintenanceParent(ctx context.Context, q store.Querier, p protocol.CommittedMaintenancePlan) error {
 	if p.ParentMaintenanceID == "" {
-		if p.ParentPlan != nil || p.ParentReceipt != nil || p.ParentPlanSHA256 != "" || p.ParentArchiveSHA256 != "" || p.ParentGeneration != 0 || p.FailedProcessExited {
+		if p.ParentPlan != nil || p.ParentReceipt != nil || p.ParentLaunchExit != nil || p.ParentPlanSHA256 != "" || p.ParentArchiveSHA256 != "" || p.ParentGeneration != 0 || p.FailedProcessExited {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "maintenance parent provenance is incomplete")
 		}
 		return nil
@@ -203,6 +203,14 @@ func validateCommittedMaintenanceParent(ctx context.Context, q store.Querier, p 
 	}
 	if parent == nil || parent.MaintenanceID != p.ParentMaintenanceID || p.ParentMaintenanceID == p.MaintenanceID || p.ParentGeneration == 0 || p.ParentGeneration != p.ExpectedGeneration || !release.ValidSHA(p.ParentArchiveSHA256) || parent.Successor != p.Previous || parent.PreparationRevision != p.PreparationRevision || parent.PreparationRequestID != p.PreparationRequestID || parent.PreparationCancelRequestID != p.PreparationCancelRequestID || !reflect.DeepEqual(parent.HostControls, p.HostControls) || !reflect.DeepEqual(parent.ReceiptRecoveryStop, p.ReceiptRecoveryStop) {
 		return protocol.Errorf(protocol.CodeConflictPayload, "independent failed maintenance provenance changed")
+	}
+	if p.PreviousProcess == (protocol.RecoveryIdentity{}) && p.ParentLaunchExit == nil {
+		return protocol.Errorf(protocol.CodeConflictPayload, "failed maintenance requires original process or owned launch exit provenance")
+	}
+	if proof := p.ParentLaunchExit; proof != nil {
+		if !p.FailedProcessExited || p.PreviousProcess != (protocol.RecoveryIdentity{}) || p.ParentReceipt != nil || proof.PID <= 1 || proof.LaunchID != parent.Successor.ProcessInstanceID || proof.ArtifactSHA256 != parent.Successor.ArtifactSHA256 || !release.ValidSHA(proof.ArtifactSHA256) || proof.ExitCode < -1 || proof.ExitCode > 255 || proof.Signal < 0 || proof.Signal > 64 || (proof.Signal == 0 && proof.ExitCode < 0) || (proof.Signal != 0 && proof.ExitCode != -1) {
+			return protocol.Errorf(protocol.CodeConflictPayload, "failed maintenance launch exit provenance changed")
+		}
 	}
 	raw, err := json.Marshal(parent)
 	if err != nil {
@@ -219,7 +227,14 @@ func validateCommittedMaintenanceParent(ctx context.Context, q store.Querier, p 
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(stored.Plan, *parent) || stored.Process != p.PreviousProcess {
+	processMatches := stored.Process == p.PreviousProcess
+	if proof := p.ParentLaunchExit; proof != nil {
+		// The candidate may have registered its own real kernel identity before
+		// the updater's first Inspect. Preserve that identity, including start
+		// ticks unavailable to the updater's independently owned Wait proof.
+		processMatches = stored.Process.StartTicks != 0 && stored.Process.PID == proof.PID && stored.Process.LaunchID == proof.LaunchID && stored.Process.SHA256 == proof.ArtifactSHA256
+	}
+	if !reflect.DeepEqual(stored.Plan, *parent) || !processMatches {
 		return protocol.Errorf(protocol.CodeConflictPayload, "failed maintenance parent ledger changed")
 	}
 	// The updater acknowledgment can be lost after a successful DB link. Its

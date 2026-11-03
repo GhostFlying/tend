@@ -291,7 +291,7 @@ func TestCommittedMaintenanceUnknownStopAndStartReconcileSameIdentity(t *testing
 }
 
 func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T) {
-	for _, mode := range []string{"checking-live", "checking-gone", "committed-unlinked"} {
+	for _, mode := range []string{"checking-live", "checking-gone", "committed-unlinked", "launch-exited"} {
 		t.Run(mode, func(t *testing.T) {
 			h, p, a := committedFixture(t)
 			ctx := t.Context()
@@ -303,12 +303,15 @@ func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T
 				t.Fatal(err)
 			}
 			a.unready = mode != "committed-unlinked"
+			if mode == "launch-exited" {
+				h.s.opts.Process = &earlyExitedProcess{fakeProcess: h.p}
+			}
 			for i := 0; i < 7; i++ {
 				_ = h.s.Step(ctx)
 			}
 			before := h.s.Status()
 			parent := before.Maintenance
-			if parent.Phase != "checking_successor" && parent.Phase != "successor_committed" {
+			if parent.Phase != "checking_successor" && parent.Phase != "successor_committed" && parent.Phase != "launch_exited" {
 				t.Fatal("failed parent shape not reached", parent.Phase)
 			}
 			next := p
@@ -325,6 +328,12 @@ func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T
 			next.ExpectedGeneration = before.Generation
 			next.Previous = p.Successor
 			next.PreviousProcess = parent.Process
+			if mode == "launch-exited" {
+				next.FailedProcessExited = true
+				proof := *parent.LaunchExit
+				next.ParentLaunchExit = &proof
+				h.s.opts.Process = h.p
+			}
 			if mode == "checking-gone" {
 				delete(h.p.live, parent.Process.PID)
 				next.FailedProcessExited = true
@@ -556,4 +565,12 @@ func TestCommittedMaintenanceContinuationRejectsLiveOriginal(t *testing.T) {
 	if h.p.starts != 0 || h.p.stops != 0 || h.s.Status().Maintenance.Phase != "authorized" {
 		t.Fatal("recovery changed live original")
 	}
+}
+
+// earlyExitedProcess reports only the same explicit owned-wait proof as Linux;
+// arbitrary Start errors and empty launch scans retain the unknown branch.
+type earlyExitedProcess struct{ *fakeProcess }
+
+func (p *earlyExitedProcess) StartMaintenance(_ context.Context, _ string, _ Config, extra map[string]string) (Identity, error) {
+	return Identity{}, &launchExitedError{proof: LaunchExitProof{PID: 2345, LaunchID: extra["TEND_UPDATER_LAUNCH_ID"], ArtifactSHA256: extra["TEND_RELEASE_SHA256"], ExitCode: 17}}
 }

@@ -154,3 +154,97 @@ func TestReceiptRecoveryStopRechecksFactsBeforeCrash(t *testing.T) {
 		t.Fatal("drifted owner admission accepted crash")
 	}
 }
+
+func TestReceiptRecoveryCapturesUseStableExecutionIdentity(t *testing.T) {
+	h, p, a, _, r := receiptRecoveryFixture(t)
+	// A normal-mode plan and two prepared observations have independent full bytes.
+	p.ReceiptRecoveryStop.Runs = append([]protocol.CommittedRetainedRun(nil), p.ReceiptRecoveryStop.Runs...)
+	p.ReceiptRecoveryStop.Runs[0].Run.Observed = protocol.RunRunning
+	h.s.state.Maintenance.Plan = p
+	r.FirstCapture = append([]protocol.CommittedRetainedRun(nil), r.FirstCapture...)
+	r.SecondCapture = append([]protocol.CommittedRetainedRun(nil), r.SecondCapture...)
+	r.FirstCapture[0].Run.Preparation = &protocol.RunPreparationFailure{Phase: protocol.PreparationPhaseWorkspace}
+	r.SecondCapture[0].Run.Preparation = &protocol.RunPreparationFailure{Phase: protocol.PreparationPhaseWorkspace, Code: "observation_changed"}
+	// Input order is not execution identity either.
+	r.SecondCapture[0], r.SecondCapture[3] = r.SecondCapture[3], r.SecondCapture[0]
+	a.archive.HostedDrained = true
+	a.archive.Blockers = []string{"native receipt reads: 7"}
+	if err := h.s.RecoverCommittedMaintenance(t.Context(), p, r); err != nil {
+		t.Fatal(err)
+	}
+	st := h.s.Status().Maintenance
+	if st.ReceiptRecoveryFirstSHA256 != digest(r.FirstCapture) || st.ReceiptRecoverySecondSHA256 != digest(r.SecondCapture) || st.ReceiptRecoveryFirstSHA256 == st.ReceiptRecoverySecondSHA256 || !st.ArchiveAuthorization.HostedDrained {
+		t.Fatal("original snapshots or truthful drain observation were rewritten", st)
+	}
+	if err := h.s.RecoverCommittedMaintenance(t.Context(), p, r); err != nil {
+		t.Fatal(err)
+	}
+	changed := r
+	changed.SecondCapture = append([]protocol.CommittedRetainedRun(nil), r.SecondCapture...)
+	changed.SecondCapture[0].Run.Observed = protocol.RunWaiting
+	if err := h.s.RecoverCommittedMaintenance(t.Context(), p, changed); err == nil {
+		t.Fatal("request replay accepted changed observation bytes")
+	}
+	for i := 0; i < 7; i++ {
+		h.step(t)
+	}
+	if h.s.Status().Maintenance.Phase != "successor_committed" {
+		t.Fatal(h.s.Status().Maintenance)
+	}
+}
+
+func TestReceiptRecoveryCapturesRejectChangedExecutionIdentity(t *testing.T) {
+	_, p, _, _, _ := receiptRecoveryFixture(t)
+	cases := map[string]func([]protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun{
+		"missing":   func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun { return v[:3] },
+		"duplicate": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun { return append(v, v[0]) },
+		"new": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].Run.RunID = "run_01M6F01JSS6Q9BFV6DJNSSBHF9"
+			return v
+		},
+		"task": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].TaskID = "task_01M6F01JSS6Q9BFV6DJNSSBHF9"
+			return v
+		},
+		"role": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].Run.Role = protocol.RoleImplement
+			return v
+		},
+		"generation": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].Run.Generation++
+			return v
+		},
+		"spec": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].Run.SpecVersion++
+			return v
+		},
+		"host": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].Run.Host = "other-fixture"
+			return v
+		},
+		"terminal": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].Run.Observed = protocol.RunFinished
+			return v
+		},
+		"invalid_role": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].Run.Role = "invalid"
+			return v
+		},
+		"zero_generation": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].Run.Generation = 0
+			return v
+		},
+		"zero_spec": func(v []protocol.CommittedRetainedRun) []protocol.CommittedRetainedRun {
+			v[0].Run.SpecVersion = 0
+			return v
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			changed := mutate(append([]protocol.CommittedRetainedRun(nil), p.ReceiptRecoveryStop.Runs...))
+			if err := ValidateReceiptRecoveryCaptures(p, p.ReceiptRecoveryStop.Runs, changed); err == nil {
+				t.Fatal("changed inventory accepted")
+			}
+		})
+	}
+}

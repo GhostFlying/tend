@@ -36,7 +36,11 @@ func TestCommittedHandoffActualFailedCandidateForward(t *testing.T) {
 func TestCommittedHandoffActualCancelledUpdaterReceiptRecovery(t *testing.T) {
 	runCommittedHandoffFixture(t, false, false, true)
 }
+func TestCommittedHandoffActualEarlyExitForward(t *testing.T) {
+	runCommittedHandoffFixture(t, false, true, false, true)
+}
 func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool, recovery ...bool) {
+	fast := len(recovery) > 1 && recovery[1]
 	receiptRecovery := len(recovery) > 0 && recovery[0]
 	if os.Getenv("TEND_TEST_SYSTEMD_USER") != "1" {
 		t.Skip("opt-in isolated systemd fixture")
@@ -44,6 +48,9 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool, recovery
 	newServer := os.Getenv("TEND_TEST_NEW_SERVER")
 	if failed {
 		newServer = os.Getenv("TEND_TEST_BAD_SERVER")
+		if fast {
+			newServer = os.Getenv("TEND_TEST_FAST_SERVER")
+		}
 	}
 	oldUpdater, newUpdater, oldServer, cli := os.Getenv("TEND_TEST_OLD_UPDATER"), os.Getenv("TEND_TEST_NEW_UPDATER"), os.Getenv("TEND_TEST_OLD_SERVER"), os.Getenv("TEND_TEST_TEND_CLI")
 	for _, p := range []string{oldUpdater, newUpdater, oldServer, newServer, cli, os.Getenv("TEND_TEST_COMMITTED_STATE"), os.Getenv("TEND_TEST_COMMITTED_HANDOFF")} {
@@ -75,6 +82,7 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool, recovery
 	serverConfig := map[string]any{"db": filepath.Join(root, "ledger.db"), "socket": socket, "updater": SocketPath(cfg), "releases": filepath.Join(root, "releases")}
 	if receiptRecovery {
 		serverConfig["receipt_recovery"] = true
+		serverConfig["hosted_drained"] = true
 	}
 	if err := writeJSON(serverFile, serverConfig); err != nil {
 		t.Fatal(err)
@@ -422,7 +430,7 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool, recovery
 	} else {
 		wait("failed candidate checking without API", func() bool {
 			st, e := Call(ctx, cfg, "status", ControlRequest{})
-			return e == nil && st.Maintenance != nil && st.Maintenance.Phase == "checking_successor" && st.Maintenance.LastError != ""
+			return e == nil && st.Maintenance != nil && ((st.Maintenance.Phase == "checking_successor" && st.Maintenance.LastError != "") || (fast && st.Maintenance.Phase == "launch_exited" && st.Maintenance.LastError == "updater: owned candidate exited; independent failed-parent forward required"))
 		})
 		committed, e = Call(ctx, cfg, "status", ControlRequest{})
 		if e != nil {
@@ -436,7 +444,14 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool, recovery
 			_ = conn.Close()
 			t.Fatal("failed candidate unexpectedly exposed a control API")
 		}
-		t.Log("actual failed candidate remains alive with no service API; original proof remains historical")
+		if fast {
+			if err := ValidateMaintenanceLaunchExit(*committed.Maintenance); err != nil {
+				t.Fatal("real early exit lacked owned wait proof", err)
+			}
+			t.Logf("owned Wait proves real fast candidate exited before identity: %+v", committed.Maintenance.LaunchExit)
+		} else {
+			t.Log("actual failed candidate remains alive with no service API; original proof remains historical")
+		}
 	}
 	firstHead, e := os.ReadFile(committedHeadPath(cfg))
 	if e != nil {
@@ -487,6 +502,7 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool, recovery
 	}
 	if failed {
 		next.Maintenance.ParentMaintenanceID = p.Maintenance.MaintenanceID
+		next.Maintenance.FailedProcessExited = fast
 		next.Maintenance.PreparationRevision = p.Maintenance.PreparationRevision
 		next.Maintenance.PreparationRequestID = p.Maintenance.PreparationRequestID
 		next.Maintenance.PreparationCancelRequestID = p.Maintenance.PreparationCancelRequestID

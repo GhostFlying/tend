@@ -688,8 +688,11 @@ D155 锁观测补充：维护计划从精确 updater 的 fd/fdinfo 验证原 flo
 仍要求真实排空；新的 `receipt_recovery_stop` 计划与独立 `recover-stop` 请求明确承担
 未知托管生命周期，不把 false 观测改成 true。只接受准备修订匹配、owner 在途为零、全部
 host 新鲜确认维护、领取为零，且旧 API 已知 hosted-effect blocker 仅有 native receipt
-reads 与托管生命周期未知。未知 blocker 拒绝。准备下两次完整 task/run 库存须相同并匹配
-固定计划和逐 host open count；task 已终态也不能漏掉其尚未终态 Run。
+reads 与托管生命周期未知。未知 blocker 拒绝。准备下两次完整 task/run 库存须以 TaskID/RunID/role/generation/spec/host 稳定身份全集
+匹配固定计划和逐 host open count；Observed/Preparation 是动态观测，允许变化但原快照
+与各自 SHA 分别保留，同请求仍严格匹配完整 payload。task 已终态也不能漏掉其尚未终态
+Run。HostedDrained 真实变为 true 时仍可选择显式恢复，只要 native receipt 未知仍为正、
+其他 effect 与原安全门均满足；这扩大原恢复谓词的接受集合，不转为普通停止。
 
 固定 updater 以精确 pidfd 仅 crash-stop 原 server 父进程，持久意图并确认实际退出，不
 发送 graceful native close、不信号 runner 或共享执行组。外部结果不因连接断开变成成功
@@ -712,5 +715,13 @@ DBlink 后恢复原身份的收据对账，archive/host CAS 仍由显式 finish 
 该原 Run，原物理回执不改；普通 release 的待对账状态通过既有 UnknownOutcome 让旧客户端
 保留原请求。新控制实际释放原 lease 后，原客户端按认证拒绝收尾。
 本范围不宣称历史 unknown 或 runner drain 清零。
+
+维护候选 Start 成功但 Inspect 前退出时，仅本次 owned Wait 返回的真实 Exited/Signaled
+状态形成独立 launch_exited 事实，不伪造 ProcessIdentity。该事实与固定打开执行的 ELF
+SHA/launch/PID 绑定；没有 Wait 证据仍 unknown。新独立窗口在精确父计划和原准备授权、
+资源/CAS、fresh 原 launch 空扫描下可以前滚新 artifact，覆盖父已登记或尚未登记的情况。
+已登记父的真实 Process 与请求原文保留，不能把空扫描解释为退出或补造 start ticks。
+仅该已证退出且单元 inactive/dead、MainPID=0 的安装阶段，允许 ControlGroup 自然为空；
+保留真实快照，以原钉定 cgroup 对比原 policy，其余属性和旧 Format2 规则不改变。
 
 Refs: D142、D154、D155。见[实施计划](plans/receipt-recovery-stop.md)。

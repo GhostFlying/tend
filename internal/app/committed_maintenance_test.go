@@ -346,3 +346,113 @@ func TestCommittedMaintenanceFailedParentResponsibilityPassesWithoutRewritingHis
 		})
 	}
 }
+
+func TestCommittedMaintenanceOwnedLaunchExitPreservesRegisteredAndAbsentParent(t *testing.T) {
+	for _, registered := range []bool{false, true} {
+		t.Run(map[bool]string{false: "never_registered", true: "registered_before_parent_inspect"}[registered], func(t *testing.T) {
+			h, as, parent, parentProcess, _ := receiptRecoveryFixture(t)
+			ctx := t.Context()
+			beforeRun, beforeLease := h.run(as.RunID), h.lease(as.RunID)
+			var beforePin *protocol.RunExecutionPin
+			if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+				var err error
+				beforePin, err = store.GetRunExecution(ctx, tx.Q(), as.RunID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var frozen protocol.CommittedMaintenanceLedger
+			if registered {
+				var err error
+				frozen, err = h.app.RegisterCommittedMaintenance(ctx, parent, parentProcess)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			raw, _ := json.Marshal(parent)
+			sum := sha256.Sum256(raw)
+			proof := protocol.MaintenanceLaunchExitProof{PID: parentProcess.PID, LaunchID: parentProcess.LaunchID, ArtifactSHA256: parentProcess.SHA256, ExitCode: 2}
+			child := protocol.CommittedMaintenancePlan{MaintenanceID: "launch-exit-repair", RequestID: h.ids.New(protocol.PrefixRequest), LinkRequestID: h.ids.New(protocol.PrefixRequest), PreparationRevision: parent.PreparationRevision, Previous: parent.Successor, Successor: protocol.UpgradeBinding{UpgradeID: "launch-exit-repair", InstanceID: "server", ProcessInstanceID: "repaired-launch", ArtifactSHA256: strings.Repeat("c", 64)}, ParentMaintenanceID: parent.MaintenanceID, ParentPlan: &parent, ParentPlanSHA256: hex.EncodeToString(sum[:]), ParentArchiveSHA256: strings.Repeat("d", 64), ParentGeneration: 10, ExpectedGeneration: 10, FailedProcessExited: true, ParentLaunchExit: &proof, ReceiptRecoveryStop: parent.ReceiptRecoveryStop}
+			process := protocol.RecoveryIdentity{PID: 124, StartTicks: 457, LaunchID: child.Successor.ProcessInstanceID, SHA256: child.Successor.ArtifactSHA256}
+			for _, mutation := range []string{"missing_proof", "invented_identity", "missing_exited_intent", "wrong_launch", "wrong_sha", "invalid_wait_status", "wrong_pid"} {
+				if mutation == "wrong_pid" && !registered {
+					continue
+				}
+				wrong := child
+				changed := proof
+				wrong.ParentLaunchExit = &changed
+				wrong.RequestID = h.ids.New(protocol.PrefixRequest)
+				switch mutation {
+				case "missing_proof":
+					wrong.ParentLaunchExit = nil
+				case "invented_identity":
+					wrong.PreviousProcess = parentProcess
+				case "missing_exited_intent":
+					wrong.FailedProcessExited = false
+				case "wrong_launch":
+					changed.LaunchID = "another-launch"
+				case "wrong_sha":
+					changed.ArtifactSHA256 = strings.Repeat("e", 64)
+				case "invalid_wait_status":
+					changed.ExitCode = -1
+				case "wrong_pid":
+					changed.PID++
+				}
+				if _, err := h.app.RegisterCommittedMaintenance(ctx, wrong, process); protocol.CodeOf(err) != protocol.CodeConflictPayload {
+					t.Fatal("unproven parent accepted", mutation, err)
+				}
+			}
+			h.app.committedMaintenanceID = child.MaintenanceID
+			first, err := h.app.RegisterCommittedMaintenance(ctx, child, process)
+			if err != nil {
+				t.Fatal("owned exited parent blocked replacement", err)
+			}
+			retry, err := h.app.RegisterCommittedMaintenance(ctx, child, process)
+			if err != nil || !reflect.DeepEqual(first, retry) {
+				t.Fatal("new request did not replay", err)
+			}
+			if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+				saved, err := store.GetCommittedMaintenance(ctx, tx.Q(), parent.MaintenanceID)
+				if registered {
+					if err != nil || !reflect.DeepEqual(saved, frozen) || saved.Process.StartTicks != parentProcess.StartTicks {
+						t.Fatal("real original parent identity overwritten", saved, err)
+					}
+				} else if !errors.Is(err, store.ErrNotFound) {
+					t.Fatal("absent parent was invented", err)
+				}
+				retained, err := store.MaintenanceProtectedRuns(ctx, tx.Q(), as.RunID)
+				if err != nil {
+					return err
+				}
+				found := false
+				for _, p := range retained {
+					if p.MaintenanceID == child.MaintenanceID && p.LeaseID == beforeLease.LeaseID {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("repair did not inherit original lease protection")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			receipt := protocol.CommittedMaintenanceReceipt{MaintenanceID: child.MaintenanceID, RequestID: child.RequestID, Previous: child.Previous, Successor: child.Successor, Process: process, Generation: 20, Epoch: process.LaunchID, FirstSequence: 1, SecondSequence: 2}
+			if _, err := h.app.LinkCommittedMaintenance(ctx, receipt); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(beforeRun, h.run(as.RunID)) || !reflect.DeepEqual(beforeLease, h.lease(as.RunID)) {
+				t.Fatal("forward repair changed original business execution")
+			}
+			if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+				pin, err := store.GetRunExecution(ctx, tx.Q(), as.RunID)
+				if err == nil && !reflect.DeepEqual(pin, beforePin) {
+					t.Fatal("forward repair changed original pin")
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
