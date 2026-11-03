@@ -940,6 +940,44 @@ try {
         assert.deepEqual(errors, [], `${name}: console errors`);
       }
       if (viewport.width <= 760) {
+        await navigate(page, "/");
+        const shortName = "pwa-short.png";
+        const longName = `${"移动端附件名称".repeat(12)}.txt`;
+        await page.locator('input[type="file"][aria-label="添加附件"]').setInputFiles([
+          { name: shortName, mimeType: "image/png", buffer: Buffer.from("local draft") },
+          { name: longName, mimeType: "text/plain", buffer: Buffer.from("local draft") },
+        ]);
+        for (const filename of [shortName, longName]) {
+          const row = page.locator("li").filter({ hasText: filename });
+          await row.getByRole("button", { name: "移除", exact: true }).waitFor();
+          const geometry = await row.evaluate((element) => {
+            const button = element.querySelector("button")!.getBoundingClientRect();
+            const name = element.querySelector("span") ?? element.firstChild!;
+            const range = document.createRange();
+            range.selectNodeContents(name);
+            const label = range.getBoundingClientRect();
+            return { gap: button.left - label.right, width: button.width, height: button.height };
+          });
+          assert(geometry.gap >= 8, `attachment name/action gap: ${JSON.stringify(geometry)}`);
+          assert(geometry.height >= 44 && geometry.width >= 44, "attachment remove touch target");
+        }
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth),
+          viewport.width,
+        );
+        await page.screenshot({ path: join(output, `${viewport.width}-${theme}-attachments.png`) });
+        await page
+          .locator("li")
+          .filter({ hasText: shortName })
+          .getByRole("button", { name: "移除", exact: true })
+          .click();
+        assert.equal(await page.locator("li").filter({ hasText: shortName }).count(), 0);
+        await page
+          .locator("li")
+          .filter({ hasText: longName })
+          .getByRole("button", { name: "移除", exact: true })
+          .click();
+        console.log(`PASS attachment spacing/removal ${viewport.width} ${theme}`);
         await navigate(page, "/diagnostics/main");
         await page.getByRole("heading", { level: 1 }).getByRole("button").click();
         await page.getByRole("dialog").waitFor();
