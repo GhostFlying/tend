@@ -160,6 +160,7 @@
 | D155 | 已提交 server 通过独立本机窗口引导 updater，再以实际归档/host 维护确认前滚；保留 unknown run、旧收据及父失败，限定失败候选可独立后继，CLI 提供完整引导、取消、对账及释放。 | 已实现，待验收 |
 | D156 | 正常维护之外提供显式 receipt-recovery crash stop：真实未知生命周期不冒充排空，完整 Run 库存及原 lease 持久保护先于新服务入口，保留物理停止事实与业务未知，prelink 延迟原生执行。 | 已确认 |
 | D157 | Manager delivery 先去重旧 logical responsibility 再查未决投递；Token 重叠查询按 native identity 与 current fact 索引关联。只改善查询规模，不改变 blocker、冲突、未知或计量语义，追加迁移83。 | 已实现，待验证 |
+| D158 | Token 归属在同一只读事务内按请求批量解析日志与本地 actor，保留原 SQL 的歧义、NULL、优先级与错误回退，不使用跨请求缓存或新增迁移。 | 已实现，待验证 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
 
@@ -747,3 +748,16 @@ domain 前缀不能覆盖此访问。追加0084的反向覆盖索引，保持跨
 本地规模/EXPLAIN 与完整结果等价只认证查询实现；生产页面延迟仍需独立有界验证。
 见[Manager 计划](plans/manager-delivery-query-latency.md)和[Token 计划](plans/usage-overlap-query-indexes.md)。
 见[控制回执查询计划](plans/manager-control-query-latency.md)。
+
+## D158：Token 归属的请求内批量解析
+
+同一用量视图的独立 turn 曾逐项扫描 run_logs 与本地来源。resolver 在当前只读事务内
+批量读取 SQLite 原投影，以当前 Token thread/turn 限定日志索引内存；重复同 Run 不形成
+歧义，不同 Run 保持未归属。来源解析保留 direct thread 优先，以及原 ORDER BY 的
+false 高于 NULL；最高 rank 的 actor 投影冲突时按完整参数执行原 SQL，保留其原有 tie
+选择，不新增排序规则。actor categories 按每条记录独立解码，未知计数仍为未知。
+
+请求内缓存不跨视图或事务，下一请求可以看到新事实。批量读取失败丢弃部分结果并回退
+原逐项 SQL；失败不缓存为确定归属。无需协议、存储 schema 或归属事实变更。完整输出
+等价与同 thread/独立 thread 两种布局的规模收益分别验证，离线收益不替代生产读回。
+见[实施计划](plans/token-attribution-resolver.md)。
