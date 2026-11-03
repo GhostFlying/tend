@@ -248,3 +248,61 @@ func TestReceiptRecoveryCapturesRejectChangedExecutionIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestReceiptRecoveryDrainedSummaryHistoryPreservesAuthorization(t *testing.T) {
+	h, p, a, crash, r := receiptRecoveryFixture(t)
+	a.archive.HostedDrained = true
+	a.archive.Blockers = []string{"native receipt reads: 7", "summary operations: 2"}
+	original := a.archive
+	if err := h.s.RecoverCommittedMaintenance(t.Context(), p, r); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(*h.s.Status().Maintenance.ArchiveAuthorization, original) {
+		t.Fatal("historical summary observation was rewritten")
+	}
+	// The independent live drain must still hold at the actual stop boundary.
+	a.archive.HostedDrained = false
+	for i := 0; i < 2; i++ {
+		if err := h.s.Step(t.Context()); err == nil {
+			t.Fatal("summary history accepted without live drain")
+		}
+	}
+	if crash.crashes != 0 || h.p.stops != 0 {
+		t.Fatal("drain drift stopped the previous server")
+	}
+	a.archive.HostedDrained = true
+	for i := 0; i < 7; i++ {
+		h.step(t)
+	}
+	if st := h.s.Status(); st.Maintenance.Phase != "successor_committed" || crash.crashes != 1 || !reflect.DeepEqual(*st.Maintenance.ArchiveAuthorization, original) {
+		t.Fatal("drained history did not preserve the authorized transition", st.Maintenance)
+	}
+}
+
+func TestReceiptRecoveryDrainedSummaryHistoryRejectsUnsafeFacts(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		drained  bool
+		blockers []string
+	}{
+		{"not drained", false, []string{"summary operations: 2"}},
+		{"malformed", true, []string{"summary operations: unknown"}},
+		{"zero", true, []string{"summary operations: 0"}},
+		{"negative", true, []string{"summary operations: -1"}},
+		{"overflow", true, []string{"summary operations: 9223372036854775808"}},
+		{"duplicate", true, []string{"summary operations: 2", "summary operations: 2"}},
+		{"other native effect", true, []string{"summary operations: 2", "hosted native turns: 1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, p, a, crash, r := receiptRecoveryFixture(t)
+			a.archive.HostedDrained = tc.drained
+			a.archive.Blockers = append([]string{"native receipt reads: 7"}, tc.blockers...)
+			if err := h.s.RecoverCommittedMaintenance(t.Context(), p, r); err == nil {
+				t.Fatal("unsafe history accepted")
+			}
+			if crash.crashes != 0 || h.p.stops != 0 || h.s.Status().Maintenance.Phase != "updater_adopted" {
+				t.Fatal("rejection changed the physical process")
+			}
+		})
+	}
+}

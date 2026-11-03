@@ -22,9 +22,20 @@ func ValidateReceiptRecoveryArchive(p protocol.CommittedMaintenancePlan, v proto
 	if err := maintenanceAdmission(p, v); err != nil {
 		return err
 	}
-	pending := false
+	pending, summaryHistory := false, false
 	for _, blocker := range v.Blockers {
 		if blocker == "hosted operations are active or uncertain" {
+			continue
+		}
+		if count, ok := strings.CutPrefix(blocker, "summary operations: "); ok {
+			n, err := strconv.ParseInt(count, 10, 64)
+			// The durable started row may outlive its bounded cleanup write.
+			// Only the independent live component drain can classify it as
+			// retained history; never rewrite it as completed or failed here.
+			if !v.HostedDrained || err != nil || n <= 0 || summaryHistory {
+				return fmt.Errorf("updater: receipt recovery cannot accept archive effect %q", blocker)
+			}
+			summaryHistory = true
 			continue
 		}
 		count, ok := strings.CutPrefix(blocker, "native receipt reads: ")

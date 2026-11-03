@@ -694,6 +694,11 @@ reads 与托管生命周期未知。未知 blocker 拒绝。准备下两次完�
 与各自 SHA 分别保留，同请求仍严格匹配完整 payload。task 已终态也不能漏掉其尚未终态
 Run。HostedDrained 真实变为 true 时仍可选择显式恢复，只要 native receipt 未知仍为正、
 其他 effect 与原安全门均满足；这扩大原恢复谓词的接受集合，不转为普通停止。
+真实 HostedDrained=true 也独立证明前台摘要调用和后台 manager 已退出；此时允许保留
+合法正数的 summary operations 作为未结账历史，原 started 记录不改、不伪成功或失败。
+HostedDrained=false 时仍拒绝摘要正数，其他 effect 不放宽。prepared/prelink 本次维护
+不重试摘要；finish 后的普通摘要 backoff 与正常调度仍按原规则。
+见[摘要历史计划](plans/drained-summary-attempt-history.md)。
 
 固定 updater 以精确 pidfd 仅 crash-stop 原 server 父进程，持久意图并确认实际退出，不
 发送 graceful native close、不信号 runner 或共享执行组。外部结果不因连接断开变成成功
