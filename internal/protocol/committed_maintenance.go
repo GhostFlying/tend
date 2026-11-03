@@ -23,7 +23,17 @@ type CommittedReceiptRecoveryStop struct {
 	Runs []CommittedRetainedRun `json:"runs"`
 }
 
+// MaintenanceLaunchExitProof is an owned child wait result, not a ProcessIdentity.
+type MaintenanceLaunchExitProof struct {
+	PID            int    `json:"pid"`
+	LaunchID       string `json:"launch_id"`
+	ArtifactSHA256 string `json:"artifact_sha256"`
+	ExitCode       int    `json:"exit_code"`
+	Signal         int    `json:"signal,omitempty"`
+}
+
 type CommittedMaintenancePlan struct {
+	ParentLaunchExit           *MaintenanceLaunchExitProof   `json:"parent_launch_exit,omitempty"`
 	ReceiptRecoveryStop        *CommittedReceiptRecoveryStop `json:"receipt_recovery_stop,omitempty"`
 	ParentReceipt              *CommittedMaintenanceReceipt  `json:"parent_receipt,omitempty"`
 	ParentMaintenanceID        string                        `json:"parent_maintenance_id,omitempty"`
@@ -102,7 +112,8 @@ type MaintenanceContinuation struct {
 }
 
 // MaintenanceReceiptRecoveryRequest is a distinct bounded stop authorization.
-// Both complete prepared captures must match the immutable plan inventory.
+// Both complete prepared captures must match the immutable execution identities;
+// each capture retains its own original observation metadata and digest.
 type MaintenanceReceiptRecoveryRequest struct {
 	RequestID          string                 `json:"request_id"`
 	ExpectedGeneration uint64                 `json:"expected_generation"`

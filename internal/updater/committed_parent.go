@@ -25,8 +25,19 @@ func (s *Supervisor) maintenanceParent(p protocol.CommittedMaintenancePlan) (*Co
 	} else if old, ok := s.state.MaintenanceHistory[p.ParentMaintenanceID]; ok {
 		parent = &old
 	}
-	if p.ParentMaintenanceID == "" || parent == nil || p.ParentPlan == nil || p.ParentMaintenanceID == p.MaintenanceID || p.ParentPlan.MaintenanceID != p.ParentMaintenanceID || digest(parent.Plan) != p.ParentPlanSHA256 || digest(*p.ParentPlan) != p.ParentPlanSHA256 || !parent.Irreversible || (parent.Phase != "checking_successor" && parent.Phase != "successor_committed") || !validIdentity(parent.Process) || parent.Plan.Successor != p.Previous || parent.Process != p.PreviousProcess || parent.ArchiveAuthorization == nil || !release.ValidSHA(p.ParentArchiveSHA256) || digest(parent.ArchiveAuthorization) != p.ParentArchiveSHA256 {
+	if p.ParentMaintenanceID == "" || parent == nil || p.ParentPlan == nil || p.ParentMaintenanceID == p.MaintenanceID || p.ParentPlan.MaintenanceID != p.ParentMaintenanceID || digest(parent.Plan) != p.ParentPlanSHA256 || digest(*p.ParentPlan) != p.ParentPlanSHA256 || !parent.Irreversible || parent.Plan.Successor != p.Previous || parent.Process != p.PreviousProcess || parent.ArchiveAuthorization == nil || !release.ValidSHA(p.ParentArchiveSHA256) || digest(parent.ArchiveAuthorization) != p.ParentArchiveSHA256 {
 		return nil, errors.New("updater: exact irreversible failed maintenance parent required")
+	}
+	knownProcess := (parent.Phase == "checking_successor" || parent.Phase == "successor_committed") && validIdentity(parent.Process)
+	if !knownProcess && ValidateMaintenanceLaunchExit(*parent) != nil {
+		return nil, errors.New("updater: failed parent has neither exact process nor owned exit proof")
+	}
+
+	if parent.Phase == "launch_exited" && (!p.FailedProcessExited || p.PreviousProcess != (Identity{}) || p.ParentLaunchExit == nil || *p.ParentLaunchExit != *parent.LaunchExit) {
+		return nil, errors.New("updater: exited launch must retain distinct no-process provenance")
+	}
+	if parent.Phase != "launch_exited" && p.ParentLaunchExit != nil {
+		return nil, errors.New("updater: unexpected maintenance launch exit proof")
 	}
 	if (p.ParentReceipt == nil) != (parent.Receipt == nil) || (p.ParentReceipt != nil && *p.ParentReceipt != *parent.Receipt) {
 		return nil, errors.New("updater: failed parent receipt changed")
@@ -68,6 +79,9 @@ func (s *Supervisor) validateFailedAdmission(ctx context.Context, p protocol.Com
 	}
 	if err := verifyResourceEvidence(maintenanceResources(p), s.opts.Now()); err != nil {
 		return err
+	}
+	if parent.Phase == "launch_exited" {
+		return s.maintenanceLaunchGone(ctx, parent)
 	}
 	if p.FailedProcessExited {
 		return s.maintenanceSourceGone(ctx, p.PreviousProcess)

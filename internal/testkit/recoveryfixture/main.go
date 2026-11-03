@@ -31,6 +31,9 @@ type fixtureConfig struct {
 }
 
 func main() {
+	if mode == "fast-exit" {
+		os.Exit(17)
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -119,7 +122,7 @@ func run() error {
 		}
 	}
 	archive := upgradectl.ArchiveControl{App: a, ObserveHosted: func(context.Context) (bool, error) {
-		if cfg.ReceiptRecovery {
+		if cfg.ReceiptRecovery && cfg.HostedDrained == nil {
 			return false, nil
 		}
 		return cfg.HostedDrained == nil || *cfg.HostedDrained, nil

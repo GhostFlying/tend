@@ -111,8 +111,10 @@ launch 查证，不能借 resume 再起一次。候选可能已接单时只能�
 沿每页 next cursor 继续 `--before`），逐 task 读取全部 runs，包括已终态 task 上的 open
 Run；只取 starting/running/waiting/interrupted/unknown。不得只取最新 execution。
 准备完成且所有 host 已确认维护后，以相同方法做两次完整捕获，按稳定身份顺序保存两个
-独立私有 JSON 数组；它们必须彼此相同、匹配固定计划库存及 archive 的逐 host count。
-库存变动时取消并建立新计划，不修改同 ID 的 payload。新 server 仍会在同一事务核验
+独立私有 JSON 数组。以 TaskID/RunID/role/generation/spec/host 比较完整执行身份集合，
+必须匹配固定计划库存及 archive 的逐 host count；顺序、Observed、Preparation 可以变化，
+但每份完整快照和自己的真实 SHA 都保留。执行身份集合变动时取消并建立新计划，不修改
+同 ID 的 payload；同请求重试仍须提供原完整捕获。新 server 仍会在同一事务核验
 实际全量 Run 与 lease；客户端双读不是数据库串行化证明。
 
 ```sh
@@ -123,7 +125,8 @@ tend updater maintenance recover-stop --socket "$UPDATER_SOCKET" \
   --second-capture "$SECOND_PREPARED_CAPTURE" --json
 ```
 
-这一步明确保存 false drain 及原未知，绑定旧进程后仅 crash-stop 原 server；不发送 native
+这一步保存真实 drain 观测及原未知；HostedDrained 真/假都不替代 native receipt 未知
+与其他 effect 安全门。绑定旧进程后仅 crash-stop 原 server；不发送 native
 business close。旧 API 的其他 hosted effects、owner 或 host ACK 不满足时拒绝。原请求
 重放只返回既有事实，改变捕获或 generation 必须使用新的合法动作。结果未知先 status，
 不能换 ID 重复 stop/start。新 candidate 在开放入口前登记全部库存与持久物理停止保护，
@@ -136,3 +139,11 @@ pending，避免收到 Continue 后自动重启原执行；这不表示 host 已
 真实事实先持久保存，再以既有 UnknownOutcome 沿原请求等待，不伪装网络失败。新的
 owner stop/cancel 能利用已保存物理事实结算原 Run；原回执不修改。新控制释放原 lease
 后，旧客户端会按认证拒绝收尾。未作这种独立处理前，不保证 runner 升级可继续。
+
+若维护候选在 Start 成功后、取得 ProcessIdentity 前退出，状态可显示 `launch_exited` 与
+`launch_exit` 的 owned Wait 事实。这不是普通 `unknown` 或 `launch_not_started`，不能
+直接 continue/relaunch。按失败父前滚提供新的独立维护 ID、request、artifact 和资源窗口，
+`failed_process_exited: true`；plan 会绑定父原文及 `parent_launch_exit`。已登记父的真实
+Process 不改写。只有实际 Wait 确证退出加 fresh 原 launch 空扫描才允许；只有扫描为空、
+退出证据丢失或仍在运行都保持 unknown，不据此重试。原 Current/Proof 和可能已迁移的
+数据版本不回退，新 artifact 必须覆盖父版本上界。

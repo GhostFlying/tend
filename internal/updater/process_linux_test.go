@@ -5,6 +5,7 @@ package updater
 import (
 	"context"
 	"errors"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -219,5 +220,52 @@ func TestLinuxProcessCrashOnlyExactParentWithoutGracefulClose(t *testing.T) {
 	}
 	if actual, err := p.Inspect(t.Context(), sibling.PID); err != nil || actual != sibling {
 		t.Fatal("crash signalled another runtime", err)
+	}
+}
+
+func TestLinuxMaintenanceEarlyExitCarriesOwnedWaitProof(t *testing.T) {
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, err := hashFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Args: []string{"-test.run=^TestUpdaterMaintenanceFastExitHelper$"}, LogPath: filepath.Join(t.TempDir(), "child.log")}
+	p := LinuxProcess{}
+	for attempt := 0; attempt < 16; attempt++ {
+		id, err := p.StartMaintenance(t.Context(), binary, cfg, map[string]string{"TEND_UPDATER_FAST_EXIT": "1", "TEND_UPDATER_LAUNCH_ID": "fast-exit-launch", "TEND_RELEASE_SHA256": sum})
+		var exited *launchExitedError
+		if errors.As(err, &exited) {
+			proof := exited.proof
+			m := CommittedMaintenance{Plan: protocol.CommittedMaintenancePlan{Successor: Binding{ProcessInstanceID: proof.LaunchID, ArtifactSHA256: sum}}, Phase: "launch_exited", Irreversible: true, LaunchExit: &proof}
+			if proof.ExitCode != 17 || proof.Signal != 0 || id != (Identity{}) || ValidateMaintenanceLaunchExit(m) != nil {
+				t.Fatal("invalid owned wait proof", proof, id, err)
+			}
+			if err := (&Supervisor{opts: Options{Process: p}}).maintenanceLaunchGone(t.Context(), &m); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A scheduler that let Inspect finish first already produced a real identity.
+		// Waiting for that known child is not an authorization to relaunch it.
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			_, err = p.Inspect(t.Context(), id.PID)
+			if errors.Is(err, ErrNotRunning) {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	t.Fatal("real fast-exit fixture never exercised the pre-identity exit branch")
+}
+func TestUpdaterMaintenanceFastExitHelper(t *testing.T) {
+	if os.Getenv("TEND_UPDATER_FAST_EXIT") == "1" {
+		os.Exit(17)
 	}
 }

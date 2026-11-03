@@ -18,6 +18,7 @@ import (
 )
 
 type CommittedHandoffPlan struct {
+	ManagerControlGroup       string                            `json:"manager_control_group,omitempty"`
 	Maintenance               protocol.CommittedMaintenancePlan `json:"maintenance"`
 	Unit                      string                            `json:"unit"`
 	UnitSHA256                string                            `json:"unit_sha256"`
@@ -63,8 +64,21 @@ func committedJournalPath(cfg Config, id string) string {
 func committedAdapter(p CommittedHandoffPlan) HandoffPlan {
 	resources := maintenanceResources(p.Maintenance)
 	resources.OriginalProcess = p.Maintenance.PreviousProcess
+	if p.Maintenance.FailedProcessExited && resources.OriginalProcess == (Identity{}) {
+		// Reuse only the real manager identity for static installer/cgroup checks;
+		// retainedCommittedChild independently verifies the owned launch exit.
+		resources.OriginalProcess = p.Updater
+	}
 	resources.ConfigSHA256 = p.Maintenance.ConfigSHA256
 	return HandoffPlan{Recovery: resources, Unit: p.Unit, UnitSHA256: p.UnitSHA256, ManagerSHA256: p.ManagerSHA256, Updater: p.Updater, UpdaterBinary: p.UpdaterBinary, ConfigFile: p.ConfigFile, ConfigFileSHA256: p.ConfigFileSHA256, Candidate: p.Candidate, CandidateSHA256: p.CandidateSHA256, LockDevice: p.LockDevice, LockInode: p.LockInode, OldUpdaterEvidence: p.OldUpdaterEvidence, OldUpdaterEvidenceSHA256: p.OldUpdaterEvidenceSHA256}
+}
+
+func validateCommittedStatic(cfg Config, p CommittedHandoffPlan) error {
+	// The old server identity is absent only for an independently proven owned
+	// child exit. Manager identity is still checked by its actual kernel identity,
+	// command, unit and lock; it does not acquire a fabricated server launch ID.
+	exited := p.Maintenance.ParentMaintenanceID != "" && p.Maintenance.FailedProcessExited && p.Maintenance.PreviousProcess == (Identity{}) && p.Maintenance.ParentLaunchExit != nil
+	return validateHandoffStaticIdentity(cfg, committedAdapter(p), !exited)
 }
 
 func ReadCommittedHandoffPlan(path string) (CommittedHandoffPlan, error) {
@@ -107,6 +121,9 @@ func PrepareCommittedHandoffPlan(ctx context.Context, cfg Config, p CommittedHan
 	m, policy, err := managerSnapshot(ctx, p.Unit)
 	if err != nil {
 		return p, err
+	}
+	if p.ManagerControlGroup == "" {
+		p.ManagerControlGroup = m["ControlGroup"]
 	}
 	pid, err := strconv.Atoi(m["MainPID"])
 	if err != nil || pid < 2 {
@@ -163,6 +180,10 @@ func PrepareCommittedHandoffPlan(ctx context.Context, cfg Config, p CommittedHan
 			copy := parent.Plan
 			q.ParentPlan = &copy
 		}
+		if q.ParentLaunchExit == nil && parent.LaunchExit != nil {
+			copy := *parent.LaunchExit
+			q.ParentLaunchExit = &copy
+		}
 		if q.ParentReceipt == nil && parent.Receipt != nil {
 			copy := *parent.Receipt
 			q.ParentReceipt = &copy
@@ -190,7 +211,7 @@ func PrepareCommittedHandoffPlan(ctx context.Context, cfg Config, p CommittedHan
 		q.StateSHA256 = digest(state)
 		q.ExpectedGeneration = state.Generation
 	}
-	if q.PreviousProcess.PID == 0 {
+	if q.PreviousProcess.PID == 0 && q.ParentMaintenanceID == "" {
 		q.PreviousProcess = state.Process
 	}
 	if q.Previous.InstanceID == "" {
@@ -242,7 +263,7 @@ func PrepareCommittedHandoffPlan(ctx context.Context, cfg Config, p CommittedHan
 
 func PlanCommittedHandoff(ctx context.Context, cfg Config, p CommittedHandoffPlan) error {
 	normalizeConfig(&cfg)
-	if err := validateHandoffStatic(cfg, committedAdapter(p)); err != nil {
+	if err := validateCommittedStatic(cfg, p); err != nil {
 		return err
 	}
 	if err := verifyCommittedParent(cfg, p); err != nil {
@@ -433,7 +454,7 @@ func continueCommittedHandoff(ctx context.Context, cfg Config, j CommittedHandof
 		return j, err
 	}
 	defer owner.Close()
-	if err = validateHandoffStatic(cfg, committedAdapter(p)); err != nil {
+	if err = validateCommittedStatic(cfg, p); err != nil {
 		return j, err
 	}
 	if err = verifyCommittedParent(cfg, p); err != nil {
@@ -553,7 +574,7 @@ func AdoptCommittedHandoff(ctx context.Context, s *Supervisor) (bool, error) {
 	if j.Phase != "starting_adopt" {
 		return true, errors.New("updater: committed installer did not authorize startup")
 	}
-	if err := validateHandoffStatic(s.cfg, committedAdapter(p)); err != nil {
+	if err := validateCommittedStatic(s.cfg, p); err != nil {
 		return true, err
 	}
 	if err := retainedCommittedChild(ctx, p); err != nil {
@@ -598,7 +619,7 @@ func ResumeCommittedHandoff(ctx context.Context, cfg Config, p CommittedHandoffP
 	if j.Phase != "planned" && j.Phase != "stopping_updater" && j.Phase != "installing_updater" && j.Phase != "starting_adopt" {
 		return j, errors.New("updater: maintenance installer phase cannot continue")
 	}
-	if err := validateHandoffStatic(cfg, committedAdapter(p)); err != nil {
+	if err := validateCommittedStatic(cfg, p); err != nil {
 		return j, err
 	}
 	if err := verifyCommittedParent(cfg, p); err != nil {
@@ -636,6 +657,26 @@ func retainedCommittedChild(ctx context.Context, p CommittedHandoffPlan) error {
 		return errors.New("updater: exited writer is limited to failed maintenance")
 	}
 	s := &Supervisor{opts: Options{Process: LinuxProcess{}}}
+	if p.Maintenance.PreviousProcess == (Identity{}) {
+		raw, err := privateFile(p.ConfigFile)
+		if err != nil {
+			return err
+		}
+		var cfg Config
+		if err := strictJSON(raw, &cfg); err != nil {
+			return err
+		}
+		normalizeConfig(&cfg)
+		s.state, err = readState(filepath.Join(cfg.StateDir, "state.json"))
+		if err != nil {
+			return err
+		}
+		parent, err := s.maintenanceParent(p.Maintenance)
+		if err != nil {
+			return err
+		}
+		return s.maintenanceLaunchGone(ctx, parent)
+	}
 	return s.maintenanceSourceGone(ctx, p.Maintenance.PreviousProcess)
 }
 func validateCommittedManager(ctx context.Context, p CommittedHandoffPlan, active bool) error {
@@ -645,9 +686,30 @@ func validateCommittedManager(ctx context.Context, p CommittedHandoffPlan, activ
 		// process with the existing guard, then separately prove that writer gone.
 		adapter.Recovery.OriginalProcess = p.Updater
 	}
-	if err := validateManager(ctx, adapter, active); err != nil {
-		return err
+	var managerErr error
+	if !active && p.Maintenance.ParentLaunchExit != nil && p.Maintenance.FailedProcessExited {
+		m, sum, err := managerSnapshot(ctx, p.Unit)
+		if err != nil {
+			return err
+		}
+		if m["ControlGroup"] == "" && p.ManagerControlGroup != "" {
+			// systemd removes an empty stopped unit cgroup. Reconstruct only that
+			// pinned runtime field, then require the entire original policy digest.
+			expected := make(map[string]string, len(m))
+			for k, v := range m {
+				expected[k] = v
+			}
+			expected["ControlGroup"] = p.ManagerControlGroup
+			sum = managerPolicyDigest(expected)
+		}
+		managerErr = validateManagerSnapshot(ctx, adapter, active, m, sum, p.ManagerControlGroup)
+	} else {
+		managerErr = validateManager(ctx, adapter, active)
 	}
+	if managerErr != nil {
+		return managerErr
+	}
+
 	if p.Maintenance.FailedProcessExited {
 		return retainedCommittedChild(ctx, p)
 	}

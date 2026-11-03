@@ -16,6 +16,7 @@ import (
 // CommittedMaintenance is separate from upgrade and forward-recovery history.
 // Neither an old terminal receipt nor an unknown business run is rewritten.
 type CommittedMaintenance struct {
+	LaunchExit                   *LaunchExitProof                            `json:"launch_exit,omitempty"`
 	ReceiptRecoveryAuthorization *protocol.MaintenanceReceiptRecoveryRequest `json:"receipt_recovery_authorization,omitempty"`
 	ReceiptRecoveryAuthorized    bool                                        `json:"receipt_recovery_authorized,omitempty"`
 	ReceiptRecoveryRequestID     string                                      `json:"receipt_recovery_request_id,omitempty"`
@@ -93,7 +94,7 @@ func (s *Supervisor) validateCommittedMaintenance(ctx context.Context, p protoco
 		return errors.New("updater: another legacy operation owns this service")
 	}
 	if p.ParentMaintenanceID == "" {
-		if !maintenanceTerminal(s.state.Maintenance) || p.ParentPlan != nil || p.ParentPlanSHA256 != "" || p.ParentArchiveSHA256 != "" || p.ParentGeneration != 0 || p.ParentReceipt != nil || p.FailedProcessExited || s.state.CommittedProof.Binding != p.Previous || s.state.Process != p.PreviousProcess {
+		if !maintenanceTerminal(s.state.Maintenance) || p.ParentPlan != nil || p.ParentPlanSHA256 != "" || p.ParentArchiveSHA256 != "" || p.ParentGeneration != 0 || p.ParentReceipt != nil || p.ParentLaunchExit != nil || p.FailedProcessExited || s.state.CommittedProof.Binding != p.Previous || s.state.Process != p.PreviousProcess {
 			return errors.New("updater: exact committed service source required")
 		}
 	} else {
@@ -105,7 +106,8 @@ func (s *Supervisor) validateCommittedMaintenance(ctx context.Context, p protoco
 			return errors.New("updater: failed maintenance source or admission responsibility changed")
 		}
 	}
-	if !validIdentity(p.PreviousProcess) || p.Previous.ArtifactSHA256 != p.PreviousProcess.SHA256 || p.Previous.ProcessInstanceID != p.PreviousProcess.LaunchID {
+	exitedLaunch := p.ParentMaintenanceID != "" && p.PreviousProcess == (Identity{})
+	if !exitedLaunch && (!validIdentity(p.PreviousProcess) || p.Previous.ArtifactSHA256 != p.PreviousProcess.SHA256 || p.Previous.ProcessInstanceID != p.PreviousProcess.LaunchID) {
 		return errors.New("updater: exact maintenance process binding required")
 	}
 	if generation && (p.ExpectedGeneration != s.state.Generation || p.StateSHA256 != digest(s.state)) {
@@ -119,6 +121,13 @@ func (s *Supervisor) validateCommittedMaintenance(ctx context.Context, p protoco
 	}
 	if _, _, err := s.committedBundle(p); err != nil {
 		return err
+	}
+	if exitedLaunch {
+		parent, err := s.maintenanceParent(p)
+		if err != nil {
+			return err
+		}
+		return s.maintenanceLaunchGone(ctx, parent)
 	}
 	if p.FailedProcessExited {
 		return s.maintenanceSourceGone(ctx, p.PreviousProcess)
@@ -273,6 +282,13 @@ func (s *Supervisor) maintenanceAuthorityValid(m *CommittedMaintenance) error {
 }
 
 func (s *Supervisor) maintenanceOldGone(ctx context.Context, m *CommittedMaintenance) error {
+	if m.Plan.ParentMaintenanceID != "" && m.Plan.PreviousProcess == (Identity{}) {
+		parent, err := s.maintenanceParent(m.Plan)
+		if err != nil {
+			return err
+		}
+		return s.maintenanceLaunchGone(ctx, parent)
+	}
 	id, err := s.opts.Process.Inspect(ctx, m.Plan.PreviousProcess.PID)
 	if err == nil && id.StartTicks == m.Plan.PreviousProcess.StartTicks {
 		return ErrUnknown
@@ -313,7 +329,7 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 		}
 		id := m.Plan.PreviousProcess
 		if m.Plan.FailedProcessExited {
-			if err := s.maintenanceSourceGone(ctx, id); err != nil {
+			if err := s.maintenanceOldGone(ctx, m); err != nil {
 				return err
 			}
 		} else {
@@ -405,8 +421,23 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 			return err
 		}
 		extra := map[string]string{"TEND_UPDATER_INSTANCE_ID": s.cfg.InstanceID, "TEND_UPDATER_PROCESS_INSTANCE_ID": m.Plan.Successor.ProcessInstanceID, "TEND_UPDATER_LAUNCH_ID": m.Plan.Successor.ProcessInstanceID, "TEND_RELEASE_SHA256": m.Target.Artifact.SHA256, "TEND_UPDATER_RELEASE_ID": m.Target.ReleaseID, "TEND_COMMITTED_MAINTENANCE_ID": m.Plan.MaintenanceID, "TEND_COMMITTED_MAINTENANCE_SOCKET": SocketPath(s.cfg)}
-		id, err := s.opts.Process.Start(ctx, m.Target.Binary, s.cfg, extra)
+		start := s.opts.Process.Start
+		if launcher, ok := s.opts.Process.(maintenanceLauncher); ok {
+			start = launcher.StartMaintenance
+		}
+		id, err := start(ctx, m.Target.Binary, s.cfg, extra)
 		if err != nil {
+			var exited *launchExitedError
+			if errors.As(err, &exited) {
+				m.LaunchExit = &exited.proof
+				m.Phase = "launch_exited"
+				if proofErr := ValidateMaintenanceLaunchExit(*m); proofErr != nil {
+					return proofErr
+				}
+				if saveErr := s.save(); saveErr != nil {
+					return saveErr
+				}
+			}
 			if errors.Is(err, ErrNotStarted) {
 				m.Phase = "launch_not_started"
 				m.Irreversible = false
@@ -417,6 +448,8 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 			return err
 		}
 		return s.maintenanceStarted(m, id)
+	case "launch_exited":
+		return errors.New("updater: owned candidate exited; independent failed-parent forward required")
 	case "launch_not_started":
 		return errors.New("updater: successor was definitely not launched; fresh continuation required")
 	case "starting_successor":

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 // requiring the previous archive protocol's other effect checks to be empty.
 // It is shared by the installer/updater and the successor startup verifier.
 func ValidateReceiptRecoveryArchive(p protocol.CommittedMaintenancePlan, v protocol.ArchiveOnlineStatus) error {
-	if p.ReceiptRecoveryStop == nil || v.HostedDrained {
+	if p.ReceiptRecoveryStop == nil {
 		return errors.New("updater: receipt recovery requires explicitly retained unknown hosted lifecycle")
 	}
 	if err := maintenanceAdmission(p, v); err != nil {
@@ -36,19 +37,12 @@ func ValidateReceiptRecoveryArchive(p protocol.CommittedMaintenancePlan, v proto
 	if !pending {
 		return errors.New("updater: retained native receipt uncertainty is required")
 	}
+	if _, err := retainedRunIdentities(p.ReceiptRecoveryStop.Runs); err != nil {
+		return err
+	}
 	counts := map[string]int64{}
-	seen := map[string]bool{}
 	for _, entry := range p.ReceiptRecoveryStop.Runs {
 		r := entry.Run
-		if !protocol.ValidID(protocol.PrefixTask, entry.TaskID) || !protocol.ValidID(protocol.PrefixRun, r.RunID) || r.Host == "" || seen[r.RunID] {
-			return errors.New("updater: incomplete retained run inventory")
-		}
-		switch r.Observed {
-		case protocol.RunStarting, protocol.RunRunning, protocol.RunWaiting, protocol.RunInterrupted, protocol.RunUnknown:
-		default:
-			return errors.New("updater: retained inventory must contain every open run only")
-		}
-		seen[r.RunID] = true
 		counts[r.Host]++
 	}
 	for _, host := range v.Hosts {
@@ -61,6 +55,55 @@ func ValidateReceiptRecoveryArchive(p protocol.CommittedMaintenancePlan, v proto
 		return errors.New("updater: retained inventory names an unknown host")
 	}
 	return nil
+}
+
+// ValidateReceiptRecoveryCaptures compares complete execution identities while
+// retaining each capture's independently authenticated observation metadata.
+func ValidateReceiptRecoveryCaptures(p protocol.CommittedMaintenancePlan, first, second []protocol.CommittedRetainedRun) error {
+	if p.ReceiptRecoveryStop == nil {
+		return errors.New("updater: receipt recovery inventory required")
+	}
+	expected, err := retainedRunIdentities(p.ReceiptRecoveryStop.Runs)
+	if err != nil {
+		return err
+	}
+	for _, capture := range [][]protocol.CommittedRetainedRun{first, second} {
+		actual, err := retainedRunIdentities(capture)
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(expected, actual) {
+			return errors.New("updater: complete prepared retained-run identities changed")
+		}
+	}
+	return nil
+}
+
+type retainedRunIdentity struct {
+	TaskID, RunID           string
+	Role                    protocol.RunRole
+	Generation, SpecVersion int64
+	Host                    string
+}
+
+func retainedRunIdentities(runs []protocol.CommittedRetainedRun) ([]retainedRunIdentity, error) {
+	identities := make([]retainedRunIdentity, 0, len(runs))
+	seen := make(map[string]bool, len(runs))
+	for _, entry := range runs {
+		r := entry.Run
+		if !protocol.ValidID(protocol.PrefixTask, entry.TaskID) || !protocol.ValidID(protocol.PrefixRun, r.RunID) || !r.Role.Valid() || r.Generation <= 0 || r.SpecVersion <= 0 || r.Host == "" || seen[r.RunID] {
+			return nil, errors.New("updater: incomplete or invalid retained run inventory")
+		}
+		switch r.Observed {
+		case protocol.RunStarting, protocol.RunRunning, protocol.RunWaiting, protocol.RunInterrupted, protocol.RunUnknown:
+		default:
+			return nil, errors.New("updater: retained inventory must contain every open run only")
+		}
+		seen[r.RunID] = true
+		identities = append(identities, retainedRunIdentity{entry.TaskID, r.RunID, r.Role, r.Generation, r.SpecVersion, r.Host})
+	}
+	slices.SortFunc(identities, func(a, b retainedRunIdentity) int { return strings.Compare(a.RunID, b.RunID) })
+	return identities, nil
 }
 
 type receiptRecoveryProcess interface {
@@ -97,8 +140,8 @@ func (s *Supervisor) RecoverCommittedMaintenance(ctx context.Context, p protocol
 			return errors.New("updater: independent receipt recovery stop request required")
 		}
 	}
-	if digest(r.FirstCapture) != digest(r.SecondCapture) || digest(r.FirstCapture) != digest(p.ReceiptRecoveryStop.Runs) {
-		return errors.New("updater: complete prepared retained-run captures changed")
+	if err := ValidateReceiptRecoveryCaptures(p, r.FirstCapture, r.SecondCapture); err != nil {
+		return err
 	}
 	if _, ok := s.opts.Process.(receiptRecoveryProcess); !ok {
 		return errors.New("updater: exact crash recovery process support unavailable")

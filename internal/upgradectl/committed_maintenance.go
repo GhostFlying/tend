@@ -161,8 +161,18 @@ func verifyMaintenanceParent(state updater.State, p protocol.CommittedMaintenanc
 		return nil
 	}
 	parent, ok := state.MaintenanceHistory[p.ParentMaintenanceID]
-	if !ok || p.ParentPlan == nil || p.ParentMaintenanceID == p.MaintenanceID || parent.Plan.MaintenanceID != p.ParentMaintenanceID || !reflect.DeepEqual(parent.Plan, *p.ParentPlan) || !reflect.DeepEqual(parent.Receipt, p.ParentReceipt) || !parent.Irreversible || (parent.Phase != "checking_successor" && parent.Phase != "successor_committed") || parent.Process != p.PreviousProcess || parent.Plan.Successor != p.Previous || parent.ArchiveAuthorization == nil {
+	if !ok || p.ParentPlan == nil || p.ParentMaintenanceID == p.MaintenanceID || parent.Plan.MaintenanceID != p.ParentMaintenanceID || !reflect.DeepEqual(parent.Plan, *p.ParentPlan) || !reflect.DeepEqual(parent.Receipt, p.ParentReceipt) || !parent.Irreversible || parent.Process != p.PreviousProcess || parent.Plan.Successor != p.Previous || parent.ArchiveAuthorization == nil {
 		return errors.New("upgradectl: independent failed maintenance history is not established")
+	}
+	if parent.Phase == "launch_exited" {
+		if err := updater.ValidateMaintenanceLaunchExit(parent); err != nil {
+			return fmt.Errorf("upgradectl: failed maintenance launch exit: %w", err)
+		}
+		if !p.FailedProcessExited || p.PreviousProcess != (protocol.RecoveryIdentity{}) || p.ParentLaunchExit == nil || !reflect.DeepEqual(p.ParentLaunchExit, parent.LaunchExit) {
+			return errors.New("upgradectl: original maintenance launch exit provenance changed")
+		}
+	} else if (parent.Phase != "checking_successor" && parent.Phase != "successor_committed") || p.ParentLaunchExit != nil {
+		return errors.New("upgradectl: failed maintenance phase does not establish exit provenance")
 	}
 	if !reflect.DeepEqual(p.ReceiptRecoveryStop, parent.Plan.ReceiptRecoveryStop) {
 		return errors.New("upgradectl: failed maintenance receipt recovery scope changed")
@@ -200,16 +210,33 @@ func verifyReceiptRecoveryAuthorization(m updater.CommittedMaintenance) error {
 		}
 		return nil
 	}
-	if !m.ReceiptRecoveryAuthorized || !protocol.ValidID(protocol.PrefixRequest, m.ReceiptRecoveryRequestID) || m.ReceiptRecoveryRequestID == m.Plan.RequestID || m.ReceiptRecoveryRequestID == m.Plan.LinkRequestID || m.ArchiveAuthorization == nil || !release.ValidSHA(m.ReceiptRecoveryFirstSHA256) || m.ReceiptRecoveryFirstSHA256 != m.ReceiptRecoverySecondSHA256 {
+	if !m.ReceiptRecoveryAuthorized || !protocol.ValidID(protocol.PrefixRequest, m.ReceiptRecoveryRequestID) || m.ReceiptRecoveryRequestID == m.Plan.RequestID || m.ReceiptRecoveryRequestID == m.Plan.LinkRequestID || m.ArchiveAuthorization == nil || !release.ValidSHA(m.ReceiptRecoveryFirstSHA256) || !release.ValidSHA(m.ReceiptRecoverySecondSHA256) {
 		return errors.New("upgradectl: explicit receipt recovery authorization is incomplete")
 	}
-	raw, err := json.Marshal(m.Plan.ReceiptRecoveryStop.Runs)
-	if err != nil {
-		return err
+	authorization := m.ReceiptRecoveryAuthorization
+	if authorization == nil || authorization.RequestID != m.ReceiptRecoveryRequestID {
+		return errors.New("upgradectl: original receipt recovery request authorization changed")
 	}
-	hash := sha256.Sum256(raw)
-	if m.ReceiptRecoveryFirstSHA256 != hex.EncodeToString(hash[:]) || m.ReceiptRecoveryAuthorization == nil || m.ReceiptRecoveryAuthorization.RequestID != m.ReceiptRecoveryRequestID || !reflect.DeepEqual(m.ReceiptRecoveryAuthorization.FirstCapture, m.Plan.ReceiptRecoveryStop.Runs) || !reflect.DeepEqual(m.ReceiptRecoveryAuthorization.SecondCapture, m.Plan.ReceiptRecoveryStop.Runs) {
-		return errors.New("upgradectl: original receipt recovery inventory authorization changed")
+	// Preserve each complete observation independently. Runtime observations can
+	// change without changing the original execution identity being retained.
+	for _, capture := range []struct {
+		runs []protocol.CommittedRetainedRun
+		hash string
+	}{
+		{authorization.FirstCapture, m.ReceiptRecoveryFirstSHA256},
+		{authorization.SecondCapture, m.ReceiptRecoverySecondSHA256},
+	} {
+		raw, err := json.Marshal(capture.runs)
+		if err != nil {
+			return err
+		}
+		hash := sha256.Sum256(raw)
+		if capture.hash != hex.EncodeToString(hash[:]) {
+			return errors.New("upgradectl: original receipt recovery inventory observation changed")
+		}
+	}
+	if err := updater.ValidateReceiptRecoveryCaptures(m.Plan, authorization.FirstCapture, authorization.SecondCapture); err != nil {
+		return fmt.Errorf("upgradectl: receipt recovery inventory authorization: %w", err)
 	}
 	if err := updater.ValidateReceiptRecoveryArchive(m.Plan, *m.ArchiveAuthorization); err != nil {
 		return fmt.Errorf("upgradectl: receipt recovery archive authorization: %w", err)
