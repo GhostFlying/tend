@@ -168,6 +168,7 @@
 | D166 | 显式升级窗口可 park 空闲 manager，经原 close 与物理回执结束旧 Run；同窗口阻止重新领取，完成或取消后以新 Run 承接责任。默认关闭，原协议与请求身份不变。 | 实现中 |
 | D164 | 原不可变 artifact 可经 owner 或主 Agent relay 的精确授权共享给目标责任代次；artifact/file/hash 与原来源冻结，撤销阻止新读，不授予源任务控制或伪造新报告。追加迁移86并提供 CLI/工具全入口。 | 实施中 |
 | D167 | 创建者或显式用户决定后续 Task 是否强制独立验收；真实来源及政策冻结，免验仍需合法结果、责任核对和交付证明，不伪造通过记录，不追溯撤销在途验收。 | 实施中 |
+| D169 | 仅在原 manager 成功 close、原事件与 native/业务回执均对清后，以独立 Task CAS/原 Run+lease 证明收束 waiting；缺 session/证明仍保 unknown，不重跑原动作。 | 实现中 |
 
 | D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
 
@@ -900,3 +901,13 @@ D164 输入冻结补充：首次绑定新 Task input 必须在创建/更新 spec
 ### D171 原问题答复附件的精确读取权限
 
 原 worker question 的 owner 回复或明确 ReplyTo 问题的补充消息，可以通过独立 request_id 和问题输入 revision CAS 授权指定不可变文件。原 AnswerJSON/spec/执行 pin/lease 不改，事件逐问题追加，撤销挡未来读取。权限只覆盖冻结的原 Run、lease、角色和仍适用的责任，不向同 Task 新代次或未证明的 continuation 继承。主 Agent 必须在已准入执行中引用真实 owner 来源；授权 provenance 不给予整消息材料权限。现有 question 读取提供文件 metadata；不承诺旧执行器收到主动注入。Refs: docs/plans/worker-answer-inputs.md。
+## D169：原 manager 的有证据独立对账
+
+retained 不代表原运行已经恢复。新的 typed 诊断和独立收束动作仅在原成功 close、
+事件尾序号一致且全部应用、没有未对账 native 或业务回执时释放该次旧 lease，保留
+Task 的 waiting 责任，后续仍走正常 admission 以新 Run 承接。owner 或实际准入的
+主 Agent owner 来源通过 Task CAS、Run/lease/close request 和原结果 SHA 指定事实，
+不接收手写停止断言，不改原 pin、回执或请求结果。未知响应继续同一完整请求身份；
+未对清业务回执时先保 unknown，原回执归账后仍以该请求续进。
+成功 close 后的新原生活动会使旧停止证明失效；确定未执行的拒绝和真只读不会伪造成继续执行。
+参见[计划](plans/retained-manager-reconciliation.md)与[操作合同](manager-reconciliation.md)。

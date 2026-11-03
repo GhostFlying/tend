@@ -112,6 +112,7 @@ var schemas = map[string]string{
   },
   "additionalProperties": false
 }`,
+	"tasks_manager_reconciliation": `{"type":"object","properties":{"task_id":{"type":"string"},"run_id":{"type":"string"}},"required":["task_id","run_id"],"additionalProperties":false}`,
 	"tasks_read": `{
   "type": "object",
   "properties": {"task_id": {"type": "string"}},
