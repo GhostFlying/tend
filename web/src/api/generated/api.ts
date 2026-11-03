@@ -1293,6 +1293,7 @@ export interface AgentIssueRun {
   run: RunView;
   source: string;
   task_id: string;
+  task_open_questions: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

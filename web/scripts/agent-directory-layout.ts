@@ -450,6 +450,7 @@ const server = createServer(async (req, res) => {
                   task_id: "task_00000000000000000000000001",
                   source: "run_responsibility",
                   pending_decision: n === 1,
+                  task_open_questions: n === 1 ? 1 : 0,
                   run: {
                     run_id: `run_0000000000000000000000000${n + 1}`,
                     role: "implement",
@@ -674,7 +675,7 @@ try {
       await associations.getByRole("button", { name: "当前冻结关联", exact: true }).waitFor();
       await associations.getByText("实际执行（2）", { exact: true }).click();
       await associations.getByText("实施 · 结果未知，待对账", { exact: true }).waitFor();
-      await associations.getByText("该任务有待处理决策", { exact: true }).waitFor();
+      await associations.getByText("原执行仍有未结问题", { exact: true }).waitFor();
       assert.equal(await associations.getByText(/original-model/).count(), 2);
       const scope = associations.getByRole("combobox", { name: "Issue 关联范围" });
       await scope.selectOption("history");

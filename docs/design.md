@@ -792,7 +792,9 @@ Agent 详情的 Issue 关联只读冻结的 run_agent_executions 身份与历史
 原 Run responsibility、manager task 合同或任务创建时的主 Issue；可变 task links 与
 显示名称不构成历史归属证据。同 Issue 多 Run 去重但保留各自角色、状态、定义版本、
 runtime、快照与来源。当前表示仍有 starting/running/waiting/interrupted/unknown Run
-或真实任务未决决定，不声明正在调用模型；Issue 生命周期独立显示。
+或原 Run/action/spec 仍有效的结构化执行问题，不声明正在调用模型；Issue 生命周期独立显示。
+普通任务级 open 问题缺少原 Run 归属时，只作为任务未结记录数输出，适用性未确认，不驱动
+当前执行分类。控制 revision 的变化本身不证明问题失效，暂停仍保留原有效执行问题。
 
 独立 owner API、命名 CLI 与 Web 同步支持范围、Issue 状态、标题/ID、原版本和稳定
 Issue 游标分页。没有冻结 Run 关联时返回明确覆盖范围，主会话或咨询缺少记录不推断

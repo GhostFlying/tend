@@ -739,6 +739,16 @@ const server = createServer(async (req, res) => {
         agents: [],
       },
     });
+  if (p === "/api/v1/agent-issues")
+    return json({
+      identity: {
+        execution_environment_id: u.searchParams.get("environment_id"),
+        local_id: u.searchParams.get("local_id"),
+      },
+      coverage: "recorded_run_pins",
+      items: [],
+      more: false,
+    });
   if (p === "/api/v1/hosted-agents")
     return json({
       configuration_revision: 1,

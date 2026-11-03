@@ -120,7 +120,7 @@ export function AgentIssues({ model }: { model: AgentIssueModel }) {
           value={scope}
           onChange={(e) => model.update({ scope: e.target.value })}
         >
-          <option value="current">当前未结执行 / 待决策</option>
+          <option value="current">当前未结执行 / 原执行问题</option>
           <option value="history">历史执行</option>
           <option value="all">全部已记录关联</option>
         </Select>
@@ -158,7 +158,7 @@ export function AgentIssues({ model }: { model: AgentIssueModel }) {
           </Button>
           <p>
             {issueStates[item.state] || item.state} ·{" "}
-            {item.current ? "仍有未结执行或任务待决策" : "历史执行"}
+            {item.current ? "仍有未结执行或原执行问题" : "历史执行"}
           </p>
           <details>
             <summary>实际执行（{item.runs?.length ?? 0}）</summary>
@@ -173,7 +173,13 @@ export function AgentIssues({ model }: { model: AgentIssueModel }) {
                   {roles[execution.run.role] || execution.run.role} ·{" "}
                   {states[execution.run.observed] || execution.run.observed}
                 </Button>
-                {execution.pending_decision && <p>该任务有待处理决策</p>}
+                {execution.pending_decision && <p>原执行仍有未结问题</p>}
+                {!!execution.task_open_questions && (
+                  <p>
+                    所属任务有 {execution.task_open_questions}{" "}
+                    条未结问题记录（不代表本次执行仍适用）
+                  </p>
+                )}
                 <p>
                   Agent v{execution.pin.agent_revision} · 登记 r{execution.pin.inventory_revision} ·{" "}
                   {execution.pin.profile.model} · {execution.pin.profile.effort || "默认强度"}

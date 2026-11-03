@@ -42,13 +42,23 @@ func (f AgentIssueFilter) Validate() error {
 
 // Frozen provenance is ranked: exact Run responsibility, manager contract,
 // then the task's creation-time canonical owner. Mutable task links are excluded.
-const agentIssuesCTE = `WITH decision_tasks AS (
- SELECT DISTINCT d.task_id,t.spec_version FROM decisions d JOIN tasks t USING(task_id)
+const agentIssuesCTE = `WITH decision_runs AS (
+ SELECT DISTINCT w.run_id FROM worker_questions w JOIN decisions d USING(decision_id)
+ JOIN runs r ON r.run_id=w.run_id JOIN plan_actions a ON a.action_id=r.action_id JOIN tasks t ON t.task_id=r.task_id
  WHERE d.status='open' AND t.lifecycle NOT IN ('completed','cancelled','failed')
+ AND w.action_id=r.action_id AND w.spec_version=t.spec_version AND a.target_spec_version=t.spec_version
+ AND a.status NOT IN ('cancelled','superseded')
+ AND (a.kind<>'implement' OR a.generation=t.implement_generation)
+ AND (a.kind<>'accept' OR a.target_artifact_id=t.current_artifact_id)
+ AND (r.observed_state NOT IN ('finished','failed') OR (r.observed_state='finished' AND EXISTS(SELECT 1 FROM run_question_handoffs h WHERE h.run_id=r.run_id AND h.stopped=1)))
+ AND NOT EXISTS(SELECT 1 FROM run_issue_responsibilities owned JOIN issue_controls i USING(issue_id) WHERE owned.run_id=r.run_id AND (owned.assignment_epoch<>i.assignment_epoch OR owned.agent_ref<>i.assignee_ref OR i.assignment_state<>'active' OR i.state NOT IN ('active','paused')))
+ AND NOT EXISTS(SELECT 1 FROM task_owner_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=r.task_id AND (c.assignment_epoch<>i.assignment_epoch OR c.agent_ref<>i.assignee_ref OR i.assignment_state<>'active'))
+), task_questions AS (
+ SELECT task_id,COUNT(*) AS open_count FROM decisions WHERE status='open' GROUP BY task_id
 ), pinned AS (
  SELECT r.run_id,r.task_id,r.role,r.generation,r.host_id,r.observed_state,a.target_spec_version,e.pin_json,
- (d.task_id IS NOT NULL AND d.spec_version=a.target_spec_version) AS pending_decision
- FROM run_agent_executions e JOIN runs r USING(run_id) JOIN plan_actions a USING(action_id) LEFT JOIN decision_tasks d ON d.task_id=r.task_id
+ (d.run_id IS NOT NULL) AS pending_decision,COALESCE(q.open_count,0) AS task_open_questions
+ FROM run_agent_executions e JOIN runs r USING(run_id) JOIN plan_actions a USING(action_id) LEFT JOIN decision_runs d ON d.run_id=r.run_id LEFT JOIN task_questions q ON q.task_id=r.task_id
  WHERE json_extract(e.pin_json,'$.identity.execution_environment_id')=?
  AND json_extract(e.pin_json,'$.identity.local_id')=?
  AND (?='' OR json_extract(e.pin_json,'$.snapshot_id')=?)
@@ -72,7 +82,7 @@ const agentIssuesCTE = `WITH decision_tasks AS (
  AND (?='' OR c.state=?) AND (?='' OR instr(lower(COALESCE(json_extract(w.body_json,'$.title'),'')),lower(?))>0 OR instr(g.issue_id,?)>0)
  AND (?='' OR g.issue_id>?) ORDER BY g.issue_id LIMIT ?
 )
-SELECT s.issue_id,s.title,s.state,s.is_current,l.task_id,l.run_id,l.role,l.generation,l.target_spec_version,COALESCE(l.host_id,''),l.observed_state,l.pin_json,l.source,l.pending_decision
+SELECT s.issue_id,s.title,s.state,s.is_current,l.task_id,l.run_id,l.role,l.generation,l.target_spec_version,COALESCE(l.host_id,''),l.observed_state,l.pin_json,l.source,l.pending_decision,l.task_open_questions
 FROM selected s JOIN linked l USING(issue_id) ORDER BY s.issue_id,l.run_id`
 
 // AgentIssues is one bounded Issue page in its caller's read transaction. All
@@ -94,7 +104,7 @@ func AgentIssues(ctx context.Context, q store.Querier, f AgentIssueFilter) (prot
 		var id, title, state, pin string
 		var current bool
 		var run protocol.AgentIssueRun
-		if err := rows.Scan(&id, &title, &state, &current, &run.TaskID, &run.Run.RunID, &run.Run.Role, &run.Run.Generation, &run.Run.SpecVersion, &run.Run.Host, &run.Run.Observed, &pin, &run.Source, &run.PendingDecision); err != nil {
+		if err := rows.Scan(&id, &title, &state, &current, &run.TaskID, &run.Run.RunID, &run.Run.Role, &run.Run.Generation, &run.Run.SpecVersion, &run.Run.Host, &run.Run.Observed, &pin, &run.Source, &run.PendingDecision, &run.TaskOpenQuestions); err != nil {
 			return out, err
 		}
 		if len(out.Items) == 0 || out.Items[len(out.Items)-1].IssueID != id {

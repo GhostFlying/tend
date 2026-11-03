@@ -14,7 +14,7 @@ func runAgentIssues(ctx context.Context, e *Env, args []string) error {
 	fs.Bool("json", true, "print complete frozen association facts")
 	environment := fs.String("environment", "", "canonical execution environment ID")
 	local := fs.String("agent", "", "canonical local Agent ID")
-	scope := fs.String("scope", "all", "all, current (unsettled runs/open decisions) or history")
+	scope := fs.String("scope", "all", "all, current (unsettled runs/original worker questions) or history")
 	state := fs.String("state", "", "canonical Issue lifecycle filter")
 	search := fs.String("search", "", "Issue title or ID search")
 	after := fs.String("after", "", "Issue ID cursor from the preceding page")
