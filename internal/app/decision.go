@@ -124,8 +124,13 @@ func applyDecision(ctx context.Context, x *Exec, tx *store.Tx, prev store.TaskRo
 		if err := tx.InsertDecision(ctx, id, d.Task.ID, q.Question, string(options), string(effects), &asked, now); err != nil {
 			return nil, nil, err
 		}
-		// Opened by a rule, it surfaces like one a planner opens.
-		events = append(events, Event{ObjectType: "decision", ObjectID: id, ObjectVersion: 1, Kind: "decision.opened", Body: map[string]any{"task_id": d.Task.ID}})
+		origin, err := taskRuleQuestionOrigin(ctx, x, tx.Q(), row, q, trigger)
+		if err != nil {
+			return nil, nil, err
+		}
+		// Opened by a rule, it surfaces like one a planner opens, while its
+		// applicability evidence is frozen in this original immutable event.
+		events = append(events, Event{ObjectType: "decision", ObjectID: id, ObjectVersion: 1, Kind: "decision.opened", Body: map[string]any{"task_id": d.Task.ID, "task_rule_origin": origin}})
 	}
 	return actions, events, nil
 }

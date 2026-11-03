@@ -167,6 +167,8 @@
 | D165 | Tailnet HTTPS 显式协商 HTTP/2 与 HTTP/1.1，以标准库复用持久事件流和页面读取；证书源、准入、认证与明文监听保持原合同，条件复现不宣称生产根因。 | 已实现，待验证 |
 | D166 | 显式升级窗口可 park 空闲 manager，经原 close 与物理回执结束旧 Run；同窗口阻止重新领取，完成或取消后以新 Run 承接责任。默认关闭，原协议与请求身份不变。 | 实现中 |
 
+| D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
+
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
 
 ## 2. 上下文注入（修订 v0.1 §7）
@@ -857,3 +859,13 @@ admitted main 工具都提供显式选项，仍通过固定本机 controller 和
 原 attempt 行按 snapshot 复用，不作为完整历史计数。只读审计按稳定事件水位分页，未来事件在原事务冻结 instance/source/target 的当时已知身份，旧空 payload 保留不可观察；不借当前 binding 回填、不输出摘要正文或本地路径。CLI 与主 Agent 只读工具同批提供，无执行策略或 runner wire 改动。见[计划](plans/handoff-attempt-audit.md)。
 
 D170 的恢复路径 RefreshHandoff（包括 injected→created）和已确定未创建的 RetargetPreparedHandoff 也在实际变更同事务记录新审计身份；相同参数重试不重复，旧无来源历史不回填。
+## D168：普通任务规则问题的冻结来源
+
+控制 revision 同时承载暂停等独立控制，不能用其差值判断问题属于旧代次。新的规则问题
+在 decision.opened 原事件冻结版本化 Task/spec 及可证原 action；按明确替代事实收敛
+对应问题与 attention。旧来源缺失不回填，规划者自由问题保持原语义，已经接纳的回答
+与原请求重试不改写。详见[计划](plans/task-question-provenance.md)。
+
+D168 的 Attention 当前性投影同样读取冻结来源的适用性，不能因单次 pause 推进
+control revision 就把仍有效的问题标为过期。明确退休的旧问题退出 open 工作列表，
+但按原 ID 与 includeArchived 历史仍能读取原问题、withdrawn Attention 和不可变来源。

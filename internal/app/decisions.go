@@ -166,6 +166,11 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		return Outcome{}, pe
 	}
+	if obsolete, err := store.TaskRuleQuestionObsolete(ctx, tx.Q(), d.DecisionID); err != nil {
+		return Outcome{}, err
+	} else if obsolete {
+		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "the question belongs to a superseded task spec or action")
+	}
 	// Task-rule questions cannot accept new answers after that responsibility
 	// ends. Previously accepted answers have already returned their stored fact.
 	// A control revision alone is insufficient: pausing retains the question.
