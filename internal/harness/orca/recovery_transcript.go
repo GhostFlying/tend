@@ -120,7 +120,7 @@ func readFailedTurn(ctx context.Context, session ProviderSession, since int64) (
 // errors, which need authentication, specification or policy changes.
 func temporaryModelError(raw json.RawMessage) string {
 	var code string
-	if json.Unmarshal(raw, &code) == nil && code == "rate_limit_exceeded" {
+	if json.Unmarshal(raw, &code) == nil && (code == "rate_limit_exceeded" || code == "server_overloaded" || code == "server_is_overloaded" || code == "overloaded") {
 		return code
 	}
 	var tagged map[string]struct {
@@ -150,7 +150,7 @@ func classifyRootError(code, message string, info json.RawMessage) string {
 	if code == "" {
 		code = temporaryModelError(info)
 	}
-	if provider == "invalid_encrypted_content" || provider == "rate_limit_exceeded" {
+	if provider == "invalid_encrypted_content" || provider == "rate_limit_exceeded" || provider == "server_overloaded" || provider == "server_is_overloaded" || provider == "overloaded" {
 		return provider
 	}
 	if match := recoveryErrorCode.FindStringSubmatch(message); match != nil {

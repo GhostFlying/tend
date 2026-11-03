@@ -1,4 +1,5 @@
 import type {
+  ConcurrencyBinding,
   AgentInventoryDefinition,
   AgentInventoryProjection,
   AgentInventoryRuntime,
@@ -12,6 +13,7 @@ export type Group = {
   projection: AgentInventoryProjection;
   catalog?: RunnerAgentCatalog | undefined;
   configurationRevision?: number | undefined;
+  concurrencyBindings?: ConcurrencyBinding[] | null | undefined;
 };
 export type Entry = {
   group: Group;

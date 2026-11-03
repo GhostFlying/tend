@@ -238,6 +238,7 @@ categories.unshift({
 let hostedCLI: string | undefined = "codex";
 const streams = new Set<ServerResponse>();
 const writes: string[] = [];
+let hideConcurrencyList = false;
 const server = createServer(async (req, res) => {
   const u = new URL(req.url!, "http://fixture.invalid"),
     p = u.pathname;
@@ -264,6 +265,128 @@ const server = createServer(async (req, res) => {
       scope: "owner",
       client_id: "directory",
       deployment_id: "directory",
+    });
+  if (p === "/api/v1/concurrency-groups" && hideConcurrencyList)
+    return json({ items: [], more: false });
+  if (p.startsWith("/api/v1/concurrency-groups"))
+    return json(
+      p.includes("/concurrency-groups/")
+        ? {
+            id: "shared-codex",
+            name: "共享 Codex",
+            revision: 2,
+            min: 1,
+            initial: 4,
+            max: 8,
+            current: 4,
+            occupied: 4,
+            running: 4,
+            waiting: 2,
+            cooldown_until: 0,
+            observation_since: Date.now() - 1800000,
+            saturated_ms: 1080000,
+            successful_turns: 12,
+            feedback_healthy: true,
+            bindings: [{ environment_id: "host-a", runtime_id: "codex", group_id: "shared-codex" }],
+          }
+        : {
+            items: [
+              {
+                id: "shared-codex",
+                name: "共享 Codex",
+                revision: 2,
+                min: 1,
+                initial: 4,
+                max: 8,
+                current: 4,
+                occupied: 4,
+                running: 4,
+                waiting: 2,
+                cooldown_until: 0,
+                observation_since: Date.now() - 1800000,
+                saturated_ms: 1080000,
+                successful_turns: 12,
+                feedback_healthy: true,
+                bindings: [
+                  { environment_id: "host-a", runtime_id: "codex", group_id: "shared-codex" },
+                ],
+              },
+            ],
+            more: false,
+          },
+    );
+  if (p === "/api/v1/concurrency-history")
+    return json({
+      since: Date.now() - 604800000,
+      until: Date.now(),
+      more: false,
+      items: [
+        {
+          id: 2,
+          group_id: "shared-codex",
+          group_name: "共享 Codex",
+          at: Date.now(),
+          reason: "stable_demand",
+          before: 3,
+          after: 4,
+          min: 1,
+          initial: 4,
+          max: 8,
+          occupied: 3,
+          cooldown_until: 0,
+          window_start: Date.now() - 1800000,
+          window_end: Date.now(),
+          saturated_ms: 1080000,
+          successful_turns: 12,
+          congestion_count: 0,
+          feedback_healthy: true,
+          waiting: 2,
+          sources: [],
+        },
+        {
+          id: 1,
+          group_id: "shared-codex",
+          group_name: "共享 Codex",
+          at: Date.now() - 3600000,
+          reason: "congestion",
+          before: 4,
+          after: 3,
+          min: 1,
+          initial: 4,
+          max: 8,
+          occupied: 4,
+          cooldown_until: 0,
+          window_start: 0,
+          window_end: 0,
+          saturated_ms: 0,
+          successful_turns: 0,
+          congestion_count: 1,
+          feedback_healthy: true,
+          waiting: 2,
+          sources: [
+            {
+              execution_id: "run:first",
+              environment_id: "host-a",
+              runtime_id: "codex",
+              agent_id: "elm",
+              issue_id: "issue-login",
+              issue_title: "修复登录",
+              task_id: "task-login",
+              run_id: "first",
+              session_id: "run:first",
+              native_session_id: "native-login",
+              turn_id: "turn-login",
+              attempt: "1",
+              kind: "congestion",
+              code: "rate_limit_exceeded",
+              http_status: 429,
+              occurred_at: Date.now() - 3601000,
+              received_at: Date.now() - 3600000,
+              event_id: "fault-login",
+            },
+          ],
+        },
+      ],
     });
   if (p === "/api/v1/snapshot")
     return json({ event_seq: 1, tasks: [], hosts, projects: [], queue: [], decisions: [] });
@@ -340,6 +463,7 @@ try {
         if (e.type() === "error" && !(failCatalog && e.text().includes("503")))
           errors.push(e.text());
       });
+      hideConcurrencyList = false;
       secondHostOnline = true;
       nativeWorker = false;
       hostedCLI = "codex";
@@ -527,6 +651,31 @@ try {
       assert.equal(await names.count(), 3);
       await filter.selectOption("method:app-server/codex");
       assert.equal(await names.count(), 6);
+      await directory.getByRole("tab", { name: "并发分组", exact: true }).click();
+      const concurrency = page.getByRole("region", { name: "并发分组", exact: true });
+      await concurrency.getByRole("button", { name: /共享 Codex/ }).click();
+      await concurrency.getByRole("heading", { name: "共享 Codex", exact: true }).waitFor();
+      assert(new URL(page.url()).searchParams.get("group") === "shared-codex");
+      await concurrency.locator("summary").filter({ hasText: "拥塞退避" }).click();
+      await concurrency.getByText("native-login", { exact: true }).waitFor();
+      await concurrency.getByRole("button", { name: "修复登录", exact: true }).waitFor();
+      await concurrency.locator("summary").filter({ hasText: "本组稳定满载" }).click();
+      await concurrency.getByText(/满载累计 18 分钟/).waitFor();
+      await concurrency.getByRole("button", { name: "重新读取", exact: true }).click();
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+        false,
+      );
+      await page.screenshot({
+        path: join(output, `concurrency-${viewport.width}-${theme}.png`),
+        fullPage: false,
+      });
+      hideConcurrencyList = true;
+      await page.reload();
+      await page.getByRole("heading", { name: "共享 Codex", exact: true }).waitFor();
+      assert.equal(await concurrency.getByRole("button", { name: /共享 Codex/ }).count(), 0);
+      await concurrency.getByText("18 分钟 / 至少 15 分钟", { exact: true }).waitFor();
+      hideConcurrencyList = false;
       assert.deepEqual(errors, []);
       assert.deepEqual(writes, []);
       console.log(

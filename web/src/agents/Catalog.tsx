@@ -17,6 +17,7 @@ import {
   type Group,
 } from "./entries.ts";
 import { cliLabel, runtimeLabel, runtimeMethod } from "./runtimeLabel.ts";
+import { ConcurrencyDirectory } from "./Concurrency.tsx";
 import { AgentDetails } from "./Details.tsx";
 import styles from "./Directory.module.css";
 
@@ -31,6 +32,7 @@ function RefreshIcon() {
 
 export function AgentCatalogView() {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [concurrencyRefresh, setConcurrencyRefresh] = useState(0);
   const root = useRef<HTMLElement>(null);
   const listPosition = useRef(0);
   const returnRow = useRef<HTMLButtonElement | null>(null);
@@ -58,6 +60,7 @@ export function AgentCatalogView() {
       id: "服务端",
       projection: hosted.value.projection,
       configurationRevision: hosted.value.configuration_revision,
+      concurrencyBindings: hosted.value.concurrency_bindings,
     });
   for (const id of hostIDs.split("\n").filter(Boolean)) {
     const c = catalogs.get(id)?.value;
@@ -140,7 +143,15 @@ export function AgentCatalogView() {
     update({ selected: selected === entry ? "" : entryKey(entry) });
   };
   const refresh = (
-    <Button variant="ghost" icon aria-label="重新读取" onClick={() => live.agents.refresh()}>
+    <Button
+      variant="ghost"
+      icon
+      aria-label="重新读取"
+      onClick={() => {
+        live.agents.refresh();
+        setConcurrencyRefresh((value) => value + 1);
+      }}
+    >
       <RefreshIcon />
     </Button>
   );
@@ -251,11 +262,18 @@ export function AgentCatalogView() {
             onKeyDown={(event) => {
               if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
               event.preventDefault();
-              const categories = event.key === "End" || (event.key !== "Home" && !filters.tab);
-              update({ tab: categories ? "categories" : undefined, search: "" });
+              const tabs = [undefined, "categories", "concurrency"] as const;
+              const current = tabs.indexOf(filters.tab);
+              const next =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? 2
+                    : (current + (event.key === "ArrowRight" ? 1 : 2)) % 3;
+              update({ tab: tabs[next], search: "" });
               event.currentTarget
                 .querySelectorAll<HTMLButtonElement>('[role="tab"]')
-                .item(categories ? 1 : 0)
+                .item(next)
                 ?.focus();
             }}
           >
@@ -277,8 +295,19 @@ export function AgentCatalogView() {
             >
               Categories
             </Button>
+            <Button
+              variant="ghost"
+              role="tab"
+              aria-selected={filters.tab === "concurrency"}
+              tabIndex={filters.tab === "concurrency" ? 0 : -1}
+              onClick={() => update({ tab: "concurrency", search: "" })}
+            >
+              并发分组
+            </Button>
           </div>
-          {filters.tab === "categories" ? (
+          {filters.tab === "concurrency" ? (
+            <ConcurrencyDirectory refreshVersion={concurrencyRefresh} />
+          ) : filters.tab === "categories" ? (
             <>
               {toolbar}
               <div className={styles.categoryList}>

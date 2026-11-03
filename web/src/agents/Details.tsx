@@ -1,3 +1,4 @@
+import { href } from "../app/router.ts";
 import type { AgentCategory } from "../api/generated/api.ts";
 import { currentObservation } from "./facts.ts";
 import { observation, purposeLabel, type Entry } from "./entries.ts";
@@ -53,6 +54,33 @@ export function AgentDetails({ entry, categories }: { entry: Entry; categories: 
         <dd>{agent.requested_model}</dd>
         <dt>推理强度</dt>
         <dd>{agent.requested_effort || "默认"}</dd>
+        <dt>并发分组</dt>
+        <dd>
+          {[
+            ...new Set([
+              agent.runtime_binding_ref.runtime_id,
+              (agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).runtime_id,
+            ]),
+          ].map((runtimeID) => {
+            const binding = (
+              group.catalog?.concurrency_bindings ??
+              group.concurrencyBindings ??
+              []
+            ).find((b) => b.runtime_id === runtimeID);
+            return (
+              <div key={runtimeID}>
+                {runtimeID} ·{" "}
+                {binding ? (
+                  <a href={href({ page: "agents", tab: "concurrency", group: binding.group_id })}>
+                    {binding.group_id}
+                  </a>
+                ) : (
+                  "未绑定"
+                )}
+              </div>
+            );
+          })}
+        </dd>
         <dt>配置</dt>
         <dd>{agent.enabled ? "已启用" : "已停用"}</dd>
         <dt>登记版本</dt>

@@ -665,6 +665,9 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 				}
 			}
 		}
+		if err := a.concurrencyAdmitHosted(ctx, tx, m, now); err != nil {
+			return err
+		}
 		if err := a.registerLogicalTurn(ctx, tx, m, now); err != nil {
 			return err
 		}
@@ -777,6 +780,11 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 		}
 		return nil
 	})
+	if errors.Is(err, ErrConcurrencyCapacity) {
+		if noteErr := a.noteConcurrencyWait(ctx, m); noteErr != nil {
+			return noteErr
+		}
+	}
 	if err == nil {
 		a.notifyChange()
 	}

@@ -17,6 +17,9 @@ type Executor struct {
 // Only the current run's choice is returned and subsequently frozen by app.
 func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 	if c.HandoffPin != nil {
+		if h.ConcurrencyBlocked[c.HandoffPin.Runtime.RuntimeID] {
+			return nil, "runtime concurrency capacity unavailable"
+		}
 		if c.HandoffPin.Identity.ExecutionEnvironmentID != h.ID {
 			return nil, "handoff belongs to another runner"
 		}
@@ -37,6 +40,9 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 			return nil, "runner does not support Issue owner responsibility"
 		}
 		if c.ManagerPin != nil {
+			if !c.Manager.ReceiptOnly && h.ConcurrencyBlocked[c.ManagerPin.Runtime.RuntimeID] {
+				return nil, "runtime concurrency capacity unavailable"
+			}
 			if c.ManagerPin.Identity.ExecutionEnvironmentID != h.ID {
 				return nil, "manager session belongs to another runner"
 			}
@@ -68,7 +74,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		}
 		var selected *protocol.RunExecutionPin
 		for _, e := range h.Executors {
-			if e.Pin.Purpose != "issue_manager" || !slices.Contains(e.Categories, c.Manager.CategoryID) || c.Manager.AgentID != "" && c.Manager.AgentID != e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID {
+			if h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || e.Pin.Purpose != "issue_manager" || !slices.Contains(e.Categories, c.Manager.CategoryID) || c.Manager.AgentID != "" && c.Manager.AgentID != e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID {
 				continue
 			}
 			if selected == nil || e.Pin.Identity.LocalID < selected.Identity.LocalID {
@@ -124,7 +130,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		return cmp.Compare(a.Pin.BackendID, b.Pin.BackendID)
 	})
 	for _, e := range executors {
-		if !matches(e, role, c.Kind == protocol.ActionAccept) {
+		if h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || !matches(e, role, c.Kind == protocol.ActionAccept) {
 			continue
 		}
 		if c.Kind == protocol.ActionImplement && (c.WorkspaceHost == "" || !c.NamedExecutionAssigned) {

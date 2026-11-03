@@ -88,6 +88,16 @@ func CapabilityBindings() []CapabilityBinding {
 		}
 		out = append(out, binding("webhooks."+action, "webhook "+action, args...))
 	}
+	out = append(out,
+		binding("GET /api/v1/concurrency-groups", "agents concurrency list"),
+		binding("GET /api/v1/concurrency-groups/{id}", "agents concurrency show", "sample"),
+		binding("GET /api/v1/concurrency-history", "agents concurrency history"),
+		binding("concurrency.create", "agents concurrency create", "sample", "--name", "Sample", "--min", "1", "--initial", "2", "--max", "8", "--revision", "0"),
+		binding("concurrency.update", "agents concurrency update", "sample", "--data", `{"name":"Sample","min":1,"initial":2,"max":8}`, "--revision", "2"),
+		binding("concurrency.bind", "agents concurrency bind", "sample", "--environment", "sample", "--runtime", "sample", "--revision", "2"),
+		binding("concurrency.unbind", "agents concurrency unbind", "sample", "--environment", "sample", "--runtime", "sample", "--revision", "2"),
+		binding("concurrency.delete", "agents concurrency delete", "sample", "--revision", "2"),
+	)
 	out = append(out, legacyBindings()...)
 	slices.SortFunc(out, func(a, b CapabilityBinding) int {
 		return strings.Compare(a.Capability+"/"+a.Command, b.Capability+"/"+b.Command)

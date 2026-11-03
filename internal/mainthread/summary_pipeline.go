@@ -122,11 +122,11 @@ func (m *Manager) generateSummary(ctx context.Context, s harness.Session, fork h
 			cfg.ApprovalPolicy = "never"
 			cfg.ApprovalsReviewer = ""
 			cfg.OnToolCall = nil
-			clean, err := s.StartThread(ctx, cfg)
+			clean, stageForker, err := m.startSummaryStage(ctx, s, cfg, forker)
 			if err != nil {
 				return final, err
 			}
-			next, e := m.collectSummary(ctx, clean, forker, snap, stagePrompt, selection)
+			next, e := m.collectSummary(ctx, clean, stageForker, snap, stagePrompt, selection)
 			if e != nil {
 				return next, e
 			}

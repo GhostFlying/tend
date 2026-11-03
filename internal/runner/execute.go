@@ -305,6 +305,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		p.Guide += fmt.Sprintf("\nYou are executing as owner of Issue %s at assignment epoch %d, role %s. Fulfill the frozen task agreement and submit its result through the existing role-specific tools. Do not launch or delegate to another Agent outside Tend: another Agent requires its own child Issue. Preserve independent acceptance isolation. Report any need for further delegation as a blocker to this Issue's coordination turn.\n", as.Responsibility.IssueID, as.Responsibility.AssignmentEpoch, as.Role)
 	}
 	persistEvent := func(eventCtx context.Context, ev harness.WorkerEvent) error {
+
 		if err := r.recordRolloutEvent(eventCtx, as.RunID, ev); err != nil {
 			return err
 		}
@@ -340,7 +341,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return err
 		}
 	}
-	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{LegacyRawUsage: !r.supportsNativeUsage(),
+	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{ConcurrencyFeedback: as.ConcurrencyFeedback, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},
@@ -430,6 +431,10 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 	}()
 	for ev := range w.Events() {
+		if appendErr == nil {
+			ev, appendErr = concurrencyWorkerEvent(ev, r.cfg.Now().UnixMilli(), attempt)
+		}
+
 		if appendErr == nil {
 			appendErr = r.recordRolloutEvent(ctx, as.RunID, ev)
 			if appendErr == nil {
@@ -1020,4 +1025,23 @@ func (r *Runner) holdCompleted(ctx context.Context, as protocol.Assignment, a *a
 	r.mu.Unlock()
 	r.applyDesired(ctx, a, protocol.DesiredHeld, now)
 	return errHeld
+}
+
+func concurrencyWorkerEvent(ev harness.WorkerEvent, now int64, attempt int) (harness.WorkerEvent, error) {
+	if ev.Kind != "worker.concurrency" {
+		return ev, nil
+	}
+	var f protocol.ConcurrencyFeedback
+	if err := json.Unmarshal(ev.Body, &f); err != nil {
+		return ev, err
+	}
+	if f.OccurredAt == 0 {
+		f.OccurredAt = now
+	}
+	if f.Attempt == "" {
+		f.Attempt = fmt.Sprint(attempt)
+	}
+	raw, err := json.Marshal(f)
+	ev.Body = raw
+	return ev, err
 }

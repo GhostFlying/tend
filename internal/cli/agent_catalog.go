@@ -35,6 +35,9 @@ func runAgentCategoryList(ctx context.Context, e *Env, args []string) error {
 }
 
 func runAgentCatalog(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "concurrency" {
+		return runConcurrency(ctx, e, args[1:])
+	}
 	if len(args) > 0 && args[0] == "hosted" {
 		return runHostedAgentCatalog(ctx, e, args[1:])
 	}

@@ -46,7 +46,8 @@ export type DiagnosticFilters = {
   since?: string;
 };
 export type AgentFilters = {
-  tab?: "categories" | undefined;
+  tab?: "categories" | "concurrency" | undefined;
+  group?: string;
   search?: string;
   category?: string;
   environment?: string;
@@ -129,7 +130,15 @@ export function parse(input: string | URL): Route {
   if (url.pathname === "/settings/agents" || url.pathname === "/agents") {
     const filters: AgentFilters = {};
     if (query.get("tab") === "categories") filters.tab = "categories";
-    for (const field of ["search", "category", "environment", "location", "selected"] as const) {
+    if (query.get("tab") === "concurrency") filters.tab = "concurrency";
+    for (const field of [
+      "search",
+      "category",
+      "environment",
+      "location",
+      "selected",
+      "group",
+    ] as const) {
       const value = query.get(field);
       if (value) filters[field] = value;
     }
@@ -189,6 +198,7 @@ export function href(route: Route): string {
       "environment",
       "location",
       "selected",
+      "group",
     ] as const) {
       const value = route[field];
       if (value) query.set(field, value);

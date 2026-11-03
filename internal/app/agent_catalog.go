@@ -46,6 +46,11 @@ func (a *App) RunnerAgentCatalog(ctx context.Context, host string) (protocol.Run
 
 func readRunnerAgentCatalog(ctx context.Context, q store.Querier, host string, now int64) (protocol.RunnerAgentCatalog, error) {
 	result := protocol.RunnerAgentCatalog{HostID: host}
+	bindings, err := concurrencyEnvironmentBindings(ctx, q, host)
+	if err != nil {
+		return result, err
+	}
+	result.ConcurrencyBindings = bindings
 	h, err := store.GetHost(ctx, q, host)
 	if err != nil {
 		return result, errNotFound(err, "host does not exist")

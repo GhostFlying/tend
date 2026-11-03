@@ -164,7 +164,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		capabilities = append(capabilities, protocol.CapabilityRolloutPreview)
 	}
 	if r.cfg.Executions != nil {
-		capabilities = append(capabilities, protocol.CapabilityAgentExecution)
+		capabilities = append(capabilities, protocol.CapabilityAgentExecution, protocol.CapabilityAdaptiveConcurrency)
 		if _, ok := r.cfg.Executions.(ContinuationResolver); ok {
 			capabilities = append(capabilities, protocol.CapabilityAgentContinuation)
 		}
