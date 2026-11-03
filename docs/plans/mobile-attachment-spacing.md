@@ -25,3 +25,7 @@ Refs: D70。
 仅在移动断点为这两个默认 header 增加顶部 inset 与相应高度，不改已有自定义 header。
 利用 Chromium 的实际 CDP safe-area override 依次验证 0/47/0px 的首页与收件箱文字、
 header 高度及回退，不模拟 iOS 的字形栅格化或原生光标拖动。原生两项仍保验证边界。
+
+独立审查确认任务详情同时有外层 PageHeader 和旧内层 Details header，顶部 inset
+必须只由外层拥有。Details 当前只有这个调用点；移除内层重复 inset，并加入实际
+任务页正文位置的 0/47/0 回归，防止只验证外层 header 而漏掉正文双重下移。

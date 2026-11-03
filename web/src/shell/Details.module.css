@@ -30,11 +30,6 @@
 }
 
 @media (max-width: 760px) {
-  .head {
-    padding-top: env(safe-area-inset-top);
-    height: calc(var(--head-height) + env(safe-area-inset-top));
-  }
-
   .back {
     display: grid;
   }
