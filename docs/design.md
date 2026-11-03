@@ -327,6 +327,8 @@ owner 认证的 `/api/v1/coordination/metrics` 从账本导出 pending owner/bac
 
 D113 补充：程序可确定处理 owner 无自由文本、精确匹配持久执行选项且已成功应用的直接面板回答；只为新生成原文保存本次 decision/version、task/spec/control revision、effect/generation 的授权事实及精确内容检查，不完成其他来源或逻辑轮。此语义不依赖 hosted main 配置。其他回答原文必须进入主协调责任。部署身份变化清理业务缓存，静态构建 shell 缓存由 service worker 版本管理。
 
+D113 部署身份读取补充：`App.DeploymentID` 先在独立读事务中读取持久 singleton，已有身份不进入写池。只有身份缺失时，结束读事务后进入写事务并再次检查，由单写事务完成唯一初始化；成功提交前不发布身份，读、写或提交失败均返回错误和空身份，后续调用可重试。不增加内存缓存，不改变持久身份、响应 header、mutation guard 或 session 特例；不修改连接数、busy timeout、协议或 CLI 能力。见 docs/plans/deployment-identity-read.md。此机制修复不代表线上持续加载已恢复。
+
 D114 当前运行边界：D45、D47、D48、D54、D59、D68、D94 及旧部署章节中的外挂行为仅保留为历史设计，不再提供入口。owner 登录只签发 owner token，旧 agent token 和非托管主 Agent 身份拒绝执行。主 Agent 工具只有一套托管 schema；历史 `addon_relay` 及 actor 来源仍按真实身份读取。runner 的 `worker-mcp` 和 provider 类型独立保留，server/runner 通信协议不变。
 
 D114 状态投影补充：主 Agent 的 `agent_conversations_list` 根据已认证的托管身份明确返回后台能力可用，与 owner API 的托管配置语义一致；`runtime_available` 表示能力已配置，会话排队、上下文就绪和运行失败仍由各自状态表达，不由存储查询的布尔零值推断运行时故障。
