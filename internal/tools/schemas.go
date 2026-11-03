@@ -200,6 +200,7 @@ var schemas = map[string]string{
   "required": ["question", "options"],
   "additionalProperties": false
 }`,
+	"question_inputs_read": argumentSchema(questionInputsReadArgs{}),
 	"decisions_resolve": `{
   "type": "object",
   "description": "Record the owner's answer to an open decision.",

@@ -32,6 +32,8 @@ type WorkerQuestionSource struct {
 
 // WorkerQuestion is replayable: reading an answer never consumes it.
 type WorkerQuestion struct {
+	InputRevision     int64           `json:"input_revision,omitempty"`
+	Inputs            []TaskInput     `json:"inputs,omitempty"`
 	Issues            []DecisionIssue `json:"issues,omitempty"`
 	DecisionID        string          `json:"decision_id"`
 	RunID             string          `json:"run_id"`

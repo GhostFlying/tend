@@ -9232,6 +9232,207 @@
       "title": "PutPlannerEntryPayload",
       "type": "object"
     },
+    "QuestionInputGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "files": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TaskInput"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "format": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "integer"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "revision",
+        "status",
+        "decision_id",
+        "task_id",
+        "run_id",
+        "lease_id",
+        "action_id",
+        "role",
+        "spec_version",
+        "generation",
+        "source_message_id",
+        "source_revision",
+        "files",
+        "reason"
+      ],
+      "title": "QuestionInputGrant",
+      "type": "object"
+    },
+    "QuestionInputPage": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_id": {
+          "type": "string"
+        },
+        "grants": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/QuestionInputGrant"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_step": {
+          "type": "string"
+        },
+        "original": {
+          "$ref": "#/definitions/QuestionInputScope"
+        },
+        "question_version": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "question_version",
+        "decision_id",
+        "revision",
+        "grants",
+        "next_step"
+      ],
+      "title": "QuestionInputPage",
+      "type": "object"
+    },
+    "QuestionInputPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "file_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "grant_revision": {
+          "type": "integer"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "run_id",
+        "lease_id",
+        "reason"
+      ],
+      "title": "QuestionInputPayload",
+      "type": "object"
+    },
+    "QuestionInputScope": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "run_id",
+        "lease_id",
+        "action_id",
+        "spec_version",
+        "role",
+        "generation"
+      ],
+      "title": "QuestionInputScope",
+      "type": "object"
+    },
     "QueueEntry": {
       "additionalProperties": false,
       "properties": {
@@ -9787,6 +9988,29 @@
         "expected_share_revision"
       ],
       "title": "RevokeArtifactSharePayload",
+      "type": "object"
+    },
+    "RevokeQuestionInputsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "grant_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "grant_revision",
+        "reason"
+      ],
+      "title": "RevokeQuestionInputsPayload",
       "type": "object"
     },
     "RolloutPreview": {
@@ -11250,6 +11474,40 @@
         "state"
       ],
       "title": "TaskExecutionView",
+      "type": "object"
+    },
+    "TaskInput": {
+      "additionalProperties": false,
+      "properties": {
+        "file_id": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "source_artifact_id": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "source_task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_id"
+      ],
+      "title": "TaskInput",
       "type": "object"
     },
     "TaskKind": {
@@ -14151,6 +14409,12 @@
     "PutPlannerEntryPayload": {
       "$ref": "#/definitions/PutPlannerEntryPayload"
     },
+    "QuestionInputPage": {
+      "$ref": "#/definitions/QuestionInputPage"
+    },
+    "QuestionInputPayload": {
+      "$ref": "#/definitions/QuestionInputPayload"
+    },
     "RateTaskPayload": {
       "$ref": "#/definitions/RateTaskPayload"
     },
@@ -14189,6 +14453,9 @@
     },
     "RevokeArtifactSharePayload": {
       "$ref": "#/definitions/RevokeArtifactSharePayload"
+    },
+    "RevokeQuestionInputsPayload": {
+      "$ref": "#/definitions/RevokeQuestionInputsPayload"
     },
     "RolloutPreview": {
       "$ref": "#/definitions/RolloutPreview"

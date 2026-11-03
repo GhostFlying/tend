@@ -8,6 +8,7 @@ func APITypes() []any {
 		HandoffAuditPage{},
 		SetIssueAcceptancePolicyPayload{},
 		ArtifactShare{}, ArtifactSharePage{}, GrantArtifactSharePayload{}, RevokeArtifactSharePayload{},
+		QuestionInputPayload{}, RevokeQuestionInputsPayload{}, QuestionInputPage{},
 		BindFeishu{}, FeishuBindingView{}, FeishuInputPage{},
 		ConcurrencyGroupPage{}, ConcurrencyHistoryPage{}, ConfigureConcurrencyPayload{}, ConcurrencyQuery{},
 		HostMaintenancePayload{}, UpgradeControlPayload{}, LocalRepositoryBinding{}, BindLocalRepositoryRequest{}, LocalRepositoryStatus{},

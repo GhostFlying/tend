@@ -73,6 +73,8 @@ type hostedMutation struct {
 var hostedMutations = []hostedMutation{
 	{"artifact_shares_grant", "Share one immutable artifact and its exact files with a target Issue from an admitted owner authorization. No source task control or delegation of further sharing.", "issue", protocol.GrantArtifactSharePayload{}, app.ArtifactShareCommand{}, true},
 	{"artifact_shares_revoke", "Revoke future reads of an exact artifact share using target Issue and share revisions. Previously frozen task inputs remain historical facts.", "issue", protocol.RevokeArtifactSharePayload{}, app.ArtifactShareCommand{Revoke: true}, true},
+	{"question_inputs_grant", "Grant only selected file_ids from the actual owner answer or ReplyTo supplement to an exact worker question/run/lease. Use the input revision CAS, real source content revision and original request identity. Does not rewrite the answer, authorize other attachments, or inherit into a continuation. Return metadata then relay it to the original executor without restarting it.", "decision", protocol.QuestionInputPayload{}, app.QuestionInputCommand{}, true},
+	{"question_inputs_revoke", "Revoke one exact question input grant_revision with the question input revision CAS. Stops future fetches; downloaded bytes, old answer receipts and independent spec inputs remain facts.", "decision", protocol.RevokeQuestionInputsPayload{}, app.QuestionInputCommand{Revoke: true}, true},
 	{"attentions_resolve", "Handle an original problem assigned to this responsibility, preserving its exact question version. Use responsibility.revision as expected_control_revision and its assignment_epoch. Explain evidence/reason; this is an Agent answer, never user authorization. Keep task effects and independent acceptance intact.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{}, true},
 	{"attentions_escalate", "Escalate an unresolved problem exactly one supervisor step: parent Issue, then main coordinator, then human. Use responsibility.revision and assignment_epoch. State attempted remedies and why they cannot work. Never notify the user directly for an internal problem, create duplicate problems, or reset task budgets.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{Escalate: true}, true},
 	{"conversation_reply", "Reply to one admitted input. Tend selects its source endpoint; never repeat the body as native text.", "logical_turn", protocol.CoordinationReply{}, app.CoordinationReply{}, true},
@@ -236,7 +238,7 @@ func namedLegacyRead(purpose agentconfig.Purpose, name string) bool {
 	}
 	if purpose == agentconfig.Main {
 		switch name {
-		case "conversation_handoff_audit", "tend_context", "repos_list", "tasks_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "decisions_list", "decisions_read", "decisions_resolve", "decisions_explain", "conversation_read", "conversation_turn_read", "conversation_turn_commit", "conversation_turn_wait", "conversation_turn_adopt", "agent_conversations_list", "agent_rollout_read", "background_sources", "background_checkin":
+		case "conversation_handoff_audit", "tend_context", "repos_list", "tasks_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "decisions_list", "decisions_read", "decisions_resolve", "decisions_explain", "question_inputs_read", "conversation_read", "conversation_turn_read", "conversation_turn_commit", "conversation_turn_wait", "conversation_turn_adopt", "agent_conversations_list", "agent_rollout_read", "background_sources", "background_checkin":
 			return true
 		}
 	}
