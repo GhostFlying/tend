@@ -52,7 +52,7 @@ const agentIssuesCTE = `WITH decision_runs AS (
  AND (a.kind<>'accept' OR a.target_artifact_id=t.current_artifact_id)
  AND (r.observed_state NOT IN ('finished','failed') OR (r.observed_state='finished' AND EXISTS(SELECT 1 FROM run_question_handoffs h WHERE h.run_id=r.run_id AND h.stopped=1)))
  AND NOT EXISTS(SELECT 1 FROM run_issue_responsibilities owned JOIN issue_controls i USING(issue_id) WHERE owned.run_id=r.run_id AND (owned.assignment_epoch<>i.assignment_epoch OR owned.agent_ref<>i.assignee_ref OR i.assignment_state<>'active' OR i.state NOT IN ('active','paused')))
- AND NOT EXISTS(SELECT 1 FROM task_owner_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=r.task_id AND (c.assignment_epoch<>i.assignment_epoch OR c.agent_ref<>i.assignee_ref OR i.assignment_state<>'active'))
+ AND NOT EXISTS(SELECT 1 FROM task_execution_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=r.task_id AND (c.assignment_epoch<>i.assignment_epoch OR c.agent_ref<>i.assignee_ref OR i.assignment_state<>'active'))
 ), task_questions AS (
  SELECT task_id,COUNT(*) AS open_count FROM decisions WHERE status='open' GROUP BY task_id
 ), pinned AS (

@@ -429,3 +429,98 @@ func TestCreatorPolicyResultEvidenceCannotPretendAcceptanceOrCrossIssue(t *testi
 		t.Fatal(err)
 	}
 }
+
+func TestCreatorPolicyAgentQuestionViewKeepsPauseAndRejectsReplacedEpoch(t *testing.T) {
+	h, runtime, issue := issueOwnerHarness(t)
+	if op := policyChange(t, h, issue, false); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityWorkerQuestions)
+	runtime.Sequence++
+	if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	spec := testSpec
+	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}}
+	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Investigate under the creator policy", Spec: spec}
+	if op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), CanonicalOwnerTaskCreate{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	as := ownerWorkerClaim(t, h, runtime, protocol.RoleImplement)
+	if as.Execution == nil || !as.WorkerQuestions {
+		t.Fatalf("missing frozen worker/question capability: %+v", as)
+	}
+	if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	question := askQuestion(t, h, as, scopeQuestion)
+	if h.count("creator_task_owner_contracts") != 1 || h.count("task_owner_contracts") != 0 {
+		t.Fatal("fixture did not use the waived contract")
+	}
+	read := func() protocol.AgentIssueRun {
+		t.Helper()
+		var result protocol.AgentIssueRun
+		found := false
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			page, err := views.AgentIssues(t.Context(), tx.Q(), views.AgentIssueFilter{Identity: as.Execution.Identity})
+			if err != nil {
+				return err
+			}
+			for _, item := range page.Items {
+				for _, run := range item.Runs {
+					if run.Run.RunID == as.RunID {
+						result, found = run, true
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !found {
+			t.Fatal("lost original frozen Run association")
+		}
+		return result
+	}
+	if got := read(); !got.PendingDecision || got.TaskOpenQuestions != 1 {
+		t.Fatalf("original question: %+v", got)
+	}
+	before := h.task(as.TaskID)
+	if op := h.exec(owner, h.env("control.set_mode", taskTarget(as.TaskID), protocol.SetControlModePayload{Mode: protocol.ControlPaused}, rev(before.ControlRevision)), SetControlMode{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if h.task(as.TaskID).ControlRevision <= before.ControlRevision {
+		t.Fatal("pause did not exercise a changed control revision")
+	}
+	if got := read(); !got.PendingDecision || got.Pin.Identity != as.Execution.Identity {
+		t.Fatalf("pause invalidated original responsibility: %+v", got)
+	}
+	// Keep the old question and Run as historical facts while simulating an
+	// independently persisted successor ownership epoch, not an owner answer.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE issue_controls SET assignment_epoch=assignment_epoch+1 WHERE issue_id=?`, issue.IssueID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got.PendingDecision || got.TaskOpenQuestions != 1 {
+		t.Fatalf("replaced responsibility masqueraded as actionable: %+v", got)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		d, err := store.GetDecision(t.Context(), tx.Q(), question.DecisionID)
+		if err == nil && d.Status != store.DecisionOpen {
+			t.Fatal("read changed the original question")
+		}
+		policy, policyErr := store.TaskAcceptancePolicy(t.Context(), tx.Q(), as.TaskID)
+		if policyErr != nil {
+			return policyErr
+		}
+		if policy == nil || policy.Required {
+			t.Fatal("view changed the frozen creator waiver")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
