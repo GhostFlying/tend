@@ -22,10 +22,11 @@ import (
 var mode = "successor"
 
 type fixtureConfig struct {
-	DB       string `json:"db"`
-	Socket   string `json:"socket"`
-	Updater  string `json:"updater"`
-	Releases string `json:"releases"`
+	DB            string `json:"db"`
+	Socket        string `json:"socket"`
+	Updater       string `json:"updater"`
+	Releases      string `json:"releases"`
+	HostedDrained *bool  `json:"hosted_drained,omitempty"`
 }
 
 func main() {
@@ -47,6 +48,12 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer cancel()
+	// A real retained process with no listener/registration reproduces a failed
+	// candidate without pretending that its missing DB row ever existed.
+	if mode == "unavailable" {
+		<-ctx.Done()
+		return nil
+	}
 	db, err := store.Open(ctx, cfg.DB, time.Now)
 	if err != nil {
 		return err
@@ -58,12 +65,21 @@ func run() error {
 	if mode == "successor" && recovery != "" {
 		opts = append(opts, app.WithForwardRecoveryStartup(recovery))
 	}
+	maintenance := os.Getenv("TEND_COMMITTED_MAINTENANCE_ID")
+	if mode == "successor" && maintenance != "" {
+		opts = append(opts, app.WithCommittedMaintenanceStartup(maintenance))
+	}
 	a := app.New(db, ids, time.Now, opts...)
 	actual, err := (updater.LinuxProcess{}).Inspect(ctx, os.Getpid())
 	if err != nil {
 		return err
 	}
-	c, err := upgradectl.New(upgradectl.Config{Instance: "fixture-server", ProcessInstance: actual.LaunchID, BinarySHA256: actual.SHA256, ControlSocket: cfg.Socket, UpdaterSocket: cfg.Updater, ReleaseDir: cfg.Releases, Interval: 50 * time.Millisecond, RecoveryReady: func(ctx context.Context) error { _, err := a.CurrentUpgrade(ctx); return err }}, a, ids, func(context.Context) (app.ServerObservation, error) {
+	c, err := upgradectl.New(upgradectl.Config{Instance: "fixture-server", ProcessInstance: actual.LaunchID, BinarySHA256: actual.SHA256, ControlSocket: cfg.Socket, UpdaterSocket: cfg.Updater, ReleaseDir: cfg.Releases, Interval: 50 * time.Millisecond, RecoveryReady: func(ctx context.Context) error {
+		return db.Read(ctx, func(tx *store.ReadTx) error {
+			var schema int64
+			return tx.Q().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&schema)
+		})
+	}}, a, ids, func(context.Context) (app.ServerObservation, error) {
 		return app.ServerObservation{Healthy: true, MainDrained: false}, nil
 	}, nil)
 	if err != nil {
@@ -74,5 +90,11 @@ func run() error {
 			return err
 		}
 	}
-	return c.Run(ctx)
+	if mode == "successor" && maintenance != "" {
+		if err := c.InitializeCommittedMaintenance(ctx, maintenance); err != nil {
+			return err
+		}
+	}
+	archive := upgradectl.ArchiveControl{App: a, ObserveHosted: func(context.Context) (bool, error) { return cfg.HostedDrained == nil || *cfg.HostedDrained, nil }}
+	return c.RunWith(ctx, archive.Handler())
 }

@@ -190,6 +190,12 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		}
 		opts = append(opts, app.WithForwardRecoveryStartup(recovery))
 	}
+	if maintenance := os.Getenv("TEND_COMMITTED_MAINTENANCE_ID"); maintenance != "" {
+		if os.Getenv("TEND_FORWARD_RECOVERY_ID") != "" || cfg.Upgrades == nil || os.Getenv("TEND_COMMITTED_MAINTENANCE_SOCKET") != cfg.Upgrades.UpdaterSocket {
+			return errors.New("committed maintenance requires its independent fixed updater startup")
+		}
+		opts = append(opts, app.WithCommittedMaintenanceStartup(maintenance))
+	}
 	if cfg.LeaseTTL > 0 {
 		opts = append(opts, app.WithLeaseTTL(time.Duration(cfg.LeaseTTL)))
 	}
@@ -448,6 +454,14 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			return errors.New("forward recovery controller unavailable")
 		}
 		if err := upgradeController.InitializeRecovery(ctx, recovery); err != nil {
+			return err
+		}
+	}
+	if maintenance := os.Getenv("TEND_COMMITTED_MAINTENANCE_ID"); maintenance != "" {
+		if upgradeController == nil {
+			return errors.New("committed maintenance controller unavailable")
+		}
+		if err := upgradeController.InitializeCommittedMaintenance(ctx, maintenance); err != nil {
 			return err
 		}
 	}

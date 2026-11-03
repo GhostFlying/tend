@@ -20,11 +20,14 @@ import (
 )
 
 func runUpdaterHandoff(ctx context.Context, e *Env, args []string) error {
-	if len(args) < 2 || args[0] != "handoff" {
+	if len(args) < 2 || (args[0] != "handoff" && args[0] != "maintenance") {
 		return usagef("updater expects handoff plan|apply|status")
 	}
 	action := args[1]
-	if !protocol.ValidUpdaterHandoffAction(action) {
+	if args[0] == "maintenance" && (action == "prepare" || action == "authorize" || action == "cancel" || action == "finish" || action == "resume" || action == "ledger" || action == "health") {
+		return runCommittedMaintenanceControl(ctx, e, args[1:])
+	}
+	if !protocol.ValidUpdaterHandoffAction(action) && !(args[0] == "maintenance" && (action == "prepare" || action == "authorize" || action == "cancel" || action == "finish")) {
 		return usagef("handoff expects plan, apply or status")
 	}
 	fs := newFlags(e, "updater handoff "+action)
@@ -76,7 +79,7 @@ func runUpdaterHandoff(ctx context.Context, e *Env, args []string) error {
 	if hex.EncodeToString(sum.Sum(nil)) != *installerSHA {
 		return usagef("installer SHA-256 differs from reviewed artifact")
 	}
-	argv := []string{"handoff", action, "--config", *config}
+	argv := []string{args[0], action, "--config", *config}
 	if *plan != "" {
 		argv = append(argv, "--plan", *plan)
 	}
@@ -86,7 +89,11 @@ func runUpdaterHandoff(ctx context.Context, e *Env, args []string) error {
 		}
 		argv = append(argv, "--resume-request-id", *resumeID, "--expected-generation", strconv.FormatUint(*generation, 10))
 	} else if *generation != 0 {
-		return usagef("expected-generation requires resume-request-id")
+		if args[0] == "maintenance" && (action == "prepare" || action == "authorize" || action == "cancel" || action == "finish") {
+			argv = append(argv, "--expected-generation", strconv.FormatUint(*generation, 10))
+		} else {
+			return usagef("expected-generation requires resume-request-id")
+		}
 	}
 	if err := os.Chmod(executable, 0o700); err != nil {
 		return err

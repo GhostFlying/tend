@@ -29,6 +29,9 @@ func recoveryOwnerControl(operation string) bool {
 // from App construction, including before the recovery registration transaction.
 func WithForwardRecoveryStartup(id string) Option { return func(a *App) { a.forwardRecoveryID = id } }
 func (a *App) recoveryStartupFenced(ctx context.Context, q store.Querier) (bool, error) {
+	if fenced, err := a.committedMaintenanceFenced(ctx, q); err != nil || fenced {
+		return fenced, err
+	}
 	if a.forwardRecoveryID == "" {
 		return store.ForwardRecoveryFenced(ctx, q)
 	}

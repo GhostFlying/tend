@@ -113,22 +113,24 @@ type CommittedProof struct {
 	Process Identity `json:"process"`
 }
 type State struct {
-	UpdaterBootID  string                         `json:"updater_boot_id,omitempty"`
-	Generation     uint64                         `json:"generation,omitempty"`
-	UpdaterEpoch   string                         `json:"updater_epoch,omitempty"`
-	Recovery       *ForwardRecovery               `json:"recovery,omitempty"`
-	Recoveries     map[string]ForwardRecovery     `json:"recoveries,omitempty"`
-	ProofHistory   []CommittedProof               `json:"proof_history,omitempty"`
-	Configurations map[string]StagedConfiguration `json:"configurations,omitempty"`
-	CommittedProof *CommittedProof                `json:"committed_proof,omitempty"`
-	RollbackProof  *RollbackProof                 `json:"rollback_proof,omitempty"`
-	Terminals      map[string]TerminalReceipt     `json:"terminals,omitempty"`
-	Format         int                            `json:"format"`
-	InstanceID     string                         `json:"instance_id"`
-	Current        Version                        `json:"current"`
-	Process        Identity                       `json:"process"`
-	Operation      *Operation                     `json:"operation,omitempty"`
-	LastError      string                         `json:"last_error,omitempty"`
+	Maintenance        *CommittedMaintenance           `json:"committed_maintenance,omitempty"`
+	MaintenanceHistory map[string]CommittedMaintenance `json:"committed_maintenance_history,omitempty"`
+	UpdaterBootID      string                          `json:"updater_boot_id,omitempty"`
+	Generation         uint64                          `json:"generation,omitempty"`
+	UpdaterEpoch       string                          `json:"updater_epoch,omitempty"`
+	Recovery           *ForwardRecovery                `json:"recovery,omitempty"`
+	Recoveries         map[string]ForwardRecovery      `json:"recoveries,omitempty"`
+	ProofHistory       []CommittedProof                `json:"proof_history,omitempty"`
+	Configurations     map[string]StagedConfiguration  `json:"configurations,omitempty"`
+	CommittedProof     *CommittedProof                 `json:"committed_proof,omitempty"`
+	RollbackProof      *RollbackProof                  `json:"rollback_proof,omitempty"`
+	Terminals          map[string]TerminalReceipt      `json:"terminals,omitempty"`
+	Format             int                             `json:"format"`
+	InstanceID         string                          `json:"instance_id"`
+	Current            Version                         `json:"current"`
+	Process            Identity                        `json:"process"`
+	Operation          *Operation                      `json:"operation,omitempty"`
+	LastError          string                          `json:"last_error,omitempty"`
 }
 
 type Process interface {

@@ -15,9 +15,12 @@ import (
 )
 
 type ControlRequest struct {
-	Recovery           *protocol.ForwardRecoveryPlan `json:"recovery,omitempty"`
-	Receipt            *protocol.RecoveryReceipt     `json:"receipt,omitempty"`
-	ExpectedGeneration uint64                        `json:"expected_generation,omitempty"`
+	MaintenanceContinuation *protocol.MaintenanceContinuation     `json:"maintenance_continuation,omitempty"`
+	Maintenance             *protocol.CommittedMaintenancePlan    `json:"maintenance,omitempty"`
+	MaintenanceReceipt      *protocol.CommittedMaintenanceReceipt `json:"maintenance_receipt,omitempty"`
+	Recovery                *protocol.ForwardRecoveryPlan         `json:"recovery,omitempty"`
+	Receipt                 *protocol.RecoveryReceipt             `json:"receipt,omitempty"`
+	ExpectedGeneration      uint64                                `json:"expected_generation,omitempty"`
 
 	Configuration  *protocol.RunnerConfiguration `json:"configuration,omitempty"`
 	Candidate      string                        `json:"candidate,omitempty"`
@@ -91,6 +94,33 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 			err = s.StageConfiguration(r.Context(), req.ID, req.ManifestSHA256, req.Candidate, req.Configuration)
 		case "/restart":
 			err = s.Restart(req.ID)
+		case "/maintenance/prepare", "/maintenance/apply", "/maintenance/cancel", "/maintenance/finish":
+			if req.Maintenance == nil {
+				err = errors.New("updater: maintenance plan required")
+			} else {
+				switch r.URL.Path {
+				case "/maintenance/prepare":
+					err = s.PrepareCommittedMaintenance(r.Context(), *req.Maintenance, req.ExpectedGeneration)
+				case "/maintenance/apply":
+					err = s.AuthorizeCommittedMaintenance(r.Context(), *req.Maintenance, req.ExpectedGeneration)
+				case "/maintenance/finish":
+					err = s.FinishCommittedMaintenance(r.Context(), *req.Maintenance, req.ExpectedGeneration)
+				case "/maintenance/cancel":
+					err = s.CancelCommittedMaintenance(r.Context(), *req.Maintenance, req.ExpectedGeneration)
+				}
+			}
+		case "/maintenance/resume":
+			if req.Maintenance == nil || req.MaintenanceContinuation == nil || req.ExpectedGeneration != req.MaintenanceContinuation.ExpectedGeneration {
+				err = errors.New("updater: exact continuation and generation required")
+			} else {
+				err = s.ContinueCommittedMaintenance(r.Context(), *req.Maintenance, *req.MaintenanceContinuation)
+			}
+		case "/maintenance/link":
+			if req.MaintenanceReceipt == nil {
+				err = errors.New("updater: maintenance receipt required")
+			} else {
+				err = s.LinkCommittedMaintenance(*req.MaintenanceReceipt, req.ExpectedGeneration)
+			}
 		case "/recovery/plan":
 			if req.Recovery == nil {
 				err = errors.New("updater: recovery plan required")

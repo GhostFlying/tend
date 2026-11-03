@@ -27,6 +27,9 @@ func CapabilityBindings() []CapabilityBinding {
 		out = append(out, binding("local EXEC updater handoff "+action, "updater handoff "+action, "--installer", "{installer}", "--installer-sha256", "{installer-sha256}", "--config", "{config}", "--plan", "{handoff}", "--json"))
 	}
 
+	for _, action := range protocol.CommittedHandoffActions() {
+		out = append(out, binding("local EXEC updater maintenance "+action, "updater maintenance "+action, "--installer", "{installer}", "--installer-sha256", "{installer-sha256}", "--config", "{config}", "--plan", "{handoff}", "--json"))
+	}
 	for _, cmd := range capabilityCommands {
 		args := []string{}
 		variables := commandVariables(cmd.Route)
@@ -184,6 +187,13 @@ func legacyBindings() []CapabilityBinding {
 		binding("local POST /agents/validate", "agents local validate", "--socket", "{socket}"),
 		binding("local POST /agents/reload", "agents local reload", "--socket", "{socket}", "--revision", "2"),
 		binding("local POST /agents/reconcile", "agents local reconcile", "--socket", "{socket}", "--request-id", "{request}"),
+		binding("local GET /upgrades/maintenance/status", "updater maintenance ledger", "--socket", "{socket}", "--maintenance-id", "maintenance", "--json"),
+		binding("local POST /updater/maintenance/health", "updater maintenance health", "--socket", "{socket}", "--plan", "{maintenance}", "--json"),
+		binding("local POST /maintenance/prepare", "updater maintenance prepare", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--json"),
+		binding("local POST /maintenance/apply", "updater maintenance authorize", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--json"),
+		binding("local POST /maintenance/cancel", "updater maintenance cancel", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--json"),
+		binding("local POST /maintenance/resume", "updater maintenance resume", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--request-id", "{request}", "--expires-at-ms", "9999999999999", "--window-claim", "continuation", "--resource-evidence", "{input}", "--resource-sha256", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--json"),
+		binding("local POST /maintenance/finish", "updater maintenance finish", "--socket", "{socket}", "--plan", "{maintenance}", "--expected-generation", "2", "--json"),
 		binding("local GET /archive/status", "archive status", "--socket", "{socket}", "--json"),
 		binding("local POST /archive/prepare", "archive prepare", "--socket", "{socket}", "--revision", "2", "--json"),
 		binding("local POST /archive/cancel", "archive cancel", "--socket", "{socket}", "--revision", "2", "--json"),

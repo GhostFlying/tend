@@ -111,13 +111,16 @@ func Open(cfg Config, opts Options) (*Supervisor, error) {
 	} else if err != nil {
 		return fail(err)
 	}
-	if (state.Format != 1 && state.Format != 2) || state.InstanceID != cfg.InstanceID {
+	if (state.Format != 1 && state.Format != 2 && state.Format != 3) || state.InstanceID != cfg.InstanceID {
 		return fail(errors.New("updater: durable state belongs to a different instance"))
 	}
 	if state.Format == 2 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Recovery == nil) {
 		return fail(errors.New("updater: incomplete format 2 recovery ownership"))
 	}
-	if state.Format == 2 {
+	if state.Format == 3 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Maintenance == nil) {
+		return fail(errors.New("updater: incomplete committed maintenance ownership"))
+	}
+	if state.Format >= 2 {
 		epoch, err := opts.NewID()
 		if err != nil {
 			return fail(err)
@@ -177,7 +180,7 @@ func (s *Supervisor) save() error {
 		}
 		s.state.Terminals[op.ID] = TerminalReceipt{Binding: op.Binding, Phase: op.Phase}
 	}
-	if s.state.Format == 2 {
+	if s.state.Format >= 2 {
 		s.state.Generation++
 	}
 	if err := s.writeState(s.statePath(), cloneState(s.state)); err != nil {
@@ -277,6 +280,9 @@ func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, conf
 	if err := s.durabilityError(); err != nil {
 		return err
 	}
+	if !maintenanceTerminal(s.state.Maintenance) {
+		return errors.New("updater: committed maintenance owns this service")
+	}
 	if s.state.Recovery != nil && s.state.Recovery.Phase != "ledger_linked" {
 		return errors.New("updater: forward recovery owns this window")
 	}
@@ -352,6 +358,9 @@ func (s *Supervisor) Cancel(id string) error { return s.CancelExpected(id, "") }
 func (s *Supervisor) CancelExpected(id, expectedPhase string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !maintenanceTerminal(s.state.Maintenance) {
+		return errors.New("updater: committed maintenance owns this service")
+	}
 	if s.state.Recovery != nil && s.state.Recovery.Phase != "ledger_linked" {
 		return errors.New("updater: forward recovery owns this window")
 	}
@@ -399,6 +408,9 @@ func (s *Supervisor) CancelExpected(id, expectedPhase string) error {
 func (s *Supervisor) Retry(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !maintenanceTerminal(s.state.Maintenance) {
+		return errors.New("updater: committed maintenance owns this service")
+	}
 	if s.state.Recovery != nil && s.state.Recovery.Phase != "ledger_linked" {
 		return errors.New("updater: forward recovery owns this window")
 	}
@@ -451,6 +463,16 @@ func (s *Supervisor) Step(ctx context.Context) error {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m := s.state.Maintenance; !maintenanceTerminal(m) {
+		err := s.maintenanceStep(ctx)
+		if err != nil && s.persistenceErr == nil && (m.LastError != err.Error() || digest(s.state) != digest(s.durable)) {
+			m.LastError = err.Error()
+			if saveErr := s.save(); saveErr != nil {
+				return saveErr
+			}
+		}
 		return err
 	}
 	if r := s.state.Recovery; r != nil && r.Phase != "ledger_linked" {

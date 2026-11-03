@@ -157,6 +157,7 @@
 | D151 | 完整 race 检查继续以 Go 动态发现的所有根测试、Example 和 Fuzz seed 为覆盖来源，固定实测成本仅用于分片放置和重包优先调度，新测试自动纳入。高容量本地机器按总测试进程预算选择最多八个 App 分片、每包最多四个 API/mainthread/E2E 分片及最多六个其他包并行；小机器保留 E2E 独立阶段和顺序回退，CI 保持原分组与容量约束。可选 TEST_REPORT_DIR 输出本轮私有原生 JSON 耗时报告，默认保留 Go 原生缓存。E2E、handoff、contextbuilder、runnerapi、tools 的普通空库 fixture 复用不可变模板，显式路径重开及迁移测试保留真实 Open。见 docs/plans/race-tail-latency.md。 | 已实现 |
 | D152 | 验收后持久保留独立交付核对责任，具体 PR/head/base/验证/部署范围通过原 taskless versioned Attention 确认，候选或观测失效持久撤销旧授权；owner 重开原子恢复新协调代次，保留 terminal task 和 unknown。API/CLI 同步，runner 2/1。见 docs/plans/delivery-responsibility.md。 | 已实现，待验收 |
 | D153 | runtime 通过 CLI 绑定服务端自适应并发分组，所有托管执行共享预算；明确拥塞减 1，30 秒合并/冷却，30 分钟稳定且累计满载 15 分钟、有成功 turn 和等待需求才加 1。Web 只读，CLI 全能力；七天历史保留 Issue/session 归因和升档依据，unknown 保留占用。见 docs/plans/adaptive-concurrency.md。 | 已实现，待验收 |
+| D155 | 已提交 server 通过独立本机窗口引导 updater，再以实际归档/host 维护确认前滚；保留 unknown run、旧收据及父失败，限定失败候选可独立后继，CLI 提供完整引导、取消、对账及释放。 | 已实现，待验收 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
 
@@ -641,3 +642,35 @@ successor 在 App 构造时 fence 新 owner/main 业务写入与新 runner claim
 receipt 文件先持久，再由 app 单事务追加 ledger link、事件、请求和本机 audit outbox，并释放 admission fence。DB 失败仅按稳定 link request 重放；updater 只在精确 receipt 和已完成 app 关联后归档原 operation、解除 unfinished 占位。status 分列原 unconfirmed 与 successor committed/link 状态。执行器回调保持私有 socket 权限，CLI 提供完整 plan/apply/status、筛选/分页及固定请求恢复。新增本机协议不改变 runner wire 2/1；追加存储迁移，不修改历史迁移。Refs: D84、D142；见[计划](plans/forward-recovery.md)与[启用说明](forward-recovery.md)。
 
 D154 补充：恢复资源交接区分本机 kernel writer 证明与固定远端证据文件的操作者见证，远端 PID 不进入本机 `/proc` 校验。owner operation 先去重和重新授权，恢复 fence 仅拒绝新动作，原归档 body admission 不变；CLI 校验并执行同一私有安装器副本。
+
+## D155：已提交 server 的独立本机维护前滚
+
+正常协调升级仍要求原 run 可对账；D154 只恢复原不可逆 checking 窗口，不扩展为任意部署授权。
+已提交服务需要新版本时，操作者可发起独立、本机、限时且绑定当前 committed proof 的维护。
+新窗口保留全部业务 run、pin、thread、决策及旧 upgrade/recovery 事实，追加独立收据与账本行。
+
+第一跳由新版固定字节 installer 执行，绑定当前 state/generation、旧 updater/child 内核身份、
+配置、unit 策略、原 flock inode、前次 journal hash 与候选发布兼容范围；它先保留原 child，
+只替换 updater。新的 format 3 状态及独立 journal/head 链不修改旧 D154 journal；已 linked
+窗口可成为下一独立窗口的来源，旧窗口和 proof 进入历史。同 ID 重试只对账；中断续进另带
+固定 continuation request 和 journal generation，不通过重复 start 推测未知结果。
+
+换 server 前使用旧服务已有 archive API，以固定 request/CAS 建立准备及显式主机维护。
+只有准备修订匹配、owner 在途为零、HostedDrained 为真、全部主机新领取已停止并确认对应
+维护控制时才能停旧 server；OnlineReady 的 run-zero 条件不用于此路径。持续未排空时可在
+旧 server 停止之前取消，保留 Current/child，仅恢复自身窗口实际创建的准备和 host CAS。
+第一次替换 updater 不要求 HostedDrained 为真，因此旧服务不认识新 API 也能完成引导。
+
+旧进程退出后先备份，再持久不可逆的新进程启动意图。候选在公开业务入口前以真实本机
+supervisor 状态和内核身份注册独立维护账本并 fence 新业务，使用两次同 boot 递增健康样本
+提交 Current/proof/receipt。app 以稳定 link request 单事务链接独立收据、事件及审计 outbox，
+updater 再确认同一 receipt；显式 finish 按原窗口 CAS 释放归档及主机维护。失败、过期或未知
+不授权回退已接单数据、伪造 run active、延长租约或改写旧失败。runner wire 保持 2/1。
+
+Refs: D84、D142、D154。见[实施计划](plans/committed-server-maintenance.md)与[操作说明](committed-maintenance.md)。
+
+D155 审查补充：确定 `ErrNotStarted` 不等同于含糊启动，保存未启动阶段；在旧进程已退出
+且未有候选运行/迁移的阶段，允许新的显式请求、generation/CAS 与新鲜限时资源证据
+继续同一候选，不调用不存在的旧服务 API。真正 unknown 启动只核原 launch。原始 state
+单次保于不可变 journal，state/history 用 hash 引用，避免递归增长。父 DB 已 link 而本机
+确认丢失时以精确父 receipt 核实成功事实，新后继不将父 Linked 置回 false。
