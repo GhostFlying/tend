@@ -321,3 +321,47 @@ func TestFeishuInteractionAnswersKeepSourceAndLateText(t *testing.T) {
 		})
 	}
 }
+
+func TestFeishuFailedParentSettlesChildButUnknownRemainsPending(t *testing.T) {
+	for _, uncertain := range []bool{false, true} {
+		t.Run(map[bool]string{false: "failed", true: "unknown"}[uncertain], func(t *testing.T) {
+			h := newHarness(t)
+			bindFeishuFixture(t, h)
+			parent := FeishuIncoming{EventID: "parent", MessageID: "external-parent", AppID: "app", TenantKey: "tenant", SenderID: "person", ChatID: "chat", ParentID: "unmapped-old-message", Text: "first"}
+			first, err := h.app.ReceiveFeishu(t.Context(), parent)
+			if err != nil || first.Status != protocol.OpFailed || first.Error == nil || first.Error.Code != protocol.CodeNotFound {
+				t.Fatal(first, err)
+			}
+			if uncertain {
+				if err = h.store.Write(t.Context(), func(tx *store.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='unknown' WHERE request_id=?`, first.RequestID)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			child := parent
+			child.EventID = "child"
+			child.MessageID = "external-child"
+			child.ParentID = parent.MessageID
+			op, err := h.app.ReceiveFeishu(t.Context(), child)
+			if uncertain {
+				if protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+					t.Fatal("uncertain parent lost safety guard", op, err)
+				}
+			} else {
+				if err != nil || op.Status != protocol.OpFailed || op.Error == nil || op.Error.Code != protocol.CodeNotFound {
+					t.Fatal("failed parent stranded child", op, err)
+				}
+				replay, err := h.app.ReceiveFeishu(t.Context(), child)
+				if err != nil || replay.RequestID != op.RequestID || replay.Status != protocol.OpFailed {
+					t.Fatal("failed child replay changed identity", replay, err)
+				}
+			}
+			pending, err := h.app.PendingFeishuInputs(t.Context())
+			if err != nil || len(pending) != 0 {
+				t.Fatal("failed or uncertain parent incorrectly retried", pending, err)
+			}
+		})
+	}
+}

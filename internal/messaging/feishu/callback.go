@@ -64,10 +64,7 @@ func (c *Callback) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
-	if !c.validSignature(r.Header, body) {
-		http.Error(w, "callback authentication failed", http.StatusUnauthorized)
-		return
-	}
+	signedBody := body
 	var encrypted struct {
 		Encrypt string `json:"encrypt"`
 	}
@@ -122,6 +119,12 @@ func (c *Callback) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"challenge": event.Challenge})
+		return
+	}
+	// Initial URL verification uses the verification token (and decryption for
+	// encrypted probes), not ordinary event signature headers.
+	if !c.validSignature(r.Header, signedBody) {
+		http.Error(w, "callback authentication failed", http.StatusUnauthorized)
 		return
 	}
 	h := event.Header
