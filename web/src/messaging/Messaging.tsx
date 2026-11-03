@@ -556,7 +556,7 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
               <ul className={styles.selectedFiles} aria-label="待发送附件">
                 {value.attachments.map((file, n) => (
                   <li key={file.file_id}>
-                    {file.name}
+                    <span>{file.name}</span>
                     <Button variant="link" onClick={() => draft.removeAttachment(n)}>
                       移除
                     </Button>

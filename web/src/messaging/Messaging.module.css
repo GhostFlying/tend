@@ -290,6 +290,20 @@
   font-size: var(--text-label);
   overflow-wrap: anywhere;
 }
+.selectedFiles li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+}
+.selectedFiles li > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.selectedFiles li > button {
+  flex: none;
+}
 .details {
   padding: var(--space-5);
   display: flex;
@@ -301,6 +315,10 @@
   font-size: var(--text-caption);
 }
 @media (max-width: 760px) {
+  .selectedFiles li > button {
+    min-height: var(--control-touch);
+    min-width: var(--control-touch);
+  }
   .header {
     padding-inline: var(--space-4);
     gap: var(--space-2);
