@@ -18,6 +18,9 @@ import (
 )
 
 func runUpgrade(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "recover" {
+		return runForwardRecovery(ctx, e, args[1:])
+	}
 	action := "start"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		action = args[0]

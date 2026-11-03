@@ -194,3 +194,31 @@ func (s *archiveReadSession) ResumeThread(_ context.Context, id string, _ harnes
 	}
 	return s.thread, nil
 }
+
+func TestRecoveryReadinessAcceptsOnlyProvenPreparedQuiescence(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	if err := e.m.RecoveryReadiness(t.Context()); err == nil {
+		t.Fatal("unprepared missing session was ready")
+	}
+	prepareArchive(t, e)
+	if err := e.m.RecoveryReadiness(t.Context()); err != nil {
+		t.Fatal("intentionally prepared quiescence was blocked", err)
+	}
+	e.m.mu.Lock()
+	e.m.archiveStarting = true
+	e.m.mu.Unlock()
+	if err := e.m.RecoveryReadiness(t.Context()); err == nil {
+		t.Fatal("prepared startup in progress was ready")
+	}
+	e.m.mu.Lock()
+	e.m.archiveStarting = false
+	e.m.active = &turn{}
+	e.m.mu.Unlock()
+	if err := e.m.RecoveryReadiness(t.Context()); err == nil {
+		t.Fatal("prepared active native work was ready")
+	}
+	e.m.mu.Lock()
+	e.m.active = nil
+	e.m.mu.Unlock()
+}

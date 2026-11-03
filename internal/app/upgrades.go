@@ -615,10 +615,22 @@ func anotherHostAwaitingNormal(ctx context.Context, q store.Querier, exclude, up
 // UpgradePausesMain gates new foreground turns throughout server replacement.
 func (a *App) UpgradePausesMain(ctx context.Context) (bool, error) {
 	paused := false
-	err := a.store.Read(ctx, func(tx *store.ReadTx) error { var err error; paused, err = upgradePausesMain(ctx, tx.Q()); return err })
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		fenced, err := a.recoveryStartupFenced(ctx, tx.Q())
+		if err != nil || fenced {
+			paused = fenced
+			return err
+		}
+		paused, err = upgradePausesMain(ctx, tx.Q())
+		return err
+	})
 	return paused, err
 }
 func upgradePausesMain(ctx context.Context, q store.Querier) (bool, error) {
+	if fenced, err := store.ForwardRecoveryFenced(ctx, q); err != nil || fenced {
+		return fenced, err
+	}
+
 	if prepared, err := archivePrepared(ctx, q); err != nil || prepared {
 		return prepared, err
 	}

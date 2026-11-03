@@ -627,3 +627,17 @@ D153 串行准备补充：上限为一时，runner 负责人尚无活动 turn �
 自身已预留的同组额度。借用期间原负责人不能启动新 turn，摘要结束才归还；若
 原负责人正在执行或有未知操作则不能借用。正常可并行的摘要仍独立申请。关闭
 原生 session 只核销该 session 实际创建的摘要额度，不能核销其他进程的未知执行。
+
+## D154：固定 updater 的原窗口前进恢复
+
+针对 terminal 升级账本与本机 irreversible checking 不一致、旧健康条件不可由 updater 改变的恢复，新增独立 forward recovery。旧 batch/start、operation 全快照、旧 proof、失败与 unconfirmed 历史保留；新 binding 的健康和 receipt 不解释为旧 batch committed。恢复不调用旧 terminal retry、不新建升级 batch、不回滚已接单数据库。
+
+第一跳是新产物的本机 installer，不依赖旧 updater 新 RPC。仅支持经逐项核验的 systemd 用户 simple service：固定 regular ExecStart、原参数和配置、KillMode=process、SIGTERM、Restart=on-failure。installer 在 unit 外运行，独立排他锁；停止 updater 后证明旧 MainPID 退出、child 完整身份保持、同 state/同 flock inode，原子替换固定 updater 产物。新进程从持久 journal 进入 adopt，普通 Step 在恢复期间被阻挡。未知策略/身份/持久化结果拒绝；不提供 shell kill、unit 修改或旧 binary 回装。
+
+恢复启用时在原 flock 下迁移至 format 2，独立 generation/CAS 和 updater epoch；format 1 原语义保留，旧 updater 不能读取 format 2。原窗口、operator UID、私有过期资源交接证据和物理 writer 退出证明为新授权条件；历史 writer 用 PID/start、launch 来源与实际退出事实绑定，无法取得的 executable hash 留空表示 unknown，不能用它替代退出证明。live server/updater/candidate 仍要求完整固定 hash 身份；旧 grant 不续期。停止和启动先持久意图，恢复 stopping 只观察退出；启动不确定只收养唯一精确 launch，零或多个均 unknown，不跨超时重复启动。
+
+successor 在 App 构造时 fence 新 owner/main 业务写入与新 runner claim，已提交请求先去重并重新授权，可信原生历史适配器仅可为既有 thread/turn/item 补记终态事实；在公开服务前向固定 updater 核对 durable 授权和自身内核身份，并通过 app 事务登记独立行。recovery health 验实际进程、binding、协议/schema、DB 读取、登记/fence 与已配置组件 readiness，区别于首次安装的 MainDrained；同 boot 至少两个递增样本，错误清计数。Current、process、独立 committed proof 和 recovery receipt 在同一次 fsync/rename/dir-fsync 中持久；旧 proof 留历史，旧 operation 不伪造 terminal。
+
+receipt 文件先持久，再由 app 单事务追加 ledger link、事件、请求和本机 audit outbox，并释放 admission fence。DB 失败仅按稳定 link request 重放；updater 只在精确 receipt 和已完成 app 关联后归档原 operation、解除 unfinished 占位。status 分列原 unconfirmed 与 successor committed/link 状态。执行器回调保持私有 socket 权限，CLI 提供完整 plan/apply/status、筛选/分页及固定请求恢复。新增本机协议不改变 runner wire 2/1；追加存储迁移，不修改历史迁移。Refs: D84、D142；见[计划](plans/forward-recovery.md)与[启用说明](forward-recovery.md)。
+
+D154 补充：恢复资源交接区分本机 kernel writer 证明与固定远端证据文件的操作者见证，远端 PID 不进入本机 `/proc` 校验。owner operation 先去重和重新授权，恢复 fence 仅拒绝新动作，原归档 body admission 不变；CLI 校验并执行同一私有安装器副本。

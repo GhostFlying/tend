@@ -60,6 +60,14 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 		mu.Lock()
 		calls = append(calls, recorded{r.Method, r.URL.Path, r.Header.Get("Authorization"), body})
 		mu.Unlock()
+		if r.URL.Path == "/upgrades/recovery/status" {
+			fmt.Fprint(w, `{"plan":{"recovery_id":"forward"},"linked":true}`)
+			return
+		}
+		if r.URL.Path == "/status" || strings.HasPrefix(r.URL.Path, "/recovery/") {
+			fmt.Fprint(w, `{"state":{"generation":2,"recoveries":{}}}`)
+			return
+		}
 		if r.URL.Path == "/api/v1/events" || r.URL.Path == "/api/v1/messaging/events" {
 			fmt.Fprint(w, "event: start\ndata: {\"event_seq\":1}\n\n")
 			return
@@ -135,14 +143,26 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 	if err = os.WriteFile(secret, bytes.Repeat([]byte{42}, 32), 0600); err != nil {
 		t.Fatal(err)
 	}
+	installerPath := filepath.Join(dir, "installer")
+	installerBytes := []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+	if err := os.WriteFile(installerPath, installerBytes, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	installerSum := sha256.Sum256(installerBytes)
+	recoveryPath := filepath.Join(dir, "recovery.json")
 	for _, entry := range CapabilityBindings() {
 		t.Run(entry.Capability+"/"+entry.Command, func(t *testing.T) {
 			env := newTestEnv(t, remote.URL)
 			output := filepath.Join(dir, "output.bin")
+			requestID := env.IDs.New(protocol.PrefixRequest)
+			recoveryJSON, _ := json.Marshal(protocol.ForwardRecoveryPlan{RecoveryID: "forward", RequestID: requestID, Original: protocol.UpgradeBinding{UpgradeID: "original"}})
+			if err := os.WriteFile(recoveryPath, recoveryJSON, 0o600); err != nil {
+				t.Fatal(err)
+			}
 			_ = os.Remove(output)
 			args := append([]string(nil), entry.Example...)
 			for i, arg := range args {
-				args[i] = strings.NewReplacer("{server}", remote.URL, "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", env.IDs.New(protocol.PrefixRequest)).Replace(arg)
+				args[i] = strings.NewReplacer("{server}", remote.URL, "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
 			}
 			mu.Lock()
 			calls = nil
@@ -155,6 +175,10 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			seen := append([]recorded(nil), calls...)
 			mu.Unlock()
 			matched := false
+			if strings.HasPrefix(entry.Capability, "local EXEC updater handoff ") {
+				action := strings.TrimPrefix(entry.Capability, "local EXEC updater handoff ")
+				matched = strings.Contains(env.out.String(), "handoff\n"+action+"\n--config\n")
+			}
 			for _, call := range seen {
 				if method, path, ok := strings.Cut(expected, " "); ok {
 					if call.method == method && capabilityPathMatches(path, call.path) {

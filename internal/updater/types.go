@@ -50,12 +50,7 @@ type Config struct {
 	StopTimeoutSeconds   int64 `json:"stop_timeout_seconds,omitempty"`
 }
 
-type Identity struct {
-	PID        int    `json:"pid"`
-	StartTicks uint64 `json:"start_ticks"`
-	LaunchID   string `json:"launch_id"`
-	SHA256     string `json:"sha256"`
-}
+type Identity = protocol.RecoveryIdentity
 type Version struct {
 	Protocol       int64            `json:"protocol"`
 	StorageVersion int64            `json:"storage_version"`
@@ -118,6 +113,12 @@ type CommittedProof struct {
 	Process Identity `json:"process"`
 }
 type State struct {
+	UpdaterBootID  string                         `json:"updater_boot_id,omitempty"`
+	Generation     uint64                         `json:"generation,omitempty"`
+	UpdaterEpoch   string                         `json:"updater_epoch,omitempty"`
+	Recovery       *ForwardRecovery               `json:"recovery,omitempty"`
+	Recoveries     map[string]ForwardRecovery     `json:"recoveries,omitempty"`
+	ProofHistory   []CommittedProof               `json:"proof_history,omitempty"`
 	Configurations map[string]StagedConfiguration `json:"configurations,omitempty"`
 	CommittedProof *CommittedProof                `json:"committed_proof,omitempty"`
 	RollbackProof  *RollbackProof                 `json:"rollback_proof,omitempty"`

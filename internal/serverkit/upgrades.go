@@ -91,7 +91,27 @@ func prepareUpgradeController(cfg *UpgradeConfig, a *app.App, front *mainthread.
 	if process == "" {
 		process = ids.New(protocol.PrefixLaunch)
 	}
-	return upgradectl.New(upgradectl.Config{Instance: cfg.Instance, ProcessInstance: process, BinarySHA256: sum, ControlSocket: cfg.ControlSocket, UpdaterSocket: cfg.UpdaterSocket, ReleaseDir: cfg.ReleaseDir, DrainMillis: time.Duration(cfg.DrainTimeout).Milliseconds(), RestartMillis: time.Duration(cfg.RestartBudget).Milliseconds(), GrantMillis: time.Duration(cfg.GrantDuration).Milliseconds()}, a, ids, func(ctx context.Context) (app.ServerObservation, error) {
+	return upgradectl.New(upgradectl.Config{RecoveryReady: func(ctx context.Context) error {
+		if _, err := a.CurrentUpgrade(ctx); err != nil {
+			return err
+		}
+		if front != nil {
+			if err := front.RecoveryReadiness(ctx); err != nil {
+				return err
+			}
+		}
+		if background != nil {
+			if err := background.RecoveryReadiness(ctx); err != nil {
+				return err
+			}
+		}
+		if uncertain, err := a.AgentCompactionsUncertain(ctx); err != nil {
+			return err
+		} else if uncertain {
+			return errors.New("agent compaction needs reconciliation")
+		}
+		return nil
+	}, Instance: cfg.Instance, ProcessInstance: process, BinarySHA256: sum, ControlSocket: cfg.ControlSocket, UpdaterSocket: cfg.UpdaterSocket, ReleaseDir: cfg.ReleaseDir, DrainMillis: time.Duration(cfg.DrainTimeout).Milliseconds(), RestartMillis: time.Duration(cfg.RestartBudget).Milliseconds(), GrantMillis: time.Duration(cfg.GrantDuration).Milliseconds()}, a, ids, func(ctx context.Context) (app.ServerObservation, error) {
 		var agents []upgradeDrainer
 		if front != nil {
 			agents = append(agents, front)

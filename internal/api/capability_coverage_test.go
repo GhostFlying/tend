@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/cli"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func validateCapabilityCoverage(capabilities []string, bindings []cli.CapabilityBinding) error {
@@ -61,13 +62,16 @@ func TestPublicCapabilityCoverageRejectsMissingAndNewEntries(t *testing.T) {
 // Updater authorization/health callbacks are executor-only, not operator commands.
 func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	expected := map[string]bool{}
+	for _, action := range protocol.UpdaterHandoffActions() {
+		expected["local EXEC updater handoff "+action] = true
+	}
 
 	// Scan every operator-handler source, not a hand-maintained file subset.
 	// Runner execution HTTP lives in runnerapi; the updater callbacks below
 	// remain explicitly classified as internal machine-authority operations.
-	internal := map[string]string{"/updater/authorize": "updater authority binding", "/updater/health": "updater health receipt"}
-	get := map[string]bool{"/agents/status": true, "/agents/registration": true, "/repositories": true, "/archive/status": true, "/upgrades/status": true}
-	for _, root := range []string{"../runner", "../../cmd/tend-runner", "../upgradectl"} {
+	internal := map[string]string{"/updater/authorize": "updater authority binding", "/updater/health": "updater health receipt", "/updater/recovery/health": "successor readiness callback", "/recovery/link": "server ledger linkage callback", "/bootstrap": "fixed updater installation bootstrap", "/upgrade": "coordinator executor action", "/stage-config": "coordinator configuration action", "/restart": "disabled direct restart", "/retry": "coordinator retry", "/cancel": "coordinator cancellation"}
+	get := map[string]bool{"/agents/status": true, "/agents/registration": true, "/repositories": true, "/archive/status": true, "/upgrades/status": true, "/upgrades/recovery/status": true, "/status": true}
+	for _, root := range []string{"../runner", "../../cmd/tend-runner", "../upgradectl", "../updater"} {
 		err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
@@ -126,7 +130,7 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 			})
 			for _, decl := range file.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Body == nil || !strings.HasSuffix(fn.Name.Name, "Handler") {
+				if !ok || fn.Body == nil || (!strings.HasSuffix(fn.Name.Name, "Handler") && !(strings.HasPrefix(name, "../updater/") && fn.Name.Name == "Serve")) {
 					continue
 				}
 				ast.Inspect(fn.Body, func(node ast.Node) bool {

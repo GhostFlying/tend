@@ -47,7 +47,11 @@ func atomicWrite(path string, data []byte, mode os.FileMode) (err error) {
 	}
 	return syncDir(filepath.Dir(path))
 }
-func copyAtomic(src, dst string, mode os.FileMode) error {
+func copyAtomic(src, dst string, mode os.FileMode) error { return copyPinnedAtomic(src, dst, mode, "") }
+
+// copyPinnedAtomic verifies the materialized temporary file before publishing
+// it. A source changed after preflight can never become the fixed executable.
+func copyPinnedAtomic(src, dst string, mode os.FileMode, expected string) error {
 	f, err := os.Open(src)
 	if err != nil {
 		return err
@@ -78,6 +82,15 @@ func copyAtomic(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	ok = true
+	if expected != "" {
+		sum, err := hashFile(tmp)
+		if err != nil {
+			return err
+		}
+		if sum != expected {
+			return fmt.Errorf("updater: copied artifact differs from the reviewed digest")
+		}
+	}
 	if err := os.Rename(tmp, dst); err != nil {
 		return err
 	}

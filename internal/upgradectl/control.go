@@ -32,6 +32,7 @@ type Backend interface {
 	ServerUpgradeHealth(context.Context, protocol.UpgradeBinding) (protocol.UpgradeHealth, error)
 }
 type Config struct {
+	RecoveryReady   func(context.Context) error
 	Now             func() time.Time
 	Instance        string
 	ProcessInstance string
@@ -47,11 +48,12 @@ type Config struct {
 	Interval        time.Duration
 }
 type Controller struct {
-	cfg     Config
-	app     Backend
-	ids     protocol.IDGen
-	observe func(context.Context) (app.ServerObservation, error)
-	log     *slog.Logger
+	recovery *recoveryRuntime
+	cfg      Config
+	app      Backend
+	ids      protocol.IDGen
+	observe  func(context.Context) (app.ServerObservation, error)
+	log      *slog.Logger
 }
 
 func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context) (app.ServerObservation, error), log *slog.Logger) (*Controller, error) {
@@ -163,6 +165,9 @@ func (c *Controller) Change(ctx context.Context, action string, r protocol.Upgra
 	return v, err
 }
 func (c *Controller) tick(ctx context.Context) error {
+	if handled, err := c.recoveryTick(ctx); handled || err != nil {
+		return err
+	}
 	if err := c.cancelStaged(ctx); err != nil {
 		return err
 	}
@@ -203,7 +208,16 @@ func (c *Controller) Handler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		var value any
 		var err error
-		if r.URL.Path == "/upgrades/status" && r.Method == http.MethodGet {
+		if r.URL.Path == "/upgrades/recovery/status" && r.Method == http.MethodGet {
+			backend, ok := c.app.(recoveryBackend)
+			if !ok {
+				err = errors.New("upgradectl: recovery ledger unavailable")
+			} else {
+				var row protocol.ForwardRecoveryLedger
+				row, _, err = backend.ForwardRecoveryReadiness(r.Context(), r.URL.Query().Get("recovery_id"))
+				value = row
+			}
+		} else if r.URL.Path == "/upgrades/status" && r.Method == http.MethodGet {
 			value, err = c.app.CurrentUpgrade(r.Context())
 		} else if r.Method == http.MethodPost {
 			switch r.URL.Path {
@@ -225,6 +239,11 @@ func (c *Controller) Handler() http.Handler {
 				var binding protocol.UpgradeBinding
 				if err = decode(r, &binding); err == nil {
 					value, err = c.app.ServerUpgradeAuthorize(r.Context(), binding)
+				}
+			case "/updater/recovery/health":
+				var plan protocol.ForwardRecoveryPlan
+				if err = decode(r, &plan); err == nil {
+					value, err = c.recoveryHealth(r.Context(), plan)
 				}
 			case "/updater/health":
 				var binding protocol.UpgradeBinding

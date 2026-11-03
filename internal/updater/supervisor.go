@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -110,8 +111,24 @@ func Open(cfg Config, opts Options) (*Supervisor, error) {
 	} else if err != nil {
 		return fail(err)
 	}
-	if state.Format != 1 || state.InstanceID != cfg.InstanceID {
+	if (state.Format != 1 && state.Format != 2) || state.InstanceID != cfg.InstanceID {
 		return fail(errors.New("updater: durable state belongs to a different instance"))
+	}
+	if state.Format == 2 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Recovery == nil) {
+		return fail(errors.New("updater: incomplete format 2 recovery ownership"))
+	}
+	if state.Format == 2 {
+		epoch, err := opts.NewID()
+		if err != nil {
+			return fail(err)
+		}
+		boot, _, err := opts.BootClock()
+		if err != nil {
+			return fail(err)
+		}
+		state.UpdaterEpoch = epoch
+		state.UpdaterBootID = boot
+		state.Generation++
 	}
 	if err := s.writeState(s.statePath(), state); err != nil {
 		return fail(err)
@@ -131,6 +148,14 @@ func (s *Supervisor) statePath() string { return filepath.Join(s.cfg.StateDir, "
 func (s *Supervisor) durabilityError() error {
 	if s.persistenceErr != nil {
 		return fmt.Errorf("updater: durability unknown; reopen supervisor before further action: %w", s.persistenceErr)
+	}
+	if s.lock == nil {
+		return errors.New("updater: supervisor is closed")
+	}
+	held, heldErr := s.lock.Stat()
+	current, currentErr := os.Lstat(filepath.Join(s.cfg.StateDir, "supervisor.lock"))
+	if heldErr != nil || currentErr != nil || !os.SameFile(held, current) {
+		return errors.New("updater: supervisor lock inode changed; no further writes allowed")
 	}
 	return nil
 }
@@ -152,6 +177,9 @@ func (s *Supervisor) save() error {
 		}
 		s.state.Terminals[op.ID] = TerminalReceipt{Binding: op.Binding, Phase: op.Phase}
 	}
+	if s.state.Format == 2 {
+		s.state.Generation++
+	}
 	if err := s.writeState(s.statePath(), cloneState(s.state)); err != nil {
 		s.persistenceErr = err
 		return s.durabilityError()
@@ -159,49 +187,11 @@ func (s *Supervisor) save() error {
 	s.durable = cloneState(s.state)
 	return nil
 }
-func cloneState(v State) State { // no aliases to internal mutable operation state
-	if v.Configurations != nil {
-		cloned := make(map[string]StagedConfiguration, len(v.Configurations))
-		for id, c := range v.Configurations {
-			c.Target.Providers = append([]string(nil), c.Target.Providers...)
-			cloned[id] = c
-		}
-		v.Configurations = cloned
-	}
-	if v.CommittedProof != nil {
-		proof := *v.CommittedProof
-		v.CommittedProof = &proof
-	}
-	if v.RollbackProof != nil {
-		proof := *v.RollbackProof
-		v.RollbackProof = &proof
-	}
-	if v.Terminals != nil {
-		cloned := make(map[string]TerminalReceipt, len(v.Terminals))
-		for id, r := range v.Terminals {
-			cloned[id] = r
-		}
-		v.Terminals = cloned
-	}
-	if v.Operation != nil {
-		o := *v.Operation
-		if o.Configuration != nil {
-			c := *o.Configuration
-			c.Target.Providers = append([]string(nil), c.Target.Providers...)
-			o.Configuration = &c
-		}
-		if o.RollbackAuthorization != nil {
-			auth := *o.RollbackAuthorization
-			o.RollbackAuthorization = &auth
-		}
-		o.Backups = append([]BackupFile(nil), o.Backups...)
-		if o.Grant != nil {
-			g := *o.Grant
-			o.Grant = &g
-		}
-		v.Operation = &o
-	}
-	return v
+func cloneState(v State) State {
+	raw, _ := json.Marshal(v)
+	var cloned State
+	_ = json.Unmarshal(raw, &cloned)
+	return cloned
 }
 func (s *Supervisor) Status() State {
 	s.mu.Lock()
@@ -287,6 +277,14 @@ func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, conf
 	if err := s.durabilityError(); err != nil {
 		return err
 	}
+	if s.state.Recovery != nil && s.state.Recovery.Phase != "ledger_linked" {
+		return errors.New("updater: forward recovery owns this window")
+	}
+	for _, r := range s.state.Recoveries {
+		if r.Plan.Original.UpgradeID == id || r.Plan.RecoveryID == id {
+			return errors.New("updater: historical forward recovery identity cannot start a new upgrade")
+		}
+	}
 	if s.state.Current.Binary == "" {
 		return errors.New("updater: bootstrap required")
 	}
@@ -354,6 +352,9 @@ func (s *Supervisor) Cancel(id string) error { return s.CancelExpected(id, "") }
 func (s *Supervisor) CancelExpected(id, expectedPhase string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.state.Recovery != nil && s.state.Recovery.Phase != "ledger_linked" {
+		return errors.New("updater: forward recovery owns this window")
+	}
 	if err := s.durabilityError(); err != nil {
 		return err
 	}
@@ -398,6 +399,9 @@ func (s *Supervisor) CancelExpected(id, expectedPhase string) error {
 func (s *Supervisor) Retry(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.state.Recovery != nil && s.state.Recovery.Phase != "ledger_linked" {
+		return errors.New("updater: forward recovery owns this window")
+	}
 	if err := s.durabilityError(); err != nil {
 		return err
 	}
@@ -447,6 +451,16 @@ func (s *Supervisor) Step(ctx context.Context) error {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if r := s.state.Recovery; r != nil && r.Phase != "ledger_linked" {
+		err := s.recoveryStep(ctx)
+		if err != nil && s.persistenceErr == nil {
+			r.LastError = err.Error()
+			if e := s.save(); e != nil {
+				return e
+			}
+		}
 		return err
 	}
 	op := s.state.Operation
