@@ -232,6 +232,7 @@
 }
 .child {
   display: flex;
+  height: auto;
   align-items: flex-start;
   gap: var(--space-1);
   width: 100%;
