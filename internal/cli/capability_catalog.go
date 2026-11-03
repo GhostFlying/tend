@@ -126,6 +126,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("GET /api/v1/issues/{id}", "issue show", "sample", "--json"),
 		binding("GET /api/v1/issues/{id}/activity", "issue activity", "sample"),
 		binding("GET /api/v1/issues/{id}/results", "issue results", "sample"),
+		binding("GET /api/v1/issues/{id}/reuse-status", "issue reuse-status", "sample", "--json"),
 		binding("GET /api/v1/issues/{id}/context", "issue context", "sample"),
 		binding("GET /api/v1/issues/{id}/followups", "issue followups", "sample"),
 		binding("GET /api/v1/issues/{id}/followups/{rule}/history", "issue followup-history", "sample", "sample"),

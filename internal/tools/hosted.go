@@ -107,6 +107,7 @@ var hostedMutations = []hostedMutation{
 	{"issues_cancel", "Record cancellation intent before settling outstanding tasks and obligations.", "issue", protocol.IssueControlPayload{}, app.CanonicalOwnerIssueCommand{Action: "cancel"}, false},
 	{"issues_finish_cancel", "Finish cancellation with explicit source/follow-on dispositions after real execution has settled.", "issue", protocol.IssueEndpointPayload{}, app.CanonicalOwnerIssueCommand{Action: "finish_cancel"}, false},
 	{"issues_close", "Close only this Issue after reviewing child/task results and obligations. For task results use evidence kind acceptance with the passed acceptance_id; delivery requires a verified provider delivery observation, not an artifact_id. Owner evidence may reference this Issue's resolved decision/action Attention. Omit source_dispositions and expected_context_revision once source obligations have already been reviewed; context CAS accompanies actual source dispositions.", "issue", protocol.IssueEndpointPayload{}, app.CanonicalOwnerIssueCommand{Action: "close"}, false},
+	{"issues_reuse", "Explicitly reuse this exact active/paused original Issue from its recorded creation request and current revision/epoch. Attach only the current admitted owner input with its source/content association revisions; preserve ownership, plan, terminal tasks and source review duties. Never infer duplicates from titles or replace an unknown creation request.", "issue", protocol.ReuseIssuePayload{}, app.ReuseIssue{}, true},
 	{"issues_reopen", "Reopen from an exact current admitted owner source and restore continuing coordination. Preserve terminal implementation tasks; reopen grants no merge or deployment authority.", "issue", protocol.IssueControlPayload{}, app.CanonicalOwnerIssueCommand{Action: "reopen"}, true},
 	{"issues_dependencies", "Revise this Issue's explicit completion dependencies without adding task execution ownership.", "issue", protocol.SetIssueDependenciesPayload{}, app.CanonicalOwnerIssueCommand{Action: "dependencies"}, false},
 	{"issues_review_sources", "Review named late source shares on a terminal Issue while retaining its terminal history.", "issue", protocol.ReviewIssueSourcesPayload{}, app.CanonicalOwnerIssueCommand{Action: "review_sources"}, false},
@@ -163,11 +164,14 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 			continue
 		}
 		spec := harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)}
-		if m.name == "issues_reopen" || m.name == "issues_create" || m.name == "issues_request_manager" || m.name == "issues_request_owner" {
+		if m.name == "issues_reuse" || m.name == "issues_reopen" || m.name == "issues_create" || m.name == "issues_request_manager" || m.name == "issues_request_owner" {
 			var root map[string]any
 			_ = json.Unmarshal(spec.InputSchema, &root)
 			body := root["properties"].(map[string]any)["payload"].(map[string]any)
 			body["required"] = append(body["required"].([]any), "source_message_id")
+			if m.name == "issues_reuse" {
+				body["required"] = append(body["required"].([]any), "reason")
+			}
 			props := body["properties"].(map[string]any)
 			if m.name == "issues_create" {
 				delete(props, "manager")
@@ -176,7 +180,7 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 				body["required"] = append(body["required"].([]any), "category_id")
 			}
 			props["source_message_id"] = map[string]any{"type": "string", "minLength": 1, "description": "Exact admitted message_id from conversation_turn_read. Never append @revision or substitute an attachment ID."}
-			if m.name == "issues_create" || m.name == "issues_reopen" {
+			if m.name == "issues_reuse" || m.name == "issues_create" || m.name == "issues_reopen" {
 				body["required"] = append(body["required"].([]any), "expected_source_revision")
 				props["expected_source_revision"] = map[string]any{"type": "integer", "minimum": 1, "description": "Exact content_revision of source_message_id from conversation_turn_read; required with the source message ID."}
 			}
@@ -186,6 +190,7 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	}
 	if purpose == agentconfig.Main {
 		out = append(out, harness.ToolSpec{Name: "upgrades_start", Description: "Start an explicitly approved delivery's verified immutable local release asynchronously. park_idle_managers closes only idle manager processes under this window, preserving logical responsibility for new runs after completion/cancellation. Never wait inside the initiating worker or manager for its own installation. Unknown uses the same request_id/upgrade_id and original payload; read upgrade status through the CLI, never start a second window.", InputSchema: exportSchema(json.RawMessage(argumentSchema(protocol.UpgradeStartRequest{})))})
+		out = append(out, harness.ToolSpec{Name: "issues_reuse_status", Description: "Read the exact original Issue creation receipt identity and current responsibility before an explicit reuse. Missing legacy evidence is unknown, not permission to recreate.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueResourceArgs{})))})
 	}
 	if purpose == agentconfig.Main || purpose == agentconfig.IssueManager {
 		out = append(out, harness.ToolSpec{Name: "issues_list", Description: "Discover canonical Issues and responsibility hierarchy. Managers see only their Issue and descendants; listing grants no write permission.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueListArgs{})))})

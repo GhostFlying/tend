@@ -869,3 +869,6 @@ D170 的恢复路径 RefreshHandoff（包括 injected→created）和已确定�
 D168 的 Attention 当前性投影同样读取冻结来源的适用性，不能因单次 pause 推进
 control revision 就把仍有效的问题标为过期。明确退休的旧问题退出 open 工作列表，
 但按原 ID 与 includeArchived 历史仍能读取原问题、withdrawn Attention 和不可变来源。
+### D172 显式复用原 Issue 责任
+
+主协调器不能按标题猜测 Issue 相同。新的 reuse 动作识别 issues.create 或 consultation promote 新建分支的精确成功创建回执，指定确切 Issue 及当前 revision/assignment epoch，把当前准入的 owner 新来源按消息双 revision CAS 关联到原责任。保留全部原关联、owner 修正与新来源 review fence，不创建 Issue、不隐式 reopen/转责/复活 Task，不改 plan/完成/交付事实。旧无可证创建来源明确 unknown/refuse；默认 create 与合法相似但不同的 Issue 不变。共享 Main 控制准入依据实际 native delivery/consumed steer 及原 logical execution 的恢复链，不把分类或 adoption 可扩充的复查集合当新授权。旧 active 显示关联原样保留，不因此转成 canonical 控制权限。真实澄清继承仅可更正原 native 已准入、相同 source/operation/target/intent 的确定失败委派；不把 adoption 当一般新授权，不重发未知结果。Refs: docs/plans/explicit-issue-reuse.md。

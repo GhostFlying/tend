@@ -155,10 +155,22 @@ func TestCorrectedDelegationResolvesOnlyItsExactSource(t *testing.T) {
 			source := id
 			if correction == "other_source" {
 				source = unconsumedDelegationSource(t, h)
-				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-					_, err := tx.Exec(t.Context(), `INSERT INTO logical_turn_messages(logical_turn_id,message_id) VALUES(?,?)`, turn.RequestID, source)
-					return err
-				}); err != nil {
+				steerDelivery, ok, err := h.app.ClaimMainSteer(t.Context(), turn.RequestID, turn.ThreadID, turn.TurnID)
+				if err != nil || !ok {
+					t.Fatal(steerDelivery, ok, err)
+				}
+				steer, ok, err := h.app.MainSteer(t.Context(), steerDelivery.RequestID)
+				if err != nil || !ok || steer.MessageID != source {
+					t.Fatal(steer, ok, err)
+				}
+				steer.InputText = "Actual native corrected source"
+				if err := h.app.UpdateMainSteer(t.Context(), steer); err != nil {
+					t.Fatal(err)
+				}
+				if _, ok, err := h.app.ConsumeMainSteer(t.Context(), turn.ThreadID, turn.TurnID, steer.InputText, "actual-corrected-item"); err != nil || !ok {
+					t.Fatal(ok, err)
+				}
+				if err := h.app.FinishDelivery(t.Context(), steerDelivery, DeliveryResult{Outcome: Delivered}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -273,7 +285,8 @@ func TestClarificationInheritsDelegationFailureAndItsCorrection(t *testing.T) {
 			id, delivery := h.say("Repair the mobile PWA")
 			turn := startHostedReview(t, h, "main", delivery)
 			p := delegationPayload(id)
-			expectWorkCode(t, hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, CanonicalOwnerIssueCommand{Action: "create"}), protocol.CodeInvalidRequest)
+			failed := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, CanonicalOwnerIssueCommand{Action: "create"})
+			expectWorkCode(t, failed, protocol.CodeInvalidRequest)
 			wait := AwaitTurnClarification{RequestID: turn.RequestID}
 			if op := h.exec(mainAgent, h.env(wait.Operation(), protocol.Target{Type: "logical_turn", ID: turn.RequestID}, protocol.TurnClarification{Question: "Which mobile browser?"}, nil), wait); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
@@ -302,9 +315,42 @@ func TestClarificationInheritsDelegationFailureAndItsCorrection(t *testing.T) {
 			}
 			if correct {
 				p.ExpectedSourceRevision = rev(1)
+				checkCorrection := func(request, operation string, payload protocol.CreateIssuePayload, want bool) {
+					t.Helper()
+					env := h.env(operation, protocol.Target{Type: "issue"}, payload, nil)
+					if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+						got, err := inheritedDelegationCorrectionAdmitted(t.Context(), &Exec{Principal: mainAgent, Env: env}, tx.Q(), request, payload.SourceMessageID, operation)
+						if err == nil && got != want {
+							t.Fatalf("request=%s operation=%s inherited correction=%t want %t", request, operation, got, want)
+						}
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				checkCorrection(next.RequestID, "issues.create", p, true)
+				checkCorrection(turn.RequestID, "issues.create", p, false)
+				changedIntent := p
+				changedIntent.Plan.Intent = "A different business obligation"
+				checkCorrection(next.RequestID, "issues.create", changedIntent, false)
+				checkCorrection(next.RequestID, "issues.reuse", p, false)
+				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='unknown' WHERE domain=? AND request_id=?`, mainAgent.DedupDomain(), failed.RequestID)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				checkCorrection(next.RequestID, "issues.create", p, false)
+				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='failed' WHERE domain=? AND request_id=?`, mainAgent.DedupDomain(), failed.RequestID)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
 				if op := hostedEffect(t, h, mainAgent, next, 2, protocol.Target{Type: "issue"}, nil, p, CanonicalOwnerIssueCommand{Action: "create"}); op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
+				checkCorrection(next.RequestID, "issues.create", p, false)
 			}
 			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 				reason, err := delegationBlockReason(t.Context(), tx.Q(), next.RequestID)

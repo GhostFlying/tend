@@ -12,12 +12,23 @@ import (
 
 func (s *Service) canonicalIssueRead(ctx context.Context, c Call, execution store.HostedExecution) (harness.ToolResult, bool) {
 	switch c.Tool {
-	case "issues_list", "issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read":
+	case "issues_reuse_status", "issues_list", "issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read":
 	default:
 		return harness.ToolResult{}, false
 	}
 	if execution.Selection.Purpose != agentconfig.Main && execution.Selection.Purpose != agentconfig.IssueManager {
 		return hostedAnswer(nil, protocol.Errorf(protocol.CodeForbidden, "consultation has no Issue planning reads")), true
+	}
+	if c.Tool == "issues_reuse_status" {
+		if execution.Selection.Purpose != agentconfig.Main {
+			return hostedAnswer(nil, protocol.Errorf(protocol.CodeForbidden, "only Main reads Issue reuse origin")), true
+		}
+		var p hostedIssueResourceArgs
+		if err := decode(c.Arguments, &p); err != nil {
+			return hostedAnswer(nil, err), true
+		}
+		value, err := s.app.IssueReuseStatus(ctx, p.IssueID)
+		return hostedAnswer(value, err), true
 	}
 	var value any
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {

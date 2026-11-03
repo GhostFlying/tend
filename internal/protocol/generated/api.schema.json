@@ -4476,6 +4476,80 @@
       "title": "InterruptReplyPayload",
       "type": "object"
     },
+    "Issue": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "assignment_state": {
+          "type": "string"
+        },
+        "closure": {
+          "$ref": "#/definitions/IssueClosure"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "depends_on": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "parent_issue_id": {
+          "type": "string"
+        },
+        "pending_assignee": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "pending_handoff_id": {
+          "type": "string"
+        },
+        "plan": {
+          "$ref": "#/definitions/IssuePlan"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/definitions/IssueState"
+        },
+        "updated_at": {
+          "type": "integer"
+        },
+        "work_status": {
+          "$ref": "#/definitions/IssueWorkStatus"
+        }
+      },
+      "required": [
+        "issue_id",
+        "state",
+        "assignee",
+        "assignment_epoch",
+        "assignment_state",
+        "revision",
+        "plan",
+        "depends_on",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "Issue",
+      "type": "object"
+    },
     "IssueActivityEntry": {
       "additionalProperties": false,
       "properties": {
@@ -6605,6 +6679,59 @@
         "more"
       ],
       "title": "IssueResultPage",
+      "type": "object"
+    },
+    "IssueReuseResult": {
+      "additionalProperties": false,
+      "properties": {
+        "issue": {
+          "$ref": "#/definitions/Issue"
+        },
+        "next_step": {
+          "type": "string"
+        },
+        "original_request_id": {
+          "type": "string"
+        },
+        "reused": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/definitions/MessageAssociations"
+        }
+      },
+      "required": [
+        "issue",
+        "original_request_id",
+        "source",
+        "reused",
+        "next_step"
+      ],
+      "title": "IssueReuseResult",
+      "type": "object"
+    },
+    "IssueReuseStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "issue": {
+          "$ref": "#/definitions/Issue"
+        },
+        "next_step": {
+          "type": "string"
+        },
+        "origin_observation": {
+          "type": "string"
+        },
+        "original_request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue",
+        "origin_observation",
+        "next_step"
+      ],
+      "title": "IssueReuseStatus",
       "type": "object"
     },
     "IssueSourceDisposition": {
@@ -9267,6 +9394,43 @@
         "runtimes"
       ],
       "title": "RetainedAgentDefinition",
+      "type": "object"
+    },
+    "ReuseIssuePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_association_revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "original_request_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "original_request_id",
+        "expected_association_revision"
+      ],
+      "title": "ReuseIssuePayload",
       "type": "object"
     },
     "ReviewIssueCompletionsPayload": {
@@ -13587,6 +13751,12 @@
     "IssueResultPage": {
       "$ref": "#/definitions/IssueResultPage"
     },
+    "IssueReuseResult": {
+      "$ref": "#/definitions/IssueReuseResult"
+    },
+    "IssueReuseStatus": {
+      "$ref": "#/definitions/IssueReuseStatus"
+    },
     "IssueTranscriptBlock": {
       "$ref": "#/definitions/IssueTranscriptBlock"
     },
@@ -13700,6 +13870,9 @@
     },
     "RespondInteraction": {
       "$ref": "#/definitions/RespondInteraction"
+    },
+    "ReuseIssuePayload": {
+      "$ref": "#/definitions/ReuseIssuePayload"
     },
     "ReviewIssueCompletionsPayload": {
       "$ref": "#/definitions/ReviewIssueCompletionsPayload"
