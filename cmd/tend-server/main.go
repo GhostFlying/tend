@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/serverkit"
 )
 
@@ -25,8 +27,20 @@ func main() {
 		}
 		return
 	}
+	capabilities := flag.Bool("capabilities", false, "print read-only capabilities and the actual executable SHA256 without loading configuration")
 	path := flag.String("config", "", "configuration file (HuJSON)")
 	flag.Parse()
+	if *capabilities {
+		report, err := release.CurrentServerCapabilities()
+		if err != nil {
+			log.Error("capability probe unavailable", "err", err)
+			os.Exit(1)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if err := serverkit.RunFile(ctx, *path, log); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("tend-server stopped", "err", err)
 		os.Exit(1)

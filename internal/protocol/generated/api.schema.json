@@ -5435,6 +5435,9 @@
             }
           ]
         },
+        "park_idle_managers": {
+          "type": "boolean"
+        },
         "server_instance": {
           "type": "string"
         }
@@ -12226,6 +12229,30 @@
       "title": "UpgradeHostView",
       "type": "object"
     },
+    "UpgradeManagerParkView": {
+      "additionalProperties": false,
+      "properties": {
+        "phase": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "run_id",
+        "phase"
+      ],
+      "title": "UpgradeManagerParkView",
+      "type": "object"
+    },
     "UpgradeView": {
       "additionalProperties": false,
       "properties": {
@@ -12245,6 +12272,12 @@
               "type": "null"
             }
           ]
+        },
+        "manager_parks": {
+          "items": {
+            "$ref": "#/definitions/UpgradeManagerParkView"
+          },
+          "type": "array"
         },
         "phase": {
           "type": "string"

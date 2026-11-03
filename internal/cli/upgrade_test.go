@@ -57,11 +57,11 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 	go func() { _ = server.Serve(listener) }()
 	te := newTestEnv(t, "http://unused.invalid")
 	req := te.IDs.New(protocol.PrefixRequest)
-	if code := te.main("upgrade", "--socket", socket, "--release", dir, "--upgrade-id", "batch", "--delivery-task", "approved-task", "--request-id", req, "--json"); code != exitOK {
+	if code := te.main("upgrade", "--socket", socket, "--release", dir, "--upgrade-id", "batch", "--delivery-task", "approved-task", "--park-idle-managers", "--request-id", req, "--json"); code != exitOK {
 		t.Fatalf("start=%d %s", code, te.errOut)
 	}
 	mu.Lock()
-	if start.RequestID != req || start.UpgradeID != "batch" || start.Release != dir || start.DeliveryTaskID != "approved-task" {
+	if start.RequestID != req || start.UpgradeID != "batch" || start.Release != dir || start.DeliveryTaskID != "approved-task" || !start.ParkIdleManagers {
 		t.Fatalf("identity lost: %+v", start)
 	}
 	mu.Unlock()

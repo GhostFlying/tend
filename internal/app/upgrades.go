@@ -19,6 +19,9 @@ const capabilityUpdater = "runner-updater-v1"
 // StartUpgrade receives an already verified immutable local bundle from the
 // local control service. The remotely supplied payload cannot choose binaries.
 type StartUpgrade struct {
+	ExecutionRequestID   string
+	ParkIdleManagers     bool
+	ServerCapabilities   []string
 	DeliveryTaskID       string
 	ArtifactSources      map[string]release.SourceIdentity
 	RunnerConfigurations map[string]protocol.RunnerConfiguration
@@ -38,6 +41,9 @@ func (StartUpgrade) Authorize(_ context.Context, x *Exec, _ store.Querier) error
 	return allowKinds(x.Principal, protocol.PrincipalSystem)
 }
 func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	if err := checkUpgradeExecution(ctx, tx.Q(), c.ExecutionRequestID); err != nil {
+		return Outcome{}, err
+	}
 	if prepared, err := archivePrepared(ctx, tx.Q()); err != nil {
 		return Outcome{}, err
 	} else if prepared {
@@ -45,6 +51,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	if err := c.Manifest.Validate(); err != nil || !release.ValidSHA(c.ManifestSHA256) || c.ManifestSize <= 0 || c.ServerInstance == "" || !release.ValidSHA(c.ServerHash) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid verified release")
+	}
+	if c.ParkIdleManagers && !slices.Contains(c.ServerCapabilities, release.ServerCapabilityManagerPark) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "candidate does not support manager park")
 	}
 	if c.Manifest.Protocol.Max < protocol.CurrentRunnerProtocol || c.Manifest.Protocol.Max > protocol.CurrentRunnerProtocol+1 || c.Manifest.Protocol.Min != max(0, c.Manifest.Protocol.Max-1) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "release must support exactly its current and previous protocol")
@@ -117,7 +126,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if source, ok := c.ArtifactSources[c.ServerHash]; ok && !source.Modified && validDeliverySHA(source.Commit) {
 		sourceCommit = source.Commit
 	}
-	r := store.UpgradeRow{View: protocol.UpgradeView{SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
+	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
 	if len(c.RunnerConfigurations) > 0 {
 		if len(c.RunnerConfigurations) != 1 || c.ServerHash != c.CurrentServerHash {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration maintenance requires one host and the current server binary")
@@ -221,6 +230,12 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "upgrade host set differs from the approved complete target set")
 		}
 		if _, err := tx.Exec(ctx, `UPDATE issue_delivery_executions SET upgrade_id=? WHERE task_id=? AND upgrade_id=''`, r.View.UpgradeID, c.DeliveryTaskID); err != nil {
+			return Outcome{}, err
+		}
+	}
+	if c.ParkIdleManagers {
+		r.ParkIdleManagers = true
+		if err := captureUpgradeManagers(ctx, x, tx, &r); err != nil {
 			return Outcome{}, err
 		}
 	}
@@ -338,87 +353,93 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 			return Outcome{}, err
 		}
 	} else {
-		switch r.View.Phase {
-		case "server_draining":
-			if c.Observation.MainDrained {
-				if c.Observation.BinarySHA256 == r.ServerHash {
-					matches, err := installedServerMatches(ctx, tx.Q(), r.Manifest)
-					if err != nil {
-						return Outcome{}, err
-					}
-					if !matches {
-						if err := attention("发布清单与当前 server 的协议或数据库版本不一致"); err != nil {
-							return Outcome{}, err
-						}
-						break
-					}
-					if r.DeliveryTaskID != "" {
-						if c.Observation.ProcessInstanceID == "" {
-							return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "current server identity is required for delivery readback")
-						}
-						r.ServerProcess = c.Observation.ProcessInstanceID
-						_, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
+		parkReady, err := advanceManagerParks(ctx, x, tx, &r)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if parkReady {
+			switch r.View.Phase {
+			case "server_draining":
+				if c.Observation.MainDrained {
+					if c.Observation.BinarySHA256 == r.ServerHash {
+						matches, err := installedServerMatches(ctx, tx.Q(), r.Manifest)
 						if err != nil {
 							return Outcome{}, err
 						}
+						if !matches {
+							if err := attention("发布清单与当前 server 的协议或数据库版本不一致"); err != nil {
+								return Outcome{}, err
+							}
+							break
+						}
+						if r.DeliveryTaskID != "" {
+							if c.Observation.ProcessInstanceID == "" {
+								return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "current server identity is required for delivery readback")
+							}
+							r.ServerProcess = c.Observation.ProcessInstanceID
+							_, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
+							if err != nil {
+								return Outcome{}, err
+							}
+							break
+						}
+						r.View.Phase = "runners"
+						r.Deadline = now + r.DrainMillis
 						break
 					}
-					r.View.Phase = "runners"
-					r.Deadline = now + r.DrainMillis
-					break
-				}
-				r.ServerPreviousHash = c.Observation.BinarySHA256
-				for _, h := range r.Hosts {
-					ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
-					if err != nil {
-						return Outcome{}, err
-					}
-					runs, err := store.ListOpenRunsOnHost(ctx, tx.Q(), h.HostID)
-					if err != nil {
-						return Outcome{}, err
-					}
-					grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: now + r.GrantMillis, RunIDs: []string{}}
-					for _, run := range runs {
-						lease, err := store.GetLeaseByRun(ctx, tx.Q(), run.RunID)
+					r.ServerPreviousHash = c.Observation.BinarySHA256
+					for _, h := range r.Hosts {
+						ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
 						if err != nil {
 							return Outcome{}, err
 						}
-						if lease.Status != store.LeaseActive || run.ObservedState == protocol.RunUnknown {
-							return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run %s must reconcile before server restart", run.RunID)
+						runs, err := store.ListOpenRunsOnHost(ctx, tx.Q(), h.HostID)
+						if err != nil {
+							return Outcome{}, err
 						}
-						grant.RunIDs = append(grant.RunIDs, run.RunID)
-						if err := tx.SetLease(ctx, lease.LeaseID, store.LeaseActive, store.LeaseActive, max(lease.ExpiresAt, grant.DeadlineMillis), now); err != nil {
+						grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: now + r.GrantMillis, RunIDs: []string{}}
+						for _, run := range runs {
+							lease, err := store.GetLeaseByRun(ctx, tx.Q(), run.RunID)
+							if err != nil {
+								return Outcome{}, err
+							}
+							if lease.Status != store.LeaseActive || run.ObservedState == protocol.RunUnknown {
+								return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run %s must reconcile before server restart", run.RunID)
+							}
+							grant.RunIDs = append(grant.RunIDs, run.RunID)
+							if err := tx.SetLease(ctx, lease.LeaseID, store.LeaseActive, store.LeaseActive, max(lease.ExpiresAt, grant.DeadlineMillis), now); err != nil {
+								return Outcome{}, err
+							}
+						}
+						ctl.Revision++
+						ctl.Mode = protocol.RunnerMaintenance
+						ctl.UpgradeID = r.View.UpgradeID
+						if ctl.CancelledUpgradeID != r.View.UpgradeID {
+							ctl.CancelledUpgradeID = ""
+						}
+						ctl.ReleaseID = r.View.ReleaseID
+						ctl.Authorization = grant
+						if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
 							return Outcome{}, err
 						}
 					}
-					ctl.Revision++
-					ctl.Mode = protocol.RunnerMaintenance
-					ctl.UpgradeID = r.View.UpgradeID
-					if ctl.CancelledUpgradeID != r.View.UpgradeID {
-						ctl.CancelledUpgradeID = ""
-					}
-					ctl.ReleaseID = r.View.ReleaseID
-					ctl.Authorization = grant
-					if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
-						return Outcome{}, err
-					}
+					r.View.Phase = "server_ready"
+					r.Deadline = now + r.GrantMillis - r.RestartMillis
 				}
-				r.View.Phase = "server_ready"
-				r.Deadline = now + r.GrantMillis - r.RestartMillis
-			}
-		case "server_ready", "server_checking":
-			reason, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
-			if err != nil {
-				return Outcome{}, err
-			}
-			if reason != "" {
-				if err := attention(reason); err != nil {
+			case "server_ready", "server_checking":
+				reason, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
+				if err != nil {
 					return Outcome{}, err
 				}
-			}
-		case "runners":
-			if err := advanceRunnerUpgrade(ctx, x, tx, &r, attention); err != nil {
-				return Outcome{}, err
+				if reason != "" {
+					if err := attention(reason); err != nil {
+						return Outcome{}, err
+					}
+				}
+			case "runners":
+				if err := advanceRunnerUpgrade(ctx, x, tx, &r, attention); err != nil {
+					return Outcome{}, err
+				}
 			}
 		}
 	}
@@ -640,6 +661,9 @@ func upgradePausesMain(ctx context.Context, q store.Querier) (bool, error) {
 	}
 	if err != nil {
 		return false, err
+	}
+	if parked, err := store.ManagerUpgradeParked(ctx, q); err != nil || parked {
+		return parked, err
 	}
 	if r.View.Status == "attention" && (r.ServerProcess == "" || r.ServerRollback != nil) {
 		return false, nil

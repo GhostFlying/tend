@@ -164,6 +164,7 @@
 | D159 | 明确协商 retain 能力的 runner 可逐 Run 保留原维护未知，不令整 host Hello 失败；持久 fence 阻止重放，未知责任、原 lease/pin 与容量继续保留。旧 peer 保持原拒绝路径。 | 已实现，待验证 |
 | D160 | Agent Issue 关联依据冻结 Run pin 与创建时责任来源，按 canonical identity 展示当前/历史及原版本；API、CLI、Web 同步提供有界分页与筛选，缺少权威关联和执行观测时明确保留缺口。 | 已实现，待验证 |
 | D163 | 终态任务的未答规则问题在原事务撤销并收敛 Attention；拒绝迟到新答复，保留已答历史与暂停语义。 | 已实现，待验证 |
+| D166 | 显式升级窗口可 park 空闲 manager，经原 close 与物理回执结束旧 Run；同窗口阻止重新领取，完成或取消后以新 Run 承接责任。默认关闭，原协议与请求身份不变。 | 实现中 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
 
@@ -819,3 +820,22 @@ provider event_id/message_id 冻结同一请求身份，持久收件恢复只处
 单纯暂停或 revision 变化不足以证明责任已被替代；非终态复查的 action/generation
 来源规则另行处理，不按同一父 Issue 批量清理新预算问题。
 见[实施计划](plans/obsolete-task-decisions.md)。
+
+## D166：升级窗口的 manager park
+
+可选 park_idle_managers 绑定同一升级 request/CAS。升级记录 state_json 保存 exact
+Task/Run/lease/close 请求；默认省略字段，旧请求规范 payload_hash 与回放不变。
+仅空闲且无未知原生业务回执时，队列既有 close；最后事件序号与真实关闭回执通过
+原 FinishManagerTurn 结束旧 Run，Task waiting 保留 Issue/conversation 责任。窗口期间
+refresh、manager claim 与新 native business 被 admission fence 阻止，不能抢回资源。
+
+普通 server/runner 安装的 open-run、journal、进程证明门槛不变。未知 close 沿原 ID
+对账；cancel/fail/完成依原 CAS 与窗口状态释放 fence 后，只有新 Run/lease 可以续责。
+发起工具异步返回，部署执行 worker 应提交现有 started-installation artifact 退出，
+不能持有自身 Run 等待安装；原 delivery duty 留给后续独立验收和正式回读。CLI 与
+admitted main 工具都提供显式选项，仍通过固定本机 controller 和精确 owner-approved
+交付范围校验，不接受远端任意产物绕过授权。交付批准同样冻结 park 选项，旧批准不能隐式扩权。
+仅 opt-in 在切换前探测固定候选的 `--capabilities` 并校验实际 executable SHA 与 feature；
+入口在配置、数据库和 listener 之前退出，旧程序不支持时拒绝，不回退普通启动。
+既有 manifest 不增字段，默认 false 不探测；CLI 提供对应 typed 能力诊断。
+见[实施计划](plans/manager-upgrade-park.md)。

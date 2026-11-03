@@ -25,6 +25,10 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 	if err != nil {
 		return hostedconfig.Selection{}, false, err
 	}
+	_, parked, err := managerUpgradePark(ctx, q, run, true)
+	if err != nil {
+		return hostedconfig.Selection{}, false, err
+	}
 	p := m.Pin
 	owner, err := store.IssueUsesOwnerExecution(ctx, q, m.IssueID)
 	if err != nil {
@@ -34,7 +38,7 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 	if owner {
 		policy = protocol.IssueOwnerPolicy
 	}
-	return hostedconfig.Selection{OwnershipPolicy: policy, ReceiptOnly: closing, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
+	return hostedconfig.Selection{OwnershipPolicy: policy, ReceiptOnly: closing || parked, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
 }
 
 // AgentConversationClaimed prevents the hosted pool from starting an Issue
@@ -130,6 +134,10 @@ func rebindRunnerRuntime(ctx context.Context, q store.Querier, selected *hostedc
 	if err != nil {
 		return err
 	}
-	selected.ReceiptOnly = receipt.ReceiptOnly || closing
+	_, parked, err := managerUpgradePark(ctx, q, run, true)
+	if err != nil {
+		return err
+	}
+	selected.ReceiptOnly = receipt.ReceiptOnly || closing || parked
 	return nil
 }

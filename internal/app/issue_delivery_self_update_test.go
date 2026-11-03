@@ -106,6 +106,18 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 	for _, a := range upgrade.Manifest.Artifacts {
 		upgrade.ArtifactSources[a.SHA256] = release.SourceIdentity{Commit: merged}
 	}
+	// An older approved deployment scope cannot silently acquire cross-Issue
+	// manager shutdown authority from a later opt-in start request.
+	unauthorizedPark := upgrade
+	unauthorizedPark.ParkIdleManagers = true
+	unauthorizedPark.ServerCapabilities = []string{release.ServerCapabilityManagerPark}
+	rejected, rejectErr := h.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalSystem}, h.env(upgrade.Operation(), protocol.Target{Type: "upgrade", ID: "unapproved-park"}, map[string]any{"release_id": upgrade.Manifest.ReleaseID, "park_idle_managers": true}, rev(0)), unauthorizedPark)
+	if protocol.CodeOf(rejectErr) != protocol.CodeForbidden {
+		t.Fatal(rejected, rejectErr)
+	}
+	if h.count("upgrades") != 0 {
+		t.Fatal("old grant expanded to manager park")
+	}
 	env := h.env(upgrade.Operation(), protocol.Target{Type: "upgrade", ID: "delivery-self-update"}, map[string]string{"release_id": upgrade.Manifest.ReleaseID}, rev(0))
 	system := protocol.Principal{Kind: protocol.PrincipalSystem}
 	for range 2 {

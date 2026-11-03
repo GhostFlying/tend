@@ -318,6 +318,11 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if parked, err := store.ManagerUpgradeParked(ctx, q); err != nil {
+		return Outcome{}, err
+	} else if parked {
+		managerCandidates = nil
+	}
 	candidates = append(candidates, managerCandidates...)
 	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
 		return Outcome{}, err

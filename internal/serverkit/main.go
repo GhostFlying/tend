@@ -457,6 +457,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	if err != nil {
 		return err
 	}
+	if upgradeController != nil {
+		ts.SetUpgradeStarter(upgradeController)
+	}
 	if recovery := os.Getenv("TEND_FORWARD_RECOVERY_ID"); recovery != "" {
 		if upgradeController == nil {
 			return errors.New("forward recovery controller unavailable")

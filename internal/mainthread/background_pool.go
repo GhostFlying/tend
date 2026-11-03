@@ -68,7 +68,12 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 				if paused {
 					preparation, err := p.App.ArchivePreparation(ctx)
 					needed, readErr := p.App.ArchiveNeedsReceiptRead(ctx, id)
-					if err != nil || readErr != nil || !preparation.Prepared || !needed {
+					parkRead := false
+					var parkErr error
+					if named && selected.RunnerManaged && selected.ReceiptOnly {
+						parkRead, parkErr = p.App.UpgradeParkReceiptRead(ctx, id, selected.RunnerRunID)
+					}
+					if err != nil || readErr != nil || parkErr != nil || !(preparation.Prepared && needed || parkRead) {
 						p.mu.Unlock()
 						continue
 					}

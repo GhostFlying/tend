@@ -9,27 +9,39 @@ import (
 	"github.com/GhostFlying/tend/internal/release"
 )
 
+// UpgradeManagerPark binds one original manager to the admitting window.
+type UpgradeManagerPark struct {
+	TaskID         string `json:"task_id"`
+	RunID          string `json:"run_id"`
+	LeaseID        string `json:"lease_id"`
+	CloseRequestID string `json:"close_request_id"`
+}
+
 // UpgradeRow keeps transition inputs and receipts alongside the public view.
 // Restoration receipts use phase rolled_back or cancelled (replacement never started).
 type UpgradeRow struct {
-	DeliveryTaskID      string                   `json:"delivery_task_id,omitempty"`
-	View                protocol.UpgradeView     `json:"view"`
-	Manifest            release.Manifest         `json:"manifest"`
-	ManifestSHA256      string                   `json:"manifest_sha256"`
-	ManifestSize        int64                    `json:"manifest_size"`
-	ServerPreviousHash  string                   `json:"server_previous_hash"`
-	ServerRollback      *protocol.UpdaterReceipt `json:"server_rollback,omitempty"`
-	ServerHash          string                   `json:"server_hash"`
-	ServerInstance      string                   `json:"server_instance"`
-	ServerProcess       string                   `json:"server_process"`
-	ServerGrantDeadline int64                    `json:"server_grant_deadline"`
-	ServerHealthy       int64                    `json:"server_healthy"`
-	ServerHealthAt      int64                    `json:"server_health_at"`
-	Deadline            int64                    `json:"deadline"`
-	DrainMillis         int64                    `json:"drain_ms"`
-	RestartMillis       int64                    `json:"restart_ms"`
-	GrantMillis         int64                    `json:"grant_ms"`
-	Hosts               []UpgradeHost            `json:"hosts"`
+	InitiatingExecutionID string                   `json:"initiating_execution_id,omitempty"`
+	StartRequestID        string                   `json:"start_request_id,omitempty"`
+	ParkIdleManagers      bool                     `json:"park_idle_managers,omitempty"`
+	ManagerParks          []UpgradeManagerPark     `json:"manager_parks,omitempty"`
+	DeliveryTaskID        string                   `json:"delivery_task_id,omitempty"`
+	View                  protocol.UpgradeView     `json:"view"`
+	Manifest              release.Manifest         `json:"manifest"`
+	ManifestSHA256        string                   `json:"manifest_sha256"`
+	ManifestSize          int64                    `json:"manifest_size"`
+	ServerPreviousHash    string                   `json:"server_previous_hash"`
+	ServerRollback        *protocol.UpdaterReceipt `json:"server_rollback,omitempty"`
+	ServerHash            string                   `json:"server_hash"`
+	ServerInstance        string                   `json:"server_instance"`
+	ServerProcess         string                   `json:"server_process"`
+	ServerGrantDeadline   int64                    `json:"server_grant_deadline"`
+	ServerHealthy         int64                    `json:"server_healthy"`
+	ServerHealthAt        int64                    `json:"server_health_at"`
+	Deadline              int64                    `json:"deadline"`
+	DrainMillis           int64                    `json:"drain_ms"`
+	RestartMillis         int64                    `json:"restart_ms"`
+	GrantMillis           int64                    `json:"grant_ms"`
+	Hosts                 []UpgradeHost            `json:"hosts"`
 }
 type UpgradeHost struct {
 	Configuration     *protocol.RunnerConfiguration `json:"configuration,omitempty"`
@@ -95,4 +107,12 @@ func ListCancelledUpgradeIDs(ctx context.Context, q Querier) ([]string, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// ManagerUpgradeParked checks every unfinished admitting window; a newer
+// historical row cannot hide an earlier attention window's durable fence.
+func ManagerUpgradeParked(ctx context.Context, q Querier) (bool, error) {
+	var parked bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM upgrades WHERE status IN ('running','attention') AND json_extract(state_json,'$.park_idle_managers')=1)`).Scan(&parked)
+	return parked, err
 }

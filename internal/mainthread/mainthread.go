@@ -626,7 +626,14 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 	if err != nil {
 		return nil, err
 	}
-	if p.Prepared {
+	parkRead := false
+	if selected := m.namedSelection(); selected != nil && selected.RunnerManaged {
+		parkRead, err = m.app.UpgradeParkReceiptRead(ctx, m.cfg.ConversationID, selected.RunnerRunID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if p.Prepared || parkRead {
 		id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
 		if err != nil {
 			return nil, err

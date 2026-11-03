@@ -16,18 +16,26 @@ type UpgradeHostView struct {
 	Reason          string `json:"reason,omitempty"`
 }
 
+type UpgradeManagerParkView struct {
+	TaskID string `json:"task_id"`
+	RunID  string `json:"run_id"`
+	Phase  string `json:"phase"`
+	Reason string `json:"reason,omitempty"`
+}
+
 // UpgradeView remains visible after completion until the next batch starts.
 type UpgradeView struct {
-	SourceCommit string            `json:"source_commit,omitempty"`
-	UpgradeID    string            `json:"upgrade_id"`
-	ReleaseID    string            `json:"release_id"`
-	Revision     int64             `json:"revision"`
-	Status       string            `json:"status"`
-	Phase        string            `json:"phase"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
-	Reason       string            `json:"reason,omitempty"`
-	Hosts        []UpgradeHostView `json:"hosts"`
+	ManagerParks []UpgradeManagerParkView `json:"manager_parks,omitempty"`
+	SourceCommit string                   `json:"source_commit,omitempty"`
+	UpgradeID    string                   `json:"upgrade_id"`
+	ReleaseID    string                   `json:"release_id"`
+	Revision     int64                    `json:"revision"`
+	Status       string                   `json:"status"`
+	Phase        string                   `json:"phase"`
+	CreatedAt    time.Time                `json:"created_at"`
+	UpdatedAt    time.Time                `json:"updated_at"`
+	Reason       string                   `json:"reason,omitempty"`
+	Hosts        []UpgradeHostView        `json:"hosts"`
 }
 
 // RunnerUpgradeTarget names an authenticated immutable release download.

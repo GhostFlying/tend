@@ -23,6 +23,7 @@ import (
 )
 
 type Backend interface {
+	CheckUpgradeStart(context.Context, *protocol.Envelope, app.StartUpgrade) (*protocol.Operation, error)
 	ListCancelledServerUpgrades(context.Context) ([]string, error)
 	GetUpgrade(context.Context, string) (store.UpgradeRow, error)
 	Execute(context.Context, protocol.Principal, *protocol.Envelope, app.Command) (protocol.Operation, error)
@@ -32,20 +33,21 @@ type Backend interface {
 	ServerUpgradeHealth(context.Context, protocol.UpgradeBinding) (protocol.UpgradeHealth, error)
 }
 type Config struct {
-	RecoveryReady   func(context.Context) error
-	Now             func() time.Time
-	Instance        string
-	ProcessInstance string
-	BinarySHA256    string
-	SourceCommit    string
-	SourceModified  bool
-	ControlSocket   string
-	UpdaterSocket   string
-	ReleaseDir      string
-	DrainMillis     int64
-	RestartMillis   int64
-	GrantMillis     int64
-	Interval        time.Duration
+	InspectServerCapabilities func(context.Context, string, string) (release.ServerCapabilities, error)
+	RecoveryReady             func(context.Context) error
+	Now                       func() time.Time
+	Instance                  string
+	ProcessInstance           string
+	BinarySHA256              string
+	SourceCommit              string
+	SourceModified            bool
+	ControlSocket             string
+	UpdaterSocket             string
+	ReleaseDir                string
+	DrainMillis               int64
+	RestartMillis             int64
+	GrantMillis               int64
+	Interval                  time.Duration
 }
 type Controller struct {
 	recovery    *recoveryRuntime
@@ -72,6 +74,9 @@ func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context
 				}
 			}
 		}
+	}
+	if cfg.InspectServerCapabilities == nil {
+		cfg.InspectServerCapabilities = release.ProbeServerCapabilities
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -124,17 +129,45 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 		}
 	}
 	payload, err := json.Marshal(struct {
-		DeliveryTaskID string                                  `json:"delivery_task_id,omitempty"`
-		ReleaseID      string                                  `json:"release_id"`
-		ManifestSHA256 string                                  `json:"manifest_sha256"`
-		Configurations map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
-	}{r.DeliveryTaskID, bundle.Manifest.ReleaseID, bundle.ManifestSHA256, r.RunnerConfigurations})
+		DeliveryTaskID   string                                  `json:"delivery_task_id,omitempty"`
+		ReleaseID        string                                  `json:"release_id"`
+		ManifestSHA256   string                                  `json:"manifest_sha256"`
+		Configurations   map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
+		ParkIdleManagers bool                                    `json:"park_idle_managers,omitempty"`
+	}{r.DeliveryTaskID, bundle.Manifest.ReleaseID, bundle.ManifestSHA256, r.RunnerConfigurations, r.ParkIdleManagers})
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
 	zero := int64(0)
 	env := &protocol.Envelope{RequestID: r.RequestID, Operation: "upgrades.start", Target: protocol.Target{Type: "upgrade", ID: r.UpgradeID}, ExpectedControlRevision: &zero, Payload: payload, Reason: "Start the verified immutable local release through the service updater."}
-	op, err := c.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, app.StartUpgrade{DeliveryTaskID: r.DeliveryTaskID, ArtifactSources: sources, RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis})
+	command := app.StartUpgrade{ExecutionRequestID: r.ExecutionRequestID, ParkIdleManagers: r.ParkIdleManagers, DeliveryTaskID: r.DeliveryTaskID, ArtifactSources: sources, RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis}
+	if r.ParkIdleManagers || r.ExecutionRequestID != "" {
+		recorded, err := c.app.CheckUpgradeStart(ctx, env, command)
+		if err != nil {
+			return protocol.UpgradeView{}, err
+		}
+		if recorded != nil {
+			if recorded.Error != nil {
+				return protocol.UpgradeView{}, recorded.Error
+			}
+			var view protocol.UpgradeView
+			err = json.Unmarshal(recorded.Result, &view)
+			return view, err
+		}
+	}
+	var capabilities release.ServerCapabilities
+	if r.ParkIdleManagers {
+		path, err := release.RegularPath(bundle.Dir, server.Path)
+		if err != nil {
+			return protocol.UpgradeView{}, err
+		}
+		capabilities, err = c.cfg.InspectServerCapabilities(ctx, path, server.SHA256)
+		if err != nil || capabilities.Validate(server.SHA256) != nil || !capabilities.Supports(release.ServerCapabilityManagerPark) {
+			return protocol.UpgradeView{}, errors.New("upgradectl: candidate lacks verified manager park support")
+		}
+	}
+	command.ServerCapabilities = capabilities.Capabilities
+	op, err := c.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, command)
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
@@ -190,6 +223,9 @@ func (c *Controller) tick(ctx context.Context) error {
 	}
 	if v.Status != "running" || v.Phase != "server_ready" || !observed.MainDrained {
 		return nil
+	}
+	if err := c.recheckManagerParkCandidate(ctx, v.UpgradeID); err != nil {
+		return err
 	}
 	// The updater persists/reconciles its process action. Repeated controller
 	// ticks use the same batch ID and the same immutable staged directory.
@@ -417,6 +453,39 @@ func (c *Controller) cancelStaged(ctx context.Context) error {
 		if state.InstanceID != c.cfg.Instance || !updater.Cancelled(state, id) {
 			return errors.New("upgradectl: cancellation lacks durable terminal proof")
 		}
+	}
+	return nil
+}
+
+func (c *Controller) recheckManagerParkCandidate(ctx context.Context, id string) error {
+	row, err := c.app.GetUpgrade(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !row.ParkIdleManagers {
+		return nil
+	}
+	bundle, err := release.Load(filepath.Join(c.cfg.ReleaseDir, id))
+	if err != nil {
+		return err
+	}
+	if bundle.ManifestSHA256 != row.ManifestSHA256 {
+		return errors.New("upgradectl: parked candidate manifest changed")
+	}
+	server, err := bundle.Artifact("server", runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return err
+	}
+	if server.SHA256 != row.ServerHash {
+		return errors.New("upgradectl: parked candidate executable changed")
+	}
+	path, err := release.RegularPath(bundle.Dir, server.Path)
+	if err != nil {
+		return err
+	}
+	report, err := c.cfg.InspectServerCapabilities(ctx, path, server.SHA256)
+	if err != nil || report.Validate(server.SHA256) != nil || !report.Supports(release.ServerCapabilityManagerPark) {
+		return errors.New("upgradectl: parked candidate capability proof changed")
 	}
 	return nil
 }

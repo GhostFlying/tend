@@ -62,10 +62,16 @@ func (a *App) ManagerClosingAttachment(ctx context.Context, run, method, thread 
 	}
 	var raw string
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		closing, err := managerRunClosing(ctx, tx.Q(), run)
+		if err != nil {
+			return err
+		}
+		if !closing {
+			return sql.ErrNoRows
+		}
 		return tx.Q().QueryRowContext(ctx, `SELECT json_extract(n.result_json,'$.result') FROM manager_native_requests n JOIN runs r USING(run_id)
  WHERE n.run_id=? AND r.role='issue_manager' AND n.status='completed' AND COALESCE(json_extract(n.result_json,'$.error'),'')=''
  AND ((?='models' AND n.method='models') OR (?='resume' AND n.method IN ('start','resume') AND json_extract(n.result_json,'$.result.ID')=?))
- AND EXISTS(SELECT 1 FROM manager_native_requests closing WHERE closing.run_id=n.run_id AND closing.method='close' AND closing.status IN ('pending','started','unknown'))
  ORDER BY n.rowid DESC LIMIT 1`, run, method, method, thread).Scan(&raw)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -77,5 +83,9 @@ func (a *App) ManagerClosingAttachment(ctx context.Context, run, method, thread 
 func managerRunClosing(ctx context.Context, q store.Querier, run string) (bool, error) {
 	var closing bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_native_requests WHERE run_id=? AND method='close' AND status IN ('pending','started','unknown'))`, run).Scan(&closing)
-	return closing, err
+	if err != nil || closing {
+		return closing, err
+	}
+	prior, err := unresolvedManagerParkClose(ctx, q, run)
+	return prior != nil, err
 }

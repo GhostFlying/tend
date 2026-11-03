@@ -115,6 +115,9 @@ func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c 
 	if bound != "" {
 		return nil, protocol.Errorf(protocol.CodeInvalidTransition, "execution already started an upgrade; reconcile its original batch")
 	}
+	if c.ParkIdleManagers != frozen.Deployment.ParkIdleManagers {
+		return nil, protocol.Errorf(protocol.CodeForbidden, "manager park differs from the approved deployment scope")
+	}
 	current, err := store.GetCanonicalIssue(ctx, q, issue)
 	if err != nil {
 		return nil, err

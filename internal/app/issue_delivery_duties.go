@@ -598,7 +598,11 @@ func deliveryDeploymentQuestion(c protocol.IssueDeliveryCandidate) string {
 	if c.Reconciliation != nil {
 		return fmt.Sprintf(" Verify existing installation only: server instance %s; complete host set %v; read back the referenced completed upgrade and original Issue before independent acceptance; no build, merge or installation is authorized. Baseline upgrade %s revision %d.", c.Deployment.ServerInstance, c.Deployment.HostIDs, c.Deployment.BaselineUpgradeID, c.Deployment.BaselineUpgradeRevision)
 	}
-	return fmt.Sprintf(" Tend executes the controlled self-update itself: server instance %s; complete host set %v; build from the verified merge and read back installed server/hosts and this original Issue before independent acceptance.", c.Deployment.ServerInstance, c.Deployment.HostIDs) + fmt.Sprintf(" Baseline upgrade %s revision %d.", c.Deployment.BaselineUpgradeID, c.Deployment.BaselineUpgradeRevision)
+	park := ""
+	if c.Deployment.ParkIdleManagers {
+		park = " This scope explicitly permits parking idle managers on those hosts through confirmed native close, retaining their logical responsibility for new runs after the window. Busy or unknown operations remain blockers; no business task cancellation or replay is authorized."
+	}
+	return park + fmt.Sprintf(" Tend executes the controlled self-update itself: server instance %s; complete host set %v; build from the verified merge and read back installed server/hosts and this original Issue before independent acceptance.", c.Deployment.ServerInstance, c.Deployment.HostIDs) + fmt.Sprintf(" Baseline upgrade %s revision %d.", c.Deployment.BaselineUpgradeID, c.Deployment.BaselineUpgradeRevision)
 }
 
 func deliveryUpgradeBinding(ctx context.Context, q store.Querier, target protocol.IssueDeliveryDeployment, id string, executionStarted int64) (store.UpgradeRow, error) {
@@ -616,7 +620,7 @@ func deliveryUpgradeBinding(ctx context.Context, q store.Querier, target protoco
 	slices.Sort(hosts)
 	want := slices.Clone(target.HostIDs)
 	slices.Sort(want)
-	if r.View.CreatedAt.UnixMilli() < executionStarted || r.ServerInstance != target.ServerInstance || !slices.Equal(hosts, want) {
+	if r.View.CreatedAt.UnixMilli() < executionStarted || r.ServerInstance != target.ServerInstance || r.ParkIdleManagers != target.ParkIdleManagers || !slices.Equal(hosts, want) {
 		return store.UpgradeRow{}, protocol.Errorf(protocol.CodeInvalidTransition, "upgrade must belong to this execution's approved server and complete host set")
 	}
 	return r, nil
