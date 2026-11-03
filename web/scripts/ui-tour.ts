@@ -325,6 +325,16 @@ const server = createServer(async (req, res) => {
       ],
       more: false,
     });
+  if (p === "/api/v1/agent-issues")
+    return json({
+      identity: {
+        execution_environment_id: url.searchParams.get("environment_id"),
+        local_id: url.searchParams.get("local_id"),
+      },
+      coverage: "recorded_run_pins",
+      items: [],
+      more: false,
+    });
   if (p === "/api/v1/hosted-agents")
     return json({
       accepted_request_id: "tour-hosted-agents",

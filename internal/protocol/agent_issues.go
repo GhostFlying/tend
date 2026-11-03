@@ -7,6 +7,8 @@ type AgentIssueRun struct {
 	Pin             RunExecutionPin `json:"pin"`
 	Source          string          `json:"source"`
 	PendingDecision bool            `json:"pending_decision"`
+	// TaskOpenQuestions preserves task-level records without asserting Run applicability.
+	TaskOpenQuestions int `json:"task_open_questions"`
 }
 
 // AgentIssue groups all recorded executions for this identity and Issue.

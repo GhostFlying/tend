@@ -653,6 +653,9 @@
         },
         "task_id": {
           "type": "string"
+        },
+        "task_open_questions": {
+          "type": "integer"
         }
       },
       "required": [
@@ -660,7 +663,8 @@
         "run",
         "pin",
         "source",
-        "pending_decision"
+        "pending_decision",
+        "task_open_questions"
       ],
       "title": "AgentIssueRun",
       "type": "object"
