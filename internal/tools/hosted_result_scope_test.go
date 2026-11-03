@@ -271,4 +271,50 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 			}
 		})
 	}
+	t.Run("explicit-sibling-artifact-share", func(t *testing.T) {
+		original := cases["sibling"]
+		var ref string
+		if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			art, err := store.GetArtifact(t.Context(), tx.Q(), original.artifact)
+			ref = art.RefJSON
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		target := current(parent.IssueID)
+		grant := execute(owner, app.ArtifactShareCommand{}, protocol.Target{Type: "issue", ID: target.IssueID}, protocol.GrantArtifactSharePayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: target.AssignmentEpoch, Reason: "Reuse original unrelated report explicitly"}, ArtifactID: original.artifact, RefSHA256: store.ArtifactRefSHA256(ref)}, &target.Revision)
+		var share protocol.ArtifactShare
+		if err := json.Unmarshal(grant.Result, &share); err != nil {
+			t.Fatal(err)
+		}
+		allowed := call("artifacts_read", artifactArgs{ArtifactID: original.artifact})
+		if !allowed.OK || !strings.Contains(string(allowed.Result), "exact delegated report") {
+			t.Fatal("shared original report unavailable", allowed)
+		}
+		for _, read := range []struct {
+			tool string
+			args any
+		}{{"tasks_read", taskArgs{TaskID: original.task}}, {"background_evidence_read", evidenceArgs{ArtifactID: original.artifact}}, {"artifacts_read", artifactArgs{ArtifactID: cases["ancestor"].artifact}}} {
+			denied := call(read.tool, read.args)
+			if denied.OK || denied.Error == nil || denied.Error.Code != protocol.CodeForbidden {
+				t.Fatal("share widened source access", read.tool, denied)
+			}
+		}
+		denied := call("artifact_shares_grant", map[string]any{"target_id": target.IssueID, "effect_seq": 12, "expected_control_revision": target.Revision, "payload": map[string]any{}})
+		if denied.OK || denied.Error == nil || denied.Error.Code != protocol.CodeForbidden {
+			t.Fatal("manager granted itself evidence", denied)
+		}
+		inventory := call("artifact_shares_list", map[string]any{"issue_id": target.IssueID, "limit": 1})
+		var page protocol.ArtifactSharePage
+		if !inventory.OK || json.Unmarshal(inventory.Result, &page) != nil || len(page.Items) != 1 || page.Items[0].ArtifactID != original.artifact {
+			t.Fatal(inventory)
+		}
+		target = current(target.IssueID)
+		execute(owner, app.ArtifactShareCommand{Revoke: true}, protocol.Target{Type: "issue", ID: target.IssueID}, protocol.RevokeArtifactSharePayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: target.AssignmentEpoch, Reason: "Revoke future reads"}, ShareID: share.ShareID, ExpectedShareRevision: share.Revision}, &target.Revision)
+		denied = call("artifacts_read", artifactArgs{ArtifactID: original.artifact})
+		if denied.OK || denied.Error == nil || denied.Error.Code != protocol.CodeForbidden {
+			t.Fatal("revoked share remained readable", denied)
+		}
+	})
+
 }

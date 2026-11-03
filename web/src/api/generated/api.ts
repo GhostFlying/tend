@@ -258,6 +258,8 @@ export interface TendAPI {
   ArchiveSummary?: ArchiveSummary;
   ArtifactDetail?: ArtifactDetail;
   ArtifactPayload?: ArtifactPayload;
+  ArtifactShare?: ArtifactShare;
+  ArtifactSharePage?: ArtifactSharePage;
   AttentionPage?: AttentionPage;
   AttentionView?: AttentionView;
   BackgroundSourcePage?: BackgroundSourcePage;
@@ -289,6 +291,7 @@ export interface TendAPI {
   FeishuInputPage?: FeishuInputPage;
   FinishIssueAssignmentPayload?: FinishIssueAssignmentPayload;
   FollowupSpec?: FollowupSpec;
+  GrantArtifactSharePayload?: GrantArtifactSharePayload;
   HandleAttentionPayload?: HandleAttentionPayload;
   HandoffAuditPage?: HandoffAuditPage;
   HostMaintenancePayload?: HostMaintenancePayload;
@@ -361,6 +364,7 @@ export interface TendAPI {
   ReuseIssuePayload?: ReuseIssuePayload;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
   ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
+  RevokeArtifactSharePayload?: RevokeArtifactSharePayload;
   RolloutPreview?: RolloutPreview;
   RunExecutionPin?: RunExecutionPin;
   RunLogPage?: RunLogPage;
@@ -1676,6 +1680,7 @@ export interface ArchiveResourcePage {
 export interface ArtifactDetail {
   acceptances: AcceptanceView[] | null;
   artifact: ArtifactView;
+  ref_sha256?: string;
   task_id: string;
 }
 /**
@@ -1739,6 +1744,37 @@ export interface ResultReport {
   body: string;
   evidence?: string[];
   uncertainties?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArtifactShare".
+ */
+export interface ArtifactShare {
+  applicable: boolean;
+  artifact_id: string;
+  assignment_epoch: number;
+  created_at: number;
+  digest: string;
+  files: ArtifactFile[] | null;
+  issue_id: string;
+  reason: string;
+  ref_sha256: string;
+  revision: number;
+  share_id: string;
+  source_issue_id: string;
+  source_message_id?: string;
+  source_revision?: number;
+  source_task_id: string;
+  status: string;
+  updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArtifactSharePage".
+ */
+export interface ArtifactSharePage {
+  items: ArtifactShare[] | null;
+  next?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2412,6 +2448,18 @@ export interface FollowupCondition {
   delivery_state?: string;
   kind: string;
   task_ids?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "GrantArtifactSharePayload".
+ */
+export interface GrantArtifactSharePayload {
+  artifact_id: string;
+  expected_assignment_epoch: number;
+  expected_source_revision?: number;
+  reason?: string;
+  ref_sha256: string;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3139,6 +3187,7 @@ export interface IssueResult {
   artifact: ArtifactView;
   created_at: number;
   generation: number;
+  ref_sha256?: string;
   run_id: string;
   spec_version: number;
   task_id: string;
@@ -3757,6 +3806,18 @@ export interface ReviewIssueSourcesPayload {
   expected_source_revision?: number;
   reason?: string;
   source_dispositions: IssueSourceDisposition[] | null;
+  source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RevokeArtifactSharePayload".
+ */
+export interface RevokeArtifactSharePayload {
+  expected_assignment_epoch: number;
+  expected_share_revision: number;
+  expected_source_revision?: number;
+  reason?: string;
+  share_id: string;
   source_message_id?: string;
 }
 /**

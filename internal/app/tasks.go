@@ -134,7 +134,7 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 	if err := checkObservationScope(ctx, tx.Q(), p.Spec.Observation); err != nil {
 		return Outcome{}, err
 	}
-	if err := freezeTaskInputs(ctx, tx.Q(), &p.Spec, nil); err != nil {
+	if err := freezeTaskInputs(ctx, x, tx.Q(), &p.Spec, nil); err != nil {
 		return Outcome{}, err
 	}
 	if err := checkWorkspaceProtocol(ctx, tx.Q(), p.Spec); err != nil {
@@ -343,7 +343,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		if err := checkObservationScope(ctx, tx.Q(), p.Spec.Observation); err != nil {
 			return Outcome{}, err
 		}
-		if err := freezeTaskInputs(ctx, tx.Q(), p.Spec, current.Inputs); err != nil {
+		if err := freezeTaskInputs(ctx, x, tx.Q(), p.Spec, current.Inputs); err != nil {
 			return Outcome{}, err
 		}
 		if err := checkWorkspaceProtocol(ctx, tx.Q(), *p.Spec); err != nil {

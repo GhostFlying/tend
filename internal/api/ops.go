@@ -14,6 +14,7 @@ import (
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
 var ownerCommands = commandMap(
+	app.ArtifactShareCommand{}, app.ArtifactShareCommand{Revoke: true},
 	app.FeishuCommand{}, app.FeishuCommand{Unbind: true},
 	app.ConfigureConcurrency{Action: "create"}, app.ConfigureConcurrency{Action: "update"}, app.ConfigureConcurrency{Action: "bind"}, app.ConfigureConcurrency{Action: "unbind"}, app.ConfigureConcurrency{Action: "delete"}, app.HandleAttention{}, app.HandleAttention{Escalate: true}, app.ReconcileConversationUsage{}, app.WebhookCommand{Action: "create"}, app.WebhookCommand{Action: "update"}, app.WebhookCommand{Action: "pause"}, app.WebhookCommand{Action: "resume"}, app.WebhookCommand{Action: "cancel"}, app.WebhookCommand{Action: "rotate"},
 	app.RespondMessagingInteraction{},

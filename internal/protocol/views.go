@@ -145,6 +145,7 @@ type DecisionView struct {
 
 // ArtifactDetail is an artifact with every verdict on it.
 type ArtifactDetail struct {
+	RefSHA256   string           `json:"ref_sha256,omitempty"`
 	Artifact    ArtifactView     `json:"artifact"`
 	TaskID      string           `json:"task_id"`
 	Acceptances []AcceptanceView `json:"acceptances"`

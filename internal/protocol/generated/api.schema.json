@@ -1451,6 +1451,9 @@
         "artifact": {
           "$ref": "#/definitions/ArtifactView"
         },
+        "ref_sha256": {
+          "type": "string"
+        },
         "task_id": {
           "type": "string"
         }
@@ -1554,6 +1557,117 @@
         "mounts"
       ],
       "title": "ArtifactPayload",
+      "type": "object"
+    },
+    "ArtifactShare": {
+      "additionalProperties": false,
+      "properties": {
+        "applicable": {
+          "type": "boolean"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "files": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ArtifactFile"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "ref_sha256": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "share_id": {
+          "type": "string"
+        },
+        "source_issue_id": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "integer"
+        },
+        "source_task_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "share_id",
+        "revision",
+        "issue_id",
+        "assignment_epoch",
+        "artifact_id",
+        "source_task_id",
+        "source_issue_id",
+        "digest",
+        "ref_sha256",
+        "files",
+        "status",
+        "applicable",
+        "reason",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ArtifactShare",
+      "type": "object"
+    },
+    "ArtifactSharePage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ArtifactShare"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "ArtifactSharePage",
       "type": "object"
     },
     "ArtifactView": {
@@ -4150,6 +4264,36 @@
       "title": "FollowupSpec",
       "type": "object"
     },
+    "GrantArtifactSharePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "ref_sha256": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "artifact_id",
+        "ref_sha256"
+      ],
+      "title": "GrantArtifactSharePayload",
+      "type": "object"
+    },
     "HandleAttentionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -6624,6 +6768,9 @@
         },
         "generation": {
           "type": "integer"
+        },
+        "ref_sha256": {
+          "type": "string"
         },
         "run_id": {
           "type": "string"
@@ -9514,6 +9661,36 @@
         "expected_context_revision"
       ],
       "title": "ReviewIssueSourcesPayload",
+      "type": "object"
+    },
+    "RevokeArtifactSharePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_share_revision": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "share_id": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "share_id",
+        "expected_share_revision"
+      ],
+      "title": "RevokeArtifactSharePayload",
       "type": "object"
     },
     "RolloutPreview": {
@@ -13571,6 +13748,12 @@
     "ArtifactPayload": {
       "$ref": "#/definitions/ArtifactPayload"
     },
+    "ArtifactShare": {
+      "$ref": "#/definitions/ArtifactShare"
+    },
+    "ArtifactSharePage": {
+      "$ref": "#/definitions/ArtifactSharePage"
+    },
     "AttentionPage": {
       "$ref": "#/definitions/AttentionPage"
     },
@@ -13663,6 +13846,9 @@
     },
     "FollowupSpec": {
       "$ref": "#/definitions/FollowupSpec"
+    },
+    "GrantArtifactSharePayload": {
+      "$ref": "#/definitions/GrantArtifactSharePayload"
     },
     "HandleAttentionPayload": {
       "$ref": "#/definitions/HandleAttentionPayload"
@@ -13879,6 +14065,9 @@
     },
     "ReviewIssueSourcesPayload": {
       "$ref": "#/definitions/ReviewIssueSourcesPayload"
+    },
+    "RevokeArtifactSharePayload": {
+      "$ref": "#/definitions/RevokeArtifactSharePayload"
     },
     "RolloutPreview": {
       "$ref": "#/definitions/RolloutPreview"
