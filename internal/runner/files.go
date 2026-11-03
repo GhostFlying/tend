@@ -168,6 +168,32 @@ func syncUploadDirectory(path string) error {
 
 func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Prepared, id string) (string, error) {
 	file, category, err := assignmentFile(as, id)
+	if err != nil && as.WorkerQuestions && (len(as.Spec) == 0 || json.Valid(as.Spec)) {
+		// Supplemental inputs are not revisions of the frozen assignment.
+		// Re-read their metadata through the same run credential on every
+		// download; the file endpoint independently checks current grants.
+		var questions []protocol.WorkerQuestion
+		reader := ownerQuestions{r: r, as: as, prepared: p}
+		if readErr := reader.read(ctx, "", &questions); readErr != nil {
+			return "", readErr
+		}
+		for _, question := range questions {
+			if question.RunID != as.RunID || question.ActionID != as.ActionID || question.SpecVersion != as.SpecVersion || question.Role != as.Role || question.InputRevision < 1 || (question.Status != "answered" && question.Status != "open") {
+				continue
+			}
+			for _, input := range question.Inputs {
+				if input.FileID == id {
+					file = protocol.ArtifactFile{FileID: input.FileID, Name: input.Name, Size: input.Size, SHA256: input.SHA256}
+					category = "question-inputs"
+					err = nil
+					break
+				}
+			}
+			if err == nil {
+				break
+			}
+		}
+	}
 	if err != nil {
 		return "", err
 	}

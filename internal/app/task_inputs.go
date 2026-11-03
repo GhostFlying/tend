@@ -110,6 +110,10 @@ func (a *App) OpenRunFile(ctx context.Context, p protocol.Principal, id string) 
 				break
 			}
 		}
+		if input == nil {
+			input, err = questionInputFile(ctx, tx.Q(), rc, id)
+			return err
+		}
 		return nil
 	})
 	if err != nil {

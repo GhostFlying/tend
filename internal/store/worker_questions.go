@@ -67,6 +67,16 @@ func WorkerQuestion(ctx context.Context, q Querier, id string) (protocol.WorkerQ
 	if d.AnswerJSON != "" {
 		out.Answer = json.RawMessage(d.AnswerJSON)
 	}
+	inputs, err := QuestionInputs(ctx, q, id)
+	if err != nil {
+		return out, err
+	}
+	out.InputRevision = inputs.Revision
+	for _, g := range inputs.Grants {
+		if g.Status == "active" && g.RunID == w.RunID {
+			out.Inputs = append(out.Inputs, g.Files...)
+		}
+	}
 	return out, nil
 }
 

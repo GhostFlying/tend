@@ -164,6 +164,7 @@ func (a *App) WorkerQuestions(ctx context.Context, p protocol.Principal) ([]prot
 			for i := range out {
 				out[i].Status = store.DecisionCancelled
 				out[i].Answer = nil
+				out[i].Inputs = nil
 			}
 		}
 		return nil
@@ -362,6 +363,10 @@ func assignmentQuestions(ctx context.Context, q store.Querier, as *protocol.Assi
 		return e
 	}
 	as.QuestionContinuation = continuation
+	for i := range questions {
+		questions[i].Inputs = nil
+		questions[i].InputRevision = 0
+	}
 	as.Questions = append(questions, as.Questions...)
 
 	return nil

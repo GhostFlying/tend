@@ -352,6 +352,8 @@ export interface TendAPI {
   PutAgentCategoryPayload?: PutAgentCategoryPayload;
   PutIssueDeadlinePayload?: PutIssueDeadlinePayload;
   PutPlannerEntryPayload?: PutPlannerEntryPayload;
+  QuestionInputPage?: QuestionInputPage;
+  QuestionInputPayload?: QuestionInputPayload;
   RateTaskPayload?: RateTaskPayload;
   RegisterRepositoryPayload?: RegisterRepositoryPayload;
   ReparentIssuePayload?: ReparentIssuePayload;
@@ -365,6 +367,7 @@ export interface TendAPI {
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
   ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
   RevokeArtifactSharePayload?: RevokeArtifactSharePayload;
+  RevokeQuestionInputsPayload?: RevokeQuestionInputsPayload;
   RolloutPreview?: RolloutPreview;
   RunExecutionPin?: RunExecutionPin;
   RunLogPage?: RunLogPage;
@@ -3729,6 +3732,81 @@ export interface PutPlannerEntryPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "QuestionInputPage".
+ */
+export interface QuestionInputPage {
+  decision_id: string;
+  grants: QuestionInputGrant[] | null;
+  next_step: string;
+  original?: QuestionInputScope;
+  question_version: number;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "QuestionInputGrant".
+ */
+export interface QuestionInputGrant {
+  action_id: string;
+  decision_id: string;
+  execution?: RunExecutionPin;
+  files: TaskInput[] | null;
+  format: number;
+  generation: number;
+  lease_id: string;
+  reason: string;
+  revision: number;
+  role: RunRole;
+  run_id: string;
+  source_message_id: string;
+  source_revision: number;
+  spec_version: number;
+  status: string;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskInput".
+ */
+export interface TaskInput {
+  file_id: string;
+  media_type?: string;
+  name?: string;
+  sha256?: string;
+  size?: number;
+  source_artifact_id?: string;
+  source_message_id?: string;
+  source_task_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "QuestionInputScope".
+ */
+export interface QuestionInputScope {
+  action_id: string;
+  generation: number;
+  lease_id: string;
+  role: RunRole;
+  run_id: string;
+  spec_version: number;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "QuestionInputPayload".
+ */
+export interface QuestionInputPayload {
+  expected_source_revision?: number;
+  file_ids?: string[];
+  grant_revision?: number;
+  lease_id: string;
+  reason: string;
+  run_id: string;
+  source_message_id?: string;
+  version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RateTaskPayload".
  */
 export interface RateTaskPayload {
@@ -3858,6 +3936,16 @@ export interface RevokeArtifactSharePayload {
   expected_source_revision?: number;
   reason?: string;
   share_id: string;
+  source_message_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RevokeQuestionInputsPayload".
+ */
+export interface RevokeQuestionInputsPayload {
+  expected_source_revision?: number;
+  grant_revision: number;
+  reason: string;
   source_message_id?: string;
 }
 /**

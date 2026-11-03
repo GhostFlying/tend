@@ -897,3 +897,6 @@ D164 输入冻结补充：首次绑定新 Task input 必须在创建/更新 spec
 政策变更使用原 request_id、Issue revision CAS 和 assignment epoch，保留不可变创建者、真实决定者、理由及来源。新 Task 在创建事务中冻结政策；后续调整不影响已有 Task、独立验收或人工决策。免验只取消自动生成独立 review 责任的需要，合法报告、文件或代码结果仍按当前 spec、代次、context 和原输入检查。
 
 免验完成的依据是当前真实 artifact 与创建者政策，不是 passed acceptance。完成通知、待核对事项、Issue 结果证据及持续交付责任明确保留这一差异。合入、部署和外部观测仍须通过各自真实证明及控制门，不由报告、完成或政策推断。仓库 PR 代码审查及 CI 完全保持。见[实施计划](plans/creator-acceptance-policy.md)。
+### D171 原问题答复附件的精确读取权限
+
+原 worker question 的 owner 回复或明确 ReplyTo 问题的补充消息，可以通过独立 request_id 和问题输入 revision CAS 授权指定不可变文件。原 AnswerJSON/spec/执行 pin/lease 不改，事件逐问题追加，撤销挡未来读取。权限只覆盖冻结的原 Run、lease、角色和仍适用的责任，不向同 Task 新代次或未证明的 continuation 继承。主 Agent 必须在已准入执行中引用真实 owner 来源；授权 provenance 不给予整消息材料权限。现有 question 读取提供文件 metadata；不承诺旧执行器收到主动注入。Refs: docs/plans/worker-answer-inputs.md。
