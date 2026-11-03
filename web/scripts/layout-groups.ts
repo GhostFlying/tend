@@ -21,6 +21,7 @@ export const layoutGroups: Record<string, string[]> = {
     "test:repos-layout",
     "test:agents",
     "test:followups",
+    "test:inbox-badge",
   ],
 };
 
