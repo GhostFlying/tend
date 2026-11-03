@@ -351,3 +351,16 @@ func (a *App) FeishuInputs(ctx context.Context, after int64, limit int, status s
 	})
 	return page, err
 }
+
+// ObserveFeishuConnection records transport liveness, never owner authority.
+func (a *App) ObserveFeishuConnection(ctx context.Context, state string) error {
+	switch state {
+	case "connected", "reconnecting", "disconnected", "connection_failed":
+	default:
+		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid Feishu connection state")
+	}
+	return a.store.Write(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE messaging_channels SET health=?,last_observed_at=? WHERE channel_id='feishu' AND health<>'disabled'`, state, a.now().UnixMilli())
+		return err
+	})
+}

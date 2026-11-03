@@ -7,6 +7,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -19,6 +20,7 @@ type Transport struct {
 	callback  *Callback
 	tenantKey string
 	owners    []string
+	socket    func(context.Context)
 }
 
 func NewTransport(a *app.App, apiConfig APIConfig, callbackConfig CallbackConfig, owners []string) (*Transport, error) {
@@ -36,7 +38,13 @@ func NewTransport(a *app.App, apiConfig APIConfig, callbackConfig CallbackConfig
 	}
 	return t, nil
 }
-func (t *Transport) ServeHTTP(w http.ResponseWriter, r *http.Request) { t.callback.ServeHTTP(w, r) }
+func (t *Transport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if t.callback == nil {
+		http.NotFound(w, r)
+		return
+	}
+	t.callback.ServeHTTP(w, r)
+}
 func (t *Transport) Receive(ctx context.Context, m Incoming) error {
 	b, err := t.app.FeishuBinding(ctx)
 	if err != nil {
@@ -98,6 +106,11 @@ func (t *Transport) Reconcile(context.Context, app.Delivery) app.DeliveryResult 
 
 // Run recovers durable callbacks that failed before their business transaction.
 func (t *Transport) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	if t.socket != nil {
+		wg.Go(func() { t.socket(ctx) })
+	}
+	defer wg.Wait()
 	timer := time.NewTicker(5 * time.Second)
 	defer timer.Stop()
 	for {

@@ -18,6 +18,9 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/testkit"
+	"path/filepath"
 )
 
 type feishuRouteFixture struct{ calls int }
@@ -70,7 +73,7 @@ func TestFeishuAssemblyUsesEffectiveLocalOwner(t *testing.T) {
 			finished := errors.New("effective owner verified")
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
-			cfg := Config{DataDir: t.TempDir(), Listen: "127.0.0.1:0", LocalOwner: "local-owner", Owners: []string{"configured-owner"}, Feishu: &FeishuConfig{AppID: "app", TenantKey: "tenant", AppSecretEnv: "TEND_FEISHU_ASSEMBLY_SECRET", VerificationTokenEnv: "TEND_FEISHU_ASSEMBLY_TOKEN", EncryptKeyEnv: "TEND_FEISHU_ASSEMBLY_KEY"}}
+			cfg := Config{DataDir: t.TempDir(), Listen: "127.0.0.1:0", LocalOwner: "local-owner", Owners: []string{"configured-owner"}, Feishu: &FeishuConfig{ReceiveMode: "http", AppID: "app", TenantKey: "tenant", AppSecretEnv: "TEND_FEISHU_ASSEMBLY_SECRET", VerificationTokenEnv: "TEND_FEISHU_ASSEMBLY_TOKEN", EncryptKeyEnv: "TEND_FEISHU_ASSEMBLY_KEY"}}
 			err := Run(ctx, cfg, []byte("isolated-assembly-secret"), Dependencies{
 				Now: func() time.Time { return now },
 				Initialize: func(ctx context.Context, rt *Runtime) error {
@@ -120,5 +123,49 @@ func TestFeishuAssemblyUsesEffectiveLocalOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestFeishuDefaultWebSocketPreparationDoesNotConnect(t *testing.T) {
+	t.Setenv("TEND_FEISHU_CONFIG_SECRET", "isolated-secret")
+	clock := testkit.NewClock()
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	a := app.New(db, testkit.NewIDGen(clock, 81), clock.Now)
+	cfg := &FeishuConfig{AppID: "app", TenantKey: "tenant", AppSecretEnv: "TEND_FEISHU_CONFIG_SECRET"}
+	transport, err := prepareFeishu(t.Context(), cfg, a, clock.Now, []string{"owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := a.FeishuBinding(t.Context())
+	if err != nil || binding.RuntimeHealth != "configured_unverified" {
+		t.Fatal(binding, err)
+	}
+	w := httptest.NewRecorder()
+	transport.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/hooks/feishu", nil))
+	if w.Code != 404 {
+		t.Fatal("default mode exposes callback")
+	}
+	cfg.CallbackListen = "localhost:8081"
+	if _, err = prepareFeishu(t.Context(), cfg, a, clock.Now, []string{"owner"}); err == nil {
+		t.Fatal("WS silently accepted callback listener")
+	}
+	cfg.CallbackListen = ""
+	cfg.ReceiveMode = "invalid"
+	if _, err = prepareFeishu(t.Context(), cfg, a, clock.Now, []string{"owner"}); err == nil {
+		t.Fatal("invalid receive mode accepted")
+	}
+	if _, err = prepareFeishu(t.Context(), nil, a, clock.Now, []string{"owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.ObserveFeishuConnection(t.Context(), "connected"); err != nil {
+		t.Fatal(err)
+	}
+	binding, err = a.FeishuBinding(t.Context())
+	if err != nil || binding.RuntimeHealth != "disabled" {
+		t.Fatal("late connection observation revived disabled transport", binding, err)
 	}
 }
