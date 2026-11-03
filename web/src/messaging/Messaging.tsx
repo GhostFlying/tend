@@ -4,6 +4,8 @@ import type { MessagingMessage, MessagingTrace } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { Link } from "../app/router.ts";
 import { useStore } from "../state/store.ts";
+import { LocalAttachment } from "../conversation/Attachments.tsx";
+import { pasteAttachments } from "../conversation/clipboard.ts";
 import { ComposerDraft } from "../conversation/draft.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { FilePreview } from "../tasks/FilePreview.tsx";
@@ -527,6 +529,16 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
               placeholder="发消息给 Tend…"
               value={value.text}
               rows={2}
+              disabled={!queue || !value.loaded || connection.status === "not-owner"}
+              readOnly={saving}
+              onPaste={(event) =>
+                pasteAttachments(event, {
+                  blocked: !queue || !value.loaded || saving || connection.status === "not-owner",
+                  addFiles: (files) => draft.addFiles(files),
+                  write: (text) => draftState({ text }),
+                  warn: setError,
+                })
+              }
               onChange={(e) => draftState({ text: e.target.value })}
               onKeyDown={(e) => {
                 if (
@@ -541,7 +553,7 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
               }}
             />
             {(value.files.length > 0 || value.attachments.length > 0) && (
-              <ul className={styles.selectedFiles}>
+              <ul className={styles.selectedFiles} aria-label="待发送附件">
                 {value.attachments.map((file, n) => (
                   <li key={file.file_id}>
                     {file.name}
@@ -551,8 +563,8 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
                   </li>
                 ))}
                 {value.files.map((file, n) => (
-                  <li key={`${file.name}-${n}`}>
-                    {file.name}
+                  <li key={n}>
+                    <LocalAttachment blob={file} name={file.name} />
                     <Button variant="link" onClick={() => draft.removeFile(n)}>
                       移除
                     </Button>
@@ -566,8 +578,11 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
                   type="file"
                   multiple
                   aria-label="添加附件"
+                  disabled={!queue || !value.loaded || saving || connection.status === "not-owner"}
                   onChange={(e) => {
-                    draftState({ files: [...value.files, ...Array.from(e.target.files ?? [])] });
+                    if (!queue || !value.loaded || saving || connection.status === "not-owner")
+                      return;
+                    draft.addFiles(Array.from(e.target.files ?? []));
                     e.target.value = "";
                   }}
                 />

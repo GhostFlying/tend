@@ -16,6 +16,7 @@ import { useStore } from "../state/store.ts";
 import styles from "./Composer.module.css";
 import { clock, latestReply, processing } from "./model.ts";
 import { LocalAttachment } from "./Attachments.tsx";
+import { pasteAttachments } from "./clipboard.ts";
 import { Close } from "../shell/icons.tsx";
 
 /** A touch screen, where Enter starts a new line and the button sends. */
@@ -156,7 +157,7 @@ export function Composer({
   };
 
   const addFiles = (files: File[]) => {
-    if (!files.length || blocked || saving.current) return;
+    if (!files.length || disabled || blocked || saving.current) return;
     composerDraft.addFiles(files);
   };
 
@@ -262,15 +263,17 @@ export function Composer({
         onChange={(e) => composerDraft.write(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={(event) => {
-          const files = Array.from(event.clipboardData.files);
-          if (!files.length) return;
-          event.preventDefault();
-          addFiles(files);
+          pasteAttachments(event, {
+            blocked: disabled || blocked || saving.current,
+            addFiles,
+            write: (text) => composerDraft.write(text),
+            warn: (message) => notify(message, "warn"),
+          });
         }}
         placeholder={presentation === "issue" ? "补充要求或继续讨论…" : "输入消息…"}
         aria-description={`发给 ${recipient?.title ?? "主 Agent"}`}
         aria-label="消息"
-        disabled={blocked}
+        disabled={disabled || blocked}
         readOnly={persisting}
       />
       <div className={styles.bar}>
@@ -292,7 +295,7 @@ export function Composer({
           aria-label="添加附件"
           title="选择文件或粘贴、拖入附件"
           onClick={() => fileInput.current?.click()}
-          disabled={blocked || persisting}
+          disabled={disabled || blocked || persisting}
         >
           <Paperclip />
         </button>
