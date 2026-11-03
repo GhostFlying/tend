@@ -5,25 +5,16 @@ import (
 	"errors"
 	"time"
 
-	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-// concurrencyForker releases a reservation only after native release succeeds.
+// concurrencyForker carries the permit; unsubscribing is not execution stop proof.
 // It does not wrap the Thread, preserving optional reconciliation interfaces.
 type concurrencyForker struct {
 	harness.ThreadForker
-	app    *app.App
 	permit string
 	owner  *concurrencyOwner
-}
-
-func (f concurrencyForker) ReleaseThread(ctx context.Context, thread string) error {
-	if err := f.ThreadForker.ReleaseThread(ctx, thread); err != nil {
-		return err
-	}
-	return f.app.ObserveAuxiliaryConcurrency(ctx, f.permit, protocol.ConcurrencyFeedback{SessionID: thread}, true)
 }
 
 func (m *Manager) startSummaryStage(ctx context.Context, s harness.Session, cfg harness.ThreadConfig, forker harness.ThreadForker) (harness.Thread, harness.ThreadForker, error) {
@@ -44,7 +35,7 @@ func (m *Manager) startSummaryStage(ctx context.Context, s harness.Session, cfg 
 		return nil, nil, errors.Join(err, stopErr)
 	}
 	if permit != "" {
-		forker = concurrencyForker{ThreadForker: forker, app: m.app, permit: permit, owner: owner}
+		forker = concurrencyForker{ThreadForker: forker, permit: permit, owner: owner}
 	}
 	return thread, forker, nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -77,10 +78,28 @@ func (a *App) CompactState(ctx context.Context, op string) (string, error) {
 	})
 	return state, err
 }
-func (a *App) SetCompactState(ctx context.Context, op, thread, state string) error {
+func (a *App) SetCompactState(ctx context.Context, op, thread, state string, selection ...*hostedconfig.Selection) error {
 	return a.store.Write(ctx, func(tx *store.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE agent_compactions SET started_after_seq=CASE WHEN ?='starting' AND status='queued' THEN COALESCE((SELECT MAX(seq) FROM agent_rollout_events e WHERE e.conversation_id=agent_compactions.conversation_id),0) ELSE started_after_seq END,status=?,thread_id=?,updated_at=? WHERE operation_id=? AND status<>'completed'`, state, state, thread, a.now().UnixMilli(), op)
-		return err
+		if state == "starting" && len(selection) > 0 && selection[0] != nil {
+			var conversation, current string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT conversation_id,status FROM agent_compactions WHERE operation_id=?`, op).Scan(&conversation, &current); err != nil {
+				return err
+			}
+			if current != "queued" {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "compaction already started; reconcile first")
+			}
+			if err := acquireAuxiliaryConcurrency(ctx, tx, "aux:compact:"+op, conversation, selection[0], a.now().UnixMilli()); err != nil {
+				return err
+			}
+		}
+		result, err := tx.Exec(ctx, `UPDATE agent_compactions SET started_after_seq=CASE WHEN ?='starting' AND status='queued' THEN COALESCE((SELECT MAX(seq) FROM agent_rollout_events e WHERE e.conversation_id=agent_compactions.conversation_id),0) ELSE started_after_seq END,status=?,thread_id=?,updated_at=? WHERE operation_id=? AND status<>'completed'`, state, state, thread, a.now().UnixMilli(), op)
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil || n == 0 {
+			return err
+		}
+		return concurrencyCompactState(ctx, tx, op, thread, state, a.now().UnixMilli())
 	})
 }
 func (a *App) CompleteNativeCompact(ctx context.Context, id, thread, item string) error {
@@ -112,6 +131,15 @@ func (a *App) CompleteNativeCompact(ctx context.Context, id, thread, item string
 		}
 		n, _ := result.RowsAffected()
 		if n > 0 {
+			ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT operation_id FROM agent_compactions WHERE conversation_id=? AND thread_id=? AND item_id=?`, store.ConversationID(id), thread, item)
+			if err != nil {
+				return err
+			}
+			for _, op := range ids {
+				if err := concurrencyCompactState(ctx, tx, op, thread, "completed", a.now().UnixMilli()); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO agent_compactions(operation_id,conversation_id,thread_id,status,source,item_id,after_json,created_at,updated_at) VALUES(?,?,?,'completed','automatic',?,?,?,?)`, a.ids.New(protocol.Prefix("compact")), store.ConversationID(id), thread, item, string(raw), a.now().UnixMilli(), a.now().UnixMilli())
