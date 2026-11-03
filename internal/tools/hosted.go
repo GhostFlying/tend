@@ -75,6 +75,7 @@ var hostedMutations = []hostedMutation{
 	{"artifact_shares_revoke", "Revoke future reads of an exact artifact share using target Issue and share revisions. Previously frozen task inputs remain historical facts.", "issue", protocol.RevokeArtifactSharePayload{}, app.ArtifactShareCommand{Revoke: true}, true},
 	{"question_inputs_grant", "Grant only selected file_ids from the actual owner answer or ReplyTo supplement to an exact worker question/run/lease. Use the input revision CAS, real source content revision and original request identity. Does not rewrite the answer, authorize other attachments, or inherit into a continuation. Return metadata then relay it to the original executor without restarting it.", "decision", protocol.QuestionInputPayload{}, app.QuestionInputCommand{}, true},
 	{"question_inputs_revoke", "Revoke one exact question input grant_revision with the question input revision CAS. Stops future fetches; downloaded bytes, old answer receipts and independent spec inputs remain facts.", "decision", protocol.RevokeQuestionInputsPayload{}, app.QuestionInputCommand{Revoke: true}, true},
+	{"tasks_reconcile_manager", "Reconcile only a proved-closed original manager after all native and business receipts are settled. Requires exact task revision, lease, close receipt SHA and current admitted owner source. Preserves waiting responsibility; never replay a missing session or declare its Issue complete.", "task", protocol.ReconcileManagerRunPayload{}, app.ReconcileManagerRun{}, true},
 	{"attentions_resolve", "Handle an original problem assigned to this responsibility, preserving its exact question version. Use responsibility.revision as expected_control_revision and its assignment_epoch. Explain evidence/reason; this is an Agent answer, never user authorization. Keep task effects and independent acceptance intact.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{}, true},
 	{"attentions_escalate", "Escalate an unresolved problem exactly one supervisor step: parent Issue, then main coordinator, then human. Use responsibility.revision and assignment_epoch. State attempted remedies and why they cannot work. Never notify the user directly for an internal problem, create duplicate problems, or reset task budgets.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{Escalate: true}, true},
 	{"conversation_reply", "Reply to one admitted input. Tend selects its source endpoint; never repeat the body as native text.", "logical_turn", protocol.CoordinationReply{}, app.CoordinationReply{}, true},
@@ -159,6 +160,9 @@ func hostedMutationSchema(payload any) json.RawMessage {
 func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	var out []harness.ToolSpec
 	out = append(out, harness.ToolSpec{Name: "conversation_input_read", Description: "Read one exact admitted communication input and immediately record witnessed consumption. No address or channel selection.", InputSchema: json.RawMessage(`{"type":"object","properties":{"message_id":{"type":"string"}},"required":["message_id"],"additionalProperties":false}`)})
+	if purpose == agentconfig.Main {
+		out = append(out, harness.ToolSpec{Name: "tasks_manager_reconciliation", Description: "Read exact ledger-only original manager close, event and business receipt evidence. Missing sessions remain unknown; this read never authorizes native replay.", InputSchema: exportSchema(json.RawMessage(argumentSchema(managerReconciliationReadArgs{})))})
+	}
 	for _, m := range hostedMutations {
 		if m.name == "issues_request_manager" {
 			// Historical callbacks and the owner CLI retain their original
@@ -304,6 +308,13 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		}
 		c.ExecutionRequestID = execution.ID
 		value, err := s.startHostedUpgrade(ctx, c, native.Status == store.TurnStarting || native.Status == store.TurnStarted)
+		return hostedAnswer(value, err), true
+	}
+	if c.Tool == "tasks_manager_reconciliation" {
+		if execution.Selection.Purpose != agentconfig.Main {
+			return fail(protocol.Errorf(protocol.CodeForbidden, "only the main coordinator can inspect global manager reconciliation"))
+		}
+		value, err := s.tasksManagerReconciliation(ctx, c)
 		return hostedAnswer(value, err), true
 	}
 	if c.Tool == "conversation_input_read" {

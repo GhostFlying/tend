@@ -7668,6 +7668,94 @@
       "title": "ManagerMigrationPayload",
       "type": "object"
     },
+    "ManagerRunReconciliation": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "blockers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "can_settle_waiting": {
+          "type": "boolean"
+        },
+        "close_last_sequence": {
+          "type": "integer"
+        },
+        "close_request_id": {
+          "type": "string"
+        },
+        "close_result_sha256": {
+          "type": "string"
+        },
+        "event_last_sequence": {
+          "type": "integer"
+        },
+        "execution": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "observed": {
+          "$ref": "#/definitions/RunObserved"
+        },
+        "pending_business_receipts": {
+          "type": "boolean"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "task_revision": {
+          "type": "integer"
+        },
+        "unapplied_events": {
+          "type": "integer"
+        },
+        "unresolved_native_requests": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "task_id",
+        "run_id",
+        "action_id",
+        "host_id",
+        "lease_id",
+        "task_revision",
+        "assignment_epoch",
+        "observed",
+        "close_last_sequence",
+        "event_last_sequence",
+        "unapplied_events",
+        "unresolved_native_requests",
+        "pending_business_receipts",
+        "can_settle_waiting",
+        "blockers"
+      ],
+      "title": "ManagerRunReconciliation",
+      "type": "object"
+    },
     "ManualSource": {
       "additionalProperties": false,
       "properties": {
@@ -9543,6 +9631,45 @@
       ],
       "title": "Rating",
       "type": "string"
+    },
+    "ReconcileManagerRunPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "close_request_id": {
+          "type": "string"
+        },
+        "close_result_sha256": {
+          "type": "string"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "lease_id",
+        "close_request_id",
+        "close_result_sha256",
+        "expected_assignment_epoch",
+        "reason"
+      ],
+      "title": "ReconcileManagerRunPayload",
+      "type": "object"
     },
     "RegisterRepositoryPayload": {
       "additionalProperties": false,
@@ -14343,6 +14470,9 @@
     "ManagerMigrationPayload": {
       "$ref": "#/definitions/ManagerMigrationPayload"
     },
+    "ManagerRunReconciliation": {
+      "$ref": "#/definitions/ManagerRunReconciliation"
+    },
     "ManualSource": {
       "$ref": "#/definitions/ManualSource"
     },
@@ -14417,6 +14547,9 @@
     },
     "RateTaskPayload": {
       "$ref": "#/definitions/RateTaskPayload"
+    },
+    "ReconcileManagerRunPayload": {
+      "$ref": "#/definitions/ReconcileManagerRunPayload"
     },
     "RegisterRepositoryPayload": {
       "$ref": "#/definitions/RegisterRepositoryPayload"

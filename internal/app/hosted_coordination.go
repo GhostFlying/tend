@@ -51,7 +51,7 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		}
 	}
 	if execution.Selection.Purpose == agentconfig.Main {
-		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{"decisions.grant_inputs", "decisions.revoke_inputs", "issues.set_acceptance_policy", protocol.OpGrantArtifactShare, protocol.OpRevokeArtifactShare, "issues.reuse", "issues.reopen", protocol.OpIssueRequestOwner, protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "attentions.resolve", "attentions.escalate", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
+		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{protocol.OpReconcileManagerRun, "decisions.grant_inputs", "decisions.revoke_inputs", "issues.set_acceptance_policy", protocol.OpGrantArtifactShare, protocol.OpRevokeArtifactShare, "issues.reuse", "issues.reopen", protocol.OpIssueRequestOwner, protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "attentions.resolve", "attentions.escalate", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "the personal planner must delegate issue work, not execute its task planning")
 		}
 	} else if execution.Selection.Purpose != agentconfig.Consultation {
@@ -248,7 +248,7 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 			delegationSources = append(delegationSources, create.Manager.SourceMessageID)
 		}
 	}
-	if execution.Selection.Purpose == agentconfig.Main && (c.Operation() == "decisions.grant_inputs" || c.Operation() == "decisions.revoke_inputs" || c.Operation() == protocol.OpGrantArtifactShare || c.Operation() == protocol.OpRevokeArtifactShare || c.Operation() == "issues.reuse" || c.Operation() == "issues.reopen" || c.Operation() == "issues.create" || c.Operation() == protocol.OpIssueRequestManager || c.Operation() == protocol.OpIssueRequestOwner) {
+	if execution.Selection.Purpose == agentconfig.Main && (c.Operation() == protocol.OpReconcileManagerRun || c.Operation() == "decisions.grant_inputs" || c.Operation() == "decisions.revoke_inputs" || c.Operation() == protocol.OpGrantArtifactShare || c.Operation() == protocol.OpRevokeArtifactShare || c.Operation() == "issues.reuse" || c.Operation() == "issues.reopen" || c.Operation() == "issues.create" || c.Operation() == protocol.OpIssueRequestManager || c.Operation() == protocol.OpIssueRequestOwner) {
 		for _, source := range delegationSources {
 			admitted, err := mainExecutionSourceAdmitted(ctx, tx.Q(), execution.ID, source)
 			if err != nil {

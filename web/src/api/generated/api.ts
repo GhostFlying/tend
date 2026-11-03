@@ -330,6 +330,7 @@ export interface TendAPI {
   LocalRepositoryBinding?: LocalRepositoryBinding;
   LocalRepositoryStatus?: LocalRepositoryStatus;
   ManagerMigrationPayload?: ManagerMigrationPayload;
+  ManagerRunReconciliation?: ManagerRunReconciliation;
   ManualSource?: ManualSource;
   MessagingChannel?: MessagingChannel;
   MessagingDelivery?: MessagingDelivery;
@@ -355,6 +356,7 @@ export interface TendAPI {
   QuestionInputPage?: QuestionInputPage;
   QuestionInputPayload?: QuestionInputPayload;
   RateTaskPayload?: RateTaskPayload;
+  ReconcileManagerRunPayload?: ReconcileManagerRunPayload;
   RegisterRepositoryPayload?: RegisterRepositoryPayload;
   ReparentIssuePayload?: ReparentIssuePayload;
   RepoRegistry?: RepoRegistry;
@@ -3377,6 +3379,30 @@ export interface ManagerMigrationPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ManagerRunReconciliation".
+ */
+export interface ManagerRunReconciliation {
+  action_id: string;
+  assignment_epoch: number;
+  blockers: string[] | null;
+  can_settle_waiting: boolean;
+  close_last_sequence: number;
+  close_request_id?: string;
+  close_result_sha256?: string;
+  event_last_sequence: number;
+  execution?: RunExecutionPin;
+  host_id: string;
+  lease_id: string;
+  observed: RunObserved;
+  pending_business_receipts: boolean;
+  run_id: string;
+  task_id: string;
+  task_revision: number;
+  unapplied_events: number;
+  unresolved_native_requests: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ManualSource".
  */
 export interface ManualSource {
@@ -3811,6 +3837,20 @@ export interface QuestionInputPayload {
  */
 export interface RateTaskPayload {
   rating: Rating;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ReconcileManagerRunPayload".
+ */
+export interface ReconcileManagerRunPayload {
+  close_request_id: string;
+  close_result_sha256: string;
+  expected_assignment_epoch: number;
+  expected_source_revision?: number;
+  lease_id: string;
+  reason: string;
+  run_id: string;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

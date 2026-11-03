@@ -39,6 +39,8 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "question-inputs show", Route: "/api/v1/decisions/{id}/inputs", JSONDefault: true},
 	{Name: "question-inputs grant", Operation: "decisions.grant_inputs", Target: "decision", RevisionRoute: "/api/v1/decisions/{id}/inputs", RevisionField: "revision", JSONDefault: true},
 	{Name: "question-inputs revoke", Operation: "decisions.revoke_inputs", Target: "decision", RevisionRoute: "/api/v1/decisions/{id}/inputs", RevisionField: "revision", JSONDefault: true},
+	{Name: "task manager-reconciliation", Route: "/api/v1/tasks/{id}/manager-reconciliation", Queries: "run=run_id", JSONDefault: true},
+	{Name: "task reconcile-manager", Operation: protocol.OpReconcileManagerRun, Target: "task", RevisionRoute: "-"},
 	{Name: "inbox list", Route: "/api/v1/inbox", Queries: "issue=issue_id kind status actionable-only=actionable_only include-archived=include_archived after limit"},
 	{Name: "session show", Route: "/api/v1/session"},
 	{Name: "deployment show", Route: "/api/v1/deployment"},
