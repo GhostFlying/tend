@@ -122,7 +122,7 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 
 ## 4. 测试
 
-- `make check` = 格式检查 + vet + staticcheck + `go test -race ./...`，加上 Web 的类型检查、lint、prettier 检查、vitest 和构建，提交前必须通过；CI 在每个 PR 上执行同样的检查，外加 Windows 和 macOS 的交叉编译。
+- `make check` = 格式检查 + vet + staticcheck + `go test -race ./...`，加上 Web 的类型检查、lint、prettier 检查、vitest 和构建。允许本地检查尚未结束时先 commit、push 并创建 PR，让 GitHub CI 与本地检查并行；PR 描述必须如实标注待完成的检查。合入前，本地完整 `make check` 和 PR 所需 CI 都必须通过；CI 在每个 PR 上执行同样的检查，外加 Windows 和 macOS 的交叉编译。
 - 单元测试默认不联网、不调用模型，使用 `testkit` 替身。
 - 需要真实 traex 或 tailnet 的集成测试使用 build tag `integration`，通过 `make it` 显式运行；测试模型使用 `TEND_TRAEX_MODEL`（默认 GPT-5.6-Sol）。
 - v0.1 §17.2 的故障场景对应的测试命名为 `TestFault_*`，便于对照检查。
@@ -133,10 +133,10 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
   - type：`feat` `fix` `refactor` `test` `docs` `build` `chore` `spike`
   - summary：英文、小写开头的祈使句，不超过 72 个字符，末尾不加句号
 - body 用英文详细描述这次做了什么、为什么这样做、引入了哪些约束；涉及设计决策时引用编号（如 `Refs: D17`），涉及计划项时引用编号（如 `Plan: B3`）。
-- body 不写跑了哪些测试、多少测试、测试结果；提交前通过 `make check` 是默认前提。
-- 每个 commit 是一个可以独立构建、测试通过的原子变更；重构和行为变化分开提交。
+- body 不写跑了哪些测试、多少测试、测试结果；检查进展与结果记录在 PR 描述中，合入前须满足第 4 节的测试门槛。
+- 每个 commit 是一个可以独立构建和测试的原子变更；允许按第 4 节的并行流程在提交后完成检查，重构和行为变化分开提交。
 - 所有改动都通过 PR 合入：从最新的 `main` 拉短期分支（`<type>/<topic>`），推送后开 PR。CI（`.github/workflows/ci.yml`，执行 `make check` 和交叉编译）通过后才能合并。
-- 每个 PR 合并前都要经过独立 review：在 PR 分支上运行 `codex review --base main -c model='"gpt-6.1-sol"' -c model_reasoning_effort='"xhigh"'`。review 意见由提交者逐条判断：确实的缺陷和值得做的改进在合并前修掉；过度防御的意见（为假设性场景加防护、超出本次范围的扩展）可以不采纳。在 PR 描述里简要记录采纳和不采纳的意见及理由。修改较大时重新 review。
+- 每个 PR 合并前都要经过独立 review：在 PR 分支上运行 `codex review --base main -c model='"gpt-6.1-sol"' -c model_reasoning_effort='"xhigh"'`。review 意见由提交者逐条判断：确实的缺陷和值得做的改进在合并前修掉；过度防御的意见（为假设性场景加防护、超出本次范围的扩展）可以不采纳。在 PR 描述里简要记录采纳和不采纳的意见及理由。合入前确认本地检查、独立 review 和所需 CI 均覆盖最终候选；候选变更后重新评估受影响的验证，修改较大时重新 review。
 - 历史保持纯线性：GitHub 仓库只允许 rebase & merge，禁止 merge commit 和 squash；`main` 禁止直接 push 和 force push。PR 合并前先 rebase 到最新的 `main`。
 - 远程：GitHub，公开仓库。
 - git 身份使用仓库或全局已有配置，不添加 agent、bot 或工具作为作者或 co-author。
