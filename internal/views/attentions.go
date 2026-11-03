@@ -88,7 +88,14 @@ func (reader *attentionReader) read(ctx context.Context, q store.Querier, id str
 		value := Decision(d)
 		v.Decision = &value
 		if v.TaskContext != nil {
-			v.TaskContext.QuestionCurrent = d.AskedRevision.Valid && d.AskedRevision.Int64 == taskRevision
+			v.TaskContext.QuestionCurrent = d.Status == store.DecisionOpen && d.AskedRevision.Valid && d.AskedRevision.Int64 == taskRevision
+			known, obsolete, err := store.TaskRuleQuestionApplicability(ctx, q, d.DecisionID)
+			if err != nil {
+				return v, err
+			}
+			if known {
+				v.TaskContext.QuestionCurrent = d.Status == store.DecisionOpen && !obsolete
+			}
 		}
 	}
 	if a.ChoiceID != "" {

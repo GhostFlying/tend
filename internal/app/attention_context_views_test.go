@@ -197,6 +197,27 @@ func TestAttentionQuestionCurrentFollowsControlRevision(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		foundCurrent := false
+		for _, a := range page.Items {
+			if a.DecisionID == original.DecisionID {
+				t.Fatal("superseded question remained in actionable open results", a)
+			}
+			if a.DecisionID == current.DecisionID {
+				foundCurrent = true
+			}
+		}
+		if !foundCurrent {
+			t.Fatal("current question was lost from open results")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		page, err := views.Attentions(t.Context(), tx.Q(), views.AttentionFilter{IncludeArchived: true})
+		if err != nil {
+			return err
+		}
 		found := 0
 		for _, a := range page.Items {
 			if a.DecisionID != original.DecisionID && a.DecisionID != current.DecisionID {
@@ -206,9 +227,15 @@ func TestAttentionQuestionCurrentFollowsControlRevision(t *testing.T) {
 			if a.TaskContext == nil || a.TaskContext.QuestionCurrent != (a.DecisionID == current.DecisionID) {
 				t.Fatalf("question does not match its original revision: %+v", a)
 			}
+			if a.DecisionID == original.DecisionID && (a.Status != "withdrawn" || a.Decision == nil || a.Decision.Status != "cancelled") {
+				t.Fatal("superseded original history was lost or remained actionable", a)
+			}
+			if a.DecisionID == current.DecisionID && a.Status != "open" {
+				t.Fatal("current question lost responsibility", a)
+			}
 		}
 		if found != 2 {
-			t.Fatalf("expected both original and current open questions, got %d", found)
+			t.Fatalf("expected both original and current historical question records, got %d", found)
 		}
 		return nil
 	}); err != nil {
