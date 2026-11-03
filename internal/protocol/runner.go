@@ -55,6 +55,9 @@ const (
 	VerdictContinue = "continue"
 	// VerdictStop means the runner must stop the run and drop it.
 	VerdictStop = "stop"
+	// VerdictRetain keeps an unresolved original run fenced without releasing
+	// its journal or starting another attempt. Only negotiated peers receive it.
+	VerdictRetain = "retain"
 )
 
 // RunVerdict tells the runner what to do with a run it reported.

@@ -495,7 +495,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := checkMaintenanceHello(ctx, q, host.HostID); err != nil {
+	if err := checkMaintenanceHello(ctx, q, host.HostID, p.Runtime); err != nil {
 		return Outcome{}, err
 	}
 	if p.WorkspaceProtocol < 0 || p.WorkspaceProtocol > 1 {
@@ -584,6 +584,16 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			stop(h.RunID, "the run is no longer wanted")
 			continue
 		}
+		protected, err := activeMaintenanceRunProtection(ctx, q, run)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if protected != nil {
+			// The negotiated peer retains this exact journal. Registration and
+			// unrelated runs can reconcile without renewing this uncertain run.
+			res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictRetain, Desired: run.DesiredState, Reason: "original maintenance execution requires independent business reconciliation"})
+			continue
+		}
 		if err := tx.SetLease(ctx, lease.LeaseID, lease.Status, store.LeaseActive, max(expires, lease.ExpiresAt), now); err != nil {
 			return Outcome{}, err
 		}
@@ -605,6 +615,15 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	}
 	for _, run := range open {
 		if held[run.RunID] {
+			continue
+		}
+		protected, err := activeMaintenanceRunProtection(ctx, q, run)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if protected != nil {
+			// A missing local journal is not authority to recreate a protected
+			// execution, even if its old observation was only starting.
 			continue
 		}
 		lease, err := store.GetLeaseByRun(ctx, q, run.RunID)
@@ -967,6 +986,17 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 				return err
 			}
 			if err == nil && rc.run.HostID == host.HostID && lease.LeaseID == ref.LeaseID && lease.Status == store.LeaseActive {
+				if runtimeSupportsRetainedReconciliation(payload.Runtime) {
+					protected, err := activeMaintenanceRunProtection(ctx, q, rc.run)
+					if err != nil {
+						return err
+					}
+					if protected != nil {
+						state.Desired = desiredFor(rc.run, rc.action, rc.task)
+						res.Runs = append(res.Runs, state)
+						continue
+					}
+				}
 				if err := tx.SetLease(ctx, lease.LeaseID, store.LeaseActive, store.LeaseActive, max(now.Add(a.leaseTTL).UnixMilli(), lease.ExpiresAt), now.UnixMilli()); err != nil {
 					return err
 				}

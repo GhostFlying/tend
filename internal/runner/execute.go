@@ -49,10 +49,16 @@ func failed(reason string, err error) error { return &stepError{reason: reason, 
 // execute drives a journaled run from its current phase to done. ctx is the
 // runner's lifetime; runCtx ends when the run is fenced or stopped.
 func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) error {
+	if errors.Is(context.Cause(runCtx), errFenced) {
+		return r.markExecutorFenced(ctx, a)
+	}
 	if a.as.Role == protocol.RoleIssueManager {
 		return r.executeManager(ctx, runCtx, a)
 	}
 	for {
+		if errors.Is(context.Cause(runCtx), errFenced) {
+			return r.markExecutorFenced(ctx, a)
+		}
 		run, err := r.cfg.Journal.Run(ctx, runID)
 		if errors.Is(err, journal.ErrNotFound) {
 			return nil
@@ -95,7 +101,7 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			return nil
 		case errors.Is(cause, errFenced):
 			r.cfg.Log.WarnContext(ctx, "run fenced; waiting for reconciliation", "run_id", runID)
-			return r.cfg.Journal.SetFenced(ctx, runID, true)
+			return r.markExecutorFenced(ctx, a)
 		case errors.Is(cause, errStopped) && run.Phase == journal.PhaseWorkerDone:
 			// A stop arriving during completion takes precedence over a
 			// pending stop check. Final phases retain their existing request.
@@ -694,26 +700,32 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 				if err2 != nil {
 					return err2
 				}
-				if err2 := r.cfg.Journal.Replace(ctx, as.RunID, journal.PhaseReleasing, req.Envelope.RequestID, journal.Request{Envelope: *env, RunID: as.RunID}); err2 != nil {
+				settled, err2 := r.settleRun(ctx, as.RunID, func() error {
+					return r.cfg.Journal.Replace(ctx, as.RunID, journal.PhaseReleasing, req.Envelope.RequestID, journal.Request{Envelope: *env, RunID: as.RunID})
+				})
+				if err2 != nil || !settled {
 					return err2
 				}
 				return r.report(ctx, as)
 			}
 		}
 	}
-	execution, err := r.resolveExecution(ctx, as)
-	if err != nil {
-		return &completionPending{err}
-	}
-	if err := execution.Workspaces.Finish(ctx, as); err != nil {
-		r.cfg.Log.WarnContext(ctx, "workspace cleanup failed", "run_id", as.RunID, "err", err)
-	}
-	if as.Workspace.ID != "" {
-		if err := r.cfg.Journal.QueueWorkspaceRelease(ctx, protocol.WorkspaceRelease{WorkspaceID: as.Workspace.ID, TaskID: as.TaskID}); err != nil {
-			return err
+	_, settleErr := r.settleRun(ctx, as.RunID, func() error {
+		execution, err := r.resolveExecution(ctx, as)
+		if err != nil {
+			return &completionPending{err}
 		}
-	}
-	return r.cfg.Journal.Done(ctx, as.RunID)
+		if err := execution.Workspaces.Finish(ctx, as); err != nil {
+			r.cfg.Log.WarnContext(ctx, "workspace cleanup failed", "run_id", as.RunID, "err", err)
+		}
+		if as.Workspace.ID != "" {
+			if err := r.cfg.Journal.QueueWorkspaceRelease(ctx, protocol.WorkspaceRelease{WorkspaceID: as.Workspace.ID, TaskID: as.TaskID}); err != nil {
+				return err
+			}
+		}
+		return r.cfg.Journal.Done(ctx, as.RunID)
+	})
+	return settleErr
 }
 
 // stopAgent confirms that an external agent can no longer write before reporting.

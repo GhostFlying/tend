@@ -70,8 +70,14 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 	if readErr != nil {
 		return readErr
 	}
+	r.mu.Lock()
+	retained := a.retained
+	r.mu.Unlock()
+	if retained {
+		return r.markExecutorFenced(lifetime, a)
+	}
 	if !run.StoppedConfirmed {
-		if err := r.cfg.Journal.SetFenced(lifetime, as.RunID, true); err != nil {
+		if err := r.markExecutorFenced(lifetime, a); err != nil {
 			return err
 		}
 		r.requestReconcile()
@@ -108,12 +114,13 @@ func (r *Runner) reportManagerStopped(ctx context.Context, as protocol.Assignmen
 			if err = r.sendManagerReceipt(ctx, as, &p.Envelope); err != nil {
 				return err
 			}
-			if err = r.cfg.Journal.DeleteRequest(ctx, p.Envelope.RequestID); err != nil {
+			settled, err := r.settleRun(ctx, as.RunID, func() error { return r.cfg.Journal.DeleteRequest(ctx, p.Envelope.RequestID) })
+			if err != nil || !settled {
 				return err
 			}
 		}
 	}
-	return r.cfg.Journal.Done(ctx, as.RunID)
+	return r.finishJournal(ctx, as.RunID)
 }
 
 func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assignment) error {
@@ -279,7 +286,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 					}
 					if closeReply {
 						nativeClosed = true
-						return r.cfg.Journal.Done(ctx, as.RunID)
+						return r.finishJournal(ctx, as.RunID)
 					}
 				}
 			}
@@ -405,7 +412,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		}
 		if command.Method == "close" && reply.Error == "" {
 			nativeClosed = true
-			return r.cfg.Journal.Done(ctx, as.RunID)
+			return r.finishJournal(ctx, as.RunID)
 		}
 	}
 	return ctx.Err()
@@ -455,7 +462,7 @@ func (r *Runner) replayManagerClose(ctx context.Context, as protocol.Assignment)
 	if err = r.sendManagerReceipt(ctx, as, env); err != nil {
 		return true, err
 	}
-	return true, r.cfg.Journal.Done(ctx, as.RunID)
+	return true, r.finishJournal(ctx, as.RunID)
 }
 
 // A close proof may reach the server before the final uploaded event has
