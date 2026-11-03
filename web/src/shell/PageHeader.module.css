@@ -22,3 +22,9 @@
 .title:focus {
   outline: none;
 }
+
+@media (max-width: 760px) {
+  .header {
+    padding-top: calc(var(--space-4) + env(safe-area-inset-top));
+  }
+}

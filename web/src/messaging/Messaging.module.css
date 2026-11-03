@@ -320,6 +320,8 @@
     min-width: var(--control-touch);
   }
   .header {
+    min-height: calc(var(--head-height) + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
     padding-inline: var(--space-4);
     gap: var(--space-2);
   }
