@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
+
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
-	"time"
 )
 
 func (m *Manager) refreshUsage(ctx context.Context, th harness.Thread) {
@@ -73,7 +74,7 @@ func (m *Manager) deliverCompact(ctx context.Context, d app.Delivery) app.Delive
 		_ = m.app.SetCompactState(ctx, p.ID, th.ID(), "failed")
 		return app.DeliveryResult{Outcome: app.Failed, Reason: "native compaction is unsupported"}
 	}
-	if err = m.app.SetCompactState(ctx, p.ID, th.ID(), "starting"); err != nil {
+	if err = m.app.SetCompactState(ctx, p.ID, th.ID(), "starting", m.namedSelection()); err != nil {
 		return retry(err)
 	}
 	request, cancel := context.WithTimeout(ctx, 30*time.Second)

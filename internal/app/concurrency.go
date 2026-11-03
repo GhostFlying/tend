@@ -461,6 +461,11 @@ func (a *App) ConcurrencyHistory(ctx context.Context, query protocol.Concurrency
 }
 
 func putConcurrencyExecution(ctx context.Context, tx *store.Tx, source protocol.ConcurrencySource, state string, now int64) error {
+	return putConcurrencyExecutionObserved(ctx, tx, source, state, now, now)
+}
+
+// Observation time advances the controller; lastSeen only establishes liveness.
+func putConcurrencyExecutionObserved(ctx context.Context, tx *store.Tx, source protocol.ConcurrencySource, state string, lastSeen, now int64) error {
 	group, err := concurrencyBinding(ctx, tx.Q(), source.EnvironmentID, source.RuntimeID)
 	if err != nil {
 		return err
@@ -489,7 +494,7 @@ func putConcurrencyExecution(ctx context.Context, tx *store.Tx, source protocol.
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO concurrency_executions(execution_id,environment_id,runtime_id,state,source_json,last_seen,group_id,parent_execution_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(execution_id) DO UPDATE SET state=excluded.state,source_json=excluded.source_json,last_seen=excluded.last_seen,parent_execution_id=excluded.parent_execution_id,group_id=CASE WHEN concurrency_executions.state='stopped' OR excluded.state='stopped' THEN concurrency_executions.group_id ELSE excluded.group_id END`, source.ExecutionID, source.EnvironmentID, source.RuntimeID, state, string(raw), now, group, source.ParentExecutionID)
+	_, err = tx.Exec(ctx, `INSERT INTO concurrency_executions(execution_id,environment_id,runtime_id,state,source_json,last_seen,group_id,parent_execution_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(execution_id) DO UPDATE SET state=excluded.state,source_json=excluded.source_json,last_seen=excluded.last_seen,parent_execution_id=excluded.parent_execution_id,group_id=CASE WHEN concurrency_executions.state='stopped' OR excluded.state='stopped' THEN concurrency_executions.group_id ELSE excluded.group_id END`, source.ExecutionID, source.EnvironmentID, source.RuntimeID, state, string(raw), lastSeen, group, source.ParentExecutionID)
 	if err != nil {
 		return err
 	}
@@ -575,7 +580,7 @@ func recordConcurrencyFeedback(ctx context.Context, tx *store.Tx, source protoco
 	source.Attempt = f.Attempt
 	source.OccurredAt = f.OccurredAt
 	source.ReceivedAt = now
-	if f.Failure != nil {
+	if f.Kind != "success" {
 		source.Kind = "congestion"
 		source.Code = f.Failure.Code
 		source.HTTPStatus = f.Failure.HTTPStatus

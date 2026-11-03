@@ -125,7 +125,7 @@ func syncConcurrencyExecutions(ctx context.Context, tx *store.Tx, now int64) err
 		if f.receiptOnly {
 			state = "stopped"
 		}
-		if err := putConcurrencyExecution(ctx, tx, source, state, f.seen); err != nil {
+		if err := putConcurrencyExecutionObserved(ctx, tx, source, state, f.seen, now); err != nil {
 			return err
 		}
 	}
@@ -180,7 +180,7 @@ func syncConcurrencyExecutions(ctx context.Context, tx *store.Tx, now int64) err
 			state = "unknown"
 			seen = f.seen
 		}
-		if err := putConcurrencyExecution(ctx, tx, source, state, seen); err != nil {
+		if err := putConcurrencyExecutionObserved(ctx, tx, source, state, seen, now); err != nil {
 			return err
 		}
 	}
@@ -277,6 +277,7 @@ func (a *App) concurrencyAdmitHosted(ctx context.Context, tx *store.Tx, m store.
 	f := protocol.ConcurrencyFeedback{SessionID: m.ThreadID, TurnID: m.TurnID, Attempt: m.RequestID, Failure: m.Failure}
 	if m.Status == store.TurnCompleted {
 		f.Kind = "success"
+		f.Failure = nil
 	}
 	if f.Kind != "" || f.Failure != nil {
 		return recordConcurrencyFeedback(ctx, tx, source, f, now)
@@ -285,7 +286,22 @@ func (a *App) concurrencyAdmitHosted(ctx context.Context, tx *store.Tx, m store.
 }
 func (a *App) RecordHostedConcurrencyEvent(ctx context.Context, request string, event protocol.ConcurrencyFeedback) error {
 	if request == "" {
-		return nil
+		return a.store.Write(ctx, func(tx *store.Tx) error {
+			var raw string
+			err := tx.Q().QueryRowContext(ctx, `SELECT e.source_json FROM concurrency_executions e JOIN agent_compactions c ON e.execution_id='aux:compact:'||c.operation_id WHERE c.thread_id=? AND c.status IN ('starting','running','unknown') AND e.state<>'stopped'`, event.SessionID).Scan(&raw)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			var source protocol.ConcurrencySource
+			if err := json.Unmarshal([]byte(raw), &source); err != nil {
+				return err
+			}
+			event.Attempt = source.Attempt
+			return recordConcurrencyFeedback(ctx, tx, source, event, a.now().UnixMilli())
+		})
 	}
 	return a.store.Write(ctx, func(tx *store.Tx) error {
 		execution, err := store.GetHostedExecution(ctx, tx.Q(), request)

@@ -184,7 +184,7 @@ func (m *Manager) summaryFork(ctx context.Context, s harness.Session, th harness
 	}
 	// A message arriving during the fork makes this summary stale, never current.
 	if permit != "" {
-		forker = concurrencyForker{ThreadForker: forker, app: m.app, permit: permit, owner: owner}
+		forker = concurrencyForker{ThreadForker: forker, permit: permit, owner: owner}
 	}
 	return fork, forker, nil
 }
@@ -211,6 +211,16 @@ func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forke
 		}
 		if !completed {
 			_ = fork.Interrupt(cleanup, turnID)
+			if reader, ok := fork.(harness.TurnReader); ok {
+				if receipt, found, readErr := reader.FindTurn(cleanup, identity, turnID); readErr == nil && found {
+					completed = receipt.Status == "completed" || receipt.Status == "failed" || receipt.Status == "interrupted"
+				}
+			}
+		}
+		if control, ok := forker.(concurrencyForker); ok {
+			if stopErr := m.app.ObserveAuxiliaryConcurrency(cleanup, control.permit, protocol.ConcurrencyFeedback{SessionID: fork.ID(), TurnID: turnID}, completed); stopErr != nil {
+				err = errors.Join(err, stopErr)
+			}
 		}
 		m.syncNativeUsage(cleanup)
 		if releaseErr := forker.ReleaseThread(cleanup, fork.ID()); releaseErr != nil {
@@ -225,6 +235,7 @@ func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forke
 	// All stages use the model selected when the history fork was frozen.
 	turnID, err = fork.StartTurn(ctx, harness.TurnInput{Text: input, UserMessageID: identity, Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort})
 	if err != nil {
+		completed = errors.Is(err, harness.ErrRejected)
 		if !errors.Is(err, harness.ErrRejected) {
 			if reader, ok := fork.(harness.TurnReader); ok {
 				readCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
