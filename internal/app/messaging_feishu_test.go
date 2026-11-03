@@ -241,3 +241,83 @@ func TestFeishuStagedParentDoesNotPermanentlyFailChild(t *testing.T) {
 		t.Fatal(message, err)
 	}
 }
+
+func TestFeishuInteractionAnswersKeepSourceAndLateText(t *testing.T) {
+	for _, answeredElsewhere := range []bool{false, true} {
+		t.Run(map[bool]string{false: "open", true: "closed"}[answeredElsewhere], func(t *testing.T) {
+			h := newHarness(t)
+			bindFeishuFixture(t, h)
+			a := attentionForTest(t, h, protocol.CreateAttentionPayload{Kind: "action", Title: "Check report"})
+			page, err := h.app.MessagingMessages(t.Context(), 0, "", "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var question protocol.MessagingMessage
+			for _, m := range page.Items {
+				if m.Interaction != nil && m.Interaction.ObjectID == a.AttentionID {
+					question = m
+				}
+			}
+			if question.MessageID == "" {
+				t.Fatal("missing interaction publication")
+			}
+			for {
+				d, _, ok, err := h.app.NextDelivery(t.Context(), FeishuDestination)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !ok {
+					break
+				}
+				if err = h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered, ExternalMessageReference: "external-question"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if answeredElsewhere {
+				h.exec(owner, h.env((AttentionCommand{Action: "confirm"}).Operation(), protocol.Target{Type: "attention", ID: a.AttentionID}, protocol.ConfirmAttentionPayload{Summary: "checked elsewhere"}, rev(a.Revision)), AttentionCommand{Action: "confirm"})
+			}
+			text := "已完成：checked report"
+			if answeredElsewhere {
+				text = "Please investigate a new discrepancy"
+			}
+			in := FeishuIncoming{EventID: "answer", MessageID: "external-answer", AppID: "app", TenantKey: "tenant", SenderID: "person", ChatID: "chat", ParentID: "external-question", Text: text}
+			op, err := h.app.ReceiveFeishu(t.Context(), in)
+			if err != nil || op.Error != nil {
+				t.Fatalf("%+v %v", op, err)
+			}
+			again, err := h.app.ReceiveFeishu(t.Context(), in)
+			if err != nil || again.RequestID != op.RequestID || string(again.Result) != string(op.Result) {
+				t.Fatalf("replayed reply changed: %+v %v", again, err)
+			}
+			id := messageID(t, op)
+			if id == question.MessageID {
+				t.Fatal("answer reused original question")
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var body, source string
+				var acknowledgements int
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT body FROM conversation_messages WHERE message_id=?`, id).Scan(&body); err != nil {
+					return err
+				}
+				if body != text {
+					t.Fatalf("owner text changed: %q", body)
+				}
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT message_id FROM feishu_inputs WHERE event_id='answer'`).Scan(&source); err != nil {
+					return err
+				}
+				if source != id {
+					t.Fatal("answer source not bound")
+				}
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM messaging_deliveries d JOIN messaging_messages m USING(message_id) WHERE d.channel_id='feishu' AND m.reply_to=?`, id).Scan(&acknowledgements); err != nil {
+					return err
+				}
+				if acknowledgements != 1 {
+					t.Fatalf("answer acknowledgement count = %d", acknowledgements)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

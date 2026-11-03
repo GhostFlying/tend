@@ -400,7 +400,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		return err
 	}
 	readDispatch := dispatch.New(a, map[string]dispatch.Handler{app.MessagingReadDestination: messaging.ReadHandler{App: a}}, readWake, now, dispatch.Config{}, log)
-	feishuClient, err := prepareFeishu(ctx, cfg.Feishu, a, now, cfg.Owners)
+	feishuClient, err := prepareFeishu(ctx, cfg.Feishu, a, now, owners)
 	if err != nil {
 		return err
 	}
