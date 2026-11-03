@@ -1,5 +1,6 @@
 import { navigate, fixtureRoot, editIssueFilters } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
+import { captureChildTitleLayout, longChildTitles } from "./child-title-layout.ts";
 /// <reference lib="dom" />
 // Approved Issue/Inbox flows against isolated API fixtures, never a live service.
 import { issueSidebar, openIssueAux, closeIssue } from "./issue-detail-helpers.ts";
@@ -17,6 +18,8 @@ import type {
   TaskDetail,
 } from "../src/api/generated/api.ts";
 const copyOnly = process.argv.includes("--s5-copy-only");
+const childTitleOnly = process.argv.includes("--child-title-layout-only");
+let longChildFixture = false;
 const catalogOnly = process.argv.includes("--catalog-only");
 const childProgressOnly = process.argv.includes("--child-progress-only");
 let hostedUnconfigured = false;
@@ -569,6 +572,11 @@ const server = createServer(async (req, res) => {
       },
     });
   if (p === "/api/v1/work-items") return json({ items: [], more: false });
+  if (p === "/api/v1/issues" && longChildFixture && u.searchParams.get("parent_id"))
+    return json({
+      items: issueRows.filter((row) => row.parent_issue_id === u.searchParams.get("parent_id")),
+      more: false,
+    });
   if (
     p === "/api/v1/issues" &&
     childProgressFixture &&
@@ -630,6 +638,10 @@ const server = createServer(async (req, res) => {
     return json({ occurrences: [], revisions: [], more: false });
   if (p.endsWith("/activity")) return json({ items: [], more: false, event_seq: seq });
   if (p.endsWith("/results")) return json({ items: [], more: false });
+  if (longChildFixture && p.startsWith("/api/v1/issues/") && !p.endsWith("/context")) {
+    const row = issueRows.find((row) => row.issue_id === p.split("/").at(-1));
+    if (row) return json({ ...issue, ...row, plan: { ...issue.plan, title: row.title } });
+  }
   if (p.startsWith("/api/v1/issues/"))
     return json(
       p.endsWith("/context")
@@ -1334,7 +1346,44 @@ async function captureS5() {
   }
 }
 
+async function captureLongChildren() {
+  assert(address && typeof address !== "string");
+  const originalRows = [...issueRows];
+  const parent = { ...issueRows[0]!, board: { ...issueRows[0]!.board! } };
+  const children = longChildTitles.map((title, index) => ({
+    ...summary(`issue-long-${index}`, title, parent.issue_id),
+    execution: { ...parent.board.execution, running: index === 0 ? 1 : 0 },
+  }));
+  parent.board.children = {
+    total: children.length,
+    done: 0,
+    cancelled: 0,
+    running: 1,
+    items: children.slice(0, 2).map((child, index) => ({
+      issue_id: child.issue_id,
+      title: child.title,
+      status: index === 0 ? "in_progress" : "todo",
+      execution: child.execution,
+    })),
+  };
+  issueRows.splice(
+    0,
+    issueRows.length,
+    parent,
+    ...children,
+    summary("issue-next-card", "下一张卡片"),
+  );
+  longChildFixture = true;
+  try {
+    await captureChildTitleLayout(browser, `http://127.0.0.1:${address.port}`, output!);
+  } finally {
+    longChildFixture = false;
+    issueRows.splice(0, issueRows.length, ...originalRows);
+  }
+}
+
 async function captureS4() {
+  await captureLongChildren();
   assert(output);
   assert(address && typeof address !== "string");
   const parent = issueRows[0]!;
@@ -1919,11 +1968,12 @@ async function checkNavigation() {
 
 try {
   const tourOnly = childProgressOnly || process.argv.includes("--s4-tour-only");
-  if (copyOnly) await captureS5();
+  if (childTitleOnly) await captureLongChildren();
+  else if (copyOnly) await captureS5();
   else if (tourOnly || !process.argv.includes("--navigation-only")) await captureS4();
   const navigationOnly = process.argv.includes("--navigation-only");
   if (navigationOnly) await checkNavigation();
-  for (const viewport of navigationOnly || tourOnly || copyOnly
+  for (const viewport of navigationOnly || tourOnly || copyOnly || childTitleOnly
     ? []
     : [
         { width: 1440, height: 1000 },
