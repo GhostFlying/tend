@@ -18,14 +18,15 @@ export function TabBar({ summary }: { summary: AttentionPage | undefined }) {
           aria-description={path === "/inbox" ? pending.description : undefined}
           aria-current={navActive(route, path) ? "page" : undefined}
         >
-          <Icon />
+          <span className={styles.icon}>
+            <Icon />
+            {path === "/inbox" && pending.count > 0 && (
+              <span className={styles.badge} data-badge="pending" aria-hidden="true">
+                {pending.count > 99 ? "99+" : `${pending.count}${pending.more ? "+" : ""}`}
+              </span>
+            )}
+          </span>
           {label}
-          {path === "/inbox" && pending.count > 0 && (
-            <span className={styles.badge}>
-              {pending.count}
-              {pending.more ? "+" : ""}
-            </span>
-          )}
         </Link>
       ))}
     </nav>
