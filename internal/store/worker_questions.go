@@ -108,7 +108,7 @@ func (t *Tx) CancelObsoleteWorkerQuestions(ctx context.Context, now int64) ([]st
  SELECT w.decision_id FROM worker_questions w JOIN runs r ON r.run_id=w.run_id JOIN plan_actions a ON a.action_id=w.action_id JOIN tasks t ON t.task_id=r.task_id
  WHERE t.lifecycle IN ('completed','cancelled') OR (r.observed_state IN ('finished','failed') AND NOT EXISTS(SELECT 1 FROM run_question_handoffs h WHERE h.run_id=r.run_id AND h.stopped=1 AND r.observed_state='finished')) OR a.status IN ('cancelled','superseded') OR a.target_spec_version<>t.spec_version OR (a.kind='implement' AND a.generation<>t.implement_generation) OR (a.kind='accept' AND a.target_artifact_id<>t.current_artifact_id)
  OR EXISTS(SELECT 1 FROM run_issue_responsibilities owned JOIN issue_controls i USING(issue_id) WHERE owned.run_id=r.run_id AND (owned.assignment_epoch<>i.assignment_epoch OR owned.agent_ref<>i.assignee_ref OR i.assignment_state<>'active' OR i.state NOT IN ('active','paused')))
- ) OR EXISTS(SELECT 1 FROM task_owner_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=decisions.task_id AND (c.assignment_epoch<>i.assignment_epoch OR c.agent_ref<>i.assignee_ref OR i.assignment_state<>'active'))) RETURNING decision_id`, now)
+ ) OR EXISTS(SELECT 1 FROM task_execution_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=decisions.task_id AND (c.assignment_epoch<>i.assignment_epoch OR c.agent_ref<>i.assignee_ref OR i.assignment_state<>'active'))) RETURNING decision_id`, now)
 	if err != nil {
 		return nil, fmt.Errorf("store: cancel stale worker questions: %w", err)
 	}

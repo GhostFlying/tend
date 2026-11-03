@@ -289,6 +289,10 @@ func commandUsage(prefix []string) string {
 		}
 	}
 	out.WriteString("\nAgent catalogs: agents show --host <id>; agents hosted; agents issues --environment <id> --agent <id> [--scope all|current|history] [--state <state>] [--search <text>] [--snapshot <id>] [--agent-revision <n>] [--after <cursor>] [--limit <n>].\nReads support --json. JSON inputs use --data or --file (use - for stdin).\nOwner writes retain --request-id and original control values; --dry-run exports the original Envelope.\nUse tend request show <id> to reconcile and tend request replay --file <original.json> for an identical retry.\n")
+	if name == "issue" || name == "issue create" || name == "issue set-acceptance-policy" {
+		out.WriteString("\nIndependent acceptance: issue create accepts independent_acceptance: {required: true|false, reason: <text>}. A read-only investigation may use false and must still submit a legal durable report. Creator identity is server-frozen; omitted policy retains independent review.\n")
+		out.WriteString("tend issue set-acceptance-policy <issue_id> --revision <revision> --epoch <epoch> --data '{\"required\":false,\"reason\":\"A bounded investigation needs no separate review\"}'\nChanges affect future tasks only; current workers cannot self-exempt. Use --dry-run to save the original Envelope; unknown results require reconciliation and identical --request-id/payload/control values, never a new request. Read issue show/task show --json for creator and frozen task policy.\n")
+	}
 	return out.String()
 }
 

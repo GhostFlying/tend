@@ -50,7 +50,7 @@ func TestCurrentAndHistoricalIssueEnumCodecsPreserveVocabulary(t *testing.T) {
 		{"IssueFollowOn", "kind", "IssueFollowOnKind", []string{"commitment", "problem", "suggestion"}},
 		{"IssueFollowOn", "status", "IssueFollowOnStatus", []string{"open", "resolved", "transferred"}},
 		{"IssueDelivery", "provider", "IssueDeliveryProvider", []string{"github", "codebase"}},
-		{"IssueEvidence", "kind", "IssueEvidenceKind", []string{"acceptance", "delivery", "owner_decision", "upgrade"}},
+		{"IssueEvidence", "kind", "IssueEvidenceKind", []string{"result", "acceptance", "delivery", "owner_decision", "upgrade"}},
 		{"IssueClosure", "kind", "IssueClosureKind", []string{"completed", "declined", "handed_off", "superseded"}},
 		{"IssueTaskDisposition", "action", "IssueTaskDispositionAction", []string{"continue_existing", "updated", "stopped"}},
 	} {

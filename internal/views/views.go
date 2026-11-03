@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -68,6 +69,10 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		if canonical {
 			d.IssueIDs = append(d.IssueIDs, item.WorkItemID)
 		}
+	}
+	d.AcceptancePolicy, err = store.TaskAcceptancePolicy(ctx, q, taskID)
+	if err != nil {
+		return d, err
 	}
 	d.CurrentArtifactID = row.CurrentArtifactID
 	if d.Relations, err = TaskRelations(ctx, q, taskID); err != nil {
@@ -187,11 +192,24 @@ func Artifact(ctx context.Context, q store.Querier, artifactID string) (protocol
 	if err != nil {
 		return protocol.ArtifactDetail{}, err
 	}
-	return protocol.ArtifactDetail{
+	detail := protocol.ArtifactDetail{
 		RefSHA256: store.ArtifactRefSHA256(art.RefJSON),
 		Artifact:  protocol.ArtifactView{ArtifactID: art.ArtifactID, RunID: art.RunID, Ref: json.RawMessage(art.RefJSON)},
 		TaskID:    art.TaskID, Acceptances: Acceptances(accs, true),
-	}, nil
+	}
+	var policy sql.NullString
+	if err := q.QueryRowContext(ctx, `SELECT p.policy_json,
+ COALESCE(t.lifecycle='completed' AND t.current_artifact_id=? AND t.spec_version=a.target_spec_version, 0)
+ FROM tasks t JOIN runs r ON r.task_id=t.task_id JOIN plan_actions a ON a.action_id=r.action_id
+ LEFT JOIN task_acceptance_policies p ON p.task_id=t.task_id WHERE t.task_id=? AND r.run_id=?`, art.ArtifactID, art.TaskID, art.RunID).Scan(&policy, &detail.CurrentCompletion); err != nil {
+		return protocol.ArtifactDetail{}, fmt.Errorf("views: read artifact completion basis: %w", err)
+	}
+	if policy.Valid {
+		if err := json.Unmarshal([]byte(policy.String), &detail.AcceptancePolicy); err != nil {
+			return protocol.ArtifactDetail{}, fmt.Errorf("views: decode artifact acceptance policy: %w", err)
+		}
+	}
+	return detail, nil
 }
 
 // Request reads the recorded outcome of a request in a dedup domain. A

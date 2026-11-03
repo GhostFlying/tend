@@ -112,7 +112,7 @@ func cancelCanonicalPrimaryTasks(ctx context.Context, x *Exec, tx *store.Tx, roo
 // Issue's implementation when withdrawing only its delegated review.
 func cancelDelegatedReviewRuns(ctx context.Context, x *Exec, tx *store.Tx, root string) ([]Event, error) {
 	actions, err := store.FollowupIDs(ctx, tx.Q(), `WITH RECURSIVE scope(id) AS (SELECT issue_id FROM issue_controls WHERE issue_id=? UNION ALL SELECT c.issue_id FROM issue_controls c JOIN scope s ON c.parent_issue_id=s.id)
- SELECT a.action_id FROM task_owner_contracts c JOIN scope s ON s.id=c.review_issue_id JOIN plan_actions a ON a.task_id=c.task_id WHERE a.kind='accept' AND a.status IN ('pending','dispatched') ORDER BY a.action_id`, root)
+ SELECT a.action_id FROM task_execution_contracts c JOIN scope s ON s.id=c.review_issue_id JOIN plan_actions a ON a.task_id=c.task_id WHERE a.kind='accept' AND a.status IN ('pending','dispatched') ORDER BY a.action_id`, root)
 	if err != nil {
 		return nil, err
 	}

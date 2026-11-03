@@ -14,10 +14,10 @@ func (facts executionFacts) issueCounts(ctx context.Context, q store.Querier, id
 	var counts protocol.ExecutionCounts
 	rows, err := q.QueryContext(ctx, `WITH related(task_id) AS (
  SELECT task_id FROM task_work_item_owners WHERE work_item_id=?
- UNION SELECT task_id FROM task_owner_contracts WHERE review_issue_id=?
+ UNION SELECT task_id FROM task_execution_contracts WHERE review_issue_id=?
  UNION SELECT r.task_id FROM run_issue_responsibilities p JOIN runs r USING(run_id) WHERE p.issue_id=?)
  SELECT t.task_id,COALESCE(o.work_item_id,''),COALESCE(c.review_issue_id,'')
- FROM related JOIN tasks t USING(task_id) LEFT JOIN task_work_item_owners o USING(task_id) LEFT JOIN task_owner_contracts c USING(task_id)
+ FROM related JOIN tasks t USING(task_id) LEFT JOIN task_work_item_owners o USING(task_id) LEFT JOIN task_execution_contracts c USING(task_id)
  WHERE t.kind<>'issue_manager' ORDER BY t.task_id`, id, id, id)
 	if err != nil {
 		return counts, err

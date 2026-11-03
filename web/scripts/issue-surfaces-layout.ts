@@ -16,6 +16,7 @@ import type {
   IssueSummary,
   IssuePlan,
   TaskDetail,
+  IssueResult,
 } from "../src/api/generated/api.ts";
 const copyOnly = process.argv.includes("--s5-copy-only");
 const childTitleOnly = process.argv.includes("--child-title-layout-only");
@@ -194,6 +195,9 @@ let taskQueued = false;
 let sourceContentRevision = 7;
 let issueCreateRequest = "";
 let issueCreateReady = false;
+let policyRequest = "";
+let policyReceiptStale = false;
+let completionResult: IssueResult | undefined;
 let rejectSource = false;
 let handoffRequest = "",
   handoffReceiptReady = false;
@@ -637,7 +641,10 @@ const server = createServer(async (req, res) => {
   if (p.includes("/followups/") && p.endsWith("/history"))
     return json({ occurrences: [], revisions: [], more: false });
   if (p.endsWith("/activity")) return json({ items: [], more: false, event_seq: seq });
-  if (p.endsWith("/results")) return json({ items: [], more: false });
+  if (p.endsWith("/results"))
+    return json({ items: completionResult ? [completionResult] : [], more: false });
+  if (completionResult && p === `/api/v1/artifacts/${completionResult.artifact.artifact_id}`)
+    return json(completionResult);
   if (longChildFixture && p.startsWith("/api/v1/issues/") && !p.endsWith("/context")) {
     const row = issueRows.find((row) => row.issue_id === p.split("/").at(-1));
     if (row) return json({ ...issue, ...row, plan: { ...issue.plan, title: row.title } });
@@ -936,6 +943,10 @@ const server = createServer(async (req, res) => {
     for await (const chunk of req) data += String(chunk);
     const envelope = JSON.parse(data) as Envelope;
     writes.push(envelope);
+    if (envelope.operation === "issues.set_acceptance_policy") {
+      policyRequest = envelope.request_id;
+      return json({ operation: { request_id: policyRequest, status: "unknown" } });
+    }
     if (envelope.operation === "conversation.inject_source") {
       sourceCount++;
       sourceRequest = envelope.request_id;
@@ -1159,6 +1170,20 @@ const server = createServer(async (req, res) => {
   }
   if (p.startsWith("/api/v1/requests/")) {
     const id = decodeURIComponent(p.split("/").at(-1)!);
+    if (id === policyRequest)
+      return json({
+        request_id: id,
+        operation: "issues.set_acceptance_policy",
+        status: policyReceiptStale ? "failed" : "unknown",
+        ...(policyReceiptStale
+          ? {
+              error: {
+                code: "stale_revision",
+                message: "Issue changed while the request was pending",
+              },
+            }
+          : {}),
+      });
     if (id === supplementRequest)
       return json({
         request_id: id,
@@ -2104,6 +2129,18 @@ try {
       assert.equal(discoveryWrites.length, 0);
       await discoverySelect.selectOption("owner");
       assert(await discoverySubmit.isEnabled());
+      const policyChoice = discoveryForm.getByRole("checkbox", {
+        name: "要求独立 Agent 验收任务结果",
+        exact: true,
+      });
+      assert(await policyChoice.isChecked());
+      await policyChoice.uncheck();
+      await discoveryForm
+        .getByRole("textbox", { name: "策略理由", exact: true })
+        .fill("调查只需可核对的完整报告");
+      await discoveryPage.screenshot({
+        path: join(output, `creator-acceptance-policy-${viewport.width}.png`),
+      });
       await discoverySubmit.click();
       await discoveryForm.getByRole("button", { name: "核实原保存请求", exact: true }).waitFor();
       assert.equal(discoveryWrites.length, 1);
@@ -2111,9 +2148,14 @@ try {
       const discoveryPayload = discoveryWrites[0]!.payload as {
         assignee?: { kind: string };
         manager?: unknown;
+        independent_acceptance?: { required: boolean; reason: string };
       };
       assert.equal(discoveryPayload.assignee?.kind, "owner");
       assert.equal(discoveryPayload.manager, undefined);
+      assert.deepEqual(discoveryPayload.independent_acceptance, {
+        required: false,
+        reason: "调查只需可核对的完整报告",
+      });
     } finally {
       releaseCategories();
       await discoveryContext.close();
@@ -2507,6 +2549,103 @@ try {
     await page.screenshot({ path: join(output, `task-receipt-${viewport.width}.png`) });
     writes.length = 0;
     await detail.getByRole("button", { name: "返回 Issue", exact: true }).click();
+    issue.acceptance_policy = {
+      required: false,
+      reason: "调查结果只需合法完整报告",
+      request_id: "req_policy_fixture",
+      issue_revision: issue.revision,
+      creator: { kind: "owner", owner_subject: "fixture-owner" },
+      decided_by: { kind: "owner", owner_subject: "fixture-owner" },
+    };
+    await page.reload();
+    await openIssueAux(page, "创建任务");
+    const waivedForm = detail.getByRole("region", { name: "创建任务", exact: true });
+    assert.equal(
+      await waivedForm.getByRole("heading", { name: "独立验收", exact: true }).count(),
+      0,
+    );
+    await waivedForm.getByRole("textbox", { name: "标题", exact: true }).fill("只读调查报告");
+    await waivedForm
+      .getByRole("textbox", { name: "目标", exact: true })
+      .fill("记录当前发现和未知，保留真实结果");
+    await waivedForm
+      .getByRole("textbox", { name: "完成条件（每行一项）", exact: true })
+      .fill("完整报告可核对");
+    await waivedForm.getByRole("combobox", { name: /仓库/ }).selectOption("sample");
+    await page.screenshot({ path: join(output, `creator-policy-task-${viewport.width}.png`) });
+    await waivedForm.getByRole("button", { name: "创建任务", exact: true }).click();
+    await detail.getByRole("heading", { name: "任务已创建", exact: true }).waitFor();
+    const waivedWrite = writes.findLast((w) => w.operation === "issues.create_task")!;
+    assert.deepEqual(
+      (waivedWrite.payload as { spec: { agent_selection: unknown } }).spec.agent_selection,
+      { implementation: { category_id: "implementer" } },
+    );
+    assert.equal(await detail.getByRole("heading", { name: "独立验收", exact: true }).count(), 0);
+    const frozenPolicy = issue.acceptance_policy;
+    completionResult = {
+      artifact: {
+        artifact_id: "artifact-waived",
+        run_id: "run-waived",
+        ref: { report: { body: "已保存按原策略完成的调查报告" } },
+      },
+      task_id: "task-waived",
+      title: "调查完成报告",
+      run_id: "run-waived",
+      spec_version: 1,
+      generation: 1,
+      created_at: now,
+      acceptances: [],
+      acceptance_policy: frozenPolicy,
+      current_completion: true,
+    };
+    issue.acceptance_policy = { ...frozenPolicy, required: true };
+    await detail.getByRole("button", { name: "返回 Issue", exact: true }).click();
+    await page.reload();
+    await openIssueAux(page, "全部执行交付");
+    const resultCard = page.locator('[data-artifact="artifact-waived"]').last();
+    await resultCard.getByText("已完成 · 本轮不要求独立验收", { exact: true }).waitFor();
+    assert.equal(await resultCard.getByText("待独立验收", { exact: true }).count(), 0);
+    await resultCard.getByRole("button", { name: "打开完整交付 →", exact: true }).click();
+    await resultCard.getByText("已保存按原策略完成的调查报告", { exact: true }).first().waitFor();
+    await page.screenshot({ path: join(output, `creator-policy-result-${viewport.width}.png`) });
+    await openIssueAux(page, "编辑定义");
+    let policyForm = page
+      .getByRole("heading", { name: "后续任务的独立验收", exact: true })
+      .locator("..");
+    await policyForm.getByRole("checkbox").uncheck();
+    const retainedReason = "调查只需完整报告；保留这份恢复后的原理由";
+    await policyForm.getByRole("textbox", { name: "调整理由", exact: true }).fill(retainedReason);
+    await policyForm.getByRole("button", { name: "保存后续任务策略", exact: true }).click();
+    await policyForm.getByRole("button", { name: "核对原策略请求", exact: true }).waitFor();
+    await page.reload();
+    await openIssueAux(page, "编辑定义");
+    policyForm = page
+      .getByRole("heading", { name: "后续任务的独立验收", exact: true })
+      .locator("..");
+    await policyForm.getByRole("button", { name: "核对原策略请求", exact: true }).waitFor();
+    assert.equal(await policyForm.getByRole("checkbox").isChecked(), false);
+    assert.equal(
+      await policyForm.getByRole("textbox", { name: "调整理由", exact: true }).inputValue(),
+      retainedReason,
+    );
+    policyReceiptStale = true;
+    await policyForm.getByRole("button", { name: "核对原策略请求", exact: true }).click();
+    await policyForm.getByRole("button", { name: "保存后续任务策略", exact: true }).waitFor();
+    assert.equal(await policyForm.getByRole("checkbox").isChecked(), false);
+    assert.equal(
+      await policyForm.getByRole("textbox", { name: "调整理由", exact: true }).inputValue(),
+      retainedReason,
+    );
+    assert.equal(writes.filter((w) => w.operation === "issues.set_acceptance_policy").length, 1);
+    await page.screenshot({
+      path: join(output, `creator-policy-stale-input-${viewport.width}.png`),
+    });
+    policyRequest = "";
+    policyReceiptStale = false;
+    completionResult = undefined;
+    delete issue.acceptance_policy;
+    await page.reload();
+    writes.length = 0;
     taskQueued = true;
     await (
       await issueSidebar(page)

@@ -44,9 +44,10 @@ type IssueDependency struct {
 
 // IssueControlSnapshot shares the immutable plan revision and records all edges.
 type IssueControlSnapshot struct {
-	Revision     int64             `json:"revision"`
-	Control      IssueControl      `json:"control"`
-	Dependencies []IssueDependency `json:"dependencies"`
+	AcceptancePolicy *IssueAcceptancePolicy `json:"acceptance_policy,omitempty"`
+	Revision         int64                  `json:"revision"`
+	Control          IssueControl           `json:"control"`
+	Dependencies     []IssueDependency      `json:"dependencies"`
 }
 
 // IssueBlocker is a precise fact, not a derived UI label or authority grant.
@@ -60,6 +61,7 @@ type IssueBlocker struct {
 // Issue is the canonical aggregate shared by owner API and coordination.
 // Legacy ledger identities remain opaque; the public identity is issue_id.
 type Issue struct {
+	AcceptancePolicy *IssueAcceptancePolicy `json:"acceptance_policy,omitempty"`
 	IssueControl
 	Revision  int64         `json:"revision"`
 	Plan      IssuePlan     `json:"plan"`

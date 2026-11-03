@@ -8,8 +8,9 @@ type IssueSourceReference struct {
 }
 
 type CreateIssuePayload struct {
-	Owner   *IssueOwnerRequest          `json:"owner,omitempty"`
-	Manager *RequestIssueManagerPayload `json:"manager,omitempty"`
+	IndependentAcceptance *IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
+	Owner                 *IssueOwnerRequest            `json:"owner,omitempty"`
+	Manager               *RequestIssueManagerPayload   `json:"manager,omitempty"`
 	IssueSourceReference
 	Plan                   IssuePlan      `json:"plan"`
 	Assignee               *IssueAssignee `json:"assignee,omitempty"`

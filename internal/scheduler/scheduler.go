@@ -40,6 +40,8 @@ type Host struct {
 
 // Candidate is a pending action together with the facts the rules need.
 type Candidate struct {
+	// AcceptanceWaived comes only from the server-frozen task policy.
+	AcceptanceWaived            bool
 	QuestionHandoff             bool
 	HandoffPin                  *protocol.RunExecutionPin
 	OwnerResponsibilityChanged  bool

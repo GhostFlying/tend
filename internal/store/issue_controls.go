@@ -62,6 +62,10 @@ func GetCanonicalIssue(ctx context.Context, q Querier, id string) (protocol.Issu
 	if err := rows.Close(); err != nil {
 		return current, err
 	}
+	current.AcceptancePolicy, err = readAcceptancePolicy(ctx, q, `SELECT policy_json FROM issue_acceptance_policies WHERE issue_id=?`, id)
+	if err != nil {
+		return current, err
+	}
 	historical, err := GetCanonicalIssueRevision(ctx, q, id, current.Revision)
 	if err != nil {
 		return current, err
@@ -90,7 +94,7 @@ func GetCanonicalIssueRevision(ctx context.Context, q Querier, id string, revisi
 	if err != nil {
 		return protocol.Issue{}, err
 	}
-	out := protocol.Issue{IssueControl: snapshot.Control, Revision: revision, Plan: plan.IssuePlan, Closure: plan.Closure, CreatedAt: plan.CreatedAt, UpdatedAt: plan.UpdatedAt, DependsOn: []string{}}
+	out := protocol.Issue{AcceptancePolicy: snapshot.AcceptancePolicy, IssueControl: snapshot.Control, Revision: revision, Plan: plan.IssuePlan, Closure: plan.Closure, CreatedAt: plan.CreatedAt, UpdatedAt: plan.UpdatedAt, DependsOn: []string{}}
 	for _, edge := range snapshot.Dependencies {
 		if edge.IssueID != id {
 			return protocol.Issue{}, fmt.Errorf("store: issue dependency snapshot identity mismatch")
@@ -132,6 +136,13 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 		if err != nil {
 			return err
 		}
+		if current.AcceptancePolicy != nil {
+			if next.AcceptancePolicy == nil || !reflect.DeepEqual(current.AcceptancePolicy.Creator, next.AcceptancePolicy.Creator) {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "Issue creator provenance is immutable")
+			}
+		} else if next.AcceptancePolicy != nil {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "historical Issue creator provenance cannot be inferred")
+		}
 		if current.Revision != expected {
 			return protocol.Errorf(protocol.CodeStaleRevision, "canonical issue revision changed")
 		}
@@ -155,7 +166,7 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 	for _, dep := range deps {
 		edges = append(edges, protocol.IssueDependency{IssueID: next.IssueID, DependsOn: dep})
 	}
-	snapshot, err := json.Marshal(protocol.IssueControlSnapshot{Revision: next.Revision, Control: next.IssueControl, Dependencies: edges})
+	snapshot, err := json.Marshal(protocol.IssueControlSnapshot{AcceptancePolicy: next.AcceptancePolicy, Revision: next.Revision, Control: next.IssueControl, Dependencies: edges})
 	if err != nil {
 		return err
 	}
@@ -178,6 +189,15 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 	_, err = t.Exec(ctx, `INSERT INTO issue_controls(issue_id,parent_issue_id,state,assignee_kind,assignee_ref,assignment_epoch,assignment_state,pending_assignee_kind,pending_assignee_ref,pending_handoff_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(issue_id) DO UPDATE SET parent_issue_id=excluded.parent_issue_id,state=excluded.state,assignee_kind=excluded.assignee_kind,assignee_ref=excluded.assignee_ref,assignment_epoch=excluded.assignment_epoch,assignment_state=excluded.assignment_state,pending_assignee_kind=excluded.pending_assignee_kind,pending_assignee_ref=excluded.pending_assignee_ref,pending_handoff_id=excluded.pending_handoff_id,updated_at=excluded.updated_at`, next.IssueID, nullString(next.ParentIssueID), next.State, next.Assignee.Kind, next.Assignee.Ref, next.AssignmentEpoch, next.AssignmentState, pendingKind, pendingRef, nullString(next.PendingHandoffID), next.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("store: save issue controls: %w", err)
+	}
+	if next.AcceptancePolicy != nil {
+		raw, err := json.Marshal(next.AcceptancePolicy)
+		if err != nil {
+			return err
+		}
+		if _, err := t.Exec(ctx, `INSERT INTO issue_acceptance_policies(issue_id,policy_json) VALUES(?,?) ON CONFLICT(issue_id) DO UPDATE SET policy_json=excluded.policy_json`, next.IssueID, string(raw)); err != nil {
+			return err
+		}
 	}
 	// A new empty progress uses the column default. This also keeps historical
 	// fixture creation independent of fields added by later migrations.

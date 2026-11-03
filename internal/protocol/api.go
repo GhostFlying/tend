@@ -6,6 +6,7 @@ package protocol
 func APITypes() []any {
 	return []any{
 		HandoffAuditPage{},
+		SetIssueAcceptancePolicyPayload{},
 		ArtifactShare{}, ArtifactSharePage{}, GrantArtifactSharePayload{}, RevokeArtifactSharePayload{},
 		BindFeishu{}, FeishuBindingView{}, FeishuInputPage{},
 		ConcurrencyGroupPage{}, ConcurrencyHistoryPage{}, ConfigureConcurrencyPayload{}, ConcurrencyQuery{},

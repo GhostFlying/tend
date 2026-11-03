@@ -51,7 +51,7 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		}
 	}
 	if execution.Selection.Purpose == agentconfig.Main {
-		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{protocol.OpGrantArtifactShare, protocol.OpRevokeArtifactShare, "issues.reuse", "issues.reopen", protocol.OpIssueRequestOwner, protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "attentions.resolve", "attentions.escalate", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
+		if x.Principal.Kind != protocol.PrincipalMainAgent || !slices.Contains([]string{"issues.set_acceptance_policy", protocol.OpGrantArtifactShare, protocol.OpRevokeArtifactShare, "issues.reuse", "issues.reopen", protocol.OpIssueRequestOwner, protocol.OpIssueRequestManager, "conversation.set_issue_associations", "issues.create", "issues.assign", "issues.finish_assignment", "attentions.create", "attentions.update", "attentions.respond", "attentions.confirm", "attentions.withdraw", "attentions.resolve", "attentions.escalate", "tasks.rate", "issues.deadlines_put", "issues.deadlines_cancel", "planner.entries_put", "conversation.reply", "conversation.publish", "conversation.notify"}, c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "the personal planner must delegate issue work, not execute its task planning")
 		}
 	} else if execution.Selection.Purpose != agentconfig.Consultation {
@@ -123,6 +123,14 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		case "conversation.commit_turn":
 			if x.Env.Target.Type != "logical_turn" || x.Env.Target.ID != execution.ID {
 				return protocol.Errorf(protocol.CodeForbidden, "commit only this execution")
+			}
+		case "issues.set_acceptance_policy":
+			target, err := store.GetCanonicalIssue(ctx, q, x.Env.Target.ID)
+			if err != nil {
+				return errNotFound(err, "Issue does not exist")
+			}
+			if x.Env.Target.Type != "issue" || target.AcceptancePolicy == nil || target.AcceptancePolicy.Creator.SourceIssueID != current.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "only the original creating responsibility may decide acceptance")
 			}
 		case "issues.create":
 			var p protocol.CreateIssuePayload

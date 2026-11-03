@@ -16,6 +16,7 @@ const openRunStates = `('starting', 'running', 'waiting', 'interrupted', 'unknow
 // CandidateRow is a pending runnable action with the facts the scheduler
 // needs.
 type CandidateRow struct {
+	AcceptanceWaived    bool
 	Action              ActionRow
 	Lifecycle           protocol.TaskLifecycle
 	Control             protocol.ControlMode
@@ -70,7 +71,7 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 			JOIN task_workspace_bindings tb ON tb.workspace_id=rb.workspace_id
 			WHERE tb.task_id=t.task_id AND r.observed_state IN `+openRunStates+`),
 		(SELECT json_group_array(ab.host_id) FROM abandoned_workspaces ab WHERE ab.task_id = t.task_id),
-		s.body_json
+		s.body_json, COALESCE((SELECT json_extract(policy.policy_json,'$.required')=0 FROM task_acceptance_policies policy WHERE policy.task_id=t.task_id),0)
 		FROM plan_actions a
 		JOIN tasks t ON t.task_id = a.task_id
 		JOIN task_specs s ON s.task_id = t.task_id AND s.spec_version = t.spec_version
@@ -88,7 +89,7 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		if err := rows.Scan(&a.ActionID, &a.TaskID, &a.Kind, &a.EffectKey, &a.TriggerJSON, &a.TargetSpecVersion, &artifact,
 			&a.AuthorizationJSON, &a.Generation, &a.Status, &commit, &a.CreatedRequestID, &a.CreatedAt,
 			&c.Lifecycle, &c.Control, &c.Block, &c.SpecVersion, &c.ImplementGeneration, &c.CurrentArtifactID, &c.Rating, &c.Project, &c.Title, &c.Weight,
-			&c.DependenciesDone, &c.WorkspaceHost, &c.WorkspaceBackendID, &c.NamedExecutionAssigned, &c.WorkspaceLegacyBindings, &c.WorkspaceOccupied, &abandoned, &c.SpecJSON); err != nil {
+			&c.DependenciesDone, &c.WorkspaceHost, &c.WorkspaceBackendID, &c.NamedExecutionAssigned, &c.WorkspaceLegacyBindings, &c.WorkspaceOccupied, &abandoned, &c.SpecJSON, &c.AcceptanceWaived); err != nil {
 			return nil, fmt.Errorf("store: scan claim candidate: %w", err)
 		}
 		if c.AbandonedHosts, err = parseList(abandoned); err != nil {

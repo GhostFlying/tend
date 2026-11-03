@@ -140,7 +140,8 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 	if err := checkWorkspaceProtocol(ctx, tx.Q(), p.Spec); err != nil {
 		return Outcome{}, err
 	}
-	d, err := domain.NewTask(taskID, project.Project, p.Spec, p.Rating)
+	required := canonical == nil || canonical.Issue.AcceptancePolicy == nil || canonical.Issue.AcceptancePolicy.Required
+	d, err := domain.NewTaskWithAcceptance(taskID, project.Project, p.Spec, p.Rating, required)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -160,6 +161,11 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 		return Outcome{}, err
 	}
 
+	if canonical != nil {
+		if err := tx.FreezeTaskAcceptancePolicy(ctx, taskID, canonical.Issue.AcceptancePolicy); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if resource != nil {
 		if err := tx.BindWorkspace(ctx, taskID, resource.WorkspaceID, domain.WorkspaceReuse, p.Spec.Workspace.SourceTaskID, now); err != nil {
 			return Outcome{}, err
@@ -359,7 +365,11 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 				return Outcome{}, err
 			}
 		}
-		d, err := domain.UpdateSpec(task, *p.Spec, current, expected)
+		policy, err := store.TaskAcceptancePolicy(ctx, tx.Q(), row.TaskID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		d, err := domain.UpdateSpecWithAcceptance(task, *p.Spec, current, expected, policy == nil || policy.Required)
 		if err != nil {
 			return Outcome{}, err
 		}

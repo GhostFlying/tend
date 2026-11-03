@@ -89,9 +89,12 @@ func (s Spec) Executable() bool {
 }
 
 // Validate checks the spec for values the ledger cannot act on.
-func (s Spec) Validate() error {
+func (s Spec) Validate() error { return s.ValidateForAcceptance(true) }
+
+// ValidateForAcceptance uses a caller-supplied frozen policy, never a worker field.
+func (s Spec) ValidateForAcceptance(required bool) error {
 	if s.AgentSelection != nil {
-		if err := s.AgentSelection.Validate(); err != nil {
+		if err := s.AgentSelection.ValidateForAcceptance(required); err != nil {
 			return err
 		}
 	}
@@ -326,7 +329,11 @@ func implementAction(t Task) ActionDraft {
 // task and commits to its first implement action; otherwise it stays a
 // draft until the spec is completed.
 func NewTask(id, project string, spec Spec, rating protocol.Rating) (Decision, error) {
-	if err := spec.Validate(); err != nil {
+	return NewTaskWithAcceptance(id, project, spec, rating, true)
+}
+
+func NewTaskWithAcceptance(id, project string, spec Spec, rating protocol.Rating, required bool) (Decision, error) {
+	if err := spec.ValidateForAcceptance(required); err != nil {
 		return Decision{}, err
 	}
 	if err := checkRating(rating); err != nil {
@@ -359,13 +366,17 @@ func NewTask(id, project string, spec Spec, rating protocol.Rating) (Decision, e
 // is a no-op. Otherwise the version advances, work planned for older
 // versions is superseded and the task returns to the queue.
 func UpdateSpec(t Task, spec Spec, current Spec, expectedRevision int64) (Decision, error) {
+	return UpdateSpecWithAcceptance(t, spec, current, expectedRevision, true)
+}
+
+func UpdateSpecWithAcceptance(t Task, spec Spec, current Spec, expectedRevision int64, required bool) (Decision, error) {
 	if err := checkRevision(t, expectedRevision); err != nil {
 		return Decision{}, err
 	}
 	if t.Lifecycle.Terminal() {
 		return Decision{}, errTransition(t, "change the spec of")
 	}
-	if err := spec.Validate(); err != nil {
+	if err := spec.ValidateForAcceptance(required); err != nil {
 		return Decision{}, err
 	}
 	if spec.Equal(current) {

@@ -146,6 +146,7 @@ type CompletionReviewAcknowledgement struct {
 type WorkItemCompletionReview struct {
 	EventID      string `json:"event_id"`
 	TaskID       string `json:"task_id"`
-	AcceptanceID string `json:"acceptance_id"`
+	AcceptanceID string `json:"acceptance_id,omitempty"`
+	ArtifactID   string `json:"artifact_id,omitempty"`
 	CreatedAt    int64  `json:"created_at"`
 }

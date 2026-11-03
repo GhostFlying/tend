@@ -133,7 +133,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		if h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || !matches(e, role, c.Kind == protocol.ActionAccept) {
 			continue
 		}
-		if c.Kind == protocol.ActionImplement && (c.WorkspaceHost == "" || !c.NamedExecutionAssigned) {
+		if c.Kind == protocol.ActionImplement && !c.AcceptanceWaived && (c.WorkspaceHost == "" || !c.NamedExecutionAssigned) {
 			found := false
 			for _, review := range executors {
 				if review.Pin.BackendID == e.Pin.BackendID && matches(review, c.AgentSelection.Acceptance, true) {

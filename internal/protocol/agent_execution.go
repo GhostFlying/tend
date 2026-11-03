@@ -18,11 +18,19 @@ type AgentRequirement struct {
 
 type TaskAgentSelection struct {
 	Implementation AgentRequirement `json:"implementation"`
-	Acceptance     AgentRequirement `json:"acceptance"`
+	Acceptance     AgentRequirement `json:"acceptance,omitzero"`
 }
 
-func (s TaskAgentSelection) Validate() error {
-	for _, r := range []AgentRequirement{s.Implementation, s.Acceptance} {
+func (s TaskAgentSelection) Validate() error { return s.ValidateForAcceptance(true) }
+
+// ValidateForAcceptance only omits an unused reviewer selector after the app
+// has established the immutable creator policy. Existing callers stay strict.
+func (s TaskAgentSelection) ValidateForAcceptance(required bool) error {
+	roles := []AgentRequirement{s.Implementation}
+	if required || s.Acceptance != (AgentRequirement{}) {
+		roles = append(roles, s.Acceptance)
+	}
+	for _, r := range roles {
 		if r.AgentID != "" {
 			parts := strings.Split(r.AgentID, "/")
 			if len(parts) != 2 || !AgentInventoryID(parts[0]) || !AgentInventoryID(parts[1]) {

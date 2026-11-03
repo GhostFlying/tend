@@ -491,6 +491,12 @@ export function IssueDetails({
                   </time>
                 </p>
                 <p className={styles.intent}>{issue.plan.intent}</p>
+                <p className={styles.muted}>
+                  独立验收：
+                  {issue.acceptance_policy?.required === false
+                    ? "由创建者决定不强制（仍须合法结果）"
+                    : "要求独立验收"}
+                </p>
                 {actionable[0] && (
                   <section className={styles.attention}>
                     <div>

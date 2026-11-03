@@ -31,8 +31,9 @@ type canonicalOwnerIssueSource struct {
 	ExpectedSourceRevision *int64 `json:"expected_source_revision,omitempty"`
 }
 type canonicalOwnerIssueCreate struct {
-	Owner   *protocol.IssueOwnerRequest          `json:"owner,omitempty"`
-	Manager *protocol.RequestIssueManagerPayload `json:"manager,omitempty"`
+	IndependentAcceptance *protocol.IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
+	Owner                 *protocol.IssueOwnerRequest            `json:"owner,omitempty"`
+	Manager               *protocol.RequestIssueManagerPayload   `json:"manager,omitempty"`
 	canonicalOwnerIssueSource
 	Plan                   protocol.IssuePlan      `json:"plan"`
 	Assignee               *protocol.IssueAssignee `json:"assignee,omitempty"`
@@ -168,6 +169,10 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 	next := protocol.Issue{
 		IssueControl: protocol.IssueControl{IssueID: x.IDs.New(protocol.PrefixWorkItem), ParentIssueID: p.ParentIssueID, State: protocol.IssueActive, Assignee: owner, AssignmentEpoch: 1, AssignmentState: "active"},
 		Revision:     1, Plan: p.Plan, DependsOn: slices.Clone(p.DependsOn), CreatedAt: now, UpdatedAt: now,
+	}
+	next.AcceptancePolicy, err = newIssueAcceptancePolicy(x, p.IndependentAcceptance)
+	if err != nil {
+		return Outcome{}, err
 	}
 	if next.DependsOn == nil {
 		next.DependsOn = []string{}
