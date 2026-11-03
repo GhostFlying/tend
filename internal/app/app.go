@@ -105,6 +105,7 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
+	forwardRecoveryID    string
 	preview              rolloutPreviewBroker
 	localRolloutPreview  func(context.Context, string, []protocol.RolloutPreviewSource, protocol.RolloutPreviewQuery) protocol.RolloutPreview
 	webhookKeys          WebhookKeys
@@ -197,6 +198,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		applied bool
 	)
 	err = a.store.Write(ctx, func(tx *store.Tx) error {
+
 		rec, err := store.GetRequest(ctx, tx.Q(), domain, env.RequestID)
 		switch {
 		case err == nil:
@@ -214,6 +216,23 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 
 		if err := cmd.Authorize(ctx, x, tx.Q()); err != nil {
 			return err
+		}
+		// Committed receipts above remain replayable during recovery. The fence
+		// applies to new actions, with a narrow exception for retained native facts.
+		if p.Kind == protocol.PrincipalOwner || p.Kind == protocol.PrincipalMainAgent || p.Kind == protocol.PrincipalBackgroundAgent || env.Operation == protocol.OpRunnerClaim || p.Kind == protocol.PrincipalSystem && recoveryOwnerControl(env.Operation) {
+			fenced, err := a.recoveryStartupFenced(ctx, tx.Q())
+			if err != nil {
+				return err
+			}
+			if fenced {
+				reconciled, err := recoveryReceiptWrite(ctx, x, tx.Q(), cmd)
+				if err != nil {
+					return err
+				}
+				if !reconciled {
+					return protocol.Errorf(protocol.CodeInvalidTransition, "forward recovery admission is fenced until exact durable receipt linkage")
+				}
+			}
 		}
 		rec = store.RequestRecord{
 			Domain: domain, RequestID: env.RequestID, Operation: env.Operation, PayloadHash: hash,

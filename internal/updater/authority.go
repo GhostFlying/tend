@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"io"
 	"net"
 	"net/http"
@@ -46,7 +47,7 @@ func NewHTTPAuthority(cfg Config) (*HTTPAuthority, error) {
 		return errors.New("updater: authority redirects are forbidden")
 	}}}, nil
 }
-func (a *HTTPAuthority) request(ctx context.Context, path string, b Binding, out any) error {
+func (a *HTTPAuthority) request(ctx context.Context, path string, b any, out any) error {
 	raw, err := json.Marshal(b)
 	if err != nil {
 		return err
@@ -93,5 +94,14 @@ func (a *HTTPAuthority) Authorize(ctx context.Context, b Binding) (Grant, error)
 func (a *HTTPAuthority) Health(ctx context.Context, b Binding) (Health, error) {
 	var h Health
 	err := a.request(ctx, a.cfg.HealthURL, b, &h)
+	return h, err
+}
+
+func (a *HTTPAuthority) RecoveryHealth(ctx context.Context, p protocol.ForwardRecoveryPlan) (protocol.RecoveryHealth, error) {
+	var h protocol.RecoveryHealth
+	if a.cfg.AuthoritySocket == "" {
+		return h, errors.New("updater: recovery requires a private authority socket")
+	}
+	err := a.request(ctx, "http://localhost/updater/recovery/health", p, &h)
 	return h, err
 }

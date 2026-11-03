@@ -14,8 +14,29 @@ import (
 // BeginOwnerMutation serializes admission with the durable prepare commit. The
 // mutex covers a short check/count only; admitted bodies finish without it.
 func (a *App) BeginOwnerMutation(ctx context.Context) (func(), error) {
+	return a.beginOwnerMutation(ctx, false)
+}
+
+// BeginOwnerOperation admits bounded operation envelopes during recovery so
+// Execute can authorize and replay receipts before rejecting new actions.
+func (a *App) BeginOwnerOperation(ctx context.Context) (func(), error) {
+	return a.beginOwnerMutation(ctx, true)
+}
+
+func (a *App) beginOwnerMutation(ctx context.Context, operation bool) (func(), error) {
 	a.archiveAdmission.Lock()
 	defer a.archiveAdmission.Unlock()
+	var fenced bool
+	if err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		fenced, err = a.recoveryStartupFenced(ctx, tx.Q())
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	if fenced && !operation {
+		return nil, protocol.Errorf(protocol.CodeInvalidTransition, "forward recovery rejects owner writes until durable linkage")
+	}
 	p, err := a.ArchivePreparation(ctx)
 	if err != nil {
 		return nil, err

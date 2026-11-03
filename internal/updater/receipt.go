@@ -41,6 +41,9 @@ func operationRollbackReceipt(s State) *protocol.UpdaterReceipt {
 
 // CommittedReceipt describes only a locally persisted commit of this version.
 func CommittedReceipt(s State) *protocol.UpdaterReceipt {
+	if r := s.Recovery; r != nil && r.Receipt != nil && s.CommittedProof != nil && s.CommittedProof.Binding == r.Plan.Successor {
+		return nil
+	}
 	proof := s.CommittedProof
 	if proof == nil || proof.Version != s.Current || proof.Process != s.Process {
 		return nil

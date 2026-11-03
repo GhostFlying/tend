@@ -278,7 +278,7 @@ func (p LinuxProcess) Stop(ctx context.Context, id Identity, timeout time.Durati
 	if err != nil {
 		return err
 	}
-	if current.StartTicks != id.StartTicks || current.SHA256 != id.SHA256 {
+	if current != id {
 		return errors.New("updater: refusing to signal reused process identity")
 	}
 	// pidfd pins the inspected process: recheck after opening so PID reuse cannot
@@ -295,7 +295,7 @@ func (p LinuxProcess) Stop(ctx context.Context, id Identity, timeout time.Durati
 	if err != nil {
 		return err
 	}
-	if current.StartTicks != id.StartTicks || current.SHA256 != id.SHA256 {
+	if current != id {
 		return ErrUnknown
 	}
 	_, _, errno = syscall.Syscall6(424, fd, uintptr(syscall.SIGTERM), 0, 0, 0, 0) // pidfd_send_signal.

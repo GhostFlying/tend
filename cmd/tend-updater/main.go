@@ -53,8 +53,19 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return errors.New("usage: tend-updater serve|bootstrap|upgrade|restart|status|retry|cancel|verify --config <file>")
 	}
 	command := args[0]
+	action := ""
+	if command == "handoff" {
+		if len(args) < 2 {
+			return errors.New("usage: tend-updater handoff plan|apply|status --config <file> --plan <file>")
+		}
+		action = args[1]
+		args = append([]string{command}, args[2:]...)
+	}
 	flags := flag.NewFlagSet("tend-updater "+command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	resumeID := flags.String("resume-request-id", "", "distinct stable request ID authorizing guarded installer continuation")
+	journalGeneration := flags.Uint64("expected-generation", 0, "current installer journal generation for continuation")
+	planFile := flags.String("plan", "", "private exact handoff plan")
 	config := flags.String("config", os.Getenv("TEND_UPDATER_CONFIG"), "fixed supervisor configuration")
 	bundle := flags.String("release", "", "release bundle directory")
 	id := flags.String("upgrade-id", "", "stable coordinator upgrade identity")
@@ -84,6 +95,47 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if command == "handoff" {
+		if action == "status" {
+			if *resumeID != "" || *journalGeneration != 0 {
+				return errors.New("updater: handoff status takes no continuation authorization")
+			}
+			j, err := updater.HandoffStatus(ctx, cfg)
+			_ = json.NewEncoder(out).Encode(j)
+			return err
+		}
+		if !protocol.ValidUpdaterHandoffAction(action) {
+			return errors.New("updater: handoff expects plan, apply or status")
+		}
+		p, err := updater.ReadHandoffPlan(*planFile)
+		if err != nil {
+			return err
+		}
+		if *resumeID != "" {
+			if action == "plan" {
+				next, err := updater.PlanHandoffResume(ctx, cfg, p, *resumeID, *journalGeneration)
+				_ = json.NewEncoder(out).Encode(map[string]any{"action": next, "allowed": err == nil})
+				return err
+			}
+			j, err := updater.ResumeHandoff(ctx, cfg, p, *resumeID, *journalGeneration)
+			_ = json.NewEncoder(out).Encode(j)
+			return err
+		}
+		if *journalGeneration != 0 {
+			return errors.New("updater: expected-generation requires resume-request-id")
+		}
+		if action == "plan" {
+			prepared, err := updater.PrepareHandoffPlan(ctx, cfg, p)
+			if err != nil {
+				_ = json.NewEncoder(out).Encode(map[string]any{"allowed": false, "reason": err.Error()})
+				return err
+			}
+			return json.NewEncoder(out).Encode(map[string]any{"allowed": true, "plan": prepared})
+		}
+		j, err := updater.ApplyHandoff(ctx, cfg, p)
+		_ = json.NewEncoder(out).Encode(j)
+		return err
+	}
 	if command == "serve" {
 		var authority updater.Authority
 		if cfg.AuthorizeURL != "" || cfg.HealthURL != "" {
@@ -97,6 +149,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 			return err
 		}
 		defer s.Close()
+		if err := updater.AdoptPendingHandoff(ctx, s); err != nil {
+			return err
+		}
 		return s.Serve(ctx)
 	}
 	switch command {

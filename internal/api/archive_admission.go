@@ -17,7 +17,11 @@ func (s *Server) archiveAdmission(next http.Handler) http.Handler {
 			s.writeError(w, r, err)
 			return
 		}
-		done, err := s.app.BeginOwnerMutation(r.Context())
+		begin := s.app.BeginOwnerMutation
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/ops" {
+			begin = s.app.BeginOwnerOperation
+		}
+		done, err := begin(r.Context())
 		if err != nil {
 			if protocol.CodeOf(err) == protocol.CodeInvalidTransition {
 				if r.ProtoMajor == 1 {

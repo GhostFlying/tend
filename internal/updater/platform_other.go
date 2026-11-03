@@ -13,3 +13,5 @@ func unlock(f *os.File) error {
 	return nil
 }
 func supported() error { return ErrUnsupported }
+
+func ownedFile(os.FileInfo) bool { return false }

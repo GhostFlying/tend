@@ -15,6 +15,10 @@ import (
 )
 
 type ControlRequest struct {
+	Recovery           *protocol.ForwardRecoveryPlan `json:"recovery,omitempty"`
+	Receipt            *protocol.RecoveryReceipt     `json:"receipt,omitempty"`
+	ExpectedGeneration uint64                        `json:"expected_generation,omitempty"`
+
 	Configuration  *protocol.RunnerConfiguration `json:"configuration,omitempty"`
 	Candidate      string                        `json:"candidate,omitempty"`
 	ManifestSHA256 string                        `json:"manifest_sha256,omitempty"`
@@ -87,6 +91,24 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 			err = s.StageConfiguration(r.Context(), req.ID, req.ManifestSHA256, req.Candidate, req.Configuration)
 		case "/restart":
 			err = s.Restart(req.ID)
+		case "/recovery/plan":
+			if req.Recovery == nil {
+				err = errors.New("updater: recovery plan required")
+			} else {
+				err = s.PlanRecovery(r.Context(), *req.Recovery)
+			}
+		case "/recovery/apply":
+			if req.Recovery == nil {
+				err = errors.New("updater: recovery plan required")
+			} else {
+				err = s.AuthorizeRecovery(r.Context(), *req.Recovery, req.ExpectedGeneration)
+			}
+		case "/recovery/link":
+			if req.Receipt == nil {
+				err = errors.New("updater: recovery receipt required")
+			} else {
+				err = s.LinkRecovery(*req.Receipt, req.ExpectedGeneration)
+			}
 		case "/retry":
 			err = s.Retry(req.ID)
 		case "/cancel":

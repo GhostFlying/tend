@@ -184,6 +184,12 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	interactionWake := dispatch.NewSignal()
 	webhookKeys := &webhookauth.Files{Dir: filepath.Join(dataDir, "webhook-keys")}
 	opts := []app.Option{app.WithWebhookKeys(webhookKeys), app.WithNotifier(dispatch.Fanout{wake, readWake, interactionWake})}
+	if recovery := os.Getenv("TEND_FORWARD_RECOVERY_ID"); recovery != "" {
+		if cfg.Upgrades == nil || os.Getenv("TEND_FORWARD_RECOVERY_SOCKET") != cfg.Upgrades.UpdaterSocket {
+			return errors.New("forward recovery requires the fixed configured updater socket")
+		}
+		opts = append(opts, app.WithForwardRecoveryStartup(recovery))
+	}
 	if cfg.LeaseTTL > 0 {
 		opts = append(opts, app.WithLeaseTTL(time.Duration(cfg.LeaseTTL)))
 	}
@@ -338,7 +344,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 
 	cb := contextbuilder.New(a, s, ids, contextbuilder.Config{})
 	ts := tools.New(a, s, cb, log)
-	handlers := map[string]dispatch.Handler{}
+	handlers := map[string]dispatch.Handler{app.ForwardRecoveryDestination: upgradectl.RecoveryNotification{App: a, Log: log}}
 	var front *mainthread.Manager
 	var background *mainthread.BackgroundPool
 	if cfg.MainAgent != nil {
@@ -436,6 +442,14 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, background, ids, log)
 	if err != nil {
 		return err
+	}
+	if recovery := os.Getenv("TEND_FORWARD_RECOVERY_ID"); recovery != "" {
+		if upgradeController == nil {
+			return errors.New("forward recovery controller unavailable")
+		}
+		if err := upgradeController.InitializeRecovery(ctx, recovery); err != nil {
+			return err
+		}
 	}
 	archives, closeArchives, err := prepareArchives(ctx, cfg.Archives, log, archive.Open)
 	if err != nil {

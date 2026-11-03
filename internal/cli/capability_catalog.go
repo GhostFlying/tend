@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"slices"
 	"strings"
 )
@@ -22,6 +23,10 @@ func binding(capability, command string, args ...string) CapabilityBinding {
 // The API contract checker compares this to the server's actual registrations.
 func CapabilityBindings() []CapabilityBinding {
 	var out []CapabilityBinding
+	for _, action := range protocol.UpdaterHandoffActions() {
+		out = append(out, binding("local EXEC updater handoff "+action, "updater handoff "+action, "--installer", "{installer}", "--installer-sha256", "{installer-sha256}", "--config", "{config}", "--plan", "{handoff}", "--json"))
+	}
+
 	for _, cmd := range capabilityCommands {
 		args := []string{}
 		variables := commandVariables(cmd.Route)
@@ -183,6 +188,10 @@ func legacyBindings() []CapabilityBinding {
 		binding("local POST /archive/prepare", "archive prepare", "--socket", "{socket}", "--revision", "2", "--json"),
 		binding("local POST /archive/cancel", "archive cancel", "--socket", "{socket}", "--revision", "2", "--json"),
 		binding("local POST /archive/host", "archive host", "--socket", "{socket}", "--revision", "2", "--host", "sample", "--json"),
+		binding("local GET /upgrades/recovery/status", "upgrade recover status", "--socket", "{socket}", "--ledger-socket", "{socket}", "--recovery-id", "forward", "--json"),
+		binding("local GET /status", "upgrade recover status", "--socket", "{socket}", "--json"),
+		binding("local POST /recovery/plan", "upgrade recover plan", "--socket", "{socket}", "--plan", "{recovery}", "--request-id", "{request}", "--upgrade-id", "original", "--recovery-id", "forward", "--json"),
+		binding("local POST /recovery/apply", "upgrade recover apply", "--socket", "{socket}", "--plan", "{recovery}", "--request-id", "{request}", "--upgrade-id", "original", "--recovery-id", "forward", "--expected-generation", "2", "--json"),
 		binding("local GET /upgrades/status", "upgrade status", "--socket", "{socket}", "--json"),
 		binding("local POST /upgrades/start", "upgrade start", "--socket", "{socket}", "--release", "{release}", "--json"),
 		binding("local POST /upgrades/retry", "upgrade retry", "--socket", "{socket}", "--upgrade-id", "sample", "--revision", "2", "--json"),

@@ -69,6 +69,7 @@ func TestReconnectRecoversFinalNativeMessagesBeforeMetadataRepair(t *testing.T) 
 	if err != nil || state.Status != "unknown" || state.RepairAttempts != 0 {
 		t.Fatal(state, err)
 	}
+	app.WithForwardRecoveryStartup("receipt-recovery")(e.app)
 	th.found = true
 	th.receipt = harness.TurnReceipt{ID: rec.TurnID, Status: "completed", Raw: json.RawMessage(`{"id":"native-known","status":"completed","items":[]}`), Messages: []harness.Event{
 		{TurnID: rec.TurnID, ItemID: "progress", ItemType: harness.ItemAgentMessage, Text: "Partial text completed in native history"},
