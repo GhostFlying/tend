@@ -39,13 +39,16 @@ func newWebSocketTransport(a *app.App, config APIConfig, tenant string, owners [
 		opts := []larkws.ClientOption{larkws.WithEventHandler(handler), larkws.WithLogger(quietSDKLogger{}), larkws.WithLogLevel(larkcore.LogLevelError), larkws.WithOnReady(func() { health("connected") }), larkws.WithOnReconnected(func() { health("connected") }), larkws.WithOnReconnecting(func() { health("reconnecting") }), larkws.WithOnDisconnected(func() { health("disconnected") }), larkws.WithOnError(func(error) { health("connection_failed") })}
 		opts = append(opts, options...)
 		client := larkws.NewClient(config.AppID, config.AppSecret, opts...)
+		// Construction starts a cache cleaner even when Start fails or is skipped.
+		// Terminal disposal owns that cleaner as well as connection workers.
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = client.Dispose(closeCtx)
+		}()
 		if err := client.Start(ctx); err != nil && ctx.Err() == nil {
 			health("connection_failed")
 		}
-		// Start joins SDK workers; CloseAndWait also makes the ownership explicit.
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = client.CloseAndWait(closeCtx)
 	}
 	return t, nil
 }

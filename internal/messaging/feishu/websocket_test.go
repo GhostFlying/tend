@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -46,6 +47,12 @@ func websocketApp(t *testing.T) (*app.App, *store.Store, *testkit.Clock) {
 }
 
 func TestWebSocketSDKReconnectDeduplicatesAndJoins(t *testing.T) {
+	cleaners := sdkCacheCleaners()
+	defer func() {
+		if got := sdkCacheCleaners(); got > cleaners {
+			t.Errorf("SDK cache cleaners grew: before=%d after=%d", cleaners, got)
+		}
+	}()
 	a, db, clock := websocketApp(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -309,5 +316,41 @@ func TestWebSocketSDKLogsDoNotExposeSecrets(t *testing.T) {
 	}
 	if err != nil {
 		t.Fatalf("SDK logging fixture failed: %v", err)
+	}
+}
+
+func sdkCacheCleaners() int {
+	stack := make([]byte, 2<<20)
+	n := runtime.Stack(stack, true)
+	return strings.Count(string(stack[:n]), "cache.(*cron).start(")
+}
+
+func TestWebSocketDisposesCacheAfterCancelledOrFailedStartup(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		name := "failed"
+		if cancelled {
+			name = "cancelled"
+		}
+		t.Run(name, func(t *testing.T) {
+			a, _, clock := websocketApp(t)
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
+			defer gateway.Close()
+			before := sdkCacheCleaners()
+			for range 3 {
+				transport, err := newWebSocketTransport(a, APIConfig{AppID: "app-fixture", AppSecret: "isolated-secret", Now: clock.Now}, "tenant-fixture", []string{"owner"}, larkws.WithDomain(gateway.URL), larkws.WithHttpClient(gateway.Client()), larkws.WithAutoReconnect(false))
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				if cancelled {
+					cancel()
+				}
+				transport.socket(ctx)
+				cancel()
+			}
+			if got := sdkCacheCleaners(); got > before {
+				t.Fatalf("SDK cache cleaners grew: before=%d after=%d", before, got)
+			}
+		})
 	}
 }

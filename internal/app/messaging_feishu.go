@@ -182,7 +182,7 @@ func (a *App) ReceiveFeishu(ctx context.Context, m FeishuIncoming) (protocol.Ope
 	if m.ParentID != "" {
 		var pending bool
 		if err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM feishu_inputs WHERE external_message_id=? AND owner=? AND binding_revision=? AND message_id='')`, m.ParentID, owner, revision).Scan(&pending)
+			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM feishu_inputs parent LEFT JOIN request_records r ON r.domain='owner' AND r.request_id=parent.request_id WHERE parent.external_message_id=? AND parent.owner=? AND parent.binding_revision=? AND parent.message_id='' AND (r.request_id IS NULL OR r.status IN ('accepted','unknown')))`, m.ParentID, owner, revision).Scan(&pending)
 		}); err != nil {
 			return protocol.Operation{}, err
 		}
@@ -293,7 +293,7 @@ func (a *App) ValidateFeishuPart(ctx context.Context, p FeishuPart) error {
 func (a *App) PendingFeishuInputs(ctx context.Context) ([]FeishuIncoming, error) {
 	result := []FeishuIncoming{}
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		rows, err := tx.Q().QueryContext(ctx, `SELECT i.payload FROM feishu_inputs i JOIN feishu_binding b ON b.singleton=1 AND b.enabled=1 AND b.revision=i.binding_revision AND b.owner=i.owner WHERE NOT EXISTS(SELECT 1 FROM request_records r WHERE r.domain='owner' AND r.request_id=i.request_id) AND NOT EXISTS(SELECT 1 FROM feishu_inputs parent WHERE parent.external_message_id=json_extract(i.payload,'$.ParentID') AND parent.owner=i.owner AND parent.binding_revision=i.binding_revision AND parent.message_id='') ORDER BY i.rowid LIMIT 50`)
+		rows, err := tx.Q().QueryContext(ctx, `SELECT i.payload FROM feishu_inputs i JOIN feishu_binding b ON b.singleton=1 AND b.enabled=1 AND b.revision=i.binding_revision AND b.owner=i.owner WHERE NOT EXISTS(SELECT 1 FROM request_records r WHERE r.domain='owner' AND r.request_id=i.request_id) AND NOT EXISTS(SELECT 1 FROM feishu_inputs parent LEFT JOIN request_records parent_request ON parent_request.domain='owner' AND parent_request.request_id=parent.request_id WHERE parent.external_message_id=json_extract(i.payload,'$.ParentID') AND parent.owner=i.owner AND parent.binding_revision=i.binding_revision AND parent.message_id='' AND (parent_request.request_id IS NULL OR parent_request.status IN ('accepted','unknown'))) ORDER BY i.rowid LIMIT 50`)
 		if err != nil {
 			return err
 		}

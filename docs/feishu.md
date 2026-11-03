@@ -17,15 +17,15 @@ Refs: D162。
 }
 ```
 
-WebSocket 模式使用固定官方 Go SDK v3.12.1，应用必须是企业自建应用，服务端只需出站访问飞书。开发者后台选择“使用长连接接收事件”，订阅 `im.message.receive_v1` 并完成应用消息权限与租户授权；保存订阅方式时需要连接已在线。SDK 处理连接鉴权、重连和帧协议，本服务不手写 protobuf。事件处理受 2.5 秒预算限制，失败不确认，平台重推继续使用原 event/message/request 身份。每个应用最多 50 连接且以集群方式随机分发，不将多个连接误认为广播。
+WebSocket 模式以官方 Go SDK v3.12.1 为基线，固定使用仅补充显式清理的 SDK fork（`16ab071ae1eb786f9d8843b933c067e80917d8b4`），应用必须是企业自建应用，服务端只需出站访问飞书。开发者后台选择“使用长连接接收事件”，订阅 `im.message.receive_v1` 并完成应用消息权限与租户授权；保存订阅方式时需要连接已在线。SDK 处理连接鉴权、重连和帧协议，本服务不手写 protobuf。事件处理受 2.5 秒预算限制，失败不确认，平台重推继续使用原 event/message/request 身份。每个应用最多 50 连接且以集群方式随机分发，不将多个连接误认为广播。
 
-`channel feishu show` 的 `runtime_health` 与 `channel list` 的 `health` 区分 `configured_unverified`、`connected`、`reconnecting`、`disconnected`、`connection_failed`。已连接只说明传输握手成功，不表示 owner 绑定、权限或端到端消息验收通过。连接错误不停止 Tend 主服务；服务端 context 负责取消连接和等待 SDK worker 退出，日志不转发 SDK 原始 payload 或错误参数。
+`channel feishu show` 的 `runtime_health` 与 `channel list` 的 `health` 区分 `configured_unverified`、`connected`、`reconnecting`、`disconnected`、`connection_failed`。已连接只说明传输握手成功，不表示 owner 绑定、权限或端到端消息验收通过。连接错误不停止 Tend 主服务；服务端 context 负责取消连接，并通过 terminal `Dispose(ctx)` 等待 SDK worker 与私有 cache cleaner 退出；构造后未启动、启动失败和正常关闭均走相同清理，日志不转发 SDK 原始 payload 或错误参数。
 
-需要 HTTP 时显式配置 `receive_mode: "http"`，并额外配置 `verification_token_env`、`encrypt_key_env`；可选 `callback_listen` 只提供签名鉴权的 `POST /hooks/feishu`，仍需部署方提供 HTTPS 公网入口。与已有 webhook 使用同一监听时地址必须一致。WebSocket 模式拒绝配置 callback listener，不开放 HTTP 接收入口。实际 app、tenant、owner open_id、私聊 chat_id、订阅与权限是联网激活前置，离线替身不代表这些条件已满足。
+需要 HTTP 时显式配置 `receive_mode: "http"`，并额外配置 `verification_token_env`、`encrypt_key_env`；可选 `callback_listen` 只提供协议鉴权的 `POST /hooks/feishu`，仍需部署方提供 HTTPS 公网入口。与已有 webhook 使用同一监听时地址必须一致。WebSocket 模式拒绝配置 callback listener，不开放 HTTP 接收入口。实际 app、tenant、owner open_id、私聊 chat_id、订阅与权限是联网激活前置，离线替身不代表这些条件已满足。
 
 官方说明：[长连接接收事件](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-)；[固定 SDK 生命周期](https://github.com/larksuite/oapi-sdk-go/blob/v3.12.1/ws/client_lifecycle.go)。
 
-只接受绑定 owner 的私聊文本，不根据消息自报内容创建权限。HTTP 模式签名校验使用收到的原始 body，之后才解密与解析；校验签名时间、verification token、app、tenant、sender 与 chat。URL challenge 不创建业务消息。附件、群聊和交互卡片未实现，明确拒绝而不冒充已收取；owner 可在 Web/CLI 处理附件。
+只接受绑定 owner 的私聊文本，不根据消息自报内容创建权限。HTTP 模式普通事件的签名校验使用收到的原始 body，校验签名时间、verification token、app、tenant、sender 与 chat。URL challenge 支持协议允许的无事件签名请求，先解密并校验 verification token，不创建业务消息；该例外不适用于普通事件。附件、群聊和交互卡片未实现，明确拒绝而不冒充已收取；owner 可在 Web/CLI 处理附件。
 
 ## CLI 与请求恢复
 
@@ -46,3 +46,5 @@ provider event/message 身份先持久化一个稳定 request-id；业务消息�
 发送冻结 app、tenant、chat、绑定 revision 和稳定 delivery UUID。回复固定原输入的 owner、chat 和绑定 revision；绑定更改或撤销不向新地址补发旧消息。明确的 429/限流错误码拒绝按受限 x-ogw-ratelimit-reset（兼容 Retry-After） 重试同一 outbox/UUID；网络断开、5xx、缺失或坏 receipt 保持 unknown，没有凭空的 UUID 反查能力，因此 reconcile 不重送。发送前 token 获取的网络/限流/5xx 瞬态失败只重试原 outbox 身份，尚未调用消息发送接口；明确永久鉴权拒绝才失败。成功回执的 opaque message ID 经 owner receipts/trace/CLI 和 Web 展示，成功仅表明 provider 接受消息，不代表用户已读或模型已处理。
 
 本实现使用应用自建 tenant access token，只在内存缓存且不自动重发消息；不新增 OAuth 共享认证。长连接/回调/发送测试均使用本地网关替身，不向真实飞书发送消息。
+
+SDK 上游 v3.12.1/v3.12.2 的私有 cache cleaner 没有显式关闭接口，构造后的 cleaner 不能仅依赖 finalizer 回收。依赖固定到 [最小清理补丁](https://github.com/GhostFlying/oapi-sdk-go/commit/16ab071ae1eb786f9d8843b933c067e80917d8b4)，保留上游协议与许可，不修改原 `Start`/`CloseAndWait` 重试语义；独立的 terminal disposal 同时清理连接与 cache。

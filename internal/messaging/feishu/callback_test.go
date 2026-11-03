@@ -156,3 +156,36 @@ func TestChallengeRequiresSameAuthentication(t *testing.T) {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestURLVerificationWithoutEventSignature(t *testing.T) {
+	for _, encrypted := range []bool{false, true} {
+		c, sink := callbackFixture(t)
+		for _, token := range []string{"verify-fixture", "wrong-token"} {
+			body, _ := json.Marshal(map[string]string{"type": "url_verification", "token": token, "challenge": "fixture-challenge"})
+			if encrypted {
+				body = encryptedFixture(t, body, c.config.EncryptKey)
+			}
+			w := httptest.NewRecorder()
+			c.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/hooks/feishu", bytes.NewReader(body)))
+			want := http.StatusUnauthorized
+			if token == "verify-fixture" {
+				want = http.StatusOK
+			}
+			if w.Code != want {
+				t.Fatalf("encrypted=%v status=%d want=%d", encrypted, w.Code, want)
+			}
+			if sink.calls != 0 {
+				t.Fatal("challenge created a business message")
+			}
+		}
+		body := messageFixture()
+		if encrypted {
+			body = encryptedFixture(t, body, c.config.EncryptKey)
+		}
+		w := httptest.NewRecorder()
+		c.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/hooks/feishu", bytes.NewReader(body)))
+		if w.Code != http.StatusUnauthorized || sink.calls != 0 {
+			t.Fatal("unsigned ordinary event bypassed signature")
+		}
+	}
+}

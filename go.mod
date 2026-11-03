@@ -64,3 +64,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+replace github.com/larksuite/oapi-sdk-go/v3 => github.com/GhostFlying/oapi-sdk-go/v3 v3.12.2-0.20261103184457-16ab071ae1eb

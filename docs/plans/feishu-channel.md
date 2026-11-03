@@ -13,3 +13,7 @@ Refs: D162。复用已有条件能力与飞书范围报告，保留其未验证�
 8. 第二轮独立审查收口：已关闭问题的飞书补充文字作为原始 owner 输入保留；回答来源在同事务同步确认发布前登记；transport 与 owner API 使用相同的有效 owner 列表。补覆盖回放幂等、原回答不改写和未授权 owner 拒绝的回归。
 
 9. 当前部署入口为私有网络，不假定已有公网回调。使用固定官方 Go SDK v3.12.1 增加出站 WebSocket 接收模式，配置启用时默认选择该模式；HTTP 回调保留为显式可选。复用同一来源校验、持久输入、请求身份和 outbox，SDK 仅承担长连接鉴权、帧协议及重连，不手写 protobuf。服务端 context 拥有连接及退出/join；连接错误只降级 channel 状态，不停止 owner API。SDK 日志不输出原始事件或凭据，configured 与 connected 分开。用本地 SDK 网关替身覆盖连接、断线重推、错误凭据、取消/退出，不访问真实飞书。
+
+10. 第三轮审查修复：URL verification 按官方协议允许无事件签名，经解密和 verification token 鉴权；普通事件仍验证原始 body 签名。父输入只有未提交或 accepted/unknown 才等待，明确 failed 父项不能使子输入永久 pending。官方 SDK 私有 cache cleaner 的退出缺口单独以正常依赖补丁解决，不用 unsafe 访问或虚报 worker 已全部退出。
+
+11. 上游 v3.12.2 核验仍无 cache cleaner 显式释放，使用基于 v3.12.1 的最小 SDK fork，固定合入 commit `16ab071ae1eb786f9d8843b933c067e80917d8b4`（保留上游许可/协议与原 Start/CloseAndWait 行为）。构造后立即 defer terminal Dispose，覆盖未启动、预取消、鉴权失败与正常重连关闭。fork 只新增 cache Close 与 terminal Dispose，经独立审查和 Go 1.17/stable 生命周期检查；Tend 另核真实本地网关及 cleaner 数不增长，不访问真实应用。
