@@ -322,7 +322,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		}
 		listeners = []net.Listener{plain}
 		// Without HTTPS certificates on the tailnet, clients use http.
-		if l, err := tn.ListenTLS(":443"); err != nil {
+		if l, err := tn.ListenTLS(ctx, ":443"); err != nil {
 			log.Warn("no https listener; clients must use http", "name", tn.DNSName(), "err", err)
 		} else {
 			listeners, secure = append(listeners, l), true

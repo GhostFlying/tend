@@ -164,6 +164,7 @@
 | D159 | 明确协商 retain 能力的 runner 可逐 Run 保留原维护未知，不令整 host Hello 失败；持久 fence 阻止重放，未知责任、原 lease/pin 与容量继续保留。旧 peer 保持原拒绝路径。 | 已实现，待验证 |
 | D160 | Agent Issue 关联依据冻结 Run pin 与创建时责任来源，按 canonical identity 展示当前/历史及原版本；API、CLI、Web 同步提供有界分页与筛选，缺少权威关联和执行观测时明确保留缺口。 | 已实现，待验证 |
 | D163 | 终态任务的未答规则问题在原事务撤销并收敛 Attention；拒绝迟到新答复，保留已答历史与暂停语义。 | 已实现，待验证 |
+| D165 | Tailnet HTTPS 显式协商 HTTP/2 与 HTTP/1.1，以标准库复用持久事件流和页面读取；证书源、准入、认证与明文监听保持原合同，条件复现不宣称生产根因。 | 已实现，待验证 |
 | D166 | 显式升级窗口可 park 空闲 manager，经原 close 与物理回执结束旧 Run；同窗口阻止重新领取，完成或取消后以新 Run 承接责任。默认关闭，原协议与请求身份不变。 | 实现中 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
@@ -820,6 +821,17 @@ provider event_id/message_id 冻结同一请求身份，持久收件恢复只处
 单纯暂停或 revision 变化不足以证明责任已被替代；非终态复查的 action/generation
 来源规则另行处理，不按同一父 Issue 批量清理新预算问题。
 见[实施计划](plans/obsolete-task-decisions.md)。
+## D165：HTTPS 事件流复用
+
+Tailnet HTTPS 使用原本机证书选择器，并保留 MagicDNS 和 HTTPS 证书开启检查，
+在原 tailnet TCP listener 上显式广告 h2/http/1.1。服务端仍由标准库
+http.Server.Serve处理，HTTP/1客户端继续可用，认证、WhoIs及明文监听合同不变。
+准备监听的等待使用服务端传入context，不另引入provider或module。
+
+真实本地TLS与显式受限HTTP连接池证明持久事件流可占用HTTP/1槽，使普通读取排队，
+同条件HTTP/2可在同一TCP连接复用。这仅认证该传输机制与修复，不证明某次生产
+页面持续加载的现场因果；fresh部署后的真实浏览器恢复仍需单独验证。见
+[实施计划](plans/https-stream-multiplexing.md)。
 
 ## D166：升级窗口的 manager park
 
