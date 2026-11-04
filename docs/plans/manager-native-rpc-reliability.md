@@ -23,3 +23,7 @@
 先记录未修改产品代码时的定向失败，再实现最小变更并跑相关 mainthread/app/coordination/runner 回归与 race。保留物理关闭成功、最后事件顺序、错误/取消未知、原权限 fence、升级 park 及原业务 receipt 不被结清的对照。
 
 在明确 scope 与其他候选的交叉风险后才启动完整 make check、规定模型与 effort 的独立 review，并准备可审阅 PR。当前并行角色候选修改 mainthread.go 与 harness 接口；本补丁在 mainthread.go 仅接入既有 shutdown flush，不改变角色合同或 harness 公共接口。若接口或基线变化，重新核对实际补丁。生产恢复由唯一操作方另行执行，不作为测试副作用。
+
+## 必需 CI 的浏览器环境
+
+实际验收发现 `ubuntu-latest` 已使用 Ubuntu 26.04，而锁定的 Playwright 1.55.1 不支持该环境，两个 layout 分组在安装浏览器依赖时失败，尚未执行回归。仅将 layout job 固定为受该版本支持的 Ubuntu 24.04，保持全部测试、锁定依赖与其余 job 不变；不以重试或跳过浏览器回归替代通过。平台支持以 [Playwright 1.55.1 的平台定义](https://github.com/microsoft/playwright/blob/v1.55.1/packages/playwright-core/src/server/utils/hostPlatform.ts) 为依据。
