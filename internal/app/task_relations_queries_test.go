@@ -9,6 +9,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 	"github.com/GhostFlying/tend/internal/views"
 )
 
@@ -36,19 +37,32 @@ func TestTaskRelationsBatchExecutionFactsInsideClaimTransaction(t *testing.T) {
 	const relatedCount = 150
 	outgoing := []protocol.TaskRelation{}
 	titles := map[string]string{}
-	for i := 0; i < relatedCount; i++ {
-		payload := createTaskPayload{Title: fmt.Sprintf("related %d", i), Spec: testSpec}
-		if i%2 == 0 {
-			payload.Relations = []protocol.TaskRelation{{Kind: protocol.RelationRelated, TaskID: root.TaskID}}
+	// Creation workflow coverage belongs to the root's real app command.
+	// Populate the same queued projection in one transaction for the scale test.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		seed, err := storefixture.ReadTaskSeed(t.Context(), tx.Q(), root.TaskID)
+		if err != nil {
+			return err
 		}
-		op, task := h.createTask(owner, payload)
-		if op.Status != protocol.OpSucceeded {
-			t.Fatal(op)
+		for i := range relatedCount {
+			row := seed.Row
+			row.TaskID = h.ids.New(protocol.PrefixTask)
+			row.WorkspaceName, row.Title = row.TaskID, fmt.Sprintf("related %d", i)
+			if err := seed.Insert(t.Context(), tx, h.ids, row); err != nil {
+				return err
+			}
+			titles[row.TaskID] = row.Title
+			if i%2 == 0 {
+				if err := tx.ReplaceTaskRelations(t.Context(), row.TaskID, []protocol.TaskRelation{{Kind: protocol.RelationRelated, TaskID: root.TaskID}}, h.clock.Now().UnixMilli()); err != nil {
+					return err
+				}
+			} else {
+				outgoing = append(outgoing, protocol.TaskRelation{Kind: protocol.RelationRelated, TaskID: row.TaskID})
+			}
 		}
-		titles[task.TaskID] = payload.Title
-		if i%2 != 0 {
-			outgoing = append(outgoing, protocol.TaskRelation{Kind: protocol.RelationRelated, TaskID: task.TaskID})
-		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	op := h.exec(owner, h.env("tasks.update_intent", taskTarget(root.TaskID), updateIntentPayload{Relations: &outgoing}, rev(h.task(root.TaskID).ControlRevision)), UpdateIntent{})
 	if op.Status != protocol.OpSucceeded {
