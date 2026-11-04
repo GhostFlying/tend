@@ -2782,6 +2782,71 @@
       "title": "ContextBlocker",
       "type": "object"
     },
+    "ContinueRetainedRunPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "protection_set_sha256": {
+          "type": "string"
+        },
+        "protections": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RetainedRunProtection"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "action_id",
+        "generation",
+        "spec_version",
+        "host_id",
+        "lease_id",
+        "execution",
+        "protections",
+        "protection_set_sha256",
+        "reason"
+      ],
+      "title": "ContinueRetainedRunPayload",
+      "type": "object"
+    },
     "ControlMode": {
       "enum": [
         "managed",
@@ -9989,6 +10054,185 @@
       "title": "RetainedAgentDefinition",
       "type": "object"
     },
+    "RetainedRunIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "action_id",
+        "generation",
+        "spec_version",
+        "host_id",
+        "lease_id",
+        "execution"
+      ],
+      "title": "RetainedRunIdentity",
+      "type": "object"
+    },
+    "RetainedRunProtection": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "linked": {
+          "type": "boolean"
+        },
+        "maintenance_id": {
+          "type": "string"
+        },
+        "original_requests_json": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "maintenance_id",
+        "run_id",
+        "task_id",
+        "action_id",
+        "host_id",
+        "lease_id",
+        "original_requests_json",
+        "linked"
+      ],
+      "title": "RetainedRunProtection",
+      "type": "object"
+    },
+    "RetainedRunReconciliation": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "can_continue": {
+          "type": "boolean"
+        },
+        "continuation_request_id": {
+          "type": "string"
+        },
+        "continuation_task_revision": {
+          "type": "integer"
+        },
+        "identity": {
+          "$ref": "#/definitions/RetainedRunIdentity"
+        },
+        "lease_status": {
+          "type": "string"
+        },
+        "observed": {
+          "$ref": "#/definitions/RunObserved"
+        },
+        "original_request_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pending_business_receipts": {
+          "type": "boolean"
+        },
+        "protection_set_sha256": {
+          "type": "string"
+        },
+        "protections": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RetainedRunProtection"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_revision": {
+          "type": "integer"
+        },
+        "unapplied_events": {
+          "type": "integer"
+        },
+        "unresolved_native_requests": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "identity",
+        "task_revision",
+        "role",
+        "observed",
+        "lease_status",
+        "protections",
+        "protection_set_sha256",
+        "original_request_ids",
+        "unresolved_native_requests",
+        "unapplied_events",
+        "pending_business_receipts",
+        "blockers",
+        "can_continue"
+      ],
+      "title": "RetainedRunReconciliation",
+      "type": "object"
+    },
     "ReuseIssuePayload": {
       "additionalProperties": false,
       "properties": {
@@ -14318,6 +14562,9 @@
     "ConfirmAttentionPayload": {
       "$ref": "#/definitions/ConfirmAttentionPayload"
     },
+    "ContinueRetainedRunPayload": {
+      "$ref": "#/definitions/ContinueRetainedRunPayload"
+    },
     "ConversationAttachment": {
       "$ref": "#/definitions/ConversationAttachment"
     },
@@ -14596,6 +14843,9 @@
     },
     "RespondInteraction": {
       "$ref": "#/definitions/RespondInteraction"
+    },
+    "RetainedRunReconciliation": {
+      "$ref": "#/definitions/RetainedRunReconciliation"
     },
     "ReuseIssuePayload": {
       "$ref": "#/definitions/ReuseIssuePayload"

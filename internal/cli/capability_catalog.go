@@ -2,9 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"github.com/GhostFlying/tend/internal/protocol"
 	"slices"
 	"strings"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // CapabilityBinding is an executable CLI entry for a public interface.
@@ -54,7 +55,9 @@ func CapabilityBindings() []CapabilityBinding {
 		}
 		if cmd.Operation != "" {
 			capability = cmd.Operation
-			if cmd.Operation == protocol.OpReconcileManagerRun {
+			if cmd.Operation == protocol.OpContinueRetainedRun {
+				args = append(args, "--data", retainedRunProofExample())
+			} else if cmd.Operation == protocol.OpReconcileManagerRun {
 				args = append(args, "--mode", "read_receipts", "--run", "original", "--lease", "original-lease", "--close-request", "original-close", "--close-sha256", strings.Repeat("a", 64), "--stopped-request", "original-stopped", "--stopped-sha256", strings.Repeat("b", 64), "--assignment-epoch", "3", "--reason", "Read the original native receipt")
 			} else {
 				args = append(args, "--data", `{}`)
@@ -302,6 +305,11 @@ func commandUsage(prefix []string) string {
 	if name == "issue" || name == "issue create" || name == "issue set-acceptance-policy" {
 		out.WriteString("\nIndependent acceptance: issue create accepts independent_acceptance: {required: true|false, reason: <text>}. A read-only investigation may use false and must still submit a legal durable report. Creator identity is server-frozen; omitted policy retains independent review.\n")
 		out.WriteString("tend issue set-acceptance-policy <issue_id> --revision <revision> --epoch <epoch> --data '{\"required\":false,\"reason\":\"A bounded investigation needs no separate review\"}'\nChanges affect future tasks only; current workers cannot self-exempt. Use --dry-run to save the original Envelope; unknown results require reconciliation and identical --request-id/payload/control values, never a new request. Read issue show/task show --json for creator and frozen task policy.\n")
+	}
+	if name == "run maintenance-reconciliation" || name == "run continue-retained" {
+		out.WriteString("\nRetained ordinary Orca Run recovery: maintenance-reconciliation is ledger-only; can_continue does not prove a live native turn or restored execution. Copy identity, every protection entry (including original_requests_json), protection_set_sha256 and task_revision from the exact original Run. continue-retained accepts the identity fields at the payload top level, the complete protections array, its hash and an independent reason; a cited source_message_id also requires expected_source_revision.\n")
+		out.WriteString("Use --revision with that original Task control revision, an explicit --request-id and --file <proof.json> (or --data <json>). Save --dry-run output as the original Envelope before submitting. The command authorizes strict attachment through the original journal and same lease only; it does not send a continuation, create a session or clear historical protection/unknown facts. Missing native evidence, old runners, pending business or a new maintenance capture keep recovery blocked.\n")
+		out.WriteString("If the result is unknown, retain the original ID, input, revision and Envelope. Run tend request show <original-id> before tend request replay --file <original-envelope.json>; replay exact bytes only, never replace the ID or refresh the proof to retry an unknown request.\n")
 	}
 	return out.String()
 }

@@ -597,6 +597,17 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 				}
 				r.requestReconcile()
 			}
+		case v.Verdict == protocol.VerdictContinueRetained:
+			if v.RetainedResume == nil || v.RetainedResume.RequestID == "" || v.RetainedResume.Mode != "attach" || run.Held || (run.Phase != journal.PhaseStarted && run.Phase != journal.PhaseWorkerDone && run.Phase != journal.PhaseSubmitting && run.Phase != journal.PhaseReleasing) {
+				return errors.New("runner: strict retained continuation identity is unavailable")
+			}
+			if err := r.cfg.Journal.SetRetainedResume(ctx, v.RunID, *v.RetainedResume); err != nil {
+				return err
+			}
+			if err := r.authorizeRetainedSettlement(ctx, v.RunID, true); err != nil {
+				return err
+			}
+			r.start(ctx, as, sent)
 		case v.Verdict == protocol.VerdictContinue:
 			if err := r.authorizeRetainedSettlement(ctx, v.RunID, true); err != nil {
 				return err

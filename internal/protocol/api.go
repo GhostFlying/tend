@@ -10,7 +10,7 @@ func APITypes() []any {
 		ArtifactShare{}, ArtifactSharePage{}, GrantArtifactSharePayload{}, RevokeArtifactSharePayload{},
 		QuestionInputPayload{}, RevokeQuestionInputsPayload{}, QuestionInputPage{},
 		BindFeishu{}, FeishuBindingView{}, FeishuInputPage{},
-		ManagerRunReconciliation{}, ReconcileManagerRunPayload{},
+		ManagerRunReconciliation{}, ReconcileManagerRunPayload{}, RetainedRunReconciliation{}, ContinueRetainedRunPayload{},
 		ConcurrencyGroupPage{}, ConcurrencyHistoryPage{}, ConfigureConcurrencyPayload{}, ConcurrencyQuery{},
 		HostMaintenancePayload{}, UpgradeControlPayload{}, LocalRepositoryBinding{}, BindLocalRepositoryRequest{}, LocalRepositoryStatus{},
 		TriggerQuery{}, TriggerEventPage{}, TriggerSchedulePage{}, WebhookSubscription{}, WebhookSubscriptionPage{}, WebhookSubscriptionPayload{}, WebhookReceipt{},

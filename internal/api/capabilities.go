@@ -60,6 +60,7 @@ func (s *Server) ownerRoutes() []ownerRoute {
 		{"GET /api/v1/sources/{id}", s.manualSource},
 		{"GET /api/v1/runs/{id}/messages", s.runMessages},
 		{"GET /api/v1/runs/{id}/native-entry", s.nativeEntry},
+		{"GET /api/v1/runs/{id}/maintenance-reconciliation", s.retainedRunReconciliation},
 		{"GET /api/v1/tasks", s.tasks},
 		{"GET /api/v1/tasks/{id}", s.task},
 		{"GET /api/v1/tasks/{id}/manager-reconciliation", s.managerRunReconciliation},

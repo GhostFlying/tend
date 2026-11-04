@@ -272,6 +272,7 @@ export interface TendAPI {
   ConcurrencyQuery?: ConcurrencyQuery;
   ConfigureConcurrencyPayload?: ConfigureConcurrencyPayload;
   ConfirmAttentionPayload?: ConfirmAttentionPayload;
+  ContinueRetainedRunPayload?: ContinueRetainedRunPayload;
   ConversationAttachment?: ConversationAttachment;
   ConversationHandoffPayload?: ConversationHandoffPayload;
   ConversationHandoffView?: ConversationHandoffView;
@@ -365,6 +366,7 @@ export interface TendAPI {
   RequestView?: RequestView;
   RespondAttentionPayload?: RespondAttentionPayload;
   RespondInteraction?: RespondInteraction;
+  RetainedRunReconciliation?: RetainedRunReconciliation;
   ReuseIssuePayload?: ReuseIssuePayload;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
   ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
@@ -2047,6 +2049,38 @@ export interface ConfigureConcurrencyPayload {
 export interface ConfirmAttentionPayload {
   source_message_id?: string;
   summary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ContinueRetainedRunPayload".
+ */
+export interface ContinueRetainedRunPayload {
+  action_id: string;
+  execution: RunExecutionPin;
+  expected_source_revision?: number;
+  generation: number;
+  host_id: string;
+  lease_id: string;
+  protection_set_sha256: string;
+  protections: RetainedRunProtection[] | null;
+  reason: string;
+  source_message_id?: string;
+  spec_version: number;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RetainedRunProtection".
+ */
+export interface RetainedRunProtection {
+  action_id: string;
+  host_id: string;
+  lease_id: string;
+  linked: boolean;
+  maintenance_id: string;
+  original_requests_json: string;
+  run_id: string;
+  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3937,6 +3971,41 @@ export interface RespondInteraction {
   option?: string;
   text?: string;
   version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RetainedRunReconciliation".
+ */
+export interface RetainedRunReconciliation {
+  blockers: string[] | null;
+  can_continue: boolean;
+  continuation_request_id?: string;
+  continuation_task_revision?: number;
+  identity: RetainedRunIdentity;
+  lease_status: string;
+  observed: RunObserved;
+  original_request_ids: string[] | null;
+  pending_business_receipts: boolean;
+  protection_set_sha256: string;
+  protections: RetainedRunProtection[] | null;
+  role: RunRole;
+  run_id: string;
+  task_revision: number;
+  unapplied_events: number;
+  unresolved_native_requests: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RetainedRunIdentity".
+ */
+export interface RetainedRunIdentity {
+  action_id: string;
+  execution: RunExecutionPin;
+  generation: number;
+  host_id: string;
+  lease_id: string;
+  spec_version: number;
+  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

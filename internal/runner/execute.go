@@ -246,13 +246,37 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if err != nil {
 		return &completionPending{err}
 	}
-	p, err := execution.Workspaces.Prepare(runCtx, as)
-	if err != nil {
-		return stopped(failed(reasonFor(err, "workspace_prepare_failed"), err))
-	}
 	run, err := r.cfg.Journal.Run(ctx, as.RunID)
 	if err != nil {
 		return err
+	}
+	strictResume, err := r.cfg.Journal.RetainedResume(ctx, as.RunID)
+	if err != nil {
+		return &completionPending{err}
+	}
+	var p Prepared
+	if strictResume != nil {
+		if run.Held || run.Thread == "" {
+			return &completionPending{harness.ErrRetainedResumePending}
+		}
+		if _, supported := execution.Workers.(interface{ StrictRetainedResume() }); !supported {
+			return &completionPending{harness.ErrRetainedResumePending}
+		}
+		workspace, supported := execution.Workspaces.(interface {
+			Reattach(context.Context, protocol.Assignment) (Prepared, error)
+		})
+		if !supported {
+			return &completionPending{harness.ErrRetainedResumePending}
+		}
+		p, err = workspace.Reattach(runCtx, as)
+		if err != nil {
+			return &completionPending{fmt.Errorf("%w: %v", harness.ErrRetainedResumePending, err)}
+		}
+	} else {
+		p, err = execution.Workspaces.Prepare(runCtx, as)
+		if err != nil {
+			return stopped(failed(reasonFor(err, "workspace_prepare_failed"), err))
+		}
 	}
 	var askOwner func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
 	var questions []protocol.WorkerQuestion
@@ -347,7 +371,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return err
 		}
 	}
-	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{ConcurrencyFeedback: as.ConcurrencyFeedback, LegacyRawUsage: !r.supportsNativeUsage(),
+	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},
@@ -382,6 +406,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		HandBack:   run.Held,
 	})
 	if err != nil {
+		if errors.Is(err, harness.ErrRetainedResumePending) {
+			return &completionPending{err}
+		}
 		if nativeMessages {
 			switch {
 			case errors.Is(err, harness.ErrHeld):
@@ -453,6 +480,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	<-messagesDone
 	stopUploader()
 	<-uploaded
+	if errors.Is(werr, harness.ErrRetainedResumePending) {
+		return &completionPending{werr}
+	}
 	if err := r.recordClosedSession(context.WithoutCancel(ctx), as); err != nil {
 		return &completionPending{err}
 	}
