@@ -61,6 +61,7 @@ type Package struct {
 type Snapshot struct {
 	Commit, Fingerprint, Module string
 	Clean                       bool
+	UnboundResources            bool `json:",omitempty"`
 	Profile                     Profile
 	Files                       map[string]File
 	Packages                    map[string]Package

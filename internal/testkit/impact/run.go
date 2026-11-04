@@ -98,6 +98,17 @@ func Run(ctx context.Context, o RunOptions, p Plan) (Result, error) {
 	}
 	env := o.env(flags)
 	run := func(program string, args ...string) error { return Command(ctx, o.Dir, o.Log, env, program, args...) }
+	raceRunner := o.RaceRunner
+	if len(p.Go) > 0 && raceRunner == "" {
+		// Execute the orchestrator directly so an intermediate go-run launcher
+		// cannot exit before the orchestrator cancels its separate child groups.
+		start := time.Now()
+		raceRunner = filepath.Join(tmp, "racecheck")
+		if err := run(o.Go, "build", "-o", raceRunner, "./internal/testkit/racecheck"); err != nil {
+			return r, err
+		}
+		r.Stages["compile"] = duration(start)
+	}
 	queue := []work{{"quality", func() error {
 		if err := run("make", "go-check", "GO="+o.Go); err != nil {
 			return err
@@ -159,10 +170,7 @@ func Run(ctx context.Context, o RunOptions, p Plan) (Result, error) {
 				timeout = "60m"
 			}
 			args = append(args[:len(args)-1], "-timeout", timeout, "./...")
-			if o.RaceRunner != "" {
-				return run(o.RaceRunner, args...)
-			}
-			return run(o.Go, append([]string{"run", "./internal/testkit/racecheck"}, args...)...)
+			return CommandGraceful(ctx, o.Dir, o.Log, env, raceRunner, args...)
 		}}
 		if g == "e2e" && o.IsolateE2E {
 			isolated = append(isolated, w)

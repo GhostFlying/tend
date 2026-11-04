@@ -155,6 +155,9 @@ func Collect(ctx context.Context, o CollectOptions) (*Index, error) {
 	if s.Profile.ModuleConfig != "" {
 		return nil, fmt.Errorf("function coverage baselines do not support alternate modules or workspaces; use complete validation")
 	}
+	if s.UnboundResources {
+		return nil, fmt.Errorf("function coverage baselines require bound resource symlinks; use complete validation")
+	}
 	index := &Index{Format: Format, Source: s, AnalysisSeconds: duration(start)}
 	tmp, err := os.MkdirTemp("", "tend-impact-")
 	if err != nil {

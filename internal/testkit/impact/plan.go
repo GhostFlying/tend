@@ -90,6 +90,9 @@ func webSourceInspection(s Snapshot) bool {
 func Select(current Snapshot, index *Index, invalid string) Plan {
 	p := Plan{Format: Format, Commit: current.Commit, Fingerprint: current.Fingerprint, Go: map[string][]string{}, Reasons: []string{}, Layout: []string{}, Profile: current.Profile}
 	full := func(reason string) { p.Full = true; p.Reasons = append(p.Reasons, reason) }
+	if current.UnboundResources {
+		full("unbound resource symlink requires complete validation")
+	}
 	if current.Profile.Overlay != "" {
 		full("compiler overlay requires complete validation")
 	}

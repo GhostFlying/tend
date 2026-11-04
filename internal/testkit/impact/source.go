@@ -385,6 +385,10 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 	paths := append(strings.Split(string(files), "\x00"), buildInputs...)
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
+	knownPaths := map[string]bool{}
+	for _, path := range paths {
+		knownPaths[filepath.Clean(filepath.Join(dir, path))] = true
+	}
 	var fingerprint bytes.Buffer
 	// Go may resolve and write sum files while discovering dependencies. Bind
 	// the effective configuration and cleanliness after that resolution.
@@ -420,6 +424,7 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 			return s, err
 		}
 		var b []byte
+		var linked []byte
 		var mode os.FileMode
 		if info == nil {
 			// The overlay introduces a virtual file. Its bytes are bound by the
@@ -430,6 +435,27 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 				return s, err
 			}
 			b = []byte("symlink:" + link)
+			target, resolveErr := filepath.EvalSymlinks(filepath.Join(dir, path))
+			var targetInfo os.FileInfo
+			if resolveErr == nil {
+				targetInfo, resolveErr = os.Stat(target)
+			}
+			if resolveErr != nil || !targetInfo.Mode().IsRegular() {
+				// An unresolved link or directory can expose arbitrary resources.
+				// Ordinary full checks still run; precise baselines are refused.
+				s.UnboundResources = true
+			} else {
+				linked, err = os.ReadFile(target)
+				if err != nil {
+					return s, fmt.Errorf("read linked resource: %w", err)
+				}
+				if !knownPaths[filepath.Clean(target)] {
+					// Tracked targets already contribute their physical bytes. Keep
+					// that compatible identity while binding ignored/external bytes.
+					fmt.Fprintln(&fingerprint, "linked-resource", path, targetInfo.Mode()&0o111, hash(linked))
+					b = fmt.Appendf(b, "\n%d:%s", targetInfo.Mode()&0o111, hash(linked))
+				}
+			}
 		} else if info.Mode().IsRegular() {
 			b, err = os.ReadFile(filepath.Join(dir, path))
 			if err != nil {
@@ -451,6 +477,10 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 				break
 			}
 		}
+		digest := hash(b)
+		if linked != nil {
+			b = linked
+		}
 		if entry, exists := overlay.files[buildPath(dir, path)]; exists {
 			if entry.deleted {
 				s.Files[path] = File{Digest: hash(b), Package: pkg, Executable: uint32(mode), Functions: map[string]Function{}}
@@ -463,6 +493,9 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 			return s, err
 		}
 		f.Executable = uint32(mode)
+		if info != nil && info.Mode()&os.ModeSymlink != 0 {
+			f.Digest = digest
+		}
 		s.Files[path] = f
 	}
 	s.Fingerprint = hash(fingerprint.Bytes())
