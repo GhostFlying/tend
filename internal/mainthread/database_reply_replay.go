@@ -23,6 +23,10 @@ func (t *databaseReplyThread) AcknowledgeReplyPrefix(ctx context.Context, event 
 	return t.app.AcknowledgeManagerReplyPrefix(ctx, t.run, event.CoordinatorSequence, t.thread, event.TurnID, event.ItemID, event.Text, consumed)
 }
 
+func (t *databaseReplyThread) AcknowledgeRepairPrefix(ctx context.Context, event harness.Event, consumed []int64) error {
+	return t.app.AcknowledgeManagerRepairPrefix(ctx, t.run, event.CoordinatorSequence, t.thread, event.TurnID, event.ItemID, event.Text, consumed)
+}
+
 func (p *BackgroundPool) startDatabaseReplyReplay(ctx context.Context, id string, wg *sync.WaitGroup) (bool, error) {
 	replay, err := p.App.LapsedManagerReplyReplay(ctx, id)
 	if err != nil || replay == nil {

@@ -35,6 +35,11 @@ type replyPrefixAcknowledger interface {
 	AcknowledgeReplyPrefix(context.Context, harness.Event, []int64) error
 }
 
+// Internal repair prose is retained as raw events, never a user reply.
+type repairPrefixAcknowledger interface {
+	AcknowledgeRepairPrefix(context.Context, harness.Event, []int64) error
+}
+
 // Reply persistence needs only its original identity, not a live native thread.
 type replyThread interface{ ID() string }
 
@@ -115,6 +120,11 @@ func (m *Manager) flushClosingReplies(ctx context.Context, th replyThread, draft
 			return err
 		}
 		if repair {
+			if internal, ok := th.(repairPrefixAcknowledger); ok {
+				if err := internal.AcknowledgeRepairPrefix(ctx, r.event, r.consumed); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if err := acknowledger.AcknowledgeReplyPrefix(ctx, r.event, r.consumed); err != nil {

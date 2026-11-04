@@ -934,3 +934,5 @@ harness Session，不查询模型，不 enqueue 原生 RPC，也不恢复 lease 
 见[实施计划](plans/retained-manager-db-replay.md)。
 
 数据库专用回放计入维护 drain，但不能作为 live interrupt 的执行证明；准入检查与 pool 注册共用 drain 锁。原 interrupted 正文可按同 item 的真实累计前缀延长，其他终态不因此可改写。未发布 background buffer 的精确终态正文也可证明持久化，确认 delta 不发布或结清其 batch。
+
+原 execution 为 logical repair 时，内部回复 delta 不得发布成用户正文。数据库回放实际消费完整固定前缀后，在同一事务重核原 repair/pending/run/thread/turn/item 身份与原始 delta 内容，保存仅含来源、消费序列及累计摘要的内部审计，再更新 applied；原始事件保留。此确认不代表 native turn 终结或业务成功，也不清理业务收据；普通回复的终态正文持久化守卫不变。
