@@ -359,3 +359,20 @@ func TestRetainedNativeRefusalWithdrawsSelection(t *testing.T) {
 		t.Fatalf("native-rejected pin remains selectable for retained owner work: %+v", retained)
 	}
 }
+
+func TestCapabilityObservationDoesNotInferToolsFromHealthyAdapter(t *testing.T) {
+	f := newSource(t)
+	f.reload(t)
+	p := newPool(t, f, func(context.Context, agentexec.BuildInput) error { return nil })
+	if err := p.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	executor := observed(t, p)
+	if !executor.Available {
+		t.Fatal(executor)
+	}
+	e, err := p.ObserveCapability(t.Context(), executor.Pin, protocol.CapabilityReference{CapabilityID: "image_gen", DefinitionRevision: 1})
+	if err != nil || e.State != "unverified" || e.Reason != "adapter_evidence_unsupported" || e.Source != nil || e.Pin != executor.Pin {
+		t.Fatal(e, err)
+	}
+}

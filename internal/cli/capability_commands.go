@@ -33,6 +33,15 @@ type capabilityCommand struct {
 }
 
 var capabilityCommands = []capabilityCommand{
+	{Name: "capability list", Route: "/api/v1/capabilities", Queries: "state search after limit", JSONDefault: true},
+	{Name: "capability show", Route: "/api/v1/capabilities/{id}", Queries: "definition-revision=revision", JSONDefault: true},
+	{Name: "capability history", Route: "/api/v1/capabilities/{id}/revisions", Queries: "state search after limit", JSONDefault: true},
+	{Name: "capability put", Operation: "capabilities.put", Target: "capability", RevisionRoute: "/api/v1/capabilities/{id}", RevisionField: "revision", JSONDefault: true},
+	{Name: "agents capabilities list", Route: "/api/v1/agent-capabilities", Queries: "environment agent runtime capability state category purpose after limit", JSONDefault: true},
+	{Name: "agents capabilities show", Route: "/api/v1/agent-capabilities/{environment}/{agent}", Queries: "runtime capability state category purpose", JSONDefault: true},
+	{Name: "agents capabilities history", Route: "/api/v1/agent-capabilities/{environment}/{agent}/evidence", Queries: "capability kind state after limit", JSONDefault: true},
+	{Name: "agents capabilities evidence", Route: "/api/v1/capability-evidence/{id}", JSONDefault: true},
+	{Name: "task capability-explain", Route: "/api/v1/tasks/{id}/capability-match", Queries: "role spec-version=spec_version environment agent runtime capability state category purpose after limit", JSONDefault: true},
 	{Name: "conversation handoff-audit", Route: "/api/v1/conversation/handoff-audit", Queries: "instance after limit", JSONDefault: true},
 	{Name: "artifact-share list", Route: "/api/v1/issues/{id}/artifact-shares", Queries: "status after limit", JSONDefault: true},
 	{Name: "artifact-share show", Route: "/api/v1/artifact-shares/{id}", JSONDefault: true},
@@ -45,7 +54,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "session show", Route: "/api/v1/session"},
 	{Name: "deployment show", Route: "/api/v1/deployment"},
 	{Name: "repo list", Route: "/api/v1/repos"},
-	{Name: "task list", Route: "/api/v1/tasks", Queries: "all finished project lifecycle sort before limit"},
+	{Name: "task list", Route: "/api/v1/tasks", Queries: "all finished project lifecycle sort before limit capability capability-role=capability_role"},
 	{Name: "task show", Route: "/api/v1/tasks/{id}"},
 	{Name: "run logs", Route: "/api/v1/runs/{id}/logs", Queries: "after wait"},
 	{Name: "run preview", Route: "/api/v1/runs/{id}/preview", Queries: "before after generation record field reference offset", JSONDefault: true},

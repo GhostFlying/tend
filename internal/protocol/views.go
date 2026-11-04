@@ -10,8 +10,9 @@ import (
 
 // TaskSummary is a task as listed.
 type TaskSummary struct {
-	Kind    TaskKind                `json:"kind,omitempty"`
-	Manager *IssueManagerAssignment `json:"manager,omitempty"`
+	RequiredCapabilities *TaskAgentSelection     `json:"required_capabilities,omitempty"`
+	Kind                 TaskKind                `json:"kind,omitempty"`
+	Manager              *IssueManagerAssignment `json:"manager,omitempty"`
 	// Only an actual canonical primary responsibility is a current Issue link.
 	// The original work_item fields remain for the coordinated caller cutover.
 	PrimaryIssueID       string             `json:"primary_issue_id,omitempty"`
@@ -98,10 +99,11 @@ type ActionView struct {
 
 // RunView is a run of a task.
 type RunView struct {
-	Preparation *RunPreparationFailure `json:"preparation,omitempty"`
-	RunID       string                 `json:"run_id"`
-	Role        RunRole                `json:"role"`
-	Generation  int64                  `json:"generation"`
+	CapabilityBinding *RunCapabilityBinding  `json:"capability_binding,omitempty"`
+	Preparation       *RunPreparationFailure `json:"preparation,omitempty"`
+	RunID             string                 `json:"run_id"`
+	Role              RunRole                `json:"role"`
+	Generation        int64                  `json:"generation"`
 	// SpecVersion is the immutable spec of the run's action. A generation
 	// alone cannot identify it, since each spec starts at generation one.
 	SpecVersion int64       `json:"spec_version,omitempty"`

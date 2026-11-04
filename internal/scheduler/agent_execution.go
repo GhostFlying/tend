@@ -8,9 +8,13 @@ import (
 )
 
 type Executor struct {
-	Continuation bool
-	Pin          protocol.RunExecutionPin
-	Categories   []string
+	CapabilitySupport    bool
+	DeclaredCapabilities []protocol.CapabilityReference
+	CapabilityEvidence   []protocol.ExecutorCapabilityEvidence
+	CapabilityNowMillis  int64
+	Continuation         bool
+	Pin                  protocol.RunExecutionPin
+	Categories           []string
 }
 
 // SelectExecution checks both roles on one backend before a first allocation.
@@ -28,7 +32,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 			original.SnapshotID, observed.SnapshotID = "", ""
 			original.InventoryRevision, observed.InventoryRevision = 0, 0
 			original.PublicSHA256, observed.PublicSHA256 = "", ""
-			if observed == original {
+			if observed == original && ExecutorCapabilityMatch(e, RequiredCapabilities(c)).State == "eligible" {
 				pin := *c.HandoffPin
 				return &pin, ""
 			}
@@ -117,7 +121,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		if accept && c.ReviewOwnerPin != nil && (e.Pin.Identity != c.ReviewOwnerPin.Identity || e.Pin.AgentRevision != c.ReviewOwnerPin.AgentRevision || e.Pin.Runtime != c.ReviewOwnerPin.Runtime || e.Pin.Profile != c.ReviewOwnerPin.Profile) {
 			return false
 		}
-		return e.Pin.Purpose != "issue_manager" && (r.AgentID == "" || r.AgentID == e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID) && r.MatchesProfile(e.Pin.Profile) && e.Pin.Identity.ExecutionEnvironmentID == h.ID && slices.Contains(e.Categories, r.CategoryID) && (r.RuntimeID == "" || r.RuntimeID == e.Pin.Runtime.RuntimeID) && (c.WorkspaceBackendID == "" || c.WorkspaceBackendID == e.Pin.BackendID) && (c.Mounts <= 1 || e.Pin.BackendID == "git") && (!accept || c.AcceptanceProfile == nil || *c.AcceptanceProfile == e.Pin.Profile)
+		return ExecutorCapabilityMatch(e, r.RequiredCapabilities).State == "eligible" && e.Pin.Purpose != "issue_manager" && (r.AgentID == "" || r.AgentID == e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID) && r.MatchesProfile(e.Pin.Profile) && e.Pin.Identity.ExecutionEnvironmentID == h.ID && slices.Contains(e.Categories, r.CategoryID) && (r.RuntimeID == "" || r.RuntimeID == e.Pin.Runtime.RuntimeID) && (c.WorkspaceBackendID == "" || c.WorkspaceBackendID == e.Pin.BackendID) && (c.Mounts <= 1 || e.Pin.BackendID == "git") && (!accept || c.AcceptanceProfile == nil || *c.AcceptanceProfile == e.Pin.Profile)
 	}
 	executors := append(slices.Clone(h.Executors), h.Continuations...)
 	slices.SortFunc(executors, func(a, b Executor) int {
@@ -148,5 +152,31 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		pin := e.Pin
 		return &pin, ""
 	}
+	if len(RequiredCapabilities(c)) > 0 {
+		return nil, "capability_unavailable: no executor satisfies the frozen required capabilities and execution constraints"
+	}
 	return nil, "no available category/runtime/model/effort candidates satisfy this host and workspace backend"
+}
+
+// RequiredCapabilities returns only the current role's frozen requirements.
+func RequiredCapabilities(c Candidate) []protocol.CapabilityReference {
+	if c.AgentSelection == nil {
+		return nil
+	}
+	if c.Kind == protocol.ActionAccept {
+		return c.AgentSelection.Acceptance.RequiredCapabilities
+	}
+	return c.AgentSelection.Implementation.RequiredCapabilities
+}
+func ExecutorCapabilityMatch(e Executor, required []protocol.CapabilityReference) protocol.CapabilityMatch {
+	m := protocol.MatchExecutorCapabilities(e.Pin, required, e.DeclaredCapabilities, e.CapabilityEvidence, e.CapabilityNowMillis)
+	if len(required) > 0 && !e.CapabilitySupport {
+		m.State = "unavailable"
+		for i := range m.Reasons {
+			m.Reasons[i].State = "unavailable"
+			m.Reasons[i].Reason = "adapter_evidence_unsupported"
+			m.Reasons[i].Recovery = "use an explicitly supported evidence adapter at this exact entry; do not change provider implicitly"
+		}
+	}
+	return m
 }

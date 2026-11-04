@@ -184,35 +184,36 @@ type Runner struct {
 	active  map[string]*active
 	wg      sync.WaitGroup
 
-	inventoryMu                 sync.Mutex
-	usageDiscovery              *nativeusage.Discovery
-	nativeUsageSupported        bool
-	usageWake                   chan struct{}
-	agentExecutionSupported     bool
-	retainedExecutions          []protocol.RunExecutionPin
-	agentContinuationSupported  bool
-	agentInventorySupported     bool
-	controlMu                   sync.Mutex
-	control                     protocol.RunnerControl
-	controlLoaded               bool
-	repositoryBindingsSupported bool
-	bootstrapMaintenance        bool
-	updaterMu                   sync.Mutex
-	cancelledUpdaterID          string
-	instanceID                  string
-	generation                  int64
-	sequence                    int64
-	grantDeadlines              map[string]time.Time
-	helloConfirmed              bool
-	grantServerDeadline         int64
-	grantID                     string
-	resourceReconciled          bool
-	resourceBusy                bool
-	resourceBlockers            []string
-	upgradePhase                string
-	upgradeError                string
-	downloadedBytes             int64
-	confirmedRuntime            protocol.RunnerRuntime
+	inventoryMu                   sync.Mutex
+	usageDiscovery                *nativeusage.Discovery
+	nativeUsageSupported          bool
+	usageWake                     chan struct{}
+	executorCapabilitiesSupported bool
+	agentExecutionSupported       bool
+	retainedExecutions            []protocol.RunExecutionPin
+	agentContinuationSupported    bool
+	agentInventorySupported       bool
+	controlMu                     sync.Mutex
+	control                       protocol.RunnerControl
+	controlLoaded                 bool
+	repositoryBindingsSupported   bool
+	bootstrapMaintenance          bool
+	updaterMu                     sync.Mutex
+	cancelledUpdaterID            string
+	instanceID                    string
+	generation                    int64
+	sequence                      int64
+	grantDeadlines                map[string]time.Time
+	helloConfirmed                bool
+	grantServerDeadline           int64
+	grantID                       string
+	resourceReconciled            bool
+	resourceBusy                  bool
+	resourceBlockers              []string
+	upgradePhase                  string
+	upgradeError                  string
+	downloadedBytes               int64
+	confirmedRuntime              protocol.RunnerRuntime
 }
 
 // New returns a Runner.
@@ -568,6 +569,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	}
 	r.repositoryBindingsSupported = res.RepositoryBindings
 	r.agentInventorySupported = res.AgentInventory && r.cfg.AgentInventory != nil
+	r.executorCapabilitiesSupported = res.ExecutorCapabilities
 	r.agentExecutionSupported = res.AgentExecution && r.cfg.Executions != nil
 	r.agentContinuationSupported = res.AgentContinuation && r.agentExecutionSupported
 	r.controlMu.Unlock()

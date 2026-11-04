@@ -235,6 +235,8 @@ export type IssueTaskDispositionAction = "continue_existing" | "updated" | "stop
 
 export interface TendAPI {
   APIResponse?: APIResponse;
+  AgentCapabilityPage?: AgentCapabilityPage;
+  AgentCapabilityQuery?: AgentCapabilityQuery;
   AgentCategory?: AgentCategory;
   AgentCategoryPage?: AgentCategoryPage;
   AgentCompactionPage?: AgentCompactionPage;
@@ -267,6 +269,9 @@ export interface TendAPI {
   BindLocalRepositoryRequest?: BindLocalRepositoryRequest;
   BindTelegram?: BindTelegram;
   CancelIssueDeadlinePayload?: CancelIssueDeadlinePayload;
+  CapabilityDefinition?: CapabilityDefinition;
+  CapabilityEvidencePage?: CapabilityEvidencePage;
+  CapabilityPage?: CapabilityPage;
   ConcurrencyGroupPage?: ConcurrencyGroupPage;
   ConcurrencyHistoryPage?: ConcurrencyHistoryPage;
   ConcurrencyQuery?: ConcurrencyQuery;
@@ -327,6 +332,7 @@ export interface TendAPI {
   IssueTranscriptPage?: IssueTranscriptPage;
   IssueView?: IssueView;
   LedgerEvent?: LedgerEvent;
+  LocalCapabilityRequestStatus?: LocalCapabilityRequestStatus;
   LocalRepositoryBinding?: LocalRepositoryBinding;
   LocalRepositoryStatus?: LocalRepositoryStatus;
   ManagerMigrationPayload?: ManagerMigrationPayload;
@@ -351,6 +357,7 @@ export interface TendAPI {
   PresentAttentionPayload?: PresentAttentionPayload;
   PromoteConsultationPayload?: PromoteConsultationPayload;
   PutAgentCategoryPayload?: PutAgentCategoryPayload;
+  PutCapabilityPayload?: PutCapabilityPayload;
   PutIssueDeadlinePayload?: PutIssueDeadlinePayload;
   PutPlannerEntryPayload?: PutPlannerEntryPayload;
   QuestionInputPage?: QuestionInputPage;
@@ -371,6 +378,7 @@ export interface TendAPI {
   RevokeArtifactSharePayload?: RevokeArtifactSharePayload;
   RevokeQuestionInputsPayload?: RevokeQuestionInputsPayload;
   RolloutPreview?: RolloutPreview;
+  RunCapabilityBinding?: RunCapabilityBinding;
   RunExecutionPin?: RunExecutionPin;
   RunLogPage?: RunLogPage;
   RunMessagePage?: RunMessagePage;
@@ -392,6 +400,7 @@ export interface TendAPI {
   StreamStart?: StreamStart;
   SubmitMessagePayload?: SubmitMessagePayload;
   TaskAgentSelection?: TaskAgentSelection;
+  TaskCapabilityExplanation?: TaskCapabilityExplanation;
   TaskDetail?: TaskDetail;
   TaskPage?: TaskPage;
   TokenUsageSample?: TokenUsageSample;
@@ -411,6 +420,7 @@ export interface TendAPI {
   UsageReconcile?: UsageReconcile;
   UsageTarget?: UsageTarget;
   UsageUpload?: UsageUpload;
+  VerifyLocalCapabilityRequest?: VerifyLocalCapabilityRequest;
   WebhookReceipt?: WebhookReceipt;
   WebhookSubscription?: WebhookSubscription;
   WebhookSubscriptionPage?: WebhookSubscriptionPage;
@@ -451,6 +461,7 @@ export interface TaskSummary {
   primary_work_item_title?: string;
   project: string;
   rating: Rating;
+  required_capabilities?: TaskAgentSelection;
   spec_version: number;
   task_id: string;
   title: string;
@@ -512,6 +523,34 @@ export interface IssueManagerAssignment {
   issue_id: string;
   receipt_only?: boolean;
   require_receipt_reader?: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskAgentSelection".
+ */
+export interface TaskAgentSelection {
+  acceptance?: AgentRequirement;
+  implementation: AgentRequirement;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentRequirement".
+ */
+export interface AgentRequirement {
+  agent_id?: string;
+  category_id: string;
+  effort?: string;
+  model?: string;
+  required_capabilities?: CapabilityReference[];
+  runtime_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CapabilityReference".
+ */
+export interface CapabilityReference {
+  capability_id: string;
+  definition_revision: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1236,6 +1275,107 @@ export interface Operation {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentCapabilityPage".
+ */
+export interface AgentCapabilityPage {
+  as_of: number;
+  items: AgentCapabilityView[] | null;
+  next_after?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentCapabilityView".
+ */
+export interface AgentCapabilityView {
+  agent_revision: number;
+  categories: string[] | null;
+  current: CapabilityMatch;
+  declared: CapabilityReference[] | null;
+  evidence: ExecutorCapabilityEvidence[] | null;
+  identity: AgentIdentity;
+  pin?: RunExecutionPin;
+  purposes: string[] | null;
+  runtime_binding_ref: AgentRuntimeReference;
+  scheduling_reason?: QueueWaitReason;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CapabilityMatch".
+ */
+export interface CapabilityMatch {
+  checked_at_ms: number;
+  evidence_ids: string[] | null;
+  reasons: CapabilityReason[] | null;
+  required: CapabilityReference[] | null;
+  state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CapabilityReason".
+ */
+export interface CapabilityReason {
+  capability: CapabilityReference;
+  evidence_id?: string;
+  expires_at_ms?: number;
+  reason: string;
+  recovery: string;
+  state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutorCapabilityEvidence".
+ */
+export interface ExecutorCapabilityEvidence {
+  capability: CapabilityReference;
+  complete: boolean;
+  cost_state?: string;
+  evidence_id: string;
+  expires_at_ms: number;
+  generation: number;
+  instance_id: string;
+  kind: string;
+  observed_at_ms: number;
+  output_sha256?: string;
+  pin: RunExecutionPin;
+  reason: string;
+  recorded_at_ms: number;
+  request_id: string;
+  scope: string;
+  sequence: number;
+  session_id?: string;
+  source?: CapabilityToolSource;
+  state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CapabilityToolSource".
+ */
+export interface CapabilityToolSource {
+  configuration_sha256: string;
+  executable_sha256: string;
+  id: string;
+  kind: string;
+  schema_sha256: string;
+  tool_name: string;
+  version: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentCapabilityQuery".
+ */
+export interface AgentCapabilityQuery {
+  after?: string;
+  agent?: string;
+  capability?: string;
+  category?: string;
+  environment?: string;
+  limit?: number;
+  purpose?: string;
+  runtime?: string;
+  state?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "AgentCategory".
  */
 export interface AgentCategory {
@@ -1341,6 +1481,7 @@ export interface AgentIssueRun {
  * via the `definition` "RunView".
  */
 export interface RunView {
+  capability_binding?: RunCapabilityBinding;
   generation: number;
   host: string;
   observed: RunObserved;
@@ -1348,6 +1489,32 @@ export interface RunView {
   role: RunRole;
   run_id: string;
   spec_version?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunCapabilityBinding".
+ */
+export interface RunCapabilityBinding {
+  bound_at_ms: number;
+  current_match?: CapabilityMatch;
+  evidence: ExecutorCapabilityEvidence[] | null;
+  evidence_ids: string[] | null;
+  pin: RunExecutionPin;
+  required: CapabilityReference[] | null;
+  required_sha256: string;
+  revalidation?: RunCapabilityRevalidation;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunCapabilityRevalidation".
+ */
+export interface RunCapabilityRevalidation {
+  evidence: ExecutorCapabilityEvidence[] | null;
+  evidence_ids: string[] | null;
+  observed_at_ms: number;
+  pin: RunExecutionPin;
+  request_id: string;
+  required_sha256: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1906,6 +2073,38 @@ export interface CancelIssueDeadlinePayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CapabilityDefinition".
+ */
+export interface CapabilityDefinition {
+  capability_id: string;
+  contract_version: number;
+  description: string;
+  revision: number;
+  state: string;
+  title: string;
+  tool_name: string;
+  verification_policy: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CapabilityEvidencePage".
+ */
+export interface CapabilityEvidencePage {
+  as_of: number;
+  items: ExecutorCapabilityEvidence[] | null;
+  next_after?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CapabilityPage".
+ */
+export interface CapabilityPage {
+  as_of: number;
+  items: CapabilityDefinition[] | null;
+  next_after?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ConcurrencyGroupPage".
  */
 export interface ConcurrencyGroupPage {
@@ -2305,25 +2504,6 @@ export interface OwnerTaskSpec {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "TaskAgentSelection".
- */
-export interface TaskAgentSelection {
-  acceptance?: AgentRequirement;
-  implementation: AgentRequirement;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "AgentRequirement".
- */
-export interface AgentRequirement {
-  agent_id?: string;
-  category_id: string;
-  effort?: string;
-  model?: string;
-  runtime_id?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "OwnerTaskInput".
  */
 export interface OwnerTaskInput {
@@ -2579,6 +2759,7 @@ export interface HostedAgentInventory {
  */
 export interface AgentInventoryProjection {
   agents: AgentInventoryDefinition[] | null;
+  capability_version?: number;
   execution_environment_id: string;
   format_version: number;
   runtimes: AgentInventoryRuntime[] | null;
@@ -2590,6 +2771,7 @@ export interface AgentInventoryProjection {
  */
 export interface AgentInventoryDefinition {
   availability: AgentInventoryAvailability;
+  capabilities?: CapabilityReference[];
   categories: string[] | null;
   display_name: string;
   enabled: boolean;
@@ -3361,6 +3543,34 @@ export interface ConversationItem {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LocalCapabilityRequestStatus".
+ */
+export interface LocalCapabilityRequestStatus {
+  envelope?: Envelope;
+  error_code?: string;
+  evidence?: ExecutorCapabilityEvidence;
+  probe_generation?: number;
+  probe_instance_id?: string;
+  recovery: string;
+  request: VerifyLocalCapabilityRequest;
+  sequence: number;
+  state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "VerifyLocalCapabilityRequest".
+ */
+export interface VerifyLocalCapabilityRequest {
+  capability: CapabilityReference;
+  expected_revision: number;
+  max_attempts: number;
+  pin: RunExecutionPin;
+  probe_kind: string;
+  request_id: string;
+  timeout_ms: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "LocalRepositoryStatus".
  */
 export interface LocalRepositoryStatus {
@@ -3738,6 +3948,18 @@ export interface PutAgentCategoryPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "PutCapabilityPayload".
+ */
+export interface PutCapabilityPayload {
+  contract_version: number;
+  description: string;
+  state: string;
+  title: string;
+  tool_name: string;
+  verification_policy: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "PutIssueDeadlinePayload".
  */
 export interface PutIssueDeadlinePayload {
@@ -4109,6 +4331,7 @@ export interface RunMessageHistory {
  * via the `definition` "RunnerAgentCatalog".
  */
 export interface RunnerAgentCatalog {
+  capabilities?: AgentCapabilityView[];
   concurrency_bindings?: ConcurrencyBinding[];
   continuation_supported?: boolean;
   continuations?: AgentExecutor[];
@@ -4391,6 +4614,24 @@ export interface ConversationImageInput {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskCapabilityExplanation".
+ */
+export interface TaskCapabilityExplanation {
+  as_of: number;
+  candidates: AgentCapabilityView[] | null;
+  checked_at_ms: number;
+  deadline_ms: number;
+  next_after?: string;
+  reasons: string[] | null;
+  recovery: string;
+  required: CapabilityReference[] | null;
+  role: RunRole;
+  spec_version: number;
+  state: string;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "TaskDetail".
  */
 export interface TaskDetail {
@@ -4418,6 +4659,7 @@ export interface TaskDetail {
   project: string;
   rating: Rating;
   relations?: TaskRelationView[];
+  required_capabilities?: TaskAgentSelection;
   runs: RunView[] | null;
   spec: unknown;
   spec_version: number;

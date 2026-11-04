@@ -61,7 +61,11 @@ func HostExecutors(ctx context.Context, q store.Querier, host string, now int64)
 					categories = append(categories, id)
 				}
 			}
-			out = append(out, scheduler.Executor{Pin: p, Categories: categories})
+			evidence, err := currentCapabilityEvidence(ctx, q, p, runtime.Runtime)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, scheduler.Executor{Pin: p, Categories: categories, DeclaredCapabilities: slices.Clone(a.Capabilities), CapabilitySupport: runtime.Runtime.JournalVersion >= 16 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityExecutorEvidence), CapabilityEvidence: evidence, CapabilityNowMillis: now})
 		}
 	}
 	return out, nil

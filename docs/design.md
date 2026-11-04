@@ -945,3 +945,25 @@ harness Session，不查询模型，不 enqueue 原生 RPC，也不恢复 lease 
 reader 使用新 Run 的正常 lease，不能续活旧 lapsed lease，也不能绕维护、park 或其他执行占位。它只按原 binding resume 原 thread，沿冻结 AppliedModel/provider/effort；缺身份或配置继续阻塞，不以当前模型目录、业务 readiness probe、新 thread、摘要、迁移或业务工具替代读取。只有原身份的真实 native 终态与完整 consumed sources 能经既有对账事务结清原 pending；物理停止、内部 repair 审计或日志里的终态线索不能代替该回执。
 
 实现复用既有 receipt-only 动作与普通请求去重，并新增可选 Assignment `require_receipt_reader` 标志。默认 false 保留历史 receipt-only 的 resolver、模型恢复与 native 操作规则；仅新 proof-bound 来源且已协商能力的 reader 为 true，启用冻结配置/noModels/严格 resolver。该临时约束不进入原 thread 的 binding identity，重连与后继代次从原 action 来源重建。字段可选且默认语义不变，不升级协议代际。新模式仅对显式报告 `runner-manager-receipt-reader-v1` 的原 host 准入；该模式新动作的 claim 与重启恢复同样要求此能力，避免旧执行器在读取前做普通业务探活。原待对账请求集合尚未清空时，非终态或失败读取后的后继代次继续携带原请求来源与能力要求；该原集合全部对清后，不把限制传播到无关责任。原 closing Run 的事件消费优先恢复同一 Run、精确 thread 的已确认 resume 内实际模型配置；仅历史 resume 缺该配置时再读该 Run 已有缓存模型目录。不能为了缺少当前 hosted turn 快照而切断原事件泵，也不因此访问当前模型目录或创建 native 会话。已持久化 compaction 的账本对账仍可完成，创建 compaction 与其他 native 维护继续禁止。历史 receipt-only 与普通业务协议不因此收紧。新 runner 的内部受限解析跳过业务探活，普通执行保持既有探活和模型选择。部署需同时更新实际 runner 才具备这条受限读取实现。见[实施计划](plans/proved-close-receipt-reader.md)。
+
+## D174：执行 Capability 的版本、证据与冻结约束
+
+Capability 与角色 category、runner feature 和 CLI 覆盖目录分别建模。能力定义追加 revision，`capabilities.put` 通过 owner request_id/CAS 与事件同事务提交；`image_gen@1` 是初始定义，其工具名为 `image_gen__imagegen`。定义退休拒绝新声明和新 Task，不改写历史 spec、pin 或证据。
+
+私有配置和公共登记采用可选 `capability_version=1` 扩展，Agent 的 `capabilities` 是显式 definition revision 集合。省略扩展和声明时不改变旧序列化与 hash。集合排序、去重校验和深复制覆盖公私投影与两 role required。声明不产生可用性，不给任意 CLI、模型、hosted 或第二用途入口补能力；同执行四元组仍允许多个稳定身份。仅消费 worker 的原 RuntimeID，不改既有单入口责任的接口或历史。
+
+证据是受信任 adapter 经 runner 身份上报的追加事实，绑定完整 execution pin、incarnation/generation、单调 sequence、工具来源/版本/schema/config/executable 摘要和观测期限。owner/协调工具/普通 worker 没有 confirmed 写入口。工具 inventory、simulation、execution 分开；execution 成功不能代替工具 inventory 资格。最高 sequence 决定当前工具事实，迟到事实保留历史，重复 sequence 冲突。TTL 最多五分钟，同时受当前 runner incarnation 和六十秒在线围栏限制；新 heartbeat 不续工具 TTL。
+
+`harness.CapabilityWorkers` 是本变更新增的最小受信任边界，不是已有外部服务：只读、无模型的完整 profile 工具登记加 `StartWithCapabilities`，后者必须在会话创建时、业务 turn 前原子核对同一配置和工具来源。当前生产 Orca/TraeX adapters 未实现该接口，明确返回 `unverified/adapter_evidence_unsupported`。session scope 无 prepare/adopt 路径时返回 `session_adoption_unsupported`，不创建额外 session、不把会话观察推广为 profile。不能用本次模拟测试声称真实 image_gen 已贯通。
+
+Task 两 role 在既有 AgentRequirement 中分别冻结 `required_capabilities`。定义必须显式 revision；集合比较/克隆/规范化不丢字段。claim 在既有身份、owner、reviewer、host/backend、workspace、共享预算围栏之内使用统一纯 matcher；所有 required 必须来自同一 pin。证据与 required digest 独立写入不可变 RunCapabilityBinding，与 run/pin/lease/request/event 原子提交，保持 RunExecutionPin 的可比较性。assignment 只向协商 peer 发送新 binding；启动前检查原 TTL、incarnation 和来源，再调用 adapter 的原子启动入口，失败记录 capability_lost，不能换身份或 provider。
+
+本机 `agents local capabilities verify/status/reconcile` 使用新增 journal 16 追加表。先持久记录原请求，唯一插入者最多探测一次，timeout≤30s，无付费调用。未知/丢响应不重新探测；reconcile 只读同原 server 请求与 payload hash。新 incarnation 已围栏原进程且 server 原请求未记录时，才能明确结束旧未知状态并由管理员发起新动作。status 保留原输入、信封与 receipt；控制 API 不接收用户自填证据。
+
+公共定义、Agent 当前/历史证据及 Task explain 提供具名 CLI/API；协调工具只有读取目录和合法 Issue Task 的能力解释。worker 的原观察接口仅补本 run binding，role 指令携带本 role required。分页游标固定筛选、水位；可变目录/匹配事实发生变化时拒绝旧游标，不能悄然跳项。Task list 可按 capability 与 role 筛选，Task show/run 保留冻结 binding。必要 UI 在现有 Agent/Task 详情展示声明、工具实证、最近调用、失效及候选原因，不实施其他 UI 产品目标。
+
+已有维护 sweep 对等待十分钟仍不满足的 Task/spec/role 产生一次持久 Attention 和事件，不调用模型/验证、不循环派发 probe。Task 仍诚实等待，可修同入口配置、显式补证据或修订未来 spec；未知先对账。
+
+协议经逐发送点评估采用 2/1 上的显式 feature `executor-capabilities-v1`：新 runner 先声明 feature，server 仅对 journal≥16 的 peer 回 ack；登记扩展要求双方协商，旧 peer 的 status 不带扩展 projection，非空 required 不给不支持的新请求或重放。新字段不进入旧默认 assignment/spec，旧无要求任务保持原义，因此本变更不递增协议、不删 1 适配。server schema 追加 88，runner journal 追加 16；旧 reader 必须拒绝新存储，历史 snapshot/hash 不重写。实际部署前的协议库存/排空和 downgrade 验证属于独立交付合同。
+
+本候选的设计边界是保守可用的基础逻辑与 adapter 合同；真实入口工具枚举、受信任 profile/同 session 执行与一次有界 image_gen 验证仍须取得真实证据，不能把 unknown 当完成。Refs: D123、D128、D142。实施计划见 `docs/plans/capability-foundation.md`。

@@ -45,7 +45,11 @@ func HostContinuations(ctx context.Context, q store.Querier, host string, now in
 				binding = *a.OwnerBinding
 			}
 			if a.Identity == e.Pin.Identity && a.Revision == e.Pin.AgentRevision && binding == e.Pin.Runtime && a.RequestedModel == e.Pin.Profile.Model && a.RequestedEffort == e.Pin.Profile.Effort {
-				out = append(out, scheduler.Executor{Continuation: true, Pin: e.Pin, Categories: slices.Clone(a.Categories)})
+				evidence, err := currentCapabilityEvidence(ctx, q, e.Pin, runtime.Runtime)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, scheduler.Executor{Continuation: true, Pin: e.Pin, Categories: slices.Clone(a.Categories), DeclaredCapabilities: slices.Clone(a.Capabilities), CapabilitySupport: runtime.Runtime.JournalVersion >= 16 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityExecutorEvidence), CapabilityEvidence: evidence, CapabilityNowMillis: now})
 			}
 		}
 	}

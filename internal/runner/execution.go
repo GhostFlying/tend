@@ -15,6 +15,12 @@ type ExecutionResolver interface {
 	Resolve(context.Context, protocol.RunExecutionPin) (ResolvedExecution, error)
 }
 
+// CapabilityResolver supplies bounded, trusted adapter observations. It does not
+// grant permission to run a model or prepare an unaccounted session.
+type CapabilityResolver interface {
+	ObserveCapability(context.Context, protocol.RunExecutionPin, protocol.CapabilityReference) (protocol.ExecutorCapabilityEvidence, error)
+}
+
 // ContinuationResolver probes only the pins the server still references. It
 // keeps these observations separate from current selection candidates.
 type ContinuationResolver interface {

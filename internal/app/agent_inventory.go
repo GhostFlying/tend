@@ -72,12 +72,27 @@ func (RegisterAgentInventory) Authorize(ctx context.Context, x *Exec, q store.Qu
 	if x.Env.Target.Type != "host" || x.Env.Target.ID != x.Principal.Subject {
 		return protocol.Errorf(protocol.CodeForbidden, "inventory belongs to the authenticated host")
 	}
-	return authorizeInventory(ctx, q, x.Principal, p.Runtime)
+	if err := authorizeInventory(ctx, q, x.Principal, p.Runtime); err != nil {
+		return err
+	}
+	if p.Projection.CapabilityVersion != 0 {
+		current, err := store.GetHostRuntime(ctx, q, x.Principal.Subject)
+		if err != nil {
+			return err
+		}
+		if !runtimeSupportsExecutorCapabilities(p.Runtime) || !runtimeSupportsExecutorCapabilities(&current.Runtime) {
+			return protocol.Errorf(protocol.CodeForbidden, "capability declaration extension was not negotiated")
+		}
+	}
+	return nil
 }
 func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.RegisterAgentInventoryPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
+	}
+	if p.Projection.CapabilityVersion != 0 && (p.Runtime == nil || !slices.Contains(p.Runtime.Capabilities, protocol.CapabilityExecutorEvidence)) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "capability declarations require negotiated executor evidence support")
 	}
 	if p.Projection.FormatVersion == 2 && (p.Runtime == nil || p.Runtime.Protocol < 2) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "format-2 inventory requires runner protocol 2")
@@ -113,6 +128,9 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	categories := []protocol.AgentCategory{}
 	seen := map[string]bool{}
 	for _, a := range p.Projection.Agents {
+		if err := checkCapabilityReferences(ctx, tx.Q(), a.Capabilities); err != nil {
+			return Outcome{}, err
+		}
 		for _, id := range a.Categories {
 			if seen[id] {
 				continue
@@ -151,6 +169,9 @@ func (a *App) ReadAgentInventory(ctx context.Context, p protocol.Principal, inpu
 		}
 		result.Online, result.LastHeartbeatAtMillis = catalog.Online, catalog.LastHeartbeatAtMillis
 		result.Current, result.Projection = catalog.Current, catalog.Projection
+		if result.Projection != nil && result.Projection.CapabilityVersion != 0 && !runtimeSupportsExecutorCapabilities(input.Runtime) {
+			result.Projection = nil
+		}
 		if input.RequestID != "" {
 			result.RequestState = "not_recorded"
 			rec, err := store.GetRequest(ctx, tx.Q(), p.DedupDomain(), input.RequestID)

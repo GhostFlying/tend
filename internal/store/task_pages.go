@@ -10,6 +10,8 @@ import (
 
 // TaskFilter selects tasks for the owner's paginated task board.
 type TaskFilter struct {
+	Capability     string
+	CapabilityRole string
 	Project        string
 	Lifecycles     []protocol.TaskLifecycle
 	CompletedOrder bool
@@ -28,9 +30,13 @@ func ListTaskPage(ctx context.Context, q Querier, filter TaskFilter, beforeUpdat
 	if filter.CompletedOrder {
 		order = taskCompletedAtSQL
 	}
-	query := `SELECT task_id FROM (SELECT tasks.*, ` + order + ` AS sort_at FROM tasks) WHERE (? = '' OR project = ?)
+	query := `SELECT task_id FROM (SELECT tasks.*, ` + order + ` AS sort_at FROM tasks) AS t WHERE (? = '' OR project = ?)
 		AND (? = '' OR sort_at < ? OR (sort_at = ? AND task_id < ?))`
 	args := []any{filter.Project, filter.Project, beforeID, beforeUpdated, beforeUpdated, beforeID}
+	if filter.Capability != "" {
+		query += ` AND EXISTS(SELECT 1 FROM task_specs s WHERE s.task_id=t.task_id AND s.spec_version=t.spec_version AND ((? IN ('','implement') AND EXISTS(SELECT 1 FROM json_each(s.body_json,'$.agent_selection.implementation.required_capabilities') r WHERE json_extract(r.value,'$.capability_id')=?)) OR (? IN ('','accept') AND EXISTS(SELECT 1 FROM json_each(s.body_json,'$.agent_selection.acceptance.required_capabilities') r WHERE json_extract(r.value,'$.capability_id')=?))))`
+		args = append(args, filter.CapabilityRole, filter.Capability, filter.CapabilityRole, filter.Capability)
+	}
 	if len(filter.Lifecycles) != 0 {
 		query += " AND lifecycle IN (" + strings.TrimSuffix(strings.Repeat("?,", len(filter.Lifecycles)), ",") + ")"
 		for _, state := range filter.Lifecycles {

@@ -1,0 +1,177 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"slices"
+	"strings"
+
+	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
+)
+
+func capabilityPageLimit(limit int) (int, error) {
+	if limit == 0 {
+		return 50, nil
+	}
+	if limit < 1 || limit > 100 {
+		return 0, protocol.Errorf(protocol.CodeInvalidRequest, "limit must be between 1 and 100")
+	}
+	return limit, nil
+}
+
+func (a *App) CapabilityDefinitions(ctx context.Context, id, state, search, after string, limit int) (protocol.CapabilityPage, error) {
+	if id != "" && !protocol.AgentInventoryID(id) {
+		return protocol.CapabilityPage{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid capability identity")
+	}
+	if state == "" {
+		state = "active"
+		if id != "" {
+			state = "all"
+		}
+	}
+	var page protocol.CapabilityPage
+	if !slices.Contains([]string{"active", "retired", "all"}, state) {
+		return page, protocol.Errorf(protocol.CodeInvalidRequest, "state must be active, retired or all")
+	}
+	limit, err := capabilityPageLimit(limit)
+	if err != nil {
+		return page, err
+	}
+	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		page, err = store.ListCapabilityDefinitions(ctx, tx.Q(), id, state, search, after, limit)
+		return err
+	})
+	return page, err
+}
+
+func (a *App) CapabilityAgents(ctx context.Context, f protocol.AgentCapabilityQuery) (protocol.AgentCapabilityPage, error) {
+	page := protocol.AgentCapabilityPage{Items: []protocol.AgentCapabilityView{}}
+	if f.Agent != "" && f.Environment == "" || !views.ValidateCapabilityState(f.State) {
+		return page, protocol.Errorf(protocol.CodeInvalidRequest, "agent requires environment; state must be eligible, pending or unavailable")
+	}
+	limit, err := capabilityPageLimit(f.Limit)
+	if err != nil {
+		return page, err
+	}
+	filter := f
+	filter.After = ""
+	filter.Limit = 0
+	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+		now := a.now().UnixMilli()
+		// Decode the original checked-at before deriving TTL dependent states.
+		clockCursor, err := store.CapabilityCursor(filter, f.After, now)
+		if err != nil {
+			return err
+		}
+		items, signature, err := views.CapabilityAgents(ctx, tx.Q(), clockCursor.AsOf)
+		if err != nil {
+			return err
+		}
+		// A second opaque cursor seals both filters and the mutable source facts.
+		// Its key is embedded in the outer cursor, which stays independent of time.
+		keyCursor, err := store.CapabilityCursor([]any{filter, signature}, clockCursor.After, now)
+		if err != nil {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "capability listing changed; start a fresh page")
+		}
+		page.AsOf = clockCursor.AsOf
+		items = views.FilterCapabilityAgents(items, f)
+		for _, item := range items {
+			key := views.CapabilityAgentKey(item)
+			if key <= keyCursor.After {
+				continue
+			}
+			if len(page.Items) == limit {
+				page.Next = clockCursor.Encode(keyCursor.Encode(views.CapabilityAgentKey(page.Items[len(page.Items)-1])))
+				break
+			}
+			page.Items = append(page.Items, item)
+		}
+		return nil
+	})
+	return page, err
+}
+
+func (a *App) CapabilityEvidenceHistory(ctx context.Context, f store.CapabilityEvidenceQuery, after string, limit int) (protocol.CapabilityEvidencePage, error) {
+	var p protocol.CapabilityEvidencePage
+	if f.Agent != "" && f.Host == "" || f.Kind != "" && !slices.Contains([]string{"tool_inventory", "execution", "simulation"}, f.Kind) || f.State != "" && !slices.Contains([]string{"unverified", "confirmed", "unavailable"}, f.State) {
+		return p, protocol.Errorf(protocol.CodeInvalidRequest, "invalid evidence filters")
+	}
+	limit, err := capabilityPageLimit(limit)
+	if err != nil {
+		return p, err
+	}
+	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		p, err = store.ListCapabilityEvidence(ctx, tx.Q(), f, after, limit)
+		return err
+	})
+	return p, err
+}
+
+func (a *App) TaskCapabilityExplanation(ctx context.Context, task string, version int64, role protocol.RunRole) (protocol.TaskCapabilityExplanation, error) {
+	return a.TaskCapabilityExplanationPage(ctx, task, version, role, protocol.AgentCapabilityQuery{})
+}
+func (a *App) TaskCapabilityExplanationPage(ctx context.Context, task string, version int64, role protocol.RunRole, f protocol.AgentCapabilityQuery) (protocol.TaskCapabilityExplanation, error) {
+	var p protocol.TaskCapabilityExplanation
+	if role == "" {
+		role = protocol.RoleImplement
+	}
+	if role != protocol.RoleImplement && role != protocol.RoleAccept || version < 0 || !views.ValidateCapabilityState(f.State) || f.Agent != "" && f.Environment == "" {
+		return p, protocol.Errorf(protocol.CodeInvalidRequest, "invalid capability role, spec_version or candidate filters")
+	}
+	limit, err := capabilityPageLimit(f.Limit)
+	if err != nil {
+		return p, err
+	}
+	filter := f
+	filter.After = ""
+	filter.Limit = 0
+	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+		now := a.now().UnixMilli()
+		clockCursor, err := store.CapabilityCursor([]any{task, version, role, filter}, f.After, now)
+		if err != nil {
+			return err
+		}
+		p, err = views.TaskCapabilities(ctx, tx.Q(), task, version, role, clockCursor.AsOf)
+		if err != nil {
+			return err
+		}
+		signature, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		keyCursor, err := store.CapabilityCursor(string(signature), clockCursor.After, now)
+		if err != nil {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "capability match facts changed; start a fresh page")
+		}
+		all := views.FilterCapabilityAgents(p.Candidates, f)
+		p.Candidates = []protocol.AgentCapabilityView{}
+		p.AsOf = clockCursor.AsOf
+		slices.SortFunc(all, func(a, b protocol.AgentCapabilityView) int {
+			return strings.Compare(capabilityCandidateKey(a), capabilityCandidateKey(b))
+		})
+		for _, v := range all {
+			key := capabilityCandidateKey(v)
+			if key <= keyCursor.After {
+				continue
+			}
+			if len(p.Candidates) == limit {
+				p.Next = clockCursor.Encode(keyCursor.Encode(capabilityCandidateKey(p.Candidates[len(p.Candidates)-1])))
+				break
+			}
+			p.Candidates = append(p.Candidates, v)
+		}
+		return nil
+	})
+	return p, err
+}
+func capabilityCandidateKey(v protocol.AgentCapabilityView) string {
+	key := views.CapabilityAgentKey(v)
+	if v.Pin != nil {
+		key += "/" + v.Pin.Runtime.RuntimeID + "/" + v.Pin.BackendID
+	}
+	return key
+}

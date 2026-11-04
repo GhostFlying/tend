@@ -5,7 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
-		HandoffAuditPage{},
+		HandoffAuditPage{}, VerifyLocalCapabilityRequest{}, LocalCapabilityRequestStatus{}, CapabilityDefinition{}, PutCapabilityPayload{}, CapabilityPage{}, CapabilityEvidencePage{}, AgentCapabilityQuery{}, AgentCapabilityPage{}, TaskCapabilityExplanation{}, RunCapabilityBinding{},
 		SetIssueAcceptancePolicyPayload{},
 		ArtifactShare{}, ArtifactSharePage{}, GrantArtifactSharePayload{}, RevokeArtifactSharePayload{},
 		QuestionInputPayload{}, RevokeQuestionInputsPayload{}, QuestionInputPage{},

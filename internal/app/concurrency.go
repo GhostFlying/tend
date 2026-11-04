@@ -14,6 +14,7 @@ import (
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 const concurrencyRetention = 7 * 24 * time.Hour
@@ -501,24 +502,7 @@ func putConcurrencyExecutionObserved(ctx context.Context, tx *store.Tx, source p
 	return sampleConcurrencyGroups(ctx, tx, []string{group, previousGroup}, now)
 }
 func concurrencyAvailable(ctx context.Context, q store.Querier, env, runtime, execution string, now int64) (bool, error) {
-	id, err := concurrencyBinding(ctx, q, env, runtime)
-	if err != nil || id == "" {
-		return true, err
-	}
-	s, err := concurrencyState(ctx, q, id)
-	if err != nil {
-		return false, err
-	}
-	var held bool
-	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM concurrency_executions WHERE execution_id=? AND state<>'stopped')`, execution).Scan(&held); err != nil {
-		return false, err
-	}
-	if held {
-		return true, nil
-	}
-	var occupied int64
-	err = q.QueryRowContext(ctx, `SELECT count(*) FROM concurrency_executions e JOIN concurrency_bindings b USING(environment_id,runtime_id) WHERE b.group_id=? AND e.state<>'stopped' AND NOT EXISTS(SELECT 1 FROM concurrency_executions child WHERE child.parent_execution_id=e.execution_id AND child.state<>'stopped')`, id).Scan(&occupied)
-	return now >= s.Group.CooldownUntil && occupied < s.Group.Current, err
+	return views.RuntimeConcurrencyAvailable(ctx, q, env, runtime, execution, now)
 }
 func refreshConcurrencyLoad(ctx context.Context, tx *store.Tx, s *domain.ConcurrencyState, now int64) error {
 	rows, err := tx.Q().QueryContext(ctx, `SELECT e.state,e.last_seen,COALESCE(json_extract(e.source_json,'$.native_session_id'),'') FROM concurrency_executions e JOIN concurrency_bindings b USING(environment_id,runtime_id) WHERE b.group_id=? AND e.state<>'stopped' AND NOT EXISTS(SELECT 1 FROM concurrency_executions child WHERE child.parent_execution_id=e.execution_id AND child.state<>'stopped')`, s.Group.ID)

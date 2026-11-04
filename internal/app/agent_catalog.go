@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // AgentCategories reads current classifications, not category history or roles.
@@ -105,6 +106,32 @@ func readRunnerAgentCatalog(ctx context.Context, q store.Querier, host string, n
 			}
 			seen[key] = len(result.RetainedDefinitions)
 			result.RetainedDefinitions = append(result.RetainedDefinitions, protocol.RetainedAgentDefinition{Pin: pin, Definition: a, Runtimes: slices.Clone(inv.Projection.Runtimes)})
+		}
+	}
+	if result.Projection != nil {
+		result.Capabilities, _, err = views.CapabilityAgentsForHost(ctx, q, host, now)
+		if err != nil {
+			return result, err
+		}
+		// Histories have their own bounded endpoint; keep only current evidence
+		// and the most recent actual execution in the directory projection.
+		for i := range result.Capabilities {
+			v := &result.Capabilities[i]
+			all := v.Evidence
+			v.Evidence = nil
+			var latestExecution *protocol.ExecutorCapabilityEvidence
+			for j := range all {
+				e := all[j]
+				if slices.Contains(v.Current.EvidenceIDs, e.EvidenceID) {
+					v.Evidence = append(v.Evidence, e)
+				}
+				if e.Kind == "execution" {
+					latestExecution = &e
+				}
+			}
+			if latestExecution != nil {
+				v.Evidence = append(v.Evidence, *latestExecution)
+			}
 		}
 	}
 	return result, nil

@@ -128,6 +128,157 @@
       "title": "ActionView",
       "type": "object"
     },
+    "AgentCapabilityPage": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentCapabilityView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_after": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "as_of"
+      ],
+      "title": "AgentCapabilityPage",
+      "type": "object"
+    },
+    "AgentCapabilityQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "title": "AgentCapabilityQuery",
+      "type": "object"
+    },
+    "AgentCapabilityView": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_revision": {
+          "type": "integer"
+        },
+        "categories": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current": {
+          "$ref": "#/definitions/CapabilityMatch"
+        },
+        "declared": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/CapabilityReference"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExecutorCapabilityEvidence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "identity": {
+          "$ref": "#/definitions/AgentIdentity"
+        },
+        "pin": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "purposes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runtime_binding_ref": {
+          "$ref": "#/definitions/AgentRuntimeReference"
+        },
+        "scheduling_reason": {
+          "$ref": "#/definitions/QueueWaitReason"
+        }
+      },
+      "required": [
+        "runtime_binding_ref",
+        "categories",
+        "purposes",
+        "identity",
+        "agent_revision",
+        "declared",
+        "current",
+        "evidence"
+      ],
+      "title": "AgentCapabilityView",
+      "type": "object"
+    },
     "AgentCategory": {
       "additionalProperties": false,
       "properties": {
@@ -361,6 +512,12 @@
         "availability": {
           "$ref": "#/definitions/AgentInventoryAvailability"
         },
+        "capabilities": {
+          "items": {
+            "$ref": "#/definitions/CapabilityReference"
+          },
+          "type": "array"
+        },
         "categories": {
           "anyOf": [
             {
@@ -446,6 +603,9 @@
               "type": "null"
             }
           ]
+        },
+        "capability_version": {
+          "type": "integer"
         },
         "execution_environment_id": {
           "type": "string"
@@ -741,6 +901,12 @@
         },
         "model": {
           "type": "string"
+        },
+        "required_capabilities": {
+          "items": {
+            "$ref": "#/definitions/CapabilityReference"
+          },
+          "type": "array"
         },
         "runtime_id": {
           "type": "string"
@@ -2255,6 +2421,251 @@
         }
       },
       "title": "CancelIssueDeadlinePayload",
+      "type": "object"
+    },
+    "CapabilityDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_id": {
+          "type": "string"
+        },
+        "contract_version": {
+          "type": "integer"
+        },
+        "description": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        },
+        "verification_policy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "capability_id",
+        "revision",
+        "title",
+        "description",
+        "state",
+        "contract_version",
+        "verification_policy",
+        "tool_name"
+      ],
+      "title": "CapabilityDefinition",
+      "type": "object"
+    },
+    "CapabilityEvidencePage": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExecutorCapabilityEvidence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_after": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "as_of"
+      ],
+      "title": "CapabilityEvidencePage",
+      "type": "object"
+    },
+    "CapabilityMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_at_ms": {
+          "type": "integer"
+        },
+        "evidence_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/CapabilityReason"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/CapabilityReference"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "required",
+        "reasons",
+        "evidence_ids",
+        "checked_at_ms"
+      ],
+      "title": "CapabilityMatch",
+      "type": "object"
+    },
+    "CapabilityPage": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/CapabilityDefinition"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_after": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "as_of"
+      ],
+      "title": "CapabilityPage",
+      "type": "object"
+    },
+    "CapabilityReason": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/definitions/CapabilityReference"
+        },
+        "evidence_id": {
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "recovery": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "capability",
+        "state",
+        "reason",
+        "recovery"
+      ],
+      "title": "CapabilityReason",
+      "type": "object"
+    },
+    "CapabilityReference": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_id": {
+          "type": "string"
+        },
+        "definition_revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "capability_id",
+        "definition_revision"
+      ],
+      "title": "CapabilityReference",
+      "type": "object"
+    },
+    "CapabilityToolSource": {
+      "additionalProperties": false,
+      "properties": {
+        "configuration_sha256": {
+          "type": "string"
+        },
+        "executable_sha256": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "schema_sha256": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version",
+        "tool_name",
+        "schema_sha256",
+        "configuration_sha256",
+        "executable_sha256"
+      ],
+      "title": "CapabilityToolSource",
       "type": "object"
     },
     "Code": {
@@ -4042,6 +4453,87 @@
       ],
       "title": "ExecutionState",
       "type": "string"
+    },
+    "ExecutorCapabilityEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/definitions/CapabilityReference"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "cost_state": {
+          "type": "string"
+        },
+        "evidence_id": {
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "observed_at_ms": {
+          "type": "integer"
+        },
+        "output_sha256": {
+          "type": "string"
+        },
+        "pin": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "recorded_at_ms": {
+          "type": "integer"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/CapabilityToolSource"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "request_id",
+        "capability",
+        "pin",
+        "instance_id",
+        "generation",
+        "sequence",
+        "kind",
+        "scope",
+        "complete",
+        "state",
+        "reason",
+        "observed_at_ms",
+        "expires_at_ms",
+        "recorded_at_ms"
+      ],
+      "title": "ExecutorCapabilityEvidence",
+      "type": "object"
     },
     "ExplainDecisionPayload": {
       "additionalProperties": false,
@@ -7515,6 +8007,46 @@
       "title": "LedgerEvent",
       "type": "object"
     },
+    "LocalCapabilityRequestStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "envelope": {
+          "$ref": "#/definitions/Envelope"
+        },
+        "error_code": {
+          "type": "string"
+        },
+        "evidence": {
+          "$ref": "#/definitions/ExecutorCapabilityEvidence"
+        },
+        "probe_generation": {
+          "type": "integer"
+        },
+        "probe_instance_id": {
+          "type": "string"
+        },
+        "recovery": {
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/definitions/VerifyLocalCapabilityRequest"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "sequence",
+        "state",
+        "recovery"
+      ],
+      "title": "LocalCapabilityRequestStatus",
+      "type": "object"
+    },
     "LocalRepositoryBinding": {
       "additionalProperties": false,
       "properties": {
@@ -9272,6 +9804,39 @@
       "title": "PutAgentCategoryPayload",
       "type": "object"
     },
+    "PutCapabilityPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "type": "integer"
+        },
+        "description": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        },
+        "verification_policy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "state",
+        "contract_version",
+        "verification_policy",
+        "tool_name"
+      ],
+      "title": "PutCapabilityPayload",
+      "type": "object"
+    },
     "PutIssueDeadlinePayload": {
       "additionalProperties": false,
       "properties": {
@@ -10234,6 +10799,128 @@
       "title": "RolloutPreviewReference",
       "type": "object"
     },
+    "RunCapabilityBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "bound_at_ms": {
+          "type": "integer"
+        },
+        "current_match": {
+          "$ref": "#/definitions/CapabilityMatch"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExecutorCapabilityEvidence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pin": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "required": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/CapabilityReference"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required_sha256": {
+          "type": "string"
+        },
+        "revalidation": {
+          "$ref": "#/definitions/RunCapabilityRevalidation"
+        }
+      },
+      "required": [
+        "evidence",
+        "required",
+        "required_sha256",
+        "evidence_ids",
+        "pin",
+        "bound_at_ms"
+      ],
+      "title": "RunCapabilityBinding",
+      "type": "object"
+    },
+    "RunCapabilityRevalidation": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExecutorCapabilityEvidence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observed_at_ms": {
+          "type": "integer"
+        },
+        "pin": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "required_sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "pin",
+        "required_sha256",
+        "evidence_ids",
+        "evidence",
+        "observed_at_ms"
+      ],
+      "title": "RunCapabilityRevalidation",
+      "type": "object"
+    },
     "RunExecutionPin": {
       "additionalProperties": false,
       "properties": {
@@ -10620,6 +11307,9 @@
     "RunView": {
       "additionalProperties": false,
       "properties": {
+        "capability_binding": {
+          "$ref": "#/definitions/RunCapabilityBinding"
+        },
         "generation": {
           "type": "integer"
         },
@@ -10655,6 +11345,12 @@
     "RunnerAgentCatalog": {
       "additionalProperties": false,
       "properties": {
+        "capabilities": {
+          "items": {
+            "$ref": "#/definitions/AgentCapabilityView"
+          },
+          "type": "array"
+        },
         "concurrency_bindings": {
           "items": {
             "$ref": "#/definitions/ConcurrencyBinding"
@@ -11418,6 +12114,92 @@
       "title": "TaskAgentSelection",
       "type": "object"
     },
+    "TaskCapabilityExplanation": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "integer"
+        },
+        "candidates": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentCapabilityView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checked_at_ms": {
+          "type": "integer"
+        },
+        "deadline_ms": {
+          "type": "integer"
+        },
+        "next_after": {
+          "type": "string"
+        },
+        "reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recovery": {
+          "type": "string"
+        },
+        "required": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/CapabilityReference"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "task_id",
+        "spec_version",
+        "role",
+        "required",
+        "state",
+        "candidates",
+        "reasons",
+        "checked_at_ms",
+        "deadline_ms",
+        "recovery"
+      ],
+      "title": "TaskCapabilityExplanation",
+      "type": "object"
+    },
     "TaskDetail": {
       "additionalProperties": false,
       "properties": {
@@ -11538,6 +12320,9 @@
             "$ref": "#/definitions/TaskRelationView"
           },
           "type": "array"
+        },
+        "required_capabilities": {
+          "$ref": "#/definitions/TaskAgentSelection"
         },
         "runs": {
           "anyOf": [
@@ -11803,6 +12588,9 @@
         },
         "rating": {
           "$ref": "#/definitions/Rating"
+        },
+        "required_capabilities": {
+          "$ref": "#/definitions/TaskAgentSelection"
         },
         "spec_version": {
           "type": "integer"
@@ -13831,6 +14619,43 @@
       "title": "Verdict",
       "type": "string"
     },
+    "VerifyLocalCapabilityRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/definitions/CapabilityReference"
+        },
+        "expected_revision": {
+          "type": "integer"
+        },
+        "max_attempts": {
+          "type": "integer"
+        },
+        "pin": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "probe_kind": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "expected_revision",
+        "pin",
+        "capability",
+        "probe_kind",
+        "timeout_ms",
+        "max_attempts"
+      ],
+      "title": "VerifyLocalCapabilityRequest",
+      "type": "object"
+    },
     "WebhookReceipt": {
       "additionalProperties": false,
       "properties": {
@@ -14207,6 +15032,12 @@
     "APIResponse": {
       "$ref": "#/definitions/APIResponse"
     },
+    "AgentCapabilityPage": {
+      "$ref": "#/definitions/AgentCapabilityPage"
+    },
+    "AgentCapabilityQuery": {
+      "$ref": "#/definitions/AgentCapabilityQuery"
+    },
     "AgentCategory": {
       "$ref": "#/definitions/AgentCategory"
     },
@@ -14302,6 +15133,15 @@
     },
     "CancelIssueDeadlinePayload": {
       "$ref": "#/definitions/CancelIssueDeadlinePayload"
+    },
+    "CapabilityDefinition": {
+      "$ref": "#/definitions/CapabilityDefinition"
+    },
+    "CapabilityEvidencePage": {
+      "$ref": "#/definitions/CapabilityEvidencePage"
+    },
+    "CapabilityPage": {
+      "$ref": "#/definitions/CapabilityPage"
     },
     "ConcurrencyGroupPage": {
       "$ref": "#/definitions/ConcurrencyGroupPage"
@@ -14483,6 +15323,9 @@
     "LedgerEvent": {
       "$ref": "#/definitions/LedgerEvent"
     },
+    "LocalCapabilityRequestStatus": {
+      "$ref": "#/definitions/LocalCapabilityRequestStatus"
+    },
     "LocalRepositoryBinding": {
       "$ref": "#/definitions/LocalRepositoryBinding"
     },
@@ -14555,6 +15398,9 @@
     "PutAgentCategoryPayload": {
       "$ref": "#/definitions/PutAgentCategoryPayload"
     },
+    "PutCapabilityPayload": {
+      "$ref": "#/definitions/PutCapabilityPayload"
+    },
     "PutIssueDeadlinePayload": {
       "$ref": "#/definitions/PutIssueDeadlinePayload"
     },
@@ -14614,6 +15460,9 @@
     },
     "RolloutPreview": {
       "$ref": "#/definitions/RolloutPreview"
+    },
+    "RunCapabilityBinding": {
+      "$ref": "#/definitions/RunCapabilityBinding"
     },
     "RunExecutionPin": {
       "$ref": "#/definitions/RunExecutionPin"
@@ -14678,6 +15527,9 @@
     "TaskAgentSelection": {
       "$ref": "#/definitions/TaskAgentSelection"
     },
+    "TaskCapabilityExplanation": {
+      "$ref": "#/definitions/TaskCapabilityExplanation"
+    },
     "TaskDetail": {
       "$ref": "#/definitions/TaskDetail"
     },
@@ -14734,6 +15586,9 @@
     },
     "UsageUpload": {
       "$ref": "#/definitions/UsageUpload"
+    },
+    "VerifyLocalCapabilityRequest": {
+      "$ref": "#/definitions/VerifyLocalCapabilityRequest"
     },
     "WebhookReceipt": {
       "$ref": "#/definitions/WebhookReceipt"

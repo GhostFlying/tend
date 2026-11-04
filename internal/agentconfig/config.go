@@ -4,6 +4,7 @@ package agentconfig
 
 import (
 	"fmt"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"slices"
 	"strings"
 	"unicode"
@@ -29,9 +30,10 @@ const (
 
 // Config contains requests, not observed provider settings or availability.
 type Config struct {
-	FormatVersion uint64            `json:"format_version"`
-	Runtimes      []RuntimeBinding  `json:"runtimes"`
-	Agents        []AgentDefinition `json:"agents"`
+	CapabilityVersion uint64            `json:"capability_version,omitempty"`
+	FormatVersion     uint64            `json:"format_version"`
+	Runtimes          []RuntimeBinding  `json:"runtimes"`
+	Agents            []AgentDefinition `json:"agents"`
 }
 
 type RuntimeBinding struct {
@@ -49,6 +51,7 @@ type RuntimeBinding struct {
 // human-readable label, not an identity key. Label changes still follow the
 // definition revision and explicit acceptance process.
 type AgentDefinition struct {
+	Capabilities []protocol.CapabilityReference `json:"capabilities,omitempty"`
 	// OwnerRuntimeID optionally supplies coordination transport for this same
 	// identity, for example when its execution transport is an Orca terminal.
 	OwnerRuntimeID string    `json:"owner_runtime_id,omitempty"`
@@ -124,6 +127,9 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 	if cfg.FormatVersion != 1 && cfg.FormatVersion != 2 {
 		return nil, invalid("unsupported_format", "$.format_version")
 	}
+	if cfg.CapabilityVersion > 1 {
+		return nil, invalid("unsupported_capability_version", "$.capability_version")
+	}
 	runtimes := make(map[string]RuntimeBinding, len(cfg.Runtimes))
 	for i, r := range cfg.Runtimes {
 		path := fmt.Sprintf("$.runtimes[%d]", i)
@@ -166,6 +172,12 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 	seen := make(map[string]bool, len(cfg.Agents))
 	for i, a := range cfg.Agents {
 		path := fmt.Sprintf("$.agents[%d]", i)
+		if len(a.Capabilities) > 0 && cfg.CapabilityVersion != 1 {
+			return nil, invalid("capability_version_required", path+".capabilities")
+		}
+		if _, err := protocol.CanonicalCapabilityReferences(a.Capabilities); err != nil {
+			return nil, invalid("invalid_capabilities", path+".capabilities")
+		}
 		if !utf8.ValidString(a.Instructions) {
 			return nil, invalid("invalid_instructions", path+".instructions")
 		}
@@ -282,6 +294,7 @@ func cloneConfig(cfg Config) Config {
 	cfg.Agents = slices.Clone(cfg.Agents)
 	for i := range cfg.Agents {
 		a := &cfg.Agents[i]
+		a.Capabilities = slices.Clone(a.Capabilities)
 		a.Categories = slices.Clone(a.Categories)
 		a.Purposes = slices.Clone(a.Purposes)
 		a.Skills = slices.Clone(a.Skills)

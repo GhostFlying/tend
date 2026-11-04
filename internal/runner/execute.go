@@ -347,7 +347,11 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return err
 		}
 	}
-	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{ConcurrencyFeedback: as.ConcurrencyFeedback, LegacyRawUsage: !r.supportsNativeUsage(),
+	startWorker, err := r.capabilityWorkerStart(runCtx, as, execution)
+	if err != nil {
+		return err
+	}
+	w, err := startWorker(runCtx, harness.WorkerSpec{ConcurrencyFeedback: as.ConcurrencyFeedback, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},
